@@ -28,10 +28,6 @@ class I18n {
   void saveSettings();
   void loadSettings();
 
-  // Get all unique characters used in a specific language
-  // Returns a sorted string of unique characters
-  static const char* getCharacterSet(Language lang);
-
  private:
   I18n() : _language(Language::EN) {}
 
