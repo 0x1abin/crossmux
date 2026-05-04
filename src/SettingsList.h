@@ -237,11 +237,10 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
 
   std::vector<SettingInfo> v = baseList;
   if (registry && registry->getFamilyCount() > 0) {
-    for (auto& s : v) {
-      if (s.nameId == StrId::STR_FONT_FAMILY) {
-        s = buildFontFamilySetting(registry);
-        break;
-      }
+    auto it = std::find_if(v.begin(), v.end(),
+                           [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_FAMILY; });
+    if (it != v.end()) {
+      *it = buildFontFamilySetting(registry);
     }
   }
   return v;
