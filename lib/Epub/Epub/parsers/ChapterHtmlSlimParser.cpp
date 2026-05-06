@@ -227,33 +227,17 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     }
     self->tableColIndex += 1;
 
-    auto tableCellBlockStyle = BlockStyle();
-    tableCellBlockStyle.textAlignDefined = true;
-    const auto align = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                           ? CssTextAlign::Justify
-                           : static_cast<CssTextAlign>(self->paragraphAlignment);
-    tableCellBlockStyle.alignment = align;
-    self->startNewTextBlock(tableCellBlockStyle);
+    self->pendingCellPrefix = (self->tableColIndex == 1) ? "[ " : "| ";
 
-    const std::string headerText =
-        "Tab Row " + std::to_string(self->tableRowIndex) + ", Cell " + std::to_string(self->tableColIndex) + ":";
-    StyleStackEntry headerStyle;
-    headerStyle.depth = self->depth;
-    headerStyle.hasBold = true;
-    headerStyle.bold = false;
-    headerStyle.hasItalic = true;
-    headerStyle.italic = true;
-    headerStyle.hasUnderline = true;
-    headerStyle.underline = false;
-    self->inlineStyleStack.push_back(headerStyle);
-    self->updateEffectiveInlineStyle();
-    self->characterData(userData, headerText.c_str(), static_cast<int>(headerText.length()));
-    if (self->partWordBufferIndex > 0) {
-      self->flushPartWordBuffer();
+    if (self->tableColIndex == 1) {
+      auto tableCellBlockStyle = BlockStyle();
+      tableCellBlockStyle.textAlignDefined = true;
+      const auto align = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
+                             ? CssTextAlign::Justify
+                             : static_cast<CssTextAlign>(self->paragraphAlignment);
+      tableCellBlockStyle.alignment = align;
+      self->startNewTextBlock(tableCellBlockStyle);
     }
-    self->nextWordContinues = false;
-    self->inlineStyleStack.pop_back();
-    self->updateEffectiveInlineStyle();
 
     self->depth += 1;
     return;
@@ -738,6 +722,14 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     return;
   }
 
+  // Inject deferred cell prefix ([ or |) so it lands in the same text block as
+  // the first real content, avoiding a line break between the prefix and content.
+  if (!self->pendingCellPrefix.empty()) {
+    std::string prefix = std::move(self->pendingCellPrefix);
+    self->pendingCellPrefix.clear();
+    self->characterData(userData, prefix.c_str(), static_cast<int>(prefix.length()));
+  }
+
   // Collect footnote link display text (for the number label)
   // Skip whitespace and brackets to normalize noterefs like "[1]" → "1"
   if (self->insideFootnoteLink) {
@@ -977,6 +969,10 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   }
 
   if (self->tableDepth == 1 && (strcmp(name, "tr") == 0)) {
+    self->characterData(userData, " ]", 2);
+    if (self->partWordBufferIndex > 0) {
+      self->flushPartWordBuffer();
+    }
     self->nextWordContinues = false;
   }
 
@@ -984,6 +980,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     self->tableDepth -= 1;
     self->tableRowIndex = 0;
     self->tableColIndex = 0;
+    self->pendingCellPrefix.clear();
     self->nextWordContinues = false;
   }
 
