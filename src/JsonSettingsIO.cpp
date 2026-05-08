@@ -65,6 +65,31 @@ void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
   }
 }
 
+void applyLegacySleepScreenSettings(CrossPointSettings& settings, uint8_t oldMode, uint8_t oldCoverMode) {
+  switch (oldMode) {
+    case 0:  // DARK
+    case 1:  // LIGHT
+      settings.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::LOGO;
+      break;
+    case 2:  // CUSTOM
+      settings.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
+      break;
+    case 3:  // COVER
+      settings.sleepScreen = (oldCoverMode == 1) ? CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CROP
+                                                 : CrossPointSettings::SLEEP_SCREEN_MODE::COVER_FIT;
+      break;
+    case 4:  // BLANK
+      settings.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::BLANK;
+      break;
+    case 5:  // COVER_CUSTOM
+      settings.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM;
+      break;
+    default:
+      settings.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::LOGO;
+      break;
+  }
+}
+
 // ---- CrossPointState ----
 
 bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
@@ -165,6 +190,21 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // Populate s with migrated values now so the generic loop below picks them up as defaults and clamps them.
   if (doc["statusBarChapterPageCount"].isNull()) {
     applyLegacyStatusBarSettings(s);
+  }
+
+  if (!doc["sleepScreenCoverMode"].isNull() || !doc["sleepScreen"].isNull()) {
+    uint8_t oldSleepScreen = doc["sleepScreen"] | (uint8_t)CrossPointSettings::SLEEP_SCREEN_MODE::LOGO;
+    uint8_t oldCoverMode = doc["sleepScreenCoverMode"] | (uint8_t)0;
+    if (oldSleepScreen > CrossPointSettings::SLEEP_SCREEN_MODE::BLANK || !doc["sleepScreenCoverMode"].isNull()) {
+      applyLegacySleepScreenSettings(s, oldSleepScreen, oldCoverMode);
+      if (needsResave) *needsResave = true;
+    }
+  }
+
+  if (!doc["sleepScreenCoverFilter"].isNull()) {
+    uint8_t oldFilter = doc["sleepScreenCoverFilter"] | (uint8_t)0;
+    s.sleepScreenFilter = (oldFilter < CrossPointSettings::SLEEP_SCREEN_FILTER_COUNT) ? oldFilter : 0;
+    if (needsResave) *needsResave = true;
   }
 
   for (const auto& info : getSettingsList()) {
