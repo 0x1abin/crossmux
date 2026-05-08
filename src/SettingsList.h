@@ -16,18 +16,18 @@ inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> list = [] {
     std::vector<SettingInfo> v = {
         // --- Display ---
-        SettingInfo::Enum(StrId::STR_SLEEP_SCREEN_MODE, &CrossPointSettings::sleepScreen,
-                          {StrId::STR_SLEEP_MODE_LOGO, StrId::STR_SLEEP_MODE_CUSTOM, StrId::STR_SLEEP_MODE_COVER_FIT,
-                           StrId::STR_SLEEP_MODE_COVER_CROP, StrId::STR_SLEEP_MODE_COVER_CUSTOM,
-                           StrId::STR_SLEEP_MODE_BLANK},
-                          "sleepScreenMode", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(
+            StrId::STR_SLEEP_SCREEN_MODE, &CrossPointSettings::sleepScreen,
+            {StrId::STR_SLEEP_MODE_LOGO, StrId::STR_SLEEP_MODE_CUSTOM, StrId::STR_SLEEP_MODE_COVER_FIT,
+             StrId::STR_SLEEP_MODE_COVER_CROP, StrId::STR_SLEEP_MODE_COVER_CUSTOM, StrId::STR_SLEEP_MODE_BLANK},
+            "sleepScreenMode", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_SLEEP_ORIENTATION, &CrossPointSettings::sleepScreenOrientation,
                           {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED, StrId::STR_LANDSCAPE_CCW},
                           "sleepScreenOrientation", StrId::STR_CAT_DISPLAY),
-        SettingInfo::Enum(StrId::STR_SLEEP_SCREEN_FILTER, &CrossPointSettings::sleepScreenFilter,
-                          {StrId::STR_SLEEP_FILTER_NONE, StrId::STR_SLEEP_FILTER_CONTRAST,
-                           StrId::STR_SLEEP_FILTER_NEGATIVE},
-                          "sleepScreenFilter", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(
+            StrId::STR_SLEEP_SCREEN_FILTER, &CrossPointSettings::sleepScreenFilter,
+            {StrId::STR_SLEEP_FILTER_NONE, StrId::STR_SLEEP_FILTER_CONTRAST, StrId::STR_SLEEP_FILTER_NEGATIVE},
+            "sleepScreenFilter", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
                           {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                           StrId::STR_CAT_DISPLAY),

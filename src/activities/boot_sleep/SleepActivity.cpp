@@ -205,8 +205,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, bool allowCrop
   renderer.clearScreen();
 
   const bool hasGreyscale =
-      bitmap.hasGreyscale() &&
-      SETTINGS.sleepScreenFilter == CrossPointSettings::SLEEP_SCREEN_FILTER::FILTER_NONE;
+      bitmap.hasGreyscale() && SETTINGS.sleepScreenFilter == CrossPointSettings::SLEEP_SCREEN_FILTER::FILTER_NONE;
 
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
