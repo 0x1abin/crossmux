@@ -9,6 +9,7 @@
 #include "CrossPointSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
+#include "UiFontSwitcher.h"
 #include "fontIds.h"
 
 void LanguageSelectActivity::onEnter() {
@@ -21,10 +22,18 @@ void LanguageSelectActivity::onEnter() {
   const auto* it = std::find(begin, end, currentLang);
   selectedIndex = (it != end) ? std::distance(begin, it) : 0;
 
+  // Force the SC family while this list is on screen so native names
+  // containing hanzi render even when the active UI language is Latin.
+  applyUiFontForLanguage(renderer, Language::ZH);
+
   requestUpdate();
 }
 
-void LanguageSelectActivity::onExit() { Activity::onExit(); }
+void LanguageSelectActivity::onExit() {
+  // Restore the font matching the (possibly-just-changed) active language.
+  applyUiFontForLanguage(renderer, I18N.getLanguage());
+  Activity::onExit();
+}
 
 void LanguageSelectActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
@@ -60,7 +69,7 @@ void LanguageSelectActivity::handleSelection() {
   SETTINGS.language = langIndex;
   SETTINGS.saveToFile();
 
-  // Return to previous page
+  // onBack() → onExit() will swap UI fonts to match the new language.
   onBack();
 }
 

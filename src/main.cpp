@@ -23,6 +23,7 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "UiFontSwitcher.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -116,16 +117,8 @@ EpdFontFamily opendyslexic14FontFamily(&opendyslexic14RegularFont, &opendyslexic
                                        &opendyslexic14BoldItalicFont);
 #endif  // OMIT_FONTS
 
-EpdFont smallFont(&notosans_8_regular);
-EpdFontFamily smallFontFamily(&smallFont);
-
-EpdFont ui10RegularFont(&ubuntu_10_regular);
-EpdFont ui10BoldFont(&ubuntu_10_bold);
-EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
-
-EpdFont ui12RegularFont(&ubuntu_12_regular);
-EpdFont ui12BoldFont(&ubuntu_12_bold);
-EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+// UI font families (UI_10 / UI_12 / SMALL_FONT_ID) live in UiFontSwitcher.cpp,
+// which is the sole owner of those font IDs and switches them by locale.
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
@@ -226,9 +219,8 @@ void setupDisplayAndFonts() {
   renderer.insertFont(OPENDYSLEXIC_12_FONT_ID, opendyslexic12FontFamily);
   renderer.insertFont(OPENDYSLEXIC_14_FONT_ID, opendyslexic14FontFamily);
 #endif  // OMIT_FONTS
-  renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
-  renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
-  renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+
+  // UI_10 / UI_12 / SMALL_FONT_ID are registered by applyUiFontForLanguage().
 
   // Discover and load SD card fonts
   sdFontSystem.begin(renderer);
@@ -261,6 +253,8 @@ void setup() {
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
     setupDisplayAndFonts();
+    // SETTINGS hasn't loaded yet — fall back to Latin UI for the error screen.
+    applyUiFontForLanguage(renderer, Language::EN);
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
     return;
   }
@@ -316,6 +310,7 @@ void setup() {
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
   setupDisplayAndFonts();
+  applyUiFontForLanguage(renderer, static_cast<Language>(SETTINGS.language));
 
   activityManager.goToBoot();
 

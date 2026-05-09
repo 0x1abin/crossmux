@@ -65,10 +65,9 @@ void GfxRenderer::begin() {
 }
 
 void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
-  auto result = fontMap.insert({fontId, font});
-  if (!result.second) {
-    LOG_ERR("GFX", "Font ID %d already registered, ignoring duplicate", fontId);
-  }
+  // Upsert: re-registering the same id replaces the family (used by UiFontSwitcher
+  // to swap UI fonts when the active language changes at runtime).
+  fontMap.insert_or_assign(fontId, font);
 }
 
 // Translate logical (x,y) coordinates to physical panel coordinates based on current orientation
