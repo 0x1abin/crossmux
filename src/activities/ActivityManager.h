@@ -88,6 +88,8 @@ class ActivityManager {
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();
+  void goToGames();
+  void goToSudoku();
   void goHome();
 
   // This will move current activity to stack instead of deleting it
