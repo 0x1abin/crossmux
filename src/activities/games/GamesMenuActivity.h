@@ -18,7 +18,7 @@ class GamesMenuActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class GameKind : uint8_t { Sudoku };
+  enum class GameKind : uint8_t { Sudoku, Gomoku };
 
   ButtonNavigator buttonNavigator;
   std::vector<GameKind> items;

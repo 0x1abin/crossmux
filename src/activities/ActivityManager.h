@@ -90,6 +90,7 @@ class ActivityManager {
   void goToCrashReport();
   void goToGames();
   void goToSudoku();
+  void goToGomoku();
   void goHome();
 
   // This will move current activity to stack instead of deleting it

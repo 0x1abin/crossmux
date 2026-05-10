@@ -17,8 +17,9 @@ void GamesMenuActivity::onExit() { Activity::onExit(); }
 
 void GamesMenuActivity::buildItems() {
   items.clear();
-  items.reserve(1);
+  items.reserve(2);
   items.push_back(GameKind::Sudoku);
+  items.push_back(GameKind::Gomoku);
 }
 
 void GamesMenuActivity::loop() {
@@ -45,6 +46,9 @@ void GamesMenuActivity::onSelect() {
     case GameKind::Sudoku:
       activityManager.goToSudoku();
       return;
+    case GameKind::Gomoku:
+      activityManager.goToGomoku();
+      return;
   }
 }
 
@@ -65,6 +69,8 @@ void GamesMenuActivity::render(RenderLock&&) {
     switch (items[i]) {
       case GameKind::Sudoku:
         return std::string(tr(STR_SUDOKU_TITLE));
+      case GameKind::Gomoku:
+        return std::string(tr(STR_GOMOKU_TITLE));
     }
     return "";
   };
@@ -74,6 +80,8 @@ void GamesMenuActivity::render(RenderLock&&) {
     switch (items[i]) {
       case GameKind::Sudoku:
         return std::string(tr(STR_SUDOKU_SUBTITLE));
+      case GameKind::Gomoku:
+        return std::string(tr(STR_GOMOKU_SUBTITLE));
     }
     return "";
   };
@@ -83,6 +91,8 @@ void GamesMenuActivity::render(RenderLock&&) {
     switch (items[i]) {
       case GameKind::Sudoku:
         return UIIcon::Sudoku;
+      case GameKind::Gomoku:
+        return UIIcon::Gomoku;
     }
     return UIIcon::Sudoku;
   };
