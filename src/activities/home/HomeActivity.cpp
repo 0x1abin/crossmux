@@ -21,7 +21,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, Recents, File transfer, Settings
+  int count = 5;  // File Browser, Recents, File transfer, Settings, Random Avatar
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -192,7 +192,8 @@ void HomeActivity::loop() {
     const int recentsIdx = idx++;
     const int opdsLibraryIdx = hasOpdsServers ? idx++ : -1;
     const int fileTransferIdx = idx++;
-    const int settingsIdx = idx;
+    const int settingsIdx = idx++;
+    const int uglyAvatarIdx = idx;
 
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
@@ -206,6 +207,8 @@ void HomeActivity::loop() {
       onFileTransferOpen();
     } else if (menuSelectedIndex == settingsIdx) {
       onSettingsOpen();
+    } else if (menuSelectedIndex == uglyAvatarIdx) {
+      onUglyAvatarOpen();
     }
   }
 }
@@ -227,8 +230,8 @@ void HomeActivity::render(RenderLock&&) {
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings};
+                                        tr(STR_SETTINGS_TITLE), tr(STR_UGLY_AVATAR)};
+  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings, Avatar};
 
   if (hasOpdsServers) {
     menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
@@ -276,3 +279,5 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
+
+void HomeActivity::onUglyAvatarOpen() { activityManager.goToUglyAvatar(); }

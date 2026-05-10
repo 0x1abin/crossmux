@@ -6,6 +6,7 @@
 
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
+#include "avatar/UglyAvatarActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -174,6 +175,8 @@ void ActivityManager::goToFileTransfer() {
 }
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToUglyAvatar() { replaceActivity(std::make_unique<UglyAvatarActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
