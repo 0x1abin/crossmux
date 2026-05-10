@@ -34,6 +34,7 @@ void GomokuMenuActivity::buildItems() {
     if (GomokuStore::load(slot)) {
       hasResume = true;
       resumeMode = slot.mode;
+      resumeAiLevel = slot.aiLevel;
       resumeBoardSize = slot.board.boardSize;
       resumeMoveCount = slot.board.moveCount;
       resumeElapsedSec = slot.elapsedSec;
@@ -53,9 +54,9 @@ void GomokuMenuActivity::buildItems() {
   // 2-Player options (always enabled in this release).
   items.push_back({ItemKind::NewGame, GomokuMode::TwoPlayer, 15, false});
   items.push_back({ItemKind::NewGame, GomokuMode::TwoPlayer, 9, false});
-  // AI options (disabled until phase B2).
-  items.push_back({ItemKind::NewGame, GomokuMode::VsAi, 15, true});
-  items.push_back({ItemKind::NewGame, GomokuMode::VsAi, 9, true});
+  // AI options: tapping these opens a difficulty modal before launching.
+  items.push_back({ItemKind::NewGame, GomokuMode::VsAi, 15, false});
+  items.push_back({ItemKind::NewGame, GomokuMode::VsAi, 9, false});
   items.push_back({ItemKind::Stats, GomokuMode::TwoPlayer, 15, false});
 }
 
@@ -66,6 +67,11 @@ void GomokuMenuActivity::loop() {
       showingStats = false;
       requestUpdate();
     }
+    return;
+  }
+
+  if (showingAiDifficulty) {
+    handleAiDifficultyInput();
     return;
   }
 
@@ -86,16 +92,45 @@ void GomokuMenuActivity::loop() {
   }
 }
 
+void GomokuMenuActivity::handleAiDifficultyInput() {
+  constexpr int kNumLevels = 3;
+  if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+      mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    aiDifficultySel = (aiDifficultySel + kNumLevels - 1) % kNumLevels;
+    requestUpdate();
+  } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
+             mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    aiDifficultySel = (aiDifficultySel + 1) % kNumLevels;
+    requestUpdate();
+  } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    GomokuStore::clear();
+    const auto level = static_cast<GomokuAiLevel>(aiDifficultySel);
+    activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, GomokuMode::VsAi,
+                                                                         pendingAiBoardSize, false, level));
+  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    showingAiDifficulty = false;
+    requestUpdate();
+  }
+}
+
 void GomokuMenuActivity::onSelect() {
   if (selected < 0 || selected >= static_cast<int>(items.size())) return;
   const Item& it = items[selected];
-  if (it.disabled) return;  // AI placeholder rows
+  if (it.disabled) return;  // legacy guard; no items currently use it
   switch (it.kind) {
     case ItemKind::Continue:
       activityManager.replaceActivity(
-          std::make_unique<GomokuGameActivity>(renderer, mappedInput, it.mode, it.boardSize, true));
+          std::make_unique<GomokuGameActivity>(renderer, mappedInput, it.mode, it.boardSize, true, resumeAiLevel));
       return;
     case ItemKind::NewGame:
+      if (it.mode == GomokuMode::VsAi) {
+        // Open the difficulty modal; actual launch happens on Confirm there.
+        pendingAiBoardSize = it.boardSize;
+        aiDifficultySel = static_cast<int>(GomokuAiLevel::Medium);
+        showingAiDifficulty = true;
+        requestUpdate();
+        return;
+      }
       GomokuStore::clear();
       activityManager.replaceActivity(
           std::make_unique<GomokuGameActivity>(renderer, mappedInput, it.mode, it.boardSize, false));
@@ -115,6 +150,11 @@ void GomokuMenuActivity::render(RenderLock&&) {
     renderStats();
   } else {
     renderList();
+    // Modal floats over the list — keep the list rendered behind it so the
+    // user retains spatial context (mirrors the in-game GameMenu pattern).
+    if (showingAiDifficulty) {
+      renderAiDifficulty();
+    }
   }
 
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -156,13 +196,22 @@ void GomokuMenuActivity::renderList() {
       case ItemKind::Continue: {
         const char* modeLabel = (resumeMode == GomokuMode::VsAi) ? tr(STR_GOMOKU_MODE_AI) : tr(STR_GOMOKU_MODE_2P);
         const char* sizeLabel = (resumeBoardSize == 9) ? tr(STR_GOMOKU_BOARD_9) : tr(STR_GOMOKU_BOARD_15);
-        snprintf(buf, sizeof(buf), "%s · %s · %02u:%02u · %u", modeLabel, sizeLabel,
-                 static_cast<unsigned>(resumeElapsedSec / 60), static_cast<unsigned>(resumeElapsedSec % 60),
-                 static_cast<unsigned>(resumeMoveCount));
+        if (resumeMode == GomokuMode::VsAi) {
+          const char* lvl = (resumeAiLevel == GomokuAiLevel::Easy)   ? tr(STR_GOMOKU_DIFF_EASY)
+                            : (resumeAiLevel == GomokuAiLevel::Hard) ? tr(STR_GOMOKU_DIFF_HARD)
+                                                                     : tr(STR_GOMOKU_DIFF_MEDIUM);
+          snprintf(buf, sizeof(buf), "%s · %s · %s · %02u:%02u · %u", modeLabel, lvl, sizeLabel,
+                   static_cast<unsigned>(resumeElapsedSec / 60), static_cast<unsigned>(resumeElapsedSec % 60),
+                   static_cast<unsigned>(resumeMoveCount));
+        } else {
+          snprintf(buf, sizeof(buf), "%s · %s · %02u:%02u · %u", modeLabel, sizeLabel,
+                   static_cast<unsigned>(resumeElapsedSec / 60), static_cast<unsigned>(resumeElapsedSec % 60),
+                   static_cast<unsigned>(resumeMoveCount));
+        }
         return std::string(buf);
       }
       case ItemKind::NewGame:
-        if (it.disabled) return std::string(tr(STR_GOMOKU_DESC_AI_COMING));
+        if (it.mode == GomokuMode::VsAi) return std::string(tr(STR_GOMOKU_DESC_AI_PICK));
         if (it.boardSize == 9) return std::string(tr(STR_GOMOKU_DESC_2P_9));
         return std::string(tr(STR_GOMOKU_DESC_2P_15));
       case ItemKind::Stats:
@@ -217,4 +266,44 @@ void GomokuMenuActivity::renderStats() {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+void GomokuMenuActivity::renderAiDifficulty() {
+  // Compact modal mirroring GomokuGameActivity::renderGameMenu (same widths
+  // / row height / fonts so it feels consistent across the app).
+  constexpr int titleH = 28;
+  constexpr int rowH = 32;
+  constexpr int kRows = 3;
+  const int w = 320;
+  const int h = titleH + rowH * kRows + 4;
+  const int x = (renderer.getScreenWidth() - w) / 2;
+  const int y = (renderer.getScreenHeight() - h) / 2;
+
+  renderer.fillRect(x, y, w, h, false);
+  renderer.drawRect(x, y, w, h, 2, true);
+
+  const int titleTextH = renderer.getTextHeight(UI_12_FONT_ID);
+  renderer.fillRect(x + 2, y + titleH, w - 4, 1, true);
+  renderer.drawText(UI_12_FONT_ID, x + 12, y + (titleH - titleTextH) / 2, tr(STR_GOMOKU_DIFFICULTY));
+
+  const char* labels[kRows] = {
+      tr(STR_GOMOKU_DIFF_EASY),
+      tr(STR_GOMOKU_DIFF_MEDIUM),
+      tr(STR_GOMOKU_DIFF_HARD),
+  };
+
+  const int itemTextH = renderer.getTextHeight(UI_12_FONT_ID);
+  const int firstY = y + titleH;
+
+  for (int i = 0; i < kRows; i++) {
+    const int rowY = firstY + i * rowH;
+    const bool inverted = (i == aiDifficultySel);
+    if (inverted) {
+      renderer.fillRect(x + 1, rowY, w - 2, rowH, true);
+    }
+    renderer.drawText(UI_12_FONT_ID, x + 12, rowY + (rowH - itemTextH) / 2, labels[i], !inverted);
+  }
+
+  const auto hints = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
 }

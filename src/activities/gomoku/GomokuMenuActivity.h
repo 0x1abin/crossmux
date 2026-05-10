@@ -33,9 +33,16 @@ class GomokuMenuActivity final : public Activity {
   bool showingStats = false;
   GomokuStats cachedStats;
 
+  // Difficulty modal state. Active when the user picked an AI option and we
+  // need them to pick a level before launching the game.
+  bool showingAiDifficulty = false;
+  uint8_t pendingAiBoardSize = 15;
+  int aiDifficultySel = static_cast<int>(GomokuAiLevel::Medium);
+
   // Resume slot info for the "Continue Game" subtitle.
   bool hasResume = false;
   GomokuMode resumeMode = GomokuMode::TwoPlayer;
+  GomokuAiLevel resumeAiLevel = GomokuAiLevel::Medium;
   uint8_t resumeBoardSize = 15;
   uint16_t resumeMoveCount = 0;
   uint16_t resumeElapsedSec = 0;
@@ -44,4 +51,6 @@ class GomokuMenuActivity final : public Activity {
   void onSelect();
   void renderList();
   void renderStats();
+  void renderAiDifficulty();
+  void handleAiDifficultyInput();
 };

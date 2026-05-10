@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "GomokuAI.h"
 #include "GomokuBoard.h"
 
 // Stats are tracked per board size: index 0 = 15×15, index 1 = 9×9.
@@ -18,7 +19,7 @@ enum class GomokuMode : uint8_t { TwoPlayer = 0, VsAi = 1 };
 struct GomokuSaveSlot {
   GomokuBoard board;
   GomokuMode mode = GomokuMode::TwoPlayer;
-  uint8_t aiDifficulty = 1;  // reserved for phase B2
+  GomokuAiLevel aiLevel = GomokuAiLevel::Medium;  // ignored for TwoPlayer
   uint8_t cursorR = 7;
   uint8_t cursorC = 7;
   uint16_t elapsedSec = 0;

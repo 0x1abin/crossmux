@@ -36,7 +36,11 @@ bool GomokuStore::load(GomokuSaveSlot& out) {
   uint8_t mode = 0;
   if (f.read(&mode, 1) != 1) return false;
   out.mode = static_cast<GomokuMode>(mode);
-  if (f.read(&out.aiDifficulty, 1) != 1) return false;
+  uint8_t levelByte = 0;
+  if (f.read(&levelByte, 1) != 1) return false;
+  // Clamp out-of-range values (older saves persisted aiDifficulty=1 here).
+  out.aiLevel = (levelByte <= static_cast<uint8_t>(GomokuAiLevel::Hard)) ? static_cast<GomokuAiLevel>(levelByte)
+                                                                         : GomokuAiLevel::Medium;
   if (f.read(&out.cursorR, 1) != 1) return false;
   if (f.read(&out.cursorC, 1) != 1) return false;
   if (f.read(reinterpret_cast<uint8_t*>(&out.elapsedSec), sizeof(out.elapsedSec)) !=
@@ -63,7 +67,8 @@ bool GomokuStore::save(const GomokuSaveSlot& in) {
   if (f.write(&version, 1) != 1) return false;
   const uint8_t mode = static_cast<uint8_t>(in.mode);
   if (f.write(&mode, 1) != 1) return false;
-  if (f.write(&in.aiDifficulty, 1) != 1) return false;
+  const uint8_t levelByte = static_cast<uint8_t>(in.aiLevel);
+  if (f.write(&levelByte, 1) != 1) return false;
   if (f.write(&in.cursorR, 1) != 1) return false;
   if (f.write(&in.cursorC, 1) != 1) return false;
   if (f.write(reinterpret_cast<const uint8_t*>(&in.elapsedSec), sizeof(in.elapsedSec)) != sizeof(in.elapsedSec)) {

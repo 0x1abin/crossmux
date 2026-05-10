@@ -8,6 +8,7 @@
 
 #include "../../components/UITheme.h"
 #include "../../fontIds.h"
+#include "GomokuAI.h"
 #include "GomokuMenuActivity.h"
 
 namespace {
@@ -31,11 +32,22 @@ const char* modeLabel(GomokuMode m) {
   return (m == GomokuMode::VsAi) ? tr(STR_GOMOKU_MODE_AI) : tr(STR_GOMOKU_MODE_2P);
 }
 
+const char* difficultyShortLabel(GomokuAiLevel level) {
+  switch (level) {
+    case GomokuAiLevel::Easy:
+      return "E";
+    case GomokuAiLevel::Hard:
+      return "H";
+    default:
+      return "M";
+  }
+}
+
 }  // namespace
 
 GomokuGameActivity::GomokuGameActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, GomokuMode mode,
-                                       uint8_t boardSize, bool resume)
-    : Activity("Gomoku", renderer, mappedInput), mode(mode), resumeRequested(resume) {
+                                       uint8_t boardSize, bool resume, GomokuAiLevel aiLevel)
+    : Activity("Gomoku", renderer, mappedInput), mode(mode), aiLevel(aiLevel), resumeRequested(resume) {
   board.clear((boardSize == 9) ? 9 : 15);
   cursorR = static_cast<uint8_t>((board.boardSize - 1) / 2);
   cursorC = cursorR;
@@ -59,6 +71,7 @@ void GomokuGameActivity::onEnter() {
     if (GomokuStore::load(slot)) {
       board = slot.board;
       mode = slot.mode;
+      aiLevel = slot.aiLevel;
       cursorR = (slot.cursorR < board.boardSize) ? slot.cursorR : static_cast<uint8_t>((board.boardSize - 1) / 2);
       cursorC = (slot.cursorC < board.boardSize) ? slot.cursorC : cursorR;
       elapsedMs = static_cast<uint32_t>(slot.elapsedSec) * 1000u;
@@ -76,6 +89,13 @@ void GomokuGameActivity::onEnter() {
     }
   } else {
     GomokuStore::recordStart(board.boardSize);
+  }
+
+  // If we resumed mid-game on AI's turn, queue a thinking pass so the AI
+  // plays its move once we render the first frame.
+  if (state == State::Playing && aiToMove()) {
+    aiThinkingArmed = true;
+    aiThinkingShown = false;
   }
 
   requestUpdate();
@@ -97,6 +117,23 @@ void GomokuGameActivity::loop() {
     if (pendingSaveAtMs != 0 && now >= pendingSaveAtMs) {
       pendingSaveAtMs = 0;
       flushSave();
+    }
+
+    // Two-stage AI move: armed → render "Thinking…" once → search → place.
+    // Forcing the render before the (possibly multi-second) search keeps the
+    // e-ink screen responsive and gives the player feedback that input is
+    // being handled.
+    if (aiThinkingArmed) {
+      if (!aiThinkingShown) {
+        aiThinkingShown = true;
+        requestUpdateAndWait();  // block until "Thinking…" is on screen
+        return;
+      }
+      runAiTurn();
+      aiThinkingArmed = false;
+      aiThinkingShown = false;
+      requestUpdate();
+      return;
     }
 
     handleInputPlaying();
@@ -180,7 +217,8 @@ void GomokuGameActivity::handleInputGameOver() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     const auto m = mode;
     const uint8_t bs = board.boardSize;
-    activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, m, bs, false));
+    const auto lv = aiLevel;
+    activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, m, bs, false, lv));
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     activityManager.replaceActivity(std::make_unique<GomokuMenuActivity>(renderer, mappedInput));
   }
@@ -196,6 +234,50 @@ void GomokuGameActivity::doPlace() {
   if (board.winner != GomokuBoard::Stone::Empty) return;
   if (!board.isEmpty(cursorR, cursorC)) return;  // can't place on occupied intersection
   if (!board.placeStone(cursorR, cursorC)) return;
+  scheduleSave();
+  if (board.winner != GomokuBoard::Stone::Empty || board.isFull()) {
+    onGameOver();
+    return;
+  }
+  if (aiToMove()) {
+    aiThinkingArmed = true;
+    aiThinkingShown = false;
+  }
+}
+
+bool GomokuGameActivity::aiToMove() const {
+  return mode == GomokuMode::VsAi && state == State::Playing && board.winner == GomokuBoard::Stone::Empty &&
+         !board.isFull() && board.nextTurn() == kAiSide;
+}
+
+void GomokuGameActivity::runAiTurn() {
+  uint8_t mv = GomokuAI::chooseMove(board, kAiSide, aiLevel);
+  uint8_t r = board.rowOf(mv);
+  uint8_t c = board.colOf(mv);
+  if (!board.placeStone(r, c)) {
+    // Should never happen — chooseMove only picks empty cells. If it does,
+    // skipping the move would leave nextTurn() pointing at the AI's color,
+    // and the player's next placement would be misattributed. Find any
+    // empty intersection as a passive fallback so the turn still advances.
+    LOG_ERR("GMK", "AI returned illegal move idx=%u; using fallback", static_cast<unsigned>(mv));
+    bool placed = false;
+    const uint16_t total = static_cast<uint16_t>(board.boardSize) * board.boardSize;
+    for (uint16_t i = 0; i < total; i++) {
+      if (board.cells[i] == static_cast<uint8_t>(GomokuBoard::Stone::Empty)) {
+        r = board.rowOf(static_cast<uint8_t>(i));
+        c = board.colOf(static_cast<uint8_t>(i));
+        if (board.placeStone(r, c)) {
+          placed = true;
+          break;
+        }
+      }
+    }
+    if (!placed) return;  // no empty cell — board is full, draw will be detected below
+  }
+  // Move cursor to AI's stone so the next player input picks up nearby —
+  // and the cursor box visibly reflects the new state.
+  cursorR = r;
+  cursorC = c;
   scheduleSave();
   if (board.winner != GomokuBoard::Stone::Empty || board.isFull()) {
     onGameOver();
@@ -240,6 +322,15 @@ void GomokuGameActivity::runMenuItem(uint8_t i) {
     case 1:  // Undo
       if (board.moveCount > 0) {
         board.undo();
+        // In vs-AI mode, undoing once would just hand the turn back to the AI
+        // which immediately replays — undo a second step so the player gets
+        // their decision back. (Skip when the player just played the very
+        // first move and the AI hasn't responded yet.)
+        if (mode == GomokuMode::VsAi && board.moveCount > 0 && board.nextTurn() == kAiSide) {
+          board.undo();
+        }
+        aiThinkingArmed = false;
+        aiThinkingShown = false;
         scheduleSave();
       }
       resumeFromMenu();
@@ -254,11 +345,12 @@ void GomokuGameActivity::runMenuItem(uint8_t i) {
       onGameOver();
       return;
     }
-    case 3: {  // New Game (same mode + size)
+    case 3: {  // New Game (same mode + size + difficulty)
       const auto m = mode;
       const uint8_t bs = board.boardSize;
+      const auto lv = aiLevel;
       GomokuStore::clear();
-      activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, m, bs, false));
+      activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, m, bs, false, lv));
       return;
     }
     case 4:  // Exit to menu
@@ -276,7 +368,7 @@ void GomokuGameActivity::flushSave() {
   GomokuSaveSlot slot;
   slot.board = board;
   slot.mode = mode;
-  slot.aiDifficulty = 1;
+  slot.aiLevel = aiLevel;
   slot.cursorR = cursorR;
   slot.cursorC = cursorC;
   slot.elapsedSec = static_cast<uint16_t>(elapsedMs / 1000);
@@ -325,7 +417,11 @@ void GomokuGameActivity::drawTitleBar() {
   const int y = centerY(TITLE_BAR_H, textH);
 
   char left[64];
-  snprintf(left, sizeof(left), "%s · %s", tr(STR_GOMOKU_TITLE), modeLabel(mode));
+  if (mode == GomokuMode::VsAi) {
+    snprintf(left, sizeof(left), "%s · %s [%s]", tr(STR_GOMOKU_TITLE), modeLabel(mode), difficultyShortLabel(aiLevel));
+  } else {
+    snprintf(left, sizeof(left), "%s · %s", tr(STR_GOMOKU_TITLE), modeLabel(mode));
+  }
   renderer.drawText(kStatusFont, 12, y, left);
 
   // Right side: small stone dot + move count + time.
@@ -513,6 +609,14 @@ void GomokuGameActivity::drawInfoPanel() {
 
 void GomokuGameActivity::drawModeLine() {
   const int y = MODE_LINE_Y;
+
+  // While AI is thinking, replace the coordinate readout with a prominent
+  // status line so the user sees that input has been accepted.
+  if (aiThinkingArmed) {
+    renderer.drawText(kStatusFont, CONTENT_X, y, tr(STR_GOMOKU_AI_THINKING));
+    return;
+  }
+
   // Left text: "Last <coord> · Cursor <coord>"
   char lastBuf[8] = "--";
   if (board.moveCount > 0) {

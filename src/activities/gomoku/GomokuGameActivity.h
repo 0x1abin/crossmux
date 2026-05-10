@@ -9,7 +9,7 @@
 class GomokuGameActivity final : public Activity {
  public:
   GomokuGameActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, GomokuMode mode, uint8_t boardSize,
-                     bool resume);
+                     bool resume, GomokuAiLevel aiLevel = GomokuAiLevel::Medium);
   ~GomokuGameActivity() override = default;
 
   void onEnter() override;
@@ -32,6 +32,9 @@ class GomokuGameActivity final : public Activity {
 
   State state = State::Playing;
   GomokuMode mode = GomokuMode::TwoPlayer;
+  GomokuAiLevel aiLevel = GomokuAiLevel::Medium;
+  // AI plays White (player is Black, first to move). Fixed for now.
+  static constexpr GomokuBoard::Stone kAiSide = GomokuBoard::Stone::White;
 
   GomokuBoard board;
   uint8_t cursorR = 7;
@@ -40,6 +43,10 @@ class GomokuGameActivity final : public Activity {
   uint32_t lastTickMs = 0;
   uint32_t pendingSaveAtMs = 0;
   bool resumeRequested = false;
+  // Two-stage AI move so the "Thinking..." frame reaches the e-ink before
+  // search begins: doPlace() arms it, loop() shows it, the next loop runs AI.
+  bool aiThinkingArmed = false;
+  bool aiThinkingShown = false;
 
   uint8_t menuSel = 0;
 
@@ -85,4 +92,8 @@ class GomokuGameActivity final : public Activity {
   void scheduleSave();
   void flushSave();
   void formatTime(uint32_t ms, char* out, size_t outLen) const;
+  // True when it's the AI's turn (mode==VsAi, AI's color, game not over).
+  bool aiToMove() const;
+  // Run AI search and place its move. Caller must verify aiToMove().
+  void runAiTurn();
 };
