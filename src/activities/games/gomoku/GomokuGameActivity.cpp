@@ -8,6 +8,7 @@
 
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
+#include "../GameUi.h"
 #include "GomokuAI.h"
 #include "GomokuMenuActivity.h"
 
@@ -20,13 +21,6 @@ constexpr int kModalHintFont = UI_10_FONT_ID;        // game-menu modal right-si
 constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;      // win-screen big title
 constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;  // win-screen stat values + info-panel stat values
 constexpr int kRecentFont = UI_12_FONT_ID;           // recent moves list
-
-// Debounce window for SD writes triggered by gameplay; mirrors CLAUDE.md's
-// SPIFFS-write-throttling guidance (avoid per-input writes to a finite-erase medium).
-constexpr uint32_t kSaveDebounceMs = 1500;
-
-// Vertically center text of height `textH` inside a box of height `boxH`.
-inline int centerY(int boxH, int textH) { return (boxH - textH) / 2; }
 
 const char* modeLabel(GomokuMode m) {
   return (m == GomokuMode::VsAi) ? tr(STR_GOMOKU_MODE_AI) : tr(STR_GOMOKU_MODE_2P);
@@ -60,7 +54,7 @@ void GomokuGameActivity::onEnter() {
   state = State::Playing;
   elapsedMs = 0;
   lastTickMs = millis();
-  pendingSaveAtMs = 0;
+  saveDebouncer.clear();
   menuSel = 0;
   statsRecorded = false;
   resignedFlag = false;
@@ -114,8 +108,7 @@ void GomokuGameActivity::loop() {
     }
     lastTickMs = now;
 
-    if (pendingSaveAtMs != 0 && now >= pendingSaveAtMs) {
-      pendingSaveAtMs = 0;
+    if (saveDebouncer.consumeIfDue(now)) {
       flushSave();
     }
 
@@ -162,13 +155,6 @@ void GomokuGameActivity::coordToText(uint8_t r, uint8_t c, char* out, size_t out
   // Row:  boardSize - r so the top row prints as the largest number.
   const char letter = (c < 8) ? static_cast<char>('A' + c) : static_cast<char>('A' + c + 1);
   snprintf(out, outLen, "%c%u", letter, static_cast<unsigned>(board.boardSize - r));
-}
-
-void GomokuGameActivity::formatTime(uint32_t ms, char* out, size_t outLen) const {
-  const uint32_t totalSec = ms / 1000;
-  const uint32_t mm = (totalSec / 60) % 100;
-  const uint32_t ss = totalSec % 60;
-  snprintf(out, outLen, "%02u:%02u", static_cast<unsigned>(mm), static_cast<unsigned>(ss));
 }
 
 // ---------- Input ----------
@@ -299,7 +285,7 @@ void GomokuGameActivity::onGameOver() {
       GomokuStore::recordDraw(board.boardSize);
     }
     GomokuStore::clear();
-    pendingSaveAtMs = 0;
+    saveDebouncer.clear();
     statsRecorded = true;
   }
 }
@@ -360,11 +346,11 @@ void GomokuGameActivity::runMenuItem(uint8_t i) {
   }
 }
 
-void GomokuGameActivity::scheduleSave() { pendingSaveAtMs = millis() + kSaveDebounceMs; }
+void GomokuGameActivity::scheduleSave() { saveDebouncer.schedule(millis()); }
 
 void GomokuGameActivity::flushSave() {
   if (state != State::Playing && state != State::GameMenu) return;
-  pendingSaveAtMs = 0;
+  saveDebouncer.clear();
   GomokuSaveSlot slot;
   slot.board = board;
   slot.mode = mode;
@@ -414,7 +400,7 @@ void GomokuGameActivity::drawTitleBar() {
   renderer.drawLine(0, TITLE_BAR_H, w, TITLE_BAR_H, true);
 
   const int textH = renderer.getTextHeight(kStatusFont);
-  const int y = centerY(TITLE_BAR_H, textH);
+  const int y = gameCenterY(TITLE_BAR_H, textH);
 
   char left[64];
   if (mode == GomokuMode::VsAi) {
@@ -430,7 +416,7 @@ void GomokuGameActivity::drawTitleBar() {
   const bool markerIsBlack = (marker == GomokuBoard::Stone::Black);
 
   char timeStr[8];
-  formatTime(elapsedMs, timeStr, sizeof(timeStr));
+  gameFormatElapsed(elapsedMs, timeStr, sizeof(timeStr));
   char tail[24];
   snprintf(tail, sizeof(tail), "%u · %s", static_cast<unsigned>(board.moveCount), timeStr);
   const int rw = renderer.getTextWidth(kStatusFont, tail);
@@ -677,7 +663,7 @@ void GomokuGameActivity::renderGameMenu() {
 
   const int titleTextH = renderer.getTextHeight(kModalItemFont);
   renderer.fillRect(x + 2, y + titleH, w - 4, 1, true);
-  renderer.drawText(kModalItemFont, x + 12, y + centerY(titleH, titleTextH), tr(STR_GOMOKU_GAME_MENU));
+  renderer.drawText(kModalItemFont, x + 12, y + gameCenterY(titleH, titleTextH), tr(STR_GOMOKU_GAME_MENU));
 
   const char* labels[MENU_ITEM_COUNT] = {
       tr(STR_GOMOKU_RESUME), tr(STR_GOMOKU_UNDO), tr(STR_GOMOKU_RESIGN), tr(STR_GOMOKU_NEW_GAME), tr(STR_GOMOKU_EXIT),
@@ -700,10 +686,10 @@ void GomokuGameActivity::renderGameMenu() {
     if (inverted) {
       renderer.fillRect(x + 1, rowY, w - 2, rowH, true);
     }
-    renderer.drawText(kModalItemFont, x + 12, rowY + centerY(rowH, itemTextH), labels[i], !inverted);
+    renderer.drawText(kModalItemFont, x + 12, rowY + gameCenterY(rowH, itemTextH), labels[i], !inverted);
     if (hints[i] && hints[i][0] != '\0') {
       const int hw = renderer.getTextWidth(kModalHintFont, hints[i]);
-      renderer.drawText(kModalHintFont, x + w - 12 - hw, rowY + centerY(rowH, hintTextH) + 2, hints[i], !inverted);
+      renderer.drawText(kModalHintFont, x + w - 12 - hw, rowY + gameCenterY(rowH, hintTextH) + 2, hints[i], !inverted);
     }
   }
 }
@@ -734,7 +720,7 @@ void GomokuGameActivity::renderGameOver() {
 
   // Subtitle: mode · size · time · N moves
   char timeBuf[8];
-  formatTime(elapsedMs, timeBuf, sizeof(timeBuf));
+  gameFormatElapsed(elapsedMs, timeBuf, sizeof(timeBuf));
   const char* sizeLabel = (board.boardSize == 9) ? tr(STR_GOMOKU_BOARD_9) : tr(STR_GOMOKU_BOARD_15);
   char sub[96];
   snprintf(sub, sizeof(sub), "%s · %s · %s · %u %s", modeLabel(mode), sizeLabel, timeBuf,

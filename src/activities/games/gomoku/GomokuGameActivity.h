@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../Activity.h"
+#include "../GameSaveDebouncer.h"
 #include "GomokuBoard.h"
 #include "GomokuStore.h"
 
@@ -41,7 +42,7 @@ class GomokuGameActivity final : public Activity {
   uint8_t cursorC = 7;
   uint32_t elapsedMs = 0;
   uint32_t lastTickMs = 0;
-  uint32_t pendingSaveAtMs = 0;
+  GameSaveDebouncer saveDebouncer;
   bool resumeRequested = false;
   // Two-stage AI move so the "Thinking..." frame reaches the e-ink before
   // search begins: doPlace() arms it, loop() shows it, the next loop runs AI.
@@ -91,7 +92,6 @@ class GomokuGameActivity final : public Activity {
   void onGameOver();  // Detects natural Win/Draw and triggers state change.
   void scheduleSave();
   void flushSave();
-  void formatTime(uint32_t ms, char* out, size_t outLen) const;
   // True when it's the AI's turn (mode==VsAi, AI's color, game not over).
   bool aiToMove() const;
   // Run AI search and place its move. Caller must verify aiToMove().

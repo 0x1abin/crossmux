@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../Activity.h"
+#include "../GameSaveDebouncer.h"
 #include "SudokuBoard.h"
 
 class SudokuGameActivity final : public Activity {
@@ -38,7 +39,7 @@ class SudokuGameActivity final : public Activity {
   uint8_t hintsLeft = 3;
   uint32_t elapsedMs = 0;
   uint32_t lastTickMs = 0;
-  uint32_t pendingSaveAtMs = 0;  // 0 = no pending save
+  GameSaveDebouncer saveDebouncer;
   bool resumeRequested = false;
   bool generationDone = false;  // Generator runs once on first loop tick
 
@@ -76,7 +77,6 @@ class SudokuGameActivity final : public Activity {
   void resumeFromMenu();  // state = Playing + reset timer base
   uint8_t menuSel = 0;
   static constexpr uint8_t MENU_ITEM_COUNT = 7;
-  void formatTime(uint32_t ms, char* out, size_t outLen) const;
 
   // Layout (logical 480×800 portrait). Single source of truth for the screen.
   static constexpr int CONTENT_X = 24;

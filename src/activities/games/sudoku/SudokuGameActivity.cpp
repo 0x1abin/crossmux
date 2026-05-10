@@ -8,6 +8,7 @@
 
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
+#include "../GameUi.h"
 #include "SudokuGenerator.h"
 #include "SudokuStore.h"
 
@@ -24,10 +25,6 @@ constexpr int kModalItemFont = UI_12_FONT_ID;        // game-menu modal rows
 constexpr int kModalHintFont = UI_10_FONT_ID;        // game-menu right-side hints
 constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;      // win-screen "Solved!"
 constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;  // win-screen stat columns
-
-// Vertically center text of height `textH` inside a box of height `boxH`.
-// drawText's y is the TOP of the glyph (see GfxRenderer.cpp:249).
-inline int centerY(int boxH, int textH) { return (boxH - textH) / 2; }
 
 }  // namespace
 
@@ -52,7 +49,7 @@ void SudokuGameActivity::onEnter() {
   hintsLeft = 3;
   elapsedMs = 0;
   lastTickMs = millis();
-  pendingSaveAtMs = 0;
+  saveDebouncer.clear();
 
   // Resume overrides defaults if a save exists.
   if (resumeRequested) {
@@ -102,8 +99,7 @@ void SudokuGameActivity::loop() {
     }
     lastTickMs = now;
 
-    if (pendingSaveAtMs != 0 && now >= pendingSaveAtMs) {
-      pendingSaveAtMs = 0;
+    if (saveDebouncer.consumeIfDue(now)) {
       flushSave();
     }
 
@@ -332,16 +328,16 @@ void SudokuGameActivity::onSolved() {
   const uint16_t cap = static_cast<uint16_t>(totalSec > 0xFFFF ? 0xFFFF : totalSec);
   SudokuStore::recordCompletion(difficulty, cap);
   SudokuStore::clear();
-  pendingSaveAtMs = 0;
+  saveDebouncer.clear();
   state = State::Won;
 }
 
-void SudokuGameActivity::scheduleSave() { pendingSaveAtMs = millis() + 1500; }
+void SudokuGameActivity::scheduleSave() { saveDebouncer.schedule(millis()); }
 
 void SudokuGameActivity::flushSave() {
   if (state != State::Playing && state != State::GameMenu) return;
   if (!generationDone) return;
-  pendingSaveAtMs = 0;
+  saveDebouncer.clear();
   SudokuSaveSlot slot;
   slot.board = board;
   slot.difficulty = difficulty;
@@ -421,7 +417,7 @@ void SudokuGameActivity::drawTitleBar() {
   renderer.drawLine(0, TITLE_BAR_H, w, TITLE_BAR_H, true);
 
   const int textH = renderer.getTextHeight(kStatusFont);
-  const int y = centerY(TITLE_BAR_H, textH);
+  const int y = gameCenterY(TITLE_BAR_H, textH);
 
   char left[64];
   snprintf(left, sizeof(left), "%s · %s", tr(STR_SUDOKU_TITLE), difficultyName(difficulty));
@@ -429,7 +425,7 @@ void SudokuGameActivity::drawTitleBar() {
 
   if (state != State::Generating) {
     char timeStr[8];
-    formatTime(elapsedMs, timeStr, sizeof(timeStr));
+    gameFormatElapsed(elapsedMs, timeStr, sizeof(timeStr));
     char right[32];
     snprintf(right, sizeof(right), "%s · %u/3", timeStr, static_cast<unsigned>(mistakes));
     const int rw = renderer.getTextWidth(kStatusFont, right);
@@ -495,7 +491,7 @@ void SudokuGameActivity::drawGrid(int x0, int y0) {
         char buf[2] = {static_cast<char>('0' + v), 0};
         const int tw = renderer.getTextWidth(fontId, buf, style);
         const int x = x0 + c * cell + (cell - tw) / 2;
-        const int y = y0 + r * cell + centerY(cell, digitH);
+        const int y = y0 + r * cell + gameCenterY(cell, digitH);
         renderer.drawText(fontId, x, y, buf, !isCursor, style);
 
         if (cellHasError(r, c)) {
@@ -521,7 +517,7 @@ void SudokuGameActivity::drawNotes(int cellX, int cellY, int cellSize, uint16_t 
     const int sy = cellY + (k / 3) * sub;
     char buf[2] = {static_cast<char>('0' + d), 0};
     const int tw = renderer.getTextWidth(kNotesFont, buf);
-    renderer.drawText(kNotesFont, sx + (sub - tw) / 2, sy + centerY(sub, textH), buf, true);
+    renderer.drawText(kNotesFont, sx + (sub - tw) / 2, sy + gameCenterY(sub, textH), buf, true);
   }
 }
 
@@ -547,7 +543,7 @@ void SudokuGameActivity::drawPalette(int x0, int y0) {
     const char ch = (i < 9) ? static_cast<char>('0' + (i + 1)) : 'X';
     const char buf[2] = {ch, 0};
     const int tw = renderer.getTextWidth(kBigDigitFont, buf);
-    renderer.drawText(kBigDigitFont, cx + (PALETTE_CELL_W - tw) / 2, cy + centerY(PALETTE_CELL_H, textH), buf,
+    renderer.drawText(kBigDigitFont, cx + (PALETTE_CELL_W - tw) / 2, cy + gameCenterY(PALETTE_CELL_H, textH), buf,
                       !isSelected);
   }
 }
@@ -612,7 +608,7 @@ void SudokuGameActivity::renderWon() {
 
   // Subtitle: difficulty · time · errors
   char timeBuf[8];
-  formatTime(elapsedMs, timeBuf, sizeof(timeBuf));
+  gameFormatElapsed(elapsedMs, timeBuf, sizeof(timeBuf));
   char sub[64];
   snprintf(sub, sizeof(sub), "%s · %s · %s %u/3", difficultyName(difficulty), timeBuf, tr(STR_SUDOKU_ERRORS),
            static_cast<unsigned>(mistakes));
@@ -686,7 +682,7 @@ void SudokuGameActivity::renderGameMenu() {
   // Title bar.
   const int titleTextH = renderer.getTextHeight(kModalItemFont);
   renderer.fillRect(x + 2, y + titleH, w - 4, 1, true);
-  renderer.drawText(kModalItemFont, x + 12, y + centerY(titleH, titleTextH), tr(STR_SUDOKU_GAME_MENU));
+  renderer.drawText(kModalItemFont, x + 12, y + gameCenterY(titleH, titleTextH), tr(STR_SUDOKU_GAME_MENU));
 
   const char* labels[MENU_ITEM_COUNT] = {
       tr(STR_SUDOKU_RESUME),  tr(STR_SUDOKU_TOGGLE_NOTES), tr(STR_SUDOKU_USE_HINT), tr(STR_SUDOKU_CHECK_ERRORS),
@@ -713,17 +709,11 @@ void SudokuGameActivity::renderGameMenu() {
     if (inverted) {
       renderer.fillRect(x + 1, rowY, w - 2, rowH, true);
     }
-    renderer.drawText(kModalItemFont, x + 12, rowY + centerY(rowH, itemTextH), labels[i], !inverted);
+    renderer.drawText(kModalItemFont, x + 12, rowY + gameCenterY(rowH, itemTextH), labels[i], !inverted);
     if (hints[i] && hints[i][0] != '\0') {
       const int hw = renderer.getTextWidth(kModalHintFont, hints[i]);
-      renderer.drawText(kModalHintFont, x + w - 12 - hw, rowY + centerY(rowH, hintTextH) + 2, hints[i], !inverted);
+      renderer.drawText(kModalHintFont, x + w - 12 - hw, rowY + gameCenterY(rowH, hintTextH) + 2, hints[i], !inverted);
     }
   }
 }
 
-void SudokuGameActivity::formatTime(uint32_t ms, char* out, size_t outLen) const {
-  const uint32_t totalSec = ms / 1000;
-  const uint32_t mm = (totalSec / 60) % 100;
-  const uint32_t ss = totalSec % 60;
-  snprintf(out, outLen, "%02u:%02u", static_cast<unsigned>(mm), static_cast<unsigned>(ss));
-}
