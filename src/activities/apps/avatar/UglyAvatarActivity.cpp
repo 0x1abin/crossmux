@@ -34,7 +34,7 @@ void UglyAvatarActivity::regenerate() {
 
 void UglyAvatarActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    onGoHome();
+    activityManager.goToApps();
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {

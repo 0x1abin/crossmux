@@ -84,7 +84,7 @@ enum UIIcon {
   Library,
   Wifi,
   Hotspot,
-  Games,
+  Apps,
   Sudoku,
   Gomoku,
   Avatar

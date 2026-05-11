@@ -20,12 +20,12 @@ namespace {
 // keep all roles ≤ 16 pt so the activity works in every build environment.
 constexpr int kBigDigitFont = NOTOSERIF_16_FONT_ID;   // fixed (given) digits + palette numerals
 constexpr int kUserDigitFont = NOTOSERIF_14_FONT_ID;  // user-input digits — smaller = thinner & lighter
-constexpr int kNotesFont = NOTOSANS_12_FONT_ID;      // 3×3 candidate notes
-constexpr int kStatusFont = UI_12_FONT_ID;           // title bar / mode line
-constexpr int kModalItemFont = UI_12_FONT_ID;        // game-menu modal rows
-constexpr int kModalHintFont = UI_10_FONT_ID;        // game-menu right-side hints
-constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;      // win-screen "Solved!"
-constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;  // win-screen stat columns
+constexpr int kNotesFont = NOTOSANS_12_FONT_ID;       // 3×3 candidate notes
+constexpr int kStatusFont = UI_12_FONT_ID;            // title bar / mode line
+constexpr int kModalItemFont = UI_12_FONT_ID;         // game-menu modal rows
+constexpr int kModalHintFont = UI_10_FONT_ID;         // game-menu right-side hints
+constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;       // win-screen "Solved!"
+constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;   // win-screen stat columns
 
 }  // namespace
 
@@ -686,8 +686,8 @@ void SudokuGameActivity::renderGameMenu() {
   renderer.drawText(kModalItemFont, x + 12, y + gameCenterY(titleH, titleTextH), tr(STR_GAME_GAME_MENU));
 
   const char* labels[MENU_ITEM_COUNT] = {
-      tr(STR_GAME_RESUME),  tr(STR_SUDOKU_TOGGLE_NOTES), tr(STR_SUDOKU_USE_HINT), tr(STR_SUDOKU_CHECK_ERRORS),
-      tr(STR_SUDOKU_RESTART), tr(STR_GAME_NEW_GAME),     tr(STR_GAME_EXIT),
+      tr(STR_GAME_RESUME),    tr(STR_SUDOKU_TOGGLE_NOTES), tr(STR_SUDOKU_USE_HINT), tr(STR_SUDOKU_CHECK_ERRORS),
+      tr(STR_SUDOKU_RESTART), tr(STR_GAME_NEW_GAME),       tr(STR_GAME_EXIT),
   };
 
   // Right-side hints (i18n-driven; no hardcoded English).
@@ -717,4 +717,3 @@ void SudokuGameActivity::renderGameMenu() {
     }
   }
 }
-

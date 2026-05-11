@@ -74,7 +74,7 @@ void SudokuMenuActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     onSelect();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    activityManager.goToGames();
+    activityManager.goToApps();
   }
 }
 

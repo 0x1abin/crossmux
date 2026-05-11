@@ -6,13 +6,13 @@
 
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
-#include "avatar/UglyAvatarActivity.h"
+#include "apps/AppsMenuActivity.h"
+#include "apps/avatar/UglyAvatarActivity.h"
+#include "apps/gomoku/GomokuMenuActivity.h"
+#include "apps/sudoku/SudokuMenuActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
-#include "games/GamesMenuActivity.h"
-#include "games/gomoku/GomokuMenuActivity.h"
-#include "games/sudoku/SudokuMenuActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -217,7 +217,7 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToGames() { replaceActivity(std::make_unique<GamesMenuActivity>(renderer, mappedInput)); }
+void ActivityManager::goToApps() { replaceActivity(std::make_unique<AppsMenuActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }
 

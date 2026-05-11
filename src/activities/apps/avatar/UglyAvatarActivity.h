@@ -5,7 +5,7 @@
 
 #include <memory>
 
-#include "../Activity.h"
+#include "../../Activity.h"
 
 class UglyAvatarActivity final : public Activity {
  public:

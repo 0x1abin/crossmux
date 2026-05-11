@@ -192,9 +192,8 @@ void HomeActivity::loop() {
     const int recentsIdx = idx++;
     const int opdsLibraryIdx = hasOpdsServers ? idx++ : -1;
     const int fileTransferIdx = idx++;
-    const int gamesIdx = idx++;
     const int settingsIdx = idx++;
-    const int uglyAvatarIdx = idx;
+    const int appsIdx = idx;
 
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
@@ -206,12 +205,10 @@ void HomeActivity::loop() {
       onOpdsBrowserOpen();
     } else if (menuSelectedIndex == fileTransferIdx) {
       onFileTransferOpen();
-    } else if (menuSelectedIndex == gamesIdx) {
-      onGamesOpen();
+    } else if (menuSelectedIndex == appsIdx) {
+      onAppsOpen();
     } else if (menuSelectedIndex == settingsIdx) {
       onSettingsOpen();
-    } else if (menuSelectedIndex == uglyAvatarIdx) {
-      onUglyAvatarOpen();
     }
   }
 }
@@ -233,8 +230,8 @@ void HomeActivity::render(RenderLock&&) {
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_GAMES_TITLE), tr(STR_SETTINGS_TITLE), tr(STR_UGLY_AVATAR)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Games, Settings, Avatar};
+                                        tr(STR_SETTINGS_TITLE), tr(STR_APPS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings, Apps};
 
   if (hasOpdsServers) {
     menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
@@ -283,6 +280,4 @@ void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 
-void HomeActivity::onGamesOpen() { activityManager.goToGames(); }
-
-void HomeActivity::onUglyAvatarOpen() { activityManager.goToUglyAvatar(); }
+void HomeActivity::onAppsOpen() { activityManager.goToApps(); }
