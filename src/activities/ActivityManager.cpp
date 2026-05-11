@@ -6,9 +6,13 @@
 
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
+#include "avatar/UglyAvatarActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "games/GamesMenuActivity.h"
+#include "games/gomoku/GomokuMenuActivity.h"
+#include "games/sudoku/SudokuMenuActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -175,6 +179,8 @@ void ActivityManager::goToFileTransfer() {
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
+void ActivityManager::goToUglyAvatar() { replaceActivity(std::make_unique<UglyAvatarActivity>(renderer, mappedInput)); }
+
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
@@ -210,6 +216,12 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 }
 
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToGames() { replaceActivity(std::make_unique<GamesMenuActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToGomoku() { replaceActivity(std::make_unique<GomokuMenuActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goHome() { replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput)); }
 

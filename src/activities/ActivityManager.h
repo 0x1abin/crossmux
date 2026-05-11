@@ -80,6 +80,7 @@ class ActivityManager {
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer();
   void goToSettings();
+  void goToUglyAvatar();
   void goToFileBrowser(std::string path = {});
   void goToRecentBooks();
   void goToBrowser();
@@ -88,6 +89,9 @@ class ActivityManager {
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();
+  void goToGames();
+  void goToSudoku();
+  void goToGomoku();
   void goHome();
 
   // This will move current activity to stack instead of deleting it
