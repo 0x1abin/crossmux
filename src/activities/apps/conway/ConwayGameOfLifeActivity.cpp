@@ -171,14 +171,14 @@ void ConwayGameOfLifeActivity::loop() {
     requestUpdate();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Right) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Down)) {
     randomize();
     running_ = false;
     requestUpdate();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
-      mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
     cycleSpeed();
     requestUpdate();
     return;
@@ -203,7 +203,7 @@ void ConwayGameOfLifeActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   char headerBuf[64];
-  const char* stateLabel = running_ ? tr(STR_PLAY) : tr(STR_PAUSE);
+  const char* stateLabel = running_ ? tr(STR_PLAYING) : tr(STR_PAUSED);
   snprintf(headerBuf, sizeof(headerBuf), "%s  ·  Gen %u  ·  %s", tr(STR_CONWAY_TITLE),
            static_cast<unsigned>(generation_), stateLabel);
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, sw, metrics.headerHeight}, headerBuf);

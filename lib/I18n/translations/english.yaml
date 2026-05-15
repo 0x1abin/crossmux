@@ -367,6 +367,8 @@ STR_RANDOM: "Random"
 STR_CONWAY_TITLE: "Game of Life"
 STR_PLAY: "Play"
 STR_PAUSE: "Pause"
+STR_PLAYING: "Playing"
+STR_PAUSED: "Paused"
 STR_SPEED: "Speed"
 
 STR_SUDOKU_TITLE: "Sudoku"
