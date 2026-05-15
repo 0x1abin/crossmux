@@ -5,7 +5,6 @@
 #include <algorithm>
 
 #include "OpdsServerStore.h"
-#include "SdCardFontGlobals.h"
 #include "apps/AppsMenuActivity.h"
 #include "apps/avatar/UglyAvatarActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
@@ -203,7 +202,6 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path) {
-  ensureSdFontLoaded();
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
 }
 

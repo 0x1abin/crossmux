@@ -14,10 +14,17 @@
 namespace {
 constexpr size_t kButtonCount = 7;
 
+// Matches hardware InputManager edge semantics: events are valid for exactly
+// one update() cycle. injectButton() (SDL thread) writes to pending* fields;
+// update() (firmware thread, once per loop) latches pending → frame and clears
+// pending; reads return frame* without consuming. Two-stage buffer prevents
+// losing events that arrive after the firmware reads but before the next update().
 struct ButtonStates {
   bool pressed = false;
-  bool wasPressed = false;
-  bool wasReleased = false;
+  bool pendingPressed = false;
+  bool pendingReleased = false;
+  bool framePressed = false;
+  bool frameReleased = false;
   unsigned long pressedAtMs = 0;
 };
 
@@ -27,7 +34,6 @@ std::mutex& state_mutex() {
 }
 
 ButtonStates g_buttons[kButtonCount];
-unsigned long g_lastUpdateMs = 0;
 }  // namespace
 
 namespace simulator {
@@ -38,11 +44,11 @@ void injectButton(uint8_t buttonIndex, bool down) {
   ButtonStates& b = g_buttons[buttonIndex];
   if (down && !b.pressed) {
     b.pressed = true;
-    b.wasPressed = true;
+    b.pendingPressed = true;
     b.pressedAtMs = static_cast<unsigned long>(SDL_GetTicks());
   } else if (!down && b.pressed) {
     b.pressed = false;
-    b.wasReleased = true;
+    b.pendingReleased = true;
   }
 }
 }  // namespace simulator
@@ -50,13 +56,12 @@ void injectButton(uint8_t buttonIndex, bool down) {
 void HalGPIO::begin() {}
 
 void HalGPIO::update() {
-  // wasPressed/wasReleased are edge-triggered and consumed by the next isPressed/wasPressed read cycle.
-  // CrossPoint's contract is: after update(), wasPressed/wasReleased reflect events since the last update().
-  // We swap-clear here.
   std::lock_guard<std::mutex> lock(state_mutex());
   for (auto& b : g_buttons) {
-    // Keep "wasPressed"/"wasReleased" sticky until next update().
-    // simulator::injectButton already set them; we just bump the timestamp.
+    b.framePressed = b.pendingPressed;
+    b.frameReleased = b.pendingReleased;
+    b.pendingPressed = false;
+    b.pendingReleased = false;
   }
 }
 
@@ -69,15 +74,13 @@ bool HalGPIO::isPressed(uint8_t buttonIndex) const {
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const {
   if (buttonIndex >= kButtonCount) return false;
   std::lock_guard<std::mutex> lock(state_mutex());
-  bool v = g_buttons[buttonIndex].wasPressed;
-  g_buttons[buttonIndex].wasPressed = false;
-  return v;
+  return g_buttons[buttonIndex].framePressed;
 }
 
 bool HalGPIO::wasAnyPressed() const {
   std::lock_guard<std::mutex> lock(state_mutex());
   for (auto& b : g_buttons) {
-    if (b.wasPressed) return true;
+    if (b.framePressed) return true;
   }
   return false;
 }
@@ -85,15 +88,13 @@ bool HalGPIO::wasAnyPressed() const {
 bool HalGPIO::wasReleased(uint8_t buttonIndex) const {
   if (buttonIndex >= kButtonCount) return false;
   std::lock_guard<std::mutex> lock(state_mutex());
-  bool v = g_buttons[buttonIndex].wasReleased;
-  g_buttons[buttonIndex].wasReleased = false;
-  return v;
+  return g_buttons[buttonIndex].frameReleased;
 }
 
 bool HalGPIO::wasAnyReleased() const {
   std::lock_guard<std::mutex> lock(state_mutex());
   for (auto& b : g_buttons) {
-    if (b.wasReleased) return true;
+    if (b.frameReleased) return true;
   }
   return false;
 }

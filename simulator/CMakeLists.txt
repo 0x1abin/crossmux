@@ -138,6 +138,9 @@ add_custom_target(i18n_generated ALL
 add_executable(crosspoint_simulator
     simulator_main.cpp
     simulator_window.cpp
+    simulator_shell.cpp
+    simulator_overlay.cpp
+    simulator_settings.cpp
     missing_symbols.cpp
     ${SIMULATOR_HAL_NATIVE}
     ${CROSSPOINT_SRC}

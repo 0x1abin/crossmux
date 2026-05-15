@@ -12,6 +12,7 @@
 #include <string>
 
 #include "simulator_config.h"
+#include "simulator_settings.h"
 #include "simulator_window.h"
 
 // Provided by src/main.cpp (renamed via build flags).
@@ -78,6 +79,9 @@ int main(int argc, char** argv) {
   CliArgs args = parse_args(argc, argv);
   g_simulator_sd_root = args.sdRoot;
 
+  simulator::HostSettings hostSettings;  // defaults from HostSettings struct
+  simulator::loadHostSettings(hostSettings);
+
   // Don't let SDL install its own SIGTERM/SIGINT handlers. By default SDL2 catches
   // them, posts SDL_QUIT, then returns control to us — which then walks out through
   // static destruction and trips ~ActivityManager()'s assert(false). With this hint
@@ -89,10 +93,12 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
-  if (!simulator::SimulatorWindow::instance().open("CrossPoint Simulator", args.scale)) {
+  if (!simulator::SimulatorWindow::instance().open("CrossPoint Simulator", args.scale,
+                                                   hostSettings.showDeviceShell)) {
     SDL_Quit();
     return 1;
   }
+  simulator::SimulatorWindow::instance().settingsOverlay().syncFrom(hostSettings);
 
   // Run the firmware setup + loop on a registered FreeRTOS task so that
   // xTaskGetCurrentTaskHandle() returns a non-null handle inside firmware code —
@@ -111,9 +117,26 @@ int main(int argc, char** argv) {
         case SDL_KEYDOWN:
         case SDL_KEYUP: {
           if (ev.key.repeat) break;  // Ignore key-repeat: HalGPIO is edge-triggered.
+          if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F1) {
+            auto& overlay = simulator::SimulatorWindow::instance().settingsOverlay();
+            overlay.setVisible(!overlay.isVisible());
+            simulator::SimulatorWindow::instance().forceRedraw();
+            break;
+          }
           uint8_t btn = map_key_to_button(ev.key.keysym.sym);
           if (btn != 0xFF) {
             simulator::injectButton(btn, ev.type == SDL_KEYDOWN);
+          }
+          break;
+        }
+        case SDL_MOUSEBUTTONDOWN: {
+          if (ev.button.button != SDL_BUTTON_LEFT) break;
+          auto& w = simulator::SimulatorWindow::instance();
+          if (!w.settingsOverlay().isVisible()) break;
+          if (w.settingsOverlay().handleClick(ev.button.x, ev.button.y)) {
+            hostSettings.showDeviceShell = !hostSettings.showDeviceShell;
+            simulator::saveHostSettings(hostSettings);
+            w.setShellVisible(hostSettings.showDeviceShell);  // resizes + redraws
           }
           break;
         }

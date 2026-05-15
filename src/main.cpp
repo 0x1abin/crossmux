@@ -239,8 +239,6 @@ void enterDeepSleep() {
   powerManager.startDeepSleep(gpio);
 }
 
-void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
-
 // Pre-decompress every non-ASCII hot-UI glyph for the current language into
 // FontDecompressor's page-buffer cache so list/menu rendering hits the fast
 // path (binary search in pageSlots[]) instead of re-decompressing the same

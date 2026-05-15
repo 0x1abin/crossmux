@@ -85,6 +85,25 @@ Keyboard mapping (matches `MappedInputManager::Button::*`):
 | ← / →     | BTN_LEFT/RIGHT | Page back / forward (reader) |
 | ↑ / ↓     | BTN_UP/DOWN    | Cursor / scroll              |
 | Esc       | BTN_POWER      | Power button (exits sim)     |
+| F1        | —              | Toggle simulator settings overlay |
+
+## Host-side settings
+
+Press **F1** to summon a translucent settings panel rendered on top of the eink
+area. Left-click a row to toggle that option. Press F1 again to dismiss.
+
+Available toggles:
+
+- **Show device shell** — wraps the eink area in an antialiased, rounded
+  black bezel modeled on the real Xteink X4 (114 × 69 × 5.9 mm @ 220 PPI →
+  598 × 987 px window at 1×). Renders three right-side button bumps
+  (Power / Previous / Next) and four front-face buttons along the bottom
+  in a 2+2 grouping (Back+OK · Next+Previous). Turning it off shrinks
+  the window back to a bare 480×800.
+
+Settings persist to `~/.crosspoint_simulator.json` (or `./simulator_settings.json`
+if `$HOME` is unset). This file is host-only — it has no effect on the firmware's
+own settings, which live on the simulated SD card under `.crosspoint/`.
 
 ## SD card layout
 
