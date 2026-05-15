@@ -468,6 +468,13 @@ bool ChineseChessBoard::makeMove(const Move& m) {
   if (m.from >= CELLS || m.to >= CELLS) return false;
   const uint8_t mover = cells[m.from];
   if (mover == Empty) return false;
+  // Reject overflow BEFORE mutating cells/hash. Otherwise an unrecorded move
+  // leaves moveCount unchanged while cells and zobristHash are advanced — a
+  // subsequent undo() would pop an older history entry and corrupt state.
+  if (moveCount >= MAX_MOVES) {
+    LOG_ERR("XQI", "moveHistory overflow at %u", static_cast<unsigned>(moveCount));
+    return false;
+  }
   Move stored = m;
   stored.captured = cells[m.to];
   cells[m.to] = mover;
@@ -478,11 +485,7 @@ bool ChineseChessBoard::makeMove(const Move& m) {
   if (stored.captured) zobristHash ^= kZobrist.piece[stored.captured][m.to];
   zobristHash ^= kZobrist.piece[mover][m.to];
   zobristHash ^= kZobrist.blackToMove;
-  if (moveCount < MAX_MOVES) {
-    moveHistory[moveCount++] = stored;
-  } else {
-    LOG_ERR("XQI", "moveHistory overflow at %u", static_cast<unsigned>(moveCount));
-  }
+  moveHistory[moveCount++] = stored;
   return true;
 }
 

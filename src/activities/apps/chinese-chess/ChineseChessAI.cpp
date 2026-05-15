@@ -34,10 +34,10 @@ constexpr int32_t kInfScore = 1000000;
 constexpr int32_t kRepetitionLossBase = kKingCaptured - 1000;
 constexpr int32_t kContempt = 30;  // centipawns; sign depends on material balance
 
-// Path-tracking flag bits stored per ply in Searcher::pathFlags[].
+// Path-tracking flag bits stored per ply in Searcher::pathFlags[]. Captures
+// are tracked separately via lastIrreversibleIndex; no F_CAPT flag is needed.
 constexpr uint8_t F_CHECK = 1 << 0;  // the move that produced this position delivered check
 constexpr uint8_t F_RED = 1 << 1;    // the mover that produced this position was Red
-constexpr uint8_t F_CAPT = 1 << 2;   // the move that produced this position was a capture
 
 struct LevelConfig {
   uint8_t maxDepth;
@@ -98,6 +98,13 @@ class Searcher {
       bool partial = false;
       for (uint8_t i = 0; i < rootCount; i++) {
         if (timeUp()) {
+          partial = true;
+          break;
+        }
+        // Bail if the board's move history is full — makeMove would reject
+        // the push and corrupt the search state on the matching pop. With a
+        // ~250-ply game and depth-6 search this can be reached in practice.
+        if (board.moveCount >= ChineseChessBoard::MAX_MOVES) {
           partial = true;
           break;
         }
@@ -188,8 +195,6 @@ class Searcher {
   uint16_t basePly = 0;
   uint16_t currentPly = 0;
   uint16_t lastIrreversibleIndex = 0;
-  // Computed once from the static material balance; drives contempt direction.
-  bool aiMaterialAhead = false;
 
   void initPath() {
     // Save the source history, then rebuild board from scratch via makeMove so
@@ -219,10 +224,7 @@ class Searcher {
       uint8_t f = 0;
       if (gaveCheck) f |= F_CHECK;
       if (mover == Side::Red) f |= F_RED;
-      if (wasCapture) {
-        f |= F_CAPT;
-        lastIrreversibleIndex = idx;
-      }
+      if (wasCapture) lastIrreversibleIndex = idx;
       pathFlags[idx] = f;
     }
 
@@ -230,8 +232,13 @@ class Searcher {
     board.resigned = savedResigned;
     basePly = savedCount;
     currentPly = basePly;
+  }
 
-    // Material balance from AI POV — cheap one-pass scan.
+  // Live material-balance check from AI's POV. Used only on repetition nodes,
+  // which are rare, so a fresh O(90) scan is fine — avoids the bug where a
+  // root-cached value would mis-direct contempt after captures deep in the
+  // search.
+  bool aiAheadNow() const {
     int32_t myMat = 0, oppMat = 0;
     for (uint8_t i = 0; i < ChineseChessBoard::CELLS; ++i) {
       const uint8_t v = board.cells[i];
@@ -244,7 +251,7 @@ class Searcher {
       else
         oppMat += pv;
     }
-    aiMaterialAhead = (myMat >= oppMat);
+    return myMat >= oppMat;
   }
 
   // Path stack push/pop, mirrored on both the inner alphaBeta loop and the
@@ -261,10 +268,7 @@ class Searcher {
     uint8_t f = 0;
     if (gaveCheck) f |= F_CHECK;
     if (mover == Side::Red) f |= F_RED;
-    if (wasCapture) {
-      f |= F_CAPT;
-      lastIrreversibleIndex = currentPly;
-    }
+    if (wasCapture) lastIrreversibleIndex = currentPly;
     pathFlags[currentPly] = f;
     return savedIrr;
   }
@@ -276,8 +280,12 @@ class Searcher {
 
   // Returns a score from `stm`'s perspective if the current position repeats a
   // prior position within the irreversible window. Returns 0 if no repetition.
-  // Caller passes `distanceFromRoot` so the mate-distance accounting matches
-  // the rest of the search (faster losses preferred when forced).
+  // Caller passes `distanceFromRoot` so the score follows standard mate-
+  // distance accounting: forced wins are scaled toward `+kRepetitionLossBase`
+  // for shorter distances (prefer faster wins) and forced losses are scaled
+  // toward `-kRepetitionLossBase` for shorter distances (prefer delaying
+  // losses). Distance subtracts from the magnitude — never adds — so the sign
+  // convention stays consistent on both branches.
   int32_t repetitionScore(Side stm, int distanceFromRoot) const {
     for (uint16_t k = lastIrreversibleIndex; k < currentPly; ++k) {
       if (pathHashes[k] != board.zobristHash) continue;
@@ -309,9 +317,12 @@ class Searcher {
         aiScore = +(kRepetitionLossBase - distanceFromRoot);
       } else {
         // Neutral repetition: lean against drawing when ahead, toward drawing
-        // when behind. NOTE: this does not implement 长捉判负 (perpetual chase);
-        // tracking threat repetition needs a separate mechanism — out of scope.
-        aiScore = aiMaterialAhead ? -kContempt : +kContempt;
+        // when behind. Material is recomputed at the repeated position itself
+        // — caching from the root would mis-direct contempt after captures
+        // inside the search. NOTE: this does not implement 长捉判负 (perpetual
+        // chase); tracking threat repetition needs a separate mechanism — out
+        // of scope.
+        aiScore = aiAheadNow() ? -kContempt : +kContempt;
       }
       return (stm == aiSide) ? aiScore : -aiScore;
     }
@@ -445,10 +456,13 @@ class Searcher {
       if (target != ChineseChessBoard::Empty && ChineseChessBoard::kindOf(target) == Kind::King) {
         return kKingCaptured - (cfg.maxDepth - depth);  // prefer faster wins
       }
-      // Safety: bail if the path stack would overflow. Should not happen
-      // (basePly ≤ 256, max search depth = 6, kPathCap = 272) but a depth
-      // bump or a long game without captures could approach it.
+      // Safety: bail if either the path stack or the board's move history
+      // would overflow. The board check is the load-bearing one — makeMove
+      // returns false past MAX_MOVES, and an unguarded pushSearchMove would
+      // increment currentPly without a matching history entry, then undo()
+      // would pop an earlier real move.
       if (currentPly + 1 >= kPathCap) break;
+      if (board.moveCount >= ChineseChessBoard::MAX_MOVES) break;
       const uint16_t savedIrr = pushSearchMove(stm, m, target);
       const int32_t s = -alphaBeta(depth - 1, -beta, -alpha, next);
       popSearchMove(savedIrr);
