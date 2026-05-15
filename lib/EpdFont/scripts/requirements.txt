@@ -1,3 +1,7 @@
 fonttools>=4.62.1
 freetype-py>=2.5.1
 pyyaml>=6.0.3
+# Needed by build_cn_charset.py (ENABLE_CHINESE_VERSION font subsetting only).
+# jieba is wordfreq's tokenizer dependency for Chinese.
+wordfreq>=3.0
+jieba>=0.42
