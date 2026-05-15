@@ -90,7 +90,8 @@ enum UIIcon {
 #ifdef ENABLE_CHINESE_VERSION
   ChineseChess,
 #endif
-  Avatar
+  Avatar,
+  Conway
 };
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };

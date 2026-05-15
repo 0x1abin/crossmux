@@ -10,6 +10,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
 #endif
+#include "apps/conway/ConwayGameOfLifeActivity.h"
 #include "apps/gomoku/GomokuMenuActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
 #include "boot_sleep/BootActivity.h"
@@ -223,6 +224,10 @@ void ActivityManager::goToApps() { replaceActivity(std::make_unique<AppsMenuActi
 void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToGomoku() { replaceActivity(std::make_unique<GomokuMenuActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToConwayGameOfLife() {
+  replaceActivity(std::make_unique<ConwayGameOfLifeActivity>(renderer, mappedInput));
+}
 
 #ifdef ENABLE_CHINESE_VERSION
 void ActivityManager::goToChineseChess() {

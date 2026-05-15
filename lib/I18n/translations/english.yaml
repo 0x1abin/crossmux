@@ -365,6 +365,13 @@ STR_UGLY_AVATAR: "Ugly Avatar"
 STR_SAVE: "Save"
 STR_RANDOM: "Random"
 
+STR_CONWAY_TITLE: "Game of Life"
+STR_PLAY: "Play"
+STR_PAUSE: "Pause"
+STR_PLAYING: "Playing"
+STR_PAUSED: "Paused"
+STR_SPEED: "Speed"
+
 STR_SUDOKU_TITLE: "Sudoku"
 STR_SUDOKU_SUBTITLE: "9×9 Classic · Offline"
 STR_GAME_CONTINUE: "Continue Game"

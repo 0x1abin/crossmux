@@ -19,6 +19,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "components/icons/chinese_chess.h"
 #endif
+#include "components/icons/conway.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
 #include "components/icons/folder.h"
@@ -94,6 +95,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
 #endif
       case UIIcon::Avatar:
         return AvatarIcon;
+      case UIIcon::Conway:
+        return ConwayIcon;
       default:
         return nullptr;
     }
