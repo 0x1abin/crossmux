@@ -28,6 +28,17 @@ constexpr int32_t kCrossedPawnBonus = 100;  // pawn that crossed the river
 constexpr int32_t kKingCaptured = 100000;
 constexpr int32_t kInfScore = 1000000;
 
+// Repetition / perpetual-check scoring.
+// kRepetitionLossBase is intentionally less than kKingCaptured so a real mate
+// beats a "you'd lose to 长将" verdict when both are findable.
+constexpr int32_t kRepetitionLossBase = kKingCaptured - 1000;
+constexpr int32_t kContempt = 30;  // centipawns; sign depends on material balance
+
+// Path-tracking flag bits stored per ply in Searcher::pathFlags[].
+constexpr uint8_t F_CHECK = 1 << 0;  // the move that produced this position delivered check
+constexpr uint8_t F_RED = 1 << 1;    // the mover that produced this position was Red
+constexpr uint8_t F_CAPT = 1 << 2;   // the move that produced this position was a capture
+
 struct LevelConfig {
   uint8_t maxDepth;
   uint16_t timeBudgetMs;
@@ -36,6 +47,9 @@ struct LevelConfig {
 };
 
 constexpr LevelConfig kLevelTable[3] = {
+    // Easy depth 2 cannot structurally observe a 2-ply perpetual-check cycle
+    // (the cycle re-enters its start at depth 4). Easy relies on jitter +
+    // suboptimal-move sampling to avoid degenerate loops in practice.
     {.maxDepth = 2, .timeBudgetMs = 800, .jitterPercent = 25, .suboptimalPercent = 25},  // Easy
     {.maxDepth = 4, .timeBudgetMs = 2500, .jitterPercent = 0, .suboptimalPercent = 0},   // Medium
     {.maxDepth = 6, .timeBudgetMs = 5000, .jitterPercent = 0, .suboptimalPercent = 0},   // Hard
@@ -48,6 +62,7 @@ class Searcher {
         oppSide(aiSide == Side::Red ? Side::Black : Side::Red),
         cfg(kLevelTable[static_cast<uint8_t>(level)]) {
     board = src;  // copy
+    initPath();
   }
 
   Move run(uint32_t& outNodes, uint8_t& outDepthReached) {
@@ -87,9 +102,10 @@ class Searcher {
           break;
         }
         const Move m = rootMoves[i];
-        board.makeMove(m);
+        const uint8_t preTarget = board.cells[m.to];
+        const uint16_t savedIrr = pushSearchMove(aiSide, m, preTarget);
         const int32_t s = -alphaBeta(d - 1, -beta, -alpha, oppSide);
-        board.undo();
+        popSearchMove(savedIrr);
         if (timedOut) {
           partial = true;
           break;
@@ -148,6 +164,9 @@ class Searcher {
 
  private:
   static constexpr int kYieldEveryNodes = 64;
+  // Path stack capacity: full game history (up to MAX_MOVES) plus headroom for
+  // the deepest search frame. MAX_MOVES=256, max search depth=6 → 272 entries.
+  static constexpr uint16_t kPathCap = ChineseChessBoard::MAX_MOVES + 16;
 
   ChineseChessBoard board;
   Side aiSide;
@@ -157,6 +176,147 @@ class Searcher {
   uint32_t startMs = 0;
   uint32_t nodes = 0;
   bool timedOut = false;
+
+  // Per-ply history for repetition / perpetual-check detection. pathHashes[i]
+  // is the Zobrist hash of the position BEFORE the i-th half-move was made
+  // (so pathHashes[0] is the initial position). pathFlags[i+1] describes the
+  // half-move that produced pathHashes[i+1] (the position reached after it).
+  // Captures are irreversible in Xiangqi (no promotion back) — when one occurs
+  // we advance `lastIrreversibleIndex` so the repetition scan can prune at it.
+  uint64_t pathHashes[kPathCap] = {};
+  uint8_t pathFlags[kPathCap] = {};
+  uint16_t basePly = 0;
+  uint16_t currentPly = 0;
+  uint16_t lastIrreversibleIndex = 0;
+  // Computed once from the static material balance; drives contempt direction.
+  bool aiMaterialAhead = false;
+
+  void initPath() {
+    // Save the source history, then rebuild board from scratch via makeMove so
+    // the new incremental Zobrist machinery populates board.zobristHash at
+    // each step. Also records check/capture flags per historical ply.
+    ChineseChessBoard::Move savedHistory[ChineseChessBoard::MAX_MOVES];
+    const uint16_t savedCount = board.moveCount;
+    for (uint16_t i = 0; i < savedCount; ++i) savedHistory[i] = board.moveHistory[i];
+
+    const ChineseChessBoard::Result savedResult = board.result;
+    const bool savedResigned = board.resigned;
+
+    board.reset();
+    pathHashes[0] = board.zobristHash;
+    pathFlags[0] = 0;
+    lastIrreversibleIndex = 0;
+
+    for (uint16_t i = 0; i < savedCount; ++i) {
+      const ChineseChessBoard::Move& m = savedHistory[i];
+      // Mover side is determined by ply parity: index 0 = Red.
+      const Side mover = (i % 2 == 0) ? Side::Red : Side::Black;
+      const bool gaveCheck = board.givesCheck(mover, m);
+      const bool wasCapture = (m.captured != ChineseChessBoard::Empty);
+      board.makeMove(m);
+      const uint16_t idx = i + 1;
+      pathHashes[idx] = board.zobristHash;
+      uint8_t f = 0;
+      if (gaveCheck) f |= F_CHECK;
+      if (mover == Side::Red) f |= F_RED;
+      if (wasCapture) {
+        f |= F_CAPT;
+        lastIrreversibleIndex = idx;
+      }
+      pathFlags[idx] = f;
+    }
+
+    board.result = savedResult;
+    board.resigned = savedResigned;
+    basePly = savedCount;
+    currentPly = basePly;
+
+    // Material balance from AI POV — cheap one-pass scan.
+    int32_t myMat = 0, oppMat = 0;
+    for (uint8_t i = 0; i < ChineseChessBoard::CELLS; ++i) {
+      const uint8_t v = board.cells[i];
+      if (v == ChineseChessBoard::Empty) continue;
+      const Kind k = ChineseChessBoard::kindOf(v);
+      if (k == Kind::King) continue;  // king value swamps everything; skip
+      const int32_t pv = kPieceValue[static_cast<uint8_t>(k)];
+      if (ChineseChessBoard::sideOf(v) == aiSide)
+        myMat += pv;
+      else
+        oppMat += pv;
+    }
+    aiMaterialAhead = (myMat >= oppMat);
+  }
+
+  // Path stack push/pop, mirrored on both the inner alphaBeta loop and the
+  // root loop in run(). Call BEFORE makeMove / AFTER undo respectively. The
+  // caller supplies the pre-move target byte so we can detect captures
+  // without re-reading the board after the mutation.
+  inline uint16_t pushSearchMove(Side mover, const ChineseChessBoard::Move& m, uint8_t preTarget) {
+    const bool gaveCheck = board.givesCheck(mover, m);
+    const bool wasCapture = (preTarget != ChineseChessBoard::Empty);
+    const uint16_t savedIrr = lastIrreversibleIndex;
+    board.makeMove(m);
+    ++currentPly;
+    pathHashes[currentPly] = board.zobristHash;
+    uint8_t f = 0;
+    if (gaveCheck) f |= F_CHECK;
+    if (mover == Side::Red) f |= F_RED;
+    if (wasCapture) {
+      f |= F_CAPT;
+      lastIrreversibleIndex = currentPly;
+    }
+    pathFlags[currentPly] = f;
+    return savedIrr;
+  }
+  inline void popSearchMove(uint16_t savedIrr) {
+    --currentPly;
+    lastIrreversibleIndex = savedIrr;
+    board.undo();
+  }
+
+  // Returns a score from `stm`'s perspective if the current position repeats a
+  // prior position within the irreversible window. Returns 0 if no repetition.
+  // Caller passes `distanceFromRoot` so the mate-distance accounting matches
+  // the rest of the search (faster losses preferred when forced).
+  int32_t repetitionScore(Side stm, int distanceFromRoot) const {
+    for (uint16_t k = lastIrreversibleIndex; k < currentPly; ++k) {
+      if (pathHashes[k] != board.zobristHash) continue;
+      // Cycle moves are pathFlags[k+1 .. currentPly] (1-based offset on the
+      // flag array because pathFlags[i+1] describes the move that produced
+      // position i+1).
+      bool aiOnlyChecker = true, oppOnlyChecker = true;
+      bool aiHadMove = false, oppHadMove = false;
+      const bool aiIsRed = (aiSide == Side::Red);
+      for (uint16_t j = k + 1; j <= currentPly; ++j) {
+        const bool moverRed = (pathFlags[j] & F_RED) != 0;
+        const bool moverIsAi = (moverRed == aiIsRed);
+        const bool gaveCheck = (pathFlags[j] & F_CHECK) != 0;
+        if (moverIsAi) {
+          aiHadMove = true;
+          if (!gaveCheck) aiOnlyChecker = false;
+        } else {
+          oppHadMove = true;
+          if (!gaveCheck) oppOnlyChecker = false;
+        }
+      }
+      int32_t aiScore;  // from AI's POV
+      const bool aiPerpetual = aiHadMove && aiOnlyChecker && !(oppHadMove && oppOnlyChecker);
+      const bool oppPerpetual = oppHadMove && oppOnlyChecker && !(aiHadMove && aiOnlyChecker);
+      if (aiPerpetual) {
+        // 长将判负: AI is the sole perpetual checker → AI loses.
+        aiScore = -(kRepetitionLossBase - distanceFromRoot);
+      } else if (oppPerpetual) {
+        aiScore = +(kRepetitionLossBase - distanceFromRoot);
+      } else {
+        // Neutral repetition: lean against drawing when ahead, toward drawing
+        // when behind. NOTE: this does not implement 长捉判负 (perpetual chase);
+        // tracking threat repetition needs a separate mechanism — out of scope.
+        aiScore = aiMaterialAhead ? -kContempt : +kContempt;
+      }
+      return (stm == aiSide) ? aiScore : -aiScore;
+    }
+    return 0;
+  }
 
   bool timeUp() {
     if (timedOut) return true;
@@ -253,6 +413,14 @@ class Searcher {
       if (timeUp()) return 0;
     }
 
+    // Repetition / perpetual-check verdict. Scans only the irreversible
+    // window; returns 0 if no prior occurrence is found. Must run BEFORE the
+    // depth==0 leaf so a repeated leaf is scored as a cycle, not as material.
+    {
+      const int32_t rs = repetitionScore(stm, static_cast<int>(currentPly - basePly));
+      if (rs != 0) return rs;
+    }
+
     if (depth == 0) {
       const int32_t e = evaluate();
       return (stm == aiSide) ? e : -e;
@@ -271,14 +439,19 @@ class Searcher {
     for (uint8_t i = 0; i < n; i++) {
       if (timeUp()) break;
       const Move m = moves[i];
-      // King-capture short-circuit: this move grabs the opponent's king.
+      // King-capture short-circuit: this move grabs the opponent's king. Skip
+      // the path push since this is a terminal node.
       const uint8_t target = board.cells[m.to];
       if (target != ChineseChessBoard::Empty && ChineseChessBoard::kindOf(target) == Kind::King) {
         return kKingCaptured - (cfg.maxDepth - depth);  // prefer faster wins
       }
-      board.makeMove(m);
+      // Safety: bail if the path stack would overflow. Should not happen
+      // (basePly ≤ 256, max search depth = 6, kPathCap = 272) but a depth
+      // bump or a long game without captures could approach it.
+      if (currentPly + 1 >= kPathCap) break;
+      const uint16_t savedIrr = pushSearchMove(stm, m, target);
       const int32_t s = -alphaBeta(depth - 1, -beta, -alpha, next);
-      board.undo();
+      popSearchMove(savedIrr);
       if (timedOut) break;
       if (s > best) best = s;
       if (best > alpha) alpha = best;

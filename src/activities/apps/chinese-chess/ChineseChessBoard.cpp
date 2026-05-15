@@ -121,6 +121,40 @@ inline void appendMove(ChineseChessBoard::Move* out, uint8_t& n, uint8_t outCap,
   n++;
 }
 
+// Compile-time Zobrist table. splitmix64 is a well-mixed 64-bit PRNG that is
+// constexpr-evaluable here, so the table lives entirely in flash with zero
+// init cost. Fixed seed → reproducible hashes across builds (helps tests).
+constexpr uint64_t splitmix64Next(uint64_t& s) {
+  s += 0x9E3779B97F4A7C15ULL;
+  uint64_t z = s;
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
+struct ZobristTable {
+  // [piece-encoding 0..15][cell index 0..89]. Rows 0 and 8 are unused (empty /
+  // unused side bit) but we keep the [16][90] shape so we can index directly
+  // by raw cell value without a translation step. Wasted: 2*90*8 = 1440 bytes
+  // of flash, acceptable.
+  uint64_t piece[16][ChineseChessBoard::CELLS];
+  uint64_t blackToMove;
+};
+
+constexpr ZobristTable makeZobristTable() {
+  ZobristTable z{};
+  uint64_t s = 0x00C0FFEE12345678ULL;
+  for (uint8_t p = 0; p < 16; ++p) {
+    for (uint8_t i = 0; i < ChineseChessBoard::CELLS; ++i) {
+      z.piece[p][i] = splitmix64Next(s);
+    }
+  }
+  z.blackToMove = splitmix64Next(s);
+  return z;
+}
+
+constexpr ZobristTable kZobrist = makeZobristTable();
+
 }  // namespace
 
 void ChineseChessBoard::reset() {
@@ -129,6 +163,7 @@ void ChineseChessBoard::reset() {
   moveCount = 0;
   result = Result::Ongoing;
   resigned = false;
+  recomputeZobrist();
 }
 
 uint8_t ChineseChessBoard::at(uint8_t r, uint8_t c) const {
@@ -367,7 +402,9 @@ uint8_t ChineseChessBoard::generateLegalMoves(Side side, Move* out, uint8_t outC
   uint8_t n = 0;
   for (uint8_t i = 0; i < total; i++) {
     if (n >= outCap) break;
-    // Make-undo trial on a mutable copy.
+    // Make-undo trial on a mutable copy. Intentionally bypasses makeMove/undo:
+    // inCheck() does not read zobristHash, so leaving the hash unmodified
+    // during the trial is safe and avoids a redundant XOR.
     ChineseChessBoard* self = const_cast<ChineseChessBoard*>(this);
     const uint8_t fromV = cells[pseudo[i].from];
     const uint8_t toV = cells[pseudo[i].to];
@@ -435,6 +472,12 @@ bool ChineseChessBoard::makeMove(const Move& m) {
   stored.captured = cells[m.to];
   cells[m.to] = mover;
   cells[m.from] = Empty;
+  // Incremental Zobrist update: remove mover from origin, remove captured (if
+  // any) from destination, place mover at destination, flip side-to-move.
+  zobristHash ^= kZobrist.piece[mover][m.from];
+  if (stored.captured) zobristHash ^= kZobrist.piece[stored.captured][m.to];
+  zobristHash ^= kZobrist.piece[mover][m.to];
+  zobristHash ^= kZobrist.blackToMove;
   if (moveCount < MAX_MOVES) {
     moveHistory[moveCount++] = stored;
   } else {
@@ -448,11 +491,42 @@ bool ChineseChessBoard::undo() {
   moveCount--;
   const Move& m = moveHistory[moveCount];
   if (m.from >= CELLS || m.to >= CELLS) return false;
-  cells[m.from] = cells[m.to];
+  const uint8_t mover = cells[m.to];  // piece sitting at destination is the mover
+  cells[m.from] = mover;
   cells[m.to] = m.captured;
+  // XOR is its own inverse; same four operations as makeMove.
+  zobristHash ^= kZobrist.piece[mover][m.from];
+  if (m.captured) zobristHash ^= kZobrist.piece[m.captured][m.to];
+  zobristHash ^= kZobrist.piece[mover][m.to];
+  zobristHash ^= kZobrist.blackToMove;
   result = Result::Ongoing;
   resigned = false;
   return true;
+}
+
+bool ChineseChessBoard::givesCheck(Side mover, const Move& m) const {
+  if (m.from >= CELLS || m.to >= CELLS) return false;
+  ChineseChessBoard* self = const_cast<ChineseChessBoard*>(this);
+  const uint8_t fromV = cells[m.from];
+  const uint8_t toV = cells[m.to];
+  self->cells[m.to] = fromV;
+  self->cells[m.from] = Empty;
+  const Side opp = (mover == Side::Red) ? Side::Black : Side::Red;
+  const bool inChk = inCheck(opp);
+  self->cells[m.from] = fromV;
+  self->cells[m.to] = toV;
+  return inChk;
+}
+
+void ChineseChessBoard::recomputeZobrist() {
+  uint64_t h = 0;
+  for (uint8_t i = 0; i < CELLS; ++i) {
+    const uint8_t v = cells[i];
+    if (v != Empty) h ^= kZobrist.piece[v][i];
+  }
+  // Red moves first, so an odd number of plies played means Black to move.
+  if (moveCount & 1) h ^= kZobrist.blackToMove;
+  zobristHash = h;
 }
 
 void ChineseChessBoard::updateResult() {
@@ -518,5 +592,7 @@ bool ChineseChessBoard::readFrom(HalFile& f) {
   }
   result = static_cast<Result>(resultByte);
   resigned = (resignedByte != 0);
+  // moveCount is now authoritative; rebuild the hash from cells + side parity.
+  recomputeZobrist();
   return true;
 }
