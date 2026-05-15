@@ -87,8 +87,10 @@ list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Epub/Epub/converters/")
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Serialization/ObfuscationUtils")
 
 # KOReaderSync credential store referenced via the KOREADER_STORE singleton in main.cpp.
+# KOReaderJsonIO.cpp implements the load/save backing the store and must link with it.
 list(APPEND CROSSPOINT_LIB
     ${REPO_ROOT}/lib/KOReaderSync/KOReaderCredentialStore.cpp
+    ${REPO_ROOT}/lib/KOReaderSync/KOReaderJsonIO.cpp
 )
 
 set(SIMULATOR_HAL_NATIVE

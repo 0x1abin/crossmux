@@ -146,7 +146,7 @@ void SdFirmwareUpdateActivity::onConfirmationResult(const ActivityResult&) {}
 void SdFirmwareUpdateActivity::performUpdate() {}
 
 #include "activities/settings/FontDownloadActivity.h"
-#include "SdCardFontGlobals.h"
+#include "SdCardFontSystem.h"
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& r, MappedInputManager& m)
     : Activity("FontDownload", r, m), fontInstaller_(sdFontSystem.registry()) {}
 STUB_ACTIVITY_BASE(FontDownloadActivity)
