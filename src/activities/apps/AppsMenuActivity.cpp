@@ -23,6 +23,7 @@ constexpr AppEntry kAppEntries[] = {
 #ifdef ENABLE_CHINESE_VERSION
     {StrId::STR_CHINESE_CHESS_TITLE, UIIcon::ChineseChess, &ActivityManager::goToChineseChess},
 #endif
+    {StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
     {StrId::STR_UGLY_AVATAR, UIIcon::Avatar, &ActivityManager::goToUglyAvatar},
 };
 

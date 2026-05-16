@@ -12,14 +12,15 @@ Reader, file browser, settings, OPDS, etc. are **not** apps — they are core e-
 apps/
 ├── AppsMenuActivity.{h,cpp}   # dispatcher — see "Adding a new app" below
 ├── GameUi.{h,cpp}             # shared helpers, game-only (centering math, elapsed-time format)
-├── GameSaveDebouncer.h        # 1.5s save debounce, used by sudoku/gomoku
+├── GameSaveDebouncer.h        # 1.5s save debounce, used by sudoku/gomoku/minesweeper
 ├── sudoku/                    # one subdirectory per app, files keep the app-name prefix
 ├── gomoku/
 ├── chinese-chess/             # conditional — gated by ENABLE_CHINESE_VERSION (see "Conditional apps" below)
+├── minesweeper/
 └── avatar/
 ```
 
-**Why the `Game*` prefix for `GameUi` and `GameSaveDebouncer`** — these helpers carry save-state and game-board semantics. They are used only by Sudoku/Gomoku, not by Ugly Avatar (which is a single-shot generator). The name reflects what they actually do; do not rename them to `App*`.
+**Why the `Game*` prefix for `GameUi` and `GameSaveDebouncer`** — these helpers carry save-state and game-board semantics. They are used by Sudoku, Gomoku, and Minesweeper, not by Ugly Avatar (which is a single-shot generator). The name reflects what they actually do; do not rename them to `App*`.
 
 **Why nested rather than flat** — apps share the "Apps" launcher concept and should be groupable. Reader and Settings are top-level features, so they sit flat at `activities/<feature>/`. This is a deliberate structural difference, not an inconsistency.
 
@@ -68,10 +69,11 @@ In `apps/AppsMenuActivity.cpp`:
 
 ```cpp
 constexpr AppEntry kAppEntries[] = {
-    {StrId::STR_SUDOKU_TITLE, UIIcon::Sudoku,    &ActivityManager::goToSudoku},
-    {StrId::STR_GOMOKU_TITLE, UIIcon::Gomoku,    &ActivityManager::goToGomoku},
-    {StrId::STR_UGLY_AVATAR,  UIIcon::Avatar,    &ActivityManager::goToUglyAvatar},
-    {StrId::STR_MYAPP_TITLE,  UIIcon::MyApp,     &ActivityManager::goToMyApp},  // new row
+    {StrId::STR_SUDOKU_TITLE,      UIIcon::Sudoku,      &ActivityManager::goToSudoku},
+    {StrId::STR_GOMOKU_TITLE,      UIIcon::Gomoku,      &ActivityManager::goToGomoku},
+    {StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
+    {StrId::STR_UGLY_AVATAR,       UIIcon::Avatar,      &ActivityManager::goToUglyAvatar},
+    {StrId::STR_MYAPP_TITLE,       UIIcon::MyApp,       &ActivityManager::goToMyApp},  // new row
 };
 ```
 

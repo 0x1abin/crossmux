@@ -90,6 +90,7 @@ enum UIIcon {
 #ifdef ENABLE_CHINESE_VERSION
   ChineseChess,
 #endif
+  Minesweeper,
   Avatar
 };
 

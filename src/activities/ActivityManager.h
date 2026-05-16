@@ -92,6 +92,7 @@ class ActivityManager {
   void goToApps();
   void goToSudoku();
   void goToGomoku();
+  void goToMinesweeper();
 #ifdef ENABLE_CHINESE_VERSION
   void goToChineseChess();
 #endif

@@ -27,6 +27,7 @@
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
+#include "components/icons/minesweeper.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
 #include "components/icons/sudoku.h"
@@ -92,6 +93,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
       case UIIcon::ChineseChess:
         return ChineseChessIcon;
 #endif
+      case UIIcon::Minesweeper:
+        return MinesweeperIcon;
       case UIIcon::Avatar:
         return AvatarIcon;
       default:
