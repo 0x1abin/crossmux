@@ -1,9 +1,14 @@
 #pragma once
 #include <HalStorage.h>
-#include <I18nKeys.h>
 
 #include <cstdint>
 #include <iosfwd>
+
+// I18nKeys.h is intentionally NOT included here. It is auto-generated and
+// changes on every translation edit; pulling it into this widely-included
+// settings header would force the entire project to recompile on i18n
+// changes. The default Language index is resolved by defaultLanguageIndex()
+// (declared below, defined in the .cpp where the include is local).
 
 class CrossPointSettings {
  private:
@@ -12,6 +17,10 @@ class CrossPointSettings {
 
   // Static instance
   static CrossPointSettings instance;
+
+  // Returns the SKU-appropriate first-boot Language enum index. Defined in
+  // CrossPointSettings.cpp so I18nKeys.h stays out of this header.
+  static uint8_t defaultLanguageIndex();
 
  public:
   // Delete copy constructor and assignment
@@ -226,11 +235,12 @@ class CrossPointSettings {
   uint8_t tiltPageTurn = TILT_OFF;
   // Language setting (Language enum index). First-boot default is ZH_CN under
   // ENABLE_CHINESE_VERSION (where the table only has EN + ZH_CN), otherwise EN.
-#ifdef ENABLE_CHINESE_VERSION
-  uint8_t language = static_cast<uint8_t>(Language::ZH_CN);
-#else
-  uint8_t language = static_cast<uint8_t>(Language::EN);
-#endif
+  // Resolved out-of-line in CrossPointSettings.cpp so the generated
+  // I18nKeys.h header doesn't leak into every consumer of this header.
+  // Note: this default also applies on factory reset (re-construction sets
+  // the field back to ZH_CN for CN builds, EN otherwise) — by design, so a
+  // fresh device always lands on the SKU's intended UI language.
+  uint8_t language = defaultLanguageIndex();
 
   ~CrossPointSettings() = default;
 

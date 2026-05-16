@@ -18,11 +18,13 @@
 # freetype-py and fonttools installed):
 #   PYTHON=/path/to/venv/bin/python bash build-cn-builtin-fonts.sh
 
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PYTHON="${PYTHON:-python}"
+# Project requires fontTools + freetype-py — both Python 3 only. Default to
+# python3 (override with PYTHON=/path/to/venv/bin/python if a venv is needed).
+PYTHON="${PYTHON:-python3}"
 
 SOURCE_OTF="../builtinFonts/source/NotoSansSC/NotoSansSC-Regular.otf"
 # Frequency-ranked subset produced by build_cn_charset.py. Defaults to the
@@ -124,13 +126,24 @@ emit_size() {
   local otf="$2"
   local font_name="notosans_cjk_${size}"
   local output_path="../builtinFonts/${font_name}.h"
+  # Write to a temp file first, then atomically mv on success. Otherwise a
+  # crash in fontconvert.py leaves the target as a zero-byte file (the shell
+  # truncates the redirect target *before* the python process runs), which
+  # the loop below would then happily report as "0 bytes" and commit.
+  local tmp_path="${output_path}.tmp"
   echo "Generating ${output_path} from $(basename "$otf")..."
   "$PYTHON" fontconvert.py "$font_name" "$size" "$otf" \
     --2bit \
     --additional-intervals 0x4E00,0x9FFF \
     --additional-intervals 0x3000,0x303F \
     --additional-intervals 0xFF00,0xFFEF \
-    > "$output_path"
+    > "$tmp_path"
+  if [ ! -s "$tmp_path" ]; then
+    echo "Error: fontconvert.py produced empty $tmp_path for ${font_name}" >&2
+    rm -f "$tmp_path"
+    exit 1
+  fi
+  mv "$tmp_path" "$output_path"
   echo "  $(wc -c < "$output_path") bytes ($(grep -E "Bitmaps\[" "$output_path" | head -1))"
 }
 

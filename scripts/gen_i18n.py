@@ -1043,7 +1043,23 @@ else:
         # may not yet be normalized into CPPDEFINES at extra_script-pre time.
         # PlatformIO populates CPPDEFINES later in the build graph, but the
         # raw "-D…" tokens live in BUILD_FLAGS (after $-substitution).
+        #
+        # Match by token, not substring: a flag like
+        # -DSOMETHING_ENABLE_CHINESE_VERSION_PROBE=1 must NOT trigger the
+        # Chinese-only path.
         flag = "ENABLE_CHINESE_VERSION"
+
+        def _build_flags_has(flag_name: str, expanded_str: str) -> bool:
+            """True iff -D<flag_name> (optionally with =value) appears as a
+            whole token in `expanded_str`. -U flips it off (last wins)."""
+            enabled = False
+            for tok in expanded_str.split():
+                if tok == f"-D{flag_name}" or tok.startswith(f"-D{flag_name}="):
+                    enabled = True
+                elif tok == f"-U{flag_name}":
+                    enabled = False
+            return enabled
+
         only = None
         try:
             sc_env = env  # type: ignore[name-defined]
@@ -1053,14 +1069,15 @@ else:
             expanded = sc_env.subst("$BUILD_FLAGS") or ""
 
             # 2) Raw CPPDEFINES list (catches Append() additions from other
-            #    pre-scripts; tuples or bare names).
+            #    pre-scripts; tuples or bare names). Compare against the bare
+            #    define name, not a substring.
             defines = sc_env.get("CPPDEFINES", []) or []
             define_names = {
                 d if isinstance(d, str) else (d[0] if d else "")
                 for d in defines
             }
 
-            if flag in expanded or flag in define_names:
+            if _build_flags_has(flag, expanded) or flag in define_names:
                 only = {"ZH_CN"}
                 print(
                     f"[gen_i18n] {flag} detected (env={env_name}); "
