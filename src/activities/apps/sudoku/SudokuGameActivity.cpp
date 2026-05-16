@@ -408,7 +408,6 @@ void SudokuGameActivity::renderPlaying() {
   drawTitleBar();
   drawGrid(GRID_X, GRID_Y);
   drawPalette(PALETTE_X, PALETTE_Y);
-  drawModeLine();
   drawFooter();
 }
 
@@ -546,26 +545,6 @@ void SudokuGameActivity::drawPalette(int x0, int y0) {
     const int tw = renderer.getTextWidth(kBigDigitFont, buf);
     renderer.drawText(kBigDigitFont, cx + (PALETTE_CELL_W - tw) / 2, cy + gameCenterY(PALETTE_CELL_H, textH), buf,
                       !isSelected);
-  }
-}
-
-void SudokuGameActivity::drawModeLine() {
-  const int y = MODE_LINE_Y;
-  char left[40];
-  snprintf(left, sizeof(left), "%s ×%u · %s %u/3", tr(STR_SUDOKU_USE_HINT), static_cast<unsigned>(hintsLeft),
-           tr(STR_SUDOKU_ERRORS), static_cast<unsigned>(mistakes));
-  renderer.drawText(kStatusFont, CONTENT_X, y, left);
-
-  // Right-side "Notes" pill — only when notes mode is active.
-  if (notesMode) {
-    const char* tag = tr(STR_SUDOKU_MODE_NOTES);
-    const int tw = renderer.getTextWidth(kStatusFont, tag);
-    const int sw = renderer.getScreenWidth();
-    constexpr int padX = 8;
-    constexpr int boxH = 20;
-    const int boxX = sw - CONTENT_X - tw - 2 * padX;
-    renderer.drawRoundedRect(boxX, y - 14, tw + 2 * padX, boxH, 1, 8, true);
-    renderer.drawText(kStatusFont, boxX + padX, y, tag);
   }
 }
 

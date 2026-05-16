@@ -51,7 +51,6 @@ class SudokuGameActivity final : public Activity {
   void drawTitleBar();
   void drawGrid(int x0, int y0);
   void drawPalette(int x0, int y0);
-  void drawModeLine();
   void drawFooter();
   void drawNotes(int cellX, int cellY, int cellSize, uint16_t notesBitmap);
 
@@ -92,5 +91,4 @@ class SudokuGameActivity final : public Activity {
   static constexpr int PALETTE_H = PALETTE_CELL_H * 2 + PALETTE_GAP;      // 168
   static constexpr int PALETTE_X = CONTENT_X;
   static constexpr int PALETTE_Y = GRID_Y + GRID_SIZE_PX + CONTENT_X;  // 516: gap below grid matches left margin
-  static constexpr int MODE_LINE_Y = PALETTE_Y + PALETTE_H + 18;       // 702
 };
