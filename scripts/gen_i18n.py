@@ -113,6 +113,7 @@ def parse_yaml_file(filepath: str) -> Dict[str, str]:
 def load_translations(
     translations_dir: str,
     verbose: bool = False,
+    only_languages: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[str], List[str], Dict[str, List[str]], List[Set[str]]]:
     """
     Read every YAML file in *translations_dir* and return:
@@ -122,6 +123,10 @@ def load_translations(
         translations     {key: [translation_per_language]}
 
     English is always first;
+
+    When *only_languages* is provided, keep only files whose _language_code
+    appears in the set (case-insensitive). English is always retained as the
+    fallback source.
     """
     yaml_dir = Path(translations_dir)
     if not yaml_dir.is_dir():
@@ -135,6 +140,21 @@ def load_translations(
     parsed: Dict[str, Dict[str, str]] = {}
     for yf in yaml_files:
         parsed[yf.name] = parse_yaml_file(str(yf))
+
+    # Apply --only-languages filter (always keep English as the fallback source)
+    if only_languages is not None:
+        wanted = {code.upper() for code in only_languages} | {"EN"}
+        filtered: Dict[str, Dict[str, str]] = {}
+        for name, data in parsed.items():
+            code = data.get("_language_code", "").upper()
+            if code in wanted:
+                filtered[name] = data
+        missing = wanted - {data.get("_language_code", "").upper() for data in filtered.values()}
+        if missing:
+            raise ValueError(
+                f"--only-languages requested codes {sorted(missing)} but no matching YAML file found"
+            )
+        parsed = filtered
 
     # Identify the English file (must exist)
     english_file = None
@@ -551,15 +571,22 @@ def generate_keys_header(
 
     # V1 language.bin migration table -- frozen enum order from commit 2f969a9.
     # Maps the old uint8_t index stored on disk to the current Language enum.
-    # If a Language enum value listed here is ever removed, this will fail to
-    # compile, signalling that the migration table needs updating.
+    # When a build excludes some languages (e.g. ENABLE_CHINESE_VERSION strips
+    # everything except EN/ZH_CN), absent codes fall back to Language::EN so the
+    # table still compiles. On-device, a user whose stored language is no longer
+    # available simply lands back on English.
     v1_codes = [
         "EN", "ES", "FR", "DE", "CS", "PT", "RU", "SV", "RO", "CA", "UK",
         "BE", "IT", "PL", "FI", "DA", "NL", "TR", "KK", "HU", "LT", "SI",
     ]
+    available_codes = set(languages)
+    v1_entries = [
+        f"Language::{c}" if c in available_codes else "Language::EN"
+        for c in v1_codes
+    ]
     lines.append("// V1 language.bin migration table (frozen enum order from 2f969a9)")
     lines.append("constexpr Language V1_LANGUAGES[] = {")
-    lines.append("    " + ", ".join(f"Language::{c}" for c in v1_codes) + ",")
+    lines.append("    " + ", ".join(v1_entries) + ",")
     lines.append("};")
     lines.append(
         f"constexpr uint8_t V1_LANGUAGE_COUNT = {len(v1_codes)};"
@@ -824,20 +851,17 @@ def main(
     src_dirs: Optional[List[str]] = None,
     strip_unused: bool = False,
     verbose: bool = False,
+    only_languages: Optional[Set[str]] = None,
 ) -> None:
     # Default paths (relative to project root)
     default_translations_dir = "lib/I18n/translations"
     default_output_dir = "lib/I18n/"
     default_src_dirs = ["src", "lib"]
 
-    if translations_dir is None or output_dir is None:
-        if len(sys.argv) == 3:
-            translations_dir = sys.argv[1]
-            output_dir = sys.argv[2]
-        else:
-            # Default for no arguments or weird arguments (e.g. SCons)
-            translations_dir = default_translations_dir
-            output_dir = default_output_dir
+    if translations_dir is None:
+        translations_dir = default_translations_dir
+    if output_dir is None:
+        output_dir = default_output_dir
 
     if src_dirs is None:
         src_dirs = default_src_dirs
@@ -856,8 +880,12 @@ def main(
         print()
 
     try:
+        if only_languages:
+            print(
+                f"Restricting build to languages: {', '.join(sorted(only_languages))} (plus EN fallback)"
+            )
         languages, language_names, string_keys, translations, inherited_sets = (
-            load_translations(translations_dir, verbose)
+            load_translations(translations_dir, verbose, only_languages)
         )
 
         # --- Unused-string detection ---
@@ -987,17 +1015,80 @@ if __name__ == "__main__":
         action="store_true",
         help="Print per-key INFO/WARNING messages and file generation details",
     )
+    parser.add_argument(
+        "--only-languages",
+        nargs="+",
+        metavar="CODE",
+        default=None,
+        help=(
+            "Only build the listed _language_code values (case-insensitive). "
+            "English is always retained as the fallback source."
+        ),
+    )
     args = parser.parse_args()
+    only = set(args.only_languages) if args.only_languages else None
     main(
         args.translations_dir,
         args.output_dir,
         args.src_dirs,
         args.strip_unused,
         args.verbose,
+        only,
     )
 else:
     try:
         Import("env")
-        main(strip_unused=True)
+
+        # Detect ENABLE_CHINESE_VERSION via multiple sources because the flag
+        # may not yet be normalized into CPPDEFINES at extra_script-pre time.
+        # PlatformIO populates CPPDEFINES later in the build graph, but the
+        # raw "-D…" tokens live in BUILD_FLAGS (after $-substitution).
+        #
+        # Match by token, not substring: a flag like
+        # -DSOMETHING_ENABLE_CHINESE_VERSION_PROBE=1 must NOT trigger the
+        # Chinese-only path.
+        flag = "ENABLE_CHINESE_VERSION"
+
+        def _build_flags_has(flag_name: str, expanded_str: str) -> bool:
+            """True iff -D<flag_name> (optionally with =value) appears as a
+            whole token in `expanded_str`. -U flips it off (last wins)."""
+            enabled = False
+            for tok in expanded_str.split():
+                if tok == f"-D{flag_name}" or tok.startswith(f"-D{flag_name}="):
+                    enabled = True
+                elif tok == f"-U{flag_name}":
+                    enabled = False
+            return enabled
+
+        only = None
+        try:
+            sc_env = env  # type: ignore[name-defined]
+            env_name = sc_env.get("PIOENV", "?")
+
+            # 1) Expanded BUILD_FLAGS string (resolves ${base.build_flags}).
+            expanded = sc_env.subst("$BUILD_FLAGS") or ""
+
+            # 2) Raw CPPDEFINES list (catches Append() additions from other
+            #    pre-scripts; tuples or bare names). Compare against the bare
+            #    define name, not a substring.
+            defines = sc_env.get("CPPDEFINES", []) or []
+            define_names = {
+                d if isinstance(d, str) else (d[0] if d else "")
+                for d in defines
+            }
+
+            if _build_flags_has(flag, expanded) or flag in define_names:
+                only = {"ZH_CN"}
+                print(
+                    f"[gen_i18n] {flag} detected (env={env_name}); "
+                    f"restricting i18n tables to EN + ZH_CN"
+                )
+            else:
+                print(f"[gen_i18n] {flag} not set (env={env_name}); building full i18n")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[gen_i18n] flag detection failed ({exc}); building full i18n")
+            only = None
+
+        main(strip_unused=True, only_languages=only)
     except NameError:
         pass

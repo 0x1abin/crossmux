@@ -850,6 +850,37 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
       }
     }
 
+#ifdef ENABLE_CHINESE_VERSION
+    // CJK per-character tokenization: flush each CJK ideograph / kana / hangul /
+    // fullwidth punctuation as its own word. Without this, an entire CJK paragraph
+    // accumulates into partWordBuffer until MAX_WORD_SIZE forces a hard truncation;
+    // the layout engine then inserts a latin-space-wide gap between every truncated
+    // fragment, which is the visible "中英文间距异常" defect. Each CJK character as
+    // its own word lets ParsedText apply CJK↔CJK zero gap (see GfxRenderer::
+    // getSpaceAdvance) and lets justify distribute spareSpace per inter-character slot.
+    {
+      const auto* peekStart = reinterpret_cast<const unsigned char*>(&s[i]);
+      const unsigned char* peek = peekStart;
+      const uint32_t cp = utf8NextCodepoint(&peek);
+      const int byteLen = static_cast<int>(peek - peekStart);
+      if (byteLen > 0 && cp != REPLACEMENT_GLYPH && i + byteLen <= len && utf8IsCjkBreakable(cp)) {
+        if (self->partWordBufferIndex > 0) {
+          self->flushPartWordBuffer();
+        }
+        for (int b = 0; b < byteLen && self->partWordBufferIndex < MAX_WORD_SIZE; ++b) {
+          self->partWordBuffer[self->partWordBufferIndex++] = s[i + b];
+        }
+        // flushPartWordBuffer reads nextWordContinues and resets it; keep its current
+        // value (set by a preceding NBSP/soft-hyphen branch) so the first CJK char in
+        // such a group attaches correctly. Subsequent CJK chars start fresh.
+        self->flushPartWordBuffer();
+        self->nextWordContinues = false;  // next char is independent — keep gap adjustable for justify
+        i += byteLen - 1;                 // for-loop's ++i consumes the final byte
+        continue;
+      }
+    }
+#endif
+
     // If we're about to run out of space, then cut the word off and start a new one.
     // For CJK text (no spaces), this is the primary word-breaking mechanism.
     // We must avoid splitting multi-byte UTF-8 sequences across word boundaries,

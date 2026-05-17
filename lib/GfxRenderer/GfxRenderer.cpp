@@ -139,7 +139,10 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
                            const bool pixelState, const EpdFontFamily::Style style) {
   const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
   if (!glyph) {
-    LOG_ERR("GFX", "No glyph for codepoint %d", cp);
+    // Missing glyph is a known limitation (subset fonts, rare characters). The reader
+    // renders □ tofu via the absence of an EpdGlyph here. DBG-level so simulator/dev
+    // logs aren't flooded; release builds (LOG_LEVEL=0/1) suppress this entirely.
+    LOG_DBG("GFX", "No glyph for codepoint U+%04X", cp);
     return;
   }
 
@@ -1114,6 +1117,28 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
 
 int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
                                  const EpdFontFamily::Style style) const {
+#ifdef ENABLE_CHINESE_VERSION
+  // CJK aware inter-word gap. Parser splits CJK into per-character words, so this
+  // function is hit for every CJK↔CJK and CJK↔Latin boundary.
+  //   • CJK↔CJK → 0 px natural gap (justify will distribute spareSpace into these slots).
+  //   • CJK↔Latin (either side) → ~1/3 of the latin space advance, just enough to avoid
+  //     a CJK glyph and an adjacent Latin glyph visually touching, without the full
+  //     latin-space gap looking absurd next to ideographs.
+  // The leftCp==0 case (line-start) means there is no preceding glyph, so the original
+  // space-advance behaviour is kept (CJK↔CJK match would otherwise force gap=0 at line
+  // start unintentionally; leftCp==0 short-circuits the L flag below).
+  {
+    const bool L = leftCp != 0 && utf8IsCjkBreakable(leftCp);
+    const bool R = rightCp != 0 && utf8IsCjkBreakable(rightCp);
+    if (L && R) {
+      return 0;
+    }
+    if (L != R) {
+      const int fullSpacePx = getSpaceWidth(fontId, style);
+      return fullSpacePx / 3;
+    }
+  }
+#endif
   // Advance table fast-path for SD card fonts during layout.
   // Kern data is not loaded during layout (consistent with previous metadataOnly behavior),
   // so we return just the space advance without kerning.

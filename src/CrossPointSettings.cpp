@@ -11,6 +11,17 @@
 #include "I18nKeys.h"
 #include "fontIds.h"
 
+// Resolved here (not in the header) so I18nKeys.h — auto-generated and
+// changed on every translation edit — doesn't pull a recompile of every
+// file that includes CrossPointSettings.h.
+uint8_t CrossPointSettings::defaultLanguageIndex() {
+#ifdef ENABLE_CHINESE_VERSION
+  return static_cast<uint8_t>(Language::ZH_CN);
+#else
+  return static_cast<uint8_t>(Language::EN);
+#endif
+}
+
 // Initialize the static instance
 CrossPointSettings CrossPointSettings::instance;
 

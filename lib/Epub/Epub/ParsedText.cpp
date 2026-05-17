@@ -41,6 +41,100 @@ uint32_t lastCodepoint(const std::string& word) {
   return utf8NextCodepoint(&ptr);
 }
 
+#ifdef ENABLE_CHINESE_VERSION
+// Line-head forbidden punctuation: characters that should not appear at the
+// start of a line. Covers ASCII closers (which the Hyphenator may emit as a
+// trailing fragment after a CJK split) and CJK trailing punctuation. When the
+// next word starts with one of these, the layout glues it back onto the
+// previous line.
+bool isCJKLeadingPunctuation(const std::string& word) {
+  if (word.empty()) return false;
+  if (word.size() == 1) {
+    const char c = word[0];
+    return c == ',' || c == '.' || c == '!' || c == '?' || c == ';' || c == ':' || c == ')' || c == ']' || c == '}';
+  }
+  const uint32_t cp = firstCodepoint(word);
+  switch (cp) {
+    case 0x3002:  // 。
+    case 0x3001:  // 、
+    case 0xFF0C:  // ，
+    case 0xFF01:  // !
+    case 0xFF1F:  // ?
+    case 0xFF1B:  // ;
+    case 0xFF1A:  // :
+    case 0xFF09:  // )
+    case 0x3011:  // 】
+    case 0x300B:  // 》
+    case 0x300F:  // 」
+    case 0x301F:  // 〟
+    case 0x201D:  // "
+    case 0x2019:  // '
+      return true;
+    default:
+      return false;
+  }
+}
+
+// CJK punctuation that should occupy full character width — when a Chinese
+// punctuation is rendered, fontconvert's advance metrics may give a narrow
+// natural width which looks cramped next to ideographs. We pad to one CJK-
+// character width so the visual rhythm matches the surrounding text.
+//
+// The previous implementation widened the entire 0x3000-0x303F and
+// 0xFF00-0xFFEF ranges, which incorrectly padded full-width Latin letters
+// and digits (Ａ-Ｚ ａ-ｚ ０-９), the ideographic space U+3000, and various
+// IDS / annotation marks whose natural advance is already at or above Han
+// width. List only punctuation that genuinely benefits from padding.
+bool isCJKFullWidthPunctuation(const std::string& word) {
+  if (word.empty()) return false;
+  const uint32_t cp = firstCodepoint(word);
+  switch (cp) {
+    // CJK Symbols and Punctuation (0x3000-0x303F)
+    case 0x3001:  // 、
+    case 0x3002:  // 。
+    case 0x3008:  // 〈
+    case 0x3009:  // 〉
+    case 0x300A:  // 《
+    case 0x300B:  // 》
+    case 0x300C:  // 「
+    case 0x300D:  // 」
+    case 0x300E:  // 『
+    case 0x300F:  // 』
+    case 0x3010:  // 【
+    case 0x3011:  // 】
+    case 0x3014:  // 〔
+    case 0x3015:  // 〕
+    case 0x3016:  // 〖
+    case 0x3017:  // 〗
+    case 0x301D:  // 〝
+    case 0x301E:  // 〞
+    case 0x301F:  // 〟
+    // Halfwidth and Fullwidth Forms (0xFF00-0xFFEF) — punctuation only.
+    case 0xFF01:  // ！
+    case 0xFF08:  // （
+    case 0xFF09:  // ）
+    case 0xFF0C:  // ，
+    case 0xFF1A:  // ：
+    case 0xFF1B:  // ；
+    case 0xFF1F:  // ？
+    case 0xFF5B:  // ｛
+    case 0xFF5D:  // ｝
+    // General Punctuation — Western quote / dash glyphs commonly mixed
+    // into Chinese prose.
+    case 0x2013:  // –
+    case 0x2014:  // —
+    case 0x2018:  // '
+    case 0x2019:  // '
+    case 0x201C:  // "
+    case 0x201D:  // "
+    case 0x2026:  // …
+      return true;
+    default:
+      return false;
+  }
+}
+#endif  // ENABLE_CHINESE_VERSION
+
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
 
 // Removes every soft hyphen in-place so rendered glyphs match measured widths.
@@ -296,8 +390,66 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
   std::vector<uint16_t> wordWidths;
   wordWidths.reserve(words.size());
 
+#ifdef ENABLE_CHINESE_VERSION
+  // Reference Han-character advance ("我"), measured once per paragraph and per
+  // distinct style. CJK punctuation narrower than this gets padded so the
+  // visual rhythm matches surrounding ideographs.
+  //
+  // Resolution is lazy and cached: a 0 entry means "not yet measured for this
+  // style". On first miss we try "我" (in the subset by way of chinese.yaml
+  // require-from); if the font subset happens to omit it we fall back to
+  // 2 × the advance of "M", a stable approximation of one Han column. Either
+  // way the cached value is non-zero after the first call so subsequent words
+  // pay zero measurement cost.
+  uint16_t cjkAdvanceByStyle[4] = {0, 0, 0, 0};
+  auto cjkReferenceAdvance = [&](EpdFontFamily::Style style) -> uint16_t {
+    const auto styleIdx = static_cast<uint8_t>(style) & 0x03;
+    if (cjkAdvanceByStyle[styleIdx] != 0) return cjkAdvanceByStyle[styleIdx];
+    uint16_t w = renderer.getTextAdvanceX(fontId, "\xE6\x88\x91", style);  // "我"
+    if (w == 0) {
+      const uint16_t m = renderer.getTextAdvanceX(fontId, "M", style);
+      if (m > 0) w = static_cast<uint16_t>(m * 2);
+    }
+    cjkAdvanceByStyle[styleIdx] = w;
+    return w;
+  };
+#endif
+
   for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
+    uint16_t w = 0;
+    bool usedCjkCache = false;
+#ifdef ENABLE_CHINESE_VERSION
+    // Fast path: a single CJK ideograph word (3-byte UTF-8 starting with 0xE0–0xEF)
+    // reuses the cached advance of "我". Per-character parser tokenization makes this
+    // path dominant for Chinese paragraphs, so the cache turns ~600 getTextAdvanceX
+    // calls per page into ≤4 (one per style actually used).
+    {
+      const std::string& wd = words[i];
+      if (wd.size() == 3 && (static_cast<uint8_t>(wd[0]) & 0xF0) == 0xE0) {
+        const auto* p = reinterpret_cast<const unsigned char*>(wd.data());
+        const uint32_t cp = utf8NextCodepoint(&p);
+        if ((cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF)) {
+          const uint16_t ref = cjkReferenceAdvance(wordStyles[i]);
+          if (ref > 0) {
+            w = ref;
+            usedCjkCache = true;
+          }
+        }
+      }
+    }
+#endif
+    if (!usedCjkCache) {
+      w = measureWordWidth(renderer, fontId, words[i], wordStyles[i]);
+    }
+#ifdef ENABLE_CHINESE_VERSION
+    if (isCJKFullWidthPunctuation(words[i])) {
+      const uint16_t ref = cjkReferenceAdvance(wordStyles[i]);
+      if (ref > 0 && w < ref) {
+        w = ref;
+      }
+    }
+#endif
+    wordWidths.push_back(w);
   }
 
   return wordWidths;
@@ -416,6 +568,29 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
       nextBreakIndex = currentWordIndex + 1;
     }
 
+#ifdef ENABLE_CHINESE_VERSION
+    // CJK line-head punctuation rule (禁则): if the next line would start with
+    // one or more closing/trailing punctuation chars (e.g. 」）or 。" runs),
+    // glue them all onto the current line instead. Reset each glued word's
+    // width to the natural advance so justification doesn't stretch the
+    // trailing punctuation visually.
+    //
+    // Safety on the width invariant:
+    //   - For CJK full-width punctuation we previously padded the width up to
+    //     the Han advance; the natural advance is <= that padding by
+    //     construction, so glueing strictly cannot widen the line.
+    //   - For ASCII closers (',', '.', '!', '?', ';', ':', ')', ']', '}') the
+    //     natural advance equals the original measured advance, so re-measuring
+    //     is a no-op — the line was already <= effectivePageWidth.
+    //
+    // Cap the run at totalWordCount so a pathological all-punctuation tail
+    // can't pull arbitrary content in.
+    while (nextBreakIndex < totalWordCount && isCJKLeadingPunctuation(words[nextBreakIndex])) {
+      wordWidths[nextBreakIndex] = measureWordWidth(renderer, fontId, words[nextBreakIndex], wordStyles[nextBreakIndex]);
+      ++nextBreakIndex;
+    }
+#endif
+
     lineBreakIndices.push_back(nextBreakIndex);
     currentWordIndex = nextBreakIndex;
   }
@@ -432,8 +607,16 @@ void ParsedText::applyParagraphIndent() {
     // CSS text-indent is explicitly set (even if 0) - don't use fallback EmSpace
     // The actual indent positioning is handled in extractLine()
   } else if (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left) {
-    // No CSS text-indent defined - use EmSpace fallback for visual indent
+    // No CSS text-indent defined - use a wide-space fallback for visual indent.
+#ifdef ENABLE_CHINESE_VERSION
+    // U+3000 IDEOGRAPHIC SPACE: CJK 排版标准全角空格，与汉字等宽；CJK 字体
+    // 子集 (0x3000-0x303F) 已含此 glyph。U+2003 EM SPACE 不在子集里，会触发
+    // "No glyph for codepoint 8195" 错误。
+    words.front().insert(0, "\xe3\x80\x80");
+#else
+    // U+2003 EM SPACE: 拉丁字体内置 glyph。
     words.front().insert(0, "\xe2\x80\x83");
+#endif
   }
 }
 
@@ -508,6 +691,18 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
     while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() && continuesVec[currentIndex]) {
       --currentIndex;
     }
+
+#ifdef ENABLE_CHINESE_VERSION
+    // CJK line-head punctuation rule (禁则): glue a run of leading-forbidden
+    // punctuation onto this line instead of letting them start the next. Use
+    // the natural advance for each to avoid stretching the line. Bound by
+    // wordWidths.size() so a pathological all-punctuation run can't escape.
+    while (currentIndex > lineStart && currentIndex < wordWidths.size() &&
+           isCJKLeadingPunctuation(words[currentIndex])) {
+      wordWidths[currentIndex] = measureWordWidth(renderer, fontId, words[currentIndex], wordStyles[currentIndex]);
+      ++currentIndex;
+    }
+#endif
 
     lineBreakIndices.push_back(currentIndex);
     isFirstLine = false;

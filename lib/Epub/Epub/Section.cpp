@@ -10,7 +10,17 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
+// Cache layout version. Latin and Chinese builds emit different word streams
+// (per-character CJK tokenization + 禁则 + full-width padding live behind
+// ENABLE_CHINESE_VERSION in ParsedText.cpp), so cached pages from one flavor
+// cannot be reused by the other. Carry separate version counters per flavor;
+// each can bump independently. Cache invalidation is automatic on mismatch
+// (no migration code needed — version mismatch triggers a clean re-parse).
+#ifdef ENABLE_CHINESE_VERSION
+constexpr uint8_t SECTION_FILE_VERSION = 26;
+#else
 constexpr uint8_t SECTION_FILE_VERSION = 23;
+#endif
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
