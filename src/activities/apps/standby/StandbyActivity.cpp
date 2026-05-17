@@ -3,16 +3,17 @@
 #include <Arduino.h>
 #include <HalGPIO.h>
 #include <I18n.h>
-#include <InputManager.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
-#include <esp_sleep.h>
 #include <esp_sntp.h>
 #include <esp_system.h>
+#include <esp_wifi.h>
 
 #include <string>
 
+#include "../../ActivityResult.h"
+#include "../../network/WifiSelectionActivity.h"
 #include "SloppyClockFace.h"
 #include "StandbyTime.h"
 #include "WifiCredentialStore.h"
@@ -35,8 +36,15 @@ constexpr FaceEntry kFaces[] = {
 };
 constexpr uint8_t kFaceCount = static_cast<uint8_t>(sizeof(kFaces) / sizeof(kFaces[0]));
 
+// Once per power-on, Standby may push the WiFi selection UI to help the user
+// get online for NTP sync. After it has been shown (regardless of whether the
+// user connected or cancelled), subsequent Standby entries within the same
+// session will not re-prompt — the explicit way to retry is Settings → WiFi.
+// This module-scope flag persists across activity destroy/recreate.
+bool g_promptedForWifiThisSession = false;
+
 // Bottom-center page indicator dots. One dot per face, filled for the current
-// face. Drawn only in Normal mode — hidden once we go Immersive / Sleep.
+// face. Drawn only in Normal mode — hidden once we go Immersive.
 constexpr int kDotDiameter = 6;
 constexpr int kDotSpacing = 14;     // gap between dot centers
 constexpr int kDotBottomInset = 24; // distance from bottom edge to top of dots
@@ -86,13 +94,6 @@ void StandbyActivity::onExit() {
     WiFi.mode(WIFI_OFF);
     syncState_ = SyncState::Idle;
   }
-  // Defensive: if the activity is destroyed mid-Sleep (rare — enterSleep
-  // normally blocks until the power button), clean up sleep wake sources so
-  // they don't leak into the next activity's sleep path.
-  if (mode_ == DisplayMode::Sleep) {
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
-  }
   if (currentFace_) {
     currentFace_->onExit();
     currentFace_.reset();
@@ -119,8 +120,29 @@ void StandbyActivity::switchFace(int8_t delta) {
 void StandbyActivity::startTimeSync() {
   if (standby_time::isSynced()) return;
 
-  // Load and look up saved credentials. SD I/O shares SPI with the e-ink panel,
-  // so we hold a RenderLock for the duration of the file access.
+  // Another activity (e.g. Settings → WiFi) may have already connected the
+  // device. Skip our own WiFi.begin in that case and go straight to NTP.
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_DBG("STANDBY", "WiFi already connected, skipping silent attempt");
+    beginNtpSync();
+    return;
+  }
+
+  // Default path: try the saved "last connected" credentials silently.
+  if (trySilentWifiConnect()) {
+    return;  // pumpTimeSync() drives the WifiConnecting → NtpSyncing transition
+  }
+
+  // No credentials available to try. Push the WiFi selection UI (once per
+  // session) so the user can connect manually.
+  if (!g_promptedForWifiThisSession) {
+    promptForWifi();
+  }
+}
+
+bool StandbyActivity::trySilentWifiConnect() {
+  // SD I/O shares SPI with the e-ink panel, so we hold a RenderLock for the
+  // duration of the credential file access.
   std::string ssid;
   std::string pass;
   {
@@ -128,13 +150,13 @@ void StandbyActivity::startTimeSync() {
     if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
     const std::string& last = WIFI_STORE.getLastConnectedSsid();
     if (last.empty()) {
-      LOG_DBG("STANDBY", "No lastConnectedSsid, skipping NTP sync");
-      return;
+      LOG_DBG("STANDBY", "No lastConnectedSsid for silent connect");
+      return false;
     }
     const WifiCredential* cred = WIFI_STORE.findCredential(last);
     if (!cred) {
       LOG_DBG("STANDBY", "lastConnectedSsid '%s' has no saved credential", last.c_str());
-      return;
+      return false;
     }
     ssid = cred->ssid;
     pass = cred->password;
@@ -151,7 +173,49 @@ void StandbyActivity::startTimeSync() {
   }
   syncState_ = SyncState::WifiConnecting;
   syncStartMs_ = millis();
-  LOG_DBG("STANDBY", "WiFi connect start: %s", ssid.c_str());
+  LOG_DBG("STANDBY", "Silent WiFi connect start: %s", ssid.c_str());
+  return true;
+}
+
+void StandbyActivity::promptForWifi() {
+  // Set the flag before pushing so a synchronous edge-case completion can't
+  // re-prompt. autoConnect=false: the UI must not retry the same credential
+  // we just failed on; let the user pick.
+  g_promptedForWifiThisSession = true;
+  LOG_DBG("STANDBY", "Prompting WiFi selection UI");
+  startActivityForResult(
+      std::make_unique<WifiSelectionActivity>(renderer, mappedInput, /*autoConnect=*/false),
+      [this](const ActivityResult& result) { onWifiResult(result); });
+}
+
+void StandbyActivity::onWifiResult(const ActivityResult& result) {
+  if (result.isCancelled) {
+    LOG_DBG("STANDBY", "WiFi UI cancelled; staying in fallback time");
+    // syncState_ is already Idle (cleared before the prompt). The face will
+    // continue ticking on the pre-sync fallback clock.
+    return;
+  }
+  // User connected via the UI; WiFi is up. Skip our own WiFi.begin and jump
+  // straight to NTP. WifiSelectionActivity already persisted the credential
+  // and updated lastConnectedSsid, so next boot the silent path will work.
+  LOG_DBG("STANDBY", "WiFi UI returned connected; starting NTP");
+  beginNtpSync();
+  requestUpdate();  // refresh header back to "Syncing…"
+}
+
+void StandbyActivity::beginNtpSync() {
+  if (esp_sntp_enabled()) esp_sntp_stop();
+#ifdef ENABLE_CHINESE_VERSION
+  // China-region servers: Aliyun is the most reliable; Tencent and the NTP
+  // Pool CN node act as fallbacks. pool.ntp.org is often blocked or slow
+  // inside the mainland.
+  configTime(kTzOffsetSec, 0, "ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org");
+#else
+  configTime(kTzOffsetSec, 0, "pool.ntp.org");
+#endif
+  syncState_ = SyncState::NtpSyncing;
+  syncStartMs_ = millis();
+  LOG_DBG("STANDBY", "NTP started");
 }
 
 void StandbyActivity::pumpTimeSync() {
@@ -161,23 +225,24 @@ void StandbyActivity::pumpTimeSync() {
   if (syncState_ == SyncState::WifiConnecting) {
     const wl_status_t st = WiFi.status();
     if (st == WL_CONNECTED) {
-      if (esp_sntp_enabled()) esp_sntp_stop();
-#ifdef ENABLE_CHINESE_VERSION
-      // China-region servers: Aliyun is the most reliable; Tencent and the NTP
-      // Pool CN node act as fallbacks. pool.ntp.org is often blocked or slow
-      // inside the mainland.
-      configTime(kTzOffsetSec, 0, "ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org");
-#else
-      configTime(kTzOffsetSec, 0, "pool.ntp.org");
-#endif
-      syncState_ = SyncState::NtpSyncing;
-      syncStartMs_ = millis();
-      LOG_DBG("STANDBY", "WiFi connected, NTP started");
+      beginNtpSync();
       return;
     }
     if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || elapsed >= kWifiTimeoutMs) {
-      LOG_DBG("STANDBY", "WiFi sync skipped (status=%d, t=%ums)", static_cast<int>(st), static_cast<unsigned>(elapsed));
-      finishTimeSync();
+      LOG_DBG("STANDBY", "Silent WiFi sync failed (status=%d, t=%ums)",
+              static_cast<int>(st), static_cast<unsigned>(elapsed));
+      // Tear down our own WiFi state cleanly, then push the selection UI
+      // (once per session). If we've already prompted, stay in fallback.
+      if (esp_sntp_enabled()) esp_sntp_stop();
+      WiFi.disconnect(false);
+      delay(100);
+      WiFi.mode(WIFI_OFF);
+      syncState_ = SyncState::Idle;
+      if (!g_promptedForWifiThisSession) {
+        promptForWifi();
+      } else {
+        requestUpdate();  // header switches back to face title
+      }
     }
     return;
   }
@@ -201,6 +266,11 @@ void StandbyActivity::finishTimeSync() {
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);
+  // Fully release the WiFi driver so HalPowerManager::setPowerSaving() can
+  // actually drop the CPU to LOW_POWER_FREQ — it short-circuits while WiFi is
+  // active (see HalPowerManager.cpp). Return value is ignored;
+  // ESP_ERR_WIFI_NOT_INIT is fine if we never connected.
+  esp_wifi_deinit();
   syncState_ = SyncState::Idle;
   requestUpdate();  // Header text and face content may now reflect synced time
 }
@@ -212,7 +282,8 @@ void StandbyActivity::loop() {
   }
 
   // Up/Down: forward "shake" to the current face. For SloppyClock this rerolls
-  // the style; future faces may interpret it differently or ignore.
+  // the style; future faces may interpret it differently or ignore. Pressing
+  // either button from Immersive wakes back to Normal first.
   if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
       mappedInput.wasReleased(MappedInputManager::Button::Down)) {
     lastInputMs_ = millis();
@@ -241,24 +312,32 @@ void StandbyActivity::loop() {
     return;
   }
 
+  // Power short-press: dedicated wake from Immersive back to Normal. Long-
+  // press is handled by main.cpp's global shutdown path.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Power)) {
+    lastInputMs_ = millis();
+    if (mode_ == DisplayMode::Immersive) {
+      mode_ = DisplayMode::Normal;
+      requestUpdate();
+    }
+    return;
+  }
+
   // Confirm is currently unbound and reserved for future face-specific or
   // chrome-toggle behaviour.
 
   pumpTimeSync();
 
-  // Mode auto-transitions on idle thresholds:
-  //   Normal      → Immersive after 5 s idle
-  //   Immersive   → Sleep after 35 s idle, BUT only on battery and only when
-  //                 NTP sync is finished. With USB connected we stay in Immersive
-  //                 indefinitely (no point sleeping while externally powered).
+  // After 5 s of idle, hide chrome and let the face fill the screen. On
+  // battery the framework takes care of power saving from there: CPU drops to
+  // LOW_POWER_FREQ after 3 s (HalPowerManager) and the whole device deep-
+  // sleeps after SETTINGS.getSleepTimeoutMs() (main.cpp). We deliberately do
+  // not run our own light-sleep loop — that just stalls main.cpp's auto power
+  // management and leaves the device unresponsive.
   const uint32_t idle = millis() - lastInputMs_;
   if (mode_ == DisplayMode::Normal && idle >= 5000u) {
     mode_ = DisplayMode::Immersive;
     requestUpdate();
-  } else if (mode_ == DisplayMode::Immersive && idle >= 35000u && syncState_ == SyncState::Idle &&
-             !gpio.isUsbConnected()) {
-    enterSleep();  // Blocks until power button (or USB plug) wakes us.
-    return;
   }
 
   if (currentFace_ && currentFace_->tick()) {
@@ -276,8 +355,8 @@ void StandbyActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   // Face renders into the full screen regardless of mode. Chrome (title, battery,
-  // dot indicator) is drawn as overlay on top in Normal mode only, so the Face
-  // content doesn't re-flow when transitioning to Immersive / Sleep.
+  // dot indicator) is drawn as overlay on top in Normal mode only, so the face
+  // content doesn't re-flow when transitioning to Immersive.
   currentFace_->render(renderer, Rect{0, 0, sw, sh});
 
   if (mode_ != DisplayMode::Normal) {
@@ -306,65 +385,3 @@ void StandbyActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-void StandbyActivity::enterSleep() {
-  if (!currentFace_) return;
-  mode_ = DisplayMode::Sleep;
-  // First Sleep frame uses FAST_REFRESH like everything else in this app.
-  requestUpdateAndWait();
-
-  // Real ESP32-C3 light sleep. This is only reached when USB is unplugged
-  // (loop() gates Sleep entry on !gpio.isUsbConnected()); on battery the
-  // USB Serial JTAG peripheral is quiescent and esp_light_sleep_start() works
-  // reliably, yielding ~0.8 mA average power.
-  const gpio_num_t powerPin = static_cast<gpio_num_t>(InputManager::POWER_BUTTON_PIN);
-  pinMode(powerPin, INPUT_PULLUP);
-  gpio_wakeup_enable(powerPin, GPIO_INTR_LOW_LEVEL);
-  esp_sleep_enable_gpio_wakeup();
-
-  LOG_DBG("STANDBY", "sleep start");
-
-  while (true) {
-    uint32_t secsToNext = currentFace_->secondsUntilNextWake();
-    if (secsToNext == 0) secsToNext = 60;
-    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(secsToNext) * 1000000ULL);
-
-    LOG_DBG("STANDBY", "light sleep %us", static_cast<unsigned>(secsToNext));
-    esp_light_sleep_start();
-    const auto cause = esp_sleep_get_wakeup_cause();
-    LOG_DBG("STANDBY", "wake cause=%d", static_cast<int>(cause));
-
-    if (cause == ESP_SLEEP_WAKEUP_GPIO) {
-      // Power button: drain the press so the main loop doesn't immediately
-      // treat it as a still-held button (which could trigger shutdown).
-      const uint32_t releaseStart = millis();
-      while (digitalRead(powerPin) == LOW && millis() - releaseStart < 2000u) {
-        vTaskDelay(pdMS_TO_TICKS(20));
-      }
-      LOG_DBG("STANDBY", "power button -> exit Sleep");
-      break;
-    }
-
-    // USB plugged in during Sleep: leave the loop so we revert to Immersive
-    // and let the user interact with full-rate rendering on external power.
-    if (gpio.isUsbConnected()) {
-      LOG_DBG("STANDBY", "USB connected -> exit Sleep");
-      break;
-    }
-
-    // Timer wake: let the face decide whether content actually changed, then
-    // redraw with FAST_REFRESH if needed. We accept some ghosting in exchange
-    // for silent, flash-free updates.
-    if (currentFace_->tick()) {
-      requestUpdateAndWait();
-    }
-  }
-
-  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
-  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
-  gpio_wakeup_disable(powerPin);
-
-  LOG_DBG("STANDBY", "sleep end -> Normal");
-  mode_ = DisplayMode::Normal;
-  lastInputMs_ = millis();
-  requestUpdate();
-}

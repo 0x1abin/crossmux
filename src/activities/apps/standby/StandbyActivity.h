@@ -6,6 +6,8 @@
 #include "../../Activity.h"
 #include "StandbyFace.h"
 
+struct ActivityResult;
+
 class StandbyActivity final : public Activity {
  public:
   explicit StandbyActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -28,9 +30,11 @@ class StandbyActivity final : public Activity {
   };
 
   enum class DisplayMode : uint8_t {
-    Normal,     // Header + button hints + face content
-    Immersive,  // Face content only (after 5s idle)
-    Sleep,      // Light-sleep loop, only power button wakes (after 35s idle)
+    Normal,     // Header + battery + face dots + face content
+    Immersive,  // Face content only (after 5s idle). On battery the framework
+                // engages CPU low-freq after 3s idle and full deep sleep after
+                // SETTINGS.getSleepTimeoutMs() — Standby just needs to stay out
+                // of the way.
   };
 
   std::unique_ptr<StandbyFace> currentFace_;
@@ -42,7 +46,10 @@ class StandbyActivity final : public Activity {
 
   void switchFace(int8_t delta);
   void startTimeSync();
+  bool trySilentWifiConnect();
+  void promptForWifi();
+  void onWifiResult(const ActivityResult& result);
+  void beginNtpSync();
   void pumpTimeSync();
   void finishTimeSync();
-  void enterSleep();
 };
