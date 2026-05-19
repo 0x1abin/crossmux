@@ -46,6 +46,7 @@ class StandbyActivity final : public Activity {
   uint32_t syncStartMs_ = 0;
   DisplayMode mode_ = DisplayMode::Normal;
   uint32_t lastInputMs_ = 0;
+  bool inverseMode_ = false;  // Confirm toggles black-bg/white-content. Not persisted.
 
   void switchFace(int8_t delta);
   void startTimeSync();

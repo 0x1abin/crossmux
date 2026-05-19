@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "OpdsServerStore.h"
+#include "apps/2048/Game2048Activity.h"
 #include "apps/AppsMenuActivity.h"
 #include "apps/avatar/UglyAvatarActivity.h"
 #include "apps/cellular/CellularGameActivity.h"
@@ -237,9 +238,9 @@ void ActivityManager::goToMinesweeper() {
   replaceActivity(std::make_unique<MinesweeperMenuActivity>(renderer, mappedInput));
 }
 
-void ActivityManager::goToCellular() {
-  replaceActivity(std::make_unique<CellularGameActivity>(renderer, mappedInput));
-}
+void ActivityManager::goToCellular() { replaceActivity(std::make_unique<CellularGameActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToGame2048() { replaceActivity(std::make_unique<Game2048Activity>(renderer, mappedInput)); }
 
 void ActivityManager::goToStandby() { replaceActivity(std::make_unique<StandbyActivity>(renderer, mappedInput)); }
 
@@ -248,9 +249,7 @@ void ActivityManager::goToChineseChess() {
   replaceActivity(std::make_unique<ChineseChessMenuActivity>(renderer, mappedInput));
 }
 
-void ActivityManager::goToWeRead() {
-  replaceActivity(std::make_unique<WeReadMenuActivity>(renderer, mappedInput));
-}
+void ActivityManager::goToWeRead() { replaceActivity(std::make_unique<WeReadMenuActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToWeReadShelf() {
   replaceActivity(std::make_unique<WeReadShelfActivity>(renderer, mappedInput));

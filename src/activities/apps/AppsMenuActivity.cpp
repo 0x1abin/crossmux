@@ -25,6 +25,7 @@ constexpr AppEntry kAppEntries[] = {
     {StrId::STR_WEREAD_TITLE, UIIcon::WeRead, &ActivityManager::goToWeRead},
 #endif
     {StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
+    {StrId::STR_2048_TITLE, UIIcon::Game2048, &ActivityManager::goToGame2048},
     {StrId::STR_UGLY_AVATAR, UIIcon::Avatar, &ActivityManager::goToUglyAvatar},
     {StrId::STR_CELLULAR_TITLE, UIIcon::Cellular, &ActivityManager::goToCellular},
     {StrId::STR_STANDBY_TITLE, UIIcon::Standby, &ActivityManager::goToStandby},

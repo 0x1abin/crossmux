@@ -95,6 +95,7 @@ enum UIIcon {
   Avatar,
   Cellular,
   Standby,
+  Game2048,
 };
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };

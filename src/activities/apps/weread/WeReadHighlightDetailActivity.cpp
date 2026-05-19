@@ -1,7 +1,6 @@
 #include "WeReadHighlightDetailActivity.h"
 
 #include <I18n.h>
-#include <Utf8.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -10,125 +9,7 @@
 
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
-
-namespace {
-
-void appendCodepoint(std::string& dst, uint32_t cp) {
-  if (cp < 0x80) {
-    dst.push_back(static_cast<char>(cp));
-  } else if (cp < 0x800) {
-    dst.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-    dst.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else if (cp < 0x10000) {
-    dst.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-    dst.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    dst.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  } else {
-    dst.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-    dst.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-    dst.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-    dst.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-  }
-}
-
-// Find the byte offset of the last ASCII space in [0, line.size()). Returns
-// std::string::npos if not found.
-size_t findLastSpace(const std::string& line) { return line.find_last_of(' '); }
-
-// CJK-aware word wrap. Splits CJK at every codepoint and Latin at spaces.
-// Falls back to a hard break when a single Latin run exceeds maxWidth.
-std::vector<std::string> wrapHighlight(const GfxRenderer& renderer, int fontId, const std::string& text, int maxWidth) {
-  std::vector<std::string> out;
-  if (text.empty() || maxWidth <= 0) return out;
-
-  std::string current;
-  current.reserve(text.size());
-
-  auto flushLine = [&](bool trimLeadingSpace) {
-    std::string line = current;
-    if (trimLeadingSpace && !line.empty() && line.front() == ' ') line.erase(0, 1);
-    out.push_back(std::move(line));
-    current.clear();
-  };
-
-  const auto* p = reinterpret_cast<const unsigned char*>(text.c_str());
-  bool atLineStart = true;
-  while (true) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0) break;
-
-    if (cp == '\n') {
-      flushLine(false);
-      atLineStart = true;
-      continue;
-    }
-    // Collapse leading whitespace at line start to avoid stray indents after
-    // a soft wrap.
-    if (atLineStart && cp == ' ') continue;
-    atLineStart = false;
-
-    std::string candidate = current;
-    appendCodepoint(candidate, cp);
-    if (renderer.getTextWidth(fontId, candidate.c_str()) <= maxWidth) {
-      current = std::move(candidate);
-      continue;
-    }
-
-    // Doesn't fit: decide where to break.
-    if (current.empty()) {
-      // Even a single codepoint exceeds the width — push it anyway so we make
-      // forward progress and don't infinite-loop.
-      current = std::move(candidate);
-      flushLine(false);
-      atLineStart = true;
-      continue;
-    }
-
-    const bool cpIsCjk = utf8IsCjkBreakable(cp);
-    const bool cpIsSpace = (cp == ' ');
-    // Last char of current as codepoint to decide if previous boundary is a
-    // natural break (CJK char on either side, or trailing space).
-    const unsigned char lastByte = static_cast<unsigned char>(current.back());
-    const bool prevIsAscii = lastByte < 0x80;
-    // Cheap heuristic: CJK ends in a multibyte sequence (high bit set). For an
-    // exact codepoint check we'd have to scan back, but for line-break purposes
-    // this is enough — Latin words don't contain raw high-bit bytes outside
-    // multibyte sequences here.
-    const bool prevIsCjkLike = !prevIsAscii;
-
-    if (cpIsCjk || prevIsCjkLike || cpIsSpace) {
-      // Natural break point: end the line here, start the next with cp (unless
-      // cp is whitespace, in which case we drop it).
-      flushLine(false);
-      if (!cpIsSpace) {
-        appendCodepoint(current, cp);
-      } else {
-        atLineStart = true;
-      }
-      continue;
-    }
-
-    // Inside a Latin word: break at the last space if any; otherwise hard-break
-    // (long URL or single token wider than the viewport).
-    size_t sp = findLastSpace(current);
-    if (sp == std::string::npos) {
-      // Hard break before cp.
-      flushLine(false);
-      appendCodepoint(current, cp);
-    } else {
-      std::string carry = current.substr(sp + 1);
-      current.erase(sp);
-      flushLine(false);
-      current = std::move(carry);
-      appendCodepoint(current, cp);
-    }
-  }
-
-  if (!current.empty()) out.push_back(std::move(current));
-  return out;
-}
-
-}  // namespace
+#include "WeReadTextWrap.h"
 
 WeReadHighlightDetailActivity::WeReadHighlightDetailActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                              std::string bookTitle, ItemSource source,
@@ -157,7 +38,7 @@ void WeReadHighlightDetailActivity::rewrap() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
   const int contentWidth = sw - 2 * metrics.contentSidePadding;
-  lines_ = wrapHighlight(renderer, UI_12_FONT_ID, currentText(), contentWidth);
+  lines_ = WeReadTextWrap::wrap(renderer, UI_12_FONT_ID, currentText(), contentWidth);
 }
 
 void WeReadHighlightDetailActivity::switchTo(int newIndex) {
