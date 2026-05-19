@@ -13,6 +13,10 @@ class SloppyClockFace final : public StandbyFace {
   void onEnter() override;
   void onExit() override;
   void onShake(uint32_t seed) override;
+  // Sloppy clock has no day/page concept — both Up and Down forward to the
+  // existing shake-reroll behaviour so the gesture keeps doing something.
+  void onPagePrev() override;
+  void onPageNext() override;
   bool tick() override;
   void render(GfxRenderer& renderer, const Rect& viewport) override;
   StrId titleId() const override { return StrId::STR_FACE_SLOPPY_CLOCK; }

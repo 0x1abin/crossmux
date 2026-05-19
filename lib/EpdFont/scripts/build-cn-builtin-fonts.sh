@@ -33,9 +33,11 @@ SOURCE_OTF="../builtinFonts/source/NotoSansSC/NotoSansSC-Regular.otf"
 # can never silently drop glyphs — see build_cn_charset.py docstring).
 # Regenerate manually with: python3 build_cn_charset.py --top <N> --require-from ...
 CHARSET_FILE="cn_common_chars.txt"
-# Force-include sources fed to build_cn_charset.py --require-from. Add more
-# i18n yamls here if additional CN-targeted locales are introduced.
-REQUIRE_FROM=(../../I18n/translations/chinese.yaml)
+# Force-include sources fed to build_cn_charset.py --require-from. Each
+# feature that needs CJK glyphs absent from both the 3500 SC pool and the
+# natural chinese.yaml STR_ values adds its own cn_<feature>_chars.txt here.
+# cn_almanac_chars.txt: ganzhi + lunar-row chars for ChineseCalendarFace.
+REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt)
 TMP_DIR="instanced_fonts/NotoSansSC"
 SUBSET_OTF="$TMP_DIR/NotoSansSC-Regular.cncommon.otf"
 # Tiny OTF holding only the CJK chars that appear in i18n YAML files (~430

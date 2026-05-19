@@ -30,6 +30,14 @@ class StandbyFace {
   // with millis() so the face can re-randomize without seeding its own RNG.
   virtual void onShake(uint32_t /*seed*/) {}
 
+  // Up / Down navigation. StandbyActivity dispatches Up→onPagePrev and
+  // Down→onPageNext on the active face. Faces that don't paginate (e.g. the
+  // SloppyClock) override these to forward to `onShake` so the gesture still
+  // does something useful; faces that do paginate (e.g. the Chinese calendar)
+  // override these to change their internal day/page offset.
+  virtual void onPagePrev() {}
+  virtual void onPageNext() {}
+
   // Called once per StandbyActivity::loop() tick. Returns true if the screen
   // needs to be redrawn (e.g. the minute boundary moved). Face owns the
   // "did anything change since last render" decision.
@@ -48,4 +56,9 @@ class StandbyFace {
   // (Sleep mode). Sloppy clock returns "seconds to next minute boundary";
   // a calendar face would return "seconds to next midnight".
   virtual uint32_t secondsUntilNextWake() const = 0;
+
+  // Faces that only render correctly in portrait override this and return
+  // true. StandbyActivity hides such faces from rotation while the screen is
+  // landscape (dot strip collapses; Left/Right skip them).
+  virtual bool requiresPortrait() const { return false; }
 };

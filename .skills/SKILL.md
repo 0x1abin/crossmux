@@ -834,18 +834,57 @@ pio run -e gh_release_cn
 `build_cn_charset.py` prints the highest-frequency casualties (chars just
 above and below the cutoff) so you can verify the trim looks reasonable.
 
+### Force-including feature-specific glyphs
+
+Each feature that needs CJK glyphs absent from both the 3500 SC pool *and*
+the natural `chinese.yaml` STR_ values ships a small dedicated text file and
+adds it to the `REQUIRE_FROM` array in
+[build-cn-builtin-fonts.sh](../lib/EpdFont/scripts/build-cn-builtin-fonts.sh).
+`build_cn_charset.py --require-from <file>` regex-scans the file for every
+CJK Unified Ideograph (`[一-鿿]`) and force-includes them in **both**
+`cn_common_chars.txt` (8/10/12/14pt) and `cn_i18n_chars.txt` (16/18pt) —
+so glyphs added via this mechanism render at every CN font size.
+
+Current example: [cn_almanac_chars.txt](../lib/EpdFont/scripts/cn_almanac_chars.txt)
+holds the chars `ChineseAlmanac.cpp` / `ChineseCalendarFace.cpp` need
+beyond the standard pool:
+
+```text
+戊庚壬癸寅卯巳酉戌廿蛰闰初七八九十冬腊
+```
+
+Pattern when adding a new feature:
+
+1. Create `lib/EpdFont/scripts/cn_<feature>_chars.txt` containing only the
+   CJK chars the feature renders that aren't otherwise covered (one line,
+   UTF-8, no separators required).
+2. Append that path to `REQUIRE_FROM=(... cn_<feature>_chars.txt)` in
+   `build-cn-builtin-fonts.sh`.
+3. Re-run `bash build-cn-builtin-fonts.sh` and commit the regenerated
+   `cn_common_chars.txt`, `cn_i18n_chars.txt`, and six `notosans_cjk_*.h`.
+
+Anti-pattern (don't do this): hiding chars in a `#` YAML comment inside
+`chinese.yaml` to abuse the regex scanner. It works (build_cn_charset.py
+does scan comments) but couples a font detail to the i18n file's structure
+and forces `gen_i18n.py` to know about it. Dedicated `cn_*_chars.txt`
+files are self-documenting and orthogonal to i18n.
+
 ### Expanding character coverage (pool, not --top)
 
 `--top` is capped by the source pool size (`chars_3500_common.txt` has 3500
 chars by construction — it is the vendored 教育部《现代汉语常用字表》).
 Passing `--top 5000` will fail with `--top is >= pool size`.
 
-To enlarge the renderable character set (e.g. classical literature, GB2312
-Lv2), drop a larger source list into `lib/EpdFont/scripts/` (e.g. a
-`gb2312_full.txt` union of Lv1+Lv2) and point `SOURCE_FILE` in
-`build_cn_charset.py` at it. This is a deliberate Flash-budget decision —
-every 1000 extra chars adds roughly **200 KB** to the 8/10/12/14pt headers
-combined.
+To enlarge the renderable character set:
+
+1. **For a handful of specific chars**: add a feature-scoped
+   `cn_<feature>_chars.txt` as described above. One-line file + one-line
+   append to `REQUIRE_FROM`. No pool expansion needed.
+2. **For broad coverage gain** (e.g. classical literature, GB2312 Lv2): drop a
+   larger source list into `lib/EpdFont/scripts/` (e.g. a `gb2312_full.txt`
+   union of Lv1+Lv2) and point `SOURCE_FILE` in `build_cn_charset.py` at it.
+   This is a deliberate Flash-budget decision — every 1000 extra chars adds
+   roughly **200 KB** to the 8/10/12/14pt headers combined.
 
 The hard ceiling is the 6.25 MB A/B-OTA slot. Today's headroom is ~1.4 MB,
 so a ~7000-char SC+TC pool would still fit, but the upcoming OTA delta
@@ -855,7 +894,7 @@ shrinks proportionally.
 
 - **No bold/italic CJK glyphs**: the bitmaps come from a single NotoSansSC-Regular subset. UI elements that pass `EpdFontFamily::Style::Bold` render the regular weight under CN.
 - **Font-size dropdown affects rendered size**: each reader size (12/14/16/18pt) and UI size (10/12pt) and small font (8pt) has its own bitmap header. Switching size really does swap glyph bitmaps.
-- **Rare characters render as □ in reader at SMALL/MEDIUM**: the 3500-char pool covers all of modern SC but omits classical / scientific rarities, Traditional Chinese variants, and most niche surnames/place names. Enlarge the pool — see "Expanding character coverage" above. Bumping `--top` alone does nothing.
+- **Rare characters render as □ in reader at SMALL/MEDIUM**: the 3500-char pool covers all of modern SC but omits classical / scientific rarities, Traditional Chinese variants, and most niche surnames/place names. Expand by adding a feature-scoped `cn_<feature>_chars.txt` or by enlarging the pool — see "Expanding character coverage" above. Bumping `--top` alone does nothing.
 - **CJK in reader at LARGE/EXTRA_LARGE shows blank** for chars outside the i18n subset — by design, since 16/18pt reader sizes are tuned for English EPUB. Switch to MEDIUM to read Chinese.
 - **`FontDecompressor` is bypassed for CJK** by design — bitmaps are stored raw because compressing 6 fonts × ~50 KB groups fragments the heap on boot.
 - **No Traditional Chinese support**: the build is explicitly SC-only (`_language_code: ZH_CN`, no `zh-TW`/`zh-HK` yaml). TC glyphs are not in any pool; TC strings would render as missing-glyph placeholders.
@@ -868,10 +907,11 @@ shrinks proportionally.
 | `lib/EpdFont/scripts/chars_3500_common.txt` | Source pool — 现代汉语常用字表, 3500 chars (committed). To expand coverage, swap this file (see "Expanding character coverage"). |
 | `lib/EpdFont/scripts/cn_common_chars.txt` | Generated full subset, drives 8/10/12/14pt (committed). Single-line UTF-8, sorted by codepoint. |
 | `lib/EpdFont/scripts/cn_i18n_chars.txt` | Generated i18n-only subset, drives 16/18pt (committed). Contains every CJK char found in `--require-from` inputs. |
-| `lib/EpdFont/scripts/build-cn-builtin-fonts.sh` | pyftsubset → fontconvert.py pipeline, six headers. Default re-runs `build_cn_charset.py`; set `SKIP_CHARSET=1` to reuse the current `cn_common_chars.txt`. The `REQUIRE_FROM=(...)` array at the top lists every file scanned for force-included CJK chars. |
+| `lib/EpdFont/scripts/build-cn-builtin-fonts.sh` | pyftsubset → fontconvert.py pipeline, six headers. Default re-runs `build_cn_charset.py`; set `SKIP_CHARSET=1` to reuse the current `cn_common_chars.txt`. The `REQUIRE_FROM=(...)` array at the top lists every file scanned for force-included CJK chars — add new feature-scoped `cn_*_chars.txt` files here. |
+| `lib/EpdFont/scripts/cn_almanac_chars.txt` | Feature-scoped force-include for `ChineseAlmanac.cpp` / `ChineseCalendarFace.cpp` — ganzhi stems/branches + lunar-row vocab that aren't in the pool or any `chinese.yaml` STR_ value. Single-line UTF-8. |
 | `lib/EpdFont/builtinFonts/notosans_cjk_{8,10,12,14,16,18}.h` | Generated bitmap headers (committed). Should always match `cn_common_chars.txt` (`8/10/12/14pt`) and `cn_i18n_chars.txt` (`16/18pt`) — see consistency check below. |
 | `lib/EpdFont/builtinFonts/source/NotoSansSC/` | TTF source dir (gitignored except for `.gitignore`). Drop `NotoSansSC-Regular.otf` here. |
-| `lib/I18n/translations/chinese.yaml` | Simplified Chinese translations (`_language_code: ZH_CN`); also fed to `--require-from` so every CJK char in `STR_*: "value"` lines is forced into both subsets. |
+| `lib/I18n/translations/chinese.yaml` | Simplified Chinese translations (`_language_code: ZH_CN`); also fed to `--require-from` so every CJK char in `STR_*: "value"` lines is forced into both subsets. Do **not** hide font-only chars in `#` comments — use a `cn_<feature>_chars.txt` file instead. |
 
 ### Consistency check
 
