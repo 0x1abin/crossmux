@@ -21,7 +21,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 6;  // File Browser, Recents, File transfer, Games, Settings, Ugly Avatar
+  int count = 5;  // File Browser, Recents, File transfer, Settings, Apps
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -113,10 +113,11 @@ void HomeActivity::onEnter() {
 
   hasOpdsServers = OPDS_STORE.hasServers();
 
-  selectorIndex = 0;
-
   const auto& metrics = UITheme::getInstance().getMetrics();
   loadRecentBooks(metrics.homeRecentBooksCount);
+
+  const auto base = static_cast<int>(recentBooks.size());
+  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
 
   // Trigger first update
   requestUpdate();
@@ -179,30 +180,32 @@ void HomeActivity::loop() {
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    // Calculate dynamic indices based on which options are available
-    int idx = 0;
-    int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    const int fileBrowserIdx = idx++;
-    const int recentsIdx = idx++;
-    const int opdsLibraryIdx = hasOpdsServers ? idx++ : -1;
-    const int fileTransferIdx = idx++;
-    const int settingsIdx = idx++;
-    const int appsIdx = idx;
-
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
-    } else if (menuSelectedIndex == fileBrowserIdx) {
-      onFileBrowserOpen();
-    } else if (menuSelectedIndex == recentsIdx) {
-      onRecentsOpen();
-    } else if (menuSelectedIndex == opdsLibraryIdx) {
-      onOpdsBrowserOpen();
-    } else if (menuSelectedIndex == fileTransferIdx) {
-      onFileTransferOpen();
-    } else if (menuSelectedIndex == appsIdx) {
-      onAppsOpen();
-    } else if (menuSelectedIndex == settingsIdx) {
-      onSettingsOpen();
+    } else {
+      const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
+      switch (indexToMenuItem(menuIndex, hasOpdsServers)) {
+        case HomeMenuItem::FILE_BROWSER:
+          onFileBrowserOpen();
+          break;
+        case HomeMenuItem::RECENTS:
+          onRecentsOpen();
+          break;
+        case HomeMenuItem::OPDS_BROWSER:
+          onOpdsBrowserOpen();
+          break;
+        case HomeMenuItem::FILE_TRANSFER:
+          onFileTransferOpen();
+          break;
+        case HomeMenuItem::SETTINGS_MENU:
+          onSettingsOpen();
+          break;
+        case HomeMenuItem::APPS:
+          onAppsOpen();
+          break;
+        default:
+          break;
+      }
     }
   }
 

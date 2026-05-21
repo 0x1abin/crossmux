@@ -16,6 +16,8 @@
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
+enum class HomeMenuItem { NONE, FILE_BROWSER, RECENTS, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU, APPS };
+
 /**
  * ActivityManager
  *
@@ -85,7 +87,7 @@ class ActivityManager {
   void goToRecentBooks();
   void goToBrowser();
   void goToReader(std::string path);
-  void goToSleep();
+  void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();
@@ -105,7 +107,7 @@ class ActivityManager {
   void goToWeReadStats();
   void goToWeReadBook(std::string bookId, std::string title);
 #endif
-  void goHome();
+  void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);

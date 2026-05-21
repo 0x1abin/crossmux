@@ -20,9 +20,9 @@ class HardwareSerial : public Stream {
   void begin(unsigned long baud);
   void begin(unsigned long baud, uint32_t config, int8_t rxPin = -1, int8_t txPin = -1);
   void end();
+  // USB-CDC TX timeout knob on real ESP32 (HWCDC); a no-op on host since writes go to a FILE*.
+  void setTxTimeoutMs(uint32_t) {}
   void setSink(std::FILE* sink) { sink_ = sink; }
-  // No-op host shim: real Arduino-ESP32 HWCDC uses this to make TX non-blocking.
-  void setTxTimeoutMs(uint32_t /*timeout*/) {}
 
   // Print overrides
   size_t write(uint8_t b) override;

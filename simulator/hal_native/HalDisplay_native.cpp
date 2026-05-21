@@ -34,9 +34,10 @@ uint8_t* allocate_fb() {
 HalDisplay::HalDisplay() {}
 HalDisplay::~HalDisplay() {}
 
-void HalDisplay::begin() {
+void HalDisplay::begin(bool /*seamless*/) {
   // Framebuffer is allocated lazily on first getFrameBuffer() to avoid leaks when
   // multiple HalDisplay instances are constructed (shouldn't happen, but defensive).
+  // seamless is a no-op in the simulator: there is no SDK resync/X3 full-sync counter.
 }
 
 uint8_t* HalDisplay::getFrameBuffer() const {
