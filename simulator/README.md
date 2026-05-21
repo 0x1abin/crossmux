@@ -19,7 +19,7 @@ filesystem for the "SD card".
 │   HalPower/Tilt/System: stubs (battery 87%, no IMU)        │
 │ simulator/missing_symbols.cpp — link glue:                 │
 │   • Activity vtables for excluded screens (WiFi/OTA/...)   │
-│   • Image-decoder + obfuscation + QR symbols (excluded)    │
+│   • Image-decoder + obfuscation symbols (excluded)         │
 │   • MySerialImpl::instance + uzlib checksum stubs          │
 │   • WiFi global instance                                   │
 └────────────────────────┬──────────────────────────────────┘
@@ -28,10 +28,11 @@ filesystem for the "SD card".
 │ simulator/shims/ — project- and ecosystem-specific headers │
 │   • open-x4-sdk:   EInkDisplay, InputManager, BatteryMonitor, SDCardManager │
 │   • SdFat:         common/FsApiConstants.h                 │
-│   • Arduino-ESP32: WiFi, NetworkUdp, HTTPClient, WebServer, WebSocketsServer, MD5Builder, esp_ota_ops │
-│   • 3rd-party:     PNGdec, JPEGDEC, qrcode, base64         │
-│   These are header-only stubs sufficient for parsing /     │
-│   linking; runtime behaviour is no-op or failure.          │
+│   • Arduino-ESP32: WiFi, NetworkClient(Secure), HTTPClient, StreamString, NetworkUdp, WebServer, WebSocketsServer, MD5Builder, esp_ota_ops │
+│   • 3rd-party:     PNGdec, JPEGDEC, base64                 │
+│   Most are no-op/failure stubs; HTTPClient is libcurl-     │
+│   backed (real network — see below). QRCode is fetched,    │
+│   not shimmed.                                             │
 └────────────────────────┬──────────────────────────────────┘
                          │ depends on
 ┌────────────────────────▼──────────────────────────────────┐
@@ -45,8 +46,10 @@ filesystem for the "SD card".
 
 The boundary between `arduino-host/` and `simulator/shims/` is strict: **arduino-host
 only contains Arduino core + FreeRTOS + ESP-IDF base APIs**. Anything Arduino-ESP32
-ecosystem (WiFi, HTTPClient, OTA, web servers) or third-party (image codecs, QR codes,
-base64) lives in `simulator/shims/`. That keeps `arduino-host` cleanly reusable —
+ecosystem (WiFi, HTTPClient, OTA, web servers) or third-party (image codecs, base64)
+lives in `simulator/shims/`. The QRCode lib is fetched (`FetchContent`, like
+ArduinoJson) rather than shimmed, so the real generator runs. That keeps `arduino-host`
+cleanly reusable —
 `grep -rni "crosspoint|xteink|epub|wifi|http|opds|qrcode"` over its tree returns no
 hits (apart from a single comment that documents what is *not* in scope).
 
@@ -66,7 +69,8 @@ cmake -S simulator -B simulator/build
 cmake --build simulator/build -j
 ```
 
-CMake fetches ArduinoJson via `FetchContent` on first configure (~1s shallow clone).
+CMake fetches ArduinoJson and `ricmoo/QRCode` via `FetchContent` on first configure
+(shallow clones, a few seconds).
 
 ## Run
 
@@ -150,13 +154,19 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
   libcurl on the host. Drop your `wrk-…` API key as plain text into
   `simulator/sd_root/.crosspoint/weread_apikey_plain.txt` — first boot migrates
   it to base64-stored `weread_apikey.txt` and deletes the plain seed.
+- **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
+  by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
+  runs the real `HttpDownloader` over libcurl, saving the latest image to
+  `sd_root/.crosspoint/airpage/latest.bmp`, then Confirm toggles QR ⇄ image.
+  The simulated MAC is fixed (`02:00:00:00:00:01`), so the 16-char device id is
+  stable across runs (`NSlZI3rjcCSnrbDQ`) — upload to that id to see your image.
 
 ## What's out of scope (first version)
 
 - WiFi config UI / OPDS / KOReader sync / Calibre / file transfer / OTA / web server
 - Image rendering inside EPUBs (PNG/JPEG decoders are stubbed)
-- QR codes on the wifi-share screen
-- 4-level grayscale (grayscale buffers fall through to 1-bpp)
+- 4-level grayscale (grayscale buffers fall through to 1-bpp — e.g. the AirPage
+  image renders in plain B&W in the sim, though the BW frame still displays)
 - Real e-ink refresh timing / ghosting
 
 Activities for those features still build (we provide empty out-of-line stubs in
@@ -179,10 +189,12 @@ user navigates into them.
   Calibre / SD firmware update / font download) have their virtual overrides
   defined empty in `missing_symbols.cpp` so the vtable links. Navigating to those
   screens in the simulator shows an empty screen rather than crashing.
-- **`simulator/shims/` is a parse-only layer.** Headers like `<HTTPClient.h>` or
-  `<PNGdec.h>` exist so consumer `.cpp` files compile and link, but every method
-  returns an error / empty value. Real implementations would need to be supplied
-  (a host HTTP client, libpng wrapper, etc.) before those features work.
+- **`simulator/shims/` is mostly a parse-only layer.** Headers like `<PNGdec.h>`
+  or `<JPEGDEC.h>` exist so consumer `.cpp` files compile and link, but their
+  methods return an error / empty value. The exception is `<HTTPClient.h>` (and
+  `NetworkClient(Secure)`), which is **libcurl-backed and does real host network
+  I/O** — that's what lets WeRead and the AirPage fetch work. Adding a real codec
+  (libpng wrapper, etc.) would similarly light up the stubbed features.
 
 ## Verifying arduino-host stays project-independent
 

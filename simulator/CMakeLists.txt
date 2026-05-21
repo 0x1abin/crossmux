@@ -16,6 +16,20 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(arduinojson)
 
+# Third-party: ricmoo/QRCode (the same lib the firmware pulls via lib_deps). Plain
+# Arduino C lib with no CMakeLists, so populate then compile qrcode.c ourselves.
+# Lets the simulator render the real AirPage QR instead of the no-op shim.
+FetchContent_Declare(
+    qrcode
+    GIT_REPOSITORY https://github.com/ricmoo/QRCode.git
+    GIT_TAG v0.0.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(qrcode)
+if(NOT qrcode_POPULATED)
+    FetchContent_Populate(qrcode)
+endif()
+
 # libcurl — backs the simulator HTTPClient shim so WeRead (and any other on-device
 # HTTPS code paths that we don't exclude) can hit the real network from host.
 find_package(CURL REQUIRED)
@@ -75,6 +89,9 @@ list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/hal/Hal.*\\.cpp$")
 # simulator/missing_symbols.cpp so the linker still resolves vtables and constructors.
 
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/network/")
+# ...but keep the real HttpDownloader: the libcurl-backed HTTPClient shim lets it
+# actually fetch over the network, so AirPage can pull images in the simulator.
+list(APPEND CROSSPOINT_SRC ${REPO_ROOT}/src/network/HttpDownloader.cpp)
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/activities/network/")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "OpdsBookBrowserActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "OtaUpdateActivity")
@@ -83,7 +100,6 @@ list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "FontDownloadActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderAuthActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderSettingsActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderSyncActivity")
-list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "QrUtils")
 
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/JpegToBmpConverter/")
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/PngToBmpConverter/")
@@ -107,12 +123,13 @@ set(SIMULATOR_HAL_NATIVE
     hal_native/HalTiltSensor_native.cpp
 )
 
-# Vendored third-party C libraries inside the repo.
+# Vendored third-party C libraries inside the repo (+ the fetched QRCode lib).
 set(VENDOR_C
     ${REPO_ROOT}/lib/expat/xmlparse.c
     ${REPO_ROOT}/lib/expat/xmlrole.c
     ${REPO_ROOT}/lib/expat/xmltok.c
     ${REPO_ROOT}/lib/uzlib/src/tinflate.c
+    ${qrcode_SOURCE_DIR}/src/qrcode.c
 )
 
 # Generate I18n headers (mirrors what scripts/gen_i18n.py does pre-build for PlatformIO).
@@ -184,6 +201,7 @@ target_include_directories(crosspoint_simulator PRIVATE
     ${REPO_ROOT}/lib/ZipFile
     ${REPO_ROOT}/lib/expat
     ${REPO_ROOT}/lib/uzlib/src
+    ${qrcode_SOURCE_DIR}/src
     ${REPO_ROOT}/lib/KOReaderSync
     ${REPO_ROOT}/lib/JpegToBmpConverter
     ${REPO_ROOT}/lib/PngToBmpConverter

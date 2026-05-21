@@ -17,6 +17,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
+#include "AirPageFace.h"
 #include "SloppyClockFace.h"
 #include "StandbyTime.h"
 #include "WifiCredentialStore.h"
@@ -45,6 +46,9 @@ constexpr FaceEntry kFaces[] = {
     {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<ChineseCalendarFace>(); },
      [](int sw, int sh) { return sh > sw; }},  // portrait only
 #endif
+    // AirPage: cloud-rendered image pages. Available in every build; sits after
+    // the Chinese calendar entry when that is compiled in, else after the clock.
+    {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<AirPageFace>(); }, [](int, int) { return true; }},
 };
 constexpr uint8_t kFaceCount = static_cast<uint8_t>(sizeof(kFaces) / sizeof(kFaces[0]));
 
@@ -403,6 +407,12 @@ void StandbyActivity::loop() {
   // invert together — no per-face plumbing required.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     lastInputMs_ = millis();
+    // Interactive faces (airpage) own Confirm: it toggles their view rather
+    // than the global inverse mode.
+    if (currentFace_ && currentFace_->isInteractive()) {
+      if (currentFace_->handleConfirm()) requestUpdate();
+      return;
+    }
     inverseMode_ = !inverseMode_;
     requestUpdate();
     return;
@@ -416,8 +426,11 @@ void StandbyActivity::loop() {
   // sleeps after SETTINGS.getSleepTimeoutMs() (main.cpp). We deliberately do
   // not run our own light-sleep loop — that just stalls main.cpp's auto power
   // management and leaves the device unresponsive.
+  // Interactive faces (airpage) stay in Normal mode so they keep their chrome
+  // (QR title/dots) and receive Up/Down/Confirm on the first press.
+  const bool interactive = currentFace_ && currentFace_->isInteractive();
   const uint32_t idle = millis() - lastInputMs_;
-  if (mode_ == DisplayMode::Normal && idle >= 5000u) {
+  if (!interactive && mode_ == DisplayMode::Normal && idle >= 5000u) {
     mode_ = DisplayMode::Immersive;
     requestUpdate();
   }
@@ -441,13 +454,24 @@ void StandbyActivity::render(RenderLock&&) {
   // content doesn't re-flow when transitioning to Immersive.
   currentFace_->render(renderer, Rect{0, 0, sw, sh});
 
+  // Interactive faces (airpage) that request an immediate grayscale frame
+  // (image view) render full-screen with no chrome and get the 4-level gray
+  // 3-pass right away — not gated on the 5s-idle Immersive transition. Their
+  // QR / loading views fall through to the Normal-mode chrome path below.
+  if (currentFace_->isInteractive() && currentFace_->wantsImmediateGrayscale()) {
+    renderer.displayBuffer();
+    applyGrayscalePass(sw, sh);
+    return;
+  }
+
   if (mode_ != DisplayMode::Normal) {
     if (inverseMode_) renderer.invertScreen();
     renderer.displayBuffer();
-    // Opt-in faces (老黄历) get a 4-level gray LUT enhancement layered on
-    // the BW image. Only fires in Immersive — Normal-mode navigation needs
-    // the ~300-500ms FAST_REFRESH and can't afford the ~2s gray LUT.
-    applyGrayscaleEnhancement(sw, sh);
+    // Opt-in faces (老黄历) get a 4-level gray LUT enhancement layered on the BW
+    // image. Only fires in Immersive — Normal-mode navigation needs the
+    // ~300-500ms FAST_REFRESH and can't afford the ~2s gray LUT. inverseMode_
+    // short-circuits because invertScreen is BW-only and mixes poorly with gray.
+    if (currentFace_->wantsGrayscale() && !inverseMode_) applyGrayscalePass(sw, sh);
     return;
   }
 
@@ -473,14 +497,13 @@ void StandbyActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-// Two extra renders (LSB then MSB) into scratch buffers, composited with the
-// BW backup by the gray LUT waveform. Mirrors EpubReaderActivity.cpp:813-837.
-// inverseMode_ short-circuits because invertScreen is BW-only and would mix
-// poorly with the grayscale composite.
-void StandbyActivity::applyGrayscaleEnhancement(int sw, int sh) {
-  if (!currentFace_->wantsGrayscale() || inverseMode_) return;
+// Two extra renders (LSB then MSB) into scratch buffers, composited with the BW
+// backup by the gray LUT waveform. Mirrors EpubReaderActivity.cpp:813-837. The
+// caller gates invocation (passive Immersive vs interactive on-demand); this
+// just runs the pass unconditionally.
+void StandbyActivity::applyGrayscalePass(int sw, int sh) {
   if (!renderer.storeBwBuffer()) {
-    LOG_ERR("STANDBY", "Grayscale AA skipped: storeBwBuffer failed");
+    LOG_ERR("STANDBY", "Grayscale pass skipped: storeBwBuffer failed");
     return;
   }
 
