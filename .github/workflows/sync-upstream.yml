@@ -1,0 +1,129 @@
+name: Sync upstream master
+
+# Daily: keep a standing PR that merges upstream master into crosstab.
+# - Clean merge  -> push the merge to chore/sync-upstream and open/refresh the PR.
+# - Conflicts    -> reset the branch, open/refresh the PR, label it
+#                   `needs-claude-resolution` and list the conflicted files.
+#                   The companion /schedule Claude routine resolves it later.
+# This workflow NEVER merges into crosstab — the human is always the one who
+# clicks merge on the PR.
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 00:00 UTC = 08:00 Asia/Shanghai
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write           # gh label create / add label
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/crosspoint-reader/crosspoint-reader.git
+  BASE: crosstab
+  SYNC_BRANCH: chore/sync-upstream
+  LABEL: needs-claude-resolution
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout crosstab
+        uses: actions/checkout@v6
+        with:
+          ref: crosstab
+          fetch-depth: 0
+          submodules: false   # tree-level merge only; submodule contents not needed
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream master
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream master --no-tags
+
+      - name: Sync and maintain PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # 1. Nothing new upstream -> done.
+          new_count="$(git rev-list --count "origin/${BASE}..upstream/master")"
+          echo "Upstream commits ahead of ${BASE}: ${new_count}"
+          if [ "$new_count" -eq 0 ]; then
+            echo "No new upstream commits — nothing to sync."
+            exit 0
+          fi
+
+          # 2. Existing sync branch already contains both tips -> PR is current, don't clobber.
+          if git ls-remote --exit-code --heads origin "$SYNC_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$SYNC_BRANCH" --no-tags
+            if git merge-base --is-ancestor upstream/master "origin/${SYNC_BRANCH}" \
+               && git merge-base --is-ancestor "origin/${BASE}" "origin/${SYNC_BRANCH}"; then
+              echo "Sync branch already up to date (contains latest master + ${BASE}); skipping."
+              exit 0
+            fi
+          fi
+
+          # 3. Rebuild the sync branch from crosstab and attempt the merge.
+          git checkout -B "$SYNC_BRANCH" "origin/${BASE}"
+
+          ensure_label() {
+            gh label create "$LABEL" \
+              --color FBCA04 \
+              --description "Sync PR has merge conflicts; awaiting Claude routine" \
+              2>/dev/null || true
+          }
+
+          ensure_pr() {
+            # Echoes the PR number, creating the PR if none is open.
+            local n body
+            n="$(gh pr list --base "$BASE" --head "$SYNC_BRANCH" --state open \
+                  --json number --jq '.[0].number')"
+            if [ -z "$n" ]; then
+              body="$(printf '%s\n' \
+                "Automated daily merge of upstream \`master\` into \`${BASE}\`." \
+                "" \
+                "Maintained by \`.github/workflows/sync-upstream.yml\`. Review and merge when green." \
+                "Conflicts (if any) are resolved automatically by the scheduled Claude routine.")"
+              n="$(gh pr create --base "$BASE" --head "$SYNC_BRANCH" \
+                    --title "chore: sync upstream master into ${BASE}" \
+                    --body "$body" | grep -oE '[0-9]+$')"
+            fi
+            echo "$n"
+          }
+
+          if git merge --no-ff --no-edit upstream/master; then
+            echo "Clean merge."
+            git push --force-with-lease origin "$SYNC_BRANCH"
+            pr="$(ensure_pr)"
+            gh pr edit "$pr" --remove-label "$LABEL" 2>/dev/null || true
+            gh pr comment "$pr" --body "✅ Clean merge of upstream \`master\` ($(git rev-parse --short upstream/master)). Ready for review & merge."
+            echo "PR #${pr} updated (clean)."
+          else
+            echo "Merge conflicts detected."
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            git merge --abort
+            # Reset branch to crosstab so the PR exists as a target for the resolver.
+            git push --force origin "HEAD:${SYNC_BRANCH}"
+            ensure_label
+            pr="$(ensure_pr)"
+            gh pr edit "$pr" --add-label "$LABEL"
+            {
+              echo "⏳ Merge of upstream \`master\` ($(git rev-parse --short upstream/master)) has conflicts. Awaiting the scheduled Claude routine."
+              echo ""
+              echo "Conflicted files:"
+              echo '```'
+              echo "$conflicts"
+              echo '```'
+            } | gh pr comment "$pr" --body-file -
+            echo "PR #${pr} flagged for resolution."
+          fi
