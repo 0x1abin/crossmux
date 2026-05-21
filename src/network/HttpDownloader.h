@@ -4,6 +4,12 @@
 #include <functional>
 #include <string>
 
+// Forward-declared: fetchUrl() takes a Stream& by reference. On-device this name
+// arrives transitively via the SdFat/Arduino chain in <HalStorage.h>; declaring
+// it here keeps the header self-sufficient (the host build's SdFat shim doesn't
+// pull Arduino's Stream in transitively).
+class Stream;
+
 /**
  * HTTP client utility for fetching content and downloading files.
  * Wraps NetworkClientSecure and HTTPClient for HTTPS requests.

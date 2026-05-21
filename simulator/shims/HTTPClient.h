@@ -4,8 +4,8 @@
 // public method shapes mirror the Arduino-ESP32 HTTPClient API just enough to
 // satisfy the call sites we keep in the simulator build.
 
-#include <WString.h>
 #include <Stream.h>
+#include <WString.h>
 #include <curl/curl.h>
 
 #include <cstdint>
@@ -80,9 +80,7 @@ class HTTPClient {
 
   int GET() { return perform_(false, nullptr, 0); }
 
-  int POST(const String& body) {
-    return POST(reinterpret_cast<const uint8_t*>(body.c_str()), body.length());
-  }
+  int POST(const String& body) { return POST(reinterpret_cast<const uint8_t*>(body.c_str()), body.length()); }
   int POST(const uint8_t* body, size_t size) { return perform_(true, body, size); }
 
   String getString() { return String(responseBody_.c_str()); }
@@ -92,6 +90,24 @@ class HTTPClient {
   }
   Stream* getStreamPtr() { return &getStream(); }
   int getSize() { return static_cast<int>(responseBody_.size()); }
+
+  // Drive the caller's sink with the already-downloaded body (libcurl delivered
+  // it whole during perform_). Mirrors HTTPClient::writeToStream — returns bytes
+  // written, or stops early if the sink refuses (e.g. a cancel flag). Used by
+  // HttpDownloader to stream the response into an FsFile.
+  int writeToStream(Stream* stream) {
+    if (!stream) return -1;
+    const size_t total = responseBody_.size();
+    size_t off = 0;
+    while (off < total) {
+      size_t chunk = total - off;
+      if (chunk > 4096) chunk = 4096;
+      const size_t w = stream->write(reinterpret_cast<const uint8_t*>(responseBody_.data() + off), chunk);
+      if (w == 0) break;  // sink refused (cancelled / write error)
+      off += w;
+    }
+    return static_cast<int>(off);
+  }
 
  private:
   // libcurl delivers the whole body before perform_ returns, so the

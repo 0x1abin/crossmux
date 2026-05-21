@@ -63,10 +63,49 @@ class StandbyFace {
   // Faces that opt in must keep render() idempotent so the repeated
   // invocations produce the same picture.
   //
-  // Policy: the enhancement only fires in Immersive (full-screen) mode and
-  // when inverseMode is off — see StandbyActivity::applyGrayscaleEnhancement.
-  // Normal-mode renders skip it to keep face/page navigation responsive.
+  // Policy: for passive faces the pass only fires in Immersive (full-screen)
+  // mode and when inverseMode is off — see StandbyActivity::render /
+  // applyGrayscalePass. Normal-mode renders skip it to keep face/page
+  // navigation responsive. (Interactive faces use wantsImmediateGrayscale.)
   virtual bool wantsGrayscale() const { return false; }
+
+  // ---- Interactive faces (e.g. airpage) -----------------------------------
+  // A face that owns its own button semantics and renders full-screen. When
+  // true, StandbyActivity:
+  //   - routes Confirm to handleConfirm() instead of toggling inverseMode_,
+  //   - never enters the 5s-idle Immersive state machine, so Up/Down reach the
+  //     face on the first press (no "wake from immersive" swallow),
+  //   - draws the face full-screen with no header / battery / pager dots, and
+  //   - applies the 4-level grayscale 3-pass immediately when the face asks
+  //     for it via wantsImmediateGrayscale().
+  // Default false — passive faces (SloppyClock, ChineseCalendar) are unaffected.
+  virtual bool isInteractive() const { return false; }
+
+  // Confirm button pressed. Return true if the face consumed it (StandbyActivity
+  // then skips its legacy inverse-toggle). Only called for interactive faces.
+  virtual bool handleConfirm() { return false; }
+
+  // Confirm button held past the long-press threshold. StandbyActivity fires
+  // this once per hold for interactive faces and swallows the subsequent
+  // release. AirPage uses it to open its mode menu. Return true to request a
+  // redraw. Default false (no-op).
+  virtual bool handleConfirmLongPress() { return false; }
+
+  // While true, the face has a modal overlay open (e.g. AirPage's mode menu) and
+  // wants all navigation kept inside it: StandbyActivity routes Back to
+  // handleBack() instead of leaving Standby, and suppresses Left/Right face
+  // switching. Up/Down/Confirm already reach the face via the interactive path.
+  virtual bool wantsExclusiveInput() const { return false; }
+
+  // Back button while wantsExclusiveInput() is true. Return true if consumed
+  // (e.g. menu closed); false lets StandbyActivity fall back to goHome().
+  virtual bool handleBack() { return false; }
+
+  // For interactive faces: when true, StandbyActivity runs the 4-level grayscale
+  // 3-pass on this frame (interactive faces render in Normal mode, where the
+  // passive wantsGrayscale()/Immersive policy never fires). render() must stay
+  // idempotent across the BW/LSB/MSB passes. Default false.
+  virtual bool wantsImmediateGrayscale() const { return false; }
 
   // Note on per-orientation availability: StandbyActivity decides whether to
   // include a face in the active rotation via the `FaceEntry::isAvailable

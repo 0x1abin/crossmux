@@ -152,16 +152,6 @@ void selfTest() {}
 }  // namespace obfuscation
 
 // =============================================================================
-// QrUtils (excluded — relies on qrcode library)
-// =============================================================================
-
-#include "util/QrUtils.h"
-
-namespace QrUtils {
-void drawQrCode(const GfxRenderer&, const Rect&, const std::string&) {}
-}
-
-// =============================================================================
 // ProgressMapper (KOReader sync excluded except credential store)
 // =============================================================================
 
@@ -211,8 +201,8 @@ void SdFirmwareUpdateActivity::promptConfirmation() {}
 void SdFirmwareUpdateActivity::onConfirmationResult(const ActivityResult&) {}
 void SdFirmwareUpdateActivity::performUpdate() {}
 
-#include "activities/settings/FontDownloadActivity.h"
 #include "SdCardFontSystem.h"
+#include "activities/settings/FontDownloadActivity.h"
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& r, MappedInputManager& m)
     : Activity("FontDownload", r, m), fontInstaller_(sdFontSystem.registry()) {}
 STUB_ACTIVITY_BASE(FontDownloadActivity)

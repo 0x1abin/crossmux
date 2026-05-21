@@ -17,6 +17,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
+#include "AirPageFace.h"
 #include "SloppyClockFace.h"
 #include "StandbyTime.h"
 #include "WifiCredentialStore.h"
@@ -25,9 +26,10 @@
 
 namespace {
 
-constexpr long kTzOffsetSec = 8 * 3600;      // UTC+8 (Beijing)
-constexpr uint32_t kWifiTimeoutMs = 15000u;  // Same as WifiSelectionActivity
-constexpr uint32_t kNtpTimeoutMs = 12000u;   // SNTP poll budget (multi-server DNS + handshake)
+constexpr long kTzOffsetSec = 8 * 3600;          // UTC+8 (Beijing)
+constexpr uint32_t kWifiTimeoutMs = 15000u;      // Same as WifiSelectionActivity
+constexpr uint32_t kNtpTimeoutMs = 12000u;       // SNTP poll budget (multi-server DNS + handshake)
+constexpr uint32_t kConfirmLongPressMs = 1000u;  // hold Confirm this long to open an interactive face's menu
 
 // Face factory table. Add new faces by appending a row here and including the
 // corresponding header above. Each entry also declares an isAvailable()
@@ -45,6 +47,9 @@ constexpr FaceEntry kFaces[] = {
     {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<ChineseCalendarFace>(); },
      [](int sw, int sh) { return sh > sw; }},  // portrait only
 #endif
+    // AirPage: cloud-rendered image pages. Available in every build; sits after
+    // the Chinese calendar entry when that is compiled in, else after the clock.
+    {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<AirPageFace>(); }, [](int, int) { return true; }},
 };
 constexpr uint8_t kFaceCount = static_cast<uint8_t>(sizeof(kFaces) / sizeof(kFaces[0]));
 
@@ -345,6 +350,13 @@ void StandbyActivity::finishTimeSync() {
 
 void StandbyActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    // A face with a modal overlay (airpage mode menu) keeps Back for itself:
+    // it closes the overlay instead of leaving Standby.
+    if (currentFace_ && currentFace_->wantsExclusiveInput()) {
+      lastInputMs_ = millis();
+      if (currentFace_->handleBack()) requestUpdate();
+      return;
+    }
     activityManager.goHome();
     return;
   }
@@ -376,6 +388,8 @@ void StandbyActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Left) ||
       mappedInput.wasReleased(MappedInputManager::Button::Right)) {
     lastInputMs_ = millis();
+    // While a face's modal overlay is open, Left/Right do not switch faces.
+    if (currentFace_ && currentFace_->wantsExclusiveInput()) return;
     if (mode_ == DisplayMode::Immersive) {
       mode_ = DisplayMode::Normal;
       requestUpdate();
@@ -397,12 +411,33 @@ void StandbyActivity::loop() {
     return;
   }
 
+  // Long-press Confirm on an interactive face (airpage) opens its mode menu.
+  // Fires once per hold; the release that ends the hold is swallowed below so it
+  // doesn't also toggle the face view.
+  if (currentFace_ && currentFace_->isInteractive() && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+      mappedInput.getHeldTime() >= kConfirmLongPressMs && !confirmLongPressFired_) {
+    confirmLongPressFired_ = true;
+    lastInputMs_ = millis();
+    if (currentFace_->handleConfirmLongPress()) requestUpdate();
+    return;
+  }
+
   // Confirm: toggle inverse (black background / white content) regardless of
   // Normal vs. Immersive. invertScreen() flips the whole framebuffer right
   // before displayBuffer(), so title / battery / face dots / face content all
   // invert together — no per-face plumbing required.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     lastInputMs_ = millis();
+    if (confirmLongPressFired_) {
+      confirmLongPressFired_ = false;  // swallow the release that ends a long press
+      return;
+    }
+    // Interactive faces (airpage) own Confirm: it toggles their view (or selects
+    // a menu row when their overlay is open) rather than the global inverse mode.
+    if (currentFace_ && currentFace_->isInteractive()) {
+      if (currentFace_->handleConfirm()) requestUpdate();
+      return;
+    }
     inverseMode_ = !inverseMode_;
     requestUpdate();
     return;
@@ -416,8 +451,11 @@ void StandbyActivity::loop() {
   // sleeps after SETTINGS.getSleepTimeoutMs() (main.cpp). We deliberately do
   // not run our own light-sleep loop — that just stalls main.cpp's auto power
   // management and leaves the device unresponsive.
+  // Interactive faces (airpage) stay in Normal mode so they keep their chrome
+  // (QR title/dots) and receive Up/Down/Confirm on the first press.
+  const bool interactive = currentFace_ && currentFace_->isInteractive();
   const uint32_t idle = millis() - lastInputMs_;
-  if (mode_ == DisplayMode::Normal && idle >= 5000u) {
+  if (!interactive && mode_ == DisplayMode::Normal && idle >= 5000u) {
     mode_ = DisplayMode::Immersive;
     requestUpdate();
   }
@@ -441,13 +479,24 @@ void StandbyActivity::render(RenderLock&&) {
   // content doesn't re-flow when transitioning to Immersive.
   currentFace_->render(renderer, Rect{0, 0, sw, sh});
 
+  // Interactive faces (airpage) that request an immediate grayscale frame
+  // (image view) render full-screen with no chrome and get the 4-level gray
+  // 3-pass right away — not gated on the 5s-idle Immersive transition. Their
+  // QR / loading views fall through to the Normal-mode chrome path below.
+  if (currentFace_->isInteractive() && currentFace_->wantsImmediateGrayscale()) {
+    renderer.displayBuffer();
+    applyGrayscalePass(sw, sh);
+    return;
+  }
+
   if (mode_ != DisplayMode::Normal) {
     if (inverseMode_) renderer.invertScreen();
     renderer.displayBuffer();
-    // Opt-in faces (老黄历) get a 4-level gray LUT enhancement layered on
-    // the BW image. Only fires in Immersive — Normal-mode navigation needs
-    // the ~300-500ms FAST_REFRESH and can't afford the ~2s gray LUT.
-    applyGrayscaleEnhancement(sw, sh);
+    // Opt-in faces (老黄历) get a 4-level gray LUT enhancement layered on the BW
+    // image. Only fires in Immersive — Normal-mode navigation needs the
+    // ~300-500ms FAST_REFRESH and can't afford the ~2s gray LUT. inverseMode_
+    // short-circuits because invertScreen is BW-only and mixes poorly with gray.
+    if (currentFace_->wantsGrayscale() && !inverseMode_) applyGrayscalePass(sw, sh);
     return;
   }
 
@@ -473,14 +522,13 @@ void StandbyActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-// Two extra renders (LSB then MSB) into scratch buffers, composited with the
-// BW backup by the gray LUT waveform. Mirrors EpubReaderActivity.cpp:813-837.
-// inverseMode_ short-circuits because invertScreen is BW-only and would mix
-// poorly with the grayscale composite.
-void StandbyActivity::applyGrayscaleEnhancement(int sw, int sh) {
-  if (!currentFace_->wantsGrayscale() || inverseMode_) return;
+// Two extra renders (LSB then MSB) into scratch buffers, composited with the BW
+// backup by the gray LUT waveform. Mirrors EpubReaderActivity.cpp:813-837. The
+// caller gates invocation (passive Immersive vs interactive on-demand); this
+// just runs the pass unconditionally.
+void StandbyActivity::applyGrayscalePass(int sw, int sh) {
   if (!renderer.storeBwBuffer()) {
-    LOG_ERR("STANDBY", "Grayscale AA skipped: storeBwBuffer failed");
+    LOG_ERR("STANDBY", "Grayscale pass skipped: storeBwBuffer failed");
     return;
   }
 
