@@ -25,10 +25,9 @@ FetchContent_Declare(
     GIT_TAG v0.0.1
     GIT_SHALLOW TRUE
 )
-FetchContent_GetProperties(qrcode)
-if(NOT qrcode_POPULATED)
-    FetchContent_Populate(qrcode)
-endif()
+# QRCode ships no CMakeLists, so MakeAvailable just populates (no add_subdirectory)
+# and still sets qrcode_SOURCE_DIR. Replaces the deprecated FetchContent_Populate().
+FetchContent_MakeAvailable(qrcode)
 
 # libcurl — backs the simulator HTTPClient shim so WeRead (and any other on-device
 # HTTPS code paths that we don't exclude) can hit the real network from host.
