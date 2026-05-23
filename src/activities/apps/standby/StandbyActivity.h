@@ -59,9 +59,8 @@ class StandbyActivity final : public Activity {
 
   // Layer a 4-level grayscale refresh on top of the BW image just committed by
   // displayBuffer(): re-render the LSB then MSB planes and composite via the
-  // gray LUT waveform. The caller decides when to invoke it — passive faces in
-  // Immersive (gated on wantsGrayscale), interactive faces on demand
-  // (wantsImmediateGrayscale). The face's render() must be idempotent across
-  // the three passes.
+  // gray LUT waveform. Used by passive faces in Immersive mode (gated on
+  // wantsGrayscale, e.g. the 老黄历 calendar). The face's render() must be
+  // idempotent across the three passes.
   void applyGrayscalePass(int sw, int sh);
 };

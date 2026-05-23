@@ -40,7 +40,10 @@ class AirPageFace final : public StandbyFace {
   bool handleBack() override;  // Back: close the menu
   void onPagePrev() override;  // UP: menu cursor up, or toggle QR <-> image
   void onPageNext() override;  // DOWN: menu selection, or request a cloud fetch
-  bool wantsImmediateGrayscale() const override { return view_ == View::Image && !menuOpen_; }
+  // Image view renders edge-to-edge (no chrome) in a single BW pass. No grayscale:
+  // the cloud image is tuned to look best as a crisp 1-bit FAST_REFRESH, and the
+  // 4-level gray pass only added a slow extra refresh.
+  bool rendersFullScreen() const override { return view_ == View::Image && !menuOpen_; }
 
  private:
   enum class View : uint8_t { Qr, Image };

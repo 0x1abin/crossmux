@@ -66,7 +66,7 @@ class StandbyFace {
   // Policy: for passive faces the pass only fires in Immersive (full-screen)
   // mode and when inverseMode is off — see StandbyActivity::render /
   // applyGrayscalePass. Normal-mode renders skip it to keep face/page
-  // navigation responsive. (Interactive faces use wantsImmediateGrayscale.)
+  // navigation responsive.
   virtual bool wantsGrayscale() const { return false; }
 
   // ---- Interactive faces (e.g. airpage) -----------------------------------
@@ -74,10 +74,9 @@ class StandbyFace {
   // true, StandbyActivity:
   //   - routes Confirm to handleConfirm() instead of toggling inverseMode_,
   //   - never enters the 5s-idle Immersive state machine, so Up/Down reach the
-  //     face on the first press (no "wake from immersive" swallow),
-  //   - draws the face full-screen with no header / battery / pager dots, and
-  //   - applies the 4-level grayscale 3-pass immediately when the face asks
-  //     for it via wantsImmediateGrayscale().
+  //     face on the first press (no "wake from immersive" swallow), and
+  //   - draws the face full-screen with no header / battery / pager dots when the
+  //     face asks for it via rendersFullScreen() (AirPage's image view).
   // Default false — passive faces (SloppyClock, ChineseCalendar) are unaffected.
   virtual bool isInteractive() const { return false; }
 
@@ -97,11 +96,11 @@ class StandbyFace {
   // (e.g. menu closed); false lets StandbyActivity fall back to goHome().
   virtual bool handleBack() { return false; }
 
-  // For interactive faces: when true, StandbyActivity runs the 4-level grayscale
-  // 3-pass on this frame (interactive faces render in Normal mode, where the
-  // passive wantsGrayscale()/Immersive policy never fires). render() must stay
-  // idempotent across the BW/LSB/MSB passes. Default false.
-  virtual bool wantsImmediateGrayscale() const { return false; }
+  // For interactive faces: when true, StandbyActivity draws this frame edge-to-edge
+  // (no header / battery / pager dots) in a single BW pass and returns early —
+  // bypassing the Normal-mode chrome overlay. AirPage uses it for its image view.
+  // Default false.
+  virtual bool rendersFullScreen() const { return false; }
 
   // Note on per-orientation availability: StandbyActivity decides whether to
   // include a face in the active rotation via the `FaceEntry::isAvailable

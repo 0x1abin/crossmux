@@ -464,13 +464,12 @@ void StandbyActivity::render(RenderLock&&) {
   // content doesn't re-flow when transitioning to Immersive.
   currentFace_->render(renderer, Rect{0, 0, sw, sh});
 
-  // Interactive faces (airpage) that request an immediate grayscale frame
-  // (image view) render full-screen with no chrome and get the 4-level gray
-  // 3-pass right away — not gated on the 5s-idle Immersive transition. Their
-  // QR / loading views fall through to the Normal-mode chrome path below.
-  if (currentFace_->isInteractive() && currentFace_->wantsImmediateGrayscale()) {
+  // Interactive faces (airpage) that render full-screen (image view) paint
+  // edge-to-edge with no chrome in a single BW pass — not gated on the 5s-idle
+  // Immersive transition. Their QR / loading views fall through to the
+  // Normal-mode chrome path below.
+  if (currentFace_->isInteractive() && currentFace_->rendersFullScreen()) {
     renderer.displayBuffer();
-    applyGrayscalePass(sw, sh);
     return;
   }
 
