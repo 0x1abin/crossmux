@@ -35,11 +35,10 @@ class AirPageFace final : public StandbyFace {
   uint32_t secondsUntilNextWake() const override { return 3600; }
 
   bool isInteractive() const override { return true; }
-  bool handleConfirm() override;           // Confirm: menu select, or toggle QR <-> image
-  bool handleConfirmLongPress() override;  // long Confirm: open the mode menu
+  bool handleConfirm() override;  // Confirm: menu select, or open the mode menu
   bool wantsExclusiveInput() const override { return menuOpen_; }
   bool handleBack() override;  // Back: close the menu
-  void onPagePrev() override;  // UP: move menu selection (menu open)
+  void onPagePrev() override;  // UP: menu cursor up, or toggle QR <-> image
   void onPageNext() override;  // DOWN: menu selection, or request a cloud fetch
   bool wantsImmediateGrayscale() const override { return view_ == View::Image && !menuOpen_; }
 

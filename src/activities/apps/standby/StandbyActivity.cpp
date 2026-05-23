@@ -29,7 +29,6 @@ namespace {
 constexpr long kTzOffsetSec = 8 * 3600;          // UTC+8 (Beijing)
 constexpr uint32_t kWifiTimeoutMs = 15000u;      // Same as WifiSelectionActivity
 constexpr uint32_t kNtpTimeoutMs = 12000u;       // SNTP poll budget (multi-server DNS + handshake)
-constexpr uint32_t kConfirmLongPressMs = 1000u;  // hold Confirm this long to open an interactive face's menu
 
 // Face factory table. Add new faces by appending a row here and including the
 // corresponding header above. Each entry also declares an isAvailable()
@@ -411,29 +410,15 @@ void StandbyActivity::loop() {
     return;
   }
 
-  // Long-press Confirm on an interactive face (airpage) opens its mode menu.
-  // Fires once per hold; the release that ends the hold is swallowed below so it
-  // doesn't also toggle the face view.
-  if (currentFace_ && currentFace_->isInteractive() && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
-      mappedInput.getHeldTime() >= kConfirmLongPressMs && !confirmLongPressFired_) {
-    confirmLongPressFired_ = true;
-    lastInputMs_ = millis();
-    if (currentFace_->handleConfirmLongPress()) requestUpdate();
-    return;
-  }
-
   // Confirm: toggle inverse (black background / white content) regardless of
   // Normal vs. Immersive. invertScreen() flips the whole framebuffer right
   // before displayBuffer(), so title / battery / face dots / face content all
   // invert together — no per-face plumbing required.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     lastInputMs_ = millis();
-    if (confirmLongPressFired_) {
-      confirmLongPressFired_ = false;  // swallow the release that ends a long press
-      return;
-    }
-    // Interactive faces (airpage) own Confirm: it toggles their view (or selects
-    // a menu row when their overlay is open) rather than the global inverse mode.
+    // Interactive faces (airpage) own Confirm: it opens their mode menu (or
+    // selects a menu row when their overlay is open) rather than the global
+    // inverse mode.
     if (currentFace_ && currentFace_->isInteractive()) {
       if (currentFace_->handleConfirm()) requestUpdate();
       return;

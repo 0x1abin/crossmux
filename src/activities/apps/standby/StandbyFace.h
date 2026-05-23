@@ -83,13 +83,9 @@ class StandbyFace {
 
   // Confirm button pressed. Return true if the face consumed it (StandbyActivity
   // then skips its legacy inverse-toggle). Only called for interactive faces.
+  // AirPage uses it to open its mode menu (or commit the highlighted row when
+  // the menu is already open).
   virtual bool handleConfirm() { return false; }
-
-  // Confirm button held past the long-press threshold. StandbyActivity fires
-  // this once per hold for interactive faces and swallows the subsequent
-  // release. AirPage uses it to open its mode menu. Return true to request a
-  // redraw. Default false (no-op).
-  virtual bool handleConfirmLongPress() { return false; }
 
   // While true, the face has a modal overlay open (e.g. AirPage's mode menu) and
   // wants all navigation kept inside it: StandbyActivity routes Back to

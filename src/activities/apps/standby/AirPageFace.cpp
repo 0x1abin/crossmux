@@ -23,10 +23,10 @@ namespace {
 // Cloud base host (the deployed companion Cloudflare app, custom domain bound).
 // To repoint, change this single constant and rebuild. No scheme here; we
 // prepend https:// below.
-constexpr char kAirPageBase[] = "pages.uipcat.com";
+constexpr char kAirPageBase[] = "pages.yunhug.com";
 
-// MQTT broker for live push (plain TCP, anonymous). The cloud /x4/<id> page
-// publishes a refresh message here (over wss:8084) when "Send" is clicked; the
+// MQTT broker for live push (plain TCP, anonymous). The cloud /?id=<id>&type=x4
+// page publishes a refresh message here (over wss:8084) when "Send" is clicked; the
 // device subscribes (over tcp:1883) and fetches the moment one arrives. Topic
 // convention is shared with the cloud repo and MUST stay in sync:
 //   airpage/device/<deviceId>/refresh
@@ -94,9 +94,20 @@ void AirPageFace::teardownWifi() {
 StrId AirPageFace::titleId() const { return StrId::STR_FACE_AIRPAGE; }
 
 void AirPageFace::onPagePrev() {
-  // UP only does something while the menu is open (move the cursor up).
-  if (!menuOpen_) return;
-  menuSel_ = static_cast<uint8_t>((menuSel_ + kMenuRows - 1) % kMenuRows);
+  // Menu open: move the cursor up. Menu closed: toggle QR <-> image (the role
+  // Confirm used to play before Confirm became the menu opener).
+  if (menuOpen_) {
+    menuSel_ = static_cast<uint8_t>((menuSel_ + kMenuRows - 1) % kMenuRows);
+    needsRedraw_ = true;
+    return;
+  }
+  if (phase_ != Phase::Idle) return;  // ignore mid-fetch
+  pendingError_ = false;
+  if (view_ == View::Qr) {
+    if (haveCachedImage_) view_ = View::Image;  // nothing to show yet -> stay on QR
+  } else {
+    view_ = View::Qr;
+  }
   needsRedraw_ = true;
 }
 
@@ -115,18 +126,8 @@ bool AirPageFace::handleConfirm() {
     return true;
   }
   if (phase_ != Phase::Idle) return true;  // consume, ignore mid-fetch
-  pendingError_ = false;
-  if (view_ == View::Qr) {
-    if (haveCachedImage_) view_ = View::Image;  // nothing to show yet -> stay on QR
-  } else {
-    view_ = View::Qr;
-  }
-  needsRedraw_ = true;
-  return true;
-}
-
-bool AirPageFace::handleConfirmLongPress() {
-  if (phase_ != Phase::Idle || menuOpen_) return false;  // not during a fetch
+  // Confirm opens the mode menu (formerly a long-press; the QR<->image toggle
+  // it used to do moved to UP/onPagePrev).
   menuOpen_ = true;
   menuSel_ = realtimeMode_ ? 1 : 0;  // start the cursor on the active mode
   needsRedraw_ = true;
@@ -314,7 +315,7 @@ void AirPageFace::render(GfxRenderer& renderer, const Rect& viewport) {
 }
 
 void AirPageFace::renderQr(GfxRenderer& renderer, const Rect& viewport) {
-  const std::string url = std::string("https://") + kAirPageBase + "/x4/" + airpage::deviceId();
+  const std::string url = std::string("https://") + kAirPageBase + "/?id=" + airpage::deviceId() + "&type=x4";
   const int qr = std::min(viewport.width, viewport.height) * 3 / 5;
   const Rect box(viewport.x + (viewport.width - qr) / 2, viewport.y + (viewport.height - qr) / 2 - 24, qr, qr);
   QrUtils::drawQrCode(renderer, box, url);
