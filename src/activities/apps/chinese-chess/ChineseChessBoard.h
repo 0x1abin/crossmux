@@ -53,6 +53,12 @@ class ChineseChessBoard {
   Result result = Result::Ongoing;
   bool resigned = false;  // true if game ended via resignation (overrides natural detection)
 
+  // Incrementally-maintained Zobrist hash of (cells + side-to-move). XOR-updated
+  // by makeMove/undo; fully rebuilt by reset/readFrom. Not serialized — it is
+  // derived state. Invariant: matches cells whenever no in-progress trial-move
+  // mutation is active (see generateLegalMoves note).
+  uint64_t zobristHash = 0;
+
   // ---------- Helpers ----------
   static constexpr uint8_t idx(uint8_t r, uint8_t c) { return static_cast<uint8_t>(r * FILES + c); }
   static constexpr uint8_t rowOf(uint8_t i) { return static_cast<uint8_t>(i / FILES); }
@@ -102,6 +108,11 @@ class ChineseChessBoard {
   // Sets `result` if checkmate or stalemate.
   void updateResult();
 
+  // Trial-make the move and report whether it puts the opponent in check. Used
+  // by the AI to classify perpetual-check cycles. Mutates cells temporarily
+  // then restores them; does NOT update zobristHash or moveHistory.
+  bool givesCheck(Side mover, const Move& m) const;
+
   // ---------- Serialization ----------
   // Format:
   //   uint8 version (=BOARD_VERSION)
@@ -123,4 +134,5 @@ class ChineseChessBoard {
   void genCannon(uint8_t from, Move* out, uint8_t& n, uint8_t outCap) const;
   void genPawn(uint8_t from, Move* out, uint8_t& n, uint8_t outCap) const;
   uint8_t findKing(Side side) const;
+  void recomputeZobrist();
 };
