@@ -2,7 +2,7 @@
 
 // Shim of open-x4-sdk's EInkDisplay header. Provides only what lib/hal/HalDisplay.h
 // references at parse time (dimension constants + member type). The actual rendering
-// path is replaced wholesale by simulator/hal_native/HalDisplay_native.cpp; no methods
+// path is replaced wholesale by simulator/hal/HalDisplay.cpp; no methods
 // on this class are ever called in simulator builds.
 
 #include <cstdint>

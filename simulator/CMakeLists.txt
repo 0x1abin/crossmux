@@ -28,8 +28,8 @@ FetchContent_MakeAvailable(arduinojson)
 
 # libcurl — backs the native simulator HTTPClient shim so WeRead (and any other
 # on-device HTTPS code paths that we don't exclude) can hit the real network from host.
-# The WASM build is offline-only (shims_wasm/HTTPClient.h shadows the curl shim), so it
-# skips libcurl entirely.
+# The WASM build is offline-only (shims/HTTPClient.h compiles a curl-free stub under
+# #ifdef __EMSCRIPTEN__), so it skips libcurl entirely.
 if(NOT EMSCRIPTEN)
     find_package(CURL REQUIRED)
 endif()
@@ -83,7 +83,7 @@ file(GLOB_RECURSE CROSSPOINT_LIB
     "${REPO_ROOT}/lib/AvatarGen/*.cpp"
 )
 
-# Real HAL .cpp is replaced by simulator/hal_native/.
+# Real HAL .cpp is replaced by simulator/hal/.
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/hal/Hal.*\\.cpp$")
 
 # Network / OTA / image-decoder .cpp files use APIs (real PNGdec / JPEGDEC / ESPmDNS /
@@ -114,26 +114,20 @@ list(APPEND CROSSPOINT_LIB
     ${REPO_ROOT}/lib/KOReaderSync/KOReaderJsonIO.cpp
 )
 
-# HAL backends. Clock/Power/Storage/System/Tilt are shared (POSIX + std::chrono, which
-# Emscripten supports as-is). Display and GPIO have WASM variants: the WASM display
-# pushes the framebuffer to the browser canvas instead of an SDL texture, and WASM GPIO
-# takes input from JavaScript instead of SDL events.
+# HAL backends for the simulator. All implementations live in hal/ and compile for both the
+# native (SDL) and WASM (browser) builds. HalDisplay/HalGPIO carry the only platform split,
+# behind #ifdef __EMSCRIPTEN__ inside the file: native pushes the framebuffer to an SDL texture
+# and reads SDL events; WASM flips a framebuffer dirty-flag and takes input from JavaScript.
+# Clock/Power/Storage/System/Tilt are pure POSIX + std::chrono, which Emscripten supports as-is.
 set(SIMULATOR_HAL
-    hal_native/HalClock_native.cpp
-    hal_native/HalPowerManager_native.cpp
-    hal_native/HalStorage_native.cpp
-    hal_native/HalSystem_native.cpp
-    hal_native/HalTiltSensor_native.cpp
+    hal/HalClock.cpp
+    hal/HalDisplay.cpp
+    hal/HalGPIO.cpp
+    hal/HalPowerManager.cpp
+    hal/HalStorage.cpp
+    hal/HalSystem.cpp
+    hal/HalTiltSensor.cpp
 )
-if(EMSCRIPTEN)
-    list(APPEND SIMULATOR_HAL
-        hal_wasm/HalDisplay_wasm.cpp
-        hal_wasm/HalGPIO_wasm.cpp)
-else()
-    list(APPEND SIMULATOR_HAL
-        hal_native/HalDisplay_native.cpp
-        hal_native/HalGPIO_native.cpp)
-endif()
 
 # Vendored third-party C libraries inside the repo.
 set(VENDOR_C
@@ -225,18 +219,9 @@ target_include_directories(crosspoint_simulator PRIVATE
     ${REPO_ROOT}/lib/expat
     ${REPO_ROOT}/lib/uzlib/src
     ${REPO_ROOT}/lib/KOReaderSync
-    ${REPO_ROOT}/lib/JpegToBmpConverter
-    ${REPO_ROOT}/lib/PngToBmpConverter
     ${REPO_ROOT}/lib/Epub/Epub/converters
     ${REPO_ROOT}/lib/AvatarGen
 )
-
-# The WASM build replaces the libcurl-backed HTTPClient shim with an offline stub.
-# Prepend shims_wasm so it shadows shims/HTTPClient.h on the include path.
-if(EMSCRIPTEN)
-    target_include_directories(crosspoint_simulator BEFORE PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/shims_wasm)
-endif()
 
 # Rename Arduino entry points so the simulator entry can drive them explicitly.
 # ENABLE_CHINESE_VERSION is on for both native and WASM: the browser demo ships the
@@ -271,10 +256,10 @@ target_compile_options(crosspoint_simulator PRIVATE -fno-exceptions -fno-rtti
 #     createSimulator() for clean loading from the browser page.
 # -----------------------------------------------------------------------------
 if(EMSCRIPTEN)
-    target_compile_options(crosspoint_simulator PRIVATE -pthread)
+    # -pthread is already applied at directory scope (top of this file) and inherited here for
+    # both compile and link, so it is not repeated on the target.
     set(SIMULATOR_SD_DEMO ${CMAKE_CURRENT_SOURCE_DIR}/sd_root_demo)
     target_link_options(crosspoint_simulator PRIVATE
-        -pthread
         -sPTHREAD_POOL_SIZE=6
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=64MB
@@ -283,7 +268,7 @@ if(EMSCRIPTEN)
         -sMODULARIZE=1
         -sEXPORT_NAME=createSimulator
         -sENVIRONMENT=web,worker
-        -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,HEAPU8
+        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,HEAPU8"
         "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_simulator_framebuffer_ptr,_simulator_consume_dirty,_simulator_display_width,_simulator_display_height,_simulator_buffer_size,_simulator_inject_button"
         "--preload-file=${SIMULATOR_SD_DEMO}@/sd"
     )

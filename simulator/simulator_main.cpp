@@ -4,29 +4,15 @@
 
 #include <HalGPIO.h>
 #include <SDL.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 #include <cstdio>
 #include <cstring>
 #include <string>
 
 #include "simulator_config.h"
+#include "simulator_firmware.h"
 #include "simulator_settings.h"
 #include "simulator_window.h"
-
-// Provided by src/main.cpp (renamed via build flags).
-void firmware_setup();
-void firmware_loop();
-
-namespace {
-void firmwareTask(void* /*unused*/) {
-  firmware_setup();
-  while (true) {
-    firmware_loop();
-  }
-}
-}  // namespace
 
 namespace {
 
@@ -53,26 +39,34 @@ CliArgs parse_args(int argc, char** argv) {
 
 uint8_t map_key_to_button(SDL_Keycode key) {
   switch (key) {
-    case SDLK_BACKSPACE: return HalGPIO::BTN_BACK;
+    case SDLK_BACKSPACE:
+      return HalGPIO::BTN_BACK;
     case SDLK_RETURN:
-    case SDLK_KP_ENTER: return HalGPIO::BTN_CONFIRM;
-    case SDLK_LEFT:     return HalGPIO::BTN_LEFT;
-    case SDLK_RIGHT:    return HalGPIO::BTN_RIGHT;
-    case SDLK_UP:       return HalGPIO::BTN_UP;
-    case SDLK_DOWN:     return HalGPIO::BTN_DOWN;
-    case SDLK_ESCAPE:   return HalGPIO::BTN_POWER;
-    default:            return 0xFF;
+    case SDLK_KP_ENTER:
+      return HalGPIO::BTN_CONFIRM;
+    case SDLK_LEFT:
+      return HalGPIO::BTN_LEFT;
+    case SDLK_RIGHT:
+      return HalGPIO::BTN_RIGHT;
+    case SDLK_UP:
+      return HalGPIO::BTN_UP;
+    case SDLK_DOWN:
+      return HalGPIO::BTN_DOWN;
+    case SDLK_ESCAPE:
+      return HalGPIO::BTN_POWER;
+    default:
+      return 0xFF;
   }
 }
 
 }  // namespace
 
 namespace simulator {
-// Defined in HalGPIO_native.cpp.
+// Defined in hal/HalGPIO.cpp.
 void injectButton(uint8_t buttonIndex, bool down);
-}
+}  // namespace simulator
 
-// Make the simulator SD-root path available to HalStorage_native.cpp via a global.
+// Make the simulator SD-root path available to hal/HalStorage.cpp via a global.
 std::string g_simulator_sd_root;
 
 int main(int argc, char** argv) {
@@ -93,18 +87,15 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
   }
-  if (!simulator::SimulatorWindow::instance().open("CrossPoint Simulator", args.scale,
-                                                   hostSettings.showDeviceShell)) {
+  if (!simulator::SimulatorWindow::instance().open("CrossPoint Simulator", args.scale, hostSettings.showDeviceShell)) {
     SDL_Quit();
     return 1;
   }
   simulator::SimulatorWindow::instance().settingsOverlay().syncFrom(hostSettings);
 
-  // Run the firmware setup + loop on a registered FreeRTOS task so that
-  // xTaskGetCurrentTaskHandle() returns a non-null handle inside firmware code —
-  // ActivityManager's RenderLock-holder assertion relies on that. The main thread
+  // Spawn the firmware setup()+loop() task (see simulator_firmware.h). The main thread below
   // owns the SDL window/event loop.
-  xTaskCreate(&firmwareTask, "firmware", 8192, nullptr, 1, nullptr);
+  simulator::startFirmwareTask();
 
   bool running = true;
   while (running) {

@@ -12,28 +12,15 @@
 
 #include <CrossPointSettings.h>
 #include <I18n.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 #include <cstring>
 #include <string>
 
-// Provided by src/main.cpp (renamed via build flags).
-void firmware_setup();
-void firmware_loop();
+#include "simulator_firmware.h"
 
-namespace {
-void firmwareTask(void* /*unused*/) {
-  firmware_setup();
-  while (true) {
-    firmware_loop();
-  }
-}
-}  // namespace
-
-// Consumed by HalStorage_native.cpp (reused as-is). All firmware SD paths resolve
-// under this root; the demo book + .crosspoint cache are preloaded into MEMFS at "/sd"
-// via the build's --preload-file.
+// Consumed by hal/HalStorage.cpp (reused as-is). All firmware SD paths resolve under this root;
+// the demo book + .crosspoint cache are preloaded into MEMFS at "/sd" via the build's
+// --preload-file.
 std::string g_simulator_sd_root;
 
 int main(int argc, char** argv) {
@@ -48,17 +35,14 @@ int main(int argc, char** argv) {
   // future IDBFS) would still override it — user choice > browser default.
   for (int i = 1; i + 1 < argc; i++) {
     if (std::strcmp(argv[i], "--lang") == 0) {
-      CrossPointSettings::getInstance().language =
-          static_cast<uint8_t>(I18n::languageFromCode(argv[i + 1]));
+      CrossPointSettings::getInstance().language = static_cast<uint8_t>(I18n::languageFromCode(argv[i + 1]));
       break;
     }
   }
 
-  // Run firmware setup()+loop() on a registered FreeRTOS task so
-  // xTaskGetCurrentTaskHandle() returns a non-null handle inside firmware code (the
-  // ActivityManager RenderLock assertion relies on that). On Emscripten this maps to a
-  // Web Worker; it may block (ulTaskNotifyTake(portMAX_DELAY), mutexes) freely.
-  xTaskCreate(&firmwareTask, "firmware", 8192, nullptr, 1, nullptr);
+  // Spawn the firmware setup()+loop() task (see simulator_firmware.h; on Emscripten it maps to a
+  // Web Worker that may block on notifications/mutexes freely).
+  simulator::startFirmwareTask();
 
   // Returning from main() hands control back to the browser event loop. With
   // -sEXIT_RUNTIME=0 the runtime is NOT torn down, so the firmware worker (and the

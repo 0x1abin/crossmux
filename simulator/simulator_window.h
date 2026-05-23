@@ -11,7 +11,7 @@
 
 namespace simulator {
 
-// Singleton owning the SDL window + texture used by HalDisplay_native to present frames.
+// Singleton owning the SDL window + texture used by the native HalDisplay backend to present frames.
 // Lives in the main thread; HalDisplay calls pushFramebuffer() from whichever thread
 // renders, which atomically swaps a back-buffer that the main loop picks up.
 class SimulatorWindow {

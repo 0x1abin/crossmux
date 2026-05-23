@@ -1,15 +1,22 @@
 #pragma once
-// libcurl-backed HTTPClient/WiFiClient shim. WeRead and other firmware code paths
-// that exchange HTTPS with the cloud now actually hit the host's network. The
-// public method shapes mirror the Arduino-ESP32 HTTPClient API just enough to
-// satisfy the call sites we keep in the simulator build.
+// HTTPClient/WiFiClient shim for the simulator, dual-backend:
+//   - native: libcurl-backed, so WeRead and other firmware HTTPS paths actually hit the host's
+//     network.
+//   - WASM:   curl-free offline stub. The browser demo excludes networked activities; any call
+//     site that still reaches a GET/POST fails gracefully (returns an error / empty body).
+// The public surface mirrors the Arduino-ESP32 HTTPClient API just enough to satisfy the call
+// sites we keep in the simulator build.
 
-#include <WString.h>
 #include <Stream.h>
-#include <curl/curl.h>
+#include <WString.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+
+#ifndef __EMSCRIPTEN__
+#include <curl/curl.h>
+#endif
 
 enum HTTPC_FOLLOW_REDIRECTS_T {
   HTTPC_DISABLE_FOLLOW_REDIRECTS = 0,
@@ -26,16 +33,66 @@ class WiFiClient {
   virtual ~WiFiClient() = default;
   bool connect(const char*, uint16_t) { return false; }
   void stop() {}
+#ifdef __EMSCRIPTEN__
+  bool connected() { return false; }  // Offline stub.
+#else
   bool connected() { return true; }  // libcurl owns the socket; treat as up.
+#endif
   int available() { return 0; }
   int read() { return -1; }
   size_t write(const uint8_t*, size_t) { return 0; }
 };
 
-// Modern Arduino-ESP32 uses NetworkClient as the base type. Simulator collapses
-// the hierarchy onto WiFiClient since libcurl already drives the transport.
+// Modern Arduino-ESP32 uses NetworkClient as the base type. Simulator collapses the hierarchy
+// onto WiFiClient (libcurl drives the transport on native; nothing does in the browser demo).
 using NetworkClient = WiFiClient;
 
+#ifdef __EMSCRIPTEN__
+// ---------------------------------------------------------------------------
+// WASM: curl-free offline stub. GET/POST report a connection failure (negative code, like the
+// Arduino HTTPClient does for HTTPC_ERROR_*); getString() returns an empty body.
+// ---------------------------------------------------------------------------
+class HTTPClient {
+ public:
+  HTTPClient() = default;
+  ~HTTPClient() = default;
+
+  HTTPClient(const HTTPClient&) = delete;
+  HTTPClient& operator=(const HTTPClient&) = delete;
+
+  bool begin(const String&) { return false; }
+  bool begin(WiFiClient&, const String&) { return false; }
+  void end() {}
+
+  void setTimeout(uint16_t) {}
+  void setFollowRedirects(int) {}
+  void setAuthorization(const char*, const char*) {}
+  void addHeader(const String&, const String&) {}
+
+  int GET() { return -1; }
+  int POST(const String&) { return -1; }
+  int POST(const uint8_t*, size_t) { return -1; }
+
+  String getString() { return String(""); }
+  Stream& getStream() { return emptyStream_; }
+  Stream* getStreamPtr() { return &emptyStream_; }
+  int getSize() { return 0; }
+
+ private:
+  class EmptyStream : public Stream {
+   public:
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    size_t write(uint8_t) override { return 0; }
+    void flush() override {}
+  };
+  EmptyStream emptyStream_;
+};
+#else
+// ---------------------------------------------------------------------------
+// Native: libcurl-backed implementation.
+// ---------------------------------------------------------------------------
 class HTTPClient {
  public:
   HTTPClient() = default;
@@ -80,9 +137,7 @@ class HTTPClient {
 
   int GET() { return perform_(false, nullptr, 0); }
 
-  int POST(const String& body) {
-    return POST(reinterpret_cast<const uint8_t*>(body.c_str()), body.length());
-  }
+  int POST(const String& body) { return POST(reinterpret_cast<const uint8_t*>(body.c_str()), body.length()); }
   int POST(const uint8_t* body, size_t size) { return perform_(true, body, size); }
 
   String getString() { return String(responseBody_.c_str()); }
@@ -164,3 +219,4 @@ class HTTPClient {
   uint16_t timeoutMs_ = 0;
   bool followRedirects_ = false;
 };
+#endif  // __EMSCRIPTEN__
