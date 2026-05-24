@@ -1,5 +1,7 @@
 # CrossPoint Reader
 
+**English** | [简体中文](./README.zh-CN.md)
+
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
 
 CrossPoint is open-source e-reader firmware - community-built, fully hackable, free forever. It's maintained by a growing community of developers and readers who believe your device should do what you want - not what a manufacturer decided for you.
@@ -7,6 +9,24 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 **Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
 
 ![CrossPoint Reader running on Xteink device](./docs/images/cover.jpg)
+
+## About CrossMux
+
+**CrossMux** is a community fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) that turns the device into more than a reader — it adds an Apps hub of mini-games and tools, richer standby faces, and a first-class Simplified Chinese build.
+
+**Version:** CrossMux 1.3.0 (based on CrossPoint Reader 1.3.0)
+
+What CrossMux adds on top of upstream:
+
+- **Apps hub** (the `Apps` menu): 2048, Minesweeper, Sudoku, Gomoku (五子棋), Chinese Chess / Xiangqi (象棋), Conway's Game of Life, and a procedural "Ugly Avatar" generator.
+- **WeRead Copilot** (微信读书): browse your shelf, notes, and reviews with an SD-backed offline cache and bulk sync.
+- **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), plus optional 4-level grayscale and inverse display modes.
+- **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
+- **Desktop / WebAssembly simulator** for developing and previewing the UI on the host.
+
+Everything from upstream CrossPoint described below still applies.
+
+---
 
 ## What can CrossPoint do?
 
@@ -171,6 +191,24 @@ git submodule update --init --recursive
 ```bash
 pio run --target upload
 ```
+
+### Build the Simplified Chinese firmware
+
+CrossMux ships a dedicated Simplified-Chinese build environment, `gh_release_cn`. It produces a Chinese-only firmware: Simplified Chinese UI + i18n, embedded CJK bitmap fonts, CJK-aware EPUB layout, and the Chinese Chess / WeRead apps. A fresh device boots straight into the Chinese UI.
+
+The CJK font headers are committed to the repo, so a normal build needs no extra asset steps:
+
+```bash
+# Build the Chinese firmware
+pio run -e gh_release_cn
+
+# Build + flash to a connected device
+pio run -e gh_release_cn -t upload
+```
+
+The resulting `firmware.bin` is written to `.pio/build/gh_release_cn/firmware.bin`; it can also be flashed with the web installer (see [Install firmware](#install-firmware)).
+
+You only need to regenerate the CJK bitmap headers when changing the character set or updating the embedded fonts — see [docs/engineering/chinese-build.md](./docs/engineering/chinese-build.md) for the font toolchain and flash-budget details.
 
 ### Contributor pre-PR checks
 
