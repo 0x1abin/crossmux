@@ -23,7 +23,7 @@ namespace {
 // Cloud base host (the deployed companion Cloudflare app, custom domain bound).
 // To repoint, change this single constant and rebuild. No scheme here; we
 // prepend https:// below.
-constexpr char kAirPageBase[] = "pages.yunhug.com";
+constexpr char kAirPageBase[] = "pages.crossmux.com";
 
 // MQTT broker for live push (plain TCP, anonymous). The cloud /?id=<id>&type=x4
 // page publishes a refresh message here (over wss:8084) when "Send" is clicked; the
