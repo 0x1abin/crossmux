@@ -286,7 +286,7 @@ if(EMSCRIPTEN)
         -sMODULARIZE=1
         -sEXPORT_NAME=createSimulator
         -sENVIRONMENT=web,worker
-        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,HEAPU8"
+        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,HEAPU8,FS"
         "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_simulator_framebuffer_ptr,_simulator_consume_dirty,_simulator_display_width,_simulator_display_height,_simulator_buffer_size,_simulator_inject_button"
         "--preload-file=${SIMULATOR_SD_DEMO}@/sd"
     )
