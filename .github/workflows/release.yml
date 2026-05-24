@@ -4,6 +4,9 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: write
+
 jobs:
   build-release:
     runs-on: ubuntu-latest
@@ -25,16 +28,31 @@ jobs:
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
-      - name: Build CrossPoint
-        run: pio run -e gh_release
+      - name: Build CrossMux (international + Chinese)
+        run: pio run -e gh_release -e gh_release_cn
+
+      - name: Stage release assets
+        run: |
+          mkdir -p dist
+          cp .pio/build/gh_release/firmware.bin     dist/firmware.bin
+          cp .pio/build/gh_release/bootloader.bin   dist/bootloader.bin
+          cp .pio/build/gh_release/partitions.bin   dist/partitions.bin
+          cp .pio/build/gh_release_cn/firmware.bin  dist/firmware-cn.bin
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CrossPoint-${{ github.ref_name }}
+          name: CrossMux-${{ github.ref_name }}
           path: |
             .pio/build/gh_release/bootloader.bin
             .pio/build/gh_release/firmware.bin
             .pio/build/gh_release/firmware.elf
             .pio/build/gh_release/firmware.map
             .pio/build/gh_release/partitions.bin
+            .pio/build/gh_release_cn/firmware.bin

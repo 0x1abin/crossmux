@@ -1,0 +1,67 @@
+name: Nightly
+
+# Daily rolling nightly build of main, published as a prerelease tagged
+# `nightly` with both international (firmware.bin) and Chinese (firmware-cn.bin)
+# assets. The website's Insider/Nightly reads the newest prerelease.
+on:
+  schedule:
+    - cron: '0 18 * * *' # daily 18:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Extract short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Build CrossMux Nightly (international + Chinese)
+        env:
+          CROSSPOINT_RC_HASH: ${{ env.SHORT_SHA }}
+        run: pio run -e gh_release_rc -e gh_release_cn_rc
+
+      - name: Stage nightly assets
+        run: |
+          mkdir -p dist
+          cp .pio/build/gh_release_rc/firmware.bin     dist/firmware.bin
+          cp .pio/build/gh_release_cn_rc/firmware.bin  dist/firmware-cn.bin
+
+      # Roll the single `nightly` release/tag forward to the current commit.
+      - name: Remove previous nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+
+      - name: Publish nightly prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: CrossMux Nightly (${{ env.SHORT_SHA }})
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          body: |
+            Rolling nightly build from `main` (${{ env.SHORT_SHA }}).
+            - `firmware.bin` — international
+            - `firmware-cn.bin` — Chinese (中文)
