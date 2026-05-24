@@ -77,6 +77,9 @@ class HTTPClient {
   Stream& getStream() { return emptyStream_; }
   Stream* getStreamPtr() { return &emptyStream_; }
   int getSize() { return 0; }
+  // Offline stub: no body was fetched, so there is nothing to stream. Mirrors the native
+  // shim's writeToStream signature; returns an error code like Arduino's HTTPC_ERROR_*.
+  int writeToStream(Stream*) { return -1; }
 
  private:
   class EmptyStream : public Stream {
