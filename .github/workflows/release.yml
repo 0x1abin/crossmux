@@ -14,6 +14,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
@@ -46,12 +47,36 @@ jobs:
           cp .pio/build/gh_release/partitions.bin   dist/partitions.bin
           cp .pio/build/gh_release_cn/firmware.bin  dist/firmware-cn.bin
 
+      # Build a complete commit-level changelog. GitHub's built-in
+      # generate_release_notes only lists PR merges, so any commit pushed
+      # straight to main is missing from the release body. git log gives us
+      # the full picture; the 7-char hashes are auto-linked to commits by
+      # the GitHub release renderer.
+      - name: Build changelog
+        run: |
+          set -euo pipefail
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          {
+            if [ -n "$PREV_TAG" ]; then
+              echo "## Changes since ${PREV_TAG}"
+              echo ""
+              git log --pretty=format:"- %s (\`%h\`)" --reverse "${PREV_TAG}..HEAD"
+              echo ""
+              echo ""
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ github.ref_name }}"
+            else
+              echo "## Initial release ${{ github.ref_name }}"
+            fi
+          } > release-body.md
+          echo "---- release-body.md ----"
+          cat release-body.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          body_path: release-body.md
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
