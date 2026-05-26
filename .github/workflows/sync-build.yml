@@ -1,0 +1,62 @@
+name: Sync PR build verify
+
+# Gate every upstream-sync PR with the release env set (gh_release +
+# gh_release_cn). Lives next to sync-upstream.yml (merge orchestration)
+# but kept as its own file so the two concerns don't entangle:
+#   sync-upstream.yml -> maintain the standing chore/sync-upstream PR
+#   sync-build.yml    -> "would this PR actually ship?" build check
+# ci.yml already covers default-env build + cppcheck + clang-format on
+# every PR. This workflow is the release-env top-up that only the sync
+# branch needs, so the `if:` below scopes it strictly to chore/sync-upstream.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+  push:
+    branches: [chore/sync-upstream]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/chore/sync-upstream') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'chore/sync-upstream')
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Build gh_release + gh_release_cn
+        run: |
+          set -euo pipefail
+          pio run -e gh_release -e gh_release_cn
