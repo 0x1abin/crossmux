@@ -51,6 +51,7 @@ jobs:
         with:
           files: dist/*
           fail_on_unmatched_files: true
+          generate_release_notes: true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
