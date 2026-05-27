@@ -7,14 +7,17 @@
 #include <string>
 
 #include "../../../components/UITheme.h"
+#include "../../../fontIds.h"
 #include "../../ActivityManager.h"
+#include "../../network/CrossPointWebServerActivity.h"
 #include "../../util/KeyboardEntryActivity.h"
 #include "WeReadKeyStore.h"
 
 namespace {
 
-constexpr int kIdxSet = 0;
-constexpr int kIdxClear = 1;  // only when keyPresent
+constexpr int kIdxWeb = 0;
+constexpr int kIdxManual = 1;
+constexpr int kIdxClear = 2;  // only when keyPresent
 
 }  // namespace
 
@@ -33,8 +36,7 @@ void WeReadSetupActivity::onExit() { Activity::onExit(); }
 
 void WeReadSetupActivity::refresh() { keyPresent = WeReadKeyStore::has(); }
 
-// One row for Set/Replace, optional Clear when a key is set.
-int WeReadSetupActivity::itemCount() const { return keyPresent ? 2 : 1; }
+int WeReadSetupActivity::itemCount() const { return keyPresent ? 3 : 2; }
 
 void WeReadSetupActivity::loop() {
   const int count = itemCount();
@@ -56,32 +58,55 @@ void WeReadSetupActivity::loop() {
   }
 }
 
-void WeReadSetupActivity::onSelect() {
-  if (selected == kIdxSet) {
-    auto handler = [this](const ActivityResult& result) {
-      if (result.isCancelled) {
-        requestUpdate();
-        return;
-      }
-      const auto& kb = std::get<KeyboardResult>(result.data);
-      if (!WeReadKeyStore::isWellFormed(kb.text)) {
-        banner = Banner::Invalid;
-        requestUpdate();
-        return;
-      }
-      if (WeReadKeyStore::save(kb.text)) {
-        banner = Banner::Saved;
-        refresh();
-        selected = 0;
-      } else {
-        banner = Banner::Invalid;
-      }
+void WeReadSetupActivity::launchKeyboardEntry() {
+  auto handler = [this](const ActivityResult& result) {
+    if (result.isCancelled) {
       requestUpdate();
-    };
-    startActivityForResult(
-        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, std::string(tr(STR_WEREAD_API_KEY_PROMPT)),
-                                                std::string(WeReadKeyStore::load()), 128, InputType::Text),
-        handler);
+      return;
+    }
+    const auto& kb = std::get<KeyboardResult>(result.data);
+    if (!WeReadKeyStore::isWellFormed(kb.text)) {
+      banner = Banner::Invalid;
+      requestUpdate();
+      return;
+    }
+    if (WeReadKeyStore::save(kb.text)) {
+      banner = Banner::Saved;
+      refresh();
+      selected = 0;
+    } else {
+      banner = Banner::Invalid;
+    }
+    requestUpdate();
+  };
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, std::string(tr(STR_WEREAD_API_KEY_PROMPT)),
+                                              std::string(WeReadKeyStore::load()), 128, InputType::Text),
+      handler);
+}
+
+void WeReadSetupActivity::launchWebServer() {
+  // Remember the pre-launch state so we can detect "key was set via the web
+  // form" when the WebServer activity finishes (user pressed Back).
+  keyWasPresentOnWebEnter = WeReadKeyStore::has();
+  auto handler = [this](const ActivityResult&) {
+    refresh();
+    if (keyPresent && !keyWasPresentOnWebEnter) {
+      banner = Banner::Saved;
+      selected = 0;
+    }
+    requestUpdate();
+  };
+  startActivityForResult(
+      std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, WebServerEntryPurpose::WeReadKeySetup),
+      handler);
+}
+
+void WeReadSetupActivity::onSelect() {
+  if (selected == kIdxWeb) {
+    launchWebServer();
+  } else if (selected == kIdxManual) {
+    launchKeyboardEntry();
   } else if (selected == kIdxClear && keyPresent) {
     WeReadKeyStore::clear();
     banner = Banner::Cleared;
@@ -99,25 +124,36 @@ void WeReadSetupActivity::render(RenderLock&&) {
   renderer.clearScreen();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, sw, metrics.headerHeight}, tr(STR_WEREAD_MENU_SETUP));
 
-  const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  // Guide paragraph: intro line + URL line (bold). Pulls users out of the
+  // dead-end "I have no idea what to paste here" state by naming the source.
+  const int contentWidth = sw - 2 * metrics.contentSidePadding;
+  const int x = metrics.contentSidePadding;
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+
+  int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, tr(STR_WEREAD_SETUP_GUIDE_INTRO), contentWidth, 2)) {
+    renderer.drawText(UI_10_FONT_ID, x, y, line.c_str());
+    y += lineHeight;
+  }
+  renderer.drawText(UI_10_FONT_ID, x, y, tr(STR_WEREAD_SETUP_GUIDE_URL), true, EpdFontFamily::BOLD);
+  y += lineHeight + metrics.verticalSpacing;
+
+  const int listY = y;
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
   const bool present = keyPresent;
   GUI.drawList(
       renderer, Rect{0, listY, sw, listH}, itemCount(), selected,
-      [present](int i) {
-        if (i == kIdxSet) {
-          return std::string(
-              I18n::getInstance().get(present ? StrId::STR_WEREAD_KEY_REPLACE : StrId::STR_WEREAD_KEY_SET_ACTION));
-        }
+      [](int i) {
+        if (i == kIdxWeb) return std::string(tr(STR_WEREAD_SETUP_VIA_WEB));
+        if (i == kIdxManual) return std::string(tr(STR_WEREAD_SETUP_VIA_KEYBOARD));
         return std::string(tr(STR_WEREAD_KEY_CLEAR));
       },
       [present](int i) {
-        if (i == kIdxSet) {
-          return std::string(
-              I18n::getInstance().get(present ? StrId::STR_WEREAD_KEY_SET : StrId::STR_WEREAD_KEY_NOT_SET));
-        }
-        return std::string{};
+        if (i == kIdxWeb) return std::string(tr(STR_WEREAD_SETUP_VIA_WEB_SUB));
+        if (i == kIdxManual) return std::string(tr(STR_WEREAD_SETUP_VIA_KEYBOARD_SUB));
+        return std::string(
+            I18n::getInstance().get(present ? StrId::STR_WEREAD_KEY_SET : StrId::STR_WEREAD_KEY_NOT_SET));
       });
 
   switch (banner) {

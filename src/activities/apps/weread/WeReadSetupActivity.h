@@ -21,14 +21,18 @@ class WeReadSetupActivity final : public Activity {
   int selected = 0;
 
   // Row layout:
-  //   0 = Set/Replace Key
-  //   1 = Clear Key (only when keyPresent)
+  //   0 = Submit via Web Server
+  //   1 = Type with on-device keyboard
+  //   2 = Clear Key (only when keyPresent)
   enum class Banner : uint8_t { None, Saved, Cleared, Invalid };
   Banner banner = Banner::None;
 
   bool keyPresent = false;
+  bool keyWasPresentOnWebEnter = false;
 
   void refresh();
   int itemCount() const;
   void onSelect();
+  void launchKeyboardEntry();
+  void launchWebServer();
 };

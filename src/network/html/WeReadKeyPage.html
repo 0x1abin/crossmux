@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>微信读书 API Key</title>
+    <style>
+      :root {
+        --font-color: #333;
+        --bg: #f5f5f5;
+        --title-color: #2c3e50;
+        --card-bg: #FFF;
+        --label-color: #7f8c8d;
+        --border-color: #eee;
+        --accent-color: rgb(110, 154, 130);
+        --accent-hover-color: #5a8c73;
+        --ok-bg: #e7f6ec;
+        --ok-fg: #1a6b34;
+        --err-bg: #fdecec;
+        --err-fg: #a02020;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --font-color: #f5f5f5;
+          --bg: #333;
+          --title-color: #ecf0f1;
+          --card-bg: #444;
+          --label-color: #bdc3c7;
+          --border-color: #555;
+          --ok-bg: #1c3d27;
+          --ok-fg: #b9e8c6;
+          --err-bg: #4a2222;
+          --err-fg: #f3c0c0;
+          color-scheme: dark;
+        }
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: var(--bg);
+        color: var(--font-color);
+      }
+      h1 {
+        color: var(--title-color);
+        border-bottom: 2px solid var(--accent-color);
+        padding-bottom: 10px;
+      }
+      h2 {
+        color: var(--title-color);
+        margin-top: 0;
+      }
+      .card {
+        background: var(--card-bg);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      label {
+        font-weight: 600;
+        display: block;
+        margin-bottom: 8px;
+        color: var(--label-color);
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px 14px;
+        font-size: 16px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--font-color);
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      button {
+        margin-top: 14px;
+        width: 100%;
+        background: var(--accent-color);
+        color: white;
+        border: 0;
+        border-radius: 6px;
+        padding: 14px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--accent-hover-color);
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .hint {
+        font-size: 14px;
+        color: var(--label-color);
+        margin-top: 12px;
+        line-height: 1.5;
+      }
+      .hint a {
+        color: var(--accent-color);
+        font-weight: 600;
+        text-decoration: underline;
+        word-break: break-all;
+      }
+      .msg {
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 14px;
+        font-size: 14px;
+        display: none;
+      }
+      .msg.ok {
+        background: var(--ok-bg);
+        color: var(--ok-fg);
+        display: block;
+      }
+      .msg.err {
+        background: var(--err-bg);
+        color: var(--err-fg);
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🔑 微信读书 API Key</h1>
+
+    <div class="card">
+      <h2>绑定 API Key</h2>
+      <div id="msg" class="msg"></div>
+      <label for="k">API Key(以 <code>wrk-</code> 开头)</label>
+      <input id="k" type="text" placeholder="wrk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false" />
+      <button id="save">保存到设备</button>
+      <div class="hint">
+        还没有 Key?请先登录
+        <a href="https://weread.qq.com/r/weread-skills" target="_blank" rel="noopener">https://weread.qq.com/r/weread-skills</a>
+        获取,然后粘贴到上方。保存成功后,按设备返回键退出 Web 服务即可。
+      </div>
+    </div>
+
+    <script>
+      const btn = document.getElementById('save');
+      const input = document.getElementById('k');
+      const msg = document.getElementById('msg');
+
+      async function submit() {
+        const key = input.value.trim();
+        msg.className = 'msg';
+        msg.textContent = '';
+        if (!key) {
+          msg.className = 'msg err';
+          msg.textContent = '请先粘贴 API Key。';
+          return;
+        }
+        btn.disabled = true;
+        try {
+          const res = await fetch('/api/weread-key', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ key })
+          });
+          const j = await res.json().catch(() => ({ ok: false, error: '响应解析失败' }));
+          if (j.ok) {
+            msg.className = 'msg ok';
+            msg.textContent = '已保存。请按设备返回键退出 Web 服务。';
+            input.value = '';
+          } else {
+            msg.className = 'msg err';
+            msg.textContent = j.error || ('保存失败(HTTP ' + res.status + ')');
+          }
+        } catch (e) {
+          msg.className = 'msg err';
+          msg.textContent = '网络错误:' + e.message;
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      btn.addEventListener('click', submit);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    </script>
+  </body>
+</html>

@@ -6,7 +6,6 @@
 #include <memory>
 #include <string>
 
-#include "../../../WifiCredentialStore.h"
 #include "../../../components/UITheme.h"
 #include "../../ActivityManager.h"
 #include "../../network/WifiSelectionActivity.h"
@@ -65,30 +64,31 @@ void WeReadMenuActivity::onEnter() {
   Activity::onEnter();
   selected = 0;
   banner = Banner::None;
-  refreshGates();
-
-  // If we don't have Wi-Fi yet AND we haven't tried auto-connecting once
-  // already this Activity instance AND a previously-used network is on file,
-  // hand off to WifiSelectionActivity. It will silently connect to the last
-  // known SSID (skipping its own scan UI) and return when done.
-  if (!wifiOk && !autoConnectAttempted_) {
-    autoConnectAttempted_ = true;
-    WIFI_STORE.loadFromFile();
-    const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
-    if (!lastSsid.empty() && WIFI_STORE.findCredential(lastSsid) != nullptr) {
-      launchAutoConnect();
-      return;
-    }
-  }
+  pendingItemAfterConnect_ = -1;
+  refreshGates();  // Only read state; WiFi stays off until the user picks a
+                   // network-requiring item — see onSelect().
   requestUpdate();
 }
 
 void WeReadMenuActivity::launchAutoConnect() {
   auto handler = [this](const ActivityResult&) {
-    // The WifiResult.connected flag would work too, but WiFi.status() is the
-    // authoritative source — re-poll it via refreshGates so we stay aligned
-    // with what FetchActivity preflights will see.
+    // WiFi.status() (via refreshGates) is the authoritative source — the
+    // sub-activity's WifiResult.connected flag would work too but we'd still
+    // need refreshGates() here so FetchActivity preflights see the same view.
     refreshGates();
+
+    if (pendingItemAfterConnect_ >= 0) {
+      const int target = pendingItemAfterConnect_;
+      pendingItemAfterConnect_ = -1;
+      if (wifiOk) {
+        // Auto-connect succeeded — continue into the sub-activity the user
+        // originally picked, so the press-then-wait flow feels like one act.
+        // keyOk was already verified by onSelect before scheduling pending.
+        dispatchMenuItem(target);
+        return;
+      }
+      banner = Banner::NoWifi;  // Connect failed/cancelled; surface it on the menu.
+    }
     requestUpdate();
   };
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, /*autoConnect=*/true), handler);
@@ -133,15 +133,11 @@ void WeReadMenuActivity::onSelect() {
     return;
   }
 
-  // All non-Setup actions need both Wi-Fi and an API key.
+  // All non-Setup actions need both an API key and Wi-Fi.
   refreshGates();
-  if (!wifiOk) {
-    banner = Banner::NoWifi;
-    requestUpdate();
-    return;
-  }
   if (!keyOk) {
-    // Send the user directly into setup rather than nagging.
+    // No key → no point spinning up Wi-Fi for a request that would fail. Hand
+    // the user to Setup; they'll come back here to pick again afterwards.
     auto handler = [this](const ActivityResult&) {
       refreshGates();
       requestUpdate();
@@ -149,8 +145,21 @@ void WeReadMenuActivity::onSelect() {
     startActivityForResult(std::make_unique<WeReadSetupActivity>(renderer, mappedInput), handler);
     return;
   }
+  if (!wifiOk) {
+    // Lazily connect: remember which item the user wanted, hand off to
+    // WifiSelectionActivity, and resume dispatch in launchAutoConnect's
+    // completion handler.
+    pendingItemAfterConnect_ = selected;
+    launchAutoConnect();
+    return;
+  }
 
-  switch (item) {
+  dispatchMenuItem(selected);
+}
+
+void WeReadMenuActivity::dispatchMenuItem(int itemIndex) {
+  // Caller is responsible for ensuring wifiOk && keyOk; this just routes.
+  switch (static_cast<MenuItem>(itemIndex)) {
     case MenuItem::Shelf:
       activityManager.goToWeReadShelf();
       break;
@@ -172,7 +181,7 @@ void WeReadMenuActivity::onSelect() {
       break;
     }
     case MenuItem::Setup:
-      break;  // handled above
+      break;  // Setup is handled upstream and never routed through here.
   }
 }
 

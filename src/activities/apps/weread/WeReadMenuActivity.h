@@ -28,12 +28,13 @@ class WeReadMenuActivity final : public Activity {
   enum class Banner : uint8_t { None, NoWifi, ComingSoon };
   Banner banner = Banner::None;
 
-  // True once this Activity instance has fired off WifiSelectionActivity for
-  // an auto-connect attempt. Prevents re-popping the WiFi UI in a loop if the
-  // user cancels. Reset on the next entry (new Activity instance).
-  bool autoConnectAttempted_ = false;
+  // Menu-item index the user picked while WiFi was off. -1 = nothing pending.
+  // launchAutoConnect()'s completion handler reads this to decide whether to
+  // dispatch into a sub-activity once the connection comes up.
+  int pendingItemAfterConnect_ = -1;
 
   void refreshGates();
   void onSelect();
   void launchAutoConnect();
+  void dispatchMenuItem(int itemIndex);
 };

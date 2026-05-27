@@ -12,6 +12,8 @@ This document describes all HTTP and WebSocket endpoints available on the CrossP
     - [POST `/upload` - Upload File](#post-upload---upload-file)
     - [POST `/mkdir` - Create Folder](#post-mkdir---create-folder)
     - [POST `/delete` - Delete File or Folder](#post-delete---delete-file-or-folder)
+    - [GET `/weread` - WeRead API Key Page (Chinese build only)](#get-weread---weread-api-key-page-chinese-build-only)
+    - [POST `/api/weread-key` - Save WeRead API Key (Chinese build only)](#post-apiweread-key---save-weread-api-key-chinese-build-only)
   - [WebSocket Endpoint](#websocket-endpoint)
     - [Port 81 - Fast Binary Upload](#port-81---fast-binary-upload)
   - [Network Modes](#network-modes)
@@ -244,6 +246,58 @@ All items deleted successfully
 - Files/folders starting with `.`
 - `System Volume Information`
 - `XTCache`
+
+---
+
+### GET `/weread` - WeRead API Key Page (Chinese build only)
+
+Serves the standalone form used to bind a WeRead Companion API key from a phone browser. Available **only in the `gh_release_cn` build** (the same build that ships the WeRead Companion feature).
+
+This endpoint is intended to be reached via the QR code displayed on the device after entering *微信读书 → API Key → 通过浏览器提交*. The web server registers no link to it from `/`, and `/` registers no link back: the two entry points (file transfer vs WeRead key setup) are kept visually separate.
+
+**Request:**
+```bash
+curl http://crosspoint.local/weread
+```
+
+**Response:** HTML page (200 OK) — a single paste form for `wrk-…` keys, plus a hint linking to <https://weread.qq.com/r/weread-skills>.
+
+---
+
+### POST `/api/weread-key` - Save WeRead API Key (Chinese build only)
+
+Validates and persists a WeRead Companion API key. Used by the `/weread` page's save button. Available **only in the `gh_release_cn` build**.
+
+**Request:**
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"key":"wrk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"}' \
+  http://crosspoint.local/api/weread-key
+```
+
+**Body (JSON):**
+
+| Field | Type   | Required | Description                              |
+| ----- | ------ | -------- | ---------------------------------------- |
+| `key` | string | Yes      | API key, must start with `wrk-`, 8-256 chars |
+
+**Response (200 OK):**
+```json
+{"ok": true}
+```
+
+The device persists the key (XOR-obfuscated with the eFuse MAC) to `/.crosspoint/weread_apikey.txt` on the SD card and updates an in-memory cache so subsequent WeRead requests pick it up without a reboot.
+
+**Error Responses:**
+
+| Status | Body                                                  | Cause                                  |
+| ------ | ----------------------------------------------------- | -------------------------------------- |
+| 400    | `{"ok":false,"error":"请求不含 JSON 体"}`              | Missing request body                   |
+| 400    | `{"ok":false,"error":"JSON 解析失败: …"}`              | Malformed JSON                         |
+| 400    | `{"ok":false,"error":"Key 必须以 wrk- 开头,长度 8-256"}` | Failed `WeReadKeyStore::isWellFormed` |
+| 500    | `{"ok":false,"error":"保存失败"}`                       | SD card write error                    |
+
+Error strings are intentionally Chinese to match the locale of the only build that exposes this endpoint.
 
 ---
 
