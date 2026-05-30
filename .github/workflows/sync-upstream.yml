@@ -117,8 +117,16 @@ jobs:
             # sync, since .skills/SKILL.md always conflicts). The Claude routine
             # re-merges from scratch and force-pushes the clean resolution — this commit
             # is just a placeholder + a conflict record for the resolver to target.
-            git checkout --theirs -- open-x4-sdk 2>/dev/null || true  # placeholder submodule ptr; routine sets the final one
-            git add -A
+            #
+            # The open-x4-sdk submodule isn't checked out (submodules: false), so a
+            # conflicted gitlink can't be staged with `git add` ("does not have a commit
+            # checked out"). Resolve it directly in the index via plumbing — placeholder
+            # = upstream's pointer; the routine sets the final one — and exclude the
+            # submodule path from the worktree scan.
+            if git ls-files --unmerged -- open-x4-sdk | grep -q .; then
+              git update-index --cacheinfo "160000,$(git rev-parse MERGE_HEAD:open-x4-sdk),open-x4-sdk"
+            fi
+            git add -A -- . ':(exclude)open-x4-sdk'
             git commit -m "chore: WIP merge upstream master (conflicts pending resolution)"
             git push --force origin "$SYNC_BRANCH"
             ensure_label
