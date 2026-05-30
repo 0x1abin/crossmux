@@ -430,12 +430,13 @@ void StandbyActivity::loop() {
 
   pumpTimeSync();
 
-  // After 5 s of idle, hide chrome and let the face fill the screen. On
-  // battery the framework takes care of power saving from there: CPU drops to
-  // LOW_POWER_FREQ after 3 s (HalPowerManager) and the whole device deep-
-  // sleeps after SETTINGS.getSleepTimeoutMs() (main.cpp). We deliberately do
-  // not run our own light-sleep loop — that just stalls main.cpp's auto power
-  // management and leaves the device unresponsive.
+  // After 5 s of idle, hide chrome and let the face fill the screen. From
+  // there the framework's idle-3 s auto-downclock kicks in (HalPowerManager →
+  // LOW_POWER_FREQ, 10 MHz). We keep preventAutoSleep() returning true so the
+  // device will NOT auto-deep-sleep — standby is a clock and must keep showing
+  // the time. The deep-sleep timer is short-circuited in main.cpp via
+  // preventAutoSleep(); downclocking is unaffected because main.cpp only
+  // resets lastActivityTime on real user input, not on preventAutoSleep().
   // Interactive faces (airpage) stay in Normal mode so they keep their chrome
   // (QR title/dots) and receive Up/Down/Confirm on the first press.
   const bool interactive = currentFace_ && currentFace_->isInteractive();

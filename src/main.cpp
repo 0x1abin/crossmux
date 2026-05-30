@@ -658,13 +658,16 @@ void loop() {
     }
   }
 
-  // Check for any user activity (button press or release) or active background work
+  // Check for any real user activity (button press, button release, or tilt).
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || halTiltSensor.hadActivity() ||
-      activityManager.preventAutoSleep()) {
+  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || halTiltSensor.hadActivity()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }
+  // preventAutoSleep() is intentionally NOT folded into the activity check above:
+  // it only short-circuits the deep-sleep timer below, not the inactivity clock
+  // that drives auto-downclock. Standby (a clock face) wants deep sleep blocked
+  // but still benefits from the framework dropping CPU to LOW_POWER_FREQ.
 
   static bool screenshotButtonsReleased = true;
   static bool screenshotComboActive = false;
@@ -691,7 +694,8 @@ void loop() {
   }
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
-  if (millis() - lastActivityTime >= sleepTimeoutMs) {
+  if (!activityManager.preventAutoSleep() &&
+      millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
