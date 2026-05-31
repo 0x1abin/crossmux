@@ -694,8 +694,12 @@ void loop() {
   }
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
+<<<<<<< HEAD
   if (!activityManager.preventAutoSleep() &&
       millis() - lastActivityTime >= sleepTimeoutMs) {
+=======
+  if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
+>>>>>>> upstream/master
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start

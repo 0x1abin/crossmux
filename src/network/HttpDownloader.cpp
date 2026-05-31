@@ -3,7 +3,10 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <Memory.h>
+<<<<<<< HEAD
 #include <Stream.h>
+=======
+>>>>>>> upstream/master
 #include <base64.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
@@ -17,8 +20,12 @@ namespace {
 // CDN sends more and logs HTTP_HEADER "Buffer length is small", but that's
 // non-fatal: the headers we read (Location, Content-Length) come first and
 // survive. Smaller keeps contiguous heap free while WiFi and TLS are up. TX
+<<<<<<< HEAD
 // carries the request body for POST (and just the request line for GET); the
 // response body streams in READ_CHUNK pieces.
+=======
+// only carries our GET; the body streams in READ_CHUNK pieces.
+>>>>>>> upstream/master
 constexpr int HTTP_RX_BUF = 4096;
 constexpr int HTTP_TX_BUF = 1024;
 // Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
@@ -97,6 +104,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     contentLength = esp_http_client_fetch_headers(client);
     status = esp_http_client_get_status_code(client);
   }
+<<<<<<< HEAD
 
   if (status != 200) {
     LOG_ERR("HTTP", "unexpected status: %d", status);
@@ -260,6 +268,53 @@ bool runPostJson(const std::string& url, const std::string& payload, const std::
     return false;
   }
   return true;
+=======
+
+  if (status != 200) {
+    LOG_ERR("HTTP", "unexpected status: %d", status);
+    esp_http_client_cleanup(client);
+    return HttpDownloader::HTTP_ERROR;
+  }
+
+  // fetch_headers returns 0 for a chunked response (no Content-Length); leave
+  // total at 0 so progress stays silent and the size check is skipped.
+  sink.total = contentLength > 0 ? static_cast<size_t>(contentLength) : 0;
+
+  auto buf = makeUniqueNoThrow<char[]>(READ_CHUNK);
+  if (!buf) {
+    LOG_ERR("HTTP", "OOM: %u byte read buffer", (unsigned)READ_CHUNK);
+    esp_http_client_cleanup(client);
+    return HttpDownloader::HTTP_ERROR;
+  }
+
+  while (true) {
+    if (sink.cancelFlag && *sink.cancelFlag) {
+      esp_http_client_cleanup(client);
+      return HttpDownloader::ABORTED;
+    }
+    const int read = esp_http_client_read(client, buf.get(), READ_CHUNK);
+    if (read < 0) {
+      LOG_ERR("HTTP", "read error after %zu bytes", sink.downloaded);
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
+    if (read == 0) break;  // all data received
+    if (!sink.write(reinterpret_cast<const uint8_t*>(buf.get()), read)) {
+      esp_http_client_cleanup(client);
+      return HttpDownloader::FILE_ERROR;
+    }
+    sink.downloaded += read;
+    if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+  }
+
+  const bool complete = esp_http_client_is_complete_data_received(client);
+  esp_http_client_cleanup(client);
+  if (!complete) {
+    LOG_ERR("HTTP", "incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
+    return HttpDownloader::HTTP_ERROR;
+  }
+  return HttpDownloader::OK;
+>>>>>>> upstream/master
 }
 }  // namespace
 
@@ -289,12 +344,15 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   Sink sink;
   sink.write = onData;
   return runGet(url, username, password, sink) == OK;
+<<<<<<< HEAD
 }
 
 bool HttpDownloader::postJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
                               const std::function<bool(Stream&)>& onResponse, int timeoutMs) {
   LOG_DBG("HTTP", "POST: %s (body=%u bytes)", url.c_str(), static_cast<unsigned>(payload.size()));
   return runPostJson(url, payload, bearerToken, onResponse, timeoutMs);
+=======
+>>>>>>> upstream/master
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
