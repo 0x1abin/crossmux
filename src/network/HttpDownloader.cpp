@@ -186,7 +186,7 @@ class EspHttpReadStream final : public Stream {
   }
 
   esp_http_client_handle_t client_;
-  char buf_[kBufSize];
+  char buf_[kBufSize] = {};
   size_t pos_ = 0;
   size_t len_ = 0;
 };
