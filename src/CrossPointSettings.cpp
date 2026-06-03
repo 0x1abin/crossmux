@@ -94,6 +94,8 @@ uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue)
   switch (legacyValue) {
     case SLEEP_1_MIN:
       return 1;
+    case SLEEP_3_MIN:
+      return 3;
     case SLEEP_5_MIN:
       return 5;
     case SLEEP_15_MIN:
@@ -333,29 +335,10 @@ float CrossPointSettings::getReaderLineCompression() const {
 }
 
 unsigned long CrossPointSettings::getSleepTimeoutMs() const {
-<<<<<<< HEAD
-  switch (sleepTimeout) {
-    case SLEEP_1_MIN:
-      return 1UL * 60 * 1000;
-    case SLEEP_3_MIN:
-      return 3UL * 60 * 1000;
-    case SLEEP_5_MIN:
-      return 5UL * 60 * 1000;
-    case SLEEP_10_MIN:
-      return 10UL * 60 * 1000;
-    case SLEEP_15_MIN:
-      return 15UL * 60 * 1000;
-    case SLEEP_30_MIN:
-      return 30UL * 60 * 1000;
-    default:
-      return 10UL * 60 * 1000;
-  }
-=======
   if (sleepTimeoutMinutes >= SLEEP_TIMEOUT_NEVER_MINUTES) return 0UL;
   const uint8_t minutes =
       std::clamp(sleepTimeoutMinutes, MIN_SLEEP_TIMEOUT_MINUTES, static_cast<uint8_t>(SLEEP_TIMEOUT_NEVER_MINUTES - 1));
   return static_cast<unsigned long>(minutes) * 60UL * 1000UL;
->>>>>>> upstream/master
 }
 
 int CrossPointSettings::getRefreshFrequency() const {

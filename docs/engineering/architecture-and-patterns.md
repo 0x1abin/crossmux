@@ -121,8 +121,11 @@ void onExit()   { /* free: vTaskDelete, free buffer, close member FsFiles */ Act
 **All fonts are loaded as global static objects** at firmware startup:
 - Noto Serif: 12, 14, 16, 18pt (4 styles each: regular, bold, italic, bold-italic)
 - Noto Sans: 12, 14, 16, 18pt (4 styles each)
-- OpenDyslexic: 8, 10, 12, 14pt (4 styles each)
 - Ubuntu UI fonts: 10, 12pt (2 styles)
+
+OpenDyslexic is no longer a flash builtin — it moved to an SD-card font
+(`lib/EpdFont/scripts/sd-fonts.yaml`). The Chinese build reuses the legacy
+`opendyslexic*` font slots in `src/main.cpp` as aliases to the embedded CJK faces.
 
 **Total**: ~80+ global `EpdFont` and `EpdFontFamily` objects
 

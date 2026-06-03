@@ -56,8 +56,8 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Source**: `lib/Epub/Epub/Section.cpp`, `lib/Epub/Epub/BookMetadataCache.cpp`
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
-- `book.bin`: **Version 5** (metadata structure)
-- `section.bin`: **Version 12** (layout structure)
+- `book.bin`: **Version 6** (metadata structure)
+- `section.bin`: **per-flavor** — Latin builds **Version 30**, Chinese builds (`ENABLE_CHINESE_VERSION`) **Version 31**. The two flavors emit different word streams (per-character CJK tokenization), so each carries an independent counter; numbers stay distinct and above every previously-shipped value so a firmware flavor swap never reuses the other's cache.
 
 **Version Increment Rules**:
 1. **ALWAYS increment version** BEFORE changing binary structure
@@ -67,7 +67,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Example** (incrementing section format version):
 ```cpp
 // lib/Epub/Epub/Section.cpp
-static constexpr uint8_t SECTION_FILE_VERSION = 13;  // Was 12, now 13
+static constexpr uint8_t SECTION_FILE_VERSION = 30;  // bump before any layout change
 
 // Add new field to structure
 struct PageLine {

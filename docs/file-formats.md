@@ -2,7 +2,7 @@
 
 ## `book.bin`
 
-### Version 5
+### Version 6
 
 ImHex Pattern:
 
@@ -105,12 +105,19 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 24
+### Version 30
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **27**. The byte layout is identical to the Latin version below; only
+> currently **31**. The byte layout is identical to the Latin version below; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
+>
+> Both counters were bumped in the upstream-master sync that merged epub bookmarks
+> (#1337), RTL (#1700), and `<sup>`/`<sub>` (#2131): those change the serialized
+> word-stream/style content, so pre-sync caches are auto-invalidated on mismatch.
+> The numbers are kept above every previously-shipped value (Latin 24/26,
+> Chinese 27/29, upstream single 25) so a firmware flavor swap never reads the
+> other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the source of truth.
 
 ImHex Pattern:
 

@@ -333,10 +333,7 @@ STR_ADD_SERVER: "Afegeix servidor"
 STR_SERVER_NAME: "Nom del servidor"
 STR_NO_SERVERS: "No hi ha servidors OPDS configurats"
 STR_DELETE_SERVER: "Suprimeix el servidor"
-<<<<<<< HEAD
 STR_DELETE_CONFIRM: "Voleu suprimir aquest servidor?"
-=======
->>>>>>> upstream/master
 STR_OPDS_SERVERS: "Servidors OPDS"
 STR_MANAGE_FONTS: "Gestiona els tipus de lletra"
 STR_FONT_BROWSER: "Navegador de tipus de lletra"
@@ -345,7 +342,6 @@ STR_NO_FONTS_AVAILABLE: "No hi ha tipus de lletra disponibles"
 STR_FONT_INSTALLED: "Tipus de lletra instal·lat!"
 STR_FONT_INSTALL_FAILED: "Ha fallat la instal·lació del tipus de lletra"
 STR_INSTALLED: "Instal·lat"
-<<<<<<< HEAD
 STR_CONFIRM_DOWNLOAD_PROMPT: "Voleu descarregar?"
 STR_SD_CARD_FULL: "Espai insuficient a la targeta SD"
 STR_FILES_LABEL: "Fitxers: "
@@ -354,10 +350,6 @@ STR_REDOWNLOAD: "Torna a descarregar"
 STR_DOWNLOAD_ALL: "Descarrega-ho tot"
 STR_UPDATE_ALL: "Actualitza-ho tot"
 STR_ALL_FONTS_INSTALLED: "Tots els tipus de lletra estan instal·lats!"
-=======
-STR_DOWNLOAD_ALL: "Descarrega-ho tot"
-STR_UPDATE_ALL: "Actualitza-ho tot"
->>>>>>> upstream/master
 STR_UPDATE_AVAILABLE: "Actualitza"
 STR_CRASH_TITLE: "Bloqueig del sistema"
 STR_CRASH_DESCRIPTION: "S'ha desat un informe detallat a crash_report.txt. Incloeu aquest fitxer a l'informe d'errors."

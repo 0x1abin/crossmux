@@ -646,8 +646,7 @@ void ParsedText::applyParagraphIndent() {
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) - don't use fallback EmSpace
     // The actual indent positioning is handled in extractLine()
-<<<<<<< HEAD
-  } else if (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left) {
+  } else if (isNaturalAlign) {
     // No CSS text-indent defined - use a wide-space fallback for visual indent.
 #ifdef ENABLE_CHINESE_VERSION
     // U+3000 IDEOGRAPHIC SPACE: CJK 排版标准全角空格，与汉字等宽；CJK 字体
@@ -656,10 +655,6 @@ void ParsedText::applyParagraphIndent() {
     words.front().insert(0, "\xe3\x80\x80");
 #else
     // U+2003 EM SPACE: 拉丁字体内置 glyph。
-=======
-  } else if (isNaturalAlign) {
-    // No CSS text-indent defined - use EmSpace fallback for visual indent
->>>>>>> upstream/master
     words.front().insert(0, "\xe2\x80\x83");
 #endif
   }

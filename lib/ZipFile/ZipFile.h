@@ -72,12 +72,6 @@ class ZipFile {
   bool readFileToStream(const char* filename, Print& out, size_t chunkSize);
 
   template <typename F>
-<<<<<<< HEAD
-  void enumerateFilePaths(F&& callback) const {
-    for (const auto& entry : fileStatSlimCache) {
-      callback(std::string_view{entry.first});
-    }
-=======
   bool enumerateFilePaths(F&& callback) {
     if (!fileStatSlimCache.empty()) {
       for (const auto& entry : fileStatSlimCache) {
@@ -131,6 +125,5 @@ class ZipFile {
       close();
     }
     return true;
->>>>>>> upstream/master
   }
 };
