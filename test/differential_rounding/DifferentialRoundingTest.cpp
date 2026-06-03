@@ -101,6 +101,7 @@ int absoluteGap(int32_t startFP, int32_t advanceFP, int32_t kernFP) {
   return fp4::toPixel(nextFP) - fp4::toPixel(startFP);
 }
 
+<<<<<<< HEAD
 // --- SD-card-font advance measurement models (ASCII-only test strings) ---
 //
 // These three helpers reproduce, in pure fixed-point, the three ways the
@@ -157,6 +158,8 @@ int renderAdvanceWithKern(const char* s) {
   return widthPx;
 }
 
+=======
+>>>>>>> upstream/master
 }  // namespace
 
 // ============================================================================
@@ -326,6 +329,7 @@ TEST(EpdFont, HeightCalculation) {
   EXPECT_EQ(textHeight("T"), 12);
   EXPECT_EQ(textHeight("To"), 12);
   EXPECT_EQ(textHeight("oo"), 8);
+<<<<<<< HEAD
 }
 
 // ============================================================================
@@ -365,4 +369,6 @@ TEST(SdCardMeasure, MeasureNeverNarrowerThanRenderWithKern) {
   for (const char* s : {"To", "Ta", "oo", "ooo", "Too", "oa", "xo", "Taoo"}) {
     EXPECT_GE(newSdMeasure(s), renderAdvanceWithKern(s)) << "s=" << s;
   }
+=======
+>>>>>>> upstream/master
 }

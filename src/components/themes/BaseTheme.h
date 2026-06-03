@@ -97,6 +97,7 @@ struct ThemeMetrics {
   int textFieldLineEndOffset;
 };
 
+<<<<<<< HEAD
 enum UIIcon {
   Folder,
   Text,
@@ -122,6 +123,9 @@ enum UIIcon {
   Standby,
   Game2048,
 };
+=======
+enum UIIcon { None = 0, Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Wifi, Hotspot, Bookmark };
+>>>>>>> upstream/master
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };
 
@@ -206,6 +210,7 @@ class BaseTheme {
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
+  virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                         const std::function<std::string(int index)>& rowTitle,
                         const std::function<std::string(int index)>& rowSubtitle = nullptr,
