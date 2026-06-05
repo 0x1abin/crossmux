@@ -42,6 +42,7 @@ uint32_t countCurrentBookmarksFromStats() {
 uint32_t findLongestSessionFromStats() {
   uint32_t maxSessionMs = 0;
   for (const auto& book : READING_STATS.getBooks()) {
+    // cppcheck-suppress useStlAlgorithm
     maxSessionMs = std::max(maxSessionMs, book.lastSessionMs);
   }
   return maxSessionMs;

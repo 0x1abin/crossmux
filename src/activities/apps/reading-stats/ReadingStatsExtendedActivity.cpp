@@ -32,14 +32,15 @@ struct ChartBar {
   uint64_t readingMs = 0;
 };
 
-void drawMetricCard(GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
+void drawMetricCard(const GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
                     const bool showCheck = false) {
   AppMetricCard::Options options;
   options.showCheck = showCheck;
   AppMetricCard::draw(renderer, rect, label, value, options);
 }
 
-void drawRecentWindowCard(GfxRenderer& renderer, const Rect& rect, const char* periodLabel, const std::string& value) {
+void drawRecentWindowCard(const GfxRenderer& renderer, const Rect& rect, const char* periodLabel,
+                          const std::string& value) {
   drawMetricCard(renderer, rect, periodLabel, value);
 }
 
@@ -147,6 +148,7 @@ std::vector<ChartBar> getRecentDailyReadingBars() {
                                     : 0;
     bars[index].bottomLabel = formatDayLabel(dayOrdinal);
     for (const auto& day : readingDays) {
+      // cppcheck-suppress useStlAlgorithm
       if (day.dayOrdinal == dayOrdinal) {
         bars[index].readingMs = day.readingMs;
         bars[index].topLabel = formatMinutesLabel(day.readingMs);
@@ -209,7 +211,7 @@ int getMaxScrollOffset(const GfxRenderer& renderer, const ThemeMetrics& metrics)
   return std::max(0, getScrollableContentBottom(renderer, metrics) - visibleHeight);
 }
 
-void drawReadingChart(GfxRenderer& renderer, const Rect& rect, const std::vector<ChartBar>& bars,
+void drawReadingChart(const GfxRenderer& renderer, const Rect& rect, const std::vector<ChartBar>& bars,
                       const bool rotateBottomLabels) {
   if (bars.empty()) {
     return;
@@ -235,6 +237,7 @@ void drawReadingChart(GfxRenderer& renderer, const Rect& rect, const std::vector
   const int chartLeft = rect.x + (rect.width - usedWidth) / 2;
   uint64_t maxValue = 1;
   for (const auto& bar : bars) {
+    // cppcheck-suppress useStlAlgorithm
     maxValue = std::max(maxValue, bar.readingMs);
   }
 

@@ -6,7 +6,7 @@
 #include "fontIds.h"
 
 namespace {
-void drawCheckBadge(GfxRenderer& renderer, const int x, const int y) {
+void drawCheckBadge(const GfxRenderer& renderer, const int x, const int y) {
   renderer.fillRect(x, y, 18, 18, true);
   renderer.drawLine(x + 4, y + 10, x + 7, y + 13, 2, false);
   renderer.drawLine(x + 7, y + 13, x + 13, y + 5, 2, false);
@@ -15,7 +15,7 @@ void drawCheckBadge(GfxRenderer& renderer, const int x, const int y) {
 
 namespace AppMetricCard {
 
-void draw(GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
+void draw(const GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
           const Options& options) {
   renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   renderer.drawRect(rect.x, rect.y, rect.width, rect.height);

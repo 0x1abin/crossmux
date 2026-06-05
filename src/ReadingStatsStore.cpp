@@ -29,6 +29,7 @@ bool countsForStreak(const ReadingDayStats& day) { return day.readingMs >= getDa
 std::string toLowerAscii(std::string value) {
   for (char& c : value) {
     if (c >= 'A' && c <= 'Z') {
+      // cppcheck-suppress useStlAlgorithm
       c = static_cast<char>(c - 'A' + 'a');
     }
   }
@@ -796,9 +797,9 @@ bool ReadingStatsStore::updateBookMetadata(const std::string& path, const std::s
   return changed;
 }
 
-bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::string& newPath,
-                                       const std::string& title, const std::string& author,
-                                       const std::string& coverBmpPath, const std::string& bookId) {
+bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::string& newPath, const std::string& title,
+                                       const std::string& author, const std::string& coverBmpPath,
+                                       const std::string& bookId) {
   const std::string normalizedNewPath = BookIdentity::normalizePath(newPath);
   if (normalizedNewPath.empty() || shouldIgnorePath(normalizedNewPath)) {
     return false;
@@ -983,6 +984,7 @@ uint64_t ReadingStatsStore::getRecentReadingMs(const uint32_t days) const {
   uint64_t totalMs = 0;
   for (const auto& day : readingDays) {
     if (day.dayOrdinal >= startDayOrdinal && day.dayOrdinal <= summaryCache.referenceDayOrdinal) {
+      // cppcheck-suppress useStlAlgorithm
       totalMs += day.readingMs;
     }
   }

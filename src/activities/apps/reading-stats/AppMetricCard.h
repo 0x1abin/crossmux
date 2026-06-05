@@ -29,7 +29,7 @@ struct Options {
   LabelMode labelMode = LabelMode::Wrap;
 };
 
-void draw(GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
+void draw(const GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
           const Options& options = Options{});
 
 }  // namespace AppMetricCard

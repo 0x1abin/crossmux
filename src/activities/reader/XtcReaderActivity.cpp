@@ -14,17 +14,17 @@
 
 #include <algorithm>
 
+#include "AchievementsStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
-#include "AchievementsStore.h"
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"
-#include "util/AchievementPopupUtils.h"
 #include "fontIds.h"
+#include "util/AchievementPopupUtils.h"
 
 void XtcReaderActivity::onEnter() {
   Activity::onEnter();

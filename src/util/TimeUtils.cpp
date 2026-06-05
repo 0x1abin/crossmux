@@ -12,7 +12,6 @@ constexpr uint32_t VALID_CLOCK_THRESHOLD = 1704067200UL;  // 2024-01-01 UTC
 // clockUtcOffsetQ is biased quarter-hours: 48 = UTC+0, 0 = UTC-12:00, 104 = UTC+14:00.
 int32_t localOffsetSeconds() {
   int offsetQ = static_cast<int>(SETTINGS.clockUtcOffsetQ);
-  if (offsetQ < 0) offsetQ = 48;
   if (offsetQ > 104) offsetQ = 48;
   return (offsetQ - 48) * 15 * 60;
 }
@@ -99,7 +98,8 @@ std::string TimeUtils::formatDate(const uint32_t epochSeconds, const bool append
   return formatIsoDate(year, month, day, appendBang);
 }
 
-std::string TimeUtils::formatDateParts(const int year, const unsigned month, const unsigned day, const bool appendBang) {
+std::string TimeUtils::formatDateParts(const int year, const unsigned month, const unsigned day,
+                                       const bool appendBang) {
   return formatIsoDate(year, month, day, appendBang);
 }
 

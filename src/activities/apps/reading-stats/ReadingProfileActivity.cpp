@@ -121,7 +121,7 @@ bool intersectsVertical(const int top, const int height, const int viewportTop, 
   return bottom > viewportTop && top < viewportBottom;
 }
 
-void fillPolygonDither(GfxRenderer& renderer, const int* xPoints, const int* yPoints, const int numPoints,
+void fillPolygonDither(const GfxRenderer& renderer, const int* xPoints, const int* yPoints, const int numPoints,
                        const Color color) {
   if (numPoints < 3) {
     return;
@@ -166,14 +166,14 @@ void fillPolygonDither(GfxRenderer& renderer, const int* xPoints, const int* yPo
   }
 }
 
-std::vector<std::string> getMetricCardLabelLines(GfxRenderer& renderer, const int maxWidth, const StrId labelId) {
+std::vector<std::string> getMetricCardLabelLines(const GfxRenderer& renderer, const int maxWidth, const StrId labelId) {
   if (labelId == StrId::STR_NONE_OPT) {
     return {};
   }
   return renderer.wrappedText(UI_10_FONT_ID, I18N.get(labelId), maxWidth, 3, EpdFontFamily::REGULAR);
 }
 
-void drawCompactMetricCard(GfxRenderer& renderer, const Rect& rect, const std::string& value,
+void drawCompactMetricCard(const GfxRenderer& renderer, const Rect& rect, const std::string& value,
                            const std::vector<std::string>& labelLines) {
   renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
@@ -207,14 +207,15 @@ int getSectionCardHeight(const GfxRenderer& renderer, const ReadingProfileMetric
   return metricCardHeight(renderer, static_cast<int>(maxLines), CARD_VALUE_LABEL_GAP);
 }
 
-void drawDiamond(GfxRenderer& renderer, const int centerX, const int centerY, const int radius, const bool state) {
+void drawDiamond(const GfxRenderer& renderer, const int centerX, const int centerY, const int radius,
+                 const bool state) {
   renderer.drawLine(centerX, centerY - radius, centerX + radius, centerY, state);
   renderer.drawLine(centerX + radius, centerY, centerX, centerY + radius, state);
   renderer.drawLine(centerX, centerY + radius, centerX - radius, centerY, state);
   renderer.drawLine(centerX - radius, centerY, centerX, centerY - radius, state);
 }
 
-void drawAlignedTextLine(GfxRenderer& renderer, const int fontId, const int x, const int y, const int width,
+void drawAlignedTextLine(const GfxRenderer& renderer, const int fontId, const int x, const int y, const int width,
                          const char* text, const AxisLabelAlign align, const bool black = true,
                          const EpdFontFamily::Style style = EpdFontFamily::REGULAR) {
   const int textWidth = renderer.getTextWidth(fontId, text, style);
@@ -234,7 +235,7 @@ void drawAlignedTextLine(GfxRenderer& renderer, const int fontId, const int x, c
   renderer.drawText(fontId, drawX, y, text, black, style);
 }
 
-void drawAxisSummary(GfxRenderer& renderer, const int x, const int y, const int width, const int score,
+void drawAxisSummary(const GfxRenderer& renderer, const int x, const int y, const int width, const int score,
                      const std::vector<std::string>& labelLines, const AxisLabelAlign align) {
   const std::string scoreText = std::to_string(score);
   drawAlignedTextLine(renderer, UI_12_FONT_ID, x, y, width, scoreText.c_str(), align, true, EpdFontFamily::BOLD);
@@ -261,7 +262,8 @@ StrId getSectionDescriptionId(const StrId labelId) {
   }
 }
 
-std::vector<std::string> getSectionDescriptionLines(GfxRenderer& renderer, const int maxWidth, const StrId labelId) {
+std::vector<std::string> getSectionDescriptionLines(const GfxRenderer& renderer, const int maxWidth,
+                                                    const StrId labelId) {
   const StrId descriptionId = getSectionDescriptionId(labelId);
   if (descriptionId == StrId::STR_NONE_OPT) {
     return {};
@@ -269,7 +271,7 @@ std::vector<std::string> getSectionDescriptionLines(GfxRenderer& renderer, const
   return renderer.wrappedText(UI_10_FONT_ID, I18N.get(descriptionId), maxWidth, 4, EpdFontFamily::REGULAR);
 }
 
-std::vector<std::string> getAxisLabelLines(GfxRenderer& renderer, const int maxWidth, const StrId labelId) {
+std::vector<std::string> getAxisLabelLines(const GfxRenderer& renderer, const int maxWidth, const StrId labelId) {
   if (labelId == StrId::STR_NONE_OPT) {
     return {};
   }

@@ -17,6 +17,7 @@
 #include <iterator>
 #include <limits>
 
+#include "AchievementsStore.h"
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -29,7 +30,6 @@
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
-#include "AchievementsStore.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
@@ -119,7 +119,7 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
 
 // Resolve the TOC (chapter) title containing a spine index, for the Reading
 // Analytics per-book detail view. Returns "" when no TOC entry matches.
-std::string getStatsChapterTitle(Epub& epub, const int spineIndex) {
+std::string getStatsChapterTitle(const Epub& epub, const int spineIndex) {
   int tocIndex = epub.getTocIndexForSpineIndex(spineIndex);
   if (tocIndex < 0) {
     int nearestTocIndex = -1;

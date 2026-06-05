@@ -94,6 +94,7 @@ TimelineDayEntry buildTimelineDayEntry(const uint32_t dayOrdinal) {
   TimelineDayEntry entry;
   entry.dayOrdinal = dayOrdinal;
   for (const auto& day : READING_STATS.getReadingDays()) {
+    // cppcheck-suppress useStlAlgorithm
     if (day.dayOrdinal == dayOrdinal) {
       entry.totalReadingMs = day.readingMs;
       break;

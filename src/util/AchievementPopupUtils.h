@@ -8,7 +8,7 @@
 #include "AchievementsStore.h"
 #include "components/UITheme.h"
 
-inline bool showPendingAchievementPopups(GfxRenderer& renderer, const unsigned long delayMs = 700) {
+inline bool showPendingAchievementPopups(const GfxRenderer& renderer, const unsigned long delayMs = 700) {
   if (!SETTINGS.achievementPopups) {
     ACHIEVEMENTS.clearPendingUnlocks();
     return false;
