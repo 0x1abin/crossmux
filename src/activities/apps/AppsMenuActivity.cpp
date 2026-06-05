@@ -2,9 +2,11 @@
 
 #include <I18n.h>
 
+#include <algorithm>
 #include <string>
 
 #include "../../components/UITheme.h"
+#include "../../util/PaginationDots.h"
 
 namespace {
 
@@ -18,6 +20,7 @@ struct AppEntry {
 };
 
 constexpr AppEntry kAppEntries[] = {
+    {StrId::STR_READING_STATS, UIIcon::Library, &ActivityManager::goToReadingStatsMenu},
     {StrId::STR_SUDOKU_TITLE, UIIcon::Sudoku, &ActivityManager::goToSudoku},
     {StrId::STR_GOMOKU_TITLE, UIIcon::Gomoku, &ActivityManager::goToGomoku},
 #ifdef ENABLE_CHINESE_VERSION
@@ -73,10 +76,28 @@ void AppsMenuActivity::render(RenderLock&&) {
   const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
+  // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
+  const int spacing = metrics.menuSpacing / 2;
+  const int rowStep = metrics.menuRowHeight + spacing;
+  // Number of rows that fit: n rows occupy n*rowHeight + (n-1)*spacing <= listH.
+  const int perPage = std::max(1, (listH + spacing) / rowStep);
+  const int totalPages = (kAppCount + perPage - 1) / perPage;
+  const int page = selected / perPage;
+  const int pageStart = page * perPage;
+  const int pageCount = std::min(perPage, kAppCount - pageStart);
+
+  // Render only the current page's slice through the shared menu (top-aligned in rect).
   GUI.drawButtonMenu(
-      renderer, Rect{0, listY, sw, listH}, kAppCount, selected,
-      [](int i) { return std::string(I18n::getInstance().get(kAppEntries[i].titleId)); },
-      [](int i) { return kAppEntries[i].icon; });
+      renderer, Rect{0, listY, sw, listH}, pageCount, selected - pageStart,
+      [pageStart](int i) { return std::string(I18n::getInstance().get(kAppEntries[i + pageStart].titleId)); },
+      [pageStart](int i) { return kAppEntries[i + pageStart].icon; }, spacing);
+
+  // Standby-style page dots, sitting above the list bottom so they stay clear of the
+  // button hints below (the last menu row never reaches this far down).
+  if (totalPages > 1) {
+    const int dotsY = listY + listH - 8;
+    drawPaginationDots(renderer, sw, dotsY, totalPages, page);
+  }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

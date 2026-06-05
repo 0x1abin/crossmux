@@ -12,6 +12,7 @@
 
 #include <string>
 
+#include "../../../util/PaginationDots.h"
 #include "../../ActivityResult.h"
 #include "../../network/WifiSelectionActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
@@ -91,26 +92,12 @@ uint8_t rankOfAvailableFace(int sw, int sh, uint8_t faceIdx) {
 bool g_promptedForWifiThisSession = false;
 
 // Bottom-center page indicator dots. One dot per face, filled for the current
-// face. Drawn only in Normal mode — hidden once we go Immersive.
-constexpr int kDotDiameter = 6;
-constexpr int kDotSpacing = 14;      // gap between dot centers
+// face. Drawn only in Normal mode — hidden once we go Immersive. Shares the dot
+// style with the Apps menu via drawPaginationDots().
 constexpr int kDotBottomInset = 24;  // distance from bottom edge to top of dots
 
 void drawFaceDots(const GfxRenderer& renderer, int sw, int sh, uint8_t total, uint8_t current) {
-  if (total == 0) return;
-  const int totalWidth = total * kDotDiameter + (total - 1) * kDotSpacing;
-  const int startX = (sw - totalWidth) / 2;
-  const int y = sh - kDotBottomInset;
-  for (uint8_t i = 0; i < total; ++i) {
-    const int x = startX + i * (kDotDiameter + kDotSpacing);
-    if (i == current) {
-      renderer.fillRoundedRect(x, y, kDotDiameter, kDotDiameter, kDotDiameter / 2, Color::Black);
-    } else {
-      // 1 px outlined dot for inactive faces.
-      renderer.drawRoundedRect(x, y, kDotDiameter, kDotDiameter, /*lineWidth=*/1, kDotDiameter / 2,
-                               /*state=*/true);
-    }
-  }
+  drawPaginationDots(renderer, sw, sh - kDotBottomInset, total, current);
 }
 
 }  // namespace

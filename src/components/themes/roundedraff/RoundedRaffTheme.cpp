@@ -193,12 +193,12 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
 void RoundedRaffTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                       const std::function<std::string(int index)>& buttonLabel,
-                                      const std::function<UIIcon(int index)>& rowIcon) const {
+                                      const std::function<UIIcon(int index)>& rowIcon, int rowSpacing) const {
   (void)rowIcon;
   const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
   const int rowX = rect.x + sidePadding;
   const int rowHeight = renderer.getLineHeight(kTitleFontId) + 20;  // 10px top + 10px bottom
-  const int rowGap = kSelectableRowGap;
+  const int rowGap = rowSpacing >= 0 ? rowSpacing : kSelectableRowGap;
   const int rowStep = rowHeight + rowGap;
   const int pageItems = std::max(1, rect.height / rowStep);
   const int safeSelectedIndex = std::max(0, selectedIndex);

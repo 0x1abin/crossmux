@@ -80,7 +80,7 @@ class RoundedRaffTheme : public BaseTheme {
                            std::function<bool()> storeCoverBuffer) const override;
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
-                      const std::function<UIIcon(int index)>& rowIcon) const override;
+                      const std::function<UIIcon(int index)>& rowIcon, int rowSpacing = -1) const override;
   void drawTextField(const GfxRenderer& renderer, Rect rect, int textWidth, bool cursorMode = false,
                      int contentStartX = 0, int contentWidth = 0) const override;
   void drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const char* label, bool isSelected,
