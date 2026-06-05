@@ -86,6 +86,7 @@ file(GLOB_RECURSE CROSSPOINT_LIB
     "${REPO_ROOT}/lib/JpegToBmpConverter/*.cpp"
     "${REPO_ROOT}/lib/JsonParser/*.cpp"
     "${REPO_ROOT}/lib/Logging/*.cpp"
+    "${REPO_ROOT}/lib/MiniBidi/*.cpp"
     "${REPO_ROOT}/lib/OpdsParser/*.cpp"
     "${REPO_ROOT}/lib/PngToBmpConverter/*.cpp"
     "${REPO_ROOT}/lib/Serialization/*.cpp"
@@ -125,9 +126,18 @@ list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Serialization/ObfuscationUtils")
 
 # KOReaderSync credential store referenced via the KOREADER_STORE singleton in main.cpp.
 # KOReaderJsonIO.cpp implements the load/save backing the store and must link with it.
+# KOReaderDocumentId.cpp backs BookIdentity::calculateContentBookId (reading-stats book
+# identity); it only depends on HalStorage/Logging/MD5Builder, all available on host.
+# ProgressMapper.cpp + ChapterXPathResolver.cpp map saved XPath/percent positions to
+# CrossPoint pages — now used by the bookmarks UI (not just KOReader sync). Their deps
+# (GfxRenderer/Epub/Utf8/XmlParserUtils/expat) are all host-available, so compile them for
+# real instead of stubbing, otherwise bookmark navigation returns empty positions.
 list(APPEND CROSSPOINT_LIB
     ${REPO_ROOT}/lib/KOReaderSync/KOReaderCredentialStore.cpp
     ${REPO_ROOT}/lib/KOReaderSync/KOReaderJsonIO.cpp
+    ${REPO_ROOT}/lib/KOReaderSync/KOReaderDocumentId.cpp
+    ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
+    ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp
 )
 
 # HAL backends for the simulator. All implementations live in hal/ and compile for both the
@@ -151,6 +161,7 @@ set(VENDOR_C
     ${REPO_ROOT}/lib/expat/xmlrole.c
     ${REPO_ROOT}/lib/expat/xmltok.c
     ${REPO_ROOT}/lib/uzlib/src/tinflate.c
+    ${REPO_ROOT}/lib/MiniBidi/minibidi.c
     ${qrcode_SOURCE_DIR}/src/qrcode.c
 )
 
@@ -215,6 +226,7 @@ target_include_directories(crosspoint_simulator PRIVATE
     ${REPO_ROOT}/lib/hal
     ${REPO_ROOT}/lib/Logging
     ${REPO_ROOT}/lib/Memory
+    ${REPO_ROOT}/lib/MiniBidi
     ${REPO_ROOT}/lib/I18n
     ${REPO_ROOT}/lib/GfxRenderer
     ${REPO_ROOT}/lib/EpdFont

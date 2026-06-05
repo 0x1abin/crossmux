@@ -341,6 +341,20 @@ unsigned long CrossPointSettings::getSleepTimeoutMs() const {
   return static_cast<unsigned long>(minutes) * 60UL * 1000UL;
 }
 
+uint64_t CrossPointSettings::getDailyGoalMs() const {
+  switch (dailyGoalTarget) {
+    case DAILY_GOAL_15_MIN:
+      return 15ULL * 60ULL * 1000ULL;
+    case DAILY_GOAL_30_MIN:
+    default:
+      return 30ULL * 60ULL * 1000ULL;
+    case DAILY_GOAL_45_MIN:
+      return 45ULL * 60ULL * 1000ULL;
+    case DAILY_GOAL_60_MIN:
+      return 60ULL * 60ULL * 1000ULL;
+  }
+}
+
 int CrossPointSettings::getRefreshFrequency() const {
   switch (refreshFrequency) {
     case REFRESH_1:

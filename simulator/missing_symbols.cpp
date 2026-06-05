@@ -152,14 +152,10 @@ void selfTest() {}
 }  // namespace obfuscation
 
 // =============================================================================
-// ProgressMapper (KOReader sync excluded except credential store)
+// ProgressMapper is now compiled for real (see CMakeLists.txt) because the
+// bookmarks UI maps saved XPath/percent positions to pages via toCrossPoint /
+// toSavedProgress. Its deps are all host-available, so no stub is needed here.
 // =============================================================================
-
-#include "ProgressMapper.h"
-
-KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>&, const CrossPointPosition&) {
-  return KOReaderPosition{};
-}
 
 // =============================================================================
 // Excluded activity vtables

@@ -49,6 +49,11 @@ class GfxRenderer {
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
   uint16_t panelWidthBytes = HalDisplay::DISPLAY_WIDTH_BYTES;
   uint32_t frameBufferSize = HalDisplay::BUFFER_SIZE;
+  // One-shot refresh-mode override consumed by the next displayBuffer() call.
+  // Lets an activity force e.g. a HALF_REFRESH for a single frame (used by the
+  // reading-stats screens) without threading the mode through every render path.
+  mutable bool nextRefreshOverridePending = false;
+  mutable HalDisplay::RefreshMode nextRefreshOverride = HalDisplay::FAST_REFRESH;
   std::vector<uint8_t*> bwBufferChunks;
   std::map<int, EpdFontFamily> fontMap;
   // Mutable because ensureSdCardFontReady() is const (called from layout code
@@ -73,6 +78,20 @@ class GfxRenderer {
   mutable int _stripY0 = 0;
   mutable int _stripRows = 0;
   mutable bool _stripActive = false;
+
+  // Logical-coordinate clip rectangle (scissor). When active, drawPixel()
+  // silently drops pixels whose *logical* (x, y) falls outside [clipX0, clipX1)
+  // x [clipY0, clipY1) — without logging "Outside range". Used by scrolling
+  // activities that deliberately draw content extending past their viewport.
+  // This is independent of and orthogonal to the grayscale strip band above:
+  // the clip is in logical (pre-rotate) coords, the strip band in physical
+  // (post-rotate) rows. Default off => existing rendering is byte-for-byte
+  // unchanged. Prefer the ClipScope RAII guard over the bare setters.
+  mutable bool clipActive = false;
+  mutable int clipX0 = 0;
+  mutable int clipY0 = 0;
+  mutable int clipX1 = 0;
+  mutable int clipY1 = 0;
 
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
@@ -129,6 +148,13 @@ class GfxRenderer {
   int getScreenWidth() const;
   int getScreenHeight() const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  // Force the next displayBuffer() to use `mode`, overriding its argument once.
+  void requestNextRefresh(const HalDisplay::RefreshMode mode) const {
+    nextRefreshOverride = mode;
+    nextRefreshOverridePending = true;
+  }
+  void clearNextRefreshOverride() const { nextRefreshOverridePending = false; }
+  void requestNextFullRefresh() const { requestNextRefresh(HalDisplay::FULL_REFRESH); }
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   // void displayWindow(int x, int y, int width, int height) const;
   void invertScreen() const;
@@ -159,6 +185,33 @@ class GfxRenderer {
   uint8_t* getWriteTarget() const { return _stripActive ? _stripBuf : frameBuffer; }
   int getWriteOriginY() const { return _stripActive ? _stripY0 : 0; }
   int getWriteRows() const { return _stripActive ? _stripRows : panelHeight; }
+
+  // Logical-coordinate clip rectangle (scissor). While set, drawPixel() drops
+  // pixels outside [x, x+width) x [y, y+height) without logging. Coordinates are
+  // logical (pre-rotation), matching what activities pass to draw calls. Prefer
+  // ClipScope below; bare setters exist for symmetry with the strip API.
+  void setClipRect(const int x, const int y, const int width, const int height) const {
+    clipX0 = x;
+    clipY0 = y;
+    clipX1 = x + width;
+    clipY1 = y + height;
+    clipActive = true;
+  }
+  void clearClipRect() const { clipActive = false; }
+
+  // RAII guard for setClipRect()/clearClipRect(). Restores the clip on scope
+  // exit (including early returns), so a forgotten clear can never silently
+  // clip a later frame or activity. Non-nesting: it clears on destruction
+  // rather than restoring a previous rect (sufficient for the flat use here).
+  struct ClipScope {
+    const GfxRenderer& renderer;
+    ClipScope(const GfxRenderer& r, const int x, const int y, const int width, const int height) : renderer(r) {
+      renderer.setClipRect(x, y, width, height);
+    }
+    ~ClipScope() { renderer.clearClipRect(); }
+    ClipScope(const ClipScope&) = delete;
+    ClipScope& operator=(const ClipScope&) = delete;
+  };
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;

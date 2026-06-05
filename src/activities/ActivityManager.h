@@ -83,6 +83,7 @@ class ActivityManager {
   void goToFileTransfer();
   void goToSettings();
   void goToUglyAvatar();
+  void goToReadingStatsMenu();
   void goToFileBrowser(std::string path = {});
   void goToRecentBooks();
   void goToBrowser();

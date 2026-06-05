@@ -11,10 +11,13 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "AchievementsStore.h"
 #include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/AchievementPopupUtils.h"
 
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
@@ -40,6 +43,7 @@ void TxtReaderActivity::onEnter() {
   APP_STATE.openEpubPath = filePath;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(filePath, fileName, "", "");
+  READING_STATS.beginSession(filePath, fileName, "", "", 0, "", 0);
 
   // Trigger first update
   requestUpdate();
@@ -55,10 +59,15 @@ void TxtReaderActivity::onExit() {
   currentPageLines.clear();
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  READING_STATS.endSession();
+  ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
+  showPendingAchievementPopups(renderer);
   txt.reset();
 }
 
 void TxtReaderActivity::loop() {
+  READING_STATS.tickActiveSession();
+
   // Long press BACK (1s+) goes to file selection
   if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= ReaderUtils::GO_HOME_MS) {
     activityManager.goToFileBrowser(txt ? txt->getPath() : "");
@@ -76,6 +85,8 @@ void TxtReaderActivity::loop() {
   if (!prevTriggered && !nextTriggered) {
     return;
   }
+
+  READING_STATS.noteActivity();
 
   if (prevTriggered && currentPage > 0) {
     currentPage--;
@@ -421,6 +432,13 @@ void TxtReaderActivity::renderStatusBar() const {
 }
 
 void TxtReaderActivity::saveProgress() const {
+  int progressPercent = totalPages > 0 ? (currentPage + 1) * 100 / totalPages : 0;
+  if (progressPercent > 100) {
+    progressPercent = 100;
+  }
+  READING_STATS.updateProgress(static_cast<uint8_t>(progressPercent), totalPages > 0 && currentPage + 1 >= totalPages,
+                               "", static_cast<uint8_t>(progressPercent));
+
   HalFile f;
   if (Storage.openFileForWrite("TRS", txt->getCachePath() + "/progress.bin", f)) {
     uint8_t data[4];

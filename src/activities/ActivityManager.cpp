@@ -20,6 +20,7 @@
 #endif
 #include "apps/gomoku/GomokuMenuActivity.h"
 #include "apps/minesweeper/MinesweeperMenuActivity.h"
+#include "apps/reading-stats/ReadingStatsMenuActivity.h"
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
 #include "boot_sleep/BootActivity.h"
@@ -246,6 +247,10 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToApps() { replaceActivity(std::make_unique<AppsMenuActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToReadingStatsMenu() {
+  replaceActivity(std::make_unique<ReadingStatsMenuActivity>(renderer, mappedInput));
+}
 
 void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }
 

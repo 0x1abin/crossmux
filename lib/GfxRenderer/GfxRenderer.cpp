@@ -327,6 +327,14 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
+  // Logical-coordinate clip (scissor): pixels a scrolling activity intentionally
+  // draws outside its viewport are dropped silently — expected overflow, not a
+  // bug. Checked before the rotate so it also saves the rotation work. Default
+  // clipActive == false keeps every existing caller on the original fast path.
+  if (clipActive && (x < clipX0 || x >= clipX1 || y < clipY0 || y >= clipY1)) {
+    return;
+  }
+
   int phyX = 0;
   int phyY = 0;
 
@@ -1183,7 +1191,12 @@ void GfxRenderer::invertScreen() const {
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
-  display.displayBuffer(refreshMode, fadingFix);
+  HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
+  if (nextRefreshOverridePending) {
+    effectiveRefreshMode = nextRefreshOverride;
+    nextRefreshOverridePending = false;
+  }
+  display.displayBuffer(effectiveRefreshMode, fadingFix);
 }
 
 std::string GfxRenderer::truncatedText(const int fontId, const char* text, const int maxWidth,

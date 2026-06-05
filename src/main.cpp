@@ -21,8 +21,10 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
+#include "AchievementsStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
@@ -464,6 +466,8 @@ void setup() {
   SETTINGS.loadFromFile();
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
+  READING_STATS.loadFromFile();
+  ACHIEVEMENTS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();

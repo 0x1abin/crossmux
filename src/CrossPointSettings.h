@@ -172,6 +172,16 @@ class CrossPointSettings {
     QUICK_RESUME_SLEEP_SCREEN_COUNT
   };
 
+  // Daily reading goal target (used by the Reading Analytics suite to mark
+  // goal-met days, streaks and the reading profile).
+  enum DAILY_GOAL_TARGET {
+    DAILY_GOAL_15_MIN = 0,
+    DAILY_GOAL_30_MIN = 1,
+    DAILY_GOAL_45_MIN = 2,
+    DAILY_GOAL_60_MIN = 3,
+    DAILY_GOAL_TARGET_COUNT
+  };
+
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -267,6 +277,12 @@ class CrossPointSettings {
   uint8_t language = defaultLanguageIndex();
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
+  // Reading Analytics suite settings.
+  // Daily reading goal target (DAILY_GOAL_TARGET enum index).
+  uint8_t dailyGoalTarget = DAILY_GOAL_30_MIN;
+  // Achievement tracking + unlock popups (1 = enabled, 0 = disabled).
+  uint8_t achievementsEnabled = 1;
+  uint8_t achievementPopups = 1;
 
   ~CrossPointSettings() = default;
 
@@ -305,6 +321,8 @@ class CrossPointSettings {
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
+  // Daily reading goal in milliseconds, derived from dailyGoalTarget.
+  uint64_t getDailyGoalMs() const;
 };
 
 // Helper macro to access settings

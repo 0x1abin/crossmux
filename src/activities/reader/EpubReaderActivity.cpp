@@ -29,11 +29,14 @@
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
+#include "AchievementsStore.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/AchievementPopupUtils.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
 
@@ -114,6 +117,37 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
   }
 }
 
+// Resolve the TOC (chapter) title containing a spine index, for the Reading
+// Analytics per-book detail view. Returns "" when no TOC entry matches.
+std::string getStatsChapterTitle(Epub& epub, const int spineIndex) {
+  int tocIndex = epub.getTocIndexForSpineIndex(spineIndex);
+  if (tocIndex < 0) {
+    int nearestTocIndex = -1;
+    int nearestSpineIndex = -1;
+    for (int index = 0; index < epub.getTocItemsCount(); ++index) {
+      const int tocSpineIndex = epub.getSpineIndexForTocIndex(index);
+      if (tocSpineIndex <= spineIndex && tocSpineIndex >= nearestSpineIndex) {
+        nearestSpineIndex = tocSpineIndex;
+        nearestTocIndex = index;
+      }
+    }
+    tocIndex = nearestTocIndex;
+  }
+  if (tocIndex < 0) {
+    return "";
+  }
+  const auto tocItem = epub.getTocItem(tocIndex);
+  return tocItem.title;
+}
+
+uint8_t getStatsChapterProgressPercent(const int currentPage, const int pageCount) {
+  if (pageCount <= 0) {
+    return 0;
+  }
+  return static_cast<uint8_t>(clampPercent(
+      static_cast<int>((static_cast<float>(currentPage + 1) / static_cast<float>(pageCount)) * 100.0f + 0.5f)));
+}
+
 }  // namespace
 
 void EpubReaderActivity::onEnter() {
@@ -164,6 +198,10 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  READING_STATS.beginSession(
+      epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getCoverBmpPath(),
+      clampPercent(static_cast<int>(epub->calculateProgress(currentSpineIndex, 0.0f) * 100.0f + 0.5f)),
+      getStatsChapterTitle(*epub, currentSpineIndex), 0);
 
   // Trigger first update
   requestUpdate();
@@ -177,6 +215,9 @@ void EpubReaderActivity::onExit() {
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  READING_STATS.endSession();
+  ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
+  showPendingAchievementPopups(renderer);
   section.reset();
   if (pendingReadFolderMove && epub) {
     const std::string srcPath = epub->getPath();
@@ -195,6 +236,8 @@ void EpubReaderActivity::loop() {
     finish();
     return;
   }
+
+  READING_STATS.tickActiveSession();
 
   // End-of-Book screen reached (currentSpineIndex == spine count) means the book is
   // finished. Two independent finished-book features key off this same condition.
@@ -273,6 +316,7 @@ void EpubReaderActivity::loop() {
                                  renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
                                  SETTINGS.orientation, !currentPageFootnotes.empty()),
                              [this](const ActivityResult& result) {
+                               READING_STATS.resumeSession();
                                // Always apply orientation change even if the menu was cancelled
                                const auto& menu = std::get<MenuResult>(result.data);
                                applyOrientation(menu.orientation);
@@ -454,6 +498,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx),
           [this](const ActivityResult& result) {
+            READING_STATS.resumeSession();
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
               RenderLock lock(*this);
@@ -474,6 +519,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::FOOTNOTES: {
       startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes),
                              [this](const ActivityResult& result) {
+                               READING_STATS.resumeSession();
                                if (!result.isCancelled) {
                                  const auto& footnoteResult = std::get<FootnoteResult>(result.data);
                                  navigateToHref(footnoteResult.href, true);
@@ -492,6 +538,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent),
           [this](const ActivityResult& result) {
+            READING_STATS.resumeSession();
             if (!result.isCancelled) {
               jumpToPercent(std::get<PercentResult>(result.data).percent);
             }
@@ -650,6 +697,7 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  READING_STATS.noteActivity();
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
       section->currentPage++;
@@ -907,6 +955,15 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
 }
 
 bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
+  int progressPercent = 0;
+  if (epub->getBookSize() > 0 && pageCount > 0) {
+    const float chapterProgress = static_cast<float>(currentPage + 1) / static_cast<float>(pageCount);
+    progressPercent =
+        clampPercent(static_cast<int>(epub->calculateProgress(spineIndex, chapterProgress) * 100.0f + 0.5f));
+  }
+  READING_STATS.updateProgress(static_cast<uint8_t>(progressPercent), progressPercent >= 100,
+                               getStatsChapterTitle(*epub, spineIndex),
+                               getStatsChapterProgressPercent(currentPage, pageCount));
   return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
 }
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,

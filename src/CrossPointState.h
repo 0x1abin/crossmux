@@ -16,6 +16,10 @@ class CrossPointState {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   bool showBootScreen = true;
+  // Most recent epoch timestamp the device trusted as valid. Used by the
+  // Reading Analytics suite to bucket reading time into days when the live
+  // clock is temporarily unavailable (RTC-less boots before NTP sync).
+  uint32_t lastKnownValidTimestamp = 0;
 
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.

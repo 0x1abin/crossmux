@@ -186,6 +186,14 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,
                             "moveFinishedToReadFolder", StrId::STR_CAT_SYSTEM),
+        // Reading Analytics suite
+        SettingInfo::Enum(StrId::STR_DAILY_GOAL, &CrossPointSettings::dailyGoalTarget,
+                          {StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_45, StrId::STR_MIN_60},
+                          "dailyGoalTarget", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Toggle(StrId::STR_ENABLE_ACHIEVEMENTS, &CrossPointSettings::achievementsEnabled,
+                            "achievementsEnabled", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Toggle(StrId::STR_ACHIEVEMENT_POPUPS, &CrossPointSettings::achievementPopups, "achievementPopups",
+                            StrId::STR_CAT_SYSTEM),
 
         // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
         SettingInfo::DynamicString(

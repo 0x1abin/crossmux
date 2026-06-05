@@ -17,10 +17,13 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "AchievementsStore.h"
 #include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"
+#include "util/AchievementPopupUtils.h"
 #include "fontIds.h"
 
 void XtcReaderActivity::onEnter() {
@@ -39,6 +42,13 @@ void XtcReaderActivity::onEnter() {
   APP_STATE.openEpubPath = xtc->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
+  {
+    const uint32_t totalPagesAtStart = xtc->getPageCount();
+    int startPercent = totalPagesAtStart > 0 ? static_cast<int>((currentPage + 1) * 100 / totalPagesAtStart) : 0;
+    if (startPercent > 100) startPercent = 100;
+    READING_STATS.beginSession(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath(),
+                               static_cast<uint8_t>(startPercent), "", 0);
+  }
 
   // Trigger first update
   requestUpdate();
@@ -49,16 +59,22 @@ void XtcReaderActivity::onExit() {
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  READING_STATS.endSession();
+  ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
+  showPendingAchievementPopups(renderer);
   xtc.reset();
 }
 
 void XtcReaderActivity::loop() {
+  READING_STATS.tickActiveSession();
+
   // Enter chapter selection activity
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
       startActivityForResult(
           std::make_unique<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage),
           [this](const ActivityResult& result) {
+            READING_STATS.resumeSession();
             if (!result.isCancelled) {
               currentPage = std::get<PageResult>(result.data).page;
             }
@@ -83,6 +99,8 @@ void XtcReaderActivity::loop() {
   if (!prevTriggered && !nextTriggered) {
     return;
   }
+
+  READING_STATS.noteActivity();
 
   // At end of the book, forward button goes home and back button returns to last page
   if (currentPage >= xtc->getPageCount()) {
@@ -375,6 +393,14 @@ void XtcReaderActivity::renderPage() {
 }
 
 void XtcReaderActivity::saveProgress() const {
+  const uint32_t totalPages = xtc->getPageCount();
+  int progressPercent = totalPages > 0 ? static_cast<int>((currentPage + 1) * 100 / totalPages) : 0;
+  if (progressPercent > 100) {
+    progressPercent = 100;
+  }
+  READING_STATS.updateProgress(static_cast<uint8_t>(progressPercent), totalPages > 0 && currentPage + 1 >= totalPages,
+                               "", static_cast<uint8_t>(progressPercent));
+
   HalFile f;
   if (Storage.openFileForWrite("XTR", xtc->getCachePath() + "/progress.bin", f)) {
     uint8_t data[4];
