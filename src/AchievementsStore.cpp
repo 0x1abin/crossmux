@@ -18,6 +18,7 @@ uint32_t countGoalDaysFromStats() {
   uint32_t count = 0;
   for (const auto& day : READING_STATS.getReadingDays()) {
     if (day.readingMs >= getDailyReadingGoalMs()) {
+      // cppcheck-suppress useStlAlgorithm
       ++count;
     }
   }
@@ -27,6 +28,7 @@ uint32_t countGoalDaysFromStats() {
 uint32_t countSessionsFromStats() {
   uint32_t count = 0;
   for (const auto& book : READING_STATS.getBooks()) {
+    // cppcheck-suppress useStlAlgorithm
     count += book.sessions;
   }
   return count;
@@ -509,7 +511,7 @@ std::vector<AchievementView> AchievementsStore::buildViews() const {
     if (lhs.state.unlocked != rhs.state.unlocked) {
       return lhs.state.unlocked > rhs.state.unlocked;
     }
-    if (lhs.state.unlocked && rhs.state.unlocked && lhs.state.unlockedAt != rhs.state.unlockedAt) {
+    if (lhs.state.unlocked && lhs.state.unlockedAt != rhs.state.unlockedAt) {
       return lhs.state.unlockedAt > rhs.state.unlockedAt;
     }
     return false;

@@ -93,10 +93,10 @@ std::string calculateContentBookId(const std::string& path) {
   const size_t fileSize = getFileSize(normalizedPath);
   auto& cache = getIdentityCache();
   for (auto it = cache.begin(); it != cache.end(); ++it) {
+    // cppcheck-suppress useStlAlgorithm
     if (it->path == normalizedPath && it->fileSize == fileSize) {
       if (it != cache.begin()) {
         CachedBookIdentity entry = *it;
-        // cppcheck-suppress useStlAlgorithm
         cache.erase(it);
         cache.insert(cache.begin(), std::move(entry));
       }
