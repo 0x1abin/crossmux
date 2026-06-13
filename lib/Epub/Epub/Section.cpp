@@ -17,7 +17,7 @@ namespace {
 // each can bump independently. Cache invalidation is automatic on mismatch
 // (no migration code needed — version mismatch triggers a clean re-parse).
 // Values are kept distinct across flavors and above every previously-shipped
-// number (Latin: 24/26, Chinese: 27/29, upstream single: 25) so a firmware
+// number (Latin: 24/26, Chinese: 27/29, upstream single: 26) so a firmware
 // flavor swap can never read the other flavor's stale cache.
 #ifdef ENABLE_CHINESE_VERSION
 constexpr uint8_t SECTION_FILE_VERSION =

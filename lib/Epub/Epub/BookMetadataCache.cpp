@@ -9,7 +9,11 @@
 #include "FsHelpers.h"
 
 namespace {
-constexpr uint8_t BOOK_CACHE_VERSION = 6;
+// Bumped to 8 on the upstream-master sync: fork shipped 6 and upstream shipped 7
+// with an identical book.bin layout (both added the `language` metadata field),
+// so 8 sits above every previously-shipped value and forces a one-time clean
+// re-parse for caches written by either lineage.
+constexpr uint8_t BOOK_CACHE_VERSION = 8;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";

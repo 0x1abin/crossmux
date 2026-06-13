@@ -78,6 +78,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
         underlineWidth = visibleWidth;
       }
 
+      // SUP/SUB glyphs are rendered at 50% scale; halve the underline to match (#2255).
+      if ((currentStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
+        underlineWidth = (underlineWidth + 1) / 2;
+      }
+
       renderer.drawLine(startX, underlineY, startX + underlineWidth, underlineY, true);
     }
   }
