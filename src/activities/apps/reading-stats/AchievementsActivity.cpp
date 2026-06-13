@@ -15,9 +15,9 @@ namespace {
 // Selection box must fully enclose the row's lowest ink (the description). With the description drawn
 // at titleTop(+8) + getLineHeight(UI_10)=30, its baseline is +58 and the SMALL-font descender reaches
 // +63 below the row top, so the box needs height >= 64; 66 leaves a 2px bottom margin.
-constexpr int ROW_GAP = 4;                           // gap between consecutive rows
-constexpr int ROW_BOX_HEIGHT = 66;                   // selection box height (encloses title + description)
-constexpr int ROW_STEP = ROW_BOX_HEIGHT + ROW_GAP;   // vertical advance per row / visible-row math
+constexpr int ROW_GAP = 4;                          // gap between consecutive rows
+constexpr int ROW_BOX_HEIGHT = 66;                  // selection box height (encloses title + description)
+constexpr int ROW_STEP = ROW_BOX_HEIGHT + ROW_GAP;  // vertical advance per row / visible-row math
 constexpr int ICON_BOX_SIZE = 24;
 
 std::string formatDurationCompact(const uint64_t totalMs) {
