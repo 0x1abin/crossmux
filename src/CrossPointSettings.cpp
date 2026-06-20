@@ -94,8 +94,6 @@ uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue)
   switch (legacyValue) {
     case SLEEP_1_MIN:
       return 1;
-    case SLEEP_3_MIN:
-      return 3;
     case SLEEP_5_MIN:
       return 5;
     case SLEEP_15_MIN:

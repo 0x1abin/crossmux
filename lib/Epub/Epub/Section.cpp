@@ -17,14 +17,16 @@ namespace {
 // each can bump independently. Cache invalidation is automatic on mismatch
 // (no migration code needed — version mismatch triggers a clean re-parse).
 // Values are kept distinct across flavors and above every previously-shipped
-// number (Latin: 24/26, Chinese: 27/29, upstream single: 26) so a firmware
-// flavor swap can never read the other flavor's stale cache.
+// number (Latin: 24/26/30, Chinese: 27/29/31, upstream single: 26/27) so a
+// firmware flavor swap can never read the other flavor's stale cache.
 #ifdef ENABLE_CHINESE_VERSION
 constexpr uint8_t SECTION_FILE_VERSION =
-    31;  // was 29; merged upstream section layout (bookmarks/RTL/sup-sub, #1337/#1700/#2131)
+    33;  // was 31; upstream-master sync: words NFC-composed (#2277) + TextBlock now
+         // serializes blockStyle.isRtl/directionDefined (#1700), so the block layout changed
 #else
 constexpr uint8_t SECTION_FILE_VERSION =
-    30;  // was 26; merged upstream section layout (bookmarks/RTL/sup-sub, #1337/#1700/#2131)
+    32;  // was 30; upstream-master sync: words NFC-composed (#2277) + TextBlock now
+         // serializes blockStyle.isRtl/directionDefined (#1700), so the block layout changed
 #endif
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +

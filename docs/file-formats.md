@@ -6,16 +6,18 @@ All POD fields are written in the ESP32 little-endian representation used by
 
 ## `book.bin`
 
-### Version 8
+### Version 9
 
 `book.bin` stores EPUB metadata plus lookup tables for spine and TOC entries.
 The current firmware writes this version from `BookMetadataCache`.
 
-> Version 8 was set on the upstream-master sync: the fork shipped 6 and upstream
-> shipped 7 with an identical layout (both added the `language` metadata field),
-> so 8 sits above every previously-shipped value and forces a one-time clean
-> re-parse for caches written by either lineage. `BookMetadataCache.cpp` is the
-> source of truth.
+> Version 9 was set on the upstream-master sync. The byte layout is identical to
+> the fork's 8 and upstream's 8 (both added the `language` metadata field), but
+> those two v8 lineages stored TOC/book titles un-normalized while upstream now
+> NFC-composes them (#2277). Because the `version != EXPECTED_VERSION` check
+> cannot distinguish "same number, NFC vs non-NFC", 9 forces a one-time clean
+> re-parse that re-composes existing caches' titles to NFC. `BookMetadataCache.cpp`
+> is the source of truth.
 
 ImHex pattern:
 
@@ -24,7 +26,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 8
+#define EXPECTED_VERSION 9
 #define MAX_STRING_LENGTH 65535
 
 struct String {
@@ -96,25 +98,27 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 30
+### Version 32
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **31**. The byte layout is identical to the Latin version below; only
+> currently **33**. The byte layout is identical to the Latin version below; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
 >
-> Both counters were bumped in the upstream-master sync that merged epub bookmarks
-> (#1337), RTL (#1700), and `<sup>`/`<sub>` (#2131): those change the serialized
-> word-stream/style content, so pre-sync caches are auto-invalidated on mismatch.
-> The numbers are kept above every previously-shipped value (Latin 24/26,
-> Chinese 27/29, upstream single 26) so a firmware flavor swap never reads the
-> other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the source of truth.
+> Both counters were bumped in the upstream-master sync that NFC-composes words
+> (#2277) and serializes `blockStyle.isRtl` / `blockStyle.directionDefined` per
+> text block (#1700): those change the serialized word-stream/style content, so
+> pre-sync caches are auto-invalidated on mismatch. The numbers are kept above
+> every previously-shipped value (Latin 24/26/30, Chinese 27/29/31, upstream
+> single 26/27) so a firmware flavor swap never reads the other flavor's stale
+> cache. `lib/Epub/Epub/Section.cpp` is the source of truth.
+
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
 
-Version 30 includes:
+Version 32 includes:
 
 - cache-busting fields for paragraph alignment, hyphenation, embedded CSS,
   image rendering mode, and Focus Reading
@@ -131,7 +135,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 30
+#define EXPECTED_VERSION 32
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
