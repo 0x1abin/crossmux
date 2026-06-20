@@ -1035,6 +1035,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
   auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
+  TextBlock::fakeBold = SETTINGS.fakeBold;
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
   scope.endScanAndPrewarm();
   const auto tPrewarm = millis();

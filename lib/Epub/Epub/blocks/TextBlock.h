@@ -49,4 +49,6 @@ class TextBlock final : public Block {
   BlockType getType() override { return TEXT_BLOCK; }
   bool serialize(HalFile& file) const;
   static std::unique_ptr<TextBlock> deserialize(HalFile& file);
+  // Fake Bold global switch — set before rendering a page, then cleared
+  static uint8_t fakeBold;  // 0=off, 1=bold, 2=extrabold
 };
