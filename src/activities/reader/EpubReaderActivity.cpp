@@ -699,6 +699,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::TOGGLE_BOOKMARK: {
       addBookmark();
+      // addBookmark() sets bookmarkRemoved but not the popup flags (the long-press
+      // path sets them itself); show the added/removed popup for the menu path too.
+      showBookmarkMessage = true;
+      bookmarkMessageTime = millis();
       break;
     }
   }
