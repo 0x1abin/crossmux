@@ -39,6 +39,18 @@ void EpubReaderBookmarksActivity::onEnter() {
       bookmarks.shrink_to_fit();
     } else {
       JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
+
+      // Backfill chapter/page info for bookmarks saved before si/pc/pp were
+      // persisted (legacy files load them as 0); otherwise those entries render
+      // with the wrong chapter title and no page count. Display-only, not re-saved.
+      for (auto& bookmark : bookmarks) {
+        if (bookmark.computedChapterPageCount == 0) {
+          CrossPointPosition pos = ProgressMapper::toCrossPoint(epub, {bookmark.xpath, bookmark.percentage}, renderer);
+          bookmark.computedSpineIndex = pos.spineIndex;
+          bookmark.computedChapterPageCount = pos.totalPages;
+          bookmark.computedChapterProgress = pos.pageNumber;
+        }
+      }
     }
   } else {
     LOG_DBG("EPB", "No bookmark file found at %s, starting with empty bookmarks", path.c_str());
