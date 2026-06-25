@@ -132,6 +132,11 @@ void HalDisplay::copyGrayscaleBuffers(const uint8_t*, const uint8_t*) {}
 void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t*) {}
 void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t*) {}
 void HalDisplay::cleanupGrayscaleBuffers(const uint8_t*) {}
+// X3-only OEM settle pass with no framebuffer effect; nothing to do in the simulator.
+void HalDisplay::preconditionGrayscale() {}
+void HalDisplay::preconditionGrayscale(uint16_t, uint16_t, uint16_t, uint16_t) {}
+// Present the BW base frame as usual; the gray planes overlaid afterward are no-ops above.
+void HalDisplay::displayGrayscaleBase(RefreshMode mode, bool turnOffScreen) { displayBuffer(mode, turnOffScreen); }
 void HalDisplay::displayGrayBuffer(bool /*turnOffScreen*/) {
   // Real hardware overlays the LSB/MSB gray bit-planes on the BW frame already shown by the
   // previous displayBuffer(). The simulator has only a single 1-bpp framebuffer, which at this
