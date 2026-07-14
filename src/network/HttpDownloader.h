@@ -11,9 +11,9 @@
 class Stream;
 
 /**
- * HTTP client utility for fetching content and downloading files. Built on
- * esp_http_client: https is verified against the CA bundle, plain http is
- * used for local servers (transport is chosen from the URL scheme).
+ * HTTP client utility for fetching content and downloading files. GETs use
+ * the configured SecureNet transport; JSON POST keeps the verified
+ * esp_http_client CA-bundle path used by the Chinese WeRead integration.
  */
 class HttpDownloader {
  public:
@@ -53,8 +53,8 @@ class HttpDownloader {
 
   // application/json POST with Bearer auth. Response body is exposed to
   // onResponse as a pull-style Stream so the caller (e.g. ArduinoJson) can
-  // deserialize it without buffering. Same TLS posture as fetchUrl: verified
-  // https via the CA bundle, plain http for local servers. Returns false on
+  // deserialize it without buffering. HTTPS is verified via the ESP CA bundle;
+  // plain HTTP remains available for local servers. Returns false on
   // any transport / status failure, or if onResponse returns false.
   static bool postJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
                        const std::function<bool(Stream&)>& onResponse, int timeoutMs = 60000);
