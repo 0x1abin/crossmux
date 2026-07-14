@@ -98,26 +98,27 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 34
+### Versions 36 / 37
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **35**. The byte layout is identical to the Latin version below; only
+> currently **37**; Latin builds use **36**. The byte layout is identical between
+> flavors; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
 >
-> Both counters were bumped after the upstream-master sync for the TextBlock arena
-> layout change: word text is now serialized as one flat arena (offset table plus
-> NUL-terminated text blob) instead of length-prefixed strings and per-field
-> arrays. The numbers are kept above every previously-shipped value (Latin
-> 24/26/30/32, Chinese 27/29/31/33, upstream single 26/27/29) so a firmware flavor
-> swap never reads the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is
-> the source of truth.
+> Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37 are
+> binary-identical to 34/35, but invalidate cached word positions because Arabic
+> contextual shaping now measures the shaped visual text. The counters remain
+> distinct and above every previously shipped value so a firmware-flavor swap
+> cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
+> source of truth.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
 
-Version 34 includes:
+Version 28 introduced serialized word style bits for underline, strikethrough,
+superscript, and subscript. The format also includes:
 
 - cache-busting fields for paragraph alignment, hyphenation, embedded CSS,
   image rendering mode, and Focus Reading
@@ -140,7 +141,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 34
+#define EXPECTED_VERSION 36
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96

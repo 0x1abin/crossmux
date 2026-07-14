@@ -18,14 +18,16 @@ namespace {
 // each can bump independently. Cache invalidation is automatic on mismatch
 // (no migration code needed — version mismatch triggers a clean re-parse).
 // Values are kept distinct across flavors and above every previously-shipped
-// number (Latin: 24/26/30/32, Chinese: 27/29/31/33, upstream single: 26/27/29)
+// number (Latin: 24/26/30/32/34, Chinese: 27/29/31/33/35, upstream single: 26/27/29/30)
 // so a firmware flavor swap can never read the other flavor's stale cache.
 // v34/v35: TextBlock word data is stored as one flat arena (offset table +
 // NUL-terminated text blob) instead of length-prefixed strings and per-field arrays.
+// v36/v37: Arabic shaping changed both drawing and measurement; cached word
+// positions from the previous versions no longer match what drawText renders.
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 35;
+constexpr uint8_t SECTION_FILE_VERSION = 37;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 34;
+constexpr uint8_t SECTION_FILE_VERSION = 36;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
