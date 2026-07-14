@@ -302,9 +302,6 @@ class CrossPointSettings {
   uint8_t language = defaultLanguageIndex();
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
-  // --- Fake Bold: 0=Off, 1=Bold (shift x,x+1), 2=Extra Bold (shift x-1,x,x+1) ---
-  // Renders BOLD/BOLD_ITALIC through REGULAR/ITALIC multi-pass instead of loading a bold glyph font
-  uint8_t fakeBold = 0;
   // Reading Analytics suite settings.
   // Daily reading goal target (DAILY_GOAL_TARGET enum index).
   uint8_t dailyGoalTarget = DAILY_GOAL_30_MIN;

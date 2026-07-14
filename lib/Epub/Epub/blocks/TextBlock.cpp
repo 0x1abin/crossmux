@@ -8,8 +8,6 @@
 
 #include <cstring>
 
-uint8_t TextBlock::fakeBold = 0;
-
 size_t TextBlock::arenaSize(const uint16_t wordCount, const bool hasFocus, const uint16_t textBytes) {
   // Layout documented in TextBlock.h: 16-bit arrays first, then 8-bit arrays, then text.
   size_t size = static_cast<size_t>(wordCount) * (sizeof(uint16_t) + sizeof(int16_t) + sizeof(uint8_t));
@@ -188,21 +186,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       const int suffixX = wordX + focusSuffixXArr[i];
       renderer.drawText(fontId, suffixX, wordY, word + boldLen, true, currentStyle, baseDir);
     } else {
-      if (fakeBold && (currentStyle & EpdFontFamily::BOLD) != 0) {
-        auto fbStyle = static_cast<EpdFontFamily::Style>(currentStyle & ~EpdFontFamily::BOLD);
-        if (fakeBold >= 2) {
-          // Extra Bold: 3-pass at x-1, x, x+1
-          renderer.drawText(fontId, wordX - 1, wordY, word, true, fbStyle, baseDir);
-          renderer.drawText(fontId, wordX, wordY, word, true, fbStyle, baseDir);
-          renderer.drawText(fontId, wordX + 1, wordY, word, true, fbStyle, baseDir);
-        } else {
-          // Bold: 2-pass at x, x+1
-          renderer.drawText(fontId, wordX, wordY, word, true, fbStyle, baseDir);
-          renderer.drawText(fontId, wordX + 1, wordY, word, true, fbStyle, baseDir);
-        }
-      } else {
-        renderer.drawText(fontId, wordX, wordY, word, true, currentStyle, baseDir);
-      }
+      renderer.drawText(fontId, wordX, wordY, word, true, currentStyle, baseDir);
     }
 
     if (scanning) {
