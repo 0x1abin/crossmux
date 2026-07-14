@@ -93,13 +93,25 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 | Panel | 800 × 480, **SSD1677** | 792 × 528, **UC81xx** |
 | Framebuffer | 48000 B | 52272 B |
 | Buffer allocation | `MAX_BUFFER_SIZE = 52272` (static, covers both) — [EInkDisplay.h:35](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
-| Geometry switch | default 800×480 | `setDisplayX3()` before `begin()` — [HalDisplay.cpp:15](../../lib/hal/HalDisplay.cpp) |
+| Geometry switch | default 800×480 | `setDisplayX3()` before `begin()` — [HalDisplay.cpp:39](../../lib/hal/HalDisplay.cpp) |
+| Display SPI clock | **20 MHz** (SSD1677 in-spec maximum) | UC81xx profile default, unchanged |
 | Battery | ADC on GPIO0 | BQ27220 fuel gauge (I²C) — [HalPowerManager.cpp](../../lib/hal/HalPowerManager.cpp) |
 | USB / charge detect | GPIO20 reads HIGH | sign of BQ27220 current — [HalGPIO.cpp:272-287](../../lib/hal/HalGPIO.cpp) |
 | RTC clock | none (internal, drifts in deep sleep) | DS3231, X3-only — [HalClock.cpp:21](../../lib/hal/HalClock.cpp) |
 | Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp:55](../../lib/hal/HalTiltSensor.cpp) |
 | Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp:194](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp:399](../../src/components/themes/lyra/LyraTheme.cpp) |
 | Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [EInkDisplay.h:56-94](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
+
+The X4 FAST path is tuned in the application HAL rather than by modifying the
+SDK gitlink: `crossPointX4Ssd1677Config()` selects the SSD1677 driver's
+incremental DU sequence (`0x1C`), and `HalDisplay::begin()` selects a 20 MHz SPI
+clock before the driver starts. The setting stays within the controller limit
+and does not change the single-framebuffer RAM budget. Its tradeoff is panel
+quality: the weaker DU waveform can leave more ghosting than the SDK's stock
+`0xFC` sequence on some panel samples. Verify menus, text pages, high-contrast
+borders, and grayscale images on real X4 hardware; if persistent residue is
+unacceptable, retain 20 MHz but restore the stock waveform override. X3 never
+constructs the SSD1677 driver, so neither tuning applies to it.
 
 The SPI display pins (`EPD_SCLK=8`, `EPD_MOSI=10`, `EPD_CS=21`, `EPD_DC=4`,
 `EPD_RST=5`, `EPD_BUSY=6`) and the ADC button layout are **identical** on both
