@@ -311,7 +311,7 @@ void drawAdjustTimeButton(const GfxRenderer& renderer, const Rect& rect, const b
   constexpr int iconSize = 32;
   const int iconX = rect.x + (rect.width - iconSize) / 2;
   const int iconY = rect.y + (rect.height - iconSize) / 2;
-  renderer.drawIcon(Settings2Icon, iconX, iconY, iconSize, iconSize);
+  renderer.drawIcon(Settings2Icon, iconX, iconY, iconSize);
 }
 
 Rect offsetRect(Rect rect, const int dy) {

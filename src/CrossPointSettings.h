@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <iosfwd>
+#include <mutex>
 
 // I18nKeys.h is intentionally NOT included here. It is auto-generated and
 // changes on every translation edit; pulling it into this widely-included
@@ -12,6 +13,8 @@
 
 class CrossPointSettings {
  private:
+  mutable std::mutex _mutex;
+
   // Private constructor for singleton
   CrossPointSettings() = default;
 
@@ -27,6 +30,10 @@ class CrossPointSettings {
   // in CrossPointSettings.cpp so I18nKeys.h stays out of this header. Public so
   // the settings loader can reset to this build's default on a cross-SKU reflash.
   static uint8_t defaultLanguageIndex();
+
+  // Access the settings mutex for protecting multi-field reads/writes from other cores.
+  // Callers must not re-enter SETTINGS methods that lock _mutex while holding it.
+  std::mutex& getMutex() const { return _mutex; }
 
   enum SLEEP_SCREEN_MODE {
     DARK = 0,
