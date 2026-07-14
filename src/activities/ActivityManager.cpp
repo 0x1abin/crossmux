@@ -9,7 +9,6 @@
 #include "apps/2048/Game2048Activity.h"
 #include "apps/AppsMenuActivity.h"
 #include "apps/avatar/UglyAvatarActivity.h"
-#include "apps/cellular/CellularGameActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
 #include "apps/weread/WeReadBookActivity.h"
@@ -262,8 +261,6 @@ void ActivityManager::goToGomoku() { replaceActivity(std::make_unique<GomokuMenu
 void ActivityManager::goToMinesweeper() {
   replaceActivity(std::make_unique<MinesweeperMenuActivity>(renderer, mappedInput));
 }
-
-void ActivityManager::goToCellular() { replaceActivity(std::make_unique<CellularGameActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToGame2048() { replaceActivity(std::make_unique<Game2048Activity>(renderer, mappedInput)); }
 

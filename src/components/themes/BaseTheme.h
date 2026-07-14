@@ -136,7 +136,6 @@ enum UIIcon {
 #endif
   Minesweeper,
   Avatar,
-  Cellular,
   Standby,
   Game2048,
 };

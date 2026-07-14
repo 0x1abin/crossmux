@@ -17,8 +17,7 @@ apps/
 ├── gomoku/
 ├── chinese-chess/             # conditional — gated by ENABLE_CHINESE_VERSION (see "Conditional apps" below)
 ├── minesweeper/
-├── avatar/
-└── cellular/                  # Conway's Game of Life — see "Stateless toy apps" below
+└── avatar/
 ```
 
 **Why the `Game*` prefix for `GameUi` and `GameSaveDebouncer`** — these helpers carry save-state and game-board semantics. They are used by Sudoku, Gomoku, and Minesweeper, not by Ugly Avatar (which is a single-shot generator). The name reflects what they actually do; do not rename them to `App*`.
@@ -89,7 +88,7 @@ That's it — no enum, no `switch` cases, no `buildItems()`. The lambdas in `ren
 
 ### 5. (Optional) Stateless toy apps
 
-Some apps have no save state at all — Cellular (Conway's Game of Life) and Ugly Avatar are single-screen toys that re-seed on entry and exit cleanly. They skip both `GameSaveDebouncer` and any `*Store.{h,cpp}` layer, and their `Activity` is launched directly (no `*MenuActivity`). Use this pattern when the app has no "in-progress game" worth resuming; it cuts a few hundred lines and avoids touching SPIFFS.
+Some apps have no save state at all. Ugly Avatar is a single-screen generator that creates a new avatar on entry and exits cleanly. It skips both `GameSaveDebouncer` and any `*Store.{h,cpp}` layer, and its `Activity` is launched directly (no `*MenuActivity`). Use this pattern when the app has no "in-progress game" worth resuming; it cuts a few hundred lines and avoids touching SPIFFS.
 
 ---
 
