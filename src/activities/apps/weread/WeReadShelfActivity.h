@@ -25,5 +25,5 @@ class WeReadShelfActivity final : public WeReadFetchActivity {
   std::vector<WeReadModels::BookCard> books_;
   int ebookCount_ = 0;
   int albumCount_ = 0;
-  bool hasMpEntry_ = false;
+  int mpCount_ = 0;
 };

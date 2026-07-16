@@ -15,7 +15,11 @@ WeReadSimilarActivity::WeReadSimilarActivity(GfxRenderer& renderer, MappedInputM
       bookId_(std::move(bookId)),
       bookTitle_(std::move(bookTitle)) {}
 
-void WeReadSimilarActivity::buildRequest(JsonDocument& body) { body["bookId"] = bookId_; }
+void WeReadSimilarActivity::buildRequest(JsonDocument& body) {
+  body["bookId"] = bookId_;
+  body["count"] = 12;
+  body["maxIdx"] = 0;
+}
 
 void WeReadSimilarActivity::buildResponseFilter(JsonDocument& filter) {
   filter["booksimilar"]["books"][0]["idx"] = true;

@@ -91,6 +91,8 @@ void buildRequest(int step, const std::string& bookId, JsonDocument& body, JsonD
       break;
     case Step::Similar:
       body["bookId"] = bookId;
+      body["count"] = 12;
+      body["maxIdx"] = 0;
       filter["booksimilar"]["books"][0]["idx"] = true;
       filter["booksimilar"]["books"][0]["readingCount"] = true;
       filter["booksimilar"]["books"][0]["book"]["bookInfo"]["bookId"] = true;

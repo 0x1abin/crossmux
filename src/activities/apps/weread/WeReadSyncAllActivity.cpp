@@ -101,6 +101,9 @@ void WeReadSyncAllActivity::spawnShelfFetch() {
   filter["albums"][0]["albumInfo"]["name"] = true;
   filter["albums"][0]["albumInfo"]["authorName"] = true;
   filter["albums"][0]["albumInfo"]["finishStatus"] = true;
+  filter["albums"][0]["albumInfoExtra"]["secret"] = true;
+  filter["albums"][0]["albumInfoExtra"]["isTop"] = true;
+  filter["mp"] = true;
   filter["errcode"] = true;
   filter["errmsg"] = true;
   filter["upgrade_info"] = true;
@@ -200,7 +203,7 @@ void WeReadSyncAllActivity::parseShelfResponseAndSave() {
       card.finishReading = b["finishReading"] | 0;
       card.isTop = b["isTop"] | 0;
       card.secret = b["secret"] | 0;
-      card.isAlbum = 0;
+      card.isAlbum = WeReadModels::kBookKindEbook;
       if (!card.bookId.empty()) {
         booksToSync_.emplace_back(card.bookId, card.title);
         shelf.push_back(std::move(card));
@@ -217,9 +220,21 @@ void WeReadSyncAllActivity::parseShelfResponseAndSave() {
       card.title = info["name"] | "";
       card.author = info["authorName"] | "";
       card.category = info["finishStatus"] | "";
-      card.isAlbum = 1;
+      card.secret = static_cast<uint8_t>(a["albumInfoExtra"]["secret"] | 0.0);
+      card.isTop = static_cast<uint8_t>(a["albumInfoExtra"]["isTop"] | 0.0);
+      card.isAlbum = WeReadModels::kBookKindAudio;
       if (!card.bookId.empty()) shelf.push_back(std::move(card));
     }
+  }
+
+  if (!resp["mp"].isNull()) {
+    WeReadModels::BookCard card;
+    card.bookId = "__weread_mp__";
+    card.title = tr(STR_WEREAD_MP_COLLECTION);
+    card.category = tr(STR_WEREAD_MP_COLLECTION_SUB);
+    card.secret = 1;
+    card.isAlbum = WeReadModels::kBookKindMp;
+    shelf.push_back(std::move(card));
   }
 
   WeReadCacheStore::saveShelf(shelf);
