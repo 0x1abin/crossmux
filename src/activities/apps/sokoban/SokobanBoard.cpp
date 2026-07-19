@@ -13,6 +13,8 @@ void SokobanBoard::clear() {
   pushes = 0;
 }
 
+SokobanBoard::SokobanBoard() : history{} {}
+
 bool SokobanBoard::loadFromStrings(const char* const* levelData, int numRows) {
   clear();
   if (numRows <= 0 || numRows > MAX_ROWS) {
@@ -24,7 +26,7 @@ bool SokobanBoard::loadFromStrings(const char* const* levelData, int numRows) {
   for (int r = 0; r < rows; ++r) {
     const char* line = levelData[r];
     int c = 0;
-    while (line[c] != '\0' && c < MAX_COLS) {
+    while (c < MAX_COLS && line[c] != '\0') {
       char ch = line[c];
       switch (ch) {
         case '#':
@@ -148,7 +150,7 @@ void SokobanBoard::pushHistory() {
 bool SokobanBoard::popHistory() {
   if (historyCount == 0) return false;
   historyCount--;
-  HistoryEntry& entry = history[historyCount];
+  const HistoryEntry& entry = history[historyCount];
   memcpy(cells, entry.cells, sizeof(cells));
   playerR = entry.playerR;
   playerC = entry.playerC;

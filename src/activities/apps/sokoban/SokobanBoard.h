@@ -8,6 +8,8 @@ class SokobanBoard {
   static constexpr int MAX_ROWS = 20;
   static constexpr int MAX_COLS = 40;
 
+  SokobanBoard();
+
   enum Cell : uint8_t { EMPTY = 0, WALL, FLOOR, TARGET, BOX, BOX_ON_TARGET, PLAYER, PLAYER_ON_TARGET };
 
   Cell cells[MAX_ROWS][MAX_COLS] = {};

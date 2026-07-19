@@ -10,7 +10,7 @@
 #include "../GameUi.h"
 
 SokobanGameActivity::SokobanGameActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("Sokoban", renderer, mappedInput) {
+    : Activity("Sokoban", renderer, mappedInput), board(), levelOffsets{} {
   heldLevelSelectDir = 0;
   lastLevelSelectScrollTime = 0;
   isFirstLevelSelectHold = false;
@@ -425,7 +425,6 @@ void SokobanGameActivity::drawBoard() {
 }
 
 void SokobanGameActivity::drawWinScreen() {
-  const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
   renderer.drawCenteredText(NOTOSERIF_14_FONT_ID, sh / 2 - 30, tr(STR_SOKOBAN_WIN));
   char buf[64];
