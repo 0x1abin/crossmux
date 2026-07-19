@@ -129,6 +129,7 @@ enum UIIcon {
   Bookmark,
   Apps,
   Sudoku,
+  Sokoban,
   Gomoku,
 #ifdef ENABLE_CHINESE_VERSION
   ChineseChess,

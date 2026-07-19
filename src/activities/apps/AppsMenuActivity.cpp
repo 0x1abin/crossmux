@@ -22,6 +22,7 @@ struct AppEntry {
 constexpr AppEntry kAppEntries[] = {
     {StrId::STR_READING_STATS, UIIcon::Library, &ActivityManager::goToReadingStatsMenu},
     {StrId::STR_SUDOKU_TITLE, UIIcon::Sudoku, &ActivityManager::goToSudoku},
+    {StrId::STR_SOKOBAN_TITLE, UIIcon::Sokoban, &ActivityManager::goToSokoban},
     {StrId::STR_GOMOKU_TITLE, UIIcon::Gomoku, &ActivityManager::goToGomoku},
 #ifdef ENABLE_CHINESE_VERSION
     {StrId::STR_CHINESE_CHESS_TITLE, UIIcon::ChineseChess, &ActivityManager::goToChineseChess},

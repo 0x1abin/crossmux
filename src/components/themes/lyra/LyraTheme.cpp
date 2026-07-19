@@ -35,6 +35,7 @@
 #include "components/icons/settings2.h"
 #include "components/icons/standby.h"
 #include "components/icons/sudoku.h"
+#include "components/icons/sokoban.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
@@ -91,6 +92,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return AppsIcon;
       case UIIcon::Sudoku:
         return SudokuIcon;
+      case UIIcon::Sokoban:
+        return SokobanIcon;
       case UIIcon::Gomoku:
         return GomokuIcon;
 #ifdef ENABLE_CHINESE_VERSION

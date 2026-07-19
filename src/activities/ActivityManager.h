@@ -95,6 +95,7 @@ class ActivityManager {
   void goToCrashReport();
   void goToApps();
   void goToSudoku();
+  void goToSokoban();
   void goToGomoku();
   void goToMinesweeper();
   void goToStandby();
