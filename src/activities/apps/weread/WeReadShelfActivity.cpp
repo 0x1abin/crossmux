@@ -45,7 +45,7 @@ void WeReadShelfActivity::parseResponse(JsonDocument& resp) {
   books_.clear();
   ebookCount_ = 0;
   albumCount_ = 0;
-  hasMpEntry_ = false;
+  mpCount_ = 0;
 
   JsonArrayConst booksJson = resp["books"].as<JsonArrayConst>();
   if (!booksJson.isNull()) {
@@ -60,7 +60,7 @@ void WeReadShelfActivity::parseResponse(JsonDocument& resp) {
       card.finishReading = b["finishReading"] | 0;
       card.isTop = b["isTop"] | 0;
       card.secret = b["secret"] | 0;
-      card.isAlbum = 0;
+      card.isAlbum = WeReadModels::kBookKindEbook;
       if (!card.bookId.empty()) {
         books_.push_back(std::move(card));
         ebookCount_++;
@@ -80,7 +80,9 @@ void WeReadShelfActivity::parseResponse(JsonDocument& resp) {
       card.author = info["authorName"] | "";
       card.category = info["finishStatus"] | "";
       card.readUpdateTime = a["albumInfoExtra"]["lectureReadUpdateTime"] | 0u;
-      card.isAlbum = 1;
+      card.secret = static_cast<uint8_t>(a["albumInfoExtra"]["secret"] | 0.0);
+      card.isTop = static_cast<uint8_t>(a["albumInfoExtra"]["isTop"] | 0.0);
+      card.isAlbum = WeReadModels::kBookKindAudio;
       if (!card.bookId.empty()) {
         books_.push_back(std::move(card));
         albumCount_++;
@@ -88,11 +90,21 @@ void WeReadShelfActivity::parseResponse(JsonDocument& resp) {
     }
   }
 
-  // mp 字段非空时书架顶部有一条「文章收藏」入口 — 只在统计里出现，不进列表。
+  // mp is a visible shelf entry per the skill contract; represent it as a
+  // non-openable pseudo row so online/offline totals stay identical.
   JsonVariantConst mp = resp["mp"];
-  hasMpEntry_ = !mp.isNull();
+  if (!mp.isNull()) {
+    WeReadModels::BookCard card;
+    card.bookId = "__weread_mp__";
+    card.title = tr(STR_WEREAD_MP_COLLECTION);
+    card.category = tr(STR_WEREAD_MP_COLLECTION_SUB);
+    card.secret = 1;
+    card.isAlbum = WeReadModels::kBookKindMp;
+    books_.push_back(std::move(card));
+    mpCount_ = 1;
+  }
 
-  // 顺便落盘:下次离线模式可直接读 SD 显示书架,无需联网。
+  // Save to SD so the next visit can render the same shelf offline.
   WeReadCacheStore::saveShelf(books_);
 }
 
@@ -100,14 +112,16 @@ bool WeReadShelfActivity::tryLoadFromCache() {
   books_.clear();
   ebookCount_ = 0;
   albumCount_ = 0;
-  hasMpEntry_ = false;
+  mpCount_ = 0;
   if (!WeReadCacheStore::loadShelf(books_)) return false;
   // Re-derive the counters so the subtitle shows the same numbers as a
   // live fetch would.
   for (const auto& b : books_) {
-    if (b.isAlbum) {
+    if (b.isAlbum == WeReadModels::kBookKindAudio) {
       ++albumCount_;
-    } else {
+    } else if (b.isAlbum == WeReadModels::kBookKindMp) {
+      ++mpCount_;
+    } else if (b.isAlbum == WeReadModels::kBookKindEbook) {
       ++ebookCount_;
     }
   }
@@ -123,15 +137,17 @@ void WeReadShelfActivity::renderContent(Rect contentRect) {
 
   // Subtitle uses a static buffer so we don't allocate every redraw.
   static char subtitleBuf[64];
-  std::snprintf(subtitleBuf, sizeof(subtitleBuf), "%d · %d 有声 · %s", ebookCount_, albumCount_,
-                hasMpEntry_ ? "含文章收藏" : "无文章收藏");
+  const int totalCount = ebookCount_ + albumCount_ + mpCount_;
+  std::snprintf(subtitleBuf, sizeof(subtitleBuf), tr(STR_WEREAD_SHELF_SUMMARY_FMT), totalCount, ebookCount_,
+                albumCount_, mpCount_);
 
   GUI.drawList(
       renderer, contentRect, static_cast<int>(books_.size()), selected,
       [this](int i) {
         const auto& b = books_[i];
         std::string title;
-        if (b.isAlbum) title += "[听] ";
+        if (b.isAlbum == WeReadModels::kBookKindAudio) title += tr(STR_WEREAD_AUDIO_PREFIX);
+        if (b.isAlbum == WeReadModels::kBookKindMp) title += tr(STR_WEREAD_MP_PREFIX);
         if (b.isTop) title += "★ ";
         title += b.title;
         return title;
@@ -145,7 +161,7 @@ void WeReadShelfActivity::renderContent(Rect contentRect) {
           sub += b.category;
         }
         // 标识此书是否已落到 SD 缓存,便于用户挑选 / 知道离线模式下哪些可读。
-        if (!b.isAlbum && WeReadCacheStore::hasBookCached(b.bookId)) {
+        if (b.isAlbum == WeReadModels::kBookKindEbook && WeReadCacheStore::hasBookCached(b.bookId)) {
           if (!sub.empty()) sub += " · ";
           sub += tr(STR_WEREAD_CACHE_BADGE);
         }
@@ -156,8 +172,8 @@ void WeReadShelfActivity::renderContent(Rect contentRect) {
 void WeReadShelfActivity::onConfirm(int index) {
   if (index < 0 || index >= static_cast<int>(books_.size())) return;
   const auto& b = books_[index];
-  if (b.isAlbum) {
-    // /book/* endpoints don't accept albumId — Book Activity would 404.
+  if (b.isAlbum != WeReadModels::kBookKindEbook) {
+    // /book/* endpoints don't accept albumId or the article-collection entry.
     return;
   }
   activityManager.goToWeReadBook(b.bookId, b.title);

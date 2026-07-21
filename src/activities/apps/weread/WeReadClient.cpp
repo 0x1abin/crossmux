@@ -10,7 +10,7 @@
 namespace {
 
 constexpr const char* kGatewayUrl = "https://i.weread.qq.com/api/agent/gateway";
-constexpr const char* kSkillVersion = "1.0.3";  // Must match weread-skills/SKILL.md `version:`
+constexpr const char* kSkillVersion = "1.0.4";  // Must match weread-skills/SKILL.md `version:`
 
 int g_lastErrCode = 0;
 std::string g_lastUpgradeMessage;

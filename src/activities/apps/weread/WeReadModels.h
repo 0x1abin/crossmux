@@ -10,6 +10,10 @@
 
 namespace WeReadModels {
 
+constexpr uint8_t kBookKindEbook = 0;
+constexpr uint8_t kBookKindAudio = 1;
+constexpr uint8_t kBookKindMp = 2;
+
 struct BookCard {
   std::string bookId;
   std::string title;
@@ -19,7 +23,7 @@ struct BookCard {
   uint8_t finishReading = 0;
   uint8_t isTop = 0;
   uint8_t secret = 0;
-  uint8_t isAlbum = 0;  // 0 = e-book (from books[]), 1 = audio (from albums[])
+  uint8_t isAlbum = kBookKindEbook;  // Row kind: e-book, audio album, or mp article collection.
 };
 
 struct NotebookRow {
@@ -37,7 +41,7 @@ struct NotebookRow {
 struct BookmarkRow {
   std::string bookmarkId;
   std::string markText;
-  std::string range;  // "start-end" — split for weread:// deep link
+  std::string range;  // "start-end" range returned by the gateway.
   uint32_t chapterUid = 0;
   uint32_t createTime = 0;
 };
