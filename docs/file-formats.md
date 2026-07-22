@@ -98,17 +98,18 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 36 / 37
+### Versions 38 / 39
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **37**; Latin builds use **36**. The byte layout is identical between
+> currently **39**; Latin builds use **38**. The byte layout is identical between
 > flavors; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
 >
-> Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37 are
-> binary-identical to 34/35, but invalidate cached word positions because Arabic
-> contextual shaping now measures the shaped visual text. The counters remain
+> Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37
+> invalidated cached word positions after Arabic contextual shaping began measuring
+> shaped visual text. Versions 38/39 add the upstream line-through style and
+> resumable partial-build cache changes. The counters remain
 > distinct and above every previously shipped value so a firmware-flavor swap
 > cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
 > source of truth.
@@ -141,7 +142,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 36
+#define EXPECTED_VERSION 38
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
