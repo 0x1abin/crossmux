@@ -99,6 +99,10 @@ inline esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client) {
   return ESP_OK;
 }
 
+// close() ends the current exchange but keeps the client handle reusable.
+// open() resets all buffered request/response state before the next transfer.
+inline esp_err_t esp_http_client_close(esp_http_client_handle_t client) { return client ? ESP_OK : ESP_FAIL; }
+
 inline esp_err_t esp_http_client_set_method(esp_http_client_handle_t client, esp_http_client_method_t method) {
   if (!client) return ESP_FAIL;
   client->method = method;

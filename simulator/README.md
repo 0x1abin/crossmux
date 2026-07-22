@@ -62,8 +62,8 @@ lifted out into its own repository (or vendored via `add_subdirectory` /
 
 ```sh
 # Prerequisites
-brew install sdl2 cmake      # macOS
-# apt install libsdl2-dev cmake  # Linux
+brew install sdl2 cmake pkg-config                    # macOS
+# apt install libsdl2-dev libcurl4-openssl-dev cmake  # Linux
 
 # From repo root:
 cmake -S simulator -B simulator/build

@@ -80,6 +80,8 @@ install_macos() {
   local missing=()
   command -v cmake   >/dev/null 2>&1 || missing+=(cmake)
   command -v python3 >/dev/null 2>&1 || missing+=(python)
+  command -v git     >/dev/null 2>&1 || missing+=(git)
+  command -v pkg-config >/dev/null 2>&1 || missing+=(pkg-config)
   pkg-config --exists sdl2 2>/dev/null || brew list sdl2 >/dev/null 2>&1 || missing+=(sdl2)
   if [[ ${#missing[@]} -gt 0 ]]; then
     log "brew install ${missing[*]}"
@@ -95,7 +97,10 @@ install_linux_apt() {
   command -v cmake   >/dev/null 2>&1 || missing+=(cmake)
   command -v python3 >/dev/null 2>&1 || missing+=(python3)
   command -v g++     >/dev/null 2>&1 || missing+=(build-essential)
+  command -v git     >/dev/null 2>&1 || missing+=(git)
+  command -v pkg-config >/dev/null 2>&1 || missing+=(pkg-config)
   pkg-config --exists sdl2 2>/dev/null || missing+=(libsdl2-dev)
+  pkg-config --exists libcurl 2>/dev/null || missing+=(libcurl4-openssl-dev)
   if [[ ${#missing[@]} -gt 0 ]]; then
     log "$sudo_cmd apt-get install -y ${missing[*]}"
     $sudo_cmd apt-get update -y
@@ -111,7 +116,10 @@ install_linux_dnf() {
   command -v cmake   >/dev/null 2>&1 || missing+=(cmake)
   command -v python3 >/dev/null 2>&1 || missing+=(python3)
   command -v g++     >/dev/null 2>&1 || missing+=(gcc-c++ make)
+  command -v git     >/dev/null 2>&1 || missing+=(git)
+  command -v pkg-config >/dev/null 2>&1 || missing+=(pkgconf-pkg-config)
   pkg-config --exists sdl2 2>/dev/null || missing+=(SDL2-devel)
+  pkg-config --exists libcurl 2>/dev/null || missing+=(libcurl-devel)
   if [[ ${#missing[@]} -gt 0 ]]; then
     log "$sudo_cmd dnf install -y ${missing[*]}"
     $sudo_cmd dnf install -y "${missing[@]}"
@@ -132,7 +140,7 @@ if [[ "$SKIP_INSTALL" != "1" ]]; then
         install_linux_dnf
       else
         err "Unsupported Linux package manager. Install these manually then re-run with SC_SKIP_INSTALL=1:"
-        err "  cmake python3 libsdl2-dev (or SDL2-devel) build-essential (or gcc-c++ make)"
+        err "  cmake python3 git pkg-config SDL2 and libcurl development packages plus a C++ compiler"
         exit 1
       fi
       ;;
@@ -151,11 +159,11 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 3: ensure the open-x4-sdk submodule is checked out
+# Step 3: ensure the FreeInk SDK submodule is checked out
 # -----------------------------------------------------------------------------
-if [[ ! -f open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h ]]; then
-  log "git submodule update --init  (open-x4-sdk)"
-  git submodule update --init
+if [[ ! -f freeink-sdk/libs/display/FreeInkDisplay/include/EInkDisplay.h ]]; then
+  log "git submodule update --init freeink-sdk"
+  git submodule update --init freeink-sdk
 fi
 
 # -----------------------------------------------------------------------------

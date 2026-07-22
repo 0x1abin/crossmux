@@ -37,6 +37,9 @@ class String {
   void reserve(size_t n) { data_.reserve(n); }
   char charAt(size_t i) const { return i < data_.length() ? data_[i] : '\0'; }
 
+  // ArduinoJson's generic reader consumes mutable String inputs byte by byte.
+  int read() { return readPos_ < data_.size() ? static_cast<unsigned char>(data_[readPos_++]) : -1; }
+
   bool equals(const String& other) const { return data_ == other.data_; }
   bool equals(const char* other) const { return other && data_ == other; }
 
@@ -156,4 +159,5 @@ class String {
 
  private:
   std::string data_;
+  size_t readPos_ = 0;
 };
