@@ -18,6 +18,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerListActivity.h"
 #include "OtaUpdateActivity.h"
+#include "ReadingStatsSettingsActivity.h"
 #include "SdCardFontSystem.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
@@ -51,9 +52,8 @@ void SettingsActivity::rebuildSettingsLists() {
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
-      // Settings merged into "Text Settings"
-      // (they stay in the shared list for the web settings API)
-      if (setting.inTextSettings) continue;
+      // Submenu settings stay in the shared list for persistence and the web API.
+      if (setting.inTextSettings || setting.inReadingStatsSettings) continue;
       readerSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_CONTROLS) {
       if (setting.valuePtr == &CrossPointSettings::pwrBtnFootnoteBack &&
@@ -86,6 +86,7 @@ void SettingsActivity::rebuildSettingsLists() {
   readerSettings.insert(readerSettings.begin() + 1,
                         SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStatsSettings));
 
   // Update currentSettings pointer and count for the active category
   switch (selectedCategoryIndex) {
@@ -373,6 +374,15 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::CustomiseStatusBar:
         startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::ReadingStatsSettings:
+        // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
+        if (auto readingStatsSettings = makeUniqueNoThrow<ReadingStatsSettingsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(readingStatsSettings), resultHandler);
+        } else {
+          LOG_ERR("SET", "OOM: ReadingStatsSettingsActivity (%u bytes)",
+                  static_cast<unsigned>(sizeof(ReadingStatsSettingsActivity)));
+        }
         break;
       case SettingAction::KOReaderSync:
         startActivityForResult(std::make_unique<KOReaderSettingsActivity>(renderer, mappedInput), resultHandler);

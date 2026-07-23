@@ -317,7 +317,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t dailyGoalTarget = DAILY_GOAL_30_MIN;
   // Achievement tracking + unlock popups (1 = enabled, 0 = disabled).
   uint8_t achievementsEnabled = 1;
-  uint8_t achievementPopups = 1;
+  uint8_t achievementPopups = 0;
 
   static constexpr uint8_t MIN_SLEEP_TIMEOUT_MINUTES = 1;
   static constexpr uint8_t SLEEP_TIMEOUT_NEVER_MINUTES = 31;
