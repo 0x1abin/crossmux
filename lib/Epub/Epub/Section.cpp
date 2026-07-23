@@ -27,10 +27,12 @@ namespace {
 // v38/v39: Upstream section-cache changes after the last CrossMux sync include
 // line-through word styles and resumable partial builds. Keep the flavors on
 // distinct values so a firmware flavor swap always invalidates stale pages.
+// v40/v41: Compressed line heights are rounded instead of truncated. Although
+// the byte layout is unchanged, the resulting pagination differs.
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 39;
+constexpr uint8_t SECTION_FILE_VERSION = 41;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 38;
+constexpr uint8_t SECTION_FILE_VERSION = 40;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
