@@ -12,12 +12,12 @@ Output:        lib/EpdFont/scripts/cn_common_chars.txt
 
 The output file feeds pyftsubset's --text-file= in build-cn-builtin-fonts.sh.
 
-When --top equals (or exceeds) the pool size, all pool chars are kept and
-the script effectively only adds --require-from chars to the output. This
-is the recommended mode: 3500 common chars covers all of modern Chinese
-that the device reasonably needs to render, and the wordfreq cutoff is
-only useful when intentionally shrinking below 3500 for tight flash
-budgets.
+--top controls how many characters are kept from the ranked source pool.
+Every --require-from character is then added on top, so required UI glyphs
+never displace common characters. The recommended mode is --top 3500:
+keep the full common-character pool, then add required feature/i18n glyphs.
+The wordfreq cutoff is only useful when intentionally shrinking below 3500
+for tighter flash budgets.
 
 Re-run whenever you want to change the target N or the input pool. The
 result is committed so the firmware build is fully reproducible.
@@ -86,8 +86,8 @@ def main() -> None:
         type=int,
         default=3500,
         help="Number of characters to keep (default: 3500, the size of the "
-        "现代汉语常用字表 pool). Lower this to shrink flash; higher only useful "
-        "if --require-from adds chars beyond the pool.",
+        "现代汉语常用字表 pool), before adding --require-from characters. "
+        "Lower this to shrink flash.",
     )
     parser.add_argument(
         "--require-from",
@@ -117,40 +117,37 @@ def main() -> None:
     required = load_required([Path(p) for p in args.require_from])
     required_beyond_pool = sorted(required - pool_chars)
 
-    pool = pool_chars | required
-    total = len(pool)
-
-    if args.top >= total:
+    if args.top < 1 or args.top > len(pool_chars):
         print(
-            f"error: --top {args.top} is >= pool size {total}; nothing to trim",
+            f"error: --top must be between 1 and pool size {len(pool_chars)} "
+            f"(got {args.top})",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    if len(required) > args.top:
-        print(
-            f"error: required set has {len(required)} chars but --top is {args.top}; "
-            "raise --top or trim the require-from input",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    ranked = rank_chars(pool)
-    required_ranked = [(c, z) for c, z in ranked if c in required]
-    non_required_ranked = [(c, z) for c, z in ranked if c not in required]
-
-    remaining_slots = args.top - len(required_ranked)
-    non_required_kept = non_required_ranked[:remaining_slots]
-    non_required_dropped = non_required_ranked[remaining_slots:]
-
-    kept = required_ranked + non_required_kept
+    ranked = rank_chars(pool_chars)
+    pool_kept = ranked[: args.top]
+    pool_kept_chars = {c for c, _ in pool_kept}
+    forced_additions = required - pool_kept_chars
+    kept_chars_set = pool_kept_chars | required
+    pool_dropped = [(c, z) for c, z in ranked[args.top :] if c not in required]
 
     # Sort kept chars back into a stable order (by codepoint) so file diffs are
     # readable when --top changes by a small amount. The font generation
     # doesn't care about order.
-    kept_chars = sorted(c for c, _ in kept)
+    kept_chars = sorted(kept_chars_set)
 
     OUTPUT_FILE.write_text("".join(kept_chars), encoding="utf-8")
+    written_chars = set(OUTPUT_FILE.read_text(encoding="utf-8"))
+    missing_pool = pool_kept_chars - written_chars
+    missing_required = required - written_chars
+    if missing_pool or missing_required:
+        print(
+            f"error: output dropped base glyphs {''.join(sorted(missing_pool))} "
+            f"or required glyphs {''.join(sorted(missing_required))}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print(
         f"Wrote {len(kept_chars)} characters to {OUTPUT_FILE.relative_to(SCRIPT_DIR.parent.parent)}",
@@ -160,15 +157,23 @@ def main() -> None:
     if required:
         i18n_chars = sorted(required)
         I18N_OUTPUT_FILE.write_text("".join(i18n_chars), encoding="utf-8")
+        written_i18n_chars = set(I18N_OUTPUT_FILE.read_text(encoding="utf-8"))
+        missing_i18n = required - written_i18n_chars
+        if missing_i18n:
+            print(
+                f"error: i18n output dropped glyphs: {''.join(sorted(missing_i18n))}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print(
             f"Wrote {len(i18n_chars)} i18n-only characters to "
             f"{I18N_OUTPUT_FILE.relative_to(SCRIPT_DIR.parent.parent)}",
             file=sys.stderr,
         )
     print(
-        f"Pool: {total} chars ({SOURCE_FILE.name} {len(pool_chars)} ∪ required {len(required)})  "
-        f"→  kept {len(kept)} ({len(required_ranked)} required + "
-        f"{len(non_required_kept)} top-Zipf)  →  dropped {len(non_required_dropped)}",
+        f"Pool: {len(pool_chars)} chars ({SOURCE_FILE.name})  "
+        f"→  kept {len(kept_chars)} ({len(pool_kept_chars)} top-Zipf + "
+        f"{len(forced_additions)} required additions)  →  dropped {len(pool_dropped)}",
         file=sys.stderr,
     )
 
@@ -181,21 +186,21 @@ def main() -> None:
         )
 
     if args.review:
-        review_n = min(args.review, len(non_required_kept), len(non_required_dropped))
+        review_n = min(args.review, len(pool_kept), len(pool_dropped))
         if review_n > 0:
             print("", file=sys.stderr)
             print(
-                f"Last {review_n} kept (lowest-frequency non-required survivors, Zipf descending):",
+                f"Last {review_n} kept from the ranked pool (Zipf descending):",
                 file=sys.stderr,
             )
-            for ch, z in non_required_kept[-review_n:]:
+            for ch, z in pool_kept[-review_n:]:
                 print(f"  {ch}  zipf={z:.2f}", file=sys.stderr)
             print("", file=sys.stderr)
             print(
                 f"First {review_n} dropped (highest-frequency casualties, Zipf descending):",
                 file=sys.stderr,
             )
-            for ch, z in non_required_dropped[:review_n]:
+            for ch, z in pool_dropped[:review_n]:
                 print(f"  {ch}  zipf={z:.2f}", file=sys.stderr)
 
 

@@ -3,16 +3,12 @@
 # Generates the per-size CJK font headers used by the ENABLE_CHINESE_VERSION
 # build. Coverage tiers per point size:
 #
-#   8/10/12pt (SMALL, UI text)   : 3500 常用字 ∪ i18n   (cn_common_chars.txt)
-#   14pt      (LARGE, reader MEDIUM default) : 7000 通用汉字 + 扩展符号
-#                                              (chars_7000_common.txt)
-#   16/18pt   (I18N, reader LARGE/EXTRA_LARGE) : ~430 i18n-only chars
+#   8/10/12/14pt (COMMON, UI + reader) : 3500 常用字 ∪ i18n
+#                                         (cn_common_chars.txt)
+#   16/18pt   (I18N, reader LARGE/EXTRA_LARGE) : ~650 i18n-only chars
 #                                                (cn_i18n_chars.txt)
 #
 # Every tier also ships ASCII + Latin-1 + CJK punctuation + full-width forms.
-# The 14pt tier additionally ships number forms / enclosed alphanumerics /
-# box drawing / block elements / geometric shapes / misc symbols / dingbats
-# for richer EPUB rendering at the reader-default size.
 #
 # Pipeline:
 #   1. pyftsubset trims NotoSansSC-Regular.otf to the requested character set
@@ -37,24 +33,19 @@ PYTHON="${PYTHON:-python3}"
 
 SOURCE_OTF="../builtinFonts/source/NotoSansSC/NotoSansSC-Regular.otf"
 # Frequency-ranked subset produced by build_cn_charset.py. Defaults to the
-# top 3000 most common Chinese characters by wordfreq Zipf score, plus every
+# top 3500 most common Chinese characters by wordfreq Zipf score, plus every
 # CJK ideograph used in the Chinese i18n strings (force-included so UI text
 # can never silently drop glyphs — see build_cn_charset.py docstring).
 # Regenerate manually with: python3 build_cn_charset.py --top <N> --require-from ...
 CHARSET_FILE="cn_common_chars.txt"
 # Force-include sources fed to build_cn_charset.py --require-from. Each
-# feature that needs CJK glyphs absent from both the 3500 SC pool and the
-# natural chinese.yaml STR_ values adds its own cn_<feature>_chars.txt here.
+# feature that needs CJK glyphs not already covered at the point size where
+# it renders adds its own cn_<feature>_chars.txt here.
 # cn_almanac_chars.txt: ganzhi + lunar-row chars for ChineseCalendarFace.
 REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt)
 TMP_DIR="instanced_fonts/NotoSansSC"
 SUBSET_OTF="$TMP_DIR/NotoSansSC-Regular.cncommon.otf"
-# Reader-default (14pt) subset: 7000 通用汉字 + extended symbol coverage.
-# Used only for the 14pt bitmap header — MEDIUM is the reader default and
-# benefits most from broader glyph coverage. See chars_7000_common.txt.
-LARGE_OTF="$TMP_DIR/NotoSansSC-Regular.cn7000.otf"
-LARGE_CHARSET_FILE="chars_7000_common.txt"
-# Tiny OTF holding only the CJK chars that appear in i18n YAML files (~430
+# Tiny OTF holding only the CJK chars that appear in i18n YAML files (~650
 # chars). Used to build the 16pt/18pt bitmap headers — those reader sizes are
 # meant for English EPUB, so we don't ship full GB2312 there, but UI strings
 # (game win banners etc.) still need to render at 16pt.
@@ -62,11 +53,9 @@ I18N_OTF="$TMP_DIR/NotoSansSC-Regular.i18nonly.otf"
 I18N_CHARSET_FILE="cn_i18n_chars.txt"
 
 # Font sizes split by character coverage:
-#   SMALL → cn_common_chars.txt subset (3500 chars, UI sizes)
-#   LARGE → chars_7000_common.txt + extended symbols (reader MEDIUM default)
+#   COMMON → cn_common_chars.txt subset (3500 common chars + required)
 #   I18N  → i18n-only subset (reader LARGE/EXTRA_LARGE + UI text fallback)
-CN_FONT_SIZES_SMALL=(8 10 12)
-CN_FONT_SIZES_LARGE=(14)
+CN_FONT_SIZES_SMALL=(8 10 12 14)
 CN_FONT_SIZES_I18N=(16 18)
 
 if [ ! -f "$SOURCE_OTF" ]; then
@@ -108,49 +97,26 @@ if [ ! -f "$I18N_CHARSET_FILE" ]; then
   exit 1
 fi
 
-if [ ! -f "$LARGE_CHARSET_FILE" ]; then
-  echo "Error: $LARGE_CHARSET_FILE not found in $(pwd)." >&2
-  echo "       This file is the 7000 通用汉字 character pool used by the 14pt" >&2
-  echo "       reader-default bitmap. Regenerate from the source .xls if missing." >&2
-  exit 1
-fi
-
-# Step 1a: subset the OTF down to cn_common_chars (3500 ∪ i18n) + ASCII +
-# Latin-1 + CJK punctuation. Used by the 8/10/12pt bitmap headers (UI sizes).
-echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$SUBSET_OTF") (small)..."
+# Step 1a: subset the OTF down to cn_common_chars (3500 ∪ required) + ASCII +
+# Latin-1 + CJK punctuation. Used by the 8/10/12/14pt bitmap headers.
+echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$SUBSET_OTF") (common)..."
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$SUBSET_OTF" \
   --text-file="$CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FFEF,U+FFFD" \
+  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
   --layout-features='*' \
   --notdef-outline \
   --recommended-glyphs \
   --no-hinting \
   --drop-tables+=DSIG,GSUB,GPOS
 
-# Step 1b: subset for 14pt — 7000 通用汉字 + extended symbol coverage.
-# Reader MEDIUM (default) benefits from broader glyph coverage: GB2312-ish
-# kanji pool + currency / arrows / math / enclosed numerals / box drawing /
-# geometric shapes / misc symbols / dingbats — pyftsubset silently drops
-# code points missing from NotoSansSC so over-broad ranges cost nothing.
-echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$LARGE_OTF") (large)..."
-"$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
-  --output-file="$LARGE_OTF" \
-  --text-file="$LARGE_CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+2030-205F,U+2070-209F,U+20A0-20CF,U+2150-218F,U+2190-21FF,U+2200-22FF,U+2460-24FF,U+2500-257F,U+2580-259F,U+25A0-25FF,U+2600-26FF,U+2700-27BF,U+3000-303F,U+FF00-FFEF,U+FFFD" \
-  --layout-features='*' \
-  --notdef-outline \
-  --recommended-glyphs \
-  --no-hinting \
-  --drop-tables+=DSIG,GSUB,GPOS
-
-# Step 1c: subset down to i18n-only CJK + ASCII + Latin-1 + CJK punctuation.
+# Step 1b: subset down to i18n-only CJK + ASCII + Latin-1 + CJK punctuation.
 # Used by the 16pt/18pt bitmap headers.
 echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)..."
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$I18N_OTF" \
   --text-file="$I18N_CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FFEF,U+FFFD" \
+  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
   --layout-features='*' \
   --notdef-outline \
   --recommended-glyphs \
@@ -160,16 +126,10 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)...
 # Step 2: emit one 2-bit raw bitmap header per requested point size.
 # (See file header for the rationale behind skipping --compress.)
 # fontconvert.py auto-skips code points missing from the source OTF, so passing
-# the broad CJK interval is fine — the i18n OTF will only emit ~430 glyphs.
-# Extra --additional-intervals beyond the base CJK trio are appended via "$@"
-# (used by the 14pt LARGE build to add enclosed numerals, box drawing,
-# geometric shapes, misc symbols and dingbats — ranges not in fontconvert.py's
-# built-in interval list).
+# the broad CJK interval is fine — the i18n OTF will only emit ~650 glyphs.
 emit_size() {
   local size="$1"
   local otf="$2"
-  shift 2
-  local extra_intervals=("$@")
   local font_name="notosans_cjk_${size}"
   local output_path="../builtinFonts/${font_name}.h"
   # Write to a temp file first, then atomically mv on success. Otherwise a
@@ -178,14 +138,11 @@ emit_size() {
   # the loop below would then happily report as "0 bytes" and commit.
   local tmp_path="${output_path}.tmp"
   echo "Generating ${output_path} from $(basename "$otf")..."
-  # ${arr[@]+"${arr[@]}"} expands to nothing when arr is empty, dodging
-  # `set -u`'s unbound-variable trip for empty arrays under older Bash.
   "$PYTHON" fontconvert.py "$font_name" "$size" "$otf" \
     --2bit \
     --additional-intervals 0x4E00,0x9FFF \
     --additional-intervals 0x3000,0x303F \
     --additional-intervals 0xFF00,0xFFEF \
-    ${extra_intervals[@]+"${extra_intervals[@]}"} \
     > "$tmp_path"
   if [ ! -s "$tmp_path" ]; then
     echo "Error: fontconvert.py produced empty $tmp_path for ${font_name}" >&2
@@ -196,28 +153,12 @@ emit_size() {
   echo "  $(wc -c < "$output_path") bytes ($(grep -E "Bitmaps\[" "$output_path" | head -1))"
 }
 
-# Symbol ranges that NotoSansSC ships but fontconvert.py's built-in intervals
-# list omits. Without these, the LARGE subset OTF would carry the glyphs but
-# the header generator would never emit them. Kept in ascending order.
-LARGE_EXTRA_INTERVALS=(
-  --additional-intervals 0x2150,0x218F  # Number Forms (½ ⅓ Ⅻ)
-  --additional-intervals 0x2460,0x24FF  # Enclosed Alphanumerics (① Ⓐ)
-  --additional-intervals 0x2500,0x257F  # Box Drawing
-  --additional-intervals 0x2580,0x259F  # Block Elements
-  --additional-intervals 0x25A0,0x25FF  # Geometric Shapes (■ ● ★)
-  --additional-intervals 0x2600,0x26FF  # Miscellaneous Symbols (☀ ♠ ♥)
-  --additional-intervals 0x2700,0x27BF  # Dingbats (✓ ✗ ❀)
-)
-
 for size in "${CN_FONT_SIZES_SMALL[@]}"; do
   emit_size "$size" "$SUBSET_OTF"
-done
-for size in "${CN_FONT_SIZES_LARGE[@]}"; do
-  emit_size "$size" "$LARGE_OTF" "${LARGE_EXTRA_INTERVALS[@]}"
 done
 for size in "${CN_FONT_SIZES_I18N[@]}"; do
   emit_size "$size" "$I18N_OTF"
 done
 
 echo ""
-echo "Done. Generated $((${#CN_FONT_SIZES_SMALL[@]} + ${#CN_FONT_SIZES_LARGE[@]} + ${#CN_FONT_SIZES_I18N[@]})) CJK font headers in ../builtinFonts/"
+echo "Done. Generated $((${#CN_FONT_SIZES_SMALL[@]} + ${#CN_FONT_SIZES_I18N[@]})) CJK font headers in ../builtinFonts/"
