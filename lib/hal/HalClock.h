@@ -23,6 +23,15 @@ class HalClock {
   // True if an RTC is present on this device
   bool isAvailable() const { return _available; }
 
+  // Validate a fresh complete RTC timestamp without changing the system clock.
+  bool hasValidRtcTime() const;
+
+  // Restore the UTC system clock from a complete, trustworthy RTC timestamp.
+  bool restoreSystemTimeFromRtc();
+
+  // Write the current UTC system clock to the RTC and verify it.
+  bool updateRtcFromSystemTime();
+
   // Get current hour (0-23) and minute (0-59).
   // Returns false if RTC is not available.
   bool getTime(uint8_t& hour, uint8_t& minute) const;
@@ -37,8 +46,5 @@ class HalClock {
   // Sync the RTC from an NTP server. Requires WiFi to be connected.
   // Blocks for up to ~5s while waiting for SNTP response.
   // Returns true if the RTC was successfully updated.
-  //
-  // Debouncing (skip if already synced once) is enforced by the caller, not here,
-  // so the HAL stays free of any app-layer settings dependency.
   bool syncFromNTP();
 };

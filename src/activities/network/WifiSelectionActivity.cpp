@@ -14,6 +14,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -397,13 +398,16 @@ void WifiSelectionActivity::checkConnectionStatus() {
             WiFi.RSSI());
 #endif
 
-    // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
-    // drifts ~2 ppm so one sync is enough; users can force a re-sync from
-    // Settings > Customise Status Bar > Sync clock now.
-    if (halClock.isAvailable() && !SETTINGS.clockHasBeenSynced) {
-      if (halClock.syncFromNTP()) {
+    // Repair an invalid X3 RTC without re-syncing a trustworthy one.
+    if (halClock.isAvailable()) {
+      const bool systemClockValid = TimeUtils::isClockValid();
+      const bool rtcTimeValid = systemClockValid ? halClock.hasValidRtcTime() : halClock.restoreSystemTimeFromRtc();
+      const bool rtcCalibrated =
+          !rtcTimeValid && (systemClockValid ? halClock.updateRtcFromSystemTime() : halClock.syncFromNTP());
+      if (rtcCalibrated && !SETTINGS.clockHasBeenSynced) {
         SETTINGS.clockHasBeenSynced = 1;
-        SETTINGS.saveToFile();
+        RenderLock lock(*this);
+        if (!SETTINGS.saveToFile()) LOG_ERR("WIFI", "Failed to save RTC calibration state");
       }
     }
 

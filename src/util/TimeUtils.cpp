@@ -67,6 +67,12 @@ uint32_t TimeUtils::getCurrentValidTimestamp() {
 
 uint32_t TimeUtils::getAuthoritativeTimestamp() { return getCurrentValidTimestamp(); }
 
+bool TimeUtils::getLocalDateTime(const uint32_t epochSeconds, std::tm& out) {
+  const int64_t localSeconds = static_cast<int64_t>(epochSeconds) + localOffsetSeconds();
+  const time_t localTime = static_cast<time_t>(localSeconds);
+  return static_cast<int64_t>(localTime) == localSeconds && gmtime_r(&localTime, &out);
+}
+
 uint32_t TimeUtils::getLocalDayOrdinal(const uint32_t epochSeconds) {
   if (!isClockValid(epochSeconds)) {
     return 0;

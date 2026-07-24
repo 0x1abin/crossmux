@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <ctime>
 #include <string>
 
 // Time helpers for the Reading Analytics suite.
@@ -20,6 +21,9 @@ bool isClockValid(uint32_t epochSeconds);
 // Current epoch seconds if the clock is trustworthy, otherwise 0.
 uint32_t getCurrentValidTimestamp();
 uint32_t getAuthoritativeTimestamp();
+
+// Convert a UTC epoch to configured fixed-offset local time without changing TZ.
+bool getLocalDateTime(uint32_t epochSeconds, std::tm& out);
 
 // Local day number (days since 1970-01-01 in local time), or 0 if the clock is invalid.
 uint32_t getLocalDayOrdinal(uint32_t epochSeconds);

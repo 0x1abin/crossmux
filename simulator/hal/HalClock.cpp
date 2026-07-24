@@ -12,6 +12,12 @@ void HalClock::begin() {
   _available = false;
 }
 
+bool HalClock::hasValidRtcTime() const { return false; }
+
+bool HalClock::restoreSystemTimeFromRtc() { return false; }
+
+bool HalClock::updateRtcFromSystemTime() { return false; }
+
 bool HalClock::getTime(uint8_t& /*hour*/, uint8_t& /*minute*/) const { return false; }
 
 bool HalClock::formatTime(char* /*buf*/, size_t /*bufSize*/, uint8_t /*utcOffsetQuarterHoursBiased*/,
