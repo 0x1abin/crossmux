@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_rom_crc.h>
 
@@ -17,15 +18,57 @@
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 
-FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {}
+namespace {
+
+constexpr uint32_t kProgressRefreshIntervalMs = 2000;
+
+}  // namespace
+
+FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                           const Purpose purpose)
+    : Activity("FontDownload", renderer, mappedInput), purpose_(purpose), fontInstaller_(sdFontSystem.registry()) {}
 
 // --- Lifecycle ---
 
 void FontDownloadActivity::onEnter() {
   Activity::onEnter();
+
+  switch (purpose_) {
+    case Purpose::Manage:
+      startWifiSelection();
+      return;
+    case Purpose::PromptThenManage: {
+      // ActivityManager owns the dialog across frames, so it must live on the heap.
+      auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(
+          renderer, mappedInput, tr(STR_CHINESE_FONT_INCOMPLETE), tr(STR_DOWNLOAD_FULL_CHINESE_FONT),
+          ConfirmationActivity::BodyPlacement::PopupTitle);
+      if (!confirmation) {
+        LOG_ERR("FONT", "OOM allocating ConfirmationActivity (%zu bytes)", sizeof(ConfirmationActivity));
+        finish();
+        return;
+      }
+      startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
+        if (result.isCancelled) {
+          finish();
+          return;
+        }
+        startWifiSelection();
+      });
+      return;
+    }
+  }
+}
+
+void FontDownloadActivity::startWifiSelection() {
   WiFi.mode(WIFI_STA);
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+  // ActivityManager owns the Wi-Fi picker across frames, so it must live on the heap.
+  auto wifiSelection = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
+  if (!wifiSelection) {
+    LOG_ERR("FONT", "OOM allocating WifiSelectionActivity (%zu bytes)", sizeof(WifiSelectionActivity));
+    finish();
+    return;
+  }
+  startActivityForResult(std::move(wifiSelection),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
@@ -47,6 +90,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
 
   {
     RenderLock lock(*this);
+    sdFontSystem.releaseLoadedFont(renderer);
     state_ = LOADING_MANIFEST;
   }
   requestUpdateAndWait();
@@ -72,6 +116,8 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   // Download manifest to a temp file on SD card to avoid holding both
   // TLS buffers and the full JSON string in RAM simultaneously.
   static constexpr const char* MANIFEST_TMP = "/fonts_manifest.tmp";
+  families_.clear();
+  downloadingFamilyIndex_ = -1;
 
   auto result = HttpDownloader::downloadToFile(FONT_MANIFEST_URL, MANIFEST_TMP, nullptr);
   if (result != HttpDownloader::OK) {
@@ -109,7 +155,11 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   }
 
   baseUrl_ = doc["baseUrl"] | "";
-  families_.clear();
+  if (baseUrl_.empty()) {
+    LOG_ERR("FONT", "Manifest has no baseUrl");
+    errorMessage_ = "Invalid font manifest";
+    return false;
+  }
   fontInstaller_.refreshRegistry();
 
   JsonArray familiesArr = doc["families"].as<JsonArray>();
@@ -119,19 +169,37 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     ManifestFamily family;
     family.name = fObj["name"] | "";
     family.description = fObj["description"] | "";
+    if (!FontInstaller::isValidFamilyName(family.name.c_str())) {
+      LOG_ERR("FONT", "Malformed manifest family name: %s", family.name.c_str());
+      families_.clear();
+      errorMessage_ = "Invalid font manifest";
+      return false;
+    }
 
-    for (JsonVariant s : fObj["styles"].as<JsonArray>()) {
+    const JsonArray stylesArr = fObj["styles"].as<JsonArray>();
+    family.styles.reserve(stylesArr.size());
+    for (JsonVariant s : stylesArr) {
       family.styles.push_back(s.as<std::string>());
     }
 
     family.totalSize = 0;
-    for (JsonObject fileObj : fObj["files"].as<JsonArray>()) {
+    const JsonArray filesArr = fObj["files"].as<JsonArray>();
+    if (filesArr.isNull() || filesArr.size() == 0) {
+      LOG_ERR("FONT", "Manifest family has no files: %s", family.name.c_str());
+      families_.clear();
+      errorMessage_ = "Invalid font manifest";
+      return false;
+    }
+    family.files.reserve(filesArr.size());
+    for (JsonObject fileObj : filesArr) {
       ManifestFile file;
       file.name = fileObj["name"] | "";
       file.size = fileObj["size"] | 0;
 
-      if (!fileObj["crc32"].is<uint32_t>()) {
-        LOG_ERR("FONT", "Malformed manifest file entry: missing or invalid crc32 for %s", file.name.c_str());
+      if (!FontInstaller::isValidCpfontFilename(file.name.c_str()) || file.size == 0 ||
+          !fileObj["crc32"].is<uint32_t>()) {
+        LOG_ERR("FONT", "Malformed manifest file entry: %s", file.name.c_str());
+        families_.clear();
         errorMessage_ = "Invalid font manifest";
         return false;
       }
@@ -185,6 +253,7 @@ void FontDownloadActivity::downloadAll() {
   {
     RenderLock lock(*this);
     state_ = COMPLETE;
+    renderer.requestNextFullRefresh();
   }
 }
 
@@ -199,6 +268,7 @@ void FontDownloadActivity::updateAll() {
   {
     RenderLock lock(*this);
     state_ = COMPLETE;
+    renderer.requestNextFullRefresh();
   }
 }
 
@@ -296,10 +366,11 @@ void FontDownloadActivity::downloadFamily(ManifestFamily& family) {
     FontInstaller::buildFontPath(family.name.c_str(), file.name.c_str(), destPath, sizeof(destPath));
 
     std::string url = baseUrl_ + file.name;
+    uint32_t lastProgressRefreshAt = millis();
 
     auto result = HttpDownloader::downloadToFile(
         url, destPath,
-        [this](size_t downloaded, size_t total) {
+        [this, &lastProgressRefreshAt](size_t downloaded, size_t total) {
           fileProgress_ = downloaded;
           fileTotal_ = total;
           mappedInput.update();
@@ -307,7 +378,11 @@ void FontDownloadActivity::downloadFamily(ManifestFamily& family) {
               mappedInput.wasPressed(MappedInputManager::Button::Back)) {
             cancelRequested_ = true;
           }
-          requestUpdate(true);
+          const uint32_t now = millis();
+          if (now - lastProgressRefreshAt >= kProgressRefreshIntervalMs) {
+            lastProgressRefreshAt = now;
+            requestUpdate(true);
+          }
         },
         &cancelRequested_);
 
@@ -388,7 +463,13 @@ void FontDownloadActivity::promptDeleteSelectedFamily() {
   std::string heading = tr(STR_DELETE);
   const auto& family = families_[pendingDeleteFamilyIndex];
   std::string body = family.name;
-  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, body),
+  // ActivityManager owns the dialog across frames, so it must live on the heap.
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, heading, body);
+  if (!confirmation) {
+    LOG_ERR("FONT", "OOM allocating ConfirmationActivity (%zu bytes)", sizeof(ConfirmationActivity));
+    return;
+  }
+  startActivityForResult(std::move(confirmation),
                          [this](const ActivityResult& result) { onDeleteConfirmationResult(result); });
 }
 
@@ -538,11 +619,8 @@ void FontDownloadActivity::loop() {
         requestUpdateAndWait();
         return;
       } else {
-        {
-          RenderLock lock(*this);
-          state_ = FAMILY_LIST;
-        }
-        requestUpdate();
+        onWifiSelectionComplete(true);
+        return;
       }
     } else {
       int x = 0;
@@ -553,11 +631,8 @@ void FontDownloadActivity::loop() {
           requestUpdateAndWait();
           return;
         }
-        {
-          RenderLock lock(*this);
-          state_ = FAMILY_LIST;
-        }
-        requestUpdate();
+        onWifiSelectionComplete(true);
+        return;
       }
     }
   }

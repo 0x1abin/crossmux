@@ -3,6 +3,9 @@
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
 
+#ifdef ENABLE_CHINESE_VERSION
+#include <atomic>
+#endif
 #include <optional>
 
 #include "BookmarkEntry.h"
@@ -81,6 +84,11 @@ class EpubReaderActivity final : public Activity {
   int lastSavedPage = -1;
   int lastSavedPageCount = -1;
 
+#ifdef ENABLE_CHINESE_VERSION
+  std::atomic<uint32_t> pendingMissingChineseCodepoint_{0};
+  std::atomic<bool> chineseFontPromptShown_{false};
+  bool maybeOfferCompleteChineseFont();
+#endif
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   void renderStatusBar() const;

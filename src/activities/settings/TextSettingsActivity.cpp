@@ -2,6 +2,10 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#ifdef ENABLE_CHINESE_VERSION
+#include <Logging.h>
+#include <Memory.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -13,6 +17,9 @@
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
 #include "TextSettingsPreview.h"
+#ifdef ENABLE_CHINESE_VERSION
+#include "activities/settings/FontDownloadActivity.h"
+#endif
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -309,12 +316,18 @@ void TextSettingsActivity::activateRow(int row) {
     case Tab::Family:
       if (row != currentFamilyIndex_) {
         applyFamily(row);
+#ifdef ENABLE_CHINESE_VERSION
+        maybeOfferCompleteChineseFont();
+#endif
         requestUpdate();
       }
       break;
     case Tab::Size:
       if (row != currentSizeIndex_) {
         applySize(row);
+#ifdef ENABLE_CHINESE_VERSION
+        maybeOfferCompleteChineseFont();
+#endif
         requestUpdate();
       }
       break;
@@ -338,6 +351,30 @@ void TextSettingsActivity::applySize(int listIndex) {
   SETTINGS.fontSize = sizes_[listIndex].settingIndex;
   sdFontSystem.ensureLoaded(renderer);
 }
+
+#ifdef ENABLE_CHINESE_VERSION
+void TextSettingsActivity::maybeOfferCompleteChineseFont() {
+  if (chineseFontPromptShown_ || SETTINGS.sdFontFamilyName[0] != '\0' ||
+      SETTINGS.fontSize < CrossPointSettings::LARGE) {
+    return;
+  }
+
+  if (!SETTINGS.saveToFile()) {
+    LOG_ERR("FONT", "Failed to save text settings before Chinese font prompt");
+  }
+
+  // ActivityManager owns the downloader across frames, so it must live on the heap.
+  auto downloader =
+      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage);
+  if (!downloader) {
+    LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
+    return;
+  }
+
+  chineseFontPromptShown_ = true;
+  startActivityForResult(std::move(downloader), [this](const ActivityResult&) { requestUpdate(); });
+}
+#endif
 
 void TextSettingsActivity::confirmLayoutRow(int row) {
   switch (static_cast<LayoutRow>(row)) {
