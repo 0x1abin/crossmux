@@ -177,9 +177,18 @@ class SdCardFont {
     // (capacities below track allocated sizes): freeing and reallocating slightly
     // different sizes on every page turn was a primary heap fragmenter — each page's
     // freed hole rarely fit the next page's need, so maxAlloc eroded all session.
-    // After a few pages the capacities converge on the book's max and page turns
-    // stop allocating entirely. freeStyleMiniData() still releases everything (and
-    // zeroes capacities) for style eviction / font unload.
+    // The per-render PrewarmScope calls clearCache() -> resetStyleMiniData(), which
+    // keeps both the allocations AND the loaded data. Buffers: reuse means
+    // ensureArrayCapacity early-returns once capacities converge on the book's
+    // max, so page turns stop touching the allocator (the free/realloc-per-page
+    // pattern was a primary heap fragmenter). Data: the next prewarm
+    // subset-checks against the resident tables (see prewarmStyle), so the idle
+    // prewarm of page N+1 serves the actual turn with zero SD reads. Retention
+    // is bounded two ways in resetStyleMiniData(): a heap floor frees outright
+    // under pressure, and sustained underuse (an outlier page's oversized bitmap
+    // arena) frees after a few consecutive low-use rebuilds. freeStyleMiniData()
+    // remains the full teardown (zeroes capacities) for style eviction / font
+    // unload.
     EpdFontData miniData{};
     EpdUnicodeInterval* miniIntervals = nullptr;
     EpdGlyph* miniGlyphs = nullptr;
@@ -189,6 +198,18 @@ class SdCardFont {
     uint32_t miniIntervalCapacity = 0;
     uint32_t miniGlyphCapacity = 0;
     uint32_t miniBitmapCapacity = 0;
+    // Bitmap bytes the current page actually used (set by prewarmStyle), the
+    // underuse-hysteresis signal; 0 = no bitmap built this scope (metadata-only
+    // prewarm), which leaves the hysteresis counter untouched.
+    uint32_t miniBitmapUsed = 0;
+    uint8_t miniUnderuseRuns = 0;
+    // True when the resident mini was built metadata-only (no bitmaps): it can
+    // serve metadata requests but a full render request must rebuild.
+    bool miniMetadataOnly = false;
+    // Set by a rebuild, consumed by resetStyleMiniData: gates the underuse
+    // hysteresis to one evaluation per rebuild (scopes reset twice, and subset
+    // hits load nothing new to judge).
+    bool miniHysteresisPending = false;
 
     // Per-page mini kern matrix (built by buildMiniKernMatrix on each full
     // prewarm). miniKernLeftClasses/miniKernRightClasses map ONLY the codepoints
@@ -262,6 +283,10 @@ class SdCardFont {
 
   // Per-style helpers
   void freeStyleMiniData(PerStyle& s);
+  // Per-scope variant: drop the page's data, keep the allocations (see the
+  // PerStyle comment). May escalate to freeStyleMiniData under heap pressure
+  // or sustained underuse.
+  void resetStyleMiniData(PerStyle& s);
   void freeStyleAll(PerStyle& s);
   void freeStyleKernLigatureData(PerStyle& s);
   void freeStyleMiniKern(PerStyle& s);
@@ -283,4 +308,8 @@ class SdCardFont {
 
   // Static callback for EpdFontData::glyphMissHandler (per-style via OverflowContext)
   static const EpdGlyph* onGlyphMiss(void* ctx, uint32_t codepoint);
+
+  // Static callback for EpdFontData::coverageHandler: answers hasCodepoint()
+  // from the RAM-resident full interval table, without SD I/O.
+  static bool onCoverageQuery(void* ctx, uint32_t codepoint);
 };

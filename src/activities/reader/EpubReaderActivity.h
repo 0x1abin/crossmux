@@ -39,6 +39,9 @@ class EpubReaderActivity final : public Activity {
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
   bool showBookmarkMessage = false;
+  // "No dictionary set" popup, shown when a lookup is triggered without a configured dictionary.
+  bool showDictionaryMessage = false;
+  unsigned long dictionaryMessageTime = 0UL;
   bool ignoreNextConfirmRelease = false;
   bool currentPageBookmarked = false;
   // BLE connection state the status bar last rendered with; loop() watches for
@@ -135,6 +138,11 @@ class EpubReaderActivity final : public Activity {
   // lifecycle then holds restarts off until the window is caught up) instead of
   // stalling the build forever below the floors.
   bool buildTickHeapGate();
+  // True while the background build is gated on the heap floors. Lets skipLoopDelay()
+  // return the loop to normal delay/power-saving during the pause: isBuilding() stays
+  // true the whole time, and without this the loop would spin at full CPU speed doing
+  // no build work — indefinitely, if the build context itself keeps the heap low.
+  bool buildHeapPaused = false;
   // How many pages to keep laid out ahead of the reader for a still-building section. A page
   // turn is ~1s on e-ink and a page builds in ~30ms, so the reader can't out-click the builder
   // -- a tiny buffer is enough. The background build stops once the watermark is this far
@@ -158,6 +166,16 @@ class EpubReaderActivity final : public Activity {
   // whole HTML must be inflated before page 1 can lay out (the giant single-spine case), which is
   // a multi-second wait. Normal chapters are well under this and stay popup-free.
   static constexpr size_t BUILD_POPUP_BYTE_THRESHOLD = 96 * 1024;
+  // Deadline backstop for the predictive gates above: if the blocking build-to-target still
+  // hasn't produced the landing page this long after the build started, surface the popup
+  // mid-build. Builds that finish under the deadline stay popup-free.
+  static constexpr unsigned long BUILD_POPUP_DEADLINE_MS = 1000;
+  // True only during onEnter's blocking build-to-target phase, until the popup has been
+  // drawn. Gates showBuildPopup() so the parser's popup callback (which persists into
+  // background buildSomeMore chunks) can never draw over a displayed page.
+  bool buildPopupPending = false;
+  // Draw the indexing popup mid-build (parser image-probe callback and deadline backstop).
+  void showBuildPopup();
   // Remap the cached relative reading position once the section's real page count is known
   // (used after a settings change re-paginates a chapter). Returns true if currentPage moved.
   // No-op while the section is still building or when the pagination is unchanged (plain resume).
@@ -168,6 +186,7 @@ class EpubReaderActivity final : public Activity {
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   // Opens the reader menu for the current position (short-press Confirm)
   void openReaderMenu();
+  void openDictionaryWordSelect();
   // Returns true if sync acted (launched, or surfaced a save error); false if it was a no-op
   // because no KOReader credentials are stored.
   bool launchKOReaderSync();
@@ -192,8 +211,10 @@ class EpubReaderActivity final : public Activity {
   // Full CPU speed + fast loop ticks while a section build runs: at the low-power
   // frequency a giant chapter's background rebuild stretches from ~40s to many
   // minutes, so the reader exits before it can finalize and the next open restarts
-  // it from page 0. Reverts to normal power behavior the moment the build finishes.
-  bool skipLoopDelay() override { return section && section->isBuilding(); }
+  // it from page 0. Reverts to normal power behavior the moment the build finishes,
+  // and while the build is heap-paused (no work is happening, so spinning at full
+  // speed would only burn battery; the paused gate still retries every loop pass).
+  bool skipLoopDelay() override { return section && section->isBuilding() && !buildHeapPaused; }
   bool isReaderActivity() const override { return true; }
   void requestGhostCleanup() override { pagesUntilFullRefresh = 1; }
   ScreenshotInfo getScreenshotInfo() const override;

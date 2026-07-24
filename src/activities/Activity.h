@@ -55,6 +55,8 @@ class Activity {
   // than a fast/partial one. Used after drawing a transient popup over grayscale content
   // (e.g. the "BT Connecting..." popup over a reader page) so it clears without ghosting.
   virtual void requestGhostCleanup() {}
+  virtual bool isHomeActivity() const { return false; }
+  virtual bool handleHomeGesture() { return false; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
   // Start a new activity without destroying the current one
@@ -71,4 +73,16 @@ class Activity {
   // TODO: remove this in near future
   void onGoHome(HomeMenuItem item = HomeMenuItem::NONE);
   void onSelectBook(const std::string& path);
+
+ protected:
+  enum class ListTouchResult : uint8_t {
+    None,      // touch did not hit the list
+    Consumed,  // touchdown moved the highlight (repaint already requested)
+    Activated  // tap landed on a row: selectedIndex is updated, caller activates it
+  };
+
+  // Shared touch handling for selectable list screens: touchdown highlights the
+  // touched row, a tap selects and reports Activated. The caller supplies the
+  // list band and runs its own activate action on Activated.
+  ListTouchResult handleListTouch(int& selectedIndex, int itemCount, int listTop, int listHeight, bool hasSubtitle);
 };
