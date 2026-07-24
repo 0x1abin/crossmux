@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -7,10 +8,14 @@
 #include "fontIds.h"
 
 class ConfirmationActivity : public Activity {
+ public:
+  enum class BodyPlacement : uint8_t { Page, PopupTitle };
+
  private:
   // Input data
   std::string heading;
   std::string body;
+  BodyPlacement bodyPlacement;
 
   const int margin = 20;
   const int spacing = 30;
@@ -24,7 +29,7 @@ class ConfirmationActivity : public Activity {
 
  public:
   ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& heading,
-                       const std::string& body);
+                       const std::string& body, BodyPlacement bodyPlacement = BodyPlacement::Page);
 
   void onEnter() override;
   void loop() override;

@@ -37,6 +37,9 @@ class TextSettingsActivity final : public Activity {
 
   void applyFamily(int listIndex);
   void applySize(int listIndex);
+#ifdef ENABLE_CHINESE_VERSION
+  void maybeOfferCompleteChineseFont();
+#endif
   void confirmLayoutRow(int row);
   void confirmStyleRow(int row);
   // Applies the row at the given list index for the active tab (Confirm and tap share this).
@@ -89,6 +92,9 @@ class TextSettingsActivity final : public Activity {
       {};  // per-Tab nav position (0 = tab bar, 1..N = row); set in onEnter
   int currentFamilyIndex_ = 0;
   int currentSizeIndex_ = 0;
+#ifdef ENABLE_CHINESE_VERSION
+  bool chineseFontPromptShown_ = false;
+#endif
 
   ThemeMetrics metrics_ = {};
   int afterHeader = 0;

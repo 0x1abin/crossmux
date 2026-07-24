@@ -199,8 +199,8 @@ void SdFirmwareUpdateActivity::performUpdate() {}
 
 #include "SdCardFontSystem.h"
 #include "activities/settings/FontDownloadActivity.h"
-FontDownloadActivity::FontDownloadActivity(GfxRenderer& r, MappedInputManager& m)
-    : Activity("FontDownload", r, m), fontInstaller_(sdFontSystem.registry()) {}
+FontDownloadActivity::FontDownloadActivity(GfxRenderer& r, MappedInputManager& m, Purpose purpose)
+    : Activity("FontDownload", r, m), purpose_(purpose), fontInstaller_(sdFontSystem.registry()) {}
 STUB_ACTIVITY_BASE(FontDownloadActivity)
 
 #include "activities/settings/KOReaderAuthActivity.h"

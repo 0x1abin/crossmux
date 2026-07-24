@@ -35,6 +35,9 @@
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
+#ifdef ENABLE_CHINESE_VERSION
+#include "activities/settings/FontDownloadActivity.h"
+#endif
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/AchievementPopupUtils.h"
@@ -324,12 +327,42 @@ void EpubReaderActivity::openDictionaryWordSelect() {
                          [this](const ActivityResult&) { requestUpdate(); });
 }
 
+#ifdef ENABLE_CHINESE_VERSION
+bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
+  if (SETTINGS.sdFontFamilyName[0] != '\0') {
+    pendingMissingChineseCodepoint_.store(0, std::memory_order_relaxed);
+    return false;
+  }
+
+  const uint32_t codepoint = pendingMissingChineseCodepoint_.exchange(0, std::memory_order_relaxed);
+  if (codepoint == 0 || chineseFontPromptShown_.exchange(true, std::memory_order_relaxed)) return false;
+
+  LOG_INF("FONT", "Missing built-in Chinese glyph U+%04X; offering SD fonts", static_cast<unsigned>(codepoint));
+
+  // ActivityManager owns the downloader across frames, so it must live on the heap.
+  auto downloader =
+      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage);
+  if (!downloader) {
+    LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
+    chineseFontPromptShown_.store(false, std::memory_order_relaxed);
+    return false;
+  }
+
+  startActivityForResult(std::move(downloader), [this](const ActivityResult&) { requestUpdate(); });
+  return true;
+}
+#endif
+
 void EpubReaderActivity::loop() {
   if (!epub) {
     // Should never happen
     finish();
     return;
   }
+
+#ifdef ENABLE_CHINESE_VERSION
+  if (maybeOfferCompleteChineseFont()) return;
+#endif
 
   READING_STATS.tickActiveSession();
 
@@ -1440,6 +1473,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   auto scope = fcm->createPrewarmScope();
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);  // scan pass
   scope.endScanAndPrewarm();
+#ifdef ENABLE_CHINESE_VERSION
+  const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
+  if (missingCodepoint != 0 && !chineseFontPromptShown_.load(std::memory_order_relaxed)) {
+    uint32_t expected = 0;
+    pendingMissingChineseCodepoint_.compare_exchange_strong(expected, missingCodepoint, std::memory_order_relaxed);
+  }
+#endif
   const auto tPrewarm = millis();
 
   const bool pageHasImages = page->hasImages();

@@ -15,20 +15,28 @@
 #define FONTS_MANIFEST_VERSION 1
 
 #ifndef FONT_MANIFEST_URL
-// Manifest + .cpfont assets are published by .github/workflows/release-fonts.yml
-// to the crosspoint-fonts repo under the "sd-fonts-m<META>-b<BIN>" tag. The tag
-// pattern must stay in sync with the workflow; it derives its version numbers
-// from lib/EpdFont/scripts/cpfont_version.py.
+// Global assets are published by .github/workflows/release-fonts.yml; Chinese
+// assets use the separately managed Gitee service. Both use the
+// "sd-fonts-m<META>-b<BIN>" tag derived from cpfont_version.py.
 #define FONT_MANIFEST_URL_STRINGIFY_INNER(x) #x
 #define FONT_MANIFEST_URL_STRINGIFY(x) FONT_MANIFEST_URL_STRINGIFY_INNER(x)
+#ifdef ENABLE_CHINESE_VERSION
+#define FONT_MANIFEST_URL                                                                             \
+  "https://gitee.com/x1abin/crossmux-fonts/releases/download/sd-fonts-m" FONT_MANIFEST_URL_STRINGIFY( \
+      FONTS_MANIFEST_VERSION) "-b" FONT_MANIFEST_URL_STRINGIFY(CPFONT_VERSION) "/fonts.json"
+#else
 #define FONT_MANIFEST_URL                                                                                           \
   "https://github.com/crosspoint-reader/crosspoint-fonts/releases/download/sd-fonts-m" FONT_MANIFEST_URL_STRINGIFY( \
       FONTS_MANIFEST_VERSION) "-b" FONT_MANIFEST_URL_STRINGIFY(CPFONT_VERSION) "/fonts.json"
 #endif
+#endif
 
 class FontDownloadActivity : public Activity {
  public:
-  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  enum class Purpose : uint8_t { Manage, PromptThenManage };
+
+  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                Purpose purpose = Purpose::Manage);
 
   void onEnter() override;
   void onExit() override;
@@ -70,6 +78,7 @@ class FontDownloadActivity : public Activity {
   };
 
   State state_ = WIFI_SELECTION;
+  Purpose purpose_;
   FontInstaller fontInstaller_;
   ButtonNavigator buttonNavigator_;
 
@@ -83,10 +92,11 @@ class FontDownloadActivity : public Activity {
   size_t currentFileTotal_ = 0;
   size_t fileProgress_ = 0;
   size_t fileTotal_ = 0;
-  int downloadingFamilyIndex_ = 0;
+  int downloadingFamilyIndex_ = -1;
   std::string errorMessage_;
   bool cancelRequested_ = false;
 
+  void startWifiSelection();
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();
   void downloadFamily(ManifestFamily& family);

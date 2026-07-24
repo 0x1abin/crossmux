@@ -12,6 +12,7 @@ gates every CN-only resource:
 |---|---|
 | i18n string table (`gen_i18n.py`) | Pre-script auto-detects the flag via `env.subst("$BUILD_FLAGS")` and emits **only EN + ZH_CN** into `I18nStrings.cpp` (saves ~144 KB vs the full 23-language table). Detection logs `[gen_i18n] ENABLE_CHINESE_VERSION detected …` during the build. |
 | Built-in fonts ([lib/EpdFont/builtinFonts/all.h](../../lib/EpdFont/builtinFonts/all.h)) | Latin headers are skipped. Six per-size CJK headers (`notosans_cjk_{8,10,12,14,16,18}.h`) replace them — raw 2-bit bitmaps. **Character coverage is tiered by point size**: 8/10/12/14pt carry all 3500 chars from `chars_3500_common.txt` plus every CJK glyph found in `chinese.yaml` and feature-specific require-from files (3515 CJK glyphs total); 16/18pt carry only the require-from set (653 CJK glyphs). Every size also includes the standard ASCII, Latin-1, and CJK punctuation ranges. The 16/18pt sizes are tuned for reader LARGE/EXTRA_LARGE (intended for English EPUB) while still rendering every built-in Chinese UI string; Chinese EPUB text at 16/18pt shows blank for chars outside the i18n subset. |
+| Downloadable fonts | The Chinese build uses the same manifest-v1 font manager as global builds; only its catalog URL points to an externally maintained Gitee release. |
 | `src/main.cpp` font globals | Each Latin `EpdFont`/`EpdFontFamily` global is aliased to the matching-size CJK header. Bold/italic variants all point at the Regular OTF (no style data in the subset). SD-card fonts still provide style variants when the user loads them. |
 | EPUB layout ([lib/Epub/Epub/ParsedText.cpp](../../lib/Epub/Epub/ParsedText.cpp)) | CJK punctuation rules are active: line-head prohibition (禁则) glues trailing punctuation back onto the previous line; full-width punctuation gets width-padded so it occupies a full CJK cell. Both are zero-cost in non-CN builds (gated by `#ifdef`). |
 | Activities (`src/activities/apps/chinese-chess/`) | Compiled in (also gated by `build_src_filter +<activities/apps/chinese-chess/>`). |
@@ -170,12 +171,37 @@ The hard ceiling is the 6.25 MiB A/B-OTA slot. The 2026-07-24 measured
 headroom is 787,619 bytes, so broad pool expansion must be budgeted and
 measured rather than inferred from the source character count.
 
+## Complete Chinese SD fonts
+
+The Chinese build downloads its catalog from:
+
+```text
+https://gitee.com/x1abin/crossmux-fonts/releases/download/sd-fonts-m<manifest>-b<binary>/fonts.json
+```
+
+The version numbers come from the firmware's manifest and cpfont constants.
+The external Gitee service must keep manifest v1 and all referenced cpfont v4
+assets under that tag. `baseUrl`, family/file names, non-zero file sizes, and
+CRC32 values must be valid; the external catalog maintainer is responsible for
+complete Chinese coverage. Global firmware continues to use the corresponding
+GitHub service.
+
+The firmware offers the guided downloader when a built-in font is changed to
+16/18pt, or when an EPUB scan sees a missing U+4E00–U+9FFF or
+U+F900–U+FAFF glyph. The render task only records the first codepoint; the main
+loop opens the activity. A reader session prompts once, and an active SD font
+is never rechecked. After confirmation it opens the ordinary **Manage Fonts**
+flow, preserving install/update/delete and batch-download behavior. Downloads
+never change `sdFontFamilyName`; the user selects an installed family later in
+the reader's text settings. Font sources and catalog-generation configuration
+remain outside this repository.
+
 ## Known limitations
 
 - **No bold/italic CJK glyphs**: the bitmaps come from a single NotoSansSC-Regular subset. UI elements that pass `EpdFontFamily::Style::Bold` render the regular weight under CN.
 - **Font-size dropdown affects rendered size**: each reader size (12/14/16/18pt) and UI size (10/12pt) and small font (8pt) has its own bitmap header. Switching size really does swap glyph bitmaps.
-- **Rare characters render as □ in reader at SMALL/MEDIUM**: the 12/14pt bitmaps use the complete 3500-char pool plus required glyphs. They omit classical/scientific rarities, Traditional Chinese variants, and uncommon names outside that set; for example, `璟` is intentionally absent. Add a feature-scoped `cn_<feature>_chars.txt` for a specific required glyph or enlarge the base pool for broad coverage.
-- **CJK in reader at LARGE/EXTRA_LARGE shows blank** for chars outside the i18n subset — by design, since 16/18pt reader sizes are tuned for English EPUB. Switch to MEDIUM to read Chinese.
+- **Rare characters render as □ in reader at SMALL/MEDIUM until an SD font is installed**: the 12/14pt bitmaps use the complete 3500-char pool plus required glyphs. They omit classical/scientific rarities, Traditional Chinese variants, and uncommon names outside that set; for example, `璟` is intentionally absent. The reader offers the complete-font downloader on the first detected missing glyph.
+- **CJK in reader at LARGE/EXTRA_LARGE needs an SD font for full coverage**: the built-in 16/18pt subsets contain only required UI glyphs. Selecting either size offers the same downloader before a Chinese EPUB encounters missing text.
 - **`FontDecompressor` is bypassed for CJK** by design — bitmaps are stored raw because compressing 6 fonts × ~50 KB groups fragments the heap on boot.
 - **No Traditional Chinese support**: the build is explicitly SC-only (`_language_code: ZH_CN`, no `zh-TW`/`zh-HK` yaml). TC glyphs are not in any pool; TC strings would render as missing-glyph placeholders.
 
