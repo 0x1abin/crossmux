@@ -7,8 +7,9 @@
 namespace chinese_almanac {
 
 // =====================================================================
-//  String tables — every glyph below must be present in the CN bitmap
-//  font subset (lib/EpdFont/scripts/cn_common_chars.txt).
+//  String tables — every rendered glyph must be present in the relevant CN
+//  bitmap subset (cn_common_chars.txt, plus cn_i18n_chars.txt for the 18pt
+//  lunar row).
 // =====================================================================
 
 const char* const kStemNames[10] = {

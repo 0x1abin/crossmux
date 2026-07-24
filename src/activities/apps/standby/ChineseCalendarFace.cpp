@@ -19,10 +19,10 @@
 //
 //   8 / 10 / 12 / 14 pt  → CN bitmap built from cn_common_chars.txt (~3500
 //                          chars).  Safe for any CJK glyph used in the design.
-//   16 / 18 pt           → CN bitmap built from cn_i18n_chars.txt (~430 chars,
-//                          i18n-only subset).  Glyphs absent from that file
-//                          render as no-ops (getGlyph returns nullptr → silent
-//                          skip), producing missing characters or blank cells.
+//   16 / 18 pt           → CN bitmap built from cn_i18n_chars.txt (~650 chars,
+//                          chinese.yaml + feature requirements). Glyphs absent
+//                          from that file render as no-ops (getGlyph returns
+//                          nullptr → silent skip).
 //
 // Therefore: every Chinese-text drawText / drawCenteredText / drawCenteredRow
 // call in this file uses ≤14pt, with one exception — the lunar row uses 18pt
@@ -143,8 +143,6 @@ int verticalCenterY(const GfxRenderer& renderer, int fontId, int bandY, int heig
 }
 
 // 宜 / 忌 card: black header strip with white label + 2×2 grid of body items.
-// Header label uses 12pt because 宜 / 忌 are absent from the 16/18pt
-// i18n CJK subset.
 void drawYiJiBox(const GfxRenderer& renderer, int x, int y, int w, int h, const char* headerLabel,
                  const char* const items[4]) {
   constexpr int kHeaderH = 36;
