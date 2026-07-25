@@ -166,7 +166,7 @@ void StandbyActivity::switchFace(int8_t delta) {
 }
 
 void StandbyActivity::startTimeSync() {
-  if (TimeUtils::isClockValid()) return;
+  if (TimeUtils::isClockValid() || !SETTINGS.clockAutoSync) return;
 
   // Another activity (e.g. Settings → WiFi) may have already connected the
   // device. Skip our own WiFi.begin in that case and request a clock sync.

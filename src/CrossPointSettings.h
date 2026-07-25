@@ -226,6 +226,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 #endif
   // Clock display format: 0 = 24-hour, 1 = 12-hour
   uint8_t clockFormat = 0;
+  // Opportunistically synchronize the system UTC clock while Wi-Fi is already connected.
+  uint8_t clockAutoSync = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
   uint8_t textAntiAliasing = 1;
