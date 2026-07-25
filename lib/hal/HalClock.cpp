@@ -3,13 +3,148 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
+#include <sys/time.h>
 #include <time.h>
 
 HalClock halClock;  // Singleton instance
 
+namespace {
+
+constexpr uint16_t MIN_TRUSTED_YEAR = 2024;
+constexpr uint16_t MAX_RTC_YEAR = 2099;
+constexpr time_t MAX_RTC_WRITE_SKEW_SECONDS = 2;
+
+int32_t daysFromCivil(int year, const unsigned month, const unsigned day) {
+  year -= month <= 2;
+  const int era = (year >= 0 ? year : year - 399) / 400;
+  const unsigned yearOfEra = static_cast<unsigned>(year - era * 400);
+  const unsigned dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+  const unsigned dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+  return era * 146097 + static_cast<int>(dayOfEra) - 719468;
+}
+
+bool rtcDateTimeToEpoch(const Rtc::DateTime& rtcTime, time_t& epoch) {
+  if (rtcTime.year < MIN_TRUSTED_YEAR || rtcTime.year > MAX_RTC_YEAR || rtcTime.month < 1 || rtcTime.month > 12 ||
+      rtcTime.day < 1 || rtcTime.day > 31 || rtcTime.hour > 23 || rtcTime.minute > 59 || rtcTime.second > 59) {
+    return false;
+  }
+
+  const int64_t seconds = static_cast<int64_t>(daysFromCivil(rtcTime.year, rtcTime.month, rtcTime.day)) * 86400 +
+                          static_cast<int64_t>(rtcTime.hour) * 3600 + static_cast<int64_t>(rtcTime.minute) * 60 +
+                          rtcTime.second;
+  const time_t converted = static_cast<time_t>(seconds);
+  if (converted < 0 || static_cast<int64_t>(converted) != seconds) return false;
+
+  struct tm roundTrip{};
+  if (!gmtime_r(&converted, &roundTrip) || roundTrip.tm_year != static_cast<int>(rtcTime.year) - 1900 ||
+      roundTrip.tm_mon != static_cast<int>(rtcTime.month) - 1 || roundTrip.tm_mday != rtcTime.day ||
+      roundTrip.tm_hour != rtcTime.hour || roundTrip.tm_min != rtcTime.minute || roundTrip.tm_sec != rtcTime.second) {
+    return false;
+  }
+
+  epoch = converted;
+  return true;
+}
+
+bool epochToRtcDateTime(const time_t epoch, Rtc::DateTime& rtcTime) {
+  if (epoch < 0) return false;
+
+  struct tm utcTime{};
+  if (!gmtime_r(&epoch, &utcTime)) return false;
+
+  const int year = utcTime.tm_year + 1900;
+  if (year < MIN_TRUSTED_YEAR || year > MAX_RTC_YEAR) return false;
+
+  rtcTime.year = static_cast<uint16_t>(year);
+  rtcTime.month = static_cast<uint8_t>(utcTime.tm_mon + 1);
+  rtcTime.day = static_cast<uint8_t>(utcTime.tm_mday);
+  rtcTime.hour = static_cast<uint8_t>(utcTime.tm_hour);
+  rtcTime.minute = static_cast<uint8_t>(utcTime.tm_min);
+  rtcTime.second = static_cast<uint8_t>(utcTime.tm_sec);
+  rtcTime.weekday = static_cast<uint8_t>(utcTime.tm_wday);
+  return true;
+}
+
+}  // namespace
+
 void HalClock::begin() {
   _available = _sdkRtc.begin();
-  LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+  LOG_INF("CLK", _available ? "RTC found" : "RTC not found");
+  if (!_available) return;
+
+  if (restoreSystemTimeFromRtc()) {
+    LOG_INF("CLK", "System UTC clock restored from RTC");
+    return;
+  }
+
+  LOG_INF("CLK", "RTC calendar is unavailable or not trustworthy");
+  uint8_t hour = 0;
+  uint8_t minute = 0;
+  getTime(hour, minute);
+}
+
+bool HalClock::hasValidRtcTime() const {
+  if (!_available) return false;
+  Rtc::DateTime rtcTime{};
+  time_t epoch = 0;
+  return _sdkRtc.now(rtcTime) && rtcDateTimeToEpoch(rtcTime, epoch);
+}
+
+bool HalClock::restoreSystemTimeFromRtc() {
+  if (!_available) return false;
+
+  Rtc::DateTime rtcTime{};
+  time_t epoch = 0;
+  if (!_sdkRtc.now(rtcTime) || !rtcDateTimeToEpoch(rtcTime, epoch)) return false;
+
+  const struct timeval systemTime = {epoch, 0};
+  if (settimeofday(&systemTime, nullptr) != 0) {
+    LOG_ERR("CLK", "Failed to restore system time from RTC");
+    return false;
+  }
+
+  _cachedHour = rtcTime.hour;
+  _cachedMinute = rtcTime.minute;
+  _hasCachedTime = true;
+  _lastPollMs = millis();
+  return true;
+}
+
+bool HalClock::updateRtcFromSystemTime() {
+  if (!_available) return false;
+
+  const time_t now = time(nullptr);
+  Rtc::DateTime rtcTime{};
+  if (!epochToRtcDateTime(now, rtcTime)) {
+    LOG_ERR("CLK", "System time is invalid; RTC was not updated");
+    return false;
+  }
+  if (!_sdkRtc.set(rtcTime)) {
+    LOG_ERR("CLK", "Failed to write UTC date and time to RTC");
+    return false;
+  }
+
+  Rtc::DateTime verifiedTime{};
+  time_t verifiedEpoch = 0;
+  if (!_sdkRtc.now(verifiedTime) || !rtcDateTimeToEpoch(verifiedTime, verifiedEpoch)) {
+    LOG_ERR("CLK", "RTC write could not be verified");
+    return false;
+  }
+  const time_t writeSkew = verifiedEpoch >= now ? verifiedEpoch - now : now - verifiedEpoch;
+  if (writeSkew > MAX_RTC_WRITE_SKEW_SECONDS) {
+    LOG_ERR("CLK", "RTC write verification differs by %lld seconds", static_cast<long long>(writeSkew));
+    return false;
+  }
+
+  _cachedHour = verifiedTime.hour;
+  _cachedMinute = verifiedTime.minute;
+  _hasCachedTime = true;
+  _lastPollMs = 0;
+  LOG_INF("CLK", "RTC set to %04u-%02u-%02u %02u:%02u:%02u UTC", static_cast<unsigned>(verifiedTime.year),
+          static_cast<unsigned>(verifiedTime.month), static_cast<unsigned>(verifiedTime.day),
+          static_cast<unsigned>(verifiedTime.hour), static_cast<unsigned>(verifiedTime.minute),
+          static_cast<unsigned>(verifiedTime.second));
+  return true;
 }
 
 bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
@@ -22,8 +157,8 @@ bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
     return true;
   }
 
-  Rtc::DateTime dt;
-  if (!_sdkRtc.now(dt)) {
+  Rtc::DateTime dt{};
+  if (!_sdkRtc.now(dt) || dt.hour > 23 || dt.minute > 59) {
     if (!_hasCachedTime) return false;
     _lastPollMs = now;
     hour = _cachedHour;
@@ -81,28 +216,7 @@ bool HalClock::syncFromNTP() {
   constexpr int maxAttempts = 50;
   for (int i = 0; i < maxAttempts; i++) {
     if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-      time_t now = time(nullptr);
-      struct tm timeinfo;
-      gmtime_r(&now, &timeinfo);
-
-      Rtc::DateTime dt;
-      dt.year = static_cast<uint16_t>(timeinfo.tm_year + 1900);
-      dt.month = static_cast<uint8_t>(timeinfo.tm_mon + 1);
-      dt.day = static_cast<uint8_t>(timeinfo.tm_mday);
-      dt.hour = static_cast<uint8_t>(timeinfo.tm_hour);
-      dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
-      dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
-      dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);
-      if (_sdkRtc.set(dt)) {
-        _lastPollMs = 0;
-        _cachedHour = dt.hour;
-        _cachedMinute = dt.minute;
-        _hasCachedTime = true;
-        LOG_INF("CLK", "RTC set to %04u-%02u-%02u %02u:%02u:%02u UTC", dt.year, dt.month, dt.day, dt.hour, dt.minute,
-                dt.second);
-        return true;
-      }
-      return false;
+      return updateRtcFromSystemTime();
     }
     delay(100);
   }

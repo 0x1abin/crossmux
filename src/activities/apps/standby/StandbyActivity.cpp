@@ -1,7 +1,7 @@
 #include "StandbyActivity.h"
 
 #include <Arduino.h>
-#include <HalGPIO.h>
+#include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -13,8 +13,10 @@
 #include <string>
 
 #include "../../../util/PaginationDots.h"
+#include "../../../util/TimeUtils.h"
 #include "../../ActivityResult.h"
 #include "../../network/WifiSelectionActivity.h"
+#include "CrossPointSettings.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
@@ -27,7 +29,7 @@
 
 namespace {
 
-constexpr long kTzOffsetSec = 8 * 3600;      // UTC+8 (Beijing)
+constexpr long kUtcOffsetSec = 0;
 constexpr uint32_t kWifiTimeoutMs = 15000u;  // Same as WifiSelectionActivity
 constexpr uint32_t kNtpTimeoutMs = 12000u;   // SNTP poll budget (multi-server DNS + handshake)
 
@@ -168,7 +170,23 @@ void StandbyActivity::switchFace(int8_t delta) {
 }
 
 void StandbyActivity::startTimeSync() {
-  if (standby_time::isSynced()) return;
+  if (TimeUtils::isClockValid()) {
+    standby_time::setSynced(true);
+    if (halClock.isAvailable() && !halClock.hasValidRtcTime()) {
+      if (halClock.updateRtcFromSystemTime()) {
+        markRtcCalibrated();
+      } else {
+        LOG_ERR("STANDBY", "Failed to repair RTC from valid system clock");
+      }
+    }
+    return;
+  }
+
+  if (halClock.restoreSystemTimeFromRtc()) {
+    standby_time::setSynced(true);
+    LOG_DBG("STANDBY", "System clock restored from RTC");
+    return;
+  }
 
   // Another activity (e.g. Settings → WiFi) may have already connected the
   // device. Skip our own WiFi.begin in that case and go straight to NTP.
@@ -249,9 +267,15 @@ void StandbyActivity::onWifiResult(const ActivityResult& result) {
     // continue ticking on the pre-sync fallback clock.
     return;
   }
+  if (TimeUtils::isClockValid() || halClock.restoreSystemTimeFromRtc()) {
+    standby_time::setSynced(true);
+    LOG_DBG("STANDBY", "WiFi UI returned with a trustworthy clock");
+    finishTimeSync();
+    return;
+  }
+
   // User connected via the UI; WiFi is up. Skip our own WiFi.begin and jump
-  // straight to NTP. WifiSelectionActivity already persisted the credential
-  // and updated lastConnectedSsid, so next boot the silent path will work.
+  // straight to NTP.
   LOG_DBG("STANDBY", "WiFi UI returned connected; starting NTP");
   beginNtpSync();
   requestUpdate();  // refresh header back to "Syncing…"
@@ -263,9 +287,9 @@ void StandbyActivity::beginNtpSync() {
   // China-region servers: Aliyun is the most reliable; Tencent and the NTP
   // Pool CN node act as fallbacks. pool.ntp.org is often blocked or slow
   // inside the mainland.
-  configTime(kTzOffsetSec, 0, "ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org");
+  configTime(kUtcOffsetSec, 0, "ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org");
 #else
-  configTime(kTzOffsetSec, 0, "pool.ntp.org");
+  configTime(kUtcOffsetSec, 0, "pool.ntp.org");
 #endif
   syncState_ = SyncState::NtpSyncing;
   syncStartMs_ = millis();
@@ -303,7 +327,19 @@ void StandbyActivity::pumpTimeSync() {
 
   if (syncState_ == SyncState::NtpSyncing) {
     if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+      if (!TimeUtils::isClockValid()) {
+        LOG_ERR("STANDBY", "NTP completed without a trustworthy system clock");
+        finishTimeSync();
+        return;
+      }
       standby_time::setSynced(true);
+      if (halClock.isAvailable()) {
+        if (halClock.updateRtcFromSystemTime()) {
+          markRtcCalibrated();
+        } else {
+          LOG_ERR("STANDBY", "NTP synced but RTC update failed");
+        }
+      }
       // Saved credentials worked this session — clear the "already prompted"
       // gate so that if they later fail (e.g. router password changed) the
       // next Standby entry can prompt the user again instead of staying
@@ -318,6 +354,13 @@ void StandbyActivity::pumpTimeSync() {
       finishTimeSync();
     }
   }
+}
+
+void StandbyActivity::markRtcCalibrated() {
+  if (SETTINGS.clockHasBeenSynced) return;
+  SETTINGS.clockHasBeenSynced = 1;
+  RenderLock lock(*this);
+  if (!SETTINGS.saveToFile()) LOG_ERR("STANDBY", "Failed to save RTC calibration state");
 }
 
 void StandbyActivity::finishTimeSync() {

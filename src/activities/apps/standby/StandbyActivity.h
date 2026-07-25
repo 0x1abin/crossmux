@@ -55,6 +55,7 @@ class StandbyActivity final : public Activity {
   void onWifiResult(const ActivityResult& result);
   void beginNtpSync();
   void pumpTimeSync();
+  void markRtcCalibrated();
   void finishTimeSync();
 
   // Layer a 4-level grayscale refresh on top of the BW image just committed by

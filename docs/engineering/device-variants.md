@@ -113,6 +113,18 @@ borders, and grayscale images on real X4 hardware; if persistent residue is
 unacceptable, retain 20 MHz but restore the stock waveform override. X3 never
 constructs the SSD1677 driver, so neither tuning applies to it.
 
+### X3 RTC recovery
+
+The X3 DS3231 and the ESP system clock both store UTC. During boot,
+`HalClock::begin()` accepts only a complete 2024–2099 calendar with a running
+oscillator before restoring the system clock. Standby can therefore show the
+configured local date and time without Wi-Fi. If the RTC is stopped, unreadable,
+or invalid, the existing NTP path restores UTC and writes a verified calendar
+back to the RTC. X4 has no RTC and keeps the existing system-clock/NTP fallback.
+
+`clockUtcOffsetQ` remains a fixed display offset used by the status bar and
+Standby faces; it does not change the process-wide timezone.
+
 The SPI display pins (`EPD_SCLK=8`, `EPD_MOSI=10`, `EPD_CS=21`, `EPD_DC=4`,
 `EPD_RST=5`, `EPD_BUSY=6`) and the ADC button layout are **identical** on both
 devices ([lib/hal/HalGPIO.h](../../lib/hal/HalGPIO.h)).

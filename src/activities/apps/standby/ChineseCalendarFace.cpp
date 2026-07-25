@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../../util/TimeUtils.h"
 #include "ChineseAlmanac.h"
 #include "I18nKeys.h"
 #include "SloppyAlphabets.h"
@@ -280,23 +281,17 @@ void drawAlmanacPage(GfxRenderer& renderer, const Rect& viewport, const AlmanacD
 //  ChineseCalendarFace lifecycle helpers
 // =====================================================================
 
-// Anchor: 1970-01-01 00:00:00 UTC+8 → time_t = -8*3600 (= -28800).  But we
-// only ever consume real `time(nullptr)` values from `localtime_r`, so this
-// helper just returns the UTC+8 midnight that contains the given local
-// struct tm.
+// Return the process-local midnight containing the supplied calendar day.
 time_t startOfDayLocal(const struct tm& local) {
   struct tm midnight = local;
   midnight.tm_hour = 0;
   midnight.tm_min = 0;
   midnight.tm_sec = 0;
   midnight.tm_isdst = 0;
-  // Use mktime, which assumes the struct tm is in local time (TZ already set
-  // to UTC+8 by configTime).
   return mktime(&midnight);
 }
 
 // Apply day offset to a base struct tm by going through time_t arithmetic.
-// Returns the resulting struct tm in local (UTC+8) zone.
 bool offsetDay(const struct tm& base, int32_t daysOffset, struct tm& out) {
   time_t midnight = startOfDayLocal(base);
   if (midnight == static_cast<time_t>(-1)) return false;
@@ -305,15 +300,9 @@ bool offsetDay(const struct tm& base, int32_t daysOffset, struct tm& out) {
   return true;
 }
 
-// Pre-NTP fallback: use UTC+8 today regardless of system clock.
-// localtime_r with the configTime'd TZ already handles this when synced;
-// when not synced, time(nullptr) returns ~ESP epoch boot time, which is
-// not meaningful as a date. We still proceed (caller decided this face is
-// active), but visible dates will be wrong until NTP succeeds.
 bool getTodayLocal(struct tm& out) {
-  const time_t now = time(nullptr);
-  if (!localtime_r(&now, &out)) return false;
-  return true;
+  const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+  return now && TimeUtils::getLocalDateTime(now, out);
 }
 
 }  // namespace
@@ -349,7 +338,7 @@ void ChineseCalendarFace::onExit() {
 bool ChineseCalendarFace::refreshCachedDay() {
   struct tm today;
   if (!getTodayLocal(today)) {
-    LOG_DBG("STANDBY", "Calendar: localtime_r failed");
+    LOG_DBG("STANDBY", "Calendar: trustworthy local date unavailable");
     cacheValid_ = false;
     return false;
   }

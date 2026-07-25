@@ -2,16 +2,14 @@
 
 #include <cstdint>
 
-// Shared, session-scoped time helpers used by Standby and its faces. The NTP
-// "is synced" flag lives in this translation unit so that faces can read it
-// without depending on StandbyActivity internals. State resets to "not synced"
-// on every cold boot (the device has no battery-backed RTC).
+// Shared time helpers used by Standby and its faces. The session flag means
+// the system clock was accepted from RTC, NTP, or the host.
 namespace standby_time {
 
-// True if NTP successfully synced during this boot session.
+// True if the system clock is trusted during this boot session.
 bool isSynced();
 
-// Setter called by StandbyActivity::finishTimeSync() when NTP completes.
+// Setter called when Standby accepts a trustworthy system clock.
 void setSynced(bool v);
 
 // Return the current wall-clock HH and MM. When isSynced() is false the result

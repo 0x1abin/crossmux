@@ -35,7 +35,7 @@ class ChineseCalendarFace final : public StandbyFace {
   std::unique_ptr<sloppy::Style> heroStyle_;
   std::unique_ptr<sloppy::Seeds> heroSeeds_;
 
-  // Day navigation: relative to "today" (per `time(nullptr)` in UTC+8).
+  // Day navigation: relative to today in the configured fixed offset.
   int32_t dayOffset_ = 0;
   AlmanacDay cachedDay_{};
   bool cacheValid_ = false;

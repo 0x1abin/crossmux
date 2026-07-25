@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <time.h>
 
+#include "../../../util/TimeUtils.h"
+
 namespace standby_time {
 namespace {
 
@@ -27,17 +29,19 @@ void setSynced(bool v) { g_synced = v; }
 
 void getNowHHMM(uint32_t fallbackStartMs, unsigned& hh, unsigned& mm) {
   if (g_synced) {
-    const time_t now = time(nullptr);
-    struct tm tmLocal;
-    localtime_r(&now, &tmLocal);
-    hh = static_cast<unsigned>(tmLocal.tm_hour);
-    mm = static_cast<unsigned>(tmLocal.tm_min);
-  } else {
-    const uint32_t elapsedMin = (millis() - fallbackStartMs) / 60000u;
-    const uint32_t totalMin = kFallbackStartHH * 60u + kFallbackStartMM + elapsedMin;
-    hh = (totalMin / 60u) % 24u;
-    mm = totalMin % 60u;
+    std::tm localTime{};
+    const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+    if (now && TimeUtils::getLocalDateTime(now, localTime)) {
+      hh = static_cast<unsigned>(localTime.tm_hour);
+      mm = static_cast<unsigned>(localTime.tm_min);
+      return;
+    }
   }
+
+  const uint32_t elapsedMin = (millis() - fallbackStartMs) / 60000u;
+  const uint32_t totalMin = kFallbackStartHH * 60u + kFallbackStartMM + elapsedMin;
+  hh = (totalMin / 60u) % 24u;
+  mm = totalMin % 60u;
 }
 
 uint32_t getMinuteTick(uint32_t fallbackStartMs) {
