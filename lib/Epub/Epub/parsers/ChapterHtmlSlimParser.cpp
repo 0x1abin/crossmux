@@ -12,9 +12,11 @@
 #include <iterator>
 #include <new>
 
+#include "../../../../src/fontIds.h"
 #include "Epub.h"
 #include "Epub/Page.h"
 #include "Epub/converters/ImageDecoderFactory.h"
+#include "Epub/converters/ImageDimsProbe.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "Epub/htmlEntities.h"
 
@@ -47,9 +49,37 @@ constexpr const char* ITALIC_TAGS[] = {"i", "em"};
 constexpr const char* UNDERLINE_TAGS[] = {"u", "ins"};
 constexpr const char* LINETHROUGH_TAGS[] = {"del", "s", "strike"};
 constexpr const char* IMAGE_TAGS[] = {"img", "image"};
-constexpr const char* SKIP_TAGS[] = {"head"};
+constexpr const char* SKIP_TAGS[] = {"head", "rp"};
 
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
+
+std::string trimAndNormalize(const std::string& str) {
+  if (str.empty()) return "";
+  size_t start = 0;
+  while (start < str.size() && isWhitespace(str[start])) {
+    start++;
+  }
+  if (start == str.size()) return "";
+  size_t end = str.size() - 1;
+  while (end > start && isWhitespace(str[end])) {
+    end--;
+  }
+  std::string result;
+  result.reserve(end - start + 1);
+  bool inSpace = false;
+  for (size_t i = start; i <= end; i++) {
+    if (isWhitespace(str[i])) {
+      if (!inSpace) {
+        result.push_back(' ');
+        inSpace = true;
+      }
+    } else {
+      result.push_back(str[i]);
+      inSpace = false;
+    }
+  }
+  return result;
+}
 
 bool matches(const char* tag_name, const char* const* possible_tags, size_t count) {
   for (size_t i = 0; i < count; i++) {
@@ -554,28 +584,47 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
             }
             std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
 
-            // Extract image to cache file
-            HalFile cachedImageFile;
-            bool extractSuccess = false;
-            if (Storage.openFileForWrite("EHP", cachedImagePath, cachedImageFile)) {
-              extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 4096);
-              cachedImageFile.flush();
-              cachedImageFile.close();
-            }
-
-            if (extractSuccess) {
-              // Get image dimensions, retrying to absorb SD-card sync latency on slow
-              // cards. Replaces a blanket delay(50) that cost ~50ms on every image, and
-              // closes the silent-drop bug where a single getDimensions failure was fatal.
+            {
+              // Probe the dimensions from the entry's first bytes (early-aborted
+              // inflate, a few KB) instead of extracting the whole image now —
+              // extraction is deferred to the first render of the page (see
+              // ImageBlock's lazy extractor). This is what keeps first-open of an
+              // image-heavy chapter from stalling for seconds per image.
               ImageDimensions dims = {0, 0};
-              ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
-              bool gotDimensions = false;
-              for (int attempt = 0; attempt < 3 && !gotDimensions; attempt++) {
-                if (attempt > 0) {
-                  delay(50);  // Give a slow SD card time to finish syncing before retrying
+              ImageDimsProbe headerProbe;
+              self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024, /*allowEarlyStop=*/true);
+              bool gotDimensions = headerProbe.getDimensions(dims);
+
+              if (!gotDimensions) {
+                // No header within the stream (rare) — fall back to extracting the
+                // whole image and probing the file. That can take seconds, so
+                // surface the indexing popup first (single-shot per parser).
+                if (self->popupFn && !self->imagePopupFired) {
+                  self->imagePopupFired = true;
+                  self->popupFn();
                 }
-                gotDimensions = decoder && decoder->getDimensions(cachedImagePath, dims);
+                HalFile cachedImageFile;
+                bool extractSuccess = false;
+                if (Storage.openFileForWrite("EHP", cachedImagePath, cachedImageFile)) {
+                  extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 4096);
+                  cachedImageFile.flush();
+                  cachedImageFile.close();
+                }
+                if (extractSuccess) {
+                  // Retry to absorb SD-card sync latency on slow cards, and to close
+                  // the silent-drop bug where a single getDimensions failure was fatal.
+                  ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
+                  for (int attempt = 0; attempt < 3 && !gotDimensions; attempt++) {
+                    if (attempt > 0) {
+                      delay(50);  // Give a slow SD card time to finish syncing before retrying
+                    }
+                    gotDimensions = decoder && decoder->getDimensions(cachedImagePath, dims);
+                  }
+                } else {
+                  LOG_ERR("EHP", "Failed to extract image");
+                }
               }
+
               if (gotDimensions) {
                 LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
 
@@ -722,13 +771,18 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 self->currentPageNextY += imageMarginTop;
 
                 // Create ImageBlock and add to page
-                auto imageBlock = std::make_shared<ImageBlock>(cachedImagePath, displayWidth, displayHeight);
+                // nothrow: make_shared uses bare new, which aborts on OOM under
+                // -fno-exceptions; images arrive mid-parse when the heap is at its
+                // most loaded, so this must fail soft into the null-check below.
+                auto imageBlock = std::shared_ptr<ImageBlock>(
+                    new (std::nothrow) ImageBlock(cachedImagePath, resolvedPath, displayWidth, displayHeight));
                 if (!imageBlock) {
                   LOG_ERR("EHP", "Failed to create ImageBlock");
                   return;
                 }
                 int xPos = (self->viewportWidth - displayWidth) / 2;
-                auto pageImage = std::make_shared<PageImage>(imageBlock, xPos, self->currentPageNextY);
+                auto pageImage =
+                    std::shared_ptr<PageImage>(new (std::nothrow) PageImage(imageBlock, xPos, self->currentPageNextY));
                 if (!pageImage) {
                   LOG_ERR("EHP", "Failed to create PageImage");
                   return;
@@ -753,8 +807,6 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 LOG_ERR("EHP", "Failed to get image dimensions");
                 Storage.remove(cachedImagePath.c_str());
               }
-            } else {
-              LOG_ERR("EHP", "Failed to extract image");
             }
           }  // isFormatSupported
         }
@@ -779,6 +831,22 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       self->depth += 1;
       return;
     }
+  }
+
+  // Ruby tag handling
+  if (strcmp(name, "ruby") == 0) {
+    self->flushPartWordBuffer();
+    self->inRuby = true;
+    self->rubyStartWordIndex = self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0;
+    self->rubyTextBuffer.clear();
+    self->depth += 1;
+    return;
+  }
+  if (strcmp(name, "rt") == 0) {
+    self->flushPartWordBuffer();
+    self->collectingRubyText = true;
+    self->depth += 1;
+    return;
   }
 
   if (matches(name, SKIP_TAGS, std::size(SKIP_TAGS))) {
@@ -1029,6 +1097,12 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     return;
   }
 
+  // Collect ruby text instead of normal word processing
+  if (self->collectingRubyText) {
+    self->rubyTextBuffer.append(s, len);
+    return;
+  }
+
   // Collect footnote link display text (for the number label)
   // Skip whitespace and brackets to normalize noterefs like "[1]" → "1"
   if (self->insideFootnoteLink) {
@@ -1236,6 +1310,41 @@ void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const X
 void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
 
+  // Ruby text: </rt> distributes ruby to base words, </ruby> resets ruby state
+  if (strcmp(name, "rt") == 0) {
+    self->collectingRubyText = false;
+    if (self->inRuby && self->currentTextBlock) {
+      const int currentWordCount = static_cast<int>(self->currentTextBlock->size());
+      const int baseWordCount = currentWordCount - self->rubyStartWordIndex;
+      std::string cleanRuby = trimAndNormalize(self->rubyTextBuffer);
+      if (!cleanRuby.empty()) {
+        if (baseWordCount > 0) {
+          self->currentTextBlock->setRubyGroupAt(self->rubyStartWordIndex, baseWordCount, cleanRuby);
+          self->rubyStartWordIndex = currentWordCount;
+        } else if (self->rubyStartWordIndex > 0) {
+          int leaderIdx = self->rubyStartWordIndex - 1;
+          while (leaderIdx >= 0 &&
+                 (self->currentTextBlock->getWordStyleAt(leaderIdx) & EpdFontFamily::RUBY_CONTINUE) != 0) {
+            leaderIdx--;
+          }
+          if (leaderIdx >= 0) {
+            std::string prevRuby = self->currentTextBlock->getRubyTextAt(leaderIdx);
+            self->currentTextBlock->setRubyForWordAt(leaderIdx, prevRuby + cleanRuby);
+          }
+        }
+      }
+    }
+    self->rubyTextBuffer.clear();
+    self->depth -= 1;
+    return;
+  }
+  if (strcmp(name, "ruby") == 0 && self->inRuby) {
+    self->inRuby = false;
+    self->rubyStartWordIndex = -1;
+    self->rubyTextBuffer.clear();
+    self->depth -= 1;
+    return;
+  }
   // Check if any style state will change after we decrement depth
   // If so, we MUST flush the partWordBuffer with the CURRENT style first
   // Note: depth hasn't been decremented yet, so we check against (depth - 1)
@@ -1483,7 +1592,8 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
 }
 
 void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
-  const int lineHeight = renderer.getLineHeight(fontId, lineCompression);
+  const int lineHeight =
+      renderer.getLineHeight(fontId, lineCompression) + line->getRubyShift(renderer.getFontAscenderSize(fontId));
 
   if (!currentPage) {
     currentPage.reset(new Page());

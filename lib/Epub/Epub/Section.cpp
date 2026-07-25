@@ -29,10 +29,12 @@ namespace {
 // distinct values so a firmware flavor swap always invalidates stale pages.
 // v40/v41: Compressed line heights are rounded instead of truncated. Although
 // the byte layout is unchanged, the resulting pagination differs.
+// v42/v43: Images persist their book-internal source href for lazy extraction,
+// and TextBlocks serialize ruby annotations and group-continuation styles.
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 41;
+constexpr uint8_t SECTION_FILE_VERSION = 43;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 40;
+constexpr uint8_t SECTION_FILE_VERSION = 42;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
