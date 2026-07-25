@@ -97,7 +97,7 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 | Display SPI clock | **20 MHz** (SSD1677 in-spec maximum) | UC81xx profile default, unchanged |
 | Battery | ADC on GPIO0 | BQ27220 fuel gauge (I²C) — [HalPowerManager.cpp](../../lib/hal/HalPowerManager.cpp) |
 | USB / charge detect | GPIO20 reads HIGH | sign of BQ27220 current — [HalGPIO.cpp:272-287](../../lib/hal/HalGPIO.cpp) |
-| RTC clock | none (internal, drifts in deep sleep) | DS3231, X3-only — [HalClock.cpp:21](../../lib/hal/HalClock.cpp) |
+| Clock persistence | ESP system clock; survives deep sleep/reset, not full power loss | ESP system clock plus DS3231 UTC backup — [HalClock.cpp](../../lib/hal/HalClock.cpp) |
 | Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp:55](../../lib/hal/HalTiltSensor.cpp) |
 | Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp:194](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp:399](../../src/components/themes/lyra/LyraTheme.cpp) |
 | Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [EInkDisplay.h:56-94](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
@@ -113,17 +113,24 @@ borders, and grayscale images on real X4 hardware; if persistent residue is
 unacceptable, retain 20 MHz but restore the stock waveform override. X3 never
 constructs the SSD1677 driver, so neither tuning applies to it.
 
-### X3 RTC recovery
+### Unified system clock and optional RTC
 
-The X3 DS3231 and the ESP system clock both store UTC. During boot,
-`HalClock::begin()` accepts only a complete 2024–2099 calendar with a running
-oscillator before restoring the system clock. Standby can therefore show the
-configured local date and time without Wi-Fi. If the RTC is stopped, unreadable,
-or invalid, the existing NTP path restores UTC and writes a verified calendar
-back to the RTC. X4 has no RTC and keeps the existing system-clock/NTP fallback.
+The POSIX/ESP system UTC clock is the runtime source on every device.
+`HalClock::begin()` probes the optional external RTC and uses it only to restore
+an invalid system clock after power loss. A stopped, unreadable, absent, or
+invalid RTC naturally falls back to the same software-clock path; business and
+UI code never branch on X3/X4 or RTC availability.
+
+Network and manual updates set the system clock first, then write the UTC value
+back to an available RTC. A failed RTC write is logged but does not invalidate
+the successfully updated system time. The RTC is not polled periodically while
+the device is running.
 
 `clockUtcOffsetQ` remains a fixed display offset used by the status bar and
-Standby faces; it does not change the process-wide timezone.
+Standby faces; it does not change the process-wide timezone. Clock display and
+synchronization no longer depend on external RTC presence. Chinese builds
+default a missing `clockUtcOffsetQ` to UTC+8; an existing saved value is
+preserved.
 
 The SPI display pins (`EPD_SCLK=8`, `EPD_MOSI=10`, `EPD_CS=21`, `EPD_DC=4`,
 `EPD_RST=5`, `EPD_BUSY=6`) and the ADC button layout are **identical** on both
@@ -171,8 +178,8 @@ X3 to the simulator is possible but out of scope here.)
   scores.
 - **Web API** — `device` field is `"X3"` / `"X4"`
   ([CrossPointWebServer.cpp:382](../../src/network/CrossPointWebServer.cpp)).
-- **UI** — X3-only menu items appear only on X3: status-bar clock (DS3231) and
-  Tilt Page Turn (QMI8658).
+- **UI** — the X3-only Tilt Page Turn item appears only when the QMI8658 is
+  detected. Clock functionality is available on every device.
 
 ## Adding a future device variant
 
@@ -181,7 +188,8 @@ The pattern generalizes. To add an "Xn":
 1. extend `DeviceType` and add `deviceIsXn()` ([HalGPIO.h](../../lib/hal/HalGPIO.h)),
 2. add an I²C (or other) fingerprint pass in `detectDeviceTypeWithFingerprint()`,
 3. add `setDisplayXn()` + the panel's controller path in the SDK `EInkDisplay`,
-4. branch the affected HAL peripherals (battery, RTC, IMU) and theme layout,
+4. keep optional peripherals (battery, RTC, IMU) behind their HAL classes and
+   branch layout only where physical geometry requires it,
 5. keep everything runtime-dispatched — do **not** introduce a build env.
 
 See also: [build-system.md](build-system.md) (envs & flags),
