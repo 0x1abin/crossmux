@@ -177,11 +177,11 @@ void DateTimeSettingsActivity::loopManualEdit() {
     return;
   }
 
-  buttonNavigator.onNextRelease([this] {
+  buttonNavigator.onRelease({MappedInputManager::Button::Down}, [this] {
     selectedEditField = ButtonNavigator::nextIndex(selectedEditField, EDIT_FIELD_COUNT);
     requestUpdate();
   });
-  buttonNavigator.onPreviousRelease([this] {
+  buttonNavigator.onRelease({MappedInputManager::Button::Up}, [this] {
     selectedEditField = ButtonNavigator::previousIndex(selectedEditField, EDIT_FIELD_COUNT);
     requestUpdate();
   });
