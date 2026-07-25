@@ -2,15 +2,19 @@
 
 #include <Logging.h>
 #include <WiFi.h>
+#include <esp_netif_sntp.h>
 #include <esp_sntp.h>
 #include <sys/time.h>
 #include <time.h>
 
-HalClock halClock;  // Singleton instance
+HalClock halClock;
 
 namespace {
 
-constexpr uint16_t MIN_TRUSTED_YEAR = 2024;
+// Earliest UTC instant that can represent 2024-01-01 in the supported UTC+14
+// local offset.
+constexpr time_t MIN_TRUSTED_EPOCH = 1704016800;  // 2023-12-31 10:00 UTC
+constexpr uint16_t MIN_TRUSTED_YEAR = 2023;
 constexpr uint16_t MAX_RTC_YEAR = 2099;
 constexpr time_t MAX_RTC_WRITE_SKEW_SECONDS = 2;
 
@@ -33,7 +37,7 @@ bool rtcDateTimeToEpoch(const Rtc::DateTime& rtcTime, time_t& epoch) {
                           static_cast<int64_t>(rtcTime.hour) * 3600 + static_cast<int64_t>(rtcTime.minute) * 60 +
                           rtcTime.second;
   const time_t converted = static_cast<time_t>(seconds);
-  if (converted < 0 || static_cast<int64_t>(converted) != seconds) return false;
+  if (converted < MIN_TRUSTED_EPOCH || static_cast<int64_t>(converted) != seconds) return false;
 
   struct tm roundTrip{};
   if (!gmtime_r(&converted, &roundTrip) || roundTrip.tm_year != static_cast<int>(rtcTime.year) - 1900 ||
@@ -47,7 +51,7 @@ bool rtcDateTimeToEpoch(const Rtc::DateTime& rtcTime, time_t& epoch) {
 }
 
 bool epochToRtcDateTime(const time_t epoch, Rtc::DateTime& rtcTime) {
-  if (epoch < 0) return false;
+  if (epoch < MIN_TRUSTED_EPOCH) return false;
 
   struct tm utcTime{};
   if (!gmtime_r(&epoch, &utcTime)) return false;
@@ -68,30 +72,23 @@ bool epochToRtcDateTime(const time_t epoch, Rtc::DateTime& rtcTime) {
 }  // namespace
 
 void HalClock::begin() {
-  _available = _sdkRtc.begin();
-  LOG_INF("CLK", _available ? "RTC found" : "RTC not found");
-  if (!_available) return;
+  _rtcAvailable = _sdkRtc.begin();
+  LOG_INF("CLK", _rtcAvailable ? "External RTC found" : "Using software clock");
 
-  if (restoreSystemTimeFromRtc()) {
-    LOG_INF("CLK", "System UTC clock restored from RTC");
-    return;
+  if (!hasValidTime() && restoreSystemTimeFromRtc()) {
+    LOG_INF("CLK", "System UTC clock restored from external RTC");
   }
-
-  LOG_INF("CLK", "RTC calendar is unavailable or not trustworthy");
-  uint8_t hour = 0;
-  uint8_t minute = 0;
-  getTime(hour, minute);
 }
 
-bool HalClock::hasValidRtcTime() const {
-  if (!_available) return false;
-  Rtc::DateTime rtcTime{};
-  time_t epoch = 0;
-  return _sdkRtc.now(rtcTime) && rtcDateTimeToEpoch(rtcTime, epoch);
+time_t HalClock::nowUtc() const {
+  const time_t now = time(nullptr);
+  return now >= MIN_TRUSTED_EPOCH ? now : 0;
 }
+
+bool HalClock::hasValidTime() const { return nowUtc() != 0; }
 
 bool HalClock::restoreSystemTimeFromRtc() {
-  if (!_available) return false;
+  if (!_rtcAvailable) return false;
 
   Rtc::DateTime rtcTime{};
   time_t epoch = 0;
@@ -99,128 +96,166 @@ bool HalClock::restoreSystemTimeFromRtc() {
 
   const struct timeval systemTime = {epoch, 0};
   if (settimeofday(&systemTime, nullptr) != 0) {
-    LOG_ERR("CLK", "Failed to restore system time from RTC");
+    LOG_ERR("CLK", "Failed to restore system time from external RTC");
     return false;
   }
-
-  _cachedHour = rtcTime.hour;
-  _cachedMinute = rtcTime.minute;
-  _hasCachedTime = true;
-  _lastPollMs = millis();
   return true;
 }
 
 bool HalClock::updateRtcFromSystemTime() {
-  if (!_available) return false;
+  if (!_rtcAvailable) return true;
 
-  const time_t now = time(nullptr);
+  const time_t now = nowUtc();
   Rtc::DateTime rtcTime{};
   if (!epochToRtcDateTime(now, rtcTime)) {
-    LOG_ERR("CLK", "System time is invalid; RTC was not updated");
+    LOG_ERR("CLK", "System time is invalid; external RTC was not updated");
     return false;
   }
   if (!_sdkRtc.set(rtcTime)) {
-    LOG_ERR("CLK", "Failed to write UTC date and time to RTC");
+    LOG_ERR("CLK", "Failed to write UTC date and time to external RTC");
     return false;
   }
 
   Rtc::DateTime verifiedTime{};
   time_t verifiedEpoch = 0;
   if (!_sdkRtc.now(verifiedTime) || !rtcDateTimeToEpoch(verifiedTime, verifiedEpoch)) {
-    LOG_ERR("CLK", "RTC write could not be verified");
+    LOG_ERR("CLK", "External RTC write could not be verified");
     return false;
   }
   const time_t writeSkew = verifiedEpoch >= now ? verifiedEpoch - now : now - verifiedEpoch;
   if (writeSkew > MAX_RTC_WRITE_SKEW_SECONDS) {
-    LOG_ERR("CLK", "RTC write verification differs by %lld seconds", static_cast<long long>(writeSkew));
+    LOG_ERR("CLK", "External RTC write verification differs by %lld seconds", static_cast<long long>(writeSkew));
     return false;
   }
 
-  _cachedHour = verifiedTime.hour;
-  _cachedMinute = verifiedTime.minute;
-  _hasCachedTime = true;
-  _lastPollMs = 0;
-  LOG_INF("CLK", "RTC set to %04u-%02u-%02u %02u:%02u:%02u UTC", static_cast<unsigned>(verifiedTime.year),
+  LOG_INF("CLK", "External RTC set to %04u-%02u-%02u %02u:%02u:%02u UTC", static_cast<unsigned>(verifiedTime.year),
           static_cast<unsigned>(verifiedTime.month), static_cast<unsigned>(verifiedTime.day),
           static_cast<unsigned>(verifiedTime.hour), static_cast<unsigned>(verifiedTime.minute),
           static_cast<unsigned>(verifiedTime.second));
   return true;
 }
 
-bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
-  if (!_available) return false;
+bool HalClock::setUtcTime(const time_t epoch) {
+  if (epoch < MIN_TRUSTED_EPOCH) return false;
 
-  const unsigned long now = millis();
-  if (_lastPollMs != 0 && (now - _lastPollMs) < CLOCK_POLL_MS) {
-    hour = _cachedHour;
-    minute = _cachedMinute;
-    return true;
-  }
-
-  Rtc::DateTime dt{};
-  if (!_sdkRtc.now(dt) || dt.hour > 23 || dt.minute > 59) {
-    if (!_hasCachedTime) return false;
-    _lastPollMs = now;
-    hour = _cachedHour;
-    minute = _cachedMinute;
-    return true;
-  }
-  _cachedHour = dt.hour;
-  _cachedMinute = dt.minute;
-  _lastPollMs = now;
-  _hasCachedTime = true;
-  hour = _cachedHour;
-  minute = _cachedMinute;
-  return true;
-}
-
-bool HalClock::formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased, bool use12Hour) const {
-  if (bufSize < (use12Hour ? 9u : 6u)) return false;
-  uint8_t h, m;
-  if (!getTime(h, m)) return false;
-
-  // Apply UTC offset: convert biased value to signed quarter-hours.
-  // Clamp against corrupted persisted values so display time can't drift outside [-12:00, +14:00].
-  if (utcOffsetQuarterHoursBiased > 104) utcOffsetQuarterHoursBiased = 104;
-  int offsetQuarterHours = static_cast<int>(utcOffsetQuarterHoursBiased) - 48;
-  int totalMinutes = static_cast<int>(h) * 60 + static_cast<int>(m) + offsetQuarterHours * 15;
-
-  // Wrap around 24 hours
-  totalMinutes = ((totalMinutes % 1440) + 1440) % 1440;
-
-  const int hour24 = totalMinutes / 60;
-  const int min = totalMinutes % 60;
-  if (use12Hour) {
-    const bool pm = hour24 >= 12;
-    int hour12 = hour24 % 12;
-    if (hour12 == 0) hour12 = 12;
-    snprintf(buf, bufSize, "%d:%02d %s", hour12, min, pm ? "PM" : "AM");
-  } else {
-    snprintf(buf, bufSize, "%02d:%02d", hour24, min);
-  }
-  return true;
-}
-
-bool HalClock::syncFromNTP() {
-  if (!_available) return false;
-
-  if (WiFi.status() != WL_CONNECTED) {
-    LOG_ERR("CLK", "WiFi not connected, cannot sync NTP");
+  const struct timeval systemTime = {epoch, 0};
+  if (settimeofday(&systemTime, nullptr) != 0) {
+    LOG_ERR("CLK", "Failed to set system UTC clock");
     return false;
   }
 
-  LOG_INF("CLK", "Starting NTP sync...");
-  configTzTime("UTC0", "pool.ntp.org", "time.nist.gov");
+  stopSntp();
+  _syncState = ClockSyncState::Idle;
+  _lastSyncMs = 0;
+  if (!updateRtcFromSystemTime()) {
+    LOG_ERR("CLK", "System clock set, but external RTC persistence failed");
+  }
+  return true;
+}
 
-  // Wait for SNTP sync to complete (up to 5 seconds)
-  constexpr int maxAttempts = 50;
-  for (int i = 0; i < maxAttempts; i++) {
-    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-      return updateRtcFromSystemTime();
-    }
-    delay(100);
+bool HalClock::startSntp() {
+  if (_syncState == ClockSyncState::Syncing) return true;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    _syncState = ClockSyncState::Failed;
+    return false;
   }
 
-  LOG_ERR("CLK", "NTP sync timed out");
-  return false;
+  if (!_sntpInitialized) {
+#ifdef ENABLE_CHINESE_VERSION
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
+        3, ESP_SNTP_SERVER_LIST("ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org"));
+#else
+    esp_sntp_config_t config =
+        ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(2, ESP_SNTP_SERVER_LIST("pool.ntp.org", "time.nist.gov"));
+#endif
+    config.start = false;
+    config.smooth_sync = false;
+    if (esp_netif_sntp_init(&config) != ESP_OK) {
+      LOG_ERR("CLK", "Failed to initialize SNTP service");
+      _syncState = ClockSyncState::Failed;
+      return false;
+    }
+    _sntpInitialized = true;
+  }
+
+  if (esp_netif_sntp_start() != ESP_OK) {
+    LOG_ERR("CLK", "Failed to start SNTP service");
+    _syncState = ClockSyncState::Failed;
+    return false;
+  }
+
+  _syncState = ClockSyncState::Syncing;
+  LOG_INF("CLK", "SNTP sync started");
+  return true;
+}
+
+void HalClock::stopSntp() {
+  if (!_sntpInitialized) return;
+  esp_netif_sntp_deinit();
+  _sntpInitialized = false;
+}
+
+void HalClock::completeSync() {
+  if (!hasValidTime()) {
+    LOG_ERR("CLK", "SNTP completed without a trustworthy system clock");
+    _syncState = ClockSyncState::Failed;
+    stopSntp();
+    return;
+  }
+
+  _syncState = ClockSyncState::Succeeded;
+  _lastSyncMs = millis();
+  stopSntp();
+  if (!updateRtcFromSystemTime()) {
+    LOG_ERR("CLK", "System clock synced, but external RTC persistence failed");
+  }
+  LOG_INF("CLK", "System UTC clock synchronized");
+}
+
+bool HalClock::requestSync() { return startSntp(); }
+
+bool HalClock::syncNow(const uint32_t timeoutMs) {
+  if (!startSntp()) return false;
+
+  if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeoutMs)) != ESP_OK) {
+    LOG_ERR("CLK", "SNTP sync timed out");
+    _syncState = ClockSyncState::Failed;
+    if (!_autoSyncEnabled) stopSntp();
+    return false;
+  }
+
+  completeSync();
+  if (!_autoSyncEnabled) stopSntp();
+  return _syncState == ClockSyncState::Succeeded;
+}
+
+void HalClock::setAutoSyncEnabled(const bool enabled) {
+  if (enabled && !_autoSyncEnabled) _wifiWasConnected = false;
+  _autoSyncEnabled = enabled;
+  if (!enabled) {
+    stopSntp();
+    if (_syncState == ClockSyncState::Syncing) _syncState = ClockSyncState::Idle;
+  }
+}
+
+void HalClock::update() {
+  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  if (!wifiConnected) {
+    if (_syncState == ClockSyncState::Syncing) _syncState = ClockSyncState::Failed;
+    if (_wifiWasConnected) stopSntp();
+    _wifiWasConnected = false;
+    return;
+  }
+
+  if (_sntpInitialized && esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+    completeSync();
+  }
+
+  const bool fresh = _syncState == ClockSyncState::Succeeded && millis() - _lastSyncMs < CONFIG_LWIP_SNTP_UPDATE_DELAY;
+  const bool syncDue = !_wifiWasConnected || (_syncState == ClockSyncState::Succeeded && !fresh);
+  if (_autoSyncEnabled && !_sntpInitialized && syncDue) {
+    startSntp();
+  }
+  _wifiWasConnected = true;
 }

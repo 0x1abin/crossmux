@@ -1,7 +1,6 @@
 #include "ClockOffsetActivity.h"
 
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <I18n.h>
 
 #include <algorithm>
@@ -11,6 +10,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 namespace {
 constexpr uint8_t MAX_POS_HOURS = 14;
@@ -330,14 +330,13 @@ void ClockOffsetActivity::render(RenderLock&&) {
   }
 
   // Live preview of the resulting wall-clock time, so users can verify against a watch.
-  if (halClock.isAvailable()) {
-    char timeBuf[9];
-    const uint8_t encoded = encodeOffset(sign, hours, minutesQuarter);
-    if (halClock.formatTime(timeBuf, sizeof(timeBuf), encoded, SETTINGS.clockFormat == 1)) {
-      char preview[24];
-      snprintf(preview, sizeof(preview), "%s %s", tr(STR_CURRENT_TIME), timeBuf);
-      renderer.drawCenteredText(UI_10_FONT_ID, centreY + 60, preview);
-    }
+  char timeBuf[9];
+  const uint8_t encoded = encodeOffset(sign, hours, minutesQuarter);
+  if (TimeUtils::formatTime(TimeUtils::getCurrentValidTimestamp(), encoded, SETTINGS.clockFormat == 1, timeBuf,
+                            sizeof(timeBuf))) {
+    char preview[24];
+    snprintf(preview, sizeof(preview), "%s %s", tr(STR_CURRENT_TIME), timeBuf);
+    renderer.drawCenteredText(UI_10_FONT_ID, centreY + 60, preview);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_NEXT_FIELD), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

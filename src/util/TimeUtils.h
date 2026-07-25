@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <string>
@@ -14,7 +15,7 @@
 // which would globally change localtime_r() and corrupt the standby clock.
 namespace TimeUtils {
 
-// True when `epochSeconds` looks like a real wall-clock time (>= 2024-01-01).
+// True when `epochSeconds` can represent a supported local time in any offset.
 bool isClockValid();
 bool isClockValid(uint32_t epochSeconds);
 
@@ -24,6 +25,19 @@ uint32_t getAuthoritativeTimestamp();
 
 // Convert a UTC epoch to configured fixed-offset local time without changing TZ.
 bool getLocalDateTime(uint32_t epochSeconds, std::tm& out);
+bool getLocalDateTime(uint32_t epochSeconds, uint8_t utcOffsetQuarterHoursBiased, std::tm& out);
+
+// Convert a local civil time in the configured fixed offset back to UTC.
+bool localDateTimeToUtcEpoch(int year, unsigned month, unsigned day, unsigned hour, unsigned minute,
+                             uint32_t& epochSeconds);
+unsigned getDaysInMonth(int year, unsigned month);
+
+// Caller-buffer formatting for UI hot paths.
+bool formatTime(uint32_t epochSeconds, uint8_t utcOffsetQuarterHoursBiased, bool use12Hour, char* buffer,
+                size_t bufferSize);
+bool formatCurrentTime(char* buffer, size_t bufferSize, bool use12Hour);
+bool formatCurrentDateTime(char* buffer, size_t bufferSize, bool use12Hour);
+void formatUtcOffset(uint8_t utcOffsetQuarterHoursBiased, char* buffer, size_t bufferSize);
 
 // Local day number (days since 1970-01-01 in local time), or 0 if the clock is invalid.
 uint32_t getLocalDayOrdinal(uint32_t epochSeconds);

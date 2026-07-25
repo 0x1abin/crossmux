@@ -3,48 +3,46 @@
 #include <Arduino.h>
 #include <Rtc.h>
 
+#include <cstdint>
+#include <ctime>
+
+enum class ClockSyncState : uint8_t {
+  Idle,
+  Syncing,
+  Succeeded,
+  Failed,
+};
+
 class HalClock;
-extern HalClock halClock;  // Singleton
+extern HalClock halClock;
 
 class HalClock {
-  bool _available = false;
-  mutable Rtc _sdkRtc;
-  mutable uint8_t _cachedHour = 0;
-  mutable uint8_t _cachedMinute = 0;
-  mutable bool _hasCachedTime = false;
-  mutable unsigned long _lastPollMs = 0;
+  Rtc _sdkRtc;
+  bool _rtcAvailable = false;
+  bool _autoSyncEnabled = true;
+  bool _wifiWasConnected = false;
+  bool _sntpInitialized = false;
+  ClockSyncState _syncState = ClockSyncState::Idle;
+  unsigned long _lastSyncMs = 0;
 
-  static constexpr unsigned long CLOCK_POLL_MS = 10000;  // 10 seconds
+  bool restoreSystemTimeFromRtc();
+  bool updateRtcFromSystemTime();
+  bool startSntp();
+  void stopSntp();
+  void completeSync();
 
  public:
-  // Call after BoardConfig has selected the active device.
+  // The POSIX UTC system clock is the runtime source on every device. An
+  // external RTC, when present, is used only to restore time after power loss.
   void begin();
+  void update();
 
-  // True if an RTC is present on this device
-  bool isAvailable() const { return _available; }
+  time_t nowUtc() const;
+  bool hasValidTime() const;
+  bool setUtcTime(time_t epoch);
 
-  // Validate a fresh complete RTC timestamp without changing the system clock.
-  bool hasValidRtcTime() const;
-
-  // Restore the UTC system clock from a complete, trustworthy RTC timestamp.
-  bool restoreSystemTimeFromRtc();
-
-  // Write the current UTC system clock to the RTC and verify it.
-  bool updateRtcFromSystemTime();
-
-  // Get current hour (0-23) and minute (0-59).
-  // Returns false if RTC is not available.
-  bool getTime(uint8_t& hour, uint8_t& minute) const;
-
-  // Format time into a caller-provided buffer.
-  // 24h mode produces "HH:MM" (needs >=6 bytes); 12h mode produces "H:MM AM"/"HH:MM PM" (needs >=9 bytes).
-  // utcOffsetQuarterHoursBiased: biased quarter-hour offset (48 = UTC+0, 0 = UTC-12, 104 = UTC+14).
-  // use12Hour: when true, format as 12-hour clock with AM/PM suffix.
-  // Returns false if RTC is not available.
-  bool formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased = 48, bool use12Hour = false) const;
-
-  // Sync the RTC from an NTP server. Requires WiFi to be connected.
-  // Blocks for up to ~5s while waiting for SNTP response.
-  // Returns true if the RTC was successfully updated.
-  bool syncFromNTP();
+  void setAutoSyncEnabled(bool enabled);
+  bool requestSync();
+  bool syncNow(uint32_t timeoutMs = 10000);
+  ClockSyncState syncState() const { return _syncState; }
 };

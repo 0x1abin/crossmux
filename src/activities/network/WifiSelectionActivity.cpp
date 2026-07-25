@@ -1,20 +1,17 @@
 #include "WifiSelectionActivity.h"
 
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
 
 #include <algorithm>
 
-#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "WifiCredentialStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/TimeUtils.h"
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -397,19 +394,6 @@ void WifiSelectionActivity::checkConnectionStatus() {
             static_cast<unsigned>(connectedBssid[4]), static_cast<unsigned>(connectedBssid[5]), WiFi.channel(),
             WiFi.RSSI());
 #endif
-
-    // Repair an invalid X3 RTC without re-syncing a trustworthy one.
-    if (halClock.isAvailable()) {
-      const bool systemClockValid = TimeUtils::isClockValid();
-      const bool rtcTimeValid = systemClockValid ? halClock.hasValidRtcTime() : halClock.restoreSystemTimeFromRtc();
-      const bool rtcCalibrated =
-          !rtcTimeValid && (systemClockValid ? halClock.updateRtcFromSystemTime() : halClock.syncFromNTP());
-      if (rtcCalibrated && !SETTINGS.clockHasBeenSynced) {
-        SETTINGS.clockHasBeenSynced = 1;
-        RenderLock lock(*this);
-        if (!SETTINGS.saveToFile()) LOG_ERR("WIFI", "Failed to save RTC calibration state");
-      }
-    }
 
     // Save this as the last connected network - SD card operations need lock as
     // we use SPI for both

@@ -1,9 +1,10 @@
 #pragma once
 
+#include <cstdint>
+
 #include "activities/Activity.h"
 
-// Manual NTP resync action. Runs a forced sync (bypassing the once-per-device debounce),
-// reports success/failure, then waits for Back. If WiFi is not connected yet, it reuses the
+// Manual one-shot clock sync. If WiFi is not connected yet, it reuses the
 // normal WiFi selection flow first.
 class ClockSyncActivity final : public Activity {
  public:
@@ -17,8 +18,13 @@ class ClockSyncActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum State { SYNCING, SUCCESS, NO_WIFI, FAILED };
-  State state = SYNCING;
+  enum class State : uint8_t {
+    Syncing,
+    Success,
+    NoWifi,
+    Failed,
+  };
+  State state = State::Syncing;
   char syncedTime[16] = {0};
   bool shouldTearDownWifiOnExit = false;
 
