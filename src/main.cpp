@@ -427,6 +427,7 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
+  halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
   READING_STATS.loadFromFile();

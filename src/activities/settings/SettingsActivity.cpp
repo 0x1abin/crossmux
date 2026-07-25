@@ -12,6 +12,7 @@
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
+#include "DateTimeSettingsActivity.h"
 #include "FontDownloadActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
@@ -62,6 +63,13 @@ void SettingsActivity::rebuildSettingsLists() {
       }
       controlsSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_SYSTEM) {
+      // These persist through the shared web settings list, but the device UI
+      // owns them in the Date & Time submenu.
+      if (setting.valuePtr == &CrossPointSettings::clockAutoSync ||
+          setting.valuePtr == &CrossPointSettings::clockUtcOffsetQ ||
+          setting.valuePtr == &CrossPointSettings::clockFormat) {
+        continue;
+      }
       systemSettings.push_back(setting);
     }
   }
@@ -72,6 +80,7 @@ void SettingsActivity::rebuildSettingsLists() {
                             SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::DateTime));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
@@ -392,6 +401,15 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Network:
         startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
+        break;
+      case SettingAction::DateTime:
+        // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
+        if (auto dateTime = makeUniqueNoThrow<DateTimeSettingsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(dateTime), resultHandler);
+        } else {
+          LOG_ERR("SET", "OOM: DateTimeSettingsActivity (%u bytes)",
+                  static_cast<unsigned>(sizeof(DateTimeSettingsActivity)));
+        }
         break;
       case SettingAction::ClearCache:
         startActivityForResult(std::make_unique<ClearCacheActivity>(renderer, mappedInput), resultHandler);

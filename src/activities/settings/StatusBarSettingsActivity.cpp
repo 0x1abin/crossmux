@@ -1,20 +1,14 @@
 #include "StatusBarSettingsActivity.h"
 
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <I18n.h>
-#include <Logging.h>
-#include <Memory.h>
 
 #include <cstring>
 
-#include "ClockOffsetActivity.h"
-#include "ClockSyncActivity.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/TimeUtils.h"
 
 namespace {
 enum MenuItem {
@@ -26,9 +20,6 @@ enum MenuItem {
   ITEM_BATTERY,
   ITEM_XTC_STATUS_BAR,
   ITEM_CLOCK,
-  ITEM_CLOCK_FORMAT,
-  ITEM_CLOCK_UTC_OFFSET,
-  ITEM_CLOCK_SYNC,
   ITEM_COUNT
 };
 
@@ -43,13 +34,7 @@ const StrId menuNames[FULL_MENU_ITEMS] = {
     StrId::STR_BATTERY,
     StrId::STR_XTC_STATUS_BAR,
     StrId::STR_CLOCK,
-    StrId::STR_CLOCK_FORMAT,
-    StrId::STR_CLOCK_UTC_OFFSET,
-    StrId::STR_CLOCK_SYNC_NOW,
 };
-
-constexpr int CLOCK_FORMAT_ITEMS = 2;
-const StrId clockFormatNames[CLOCK_FORMAT_ITEMS] = {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H};
 
 constexpr int PROGRESS_BAR_ITEMS = 3;
 const StrId progressBarNames[PROGRESS_BAR_ITEMS] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE};
@@ -92,14 +77,6 @@ void StatusBarSettingsActivity::onEnter() {
 
   if (SETTINGS.xtcStatusBarMode >= XTC_STATUS_BAR_ITEMS) {
     SETTINGS.xtcStatusBarMode = CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_HIDE;
-  }
-
-  if (SETTINGS.clockUtcOffsetQ > 104) {
-    SETTINGS.clockUtcOffsetQ = 48;  // Default to UTC+0
-  }
-
-  if (SETTINGS.clockFormat >= CLOCK_FORMAT_ITEMS) {
-    SETTINGS.clockFormat = 0;
   }
 
   if (SETTINGS.statusBarClock >= STATUS_BAR_CLOCK_ITEMS) {
@@ -203,23 +180,6 @@ void StatusBarSettingsActivity::handleSelection() {
     case ITEM_CLOCK:
       SETTINGS.statusBarClock = (SETTINGS.statusBarClock + 1) % STATUS_BAR_CLOCK_ITEMS;
       break;
-    case ITEM_CLOCK_FORMAT:
-      SETTINGS.clockFormat = (SETTINGS.clockFormat + 1) % CLOCK_FORMAT_ITEMS;
-      break;
-    case ITEM_CLOCK_UTC_OFFSET:
-      if (auto activity = makeUniqueNoThrow<ClockOffsetActivity>(renderer, mappedInput)) {
-        startActivityForResult(std::move(activity), nullptr);
-      } else {
-        LOG_ERR("CLK", "OOM: ClockOffsetActivity (%u bytes)", static_cast<unsigned>(sizeof(ClockOffsetActivity)));
-      }
-      return;
-    case ITEM_CLOCK_SYNC:
-      if (auto activity = makeUniqueNoThrow<ClockSyncActivity>(renderer, mappedInput)) {
-        startActivityForResult(std::move(activity), nullptr);
-      } else {
-        LOG_ERR("CLK", "OOM: ClockSyncActivity (%u bytes)", static_cast<unsigned>(sizeof(ClockSyncActivity)));
-      }
-      return;
     default:
       return;
   }
@@ -260,17 +220,6 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
             return I18N.get(xtcStatusBarNames[SETTINGS.xtcStatusBarMode]);
           case ITEM_CLOCK:
             return I18N.get(statusBarClockNames[SETTINGS.statusBarClock]);
-          case ITEM_CLOCK_FORMAT: {
-            const uint8_t fmt = SETTINGS.clockFormat < CLOCK_FORMAT_ITEMS ? SETTINGS.clockFormat : 0;
-            return std::string(I18N.get(clockFormatNames[fmt]));
-          }
-          case ITEM_CLOCK_UTC_OFFSET: {
-            char offset[16];
-            TimeUtils::formatUtcOffset(SETTINGS.clockUtcOffsetQ, offset, sizeof(offset));
-            return std::string(offset);
-          }
-          case ITEM_CLOCK_SYNC:
-            return halClock.hasValidTime() ? tr(STR_CLOCK_SYNCED) : tr(STR_NOT_SET);
           default:
             return tr(STR_HIDE);
         }

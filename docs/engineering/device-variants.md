@@ -127,10 +127,10 @@ the successfully updated system time. The RTC is not polled periodically while
 the device is running.
 
 `clockUtcOffsetQ` remains a fixed display offset used by the status bar and
-Standby faces; it does not change the process-wide timezone. Clock display and
-synchronization no longer depend on external RTC presence. Chinese builds
-default a missing `clockUtcOffsetQ` to UTC+8; an existing saved value is
-preserved.
+Standby faces; it does not change the process-wide timezone. Every device exposes
+automatic sync, manual date/time, fixed offset, 12/24-hour format, and one-shot
+sync under **Settings → System → Date & Time**. Chinese builds default a missing
+`clockUtcOffsetQ` to UTC+8; an existing saved value is preserved.
 
 The SPI display pins (`EPD_SCLK=8`, `EPD_MOSI=10`, `EPD_CS=21`, `EPD_DC=4`,
 `EPD_RST=5`, `EPD_BUSY=6`) and the ADC button layout are **identical** on both
@@ -179,7 +179,7 @@ X3 to the simulator is possible but out of scope here.)
 - **Web API** — `device` field is `"X3"` / `"X4"`
   ([CrossPointWebServer.cpp:382](../../src/network/CrossPointWebServer.cpp)).
 - **UI** — the X3-only Tilt Page Turn item appears only when the QMI8658 is
-  detected. Clock functionality is available on every device.
+  detected. Clock and Date & Time settings are available on every device.
 
 ## Adding a future device variant
 
