@@ -23,7 +23,6 @@ class StatusBarSettingsActivity final : public Activity {
   OptionPopup optionPopup;
 
   int selectedIndex = 0;
-  // Decided in onEnter() based on halClock.isAvailable() so clock entries are hidden on X4.
   int visibleItemCount = 0;
 
   void handleSelection();

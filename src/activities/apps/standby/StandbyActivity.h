@@ -21,15 +21,15 @@ class StandbyActivity final : public Activity {
   // Standby is a clock — keep the framework's deep-sleep timer (main.cpp:422,
   // default 10 min) paused for the entire lifetime of this activity. Exiting
   // back to Apps restores the default sleep behaviour. Tight-loop polling is
-  // still only used during WiFi/NTP sync.
+  // still only used during WiFi/clock sync.
   bool preventAutoSleep() override { return true; }
   bool skipLoopDelay() override { return syncState_ != SyncState::Idle; }
 
  private:
   enum class SyncState : uint8_t {
-    Idle,            // No sync running (either succeeded or skipped/failed)
-    WifiConnecting,  // WiFi.begin() called, polling WiFi.status()
-    NtpSyncing,      // SNTP started, polling sntp_get_sync_status()
+    Idle,
+    WifiConnecting,
+    ClockSyncing,
   };
 
   enum class DisplayMode : uint8_t {
@@ -53,9 +53,8 @@ class StandbyActivity final : public Activity {
   bool trySilentWifiConnect();
   void promptForWifi();
   void onWifiResult(const ActivityResult& result);
-  void beginNtpSync();
+  void beginClockSync();
   void pumpTimeSync();
-  void markRtcCalibrated();
   void finishTimeSync();
 
   // Layer a 4-level grayscale refresh on top of the BW image just committed by

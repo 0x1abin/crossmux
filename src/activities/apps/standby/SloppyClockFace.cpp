@@ -10,6 +10,7 @@
 #include <cstdio>
 
 #include "StandbyTime.h"
+#include "fontIds.h"
 
 void SloppyClockFace::onEnter() {
   style_ = makeUniqueNoThrow<sloppy::Style>();
@@ -45,7 +46,7 @@ void SloppyClockFace::regenerate(uint32_t seed) {
 
 bool SloppyClockFace::tick() {
   if (!style_ || !seeds_) return false;
-  const uint32_t nowMin = standby_time::getMinuteTick(startMs_);
+  const uint32_t nowMin = standby_time::getMinuteTick();
   if (static_cast<int32_t>(nowMin) == lastMin_) return false;
   lastMin_ = static_cast<int32_t>(nowMin);
   return true;
@@ -55,7 +56,10 @@ void SloppyClockFace::render(GfxRenderer& renderer, const Rect& viewport) {
   if (!style_ || !seeds_) return;
   unsigned hh = 0;
   unsigned mm = 0;
-  standby_time::getNowHHMM(startMs_, hh, mm);
+  if (!standby_time::getNowHHMM(hh, mm)) {
+    renderer.drawCenteredText(UI_12_FONT_ID, viewport.y + viewport.height / 2, "--:--", true, EpdFontFamily::BOLD);
+    return;
+  }
   char buf[8];
   std::snprintf(buf, sizeof(buf), "%02u\n%02u", hh, mm);
   sloppy::draw(renderer, *style_, *seeds_, buf, viewport);

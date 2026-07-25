@@ -6,7 +6,6 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
-#include <esp_sntp.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
 
@@ -29,9 +28,8 @@
 
 namespace {
 
-constexpr long kUtcOffsetSec = 0;
 constexpr uint32_t kWifiTimeoutMs = 15000u;  // Same as WifiSelectionActivity
-constexpr uint32_t kNtpTimeoutMs = 12000u;   // SNTP poll budget (multi-server DNS + handshake)
+constexpr uint32_t kNtpTimeoutMs = 12000u;
 
 // Face factory table. Add new faces by appending a row here and including the
 // corresponding header above. Each entry also declares an isAvailable()
@@ -87,7 +85,7 @@ uint8_t rankOfAvailableFace(int sw, int sh, uint8_t faceIdx) {
 }
 
 // Once per power-on, Standby may push the WiFi selection UI to help the user
-// get online for NTP sync. After it has been shown (regardless of whether the
+// get online for clock sync. After it has been shown (regardless of whether the
 // user connected or cancelled), subsequent Standby entries within the same
 // session will not re-prompt — the explicit way to retry is Settings → WiFi.
 // This module-scope flag persists across activity destroy/recreate.
@@ -130,8 +128,6 @@ void StandbyActivity::onEnter() {
 
 void StandbyActivity::onExit() {
   if (syncState_ != SyncState::Idle) {
-    // User backed out while sync was running — tear down cleanly.
-    if (esp_sntp_enabled()) esp_sntp_stop();
     WiFi.disconnect(false);
     delay(100);
     WiFi.mode(WIFI_OFF);
@@ -170,35 +166,19 @@ void StandbyActivity::switchFace(int8_t delta) {
 }
 
 void StandbyActivity::startTimeSync() {
-  if (TimeUtils::isClockValid()) {
-    standby_time::setSynced(true);
-    if (halClock.isAvailable() && !halClock.hasValidRtcTime()) {
-      if (halClock.updateRtcFromSystemTime()) {
-        markRtcCalibrated();
-      } else {
-        LOG_ERR("STANDBY", "Failed to repair RTC from valid system clock");
-      }
-    }
-    return;
-  }
-
-  if (halClock.restoreSystemTimeFromRtc()) {
-    standby_time::setSynced(true);
-    LOG_DBG("STANDBY", "System clock restored from RTC");
-    return;
-  }
+  if (TimeUtils::isClockValid()) return;
 
   // Another activity (e.g. Settings → WiFi) may have already connected the
-  // device. Skip our own WiFi.begin in that case and go straight to NTP.
+  // device. Skip our own WiFi.begin in that case and request a clock sync.
   if (WiFi.status() == WL_CONNECTED) {
     LOG_DBG("STANDBY", "WiFi already connected, skipping silent attempt");
-    beginNtpSync();
+    beginClockSync();
     return;
   }
 
   // Default path: try the saved "last connected" credentials silently.
   if (trySilentWifiConnect()) {
-    return;  // pumpTimeSync() drives the WifiConnecting → NtpSyncing transition
+    return;
   }
 
   // No credentials available to try. Push the WiFi selection UI (once per
@@ -256,115 +236,96 @@ void StandbyActivity::promptForWifi() {
   // we just failed on; let the user pick.
   g_promptedForWifiThisSession = true;
   LOG_DBG("STANDBY", "Prompting WiFi selection UI");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, /*autoConnect=*/false),
-                         [this](const ActivityResult& result) { onWifiResult(result); });
+  // ActivityManager owns the picker across frames; stack lifetime is insufficient.
+  auto activity = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, /*autoConnect=*/false);
+  if (!activity) {
+    LOG_ERR("STANDBY", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
+    return;
+  }
+  startActivityForResult(std::move(activity), [this](const ActivityResult& result) { onWifiResult(result); });
 }
 
 void StandbyActivity::onWifiResult(const ActivityResult& result) {
   if (result.isCancelled) {
-    LOG_DBG("STANDBY", "WiFi UI cancelled; staying in fallback time");
-    // syncState_ is already Idle (cleared before the prompt). The face will
-    // continue ticking on the pre-sync fallback clock.
+    LOG_DBG("STANDBY", "WiFi UI cancelled; clock remains unavailable");
     return;
   }
-  if (TimeUtils::isClockValid() || halClock.restoreSystemTimeFromRtc()) {
-    standby_time::setSynced(true);
+  if (TimeUtils::isClockValid()) {
     LOG_DBG("STANDBY", "WiFi UI returned with a trustworthy clock");
     finishTimeSync();
     return;
   }
 
-  // User connected via the UI; WiFi is up. Skip our own WiFi.begin and jump
-  // straight to NTP.
-  LOG_DBG("STANDBY", "WiFi UI returned connected; starting NTP");
-  beginNtpSync();
+  LOG_DBG("STANDBY", "WiFi UI returned connected; requesting clock sync");
+  beginClockSync();
   requestUpdate();  // refresh header back to "Syncing…"
 }
 
-void StandbyActivity::beginNtpSync() {
-  if (esp_sntp_enabled()) esp_sntp_stop();
-#ifdef ENABLE_CHINESE_VERSION
-  // China-region servers: Aliyun is the most reliable; Tencent and the NTP
-  // Pool CN node act as fallbacks. pool.ntp.org is often blocked or slow
-  // inside the mainland.
-  configTime(kUtcOffsetSec, 0, "ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org");
-#else
-  configTime(kUtcOffsetSec, 0, "pool.ntp.org");
-#endif
-  syncState_ = SyncState::NtpSyncing;
+void StandbyActivity::beginClockSync() {
+  if (!halClock.requestSync()) {
+    LOG_ERR("STANDBY", "Clock sync could not start");
+    finishTimeSync();
+    return;
+  }
+  syncState_ = SyncState::ClockSyncing;
   syncStartMs_ = millis();
-  LOG_DBG("STANDBY", "NTP started");
+  LOG_DBG("STANDBY", "Clock sync started");
 }
 
 void StandbyActivity::pumpTimeSync() {
   if (syncState_ == SyncState::Idle) return;
   const uint32_t elapsed = millis() - syncStartMs_;
 
-  if (syncState_ == SyncState::WifiConnecting) {
-    const wl_status_t st = WiFi.status();
-    if (st == WL_CONNECTED) {
-      beginNtpSync();
+  switch (syncState_) {
+    case SyncState::Idle:
       return;
-    }
-    if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || elapsed >= kWifiTimeoutMs) {
-      LOG_DBG("STANDBY", "Silent WiFi sync failed (status=%d, t=%ums)", static_cast<int>(st),
+    case SyncState::WifiConnecting: {
+      const wl_status_t status = WiFi.status();
+      if (status == WL_CONNECTED) {
+        beginClockSync();
+        return;
+      }
+      if (status != WL_CONNECT_FAILED && status != WL_NO_SSID_AVAIL && elapsed < kWifiTimeoutMs) return;
+
+      LOG_DBG("STANDBY", "Silent WiFi sync failed (status=%d, t=%ums)", static_cast<int>(status),
               static_cast<unsigned>(elapsed));
-      // Tear down our own WiFi state cleanly, then push the selection UI
-      // (once per session). If we've already prompted, stay in fallback.
-      if (esp_sntp_enabled()) esp_sntp_stop();
       WiFi.disconnect(false);
       delay(100);
       WiFi.mode(WIFI_OFF);
       syncState_ = SyncState::Idle;
-      if (!g_promptedForWifiThisSession) {
+      if (!g_promptedForWifiThisSession)
         promptForWifi();
-      } else {
-        requestUpdate();  // header switches back to face title
-      }
-    }
-    return;
-  }
-
-  if (syncState_ == SyncState::NtpSyncing) {
-    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-      if (!TimeUtils::isClockValid()) {
-        LOG_ERR("STANDBY", "NTP completed without a trustworthy system clock");
-        finishTimeSync();
-        return;
-      }
-      standby_time::setSynced(true);
-      if (halClock.isAvailable()) {
-        if (halClock.updateRtcFromSystemTime()) {
-          markRtcCalibrated();
-        } else {
-          LOG_ERR("STANDBY", "NTP synced but RTC update failed");
-        }
-      }
-      // Saved credentials worked this session — clear the "already prompted"
-      // gate so that if they later fail (e.g. router password changed) the
-      // next Standby entry can prompt the user again instead of staying
-      // silently stuck on the fallback clock.
-      g_promptedForWifiThisSession = false;
-      LOG_DBG("STANDBY", "NTP synced");
-      finishTimeSync();
+      else
+        requestUpdate();
       return;
     }
-    if (elapsed >= kNtpTimeoutMs) {
-      LOG_DBG("STANDBY", "NTP timeout");
-      finishTimeSync();
-    }
+    case SyncState::ClockSyncing:
+      switch (halClock.syncState()) {
+        case ClockSyncState::Succeeded:
+          g_promptedForWifiThisSession = false;
+          LOG_DBG("STANDBY", "Clock synchronized");
+          finishTimeSync();
+          return;
+        case ClockSyncState::Failed:
+          LOG_DBG("STANDBY", "Clock sync failed");
+          finishTimeSync();
+          return;
+        case ClockSyncState::Idle:
+          if (elapsed < kNtpTimeoutMs) return;
+          LOG_DBG("STANDBY", "Clock sync stopped");
+          finishTimeSync();
+          return;
+        case ClockSyncState::Syncing:
+          if (elapsed < kNtpTimeoutMs) return;
+          LOG_DBG("STANDBY", "Clock sync timed out");
+          finishTimeSync();
+          return;
+      }
+      break;
   }
-}
-
-void StandbyActivity::markRtcCalibrated() {
-  if (SETTINGS.clockHasBeenSynced) return;
-  SETTINGS.clockHasBeenSynced = 1;
-  RenderLock lock(*this);
-  if (!SETTINGS.saveToFile()) LOG_ERR("STANDBY", "Failed to save RTC calibration state");
 }
 
 void StandbyActivity::finishTimeSync() {
-  if (esp_sntp_enabled()) esp_sntp_stop();
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);
@@ -374,7 +335,7 @@ void StandbyActivity::finishTimeSync() {
   // ESP_ERR_WIFI_NOT_INIT is fine if we never connected.
   esp_wifi_deinit();
   syncState_ = SyncState::Idle;
-  requestUpdate();  // Header text and face content may now reflect synced time
+  requestUpdate();
 }
 
 void StandbyActivity::loop() {

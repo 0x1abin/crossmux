@@ -64,9 +64,8 @@ void ReadingDateSelectionActivity::onEnter() {
     bool usedFallback = false;
     const uint32_t referenceTimestamp = READING_STATS.getDisplayTimestamp(&usedFallback);
     if (TimeUtils::isClockValid(referenceTimestamp)) {
-      time_t currentTime = static_cast<time_t>(referenceTimestamp);
       tm localTime = {};
-      if (localtime_r(&currentTime, &localTime) != nullptr) {
+      if (TimeUtils::getLocalDateTime(referenceTimestamp, localTime)) {
         year = std::clamp(localTime.tm_year + 1900, MIN_YEAR, MAX_YEAR);
         month = static_cast<unsigned>(std::clamp(localTime.tm_mon + 1, MIN_MONTH, MAX_MONTH));
         day = static_cast<unsigned>(

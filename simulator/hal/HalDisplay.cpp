@@ -103,6 +103,12 @@ void HalDisplay::displayBuffer(RefreshMode /*mode*/, bool /*turnOffScreen*/) {
 
 void HalDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) { displayBuffer(mode, turnOffScreen); }
 
+void HalDisplay::displayBufferAsync(RefreshMode mode) { displayBuffer(mode); }
+
+void HalDisplay::waitRefreshComplete() {}
+
+bool HalDisplay::supportsAsyncRefresh() const { return false; }
+
 void HalDisplay::deepSleep() {}
 
 void HalDisplay::drawImage(const uint8_t* imageData, uint16_t x, uint16_t y, uint16_t w, uint16_t h,

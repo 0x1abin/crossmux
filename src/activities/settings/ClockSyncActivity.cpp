@@ -4,6 +4,7 @@
 #include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include <cstdio>
@@ -14,10 +15,11 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 void ClockSyncActivity::onEnter() {
   Activity::onEnter();
-  state = SYNCING;
+  state = State::Syncing;
   syncedTime[0] = '\0';
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -41,7 +43,15 @@ void ClockSyncActivity::onExit() {
 
 void ClockSyncActivity::launchWifiSelection() {
   LOG_INF("CLK", "Manual sync requested without WiFi, launching WiFi selection");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+  // ActivityManager owns the picker across frames; stack lifetime is insufficient.
+  auto activity = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("CLK", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
+    state = State::Failed;
+    requestUpdate();
+    return;
+  }
+  startActivityForResult(std::move(activity),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
@@ -52,40 +62,35 @@ void ClockSyncActivity::onWifiSelectionComplete(const bool connected) {
     return;
   }
 
-  state = SYNCING;
+  state = State::Syncing;
   requestUpdate();
 }
 
 void ClockSyncActivity::runSync() {
   if (WiFi.status() != WL_CONNECTED) {
     LOG_INF("CLK", "Manual sync requested but WiFi is not connected after selection");
-    state = NO_WIFI;
+    state = State::NoWifi;
     requestUpdate();
     return;
   }
 
-  const bool ok = halClock.syncFromNTP();
+  const bool ok = halClock.syncNow();
   if (!ok) {
-    state = FAILED;
+    state = State::Failed;
     requestUpdate();
     return;
   }
 
-  // Mark as synced so the auto-sync hook stops firing on future WiFi connects.
-  SETTINGS.clockHasBeenSynced = 1;
-  SETTINGS.saveToFile();
-
-  // Read the freshly synced time back for the user-facing confirmation.
   char buf[9];
-  if (halClock.formatTime(buf, sizeof(buf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
+  if (TimeUtils::formatCurrentTime(buf, sizeof(buf), SETTINGS.clockFormat == 1)) {
     snprintf(syncedTime, sizeof(syncedTime), "%s", buf);
   }
-  state = SUCCESS;
+  state = State::Success;
   requestUpdate();
 }
 
 void ClockSyncActivity::loop() {
-  if (state == SYNCING) {
+  if (state == State::Syncing) {
     // First-tick: render the "Syncing..." screen, then perform the (blocking) sync.
     // requestUpdateAndWait below forces the render before we block on WiFi.
     requestUpdateAndWait();
@@ -112,10 +117,10 @@ void ClockSyncActivity::render(RenderLock&&) {
   const int midY = pageHeight / 2;
 
   switch (state) {
-    case SYNCING:
+    case State::Syncing:
       renderer.drawCenteredText(UI_12_FONT_ID, midY, tr(STR_CLOCK_SYNCING));
       break;
-    case SUCCESS: {
+    case State::Success: {
       renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_OK), true, EpdFontFamily::BOLD);
       if (syncedTime[0] != '\0') {
         char line[32];
@@ -124,17 +129,17 @@ void ClockSyncActivity::render(RenderLock&&) {
       }
       break;
     }
-    case NO_WIFI:
+    case State::NoWifi:
       renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_NO_WIFI), true, EpdFontFamily::BOLD);
       renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, tr(STR_CLOCK_SYNC_NO_WIFI_HINT));
       break;
-    case FAILED:
+    case State::Failed:
       renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_FAIL), true, EpdFontFamily::BOLD);
       renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, tr(STR_CHECK_SERIAL_OUTPUT));
       break;
   }
 
-  if (state != SYNCING) {
+  if (state != State::Syncing) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }

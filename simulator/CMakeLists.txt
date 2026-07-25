@@ -135,6 +135,7 @@ list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Serialization/ObfuscationUtils")
 # (GfxRenderer/Epub/Utf8/XmlParserUtils/expat) are all host-available, so compile them for
 # real instead of stubbing, otherwise bookmark navigation returns empty positions.
 list(APPEND CROSSPOINT_LIB
+    ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp
     ${REPO_ROOT}/lib/KOReaderSync/KOReaderCredentialStore.cpp
     ${REPO_ROOT}/lib/KOReaderSync/KOReaderDocumentId.cpp
     ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
@@ -254,6 +255,7 @@ target_include_directories(crosspoint_simulator PRIVATE
     ${REPO_ROOT}/lib/KOReaderSync
     ${REPO_ROOT}/lib/Epub/Epub/converters
     ${REPO_ROOT}/lib/AvatarGen
+    ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include
 )
 
 # Rename Arduino entry points so the simulator entry can drive them explicitly.
@@ -309,4 +311,3 @@ if(EMSCRIPTEN)
         OUTPUT_NAME "crosspoint_simulator_wasm"
         SUFFIX ".js")
 endif()
-

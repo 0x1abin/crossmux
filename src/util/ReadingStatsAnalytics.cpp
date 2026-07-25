@@ -14,11 +14,8 @@ int resolveYearFromTimestamp(const uint32_t timestamp) {
     return 0;
   }
 
-  time_t currentTime = static_cast<time_t>(timestamp);
   tm localTime = {};
-  if (localtime_r(&currentTime, &localTime) == nullptr) {
-    return 0;
-  }
+  if (!TimeUtils::getLocalDateTime(timestamp, localTime)) return 0;
   return localTime.tm_year + 1900;
 }
 

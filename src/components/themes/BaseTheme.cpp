@@ -1,7 +1,6 @@
 #include "BaseTheme.h"
 
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -16,6 +15,7 @@
 #include "components/UITheme.h"
 #include "components/icons/bookmark.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 // Internal constants
 namespace {
@@ -788,7 +788,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
   const auto sb = SETTINGS.statusBarSpec();
-  const bool showStatusBarTextLane = sb.textLaneVisible(halClock.isAvailable());
+  const bool showStatusBarTextLane = sb.textLaneVisible();
 
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
@@ -859,22 +859,22 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     leftClusterWidth += batteryWidth;
   }
 
-  // Draw Clock (X3 only — DS3231 RTC)
-  if (sb.showsClock() && halClock.isAvailable()) {
+  // Draw Clock
+  if (sb.showsClock()) {
     char timeBuf[9];
-    if (halClock.formatTime(timeBuf, sizeof(timeBuf), sb.clockUtcOffsetQ, sb.clock12h)) {
-      int clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
-      int clockX = 0;
-      // Position to the left or right of the progress text (with a small gap)
-      if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_LEFT) {
-        clockX = leftClusterX + leftClusterWidth + (leftClusterWidth > 0 ? 10 : 0);
-        leftClusterWidth += clockTextWidth + 10;
-      } else if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_RIGHT) {
-        clockX = rightClusterX - rightClusterWidth - (rightClusterWidth > 0 ? 10 : 0) - clockTextWidth;
-        rightClusterWidth += clockTextWidth + 10;
-      }
-      renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
+    if (!TimeUtils::formatCurrentTime(timeBuf, sizeof(timeBuf), sb.clock12h))
+      snprintf(timeBuf, sizeof(timeBuf), "--:--");
+    const int clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
+    int clockX = 0;
+    // Position to the left or right of the progress text (with a small gap)
+    if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_LEFT) {
+      clockX = leftClusterX + leftClusterWidth + (leftClusterWidth > 0 ? 10 : 0);
+      leftClusterWidth += clockTextWidth + 10;
+    } else if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_RIGHT) {
+      clockX = rightClusterX - rightClusterWidth - (rightClusterWidth > 0 ? 10 : 0) - clockTextWidth;
+      rightClusterWidth += clockTextWidth + 10;
     }
+    renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
   }
 
   // Draw Bookmark

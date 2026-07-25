@@ -281,22 +281,24 @@ void drawAlmanacPage(GfxRenderer& renderer, const Rect& viewport, const AlmanacD
 //  ChineseCalendarFace lifecycle helpers
 // =====================================================================
 
-// Return the process-local midnight containing the supplied calendar day.
-time_t startOfDayLocal(const struct tm& local) {
-  struct tm midnight = local;
-  midnight.tm_hour = 0;
-  midnight.tm_min = 0;
-  midnight.tm_sec = 0;
-  midnight.tm_isdst = 0;
-  return mktime(&midnight);
-}
-
-// Apply day offset to a base struct tm by going through time_t arithmetic.
+// Apply a fixed-day offset without consulting the process-global TZ state.
 bool offsetDay(const struct tm& base, int32_t daysOffset, struct tm& out) {
-  time_t midnight = startOfDayLocal(base);
-  if (midnight == static_cast<time_t>(-1)) return false;
-  midnight += static_cast<time_t>(daysOffset) * 86400;
-  if (!localtime_r(&midnight, &out)) return false;
+  const int64_t dayOrdinal =
+      static_cast<int64_t>(TimeUtils::getDayOrdinalForDate(base.tm_year + 1900, base.tm_mon + 1, base.tm_mday)) +
+      daysOffset;
+  if (dayOrdinal < 0 || dayOrdinal > UINT32_MAX) return false;
+
+  int year = 0;
+  unsigned month = 0;
+  unsigned day = 0;
+  if (!TimeUtils::getDateFromDayOrdinal(static_cast<uint32_t>(dayOrdinal), year, month, day)) return false;
+
+  out = base;
+  out.tm_year = year - 1900;
+  out.tm_mon = static_cast<int>(month) - 1;
+  out.tm_mday = static_cast<int>(day);
+  out.tm_wday = static_cast<int>((dayOrdinal + 4) % 7);  // 1970-01-01 was Thursday.
+  out.tm_yday = static_cast<int>(dayOrdinal) - static_cast<int>(TimeUtils::getDayOrdinalForDate(year, 1, 1));
   return true;
 }
 

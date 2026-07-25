@@ -123,17 +123,19 @@ unsigned long HalGPIO::getPowerButtonHeldTime() const {
   return 0;
 }
 
-#ifdef __EMSCRIPTEN__
-// No real device to sleep. In the browser we keep the runtime alive; treat deep sleep as a
-// no-op (the page stays on the last rendered frame).
-void HalGPIO::startDeepSleep() {}
-#else
-// Native: exit the process to mimic the device powering down.
-void HalGPIO::startDeepSleep() { std::exit(0); }
-#endif
+bool HalGPIO::hasTouch() const { return false; }
+bool HalGPIO::wasTouchTap(float&, float&) const { return false; }
+bool HalGPIO::wasTouchDown(float&, float&) const { return false; }
+bool HalGPIO::isTouchTapCandidate(float&, float&, unsigned long&) const { return false; }
+bool HalGPIO::isTouchHeldAt(float&, float&) const { return false; }
+unsigned long HalGPIO::lastTouchHeldMs() const { return 0; }
+bool HalGPIO::wasSwipe(float&, float&, float&, float&) const { return false; }
+bool HalGPIO::wasTouchActivity() const { return false; }
+void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(bool) {}
 
-void HalGPIO::verifyPowerButtonWakeup(uint16_t /*requiredDurationMs*/, bool /*shortPressAllowed*/) {
-  // No-op: in the simulator we always proceed past the boot wakeup gate.
+bool HalGPIO::verifyPowerButtonWakeup(uint16_t /*requiredDurationMs*/, bool /*shortPressAllowed*/) {
+  // The simulator always proceeds past the boot wakeup gate.
+  return true;
 }
 
 bool HalGPIO::isUsbConnected() const { return true; }
