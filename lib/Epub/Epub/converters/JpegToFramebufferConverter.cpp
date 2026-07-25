@@ -89,10 +89,19 @@ int32_t jpegSeek(JPEGFILE* pFile, int32_t pos) {
   return pos;
 }
 
-// JPEGDEC object is ~17 KB due to internal decode buffers.
-// Heap-allocate on demand so memory is only used during active decode.
-constexpr size_t JPEG_DECODER_APPROX_SIZE = 20 * 1024;
-constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_APPROX_SIZE + 16 * 1024;
+// JPEGDEC carries its decode buffers inline. Allocate it only during active
+// decode and require both aggregate headroom and one sufficiently large block.
+constexpr size_t JPEG_DECODER_SIZE = sizeof(JPEGDEC);
+constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_SIZE + 16 * 1024;
+
+bool hasHeapForJpegDecoder(const char* operation) {
+  const size_t freeHeap = ESP.getFreeHeap();
+  const size_t maxAlloc = ESP.getMaxAllocHeap();
+  if (freeHeap >= MIN_FREE_HEAP_FOR_JPEG && maxAlloc >= JPEG_DECODER_SIZE) return true;
+  LOG_ERR("JPG", "Not enough heap for JPEG %s (free=%u need=%u, maxAlloc=%u need=%u)", operation, freeHeap,
+          MIN_FREE_HEAP_FOR_JPEG, maxAlloc, JPEG_DECODER_SIZE);
+  return false;
+}
 
 // Choose JPEGDEC's built-in scale factor for coarse downscaling.
 // Returns the scale denominator (1, 2, 4, or 8) and sets jpegScaleOption.
@@ -355,13 +364,9 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 }  // namespace
 
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
-  size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
-    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_JPEG);
-    return false;
-  }
+  if (!hasHeapForJpegDecoder("dimensions")) return false;
 
-  std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
+  auto jpeg = makeUniqueNoThrow<JPEGDEC>();
   if (!jpeg) {
     LOG_ERR("JPG", "Failed to allocate JPEG decoder for dimensions");
     return false;
@@ -385,13 +390,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
                                                      const RenderConfig& config) {
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
-  size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
-    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_JPEG);
-    return false;
-  }
+  if (!hasHeapForJpegDecoder("decode")) return false;
 
-  std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
+  auto jpeg = makeUniqueNoThrow<JPEGDEC>();
   if (!jpeg) {
     LOG_ERR("JPG", "Failed to allocate JPEG decoder");
     return false;

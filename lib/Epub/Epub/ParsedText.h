@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -13,11 +14,15 @@
 class GfxRenderer;
 
 class ParsedText {
-  std::vector<std::string> words;
+  // Long CJK paragraphs can exceed 512 short tokens. A vector<string> growth
+  // from 512 to 1024 needs one 24 KB contiguous block while retaining the old
+  // 12 KB block; deque keeps the same indexed interface without that peak.
+  std::deque<std::string> words;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;      // true = word attaches to previous with no break
   std::vector<bool> wordNoSpaceBefore;  // true = may break before token, but no synthetic space when joined
   std::vector<bool> wordIsFocusSuffix;  // true = token is the regular tail of a focus bold-prefix split
+  std::deque<std::string> rubyTexts;
   BlockStyle blockStyle;
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
@@ -60,6 +65,12 @@ class ParsedText {
   ~ParsedText() = default;
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false);
+  void setRubyForWordAt(size_t index, const std::string& ruby);
+  void setRubyGroupAt(size_t startIndex, size_t count, const std::string& ruby);
+  EpdFontFamily::Style getWordStyleAt(size_t index) const {
+    return index < wordStyles.size() ? wordStyles[index] : EpdFontFamily::REGULAR;
+  }
+  std::string getRubyTextAt(size_t index) const { return index < rubyTexts.size() ? rubyTexts[index] : std::string(); }
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }

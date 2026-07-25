@@ -262,6 +262,21 @@ def sync_marker_found(root: Path, upstream_base_ref: str) -> bool:
     return marker_sha.lower() in lowered or "sync upstream master" in lowered
 
 
+def latest_synced_upstream_ref(root: Path, upstream_ref: str) -> str | None:
+    subjects = git_output(root, "log", "--format=%s", "--max-count=300", "HEAD")
+    pattern = re.compile(r"sync upstream \S+ into \S+ \(([0-9a-f]{7,40})\)", re.IGNORECASE)
+    for subject in subjects.splitlines():
+        match = pattern.search(subject)
+        if not match:
+            continue
+        candidate = match.group(1)
+        if git_success(root, "rev-parse", "--verify", f"{candidate}^{{commit}}") and is_ancestor(
+            root, candidate, upstream_ref
+        ):
+            return candidate
+    return None
+
+
 def auto_squash_base(root: Path, ctx: Context, requested: str) -> str | None:
     if requested == "none":
         return None
@@ -269,6 +284,9 @@ def auto_squash_base(root: Path, ctx: Context, requested: str) -> str | None:
         return requested
     if ctx.upstream_branch != DEFAULT_UPSTREAM_BRANCH:
         return None
+    synced_ref = latest_synced_upstream_ref(root, ctx.upstream_ref)
+    if synced_ref:
+        return synced_ref
     candidate = f"refs/remotes/{ctx.upstream_remote}/master"
     if not git_success(root, "show-ref", "--verify", candidate):
         return None
@@ -489,6 +507,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         "upstream_remote": ctx.upstream_remote,
         "upstream_branch": ctx.upstream_branch,
         "upstream_sha": upstream_full,
+        "squash_from": auto_squash_base(ctx.root, ctx, args.squash_from),
         "suggested_branch": suggested,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))

@@ -1,6 +1,6 @@
 ---
 name: sync-upstream
-description: Automate CrossMux/CrossPoint upstream repository synchronization. Use when the user asks to sync, update, or merge the latest upstream changes, especially upstream/develop, into this repo through a new branch and pull request instead of committing directly on main or the active target branch. Covers remote/base detection, agent sync branch creation, squash-sync fallback, CrossMux-specific conflict policy, validation builds, pushing to origin, and opening a draft PR.
+description: Automate and review CrossMux/CrossPoint upstream repository synchronization. Use when the user asks to sync, update, compare, or merge upstream changes, especially upstream/develop, into this repo through a new branch and pull request instead of committing directly on main or the active target branch. Covers overlap review, upstream-preferred conflict policy, remote/base detection, agent sync branch creation, squash-sync fallback, validation builds, pushing to origin, and opening a draft PR.
 ---
 
 # Sync Upstream
@@ -42,6 +42,16 @@ python3 .claude/skills/sync-upstream/scripts/sync_upstream.py publish --draft
 
 ## Conflict Policy
 
+- Review behavioral overlap before resolving file conflicts. When upstream now
+  provides the same capability and satisfies CrossMux business requirements,
+  use the upstream implementation and remove the duplicate local path.
+- Keep a CrossMux-local implementation only for a requirement upstream does not
+  meet. Limit it to that gap and record the reason in the PR body; do not retain
+  parallel implementations merely because the local one landed first.
+- For Chinese support, prefer upstream's generic CJK parsing, layout, rendering,
+  and font mechanisms. Preserve CN-build-only behavior only where upstream does
+  not provide the same offline, first-boot, glyph-coverage, distribution, or
+  flash-budget guarantees.
 - `.skills/SKILL.md` is a thin map. When upstream changes it, follow
   `docs/engineering/upstream-merge-policy.md`: keep the map thin, route deep
   content into `docs/engineering/`, and do not drop upstream hunks silently.
@@ -53,6 +63,9 @@ python3 .claude/skills/sync-upstream/scripts/sync_upstream.py publish --draft
   directories, then run `git submodule update --init --recursive`.
 - If an upstream change is intentionally skipped as out of scope, mention the
   skipped hunk in the PR body.
+- When an upstream change alters a cache layout or pagination, advance the
+  CrossMux per-flavor cache versions above every shipped value and update
+  `docs/file-formats.md`.
 
 ## Validation
 

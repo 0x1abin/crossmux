@@ -98,10 +98,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 40 / 41
+### Versions 42 / 43
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **41**; Latin builds use **40**. The byte layout is identical between
+> currently **43**; Latin builds use **42**. The byte layout is identical between
 > flavors; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
@@ -111,7 +111,8 @@ if (parsedSize != fileSize) {
 > shaped visual text. Versions 38/39 add the upstream line-through style and
 > resumable partial-build cache changes. Versions 40/41 keep the same byte layout
 > but invalidate pagination because compressed line heights are rounded instead
-> of truncated. The counters remain
+> of truncated. Versions 42/43 persist each image's book-internal source href for
+> lazy extraction and serialize ruby annotations/group-continuation styles. The counters remain
 > distinct and above every previously shipped value so a firmware-flavor swap
 > cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
 > source of truth.
@@ -131,7 +132,9 @@ superscript, and subscript. The format also includes:
 - optional per-word Focus Reading split metadata
 - per-page footnote entries
 - serialized word style bits for underline, strikethrough, superscript, and
-  subscript
+  subscript, plus the internal ruby-group continuation marker
+- optional ruby annotation strings for `<ruby>` / `<rt>` content
+- image source hrefs used for lazy extraction
 - flat TextBlock word storage (v29): per-word arrays plus one shared
   NUL-terminated text blob, replacing v28's length-prefixed word strings. The
   on-disk order mirrors the in-RAM arena so the firmware reads a whole block

@@ -4,6 +4,7 @@
 #include <Logging.h>
 
 #include "CrossPointSettings.h"
+#include "fontIds.h"
 
 namespace {
 
@@ -12,6 +13,21 @@ static uint8_t fontSizeEnumFromSettings() {
   if (e >= CrossPointSettings::FONT_SIZE_COUNT) e = 1;  // default to MEDIUM
   return e;
 }
+
+#ifndef ENABLE_CHINESE_VERSION
+// Global-build UI fonts and their physical point sizes (at 150 DPI, matching
+// the SD-font converter). CN builds already embed Simplified-Chinese UI fonts
+// and deliberately avoid keeping three additional SD font sizes resident.
+struct UiFontSize {
+  int fontId;
+  uint8_t pointSize;
+};
+constexpr UiFontSize kUiFontSizes[] = {
+    {SMALL_FONT_ID, 8},
+    {UI_10_FONT_ID, 10},
+    {UI_12_FONT_ID, 12},
+};
+#endif
 
 }  // namespace
 
@@ -30,6 +46,7 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
     const auto* family = registry_.findFamily(SETTINGS.sdFontFamilyName);
     if (family) {
       if (manager_.loadFamily(*family, renderer, fontSizeEnumFromSettings())) {
+        setupUiFallbacks(renderer);
         LOG_DBG("SDFS", "Loaded SD card font family: %s", SETTINGS.sdFontFamilyName);
       } else {
         LOG_ERR("SDFS", "Failed to load SD font family: %s (clearing)", SETTINGS.sdFontFamilyName);
@@ -95,6 +112,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
   const auto* family = registry_.findFamily(wantedFamily);
   if (family) {
     if (manager_.loadFamily(*family, renderer, sizeEnum)) {
+      setupUiFallbacks(renderer);
       LOG_DBG("SDFS", "Loaded SD font family: %s", wantedFamily);
     } else {
       LOG_ERR("SDFS", "Failed to load SD font family: %s (clearing)", wantedFamily);
@@ -109,6 +127,56 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
 }
 
 void SdCardFontSystem::releaseLoadedFont(GfxRenderer& renderer) { manager_.unloadAll(renderer); }
+
+void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
+#ifdef ENABLE_CHINESE_VERSION
+  // The CN firmware's built-in 8/10/12pt UI fonts cover its Simplified-Chinese
+  // interface. Keep only the selected reader-size SD font resident: loading
+  // three more broad-CJK sizes leaves too little contiguous heap for EPUB image
+  // decoding and glyph prewarm.
+  (void)renderer;
+  return;
+#else
+  const std::string& familyName = manager_.currentFamilyName();
+  if (familyName.empty()) return;  // no SD family loaded — nothing to fall back to
+
+  const auto* family = registry_.findFamily(familyName);
+  if (!family) return;
+
+  // Probe before paying for the UI sizes. Skip Latin-only families and, in the
+  // CN build, avoid loading duplicate SD sizes when the built-in UI fonts
+  // already cover the same script.
+  const auto readerIt = renderer.getFontMap().find(manager_.getFontId(familyName));
+  if (readerIt == renderer.getFontMap().end()) return;
+  // One representative codepoint per script: Han, Hiragana, Katakana, Hangul.
+  static constexpr uint32_t kCjkProbes[] = {0x4E00, 0x3042, 0x30A2, 0xAC00};
+  bool needsFallback = false;
+  for (const uint32_t cp : kCjkProbes) {
+    if (!readerIt->second.hasCodepoint(cp)) continue;
+    for (const auto& ui : kUiFontSizes) {
+      const auto primaryIt = renderer.getFontMap().find(ui.fontId);
+      if (primaryIt != renderer.getFontMap().end() && !primaryIt->second.hasCodepoint(cp)) {
+        needsFallback = true;
+        break;
+      }
+    }
+    if (needsFallback) break;
+  }
+  if (!needsFallback) {
+    LOG_DBG("SDFS", "%s adds no CJK UI coverage - skipping fallback sizes", familyName.c_str());
+    return;
+  }
+
+  for (const auto& ui : kUiFontSizes) {
+    const int sdFontId = manager_.loadFamilyExtraSize(*family, renderer, ui.pointSize);
+    if (sdFontId != 0) {
+      renderer.setFallbackFont(ui.fontId, sdFontId);
+    } else {
+      LOG_DBG("SDFS", "No %u pt SD glyphs for UI fallback in %s", ui.pointSize, familyName.c_str());
+    }
+  }
+#endif
+}
 
 int SdCardFontSystem::resolveFontId(const char* familyName, uint8_t /*fontSizeEnum*/) const {
   // The manager loads exactly one size (closest to SETTINGS.fontSize), so the

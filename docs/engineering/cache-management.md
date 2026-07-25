@@ -57,7 +57,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
 - `book.bin`: **Version 8** (metadata structure) — bumped on the upstream-master sync; the fork shipped 6 and upstream shipped 7 with an identical layout (both added the `language` field), so 8 sits above both lineages and forces a one-time clean re-parse.
-- `section.bin`: **per-flavor** — Latin builds **Version 40**, Chinese builds (`ENABLE_CHINESE_VERSION`) **Version 41**. Versions 40/41 invalidate old pagination because compressed line heights are now rounded instead of truncated. The two flavors emit different word streams (per-character CJK tokenization), so each carries an independent counter; numbers stay distinct and above every previously-shipped value so a firmware flavor swap never reuses the other's cache.
+- `section.bin`: **per-flavor** — Latin builds **Version 42**, Chinese builds (`ENABLE_CHINESE_VERSION`) **Version 43**. Versions 42/43 add lazy-image source hrefs and ruby annotations/group markers. The two flavors emit different word streams (per-character CJK tokenization), so each carries an independent counter; numbers stay distinct and above every previously-shipped value so a firmware flavor swap never reuses the other's cache.
 
 **Version Increment Rules**:
 1. **ALWAYS increment version** BEFORE changing binary structure
@@ -67,7 +67,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Example** (incrementing section format version):
 ```cpp
 // lib/Epub/Epub/Section.cpp
-static constexpr uint8_t SECTION_FILE_VERSION = 40;  // bump before any layout change
+static constexpr uint8_t SECTION_FILE_VERSION = 42;  // bump before any layout change
 
 // Add new field to structure
 struct PageLine {
