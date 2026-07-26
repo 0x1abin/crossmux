@@ -1589,6 +1589,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 #endif
   const auto tPrewarm = millis();
 
+  const bool manualRefreshPending = forcedRefreshPending;
+  forcedRefreshPending = false;
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing;
   const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
@@ -1618,6 +1620,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // Step 2: Re-render with images and display again (images appear clean)
     int16_t imgX, imgY, imgW, imgH;
     if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
+      // Image pages intentionally bypass the regular refresh cadence. Preserve
+      // the manual clean pass before their double-FAST grayscale pipeline.
+      if (manualRefreshPending) {
+        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      }
       renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 

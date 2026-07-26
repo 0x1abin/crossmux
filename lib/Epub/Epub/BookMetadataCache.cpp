@@ -16,7 +16,9 @@ namespace {
 // field), but those two v8 lineages stored titles un-normalized; the `!=` version
 // check cannot tell "same number, NFC vs non-NFC" apart, so bump to 9 to force a
 // one-time clean re-parse that re-composes existing caches' titles to NFC.
-constexpr uint8_t BOOK_CACHE_VERSION = 9;
+// v11: ignore ambiguous guide text references. Upstream shipped that behavior
+// as v10, so CrossMux advances past both lineages to avoid a version collision.
+constexpr uint8_t BOOK_CACHE_VERSION = 11;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";

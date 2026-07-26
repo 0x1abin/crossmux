@@ -31,10 +31,11 @@ namespace {
 // the byte layout is unchanged, the resulting pagination differs.
 // v42/v43: Images persist their book-internal source href for lazy extraction,
 // and TextBlocks serialize ruby annotations and group-continuation styles.
+// v44/v45: Closed HTML tags split adjacent text blocks, changing pagination.
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 43;
+constexpr uint8_t SECTION_FILE_VERSION = 45;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 42;
+constexpr uint8_t SECTION_FILE_VERSION = 44;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /

@@ -6,18 +6,15 @@ All POD fields are written in the ESP32 little-endian representation used by
 
 ## `book.bin`
 
-### Version 9
+### Version 11
 
 `book.bin` stores EPUB metadata plus lookup tables for spine and TOC entries.
 The current firmware writes this version from `BookMetadataCache`.
 
-> Version 9 was set on the upstream-master sync. The byte layout is identical to
-> the fork's 8 and upstream's 8 (both added the `language` metadata field), but
-> those two v8 lineages stored TOC/book titles un-normalized while upstream now
-> NFC-composes them (#2277). Because the `version != EXPECTED_VERSION` check
-> cannot distinguish "same number, NFC vs non-NFC", 9 forces a one-time clean
-> re-parse that re-composes existing caches' titles to NFC. `BookMetadataCache.cpp`
-> is the source of truth.
+> Version 9 forced a one-time rebuild after upstream began NFC-composing titles.
+> Upstream version 10 ignores ambiguous EPUB guide text references. CrossMux uses
+> 11 to include both changes while remaining above every shipped value from
+> either lineage. `BookMetadataCache.cpp` is the source of truth.
 
 ImHex pattern:
 
@@ -26,7 +23,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 9
+#define EXPECTED_VERSION 11
 #define MAX_STRING_LENGTH 65535
 
 struct String {
@@ -98,10 +95,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 42 / 43
+### Versions 44 / 45
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **43**; Latin builds use **42**. The byte layout is identical between
+> currently **45**; Latin builds use **44**. The byte layout is identical between
 > flavors; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
@@ -112,7 +109,9 @@ if (parsedSize != fileSize) {
 > resumable partial-build cache changes. Versions 40/41 keep the same byte layout
 > but invalidate pagination because compressed line heights are rounded instead
 > of truncated. Versions 42/43 persist each image's book-internal source href for
-> lazy extraction and serialize ruby annotations/group-continuation styles. The counters remain
+> lazy extraction and serialize ruby annotations/group-continuation styles.
+> Versions 44/45 invalidate pagination after closed HTML tags began splitting
+> adjacent text blocks. The counters remain
 > distinct and above every previously shipped value so a firmware-flavor swap
 > cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
 > source of truth.
@@ -147,7 +146,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 40
+#define EXPECTED_VERSION 44
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
