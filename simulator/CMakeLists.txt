@@ -46,6 +46,7 @@ FetchContent_MakeAvailable(qrcode)
 # curl-free stub under #ifdef __EMSCRIPTEN__), so it skips libcurl entirely.
 if(NOT EMSCRIPTEN)
     find_package(CURL REQUIRED)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 endif()
 
 # SDL2 — native simulator window only. The WASM build renders via the browser canvas
@@ -99,6 +100,11 @@ file(GLOB_RECURSE CROSSPOINT_LIB
     "${REPO_ROOT}/lib/ZipFile/*.cpp"
     "${REPO_ROOT}/lib/AvatarGen/*.cpp"
 )
+
+# WeRead requires native HTTPS and OpenSSL-backed MD5.
+if(EMSCRIPTEN)
+    list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/activities/apps/weread/")
+endif()
 
 # Real HAL .cpp is replaced by simulator/hal/.
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/hal/Hal.*\\.cpp$")
@@ -213,7 +219,7 @@ add_dependencies(crosspoint_simulator i18n_generated)
 target_link_libraries(crosspoint_simulator PRIVATE arduino_host ArduinoJson)
 
 if(NOT EMSCRIPTEN)
-    target_link_libraries(crosspoint_simulator PRIVATE CURL::libcurl)
+    target_link_libraries(crosspoint_simulator PRIVATE CURL::libcurl OpenSSL::Crypto)
     if(SDL2_FOUND)
         target_link_libraries(crosspoint_simulator PRIVATE SDL2::SDL2)
     else()
@@ -259,9 +265,8 @@ target_include_directories(crosspoint_simulator PRIVATE
 )
 
 # Rename Arduino entry points so the simulator entry can drive them explicitly.
-# ENABLE_CHINESE_VERSION is on for both native and WASM: the browser demo ships the
-# Chinese build (CJK fonts + WeRead/中国象棋/农历/CJK typography), with the startup
-# language following navigator.language (see simulator_main_wasm.cpp --lang).
+# ENABLE_CHINESE_VERSION includes WeRead on native builds; the browser build
+# excludes its sources because the browser HTTP shim is offline.
 target_compile_definitions(crosspoint_simulator PRIVATE
     CROSSPOINT_EMULATED=1
     EINK_DISPLAY_SINGLE_BUFFER_MODE=1
@@ -275,6 +280,13 @@ target_compile_definitions(crosspoint_simulator PRIVATE
     "setup=firmware_setup"
     "loop=firmware_loop"
 )
+
+if(NOT EMSCRIPTEN)
+    target_compile_definitions(crosspoint_simulator PRIVATE
+        CROSSPOINT_SIM_REAL_MD5=1
+        CROSSPOINT_SIM_VERIFIED_TLS=1
+    )
+endif()
 
 target_compile_options(crosspoint_simulator PRIVATE -fno-exceptions -fno-rtti
     -Wno-unused-parameter -Wno-deprecated-declarations -Wno-bidi-chars)
