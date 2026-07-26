@@ -474,6 +474,8 @@ void FontDownloadActivity::promptDeleteSelectedFamily() {
 }
 
 void FontDownloadActivity::onDeleteConfirmationResult(const ActivityResult& result) {
+  waitForConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+
   if (result.isCancelled) {
     requestUpdate();
     return;
@@ -504,6 +506,13 @@ bool FontDownloadActivity::isSelectedFamilyDeletable() const {
 // --- Input handling ---
 
 void FontDownloadActivity::loop() {
+  if (waitForConfirmRelease_) {
+    if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+      waitForConfirmRelease_ = false;
+    }
+    return;
+  }
+
   if (state_ == FAMILY_LIST) {
     auto activateSelected = [this] {
       if (families_.empty()) return;
@@ -591,7 +600,7 @@ void FontDownloadActivity::loop() {
       requestUpdate();
     });
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       activateSelected();
       return;
     }

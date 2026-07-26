@@ -95,6 +95,7 @@ class FontDownloadActivity : public Activity {
   int downloadingFamilyIndex_ = -1;
   std::string errorMessage_;
   bool cancelRequested_ = false;
+  bool waitForConfirmRelease_ = false;
 
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);
