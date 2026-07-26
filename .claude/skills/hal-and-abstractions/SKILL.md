@@ -1,6 +1,6 @@
 ---
 name: hal-and-abstractions
-description: Layering and abstraction discipline for the firmware. Use when touching storage, input, display, settings, i18n, or rendering, or any code that could reach into the SDK. Covers routing through the HAL (HalStorage / HalGPIO / HalDisplay) instead of raw SDK classes, MappedInputManager logical buttons instead of raw GPIO indices, UITheme/GUI for all rendering, the singleton macros, tr() for user-facing text, and where a new abstraction boundary belongs.
+description: Layering and abstraction discipline for the firmware. Use when touching storage, input edges, long presses, Activity or popup input transitions, display, settings, i18n, rendering, or code that could reach into the SDK. Covers routing through the HAL, MappedInputManager logical buttons and one-gesture/one-action release barriers, UITheme/GUI rendering, singleton macros, tr(), and where an abstraction boundary belongs.
 ---
 
 # HAL and Abstractions
@@ -28,6 +28,23 @@ This is when and how to route through them, and where to draw a new boundary.
 - **Shared state:** the singleton macros (`SETTINGS`, `APP_STATE`, `GUI`,
   `Storage`, `I18N`), not threaded pointers.
 
+## Preserve Input Ownership
+
+For edge selection, long presses, or Activity/popup transitions, read
+[`docs/engineering/ui-and-input.md`](../../../docs/engineering/ui-and-input.md).
+Trace the logical button through the originating owner, child or popup, result
+callback, and resumed owner. Identify every `wasPressed()`, `wasReleased()`,
+and `isPressed()` consumer.
+
+- Normal Activities read the shared input snapshot; they do not call
+  `mappedInput.update()`.
+- Assign one owner and one semantic action to each physical gesture.
+- If ownership changes while a button is held, initialize a release barrier
+  from `isPressed()` and return through the release frame.
+- If a long-press action fires, consume its release.
+- Keep a local boolean barrier until repeated cases demonstrate a need for a
+  shared abstraction.
+
 ## User-facing text
 
 Every string a user reads goes through `tr(STR_*)`. Add the key to the English
@@ -52,6 +69,10 @@ it carries one of those contracts or hides a real implementation choice.
 - [ ] File access uses `HalFile`; no `.close()` on a local handle
       (DESTRUCTOR_CLOSES_FILE); members closed in `onExit`.
 - [ ] Input uses `MappedInputManager::Button`, not raw `BTN_*` indices.
+- [ ] One physical gesture produces one action across Activity/popup boundaries.
+- [ ] Held buttons are gated and the release frame is consumed; touch remains
+      unaffected when no physical button is held.
+- [ ] Normal Activities do not update input; a long press consumes its release.
 - [ ] Rendering goes through GUI/UITheme and oriented metrics; no 800/480 or
       hardcoded fonts/coords.
 - [ ] User-facing strings use `tr(STR_*)`; new keys added to YAML and

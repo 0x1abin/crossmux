@@ -95,9 +95,12 @@ void enterNewActivity(Activity* activity) {
 **Activity Pattern**:
 ```cpp
 void onEnter()  { Activity::onEnter(); /* alloc: buffer, tasks */ render(); }
-void loop()     { mappedInput.update(); /* handle input */ }
+void loop()     { /* read the mappedInput snapshot; handle input */ }
 void onExit()   { /* free: vTaskDelete, free buffer, close member FsFiles */ Activity::onExit(); }
 ```
+
+The main loop updates mapped input once per frame before
+`ActivityManager::loop()`. Normal Activities must not update it again.
 
 **Critical**: Free resources in reverse order. Delete tasks BEFORE activity destruction.
 
