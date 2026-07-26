@@ -25,10 +25,6 @@ namespace {
 constexpr int HTTP_RX_BUF = 2048;
 constexpr int HTTP_TX_BUF = 512;
 #endif
-// WeRead JSON POSTs keep the verified ESP certificate-bundle transport. These
-// buffers are scoped to that request and the response is streamed into ArduinoJson.
-constexpr int POST_HTTP_RX_BUF = 4096;
-constexpr int POST_HTTP_TX_BUF = 1024;
 // Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
 // (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
 // slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
@@ -219,124 +215,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 }
 #endif  // !FREEINK_NET_WOLFSSL
 
-// Pull-style Stream wrapper around esp_http_client_read. Backed by a small
-// refill buffer so each read()/peek() byte does not cost a syscall.
-// esp_http_client_read already strips chunked transfer encoding, so the
-// wrapper has no framing logic — read()==0 is the only EOF signal we need.
-//
-// setTimeout(0) makes Stream::timedRead bail immediately on -1 (our
-// "no more data" code), so ArduinoJson stops as soon as it has parsed the
-// closing token rather than spending the default 1s waiting for more input.
-class EspHttpReadStream final : public Stream {
- public:
-  explicit EspHttpReadStream(esp_http_client_handle_t client) : client_(client) { setTimeout(0); }
-
-  int available() override { return static_cast<int>(len_ - pos_); }
-
-  int read() override {
-    if (pos_ >= len_ && !refill()) return -1;
-    return static_cast<unsigned char>(buf_[pos_++]);
-  }
-
-  int peek() override {
-    if (pos_ >= len_ && !refill()) return -1;
-    return static_cast<unsigned char>(buf_[pos_]);
-  }
-
-  size_t write(uint8_t) override { return 0; }
-  void flush() override {}
-
- private:
-  static constexpr size_t kBufSize = 1024;
-
-  bool refill() {
-    const int n = esp_http_client_read(client_, buf_, static_cast<int>(kBufSize));
-    if (n < 0) {
-      LOG_ERR("HTTP", "read error mid-body");
-      return false;
-    }
-    if (n == 0) return false;  // server-side EOF
-    pos_ = 0;
-    len_ = static_cast<size_t>(n);
-    return true;
-  }
-
-  esp_http_client_handle_t client_;
-  char buf_[kBufSize] = {};
-  size_t pos_ = 0;
-  size_t len_ = 0;
-};
-
-bool runPostJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
-                 const std::function<bool(Stream&)>& onResponse, int timeoutMs) {
-  esp_http_client_config_t config = {};
-  config.url = url.c_str();
-  config.buffer_size = POST_HTTP_RX_BUF;
-  config.buffer_size_tx = POST_HTTP_TX_BUF;
-  config.timeout_ms = timeoutMs;
-  // Verified HTTPS via the bundled CA roots — same trust posture as runGet.
-  config.crt_bundle_attach = esp_crt_bundle_attach;
-  config.method = HTTP_METHOD_POST;
-  config.keep_alive_enable = true;
-
-  esp_http_client_handle_t client = esp_http_client_init(&config);
-  if (!client) {
-    LOG_ERR("HTTP", "POST client init failed");
-    return false;
-  }
-
-  esp_http_client_set_header(client, "Content-Type", "application/json");
-  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (!bearerToken.empty()) {
-    const std::string authHeader = "Bearer " + bearerToken;
-    esp_http_client_set_header(client, "Authorization", authHeader.c_str());
-  }
-
-  // open(content_length) reserves the body length for the request line;
-  // write() then streams the payload. POST does not follow redirects here —
-  // a 30x on a JSON RPC endpoint is a server misconfiguration we want to
-  // surface, not silently re-POST against.
-  esp_err_t err = esp_http_client_open(client, static_cast<int>(payload.size()));
-  if (err != ESP_OK) {
-    LOG_ERR("HTTP", "POST open failed: %s", esp_err_to_name(err));
-    esp_http_client_cleanup(client);
-    return false;
-  }
-
-  if (!payload.empty()) {
-    const int written = esp_http_client_write(client, payload.data(), static_cast<int>(payload.size()));
-    if (written < 0 || static_cast<size_t>(written) != payload.size()) {
-      LOG_ERR("HTTP", "POST write short: %d of %u", written, static_cast<unsigned>(payload.size()));
-      esp_http_client_cleanup(client);
-      return false;
-    }
-  }
-
-  const int64_t contentLength = esp_http_client_fetch_headers(client);
-  (void)contentLength;  // body length is irrelevant when streaming
-  const int status = esp_http_client_get_status_code(client);
-  if (status != 200) {
-    LOG_ERR("HTTP", "POST unexpected status: %d", status);
-    esp_http_client_cleanup(client);
-    return false;
-  }
-
-  EspHttpReadStream bodyStream(client);
-  const bool consumerOk = onResponse(bodyStream);
-  esp_http_client_cleanup(client);
-  // A successful consumer (e.g., ArduinoJson hitting the closing `}`) is the
-  // ground truth for "body received". Don't require draining the stream — a
-  // valid JSON document parses without reading any trailing bytes the server
-  // might still send (whitespace, server-side keepalive padding). The device
-  // GET path checks is_complete_data_received because it counts bytes against
-  // Content-Length; here the parser is the framing.
-  if (!consumerOk) {
-    LOG_ERR("HTTP", "POST consumer reported failure");
-    return false;
-  }
-  return true;
-}
-
 // All HTTP(S) fetches go through wolfSSL when it is the active TLS stack: it
 // speaks TLS 1.3 and reads large bodies from servers where the esp_http_client/
 // mbedTLS path fails to connect or stalls mid-stream. Plain-http URLs still use a
@@ -377,12 +255,6 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   Sink sink;
   sink.write = onData;
   return runGetSecure(url, username, password, sink) == OK;
-}
-
-bool HttpDownloader::postJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
-                              const std::function<bool(Stream&)>& onResponse, int timeoutMs) {
-  LOG_DBG("HTTP", "POST: %s (body=%u bytes)", url.c_str(), static_cast<unsigned>(payload.size()));
-  return runPostJson(url, payload, bearerToken, onResponse, timeoutMs);
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,

@@ -101,12 +101,9 @@ class ActivityManager {
   void goToGame2048();
 #ifdef ENABLE_CHINESE_VERSION
   void goToChineseChess();
+#endif
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
   void goToWeRead();
-  void goToWeReadShelf();
-  void goToWeReadSearch();
-  void goToWeReadRecommend();
-  void goToWeReadStats();
-  void goToWeReadBook(std::string bookId, std::string title);
 #endif
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
 

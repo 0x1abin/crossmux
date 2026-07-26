@@ -16,6 +16,7 @@ gates every CN-only resource:
 | `src/main.cpp` font globals | Each Latin `EpdFont`/`EpdFontFamily` global is aliased to the matching-size CJK header. Bold/italic variants all point at the Regular OTF (no style data in the subset). SD-card fonts still provide style variants when the user loads them. |
 | EPUB layout ([lib/Epub/Epub/ParsedText.cpp](../../lib/Epub/Epub/ParsedText.cpp)) | CJK punctuation rules are active: line-head prohibition (禁则) glues trailing punctuation back onto the previous line; full-width punctuation gets width-padded so it occupies a full CJK cell. Both are zero-cost in non-CN builds (gated by `#ifdef`). |
 | Activities (`src/activities/apps/chinese-chess/`) | Compiled in (also gated by `build_src_filter +<activities/apps/chinese-chess/>`). |
+| WeRead (`src/activities/apps/weread/`) | Compiled into native CN builds through `build_src_filter`. Device requests use the app-local `WeReadHttpClient` over wolfSSL; the native simulator uses the `esp_http_client` shim over libcurl; WASM excludes the app. |
 | First-boot locale defaults (`src/CrossPointSettings.h`) | A fresh CN build starts with `Language::ZH_CN` and UTC+8 (`clockUtcOffsetQ = 80`); non-CN builds default to `Language::EN` and UTC+0. Saved UTC offsets are preserved across reflashes. When switching CN → global, the existing SKU/renderability guard resets Chinese to English, including legacy settings without a `langSku` marker. |
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
@@ -25,8 +26,8 @@ gates every CN-only resource:
 | Code + non-font data | ~3.15 MB |
 | 4 CJK font headers 8/10/12/14pt (3515 CJK + 497 ASCII/Latin/punctuation glyphs) | 2,109,690 |
 | 2 CJK font headers 16/18pt (653 CJK + 497 ASCII/Latin/punctuation glyphs) | 506,899 |
-| **Total (`gh_release_cn`, 2026-07-24)** | **5,765,981 / 6,553,600 bytes**, 787,619 bytes headroom |
-| **Total (`gh_release_cn_rc`, 2026-07-24)** | **5,765,995 / 6,553,600 bytes**, 787,605 bytes headroom |
+| **Total (`gh_release_cn`, 2026-07-26)** | **5,775,431 / 6,553,600 bytes**, 778,169 bytes headroom; 53,036 bytes static RAM |
+| **Total (`gh_release_cn_rc`, 2026-07-26)** | **5,775,445 / 6,553,600 bytes**, 778,155 bytes headroom; 53,036 bytes static RAM |
 
 A/B OTA rollback works exactly like the Latin build — the firmware fits in
 both app slots, and a failed update can auto-revert.
@@ -54,23 +55,35 @@ both app slots, and a failed update can auto-revert.
 > Relative to the 6,502,659-byte RC baseline, the RC image is 736,664 bytes
 > smaller while adding the previously missing required glyphs.
 
-The CN build keeps two size strategies stacked together to land in that
-budget:
+The CN build keeps LTO disabled. Combining LTO with the custom ESP-IDF core
+rebuild previously allowed cache-critical SPI flash helpers to be linked into
+Flash; calling them while cache was disabled caused an early-boot Cache Error.
+Do not re-enable LTO without checking the final ELF and map for the affected
+IRAM mappings.
 
-1. **`-flto=auto`** in `[env:gh_release_cn]`. Saves ~140 KB on `.text` via
-   cross-TU dead-code elimination. The framework's default `-fno-lto`
-   linker flag is stripped via `build_unflags` so the linker plugin
-   picks up LTO IR in project objects; pre-built framework `.a` libs
-   stay non-LTO and the GCC linker plugin handles the mix. `-Oz` was
-   tested and produced byte-identical output to the framework's default
-   `-Os` on this codebase, so it is *not* enabled (would only add
-   configuration complexity).
-2. **Per-size CJK character coverage** in `build-cn-builtin-fonts.sh`
-   (see "Regenerating the CJK fonts" below). 8/10/12/14pt carry the complete
-   3500-char pool plus required glyphs; 16/18pt carry only required glyphs.
-   Removing the former 14pt 7000-char/symbol tier shrinks raw Flash-resident
-   bitmap and glyph metadata. It does not add a decompression buffer, heap
-   allocation, or DRAM use.
+The remaining size strategy is **per-size CJK character coverage** in
+`build-cn-builtin-fonts.sh` (see "Regenerating the CJK fonts" below).
+8/10/12/14pt carry the complete 3500-char pool plus required glyphs; 16/18pt
+carry only required glyphs. Removing the former 14pt 7000-char/symbol tier
+shrinks raw Flash-resident bitmap and glyph metadata without adding a
+decompression buffer, heap allocation, or DRAM use.
+
+## WeRead transport
+
+WeRead owns its transport in `src/activities/apps/weread/WeReadHttpClient.*`;
+the public `HttpDownloader` has no WeRead-specific session, Cookie, or protocol
+logic. On device, the client uses wolfSSL through `freeink::SecureClient`, a
+caller-owned 1 KB HTTP work buffer, and one best-effort persistent connection
+from TOC retrieval through the final book response. It closes the connection
+before EPUB packaging, and also closes early when free heap falls below 20 KB
+or the largest block falls below 8 KB.
+
+Device requests call `setInsecure()`: traffic is encrypted, but the CA and host
+identity are not verified. This makes session credentials and downloaded
+content vulnerable to a man-in-the-middle attacker. The native simulator takes
+a different path, `WeReadHttpClient -> esp_http_client shim -> libcurl`, and
+uses libcurl's host trust store for certificate verification. WeRead uses an
+unofficial Web protocol and may stop working when the service changes.
 
 ## Regenerating the CJK fonts
 

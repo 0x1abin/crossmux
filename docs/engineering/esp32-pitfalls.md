@@ -76,7 +76,7 @@ struct Callback { void* ctx; void (*fn)(void*); };
 When a template is necessary, limit instantiations: use explicit template instantiation in a `.cpp` file to prevent the compiler from generating duplicates across translation units.
 
 ## ArduinoJson v7: `| 0` / `| 0u` is strict
-`JsonVariant::operator|(int)` in ArduinoJson v7 returns the *default* whenever the variant holds a value of a different underlying type — including a number stored as `double`. Many JSON producers (including the WeRead agent gateway) emit numerics as doubles: a Unix timestamp as `1.734600517e9`, a rating as `80.0`. Reading those via `| 0` / `| 0u` silently yields 0 with no error.
+`JsonVariant::operator|(int)` in ArduinoJson v7 returns the *default* whenever the variant holds a value of a different underlying type — including a number stored as `double`. Many JSON producers emit numerics as doubles: a Unix timestamp as `1.734600517e9`, a rating as `80.0`. Reading those via `| 0` / `| 0u` silently yields 0 with no error.
 
 ```cpp
 // WRONG — returns 0 whenever the JSON value is stored as double:

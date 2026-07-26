@@ -13,11 +13,17 @@
 What CrossMux adds on top of upstream:
 
 - **Apps hub** (the `Apps` menu): 2048, Minesweeper, Sudoku, Gomoku (五子棋), Chinese Chess / Xiangqi (象棋), and a procedural "Ugly Avatar" generator. The menu paginates with page dots once the apps overflow a single screen.
-- **WeRead Copilot** (微信读书): browse your shelf, notes, and reviews with an SD-backed offline cache and bulk sync.
+- **WeRead** (微信读书): scan to sign in, browse your shelf, download books, and read them offline as EPUBs.
 - **Reading analytics**: reading stats, a monthly reading heatmap, a reading profile, and achievements — backed by an SD-stored JSON history.
 - **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), plus **AirPage** — a cloud-backed face that shows a QR code to its upload page and fetches a cloud-rendered image over Wi-Fi (manual or live MQTT push), shown full-screen in 4-level grayscale and cached on SD. Optional 4-level grayscale and inverse display modes throughout.
 - **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
 - **Desktop / WebAssembly simulator** for developing and previewing the UI on the host.
+
+> **WeRead security notice:** WeRead uses an unofficial Web protocol that may
+> change without notice. Device builds encrypt traffic with wolfSSL but call
+> `setInsecure()`, so they do not verify the server CA or host identity and are
+> vulnerable to man-in-the-middle attacks. Use WeRead only on a trusted network.
+> The native simulator verifies certificates through libcurl's host trust store.
 
 ---
 

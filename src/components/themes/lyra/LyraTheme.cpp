@@ -20,6 +20,8 @@
 #include "components/icons/bookmark.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "components/icons/chinese_chess.h"
+#endif
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
 #include "components/icons/weread.h"
 #endif
 #include "components/icons/cover.h"
@@ -97,6 +99,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
 #ifdef ENABLE_CHINESE_VERSION
       case UIIcon::ChineseChess:
         return ChineseChessIcon;
+#endif
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
       case UIIcon::WeRead:
         return WeReadIcon;
 #endif

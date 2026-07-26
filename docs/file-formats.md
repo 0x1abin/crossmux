@@ -345,3 +345,29 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## WeRead cache
+
+The Simplified Chinese build keeps WeRead's private data below `/.crosspoint/weread/`.
+Completed EPUB files are stored in `/WeRead/`; the pre-release `/Books/WeRead/`
+location is not migrated or read.
+
+- `session.bin` is the existing device-bound obfuscation envelope. Its decoded
+  payload starts with `WRA1\n`, followed by bounded `wr_vid`, `wr_skey`, and
+  `wr_rt` lines. No response body, signature, or complete Cookie header is
+  stored.
+- `shelf.bin` and `<bookId>/toc.bin` start with a 12-byte little-endian header:
+  `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
+  Their magic values are `WRS4` (`0x34535257`) and `WRT1` (`0x31545257`);
+  version is currently `1`.
+- Shelf records contain fixed `bookId[64]`, `title[192]`, and `author[96]`
+  fields. TOC records contain fixed `chapterUid[64]`, `title[192]`,
+  `uint32 chapterIdx`, and a paid flag.
+
+Readers reject a wrong magic, version, record size, or total file length.
+Writers use `.part` plus atomic replacement, so a damaged or interrupted index
+is never exposed as current data.
+
+`WRA1` replaces the pre-release `WRD3` session marker after the application
+rename. `WRS4` rejects `WRS3` shelves whose book titles could be overwritten by
+nested category titles. Existing TOCs, chapter files, and EPUBs remain valid.

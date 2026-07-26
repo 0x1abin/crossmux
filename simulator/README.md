@@ -73,22 +73,47 @@ cmake --build simulator/build -j
 CMake fetches ArduinoJson and `ricmoo/QRCode` via `FetchContent` on first configure
 (shallow clones, a few seconds).
 
+### WeRead
+
+The native simulator includes WeRead and requires OpenSSL Crypto:
+
+```sh
+# brew install openssl@3
+# apt install libssl-dev
+./simulator/build/crosspoint_simulator \
+  --sd-root /private/tmp/crossmux-weread-sd
+```
+
+The host WiFi shim is always connected. Open **Apps → WeRead**, scan the QR code,
+then use the same SD root on later launches to test session and offline-book
+recovery. Requests follow `WeReadHttpClient → esp_http_client shim → libcurl`;
+this is separate from the public `HttpDownloader` used by other applications.
+The simulator verifies TLS through libcurl's host trust store, passes all
+`Set-Cookie` response headers to the firmware, and spools response bodies to an
+anonymous host temporary file before the firmware consumes them in chunks.
+
+`/private/tmp/crossmux-weread-sd/.crosspoint/weread/session.bin` contains
+the whitelisted session values in reversible host-only base64, not device-bound
+encryption. Keep that test directory private and remove it when finished.
+WeRead is hidden in WASM, and the native simulator does not model ESP32 heap
+limits or e-ink timing.
+
 ## WebAssembly (browser) build
 
 The same firmware also builds to WASM for the crosspoint-web homepage demo, sharing the
 **same HAL sources** as the native build: `hal/HalDisplay.cpp` and `hal/HalGPIO.cpp` carry a
 small `#ifdef __EMSCRIPTEN__` backend (a framebuffer dirty-flag + browser canvas instead of an
 SDL texture; JavaScript events instead of SDL keys), and `shims/esp_http_client.h` compiles a
-curl-free offline stub under the same guard. The WASM build sets **ENABLE_CHINESE_VERSION**
-(CJK fonts + WeRead/中国象棋/农历/CJK typography — same as native) and preloads a small
+	curl-free offline stub under the same guard. The WASM build sets **ENABLE_CHINESE_VERSION**
+	(CJK fonts + 中国象棋/农历/CJK typography) and preloads a small
 public-domain book from `sd_root_demo/` into MEMFS at `/sd`. The startup UI language follows the
 browser: `index.html` maps `navigator.language` to a `--lang ZH_CN|EN` arg that
 `simulator_main_wasm.cpp` applies before first render. FreeRTOS tasks run on Web Worker threads
 (pthreads), so the page must be cross-origin isolated (COOP/COEP).
 
-Because the browser build has no libcurl, all networked features are offline: WeRead and any
-other HTTPS path return errors through the esp_http_client stub, so those screens render but fetch
-nothing. (Network config / OPDS / KOReader / OTA are out of scope on both builds — see below.)
+Because the browser build has no libcurl, WeRead is excluded and other HTTPS
+paths return errors through the esp_http_client stub. Network config / OPDS /
+KOReader / OTA are out of scope on both builds.
 
 ```sh
 # Prerequisites: emsdk (https://github.com/emscripten-core/emsdk), activated.
@@ -102,9 +127,9 @@ See `crosspoint-web/SIMULATOR.md` for how the artifacts are embedded and served.
 ## Run
 
 ```sh
-./simulator/build/crosspoint_simulator                    # opens 800×480 window
+./simulator/build/crosspoint_simulator                    # opens 480×800 portrait window
 ./simulator/build/crosspoint_simulator --sd-root /tmp/sd  # custom sd_root
-./simulator/build/crosspoint_simulator --scale 2          # 2× window magnification
+./simulator/build/crosspoint_simulator --scale 2          # 2× magnification for large displays
 ```
 
 Keyboard mapping (matches `MappedInputManager::Button::*`):
@@ -176,12 +201,9 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
 - All on-disk caches (book.bin, sections/*.bin, css_rules.cache, progress.bin)
 - Multi-language UI via the `tr()` macro (generated I18nStrings)
 - 1-bpp framebuffer rendering and font system (text-only EPUBs)
-- **WeRead (微信读书) app: real HTTPS to i.weread.qq.com via libcurl.** WiFi
-  shim reports `WL_CONNECTED`; `HttpDownloader::postJson` runs through the
-  esp_http_client shim, which is libcurl-backed on native. Drop your `wrk-…` API
-  key as plain text into `simulator/sd_root/.crosspoint/weread_apikey_plain.txt`
-  — first boot migrates it to base64-stored `weread_apikey.txt` and deletes the
-  plain seed.
+- **WeRead (微信读书): real HTTPS via its dedicated client and libcurl shim.**
+  Scan to sign in, sync the account shelf, download books to SD, and open the
+  generated EPUB in Reader.
 - **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
   by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
   runs the real `HttpDownloader` over libcurl, saving the latest image to
@@ -224,7 +246,8 @@ user navigates into them.
   or `<JPEGDEC.h>` exist so consumer `.cpp` files compile and link, but their
   methods return an error / empty value. The exception is `<esp_http_client.h>`
   (and its `<esp_crt_bundle.h>` companion), which is **libcurl-backed and does
-  real host network I/O** — that's what lets WeRead and the AirPage fetch work.
+  real host network I/O** — that's what lets WeRead's dedicated client and the
+  AirPage fetch work.
   Adding a real codec (libpng wrapper, etc.) would similarly light up the
   stubbed features.
 

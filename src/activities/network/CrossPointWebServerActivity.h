@@ -11,32 +11,15 @@
 // Web server activity states
 enum class WebServerActivityState {
   MODE_SELECTION,  // Showing NetworkModeSelectionActivity (Join / Calibre / Hotspot)
-  WIFI_SELECTION,  // WifiSelectionActivity is active (for Join Network / WeRead paths)
+  WIFI_SELECTION,  // WifiSelectionActivity is active
   AP_STARTING,     // Starting Access Point mode
   SERVER_RUNNING,  // Web server is running and handling requests
   SHUTTING_DOWN    // Shutting down server and WiFi
 };
 
-// Entry intent — drives which onboarding path the activity takes:
-//
-//   FileTransfer    Default. Opens NetworkModeSelectionActivity so the user
-//                   picks Join Network / Calibre / Create Hotspot, then a
-//                   general-purpose web server backs file management.
-//
-//   WeReadKeySetup  Single-purpose path for binding a WeRead API key via the
-//                   user's phone. Skips the mode chooser, only runs STA on a
-//                   saved network, and the device screen / QR point at the
-//                   /weread paste form instead of the file-transfer root.
-enum class WebServerEntryPurpose {
-  FileTransfer,
-  WeReadKeySetup,
-};
-
 /**
  * CrossPointWebServerActivity owns the device-side flow for bringing up the
- * built-in web server. Two entry purposes share this activity (see
- * WebServerEntryPurpose) — the file-transfer path runs the full network mode
- * chooser, while the WeRead-key path skips straight to STA + the /weread page.
+ * built-in file-transfer web server.
  *
  * Shared lifecycle:
  *  - Connect WiFi (STA or AP), with mDNS for crosspoint.local resolution.
@@ -46,9 +29,6 @@ enum class WebServerEntryPurpose {
  */
 class CrossPointWebServerActivity final : public Activity {
   WebServerActivityState state = WebServerActivityState::MODE_SELECTION;
-
-  // Entry intent (see WebServerEntryPurpose). Set in the constructor.
-  WebServerEntryPurpose purpose = WebServerEntryPurpose::FileTransfer;
 
   // Network mode
   NetworkMode networkMode = NetworkMode::JOIN_NETWORK;
@@ -82,9 +62,8 @@ class CrossPointWebServerActivity final : public Activity {
   void startWebServer();
 
  public:
-  explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                       WebServerEntryPurpose purpose = WebServerEntryPurpose::FileTransfer)
-      : Activity("CrossPointWebServer", renderer, mappedInput), purpose(purpose) {}
+  explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
+      : Activity("CrossPointWebServer", renderer, mappedInput) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
