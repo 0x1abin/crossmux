@@ -81,6 +81,12 @@ renders book content normally. Japanese/Korean UI glyphs outside the embedded
 set may therefore show replacement boxes in that build; preserving contiguous
 heap for EPUB decoding takes priority on the ESP32-C3.
 
+Note that **Settings > Reader > Font Size** lists every size the family ships,
+so a family built at 8,10,12,14,16,18 offers all six as reading sizes — the UI
+sizes are not hidden from the list. Reading at 8 pt is your call; if you would
+rather not see the small sizes there, convert two families (one with the UI
+sizes for fallback, one with only the reading sizes you want).
+
 When converting your own font, include the UI sizes:
 
     python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
