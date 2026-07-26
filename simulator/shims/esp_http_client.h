@@ -3,13 +3,14 @@
 //   - native: libcurl-backed. The handle spools the body to an anonymous
 //     temporary file during fetch_headers(), then serves it through read().
 //     Response size therefore does not determine simulator heap use. Sufficient
-//     for HttpDownloader (downloadToFile + postJson) to drive AirPage image
-//     fetches and the WeRead JSON RPC against the live network.
+//     for HttpDownloader downloads and WeReadHttpClient JSON requests against
+//     the live network.
 //   - WASM:   offline stub. open/fetch_headers report failure so the same
 //     call sites bail gracefully without pulling libcurl into the browser
 //     build (which has no socket access anyway).
 //
-// The public surface mirrors only what HttpDownloader.cpp actually calls.
+// The public surface mirrors only what HttpDownloader.cpp and
+// WeReadHttpClient.cpp call.
 
 #include <strings.h>
 

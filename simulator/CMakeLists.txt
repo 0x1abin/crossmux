@@ -40,10 +40,10 @@ FetchContent_Declare(
 # and still sets qrcode_SOURCE_DIR. Replaces the deprecated FetchContent_Populate().
 FetchContent_MakeAvailable(qrcode)
 
-# libcurl — backs the native simulator's esp_http_client shim (shims/esp_http_client.h)
-# so WeRead, AirPage, and any other on-device HTTPS code paths we don't exclude can hit
-# the real network from host. The WASM build is offline-only (the same shim compiles a
-# curl-free stub under #ifdef __EMSCRIPTEN__), so it skips libcurl entirely.
+# libcurl — backs the native simulator's esp_http_client shim
+# (shims/esp_http_client.h), including WeRead's dedicated host transport.
+# AirPage and other included HTTPS paths use it as well. The WASM build is
+# offline-only, so the same shim compiles a curl-free stub there.
 if(NOT EMSCRIPTEN)
     find_package(CURL REQUIRED)
     find_package(OpenSSL REQUIRED COMPONENTS Crypto)
@@ -115,8 +115,8 @@ list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/hal/Hal.*\\.cpp$")
 # simulator/missing_symbols.cpp so the linker still resolves vtables and constructors.
 
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/network/")
-# ...but keep the real HttpDownloader: the libcurl-backed esp_http_client shim lets it
-# actually fetch over the network, so AirPage and WeRead can hit the real internet.
+# ...but keep the real HttpDownloader for applications such as AirPage. WeRead's
+# dedicated transport is included with the rest of its activity sources.
 list(APPEND CROSSPOINT_SRC ${REPO_ROOT}/src/network/HttpDownloader.cpp)
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/activities/network/")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "OpdsBookBrowserActivity")

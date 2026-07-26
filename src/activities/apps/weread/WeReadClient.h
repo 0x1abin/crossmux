@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <string>
 
+#include "WeReadHttpClient.h"
 #include "WeReadStore.h"
-#include "network/HttpDownloader.h"
 
 namespace WeReadClient {
 
@@ -97,7 +97,7 @@ class Operation {
   WeReadStore::Session session_;
   WeReadStore::ShelfRecord book_;
   WeReadStore::TocRecord chapter_;
-  HttpDownloader::VerifiedSession bookSession_;
+  WeReadHttpClient::Session bookSession_;
   HalFile tocFile_;
   uint32_t chapterCount_ = 0;
   uint32_t chapterIndex_ = 0;

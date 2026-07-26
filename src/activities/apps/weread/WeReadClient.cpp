@@ -17,7 +17,6 @@
 #include <string>
 
 #include "WeReadProtocol.h"
-#include "network/HttpDownloader.h"
 #include "util/TimeUtils.h"
 
 namespace WeReadClient {
@@ -118,11 +117,11 @@ void absorbSetCookie(WeReadStore::Session* session, const char* headerName, cons
 Error requestOnce(const char* method, const char* path, const uint8_t* body, const size_t bodySize,
                   WeReadStore::Session* session, const char* referer, ResponseSink& sink, int& status, char* cookie,
                   const size_t cookieSize, char* url, const size_t urlSize, uint8_t* readBuffer,
-                  const size_t readBufferSize, HttpDownloader::VerifiedSession* reusableSession = nullptr) {
+                  const size_t readBufferSize, WeReadHttpClient::Session* reusableSession = nullptr) {
   if (!method || !path || !cookie || cookieSize == 0 || !url || urlSize == 0 || !readBuffer || readBufferSize == 0) {
     return Error::Protocol;
   }
-  HttpDownloader::Header headers[6] = {};
+  WeReadHttpClient::Header headers[6] = {};
   size_t headerCount = 0;
   headers[headerCount++] = {"User-Agent", kUserAgent};
   headers[headerCount++] = {"Accept", "application/json, text/plain, */*"};
@@ -135,7 +134,7 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
     headers[headerCount++] = {"Cookie", cookie};
   }
 
-  HttpDownloader::RequestOptions options;
+  WeReadHttpClient::RequestOptions options;
   options.method = method;
   options.body = body;
   options.bodySize = bodySize;
@@ -151,10 +150,10 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
   const auto onData = [&sink](const uint8_t* data, const size_t len) { return sink.write(sink.ctx, data, len); };
   const auto onHeader = [session](const char* name, const char* value) { absorbSetCookie(session, name, value); };
   const auto result = reusableSession
-                          ? HttpDownloader::requestVerified(*reusableSession, url, options, onData, onHeader, status)
-                          : HttpDownloader::requestVerified(url, options, onData, onHeader, status);
-  if (result == HttpDownloader::OK) return sink.finish(sink.ctx) ? Error::Ok : Error::SdCard;
-  if (result == HttpDownloader::FILE_ERROR || result == HttpDownloader::ABORTED) return sink.writeError;
+                          ? WeReadHttpClient::request(*reusableSession, url, options, onData, onHeader, status)
+                          : WeReadHttpClient::request(url, options, onData, onHeader, status);
+  if (result == WeReadHttpClient::Result::Ok) return sink.finish(sink.ctx) ? Error::Ok : Error::SdCard;
+  if (result == WeReadHttpClient::Result::Aborted) return sink.writeError;
   return Error::Network;
 }
 
@@ -1717,8 +1716,8 @@ Operation::Event Operation::step() {
       if (!makeReaderReferer(book_.bookId, chapter_.chapterUid, referer_)) return fail(Error::Protocol);
       if (!psvts_[0]) {
         if (!TimeUtils::isClockValid()) {
-          // SNTP and mbedTLS both have large internal allocations. A cold-clock
-          // download reconnects after sync rather than keeping both alive.
+          // SNTP and TLS both hold network buffers. A cold-clock download
+          // reconnects after sync rather than keeping both alive.
           bookSession_.reset();
           startClockSync();
           nextActionAt_ = millis() + kClockSyncTimeoutMs;
