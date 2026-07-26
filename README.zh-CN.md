@@ -23,6 +23,11 @@
 - **简体中文固件**（`gh_release_cn`）：中文 UI + i18n、内嵌 CJK 字体、面向中文的 EPUB 排版（断词与禁则等）。详见下方 [编译简体中文固件](#编译简体中文固件)。
 - **桌面 / WebAssembly 模拟器**：可在电脑上开发与预览 UI。
 
+> **微信读书安全提示**：微信读书使用可能随时变化的非公开 Web 协议。真机通过
+> wolfSSL 加密传输，但调用 `setInsecure()`，不会验证服务器 CA 与主机身份，存在
+> 中间人攻击风险；请只在可信网络中使用。原生模拟器仍通过 libcurl 的主机信任库
+> 验证证书。
+
 上游 CrossPoint 的全部能力（EPUB 2/3 渲染、多格式支持、无线传书、OPDS、OTA 等）在 CrossMux 中同样可用，详见 [English README](./README.md#what-can-crosspoint-do)。
 
 ---

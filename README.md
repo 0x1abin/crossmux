@@ -19,6 +19,12 @@ What CrossMux adds on top of upstream:
 - **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
 - **Desktop / WebAssembly simulator** for developing and previewing the UI on the host.
 
+> **WeRead security notice:** WeRead uses an unofficial Web protocol that may
+> change without notice. Device builds encrypt traffic with wolfSSL but call
+> `setInsecure()`, so they do not verify the server CA or host identity and are
+> vulnerable to man-in-the-middle attacks. Use WeRead only on a trusted network.
+> The native simulator verifies certificates through libcurl's host trust store.
+
 ---
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)

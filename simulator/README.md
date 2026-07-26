@@ -86,9 +86,11 @@ The native simulator includes WeRead and requires OpenSSL Crypto:
 
 The host WiFi shim is always connected. Open **Apps → WeRead**, scan the QR code,
 then use the same SD root on later launches to test session and offline-book
-recovery. The simulator verifies TLS through libcurl's host trust store, passes
-all `Set-Cookie` response headers to the firmware, and spools response bodies
-to an anonymous host temporary file before the firmware consumes them in chunks.
+recovery. Requests follow `WeReadHttpClient → esp_http_client shim → libcurl`;
+this is separate from the public `HttpDownloader` used by other applications.
+The simulator verifies TLS through libcurl's host trust store, passes all
+`Set-Cookie` response headers to the firmware, and spools response bodies to an
+anonymous host temporary file before the firmware consumes them in chunks.
 
 `/private/tmp/crossmux-weread-sd/.crosspoint/weread/session.bin` contains
 the whitelisted session values in reversible host-only base64, not device-bound
@@ -199,8 +201,9 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
 - All on-disk caches (book.bin, sections/*.bin, css_rules.cache, progress.bin)
 - Multi-language UI via the `tr()` macro (generated I18nStrings)
 - 1-bpp framebuffer rendering and font system (text-only EPUBs)
-- **WeRead (微信读书): real HTTPS via libcurl.** Scan to sign in, sync the
-  account shelf, download books to SD, and open the generated EPUB in Reader.
+- **WeRead (微信读书): real HTTPS via its dedicated client and libcurl shim.**
+  Scan to sign in, sync the account shelf, download books to SD, and open the
+  generated EPUB in Reader.
 - **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
   by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
   runs the real `HttpDownloader` over libcurl, saving the latest image to
@@ -243,7 +246,8 @@ user navigates into them.
   or `<JPEGDEC.h>` exist so consumer `.cpp` files compile and link, but their
   methods return an error / empty value. The exception is `<esp_http_client.h>`
   (and its `<esp_crt_bundle.h>` companion), which is **libcurl-backed and does
-  real host network I/O** — that's what lets WeRead and the AirPage fetch work.
+  real host network I/O** — that's what lets WeRead's dedicated client and the
+  AirPage fetch work.
   Adding a real codec (libpng wrapper, etc.) would similarly light up the
   stubbed features.
 
