@@ -74,39 +74,6 @@ void CrossPointWebServerActivity::onEnter() {
   lastHandleClientTime = 0;
   requestUpdate();
 
-  if (purpose == WebServerEntryPurpose::WeReadKeySetup) {
-    // WeRead users only want STA on the saved network — AP/Calibre aren't
-    // useful for pasting a key. Skip NetworkModeSelectionActivity entirely.
-
-    // Opportunistic fast path: if STA already happens to be up (e.g. the user
-    // visited Shelf earlier in this session and we never tore the link down),
-    // jump straight to startWebServer and save them the WifiSelectionActivity
-    // round-trip.
-    if ((WiFi.getMode() & WIFI_MODE_STA) && WiFi.status() == WL_CONNECTED) {
-      LOG_DBG("WEBACT", "WeRead path: STA already connected, jumping to startWebServer");
-      isApMode = false;
-      const IPAddress ip = WiFi.localIP();
-      char ipStr[16];
-      snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-      connectedIP = ipStr;
-      const String ssid = WiFi.SSID();
-      connectedSSID = ssid.length() > 0 ? std::string(ssid.c_str()) : std::string("<unknown>");
-      networkMode = NetworkMode::JOIN_NETWORK;
-      restartMdns(AP_HOSTNAME, "WEBACT");
-      startWebServer();
-      return;
-    }
-
-    // Fall through to the standard JOIN_NETWORK flow (WiFi.mode(STA) +
-    // WifiSelectionActivity), reusing onNetworkModeSelected so the WeRead and
-    // file-transfer STA paths stay in lockstep. onWifiSelectionComplete(false)
-    // has its own WeRead branch that exits cleanly instead of bouncing back to
-    // NetworkModeSelectionActivity.
-    onNetworkModeSelected(NetworkMode::JOIN_NETWORK);
-    return;
-  }
-
-  // FileTransfer (default) — show the network mode chooser.
   LOG_DBG("WEBACT", "Launching NetworkModeSelectionActivity...");
   startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) {
@@ -206,10 +173,6 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
 
     // Start the web server
     startWebServer();
-  } else if (purpose == WebServerEntryPurpose::WeReadKeySetup) {
-    // WeRead path never showed NetworkModeSelectionActivity — going back to it
-    // would surface file-transfer chrome the user didn't ask for. Just exit.
-    onGoHome();
   } else {
     // User cancelled - go back to mode selection
     state = WebServerActivityState::MODE_SELECTION;
@@ -401,7 +364,6 @@ void CrossPointWebServerActivity::loop() {
 
 const char* CrossPointWebServerActivity::headerTitle() const {
   if (isApMode) return tr(STR_HOTSPOT_MODE);
-  if (purpose == WebServerEntryPurpose::WeReadKeySetup) return tr(STR_WEREAD_WEB_SERVER_TITLE);
   return tr(STR_FILE_TRANSFER);
 }
 
@@ -433,9 +395,7 @@ void CrossPointWebServerActivity::renderServerRunning() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
 
-  // URL suffix for the QR / displayed URL — WeRead mode lands users directly
-  // on the paste form; file-transfer keeps the existing root behavior.
-  const char* urlSuffix = purpose == WebServerEntryPurpose::WeReadKeySetup ? "/weread" : "/";
+  constexpr const char* urlSuffix = "/";
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle(), nullptr);
   GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
                     connectedSSID.c_str());

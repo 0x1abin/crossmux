@@ -19,16 +19,10 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
-#ifdef ENABLE_CHINESE_VERSION
-#include "activities/apps/weread/WeReadKeyStore.h"
-#endif
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
-#ifdef ENABLE_CHINESE_VERSION
-#include "html/WeReadKeyPageHtml.generated.h"
-#endif
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
@@ -188,13 +182,6 @@ void CrossPointWebServer::begin() {
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
   server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
-
-#ifdef ENABLE_CHINESE_VERSION
-  // WeRead API key endpoints — companion-app key bound via phone browser.
-  // Only registered in the Chinese release where the WeRead app is compiled in.
-  server->on("/weread", HTTP_GET, [this] { handleWeReadKeyPage(); });
-  server->on("/api/weread-key", HTTP_POST, [this] { handlePostWeReadKey(); });
-#endif
 
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
@@ -1985,49 +1972,3 @@ void CrossPointWebServer::handleFontDelete() {
     LOG_ERR("WEB", "Failed to delete font family: %s", familyName);
   }
 }
-
-#ifdef ENABLE_CHINESE_VERSION
-// ---- WeRead API key ----
-
-void CrossPointWebServer::handleWeReadKeyPage() const {
-  sendHtmlContent(server.get(), WeReadKeyPageHtml, sizeof(WeReadKeyPageHtml));
-  LOG_DBG("WEB", "Served WeRead key page");
-}
-
-void CrossPointWebServer::handlePostWeReadKey() {
-  // Endpoint is only served in the Chinese build (ENABLE_CHINESE_VERSION), so
-  // the user-visible error strings are intentionally Chinese to match the
-  // accompanying /weread page.
-  if (!server->hasArg("plain")) {
-    server->send(400, "application/json", "{\"ok\":false,\"error\":\"\\u8bf7\\u6c42\\u4e0d\\u542b JSON \\u4f53\"}");
-    return;
-  }
-
-  const String body = server->arg("plain");
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
-  if (err) {
-    server->send(400, "application/json",
-                 String("{\"ok\":false,\"error\":\"JSON \\u89e3\\u6790\\u5931\\u8d25: ") + err.c_str() + "\"}");
-    return;
-  }
-
-  const std::string key = doc["key"].as<std::string>();
-  if (!WeReadKeyStore::isWellFormed(key)) {
-    // "Key 必须以 wrk- 开头,长度 8-256"
-    server->send(400, "application/json",
-                 "{\"ok\":false,\"error\":\"Key \\u5fc5\\u987b\\u4ee5 wrk- \\u5f00\\u5934,\\u957f\\u5ea6 8-256\"}");
-    return;
-  }
-
-  if (!WeReadKeyStore::save(key)) {
-    // "保存失败"
-    server->send(500, "application/json", "{\"ok\":false,\"error\":\"\\u4fdd\\u5b58\\u5931\\u8d25\"}");
-    LOG_ERR("WEB", "WeReadKeyStore::save() failed");
-    return;
-  }
-
-  server->send(200, "application/json", "{\"ok\":true}");
-  LOG_DBG("WEB", "WeRead API key saved via web (len=%u)", static_cast<unsigned>(key.length()));
-}
-#endif  // ENABLE_CHINESE_VERSION

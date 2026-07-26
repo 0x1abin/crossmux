@@ -11,6 +11,10 @@
 #include <functional>
 #include <string>
 
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#include <cstring>
+#endif
+
 #if defined(FREEINK_NET_WOLFSSL)
 #include <SecureHttpClient.h>
 
@@ -25,10 +29,11 @@ namespace {
 constexpr int HTTP_RX_BUF = 2048;
 constexpr int HTTP_TX_BUF = 512;
 #endif
-// WeRead JSON POSTs keep the verified ESP certificate-bundle transport. These
-// buffers are scoped to that request and the response is streamed into ArduinoJson.
-constexpr int POST_HTTP_RX_BUF = 4096;
-constexpr int POST_HTTP_TX_BUF = 1024;
+// WeRead parses in 1 KB chunks. A larger RX buffer also makes
+// esp_http_client_fetch_headers() demand a larger contiguous block when the
+// first chunk of a response body arrives with the headers.
+constexpr int VERIFIED_HTTP_RX_BUF = 2048;
+constexpr int VERIFIED_HTTP_TX_BUF = 1024;
 // Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
 // (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
 // slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
@@ -44,6 +49,30 @@ struct Sink {
   size_t total = 0;
   size_t downloaded = 0;
 };
+
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+struct RequestEventContext {
+  const HttpDownloader::HeaderCallback* onHeader = nullptr;
+};
+
+void cleanupVerifiedClient(esp_http_client_handle_t& client) {
+  if (!client) return;
+  esp_http_client_set_user_data(client, nullptr);
+  esp_http_client_cleanup(client);
+  client = nullptr;
+  LOG_INF("WR", "TLS closed: free=%u largest=%u stack=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+}
+
+esp_err_t onRequestEvent(esp_http_client_event_t* event) {
+  auto* context = static_cast<RequestEventContext*>(event->user_data);
+  if (event->event_id == HTTP_EVENT_ON_HEADER && context && context->onHeader && *context->onHeader &&
+      event->header_key && event->header_value) {
+    (*context->onHeader)(event->header_key, event->header_value);
+  }
+  return ESP_OK;
+}
+#endif
 
 bool isRedirect(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
@@ -219,123 +248,113 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 }
 #endif  // !FREEINK_NET_WOLFSSL
 
-// Pull-style Stream wrapper around esp_http_client_read. Backed by a small
-// refill buffer so each read()/peek() byte does not cost a syscall.
-// esp_http_client_read already strips chunked transfer encoding, so the
-// wrapper has no framing logic — read()==0 is the only EOF signal we need.
-//
-// setTimeout(0) makes Stream::timedRead bail immediately on -1 (our
-// "no more data" code), so ArduinoJson stops as soon as it has parsed the
-// closing token rather than spending the default 1s waiting for more input.
-class EspHttpReadStream final : public Stream {
- public:
-  explicit EspHttpReadStream(esp_http_client_handle_t client) : client_(client) { setTimeout(0); }
-
-  int available() override { return static_cast<int>(len_ - pos_); }
-
-  int read() override {
-    if (pos_ >= len_ && !refill()) return -1;
-    return static_cast<unsigned char>(buf_[pos_++]);
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+HttpDownloader::DownloadError runVerifiedRequest(const char* url, const HttpDownloader::RequestOptions& options,
+                                                 const HttpDownloader::DataCallback& onData,
+                                                 const HttpDownloader::HeaderCallback& onHeader, int& status,
+                                                 esp_http_client_handle_t& client) {
+  status = -1;
+  if (!url || !options.method || (strcmp(options.method, "GET") != 0 && strcmp(options.method, "POST") != 0) ||
+      (options.bodySize > 0 && !options.body) || !options.readBuffer || options.readBufferSize == 0) {
+    return HttpDownloader::HTTP_ERROR;
   }
 
-  int peek() override {
-    if (pos_ >= len_ && !refill()) return -1;
-    return static_cast<unsigned char>(buf_[pos_]);
-  }
-
-  size_t write(uint8_t) override { return 0; }
-  void flush() override {}
-
- private:
-  static constexpr size_t kBufSize = 1024;
-
-  bool refill() {
-    const int n = esp_http_client_read(client_, buf_, static_cast<int>(kBufSize));
-    if (n < 0) {
-      LOG_ERR("HTTP", "read error mid-body");
-      return false;
+  const bool reused = client != nullptr;
+  LOG_INF("WR", "TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
+          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
+          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+  RequestEventContext eventContext{&onHeader};
+  const esp_http_client_method_t method = strcmp(options.method, "POST") == 0 ? HTTP_METHOD_POST : HTTP_METHOD_GET;
+  if (client) {
+    if (esp_http_client_set_url(client, url) != ESP_OK || esp_http_client_set_method(client, method) != ESP_OK ||
+        esp_http_client_set_timeout_ms(client, options.timeoutMs) != ESP_OK ||
+        esp_http_client_set_user_data(client, &eventContext) != ESP_OK) {
+      LOG_ERR("HTTP", "verified request reuse setup failed");
+      cleanupVerifiedClient(client);
+      return HttpDownloader::HTTP_ERROR;
     }
-    if (n == 0) return false;  // server-side EOF
-    pos_ = 0;
-    len_ = static_cast<size_t>(n);
-    return true;
+  } else {
+    esp_http_client_config_t config = {};
+    config.url = url;
+    config.buffer_size = VERIFIED_HTTP_RX_BUF;
+    config.buffer_size_tx = VERIFIED_HTTP_TX_BUF;
+    config.timeout_ms = options.timeoutMs;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.method = method;
+    config.keep_alive_enable = false;
+    config.event_handler = onRequestEvent;
+    config.user_data = &eventContext;
+
+    client = esp_http_client_init(&config);
+    if (!client) {
+      LOG_ERR("HTTP", "verified request init failed");
+      return HttpDownloader::HTTP_ERROR;
+    }
   }
 
-  esp_http_client_handle_t client_;
-  char buf_[kBufSize] = {};
-  size_t pos_ = 0;
-  size_t len_ = 0;
-};
-
-bool runPostJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
-                 const std::function<bool(Stream&)>& onResponse, int timeoutMs) {
-  esp_http_client_config_t config = {};
-  config.url = url.c_str();
-  config.buffer_size = POST_HTTP_RX_BUF;
-  config.buffer_size_tx = POST_HTTP_TX_BUF;
-  config.timeout_ms = timeoutMs;
-  // Verified HTTPS via the bundled CA roots — same trust posture as runGet.
-  config.crt_bundle_attach = esp_crt_bundle_attach;
-  config.method = HTTP_METHOD_POST;
-  config.keep_alive_enable = true;
-
-  esp_http_client_handle_t client = esp_http_client_init(&config);
-  if (!client) {
-    LOG_ERR("HTTP", "POST client init failed");
-    return false;
+  if (esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION) != ESP_OK) {
+    cleanupVerifiedClient(client);
+    return HttpDownloader::HTTP_ERROR;
+  }
+  for (size_t i = 0; i < options.headerCount; ++i) {
+    const auto& header = options.headers[i];
+    if (header.name && header.value && esp_http_client_set_header(client, header.name, header.value) != ESP_OK) {
+      cleanupVerifiedClient(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
   }
 
-  esp_http_client_set_header(client, "Content-Type", "application/json");
-  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (!bearerToken.empty()) {
-    const std::string authHeader = "Bearer " + bearerToken;
-    esp_http_client_set_header(client, "Authorization", authHeader.c_str());
-  }
-
-  // open(content_length) reserves the body length for the request line;
-  // write() then streams the payload. POST does not follow redirects here —
-  // a 30x on a JSON RPC endpoint is a server misconfiguration we want to
-  // surface, not silently re-POST against.
-  esp_err_t err = esp_http_client_open(client, static_cast<int>(payload.size()));
+  esp_err_t err = esp_http_client_open(client, static_cast<int>(options.bodySize));
   if (err != ESP_OK) {
-    LOG_ERR("HTTP", "POST open failed: %s", esp_err_to_name(err));
-    esp_http_client_cleanup(client);
-    return false;
+    LOG_ERR("HTTP", "verified request open failed: %s", esp_err_to_name(err));
+    cleanupVerifiedClient(client);
+    return HttpDownloader::HTTP_ERROR;
   }
 
-  if (!payload.empty()) {
-    const int written = esp_http_client_write(client, payload.data(), static_cast<int>(payload.size()));
-    if (written < 0 || static_cast<size_t>(written) != payload.size()) {
-      LOG_ERR("HTTP", "POST write short: %d of %u", written, static_cast<unsigned>(payload.size()));
-      esp_http_client_cleanup(client);
-      return false;
+  size_t sent = 0;
+  while (sent < options.bodySize) {
+    const int written = esp_http_client_write(client, reinterpret_cast<const char*>(options.body + sent),
+                                              static_cast<int>(options.bodySize - sent));
+    if (written <= 0) {
+      LOG_ERR("HTTP", "verified request body write failed after %u bytes", static_cast<unsigned>(sent));
+      cleanupVerifiedClient(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
+    sent += static_cast<size_t>(written);
+  }
+
+  if (esp_http_client_fetch_headers(client) < 0) {
+    LOG_ERR("HTTP", "verified request header read failed");
+    cleanupVerifiedClient(client);
+    return HttpDownloader::HTTP_ERROR;
+  }
+  status = esp_http_client_get_status_code(client);
+
+  while (true) {
+    const int got = esp_http_client_read(client, reinterpret_cast<char*>(options.readBuffer),
+                                         static_cast<int>(options.readBufferSize));
+    if (got < 0) {
+      LOG_ERR("HTTP", "verified request read failed");
+      cleanupVerifiedClient(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
+    if (got == 0) break;
+    if (onData && !onData(options.readBuffer, static_cast<size_t>(got))) {
+      cleanupVerifiedClient(client);
+      return HttpDownloader::ABORTED;
     }
   }
 
-  const int64_t contentLength = esp_http_client_fetch_headers(client);
-  (void)contentLength;  // body length is irrelevant when streaming
-  const int status = esp_http_client_get_status_code(client);
-  if (status != 200) {
-    LOG_ERR("HTTP", "POST unexpected status: %d", status);
-    esp_http_client_cleanup(client);
-    return false;
-  }
-
-  EspHttpReadStream bodyStream(client);
-  const bool consumerOk = onResponse(bodyStream);
-  esp_http_client_cleanup(client);
-  // A successful consumer (e.g., ArduinoJson hitting the closing `}`) is the
-  // ground truth for "body received". Don't require draining the stream — a
-  // valid JSON document parses without reading any trailing bytes the server
-  // might still send (whitespace, server-side keepalive padding). The device
-  // GET path checks is_complete_data_received because it counts bytes against
-  // Content-Length; here the parser is the framing.
-  if (!consumerOk) {
-    LOG_ERR("HTTP", "POST consumer reported failure");
-    return false;
-  }
-  return true;
+  const bool complete = esp_http_client_is_complete_data_received(client);
+  const bool persistent = complete && esp_http_client_is_persistent_connection(client);
+  esp_http_client_set_user_data(client, nullptr);
+  if (!persistent) cleanupVerifiedClient(client);
+  LOG_INF("WR", "TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
+          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
+          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+  return complete ? HttpDownloader::OK : HttpDownloader::HTTP_ERROR;
 }
+#endif
 
 // All HTTP(S) fetches go through wolfSSL when it is the active TLS stack: it
 // speaks TLS 1.3 and reads large bodies from servers where the esp_http_client/
@@ -379,11 +398,25 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   return runGetSecure(url, username, password, sink) == OK;
 }
 
-bool HttpDownloader::postJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
-                              const std::function<bool(Stream&)>& onResponse, int timeoutMs) {
-  LOG_DBG("HTTP", "POST: %s (body=%u bytes)", url.c_str(), static_cast<unsigned>(payload.size()));
-  return runPostJson(url, payload, bearerToken, onResponse, timeoutMs);
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+HttpDownloader::VerifiedSession::~VerifiedSession() { reset(); }
+
+void HttpDownloader::VerifiedSession::reset() { cleanupVerifiedClient(client_); }
+
+HttpDownloader::DownloadError HttpDownloader::requestVerified(const char* url, const RequestOptions& options,
+                                                              const DataCallback& onData,
+                                                              const HeaderCallback& onHeader, int& status) {
+  VerifiedSession session;
+  return requestVerified(session, url, options, onData, onHeader, status);
 }
+
+HttpDownloader::DownloadError HttpDownloader::requestVerified(VerifiedSession& session, const char* url,
+                                                              const RequestOptions& options, const DataCallback& onData,
+                                                              const HeaderCallback& onHeader, int& status) {
+  LOG_DBG("HTTP", "%s %s", options.method ? options.method : "?", url ? url : "?");
+  return runVerifiedRequest(url, options, onData, onHeader, status, session.client_);
+}
+#endif
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,

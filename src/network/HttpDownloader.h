@@ -4,6 +4,10 @@
 #include <functional>
 #include <string>
 
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#include <esp_http_client.h>
+#endif
+
 // Forward-declared: fetchUrl() takes a Stream& by reference. On-device this name
 // arrives transitively via the SdFat/Arduino chain in <HalStorage.h>; declaring
 // it here keeps the header self-sufficient (the host build's SdFat shim doesn't
@@ -21,6 +25,40 @@ class HttpDownloader {
   // Called with each body chunk as it arrives; return false to abort. Lets a
   // streaming parser consume the response without buffering the whole body.
   using DataCallback = std::function<bool(const uint8_t* data, size_t len)>;
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+  using HeaderCallback = std::function<void(const char* name, const char* value)>;
+
+  class VerifiedSession {
+   public:
+    VerifiedSession() = default;
+    ~VerifiedSession();
+    VerifiedSession(const VerifiedSession&) = delete;
+    VerifiedSession& operator=(const VerifiedSession&) = delete;
+
+    bool reusable() const { return client_ != nullptr; }
+    void reset();
+
+   private:
+    friend class HttpDownloader;
+    esp_http_client_handle_t client_ = nullptr;
+  };
+
+  struct Header {
+    const char* name;
+    const char* value;
+  };
+
+  struct RequestOptions {
+    const char* method = "GET";
+    const uint8_t* body = nullptr;
+    size_t bodySize = 0;
+    const Header* headers = nullptr;
+    size_t headerCount = 0;
+    int timeoutMs = 60000;
+    uint8_t* readBuffer = nullptr;
+    size_t readBufferSize = 0;
+  };
+#endif
 
   enum DownloadError {
     OK = 0,
@@ -51,11 +89,13 @@ class HttpDownloader {
                                       ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "");
 
-  // application/json POST with Bearer auth. Response body is exposed to
-  // onResponse as a pull-style Stream so the caller (e.g. ArduinoJson) can
-  // deserialize it without buffering. HTTPS is verified via the ESP CA bundle;
-  // plain HTTP remains available for local servers. Returns false on
-  // any transport / status failure, or if onResponse returns false.
-  static bool postJson(const std::string& url, const std::string& payload, const std::string& bearerToken,
-                       const std::function<bool(Stream&)>& onResponse, int timeoutMs = 60000);
+#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+  // Verified esp_http_client request with caller-supplied headers and streaming
+  // response callbacks. Unlike fetchUrl(), non-2xx status codes are returned to
+  // the caller through `status` after their body has been streamed.
+  static DownloadError requestVerified(const char* url, const RequestOptions& options, const DataCallback& onData,
+                                       const HeaderCallback& onHeader, int& status);
+  static DownloadError requestVerified(VerifiedSession& session, const char* url, const RequestOptions& options,
+                                       const DataCallback& onData, const HeaderCallback& onHeader, int& status);
+#endif
 };
