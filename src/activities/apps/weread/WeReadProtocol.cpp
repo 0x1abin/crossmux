@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 namespace WeReadProtocol {
 namespace {
@@ -184,10 +185,8 @@ bool isAllowedXhtmlTag(const char* name) {
   static constexpr const char* kAllowed[] = {"p",      "div", "section", "article",    "h1", "h2", "h3",
                                              "h4",     "h5",  "h6",      "blockquote", "ul", "ol", "li",
                                              "strong", "b",   "em",      "i",          "br", "hr", "span"};
-  for (const char* allowed : kAllowed) {
-    if (strcmp(name, allowed) == 0) return true;
-  }
-  return false;
+  return std::any_of(std::begin(kAllowed), std::end(kAllowed),
+                     [name](const char* allowed) { return strcmp(name, allowed) == 0; });
 }
 
 bool PsvtsExtractor::reset() {
