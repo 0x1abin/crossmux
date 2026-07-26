@@ -8,9 +8,48 @@ namespace WeReadProtocol {
 using Md5Function = bool (*)(const uint8_t* data, size_t len, char out[33]);
 using ByteSink = bool (*)(void* ctx, const uint8_t* data, size_t len);
 
-enum class ChapterResponse : uint8_t { Content, Unavailable, Error };
+enum class ChapterResponse : uint8_t { Content, AuthenticationRequired, Retryable, Error };
 
 ChapterResponse classifyChapterResponse(int status, bool emptyObject);
+bool isEmptyJsonObject(const uint8_t* data, size_t len);
+bool mergeRuntimeCookie(char* header, size_t headerSize, const char* name, size_t nameLen, const char* value,
+                        size_t valueLen);
+bool isAllowedXhtmlTag(const char* name);
+
+class PsvtsExtractor {
+ public:
+  PsvtsExtractor(char* out, size_t outSize) : out_(out), outSize_(outSize) {}
+
+  bool reset();
+  bool feed(const uint8_t* data, size_t len);
+  bool complete() const { return state_ == State::Complete; }
+
+ private:
+  enum class State : uint8_t { SearchKey, ExpectColon, ExpectQuote, ReadValue, Complete, Invalid };
+
+  void resumeSearch(uint8_t value);
+
+  char* out_;
+  size_t outSize_;
+  size_t keyOffset_ = 0;
+  size_t valueLength_ = 0;
+  State state_ = State::SearchKey;
+};
+
+class XhtmlTagProbe {
+ public:
+  bool reset();
+  bool feed(const uint8_t* data, size_t len);
+  bool complete() const { return state_ == State::Complete; }
+
+ private:
+  enum class State : uint8_t { SearchOpen, ReadName, SkipTag, Complete };
+
+  char name_[16] = {};
+  size_t nameLength_ = 0;
+  State state_ = State::SearchOpen;
+};
+
 bool encodeId(const char* value, Md5Function md5, char* out, size_t outSize);
 bool matchesMd5(const char* expected, size_t expectedLen, const char* actual, size_t actualLen);
 bool signQuery(const char* query, char* out, size_t outSize);

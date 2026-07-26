@@ -9,6 +9,8 @@
 
 namespace WeReadClient {
 
+struct OperationTestPeer;
+
 enum class Error {
   Ok,
   Cancelled,
@@ -41,6 +43,8 @@ class Operation {
   bool active() const;
 
  private:
+  friend struct OperationTestPeer;
+
   enum class Phase : uint8_t {
     Idle,
     LoginUid,
@@ -53,6 +57,7 @@ class Operation {
     OpenToc,
     LoadChapter,
     SyncClock,
+    FetchReader,
     FetchPrimary,
     FetchText0,
     FetchText1,
@@ -60,7 +65,6 @@ class Operation {
     FetchEpub3,
     DecodeText,
     DecodeEpub,
-    WriteUnavailable,
     AdvanceChapter,
     PackageBook,
     Complete,
@@ -69,13 +73,24 @@ class Operation {
   };
 
   static constexpr size_t kCookieSize = 896;
-  static constexpr size_t kIoBufferSize = 1024;
+  // Reader pages currently include response headers larger than 2 KB.
+  static constexpr size_t kIoBufferSize = 4096;
   static constexpr size_t kUrlSize = 512;
+  static constexpr uint8_t kMaxRequestAttempts = 3;
+  static constexpr Event chapterResponseRetryEvent(const uint8_t attempts) {
+    return attempts >= kMaxRequestAttempts ? Event::Failed : Event::None;
+  }
+  static constexpr Phase chapterResponseRetryPhase() { return Phase::FetchReader; }
+  static constexpr bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
+    return paid && !plainText && !hasXhtmlTag;
+  }
 
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
   Event fail(Error error);
   Event handleRequestError(Error error, Phase retryPhase);
+  Event retryChapterResponse();
+  Event reauthenticateChapter();
   void requestSucceeded();
   void guardBookSession(const char* phase);
   bool preparePaths();
@@ -85,6 +100,7 @@ class Operation {
   Error renewSession();
   Error syncShelfOnce();
   Error fetchTocOnce();
+  Error fetchReaderOnce();
   Error fetchShardOnce(const char* endpoint, const std::string& destination);
   Event inspectPrimary();
   Event decodeChapter(bool plainText);
@@ -102,11 +118,11 @@ class Operation {
   uint32_t chapterCount_ = 0;
   uint32_t chapterIndex_ = 0;
   uint8_t requestAttempt_ = 0;
+  uint8_t chapterResponseAttempts_ = 0;
   bool cancelRequested_ = false;
   bool renewalAttempted_ = false;
   bool loginRecoveryAttempted_ = false;
   bool loginConfirmed_ = false;
-  bool primaryPsvtsRefreshed_ = false;
   unsigned long loginStartedAt_ = 0;
   unsigned long nextActionAt_ = 0;
   unsigned long lastShardRequestAt_ = 0;

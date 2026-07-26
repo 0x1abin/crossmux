@@ -24,7 +24,7 @@
 
 namespace {
 
-static_assert(sizeof(WeReadClient::Operation) <= 6 * 1024, "WeRead workspace exceeds its fixed heap budget");
+static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead workspace exceeds its fixed heap budget");
 
 enum class MenuAction : uint8_t { Shelf, Refresh, Logout };
 
@@ -41,8 +41,8 @@ constexpr MenuEntry kMenuEntries[] = {
 
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
 
-void logHeap(const char* phase) {
-  LOG_INF("WR", "%s: free=%u largest=%u stack=%u", phase, static_cast<unsigned>(ESP.getFreeHeap()),
+void logHeap([[maybe_unused]] const char* phase) {
+  LOG_DBG("WR", "%s: free=%u largest=%u stack=%u", phase, static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
 

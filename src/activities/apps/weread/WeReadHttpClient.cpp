@@ -37,7 +37,7 @@ void cleanupClient(freeink::SecureClient& client) {
   const bool hadConnection = client.connected();
   client.stop();
   if (!hadConnection) return;
-  LOG_INF("WR", "wolfSSL TLS closed: free=%u largest=%u stack=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+  LOG_DBG("WR", "wolfSSL TLS closed: free=%u largest=%u stack=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
 
@@ -120,7 +120,10 @@ bool readLine(freeink::SecureClient& client, uint8_t* buffer, const size_t capac
         buffer[length] = '\0';
         return true;
       }
-      if (length + 1 >= capacity) return false;
+      if (length + 1 >= capacity) {
+        LOG_ERR("HTTP", "wolfSSL line too long: capacity=%u", static_cast<unsigned>(capacity));
+        return false;
+      }
       buffer[length++] = static_cast<uint8_t>(value);
       continue;
     }
@@ -222,7 +225,7 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   }
 
   const bool reused = client.connected();
-  LOG_INF("WR", "wolfSSL TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
+  LOG_DBG("WR", "wolfSSL TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
@@ -372,7 +375,7 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
 
   const bool persistent = keepAlive && client.connected();
   if (!persistent) cleanupClient(client);
-  LOG_INF("WR", "wolfSSL TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
+  LOG_DBG("WR", "wolfSSL TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   return WeReadHttpClient::Result::Ok;
@@ -390,7 +393,7 @@ void cleanupClient(esp_http_client_handle_t& client) {
   esp_http_client_set_user_data(client, nullptr);
   esp_http_client_cleanup(client);
   client = nullptr;
-  LOG_INF("WR", "TLS closed: free=%u largest=%u stack=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+  LOG_DBG("WR", "TLS closed: free=%u largest=%u stack=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
 
@@ -414,7 +417,7 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   }
 
   const bool reused = client != nullptr;
-  LOG_INF("WR", "TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
+  LOG_DBG("WR", "TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   RequestEventContext eventContext{&onHeader};
@@ -503,7 +506,7 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   const bool persistent = complete && esp_http_client_is_persistent_connection(client);
   esp_http_client_set_user_data(client, nullptr);
   if (!persistent) cleanupClient(client);
-  LOG_INF("WR", "TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
+  LOG_DBG("WR", "TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   return complete ? WeReadHttpClient::Result::Ok : WeReadHttpClient::Result::NetworkError;

@@ -3,7 +3,6 @@
 #if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
 
 #include <Arduino.h>
-#include <I18n.h>
 #include <Logging.h>
 #include <MD5Builder.h>
 #include <Memory.h>
@@ -35,16 +34,20 @@ constexpr unsigned long kLoginPollMs = 2000;
 constexpr unsigned long kShardPaceMs = 400;
 constexpr unsigned long kClockSyncTimeoutMs = 12000;
 constexpr unsigned long kNetworkRetryBaseMs = 1000;
-constexpr uint8_t kMaxRequestAttempts = 3;
 constexpr size_t kTransferBufferSize = 1024;
 // Local decode/package work uses at most one 1 KB transfer buffer at a time.
 // Keep wider headroom for SD internals and the event-driven progress render.
 constexpr size_t kBookSessionMinFreeHeap = 20 * 1024;
 constexpr size_t kBookSessionMinLargestBlock = 8 * 1024;
 
-void logMemory(const char* phase) {
-  LOG_INF("WR", "%s: free=%u largest=%u stack=%u", phase, static_cast<unsigned>(ESP.getFreeHeap()),
+void logMemory([[maybe_unused]] const char* phase) {
+  LOG_DBG("WR", "%s: free=%u largest=%u stack=%u", phase, static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+}
+
+void logJobComplete() {
+  LOG_INF("WR", "job complete");
+  logMemory("job complete");
 }
 
 void startClockSync() {
@@ -100,18 +103,56 @@ bool md5Hex(const uint8_t* data, const size_t len, char out[33]) {
   return true;
 }
 
-void absorbSetCookie(WeReadStore::Session* session, const char* headerName, const char* headerValue) {
-  if (!session || !equalsIgnoreCase(headerName, "set-cookie") || !headerValue) return;
+bool mergeSessionCookies(const WeReadStore::Session* session, char* cookie, const size_t cookieSize) {
+  if (!session) return true;
+  if (session->vid[0] &&
+      !WeReadProtocol::mergeRuntimeCookie(cookie, cookieSize, "wr_vid", 6, session->vid, strlen(session->vid))) {
+    return false;
+  }
+  if (session->skey[0] &&
+      !WeReadProtocol::mergeRuntimeCookie(cookie, cookieSize, "wr_skey", 7, session->skey, strlen(session->skey))) {
+    return false;
+  }
+  return !session->rt[0] ||
+         WeReadProtocol::mergeRuntimeCookie(cookie, cookieSize, "wr_rt", 5, session->rt, strlen(session->rt));
+}
+
+bool absorbSetCookie(WeReadStore::Session* session, const char* headerName, const char* headerValue, char* cookie,
+                     const size_t cookieSize) {
+  if (!equalsIgnoreCase(headerName, "set-cookie") || !headerValue) return true;
+  while (std::isspace(static_cast<unsigned char>(*headerValue))) ++headerValue;
   const char* equals = strchr(headerValue, '=');
-  if (!equals) return;
+  if (!equals) return true;
+  const char* nameEnd = equals;
+  while (nameEnd > headerValue && std::isspace(static_cast<unsigned char>(nameEnd[-1]))) --nameEnd;
+  const size_t nameLen = static_cast<size_t>(nameEnd - headerValue);
+  if (nameLen < 3 || memcmp(headerValue, "wr_", 3) != 0) return true;
+
+  const char* value = equals + 1;
+  while (std::isspace(static_cast<unsigned char>(*value))) ++value;
   const char* end = strchr(equals + 1, ';');
   if (!end) end = headerValue + strlen(headerValue);
-  const size_t nameLen = static_cast<size_t>(equals - headerValue);
-  if (nameLen == 0 || nameLen >= 16) return;
-  char name[16];
-  memcpy(name, headerValue, nameLen);
-  name[nameLen] = '\0';
-  session->setCookie(name, equals + 1, static_cast<size_t>(end - equals - 1));
+  while (end > value && std::isspace(static_cast<unsigned char>(end[-1]))) --end;
+  const size_t valueLen = static_cast<size_t>(end - value);
+  if (!WeReadProtocol::mergeRuntimeCookie(cookie, cookieSize, headerValue, nameLen, value, valueLen)) {
+    LOG_ERR("WR", "runtime cookie rejected");
+    return false;
+  }
+
+  bool persistent = true;
+  if (session && nameLen == 6 && memcmp(headerValue, "wr_vid", 6) == 0) {
+    persistent = session->setCookie("wr_vid", value, valueLen);
+  } else if (session && nameLen == 7 && memcmp(headerValue, "wr_skey", 7) == 0) {
+    persistent = session->setCookie("wr_skey", value, valueLen);
+  } else if (session && nameLen == 5 && memcmp(headerValue, "wr_rt", 5) == 0) {
+    persistent = session->setCookie("wr_rt", value, valueLen);
+  }
+  if (!persistent) {
+    LOG_ERR("WR", "runtime cookie rejected: name=%.*s", static_cast<int>(nameLen), headerValue);
+    return false;
+  }
+  LOG_DBG("WR", "runtime cookie accepted: name=%.*s", static_cast<int>(nameLen), headerValue);
+  return true;
 }
 
 Error requestOnce(const char* method, const char* path, const uint8_t* body, const size_t bodySize,
@@ -128,11 +169,8 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
   headers[headerCount++] = {"Origin", kOrigin};
   headers[headerCount++] = {"Referer", referer ? referer : kDefaultReferer};
   if (bodySize > 0) headers[headerCount++] = {"Content-Type", "application/json;charset=UTF-8"};
-  cookie[0] = '\0';
-  if (session && session->valid()) {
-    if (!session->cookieHeader(cookie, cookieSize)) return Error::Protocol;
-    headers[headerCount++] = {"Cookie", cookie};
-  }
+  if (!mergeSessionCookies(session, cookie, cookieSize)) return Error::Protocol;
+  if (cookie[0]) headers[headerCount++] = {"Cookie", cookie};
 
   WeReadHttpClient::RequestOptions options;
   options.method = method;
@@ -148,11 +186,17 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
   const int urlLength = snprintf(url, urlSize, "%s%s", kHost, path);
   if (urlLength <= 0 || static_cast<size_t>(urlLength) >= urlSize) return Error::Protocol;
   const auto onData = [&sink](const uint8_t* data, const size_t len) { return sink.write(sink.ctx, data, len); };
-  const auto onHeader = [session](const char* name, const char* value) { absorbSetCookie(session, name, value); };
+  bool cookiesOk = true;
+  const auto onHeader = [session, cookie, cookieSize, &cookiesOk](const char* name, const char* value) {
+    cookiesOk = absorbSetCookie(session, name, value, cookie, cookieSize) && cookiesOk;
+  };
   const auto result = reusableSession
                           ? WeReadHttpClient::request(*reusableSession, url, options, onData, onHeader, status)
                           : WeReadHttpClient::request(url, options, onData, onHeader, status);
-  if (result == WeReadHttpClient::Result::Ok) return sink.finish(sink.ctx) ? Error::Ok : Error::SdCard;
+  if (result == WeReadHttpClient::Result::Ok) {
+    if (!sink.finish(sink.ctx)) return Error::SdCard;
+    return cookiesOk ? Error::Ok : Error::Protocol;
+  }
   if (result == WeReadHttpClient::Result::Aborted) return sink.writeError;
   return Error::Network;
 }
@@ -606,6 +650,12 @@ bool finishFile(void* raw) {
   return true;
 }
 
+bool resetPsvts(void* raw) { return static_cast<WeReadProtocol::PsvtsExtractor*>(raw)->reset(); }
+
+bool extractPsvts(void* raw, const uint8_t* data, const size_t len) {
+  return static_cast<WeReadProtocol::PsvtsExtractor*>(raw)->feed(data, len);
+}
+
 bool isSafeProtocolToken(const char* value) {
   if (!value || !value[0]) return false;
   for (const auto* p = reinterpret_cast<const uint8_t*>(value); *p; ++p) {
@@ -622,25 +672,6 @@ bool makeReaderReferer(const char* bookId, const char* chapterUid, std::string& 
     return false;
   }
   referer = std::string(kHost) + "/web/reader/" + encodedBook + "k" + encodedChapter;
-  return true;
-}
-
-bool refreshPsvts(char* out, const size_t outSize) {
-  // The web reader initializes psvts as e(current Unix second); content requests
-  // use the same value and move ct forward when both timestamps collide.
-  uint32_t timestamp = TimeUtils::getCurrentValidTimestamp();
-  if (!out || outSize == 0 || timestamp == 0) return false;
-  char timestampText[16];
-  char encoded[128];
-  snprintf(timestampText, sizeof(timestampText), "%u", static_cast<unsigned>(timestamp));
-  if (!WeReadProtocol::encodeId(timestampText, md5Hex, encoded, sizeof(encoded))) return false;
-  if (out[0] && strcmp(out, encoded) == 0) {
-    snprintf(timestampText, sizeof(timestampText), "%u", static_cast<unsigned>(timestamp + 1));
-    if (!WeReadProtocol::encodeId(timestampText, md5Hex, encoded, sizeof(encoded))) return false;
-  }
-  const size_t len = strlen(encoded);
-  if (len >= outSize) return false;
-  memcpy(out, encoded, len + 1);
   return true;
 }
 
@@ -694,6 +725,21 @@ bool readPrefix(const std::string& path, uint8_t* out, const size_t len) {
   return Storage.openFileForRead("WR", path, file) && file.read(out, len) == static_cast<int>(len);
 }
 
+bool containsAllowedXhtmlTag(const std::string& path, uint8_t* buffer, const size_t bufferSize, bool& contains) {
+  contains = false;
+  if (!buffer || bufferSize == 0) return false;
+  HalFile file;
+  if (!Storage.openFileForRead("WR", path, file)) return false;
+  WeReadProtocol::XhtmlTagProbe probe;
+  probe.reset();
+  while (file.available() && !probe.complete()) {
+    const int got = file.read(buffer, bufferSize);
+    if (got <= 0 || !probe.feed(buffer, static_cast<size_t>(got))) return false;
+  }
+  contains = probe.complete();
+  return true;
+}
+
 bool smallFileContains(const std::string& path, const char* needle) {
   HalFile file;
   if (!needle || !needle[0] || !Storage.openFileForRead("WR", path, file) || file.fileSize() > 2048) return false;
@@ -709,6 +755,14 @@ bool smallFileContains(const std::string& path, const char* needle) {
     carry = keep;
   }
   return false;
+}
+
+bool smallFileIsEmptyObject(const std::string& path) {
+  HalFile file;
+  if (!Storage.openFileForRead("WR", path, file) || file.fileSize64() > 16) return false;
+  const size_t size = file.fileSize();
+  uint8_t body[16];
+  return file.read(body, size) == static_cast<int>(size) && WeReadProtocol::isEmptyJsonObject(body, size);
 }
 
 bool validateShard(const std::string& path) {
@@ -860,14 +914,6 @@ bool writeLiteral(HalFile& output, const char* text) {
   return output.write(reinterpret_cast<const uint8_t*>(text), strlen(text)) == strlen(text);
 }
 
-bool allowedTag(const char* name) {
-  static constexpr const char* kAllowed[] = {"p",      "div", "section", "article",    "h1", "h2", "h3",
-                                             "h4",     "h5",  "h6",      "blockquote", "ul", "ol", "li",
-                                             "strong", "b",   "em",      "i",          "br", "hr", "span"};
-  return std::any_of(std::begin(kAllowed), std::end(kAllowed),
-                     [name](const char* allowed) { return strcmp(name, allowed) == 0; });
-}
-
 struct XhtmlSanitizer {
   HalFile* output = nullptr;
   bool plainText = false;
@@ -983,7 +1029,7 @@ bool processTag(XhtmlSanitizer& sanitizer) {
     return true;
   }
   if (sanitizer.skip || sanitizer.skipHead || strcmp(name, "html") == 0 || strcmp(name, "body") == 0 ||
-      !allowedTag(name)) {
+      !WeReadProtocol::isAllowedXhtmlTag(name)) {
     return true;
   }
   if (!writeLiteral(*sanitizer.output, "<")) return false;
@@ -1046,21 +1092,6 @@ bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath
   output.flush();
   output.close();
   return WeReadStore::atomicReplace(partPath, outputPath);
-}
-
-bool writePlaceholder(const std::string& path, const char* title) {
-  const std::string part = path + ".part";
-  if (Storage.exists(part.c_str())) Storage.remove(part.c_str());
-  HalFile file;
-  if (!Storage.openFileForWrite("WR", part, file)) return false;
-  const bool ok = writeLiteral(file,
-                               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                               "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>") &&
-                  writeXmlText(file, title) && writeLiteral(file, "</title></head><body><p>") &&
-                  writeXmlText(file, tr(STR_WEREAD_CACHE_NOT_AVAILABLE)) && writeLiteral(file, "</p></body></html>");
-  file.flush();
-  file.close();
-  return ok && WeReadStore::atomicReplace(part, path);
 }
 
 bool writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
@@ -1201,6 +1232,7 @@ bool Operation::active() const {
     case Phase::OpenToc:
     case Phase::LoadChapter:
     case Phase::SyncClock:
+    case Phase::FetchReader:
     case Phase::FetchPrimary:
     case Phase::FetchText0:
     case Phase::FetchText1:
@@ -1208,7 +1240,6 @@ bool Operation::active() const {
     case Phase::FetchEpub3:
     case Phase::DecodeText:
     case Phase::DecodeEpub:
-    case Phase::WriteUnavailable:
     case Phase::AdvanceChapter:
     case Phase::PackageBook:
       return true;
@@ -1231,11 +1262,11 @@ void Operation::reset() {
   chapterCount_ = 0;
   chapterIndex_ = 0;
   requestAttempt_ = 0;
+  chapterResponseAttempts_ = 0;
   cancelRequested_ = false;
   renewalAttempted_ = false;
   loginRecoveryAttempted_ = false;
   loginConfirmed_ = false;
-  primaryPsvtsRefreshed_ = false;
   loginStartedAt_ = 0;
   nextActionAt_ = 0;
   lastShardRequestAt_ = 0;
@@ -1243,7 +1274,8 @@ void Operation::reset() {
   previousVid_[0] = '\0';
   loginUid_[0] = '\0';
   psvts_[0] = '\0';
-  cookie_[0] = '\0';
+  // Shelf sync and download are separate jobs on the same account.
+  // startLogin() clears runtime cookies before an account can change.
   url_[0] = '\0';
   referer_.clear();
   bookDir_.clear();
@@ -1283,6 +1315,7 @@ void Operation::startLogin(const Phase resume) {
   previousVid_[sizeof(previousVid_) - 1] = '\0';
   session_.clear();
   loginUid_[0] = '\0';
+  cookie_[0] = '\0';
   url_[0] = '\0';
   loginConfirmed_ = false;
   loginStartedAt_ = millis();
@@ -1341,6 +1374,25 @@ Operation::Event Operation::handleRequestError(const Error error, const Phase re
   return fail(error);
 }
 
+Operation::Event Operation::retryChapterResponse() {
+  const Event event = chapterResponseRetryEvent(++chapterResponseAttempts_);
+  if (event == Event::Failed) return fail(Error::Unavailable);
+  psvts_[0] = '\0';
+  requestAttempt_ = 0;
+  nextActionAt_ = millis() + kNetworkRetryBaseMs * chapterResponseAttempts_;
+  phase_ = chapterResponseRetryPhase();
+  LOG_INF("WR", "chapter response retry: retry=%u/%u delay=%u", static_cast<unsigned>(chapterResponseAttempts_),
+          static_cast<unsigned>(kMaxRequestAttempts - 1),
+          static_cast<unsigned>(kNetworkRetryBaseMs * chapterResponseAttempts_));
+  return event;
+}
+
+Operation::Event Operation::reauthenticateChapter() {
+  psvts_[0] = '\0';
+  requestAuthentication(Phase::LoadChapter);
+  return phase_ == Phase::Failed ? fail(error_) : Event::None;
+}
+
 void Operation::requestSucceeded() {
   requestAttempt_ = 0;
   nextActionAt_ = 0;
@@ -1352,7 +1404,7 @@ void Operation::guardBookSession(const char* phase) {
   if (!bookSession_.reusable()) return;
   const size_t freeHeap = ESP.getFreeHeap();
   const size_t largestBlock = ESP.getMaxAllocHeap();
-  LOG_INF("WR", "book TLS guard: phase=%s free=%u largest=%u stack=%u", phase ? phase : "?",
+  LOG_DBG("WR", "book TLS guard: phase=%s free=%u largest=%u stack=%u", phase ? phase : "?",
           static_cast<unsigned>(freeHeap), static_cast<unsigned>(largestBlock),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   if (freeHeap >= kBookSessionMinFreeHeap && largestBlock >= kBookSessionMinLargestBlock) return;
@@ -1495,6 +1547,21 @@ Error Operation::fetchTocOnce() {
   return context.writer.finish() ? Error::Ok : Error::SdCard;
 }
 
+Error Operation::fetchReaderOnce() {
+  const size_t hostLength = strlen(kHost);
+  if (referer_.compare(0, hostLength, kHost) != 0) return Error::Protocol;
+  WeReadProtocol::PsvtsExtractor context(psvts_, sizeof(psvts_));
+  ResponseSink sink{&context, resetPsvts, extractPsvts, noOpFinish, Error::Protocol};
+  const Error error =
+      requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink, responseStatus_,
+                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  if (error != Error::Ok) return error;
+  if (responseStatus_ == 401) return Error::SessionExpired;
+  if (responseStatus_ == 403 || (responseStatus_ == 200 && !context.complete())) return Error::Unavailable;
+  if (responseStatus_ != 200 || !isSafeProtocolToken(psvts_)) return Error::Protocol;
+  return Error::Ok;
+}
+
 Error Operation::fetchShardOnce(const char* endpoint, const std::string& destination) {
   size_t bodySize = 0;
   if (!makeContentBody(book_.bookId, chapter_.chapterUid, psvts_, reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_),
@@ -1520,28 +1587,20 @@ Operation::Event Operation::finishWholeBook(const std::string& source) {
   if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);
   if (tocFile_.isOpen()) tocFile_.close();
   phase_ = Phase::Complete;
-  logMemory("job complete");
+  logJobComplete();
   return Event::Complete;
 }
 
 Operation::Event Operation::inspectPrimary() {
   const std::string raw0 = bookDir_ + "/shard0.part";
-  if (smallFileContains(raw0, "-2012")) {
-    requestAuthentication(Phase::FetchPrimary);
-    return phase_ == Phase::Failed ? fail(error_) : Event::None;
-  }
-  if ((responseStatus_ != 200 || smallFileContains(raw0, "{}")) && !primaryPsvtsRefreshed_) {
-    if (!refreshPsvts(psvts_, sizeof(psvts_))) return fail(Error::Clock);
-    primaryPsvtsRefreshed_ = true;
-    phase_ = Phase::FetchPrimary;
-    return Event::None;
-  }
-  switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileContains(raw0, "{}"))) {
+  if (smallFileContains(raw0, "-2012")) return reauthenticateChapter();
+  switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileIsEmptyObject(raw0))) {
     case WeReadProtocol::ChapterResponse::Content:
       break;
-    case WeReadProtocol::ChapterResponse::Unavailable:
-      phase_ = Phase::WriteUnavailable;
-      return Event::None;
+    case WeReadProtocol::ChapterResponse::AuthenticationRequired:
+      return reauthenticateChapter();
+    case WeReadProtocol::ChapterResponse::Retryable:
+      return retryChapterResponse();
     case WeReadProtocol::ChapterResponse::Error:
       return fail(Error::Protocol);
   }
@@ -1567,6 +1626,12 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
   std::string decoded;
   const size_t count = plainText ? 2 : 3;
   if (!combineAndDecode(shards, count, bookDir_, decoded)) return fail(Error::Integrity);
+  const auto cleanup = [&]() {
+    Storage.remove(decoded.c_str());
+    Storage.remove(raw0.c_str());
+    Storage.remove(raw1.c_str());
+    if (!plainText) Storage.remove(raw3.c_str());
+  };
   if (!plainText) {
     uint8_t prefix[4] = {};
     if (readPrefix(decoded, prefix, sizeof(prefix)) && prefix[0] == 'P' && prefix[1] == 'K' && prefix[2] == 3 &&
@@ -1574,12 +1639,29 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
       return finishWholeBook(decoded);
     }
   }
+  uint64_t decodedBytes = 0;
+  {
+    HalFile decodedFile;
+    if (Storage.openFileForRead("WR", decoded, decodedFile)) decodedBytes = decodedFile.fileSize64();
+  }
+  LOG_DBG("WR", "chapter decoded: index=%u paid=%u bytes=%llu", static_cast<unsigned>(chapterIndex_),
+          static_cast<unsigned>(chapter_.paid), static_cast<unsigned long long>(decodedBytes));
+  bool hasXhtmlTag = true;
+  if (chapter_.paid && !plainText) {
+    if (!containsAllowedXhtmlTag(decoded, ioBuffer_, sizeof(ioBuffer_), hasXhtmlTag)) {
+      cleanup();
+      return fail(Error::SdCard);
+    }
+  }
+  if (shouldRetryPaidPreview(chapter_.paid != 0, plainText, hasXhtmlTag)) {
+    LOG_INF("WR", "paid preview rejected: chapter=%u bytes=%llu", static_cast<unsigned>(chapterIndex_),
+            static_cast<unsigned long long>(decodedBytes));
+    cleanup();
+    return retryChapterResponse();
+  }
   const bool ok =
       sanitizeToXhtml(decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_), chapter_.title, plainText);
-  Storage.remove(decoded.c_str());
-  Storage.remove(raw0.c_str());
-  Storage.remove(raw1.c_str());
-  if (!plainText) Storage.remove(raw3.c_str());
+  cleanup();
   if (!ok) return fail(Error::SdCard);
   phase_ = Phase::AdvanceChapter;
   return Event::None;
@@ -1597,7 +1679,8 @@ Operation::Event Operation::step() {
     logMemory("job cancelled");
     return Event::Cancelled;
   }
-  if (requestAttempt_ > 0 && nextActionAt_ != 0 && static_cast<long>(millis() - nextActionAt_) < 0) {
+  if ((requestAttempt_ > 0 || chapterResponseAttempts_ > 0) && nextActionAt_ != 0 &&
+      static_cast<long>(millis() - nextActionAt_) < 0) {
     return Event::None;
   }
 
@@ -1668,7 +1751,7 @@ Operation::Event Operation::step() {
       if (error != Error::Ok) return handleRequestError(error, Phase::SyncShelf);
       requestSucceeded();
       phase_ = Phase::Complete;
-      logMemory("job complete");
+      logJobComplete();
       return Event::Complete;
     }
 
@@ -1709,6 +1792,7 @@ Operation::Event Operation::step() {
         return Event::None;
       }
       if (!WeReadStore::readTocRecord(tocFile_, chapterIndex_, chapter_)) return fail(Error::SdCard);
+      chapterResponseAttempts_ = 0;
       if (Storage.exists(WeReadStore::chapterPath(bookDir_, chapterIndex_).c_str())) {
         phase_ = Phase::AdvanceChapter;
         return Event::None;
@@ -1725,10 +1809,8 @@ Operation::Event Operation::step() {
           logMemory("clock sync start");
           return Event::None;
         }
-        if (!refreshPsvts(psvts_, sizeof(psvts_))) return fail(Error::Clock);
       }
-      primaryPsvtsRefreshed_ = false;
-      phase_ = Phase::FetchPrimary;
+      phase_ = psvts_[0] ? Phase::FetchPrimary : Phase::FetchReader;
       return Event::None;
     }
 
@@ -1743,6 +1825,19 @@ Operation::Event Operation::step() {
       stopClockSync();
       logMemory("clock sync timeout");
       return fail(Error::Clock);
+
+    case Phase::FetchReader: {
+      if (!waitForShardPace()) return Event::None;
+      const Error error = fetchReaderOnce();
+      if (error == Error::SessionExpired) return reauthenticateChapter();
+      if (error == Error::Unavailable) return retryChapterResponse();
+      if (error != Error::Ok) return handleRequestError(error, Phase::FetchReader);
+      requestSucceeded();
+      LOG_DBG("WR", "reader psvts: chapter=%u refreshed=%u", static_cast<unsigned>(chapterIndex_),
+              static_cast<unsigned>(chapterResponseAttempts_ > 0));
+      phase_ = Phase::FetchPrimary;
+      return Event::None;
+    }
 
     case Phase::FetchPrimary: {
       if (!waitForShardPace()) return Event::None;
@@ -1759,13 +1854,14 @@ Operation::Event Operation::step() {
       const Error error = fetchShardOnce("/web/book/chapter/t_0", raw0);
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchText0);
       requestAttempt_ = 0;
-      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileContains(raw0, "{}"))) {
+      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileIsEmptyObject(raw0))) {
         case WeReadProtocol::ChapterResponse::Content:
           phase_ = Phase::FetchText1;
           return Event::None;
-        case WeReadProtocol::ChapterResponse::Unavailable:
-          phase_ = Phase::WriteUnavailable;
-          return Event::None;
+        case WeReadProtocol::ChapterResponse::AuthenticationRequired:
+          return reauthenticateChapter();
+        case WeReadProtocol::ChapterResponse::Retryable:
+          return retryChapterResponse();
         case WeReadProtocol::ChapterResponse::Error:
           return fail(Error::Protocol);
       }
@@ -1778,14 +1874,15 @@ Operation::Event Operation::step() {
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchText1);
       requestSucceeded();
       guardBookSession("text validate");
-      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileContains(raw1, "{}"))) {
+      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileIsEmptyObject(raw1))) {
         case WeReadProtocol::ChapterResponse::Content:
           if (!validateShard(bookDir_ + "/shard0.part") || !validateShard(raw1)) return fail(Error::Integrity);
           phase_ = Phase::DecodeText;
           return Event::None;
-        case WeReadProtocol::ChapterResponse::Unavailable:
-          phase_ = Phase::WriteUnavailable;
-          return Event::None;
+        case WeReadProtocol::ChapterResponse::AuthenticationRequired:
+          return reauthenticateChapter();
+        case WeReadProtocol::ChapterResponse::Retryable:
+          return retryChapterResponse();
         case WeReadProtocol::ChapterResponse::Error:
           return fail(Error::Protocol);
       }
@@ -1797,13 +1894,14 @@ Operation::Event Operation::step() {
       const Error error = fetchShardOnce("/web/book/chapter/e_1", raw1);
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchEpub1);
       requestAttempt_ = 0;
-      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileContains(raw1, "{}"))) {
+      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileIsEmptyObject(raw1))) {
         case WeReadProtocol::ChapterResponse::Content:
           phase_ = Phase::FetchEpub3;
           return Event::None;
-        case WeReadProtocol::ChapterResponse::Unavailable:
-          phase_ = Phase::WriteUnavailable;
-          return Event::None;
+        case WeReadProtocol::ChapterResponse::AuthenticationRequired:
+          return reauthenticateChapter();
+        case WeReadProtocol::ChapterResponse::Retryable:
+          return retryChapterResponse();
         case WeReadProtocol::ChapterResponse::Error:
           return fail(Error::Protocol);
       }
@@ -1817,16 +1915,17 @@ Operation::Event Operation::step() {
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchEpub3);
       requestSucceeded();
       guardBookSession("epub validate");
-      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileContains(raw3, "{}"))) {
+      switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileIsEmptyObject(raw3))) {
         case WeReadProtocol::ChapterResponse::Content:
           if (!validateShard(bookDir_ + "/shard0.part") || !validateShard(raw1) || !validateShard(raw3)) {
             return fail(Error::Integrity);
           }
           phase_ = Phase::DecodeEpub;
           return Event::None;
-        case WeReadProtocol::ChapterResponse::Unavailable:
-          phase_ = Phase::WriteUnavailable;
-          return Event::None;
+        case WeReadProtocol::ChapterResponse::AuthenticationRequired:
+          return reauthenticateChapter();
+        case WeReadProtocol::ChapterResponse::Retryable:
+          return retryChapterResponse();
         case WeReadProtocol::ChapterResponse::Error:
           return fail(Error::Protocol);
       }
@@ -1841,14 +1940,6 @@ Operation::Event Operation::step() {
       guardBookSession("epub decode");
       logMemory("chapter decode");
       return decodeChapter(false);
-
-    case Phase::WriteUnavailable:
-      guardBookSession("unavailable");
-      if (!writePlaceholder(WeReadStore::chapterPath(bookDir_, chapterIndex_), chapter_.title)) {
-        return fail(Error::SdCard);
-      }
-      phase_ = Phase::AdvanceChapter;
-      return Event::None;
 
     case Phase::AdvanceChapter:
       guardBookSession("progress");
@@ -1867,7 +1958,7 @@ Operation::Event Operation::step() {
       cleanupTransient(bookDir_, "");
       if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);
       phase_ = Phase::Complete;
-      logMemory("job complete");
+      logJobComplete();
       return Event::Complete;
     }
   }

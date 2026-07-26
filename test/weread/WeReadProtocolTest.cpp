@@ -4,7 +4,24 @@
 #include <string>
 #include <vector>
 
+#include "WeReadClient.h"
 #include "WeReadProtocol.h"
+
+namespace WeReadClient {
+
+struct OperationTestPeer {
+  static Operation::Event chapterResponseRetryEvent(const uint8_t attempts) {
+    return Operation::chapterResponseRetryEvent(attempts);
+  }
+  static bool chapterResponseRetryRestartsReader() {
+    return Operation::chapterResponseRetryPhase() == Operation::Phase::FetchReader;
+  }
+  static bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
+    return Operation::shouldRetryPaidPreview(paid, plainText, hasXhtmlTag);
+  }
+};
+
+}  // namespace WeReadClient
 
 namespace {
 
@@ -39,13 +56,127 @@ bool appendBytes(void* ctx, const uint8_t* data, size_t len) {
 
 }  // namespace
 
-TEST(WeReadProtocol, ClassifiesUnavailableChapterResponses) {
+TEST(WeReadProtocol, SeparatesAuthenticationAndRetryableChapterResponses) {
   using WeReadProtocol::ChapterResponse;
   EXPECT_EQ(WeReadProtocol::classifyChapterResponse(200, false), ChapterResponse::Content);
-  EXPECT_EQ(WeReadProtocol::classifyChapterResponse(200, true), ChapterResponse::Unavailable);
-  EXPECT_EQ(WeReadProtocol::classifyChapterResponse(401, false), ChapterResponse::Unavailable);
-  EXPECT_EQ(WeReadProtocol::classifyChapterResponse(403, false), ChapterResponse::Unavailable);
+  EXPECT_EQ(WeReadProtocol::classifyChapterResponse(200, true), ChapterResponse::Retryable);
+  EXPECT_EQ(WeReadProtocol::classifyChapterResponse(401, false), ChapterResponse::AuthenticationRequired);
+  EXPECT_EQ(WeReadProtocol::classifyChapterResponse(403, false), ChapterResponse::Retryable);
   EXPECT_EQ(WeReadProtocol::classifyChapterResponse(500, false), ChapterResponse::Error);
+}
+
+TEST(WeReadProtocol, MatchesOnlyAnExactEmptyJsonObject) {
+  constexpr uint8_t empty[] = " \r\n{ }\t";
+  constexpr uint8_t nested[] = "{\"metadata\":{}}";
+  EXPECT_TRUE(WeReadProtocol::isEmptyJsonObject(empty, sizeof(empty) - 1));
+  EXPECT_FALSE(WeReadProtocol::isEmptyJsonObject(nested, sizeof(nested) - 1));
+  EXPECT_FALSE(WeReadProtocol::isEmptyJsonObject(nullptr, 0));
+}
+
+TEST(WeReadProtocol, MaintainsBoundedRuntimeCookies) {
+  char header[128] = {};
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_vid", 6, "1", 1));
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_skey", 7, "two", 3));
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_extra", 8, "abc", 3));
+  EXPECT_STREQ(header, "wr_vid=1; wr_skey=two; wr_extra=abc");
+
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_skey", 7, "rotated", 7));
+  EXPECT_STREQ(header, "wr_vid=1; wr_skey=rotated; wr_extra=abc");
+
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_skey", 7, "", 0));
+  EXPECT_STREQ(header, "wr_vid=1; wr_extra=abc");
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_vid", 6, "", 0));
+  EXPECT_STREQ(header, "wr_extra=abc");
+  ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_extra", 8, "", 0));
+  EXPECT_STREQ(header, "");
+}
+
+TEST(WeReadProtocol, RejectsUnsafeOrOversizedRuntimeCookiesWithoutMutation) {
+  char header[24] = "wr_vid=1";
+  EXPECT_FALSE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "session", 7, "x", 1));
+  EXPECT_STREQ(header, "wr_vid=1");
+  EXPECT_FALSE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_bad name", 11, "x", 1));
+  EXPECT_STREQ(header, "wr_vid=1");
+  EXPECT_FALSE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_bad", 6, "x;y", 3));
+  EXPECT_STREQ(header, "wr_vid=1");
+  EXPECT_FALSE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_bad", 6, "x\r\nInjected", 11));
+  EXPECT_STREQ(header, "wr_vid=1");
+  EXPECT_FALSE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_overflow", 11, "0123456789", 10));
+  EXPECT_STREQ(header, "wr_vid=1");
+}
+
+TEST(WeReadProtocol, ExtractsPsvtsAcrossEveryChunkBoundary) {
+  constexpr char html[] = R"(<script>window.__INITIAL_STATE__={"other":1,"psvts" : "abc_DEF-123"};</script>)";
+  for (size_t split = 0; split <= sizeof(html) - 1; ++split) {
+    char psvts[32];
+    WeReadProtocol::PsvtsExtractor extractor(psvts, sizeof(psvts));
+    ASSERT_TRUE(extractor.reset());
+    ASSERT_TRUE(extractor.feed(reinterpret_cast<const uint8_t*>(html), split));
+    ASSERT_TRUE(extractor.feed(reinterpret_cast<const uint8_t*>(html) + split, sizeof(html) - 1 - split));
+    ASSERT_TRUE(extractor.complete()) << "split=" << split;
+    EXPECT_STREQ(psvts, "abc_DEF-123");
+  }
+}
+
+TEST(WeReadProtocol, RejectsMissingInvalidAndOversizedPsvts) {
+  constexpr char missing[] = R"({"other":"abc"})";
+  constexpr char invalid[] = R"({"psvts":"abc.def"})";
+  constexpr char oversized[] = R"({"psvts":"abcdefgh"})";
+
+  char output[16];
+  WeReadProtocol::PsvtsExtractor extractor(output, sizeof(output));
+  ASSERT_TRUE(extractor.reset());
+  ASSERT_TRUE(extractor.feed(reinterpret_cast<const uint8_t*>(missing), sizeof(missing) - 1));
+  EXPECT_FALSE(extractor.complete());
+
+  ASSERT_TRUE(extractor.reset());
+  ASSERT_TRUE(extractor.feed(reinterpret_cast<const uint8_t*>(invalid), sizeof(invalid) - 1));
+  EXPECT_FALSE(extractor.complete());
+  EXPECT_STREQ(output, "");
+
+  char shortOutput[8];
+  WeReadProtocol::PsvtsExtractor shortExtractor(shortOutput, sizeof(shortOutput));
+  ASSERT_TRUE(shortExtractor.reset());
+  ASSERT_TRUE(shortExtractor.feed(reinterpret_cast<const uint8_t*>(oversized), sizeof(oversized) - 1));
+  EXPECT_FALSE(shortExtractor.complete());
+  EXPECT_STREQ(shortOutput, "");
+}
+
+TEST(WeReadProtocol, DetectsAllowedXhtmlTagsAcrossEveryChunkBoundary) {
+  constexpr char xhtml[] = "preview text<div class=\"chapter\">full text</div>";
+  for (size_t split = 0; split <= sizeof(xhtml) - 1; ++split) {
+    WeReadProtocol::XhtmlTagProbe probe;
+    ASSERT_TRUE(probe.reset());
+    ASSERT_TRUE(probe.feed(reinterpret_cast<const uint8_t*>(xhtml), split));
+    ASSERT_TRUE(probe.feed(reinterpret_cast<const uint8_t*>(xhtml) + split, sizeof(xhtml) - 1 - split));
+    EXPECT_TRUE(probe.complete()) << "split=" << split;
+  }
+
+  WeReadProtocol::XhtmlTagProbe plain;
+  ASSERT_TRUE(plain.reset());
+  constexpr char preview[] = "only a preview...";
+  ASSERT_TRUE(plain.feed(reinterpret_cast<const uint8_t*>(preview), sizeof(preview) - 1));
+  EXPECT_FALSE(plain.complete());
+
+  WeReadProtocol::XhtmlTagProbe ignored;
+  ASSERT_TRUE(ignored.reset());
+  constexpr char nonContent[] = "<html><head><script>ignored</script></head><body>text</body></html>";
+  ASSERT_TRUE(ignored.feed(reinterpret_cast<const uint8_t*>(nonContent), sizeof(nonContent) - 1));
+  EXPECT_FALSE(ignored.complete());
+}
+
+TEST(WeReadClientState, RetryableChapterResponsesNeverSignalCompletion) {
+  using Event = WeReadClient::Operation::Event;
+  EXPECT_EQ(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(1), Event::None);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(2), Event::None);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(3), Event::Failed);
+  EXPECT_NE(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(1), Event::ChapterComplete);
+  EXPECT_NE(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(3), Event::ChapterComplete);
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::chapterResponseRetryRestartsReader());
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, false, false));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(false, false, false));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, true, false));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, false, true));
 }
 
 TEST(WeReadProtocol, EncodesNumericAndUtf8Ids) {

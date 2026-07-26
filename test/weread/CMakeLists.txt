@@ -4,10 +4,15 @@ add_executable(WeReadProtocolTest
 )
 
 target_include_directories(WeReadProtocolTest PRIVATE
+  ${REPO_ROOT}/src
   ${REPO_ROOT}/src/activities/apps/weread
+  ${REPO_ROOT}/lib/hal
+  ${REPO_ROOT}/lib/Logging
+  ${REPO_ROOT}/simulator/shims
 )
 
 target_link_libraries(WeReadProtocolTest PRIVATE
+  arduino_host
   crosspoint_test_common
   GTest::gtest_main
 )

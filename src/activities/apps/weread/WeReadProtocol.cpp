@@ -1,6 +1,7 @@
 #include "WeReadProtocol.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -57,6 +58,24 @@ bool parseHex4(const char* value, uint32_t& cp) {
   return true;
 }
 
+bool validCookieName(const char* name, const size_t len) {
+  if (!name || len < 4 || memcmp(name, "wr_", 3) != 0) return false;
+  for (size_t i = 0; i < len; ++i) {
+    const auto value = static_cast<uint8_t>(name[i]);
+    if (!std::isalnum(value) && value != '_' && value != '-') return false;
+  }
+  return true;
+}
+
+bool validCookieValue(const char* value, const size_t len) {
+  if (!value && len != 0) return false;
+  for (size_t i = 0; i < len; ++i) {
+    const auto byte = static_cast<uint8_t>(value[i]);
+    if (byte < 0x21 || byte > 0x7E || byte == ';') return false;
+  }
+  return true;
+}
+
 uint8_t base64Value(uint8_t c) {
   if (c >= 'A' && c <= 'Z') return c - 'A';
   if (c >= 'a' && c <= 'z') return c - 'a' + 26;
@@ -87,8 +106,199 @@ uint32_t parseDecimal(const char* value, size_t len) {
 }  // namespace
 
 ChapterResponse classifyChapterResponse(const int status, const bool emptyObject) {
-  if (status == 401 || status == 403 || (status == 200 && emptyObject)) return ChapterResponse::Unavailable;
+  if (status == 401) return ChapterResponse::AuthenticationRequired;
+  if (status == 403 || (status == 200 && emptyObject)) return ChapterResponse::Retryable;
   return status == 200 ? ChapterResponse::Content : ChapterResponse::Error;
+}
+
+bool isEmptyJsonObject(const uint8_t* data, const size_t len) {
+  if (!data) return false;
+  uint8_t state = 0;
+  for (size_t i = 0; i < len; ++i) {
+    if (std::isspace(data[i])) continue;
+    if (state == 0 && data[i] == '{') {
+      state = 1;
+    } else if (state == 1 && data[i] == '}') {
+      state = 2;
+    } else {
+      return false;
+    }
+  }
+  return state == 2;
+}
+
+bool mergeRuntimeCookie(char* header, const size_t headerSize, const char* name, const size_t nameLen,
+                        const char* value, const size_t valueLen) {
+  if (!header || headerSize == 0 || nameLen >= headerSize || valueLen >= headerSize ||
+      !validCookieName(name, nameLen) || !validCookieValue(value, valueLen)) {
+    return false;
+  }
+  const size_t headerLen = strnlen(header, headerSize);
+  if (headerLen == headerSize) return false;
+
+  size_t entryStart = 0;
+  while (entryStart < headerLen) {
+    const char* equals = static_cast<const char*>(memchr(header + entryStart, '=', headerLen - entryStart));
+    if (!equals) return false;
+    const size_t entryNameLen = static_cast<size_t>(equals - header - entryStart);
+    const char* separator = strstr(equals + 1, "; ");
+    const size_t entryEnd = separator ? static_cast<size_t>(separator - header) : headerLen;
+    if (entryNameLen == nameLen && memcmp(header + entryStart, name, nameLen) == 0) {
+      const size_t oldValueStart = static_cast<size_t>(equals - header) + 1;
+      const size_t oldValueLen = entryEnd - oldValueStart;
+      if (valueLen == 0) {
+        const size_t removeStart = entryStart == 0 ? 0 : entryStart - 2;
+        const size_t removeEnd = entryStart == 0 && separator ? entryEnd + 2 : entryEnd;
+        memmove(header + removeStart, header + removeEnd, headerLen - removeEnd + 1);
+        return true;
+      }
+      const size_t baseLength = headerLen - oldValueLen;
+      if (valueLen >= headerSize - baseLength) return false;
+      memmove(header + oldValueStart + valueLen, header + entryEnd, headerLen - entryEnd + 1);
+      memcpy(header + oldValueStart, value, valueLen);
+      return true;
+    }
+    entryStart = entryEnd + (separator ? 2 : 0);
+  }
+
+  if (valueLen == 0) return true;
+  const size_t separatorLen = headerLen == 0 ? 0 : 2;
+  const size_t available = headerSize - headerLen - 1;
+  const size_t prefixLength = separatorLen + nameLen + 1;
+  if (prefixLength > available || valueLen > available - prefixLength) return false;
+  size_t pos = headerLen;
+  if (separatorLen != 0) {
+    header[pos++] = ';';
+    header[pos++] = ' ';
+  }
+  memcpy(header + pos, name, nameLen);
+  pos += nameLen;
+  header[pos++] = '=';
+  memcpy(header + pos, value, valueLen);
+  header[pos + valueLen] = '\0';
+  return true;
+}
+
+bool isAllowedXhtmlTag(const char* name) {
+  if (!name) return false;
+  static constexpr const char* kAllowed[] = {"p",      "div", "section", "article",    "h1", "h2", "h3",
+                                             "h4",     "h5",  "h6",      "blockquote", "ul", "ol", "li",
+                                             "strong", "b",   "em",      "i",          "br", "hr", "span"};
+  for (const char* allowed : kAllowed) {
+    if (strcmp(name, allowed) == 0) return true;
+  }
+  return false;
+}
+
+bool PsvtsExtractor::reset() {
+  keyOffset_ = 0;
+  valueLength_ = 0;
+  state_ = State::SearchKey;
+  if (!out_ || outSize_ < 2) return false;
+  out_[0] = '\0';
+  return true;
+}
+
+void PsvtsExtractor::resumeSearch(const uint8_t value) {
+  static constexpr char kKey[] = "\"psvts\"";
+  state_ = State::SearchKey;
+  keyOffset_ = value == static_cast<uint8_t>(kKey[0]) ? 1 : 0;
+}
+
+bool PsvtsExtractor::feed(const uint8_t* data, const size_t len) {
+  if ((!data && len != 0) || !out_ || outSize_ < 2) return false;
+  static constexpr char kKey[] = "\"psvts\"";
+  for (size_t i = 0; i < len; ++i) {
+    const uint8_t value = data[i];
+    switch (state_) {
+      case State::SearchKey:
+        if (value == static_cast<uint8_t>(kKey[keyOffset_])) {
+          if (++keyOffset_ == sizeof(kKey) - 1) state_ = State::ExpectColon;
+        } else {
+          resumeSearch(value);
+        }
+        break;
+      case State::ExpectColon:
+        if (std::isspace(value)) break;
+        if (value == ':') {
+          state_ = State::ExpectQuote;
+        } else {
+          resumeSearch(value);
+        }
+        break;
+      case State::ExpectQuote:
+        if (std::isspace(value)) break;
+        if (value == '"') {
+          valueLength_ = 0;
+          state_ = State::ReadValue;
+        } else {
+          resumeSearch(value);
+        }
+        break;
+      case State::ReadValue:
+        if (value == '"') {
+          if (valueLength_ == 0) {
+            state_ = State::Invalid;
+          } else {
+            out_[valueLength_] = '\0';
+            state_ = State::Complete;
+          }
+        } else if ((std::isalnum(value) || value == '-' || value == '_') && valueLength_ + 1 < outSize_) {
+          out_[valueLength_++] = static_cast<char>(value);
+        } else {
+          out_[0] = '\0';
+          state_ = State::Invalid;
+        }
+        break;
+      case State::Complete:
+      case State::Invalid:
+        break;
+    }
+  }
+  return true;
+}
+
+bool XhtmlTagProbe::reset() {
+  nameLength_ = 0;
+  state_ = State::SearchOpen;
+  name_[0] = '\0';
+  return true;
+}
+
+bool XhtmlTagProbe::feed(const uint8_t* data, const size_t len) {
+  if (!data && len != 0) return false;
+  for (size_t i = 0; i < len && state_ != State::Complete; ++i) {
+    const uint8_t value = data[i];
+    switch (state_) {
+      case State::SearchOpen:
+        if (value == '<') {
+          nameLength_ = 0;
+          state_ = State::ReadName;
+        }
+        break;
+      case State::ReadName:
+        if (std::isalnum(value)) {
+          if (nameLength_ + 1 >= sizeof(name_)) {
+            state_ = State::SkipTag;
+          } else {
+            name_[nameLength_++] = static_cast<char>(std::tolower(value));
+          }
+        } else if (nameLength_ != 0 && (std::isspace(value) || value == '/' || value == '>')) {
+          name_[nameLength_] = '\0';
+          state_ = isAllowedXhtmlTag(name_) ? State::Complete : (value == '>' ? State::SearchOpen : State::SkipTag);
+        } else {
+          state_ = value == '<' ? State::ReadName : State::SkipTag;
+          nameLength_ = 0;
+        }
+        break;
+      case State::SkipTag:
+        if (value == '>') state_ = State::SearchOpen;
+        break;
+      case State::Complete:
+        break;
+    }
+  }
+  return true;
 }
 
 bool encodeId(const char* value, Md5Function md5, char* out, size_t outSize) {
