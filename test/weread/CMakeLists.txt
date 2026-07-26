@@ -50,7 +50,7 @@ target_link_libraries(WeReadStoreTest PRIVATE
   GTest::gtest_main
 )
 
-gtest_discover_tests(WeReadStoreTest)
+gtest_discover_tests(WeReadStoreTest PROPERTIES RUN_SERIAL TRUE)
 
 find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
