@@ -38,6 +38,10 @@ class FontDownloadActivity : public Activity {
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                 Purpose purpose = Purpose::Manage);
 
+#ifdef ENABLE_CHINESE_VERSION
+  static bool wasChineseFontPromptShownThisBoot();
+#endif
+
   void onEnter() override;
   void onExit() override;
   void loop() override;

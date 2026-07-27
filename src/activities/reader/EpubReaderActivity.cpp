@@ -368,7 +368,7 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
   }
 
   const uint32_t codepoint = pendingMissingChineseCodepoint_.exchange(0, std::memory_order_relaxed);
-  if (codepoint == 0 || chineseFontPromptShown_.exchange(true, std::memory_order_relaxed)) return false;
+  if (codepoint == 0 || FontDownloadActivity::wasChineseFontPromptShownThisBoot()) return false;
 
   LOG_INF("FONT", "Missing built-in Chinese glyph U+%04X; offering SD fonts", static_cast<unsigned>(codepoint));
 
@@ -377,7 +377,6 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
       makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
-    chineseFontPromptShown_.store(false, std::memory_order_relaxed);
     return false;
   }
 
@@ -1622,7 +1621,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
 #ifdef ENABLE_CHINESE_VERSION
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
-  if (missingCodepoint != 0 && !chineseFontPromptShown_.load(std::memory_order_relaxed)) {
+  if (missingCodepoint != 0 && !FontDownloadActivity::wasChineseFontPromptShownThisBoot()) {
     uint32_t expected = 0;
     pendingMissingChineseCodepoint_.compare_exchange_strong(expected, missingCodepoint, std::memory_order_relaxed);
   }

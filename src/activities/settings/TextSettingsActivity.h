@@ -95,9 +95,6 @@ class TextSettingsActivity final : public Activity {
       {};  // per-Tab nav position (0 = tab bar, 1..N = row); set in onEnter
   int currentFamilyIndex_ = 0;
   int currentSizeIndex_ = 0;
-#ifdef ENABLE_CHINESE_VERSION
-  bool chineseFontPromptShown_ = false;
-#endif
 
   ThemeMetrics metrics_ = {};
   int afterHeader = 0;
