@@ -11,6 +11,7 @@ class EpdFont {
   void getTextDimensions(const char* string, int* w, int* h) const;
 
   const EpdGlyph* getGlyph(uint32_t cp) const;
+  const EpdGlyph* getGlyph(uint32_t cp, bool* usedReplacement) const;
 
   /// Returns true if this font covers `cp`: either via its in-RAM interval
   /// table or, for SD card fonts, via the coverageHandler that consults the

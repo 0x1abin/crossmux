@@ -76,10 +76,48 @@ const EpdFontData kTestFontData = {
   .glyphMissHandler  = nullptr,
   .glyphMissCtx      = nullptr,
 };
+
+const EpdGlyph kReplacementGlyphs[] = {
+  { 8, 12, 128, 0, 12, 0, 0 },
+};
+
+const EpdUnicodeInterval kReplacementIntervals[] = {
+  { 0xFFFD, 0xFFFD, 0 },
+};
+
+const EpdFontData kReplacementFontData = {
+  .bitmap            = nullptr,
+  .glyph             = kReplacementGlyphs,
+  .intervals         = kReplacementIntervals,
+  .intervalCount     = 1,
+  .advanceY          = 16,
+  .ascender          = 12,
+  .descender         = 0,
+  .is2Bit            = false,
+  .groups            = nullptr,
+  .groupCount        = 0,
+  .glyphToGroup      = nullptr,
+  .kernLeftClasses   = nullptr,
+  .kernRightClasses  = nullptr,
+  .kernMatrix        = nullptr,
+  .kernLeftEntryCount  = 0,
+  .kernRightEntryCount = 0,
+  .kernLeftClassCount  = 0,
+  .kernRightClassCount = 0,
+  .ligaturePairs     = nullptr,
+  .ligaturePairCount = 0,
+  .glyphMissHandler  = nullptr,
+  .glyphMissCtx      = nullptr,
+};
 // clang-format on
 
 EpdFont& testFont() {
   static EpdFont font(&kTestFontData);
+  return font;
+}
+
+EpdFont& replacementFont() {
+  static EpdFont font(&kReplacementFontData);
   return font;
 }
 
@@ -245,6 +283,24 @@ TEST(EpdFont, GlyphLookup) {
   // No U+FFFD in font, so unknown codepoints return nullptr
   EXPECT_EQ(testFont().getGlyph('Z'), nullptr);
   EXPECT_EQ(testFont().getGlyph('b'), nullptr);
+}
+
+TEST(EpdFont, CoveredGlyphDoesNotReportReplacement) {
+  bool usedReplacement = true;
+  EXPECT_NE(testFont().getGlyph('T', &usedReplacement), nullptr);
+  EXPECT_FALSE(usedReplacement);
+}
+
+TEST(EpdFont, MissingGlyphReportsReplacement) {
+  bool usedReplacement = false;
+  EXPECT_EQ(replacementFont().getGlyph(0x749F, &usedReplacement), &kReplacementGlyphs[0]);
+  EXPECT_TRUE(usedReplacement);
+}
+
+TEST(EpdFont, MissingGlyphWithoutReplacementStillReportsMissing) {
+  bool usedReplacement = false;
+  EXPECT_EQ(testFont().getGlyph(0x749F, &usedReplacement), nullptr);
+  EXPECT_TRUE(usedReplacement);
 }
 
 // Known-value regression tests.  Expected widths are computed by hand using

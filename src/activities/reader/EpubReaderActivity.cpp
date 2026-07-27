@@ -1575,18 +1575,29 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.clearScreen();
   }
 
-  // Font prewarm: scan pass accumulates text, then prewarm, then real render
+  // Compressed and SD fonts need a scan pass to build their page glyph cache.
+  // Raw built-in fonts render directly and skip both the scan and its temporary string.
   auto* fcm = renderer.getFontCacheManager();
-  auto scope = fcm->createPrewarmScope();
-  page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);  // scan pass
-  scope.endScanAndPrewarm();
 #ifdef ENABLE_CHINESE_VERSION
-  const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
-  if (missingCodepoint != 0 && !chineseFontPromptShown_.load(std::memory_order_relaxed)) {
-    uint32_t expected = 0;
-    pendingMissingChineseCodepoint_.compare_exchange_strong(expected, missingCodepoint, std::memory_order_relaxed);
-  }
+  fcm->consumeMissingChineseCodepoint();  // discard status/UI glyphs left by the previous render
 #endif
+  struct RawFontCacheGuard {
+    FontCacheManager* manager = nullptr;
+    ~RawFontCacheGuard() {
+      if (manager) manager->clearCache();
+    }
+  } rawFontCacheGuard;
+  std::optional<FontCacheManager::PrewarmScope> prewarmScope;
+  if (fcm->needsPrewarmScan(fontId)) {
+    prewarmScope.emplace(*fcm);
+    page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);  // scan pass
+    prewarmScope->endScanAndPrewarm();
+  } else {
+    // Preserve PrewarmScope's cache lifecycle without allocating its scan string.
+    fcm->clearCache();
+    fcm->resetStats();
+    rawFontCacheGuard.manager = fcm;
+  }
   const auto tPrewarm = millis();
 
   const bool manualRefreshPending = forcedRefreshPending;
@@ -1609,6 +1620,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   };
 
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+#ifdef ENABLE_CHINESE_VERSION
+  const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
+  if (missingCodepoint != 0 && !chineseFontPromptShown_.load(std::memory_order_relaxed)) {
+    uint32_t expected = 0;
+    pendingMissingChineseCodepoint_.compare_exchange_strong(expected, missingCodepoint, std::memory_order_relaxed);
+  }
+#endif
   renderStatusBar();
   const auto tBwRender = millis();
 

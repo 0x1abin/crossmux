@@ -20,11 +20,13 @@ class FontCacheManager {
   void logStats(const char* label = "render");
   void resetStats();
   bool canIdlePrewarm(int fontId) const;
+  bool needsPrewarmScan(int fontId) const;
 
   // Scan-mode API: called by GfxRenderer::drawText() during scan pass
   bool isScanning() const;
   void recordText(const char* text, int fontId, EpdFontFamily::Style style);
 #ifdef ENABLE_CHINESE_VERSION
+  void reportMissingChineseCodepoint(int fontId, uint32_t codepoint);
   uint32_t consumeMissingChineseCodepoint();
 #endif
 

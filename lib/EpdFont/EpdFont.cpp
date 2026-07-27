@@ -155,10 +155,12 @@ uint32_t EpdFont::applyLigatures(uint32_t cp, const char*& text) const {
   return cp;
 }
 
-const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
-  const int count = data->intervalCount;
-  if (count == 0 && !data->glyphMissHandler) return nullptr;
+const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const { return getGlyph(cp, nullptr); }
 
+const EpdGlyph* EpdFont::getGlyph(const uint32_t cp, bool* const usedReplacement) const {
+  if (usedReplacement) *usedReplacement = false;
+
+  const int count = data->intervalCount;
   if (count > 0) {
     const EpdUnicodeInterval* intervals = data->intervals;
     const auto* end = intervals + count;
@@ -184,6 +186,7 @@ const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
   }
 
   if (cp != REPLACEMENT_GLYPH) {
+    if (usedReplacement) *usedReplacement = true;
     return getGlyph(REPLACEMENT_GLYPH);
   }
   return nullptr;
