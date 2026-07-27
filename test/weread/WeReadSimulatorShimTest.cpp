@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "WeReadHttpClient.h"
+
 namespace {
 
 struct HeaderCapture {
@@ -32,6 +34,26 @@ TEST(WeReadSimulatorShim, ComputesRealMd5) {
   md5.calculate();
   EXPECT_STREQ(md5.toString().c_str(), "900150983cd24fb0d6963f7d28e17f72");
 }
+
+TEST(WeReadHttpClient, ExtractsOnlyBoundedHttpsHosts) {
+  WeReadHttpClient::HttpsUrlView view;
+  ASSERT_TRUE(WeReadHttpClient::parseHttpsUrl("https://Res.WeRead.QQ.Com/path/image.jpg", view));
+  EXPECT_EQ(std::string(view.host, view.hostLength), "Res.WeRead.QQ.Com");
+  EXPECT_STREQ(view.path, "/path/image.jpg");
+
+  char host[128];
+  ASSERT_TRUE(WeReadHttpClient::extractHttpsHost("https://Res.WeRead.QQ.Com/path/image.jpg", host, sizeof(host)));
+  EXPECT_STREQ(host, "res.weread.qq.com");
+  EXPECT_FALSE(WeReadHttpClient::extractHttpsHost("http://res.weread.qq.com/image.jpg", host, sizeof(host)));
+  EXPECT_FALSE(WeReadHttpClient::extractHttpsHost("https://user@res.weread.qq.com/image.jpg", host, sizeof(host)));
+  EXPECT_FALSE(WeReadHttpClient::extractHttpsHost("https://res..weread.qq.com/image.jpg", host, sizeof(host)));
+  EXPECT_FALSE(
+      WeReadHttpClient::extractHttpsHost("https://res.weread.qq.com/image.jpg\nX-Test: bad", host, sizeof(host)));
+  char shortHost[8];
+  EXPECT_FALSE(WeReadHttpClient::extractHttpsHost("https://res.weread.qq.com/image.jpg", shortHost, sizeof(shortHost)));
+}
+
+TEST(WeReadHttpClient, SimulatorNetworkIsReady) { EXPECT_TRUE(WeReadHttpClient::networkReady()); }
 
 TEST(WeReadSimulatorShim, SupportsCooperativeSntpCalls) {
   esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);

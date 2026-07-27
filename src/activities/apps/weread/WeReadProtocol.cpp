@@ -182,11 +182,141 @@ bool mergeRuntimeCookie(char* header, const size_t headerSize, const char* name,
 
 bool isAllowedXhtmlTag(const char* name) {
   if (!name) return false;
-  static constexpr const char* kAllowed[] = {"p",      "div", "section", "article",    "h1", "h2", "h3",
-                                             "h4",     "h5",  "h6",      "blockquote", "ul", "ol", "li",
-                                             "strong", "b",   "em",      "i",          "br", "hr", "span"};
+  static constexpr const char* kAllowed[] = {"p",  "div", "section",    "article", "h1",   "h2", "h3",     "h4",
+                                             "h5", "h6",  "blockquote", "ul",      "ol",   "li", "strong", "b",
+                                             "em", "i",   "br",         "hr",      "span", "img"};
   return std::any_of(std::begin(kAllowed), std::end(kAllowed),
                      [name](const char* allowed) { return strcmp(name, allowed) == 0; });
+}
+
+bool extractImageAttributes(const char* tag, char* source, const size_t sourceSize, char* alt, const size_t altSize) {
+  if (!tag || !source || sourceSize < 2 || !alt || altSize == 0) return false;
+  source[0] = '\0';
+  alt[0] = '\0';
+  const char* cursor = tag;
+  while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+  if (*cursor == '/') return false;
+  const char* name = cursor;
+  while (std::isalnum(static_cast<unsigned char>(*cursor))) ++cursor;
+  if (cursor - name != 3 || std::tolower(static_cast<unsigned char>(name[0])) != 'i' ||
+      std::tolower(static_cast<unsigned char>(name[1])) != 'm' ||
+      std::tolower(static_cast<unsigned char>(name[2])) != 'g') {
+    return false;
+  }
+
+  while (*cursor) {
+    while (std::isspace(static_cast<unsigned char>(*cursor)) || *cursor == '/') ++cursor;
+    if (!*cursor) break;
+    const char* attribute = cursor;
+    while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != '=' && *cursor != '/') {
+      ++cursor;
+    }
+    const size_t nameLen = static_cast<size_t>(cursor - attribute);
+    const bool sourceAttribute = nameLen == 3 && std::tolower(static_cast<unsigned char>(attribute[0])) == 's' &&
+                                 std::tolower(static_cast<unsigned char>(attribute[1])) == 'r' &&
+                                 std::tolower(static_cast<unsigned char>(attribute[2])) == 'c';
+    const bool altAttribute = nameLen == 3 && std::tolower(static_cast<unsigned char>(attribute[0])) == 'a' &&
+                              std::tolower(static_cast<unsigned char>(attribute[1])) == 'l' &&
+                              std::tolower(static_cast<unsigned char>(attribute[2])) == 't';
+    while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+    if (*cursor != '=') {
+      while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+      continue;
+    }
+    ++cursor;
+    while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+    if (*cursor != '"' && *cursor != '\'') {
+      if (sourceAttribute || altAttribute) return false;
+      while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != '/') ++cursor;
+      continue;
+    }
+    const char quote = *cursor++;
+    const char* value = cursor;
+    while (*cursor && *cursor != quote) ++cursor;
+    if (*cursor != quote) return false;
+    const size_t valueLen = static_cast<size_t>(cursor - value);
+    ++cursor;
+
+    char* destination = nullptr;
+    size_t capacity = 0;
+    if (sourceAttribute) {
+      destination = source;
+      capacity = sourceSize;
+    } else if (altAttribute) {
+      destination = alt;
+      capacity = altSize;
+    }
+    if (destination) {
+      if (valueLen >= capacity) {
+        if (sourceAttribute) return false;
+        alt[0] = '\0';
+        continue;
+      }
+      memcpy(destination, value, valueLen);
+      destination[valueLen] = '\0';
+    }
+  }
+  return source[0] != '\0';
+}
+
+ImageType normalizeImageUrl(const char* source, char* output, const size_t outputSize) {
+  if (!source || !output || outputSize < 10) return ImageType::None;
+  size_t written = 0;
+  if (source[0] == '/' && source[1] == '/') {
+    static constexpr char kScheme[] = "https:";
+    if (sizeof(kScheme) - 1 >= outputSize) return ImageType::None;
+    memcpy(output, kScheme, sizeof(kScheme) - 1);
+    written = sizeof(kScheme) - 1;
+  } else {
+    static constexpr char kScheme[] = "https://";
+    for (size_t i = 0; i < sizeof(kScheme) - 1; ++i) {
+      if (!source[i] || std::tolower(static_cast<unsigned char>(source[i])) != kScheme[i]) return ImageType::None;
+      output[written++] = kScheme[i];
+    }
+    source += sizeof(kScheme) - 1;
+  }
+
+  while (*source && *source != '#') {
+    if (written + 1 >= outputSize) return ImageType::None;
+    const unsigned char value = static_cast<unsigned char>(*source);
+    if (value <= 0x20 || value == 0x7F || value == '"' || value == '\'' || value == '<' || value == '>' ||
+        value == '\\') {
+      return ImageType::None;
+    }
+    if (strncmp(source, "&amp;", 5) == 0) {
+      output[written++] = '&';
+      source += 5;
+      continue;
+    }
+    output[written++] = *source++;
+  }
+  output[written] = '\0';
+
+  const char* host = output + 8;
+  const char* path = strchr(host, '/');
+  if (!path || path == host || host[0] == '.' || path[-1] == '.') return ImageType::None;
+  bool previousDot = false;
+  for (const char* cursor = host; cursor < path; ++cursor) {
+    const unsigned char value = static_cast<unsigned char>(*cursor);
+    if (!std::isalnum(value) && value != '.' && value != '-') return ImageType::None;
+    if (value == '.' && previousDot) return ImageType::None;
+    previousDot = value == '.';
+  }
+  const char* pathEnd = strchr(path, '?');
+  if (!pathEnd) pathEnd = output + written;
+  const char* extension = pathEnd;
+  while (extension > path && extension[-1] != '.') --extension;
+  if (extension == path || extension[-1] != '.') return ImageType::None;
+  const size_t extensionLen = static_cast<size_t>(pathEnd - extension);
+  const auto extensionIs = [extension, extensionLen](const char* expected) {
+    if (strlen(expected) != extensionLen) return false;
+    for (size_t i = 0; i < extensionLen; ++i) {
+      if (std::tolower(static_cast<unsigned char>(extension[i])) != expected[i]) return false;
+    }
+    return true;
+  };
+  if (extensionIs("jpg") || extensionIs("jpeg")) return ImageType::Jpeg;
+  return extensionIs("png") ? ImageType::Png : ImageType::None;
 }
 
 bool PsvtsExtractor::reset() {
@@ -435,6 +565,144 @@ size_t decodeJsonString(const char* value, size_t len, char* out, size_t outSize
     ++i;
   }
   return pos;
+}
+
+void JsonStringDecoder::reset() {
+  pendingLen_ = 0;
+  failed_ = false;
+}
+
+bool JsonStringDecoder::feed(const char* data, const size_t len) {
+  if (failed_ || (!data && len != 0)) return false;
+  for (size_t i = 0; i < len; ++i) {
+    if (pendingLen_ == sizeof(pending_)) {
+      failed_ = true;
+      return false;
+    }
+    pending_[pendingLen_++] = static_cast<uint8_t>(data[i]);
+    if (!drain(false)) return false;
+  }
+  return true;
+}
+
+bool JsonStringDecoder::finish() {
+  if (failed_ || !drain(true)) return false;
+  return pendingLen_ == 0;
+}
+
+bool JsonStringDecoder::drain(const bool final) {
+  while (pendingLen_ > 0) {
+    if (pending_[0] == '\\') {
+      if (pendingLen_ < 2) {
+        if (!final) return true;
+        if (!emit(pending_, 1)) return false;
+        consume(1);
+        continue;
+      }
+      if (pending_[1] != 'u') {
+        if (!emit(pending_, 1)) return false;
+        consume(1);
+        continue;
+      }
+      if (pendingLen_ < 6) {
+        if (!final) return true;
+        if (!emit(pending_, 1)) return false;
+        consume(1);
+        continue;
+      }
+      uint32_t codepoint = 0;
+      if (!parseHex4(reinterpret_cast<const char*>(pending_ + 2), codepoint)) {
+        if (!emit(pending_, 1)) return false;
+        consume(1);
+        continue;
+      }
+      size_t consumed = 6;
+      if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+        if (pendingLen_ < 12) {
+          if (!final) return true;
+          codepoint = 0xFFFD;
+        } else {
+          uint32_t low = 0;
+          if (pending_[6] == '\\' && pending_[7] == 'u' &&
+              parseHex4(reinterpret_cast<const char*>(pending_ + 8), low) && low >= 0xDC00 && low <= 0xDFFF) {
+            codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + low - 0xDC00;
+            consumed = 12;
+          } else {
+            codepoint = 0xFFFD;
+          }
+        }
+      } else if (codepoint >= 0xDC00 && codepoint <= 0xDFFF) {
+        codepoint = 0xFFFD;
+      }
+      if (!emitCodepoint(codepoint)) return false;
+      consume(consumed);
+      continue;
+    }
+
+    size_t codepointLen = 1;
+    const uint8_t lead = pending_[0];
+    if ((lead & 0xE0) == 0xC0) {
+      codepointLen = 2;
+    } else if ((lead & 0xF0) == 0xE0) {
+      codepointLen = 3;
+    } else if ((lead & 0xF8) == 0xF0) {
+      codepointLen = 4;
+    } else if (lead >= 0x80) {
+      if (!emitCodepoint(0xFFFD)) return false;
+      consume(1);
+      continue;
+    }
+    if (pendingLen_ < codepointLen) {
+      if (!final) return true;
+      if (!emitCodepoint(0xFFFD)) return false;
+      consume(pendingLen_);
+      continue;
+    }
+    bool valid = true;
+    for (size_t i = 1; i < codepointLen; ++i) valid &= (pending_[i] & 0xC0) == 0x80;
+    if (!valid) {
+      if (!emitCodepoint(0xFFFD)) return false;
+      consume(1);
+      continue;
+    }
+    if (!emit(pending_, codepointLen)) return false;
+    consume(codepointLen);
+  }
+  return true;
+}
+
+bool JsonStringDecoder::emit(const uint8_t* data, const size_t len) {
+  if (!sink_ || !sink_(ctx_, data, len)) {
+    failed_ = true;
+    return false;
+  }
+  return true;
+}
+
+bool JsonStringDecoder::emitCodepoint(const uint32_t codepoint) {
+  uint8_t bytes[4];
+  size_t len = 0;
+  if (codepoint <= 0x7F) {
+    bytes[len++] = static_cast<uint8_t>(codepoint);
+  } else if (codepoint <= 0x7FF) {
+    bytes[len++] = static_cast<uint8_t>(0xC0 | (codepoint >> 6));
+    bytes[len++] = static_cast<uint8_t>(0x80 | (codepoint & 0x3F));
+  } else if (codepoint <= 0xFFFF) {
+    bytes[len++] = static_cast<uint8_t>(0xE0 | (codepoint >> 12));
+    bytes[len++] = static_cast<uint8_t>(0x80 | ((codepoint >> 6) & 0x3F));
+    bytes[len++] = static_cast<uint8_t>(0x80 | (codepoint & 0x3F));
+  } else {
+    bytes[len++] = static_cast<uint8_t>(0xF0 | (codepoint >> 18));
+    bytes[len++] = static_cast<uint8_t>(0x80 | ((codepoint >> 12) & 0x3F));
+    bytes[len++] = static_cast<uint8_t>(0x80 | ((codepoint >> 6) & 0x3F));
+    bytes[len++] = static_cast<uint8_t>(0x80 | (codepoint & 0x3F));
+  }
+  return emit(bytes, len);
+}
+
+void JsonStringDecoder::consume(const size_t len) {
+  if (len < pendingLen_) memmove(pending_, pending_ + len, pendingLen_ - len);
+  pendingLen_ -= static_cast<uint8_t>(len);
 }
 
 size_t swapPositions(const size_t encodedLength, const uint8_t* tail, const size_t tailLen, uint32_t out[10]) {

@@ -73,10 +73,12 @@ decompression buffer, heap allocation, or DRAM use.
 WeRead owns its transport in `src/activities/apps/weread/WeReadHttpClient.*`;
 the public `HttpDownloader` has no WeRead-specific session, Cookie, or protocol
 logic. On device, the client uses wolfSSL through `freeink::SecureClient`, a
-caller-owned 1 KB HTTP work buffer, and one best-effort persistent connection
-from TOC retrieval through the final book response. It closes the connection
-before EPUB packaging, and also closes early when free heap falls below 20 KB
-or the largest block falls below 8 KB.
+caller-owned 4 KB work buffer, and one best-effort persistent connection.
+Chapter images are streamed to SD and scheduled in batches by HTTPS host, so
+requests for the same host reuse that single connection. Redirects may change
+the active host, but only `weread.qq.com` and its subdomains receive the WeRead
+Cookie. The connection closes before EPUB packaging, and also closes early
+when free heap falls below 20 KB or the largest block falls below 8 KB.
 
 Device requests call `setInsecure()`: traffic is encrypted, but the CA and host
 identity are not verified. This makes session credentials and downloaded

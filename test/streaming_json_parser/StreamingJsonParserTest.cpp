@@ -49,7 +49,8 @@ void onArrayStart(void* ctx) { static_cast<TestContext*>(ctx)->events.push_back(
 void onArrayEnd(void* ctx) { static_cast<TestContext*>(ctx)->events.push_back({EventType::ARRAY_END, {}}); }
 
 JsonCallbacks makeCallbacks(TestContext* ctx) {
-  return {ctx, onKey, onString, onNumber, onBool, onNull, onObjectStart, onObjectEnd, onArrayStart, onArrayEnd};
+  return {ctx,           onKey,       onString,     onNumber,   onBool, onNull,
+          onObjectStart, onObjectEnd, onArrayStart, onArrayEnd, nullptr};
 }
 
 std::vector<Event> parse(const char* json) {
@@ -85,6 +86,39 @@ TEST(StreamingJsonParser, SimpleObject) {
   EXPECT_EQ(events[4].type, EventType::NUMBER);
   EXPECT_EQ(events[4].value, "42");
   EXPECT_EQ(events[5].type, EventType::OBJECT_END);
+}
+
+TEST(StreamingJsonParser, StreamsOnlyOverflowingStringValues) {
+  struct ChunkContext {
+    std::string shortValue;
+    std::string longValue;
+    int chunks = 0;
+    bool final = false;
+  } ctx;
+  const auto onShort = [](void* raw, const char* value, size_t len) {
+    static_cast<ChunkContext*>(raw)->shortValue.assign(value, len);
+  };
+  const auto onChunk = [](void* raw, const char* value, size_t len, bool final) {
+    auto* capture = static_cast<ChunkContext*>(raw);
+    capture->longValue.append(value, len);
+    ++capture->chunks;
+    capture->final = final;
+  };
+  JsonCallbacks callbacks = {};
+  callbacks.ctx = &ctx;
+  callbacks.onString = onShort;
+  callbacks.onStringChunk = onChunk;
+  StreamingJsonParser parser(callbacks);
+
+  const std::string longValue(StreamingJsonParser::TOKEN_BUF_SIZE * 2 + 7, 'x');
+  const std::string json = "{\"short\":\"ok\",\"long\":\"" + longValue + "\"}";
+  for (char byte : json) parser.feed(&byte, 1);
+
+  EXPECT_FALSE(parser.hasError());
+  EXPECT_EQ(ctx.shortValue, "ok");
+  EXPECT_EQ(ctx.longValue, longValue);
+  EXPECT_GE(ctx.chunks, 3);
+  EXPECT_TRUE(ctx.final);
 }
 
 TEST(StreamingJsonParser, NestedObjects) {

@@ -13,12 +13,17 @@ struct OperationTestPeer {
   static Operation::Event chapterResponseRetryEvent(const uint8_t attempts) {
     return Operation::chapterResponseRetryEvent(attempts);
   }
+  static Operation::Event detailCompletionEvent(const bool coverPending) {
+    return Operation::detailCompletionEvent(coverPending);
+  }
   static bool chapterResponseRetryRestartsReader() {
     return Operation::chapterResponseRetryPhase() == Operation::Phase::FetchReader;
   }
   static bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
     return Operation::shouldRetryPaidPreview(paid, plainText, hasXhtmlTag);
   }
+  static bool imageAttemptPending(const uint8_t attempts) { return Operation::imageAttemptPending(attempts); }
+  static bool imageRedirectAllowed(const uint8_t redirects) { return Operation::imageRedirectAllowed(redirects); }
 };
 
 }  // namespace WeReadClient
@@ -56,6 +61,30 @@ bool appendBytes(void* ctx, const uint8_t* data, size_t len) {
 
 }  // namespace
 
+TEST(WeReadProtocol, DecodesLongJsonStringsAcrossEveryChunkBoundary) {
+  constexpr char encoded[] = "开头\\u4E2D\\u6587-\\uD83D\\uDE03-结尾";
+  constexpr char expected[] = "开头中文-😃-结尾";
+  for (size_t split = 0; split <= sizeof(encoded) - 1; ++split) {
+    std::vector<uint8_t> output;
+    WeReadProtocol::JsonStringDecoder decoder(appendBytes, &output);
+    decoder.reset();
+    ASSERT_TRUE(decoder.feed(encoded, split));
+    ASSERT_TRUE(decoder.feed(encoded + split, sizeof(encoded) - 1 - split));
+    ASSERT_TRUE(decoder.finish()) << "split=" << split;
+    EXPECT_EQ(std::string(output.begin(), output.end()), expected);
+  }
+}
+
+TEST(WeReadProtocol, ReplacesMalformedOrIncompleteUnicodeEscapesSafely) {
+  std::vector<uint8_t> output;
+  WeReadProtocol::JsonStringDecoder decoder(appendBytes, &output);
+  decoder.reset();
+  constexpr char encoded[] = "\\uD800x\\uDC00\\u12";
+  ASSERT_TRUE(decoder.feed(encoded, sizeof(encoded) - 1));
+  ASSERT_TRUE(decoder.finish());
+  EXPECT_EQ(std::string(output.begin(), output.end()), "�x�\\u12");
+}
+
 TEST(WeReadProtocol, SeparatesAuthenticationAndRetryableChapterResponses) {
   using WeReadProtocol::ChapterResponse;
   EXPECT_EQ(WeReadProtocol::classifyChapterResponse(200, false), ChapterResponse::Content);
@@ -89,6 +118,50 @@ TEST(WeReadProtocol, MaintainsBoundedRuntimeCookies) {
   EXPECT_STREQ(header, "wr_extra=abc");
   ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_extra", 8, "", 0));
   EXPECT_STREQ(header, "");
+}
+
+TEST(WeReadProtocol, ExtractsImageAttributesRegardlessOfCaseOrderAndQuotes) {
+  char source[512];
+  char alt[256];
+  ASSERT_TRUE(WeReadProtocol::extractImageAttributes(
+      "IMG class='content' ALT='插图 &amp; 说明' data-x=\"1\" SRC=\"//cdn.example/a.JPEG?x=1&amp;y=2\" /", source,
+      sizeof(source), alt, sizeof(alt)));
+  EXPECT_STREQ(source, "//cdn.example/a.JPEG?x=1&amp;y=2");
+  EXPECT_STREQ(alt, "插图 &amp; 说明");
+
+  ASSERT_TRUE(WeReadProtocol::extractImageAttributes("img src='https://cdn.example/a.png' alt=\"封面\"", source,
+                                                     sizeof(source), alt, sizeof(alt)));
+  EXPECT_STREQ(source, "https://cdn.example/a.png");
+  EXPECT_STREQ(alt, "封面");
+  EXPECT_FALSE(WeReadProtocol::extractImageAttributes("image src='https://cdn.example/a.png'", source, sizeof(source),
+                                                      alt, sizeof(alt)));
+  EXPECT_FALSE(WeReadProtocol::extractImageAttributes("img src=https://cdn.example/a.png", source, sizeof(source), alt,
+                                                      sizeof(alt)));
+  EXPECT_TRUE(WeReadProtocol::extractImageAttributes("img loading=lazy src='https://cdn.example/a.png'", source,
+                                                     sizeof(source), alt, sizeof(alt)));
+}
+
+TEST(WeReadProtocol, NormalizesOnlyBoundedHttpsJpegAndPngUrls) {
+  using WeReadProtocol::ImageType;
+  char normalized[512];
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("//cdn.example/a.JPEG?x=1&amp;y=2", normalized, sizeof(normalized)),
+            ImageType::Jpeg);
+  EXPECT_STREQ(normalized, "https://cdn.example/a.JPEG?x=1&y=2");
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("HTTPS://cdn.example/path/a.PNG#ignored", normalized, sizeof(normalized)),
+            ImageType::Png);
+  EXPECT_STREQ(normalized, "https://cdn.example/path/a.PNG");
+
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("/images/a.jpg", normalized, sizeof(normalized)), ImageType::None);
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("http://cdn.example/a.jpg", normalized, sizeof(normalized)),
+            ImageType::None);
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("https://cdn.example/a.gif", normalized, sizeof(normalized)),
+            ImageType::None);
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("https://user@cdn.example/a.jpg", normalized, sizeof(normalized)),
+            ImageType::None);
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl("https://cdn.example/a.jpg\nX: y", normalized, sizeof(normalized)),
+            ImageType::None);
+  const std::string tooLong = "https://cdn.example/" + std::string(600, 'a') + ".png";
+  EXPECT_EQ(WeReadProtocol::normalizeImageUrl(tooLong.c_str(), normalized, sizeof(normalized)), ImageType::None);
 }
 
 TEST(WeReadProtocol, RejectsUnsafeOrOversizedRuntimeCookiesWithoutMutation) {
@@ -177,6 +250,26 @@ TEST(WeReadClientState, RetryableChapterResponsesNeverSignalCompletion) {
   EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(false, false, false));
   EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, true, false));
   EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, false, true));
+}
+
+TEST(WeReadClientState, ExposesDetailBeforePendingCover) {
+  using Event = WeReadClient::Operation::Event;
+  EXPECT_EQ(WeReadClient::OperationTestPeer::detailCompletionEvent(true), Event::DetailReady);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::detailCompletionEvent(false), Event::Complete);
+}
+
+TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {
+  const WeReadClient::DownloadOptions options;
+  EXPECT_EQ(options.imagePolicy, WeReadStore::ImagePolicy::Embed);
+  EXPECT_EQ(WeReadClient::Operation::progressDecile(0, 100), 0U);
+  EXPECT_EQ(WeReadClient::Operation::progressDecile(9, 100), 0U);
+  EXPECT_EQ(WeReadClient::Operation::progressDecile(10, 100), 1U);
+  EXPECT_EQ(WeReadClient::Operation::progressDecile(100, 100), 10U);
+  EXPECT_EQ(WeReadClient::Operation::progressDecile(0, 0), 0U);
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::imageAttemptPending(1));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::imageAttemptPending(2));
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::imageRedirectAllowed(4));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::imageRedirectAllowed(5));
 }
 
 TEST(WeReadProtocol, EncodesNumericAndUtf8Ids) {

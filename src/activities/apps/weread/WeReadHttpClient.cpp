@@ -2,7 +2,9 @@
 
 #include <Arduino.h>
 #include <Logging.h>
+#include <WiFi.h>
 
+#include <cctype>
 #include <cstring>
 
 #if defined(FREEINK_NET_WOLFSSL) && !defined(CROSSPOINT_EMULATED)
@@ -15,10 +17,21 @@
 
 namespace {
 
+bool containsNewline(const char* value) { return value && (strchr(value, '\r') || strchr(value, '\n')); }
+
+bool copyHttpsUrlParts(const char* url, char* host, const size_t hostSize, const char*& path) {
+  WeReadHttpClient::HttpsUrlView view;
+  if (!host || hostSize < 2 || !WeReadHttpClient::parseHttpsUrl(url, view) || view.hostLength >= hostSize) return false;
+  for (size_t i = 0; i < view.hostLength; ++i) {
+    host[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(view.host[i])));
+  }
+  host[view.hostLength] = '\0';
+  path = view.path;
+  return true;
+}
+
 #if defined(FREEINK_NET_WOLFSSL) && !defined(CROSSPOINT_EMULATED)
-constexpr char WEREAD_HTTPS_PREFIX[] = "https://weread.qq.com";
-constexpr char WEREAD_HOST[] = "weread.qq.com";
-constexpr uint16_t WEREAD_PORT = 443;
+constexpr uint16_t HTTPS_PORT = 443;
 
 enum class TransferResult : uint8_t {
   Ok,
@@ -40,8 +53,6 @@ void cleanupClient(freeink::SecureClient& client) {
   LOG_DBG("WR", "wolfSSL TLS closed: free=%u largest=%u stack=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
-
-bool containsNewline(const char* value) { return value && (strchr(value, '\r') || strchr(value, '\n')); }
 
 bool hasHeaderToken(const char* value, const char* token) {
   if (!value || !token || !*token) return false;
@@ -205,18 +216,18 @@ TransferResult readChunkedBody(freeink::SecureClient& client, uint8_t* buffer, c
 WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::RequestOptions& options,
                                     const WeReadHttpClient::DataCallback& onData,
                                     const WeReadHttpClient::HeaderCallback& onHeader, int& status,
-                                    freeink::SecureClient& client) {
+                                    freeink::SecureClient& client, char* sessionHost, const size_t sessionHostSize,
+                                    uint32_t& newConnections, uint32_t& reusedRequests) {
   status = -1;
+  char host[128];
+  const char* path = nullptr;
   if (!url || !options.method || (strcmp(options.method, "GET") != 0 && strcmp(options.method, "POST") != 0) ||
       (options.bodySize > 0 && !options.body) || (options.headerCount > 0 && !options.headers) ||
       options.timeoutMs <= 0 || !options.readBuffer || options.readBufferSize < 2 ||
-      strncmp(url, WEREAD_HTTPS_PREFIX, sizeof(WEREAD_HTTPS_PREFIX) - 1) != 0 ||
-      url[sizeof(WEREAD_HTTPS_PREFIX) - 1] != '/') {
+      !copyHttpsUrlParts(url, host, sizeof(host), path) || !sessionHost || sessionHostSize < sizeof(host)) {
     return WeReadHttpClient::Result::NetworkError;
   }
 
-  const char* path = url + sizeof(WEREAD_HTTPS_PREFIX) - 1;
-  if (containsNewline(path)) return WeReadHttpClient::Result::NetworkError;
   for (size_t i = 0; i < options.headerCount; ++i) {
     const auto& header = options.headers[i];
     if (!header.name || !header.value || containsNewline(header.name) || containsNewline(header.value)) {
@@ -224,25 +235,35 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
     }
   }
 
+  if (client.connected() && strcmp(sessionHost, host) != 0) {
+    LOG_INF("WR", "TLS host switch: %s -> %s", sessionHost, host);
+    cleanupClient(client);
+  }
   const bool reused = client.connected();
-  LOG_DBG("WR", "wolfSSL TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
+  LOG_DBG("WR", "wolfSSL TLS %s: host=%s free=%u largest=%u stack=%u", reused ? "reused" : "new", host,
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
   client.setInsecure();
   client.setTimeout(static_cast<unsigned long>(options.timeoutMs));
-  if (!reused && !client.connect(WEREAD_HOST, WEREAD_PORT)) {
+  if (!reused && !client.connect(host, HTTPS_PORT)) {
     LOG_ERR("HTTP", "wolfSSL request connect failed");
     cleanupClient(client);
     return WeReadHttpClient::Result::NetworkError;
   }
+  if (reused) {
+    ++reusedRequests;
+  } else {
+    ++newConnections;
+  }
+  memcpy(sessionHost, host, strlen(host) + 1);
 
   bool hasUserAgent = false;
   char contentLength[32];
   const int contentLengthSize =
       snprintf(contentLength, sizeof(contentLength), "Content-Length: %u\r\n", static_cast<unsigned>(options.bodySize));
   bool requestWritten = writeText(client, options.method) && writeText(client, " ") && writeText(client, path) &&
-                        writeText(client, " HTTP/1.1\r\nHost: ") && writeText(client, WEREAD_HOST) &&
+                        writeText(client, " HTTP/1.1\r\nHost: ") && writeText(client, host) &&
                         writeText(client, "\r\nConnection: keep-alive\r\n");
   for (size_t i = 0; i < options.headerCount; ++i) {
     const auto& header = options.headers[i];
@@ -374,8 +395,11 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   }
 
   const bool persistent = keepAlive && client.connected();
-  if (!persistent) cleanupClient(client);
-  LOG_DBG("WR", "wolfSSL TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
+  if (!persistent) {
+    LOG_INF("WR", "TLS peer closed: host=%s", host);
+    cleanupClient(client);
+  }
+  LOG_DBG("WR", "wolfSSL TLS response: host=%s persistent=%u free=%u largest=%u stack=%u", host, persistent ? 1U : 0U,
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   return WeReadHttpClient::Result::Ok;
@@ -409,15 +433,24 @@ esp_err_t onRequestEvent(esp_http_client_event_t* event) {
 WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::RequestOptions& options,
                                     const WeReadHttpClient::DataCallback& onData,
                                     const WeReadHttpClient::HeaderCallback& onHeader, int& status,
-                                    esp_http_client_handle_t& client) {
+                                    esp_http_client_handle_t& client, char* sessionHost, const size_t sessionHostSize,
+                                    uint32_t& newConnections, uint32_t& reusedRequests) {
   status = -1;
+  char host[128];
+  const char* path = nullptr;
   if (!url || !options.method || (strcmp(options.method, "GET") != 0 && strcmp(options.method, "POST") != 0) ||
-      (options.bodySize > 0 && !options.body) || !options.readBuffer || options.readBufferSize == 0) {
+      (options.bodySize > 0 && !options.body) || (options.headerCount > 0 && !options.headers) ||
+      options.timeoutMs <= 0 || !options.readBuffer || options.readBufferSize == 0 ||
+      !copyHttpsUrlParts(url, host, sizeof(host), path) || !sessionHost || sessionHostSize < sizeof(host)) {
     return WeReadHttpClient::Result::NetworkError;
   }
 
+  if (client && strcmp(sessionHost, host) != 0) {
+    LOG_INF("WR", "TLS host switch: %s -> %s", sessionHost, host);
+    cleanupClient(client);
+  }
   const bool reused = client != nullptr;
-  LOG_DBG("WR", "TLS %s: free=%u largest=%u stack=%u", reused ? "reused" : "new",
+  LOG_DBG("WR", "TLS %s: host=%s free=%u largest=%u stack=%u", reused ? "reused" : "new", host,
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   RequestEventContext eventContext{&onHeader};
@@ -448,6 +481,12 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
       return WeReadHttpClient::Result::NetworkError;
     }
   }
+  if (reused) {
+    ++reusedRequests;
+  } else {
+    ++newConnections;
+  }
+  memcpy(sessionHost, host, strlen(host) + 1);
 
   if (esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION) != ESP_OK) {
     cleanupClient(client);
@@ -505,8 +544,11 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   const bool complete = esp_http_client_is_complete_data_received(client);
   const bool persistent = complete && esp_http_client_is_persistent_connection(client);
   esp_http_client_set_user_data(client, nullptr);
-  if (!persistent) cleanupClient(client);
-  LOG_DBG("WR", "TLS response: persistent=%u free=%u largest=%u stack=%u", persistent ? 1U : 0U,
+  if (!persistent) {
+    LOG_INF("WR", "TLS peer closed: host=%s", host);
+    cleanupClient(client);
+  }
+  LOG_DBG("WR", "TLS response: host=%s persistent=%u free=%u largest=%u stack=%u", host, persistent ? 1U : 0U,
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   return complete ? WeReadHttpClient::Result::Ok : WeReadHttpClient::Result::NetworkError;
@@ -517,28 +559,87 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
 
 namespace WeReadHttpClient {
 
+bool parseHttpsUrl(const char* url, HttpsUrlView& view) {
+  view = {};
+  static constexpr char kPrefix[] = "https://";
+  if (!url || strncmp(url, kPrefix, sizeof(kPrefix) - 1) != 0 || strchr(url, '\r') || strchr(url, '\n') ||
+      strchr(url, '#')) {
+    return false;
+  }
+  view.host = url + sizeof(kPrefix) - 1;
+  view.path = strchr(view.host, '/');
+  if (!view.path || view.path == view.host || view.host[0] == '.' || view.path[-1] == '.') return false;
+  view.hostLength = static_cast<size_t>(view.path - view.host);
+  bool previousDot = false;
+  for (size_t i = 0; i < view.hostLength; ++i) {
+    const unsigned char value = static_cast<unsigned char>(view.host[i]);
+    if (!std::isalnum(value) && value != '.' && value != '-') return false;
+    if (value == '.' && previousDot) return false;
+    previousDot = value == '.';
+  }
+  return true;
+}
+
+bool extractHttpsHost(const char* url, char* host, const size_t hostSize) {
+  HttpsUrlView view;
+  if (!host || hostSize < 2 || !parseHttpsUrl(url, view) || view.hostLength >= hostSize) return false;
+  for (size_t i = 0; i < view.hostLength; ++i) {
+    host[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(view.host[i])));
+  }
+  host[view.hostLength] = '\0';
+  return true;
+}
+
+bool networkReady() {
+#ifdef CROSSPOINT_EMULATED
+  return true;
+#else
+  const wifi_mode_t mode = WiFi.getMode();
+  return (mode & WIFI_MODE_STA) && WiFi.status() == WL_CONNECTED;
+#endif
+}
+
 Session::~Session() { reset(); }
 
 bool Session::reusable() {
 #if defined(FREEINK_NET_WOLFSSL) && !defined(CROSSPOINT_EMULATED)
-  return client_.connected();
+  return host_[0] && client_.connected();
 #else
-  return client_ != nullptr;
+  return host_[0] && client_ != nullptr;
 #endif
 }
 
-void Session::reset() { cleanupClient(client_); }
+void Session::reset() {
+  cleanupClient(client_);
+  host_[0] = '\0';
+}
+
+void Session::clearStats() {
+  newConnections_ = 0;
+  reusedRequests_ = 0;
+}
 
 Result request(const char* url, const RequestOptions& options, const DataCallback& onData,
                const HeaderCallback& onHeader, int& status) {
+  if (!networkReady()) {
+    status = -1;
+    LOG_INF("HTTP", "Request skipped: Wi-Fi not ready");
+    return Result::NetworkError;
+  }
   Session session;
   return request(session, url, options, onData, onHeader, status);
 }
 
 Result request(Session& session, const char* url, const RequestOptions& options, const DataCallback& onData,
                const HeaderCallback& onHeader, int& status) {
+  if (!networkReady()) {
+    status = -1;
+    LOG_INF("HTTP", "Request skipped: Wi-Fi not ready");
+    return Result::NetworkError;
+  }
   LOG_DBG("HTTP", "%s %s", options.method ? options.method : "?", url ? url : "?");
-  return runRequest(url, options, onData, onHeader, status, session.client_);
+  return runRequest(url, options, onData, onHeader, status, session.client_, session.host_, sizeof(session.host_),
+                    session.newConnections_, session.reusedRequests_);
 }
 
 }  // namespace WeReadHttpClient
