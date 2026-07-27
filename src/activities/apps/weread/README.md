@@ -1,0 +1,45 @@
+# 微信读书
+
+CrossMux 的非官方微信读书客户端，用于扫码登录、同步个人书架，并将书籍缓存为 EPUB 供内置阅读器离线阅读。
+
+## 功能与使用
+
+- 仅包含在简体中文固件 `gh_release_cn` 和原生模拟器中，不支持 WebAssembly。
+- 从 **Apps → 微信读书** 进入。没有有效本地会话时会先显示免责声明；选择“同意”后才会联网，返回则退出到 Apps。
+- 使用微信扫码登录后可浏览或刷新书架、缓存整本书以供离线阅读，以及退出登录。已有有效会话时会直接进入菜单。
+- 缓存完成后的 EPUB 保存在 `/WeRead/<书名>-<bookId>.epub`，可由内置阅读器离线打开。
+
+构建简体中文固件：
+
+```sh
+pio run -e gh_release_cn
+```
+
+原生模拟器的构建、运行和 SD 卡目录配置见 [模拟器文档](../../../../simulator/README.md#weread)。
+
+## 代码与数据
+
+| 文件 | 职责 |
+|---|---|
+| `WeReadActivity.*` | 界面、按键和任务状态流 |
+| `WeReadClient.*` | 登录、书架同步、章节获取和 EPUB 打包流程 |
+| `WeReadHttpClient.*` | 真机与模拟器的 HTTP/TLS 传输 |
+| `WeReadProtocol.*` | 协议数据处理和正文转换 |
+| `WeReadStore.*` | SD 卡会话、索引、章节缓存和 EPUB 存储 |
+
+登录会话、书架索引及缓存中间数据保存在 SD 卡的 `/.crosspoint/weread/`。其中 `session.bin` 含登录会话信息，请妥善保管 SD 卡；退出登录会清除本地会话和书架索引，已缓存的 EPUB 会保留。
+
+## 免责声明
+
+本功能为 CrossMux 提供的非官方第三方功能，与腾讯、微信及微信读书无关。服务可能随官方接口变更而失效。请遵守微信读书用户协议及相关法律法规，并自行承担账号、数据及内容使用风险。
+
+真机传输虽使用 TLS 加密，但由于硬件资源限制，当前不校验服务器 CA 与主机身份，存在中间人攻击风险。请仅在可信网络中使用，并妥善保管保存登录会话的 SD 卡。原生模拟器通过 libcurl 的主机信任库验证证书。更多实现细节见 [简体中文构建说明](../../../../docs/engineering/chinese-build.md#weread-transport)。
+
+本项目遵循仓库根目录的 [MIT License](../../../../LICENSE)。上述免责声明不构成额外的许可证限制。
+
+## 致谢
+
+- [finlater/weread.koplugin](https://github.com/finlater/weread.koplugin/)：微信读书协议研究及 KOReader 端实现思路。
+- [nasonliu/papers3-weread](https://github.com/nasonliu/papers3-weread)：ESP32 墨水屏设备上的登录、同步与离线阅读实践。
+
+感谢上述项目公开的研究与实践。相关链接仅表示参考与致谢，不代表项目之间存在隶属关系，也不改变各仓库原有的许可证。
