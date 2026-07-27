@@ -356,18 +356,55 @@ location is not migrated or read.
   payload starts with `WRA1\n`, followed by bounded `wr_vid`, `wr_skey`, and
   `wr_rt` lines. No response body, signature, or complete Cookie header is
   stored.
-- `shelf.bin` and `<bookId>/toc.bin` start with a 12-byte little-endian header:
+- `shelf.bin`, `<bookId>/toc.bin`, per-chapter
+  `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
+  indexes start with a 12-byte little-endian header:
   `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
   Their magic values are `WRS4` (`0x34535257`) and `WRT1` (`0x31545257`);
-  version is currently `1`.
+  image indexes use `WRI1` (`0x31495257`) and image work indexes use `WIP1`
+  (`0x31504957`). Version is currently `1`.
 - Shelf records contain fixed `bookId[64]`, `title[192]`, and `author[96]`
   fields. TOC records contain fixed `chapterUid[64]`, `title[192]`,
   `uint32 chapterIdx`, and a paid flag.
-
+- `WRI1` records contain a generated EPUB-relative `href[64]` and the original
+  HTTPS image URL in `url[512]`; both are NUL-terminated. TXT chapters have a
+  valid zero-record index. Images that pass download and JPEG/PNG validation
+  are stored below `<bookId>/images/` and embedded into the generated EPUB.
+- `WIP1` records contain one `WRI1` record followed by `uint8 state`,
+  `uint8 attempts`, `uint8 redirects`, and one reserved byte. They schedule
+  pending images by HTTPS host so one TLS connection can serve a host batch.
+  During an `Embed` download, completed records are also the authoritative
+  image list for the OPF manifest and ZIP packaging pass.
+  `images.work` is always rebuilt from `WRI1`, may be deleted after interruption,
+  and is removed when the job finishes; it is not a durable cache format.
+- Per-book `options.bin` is an atomic fixed 8-byte `WRO1` record:
+  `uint32 magic` (`0x314F5257`), `uint16 version` (`1`), `uint8 imagePolicy`,
+  and one zero reserved byte. Policy `0` embeds validated images and policy `1`
+  excludes image requests and EPUB image entries while retaining `WRI1` and
+  existing image files. Missing, truncated, unknown-policy, or otherwise
+  damaged records fall back to policy `0`. The record is replaced only after a
+  generated EPUB succeeds; a directly returned complete EPUB remains unchanged.
+- Per-book `detail.bin` starts with a fixed 1024-byte `WBD1` header followed
+  immediately by the decoded UTF-8 introduction. The version-1 header contains
+  `uint32 magic` (`0x31444257`), `uint16 version`, `uint16 headerSize`,
+  `uint32 introLength`, `uint16 newRating`, `uint16 flags`,
+  `uint32 newRatingCount`, `uint32 totalWords`, then fixed NUL-terminated
+  `title[192]`, `author[96]`, `publisher[96]`, `category[96]`, and
+  `coverUrl[512]` fields plus eight zero reserved bytes. Flag bit 0 records that
+  the introduction was truncated at its 64 KiB UTF-8-safe limit. The file size
+  must equal `1024 + introLength`; unknown flags, non-zero reserved bytes, and
+  unterminated fixed strings invalidate the cache. The file is committed from
+  `detail.bin.part` only after the complete response parses successfully.
+- A successfully converted 96×140 2-bit cover is stored as
+  `<bookId>/cover.bmp`. Its JPEG/PNG source and `cover.bmp.part` are transient;
+  a failed fetch or conversion does not replace an existing BMP.
 Readers reject a wrong magic, version, record size, or total file length.
 Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.
 
 `WRA1` replaces the pre-release `WRD3` session marker after the application
 rename. `WRS4` rejects `WRS3` shelves whose book titles could be overwritten by
-nested category titles. Existing TOCs, chapter files, and EPUBs remain valid.
+nested category titles. A cached chapter without a valid `WRI1` index is
+downloaded again so pre-image-support chapter caches cannot silently lose
+figures. Existing `/WeRead/*.epub` files remain readable and are not upgraded
+automatically; delete and download one again to embed its images.
