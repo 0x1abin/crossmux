@@ -5,6 +5,7 @@
 #include <string>
 
 #include "WeReadHttpClient.h"
+#include "WeReadProtocol.h"
 #include "WeReadStore.h"
 
 namespace WeReadClient {
@@ -25,19 +26,37 @@ enum class Error {
   OutOfMemory,
 };
 
+struct DownloadOptions {
+  WeReadStore::ImagePolicy imagePolicy = WeReadStore::ImagePolicy::Embed;
+};
+
 class Operation {
  public:
-  enum class Kind : uint8_t { Sync, Download };
-  enum class Event : uint8_t { None, QrReady, Authenticated, ChapterComplete, Complete, Cancelled, Failed };
+  enum class Kind : uint8_t { Sync, Detail, Download };
+  enum class Event : uint8_t {
+    None,
+    QrReady,
+    Authenticated,
+    DetailReady,
+    ChapterComplete,
+    Complete,
+    Cancelled,
+    Failed
+  };
+  enum class ProgressStage : uint8_t { Chapters, Images, Packaging };
 
-  bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr);
+  bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {});
   Event step();
   void cancel();
   void reset();
 
   Error error() const { return error_; }
-  uint32_t completedChapters() const { return chapterIndex_; }
-  uint32_t chapterCount() const { return chapterCount_; }
+  ProgressStage progressStage() const { return progressStage_; }
+  uint32_t progressCompleted() const { return progressCompleted_; }
+  uint32_t progressTotal() const { return progressTotal_; }
+  static constexpr uint8_t progressDecile(const uint32_t completed, const uint32_t total) {
+    return total == 0 ? 0 : static_cast<uint8_t>((static_cast<uint64_t>(completed) * 10) / total);
+  }
   const char* qrUrl() const { return url_; }
   const char* finalPath() const { return outputPath_.c_str(); }
   bool active() const;
@@ -52,6 +71,10 @@ class Operation {
     LoginPoll,
     SyncShelf,
     Renew,
+    PrepareDetail,
+    FetchDetail,
+    FetchCover,
+    ConvertCover,
     PrepareDownload,
     FetchToc,
     OpenToc,
@@ -66,6 +89,8 @@ class Operation {
     DecodeText,
     DecodeEpub,
     AdvanceChapter,
+    PrepareImages,
+    DownloadImages,
     PackageBook,
     Complete,
     Cancelled,
@@ -77,13 +102,19 @@ class Operation {
   static constexpr size_t kIoBufferSize = 4096;
   static constexpr size_t kUrlSize = 512;
   static constexpr uint8_t kMaxRequestAttempts = 3;
+  static constexpr uint8_t kMaxImageRedirects = 5;
   static constexpr Event chapterResponseRetryEvent(const uint8_t attempts) {
     return attempts >= kMaxRequestAttempts ? Event::Failed : Event::None;
+  }
+  static constexpr Event detailCompletionEvent(const bool coverPending) {
+    return coverPending ? Event::DetailReady : Event::Complete;
   }
   static constexpr Phase chapterResponseRetryPhase() { return Phase::FetchReader; }
   static constexpr bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
     return paid && !plainText && !hasXhtmlTag;
   }
+  static constexpr bool imageAttemptPending(const uint8_t attempts) { return attempts < 2; }
+  static constexpr bool imageRedirectAllowed(const uint8_t redirects) { return redirects < kMaxImageRedirects; }
 
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
@@ -99,17 +130,27 @@ class Operation {
   Error pollLogin();
   Error renewSession();
   Error syncShelfOnce();
+  Error fetchDetailOnce();
+  Event fetchCover();
+  Event convertCover();
   Error fetchTocOnce();
   Error fetchReaderOnce();
   Error fetchShardOnce(const char* endpoint, const std::string& destination);
   Event inspectPrimary();
   Event decodeChapter(bool plainText);
   Event finishWholeBook(const std::string& source);
+  Event cancelNow();
+  Error prepareImageWork();
+  Event downloadNextImage();
+  Error requestImage(WeReadStore::ImageRecord& image, WeReadStore::ImageWorkState& state, uint8_t& attempts,
+                     uint8_t& redirects, bool trackProgress);
 
   Phase phase_ = Phase::Idle;
   Phase resumePhase_ = Phase::Idle;
   Kind kind_ = Kind::Sync;
   Error error_ = Error::Ok;
+  ProgressStage progressStage_ = ProgressStage::Chapters;
+  DownloadOptions options_;
   WeReadStore::Session session_;
   WeReadStore::ShelfRecord book_;
   WeReadStore::TocRecord chapter_;
@@ -117,8 +158,21 @@ class Operation {
   HalFile tocFile_;
   uint32_t chapterCount_ = 0;
   uint32_t chapterIndex_ = 0;
+  uint32_t progressCompleted_ = 0;
+  uint32_t progressTotal_ = 0;
+  uint32_t imageWorkCount_ = 0;
+  uint32_t imageWorkCursor_ = 0;
+  uint32_t imageDownloaded_ = 0;
+  uint32_t imageCached_ = 0;
+  uint32_t imageSkipped_ = 0;
+  uint32_t imageRedirects_ = 0;
+  uint32_t imageFilesCreated_ = 0;
+  uint64_t imageBytes_ = 0;
   uint8_t requestAttempt_ = 0;
   uint8_t chapterResponseAttempts_ = 0;
+  uint8_t coverAttempts_ = 0;
+  uint8_t coverRedirects_ = 0;
+  WeReadStore::ImageWorkState coverState_ = WeReadStore::ImageWorkState::Pending;
   bool cancelRequested_ = false;
   bool renewalAttempted_ = false;
   bool loginRecoveryAttempted_ = false;
@@ -126,10 +180,13 @@ class Operation {
   unsigned long loginStartedAt_ = 0;
   unsigned long nextActionAt_ = 0;
   unsigned long lastShardRequestAt_ = 0;
+  unsigned long imagePhaseStartedAt_ = 0;
   int responseStatus_ = 0;
   char previousVid_[64] = {};
   char loginUid_[128] = {};
   char psvts_[128] = {};
+  char imageHost_[128] = {};
+  WeReadProtocol::ImageType coverType_ = WeReadProtocol::ImageType::None;
   char cookie_[kCookieSize] = {};
   char url_[kUrlSize] = {};
   uint8_t ioBuffer_[kIoBufferSize] = {};

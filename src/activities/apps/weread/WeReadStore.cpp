@@ -23,7 +23,6 @@ struct IndexHeader {
 };
 static_assert(sizeof(IndexHeader) == 12);
 
-constexpr size_t kIoBufferSize = 1024;
 constexpr size_t kMaxSessionFileSize = 2048;
 constexpr char kSessionMagic[] = "WRA1\n";
 constexpr char kShelfPartPath[] = "/.crosspoint/weread/shelf.bin.part";
@@ -40,13 +39,11 @@ bool setBounded(char (&dest)[N], const char* value, const size_t len) {
   return true;
 }
 
-bool readIndexHeader(const char* path, const uint32_t magic, const uint16_t recordSize, HalFile& file,
-                     uint32_t& count) {
+bool validateIndexHeader(HalFile& file, const uint32_t magic, const uint16_t recordSize, uint32_t& count) {
   count = 0;
-  if (!Storage.openFileForRead("WR", path, file)) return false;
   IndexHeader header{};
-  if (file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) || header.magic != magic ||
-      header.version != kIndexVersion || header.recordSize != recordSize) {
+  if (!file.seek(0) || file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
+      header.magic != magic || header.version != kIndexVersion || header.recordSize != recordSize) {
     return false;
   }
   const uint64_t expectedSize =
@@ -56,10 +53,34 @@ bool readIndexHeader(const char* path, const uint32_t magic, const uint16_t reco
   return true;
 }
 
+bool readIndexHeader(const char* path, const uint32_t magic, const uint16_t recordSize, HalFile& file,
+                     uint32_t& count) {
+  return Storage.openFileForRead("WR", path, file) && validateIndexHeader(file, magic, recordSize, count);
+}
+
 bool readRecord(HalFile& file, const uint32_t index, const uint16_t recordSize, void* record) {
   const uint64_t offset = sizeof(IndexHeader) + static_cast<uint64_t>(index) * recordSize;
   return offset <= SIZE_MAX && file.seek(static_cast<size_t>(offset)) &&
          file.read(record, recordSize) == static_cast<int>(recordSize);
+}
+
+bool boundedString(const char* value, const size_t capacity) { return memchr(value, '\0', capacity) != nullptr; }
+
+bool validBookDetailHeader(const BookDetailHeader& header) {
+  static constexpr uint16_t kKnownFlags = kBookDetailIntroTruncated;
+  if (header.magic != kBookDetailMagic || header.version != kBookDetailVersion ||
+      header.headerSize != sizeof(BookDetailHeader) || header.introLength > kMaxBookIntroBytes ||
+      (header.flags & ~kKnownFlags) != 0 || !boundedString(header.title, sizeof(header.title)) ||
+      !boundedString(header.author, sizeof(header.author)) ||
+      !boundedString(header.publisher, sizeof(header.publisher)) ||
+      !boundedString(header.category, sizeof(header.category)) ||
+      !boundedString(header.coverUrl, sizeof(header.coverUrl))) {
+    return false;
+  }
+  for (const uint8_t byte : header.reserved) {
+    if (byte != 0) return false;
+  }
+  return true;
 }
 
 uint16_t readLe16(const uint8_t* bytes) {
@@ -233,6 +254,60 @@ void IndexWriter::abort() {
   count_ = 0;
 }
 
+bool BookDetailWriter::begin(const std::string& bookDir) {
+  abort();
+  finalPath_ = detailPath(bookDir);
+  partPath_ = finalPath_ + ".part";
+  if (Storage.exists(partPath_.c_str())) Storage.remove(partPath_.c_str());
+  if (!Storage.openFileForWrite("WR", partPath_, file_)) return false;
+  BookDetailHeader placeholder;
+  if (file_.write(&placeholder, sizeof(placeholder)) != sizeof(placeholder)) {
+    abort();
+    return false;
+  }
+  introLength_ = 0;
+  truncated_ = false;
+  active_ = true;
+  return true;
+}
+
+bool BookDetailWriter::appendIntro(const uint8_t* data, const size_t len) {
+  if (!active_ || (!data && len != 0)) return false;
+  if (truncated_ || len > kMaxBookIntroBytes - introLength_) {
+    truncated_ = true;
+    return true;
+  }
+  if (file_.write(data, len) != len) return false;
+  introLength_ += static_cast<uint32_t>(len);
+  return true;
+}
+
+bool BookDetailWriter::finish(BookDetailHeader header) {
+  if (!active_) return false;
+  header.introLength = introLength_;
+  if (truncated_) header.flags |= kBookDetailIntroTruncated;
+  if (!validBookDetailHeader(header) || !file_.seek(0) || file_.write(&header, sizeof(header)) != sizeof(header)) {
+    abort();
+    return false;
+  }
+  file_.flush();
+  file_.close();
+  active_ = false;
+  if (!atomicReplace(partPath_, finalPath_)) {
+    Storage.remove(partPath_.c_str());
+    return false;
+  }
+  return true;
+}
+
+void BookDetailWriter::abort() {
+  if (file_.isOpen()) file_.close();
+  active_ = false;
+  introLength_ = 0;
+  truncated_ = false;
+  if (!partPath_.empty() && Storage.exists(partPath_.c_str())) Storage.remove(partPath_.c_str());
+}
+
 bool openShelf(HalFile& file, uint32_t& count) {
   return readIndexHeader(kShelfPath, kShelfMagic, sizeof(ShelfRecord), file, count);
 }
@@ -241,12 +316,44 @@ bool openToc(const std::string& path, HalFile& file, uint32_t& count) {
   return readIndexHeader(path.c_str(), kTocMagic, sizeof(TocRecord), file, count);
 }
 
+bool openImageIndex(const std::string& path, HalFile& file, uint32_t& count) {
+  return readIndexHeader(path.c_str(), kImageMagic, sizeof(ImageRecord), file, count);
+}
+
+bool openImageWorkIndex(const std::string& path, HalFile& file, uint32_t& count) {
+  return readIndexHeader(path.c_str(), kImageWorkMagic, sizeof(ImageWorkRecord), file, count);
+}
+
+bool openImageWorkIndexForUpdate(const std::string& path, HalFile& file, uint32_t& count) {
+  file = Storage.open(path.c_str(), O_RDWR);
+  return file.isOpen() && validateIndexHeader(file, kImageWorkMagic, sizeof(ImageWorkRecord), count);
+}
+
 bool readShelfRecord(HalFile& file, const uint32_t index, ShelfRecord& record) {
   return readRecord(file, index, sizeof(record), &record);
 }
 
 bool readTocRecord(HalFile& file, const uint32_t index, TocRecord& record) {
   return readRecord(file, index, sizeof(record), &record);
+}
+
+bool readImageRecord(HalFile& file, const uint32_t index, ImageRecord& record) {
+  return readRecord(file, index, sizeof(record), &record);
+}
+
+bool readImageWorkRecord(HalFile& file, const uint32_t index, ImageWorkRecord& record) {
+  return readRecord(file, index, sizeof(record), &record);
+}
+
+bool updateImageWorkRecord(HalFile& file, const uint32_t count, const uint32_t index, const ImageWorkRecord& record) {
+  if (!file.isOpen() || index >= count) return false;
+  const uint64_t offset = sizeof(IndexHeader) + static_cast<uint64_t>(index) * sizeof(ImageWorkRecord);
+  if (offset > SIZE_MAX || !file.seek(static_cast<size_t>(offset)) ||
+      file.write(&record, sizeof(record)) != sizeof(record)) {
+    return false;
+  }
+  file.flush();
+  return true;
 }
 
 std::string bookDirectory(const char* bookId) {
@@ -261,10 +368,69 @@ std::string chapterPath(const std::string& bookDir, const uint32_t chapterIndex)
   return bookDir + filename;
 }
 
+std::string imageIndexPath(const std::string& bookDir, const uint32_t chapterIndex) {
+  char filename[40];
+  snprintf(filename, sizeof(filename), "/chapters/%06u.images", static_cast<unsigned>(chapterIndex));
+  return bookDir + filename;
+}
+
+std::string imageWorkPath(const std::string& bookDir) { return bookDir + "/images.work"; }
+
+std::string optionsPath(const std::string& bookDir) { return bookDir + "/options.bin"; }
+
+std::string detailPath(const std::string& bookDir) { return bookDir + "/detail.bin"; }
+
+std::string coverPath(const std::string& bookDir) { return bookDir + "/cover.bmp"; }
+
 std::string finalBookPath(const ShelfRecord& book) {
   const std::string title = StringUtils::sanitizeFilename(book.title, 80);
   const std::string id = StringUtils::sanitizeFilename(book.bookId, 40);
   return "/WeRead/" + title + "-" + id + ".epub";
+}
+
+bool loadBookOptions(const std::string& bookDir, BookOptions& options) {
+  options = {};
+  const std::string path = optionsPath(bookDir);
+  if (!Storage.exists(path.c_str())) return false;
+  HalFile file;
+  if (!Storage.openFileForRead("WR", path, file) || file.fileSize64() != sizeof(options) ||
+      file.read(&options, sizeof(options)) != static_cast<int>(sizeof(options)) || options.magic != kBookOptionsMagic ||
+      options.version != kBookOptionsVersion || options.reserved != 0 ||
+      (options.imagePolicy != ImagePolicy::Embed && options.imagePolicy != ImagePolicy::Exclude)) {
+    options = {};
+    return false;
+  }
+  return true;
+}
+
+bool saveBookOptions(const std::string& bookDir, const BookOptions& options) {
+  if (options.magic != kBookOptionsMagic || options.version != kBookOptionsVersion || options.reserved != 0 ||
+      (options.imagePolicy != ImagePolicy::Embed && options.imagePolicy != ImagePolicy::Exclude)) {
+    return false;
+  }
+  const std::string finalPath = optionsPath(bookDir);
+  const std::string partPath = finalPath + ".part";
+  if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+  HalFile file;
+  if (!Storage.openFileForWrite("WR", partPath, file) || file.write(&options, sizeof(options)) != sizeof(options)) {
+    if (file.isOpen()) file.close();
+    if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+    return false;
+  }
+  file.flush();
+  file.close();
+  return atomicReplace(partPath, finalPath);
+}
+
+bool openBookDetail(const std::string& bookDir, BookDetailHeader& header, HalFile& file) {
+  header = {};
+  if (!Storage.openFileForRead("WR", detailPath(bookDir), file) ||
+      file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) || !validBookDetailHeader(header) ||
+      file.fileSize64() != static_cast<uint64_t>(sizeof(header)) + header.introLength) {
+    header = {};
+    return false;
+  }
+  return true;
 }
 
 bool atomicReplace(const std::string& partPath, const std::string& finalPath) {
@@ -364,8 +530,10 @@ bool StoreOnlyZipWriter::writeU32(HalFile& file, const uint32_t value) {
   return writeBytes(file, bytes, sizeof(bytes));
 }
 
-bool StoreOnlyZipWriter::begin(const std::string& outputPath, const std::string& centralPath) {
+bool StoreOnlyZipWriter::begin(const std::string& outputPath, const std::string& centralPath, uint8_t* buffer,
+                               const size_t bufferSize) {
   abort();
+  if (!buffer || bufferSize == 0) return false;
   outputPath_ = outputPath;
   centralPath_ = centralPath;
   if (Storage.exists(outputPath_.c_str())) Storage.remove(outputPath_.c_str());
@@ -375,14 +543,8 @@ bool StoreOnlyZipWriter::begin(const std::string& outputPath, const std::string&
     abort();
     return false;
   }
-  // One fixed 1 KB transfer buffer is allocated once for the writer lifetime;
-  // chapter files can be arbitrarily large without changing heap use.
-  buffer_ = makeUniqueNoThrow<uint8_t[]>(kIoBufferSize);
-  if (!buffer_) {
-    LOG_ERR("WR", "OOM: %u-byte EPUB writer buffer", static_cast<unsigned>(kIoBufferSize));
-    abort();
-    return false;
-  }
+  buffer_ = buffer;
+  bufferSize_ = bufferSize;
   entryCount_ = 0;
   active_ = true;
   return true;
@@ -434,10 +596,10 @@ bool StoreOnlyZipWriter::addFile(const char* name, const std::string& sourcePath
   uint32_t crc = 0xFFFFFFFF;
   uint32_t copied = 0;
   while (copied < record.size) {
-    const size_t wanted = std::min<size_t>(kIoBufferSize, record.size - copied);
-    const int got = source.read(buffer_.get(), wanted);
-    if (got <= 0 || !writeBytes(output_, buffer_.get(), static_cast<size_t>(got))) return false;
-    crc = WeReadProtocol::crc32Update(crc, buffer_.get(), static_cast<size_t>(got));
+    const size_t wanted = std::min<size_t>(bufferSize_, record.size - copied);
+    const int got = source.read(buffer_, wanted);
+    if (got <= 0 || !writeBytes(output_, buffer_, static_cast<size_t>(got))) return false;
+    crc = WeReadProtocol::crc32Update(crc, buffer_, static_cast<size_t>(got));
     copied += static_cast<uint32_t>(got);
   }
   record.crc = crc ^ 0xFFFFFFFF;
@@ -489,7 +651,8 @@ bool StoreOnlyZipWriter::finish() {
   output_.flush();
   output_.close();
   active_ = false;
-  buffer_.reset();
+  buffer_ = nullptr;
+  bufferSize_ = 0;
   Storage.remove(centralPath_.c_str());
   if (!ok) Storage.remove(outputPath_.c_str());
   return ok;
@@ -498,7 +661,8 @@ bool StoreOnlyZipWriter::finish() {
 void StoreOnlyZipWriter::abort() {
   if (output_.isOpen()) output_.close();
   if (central_.isOpen()) central_.close();
-  buffer_.reset();
+  buffer_ = nullptr;
+  bufferSize_ = 0;
   active_ = false;
   entryCount_ = 0;
   if (!outputPath_.empty() && Storage.exists(outputPath_.c_str())) Storage.remove(outputPath_.c_str());

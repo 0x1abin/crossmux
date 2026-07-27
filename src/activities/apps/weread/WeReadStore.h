@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <string>
 
 namespace WeReadStore {
@@ -12,9 +11,31 @@ namespace WeReadStore {
 constexpr const char* kRoot = "/.crosspoint/weread";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
-constexpr uint32_t kShelfMagic = 0x34535257;  // WRS4
-constexpr uint32_t kTocMagic = 0x31545257;    // WRT1
+constexpr uint32_t kShelfMagic = 0x34535257;        // WRS4
+constexpr uint32_t kTocMagic = 0x31545257;          // WRT1
+constexpr uint32_t kImageMagic = 0x31495257;        // WRI1
+constexpr uint32_t kImageWorkMagic = 0x31504957;    // WIP1
+constexpr uint32_t kBookOptionsMagic = 0x314F5257;  // WRO1
+constexpr uint32_t kBookDetailMagic = 0x31444257;   // WBD1
 constexpr uint16_t kIndexVersion = 1;
+constexpr uint16_t kBookOptionsVersion = 1;
+constexpr uint16_t kBookDetailVersion = 1;
+constexpr uint16_t kBookDetailHeaderSize = 1024;
+constexpr uint32_t kMaxBookIntroBytes = 64 * 1024;
+constexpr uint16_t kBookDetailIntroTruncated = 1U << 0;
+
+enum class ImagePolicy : uint8_t {
+  Embed,
+  Exclude,
+};
+
+struct BookOptions {
+  uint32_t magic = kBookOptionsMagic;
+  uint16_t version = kBookOptionsVersion;
+  ImagePolicy imagePolicy = ImagePolicy::Embed;
+  uint8_t reserved = 0;
+};
+static_assert(sizeof(BookOptions) == 8);
 
 struct Session {
   char vid[64] = {};
@@ -33,6 +54,24 @@ struct ShelfRecord {
   char author[96] = {};
 };
 
+struct BookDetailHeader {
+  uint32_t magic = kBookDetailMagic;
+  uint16_t version = kBookDetailVersion;
+  uint16_t headerSize = kBookDetailHeaderSize;
+  uint32_t introLength = 0;
+  uint16_t newRating = 0;
+  uint16_t flags = 0;
+  uint32_t newRatingCount = 0;
+  uint32_t totalWords = 0;
+  char title[192] = {};
+  char author[96] = {};
+  char publisher[96] = {};
+  char category[96] = {};
+  char coverUrl[512] = {};
+  uint8_t reserved[8] = {};
+};
+static_assert(sizeof(BookDetailHeader) == kBookDetailHeaderSize);
+
 struct TocRecord {
   char chapterUid[64] = {};
   char title[192] = {};
@@ -40,6 +79,27 @@ struct TocRecord {
   uint8_t paid = 0;
   uint8_t reserved[3] = {};
 };
+
+struct ImageRecord {
+  char href[64] = {};
+  char url[512] = {};
+};
+static_assert(sizeof(ImageRecord) == 576);
+
+enum class ImageWorkState : uint8_t {
+  Pending,
+  Complete,
+  Skipped,
+};
+
+struct ImageWorkRecord {
+  ImageRecord image;
+  ImageWorkState state = ImageWorkState::Pending;
+  uint8_t attempts = 0;
+  uint8_t redirects = 0;
+  uint8_t reserved = 0;
+};
+static_assert(sizeof(ImageWorkRecord) == 580);
 
 class IndexWriter {
  public:
@@ -59,6 +119,22 @@ class IndexWriter {
   bool active_ = false;
 };
 
+class BookDetailWriter {
+ public:
+  bool begin(const std::string& bookDir);
+  bool appendIntro(const uint8_t* data, size_t len);
+  bool finish(BookDetailHeader header);
+  void abort();
+
+ private:
+  HalFile file_;
+  std::string finalPath_;
+  std::string partPath_;
+  uint32_t introLength_ = 0;
+  bool truncated_ = false;
+  bool active_ = false;
+};
+
 bool ensureRoot();
 bool loadSession(Session& session);
 bool saveSession(const Session& session);
@@ -67,20 +143,34 @@ bool clearShelf();
 
 bool openShelf(HalFile& file, uint32_t& count);
 bool openToc(const std::string& path, HalFile& file, uint32_t& count);
+bool openImageIndex(const std::string& path, HalFile& file, uint32_t& count);
+bool openImageWorkIndex(const std::string& path, HalFile& file, uint32_t& count);
+bool openImageWorkIndexForUpdate(const std::string& path, HalFile& file, uint32_t& count);
 bool readShelfRecord(HalFile& file, uint32_t index, ShelfRecord& record);
 bool readTocRecord(HalFile& file, uint32_t index, TocRecord& record);
+bool readImageRecord(HalFile& file, uint32_t index, ImageRecord& record);
+bool readImageWorkRecord(HalFile& file, uint32_t index, ImageWorkRecord& record);
+bool updateImageWorkRecord(HalFile& file, uint32_t count, uint32_t index, const ImageWorkRecord& record);
 
 std::string bookDirectory(const char* bookId);
 std::string tocPath(const char* bookId);
 std::string chapterPath(const std::string& bookDir, uint32_t chapterIndex);
+std::string imageIndexPath(const std::string& bookDir, uint32_t chapterIndex);
+std::string imageWorkPath(const std::string& bookDir);
+std::string optionsPath(const std::string& bookDir);
+std::string detailPath(const std::string& bookDir);
+std::string coverPath(const std::string& bookDir);
 std::string finalBookPath(const ShelfRecord& book);
 
+bool loadBookOptions(const std::string& bookDir, BookOptions& options);
+bool saveBookOptions(const std::string& bookDir, const BookOptions& options);
+bool openBookDetail(const std::string& bookDir, BookDetailHeader& header, HalFile& file);
 bool atomicReplace(const std::string& partPath, const std::string& finalPath);
 bool looksLikeZip(const std::string& path);
 
 class StoreOnlyZipWriter {
  public:
-  bool begin(const std::string& outputPath, const std::string& centralPath);
+  bool begin(const std::string& outputPath, const std::string& centralPath, uint8_t* buffer, size_t bufferSize);
   bool addBuffer(const char* name, const uint8_t* data, size_t len);
   bool addFile(const char* name, const std::string& sourcePath);
   bool finish();
@@ -104,7 +194,8 @@ class StoreOnlyZipWriter {
 
   HalFile output_;
   HalFile central_;
-  std::unique_ptr<uint8_t[]> buffer_;
+  uint8_t* buffer_ = nullptr;
+  size_t bufferSize_ = 0;
   std::string outputPath_;
   std::string centralPath_;
   uint16_t entryCount_ = 0;

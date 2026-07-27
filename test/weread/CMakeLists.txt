@@ -6,6 +6,7 @@ add_executable(WeReadProtocolTest
 target_include_directories(WeReadProtocolTest PRIVATE
   ${REPO_ROOT}/src
   ${REPO_ROOT}/src/activities/apps/weread
+  ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/simulator/shims
@@ -36,6 +37,7 @@ add_executable(WeReadStoreTest
 target_include_directories(WeReadStoreTest PRIVATE
   ${REPO_ROOT}/src
   ${REPO_ROOT}/src/activities/apps/weread
+  ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
@@ -62,13 +64,18 @@ find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 
 add_executable(WeReadSimulatorShimTest
   WeReadSimulatorShimTest.cpp
+  ${REPO_ROOT}/src/activities/apps/weread/WeReadHttpClient.cpp
 )
 
 target_include_directories(WeReadSimulatorShimTest PRIVATE
+  ${REPO_ROOT}/src/activities/apps/weread
+  ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/simulator/shims
 )
 
 target_compile_definitions(WeReadSimulatorShimTest PRIVATE
+  CROSSPOINT_EMULATED=1
+  CROSSPOINT_VERSION="test"
   CROSSPOINT_SIM_REAL_MD5=1
   CROSSPOINT_SIM_VERIFIED_TLS=1
 )

@@ -3,11 +3,14 @@
 #if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
 
 #include <Arduino.h>
+#include <HalClock.h>
+#include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <MD5Builder.h>
 #include <Memory.h>
+#include <PngToBmpConverter.h>
 #include <StreamingJsonParser.h>
-#include <esp_sntp.h>
+#include <strings.h>
 
 #include <algorithm>
 #include <cctype>
@@ -35,6 +38,7 @@ constexpr unsigned long kShardPaceMs = 400;
 constexpr unsigned long kClockSyncTimeoutMs = 12000;
 constexpr unsigned long kNetworkRetryBaseMs = 1000;
 constexpr size_t kTransferBufferSize = 1024;
+constexpr size_t kMaxImageBytes = 4 * 1024 * 1024;
 // Local decode/package work uses at most one 1 KB transfer buffer at a time.
 // Keep wider headroom for SD internals and the event-driven progress render.
 constexpr size_t kBookSessionMinFreeHeap = 20 * 1024;
@@ -48,25 +52,6 @@ void logMemory([[maybe_unused]] const char* phase) {
 void logJobComplete() {
   LOG_INF("WR", "job complete");
   logMemory("job complete");
-}
-
-void startClockSync() {
-  if (esp_sntp_enabled()) esp_sntp_stop();
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-#ifdef ENABLE_CHINESE_VERSION
-  esp_sntp_setservername(0, "ntp.aliyun.com");
-  esp_sntp_setservername(1, "ntp.tencent.com");
-  esp_sntp_setservername(2, "cn.pool.ntp.org");
-#else
-  esp_sntp_setservername(0, "pool.ntp.org");
-  esp_sntp_setservername(1, nullptr);
-  esp_sntp_setservername(2, nullptr);
-#endif
-  esp_sntp_init();
-}
-
-void stopClockSync() {
-  if (esp_sntp_enabled()) esp_sntp_stop();
 }
 
 struct ResponseSink {
@@ -326,7 +311,8 @@ void simpleArrayEnd(void* raw) {
 
 JsonCallbacks simpleCallbacks(SimpleJsonContext* ctx) {
   return {ctx,     simpleKey,         simpleString,    simpleNumber,     simpleBool,
-          nullptr, simpleObjectStart, simpleObjectEnd, simpleArrayStart, simpleArrayEnd};
+          nullptr, simpleObjectStart, simpleObjectEnd, simpleArrayStart, simpleArrayEnd,
+          nullptr};
 }
 
 bool resetSimple(void* raw) {
@@ -452,7 +438,8 @@ void shelfArrayEnd(void* raw) {
 
 JsonCallbacks shelfCallbacks(ShelfJsonContext* ctx) {
   return {ctx,     shelfKey,         shelfValue,     shelfValue,      nullptr,
-          nullptr, shelfObjectStart, shelfObjectEnd, shelfArrayStart, shelfArrayEnd};
+          nullptr, shelfObjectStart, shelfObjectEnd, shelfArrayStart, shelfArrayEnd,
+          nullptr};
 }
 
 bool resetShelf(void* raw) {
@@ -594,7 +581,8 @@ void tocArrayEnd(void* raw) {
 }
 
 JsonCallbacks tocCallbacks(TocJsonContext* ctx) {
-  return {ctx, tocKey, tocValue, tocValue, tocBool, nullptr, tocObjectStart, tocObjectEnd, tocArrayStart, tocArrayEnd};
+  return {ctx,          tocKey,        tocValue,    tocValue, tocBool, nullptr, tocObjectStart,
+          tocObjectEnd, tocArrayStart, tocArrayEnd, nullptr};
 }
 
 bool resetToc(void* raw) {
@@ -621,10 +609,286 @@ bool feedToc(void* raw, const uint8_t* data, const size_t len) {
   return !ctx.parser->hasError() && !ctx.writeFailed;
 }
 
+enum class DetailField : uint8_t {
+  None,
+  Title,
+  Author,
+  Intro,
+  Cover,
+  Publisher,
+  Category,
+  Categories,
+  CategoryTitle,
+  TotalWords,
+  NewRating,
+  NewRatingCount,
+  ErrorCode,
+};
+
+struct DetailJsonContext {
+  StreamingJsonParser* parser = nullptr;
+  WeReadProtocol::JsonStringDecoder* introDecoder = nullptr;
+  WeReadStore::BookDetailWriter writer;
+  WeReadStore::BookDetailHeader header;
+  const WeReadStore::ShelfRecord* book = nullptr;
+  const std::string* bookDir = nullptr;
+  DetailField field = DetailField::None;
+  int depth = 0;
+  int categoriesDepth = -1;
+  int errorCode = 0;
+  uint8_t introBuffer[256] = {};
+  size_t introBufferLength = 0;
+  bool rootClosed = false;
+  bool introChunking = false;
+  bool writeFailed = false;
+};
+
+bool writeDetailIntro(void* raw, const uint8_t* data, const size_t len) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  if (ctx.introBufferLength + len > sizeof(ctx.introBuffer) &&
+      !ctx.writer.appendIntro(ctx.introBuffer, ctx.introBufferLength)) {
+    ctx.writeFailed = true;
+    return false;
+  }
+  if (ctx.introBufferLength + len > sizeof(ctx.introBuffer)) ctx.introBufferLength = 0;
+  if (len > sizeof(ctx.introBuffer) - ctx.introBufferLength) {
+    ctx.writeFailed = true;
+    return false;
+  }
+  memcpy(ctx.introBuffer + ctx.introBufferLength, data, len);
+  ctx.introBufferLength += len;
+  return true;
+}
+
+bool finishDetail(void* raw) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  if (ctx.writeFailed) return false;
+  if (ctx.introBufferLength > 0 && !ctx.writer.appendIntro(ctx.introBuffer, ctx.introBufferLength)) {
+    ctx.writeFailed = true;
+    return false;
+  }
+  ctx.introBufferLength = 0;
+  return true;
+}
+
+void detailKey(void* raw, const char* key, size_t) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  if (ctx.depth == 1) {
+    if (strcmp(key, "title") == 0) {
+      ctx.field = DetailField::Title;
+    } else if (strcmp(key, "author") == 0) {
+      ctx.field = DetailField::Author;
+    } else if (strcmp(key, "intro") == 0) {
+      ctx.field = DetailField::Intro;
+    } else if (strcmp(key, "cover") == 0) {
+      ctx.field = DetailField::Cover;
+    } else if (strcmp(key, "publisher") == 0) {
+      ctx.field = DetailField::Publisher;
+    } else if (strcmp(key, "category") == 0) {
+      ctx.field = DetailField::Category;
+    } else if (strcmp(key, "categories") == 0) {
+      ctx.field = DetailField::Categories;
+    } else if (strcmp(key, "totalWords") == 0 || strcmp(key, "wordCount") == 0) {
+      ctx.field = DetailField::TotalWords;
+    } else if (strcmp(key, "newRating") == 0) {
+      ctx.field = DetailField::NewRating;
+    } else if (strcmp(key, "newRatingCount") == 0) {
+      ctx.field = DetailField::NewRatingCount;
+    } else if (strcmp(key, "errcode") == 0 || strcmp(key, "errCode") == 0) {
+      ctx.field = DetailField::ErrorCode;
+    } else {
+      ctx.field = DetailField::None;
+    }
+    return;
+  }
+  ctx.field = ctx.categoriesDepth >= 0 && ctx.depth == ctx.categoriesDepth + 1 && strcmp(key, "title") == 0
+                  ? DetailField::CategoryTitle
+                  : DetailField::None;
+}
+
+void detailString(void* raw, const char* value, const size_t len) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  switch (ctx.field) {
+    case DetailField::Title:
+      copyDecoded(value, len, ctx.header.title, sizeof(ctx.header.title));
+      break;
+    case DetailField::Author:
+      copyDecoded(value, len, ctx.header.author, sizeof(ctx.header.author));
+      break;
+    case DetailField::Intro:
+      ctx.introDecoder->reset();
+      if (!ctx.introDecoder->feed(value, len) || !ctx.introDecoder->finish()) ctx.writeFailed = true;
+      break;
+    case DetailField::Cover:
+      copyDecoded(value, len, ctx.header.coverUrl, sizeof(ctx.header.coverUrl));
+      {
+        char normalized[sizeof(ctx.header.coverUrl)] = {};
+        if (WeReadProtocol::normalizeImageUrl(ctx.header.coverUrl, normalized, sizeof(normalized)) ==
+            WeReadProtocol::ImageType::None) {
+          ctx.header.coverUrl[0] = '\0';
+        } else {
+          memcpy(ctx.header.coverUrl, normalized, sizeof(ctx.header.coverUrl));
+        }
+      }
+      break;
+    case DetailField::Publisher:
+      copyDecoded(value, len, ctx.header.publisher, sizeof(ctx.header.publisher));
+      break;
+    case DetailField::Category:
+      copyDecoded(value, len, ctx.header.category, sizeof(ctx.header.category));
+      break;
+    case DetailField::CategoryTitle:
+      if (!ctx.header.category[0]) copyDecoded(value, len, ctx.header.category, sizeof(ctx.header.category));
+      break;
+    case DetailField::ErrorCode:
+      ctx.errorCode = atoi(value);
+      break;
+    case DetailField::TotalWords:
+      ctx.header.totalWords = static_cast<uint32_t>(std::min<unsigned long>(strtoul(value, nullptr, 10), UINT32_MAX));
+      break;
+    case DetailField::NewRating: {
+      const unsigned long rating = strtoul(value, nullptr, 10);
+      ctx.header.newRating = rating <= 1000 ? static_cast<uint16_t>(rating) : 0;
+      break;
+    }
+    case DetailField::NewRatingCount:
+      ctx.header.newRatingCount =
+          static_cast<uint32_t>(std::min<unsigned long>(strtoul(value, nullptr, 10), UINT32_MAX));
+      break;
+    case DetailField::None:
+    case DetailField::Categories:
+      break;
+  }
+  ctx.field = DetailField::None;
+}
+
+void detailStringChunk(void* raw, const char* value, const size_t len, const bool final) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  if (ctx.field != DetailField::Intro) {
+    if (final) ctx.field = DetailField::None;
+    return;
+  }
+  if (!ctx.introChunking) {
+    ctx.introDecoder->reset();
+    ctx.introChunking = true;
+  }
+  if (!ctx.introDecoder->feed(value, len) || (final && !ctx.introDecoder->finish())) ctx.writeFailed = true;
+  if (final) {
+    ctx.introChunking = false;
+    ctx.field = DetailField::None;
+  }
+}
+
+void detailNumber(void* raw, const char* value, size_t) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  const unsigned long parsed = strtoul(value, nullptr, 10);
+  switch (ctx.field) {
+    case DetailField::TotalWords:
+      ctx.header.totalWords = static_cast<uint32_t>(std::min<unsigned long>(parsed, UINT32_MAX));
+      break;
+    case DetailField::NewRating:
+      ctx.header.newRating = parsed <= 1000 ? static_cast<uint16_t>(parsed) : 0;
+      break;
+    case DetailField::NewRatingCount:
+      ctx.header.newRatingCount = static_cast<uint32_t>(std::min<unsigned long>(parsed, UINT32_MAX));
+      break;
+    case DetailField::ErrorCode:
+      ctx.errorCode = atoi(value);
+      break;
+    case DetailField::None:
+    case DetailField::Title:
+    case DetailField::Author:
+    case DetailField::Intro:
+    case DetailField::Cover:
+    case DetailField::Publisher:
+    case DetailField::Category:
+    case DetailField::Categories:
+    case DetailField::CategoryTitle:
+      break;
+  }
+  ctx.field = DetailField::None;
+}
+
+void detailObjectStart(void* raw) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  ++ctx.depth;
+  ctx.field = DetailField::None;
+}
+
+void detailObjectEnd(void* raw) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  if (ctx.depth == 1) ctx.rootClosed = true;
+  if (ctx.depth > 0) --ctx.depth;
+  ctx.field = DetailField::None;
+}
+
+void detailArrayStart(void* raw) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  ++ctx.depth;
+  if (ctx.field == DetailField::Categories) ctx.categoriesDepth = ctx.depth;
+  ctx.field = DetailField::None;
+}
+
+void detailArrayEnd(void* raw) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  if (ctx.depth == ctx.categoriesDepth) ctx.categoriesDepth = -1;
+  if (ctx.depth > 0) --ctx.depth;
+  ctx.field = DetailField::None;
+}
+
+JsonCallbacks detailCallbacks(DetailJsonContext* ctx) {
+  return {ctx,
+          detailKey,
+          detailString,
+          detailNumber,
+          nullptr,
+          nullptr,
+          detailObjectStart,
+          detailObjectEnd,
+          detailArrayStart,
+          detailArrayEnd,
+          detailStringChunk};
+}
+
+bool resetDetail(void* raw) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  ctx.writer.abort();
+  if (!ctx.book || !ctx.bookDir || !ctx.writer.begin(*ctx.bookDir)) return false;
+  ctx.header = {};
+  memcpy(ctx.header.title, ctx.book->title, sizeof(ctx.header.title));
+  ctx.header.title[sizeof(ctx.header.title) - 1] = '\0';
+  memcpy(ctx.header.author, ctx.book->author, sizeof(ctx.header.author));
+  ctx.header.author[sizeof(ctx.header.author) - 1] = '\0';
+  ctx.field = DetailField::None;
+  ctx.depth = 0;
+  ctx.categoriesDepth = -1;
+  ctx.errorCode = 0;
+  ctx.introBufferLength = 0;
+  ctx.rootClosed = false;
+  ctx.introChunking = false;
+  ctx.writeFailed = false;
+  ctx.introDecoder->reset();
+  ctx.parser->reset();
+  return true;
+}
+
+bool feedDetail(void* raw, const uint8_t* data, const size_t len) {
+  auto& ctx = *static_cast<DetailJsonContext*>(raw);
+  ctx.parser->feed(reinterpret_cast<const char*>(data), len);
+  return !ctx.parser->hasError() && !ctx.writeFailed;
+}
+
 struct FileSink {
+  enum class Failure : uint8_t { None, SdCard, TooLarge, Cancelled };
+
   HalFile file;
   const std::string* path = nullptr;
   size_t size = 0;
+  size_t maxSize = SIZE_MAX;
+  bool* cancelRequested = nullptr;
+  Failure failure = Failure::None;
+  uint8_t prefix[8] = {};
+  size_t prefixSize = 0;
 };
 
 bool resetFile(void* raw) {
@@ -633,12 +897,30 @@ bool resetFile(void* raw) {
   if (sink.file.isOpen()) sink.file.close();
   if (Storage.exists(sink.path->c_str())) Storage.remove(sink.path->c_str());
   sink.size = 0;
+  sink.failure = FileSink::Failure::None;
+  sink.prefixSize = 0;
   return Storage.openFileForWrite("WR", *sink.path, sink.file);
 }
 
 bool writeFile(void* raw, const uint8_t* data, const size_t len) {
   auto& sink = *static_cast<FileSink*>(raw);
-  if (sink.file.write(data, len) != len) return false;
+  if (sink.cancelRequested && *sink.cancelRequested) {
+    sink.failure = FileSink::Failure::Cancelled;
+    return false;
+  }
+  if (len > sink.maxSize - sink.size) {
+    sink.failure = FileSink::Failure::TooLarge;
+    return false;
+  }
+  const size_t prefixBytes = std::min(len, sizeof(sink.prefix) - sink.prefixSize);
+  if (prefixBytes > 0) {
+    memcpy(sink.prefix + sink.prefixSize, data, prefixBytes);
+    sink.prefixSize += prefixBytes;
+  }
+  if (sink.file.write(data, len) != len) {
+    sink.failure = FileSink::Failure::SdCard;
+    return false;
+  }
   sink.size += len;
   return true;
 }
@@ -662,6 +944,94 @@ bool isSafeProtocolToken(const char* value) {
     if (!std::isalnum(*p) && *p != '-' && *p != '_') return false;
   }
   return true;
+}
+
+bool isWereadUrl(const char* url) {
+  WeReadHttpClient::HttpsUrlView parts;
+  if (!WeReadHttpClient::parseHttpsUrl(url, parts)) return false;
+  static constexpr char kDomain[] = "weread.qq.com";
+  const size_t domainLength = sizeof(kDomain) - 1;
+  if (parts.hostLength == domainLength) {
+    return strncasecmp(parts.host, kDomain, domainLength) == 0;
+  }
+  return parts.hostLength > domainLength && parts.host[parts.hostLength - domainLength - 1] == '.' &&
+         strncasecmp(parts.host + parts.hostLength - domainLength, kDomain, domainLength) == 0;
+}
+
+bool resolveRedirectUrl(const char* current, const char* location, char* output, const size_t outputSize) {
+  if (!current || !location || !output || outputSize == 0) return false;
+  while (std::isspace(static_cast<unsigned char>(*location))) ++location;
+  const char* end = location + strlen(location);
+  while (end > location && std::isspace(static_cast<unsigned char>(end[-1]))) --end;
+  const char* fragment = static_cast<const char*>(memchr(location, '#', static_cast<size_t>(end - location)));
+  if (fragment) end = fragment;
+  if (end == location) return false;
+
+  int written = -1;
+  if (static_cast<size_t>(end - location) >= 8 && strncmp(location, "https://", 8) == 0) {
+    if (static_cast<size_t>(end - location) >= outputSize) return false;
+    memcpy(output, location, static_cast<size_t>(end - location));
+    output[end - location] = '\0';
+  } else if (end - location >= 2 && location[0] == '/' && location[1] == '/') {
+    written = snprintf(output, outputSize, "https:%.*s", static_cast<int>(end - location), location);
+  } else if (location[0] == '/') {
+    WeReadHttpClient::HttpsUrlView parts;
+    if (!WeReadHttpClient::parseHttpsUrl(current, parts)) return false;
+    written = snprintf(output, outputSize, "https://%.*s%.*s", static_cast<int>(parts.hostLength), parts.host,
+                       static_cast<int>(end - location), location);
+  } else {
+    return false;
+  }
+  if (written >= 0 && (written == 0 || static_cast<size_t>(written) >= outputSize)) return false;
+  WeReadHttpClient::HttpsUrlView verified;
+  return WeReadHttpClient::parseHttpsUrl(output, verified);
+}
+
+WeReadProtocol::ImageType imageTypeFromHref(const char* href) {
+  if (!href) return WeReadProtocol::ImageType::None;
+  const size_t length = strlen(href);
+  if (length > 4 && strcasecmp(href + length - 4, ".jpg") == 0) return WeReadProtocol::ImageType::Jpeg;
+  if (length > 4 && strcasecmp(href + length - 4, ".png") == 0) return WeReadProtocol::ImageType::Png;
+  return WeReadProtocol::ImageType::None;
+}
+
+bool validImageRecord(const WeReadStore::ImageRecord& record) {
+  if (!memchr(record.href, '\0', sizeof(record.href)) || !memchr(record.url, '\0', sizeof(record.url)) ||
+      strncmp(record.href, "images/", 7) != 0 || strstr(record.href, "..") ||
+      imageTypeFromHref(record.href) == WeReadProtocol::ImageType::None) {
+    return false;
+  }
+  WeReadHttpClient::HttpsUrlView parts;
+  return WeReadHttpClient::parseHttpsUrl(record.url, parts);
+}
+
+bool validImageWorkRecord(const WeReadStore::ImageWorkRecord& record) {
+  switch (record.state) {
+    case WeReadStore::ImageWorkState::Pending:
+      return record.attempts < 2 && validImageRecord(record.image);
+    case WeReadStore::ImageWorkState::Complete:
+    case WeReadStore::ImageWorkState::Skipped:
+      return validImageRecord(record.image);
+  }
+  return false;
+}
+
+bool validImageFile(const std::string& path, const WeReadProtocol::ImageType type) {
+  HalFile file;
+  uint8_t prefix[8] = {};
+  if (type == WeReadProtocol::ImageType::None || !Storage.openFileForRead("WR", path, file) || file.fileSize64() == 0 ||
+      file.fileSize64() > kMaxImageBytes) {
+    return false;
+  }
+  const size_t wanted = type == WeReadProtocol::ImageType::Png ? sizeof(prefix) : 3;
+  if (file.read(prefix, wanted) != static_cast<int>(wanted)) return false;
+  static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+  return type == WeReadProtocol::ImageType::Png ? memcmp(prefix, kPng, sizeof(kPng)) == 0
+                                                : prefix[0] == 0xFF && prefix[1] == 0xD8 && prefix[2] == 0xFF;
+}
+
+const char* imageMediaType(const WeReadProtocol::ImageType type) {
+  return type == WeReadProtocol::ImageType::Png ? "image/png" : "image/jpeg";
 }
 
 bool makeReaderReferer(const char* bookId, const char* chapterUid, std::string& referer) {
@@ -914,14 +1284,43 @@ bool writeLiteral(HalFile& output, const char* text) {
   return output.write(reinterpret_cast<const uint8_t*>(text), strlen(text)) == strlen(text);
 }
 
+void decodeBasicHtmlEntities(char* text) {
+  if (!text) return;
+  char* read = text;
+  char* write = text;
+  while (*read) {
+    struct Entity {
+      const char* encoded;
+      char decoded;
+    };
+    static constexpr Entity kEntities[] = {
+        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''}};
+    bool replaced = false;
+    for (const auto& entity : kEntities) {
+      const size_t length = strlen(entity.encoded);
+      if (strncmp(read, entity.encoded, length) != 0) continue;
+      *write++ = entity.decoded;
+      read += length;
+      replaced = true;
+      break;
+    }
+    if (!replaced) *write++ = *read++;
+  }
+  *write = '\0';
+}
+
 struct XhtmlSanitizer {
   HalFile* output = nullptr;
+  WeReadStore::IndexWriter* imageWriter = nullptr;
+  char* tag = nullptr;
+  size_t tagCapacity = 0;
+  uint32_t chapterIndex = 0;
   bool plainText = false;
   bool inTag = false;
   bool inEntity = false;
   bool skip = false;
   bool skipHead = false;
-  char tag[96] = {};
+  bool tagOverflow = false;
   size_t tagLen = 0;
   char entity[24] = {};
   size_t entityLen = 0;
@@ -998,6 +1397,12 @@ bool emitSanitizedTextByte(XhtmlSanitizer& sanitizer, const uint8_t value) {
 }
 
 bool processTag(XhtmlSanitizer& sanitizer) {
+  if (sanitizer.tagOverflow || !sanitizer.tag || sanitizer.tagCapacity == 0) {
+    sanitizer.tagLen = 0;
+    sanitizer.inTag = false;
+    sanitizer.tagOverflow = false;
+    return true;
+  }
   sanitizer.tag[sanitizer.tagLen] = '\0';
   const char* tagEnd = sanitizer.tag + sanitizer.tagLen;
   while (tagEnd > sanitizer.tag && std::isspace(static_cast<unsigned char>(tagEnd[-1]))) --tagEnd;
@@ -1028,6 +1433,33 @@ bool processTag(XhtmlSanitizer& sanitizer) {
     sanitizer.skip = !closing && !selfClosing;
     return true;
   }
+  if (!closing && strcmp(name, "img") == 0 && !sanitizer.skip && !sanitizer.skipHead) {
+    WeReadStore::ImageRecord record;
+    char alt[256] = {};
+    const bool extracted =
+        WeReadProtocol::extractImageAttributes(sanitizer.tag, record.url, sizeof(record.url), alt, sizeof(alt));
+    const WeReadProtocol::ImageType type =
+        extracted ? WeReadProtocol::normalizeImageUrl(record.url, sanitizer.tag, sizeof(record.url))
+                  : WeReadProtocol::ImageType::None;
+    decodeBasicHtmlEntities(alt);
+    if (type != WeReadProtocol::ImageType::None) {
+      memcpy(record.url, sanitizer.tag, strlen(sanitizer.tag) + 1);
+      const char* extension = type == WeReadProtocol::ImageType::Jpeg ? "jpg" : "png";
+      const int hrefLen = snprintf(record.href, sizeof(record.href), "images/ch%06u-%u.%s",
+                                   static_cast<unsigned>(sanitizer.chapterIndex),
+                                   static_cast<unsigned>(sanitizer.imageWriter->count()), extension);
+      if (hrefLen <= 0 || static_cast<size_t>(hrefLen) >= sizeof(record.href) ||
+          !sanitizer.imageWriter->append(&record) || !writeLiteral(*sanitizer.output, "<img src=\"") ||
+          !writeLiteral(*sanitizer.output, record.href)) {
+        return false;
+      }
+      if (alt[0] && (!writeLiteral(*sanitizer.output, "\" alt=\"") || !writeXmlText(*sanitizer.output, alt))) {
+        return false;
+      }
+      return writeLiteral(*sanitizer.output, "\"/>");
+    }
+    return !alt[0] || writeXmlText(*sanitizer.output, alt);
+  }
   if (sanitizer.skip || sanitizer.skipHead || strcmp(name, "html") == 0 || strcmp(name, "body") == 0 ||
       !WeReadProtocol::isAllowedXhtmlTag(name)) {
     return true;
@@ -1042,60 +1474,78 @@ bool processTag(XhtmlSanitizer& sanitizer) {
   return writeLiteral(*sanitizer.output, ">");
 }
 
-bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath, const char* title,
-                     const bool plainText) {
+bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath, const std::string& imageIndexPath,
+                     const uint32_t chapterIndex, const char* title, const bool plainText, uint8_t* readBuffer,
+                     const size_t readBufferSize, char* tagBuffer, const size_t tagBufferSize) {
   HalFile input;
-  if (!Storage.openFileForRead("WR", inputPath, input)) return false;
+  if (!readBuffer || readBufferSize == 0 || !tagBuffer || tagBufferSize < sizeof(WeReadStore::ImageRecord::url) ||
+      !Storage.openFileForRead("WR", inputPath, input)) {
+    return false;
+  }
   const std::string partPath = outputPath + ".part";
   if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+  if (Storage.exists(imageIndexPath.c_str()) && !Storage.remove(imageIndexPath.c_str())) return false;
   HalFile output;
   if (!Storage.openFileForWrite("WR", partPath, output)) return false;
-  if (!writeLiteral(output,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>") ||
-      !writeXmlText(output, title) || !writeLiteral(output, "</title></head><body>")) {
-    return false;
-  }
-  if (plainText && !writeLiteral(output, "<p>")) return false;
+  WeReadStore::IndexWriter imageWriter;
+  if (!imageWriter.begin(imageIndexPath, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord))) return false;
 
-  XhtmlSanitizer sanitizer{&output, plainText};
-  auto buffer = makeUniqueNoThrow<uint8_t[]>(kTransferBufferSize);
-  if (!buffer) {
-    LOG_ERR("WR", "OOM: %u-byte XHTML buffer", static_cast<unsigned>(kTransferBufferSize));
+  const bool written = [&]() {
+    if (!writeLiteral(output,
+                      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                      "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>") ||
+        !writeXmlText(output, title) || !writeLiteral(output, "</title></head><body>") ||
+        (plainText && !writeLiteral(output, "<p>"))) {
+      return false;
+    }
+
+    XhtmlSanitizer sanitizer{&output, &imageWriter, tagBuffer, tagBufferSize, chapterIndex, plainText};
+    while (input.available()) {
+      const int got = input.read(readBuffer, readBufferSize);
+      if (got <= 0) return false;
+      for (int i = 0; i < got; ++i) {
+        const uint8_t value = readBuffer[i];
+        if (!plainText && sanitizer.inTag) {
+          if (value == '>') {
+            if (!processTag(sanitizer)) return false;
+          } else if (sanitizer.tagLen + 1 < sanitizer.tagCapacity) {
+            sanitizer.tag[sanitizer.tagLen++] = static_cast<char>(value);
+          } else {
+            sanitizer.tagOverflow = true;
+          }
+          continue;
+        }
+        if (!plainText && value == '<') {
+          if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
+          sanitizer.inTag = true;
+          sanitizer.tagOverflow = false;
+          sanitizer.tagLen = 0;
+          continue;
+        }
+        if (!emitSanitizedTextByte(sanitizer, value)) return false;
+      }
+    }
+    if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
+    return (!plainText || writeLiteral(output, "</p>")) && writeLiteral(output, "</body></html>");
+  }();
+  if (!written) {
+    imageWriter.abort();
+    output.close();
+    Storage.remove(partPath.c_str());
     return false;
   }
-  while (input.available()) {
-    const int got = input.read(buffer.get(), kTransferBufferSize);
-    if (got <= 0) return false;
-    for (int i = 0; i < got; ++i) {
-      const uint8_t value = buffer[i];
-      if (!plainText && sanitizer.inTag) {
-        if (value == '>') {
-          if (!processTag(sanitizer)) return false;
-        } else if (sanitizer.tagLen + 1 < sizeof(sanitizer.tag)) {
-          sanitizer.tag[sanitizer.tagLen++] = static_cast<char>(value);
-        }
-        continue;
-      }
-      if (!plainText && value == '<') {
-        if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
-        sanitizer.inTag = true;
-        sanitizer.tagLen = 0;
-        continue;
-      }
-      if (!emitSanitizedTextByte(sanitizer, value)) return false;
-    }
-  }
-  if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
-  if (plainText && !writeLiteral(output, "</p>")) return false;
-  if (!writeLiteral(output, "</body></html>")) return false;
   output.flush();
   output.close();
-  return WeReadStore::atomicReplace(partPath, outputPath);
+  if (!WeReadStore::atomicReplace(partPath, outputPath) || !imageWriter.finish()) {
+    Storage.remove(partPath.c_str());
+    return false;
+  }
+  return true;
 }
 
-bool writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
-                       const uint32_t chapterCount, std::string& navPath, std::string& opfPath) {
+Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
+                        const uint32_t chapterCount, const WeReadStore::ImagePolicy imagePolicy,
+                        const std::string& workPath, std::string& navPath, std::string& opfPath) {
   navPath = bookDir + "/nav.part";
   opfPath = bookDir + "/content.part";
   if (Storage.exists(navPath.c_str())) Storage.remove(navPath.c_str());
@@ -1107,7 +1557,7 @@ bool writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecor
   uint32_t verifiedCount = 0;
   if (!Storage.openFileForWrite("WR", navPath, nav) || !Storage.openFileForWrite("WR", opfPath, opf) ||
       !WeReadStore::openToc(tocPath, toc, verifiedCount) || verifiedCount != chapterCount) {
-    return false;
+    return Error::SdCard;
   }
   if (!writeLiteral(nav,
                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -1126,46 +1576,73 @@ bool writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecor
                     "</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest>"
                     "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" "
                     "properties=\"nav\"/>")) {
-    return false;
+    return Error::SdCard;
   }
 
   for (uint32_t i = 0; i < chapterCount; ++i) {
     WeReadStore::TocRecord record;
-    if (!WeReadStore::readTocRecord(toc, i, record)) return false;
+    if (!WeReadStore::readTocRecord(toc, i, record)) return Error::SdCard;
     char filename[32];
     char item[192];
     snprintf(filename, sizeof(filename), "ch%06u.xhtml", static_cast<unsigned>(i));
     const int navLen = snprintf(item, sizeof(item), "<li><a href=\"%s\">", filename);
     if (navLen <= 0 || static_cast<size_t>(navLen) >= sizeof(item) || !writeLiteral(nav, item) ||
         !writeXmlText(nav, record.title) || !writeLiteral(nav, "</a></li>")) {
-      return false;
+      return Error::SdCard;
     }
     const int opfLen =
         snprintf(item, sizeof(item), "<item id=\"ch%06u\" href=\"%s\" media-type=\"application/xhtml+xml\"/>",
                  static_cast<unsigned>(i), filename);
-    if (opfLen <= 0 || static_cast<size_t>(opfLen) >= sizeof(item) || !writeLiteral(opf, item)) return false;
+    if (opfLen <= 0 || static_cast<size_t>(opfLen) >= sizeof(item) || !writeLiteral(opf, item)) {
+      return Error::SdCard;
+    }
   }
-  if (!writeLiteral(nav, "</ol></nav></body></html>") || !writeLiteral(opf, "</manifest><spine>")) return false;
+  if (imagePolicy == WeReadStore::ImagePolicy::Embed) {
+    HalFile images;
+    uint32_t imageCount = 0;
+    if (!WeReadStore::openImageWorkIndex(workPath, images, imageCount)) return Error::Integrity;
+    for (uint32_t image = 0; image < imageCount; ++image) {
+      WeReadStore::ImageWorkRecord record;
+      if (!WeReadStore::readImageWorkRecord(images, image, record) || !validImageWorkRecord(record) ||
+          record.state == WeReadStore::ImageWorkState::Pending) {
+        return Error::Integrity;
+      }
+      if (record.state != WeReadStore::ImageWorkState::Complete) continue;
+      char item[256];
+      const int length = snprintf(item, sizeof(item), "<item id=\"img%06u\" href=\"%s\" media-type=\"%s\"/>",
+                                  static_cast<unsigned>(image), record.image.href,
+                                  imageMediaType(imageTypeFromHref(record.image.href)));
+      if (length <= 0 || static_cast<size_t>(length) >= sizeof(item) || !writeLiteral(opf, item)) {
+        return Error::SdCard;
+      }
+    }
+  }
+  if (!writeLiteral(nav, "</ol></nav></body></html>") || !writeLiteral(opf, "</manifest><spine>")) {
+    return Error::SdCard;
+  }
   for (uint32_t i = 0; i < chapterCount; ++i) {
     char item[64];
     snprintf(item, sizeof(item), "<itemref idref=\"ch%06u\"/>", static_cast<unsigned>(i));
-    if (!writeLiteral(opf, item)) return false;
+    if (!writeLiteral(opf, item)) return Error::SdCard;
   }
-  if (!writeLiteral(opf, "</spine></package>")) return false;
+  if (!writeLiteral(opf, "</spine></package>")) return Error::SdCard;
   nav.flush();
   opf.flush();
-  return true;
+  return Error::Ok;
 }
 
 Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookDir, const std::string& tocPath,
-                  const uint32_t chapterCount, const std::string& finalPartPath) {
+                  const uint32_t chapterCount, const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath,
+                  uint8_t* buffer, const size_t bufferSize, const std::string& finalPartPath) {
   std::string navPath;
   std::string opfPath;
-  if (!writePackageFiles(bookDir, book, tocPath, chapterCount, navPath, opfPath)) return Error::SdCard;
+  const Error packageFilesError =
+      writePackageFiles(bookDir, book, tocPath, chapterCount, imagePolicy, workPath, navPath, opfPath);
+  if (packageFilesError != Error::Ok) return packageFilesError;
 
   const std::string centralPath = bookDir + "/central.part";
   WeReadStore::StoreOnlyZipWriter zip;
-  if (!zip.begin(finalPartPath, centralPath)) return Error::OutOfMemory;
+  if (!zip.begin(finalPartPath, centralPath, buffer, bufferSize)) return Error::SdCard;
   static constexpr char kMimetype[] = "application/epub+zip";
   static constexpr char kContainer[] =
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -1197,6 +1674,30 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
       return Error::SdCard;
     }
   }
+  if (imagePolicy == WeReadStore::ImagePolicy::Embed) {
+    HalFile images;
+    uint32_t imageCount = 0;
+    if (!WeReadStore::openImageWorkIndex(workPath, images, imageCount)) {
+      zip.abort();
+      return Error::Integrity;
+    }
+    for (uint32_t image = 0; image < imageCount; ++image) {
+      WeReadStore::ImageWorkRecord record;
+      if (!WeReadStore::readImageWorkRecord(images, image, record) || !validImageWorkRecord(record) ||
+          record.state == WeReadStore::ImageWorkState::Pending) {
+        zip.abort();
+        return Error::Integrity;
+      }
+      if (record.state != WeReadStore::ImageWorkState::Complete) continue;
+      const std::string sourcePath = bookDir + "/" + record.image.href;
+      char entryName[96];
+      const int length = snprintf(entryName, sizeof(entryName), "OEBPS/%s", record.image.href);
+      if (length <= 0 || static_cast<size_t>(length) >= sizeof(entryName) || !zip.addFile(entryName, sourcePath)) {
+        zip.abort();
+        return Error::SdCard;
+      }
+    }
+  }
   if (!zip.finish() || !WeReadStore::looksLikeZip(finalPartPath)) return Error::Integrity;
   Storage.remove(navPath.c_str());
   Storage.remove(opfPath.c_str());
@@ -1204,13 +1705,23 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
 }
 
 void cleanupTransient(const std::string& bookDir, const std::string& finalPartPath) {
-  static constexpr const char* kNames[] = {"/shard0.part",  "/shard1.part",  "/shard3.part", "/encoded.part",
-                                           "/decoded.part", "/central.part", "/nav.part",    "/content.part"};
+  static constexpr const char* kNames[] = {"/shard0.part",  "/shard1.part",     "/shard3.part", "/encoded.part",
+                                           "/decoded.part", "/central.part",    "/nav.part",    "/content.part",
+                                           "/images.work",  "/images.work.part"};
   for (const char* name : kNames) {
     const std::string path = bookDir + name;
     if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
   }
   if (!finalPartPath.empty() && Storage.exists(finalPartPath.c_str())) Storage.remove(finalPartPath.c_str());
+}
+
+void cleanupDetailTransient(const std::string& bookDir) {
+  static constexpr const char* kNames[] = {"/detail.bin.part",       "/cover.bmp.part",   "/cover.source.jpg",
+                                           "/cover.source.jpg.part", "/cover.source.png", "/cover.source.png.part"};
+  for (const char* name : kNames) {
+    const std::string path = bookDir + name;
+    if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
+  }
 }
 
 }  // namespace
@@ -1227,6 +1738,10 @@ bool Operation::active() const {
     case Phase::LoginPoll:
     case Phase::SyncShelf:
     case Phase::Renew:
+    case Phase::PrepareDetail:
+    case Phase::FetchDetail:
+    case Phase::FetchCover:
+    case Phase::ConvertCover:
     case Phase::PrepareDownload:
     case Phase::FetchToc:
     case Phase::OpenToc:
@@ -1241,6 +1756,8 @@ bool Operation::active() const {
     case Phase::DecodeText:
     case Phase::DecodeEpub:
     case Phase::AdvanceChapter:
+    case Phase::PrepareImages:
+    case Phase::DownloadImages:
     case Phase::PackageBook:
       return true;
   }
@@ -1249,20 +1766,37 @@ bool Operation::active() const {
 
 void Operation::reset() {
   bookSession_.reset();
-  if (phase_ == Phase::SyncClock) stopClockSync();
-  if (kind_ == Kind::Download && active() && !bookDir_.empty()) cleanupTransient(bookDir_, finalPartPath_);
+  if (kind_ == Kind::Download && active() && !bookDir_.empty()) {
+    cleanupTransient(bookDir_, finalPartPath_);
+  }
+  if (kind_ == Kind::Detail && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
   if (tocFile_.isOpen()) tocFile_.close();
   phase_ = Phase::Idle;
   resumePhase_ = Phase::Idle;
   kind_ = Kind::Sync;
   error_ = Error::Ok;
+  progressStage_ = ProgressStage::Chapters;
+  options_ = {};
   session_.clear();
   book_ = {};
   chapter_ = {};
   chapterCount_ = 0;
   chapterIndex_ = 0;
+  progressCompleted_ = 0;
+  progressTotal_ = 0;
+  imageWorkCount_ = 0;
+  imageWorkCursor_ = 0;
+  imageDownloaded_ = 0;
+  imageCached_ = 0;
+  imageSkipped_ = 0;
+  imageRedirects_ = 0;
+  imageFilesCreated_ = 0;
+  imageBytes_ = 0;
   requestAttempt_ = 0;
   chapterResponseAttempts_ = 0;
+  coverAttempts_ = 0;
+  coverRedirects_ = 0;
+  coverState_ = WeReadStore::ImageWorkState::Pending;
   cancelRequested_ = false;
   renewalAttempted_ = false;
   loginRecoveryAttempted_ = false;
@@ -1270,10 +1804,13 @@ void Operation::reset() {
   loginStartedAt_ = 0;
   nextActionAt_ = 0;
   lastShardRequestAt_ = 0;
+  imagePhaseStartedAt_ = 0;
   responseStatus_ = 0;
   previousVid_[0] = '\0';
   loginUid_[0] = '\0';
   psvts_[0] = '\0';
+  imageHost_[0] = '\0';
+  coverType_ = WeReadProtocol::ImageType::None;
   // Shelf sync and download are separate jobs on the same account.
   // startLogin() clears runtime cookies before an account can change.
   url_[0] = '\0';
@@ -1284,19 +1821,42 @@ void Operation::reset() {
   finalPartPath_.clear();
 }
 
-bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book) {
+bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options) {
   reset();
   kind_ = kind;
-  if (kind == Kind::Download) {
+  if (kind != Kind::Sync) {
     if (!book || !isSafeProtocolToken(book->bookId)) {
       error_ = Error::Protocol;
       phase_ = Phase::Failed;
       return false;
     }
+    if (kind == Kind::Download) {
+      switch (options.imagePolicy) {
+        case WeReadStore::ImagePolicy::Embed:
+        case WeReadStore::ImagePolicy::Exclude:
+          break;
+        default:
+          error_ = Error::Protocol;
+          phase_ = Phase::Failed;
+          return false;
+      }
+      options_ = options;
+    }
     book_ = *book;
   }
   WeReadStore::loadSession(session_);
-  const Phase first = kind == Kind::Sync ? Phase::SyncShelf : Phase::PrepareDownload;
+  Phase first = Phase::SyncShelf;
+  switch (kind) {
+    case Kind::Sync:
+      first = Phase::SyncShelf;
+      break;
+    case Kind::Detail:
+      first = Phase::PrepareDetail;
+      break;
+    case Kind::Download:
+      first = Phase::PrepareDownload;
+      break;
+  }
   if (session_.valid()) {
     phase_ = first;
   } else {
@@ -1308,6 +1868,19 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book) {
 
 void Operation::cancel() {
   if (active()) cancelRequested_ = true;
+}
+
+Operation::Event Operation::cancelNow() {
+  bookSession_.reset();
+  if (tocFile_.isOpen()) tocFile_.close();
+  if (kind_ == Kind::Download && !bookDir_.empty()) {
+    cleanupTransient(bookDir_, finalPartPath_);
+  }
+  if (kind_ == Kind::Detail && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
+  error_ = Error::Cancelled;
+  phase_ = Phase::Cancelled;
+  logMemory("job cancelled");
+  return Event::Cancelled;
 }
 
 void Operation::startLogin(const Phase resume) {
@@ -1346,13 +1919,16 @@ void Operation::requestAuthentication(const Phase resume) {
 Operation::Event Operation::fail(const Error error) {
   const Phase failedPhase = phase_;
   bookSession_.reset();
-  if (phase_ == Phase::SyncClock) stopClockSync();
   error_ = error;
   if (tocFile_.isOpen()) tocFile_.close();
   if (kind_ == Kind::Download && !bookDir_.empty()) {
     const std::string chapterPart = WeReadStore::chapterPath(bookDir_, chapterIndex_) + ".part";
+    const std::string imageIndexPart = WeReadStore::imageIndexPath(bookDir_, chapterIndex_) + ".part";
     if (Storage.exists(chapterPart.c_str())) Storage.remove(chapterPart.c_str());
+    if (Storage.exists(imageIndexPart.c_str())) Storage.remove(imageIndexPart.c_str());
     cleanupTransient(bookDir_, finalPartPath_);
+  } else if (kind_ == Kind::Detail && !bookDir_.empty()) {
+    cleanupDetailTransient(bookDir_);
   }
   phase_ = Phase::Failed;
   LOG_ERR("WR", "job failed: phase=%u error=%u", static_cast<unsigned>(failedPhase), static_cast<unsigned>(error));
@@ -1361,6 +1937,7 @@ Operation::Event Operation::fail(const Error error) {
 }
 
 Operation::Event Operation::handleRequestError(const Error error, const Phase retryPhase) {
+  if (error == Error::Network && !WeReadHttpClient::networkReady()) return fail(error);
   if (error == Error::Network && requestAttempt_ < kMaxRequestAttempts - 1) {
     ++requestAttempt_;
     const unsigned long delayMs = kNetworkRetryBaseMs * requestAttempt_;
@@ -1414,13 +1991,15 @@ void Operation::guardBookSession(const char* phase) {
 }
 
 bool Operation::preparePaths() {
+  bookDir_ = WeReadStore::bookDirectory(book_.bookId);
   outputPath_ = WeReadStore::finalBookPath(book_);
   finalPartPath_ = outputPath_ + ".part";
-  bookDir_ = WeReadStore::bookDirectory(book_.bookId);
   tocPath_ = bookDir_ + "/toc.bin";
   const std::string chaptersDir = bookDir_ + "/chapters";
+  const std::string imagesDir = bookDir_ + "/images";
   return WeReadStore::ensureRoot() && Storage.ensureDirectoryExists(bookDir_.c_str()) &&
-         Storage.ensureDirectoryExists(chaptersDir.c_str()) && Storage.ensureDirectoryExists("/WeRead");
+         Storage.ensureDirectoryExists(chaptersDir.c_str()) && Storage.ensureDirectoryExists(imagesDir.c_str()) &&
+         Storage.ensureDirectoryExists("/WeRead");
 }
 
 bool Operation::waitForShardPace() {
@@ -1519,6 +2098,43 @@ Error Operation::syncShelfOnce() {
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
 }
 
+Error Operation::fetchDetailOnce() {
+  DetailJsonContext context;
+  context.book = &book_;
+  context.bookDir = &bookDir_;
+  WeReadProtocol::JsonStringDecoder decoder(writeDetailIntro, &context);
+  context.introDecoder = &decoder;
+  StreamingJsonParser parser(detailCallbacks(&context));
+  context.parser = &parser;
+  ResponseSink sink{&context, resetDetail, feedDetail, finishDetail, Error::SdCard};
+
+  char encodedBookId[192];
+  if (!WeReadProtocol::urlEncode(book_.bookId, encodedBookId, sizeof(encodedBookId))) return Error::Protocol;
+  referer_ = "/web/book/info?bookId=";
+  referer_ += encodedBookId;
+  const Error error =
+      requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
+                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  if (error != Error::Ok) {
+    context.writer.abort();
+    return error;
+  }
+  if (context.errorCode == -2012) {
+    context.writer.abort();
+    return Error::SessionExpired;
+  }
+  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser.hasError() ||
+      context.writeFailed || !context.header.title[0]) {
+    context.writer.abort();
+    return Error::Protocol;
+  }
+  if (!context.writer.finish(context.header)) return Error::SdCard;
+  coverType_ = WeReadProtocol::normalizeImageUrl(context.header.coverUrl, url_, sizeof(url_));
+  if (coverType_ == WeReadProtocol::ImageType::None) url_[0] = '\0';
+  logMemory("detail parsed");
+  return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+}
+
 Error Operation::fetchTocOnce() {
   TocJsonContext context;
   context.path = tocPath_;
@@ -1578,9 +2194,18 @@ Error Operation::fetchShardOnce(const char* endpoint, const std::string& destina
 Operation::Event Operation::finishWholeBook(const std::string& source) {
   bookSession_.reset();
   if (!WeReadStore::looksLikeZip(source)) return fail(Error::Integrity);
+  WeReadStore::BookOptions previousOptions;
+  const bool hadPreviousOptions = WeReadStore::loadBookOptions(bookDir_, previousOptions);
+  const std::string optionsPath = WeReadStore::optionsPath(bookDir_);
+  if (Storage.exists(optionsPath.c_str()) && !Storage.remove(optionsPath.c_str())) {
+    return fail(Error::SdCard);
+  }
   if (Storage.exists(finalPartPath_.c_str())) Storage.remove(finalPartPath_.c_str());
   if (!Storage.rename(source.c_str(), finalPartPath_.c_str()) ||
       !WeReadStore::atomicReplace(finalPartPath_, outputPath_)) {
+    if (hadPreviousOptions && !WeReadStore::saveBookOptions(bookDir_, previousOptions)) {
+      LOG_ERR("WR", "Failed to restore book options after whole EPUB replacement failure");
+    }
     return fail(Error::SdCard);
   }
   cleanupTransient(bookDir_, "");
@@ -1589,6 +2214,355 @@ Operation::Event Operation::finishWholeBook(const std::string& source) {
   phase_ = Phase::Complete;
   logJobComplete();
   return Event::Complete;
+}
+
+Error Operation::prepareImageWork() {
+  const std::string workPath = WeReadStore::imageWorkPath(bookDir_);
+  WeReadStore::IndexWriter writer;
+  if (!writer.begin(workPath, WeReadStore::kImageWorkMagic, sizeof(WeReadStore::ImageWorkRecord))) {
+    return Error::SdCard;
+  }
+
+  progressStage_ = ProgressStage::Images;
+  progressCompleted_ = 0;
+  progressTotal_ = 0;
+  imageDownloaded_ = 0;
+  imageCached_ = 0;
+  imageSkipped_ = 0;
+  imageRedirects_ = 0;
+  imageFilesCreated_ = 0;
+  imageBytes_ = 0;
+  imagePhaseStartedAt_ = millis();
+  for (uint32_t chapter = 0; chapter < chapterCount_; ++chapter) {
+    HalFile images;
+    uint32_t imageCount = 0;
+    if (!WeReadStore::openImageIndex(WeReadStore::imageIndexPath(bookDir_, chapter), images, imageCount)) {
+      writer.abort();
+      return Error::Integrity;
+    }
+    for (uint32_t image = 0; image < imageCount; ++image) {
+      WeReadStore::ImageWorkRecord work;
+      if (!WeReadStore::readImageRecord(images, image, work.image) || !validImageRecord(work.image)) {
+        writer.abort();
+        return Error::Integrity;
+      }
+      if (validImageFile(bookDir_ + "/" + work.image.href, imageTypeFromHref(work.image.href))) {
+        work.state = WeReadStore::ImageWorkState::Complete;
+        ++imageCached_;
+        ++progressCompleted_;
+      }
+      if (!writer.append(&work)) {
+        writer.abort();
+        return Error::SdCard;
+      }
+      ++progressTotal_;
+    }
+  }
+  if (!writer.finish()) return Error::SdCard;
+  imageWorkCount_ = progressTotal_;
+  imageWorkCursor_ = 0;
+  imageHost_[0] = '\0';
+  if (tocFile_.isOpen()) tocFile_.close();
+  uint32_t verifiedCount = 0;
+  if (!WeReadStore::openImageWorkIndexForUpdate(workPath, tocFile_, verifiedCount) ||
+      verifiedCount != imageWorkCount_) {
+    return Error::Integrity;
+  }
+  bookSession_.reset();
+  bookSession_.clearStats();
+  return Error::Ok;
+}
+
+Error Operation::requestImage(WeReadStore::ImageRecord& image, WeReadStore::ImageWorkState& state, uint8_t& attempts,
+                              uint8_t& redirects, const bool trackProgress) {
+  const WeReadProtocol::ImageType type = imageTypeFromHref(image.href);
+  const std::string destination = bookDir_ + "/" + image.href;
+  if (validImageFile(destination, type)) {
+    state = WeReadStore::ImageWorkState::Complete;
+    if (trackProgress) {
+      ++imageCached_;
+      ++progressCompleted_;
+    }
+    return Error::Ok;
+  }
+  const std::string partPath = destination + ".part";
+  referer_ = image.url;
+
+  FileSink file;
+  file.path = &partPath;
+  file.maxSize = kMaxImageBytes;
+  file.cancelRequested = &cancelRequested_;
+
+  WeReadHttpClient::Header headers[4] = {{"User-Agent", kUserAgent},
+                                         {"Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"},
+                                         {"Referer", kDefaultReferer}};
+  size_t headerCount = 3;
+  cookie_[0] = '\0';
+  if (isWereadUrl(referer_.c_str())) {
+    if (!session_.cookieHeader(cookie_, sizeof(cookie_))) {
+      return Error::Protocol;
+    }
+    headers[headerCount++] = {"Cookie", cookie_};
+  }
+
+  WeReadHttpClient::RequestOptions options;
+  options.headers = headers;
+  options.headerCount = headerCount;
+  options.timeoutMs = kRequestTimeoutMs;
+  options.readBuffer = ioBuffer_;
+  options.readBufferSize = sizeof(ioBuffer_);
+
+  bool hasLocation = false;
+  bool locationValid = true;
+  url_[0] = '\0';
+  responseStatus_ = -1;
+  const auto onData = [this, &file](const uint8_t* data, const size_t len) {
+    if (responseStatus_ != 200) return true;
+    if (!file.file.isOpen()) {
+      if (!resetFile(&file)) {
+        file.failure = FileSink::Failure::SdCard;
+        return false;
+      }
+    }
+    return writeFile(&file, data, len);
+  };
+  const auto onHeader = [this, &hasLocation, &locationValid](const char* name, const char* value) {
+    if (!equalsIgnoreCase(name, "location") || !value) return;
+    const size_t length = strlen(value);
+    hasLocation = true;
+    if (length >= sizeof(url_)) {
+      locationValid = false;
+      return;
+    }
+    memcpy(url_, value, length + 1);
+  };
+  const WeReadHttpClient::Result result =
+      WeReadHttpClient::request(bookSession_, referer_.c_str(), options, onData, onHeader, responseStatus_);
+  if (file.file.isOpen()) finishFile(&file);
+
+  if (file.failure == FileSink::Failure::Cancelled) {
+    if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+    return Error::Cancelled;
+  }
+  if (file.failure == FileSink::Failure::SdCard) {
+    if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+    return Error::SdCard;
+  }
+
+  if (trackProgress && responseStatus_ == 200) {
+    imageBytes_ += file.size;
+    if (file.size > 0) ++imageFilesCreated_;
+  }
+
+  const auto recoverableFailure = [this, &state, &attempts, &partPath, trackProgress](const bool resetSession) {
+    if (resetSession) bookSession_.reset();
+    if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+    ++attempts;
+    if (imageAttemptPending(attempts)) return;
+    state = WeReadStore::ImageWorkState::Skipped;
+    if (trackProgress) {
+      ++imageSkipped_;
+      ++progressCompleted_;
+    }
+  };
+
+  if (result != WeReadHttpClient::Result::Ok || file.failure == FileSink::Failure::TooLarge) {
+    recoverableFailure(true);
+    return Error::Ok;
+  }
+
+  const bool redirected = responseStatus_ == 301 || responseStatus_ == 302 || responseStatus_ == 303 ||
+                          responseStatus_ == 307 || responseStatus_ == 308;
+  if (redirected) {
+    if (!hasLocation || !locationValid || !imageRedirectAllowed(redirects) ||
+        !resolveRedirectUrl(referer_.c_str(), url_, reinterpret_cast<char*>(ioBuffer_), sizeof(url_))) {
+      recoverableFailure(false);
+      return Error::Ok;
+    }
+    char destinationHost[128];
+    if (!WeReadHttpClient::extractHttpsHost(reinterpret_cast<const char*>(ioBuffer_), destinationHost,
+                                            sizeof(destinationHost))) {
+      return Error::Protocol;
+    }
+    LOG_INF("WR", "image redirect: %s -> %s", imageHost_, destinationHost);
+    memcpy(image.url, ioBuffer_, strlen(reinterpret_cast<const char*>(ioBuffer_)) + 1);
+    attempts = 0;
+    ++redirects;
+    if (trackProgress) ++imageRedirects_;
+    return Error::Ok;
+  }
+
+  if (responseStatus_ != 200) {
+    recoverableFailure(false);
+    return Error::Ok;
+  }
+
+  static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+  const bool validMagic =
+      type == WeReadProtocol::ImageType::Png
+          ? file.prefixSize >= sizeof(kPng) && memcmp(file.prefix, kPng, sizeof(kPng)) == 0
+          : file.prefixSize >= 3 && file.prefix[0] == 0xFF && file.prefix[1] == 0xD8 && file.prefix[2] == 0xFF;
+  if (!validMagic || file.size == 0) {
+    recoverableFailure(false);
+    return Error::Ok;
+  }
+
+  if (!WeReadStore::atomicReplace(partPath, destination)) return Error::SdCard;
+  state = WeReadStore::ImageWorkState::Complete;
+  if (trackProgress) {
+    ++imageDownloaded_;
+    ++progressCompleted_;
+  }
+  return Error::Ok;
+}
+
+Operation::Event Operation::fetchCover() {
+  if (coverType_ == WeReadProtocol::ImageType::None || !url_[0]) {
+    phase_ = Phase::Complete;
+    return Event::Complete;
+  }
+
+  WeReadStore::ImageRecord image;
+  const char* href = coverType_ == WeReadProtocol::ImageType::Png ? "cover.source.png" : "cover.source.jpg";
+  memcpy(image.href, href, strlen(href) + 1);
+  memcpy(image.url, url_, strlen(url_) + 1);
+  if (!WeReadHttpClient::extractHttpsHost(image.url, imageHost_, sizeof(imageHost_))) {
+    phase_ = Phase::Complete;
+    return Event::Complete;
+  }
+
+  const Error error = requestImage(image, coverState_, coverAttempts_, coverRedirects_, false);
+  if (image.url[0]) memcpy(url_, image.url, strlen(image.url) + 1);
+  if (error == Error::Cancelled) return cancelNow();
+  if (error != Error::Ok) return fail(error);
+
+  switch (coverState_) {
+    case WeReadStore::ImageWorkState::Pending:
+      return Event::None;
+    case WeReadStore::ImageWorkState::Skipped:
+      phase_ = Phase::Complete;
+      logMemory("cover skipped");
+      return Event::Complete;
+    case WeReadStore::ImageWorkState::Complete:
+      phase_ = Phase::ConvertCover;
+      return Event::None;
+  }
+  return fail(Error::Protocol);
+}
+
+Operation::Event Operation::convertCover() {
+  bookSession_.reset();
+  logMemory("cover convert start");
+  const std::string source =
+      bookDir_ + (coverType_ == WeReadProtocol::ImageType::Png ? "/cover.source.png" : "/cover.source.jpg");
+  const std::string final = WeReadStore::coverPath(bookDir_);
+  const std::string part = final + ".part";
+  if (Storage.exists(part.c_str())) Storage.remove(part.c_str());
+
+  HalFile input;
+  HalFile output;
+  if (!Storage.openFileForRead("WR", source, input) || !Storage.openFileForWrite("WR", part, output)) {
+    if (input.isOpen()) input.close();
+    if (output.isOpen()) output.close();
+    if (Storage.exists(part.c_str())) Storage.remove(part.c_str());
+    if (Storage.exists(source.c_str())) Storage.remove(source.c_str());
+    phase_ = Phase::Complete;
+    return Event::Complete;
+  }
+  const bool converted = coverType_ == WeReadProtocol::ImageType::Png
+                             ? PngToBmpConverter::pngFileToBmpStreamWithSize(input, output, 96, 140)
+                             : JpegToBmpConverter::jpegFileToBmpStreamWithSize(input, output, 96, 140);
+  input.close();
+  output.close();
+  Storage.remove(source.c_str());
+  if (!converted) {
+    Storage.remove(part.c_str());
+    phase_ = Phase::Complete;
+    logMemory("cover convert skipped");
+    return Event::Complete;
+  }
+  if (!WeReadStore::atomicReplace(part, final)) return fail(Error::SdCard);
+  phase_ = Phase::Complete;
+  logMemory("cover convert complete");
+  return Event::Complete;
+}
+
+Operation::Event Operation::downloadNextImage() {
+  WeReadStore::ImageWorkRecord selected;
+  uint32_t selectedIndex = 0;
+  bool found = false;
+  if (!tocFile_.isOpen()) return fail(Error::Integrity);
+
+  if (!imageHost_[0]) {
+    for (uint32_t i = 0; i < imageWorkCount_; ++i) {
+      WeReadStore::ImageWorkRecord record;
+      if (!WeReadStore::readImageWorkRecord(tocFile_, i, record) || !validImageWorkRecord(record)) {
+        return fail(Error::Integrity);
+      }
+      if (record.state != WeReadStore::ImageWorkState::Pending) continue;
+      if (!WeReadHttpClient::extractHttpsHost(record.image.url, imageHost_, sizeof(imageHost_))) {
+        return fail(Error::Integrity);
+      }
+      imageWorkCursor_ = 0;
+      LOG_INF("WR", "image host batch: host=%s", imageHost_);
+      break;
+    }
+  }
+
+  while (imageHost_[0] && imageWorkCursor_ < imageWorkCount_) {
+    const uint32_t current = imageWorkCursor_++;
+    WeReadStore::ImageWorkRecord record;
+    if (!WeReadStore::readImageWorkRecord(tocFile_, current, record) || !validImageWorkRecord(record)) {
+      return fail(Error::Integrity);
+    }
+    if (record.state != WeReadStore::ImageWorkState::Pending) continue;
+    char host[128];
+    if (!WeReadHttpClient::extractHttpsHost(record.image.url, host, sizeof(host))) return fail(Error::Integrity);
+    if (strcmp(host, imageHost_) != 0) continue;
+    selected = record;
+    selectedIndex = current;
+    found = true;
+    break;
+  }
+
+  if (found) {
+    const Error error = requestImage(selected.image, selected.state, selected.attempts, selected.redirects, true);
+    if (error == Error::Cancelled) return cancelNow();
+    if (error != Error::Ok) return fail(error);
+    if (!WeReadStore::updateImageWorkRecord(tocFile_, imageWorkCount_, selectedIndex, selected)) {
+      return fail(Error::SdCard);
+    }
+    if (selected.state == WeReadStore::ImageWorkState::Skipped) {
+      LOG_INF("WR", "image skipped: index=%u", static_cast<unsigned>(selectedIndex));
+    } else if (selected.state == WeReadStore::ImageWorkState::Pending && selected.attempts > 0) {
+      LOG_INF("WR", "image retry queued: index=%u retry=%u/1", static_cast<unsigned>(selectedIndex),
+              static_cast<unsigned>(selected.attempts));
+    }
+    logMemory("image processed");
+    return Event::None;
+  }
+
+  if (!imageHost_[0]) {
+    LOG_INF("WR",
+            "image phase complete: ms=%lu total=%u downloaded=%u cached=%u skipped=%u bytes=%llu redirects=%u "
+            "files=%u tlsNew=%u tlsReused=%u",
+            millis() - imagePhaseStartedAt_, static_cast<unsigned>(progressTotal_),
+            static_cast<unsigned>(imageDownloaded_), static_cast<unsigned>(imageCached_),
+            static_cast<unsigned>(imageSkipped_), static_cast<unsigned long long>(imageBytes_),
+            static_cast<unsigned>(imageRedirects_), static_cast<unsigned>(imageFilesCreated_),
+            static_cast<unsigned>(bookSession_.newConnections()), static_cast<unsigned>(bookSession_.reusedRequests()));
+    bookSession_.reset();
+    tocFile_.close();
+    progressStage_ = ProgressStage::Packaging;
+    progressCompleted_ = 0;
+    progressTotal_ = 0;
+    phase_ = Phase::PackageBook;
+    return Event::None;
+  }
+
+  imageHost_[0] = '\0';
+  imageWorkCursor_ = 0;
+  return Event::None;
 }
 
 Operation::Event Operation::inspectPrimary() {
@@ -1659,8 +2633,10 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
     cleanup();
     return retryChapterResponse();
   }
-  const bool ok =
-      sanitizeToXhtml(decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_), chapter_.title, plainText);
+  const bool ok = sanitizeToXhtml(decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_),
+                                  WeReadStore::imageIndexPath(bookDir_, chapterIndex_), chapterIndex_, chapter_.title,
+                                  plainText, reinterpret_cast<uint8_t*>(url_), sizeof(url_),
+                                  reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_));
   cleanup();
   if (!ok) return fail(Error::SdCard);
   phase_ = Phase::AdvanceChapter;
@@ -1669,16 +2645,7 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
 
 Operation::Event Operation::step() {
   if (!active()) return Event::None;
-  if (cancelRequested_) {
-    bookSession_.reset();
-    if (phase_ == Phase::SyncClock) stopClockSync();
-    if (tocFile_.isOpen()) tocFile_.close();
-    if (kind_ == Kind::Download && !bookDir_.empty()) cleanupTransient(bookDir_, finalPartPath_);
-    error_ = Error::Cancelled;
-    phase_ = Phase::Cancelled;
-    logMemory("job cancelled");
-    return Event::Cancelled;
-  }
+  if (cancelRequested_) return cancelNow();
   if ((requestAttempt_ > 0 || chapterResponseAttempts_ > 0) && nextActionAt_ != 0 &&
       static_cast<long>(millis() - nextActionAt_) < 0) {
     return Event::None;
@@ -1755,10 +2722,65 @@ Operation::Event Operation::step() {
       return Event::Complete;
     }
 
-    case Phase::PrepareDownload:
+    case Phase::PrepareDetail: {
+      bookDir_ = WeReadStore::bookDirectory(book_.bookId);
+      if (!WeReadStore::ensureRoot() || !Storage.ensureDirectoryExists(bookDir_.c_str())) return fail(Error::SdCard);
+      WeReadStore::BookDetailHeader cached;
+      HalFile detail;
+      if (WeReadStore::openBookDetail(bookDir_, cached, detail)) {
+        if (Storage.exists(WeReadStore::coverPath(bookDir_).c_str()) || !cached.coverUrl[0]) {
+          phase_ = Phase::Complete;
+          logJobComplete();
+          return Event::Complete;
+        }
+        coverType_ = WeReadProtocol::normalizeImageUrl(cached.coverUrl, url_, sizeof(url_));
+        if (coverType_ == WeReadProtocol::ImageType::None) {
+          phase_ = Phase::Complete;
+          return Event::Complete;
+        }
+        requestAttempt_ = 0;
+        chapterResponseAttempts_ = 0;
+        phase_ = Phase::FetchCover;
+        return detailCompletionEvent(true);
+      }
+      phase_ = Phase::FetchDetail;
+      return Event::None;
+    }
+
+    case Phase::FetchDetail: {
+      const Error error = fetchDetailOnce();
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::FetchDetail);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::FetchDetail);
+      requestSucceeded();
+      if (!url_[0] || coverType_ == WeReadProtocol::ImageType::None) {
+        phase_ = Phase::Complete;
+        logJobComplete();
+        return detailCompletionEvent(false);
+      }
+      phase_ = Phase::FetchCover;
+      return detailCompletionEvent(true);
+    }
+
+    case Phase::FetchCover: {
+      const Event event = fetchCover();
+      if (event == Event::Complete) logJobComplete();
+      return event;
+    }
+
+    case Phase::ConvertCover: {
+      const Event event = convertCover();
+      if (event == Event::Complete) logJobComplete();
+      return event;
+    }
+
+    case Phase::PrepareDownload: {
       if (!preparePaths()) return fail(Error::SdCard);
       phase_ = Phase::FetchToc;
       return Event::None;
+    }
 
     case Phase::FetchToc: {
       const Error error = fetchTocOnce();
@@ -1779,6 +2801,9 @@ Operation::Event Operation::step() {
         return fail(Error::Protocol);
       }
       chapterIndex_ = 0;
+      progressStage_ = ProgressStage::Chapters;
+      progressCompleted_ = 0;
+      progressTotal_ = chapterCount_;
       psvts_[0] = '\0';
       logMemory("toc parsed");
       phase_ = Phase::LoadChapter;
@@ -1786,24 +2811,27 @@ Operation::Event Operation::step() {
 
     case Phase::LoadChapter: {
       if (chapterIndex_ >= chapterCount_) {
-        bookSession_.reset();
         if (tocFile_.isOpen()) tocFile_.close();
-        phase_ = Phase::PackageBook;
+        phase_ = Phase::PrepareImages;
         return Event::None;
       }
       if (!WeReadStore::readTocRecord(tocFile_, chapterIndex_, chapter_)) return fail(Error::SdCard);
       chapterResponseAttempts_ = 0;
-      if (Storage.exists(WeReadStore::chapterPath(bookDir_, chapterIndex_).c_str())) {
+      HalFile imageIndex;
+      uint32_t imageCount = 0;
+      if (Storage.exists(WeReadStore::chapterPath(bookDir_, chapterIndex_).c_str()) &&
+          WeReadStore::openImageIndex(WeReadStore::imageIndexPath(bookDir_, chapterIndex_), imageIndex, imageCount)) {
         phase_ = Phase::AdvanceChapter;
         return Event::None;
       }
       if (!makeReaderReferer(book_.bookId, chapter_.chapterUid, referer_)) return fail(Error::Protocol);
       if (!psvts_[0]) {
         if (!TimeUtils::isClockValid()) {
+          if (!WeReadHttpClient::networkReady()) return fail(Error::Network);
           // SNTP and TLS both hold network buffers. A cold-clock download
           // reconnects after sync rather than keeping both alive.
           bookSession_.reset();
-          startClockSync();
+          if (!halClock.requestSync()) return fail(Error::Clock);
           nextActionAt_ = millis() + kClockSyncTimeoutMs;
           phase_ = Phase::SyncClock;
           logMemory("clock sync start");
@@ -1816,14 +2844,14 @@ Operation::Event Operation::step() {
 
     case Phase::SyncClock:
       if (TimeUtils::isClockValid()) {
-        stopClockSync();
         logMemory("clock sync complete");
         phase_ = Phase::LoadChapter;
         return Event::None;
       }
-      if (static_cast<long>(millis() - nextActionAt_) < 0) return Event::None;
-      stopClockSync();
-      logMemory("clock sync timeout");
+      if (halClock.syncState() != ClockSyncState::Failed && static_cast<long>(millis() - nextActionAt_) < 0) {
+        return Event::None;
+      }
+      logMemory(halClock.syncState() == ClockSyncState::Failed ? "clock sync failed" : "clock sync timeout");
       return fail(Error::Clock);
 
     case Phase::FetchReader: {
@@ -1944,19 +2972,71 @@ Operation::Event Operation::step() {
     case Phase::AdvanceChapter:
       guardBookSession("progress");
       ++chapterIndex_;
+      progressCompleted_ = chapterIndex_;
       phase_ = Phase::LoadChapter;
       return Event::ChapterComplete;
+
+    case Phase::PrepareImages: {
+      if (options_.imagePolicy == WeReadStore::ImagePolicy::Exclude) {
+        bookSession_.reset();
+        progressStage_ = ProgressStage::Packaging;
+        progressCompleted_ = 0;
+        progressTotal_ = 0;
+        phase_ = Phase::PackageBook;
+        LOG_INF("WR", "image phase excluded");
+        return Event::None;
+      }
+      const Error error = prepareImageWork();
+      if (error != Error::Ok) return fail(error);
+      if (imageWorkCount_ == 0) {
+        LOG_INF("WR",
+                "image phase complete: ms=%lu total=0 downloaded=0 cached=0 skipped=0 bytes=0 redirects=0 files=0 "
+                "tlsNew=0 tlsReused=0",
+                millis() - imagePhaseStartedAt_);
+        tocFile_.close();
+        progressStage_ = ProgressStage::Packaging;
+        progressCompleted_ = 0;
+        progressTotal_ = 0;
+        phase_ = Phase::PackageBook;
+      } else {
+        phase_ = Phase::DownloadImages;
+      }
+      return Event::None;
+    }
+
+    case Phase::DownloadImages:
+      return downloadNextImage();
 
     case Phase::PackageBook: {
       bookSession_.reset();
       logMemory("package start");
-      const Error error = packageBook(book_, bookDir_, tocPath_, chapterCount_, finalPartPath_);
+      const unsigned long packageStartedAt = millis();
+      const Error error =
+          packageBook(book_, bookDir_, tocPath_, chapterCount_, options_.imagePolicy,
+                      WeReadStore::imageWorkPath(bookDir_), ioBuffer_, sizeof(ioBuffer_), finalPartPath_);
       logMemory("package end");
-      if (error != Error::Ok || !WeReadStore::atomicReplace(finalPartPath_, outputPath_)) {
-        return fail(error == Error::Ok ? Error::SdCard : error);
-      }
-      cleanupTransient(bookDir_, "");
+      if (error != Error::Ok) return fail(error);
       if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);
+      WeReadStore::BookOptions previousOptions;
+      const bool hadPreviousOptions = WeReadStore::loadBookOptions(bookDir_, previousOptions);
+      WeReadStore::BookOptions savedOptions;
+      savedOptions.imagePolicy = options_.imagePolicy;
+      if (!WeReadStore::saveBookOptions(bookDir_, savedOptions)) return fail(Error::SdCard);
+      if (!WeReadStore::atomicReplace(finalPartPath_, outputPath_)) {
+        if (hadPreviousOptions) {
+          WeReadStore::saveBookOptions(bookDir_, previousOptions);
+        } else {
+          const std::string path = WeReadStore::optionsPath(bookDir_);
+          if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
+        }
+        return fail(Error::SdCard);
+      }
+      HalFile packaged;
+      const uint64_t packageBytes = Storage.openFileForRead("WR", outputPath_, packaged) ? packaged.fileSize64() : 0;
+      LOG_INF("WR", "package complete: ms=%lu bytes=%llu images=%s", millis() - packageStartedAt,
+              static_cast<unsigned long long>(packageBytes),
+              options_.imagePolicy == WeReadStore::ImagePolicy::Embed ? "embed" : "exclude");
+      cleanupTransient(bookDir_, "");
       phase_ = Phase::Complete;
       logJobComplete();
       return Event::Complete;

@@ -1,7 +1,9 @@
 #include <ObfuscationUtils.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -149,6 +151,195 @@ TEST_F(WeReadStoreTest, OpensValidEmptyShelfIndex) {
   EXPECT_EQ(count, 0U);
 }
 
+TEST_F(WeReadStoreTest, WritesEmptyAndPopulatedImageIndexesAndRejectsCorruption) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
+  const std::string path = WeReadStore::imageIndexPath("/work", 7);
+  WeReadStore::IndexWriter images;
+  ASSERT_TRUE(images.begin(path, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord)));
+  ASSERT_TRUE(images.finish());
+
+  uint32_t count = 1;
+  {
+    HalFile file;
+    ASSERT_TRUE(WeReadStore::openImageIndex(path, file, count));
+    EXPECT_EQ(count, 0U);
+  }
+
+  ASSERT_TRUE(images.begin(path, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord)));
+  WeReadStore::ImageRecord first;
+  strcpy(first.href, "images/ch000007-0.jpg");
+  strcpy(first.url, "https://res.weread.qq.com/a.jpg?token=1");
+  ASSERT_TRUE(images.append(&first));
+  WeReadStore::ImageRecord second;
+  strcpy(second.href, "images/ch000007-1.png");
+  strcpy(second.url, "https://cdn.example/b.png");
+  ASSERT_TRUE(images.append(&second));
+  ASSERT_TRUE(images.finish());
+
+  {
+    HalFile file;
+    ASSERT_TRUE(WeReadStore::openImageIndex(path, file, count));
+    ASSERT_EQ(count, 2U);
+    WeReadStore::ImageRecord loaded;
+    ASSERT_TRUE(WeReadStore::readImageRecord(file, 1, loaded));
+    EXPECT_STREQ(loaded.href, second.href);
+    EXPECT_STREQ(loaded.url, second.url);
+  }
+
+  std::ofstream corrupt(hostPath(path.c_str()), std::ios::binary | std::ios::app);
+  ASSERT_TRUE(corrupt.good());
+  corrupt.put('\0');
+  corrupt.close();
+  HalFile rejected;
+  EXPECT_FALSE(WeReadStore::openImageIndex(path, rejected, count));
+}
+
+TEST_F(WeReadStoreTest, UpdatesTransientImageWorkIndexAndRebuildsCorruption) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
+  const std::string path = WeReadStore::imageWorkPath("/work");
+  WeReadStore::IndexWriter writer;
+  ASSERT_TRUE(writer.begin(path, WeReadStore::kImageWorkMagic, sizeof(WeReadStore::ImageWorkRecord)));
+
+  WeReadStore::ImageWorkRecord first;
+  strcpy(first.image.href, "images/ch000001-0.jpg");
+  strcpy(first.image.url, "https://res.weread.qq.com/a.jpg");
+  ASSERT_TRUE(writer.append(&first));
+  WeReadStore::ImageWorkRecord second;
+  strcpy(second.image.href, "images/ch000001-1.png");
+  strcpy(second.image.url, "https://cdn.example/b.png");
+  second.state = WeReadStore::ImageWorkState::Complete;
+  ASSERT_TRUE(writer.append(&second));
+  ASSERT_TRUE(writer.finish());
+
+  uint32_t count = 0;
+  {
+    HalFile file;
+    ASSERT_TRUE(WeReadStore::openImageWorkIndexForUpdate(path, file, count));
+    ASSERT_EQ(count, 2U);
+    first.attempts = 1;
+    first.redirects = 2;
+    strcpy(first.image.url, "https://cdn.example/a.jpg");
+    ASSERT_TRUE(WeReadStore::updateImageWorkRecord(file, count, 0, first));
+    EXPECT_FALSE(WeReadStore::updateImageWorkRecord(file, count, 2, first));
+    WeReadStore::ImageWorkRecord loaded;
+    ASSERT_TRUE(WeReadStore::readImageWorkRecord(file, 0, loaded));
+    EXPECT_STREQ(loaded.image.url, first.image.url);
+    EXPECT_EQ(loaded.state, WeReadStore::ImageWorkState::Pending);
+    EXPECT_EQ(loaded.attempts, 1U);
+    EXPECT_EQ(loaded.redirects, 2U);
+  }
+
+  std::ofstream corrupt(hostPath(path.c_str()), std::ios::binary | std::ios::app);
+  ASSERT_TRUE(corrupt.good());
+  corrupt.put('\0');
+  corrupt.close();
+  HalFile rejected;
+  EXPECT_FALSE(WeReadStore::openImageWorkIndex(path, rejected, count));
+
+  ASSERT_TRUE(writer.begin(path, WeReadStore::kImageWorkMagic, sizeof(WeReadStore::ImageWorkRecord)));
+  ASSERT_TRUE(writer.finish());
+  HalFile rebuilt;
+  ASSERT_TRUE(WeReadStore::openImageWorkIndex(path, rebuilt, count));
+  EXPECT_EQ(count, 0U);
+}
+
+TEST_F(WeReadStoreTest, PersistsFixedBookOptionsAndDefaultsOnMissingOrCorruptFiles) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
+  WeReadStore::BookOptions options;
+  EXPECT_FALSE(WeReadStore::loadBookOptions("/work", options));
+  EXPECT_EQ(options.imagePolicy, WeReadStore::ImagePolicy::Embed);
+
+  options.imagePolicy = WeReadStore::ImagePolicy::Exclude;
+  ASSERT_TRUE(WeReadStore::saveBookOptions("/work", options));
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/work/options.bin")), 8U);
+  WeReadStore::BookOptions loaded;
+  ASSERT_TRUE(WeReadStore::loadBookOptions("/work", loaded));
+  EXPECT_EQ(loaded.imagePolicy, WeReadStore::ImagePolicy::Exclude);
+  EXPECT_FALSE(Storage.exists("/work/options.bin.part"));
+
+  std::fstream corrupt(hostPath("/work/options.bin"), std::ios::binary | std::ios::in | std::ios::out);
+  ASSERT_TRUE(corrupt.good());
+  corrupt.put('\0');
+  corrupt.close();
+  EXPECT_FALSE(WeReadStore::loadBookOptions("/work", loaded));
+  EXPECT_EQ(loaded.imagePolicy, WeReadStore::ImagePolicy::Embed);
+}
+
+TEST_F(WeReadStoreTest, StreamsAndValidatesAtomicBookDetailFiles) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
+  WeReadStore::BookDetailHeader header;
+  strcpy(header.title, "测试书");
+  strcpy(header.author, "作者");
+  strcpy(header.publisher, "出版社");
+  strcpy(header.category, "文学");
+  strcpy(header.coverUrl, "https://cdn.example/cover.jpg");
+  header.newRating = 890;
+  header.newRatingCount = 1234;
+  header.totalWords = 456789;
+
+  WeReadStore::BookDetailWriter writer;
+  ASSERT_TRUE(writer.begin("/work"));
+  constexpr char first[] = "第一段";
+  constexpr char second[] = "，第二段。";
+  ASSERT_TRUE(writer.appendIntro(reinterpret_cast<const uint8_t*>(first), sizeof(first) - 1));
+  ASSERT_TRUE(writer.appendIntro(reinterpret_cast<const uint8_t*>(second), sizeof(second) - 1));
+  ASSERT_TRUE(writer.finish(header));
+  EXPECT_FALSE(Storage.exists("/work/detail.bin.part"));
+
+  HalFile file;
+  WeReadStore::BookDetailHeader loaded;
+  ASSERT_TRUE(WeReadStore::openBookDetail("/work", loaded, file));
+  EXPECT_STREQ(loaded.title, header.title);
+  EXPECT_EQ(loaded.newRating, 890U);
+  EXPECT_EQ(loaded.totalWords, 456789U);
+  ASSERT_EQ(loaded.introLength, sizeof(first) + sizeof(second) - 2);
+  std::string intro(loaded.introLength, '\0');
+  ASSERT_EQ(file.read(intro.data(), intro.size()), static_cast<int>(intro.size()));
+  EXPECT_EQ(intro, "第一段，第二段。");
+  file.close();
+
+  std::ifstream goodFile(hostPath("/work/detail.bin"), std::ios::binary);
+  const std::vector<char> good((std::istreambuf_iterator<char>(goodFile)), std::istreambuf_iterator<char>());
+  const auto rejectMutation = [this, &good](const size_t offset, const char value) {
+    std::vector<char> damaged = good;
+    damaged[offset] = value;
+    std::ofstream output(hostPath("/work/detail.bin"), std::ios::binary | std::ios::trunc);
+    output.write(damaged.data(), static_cast<std::streamsize>(damaged.size()));
+    output.close();
+    HalFile rejected;
+    WeReadStore::BookDetailHeader rejectedHeader;
+    EXPECT_FALSE(WeReadStore::openBookDetail("/work", rejectedHeader, rejected));
+  };
+  rejectMutation(offsetof(WeReadStore::BookDetailHeader, version), '\0');
+  rejectMutation(offsetof(WeReadStore::BookDetailHeader, headerSize), '\1');
+  rejectMutation(offsetof(WeReadStore::BookDetailHeader, reserved), '\1');
+
+  std::ofstream shortFile(hostPath("/work/detail.bin"), std::ios::binary | std::ios::trunc);
+  shortFile.write(good.data(), static_cast<std::streamsize>(good.size() - 1));
+  shortFile.close();
+  HalFile rejected;
+  EXPECT_FALSE(WeReadStore::openBookDetail("/work", loaded, rejected));
+}
+
+TEST_F(WeReadStoreTest, CapsBookIntroductionWithoutSplittingDecoderChunks) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
+  WeReadStore::BookDetailWriter writer;
+  ASSERT_TRUE(writer.begin("/work"));
+  std::vector<uint8_t> full(WeReadStore::kMaxBookIntroBytes, 'a');
+  ASSERT_TRUE(writer.appendIntro(full.data(), full.size()));
+  constexpr uint8_t extra[] = {0xE4, 0xB8, 0xAD};
+  ASSERT_TRUE(writer.appendIntro(extra, sizeof(extra)));
+  WeReadStore::BookDetailHeader header;
+  strcpy(header.title, "长简介");
+  ASSERT_TRUE(writer.finish(header));
+
+  HalFile file;
+  WeReadStore::BookDetailHeader loaded;
+  ASSERT_TRUE(WeReadStore::openBookDetail("/work", loaded, file));
+  EXPECT_EQ(loaded.introLength, WeReadStore::kMaxBookIntroBytes);
+  EXPECT_NE(loaded.flags & WeReadStore::kBookDetailIntroTruncated, 0U);
+}
+
 TEST_F(WeReadStoreTest, SessionRoundTripsOnlyWhitelistedCookiesAndRejectsBadMagic) {
   WeReadStore::Session session;
   ASSERT_TRUE(session.setCookie("wr_vid", "wrong", 5));
@@ -252,16 +443,25 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
       "</rootfiles></container>";
   static constexpr char kOpf[] =
       "<package><manifest><item id=\"nav\" href=\"nav.xhtml\"/><item id=\"ch000000\" "
-      "href=\"ch000000.xhtml\"/><item id=\"ch000001\" href=\"ch000001.xhtml\"/></manifest>"
+      "href=\"ch000000.xhtml\"/><item id=\"ch000001\" href=\"ch000001.xhtml\"/>"
+      "<item id=\"img000000_0\" href=\"images/ch000000-0.png\" media-type=\"image/png\"/></manifest>"
       "<spine><itemref idref=\"ch000000\"/><itemref idref=\"ch000001\"/></spine></package>";
   static constexpr char kNav[] =
       "<html><nav><ol><li><a href=\"ch000000.xhtml\">一</a></li><li><a "
       "href=\"ch000001.xhtml\">二</a></li></ol></nav></html>";
-  ASSERT_TRUE(Storage.writeFile("/work/ch0.xhtml", "<html><body><p>一</p></body></html>"));
+  ASSERT_TRUE(Storage.writeFile(
+      "/work/ch0.xhtml", "<html><body><p>一</p><img src=\"images/ch000000-0.png\" alt=\"插图\"/></body></html>"));
   ASSERT_TRUE(Storage.writeFile("/work/ch1.xhtml", "<html><body><p>二</p></body></html>"));
+  static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+  {
+    HalFile image;
+    ASSERT_TRUE(Storage.openFileForWrite("WR", "/work/image.png", image));
+    ASSERT_EQ(image.write(kPng, sizeof(kPng)), sizeof(kPng));
+  }
 
   WeReadStore::StoreOnlyZipWriter zip;
-  ASSERT_TRUE(zip.begin("/work/book.epub", "/work/central.part"));
+  std::array<uint8_t, 4096> zipBuffer{};
+  ASSERT_TRUE(zip.begin("/work/book.epub", "/work/central.part", zipBuffer.data(), zipBuffer.size()));
   ASSERT_TRUE(zip.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)));
   ASSERT_TRUE(
       zip.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)));
@@ -269,6 +469,7 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
   ASSERT_TRUE(zip.addBuffer("OEBPS/nav.xhtml", reinterpret_cast<const uint8_t*>(kNav), strlen(kNav)));
   ASSERT_TRUE(zip.addFile("OEBPS/ch000000.xhtml", "/work/ch0.xhtml"));
   ASSERT_TRUE(zip.addFile("OEBPS/ch000001.xhtml", "/work/ch1.xhtml"));
+  ASSERT_TRUE(zip.addFile("OEBPS/images/ch000000-0.png", "/work/image.png"));
   ASSERT_TRUE(zip.finish());
   ASSERT_TRUE(WeReadStore::looksLikeZip("/work/book.epub"));
   EXPECT_FALSE(Storage.exists("/work/central.part"));
@@ -276,13 +477,22 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
   std::ifstream input(hostPath("/work/book.epub"), std::ios::binary);
   ASSERT_TRUE(input.good());
   const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  const std::string archive(bytes.begin(), bytes.end());
+  EXPECT_NE(archive.find("src=\"images/ch000000-0.png\""), std::string::npos);
+  EXPECT_NE(archive.find("media-type=\"image/png\""), std::string::npos);
+  EXPECT_EQ(archive.find("images/failed.jpg"), std::string::npos);
   ASSERT_GE(bytes.size(), 22U);
   const size_t eocd = bytes.size() - 22;
   ASSERT_EQ(readLe32(bytes, eocd), 0x06054B50U);
-  ASSERT_EQ(readLe16(bytes, eocd + 10), 6U);
+  ASSERT_EQ(readLe16(bytes, eocd + 10), 7U);
   size_t cursor = readLe32(bytes, eocd + 16);
-  const std::vector<std::string> expected = {"mimetype",        "META-INF/container.xml", "OEBPS/content.opf",
-                                             "OEBPS/nav.xhtml", "OEBPS/ch000000.xhtml",   "OEBPS/ch000001.xhtml"};
+  const std::vector<std::string> expected = {"mimetype",
+                                             "META-INF/container.xml",
+                                             "OEBPS/content.opf",
+                                             "OEBPS/nav.xhtml",
+                                             "OEBPS/ch000000.xhtml",
+                                             "OEBPS/ch000001.xhtml",
+                                             "OEBPS/images/ch000000-0.png"};
   for (const auto& name : expected) {
     ASSERT_EQ(readLe32(bytes, cursor), 0x02014B50U);
     EXPECT_EQ(readLe16(bytes, cursor + 10), 0U);
@@ -309,7 +519,8 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
   EXPECT_FALSE(WeReadStore::looksLikeZip("/work/book.epub"));
 
   WeReadStore::StoreOnlyZipWriter incomplete;
-  ASSERT_TRUE(incomplete.begin("/work/incomplete.epub", "/work/incomplete.central"));
+  ASSERT_TRUE(
+      incomplete.begin("/work/incomplete.epub", "/work/incomplete.central", zipBuffer.data(), zipBuffer.size()));
   ASSERT_TRUE(incomplete.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)));
   ASSERT_TRUE(incomplete.addBuffer("one", reinterpret_cast<const uint8_t*>("1"), 1));
   ASSERT_TRUE(incomplete.addBuffer("two", reinterpret_cast<const uint8_t*>("2"), 1));
