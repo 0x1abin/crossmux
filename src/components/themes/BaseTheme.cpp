@@ -54,6 +54,13 @@ void BaseTheme::drawBatteryOutline(const GfxRenderer& renderer, int x, int y, in
   renderer.drawLine(x + battWidth - 0, y + 4, x + battWidth - 0, y + rectHeight - 5);
 }
 
+void BaseTheme::drawDitherMask(const GfxRenderer& renderer, const int x, const int y, const int width,
+                               const int height) {
+  for (int py = y; py < y + height; ++py)
+    for (int px = x; px < x + width; ++px)
+      if ((px + py) % 2 == 0) renderer.drawPixel(px, py, false);
+}
+
 void BaseTheme::drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY) {
   // Draw lightning bolt (white/inverted on black fill for visibility)
   renderer.drawLine(boltX + 4, boltY + 0, boltX + 5, boltY + 0, false);
@@ -311,7 +318,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
-
+    const bool dimmed = rowDimmed && rowDimmed(i) && i != selectedIndex;
     int rowTextWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2;
     std::string valueText;
     if (rowValue != nullptr) {
@@ -327,20 +334,15 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     auto itemName = rowTitle(i);
     auto font = UI_10_FONT_ID;
     auto item = renderer.truncatedText(font, itemName.c_str(), rowTextWidth);
-    renderer.drawText(font, rect.x + BaseMetrics::values.contentSidePadding, itemY, item.c_str(), i != selectedIndex);
-
-    // Apply checkerboard dither to create gray text effect for dimmed items
-    if (rowDimmed && rowDimmed(i) && i != selectedIndex) {
-      const int titleWidth = renderer.getTextWidth(font, item.c_str());
-      const int lineH = renderer.getLineHeight(font);
-      const int tx = rect.x + BaseMetrics::values.contentSidePadding;
-      for (int py = itemY; py < itemY + lineH; py++)
-        for (int px = tx; px < tx + titleWidth; px++)
-          if ((px + py) % 2 == 0) renderer.drawPixel(px, py, false);
+    const int titleX = rect.x + BaseMetrics::values.contentSidePadding;
+    renderer.drawText(font, titleX, itemY, item.c_str(), i != selectedIndex);
+    if (dimmed) {
+      drawDitherMask(renderer, titleX, itemY, renderer.getTextWidth(font, item.c_str()), renderer.getLineHeight(font));
     }
 
+    std::string subtitleText;
     if (rowSubtitle != nullptr) {
-      std::string subtitleText = rowSubtitle(i);
+      subtitleText = rowSubtitle(i);
       if (!subtitleText.empty()) {
         auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
         renderer.drawText(SMALL_FONT_ID, rect.x + BaseMetrics::values.contentSidePadding, itemY + 22, subtitle.c_str(),
@@ -350,12 +352,10 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     if (!valueText.empty()) {
       const auto valueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
-      int valueY = itemY;
-      if (rowSubtitle != nullptr) {
-        valueY = itemY + 10;
-      }
-      renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth,
-                        valueY, valueText.c_str(), i != selectedIndex);
+      const int valueX = rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth;
+      const int valueY = itemY + (subtitleText.empty() ? 0 : 10);
+      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), i != selectedIndex);
+      if (dimmed) drawDitherMask(renderer, valueX, valueY, valueTextWidth, renderer.getLineHeight(UI_10_FONT_ID));
     }
   }
 }

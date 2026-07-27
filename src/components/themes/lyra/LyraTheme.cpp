@@ -322,6 +322,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   int iconY = (rowSubtitle != nullptr) ? 16 : 10;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
+    const bool dimmed = rowDimmed && rowDimmed(i) && i != selectedIndex;
     int rowTextWidth = textWidth;
 
     // Draw name
@@ -337,14 +338,9 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     auto itemName = rowTitle(i);
     auto item = renderer.truncatedText(UI_10_FONT_ID, itemName.c_str(), rowTextWidth);
     renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), true);
-
-    // Apply checkerboard dither to create gray text effect for dimmed items
-    if (rowDimmed && rowDimmed(i) && i != selectedIndex) {
-      const int titleWidth = renderer.getTextWidth(UI_10_FONT_ID, item.c_str());
-      const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
-      for (int py = itemY + 7; py < itemY + 7 + lineH; py++)
-        for (int px = textX; px < textX + titleWidth; px++)
-          if ((px + py) % 2 == 0) renderer.drawPixel(px, py, false);
+    if (dimmed) {
+      drawDitherMask(renderer, textX, itemY + 7, renderer.getTextWidth(UI_10_FONT_ID, item.c_str()),
+                     renderer.getLineHeight(UI_10_FONT_ID));
     }
 
     if (rowIcon != nullptr) {
@@ -356,9 +352,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       }
     }
 
+    std::string subtitleText;
     if (rowSubtitle != nullptr) {
       // Draw subtitle
-      std::string subtitleText = rowSubtitle(i);
+      subtitleText = rowSubtitle(i);
       auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
       renderer.drawText(SMALL_FONT_ID, textX, itemY + 30, subtitle.c_str(), true);
     }
@@ -371,12 +368,13 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
             valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
       }
 
-      int valueY = itemY + 6;
-      if (rowSubtitle != nullptr) {
-        valueY = itemY + 16;
+      const int valueX = rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth;
+      const int valueY = itemY + (subtitleText.empty() ? 7 : 16);
+      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), !(i == selectedIndex && highlightValue));
+      if (dimmed) {
+        drawDitherMask(renderer, valueX, valueY, renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()),
+                       renderer.getLineHeight(UI_10_FONT_ID));
       }
-      renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth,
-                        valueY, valueText.c_str(), !(i == selectedIndex && highlightValue));
     }
   }
 }
