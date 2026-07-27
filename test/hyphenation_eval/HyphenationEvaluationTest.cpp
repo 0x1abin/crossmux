@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "lib/Epub/Epub/hyphenation/HyphenationCommon.h"
+#include "lib/Epub/Epub/hyphenation/Hyphenator.h"
 #include "lib/Epub/Epub/hyphenation/LanguageHyphenator.h"
 #include "lib/Epub/Epub/hyphenation/LanguageRegistry.h"
 
@@ -232,3 +233,39 @@ TEST(HyphenationEval, Spanish) { runLanguageEval("spanish", "es", "spanish_hyphe
 TEST(HyphenationEval, Italian) { runLanguageEval("italian", "it", "italian_hyphenation_tests.txt", 98.99); }
 TEST(HyphenationEval, Polish) { runLanguageEval("polish", "pl", "polish_hyphenation_tests.txt", 98.92); }
 TEST(HyphenationEval, Swedish) { runLanguageEval("swedish", "sv", "swedish_hyphenation_tests.txt", 94.01); }
+
+TEST(HyphenationFallback, OversizedUrlWrapsWithoutChangingText) {
+  Hyphenator::setPreferredLanguage("en");
+  const std::string url = "https://example.com/very-long_path/章节?id=1234567890";
+
+  const auto legalBreaks = Hyphenator::breakOffsets(url, false);
+  ASSERT_FALSE(legalBreaks.empty());
+
+  const size_t firstLegalOffset =
+      std::min_element(legalBreaks.begin(), legalBreaks.end(), [](const auto& left, const auto& right) {
+        return left.byteOffset < right.byteOffset;
+      })->byteOffset;
+  ASSERT_GT(firstLegalOffset, 3u);
+
+  const auto emergencyBreaks = Hyphenator::breakOffsets(url, true);
+  const Hyphenator::BreakInfo* fallback = nullptr;
+  for (const auto& info : emergencyBreaks) {
+    if (info.byteOffset < firstLegalOffset && (!fallback || info.byteOffset > fallback->byteOffset)) {
+      fallback = &info;
+    }
+  }
+
+  ASSERT_NE(fallback, nullptr);
+  EXPECT_FALSE(fallback->requiresInsertedHyphen);
+  EXPECT_EQ(url.substr(0, fallback->byteOffset) + url.substr(fallback->byteOffset), url);
+  EXPECT_NE(static_cast<unsigned char>(url[fallback->byteOffset]) & 0xC0, 0x80);
+}
+
+TEST(HyphenationFallback, LinguisticBreaksRemainAvailableBeforeEmergencyFallback) {
+  Hyphenator::setPreferredLanguage("de");
+  const auto legalBreaks = Hyphenator::breakOffsets("Quadratkilometer", false);
+
+  ASSERT_FALSE(legalBreaks.empty());
+  EXPECT_TRUE(std::any_of(legalBreaks.begin(), legalBreaks.end(),
+                          [](const auto& info) { return info.requiresInsertedHyphen; }));
+}

@@ -95,10 +95,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 44 / 45
+### Versions 46 / 47
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **45**; Latin builds use **44**. The byte layout is identical between
+> currently **47**; Latin builds use **46**. The byte layout is identical between
 > flavors; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
@@ -111,7 +111,9 @@ if (parsedSize != fileSize) {
 > of truncated. Versions 42/43 persist each image's book-internal source href for
 > lazy extraction and serialize ruby annotations/group-continuation styles.
 > Versions 44/45 invalidate pagination after closed HTML tags began splitting
-> adjacent text blocks. The counters remain
+> adjacent text blocks. Versions 46/47 keep the byte layout unchanged but
+> invalidate pagination because oversized tokens now wrap at UTF-8 boundaries
+> without inserting synthetic hyphens. The counters remain
 > distinct and above every previously shipped value so a firmware-flavor swap
 > cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
 > source of truth.
@@ -146,7 +148,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 44
+#define EXPECTED_VERSION 46
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96

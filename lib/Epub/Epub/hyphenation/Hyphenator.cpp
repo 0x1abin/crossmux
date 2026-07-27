@@ -85,7 +85,7 @@ std::vector<Hyphenator::BreakInfo> buildExplicitBreakInfos(const std::vector<Cod
 bool isSegmentSeparator(const uint32_t cp) { return isExplicitHyphen(cp) || isApostrophe(cp); }
 
 void appendSegmentPatternBreaks(const std::vector<CodepointInfo>& cps, const LanguageHyphenator& hyphenator,
-                                const bool includeFallback, std::vector<Hyphenator::BreakInfo>& outBreaks) {
+                                std::vector<Hyphenator::BreakInfo>& outBreaks) {
   size_t segStart = 0;
 
   for (size_t i = 0; i <= cps.size(); ++i) {
@@ -98,14 +98,6 @@ void appendSegmentPatternBreaks(const std::vector<CodepointInfo>& cps, const Lan
     if (i > segStart) {
       std::vector<CodepointInfo> segment(cps.begin() + segStart, cps.begin() + i);
       auto segIndexes = hyphenator.breakIndexes(segment);
-
-      if (includeFallback && segIndexes.empty()) {
-        const size_t minPrefix = hyphenator.minPrefix();
-        const size_t minSuffix = hyphenator.minSuffix();
-        for (size_t idx = minPrefix; idx + minSuffix <= segment.size(); ++idx) {
-          segIndexes.push_back(idx);
-        }
-      }
 
       for (const size_t idx : segIndexes) {
         assert(idx > 0 && idx < segment.size());
@@ -170,6 +162,18 @@ void sortAndDedupeBreakInfos(std::vector<Hyphenator::BreakInfo>& infos) {
               infos.end());
 }
 
+void appendFallbackBreakInfos(const std::vector<CodepointInfo>& cps, const size_t minPrefix, const size_t minSuffix,
+                              std::vector<Hyphenator::BreakInfo>& infos) {
+  if (cps.size() < minPrefix + minSuffix) return;
+
+  const size_t fallbackCount = cps.size() - minPrefix - minSuffix + 1;
+  // Cold oversized-token path: one bounded BreakInfo per UTF-8 codepoint; reserve once to avoid heap fragmentation.
+  infos.reserve(infos.size() + fallbackCount);
+  for (size_t idx = minPrefix; idx + minSuffix <= cps.size(); ++idx) {
+    infos.push_back({cps[idx].byteOffset, false});
+  }
+}
+
 }  // namespace
 
 std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& word, const bool includeFallback) {
@@ -209,12 +213,17 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
     //                                            @16 Satellitensys|tems  (+hyphen)
     //   Result: 6 sorted break points; the line-breaker picks the widest prefix that fits.
     if (hyphenator) {
-      appendSegmentPatternBreaks(cps, *hyphenator, /*includeFallback=*/false, explicitBreakInfos);
+      appendSegmentPatternBreaks(cps, *hyphenator, explicitBreakInfos);
     }
     // Also add apostrophe contraction breaks when present (e.g. "l'état-major"
     // has both an explicit hyphen and an apostrophe that can independently break).
     if (hasApostropheLikeSeparator) {
       appendApostropheContractionBreaks(cps, explicitBreakInfos);
+    }
+    if (includeFallback) {
+      const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
+      const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
+      appendFallbackBreakInfos(cps, minPrefix, minSuffix, explicitBreakInfos);
     }
     // Merge all break points into ascending byte-offset order.
     sortAndDedupeBreakInfos(explicitBreakInfos);
@@ -228,9 +237,14 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   if (hasApostropheLikeSeparator) {
     std::vector<BreakInfo> segmentedBreaks;
     if (hyphenator) {
-      appendSegmentPatternBreaks(cps, *hyphenator, includeFallback, segmentedBreaks);
+      appendSegmentPatternBreaks(cps, *hyphenator, segmentedBreaks);
     }
     appendApostropheContractionBreaks(cps, segmentedBreaks);
+    if (includeFallback) {
+      const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
+      const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
+      appendFallbackBreakInfos(cps, minPrefix, minSuffix, segmentedBreaks);
+    }
     sortAndDedupeBreakInfos(segmentedBreaks);
     return segmentedBreaks;
   }
@@ -239,19 +253,6 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   std::vector<size_t> indexes;
   if (hyphenator) {
     indexes = hyphenator->breakIndexes(cps);
-  }
-
-  // Only add fallback breaks if needed
-  if (includeFallback && indexes.empty()) {
-    const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
-    const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
-    for (size_t idx = minPrefix; idx + minSuffix <= cps.size(); ++idx) {
-      indexes.push_back(idx);
-    }
-  }
-
-  if (indexes.empty()) {
-    return {};
   }
 
   std::vector<Hyphenator::BreakInfo> breaks;
@@ -267,6 +268,13 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
       needsHyphen = false;
     }
     breaks.push_back({byteOffsetForIndex(cps, idx), needsHyphen});
+  }
+
+  if (includeFallback) {
+    const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
+    const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
+    appendFallbackBreakInfos(cps, minPrefix, minSuffix, breaks);
+    sortAndDedupeBreakInfos(breaks);
   }
 
   return breaks;

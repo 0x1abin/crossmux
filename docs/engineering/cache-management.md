@@ -57,7 +57,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
 - `book.bin`: **Version 11** (metadata structure) — includes NFC-composed titles and ignores ambiguous EPUB guide text references while remaining above every version shipped by either lineage.
-- `section.bin`: **per-flavor** — Latin builds **Version 44**, Chinese builds (`ENABLE_CHINESE_VERSION`) **Version 45**. Versions 44/45 invalidate pagination after closed HTML tags began splitting adjacent text blocks. The two flavors emit different word streams (per-character CJK tokenization), so each carries an independent counter; numbers stay distinct and above every previously shipped value so a firmware flavor swap never reuses the other's cache.
+- `section.bin`: **per-flavor** — Latin builds **Version 46**, Chinese builds (`ENABLE_CHINESE_VERSION`) **Version 47**. Versions 46/47 invalidate pagination after oversized tokens began using UTF-8-safe emergency wrapping without synthetic hyphens. The two flavors emit different word streams (per-character CJK tokenization), so each carries an independent counter; numbers stay distinct and above every previously shipped value so a firmware flavor swap never reuses the other's cache.
 
 **Version Increment Rules**:
 1. **ALWAYS increment version** BEFORE changing binary structure
