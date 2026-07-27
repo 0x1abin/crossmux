@@ -77,10 +77,8 @@ bool validBookDetailHeader(const BookDetailHeader& header) {
       !boundedString(header.coverUrl, sizeof(header.coverUrl))) {
     return false;
   }
-  for (const uint8_t byte : header.reserved) {
-    if (byte != 0) return false;
-  }
-  return true;
+  return std::all_of(header.reserved, header.reserved + sizeof(header.reserved),
+                     [](const uint8_t byte) { return byte == 0; });
 }
 
 uint16_t readLe16(const uint8_t* bytes) {
