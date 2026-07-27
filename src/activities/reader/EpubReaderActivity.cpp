@@ -407,9 +407,11 @@ void EpubReaderActivity::loop() {
   // floor. Cross-chapter prewarm is deliberately out of scope (next spine's
   // section isn't loaded).
   constexpr unsigned long IDLE_PREWARM_DEBOUNCE_MS = 400;
+  auto* fcm = renderer.getFontCacheManager();
   if (section && !section->isBuilding() && !RenderLock::peek() && renderer.hasFrameBuffer() &&
       lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS &&
-      ESP.getFreeHeap() > RENDER_MIN_FREE_HEAP && ESP.getMaxAllocHeap() > RENDER_MIN_MAX_ALLOC &&
+      ESP.getFreeHeap() > RENDER_MIN_FREE_HEAP && ESP.getMaxAllocHeap() > RENDER_MIN_MAX_ALLOC && fcm &&
+      fcm->canIdlePrewarm(SETTINGS.getReaderFontId()) &&
       (idlePrewarmSpine != currentSpineIndex || idlePrewarmPage != section->currentPage)) {
     RenderLock lock;  // the page table must not change under the scan
     // Re-check under the lock: peek() and acquisition are not atomic, so the render
@@ -421,13 +423,11 @@ void EpubReaderActivity::loop() {
       const int nextPage = section->currentPage + 1;
       if (nextPage < static_cast<int>(section->pageCount)) {
         if (const auto p = section->loadPage(nextPage)) {
-          if (auto* fcm = renderer.getFontCacheManager()) {
-            const auto t0 = millis();
-            auto scope = fcm->createPrewarmScope();
-            p->render(renderer, SETTINGS.getReaderFontId(), 0, 0);  // scan only, no pixels
-            scope.endScanAndPrewarm();
-            LOG_DBG("ERS", "Idle prewarm: page %d in %lums", nextPage, millis() - t0);
-          }
+          const auto t0 = millis();
+          auto scope = fcm->createPrewarmScope();
+          p->render(renderer, SETTINGS.getReaderFontId(), 0, 0);  // scan only, no pixels
+          scope.endScanAndPrewarm();
+          LOG_DBG("ERS", "Idle prewarm: page %d in %lums", nextPage, millis() - t0);
         }
       }
     }
@@ -1649,32 +1649,28 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tDisplay = millis();
 
-  // Tiled grayscale: render each plane band-by-band, leaving the BW
-  // framebuffer intact so no full-frame storeBwBuffer is needed; controller
-  // RAM is re-synced from the live framebuffer afterward. The page is
-  // re-rendered ceil(H/STRIP_ROWS) times per plane, but renderCharImpl culls
-  // out-of-band glyphs before decode so the cost stays close to one render.
-  // Both text (drawPixel) and images (DirectPixelWriter) honor the active
-  // strip target. When the BW refresh above went out async, the plane
-  // rendering below overlaps the panel's refresh time; only the controller
-  // RAM writes wait for BUSY.
+  // Tiled grayscale leaves the BW framebuffer intact so no full-frame
+  // storeBwBuffer is needed; controller RAM is re-synced from the live
+  // framebuffer afterward. A whole-plane buffer is rendered in one pass when
+  // heap allows; the low-memory fallback re-renders per band and relies on
+  // renderCharImpl to cull out-of-band glyphs before decode. Both text
+  // (drawPixel) and images (DirectPixelWriter) honor the active strip target.
+  // When the BW refresh above went out async, plane rendering overlaps the
+  // panel's refresh time; only controller RAM writes wait for BUSY.
   if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
     const size_t planeBytes = static_cast<size_t>(gwBytes) * gh;
 
-    // Render one plane band-by-band into a whole-plane buffer without touching
-    // the controller, so it can run while the refresh is still in flight.
+    // Render one plane into a whole-plane buffer without touching the
+    // controller, so it can run while the refresh is still in flight.
     auto renderPlaneToBuffer = [&](const bool lsbPlane, uint8_t* buf) {
       renderer.setRenderMode(lsbPlane ? GfxRenderer::GRAYSCALE_LSB : GfxRenderer::GRAYSCALE_MSB);
-      for (int y = 0; y < gh; y += STRIP_ROWS) {
-        const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
-        renderer.beginStripTarget(buf + static_cast<size_t>(y) * gwBytes, y, rows);
-        renderer.clearScreen(0x00);
-        renderGrayscalePass();
-        renderer.endStripTarget();
-      }
+      renderer.beginStripTarget(buf, 0, gh);
+      renderer.clearScreen(0x00);
+      renderGrayscalePass();
+      renderer.endStripTarget();
     };
 
     // Tiered on heap pressure: two plane buffers hide both plane renders

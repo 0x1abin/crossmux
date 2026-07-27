@@ -75,6 +75,10 @@ void FontCacheManager::resetStats() {
   }
 }
 
+bool FontCacheManager::canIdlePrewarm(const int fontId) const {
+  return sdCardFonts_.find(fontId) != sdCardFonts_.end();
+}
+
 bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanning; }
 
 void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
