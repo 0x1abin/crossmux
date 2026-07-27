@@ -3,9 +3,6 @@
 #include <FontDecompressor.h>
 #include <Logging.h>
 #include <SdCardFont.h>
-#ifdef ENABLE_CHINESE_VERSION
-#include <Utf8.h>
-#endif
 
 #include <cstring>
 
@@ -79,42 +76,42 @@ bool FontCacheManager::canIdlePrewarm(const int fontId) const {
   return sdCardFonts_.find(fontId) != sdCardFonts_.end();
 }
 
+bool FontCacheManager::needsPrewarmScan(const int fontId) const {
+  if (sdCardFonts_.count(fontId) != 0) return true;
+
+  const auto familyIt = fontMap_.find(fontId);
+  if (familyIt == fontMap_.end()) return false;
+  for (uint8_t i = 0; i < 4; i++) {
+    const auto style = static_cast<EpdFontFamily::Style>(i);
+    const EpdFontData* data = familyIt->second.getData(style);
+    if (data && data->groups) return true;
+  }
+  return false;
+}
+
 bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanning; }
 
-void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
+void FontCacheManager::recordText(const char* text, const int fontId, EpdFontFamily::Style style) {
   scanText_ += text;
   if (scanFontId_ < 0) scanFontId_ = fontId;
   const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
   const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
   uint32_t cpCount = 0;
-#ifdef ENABLE_CHINESE_VERSION
-  const EpdFontFamily* builtinFamily = nullptr;
-  const EpdGlyph* replacementGlyph = nullptr;
-  if (missingChineseCodepoint_ == 0 && sdCardFonts_.count(fontId) == 0) {
-    const auto familyIt = fontMap_.find(fontId);
-    if (familyIt != fontMap_.end()) {
-      builtinFamily = &familyIt->second;
-      replacementGlyph = builtinFamily->getGlyph(REPLACEMENT_GLYPH, static_cast<EpdFontFamily::Style>(baseStyle));
-    }
-  }
-  while (*p) {
-    const uint32_t cp = utf8NextCodepoint(&p);
-    cpCount++;
-    if (builtinFamily && missingChineseCodepoint_ == 0 && isDownloadableChineseCodepoint(cp)) {
-      const auto* glyph = builtinFamily->getGlyph(cp, static_cast<EpdFontFamily::Style>(baseStyle));
-      if (!glyph || glyph == replacementGlyph) missingChineseCodepoint_ = cp;
-    }
-  }
-#else
   while (*p) {
     if ((*p & 0xC0) != 0x80) cpCount++;
     p++;
   }
-#endif
   scanStyleCounts_[baseStyle] += cpCount;
 }
 
 #ifdef ENABLE_CHINESE_VERSION
+void FontCacheManager::reportMissingChineseCodepoint(const int fontId, const uint32_t codepoint) {
+  if (missingChineseCodepoint_ != 0 || sdCardFonts_.count(fontId) != 0 || !isDownloadableChineseCodepoint(codepoint)) {
+    return;
+  }
+  missingChineseCodepoint_ = codepoint;
+}
+
 uint32_t FontCacheManager::consumeMissingChineseCodepoint() {
   const uint32_t codepoint = missingChineseCodepoint_;
   missingChineseCodepoint_ = 0;

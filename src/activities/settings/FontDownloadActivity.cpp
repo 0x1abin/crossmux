@@ -1,5 +1,9 @@
 #include "FontDownloadActivity.h"
 
+#ifdef ENABLE_CHINESE_VERSION
+#include <atomic>
+#endif
+
 #include <ArduinoJson.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -22,11 +26,21 @@ namespace {
 
 constexpr uint32_t kProgressRefreshIntervalMs = 2000;
 
+#ifdef ENABLE_CHINESE_VERSION
+std::atomic<bool> chineseFontPromptShownThisBoot{false};
+#endif
+
 }  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const Purpose purpose)
     : Activity("FontDownload", renderer, mappedInput), purpose_(purpose), fontInstaller_(sdFontSystem.registry()) {}
+
+#ifdef ENABLE_CHINESE_VERSION
+bool FontDownloadActivity::wasChineseFontPromptShownThisBoot() {
+  return chineseFontPromptShownThisBoot.load(std::memory_order_relaxed);
+}
+#endif
 
 // --- Lifecycle ---
 
@@ -47,6 +61,9 @@ void FontDownloadActivity::onEnter() {
         finish();
         return;
       }
+#ifdef ENABLE_CHINESE_VERSION
+      chineseFontPromptShownThisBoot.store(true, std::memory_order_relaxed);
+#endif
       startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
         if (result.isCancelled) {
           finish();

@@ -96,7 +96,6 @@ class EpubReaderActivity final : public Activity {
 
 #ifdef ENABLE_CHINESE_VERSION
   std::atomic<uint32_t> pendingMissingChineseCodepoint_{0};
-  std::atomic<bool> chineseFontPromptShown_{false};
   bool maybeOfferCompleteChineseFont();
 #endif
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,

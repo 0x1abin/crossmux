@@ -379,7 +379,7 @@ void TextSettingsActivity::applySize(int listIndex) {
 
 #ifdef ENABLE_CHINESE_VERSION
 void TextSettingsActivity::maybeOfferCompleteChineseFont() {
-  if (chineseFontPromptShown_ || SETTINGS.sdFontFamilyName[0] != '\0' ||
+  if (FontDownloadActivity::wasChineseFontPromptShownThisBoot() || SETTINGS.sdFontFamilyName[0] != '\0' ||
       SETTINGS.fontPointSize < 16) {  // Legacy LARGE threshold.
     return;
   }
@@ -396,7 +396,6 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
     return;
   }
 
-  chineseFontPromptShown_ = true;
   startActivityForResult(std::move(downloader), [this](const ActivityResult&) { requestUpdate(); });
 }
 #endif
