@@ -37,6 +37,12 @@ struct RequestOptions {
   size_t readBufferSize = 0;
 };
 
+struct HttpsUrlView {
+  const char* host = nullptr;
+  size_t hostLength = 0;
+  const char* path = nullptr;
+};
+
 class Session {
  public:
   Session() = default;
@@ -46,6 +52,9 @@ class Session {
 
   bool reusable();
   void reset();
+  void clearStats();
+  uint32_t newConnections() const { return newConnections_; }
+  uint32_t reusedRequests() const { return reusedRequests_; }
 
  private:
   friend Result request(Session& session, const char* url, const RequestOptions& options, const DataCallback& onData,
@@ -55,8 +64,14 @@ class Session {
 #else
   esp_http_client_handle_t client_ = nullptr;
 #endif
+  char host_[128] = {};
+  uint32_t newConnections_ = 0;
+  uint32_t reusedRequests_ = 0;
 };
 
+bool parseHttpsUrl(const char* url, HttpsUrlView& view);
+bool extractHttpsHost(const char* url, char* host, size_t hostSize);
+bool networkReady();
 Result request(const char* url, const RequestOptions& options, const DataCallback& onData,
                const HeaderCallback& onHeader, int& status);
 Result request(Session& session, const char* url, const RequestOptions& options, const DataCallback& onData,
