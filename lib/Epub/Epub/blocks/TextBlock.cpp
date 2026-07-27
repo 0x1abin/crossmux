@@ -125,7 +125,9 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   }
 
   const bool scanning = renderer.isFontCacheScanning();
+  const bool hasRubyText = hasRuby();
   const int ascender = renderer.getFontAscenderSize(fontId);
+  const int rubyShift = hasRubyText ? (ascender / 2) : 0;
 
   // Resolve ruby collisions left-to-right to prevent adjacent ruby texts from overlapping
   struct RubyDrawInfo {
@@ -134,9 +136,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     std::string text;
     BidiUtils::BidiBaseDir baseDir;
   };
-  std::vector<int> wordShiftArr(numWords, 0);
-  std::vector<RubyDrawInfo> rubies(numWords);
-  if (hasRuby()) {
+  std::vector<int> wordShiftArr;
+  std::vector<RubyDrawInfo> rubies;
+  if (hasRubyText) {
+    wordShiftArr.resize(numWords, 0);
+    rubies.resize(numWords);
     int accumulatedShift = 0;
     int lastEnd = -9999;
     for (uint16_t i = 0; i < numWords; i++) {
@@ -249,7 +253,6 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     // drawText, so these offsets are chosen relative to the full-size ascender:
     //   SUP: raise by 40% of ascender — sits clearly above the cap-height
     //   SUB: lower by 25% of ascender — descends below baseline without clashing with ascenders below
-    const int rubyShift = getRubyShift(ascender);
     int wordY = y + rubyShift;
     if ((currentStyle & EpdFontFamily::SUP) != 0) {
       wordY -= ascender * 2 / 5;
@@ -257,7 +260,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       wordY += ascender / 4;
     }
 
-    const int drawX = wordX + wordShiftArr[i];
+    const int drawX = wordX + (hasRubyText ? wordShiftArr[i] : 0);
 
     if (boundary > 0) {
       // Focus split: draw bold prefix, then the regular suffix at a pre-computed x offset.
@@ -281,7 +284,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     }
 
     // Horizontal ruby text rendering
-    if (i < rubyTexts.size() && !rubyTexts[i].empty() && (wordStyle(i) & EpdFontFamily::RUBY_CONTINUE) == 0) {
+    if (hasRubyText && i < rubyTexts.size() && !rubyTexts[i].empty() &&
+        (wordStyle(i) & EpdFontFamily::RUBY_CONTINUE) == 0) {
       const int rubyY = wordY - ascender;
       renderer.drawText(fontId, rubies[i].x, rubyY, rubies[i].text.c_str(), true, EpdFontFamily::SUP,
                         rubies[i].baseDir);
