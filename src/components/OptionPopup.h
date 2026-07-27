@@ -94,12 +94,27 @@ class OptionPopup {
       selectedIndex = (selectedIndex + 1) % count;
       requestUpdate();
       return true;
-    } else if (input.wasReleased(MappedInputManager::Button::Confirm)) {
+    }
+
+    const auto confirm = MappedInputManager::Button::Confirm;
+    const bool confirmReleased = input.wasReleased(confirm);
+    // A popup opened by Confirm inherits that held button; consume only its trailing release.
+    if (ignoreInitialConfirmRelease) {
+      if (confirmReleased) {
+        ignoreInitialConfirmRelease = false;
+        return true;
+      } else if (!input.isPressed(confirm)) {
+        ignoreInitialConfirmRelease = false;
+      }
+    }
+
+    if (confirmReleased) {
       active = false;
       if (onSelectCallback) onSelectCallback(selectedIndex);
       requestUpdate();
       return true;
-    } else if (input.wasPressed(MappedInputManager::Button::Back)) {
+    }
+    if (input.wasPressed(MappedInputManager::Button::Back)) {
       active = false;
       requestUpdate();
       return true;
@@ -141,6 +156,7 @@ class OptionPopup {
       selectedIndex = currentIndex;
     }
     onSelectCallback = std::move(onSelect);
+    ignoreInitialConfirmRelease = true;
     active = true;
   }
 
@@ -207,6 +223,7 @@ class OptionPopup {
   std::vector<std::string> ownedStrings;
   int selectedIndex = 0;
   std::function<void(int)> onSelectCallback;
+  bool ignoreInitialConfirmRelease = false;
   mutable Layout layout;
   mutable bool layoutValid = false;
 };
