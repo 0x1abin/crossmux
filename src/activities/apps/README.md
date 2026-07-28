@@ -30,7 +30,7 @@ apps/
 
 ## Adding a new app
 
-The dispatcher is table-driven. A new app needs **two** edits plus the app files themselves:
+The dispatcher is table-driven. A new app needs the app files, a navigation method, and one catalog entry:
 
 ### 1. Create the app
 
@@ -63,21 +63,32 @@ void ActivityManager::goToMyApp() {
 }
 ```
 
-### 3. Append one row to `kAppEntries`
+### 3. Assign an ID and append one row to `kAppEntries`
 
 In `apps/AppsMenuActivity.cpp`:
 
 ```cpp
+enum class AppId : uint8_t {
+  Sudoku = 2,
+  Gomoku = 3,
+  Minesweeper = 5,
+  UglyAvatar = 7,
+  MyApp = 9,  // new, never-reused bit ID
+  Count = 10,
+};
+
 constexpr AppEntry kAppEntries[] = {
-    {StrId::STR_SUDOKU_TITLE,      UIIcon::Sudoku,      &ActivityManager::goToSudoku},
-    {StrId::STR_GOMOKU_TITLE,      UIIcon::Gomoku,      &ActivityManager::goToGomoku},
-    {StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
-    {StrId::STR_UGLY_AVATAR,       UIIcon::Avatar,      &ActivityManager::goToUglyAvatar},
-    {StrId::STR_MYAPP_TITLE,       UIIcon::MyApp,       &ActivityManager::goToMyApp},  // new row
+    {AppId::Sudoku,      StrId::STR_SUDOKU_TITLE,      UIIcon::Sudoku,      &ActivityManager::goToSudoku},
+    {AppId::Gomoku,      StrId::STR_GOMOKU_TITLE,      UIIcon::Gomoku,      &ActivityManager::goToGomoku},
+    {AppId::Minesweeper, StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
+    {AppId::UglyAvatar,  StrId::STR_UGLY_AVATAR,       UIIcon::Avatar,      &ActivityManager::goToUglyAvatar},
+    {AppId::MyApp,       StrId::STR_MYAPP_TITLE,       UIIcon::MyApp,       &ActivityManager::goToMyApp},
 };
 ```
 
-That's it — no enum, no `switch` cases, no `buildItems()`. The lambdas in `render()` and the dispatch in `loop()` both read the same table.
+The ID is the persisted bit position in `hiddenAppsMask`: allocate the next unused value, never reuse or change existing
+values, and keep conditional-app IDs outside their `#ifdef`. New bits default to visible. The menu, launcher, and App
+Visibility settings all read this same table; no `switch` or `buildItems()` is needed.
 
 ### 4. Add the i18n key and icon
 
@@ -105,7 +116,7 @@ When adding such an app, wrap every line in the four standard add-an-app edits w
 | `BaseTheme.h` | The new `UIIcon::<App>` enum variant |
 | `themes/lyra/LyraTheme.cpp` | `#include "components/icons/<app>.h"` and the `case UIIcon::<App>:` branch in `iconForName` |
 | `ActivityManager.{h,cpp}` | The `goTo<App>()` declaration, the `#include "apps/<app>/<App>MenuActivity.h"`, and the `goTo<App>()` definition |
-| `AppsMenuActivity.cpp` | The `kAppEntries[]` row (`kAppCount` uses `sizeof/sizeof`, so it auto-adjusts) |
+| `AppsMenuActivity.cpp` | The unconditional stable `AppId` plus the guarded `kAppEntries[]` row (`kAppCount` auto-adjusts) |
 | `main.cpp` | App-specific font objects + `renderer.insertFont(...)` calls, if the app needs a custom font |
 | `lib/EpdFont/builtinFonts/all.h` | `#include` of the app's font header |
 | `platformio.ini` (base) | Add `-<activities/apps/<app>/>` to the default `build_src_filter` |
