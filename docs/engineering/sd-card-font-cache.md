@@ -165,17 +165,44 @@ verification failure; all continue with the SD font.
 
 ## Performance verification
 
-Debug builds expose the storage source and timing needed for an A/B comparison:
+An exploratory A/B measurement was run on an X4 with a Chinese SD-card reader
+font and EPUB content. One session read the font directly from SD; the other
+used the preprocessed internal-Flash cache. Temporary structured timing logs
+confirmed `source=sd` and `source=flash` respectively. The SD session supplied
+20 render-path prewarm samples and the Flash session supplied 28. Values below
+use the median and nearest-rank p95.
+
+| Metric | SD median / p95 | Flash median / p95 | Improvement |
+|---|---:|---:|---:|
+| Font prewarm | 269 / 538 ms | 17 / 32 ms | 93.7% / 94.1% |
+| Font read | 257 / 430 ms | 2 / 21 ms | 99.2% / 95.1% |
+| Render-path prewarm | 335 / 548 ms | 20 / 35 ms | 94.0% / 93.6% |
+
+For samples with non-zero I/O, the median per-sample `read_ms / io_ops`
+dropped from 1.414 ms per operation to 0.063 ms, a 95.5% reduction. The p95 I/O
+counts were nearly unchanged (336 from SD and 332 from Flash), so the gain
+comes from lower random-read latency rather than doing less font work.
+
+The observed median book-open time fell from 6,626 ms to 2,907 ms, but this is
+not treated as an end-to-end acceptance result. Each mode had only two open
+samples, the pages were not matched, and grayscale rendering, allocation
+failures, and one interleaved serial line contaminated page-total timing. The
+measurement therefore supports the font-read and prewarm speedup only.
+
+Existing debug logs expose the storage source and timing needed to repeat the
+comparison:
 
 - `Initial load source=flash|sd load_ms=...`
 - `[epub-page]` or `[txt-page] source=flash|sd total=... read_ms=...`
 - `First page displayed: open_total=...`
 - Page rendering logs report display time separately from font prewarm.
 
-Compare the same device, SD card, font, point size, and book in SD and Flash
-modes. Measure cold initial load and first-page display, then at least 30 text
-pages for median and p95 prewarm/read time. Keep e-paper refresh time separate:
-the cache accelerates font I/O, not the physical panel waveform.
+A controlled end-to-end rerun must use the same device, SD card, font, point
+size, book, and page range in both modes. Disable text antialiasing, avoid image
+pages, collect at least five cold book opens and 30 consecutive text pages per
+mode, and keep a fixed dwell time when measuring idle prewarm. Report e-paper
+refresh separately: the cache accelerates font I/O, not the physical panel
+waveform.
 
 The implementation adds no resident cache buffer, background task, or LRU. Its
 only new working allocation is the existing 4KiB preload buffer, which is
