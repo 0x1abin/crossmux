@@ -5,6 +5,7 @@
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
+#include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
@@ -173,6 +174,7 @@ void OtaUpdateActivity::runUpdateInstall() {
   {
     RenderLock lock(*this);
     state = UPDATE_IN_PROGRESS;
+    sdFontSystem.releaseLoadedFont(renderer);
   }
   requestUpdateAndWait();
   const auto res = updater.installUpdate(
@@ -188,6 +190,7 @@ void OtaUpdateActivity::runUpdateInstall() {
     LOG_DBG("OTA", "Update failed: %d", res);
     {
       RenderLock lock(*this);
+      sdFontSystem.ensureLoaded(renderer, false);
       state = FAILED;
     }
     requestUpdate();

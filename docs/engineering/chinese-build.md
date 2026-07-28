@@ -26,8 +26,8 @@ gates every CN-only resource:
 | Code + non-font data | ~3.15 MB |
 | 4 CJK font headers 8/10/12/14pt (3515 CJK + 497 ASCII/Latin/punctuation glyphs) | 2,109,690 |
 | 2 CJK font headers 16/18pt (653 CJK + 497 ASCII/Latin/punctuation glyphs) | 506,899 |
-| **Total (`gh_release_cn`, 2026-07-28)** | **5,831,001 / 6,553,600 bytes**, 722,599 bytes headroom; 53,028 bytes static RAM |
-| **Total (`gh_release_cn_rc`, 2026-07-28)** | **5,831,033 / 6,553,600 bytes**, 722,567 bytes headroom; 53,028 bytes static RAM |
+| **Total (`gh_release_cn`, 2026-07-28)** | **5,843,493 / 6,553,600 bytes**, 710,107 bytes headroom; 53,060 bytes static RAM |
+| **Total (`gh_release_cn_rc`, 2026-07-28)** | **5,843,525 / 6,553,600 bytes**, 710,075 bytes headroom; 53,060 bytes static RAM |
 
 A/B OTA rollback works exactly like the Latin build — the firmware fits in
 both app slots, and a failed update can auto-revert.

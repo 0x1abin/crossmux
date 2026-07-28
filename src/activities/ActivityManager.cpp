@@ -2,9 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <HalPowerManager.h>
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
 #include <Memory.h>
-#endif
 
 #include <algorithm>
 
@@ -237,6 +235,17 @@ void ActivityManager::goToSleep(bool fromTimeout) {
 }
 
 void ActivityManager::goToBoot() { replaceActivity(std::make_unique<BootActivity>(renderer, mappedInput)); }
+
+bool ActivityManager::goToPostOtaBoot(bool allowAutoPreload) {
+  // Activities outlive this call and are owned by ActivityManager, so this small allocation cannot use the stack.
+  auto activity = makeUniqueNoThrow<BootActivity>(renderer, mappedInput, BootActivity::Mode::PostOta, allowAutoPreload);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: BootActivity (%u bytes)", static_cast<unsigned>(sizeof(BootActivity)));
+    return false;
+  }
+  replaceActivity(std::move(activity));
+  return true;
+}
 
 void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::Style style) {
   replaceActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, std::move(message), style));

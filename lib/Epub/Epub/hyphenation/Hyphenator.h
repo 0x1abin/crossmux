@@ -10,9 +10,8 @@ class Hyphenator {
  public:
   struct BreakInfo {
     size_t byteOffset;            // Byte position inside the UTF-8 word where a break may occur.
-    bool requiresInsertedHyphen;  // true = a visible '-' must be rendered at the break (pattern/fallback breaks).
-                                  // false = break occurs at an existing visible separator boundary
-                                  //         (explicit '-' or eligible apostrophe contraction boundary).
+    bool requiresInsertedHyphen;  // true = a visible '-' must be rendered at a language-pattern break.
+                                  // false = break is already visible or is an emergency wrap that preserves text.
   };
 
   // Returns byte offsets where the word may be hyphenated.
@@ -30,9 +29,8 @@ class Hyphenator {
   //      avoiding short clitics (e.g. l', d') and contraction tails (e.g. 've, 're, 'll).
   //   3. Language-specific Liang patterns (e.g. German de_patterns).
   //      Example: "Quadratkilometer" -> Qua|drat|ki|lo|me|ter.
-  //   4. Fallback every-N-chars splitting (only when includeFallback is true AND no
-  //      pattern breaks were found). Used as a last resort to prevent a single oversized
-  //      word from overflowing the page width.
+  //   4. UTF-8-safe fallback boundaries when includeFallback is true. These do not insert
+  //      a visible hyphen, so URLs and identifiers remain unchanged when emergency-wrapped.
   static std::vector<BreakInfo> breakOffsets(const std::string& word, bool includeFallback);
 
   // Provide a publication-level language hint (e.g. "en", "en-US", "ru") used to select hyphenation rules.

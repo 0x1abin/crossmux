@@ -95,10 +95,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 44 / 45
+### Versions 46 / 47
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **45**; Latin builds use **44**. The byte layout is identical between
+> currently **47**; Latin builds use **46**. The byte layout is identical between
 > flavors; only
 > the word-stream contents differ (per-character CJK tokenization), so caches are
 > not reusable across flavors.
@@ -111,7 +111,9 @@ if (parsedSize != fileSize) {
 > of truncated. Versions 42/43 persist each image's book-internal source href for
 > lazy extraction and serialize ruby annotations/group-continuation styles.
 > Versions 44/45 invalidate pagination after closed HTML tags began splitting
-> adjacent text blocks. The counters remain
+> adjacent text blocks. Versions 46/47 keep the byte layout unchanged but
+> invalidate pagination because oversized tokens now wrap at UTF-8 boundaries
+> without inserting synthetic hyphens. The counters remain
 > distinct and above every previously shipped value so a firmware-flavor swap
 > cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
 > source of truth.
@@ -146,7 +148,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 44
+#define EXPECTED_VERSION 46
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
@@ -431,3 +433,47 @@ chapter images.
 `wordCount`, used to map local whole-book progress to WeRead chapter offsets.
 Manual progress sync refreshes only an old or invalid TOC; an existing
 `/WeRead/*.epub` is retained.
+
+## SD-card font cache
+
+For the runtime read path, OTA/rollback lifecycle, rebuild triggers, progress
+UI, and performance verification, see
+[SD-Card Font Cache](engineering/sd-card-font-cache.md). Its
+[partition reuse model](engineering/sd-card-font-cache.md#partition-reuse-model)
+shows how the inactive application slot changes roles without modifying
+`otadata` or using SPIFFS.
+
+The non-running OTA application slot may temporarily hold the selected SD
+reader font. It is a disposable acceleration cache, not a firmware image and
+does not modify `otadata`. A normal online or SD-card OTA erases and overwrites
+it. The current 0x640000-byte OTA slots reserve the first 4096 bytes for the
+cache header, leaving at most 6,549,504 bytes for one `.cpfont` payload.
+
+Header version 1 is a fixed 156-byte little-endian record at slot offset 0:
+
+| Offset | Field |
+|---:|---|
+| 0 | `uint8 magic[8]` = `CPSDFC1\0` |
+| 8 | `uint16 version` = 1 |
+| 10 | `uint16 headerSize` = 156 |
+| 12 | `uint32 payloadSize` |
+| 16 | `uint32 contentHash` (FNV-1a of the `.cpfont` header and style TOC) |
+| 20 | `uint32 payloadCrc` |
+| 24 | `uint32 headerCrc` (CRC-32 with this field zeroed) |
+| 28 | NUL-terminated `char sourcePath[128]` |
+
+The `.cpfont` bytes start at offset 4096. A writer first erases the header,
+writes and CRC-verifies the complete payload, then commits the header last.
+Startup validates the header, source path and size, content hash, and normal
+`.cpfont` structure; it deliberately does not rescan the complete payload CRC.
+Any Flash read failure immediately falls back to the SD source.
+
+The legacy `CPOTAF1\0` Magic is rejected even when its header CRC is valid, so
+older caches safely fall back to SD and are rebuilt through the normal
+preprocessing flow.
+
+After an OTA, application confirmation is deferred until the new firmware has
+initialized the display and physically rendered its startup verification page.
+Only after confirmation cancels rollback may the old firmware slot be erased
+and rebuilt as a font cache. If that copy is interrupted or fails, the
+uncommitted header remains invalid and the selected font loads from SD.

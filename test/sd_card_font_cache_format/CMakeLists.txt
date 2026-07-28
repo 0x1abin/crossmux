@@ -1,0 +1,3 @@
+add_executable(sd_card_font_cache_format_test SdCardFontCacheFormatTest.cpp)
+target_link_libraries(sd_card_font_cache_format_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(sd_card_font_cache_format_test)

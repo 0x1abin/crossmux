@@ -3,6 +3,7 @@
 #include <EpdFontFamily.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SdCardFont.h>
 #include <SdCardFontRegistry.h>
 
@@ -28,16 +29,16 @@ int SdCardFontManager::computeFontId(uint32_t contentHash, const char* familyNam
   return id != 0 ? id : 1;  // 0 is reserved as "not found" sentinel
 }
 
-int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer) {
-  auto* font = new (std::nothrow) SdCardFont();
+int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer,
+                                bool preferFlash) {
+  auto font = makeUniqueNoThrow<SdCardFont>();
   if (!font) {
     LOG_ERR("SDMGR", "Failed to allocate SdCardFont for %s", file.path.c_str());
     return 0;
   }
 
-  if (!font->load(file.path.c_str())) {
+  if (!font->load(file.path.c_str(), preferFlash)) {
     LOG_ERR("SDMGR", "Failed to load %s", file.path.c_str());
-    delete font;
     return 0;
   }
 
@@ -46,20 +47,22 @@ int SdCardFontManager::loadFile(const SdCardFontFileInfo& file, const char* fami
   // with FNV-1a hashes, but provides a safety net)
   if (renderer.getFontMap().count(fontId) != 0) {
     LOG_ERR("SDMGR", "Font ID %d collides with existing font, skipping %s", fontId, file.path.c_str());
-    delete font;
     return 0;
   }
-  renderer.registerSdCardFont(fontId, font);
-  loaded_.push_back({font, fontId, file.pointSize});
+  renderer.registerSdCardFont(fontId, font.get());
+  loaded_.push_back({font.get(), fontId, file.pointSize});
 
-  LOG_DBG("SDMGR", "Loaded %s size=%u id=%d styles=%u", file.path.c_str(), file.pointSize, fontId, font->styleCount());
+  LOG_DBG("SDMGR", "Loaded %s size=%u id=%d styles=%u source=%s", file.path.c_str(), file.pointSize, fontId,
+          font->styleCount(), font->usingFlash() ? "flash" : "sd");
 
   EpdFontFamily fontFamily(font->getEpdFont(0), font->getEpdFont(1), font->getEpdFont(2), font->getEpdFont(3));
   renderer.insertFont(fontId, fontFamily);
+  font.release();
   return fontId;
 }
 
-bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t pointSize) {
+bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t pointSize,
+                                   bool preferFlash) {
   // Unload any previously loaded family first
   if (!loadedFamilyName_.empty()) {
     unloadAll(renderer);
@@ -71,7 +74,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (loadFile(*selected, family.name.c_str(), renderer) == 0) {
+  if (loadFile(*selected, family.name.c_str(), renderer, preferFlash) == 0) {
     return false;
   }
 
@@ -91,7 +94,7 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
     if (lf.size == pointSize) return lf.fontId;
   }
 
-  return loadFile(*file, family.name.c_str(), renderer);
+  return loadFile(*file, family.name.c_str(), renderer, false);
 }
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {

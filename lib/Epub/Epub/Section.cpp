@@ -32,10 +32,12 @@ namespace {
 // v42/v43: Images persist their book-internal source href for lazy extraction,
 // and TextBlocks serialize ruby annotations and group-continuation styles.
 // v44/v45: Closed HTML tags split adjacent text blocks, changing pagination.
+// v46/v47: Oversized tokens use UTF-8-safe emergency wrapping without inserting
+// synthetic hyphens, changing cached word positions and pagination.
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 45;
+constexpr uint8_t SECTION_FILE_VERSION = 47;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 44;
+constexpr uint8_t SECTION_FILE_VERSION = 46;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /

@@ -31,6 +31,8 @@ class EpubReaderActivity final : public Activity {
   int cachedChapterTotalPageCount = 0;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  unsigned long openStartMs;
+  bool firstPageLogged = false;
   // Signals that the next render should reposition within the newly loaded section
   // based on a cross-book percentage jump.
   bool pendingPercentJump = false;
@@ -201,10 +203,11 @@ class EpubReaderActivity final : public Activity {
 
  public:
   explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub,
-                              int initialRefreshCountdown)
+                              int initialRefreshCountdown, unsigned long openStartMs)
       : Activity("EpubReader", renderer, mappedInput),
         epub(std::move(epub)),
-        pagesUntilFullRefresh(initialRefreshCountdown) {}
+        pagesUntilFullRefresh(initialRefreshCountdown),
+        openStartMs(openStartMs) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
