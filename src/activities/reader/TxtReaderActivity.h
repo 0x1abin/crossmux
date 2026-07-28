@@ -13,6 +13,8 @@ class TxtReaderActivity final : public Activity {
   int currentPage = 0;
   int totalPages = 1;
   int pagesUntilFullRefresh = 0;
+  unsigned long openStartMs;
+  bool firstPageLogged = false;
 
   // Streaming text reader - stores file offsets for each page
   std::vector<size_t> pageOffsets;  // File offset for start of each page
@@ -43,10 +45,11 @@ class TxtReaderActivity final : public Activity {
 
  public:
   explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt,
-                             int initialRefreshCountdown)
+                             int initialRefreshCountdown, unsigned long openStartMs)
       : Activity("TxtReader", renderer, mappedInput),
         txt(std::move(txt)),
-        pagesUntilFullRefresh(initialRefreshCountdown) {}
+        pagesUntilFullRefresh(initialRefreshCountdown),
+        openStartMs(openStartMs) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

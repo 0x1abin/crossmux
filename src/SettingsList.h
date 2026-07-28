@@ -82,11 +82,13 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
     if (v < CrossPointSettings::BUILTIN_FONT_COUNT) {
       SETTINGS.fontFamily = v;
       SETTINGS.sdFontFamilyName[0] = '\0';
+      SETTINGS.sdFontFlashPreload = 0;
     } else {
       int sdIdx = v - CrossPointSettings::BUILTIN_FONT_COUNT;
       if (sdIdx < static_cast<int>(sdFamilyNames.size())) {
         strncpy(SETTINGS.sdFontFamilyName, sdFamilyNames[sdIdx].c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
         SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+        SETTINGS.sdFontFlashPreload = 0;
       }
     }
   };

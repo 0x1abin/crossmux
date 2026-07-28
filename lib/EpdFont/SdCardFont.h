@@ -36,7 +36,8 @@ class SdCardFont {
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
   // Supports v4 (multi-style) format.
   // Returns true on success.
-  bool load(const char* path);
+  bool load(const char* path, bool preferFlash = false);
+  bool usingFlash() const { return useFlash_; }
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
@@ -123,6 +124,8 @@ class SdCardFont {
   uint32_t contentHash() const { return contentHash_; }
 
  private:
+  bool loadSelectedSource();
+
   // Per-style metadata (parsed from file header/TOC)
   struct CpFontHeader {
     uint32_t intervalCount = 0;
@@ -244,6 +247,8 @@ class SdCardFont {
   uint8_t styleCount_ = 0;
 
   char filePath_[128] = {};
+  mutable bool useFlash_ = false;
+  size_t flashPayloadSize_ = 0;
 
   // Overflow context: glyphMissHandler needs to know which style it's serving
   struct OverflowContext {

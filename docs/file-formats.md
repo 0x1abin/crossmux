@@ -416,3 +416,47 @@ downloaded again so pre-image-support chapter caches cannot silently lose
 figures. Existing `/WeRead/*.epub` files remain readable and are not upgraded
 automatically; cache a book again to embed its available cover and selected
 chapter images.
+
+## SD-card font cache
+
+For the runtime read path, OTA/rollback lifecycle, rebuild triggers, progress
+UI, and performance verification, see
+[SD-Card Font Cache](engineering/sd-card-font-cache.md). Its
+[partition reuse model](engineering/sd-card-font-cache.md#partition-reuse-model)
+shows how the inactive application slot changes roles without modifying
+`otadata` or using SPIFFS.
+
+The non-running OTA application slot may temporarily hold the selected SD
+reader font. It is a disposable acceleration cache, not a firmware image and
+does not modify `otadata`. A normal online or SD-card OTA erases and overwrites
+it. The current 0x640000-byte OTA slots reserve the first 4096 bytes for the
+cache header, leaving at most 6,549,504 bytes for one `.cpfont` payload.
+
+Header version 1 is a fixed 156-byte little-endian record at slot offset 0:
+
+| Offset | Field |
+|---:|---|
+| 0 | `uint8 magic[8]` = `CPSDFC1\0` |
+| 8 | `uint16 version` = 1 |
+| 10 | `uint16 headerSize` = 156 |
+| 12 | `uint32 payloadSize` |
+| 16 | `uint32 contentHash` (FNV-1a of the `.cpfont` header and style TOC) |
+| 20 | `uint32 payloadCrc` |
+| 24 | `uint32 headerCrc` (CRC-32 with this field zeroed) |
+| 28 | NUL-terminated `char sourcePath[128]` |
+
+The `.cpfont` bytes start at offset 4096. A writer first erases the header,
+writes and CRC-verifies the complete payload, then commits the header last.
+Startup validates the header, source path and size, content hash, and normal
+`.cpfont` structure; it deliberately does not rescan the complete payload CRC.
+Any Flash read failure immediately falls back to the SD source.
+
+The legacy `CPOTAF1\0` Magic is rejected even when its header CRC is valid, so
+older caches safely fall back to SD and are rebuilt through the normal
+preprocessing flow.
+
+After an OTA, application confirmation is deferred until the new firmware has
+initialized the display and physically rendered its startup verification page.
+Only after confirmation cancels rollback may the old firmware slot be erased
+and rebuilt as a font cache. If that copy is interrupted or fails, the
+uncommitted header remains invalid and the selected font loads from SD.

@@ -295,6 +295,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t focusReadingEnabled = 0;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
+  // Prefer the internal Flash cache for the selected SD reader font.
+  uint8_t sdFontFlashPreload = 0;
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)

@@ -7,6 +7,7 @@
 #include <HalClock.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
+#include <HalOtaSlot.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
@@ -344,14 +345,15 @@ void enterDeepSleep(bool fromTimeout = false) {
   powerManager.startDeepSleep(gpio);
 }
 
-void setupDisplayAndFonts(bool seamless = false) {
+bool setupDisplayAndFonts(bool seamless = false) {
   display.begin(seamless);
   renderer.begin();
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
 
   // Initialize font decompressor for compressed reader fonts
-  if (!fontDecompressor.init()) {
+  const bool fontDecompressorReady = fontDecompressor.init();
+  if (!fontDecompressorReady) {
     LOG_ERR("MAIN", "Font decompressor init failed");
   }
   fontCacheManager.setFontDecompressor(&fontDecompressor);
@@ -378,6 +380,7 @@ void setupDisplayAndFonts(bool seamless = false) {
   sdFontSystem.begin(renderer);
 
   LOG_DBG("MAIN", "Fonts setup");
+  return fontDecompressorReady;
 }
 
 void setup() {
@@ -399,6 +402,7 @@ void setup() {
 #endif
 
   HalSystem::begin();
+  const bool otaPendingAtBoot = HalOtaSlot::runningImageState() == HalOtaSlot::RunningImageState::PendingVerify;
 
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
@@ -419,8 +423,16 @@ void setup() {
   // We need 6 open files concurrently when parsing a new chapter
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
-    setupDisplayAndFonts(isSilentReboot);
+    const bool fontsReady = setupDisplayAndFonts(isSilentReboot);
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
+    activityManager.requestUpdateAndWait();
+    if (otaPendingAtBoot && fontsReady) {
+      if (HalOtaSlot::confirmRunningImage()) {
+        LOG_INF("OTA", "Running image confirmed after SD error display");
+      } else {
+        LOG_ERR("OTA", "Running image confirmation failed after SD error display");
+      }
+    }
     return;
   }
 
@@ -490,42 +502,45 @@ void setup() {
                                                         : BootResume::Splash;
   bool allowFastInitialReaderRefresh = false;
 
-  setupDisplayAndFonts(resume != BootResume::Splash);
+  const bool fontsReady = setupDisplayAndFonts(resume != BootResume::Splash);
+  const bool postOtaBoot = otaPendingAtBoot && fontsReady && activityManager.goToPostOtaBoot(!recoveryFirmwareMode);
 
-  switch (resume) {
-    case BootResume::Silent:
-      // Splash skipped: the routing block below picks the target activity; the
-      // panel keeps showing the pre-reboot popup until that first paint lands.
-      break;
-    case BootResume::QuickResume:
-      // One-shot flag: re-arm the splash for the next non-quick-resume boot. Save
-      // before any painting so a hang in the blocking paint path can't strand
-      // us in a quick-resume-with-no-frame loop on the next boot.
-      APP_STATE.showBootScreen = true;
-      APP_STATE.saveToFile();
-      if (loadSleepFrameBuffer()) {
-        const bool useDifferentialRefresh = gpio.deviceIsX3();
-        if (useDifferentialRefresh) {
-          // begin() clears the X3 controller RAM, so restore the saved frame as
-          // the baseline before replacing the moon with the loading icon.
-          renderer.cleanupGrayscaleWithFrameBuffer();
-        }
+  if (!postOtaBoot) {
+    switch (resume) {
+      case BootResume::Silent:
+        // Splash skipped: the routing block below picks the target activity; the
+        // panel keeps showing the pre-reboot popup until that first paint lands.
+        break;
+      case BootResume::QuickResume:
+        // One-shot flag: re-arm the splash for the next non-quick-resume boot. Save
+        // before any painting so a hang in the blocking paint path can't strand
+        // us in a quick-resume-with-no-frame loop on the next boot.
+        APP_STATE.showBootScreen = true;
+        APP_STATE.saveToFile();
+        if (loadSleepFrameBuffer()) {
+          const bool useDifferentialRefresh = gpio.deviceIsX3();
+          if (useDifferentialRefresh) {
+            // begin() clears the X3 controller RAM, so restore the saved frame as
+            // the baseline before replacing the moon with the loading icon.
+            renderer.cleanupGrayscaleWithFrameBuffer();
+          }
 
-        const auto pageHeight = renderer.getScreenHeight();
-        renderer.drawImage(LoadingIcon, 0, pageHeight - LOADINGICON_HEIGHT, LOADINGICON_WIDTH, LOADINGICON_HEIGHT);
-        if (useDifferentialRefresh) {
-          renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
-          allowFastInitialReaderRefresh = true;
+          const auto pageHeight = renderer.getScreenHeight();
+          renderer.drawImage(LoadingIcon, 0, pageHeight - LOADINGICON_HEIGHT, LOADINGICON_WIDTH, LOADINGICON_HEIGHT);
+          if (useDifferentialRefresh) {
+            renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+            allowFastInitialReaderRefresh = true;
+          } else {
+            renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+          }
         } else {
-          renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+          activityManager.goToBoot();  // frame file missing, fall back to the splash
         }
-      } else {
-        activityManager.goToBoot();  // frame file missing, fall back to the splash
-      }
-      break;
-    case BootResume::Splash:
-      activityManager.goToBoot();
-      break;
+        break;
+      case BootResume::Splash:
+        activityManager.goToBoot();
+        break;
+    }
   }
 
   if (recoveryFirmwareMode) {
@@ -535,6 +550,8 @@ void setup() {
   } else if (HalSystem::isRebootFromPanic()) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
+  } else if (postOtaBoot) {
+    activityManager.goHome();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
@@ -558,6 +575,10 @@ void setup() {
   }
 
   if (resume == BootResume::Silent) {
+    if (postOtaBoot) {
+      // Apply the queued Home replacement before waiting for its first physical paint.
+      activityManager.loop();
+    }
     // Block until the first paint physically completes. refreshDisplay()
     // waits on the panel BUSY pin so when this returns the user can see the
     // new activity. Without the wait, an edge captured by gpio.update()

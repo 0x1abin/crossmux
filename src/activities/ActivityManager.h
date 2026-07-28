@@ -91,6 +91,7 @@ class ActivityManager {
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
+  bool goToPostOtaBoot(bool allowAutoPreload);
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();
   void goToApps();

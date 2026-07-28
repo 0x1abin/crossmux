@@ -20,7 +20,7 @@ class SdCardFontSystem {
   /// Ensure the correct SD font family is loaded for the current settings.
   /// Call before entering the reader or after settings change.
   /// Also re-discovers if the registry has been marked dirty (e.g. by web upload).
-  void ensureLoaded(GfxRenderer& renderer);
+  void ensureLoaded(GfxRenderer& renderer, bool allowFlashCache = true);
 
   /// Release the resident SD font without changing the saved selection.
   void releaseLoadedFont(GfxRenderer& renderer);

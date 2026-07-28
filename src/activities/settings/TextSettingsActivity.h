@@ -2,6 +2,7 @@
 
 #include <SdCardFontRegistry.h>
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -28,6 +29,7 @@ class TextSettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool preventAutoSleep() override { return fontLoadState_.load() != FontLoadState::Idle; }
 
  private:
   // Row indices per tab. enum class (not plain enum) so a LayoutRow can't be
@@ -35,8 +37,16 @@ class TextSettingsActivity final : public Activity {
   enum class LayoutRow { LineSpacing, ParaSpacing, Alignment, ScreenMargin, Count };
   enum class StyleRow { FocusReading, Hyphenation, EmbeddedStyle, AntiAliasing, Count };
 
-  void applyFamily(int listIndex);
+  enum class FontLoadState : uint8_t { Idle, Preloading, Ready };
+
+  void applyFamily(int listIndex, bool forceReload = false);
   void applySize(int listIndex);
+  void promptSdFamily(int listIndex);
+  void selectSdFamily(int listIndex, bool preload);
+  bool preloadFont(const SdCardFontFileInfo& file, const char* familyName);
+  void finishPreload(bool succeeded);
+  void showPreloadFailure();
+  const SdCardFontFileInfo* fontFileForFamily(int listIndex, uint8_t pointSize) const;
 #ifdef ENABLE_CHINESE_VERSION
   void maybeOfferCompleteChineseFont();
 #endif
@@ -101,4 +111,11 @@ class TextSettingsActivity final : public Activity {
   int bottomReserved = 0;
   int usableHeight = 0;
   int previewHeight = 0;
+  std::atomic<FontLoadState> fontLoadState_{FontLoadState::Idle};
+  std::atomic<size_t> preloadCompleted_{0};
+  std::atomic<size_t> preloadTotal_{1};
+  const char* preloadFamilyName_ = "";
+  uint8_t preloadPointSize_ = 0;
+  bool preloadVerifying_ = false;
+  unsigned lastPreloadPercent_ = 101;
 };
