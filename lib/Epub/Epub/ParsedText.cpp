@@ -957,32 +957,35 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   const std::string& word = words[wordIndex];
   const auto style = wordStyles[wordIndex];
 
-  // Collect candidate breakpoints (byte offsets and hyphen requirements).
-  auto breakInfos = Hyphenator::breakOffsets(word, allowFallbackBreaks);
-  if (breakInfos.empty()) {
-    return false;
-  }
-
   size_t chosenOffset = 0;
   int chosenWidth = -1;
   bool chosenNeedsHyphen = true;
 
-  // Iterate over each legal breakpoint and retain the widest prefix that still fits.
-  for (const auto& info : breakInfos) {
-    const size_t offset = info.byteOffset;
-    if (offset == 0 || offset >= word.size()) {
-      continue;
-    }
+  const auto chooseWidestFittingBreak = [&](const bool includeFallback) {
+    const auto breakInfos = Hyphenator::breakOffsets(word, includeFallback);
+    for (const auto& info : breakInfos) {
+      const size_t offset = info.byteOffset;
+      if (offset == 0 || offset >= word.size()) {
+        continue;
+      }
 
-    const bool needsHyphen = info.requiresInsertedHyphen;
-    const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, offset), style, needsHyphen);
-    if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
-      continue;  // Skip if too wide or not an improvement
-    }
+      const bool needsHyphen = info.requiresInsertedHyphen;
+      const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, offset), style, needsHyphen);
+      if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
+        continue;
+      }
 
-    chosenWidth = prefixWidth;
-    chosenOffset = offset;
-    chosenNeedsHyphen = needsHyphen;
+      chosenWidth = prefixWidth;
+      chosenOffset = offset;
+      chosenNeedsHyphen = needsHyphen;
+    }
+  };
+
+  // Prefer language and explicit breakpoints. Only allocate the full UTF-8 fallback list
+  // when an oversized token has no legal breakpoint that fits the available width.
+  chooseWidestFittingBreak(/*includeFallback=*/false);
+  if (chosenWidth < 0 && allowFallbackBreaks) {
+    chooseWidestFittingBreak(/*includeFallback=*/true);
   }
 
   if (chosenWidth < 0) {
