@@ -360,11 +360,12 @@ location is not migrated or read.
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
   `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
-  Their magic values are `WRS4` (`0x34535257`) and `WRT1` (`0x31545257`);
+  Their magic values are `WRS5` (`0x35535257`) and `WRT1` (`0x31545257`);
   image indexes use `WRI1` (`0x31495257`) and image work indexes use `WIP1`
   (`0x31504957`). Version is currently `1`.
 - Shelf records contain fixed `bookId[64]`, `title[192]`, and `author[96]`
-  fields. TOC records contain fixed `chapterUid[64]`, `title[192]`,
+  fields followed by `uint32 readUpdateTime`. TOC records contain fixed
+  `chapterUid[64]`, `title[192]`,
   `uint32 chapterIdx`, and a paid flag.
 - `WRI1` records contain a generated EPUB-relative `href[64]` and the original
   HTTPS image URL in `url[512]`; both are NUL-terminated. TXT chapters have a
@@ -403,8 +404,12 @@ Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.
 
 `WRA1` replaces the pre-release `WRD3` session marker after the application
-rename. `WRS4` rejects `WRS3` shelves whose book titles could be overwritten by
-nested category titles. A cached chapter without a valid `WRI1` index is
+rename. `WRS5` rejects `WRS4` shelves because shelf records now include
+`readUpdateTime`; a successful sync rewrites them in descending timestamp
+order while preserving server order for ties. Existing per-book detail,
+cover, and EPUB files are retained. `WRS4` rejected `WRS3` shelves whose book
+titles could be overwritten by nested category titles. A cached chapter
+without a valid `WRI1` index is
 downloaded again so pre-image-support chapter caches cannot silently lose
 figures. Existing `/WeRead/*.epub` files remain readable and are not upgraded
 automatically; delete and download one again to embed its images.

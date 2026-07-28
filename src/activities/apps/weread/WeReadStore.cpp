@@ -23,6 +23,12 @@ struct IndexHeader {
 };
 static_assert(sizeof(IndexHeader) == 12);
 
+struct ShelfSortKey {
+  uint32_t readUpdateTime;
+  uint32_t sourceIndex;
+};
+static_assert(sizeof(ShelfSortKey) == 8);
+
 constexpr size_t kMaxSessionFileSize = 2048;
 constexpr char kSessionMagic[] = "WRA1\n";
 constexpr char kShelfPartPath[] = "/.crosspoint/weread/shelf.bin.part";
@@ -308,6 +314,49 @@ void BookDetailWriter::abort() {
 
 bool openShelf(HalFile& file, uint32_t& count) {
   return readIndexHeader(kShelfPath, kShelfMagic, sizeof(ShelfRecord), file, count);
+}
+
+ShelfSortResult sortShelfByRecent() {
+  IndexWriter sorted;
+  {
+    HalFile source;
+    uint32_t count = 0;
+    if (!openShelf(source, count)) return ShelfSortResult::StorageError;
+    if (count < 2) return ShelfSortResult::Ok;
+    if (static_cast<size_t>(count) > SIZE_MAX / sizeof(ShelfSortKey)) return ShelfSortResult::OutOfMemory;
+
+    // Sorting needs one rank per book; keep it off the small task stack. This is
+    // the only allocation and is exactly 8 * count bytes, released before return.
+    auto keys = makeUniqueNoThrow<ShelfSortKey[]>(count);
+    if (!keys) {
+      LOG_ERR("WR", "OOM: shelf sort (%zu bytes)", static_cast<size_t>(count) * sizeof(ShelfSortKey));
+      return ShelfSortResult::OutOfMemory;
+    }
+
+    ShelfRecord record;
+    bool alreadySorted = true;
+    for (uint32_t i = 0; i < count; ++i) {
+      if (!readShelfRecord(source, i, record)) return ShelfSortResult::StorageError;
+      keys[i] = {record.readUpdateTime, i};
+      if (i > 0 && keys[i - 1].readUpdateTime < keys[i].readUpdateTime) alreadySorted = false;
+    }
+    if (alreadySorted) return ShelfSortResult::Ok;
+
+    ShelfSortKey* const begin = keys.get();
+    std::sort(begin, begin + count, [](const ShelfSortKey& left, const ShelfSortKey& right) {
+      if (left.readUpdateTime != right.readUpdateTime) return left.readUpdateTime > right.readUpdateTime;
+      return left.sourceIndex < right.sourceIndex;
+    });
+
+    if (!sorted.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return ShelfSortResult::StorageError;
+    for (uint32_t i = 0; i < count; ++i) {
+      if (!readShelfRecord(source, keys[i].sourceIndex, record) || !sorted.append(&record)) {
+        sorted.abort();
+        return ShelfSortResult::StorageError;
+      }
+    }
+  }
+  return sorted.finish() ? ShelfSortResult::Ok : ShelfSortResult::StorageError;
 }
 
 bool openToc(const std::string& path, HalFile& file, uint32_t& count) {

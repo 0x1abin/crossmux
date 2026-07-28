@@ -106,6 +106,18 @@ uint32_t parseDecimal(const char* value, size_t len) {
 
 }  // namespace
 
+uint32_t parseUint32OrZero(const char* value, const size_t len) {
+  if (!value || len == 0) return 0;
+  uint32_t result = 0;
+  for (size_t i = 0; i < len; ++i) {
+    if (value[i] < '0' || value[i] > '9') return 0;
+    const uint32_t digit = static_cast<uint32_t>(value[i] - '0');
+    if (result > (UINT32_MAX - digit) / 10) return 0;
+    result = result * 10 + digit;
+  }
+  return result;
+}
+
 ChapterResponse classifyChapterResponse(const int status, const bool emptyObject) {
   if (status == 401) return ChapterResponse::AuthenticationRequired;
   if (status == 403 || (status == 200 && emptyObject)) return ChapterResponse::Retryable;
