@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 
@@ -117,6 +119,150 @@ uint32_t parseUint32OrZero(const char* value, const size_t len) {
   }
   return result;
 }
+
+bool hasUsablePclts(const char* value) { return value && value[0] && strcmp(value, "0") != 0; }
+
+RemoteProgressParser::RemoteProgressParser(const char* requestedBookId)
+    : requestedBookId_(requestedBookId), parser_(callbacks(this)) {
+  reset();
+}
+
+JsonCallbacks RemoteProgressParser::callbacks(RemoteProgressParser* parser) {
+  return {parser,        onKey,       onValue,      onValue,    nullptr, nullptr,
+          onObjectStart, onObjectEnd, onArrayStart, onArrayEnd, nullptr};
+}
+
+bool RemoteProgressParser::reset() {
+  std::fill(std::begin(candidates_), std::end(candidates_), Candidate{});
+  progress_ = {};
+  field_ = Field::None;
+  objectDepth_ = 0;
+  containerDepth_ = 0;
+  bestDepth_ = UINT8_MAX;
+  bestScore_ = -1;
+  errorCode_ = 0;
+  rootClosed_ = false;
+  parser_.reset();
+  return true;
+}
+
+bool RemoteProgressParser::feed(const uint8_t* data, const size_t len) {
+  if (!data && len != 0) return false;
+  parser_.feed(reinterpret_cast<const char*>(data), len);
+  return !parser_.hasError();
+}
+
+bool RemoteProgressParser::complete() const { return rootClosed_ && !parser_.hasError() && bestScore_ >= 0; }
+
+RemoteProgressParser::Candidate* RemoteProgressParser::currentCandidate() {
+  return objectDepth_ > 0 && objectDepth_ <= kMaxObjectDepth ? &candidates_[objectDepth_ - 1] : nullptr;
+}
+
+void RemoteProgressParser::acceptCandidate(const Candidate& candidate) {
+  const bool bookMatches =
+      !candidate.hasBookId || (requestedBookId_ && strcmp(candidate.bookId, requestedBookId_) == 0);
+  if (!candidate.hasProgress || !bookMatches) return;
+
+  const int score = static_cast<int>(candidate.hasBookId) + static_cast<int>(candidate.chapterUid[0] != '\0') +
+                    static_cast<int>(candidate.hasChapterOffset);
+  if (score < bestScore_ || (score == bestScore_ && objectDepth_ >= bestDepth_)) return;
+
+  memcpy(progress_.chapterUid, candidate.chapterUid, sizeof(progress_.chapterUid));
+  progress_.percent = candidate.progress;
+  progress_.chapterOffset = candidate.chapterOffset;
+  progress_.hasChapterOffset = candidate.hasChapterOffset && candidate.chapterUid[0] != '\0';
+  bestDepth_ = objectDepth_;
+  bestScore_ = score;
+}
+
+void RemoteProgressParser::onKey(void* raw, const char* key, size_t) {
+  auto& parser = *static_cast<RemoteProgressParser*>(raw);
+  if (strcmp(key, "bookId") == 0 || strcmp(key, "book_id") == 0) {
+    parser.field_ = Field::BookId;
+  } else if (strcmp(key, "progress") == 0 || strcmp(key, "readingProgress") == 0 || strcmp(key, "bookProgress") == 0) {
+    parser.field_ = Field::Progress;
+  } else if (strcmp(key, "chapterUid") == 0 || strcmp(key, "chapterId") == 0 || strcmp(key, "chapter_uid") == 0) {
+    parser.field_ = Field::ChapterUid;
+  } else if (strcmp(key, "chapterOffset") == 0 || strcmp(key, "chapterPos") == 0 || strcmp(key, "offset") == 0 ||
+             strcmp(key, "chapter_offset") == 0) {
+    parser.field_ = Field::ChapterOffset;
+  } else if (strcmp(key, "errcode") == 0 || strcmp(key, "errCode") == 0) {
+    parser.field_ = Field::ErrorCode;
+  } else {
+    parser.field_ = Field::None;
+  }
+}
+
+void RemoteProgressParser::onValue(void* raw, const char* value, const size_t len) {
+  auto& parser = *static_cast<RemoteProgressParser*>(raw);
+  Candidate* candidate = parser.currentCandidate();
+  if (parser.field_ == Field::ErrorCode) {
+    parser.errorCode_ = atoi(value);
+  } else if (candidate) {
+    switch (parser.field_) {
+      case Field::BookId:
+        decodeJsonString(value, len, candidate->bookId, sizeof(candidate->bookId));
+        candidate->hasBookId = candidate->bookId[0] != '\0';
+        break;
+      case Field::Progress: {
+        char number[32] = {};
+        if (len < sizeof(number)) {
+          memcpy(number, value, len);
+          char* end = nullptr;
+          const float parsed = strtof(number, &end);
+          if (end && *end == '\0' && std::isfinite(parsed) && parsed >= 0.0f && parsed <= 100.0f) {
+            candidate->progress = parsed;
+            candidate->hasProgress = true;
+          }
+        }
+        break;
+      }
+      case Field::ChapterUid:
+        decodeJsonString(value, len, candidate->chapterUid, sizeof(candidate->chapterUid));
+        break;
+      case Field::ChapterOffset:
+        candidate->chapterOffset = parseUint32OrZero(value, len);
+        candidate->hasChapterOffset = candidate->chapterOffset != 0 || (len == 1 && value && value[0] == '0');
+        break;
+      case Field::None:
+      case Field::ErrorCode:
+        break;
+    }
+  }
+  parser.field_ = Field::None;
+}
+
+void RemoteProgressParser::onObjectStart(void* raw) {
+  auto& parser = *static_cast<RemoteProgressParser*>(raw);
+  ++parser.containerDepth_;
+  ++parser.objectDepth_;
+  if (Candidate* candidate = parser.currentCandidate()) *candidate = {};
+  parser.field_ = Field::None;
+}
+
+void RemoteProgressParser::onObjectEnd(void* raw) {
+  auto& parser = *static_cast<RemoteProgressParser*>(raw);
+  if (const Candidate* candidate = parser.currentCandidate()) parser.acceptCandidate(*candidate);
+  if (parser.containerDepth_ == 1) parser.rootClosed_ = true;
+  if (parser.objectDepth_ > 0) --parser.objectDepth_;
+  if (parser.containerDepth_ > 0) --parser.containerDepth_;
+  parser.field_ = Field::None;
+}
+
+void RemoteProgressParser::onArrayStart(void* raw) {
+  auto& parser = *static_cast<RemoteProgressParser*>(raw);
+  ++parser.containerDepth_;
+  parser.field_ = Field::None;
+}
+
+void RemoteProgressParser::onArrayEnd(void* raw) {
+  auto& parser = *static_cast<RemoteProgressParser*>(raw);
+  if (parser.containerDepth_ == 1) parser.rootClosed_ = true;
+  if (parser.containerDepth_ > 0) --parser.containerDepth_;
+  parser.field_ = Field::None;
+}
+
+static_assert(sizeof(RemoteProgressParser) <= 2048, "WeRead progress parser exceeds its fixed stack budget");
 
 ChapterResponse classifyChapterResponse(const int status, const bool emptyObject) {
   if (status == 401) return ChapterResponse::AuthenticationRequired;
@@ -335,28 +481,34 @@ bool PsvtsExtractor::reset() {
   keyOffset_ = 0;
   valueLength_ = 0;
   state_ = State::SearchKey;
-  if (!out_ || outSize_ < 2) return false;
+  if (!out_ || outSize_ < 2 || !key_ || keyLength_ == 0) return false;
   out_[0] = '\0';
   return true;
 }
 
 void PsvtsExtractor::resumeSearch(const uint8_t value) {
-  static constexpr char kKey[] = "\"psvts\"";
   state_ = State::SearchKey;
-  keyOffset_ = value == static_cast<uint8_t>(kKey[0]) ? 1 : 0;
+  keyOffset_ = value == '"' ? 1 : 0;
 }
 
 bool PsvtsExtractor::feed(const uint8_t* data, const size_t len) {
-  if ((!data && len != 0) || !out_ || outSize_ < 2) return false;
-  static constexpr char kKey[] = "\"psvts\"";
+  if ((!data && len != 0) || !out_ || outSize_ < 2 || !key_ || keyLength_ == 0) return false;
   for (size_t i = 0; i < len; ++i) {
     const uint8_t value = data[i];
     switch (state_) {
       case State::SearchKey:
-        if (value == static_cast<uint8_t>(kKey[keyOffset_])) {
-          if (++keyOffset_ == sizeof(kKey) - 1) state_ = State::ExpectColon;
+        if (keyOffset_ == 0) {
+          if (value == '"') keyOffset_ = 1;
         } else {
-          resumeSearch(value);
+          const size_t keyIndex = keyOffset_ - 1;
+          const uint8_t expected =
+              keyIndex < keyLength_ ? static_cast<uint8_t>(key_[keyIndex]) : static_cast<uint8_t>('"');
+          if (value == expected) {
+            ++keyOffset_;
+            if (keyOffset_ == keyLength_ + 2) state_ = State::ExpectColon;
+          } else {
+            resumeSearch(value);
+          }
         }
         break;
       case State::ExpectColon:

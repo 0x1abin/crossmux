@@ -37,9 +37,25 @@ struct DownloadOptions {
   ChapterScope chapterScope = ChapterScope::WholeBook;
 };
 
+struct ProgressSyncInput {
+  float localFraction = 0.0f;
+};
+
+enum class ProgressSyncOutcome : uint8_t {
+  None,
+  AlreadySynced,
+  RemoteAhead,
+  LocalUploaded,
+};
+
+struct ProgressSyncResult {
+  ProgressSyncOutcome outcome = ProgressSyncOutcome::None;
+  float remoteFraction = 0.0f;
+};
+
 class Operation {
  public:
-  enum class Kind : uint8_t { Sync, Detail, Download };
+  enum class Kind : uint8_t { Sync, Detail, Download, ProgressSync };
   enum class Event : uint8_t {
     None,
     QrReady,
@@ -54,6 +70,7 @@ class Operation {
   enum class ProgressStage : uint8_t { Chapters, Images, Packaging };
 
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {});
+  bool beginProgressSync(const char* bookId, ProgressSyncInput input);
   Event step();
   void cancel();
   void reset();
@@ -70,6 +87,7 @@ class Operation {
   }
   const char* qrUrl() const { return url_; }
   const char* finalPath() const { return outputPath_.c_str(); }
+  const ProgressSyncResult& progressSyncResult() const { return progressSyncResult_; }
   bool active() const;
 
  private:
@@ -88,6 +106,12 @@ class Operation {
     ConvertCover,
     PrepareDownload,
     FetchToc,
+    PrepareProgressSync,
+    FetchProgress,
+    DecideProgress,
+    FetchProgressReader,
+    SendProgressEnter,
+    SendProgressReport,
     OpenToc,
     AwaitChapterRange,
     LoadChapter,
@@ -158,6 +182,12 @@ class Operation {
   Event fetchCover();
   Event convertCover();
   Error fetchTocOnce();
+  Error fetchProgressOnce();
+  Error fetchProgressReaderOnce();
+  Error sendProgressOnce(bool report);
+  float normalizedRemoteProgress() const;
+  void persistInitialProgress();
+  Error decideProgress();
   Error fetchReaderOnce();
   Error fetchShardOnce(const char* endpoint, const std::string& destination);
   Event inspectPrimary();
@@ -175,6 +205,8 @@ class Operation {
   Error error_ = Error::Ok;
   ProgressStage progressStage_ = ProgressStage::Chapters;
   DownloadOptions options_;
+  ProgressSyncInput progressSyncInput_;
+  ProgressSyncResult progressSyncResult_;
   WeReadStore::Session session_;
   WeReadStore::ShelfRecord book_;
   WeReadStore::TocRecord chapter_;
@@ -186,6 +218,7 @@ class Operation {
   uint32_t chapterIndex_ = 0;
   uint32_t progressCompleted_ = 0;
   uint32_t progressTotal_ = 0;
+  uint32_t progressChapterOffset_ = 0;
   uint32_t imageWorkCount_ = 0;
   uint32_t imageWorkCursor_ = 0;
   uint32_t imageDownloaded_ = 0;
@@ -211,6 +244,11 @@ class Operation {
   char previousVid_[64] = {};
   char loginUid_[128] = {};
   char psvts_[128] = {};
+  float remoteRawFraction_ = 0.0f;
+  float initialProgressFraction_ = 0.0f;
+  bool remoteHasChapterOffset_ = false;
+  bool initialProgressValid_ = false;
+  uint32_t remoteChapterOffset_ = 0;
   char imageHost_[128] = {};
   WeReadProtocol::ImageType coverType_ = WeReadProtocol::ImageType::None;
   char cookie_[kCookieSize] = {};

@@ -123,6 +123,62 @@ TEST(WeReadProtocol, ParsesBoundedShelfTimestampsOrFallsBackToZero) {
   EXPECT_EQ(WeReadProtocol::parseUint32OrZero("4294967296", 10), 0U);
 }
 
+TEST(WeReadProtocol, UsesOnlyARealReaderCursor) {
+  EXPECT_FALSE(WeReadProtocol::hasUsablePclts(nullptr));
+  EXPECT_FALSE(WeReadProtocol::hasUsablePclts(""));
+  EXPECT_FALSE(WeReadProtocol::hasUsablePclts("0"));
+  EXPECT_TRUE(WeReadProtocol::hasUsablePclts("chapter-token_1"));
+}
+
+TEST(WeReadProtocol, ParsesNestedRemoteProgressAcrossEveryChunkBoundary) {
+  constexpr char json[] =
+      R"({"ignored":{"bookId":"other-book","progress":99},"payload":{"bookId":"book-1","progress":"40.5","chapterUid":"chapter-2","metadata":{"progress":77},"chapterOffset":150}})";
+  for (size_t split = 0; split <= sizeof(json) - 1; ++split) {
+    WeReadProtocol::RemoteProgressParser parser("book-1");
+    ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(json), split));
+    ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(json) + split, sizeof(json) - 1 - split));
+    ASSERT_TRUE(parser.complete()) << "split=" << split;
+    EXPECT_EQ(parser.errorCode(), 0);
+    EXPECT_FLOAT_EQ(parser.progress().percent, 40.5f);
+    EXPECT_STREQ(parser.progress().chapterUid, "chapter-2");
+    EXPECT_EQ(parser.progress().chapterOffset, 150U);
+    EXPECT_TRUE(parser.progress().hasChapterOffset);
+  }
+}
+
+TEST(WeReadProtocol, RejectsInvalidOrMismatchedRemoteProgressAndFallsBackToRawPercent) {
+  WeReadProtocol::RemoteProgressParser parser("book-1");
+  constexpr char invalid[] = R"({"bookId":"book-1","progress":101,"chapterOffset":"bad"})";
+  ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(invalid), sizeof(invalid) - 1));
+  EXPECT_FALSE(parser.complete());
+
+  ASSERT_TRUE(parser.reset());
+  constexpr char mismatched[] = R"({"bookId":"other-book","progress":20})";
+  ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(mismatched), sizeof(mismatched) - 1));
+  EXPECT_FALSE(parser.complete());
+
+  ASSERT_TRUE(parser.reset());
+  constexpr char raw[] = R"({"data":{"readingProgress":33}})";
+  for (size_t i = 0; i < sizeof(raw) - 1; ++i) {
+    ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(raw) + i, 1));
+  }
+  ASSERT_TRUE(parser.complete());
+  EXPECT_FLOAT_EQ(parser.progress().percent, 33.0f);
+  EXPECT_STREQ(parser.progress().chapterUid, "");
+  EXPECT_FALSE(parser.progress().hasChapterOffset);
+
+  ASSERT_TRUE(parser.reset());
+  constexpr char nestedMetadata[] = R"({"progress":40,"metadata":{"progress":77}})";
+  ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(nestedMetadata), sizeof(nestedMetadata) - 1));
+  ASSERT_TRUE(parser.complete());
+  EXPECT_FLOAT_EQ(parser.progress().percent, 40.0f);
+
+  ASSERT_TRUE(parser.reset());
+  constexpr char truncated[] = R"({"progress":12)";
+  ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(truncated), sizeof(truncated) - 1));
+  EXPECT_FALSE(parser.complete());
+}
+
 TEST(WeReadProtocol, MaintainsBoundedRuntimeCookies) {
   char header[128] = {};
   ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_vid", 6, "1", 1));
@@ -209,6 +265,20 @@ TEST(WeReadProtocol, ExtractsPsvtsAcrossEveryChunkBoundary) {
     ASSERT_TRUE(extractor.feed(reinterpret_cast<const uint8_t*>(html) + split, sizeof(html) - 1 - split));
     ASSERT_TRUE(extractor.complete()) << "split=" << split;
     EXPECT_STREQ(psvts, "abc_DEF-123");
+  }
+}
+
+TEST(WeReadProtocol, ExtractsNamedReaderContextFields) {
+  constexpr char html[] = R"({"pclts":"chapter-token_1","token":"reader-token_2"})";
+  for (const auto* key : {"pclts", "token"}) {
+    char output[32];
+    WeReadProtocol::PsvtsExtractor extractor(output, sizeof(output), key);
+    ASSERT_TRUE(extractor.reset());
+    for (size_t i = 0; i < sizeof(html) - 1; ++i) {
+      ASSERT_TRUE(extractor.feed(reinterpret_cast<const uint8_t*>(html) + i, 1));
+    }
+    ASSERT_TRUE(extractor.complete()) << key;
+    EXPECT_STREQ(output, strcmp(key, "pclts") == 0 ? "chapter-token_1" : "reader-token_2");
   }
 }
 
