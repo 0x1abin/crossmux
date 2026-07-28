@@ -18,6 +18,7 @@
 #include "../../../SdCardFontSystem.h"
 #include "../../../SilentRestart.h"
 #include "../../../components/UITheme.h"
+#include "../../../components/icons/cover.h"
 #include "../../../fontIds.h"
 #include "../../../util/QrUtils.h"
 #include "../../network/WifiSelectionActivity.h"
@@ -41,8 +42,37 @@ constexpr MenuEntry kMenuEntries[] = {
 };
 
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
-constexpr int kDetailCoverWidth = 96;
-constexpr int kDetailCoverHeight = 140;
+constexpr int kCoverWidth = 96;
+constexpr int kCoverHeight = 140;
+
+struct ShelfGridLayout {
+  int columns = 1;
+  int rows = 1;
+  int itemsPerPage = 1;
+  int tileWidth = kCoverWidth;
+  int tileHeight = kCoverHeight;
+  int startX = 0;
+  int startY = 0;
+  int spacing = 0;
+};
+
+ShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content, const int sidePadding, const int spacing) {
+  ShelfGridLayout layout;
+  const int titleHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  layout.spacing = std::max(2, spacing);
+  layout.tileWidth = kCoverWidth + layout.spacing * 2;
+  layout.tileHeight = kCoverHeight + layout.spacing + titleHeight;
+  const int availableWidth = std::max(1, content.width - sidePadding * 2);
+  const int availableHeight = std::max(1, content.height);
+  layout.columns = std::max(1, availableWidth / layout.tileWidth);
+  layout.rows = std::max(1, (availableHeight + layout.spacing) / (layout.tileHeight + layout.spacing));
+  layout.itemsPerPage = layout.columns * layout.rows;
+  const int gridWidth = layout.columns * layout.tileWidth;
+  const int gridHeight = layout.rows * layout.tileHeight + (layout.rows - 1) * layout.spacing;
+  layout.startX = content.x + (content.width - gridWidth) / 2;
+  layout.startY = content.y + std::max(0, (availableHeight - gridHeight) / 2);
+  return layout;
+}
 
 struct Utf8Glyph {
   char text[5] = {};
@@ -110,6 +140,7 @@ void WeReadActivity::onEnter() {
   }
   menuSelected_ = 0;
   shelfSelected_ = 0;
+  resetShelfCoverLoading();
   detailSelected_ = 0;
   introPage_ = 0;
   introPageCount_ = 1;
@@ -152,12 +183,32 @@ bool WeReadActivity::refreshShelf() {
   } else if (shelfSelected_ >= static_cast<int>(shelfCount_)) {
     shelfSelected_ = static_cast<int>(shelfCount_ - 1);
   }
+  resetShelfCoverLoading();
   return true;
 }
 
 bool WeReadActivity::readShelf(const int index, WeReadStore::ShelfRecord& record) const {
   return index >= 0 && static_cast<uint32_t>(index) < shelfCount_ &&
          WeReadStore::readShelfRecord(shelfFile_, static_cast<uint32_t>(index), record);
+}
+
+Rect WeReadActivity::contentBounds() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentH = renderer.getScreenHeight() - contentY - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return Rect{0, contentY, renderer.getScreenWidth(), std::max(0, contentH)};
+}
+
+int WeReadActivity::shelfItemsPerPage() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return shelfGridLayout(renderer, contentBounds(), metrics.contentSidePadding, metrics.verticalSpacing).itemsPerPage;
+}
+
+void WeReadActivity::resetShelfCoverLoading() {
+  if (state_.load() == State::Shelf) operation_.reset();
+  shelfCoverPageStart_ = -1;
+  shelfCoverCursor_ = 0;
+  shelfCoverStopped_ = false;
 }
 
 void WeReadActivity::requestDownloadUpdate() {
@@ -243,18 +294,72 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
       requestUpdateAndWait();
     } else if (job == Job::Download) {
       requestDownloadUpdate();
-    } else {
+    } else if (job == Job::Detail) {
       requestUpdateAndWait();
     }
   }
 }
 
-void WeReadActivity::advanceJob() {
+WeReadClient::Operation::Event WeReadActivity::stepOperation() {
   // Rendering owns a second 8KB task and large display buffers. Serialize it
   // with each synchronous protocol step so TLS never competes with a refresh.
   RenderLock renderBarrier(*this);
   if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
-  const auto event = operation_.step();
+  return operation_.step();
+}
+
+void WeReadActivity::advanceShelfCovers() {
+  if (shelfCoverStopped_ || shelfCount_ == 0 || WiFi.status() != WL_CONNECTED) return;
+  const int itemsPerPage = shelfItemsPerPage();
+  const int pageStart = shelfSelected_ / itemsPerPage * itemsPerPage;
+  if (pageStart != shelfCoverPageStart_) {
+    operation_.reset();
+    shelfCoverPageStart_ = pageStart;
+    shelfCoverCursor_ = pageStart;
+  }
+
+  if (operation_.active()) {
+    switch (stepOperation()) {
+      case WeReadClient::Operation::Event::None:
+      case WeReadClient::Operation::Event::DetailReady:
+        return;
+      case WeReadClient::Operation::Event::Complete:
+        ++shelfCoverCursor_;
+        requestUpdate();
+        return;
+      case WeReadClient::Operation::Event::QrReady:
+      case WeReadClient::Operation::Event::Authenticated:
+      case WeReadClient::Operation::Event::ChapterComplete:
+      case WeReadClient::Operation::Event::Cancelled:
+      case WeReadClient::Operation::Event::Failed:
+        operation_.reset();
+        shelfCoverStopped_ = true;
+        return;
+    }
+  }
+
+  const int pageEnd = std::min(pageStart + itemsPerPage, static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX)));
+  while (shelfCoverCursor_ < pageEnd) {
+    WeReadStore::ShelfRecord book;
+    if (!readShelf(shelfCoverCursor_, book)) {
+      shelfCoverStopped_ = true;
+      return;
+    }
+    const std::string cover = WeReadStore::coverPath(WeReadStore::bookDirectory(book.bookId));
+    if (Storage.exists(cover.c_str())) {
+      ++shelfCoverCursor_;
+      continue;
+    }
+    if (!operation_.begin(WeReadClient::Operation::Kind::Detail, &book)) {
+      operation_.reset();
+      shelfCoverStopped_ = true;
+    }
+    return;
+  }
+}
+
+void WeReadActivity::advanceJob() {
+  const auto event = stepOperation();
   if (retryJob_ == Job::Download) {
     const auto stage = operation_.progressStage();
     const uint32_t completed = operation_.progressCompleted();
@@ -660,17 +765,24 @@ void WeReadActivity::handleMenuInput() {
 
 void WeReadActivity::handleShelfInput() {
   const int count = static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX));
-  buttonNavigator_.onNext([this, count] {
+  const int itemsPerPage = shelfItemsPerPage();
+  buttonNavigator_.onNext([this, count, itemsPerPage] {
+    const int previousPage = shelfSelected_ / itemsPerPage;
     shelfSelected_ = ButtonNavigator::nextIndex(shelfSelected_, count);
+    if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
     requestUpdate();
   });
-  buttonNavigator_.onPrevious([this, count] {
+  buttonNavigator_.onPrevious([this, count, itemsPerPage] {
+    const int previousPage = shelfSelected_ / itemsPerPage;
     shelfSelected_ = ButtonNavigator::previousIndex(shelfSelected_, count);
+    if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
     requestUpdate();
   });
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    resetShelfCoverLoading();
     activateSelected();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    resetShelfCoverLoading();
     state_.store(State::Menu);
     requestUpdate();
   }
@@ -723,6 +835,7 @@ void WeReadActivity::loop() {
       return;
     case State::Shelf:
       handleShelfInput();
+      if (state_.load() == State::Shelf) advanceShelfCovers();
       return;
     case State::Detail:
       handleDetailInput();
@@ -869,10 +982,56 @@ bool WeReadActivity::drawDetailIntroduction(const Rect& bounds, const bool selec
   return false;
 }
 
+void WeReadActivity::drawShelfGrid(const Rect& content) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto layout = shelfGridLayout(renderer, content, metrics.contentSidePadding, metrics.verticalSpacing);
+  const int count = static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX));
+  const int page = shelfSelected_ / layout.itemsPerPage;
+  const int pageStart = page * layout.itemsPerPage;
+  const int pageEnd = std::min(pageStart + layout.itemsPerPage, count);
+
+  for (int index = pageStart; index < pageEnd; ++index) {
+    WeReadStore::ShelfRecord book;
+    if (!readShelf(index, book)) continue;
+
+    const int item = index - pageStart;
+    const int tileX = layout.startX + item % layout.columns * layout.tileWidth;
+    const int tileY = layout.startY + item / layout.columns * (layout.tileHeight + layout.spacing);
+    const int coverX = tileX + (layout.tileWidth - kCoverWidth) / 2;
+    bool coverDrawn = false;
+    const std::string coverPath = WeReadStore::coverPath(WeReadStore::bookDirectory(book.bookId));
+    if (Storage.exists(coverPath.c_str())) {
+      HalFile file;
+      if (Storage.openFileForRead("WR", coverPath, file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          renderer.drawBitmap(bitmap, coverX, tileY, kCoverWidth, kCoverHeight);
+          coverDrawn = true;
+        }
+      }
+    }
+    renderer.drawRect(coverX, tileY, kCoverWidth, kCoverHeight);
+    if (!coverDrawn) {
+      renderer.drawIcon(CoverIcon, coverX + (kCoverWidth - 32) / 2, tileY + (kCoverHeight - 32) / 2, 32);
+    }
+
+    const std::string title = renderer.truncatedText(SMALL_FONT_ID, book.title, layout.tileWidth - 4);
+    const int titleWidth = renderer.getTextAdvanceX(SMALL_FONT_ID, title.c_str(), EpdFontFamily::REGULAR);
+    renderer.drawText(SMALL_FONT_ID, tileX + std::max(0, (layout.tileWidth - titleWidth) / 2),
+                      tileY + kCoverHeight + layout.spacing, title.c_str());
+    if (index == shelfSelected_) {
+      renderer.drawRect(tileX, tileY - 2, layout.tileWidth, layout.tileHeight + 4);
+      renderer.drawRect(tileX + 1, tileY - 1, layout.tileWidth - 2, layout.tileHeight + 2);
+    }
+  }
+
+  GUI.drawSideScrollBar(renderer, content, count, pageStart, layout.itemsPerPage);
+}
+
 void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int side = metrics.contentSidePadding;
-  const Rect cover{side, content.y, kDetailCoverWidth, kDetailCoverHeight};
+  const Rect cover{side, content.y, kCoverWidth, kCoverHeight};
   renderer.drawRect(cover.x, cover.y, cover.width, cover.height);
   bool coverDrawn = false;
   const std::string coverFile = WeReadStore::coverPath(WeReadStore::bookDirectory(pendingBook_.bookId));
@@ -1053,9 +1212,7 @@ void WeReadActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const int height = renderer.getScreenHeight();
-  const int contentY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentH = height - contentY - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  const Rect content{0, contentY, width, contentH};
+  const Rect content = contentBounds();
   const State state = state_.load();
 
   renderer.clearScreen();
@@ -1094,22 +1251,7 @@ void WeReadActivity::render(RenderLock&&) {
       if (shelfCount_ == 0) {
         GUI.drawPopup(renderer, tr(STR_WEREAD_SHELF_EMPTY));
       } else {
-        GUI.drawList(
-            renderer, content, static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX)), shelfSelected_,
-            [this](const int index) {
-              WeReadStore::ShelfRecord book;
-              return readShelf(index, book) ? std::string(book.title) : std::string();
-            },
-            [this](const int index) {
-              WeReadStore::ShelfRecord book;
-              if (!readShelf(index, book)) return std::string();
-              std::string subtitle(book.author);
-              if (Storage.exists(WeReadStore::finalBookPath(book).c_str())) {
-                if (!subtitle.empty()) subtitle += " · ";
-                subtitle += tr(STR_WEREAD_CACHE_BADGE);
-              }
-              return subtitle;
-            });
+        drawShelfGrid(content);
       }
       break;
     case State::Detail:
@@ -1247,4 +1389,7 @@ void WeReadActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool WeReadActivity::preventAutoSleep() { return isBusy(state_.load()); }
+bool WeReadActivity::preventAutoSleep() {
+  const State state = state_.load();
+  return isBusy(state) || (state == State::Shelf && operation_.active());
+}

@@ -57,6 +57,8 @@ class WeReadActivity final : public Activity {
   uint32_t shelfCount_ = 0;
   int menuSelected_ = 0;
   int shelfSelected_ = 0;
+  int shelfCoverPageStart_ = -1;
+  int shelfCoverCursor_ = 0;
   int detailSelected_ = 0;
   int introPage_ = 0;
   int introPageCount_ = 1;
@@ -70,11 +72,17 @@ class WeReadActivity final : public Activity {
   bool detailOptionsKnown_ = false;
   bool detailIntroTruncated_ = false;
   bool introPagesTruncated_ = false;
+  bool shelfCoverStopped_ = false;
   std::atomic<bool> downloadRenderPending_{false};
   std::atomic<bool> stageRenderPending_{false};
 
   bool refreshShelf();
   bool readShelf(int index, WeReadStore::ShelfRecord& record) const;
+  Rect contentBounds() const;
+  int shelfItemsPerPage() const;
+  void resetShelfCoverLoading();
+  void advanceShelfCovers();
+  WeReadClient::Operation::Event stepOperation();
   void requestDownloadUpdate();
   void requestJobUpdate();
   void startJob(Job job, const WeReadStore::ShelfRecord* book = nullptr);
@@ -89,6 +97,7 @@ class WeReadActivity final : public Activity {
   void handleIntroductionInput();
   void buildIntroductionPages();
   bool drawDetailIntroduction(const Rect& bounds, bool selected);
+  void drawShelfGrid(const Rect& content);
   void drawBookDetail(const Rect& content, bool coverLoading = false);
   void drawIntroduction(const Rect& content);
   void advanceJob();

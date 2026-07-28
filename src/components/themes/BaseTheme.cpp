@@ -271,6 +271,23 @@ int BaseTheme::getListPageItems(int contentHeight, bool hasSubtitle) const {
   return std::max(1, contentHeight / rowStep);
 }
 
+void BaseTheme::drawSideScrollBar(const GfxRenderer& renderer, Rect rect, int itemCount, int pageStartIndex,
+                                  int pageItems) const {
+  if (itemCount <= pageItems || pageItems <= 0 || rect.height <= 0) return;
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int totalPages = 1 + (itemCount - 1) / pageItems;
+  const int currentPage = std::clamp(pageStartIndex / pageItems, 0, totalPages - 1);
+  const int scrollBarHeight =
+      std::max(1, static_cast<int>((static_cast<int64_t>(rect.height) * pageItems) / itemCount));
+  const int scrollBarY =
+      rect.y + static_cast<int>((static_cast<int64_t>(rect.height - scrollBarHeight) * currentPage) / (totalPages - 1));
+  const int scrollBarX = rect.x + rect.width - metrics.scrollBarRightOffset;
+
+  renderer.drawLine(scrollBarX, rect.y, scrollBarX, rect.y + rect.height, true);
+  renderer.fillRect(scrollBarX - metrics.scrollBarWidth, scrollBarY, metrics.scrollBarWidth, scrollBarHeight, true);
+}
+
 void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,

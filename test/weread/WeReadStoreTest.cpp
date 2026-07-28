@@ -75,7 +75,7 @@ class WeReadStoreTest : public ::testing::Test {
 TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   {
-    constexpr uint32_t kLegacyShelfMagic = 0x33535257;  // WRS3
+    constexpr uint32_t kLegacyShelfMagic = 0x34535257;  // WRS4
     WeReadStore::IndexWriter legacyShelf;
     ASSERT_TRUE(legacyShelf.begin(WeReadStore::kShelfPath, kLegacyShelfMagic, sizeof(WeReadStore::ShelfRecord)));
     WeReadStore::ShelfRecord record;
@@ -137,6 +137,53 @@ TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
   corrupt.close();
   HalFile rejected;
   EXPECT_FALSE(WeReadStore::openShelf(rejected, count));
+}
+
+TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLast) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  for (unsigned i = 0; i < 600; ++i) {
+    WeReadStore::ShelfRecord record;
+    snprintf(record.bookId, sizeof(record.bookId), "book-%03u", i);
+    record.readUpdateTime = i == 1 ? 100 : i == 2 || i == 3 ? 300 : i == 4 ? 200 : 0;
+    ASSERT_TRUE(shelf.append(&record));
+  }
+  ASSERT_TRUE(shelf.finish());
+  ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Ok);
+
+  HalFile file;
+  uint32_t count = 0;
+  ASSERT_TRUE(WeReadStore::openShelf(file, count));
+  ASSERT_EQ(count, 600U);
+  uint32_t previousTime = UINT32_MAX;
+  unsigned previousSourceIndex = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    WeReadStore::ShelfRecord record;
+    ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+    unsigned sourceIndex = 0;
+    ASSERT_EQ(sscanf(record.bookId, "book-%u", &sourceIndex), 1);
+    EXPECT_LE(record.readUpdateTime, previousTime);
+    if (record.readUpdateTime == previousTime) EXPECT_GT(sourceIndex, previousSourceIndex);
+    previousTime = record.readUpdateTime;
+    previousSourceIndex = sourceIndex;
+  }
+
+  WeReadStore::ShelfRecord record;
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 0, record));
+  EXPECT_STREQ(record.bookId, "book-002");
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 1, record));
+  EXPECT_STREQ(record.bookId, "book-003");
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 4, record));
+  EXPECT_STREQ(record.bookId, "book-000");
+}
+
+TEST_F(WeReadStoreTest, RejectsCorruptShelfSortWithoutLeavingPartialReplacement) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "corrupt"));
+  EXPECT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::StorageError);
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
+  EXPECT_TRUE(Storage.exists(WeReadStore::kShelfPath));
 }
 
 TEST_F(WeReadStoreTest, OpensValidEmptyShelfIndex) {

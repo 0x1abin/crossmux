@@ -11,7 +11,7 @@ namespace WeReadStore {
 constexpr const char* kRoot = "/.crosspoint/weread";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
-constexpr uint32_t kShelfMagic = 0x34535257;        // WRS4
+constexpr uint32_t kShelfMagic = 0x35535257;        // WRS5
 constexpr uint32_t kTocMagic = 0x31545257;          // WRT1
 constexpr uint32_t kImageMagic = 0x31495257;        // WRI1
 constexpr uint32_t kImageWorkMagic = 0x31504957;    // WIP1
@@ -52,6 +52,14 @@ struct ShelfRecord {
   char bookId[64] = {};
   char title[192] = {};
   char author[96] = {};
+  uint32_t readUpdateTime = 0;
+};
+static_assert(sizeof(ShelfRecord) == 356);
+
+enum class ShelfSortResult : uint8_t {
+  Ok,
+  OutOfMemory,
+  StorageError,
 };
 
 struct BookDetailHeader {
@@ -142,6 +150,7 @@ bool clearSession();
 bool clearShelf();
 
 bool openShelf(HalFile& file, uint32_t& count);
+ShelfSortResult sortShelfByRecent();
 bool openToc(const std::string& path, HalFile& file, uint32_t& count);
 bool openImageIndex(const std::string& path, HalFile& file, uint32_t& count);
 bool openImageWorkIndex(const std::string& path, HalFile& file, uint32_t& count);

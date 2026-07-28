@@ -336,7 +336,7 @@ bool feedSimple(void* raw, const uint8_t* data, const size_t len) {
   return !ctx.parser->hasError();
 }
 
-enum class ShelfField : uint8_t { None, Books, BookId, Title, Author, ErrorCode };
+enum class ShelfField : uint8_t { None, Books, BookId, Title, Author, ReadUpdateTime, ErrorCode };
 
 struct ShelfJsonContext {
   StreamingJsonParser* parser = nullptr;
@@ -363,6 +363,8 @@ void shelfKey(void* raw, const char* key, size_t) {
     ctx.field = ShelfField::Title;
   } else if (strcmp(key, "author") == 0) {
     ctx.field = ShelfField::Author;
+  } else if (strcmp(key, "readUpdateTime") == 0) {
+    ctx.field = ShelfField::ReadUpdateTime;
   } else if (strcmp(key, "errcode") == 0 || strcmp(key, "errCode") == 0) {
     ctx.field = ShelfField::ErrorCode;
   } else {
@@ -382,6 +384,9 @@ void shelfValue(void* raw, const char* value, const size_t len) {
         break;
       case ShelfField::Author:
         copyDecoded(value, len, ctx.current.author, sizeof(ctx.current.author));
+        break;
+      case ShelfField::ReadUpdateTime:
+        ctx.current.readUpdateTime = WeReadProtocol::parseUint32OrZero(value, len);
         break;
       case ShelfField::None:
       case ShelfField::Books:
@@ -2094,6 +2099,14 @@ Error Operation::syncShelfOnce() {
     return Error::Protocol;
   }
   if (!context.writer.finish()) return Error::SdCard;
+  switch (WeReadStore::sortShelfByRecent()) {
+    case WeReadStore::ShelfSortResult::Ok:
+      break;
+    case WeReadStore::ShelfSortResult::OutOfMemory:
+      return Error::OutOfMemory;
+    case WeReadStore::ShelfSortResult::StorageError:
+      return Error::SdCard;
+  }
   logMemory("shelf parsed");
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
 }

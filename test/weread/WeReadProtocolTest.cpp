@@ -102,6 +102,15 @@ TEST(WeReadProtocol, MatchesOnlyAnExactEmptyJsonObject) {
   EXPECT_FALSE(WeReadProtocol::isEmptyJsonObject(nullptr, 0));
 }
 
+TEST(WeReadProtocol, ParsesBoundedShelfTimestampsOrFallsBackToZero) {
+  EXPECT_EQ(WeReadProtocol::parseUint32OrZero("1784923368", 10), 1784923368U);
+  EXPECT_EQ(WeReadProtocol::parseUint32OrZero("4294967295", 10), UINT32_MAX);
+  EXPECT_EQ(WeReadProtocol::parseUint32OrZero("", 0), 0U);
+  EXPECT_EQ(WeReadProtocol::parseUint32OrZero("-1", 2), 0U);
+  EXPECT_EQ(WeReadProtocol::parseUint32OrZero("12x", 3), 0U);
+  EXPECT_EQ(WeReadProtocol::parseUint32OrZero("4294967296", 10), 0U);
+}
+
 TEST(WeReadProtocol, MaintainsBoundedRuntimeCookies) {
   char header[128] = {};
   ASSERT_TRUE(WeReadProtocol::mergeRuntimeCookie(header, sizeof(header), "wr_vid", 6, "1", 1));

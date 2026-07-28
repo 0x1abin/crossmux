@@ -48,20 +48,20 @@ unsigned int uzlib_crc32(const void*, unsigned int, unsigned int prev) { return 
 }
 
 // =============================================================================
-// Excluded image converters / decoder factory
+// WASM-only image converter stubs / excluded decoder factory
 // =============================================================================
 
+#ifdef __EMSCRIPTEN__
+#include "JpegToBmpConverter.h"
 #include "PngToBmpConverter.h"
-
 bool PngToBmpConverter::pngFileToBmpStream(HalFile&, Print&, bool) { return false; }
 bool PngToBmpConverter::pngFileToBmpStreamWithSize(HalFile&, Print&, int, int) { return false; }
 bool PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(HalFile&, Print&, int, int) { return false; }
 
-#include "JpegToBmpConverter.h"
-
 bool JpegToBmpConverter::jpegFileToBmpStream(HalFile&, Print&, bool) { return false; }
 bool JpegToBmpConverter::jpegFileToBmpStreamWithSize(HalFile&, Print&, int, int) { return false; }
 bool JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(HalFile&, Print&, int, int) { return false; }
+#endif
 
 #include "Epub/converters/ImageDecoderFactory.h"
 
@@ -201,6 +201,9 @@ void SdFirmwareUpdateActivity::performUpdate() {}
 #include "activities/settings/FontDownloadActivity.h"
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& r, MappedInputManager& m, Purpose purpose)
     : Activity("FontDownload", r, m), purpose_(purpose), fontInstaller_(sdFontSystem.registry()) {}
+#ifdef ENABLE_CHINESE_VERSION
+bool FontDownloadActivity::wasChineseFontPromptShownThisBoot() { return true; }
+#endif
 STUB_ACTIVITY_BASE(FontDownloadActivity)
 
 #include "activities/settings/KOReaderAuthActivity.h"

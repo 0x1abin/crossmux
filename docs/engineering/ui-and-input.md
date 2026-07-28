@@ -122,6 +122,9 @@ action**.
 ## UITheme (The GUI Macro)
 * Rule: All UI rendering must go through the GUI macro (UITheme).
 * Do not hardcode fonts, colors, or positioning. This ensures orientation-aware layout consistency.
+* Paginated custom grids should call `GUI.drawSideScrollBar()` with their item
+  count, page start, and page capacity so the active theme controls the bar
+  dimensions and placement.
 
 > User-facing text must use the `tr()` macro — see
 > [hardware-constraints.md](hardware-constraints.md) → Resource Protocol rule 5,
