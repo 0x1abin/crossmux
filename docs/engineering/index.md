@@ -18,6 +18,7 @@ that matches your task — don't load everything at once.
 | [testing-and-debugging.md](testing-and-debugging.md) | Building, monitoring, debugging crashes, verifying changes, or reading CI workflows. |
 | [git-workflow.md](git-workflow.md) | Any git operation: detecting repo context, branching, commit format, or deciding whether to commit. |
 | [cache-management.md](cache-management.md) | Changing a cache binary layout, invalidating caches, or bumping a format version. (Byte-level formats: [../file-formats.md](../file-formats.md).) |
+| [sd-card-font-cache.md](sd-card-font-cache.md) | Reviewing the SD-card reader-font cache, its inactive-OTA-slot backend, rollback boundary, commit protocol, SD fallback, progress UI, or performance logs. |
 | [chinese-build.md](chinese-build.md) | Working on the `gh_release_cn` Simplified-Chinese firmware or the embedded CJK fonts. |
 | [device-variants.md](device-variants.md) | Building or flashing for the Xteink X3 vs X4, runtime device detection (one binary, both panels), and the per-device hardware differences. |
 | [upstream-merge-policy.md](upstream-merge-policy.md) | Resolving a sync conflict on `CLAUDE.md` / `.skills/SKILL.md` — how to keep the map thin and route upstream changes into these docs. |

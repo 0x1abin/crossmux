@@ -1485,6 +1485,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
+    if (!firstPageLogged) {
+      firstPageLogged = true;
+      LOG_DBG("ERS", "First page displayed: open_total=%lums", lastRenderCompleteMs - openStartMs);
+    }
   }
   // Only persist when the position actually changed. render() also runs on menu,
   // bookmark and screenshot re-renders, and writeAtomic is several FAT ops for 6 bytes.
@@ -1598,6 +1602,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     rawFontCacheGuard.manager = fcm;
   }
   const auto tPrewarm = millis();
+  fcm->logStats("epub-page");
 
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;

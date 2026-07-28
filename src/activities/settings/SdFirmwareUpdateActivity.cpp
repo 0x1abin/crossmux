@@ -8,6 +8,7 @@
 #include <esp_ota_ops.h>
 
 #include "MappedInputManager.h"
+#include "SdCardFontSystem.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
@@ -143,6 +144,7 @@ void SdFirmwareUpdateActivity::onConfirmationResult(const ActivityResult& result
     state = State::UPDATING;
     writtenBytes = 0;
     lastRenderedPercent = 101;
+    sdFontSystem.releaseLoadedFont(renderer);
   }
   requestUpdateAndWait();
   performUpdate();
@@ -169,6 +171,7 @@ void SdFirmwareUpdateActivity::performUpdate() {
     LOG_ERR("FW", "flash failed: %s", firmware_flash::resultName(result));
     errorMessage = tr(STR_FIRMWARE_WRITE_FAILED);
     RenderLock lock(*this);
+    sdFontSystem.ensureLoaded(renderer, false);
     state = State::FAILED;
     requestUpdate();
     return;

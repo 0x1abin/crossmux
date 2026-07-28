@@ -1,9 +1,11 @@
 #include "TextSettingsActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <I18n.h>
-#ifdef ENABLE_CHINESE_VERSION
 #include <Logging.h>
+#include <SdCardFontCache.h>
+#ifdef ENABLE_CHINESE_VERSION
 #include <Memory.h>
 #endif
 
@@ -22,6 +24,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "activities/settings/FontDownloadActivity.h"
 #endif
+#include "components/FontPreloadView.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -48,6 +51,8 @@ constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, St
 constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
 constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;
+constexpr StrId PRELOAD_OPTIONS[] = {StrId::STR_NO, StrId::STR_YES};
+constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 }  // namespace
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -218,6 +223,14 @@ void TextSettingsActivity::loop() {
 }
 
 void TextSettingsActivity::render(RenderLock&&) {
+  const FontLoadState fontLoadState = fontLoadState_.load();
+  if (fontLoadState != FontLoadState::Idle) {
+    fontpreload::draw(renderer, preloadFamilyName_, preloadPointSize_, preloadCompleted_.load(), preloadTotal_.load(),
+                      fontLoadState == FontLoadState::Ready ? fontpreload::State::Ready : fontpreload::State::Progress);
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
+
   if (optionPopup_.processRender(renderer, mappedInput)) return;  // picker draws over everything
 
   renderer.clearScreen();
@@ -308,12 +321,14 @@ void TextSettingsActivity::render(RenderLock&&) {
 // next one, and the render task walks that same object inside the preview's
 // prewarmCache() — so without this lock a font switch can free the mini glyph
 // arrays out from under prewarmStyle() (crash: null s.miniGlyphs mid-read/sort).
-void TextSettingsActivity::applyFamily(int listIndex) {
+void TextSettingsActivity::applyFamily(int listIndex, bool forceReload) {
   RenderLock lock;
+  if (forceReload) sdFontSystem.releaseLoadedFont(renderer);
   const auto& font = fonts_[listIndex];
   if (font.isBuiltin) {
     SETTINGS.fontFamily = font.settingIndex;
     SETTINGS.sdFontFamilyName[0] = '\0';
+    SETTINGS.sdFontFlashPreload = 0;
     sdFontSystem.ensureLoaded(renderer);  // unloads the previously resident SD font
     currentFamilyIndex_ = listIndex;
   } else if (registry_) {
@@ -339,7 +354,10 @@ void TextSettingsActivity::applyFamily(int listIndex) {
 void TextSettingsActivity::activateRow(int row) {
   switch (tab_) {
     case Tab::Family:
-      if (row != currentFamilyIndex_) {
+      if (!fonts_[row].isBuiltin) {
+        promptSdFamily(row);
+        requestUpdate();
+      } else if (row != currentFamilyIndex_) {
         applyFamily(row);
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
@@ -349,7 +367,13 @@ void TextSettingsActivity::activateRow(int row) {
       break;
     case Tab::Size:
       if (row != currentSizeIndex_) {
+        bool preloadSucceeded = true;
+        if (SETTINGS.sdFontFamilyName[0] != '\0' && SETTINGS.sdFontFlashPreload != 0) {
+          const auto* file = fontFileForFamily(currentFamilyIndex_, sizes_[row].pointSize);
+          preloadSucceeded = file && preloadFont(*file, fonts_[currentFamilyIndex_].name.c_str());
+        }
         applySize(row);
+        finishPreload(preloadSucceeded);
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
 #endif
@@ -375,6 +399,113 @@ void TextSettingsActivity::applySize(int listIndex) {
   currentSizeIndex_ = listIndex;
   SETTINGS.fontPointSize = sizes_[listIndex].pointSize;
   sdFontSystem.ensureLoaded(renderer);
+}
+
+const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(int listIndex, uint8_t pointSize) const {
+  if (!registry_ || listIndex < CrossPointSettings::BUILTIN_FONT_COUNT ||
+      listIndex >= static_cast<int>(fonts_.size())) {
+    return nullptr;
+  }
+  const int familyIndex = fonts_[listIndex].settingIndex - CrossPointSettings::BUILTIN_FONT_COUNT;
+  const auto& families = registry_->getFamilies();
+  return familyIndex >= 0 && familyIndex < static_cast<int>(families.size())
+             ? families[familyIndex].findNearestSize(pointSize)
+             : nullptr;
+}
+
+void TextSettingsActivity::promptSdFamily(int listIndex) {
+  optionPopup_.show(StrId::STR_FONT_PRELOAD_PROMPT, PRELOAD_OPTIONS, static_cast<int>(std::size(PRELOAD_OPTIONS)), 0,
+                    [this, listIndex](int selected) { selectSdFamily(listIndex, selected == 1); });
+}
+
+void TextSettingsActivity::selectSdFamily(int listIndex, bool preload) {
+  SETTINGS.sdFontFlashPreload = preload ? 1 : 0;
+  bool preloadSucceeded = true;
+  if (preload) {
+    const auto* file = fontFileForFamily(listIndex, SETTINGS.fontPointSize);
+    preloadSucceeded = file && preloadFont(*file, fonts_[listIndex].name.c_str());
+  }
+
+  applyFamily(listIndex, true);
+  finishPreload(preloadSucceeded);
+#ifdef ENABLE_CHINESE_VERSION
+  maybeOfferCompleteChineseFont();
+#endif
+  requestUpdate();
+}
+
+bool TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const char* familyName) {
+  size_t cachedPayloadSize = 0;
+  const bool alreadyCached = SdCardFontCache::isValidFor(file.path.c_str(), &cachedPayloadSize);
+  {
+    RenderLock lock(*this);
+    preloadFamilyName_ = familyName;
+    preloadPointSize_ = file.pointSize;
+    preloadVerifying_ = false;
+    preloadCompleted_.store(alreadyCached ? cachedPayloadSize * 2 : 0);
+    preloadTotal_.store(alreadyCached ? cachedPayloadSize * 2 : 1);
+    lastPreloadPercent_ = 0;
+    fontLoadState_.store(FontLoadState::Preloading);
+    if (!alreadyCached) sdFontSystem.releaseLoadedFont(renderer);
+  }
+  requestUpdateAndWait();
+
+  if (alreadyCached) {
+    {
+      RenderLock lock(*this);
+      fontLoadState_.store(FontLoadState::Ready);
+    }
+    requestUpdateAndWait();
+    LOG_DBG("SDFCACHE", "Preload result for %s: %s", file.path.c_str(),
+            SdCardFontCache::resultName(SdCardFontCache::Result::AlreadyCached));
+    return true;
+  }
+
+  const auto result = SdCardFontCache::preload(
+      file.path.c_str(),
+      [](size_t completed, size_t total, void* context) {
+        auto* self = static_cast<TextSettingsActivity*>(context);
+        self->preloadTotal_.store(total);
+        self->preloadCompleted_.store(completed);
+        const bool verifying = completed > total / 2;
+        const bool phaseChanged = self->preloadVerifying_ != verifying;
+        self->preloadVerifying_ = verifying;
+        const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
+        if (phaseChanged || percent == 100 || percent >= self->lastPreloadPercent_ + 10) {
+          self->lastPreloadPercent_ = percent;
+          self->requestUpdate(true);
+        }
+      },
+      this);
+  LOG_DBG("SDFCACHE", "Preload result for %s: %s", file.path.c_str(), SdCardFontCache::resultName(result));
+
+  const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
+  if (succeeded) {
+    if (result == SdCardFontCache::Result::AlreadyCached) {
+      size_t payloadSize = 0;
+      if (SdCardFontCache::isValidFor(file.path.c_str(), &payloadSize)) {
+        preloadTotal_.store(payloadSize * 2);
+        preloadCompleted_.store(payloadSize * 2);
+      }
+    }
+    requestUpdateAndWait();
+    {
+      RenderLock lock(*this);
+      fontLoadState_.store(FontLoadState::Ready);
+    }
+    requestUpdateAndWait();
+  }
+  return succeeded;
+}
+
+void TextSettingsActivity::finishPreload(bool succeeded) {
+  RenderLock lock(*this);
+  fontLoadState_.store(FontLoadState::Idle);
+  if (!succeeded) showPreloadFailure();
+}
+
+void TextSettingsActivity::showPreloadFailure() {
+  optionPopup_.show(StrId::STR_FONT_PRELOAD_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
 }
 
 #ifdef ENABLE_CHINESE_VERSION

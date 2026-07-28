@@ -119,8 +119,8 @@ void ReaderActivity::goToLibrary(const std::string& fromBookPath) {
 void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
   const auto epubPath = epub->getPath();
   currentBookPath = epubPath;
-  activityManager.replaceActivity(
-      std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub), initialRefreshCountdown()));
+  activityManager.replaceActivity(std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub),
+                                                                       initialRefreshCountdown(), openStartMs));
 }
 
 void ReaderActivity::onGoToBmpViewer(const std::string& path) {
@@ -137,8 +137,8 @@ void ReaderActivity::onGoToXtcReader(std::unique_ptr<Xtc> xtc) {
 void ReaderActivity::onGoToTxtReader(std::unique_ptr<Txt> txt) {
   const auto txtPath = txt->getPath();
   currentBookPath = txtPath;
-  activityManager.replaceActivity(
-      std::make_unique<TxtReaderActivity>(renderer, mappedInput, std::move(txt), initialRefreshCountdown()));
+  activityManager.replaceActivity(std::make_unique<TxtReaderActivity>(renderer, mappedInput, std::move(txt),
+                                                                      initialRefreshCountdown(), openStartMs));
 }
 
 void ReaderActivity::onEnter() {
