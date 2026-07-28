@@ -58,7 +58,10 @@ constexpr uint16_t appBit(const AppId id) { return uint16_t{1} << static_cast<ui
 constexpr int visibleAppCount(const uint16_t hiddenMask) {
   int count = 0;
   for (const auto& app : kAppEntries) {
-    if ((hiddenMask & appBit(app.id)) == 0) ++count;
+    if ((hiddenMask & appBit(app.id)) == 0) {
+      // cppcheck-suppress useStlAlgorithm
+      ++count;
+    }
   }
   return count;
 }
