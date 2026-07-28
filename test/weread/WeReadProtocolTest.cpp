@@ -16,6 +16,9 @@ struct OperationTestPeer {
   static Operation::Event detailCompletionEvent(const bool coverPending) {
     return Operation::detailCompletionEvent(coverPending);
   }
+  static bool detailCoverPending(const bool hasBmp, const bool hasSource, const bool hasUrl) {
+    return Operation::detailCoverPending(hasBmp, hasSource, hasUrl);
+  }
   static bool chapterResponseRetryRestartsReader() {
     return Operation::chapterResponseRetryPhase() == Operation::Phase::FetchReader;
   }
@@ -265,6 +268,13 @@ TEST(WeReadClientState, ExposesDetailBeforePendingCover) {
   using Event = WeReadClient::Operation::Event;
   EXPECT_EQ(WeReadClient::OperationTestPeer::detailCompletionEvent(true), Event::DetailReady);
   EXPECT_EQ(WeReadClient::OperationTestPeer::detailCompletionEvent(false), Event::Complete);
+}
+
+TEST(WeReadClientState, RefreshesMissingOriginalCoverFromCachedDetail) {
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::detailCoverPending(true, false, true));
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::detailCoverPending(false, false, true));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::detailCoverPending(true, true, true));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::detailCoverPending(true, false, false));
 }
 
 TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {

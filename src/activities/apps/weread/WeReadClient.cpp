@@ -1039,6 +1039,27 @@ const char* imageMediaType(const WeReadProtocol::ImageType type) {
   return type == WeReadProtocol::ImageType::Png ? "image/png" : "image/jpeg";
 }
 
+const char* coverSourceName(const WeReadProtocol::ImageType type) {
+  return type == WeReadProtocol::ImageType::Png ? "cover.source.png" : "cover.source.jpg";
+}
+
+const char* coverEntryName(const WeReadProtocol::ImageType type) {
+  return type == WeReadProtocol::ImageType::Png ? "cover.png" : "cover.jpg";
+}
+
+WeReadProtocol::ImageType findCoverSource(const std::string& bookDir, std::string& path) {
+  // Cold path: reuse one bounded (< 100-byte) path string while cover bytes stay on SD.
+  path.reserve(bookDir.size() + sizeof("/cover.source.png"));
+  path = bookDir;
+  path += "/cover.source.png";
+  if (validImageFile(path, WeReadProtocol::ImageType::Png)) return WeReadProtocol::ImageType::Png;
+  path.resize(bookDir.size());
+  path += "/cover.source.jpg";
+  if (validImageFile(path, WeReadProtocol::ImageType::Jpeg)) return WeReadProtocol::ImageType::Jpeg;
+  path.clear();
+  return WeReadProtocol::ImageType::None;
+}
+
 bool makeReaderReferer(const char* bookId, const char* chapterUid, std::string& referer) {
   char encodedBook[128];
   char encodedChapter[128];
@@ -1550,7 +1571,8 @@ bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath
 
 Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
                         const uint32_t chapterCount, const WeReadStore::ImagePolicy imagePolicy,
-                        const std::string& workPath, std::string& navPath, std::string& opfPath) {
+                        const std::string& workPath, const WeReadProtocol::ImageType coverType, std::string& navPath,
+                        std::string& opfPath) {
   navPath = bookDir + "/nav.part";
   opfPath = bookDir + "/content.part";
   if (Storage.exists(navPath.c_str())) Storage.remove(navPath.c_str());
@@ -1581,6 +1603,12 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
                     "</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest>"
                     "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" "
                     "properties=\"nav\"/>")) {
+    return Error::SdCard;
+  }
+  if (coverType != WeReadProtocol::ImageType::None &&
+      (!writeLiteral(opf, "<item id=\"cover-image\" href=\"") || !writeLiteral(opf, coverEntryName(coverType)) ||
+       !writeLiteral(opf, "\" media-type=\"") || !writeLiteral(opf, imageMediaType(coverType)) ||
+       !writeLiteral(opf, "\" properties=\"cover-image\"/>"))) {
     return Error::SdCard;
   }
 
@@ -1641,8 +1669,10 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
                   uint8_t* buffer, const size_t bufferSize, const std::string& finalPartPath) {
   std::string navPath;
   std::string opfPath;
+  std::string coverSourcePath;
+  const WeReadProtocol::ImageType coverType = findCoverSource(bookDir, coverSourcePath);
   const Error packageFilesError =
-      writePackageFiles(bookDir, book, tocPath, chapterCount, imagePolicy, workPath, navPath, opfPath);
+      writePackageFiles(bookDir, book, tocPath, chapterCount, imagePolicy, workPath, coverType, navPath, opfPath);
   if (packageFilesError != Error::Ok) return packageFilesError;
 
   const std::string centralPath = bookDir + "/central.part";
@@ -1657,6 +1687,12 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
   if (!zip.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)) ||
       !zip.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)) ||
       !zip.addFile("OEBPS/content.opf", opfPath) || !zip.addFile("OEBPS/nav.xhtml", navPath)) {
+    zip.abort();
+    return Error::SdCard;
+  }
+  if (coverType != WeReadProtocol::ImageType::None &&
+      !zip.addFile(coverType == WeReadProtocol::ImageType::Png ? "OEBPS/cover.png" : "OEBPS/cover.jpg",
+                   coverSourcePath)) {
     zip.abort();
     return Error::SdCard;
   }
@@ -1721,8 +1757,8 @@ void cleanupTransient(const std::string& bookDir, const std::string& finalPartPa
 }
 
 void cleanupDetailTransient(const std::string& bookDir) {
-  static constexpr const char* kNames[] = {"/detail.bin.part",       "/cover.bmp.part",   "/cover.source.jpg",
-                                           "/cover.source.jpg.part", "/cover.source.png", "/cover.source.png.part"};
+  static constexpr const char* kNames[] = {"/detail.bin.part", "/cover.bmp.part", "/cover.source.jpg.part",
+                                           "/cover.source.png.part"};
   for (const char* name : kNames) {
     const std::string path = bookDir + name;
     if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
@@ -2436,7 +2472,7 @@ Operation::Event Operation::fetchCover() {
   }
 
   WeReadStore::ImageRecord image;
-  const char* href = coverType_ == WeReadProtocol::ImageType::Png ? "cover.source.png" : "cover.source.jpg";
+  const char* href = coverSourceName(coverType_);
   memcpy(image.href, href, strlen(href) + 1);
   memcpy(image.url, url_, strlen(url_) + 1);
   if (!WeReadHttpClient::extractHttpsHost(image.url, imageHost_, sizeof(imageHost_))) {
@@ -2466,8 +2502,7 @@ Operation::Event Operation::fetchCover() {
 Operation::Event Operation::convertCover() {
   bookSession_.reset();
   logMemory("cover convert start");
-  const std::string source =
-      bookDir_ + (coverType_ == WeReadProtocol::ImageType::Png ? "/cover.source.png" : "/cover.source.jpg");
+  const std::string source = bookDir_ + "/" + coverSourceName(coverType_);
   const std::string final = WeReadStore::coverPath(bookDir_);
   const std::string part = final + ".part";
   if (Storage.exists(part.c_str())) Storage.remove(part.c_str());
@@ -2487,14 +2522,19 @@ Operation::Event Operation::convertCover() {
                              : JpegToBmpConverter::jpegFileToBmpStreamWithSize(input, output, 96, 140);
   input.close();
   output.close();
-  Storage.remove(source.c_str());
   if (!converted) {
     Storage.remove(part.c_str());
+    Storage.remove(source.c_str());
     phase_ = Phase::Complete;
     logMemory("cover convert skipped");
     return Event::Complete;
   }
   if (!WeReadStore::atomicReplace(part, final)) return fail(Error::SdCard);
+  const std::string alternate =
+      bookDir_ + "/" +
+      coverSourceName(coverType_ == WeReadProtocol::ImageType::Png ? WeReadProtocol::ImageType::Jpeg
+                                                                   : WeReadProtocol::ImageType::Png);
+  if (Storage.exists(alternate.c_str()) && !Storage.remove(alternate.c_str())) return fail(Error::SdCard);
   phase_ = Phase::Complete;
   logMemory("cover convert complete");
   return Event::Complete;
@@ -2741,7 +2781,10 @@ Operation::Event Operation::step() {
       WeReadStore::BookDetailHeader cached;
       HalFile detail;
       if (WeReadStore::openBookDetail(bookDir_, cached, detail)) {
-        if (Storage.exists(WeReadStore::coverPath(bookDir_).c_str()) || !cached.coverUrl[0]) {
+        std::string coverSource;
+        const bool hasCoverSource = findCoverSource(bookDir_, coverSource) != WeReadProtocol::ImageType::None;
+        if (!detailCoverPending(Storage.exists(WeReadStore::coverPath(bookDir_).c_str()), hasCoverSource,
+                                cached.coverUrl[0])) {
           phase_ = Phase::Complete;
           logJobComplete();
           return Event::Complete;

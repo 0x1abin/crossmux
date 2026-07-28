@@ -485,8 +485,16 @@ void WeReadActivity::openSelectedDetail(const WeReadStore::ShelfRecord& book) {
   detailLoadFailed_ = false;
   loadSelectedDetail();
   const std::string bookDir = WeReadStore::bookDirectory(book.bookId);
-  const bool coverMissing =
-      detailLoaded_ && detail_.coverUrl[0] && !Storage.exists(WeReadStore::coverPath(bookDir).c_str());
+  char coverSource[128];
+  int coverSourceLength = snprintf(coverSource, sizeof(coverSource), "%s/cover.source.png", bookDir.c_str());
+  bool coverSourceMissing = coverSourceLength <= 0 || static_cast<size_t>(coverSourceLength) >= sizeof(coverSource) ||
+                            !Storage.exists(coverSource);
+  coverSourceLength = snprintf(coverSource, sizeof(coverSource), "%s/cover.source.jpg", bookDir.c_str());
+  coverSourceMissing =
+      coverSourceMissing && (coverSourceLength <= 0 || static_cast<size_t>(coverSourceLength) >= sizeof(coverSource) ||
+                             !Storage.exists(coverSource));
+  const bool coverMissing = detailLoaded_ && detail_.coverUrl[0] &&
+                            (!Storage.exists(WeReadStore::coverPath(bookDir).c_str()) || coverSourceMissing);
   if (!detailLoaded_) {
     if (WiFi.status() == WL_CONNECTED) {
       startJob(Job::Detail, &book);

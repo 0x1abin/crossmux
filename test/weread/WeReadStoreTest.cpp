@@ -482,14 +482,16 @@ TEST_F(WeReadStoreTest, AtomicReplaceRecoversInterruptedBackupBeforeReplacing) {
   EXPECT_FALSE(Storage.exists("/work/book.epub.bak"));
 }
 
-TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
+TEST_F(WeReadStoreTest, WritesPngCoverWithEmbeddedBodyImagesInReadingOrder) {
   ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
   static constexpr char kMimetype[] = "application/epub+zip";
   static constexpr char kContainer[] =
       "<?xml version=\"1.0\"?><container><rootfiles><rootfile full-path=\"OEBPS/content.opf\"/>"
       "</rootfiles></container>";
   static constexpr char kOpf[] =
-      "<package><manifest><item id=\"nav\" href=\"nav.xhtml\"/><item id=\"ch000000\" "
+      "<package><manifest><item id=\"nav\" href=\"nav.xhtml\"/>"
+      "<item id=\"cover-image\" href=\"cover.png\" media-type=\"image/png\" properties=\"cover-image\"/>"
+      "<item id=\"ch000000\" "
       "href=\"ch000000.xhtml\"/><item id=\"ch000001\" href=\"ch000001.xhtml\"/>"
       "<item id=\"img000000_0\" href=\"images/ch000000-0.png\" media-type=\"image/png\"/></manifest>"
       "<spine><itemref idref=\"ch000000\"/><itemref idref=\"ch000001\"/></spine></package>";
@@ -505,6 +507,11 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
     ASSERT_TRUE(Storage.openFileForWrite("WR", "/work/image.png", image));
     ASSERT_EQ(image.write(kPng, sizeof(kPng)), sizeof(kPng));
   }
+  {
+    HalFile cover;
+    ASSERT_TRUE(Storage.openFileForWrite("WR", "/work/cover.png", cover));
+    ASSERT_EQ(cover.write(kPng, sizeof(kPng)), sizeof(kPng));
+  }
 
   WeReadStore::StoreOnlyZipWriter zip;
   std::array<uint8_t, 4096> zipBuffer{};
@@ -514,6 +521,7 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
       zip.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)));
   ASSERT_TRUE(zip.addBuffer("OEBPS/content.opf", reinterpret_cast<const uint8_t*>(kOpf), strlen(kOpf)));
   ASSERT_TRUE(zip.addBuffer("OEBPS/nav.xhtml", reinterpret_cast<const uint8_t*>(kNav), strlen(kNav)));
+  ASSERT_TRUE(zip.addFile("OEBPS/cover.png", "/work/cover.png"));
   ASSERT_TRUE(zip.addFile("OEBPS/ch000000.xhtml", "/work/ch0.xhtml"));
   ASSERT_TRUE(zip.addFile("OEBPS/ch000001.xhtml", "/work/ch1.xhtml"));
   ASSERT_TRUE(zip.addFile("OEBPS/images/ch000000-0.png", "/work/image.png"));
@@ -526,20 +534,17 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
   const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
   const std::string archive(bytes.begin(), bytes.end());
   EXPECT_NE(archive.find("src=\"images/ch000000-0.png\""), std::string::npos);
-  EXPECT_NE(archive.find("media-type=\"image/png\""), std::string::npos);
+  EXPECT_NE(archive.find("id=\"cover-image\" href=\"cover.png\" media-type=\"image/png\" properties=\"cover-image\""),
+            std::string::npos);
   EXPECT_EQ(archive.find("images/failed.jpg"), std::string::npos);
   ASSERT_GE(bytes.size(), 22U);
   const size_t eocd = bytes.size() - 22;
   ASSERT_EQ(readLe32(bytes, eocd), 0x06054B50U);
-  ASSERT_EQ(readLe16(bytes, eocd + 10), 7U);
+  ASSERT_EQ(readLe16(bytes, eocd + 10), 8U);
   size_t cursor = readLe32(bytes, eocd + 16);
-  const std::vector<std::string> expected = {"mimetype",
-                                             "META-INF/container.xml",
-                                             "OEBPS/content.opf",
-                                             "OEBPS/nav.xhtml",
-                                             "OEBPS/ch000000.xhtml",
-                                             "OEBPS/ch000001.xhtml",
-                                             "OEBPS/images/ch000000-0.png"};
+  const std::vector<std::string> expected = {
+      "mimetype",        "META-INF/container.xml", "OEBPS/content.opf",    "OEBPS/nav.xhtml",
+      "OEBPS/cover.png", "OEBPS/ch000000.xhtml",   "OEBPS/ch000001.xhtml", "OEBPS/images/ch000000-0.png"};
   for (const auto& name : expected) {
     ASSERT_EQ(readLe32(bytes, cursor), 0x02014B50U);
     EXPECT_EQ(readLe16(bytes, cursor + 10), 0U);
@@ -573,6 +578,51 @@ TEST_F(WeReadStoreTest, WritesValidStoreOnlyEpubInReadingOrder) {
   ASSERT_TRUE(incomplete.addBuffer("two", reinterpret_cast<const uint8_t*>("2"), 1));
   ASSERT_TRUE(incomplete.finish());
   EXPECT_FALSE(WeReadStore::looksLikeZip("/work/incomplete.epub"));
+}
+
+TEST_F(WeReadStoreTest, WritesJpegCoverWithExcludedBodyImagesAndAllowsCoverlessEpub) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
+  static constexpr char kMimetype[] = "application/epub+zip";
+  static constexpr char kContainer[] =
+      "<?xml version=\"1.0\"?><container><rootfiles><rootfile full-path=\"OEBPS/content.opf\"/>"
+      "</rootfiles></container>";
+  static constexpr char kCoverOpf[] =
+      "<package><manifest><item id=\"cover-image\" href=\"cover.jpg\" media-type=\"image/jpeg\" "
+      "properties=\"cover-image\"/></manifest><spine/></package>";
+  static constexpr char kCoverlessOpf[] = "<package><manifest/><spine/></package>";
+  static constexpr uint8_t kJpeg[] = {0xFF, 0xD8, 0xFF, 0xD9};
+  {
+    HalFile cover;
+    ASSERT_TRUE(Storage.openFileForWrite("WR", "/work/cover.jpg", cover));
+    ASSERT_EQ(cover.write(kJpeg, sizeof(kJpeg)), sizeof(kJpeg));
+  }
+
+  std::array<uint8_t, 4096> zipBuffer{};
+  WeReadStore::StoreOnlyZipWriter withCover;
+  ASSERT_TRUE(withCover.begin("/work/jpeg-cover.epub", "/work/jpeg-cover.central", zipBuffer.data(), zipBuffer.size()));
+  ASSERT_TRUE(withCover.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)));
+  ASSERT_TRUE(
+      withCover.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)));
+  ASSERT_TRUE(withCover.addBuffer("OEBPS/content.opf", reinterpret_cast<const uint8_t*>(kCoverOpf), strlen(kCoverOpf)));
+  ASSERT_TRUE(withCover.addFile("OEBPS/cover.jpg", "/work/cover.jpg"));
+  ASSERT_TRUE(withCover.finish());
+  ASSERT_TRUE(WeReadStore::looksLikeZip("/work/jpeg-cover.epub"));
+
+  std::ifstream input(hostPath("/work/jpeg-cover.epub"), std::ios::binary);
+  ASSERT_TRUE(input.good());
+  const std::string archive((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  EXPECT_NE(archive.find("id=\"cover-image\" href=\"cover.jpg\" media-type=\"image/jpeg\" properties=\"cover-image\""),
+            std::string::npos);
+
+  WeReadStore::StoreOnlyZipWriter coverless;
+  ASSERT_TRUE(coverless.begin("/work/coverless.epub", "/work/coverless.central", zipBuffer.data(), zipBuffer.size()));
+  ASSERT_TRUE(coverless.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)));
+  ASSERT_TRUE(
+      coverless.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)));
+  ASSERT_TRUE(
+      coverless.addBuffer("OEBPS/content.opf", reinterpret_cast<const uint8_t*>(kCoverlessOpf), strlen(kCoverlessOpf)));
+  ASSERT_TRUE(coverless.finish());
+  EXPECT_TRUE(WeReadStore::looksLikeZip("/work/coverless.epub"));
 }
 
 }  // namespace
