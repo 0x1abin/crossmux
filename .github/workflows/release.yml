@@ -47,33 +47,38 @@ jobs:
           cp .pio/build/gh_release/partitions.bin   dist/partitions.bin
           cp .pio/build/gh_release_cn/firmware.bin  dist/firmware-cn.bin
 
-      # Build a complete commit-level changelog. GitHub's built-in
+      # Prefer curated notes for a named release. When none are checked in,
+      # build a complete commit-level changelog. GitHub's built-in
       # generate_release_notes only lists PR merges, so any commit pushed
-      # straight to main is missing from the release body. git log gives us
-      # the full picture; the 7-char hashes are auto-linked to commits by
-      # the GitHub release renderer.
-      - name: Build changelog
+      # straight to main would otherwise be missing from the release body.
+      - name: Build release notes
         run: |
           set -euo pipefail
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          {
-            if [ -n "$PREV_TAG" ]; then
-              echo "## Changes since ${PREV_TAG}"
-              echo ""
-              git log --pretty=format:"- %s (\`%h\`)" --reverse "${PREV_TAG}..HEAD"
-              echo ""
-              echo ""
-              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ github.ref_name }}"
-            else
-              echo "## Initial release ${{ github.ref_name }}"
-            fi
-          } > release-body.md
+          CURATED_NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$CURATED_NOTES" ]; then
+            cp "$CURATED_NOTES" release-body.md
+          else
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            {
+              if [ -n "$PREV_TAG" ]; then
+                echo "## Changes since ${PREV_TAG}"
+                echo ""
+                git log --pretty=format:"- %s (\`%h\`)" --reverse "${PREV_TAG}..HEAD"
+                echo ""
+                echo ""
+                echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${{ github.ref_name }}"
+              else
+                echo "## Initial release ${{ github.ref_name }}"
+              fi
+            } > release-body.md
+          fi
           echo "---- release-body.md ----"
           cat release-body.md
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: CrossMux ${{ github.ref_name }}
           files: dist/*
           fail_on_unmatched_files: true
           body_path: release-body.md
