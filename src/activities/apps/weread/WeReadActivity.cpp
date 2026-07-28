@@ -10,6 +10,7 @@
 #include <WiFi.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -39,6 +40,11 @@ constexpr MenuEntry kMenuEntries[] = {
     {StrId::STR_WEREAD_MENU_SHELF, MenuAction::Shelf},
     {StrId::STR_WEREAD_MENU_REFRESH, MenuAction::Refresh},
     {StrId::STR_WEREAD_MENU_LOGOUT, MenuAction::Logout},
+};
+
+constexpr StrId kCacheScopeOptions[] = {
+    StrId::STR_WEREAD_CACHE_WHOLE_BOOK,
+    StrId::STR_WEREAD_CACHE_CHAPTER_RANGE,
 };
 
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
@@ -129,6 +135,158 @@ void logHeap([[maybe_unused]] const char* phase) {
           static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
 
+class WeReadChapterRangeActivity final : public Activity {
+ public:
+  WeReadChapterRangeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WeReadClient::Operation& operation,
+                             const int chapterCount)
+      : Activity("WeReadChapterRange", renderer, mappedInput), operation_(operation), chapterCount_(chapterCount) {}
+
+  void onEnter() override {
+    Activity::onEnter();
+    logHeap("chapter range selector");
+    requestUpdate();
+  }
+
+  void loop() override {
+    if (readFailed_.load()) {
+      setResult(ActivityResult{});
+      finish();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      ActivityResult result;
+      result.isCancelled = true;
+      setResult(std::move(result));
+      finish();
+      return;
+    }
+
+    const int pageItems = UITheme::getInstance().getNumberOfItemsPerPage(renderer, true, false, true, false);
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    const int contentTop = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const int contentHeight = screen.height - contentTop - metrics.verticalSpacing;
+    switch (handleListTouch(selectedIndex_, chapterCount_, contentTop, contentHeight, false)) {
+      case ListTouchResult::Activated:
+        selectCurrent();
+        return;
+      case ListTouchResult::Consumed:
+        return;
+      case ListTouchResult::None:
+        break;
+    }
+
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Up) {
+      selectedIndex_ = ButtonNavigator::nextPageIndex(selectedIndex_, chapterCount_, pageItems);
+      requestUpdate();
+      return;
+    }
+    if (swipe == MappedInputManager::SwipeDir::Down) {
+      selectedIndex_ = ButtonNavigator::previousPageIndex(selectedIndex_, chapterCount_, pageItems);
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      selectCurrent();
+      return;
+    }
+
+    buttonNavigator_.onNextRelease([this] {
+      selectedIndex_ = ButtonNavigator::nextIndex(selectedIndex_, chapterCount_);
+      requestUpdate();
+    });
+    buttonNavigator_.onPreviousRelease([this] {
+      selectedIndex_ = ButtonNavigator::previousIndex(selectedIndex_, chapterCount_);
+      requestUpdate();
+    });
+    buttonNavigator_.onNextContinuous([this, pageItems] {
+      selectedIndex_ = ButtonNavigator::nextPageIndex(selectedIndex_, chapterCount_, pageItems);
+      requestUpdate();
+    });
+    buttonNavigator_.onPreviousContinuous([this, pageItems] {
+      selectedIndex_ = ButtonNavigator::previousPageIndex(selectedIndex_, chapterCount_, pageItems);
+      requestUpdate();
+    });
+  }
+
+  void render(RenderLock&&) override {
+    renderer.clearScreen();
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight},
+                   I18N.get(stageTitle()));
+
+    const int contentTop = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const int contentHeight = screen.height - contentTop - metrics.verticalSpacing;
+    GUI.drawList(
+        renderer, Rect{screen.x, contentTop, screen.width, contentHeight}, chapterCount_, selectedIndex_,
+        [this](const int index) { return rowTitle(index); }, nullptr, nullptr,
+        [this](const int index) {
+          return stage_ == Stage::End && index == firstIndex_ ? std::string(tr(STR_WEREAD_CACHE_RANGE_START_MARK))
+                                                              : std::string();
+        },
+        false, [this](const int index) { return stage_ == Stage::End && index < firstIndex_; });
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+  }
+
+ private:
+  enum class Stage : uint8_t { Start, End };
+
+  WeReadClient::Operation& operation_;
+  ButtonNavigator buttonNavigator_;
+  WeReadStore::TocRecord rowRecord_;
+  std::atomic<bool> readFailed_{false};
+  int chapterCount_ = 0;
+  int selectedIndex_ = 0;
+  int firstIndex_ = 0;
+  Stage stage_ = Stage::Start;
+
+  StrId stageTitle() const {
+    switch (stage_) {
+      case Stage::Start:
+        return StrId::STR_WEREAD_CACHE_RANGE_START;
+      case Stage::End:
+        return StrId::STR_WEREAD_CACHE_RANGE_END;
+    }
+    return StrId::STR_WEREAD_CACHE_RANGE_START;
+  }
+
+  std::string rowTitle(const int index) {
+    if (readFailed_.load()) return {};
+    if (!operation_.readChapter(static_cast<uint32_t>(index), rowRecord_) ||
+        !memchr(rowRecord_.title, '\0', sizeof(rowRecord_.title))) {
+      readFailed_.store(true);
+      return {};
+    }
+    char text[sizeof(rowRecord_.title) + 16];
+    snprintf(text, sizeof(text), "%u. %s", static_cast<unsigned>(index + 1),
+             rowRecord_.title[0] ? rowRecord_.title : tr(STR_UNNAMED));
+    return text;
+  }
+
+  void selectCurrent() {
+    switch (stage_) {
+      case Stage::Start:
+        firstIndex_ = selectedIndex_;
+        stage_ = Stage::End;
+        requestUpdate();
+        return;
+      case Stage::End:
+        if (selectedIndex_ < firstIndex_) return;
+        setResult(ChapterRangeResult{static_cast<uint32_t>(firstIndex_), static_cast<uint32_t>(selectedIndex_)});
+        finish();
+        return;
+    }
+  }
+};
+
+static_assert(sizeof(WeReadChapterRangeActivity) <= 1024, "WeRead chapter selector exceeds its fixed heap budget");
+
 }  // namespace
 
 void WeReadActivity::onEnter() {
@@ -150,6 +308,8 @@ void WeReadActivity::onEnter() {
   detailOptionsKnown_ = false;
   detailIntroTruncated_ = false;
   introPagesTruncated_ = false;
+  downloadChapterScope_ = WeReadClient::DownloadOptions::ChapterScope::WholeBook;
+  cacheScopePopupClosing_ = false;
   // This bounded 832-byte probe is gone before TLS and avoids a transient heap
   // allocation that could fragment the ESP32-C3 heap.
   WeReadStore::Session session;
@@ -282,7 +442,10 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
       break;
   }
   WeReadClient::DownloadOptions options;
-  if (job == Job::Download && book) options.imagePolicy = detailImagePolicy_;
+  if (job == Job::Download && book) {
+    options.imagePolicy = detailImagePolicy_;
+    options.chapterScope = downloadChapterScope_;
+  }
   if (!operation_.begin(kind, book, options)) {
     error_ = operation_.error();
     state_.store(State::Error);
@@ -329,6 +492,7 @@ void WeReadActivity::advanceShelfCovers() {
         return;
       case WeReadClient::Operation::Event::QrReady:
       case WeReadClient::Operation::Event::Authenticated:
+      case WeReadClient::Operation::Event::ChapterRangeReady:
       case WeReadClient::Operation::Event::ChapterComplete:
       case WeReadClient::Operation::Event::Cancelled:
       case WeReadClient::Operation::Event::Failed:
@@ -402,6 +566,9 @@ void WeReadActivity::advanceJob() {
         state_.store(State::DetailCoverLoading);
         requestUpdate();
       }
+      return;
+    case WeReadClient::Operation::Event::ChapterRangeReady:
+      selectChapterRange();
       return;
     case WeReadClient::Operation::Event::ChapterComplete:
       state_.store(State::Downloading);
@@ -558,11 +725,7 @@ void WeReadActivity::activateDetailSelection() {
       return;
     }
     case DetailAction::Cache:
-      if (WiFi.status() == WL_CONNECTED) {
-        startJob(Job::Download, &pendingBook_);
-      } else {
-        connectThen(Job::Download, &pendingBook_);
-      }
+      showCacheScopePopup();
       return;
     case DetailAction::Images:
       detailImagePolicy_ = detailImagePolicy_ == WeReadStore::ImagePolicy::Embed ? WeReadStore::ImagePolicy::Exclude
@@ -570,6 +733,84 @@ void WeReadActivity::activateDetailSelection() {
       requestUpdate();
       return;
   }
+}
+
+void WeReadActivity::showCacheScopePopup() {
+  cacheScopePopup_.show(StrId::STR_WEREAD_CACHE_BOOK, kCacheScopeOptions,
+                        static_cast<int>(sizeof(kCacheScopeOptions) / sizeof(kCacheScopeOptions[0])), 0,
+                        [this](const int index) {
+                          const auto scope = static_cast<WeReadClient::DownloadOptions::ChapterScope>(index);
+                          switch (scope) {
+                            case WeReadClient::DownloadOptions::ChapterScope::WholeBook:
+                            case WeReadClient::DownloadOptions::ChapterScope::SelectRange:
+                              downloadChapterScope_ = scope;
+                              startBookDownload();
+                              return;
+                          }
+                        });
+  requestUpdate();
+}
+
+void WeReadActivity::startBookDownload() {
+  if (WiFi.status() == WL_CONNECTED) {
+    startJob(Job::Download, &pendingBook_);
+  } else {
+    connectThen(Job::Download, &pendingBook_);
+  }
+}
+
+void WeReadActivity::failChapterRangeSelection(const WeReadClient::Error error) {
+  operation_.reset();
+  error_ = error;
+  state_.store(State::Error);
+  requestDownloadUpdate();
+}
+
+void WeReadActivity::cancelChapterRangeSelection() {
+  operation_.reset();
+  downloadChapterScope_ = WeReadClient::DownloadOptions::ChapterScope::WholeBook;
+  state_.store(State::Detail);
+  requestUpdate();
+}
+
+void WeReadActivity::selectChapterRange() {
+  const uint32_t chapterCount = operation_.chapterCount();
+  if (chapterCount == 0 || chapterCount > static_cast<uint32_t>(INT_MAX)) {
+    failChapterRangeSelection(WeReadClient::Error::Protocol);
+    return;
+  }
+
+  // The Activity stack requires heap ownership. One bounded selector retains a
+  // single TocRecord; chapter titles remain in the SD-backed index.
+  auto selector =
+      makeUniqueNoThrow<WeReadChapterRangeActivity>(renderer, mappedInput, operation_, static_cast<int>(chapterCount));
+  if (!selector) {
+    LOG_ERR("WR", "OOM: chapter range selector (%zu bytes)", sizeof(WeReadChapterRangeActivity));
+    failChapterRangeSelection(WeReadClient::Error::OutOfMemory);
+    return;
+  }
+
+  startActivityForResult(std::move(selector), [this](const ActivityResult& result) {
+    if (result.isCancelled) {
+      cancelChapterRangeSelection();
+      return;
+    }
+    const auto* range = std::get_if<ChapterRangeResult>(&result.data);
+    if (!range) {
+      failChapterRangeSelection(WeReadClient::Error::SdCard);
+      return;
+    }
+    if (!operation_.setChapterRange(range->first, range->last)) {
+      failChapterRangeSelection(WeReadClient::Error::Protocol);
+      return;
+    }
+    progressStage_.store(WeReadClient::Operation::ProgressStage::Chapters);
+    progressCompleted_.store(0);
+    progressTotal_.store(range->last - range->first + 1);
+    stageRenderPending_.store(true);
+    state_.store(State::Downloading);
+    requestDownloadUpdate();
+  });
 }
 
 void WeReadActivity::handleDetailInput() {
@@ -797,6 +1038,19 @@ void WeReadActivity::handleShelfInput() {
 }
 
 void WeReadActivity::handleErrorInput() {
+  if (error_ == WeReadClient::Error::WholeBookOnly) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      operation_.reset();
+      state_.store(State::Detail);
+      showCacheScopePopup();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      operation_.reset();
+      state_.store(State::Detail);
+      requestUpdate();
+    }
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (WiFi.status() == WL_CONNECTED) {
       switch (retryJob_) {
@@ -836,6 +1090,22 @@ void WeReadActivity::handleLogoutErrorInput() {
 }
 
 void WeReadActivity::loop() {
+  if (cacheScopePopup_.handleInput(mappedInput, [this] { requestUpdate(); })) {
+    cacheScopePopupClosing_ = !cacheScopePopup_.isActive();
+    return;
+  }
+  if (cacheScopePopupClosing_) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
+        mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+      return;
+    }
+    cacheScopePopupClosing_ = false;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      return;
+    }
+  }
+
   const State state = state_.load();
   switch (state) {
     case State::Menu:
@@ -904,6 +1174,8 @@ const char* WeReadActivity::errorMessage() const {
       return WiFi.status() == WL_CONNECTED ? tr(STR_WEREAD_HTTP_ERROR) : tr(STR_WEREAD_NO_WIFI);
     case WeReadClient::Error::Unavailable:
       return tr(STR_WEREAD_CACHE_NOT_AVAILABLE);
+    case WeReadClient::Error::WholeBookOnly:
+      return tr(STR_WEREAD_CACHE_WHOLE_BOOK_ONLY);
     default:
       return tr(STR_WEREAD_HTTP_ERROR);
   }
@@ -1217,6 +1489,7 @@ void WeReadActivity::drawIntroduction(const Rect& content) {
 void WeReadActivity::render(RenderLock&&) {
   downloadRenderPending_.store(false);
   stageRenderPending_.store(false);
+  if (cacheScopePopup_.processRender(renderer, mappedInput)) return;
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const int height = renderer.getScreenHeight();
@@ -1378,7 +1651,7 @@ void WeReadActivity::render(RenderLock&&) {
     case State::Error:
     case State::LogoutError:
       back = tr(STR_BACK);
-      confirm = tr(STR_RETRY);
+      confirm = state == State::Error && error_ == WeReadClient::Error::WholeBookOnly ? tr(STR_SELECT) : tr(STR_RETRY);
       break;
     case State::Connecting:
     case State::Qr:

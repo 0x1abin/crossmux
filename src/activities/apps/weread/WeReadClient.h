@@ -24,10 +24,17 @@ enum class Error {
   Unavailable,
   Clock,
   OutOfMemory,
+  WholeBookOnly,
 };
 
 struct DownloadOptions {
+  enum class ChapterScope : uint8_t {
+    WholeBook,
+    SelectRange,
+  };
+
   WeReadStore::ImagePolicy imagePolicy = WeReadStore::ImagePolicy::Embed;
+  ChapterScope chapterScope = ChapterScope::WholeBook;
 };
 
 struct ProgressSyncInput {
@@ -54,6 +61,7 @@ class Operation {
     QrReady,
     Authenticated,
     DetailReady,
+    ChapterRangeReady,
     ChapterComplete,
     Complete,
     Cancelled,
@@ -66,8 +74,11 @@ class Operation {
   Event step();
   void cancel();
   void reset();
+  bool readChapter(uint32_t index, WeReadStore::TocRecord& record);
+  bool setChapterRange(uint32_t first, uint32_t last);
 
   Error error() const { return error_; }
+  uint32_t chapterCount() const { return chapterCount_; }
   ProgressStage progressStage() const { return progressStage_; }
   uint32_t progressCompleted() const { return progressCompleted_; }
   uint32_t progressTotal() const { return progressTotal_; }
@@ -102,6 +113,7 @@ class Operation {
     SendProgressEnter,
     SendProgressReport,
     OpenToc,
+    AwaitChapterRange,
     LoadChapter,
     SyncClock,
     FetchReader,
@@ -142,6 +154,15 @@ class Operation {
   }
   static constexpr bool imageAttemptPending(const uint8_t attempts) { return attempts < 2; }
   static constexpr bool imageRedirectAllowed(const uint8_t redirects) { return redirects < kMaxImageRedirects; }
+  static constexpr bool validChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
+    return count > 0 && first <= last && last < count;
+  }
+  static constexpr uint32_t chapterRangeCount(const uint32_t first, const uint32_t last, const uint32_t count) {
+    return validChapterRange(first, last, count) ? last - first + 1 : 0;
+  }
+  static constexpr bool wholeChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
+    return validChapterRange(first, last, count) && first == 0 && last == count - 1;
+  }
 
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
@@ -192,6 +213,8 @@ class Operation {
   WeReadHttpClient::Session bookSession_;
   HalFile tocFile_;
   uint32_t chapterCount_ = 0;
+  uint32_t firstChapterIndex_ = 0;
+  uint32_t lastChapterIndex_ = 0;
   uint32_t chapterIndex_ = 0;
   uint32_t progressCompleted_ = 0;
   uint32_t progressTotal_ = 0;
