@@ -1,12 +1,14 @@
 #pragma once
 
+#include <I18n.h>
+
 #include "../../util/ButtonNavigator.h"
 #include "../Activity.h"
 
 // Apps menu — the single entry-point on the home screen for all non-reader sub-apps
 // (Sudoku, Gomoku, Ugly Avatar, ...). The full list is the constexpr `kAppEntries` table
-// in AppsMenuActivity.cpp; add a new app by appending one row there and a goTo<App>() in
-// ActivityManager. See src/activities/apps/README.md for the full convention.
+// in AppsMenuActivity.cpp; add a new app by assigning a stable AppId, appending one row,
+// and adding goTo<App>() in ActivityManager. See src/activities/apps/README.md.
 class AppsMenuActivity final : public Activity {
  public:
   AppsMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -18,7 +20,15 @@ class AppsMenuActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 
+  static int getAppCount();
+  static StrId getAppTitleId(int appIndex);
+  static bool isAppVisible(int appIndex);
+  static bool setAppVisible(int appIndex, bool visible);
+
  private:
+  static int getVisibleAppCount();
+  static int getAppIndexForVisibleIndex(int visibleIndex);
+
   ButtonNavigator buttonNavigator;
   int selected = 0;
 };

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "AppVisibilitySettingsActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
@@ -79,6 +80,7 @@ void SettingsActivity::rebuildSettingsLists() {
     controlsSettings.insert(controlsSettings.begin(),
                             SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   }
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_APP_VISIBILITY, SettingAction::AppVisibility));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::DateTime));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
@@ -391,6 +393,15 @@ void SettingsActivity::toggleCurrentSetting() {
         } else {
           LOG_ERR("SET", "OOM: ReadingStatsSettingsActivity (%u bytes)",
                   static_cast<unsigned>(sizeof(ReadingStatsSettingsActivity)));
+        }
+        break;
+      case SettingAction::AppVisibility:
+        // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
+        if (auto appVisibility = makeUniqueNoThrow<AppVisibilitySettingsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(appVisibility), [](const ActivityResult&) {});
+        } else {
+          LOG_ERR("SET", "OOM: AppVisibilitySettingsActivity (%u bytes)",
+                  static_cast<unsigned>(sizeof(AppVisibilitySettingsActivity)));
         }
         break;
       case SettingAction::KOReaderSync:
