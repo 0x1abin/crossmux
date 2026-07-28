@@ -26,8 +26,8 @@ gates every CN-only resource:
 | Code + non-font data | ~3.15 MB |
 | 4 CJK font headers 8/10/12/14pt (3515 CJK + 497 ASCII/Latin/punctuation glyphs) | 2,109,690 |
 | 2 CJK font headers 16/18pt (653 CJK + 497 ASCII/Latin/punctuation glyphs) | 506,899 |
-| **Total (`gh_release_cn`, 2026-07-26)** | **5,775,431 / 6,553,600 bytes**, 778,169 bytes headroom; 53,036 bytes static RAM |
-| **Total (`gh_release_cn_rc`, 2026-07-26)** | **5,775,445 / 6,553,600 bytes**, 778,155 bytes headroom; 53,036 bytes static RAM |
+| **Total (`gh_release_cn`, 2026-07-28)** | **5,831,001 / 6,553,600 bytes**, 722,599 bytes headroom; 53,028 bytes static RAM |
+| **Total (`gh_release_cn_rc`, 2026-07-28)** | **5,831,033 / 6,553,600 bytes**, 722,567 bytes headroom; 53,028 bytes static RAM |
 
 A/B OTA rollback works exactly like the Latin build — the firmware fits in
 both app slots, and a failed update can auto-revert.
@@ -86,6 +86,31 @@ content vulnerable to a man-in-the-middle attacker. The native simulator takes
 a different path, `WeReadHttpClient -> esp_http_client shim -> libcurl`, and
 uses libcurl's host trust store for certificate verification. WeRead uses an
 unofficial Web protocol and may stop working when the service changes.
+
+## WeRead progress sync
+
+The reader exposes one **Sync Progress** menu action. When the current EPUB path
+exactly matches a standard book in `shelf.bin`, the action uses WeRead; all other
+EPUBs continue to use KOReader. WeRead public-account books (`MP_WXS_`), moved
+files, and renamed files are intentionally treated as ordinary EPUBs. The
+existing long-press KOReader shortcut is unchanged.
+
+Manual WeRead sync renews the saved Cookie, fetches the remote position, and
+maps it through the `WRT2` chapter word counts. Positions within two percentage
+points are left unchanged. Otherwise the farther position wins automatically:
+a remote position is applied locally, or the local position is sent with an
+enter/report pair and `rt=0`. The firmware does not synthesize or report reading
+time. An expired session directs the user back to **Apps → WeRead** to sign in;
+it does not open a QR flow from the reader.
+
+For a new standard-book cache, the downloader fetches cloud progress after the
+`WRT2` catalog and before any chapter or image. This request is best effort:
+network, authentication, and protocol failures are logged but do not block the
+book download. After the EPUB is atomically replaced, a successful result is
+stored as the one-shot `WRP1` initial position. The reader consumes it only when
+there is no valid local `progress.bin`; an existing local position always wins.
+Public-account books skip this prefetch. See [file-formats.md](../file-formats.md)
+for the `WRT2` and `WRP1` layouts and migration rules.
 
 ## Regenerating the CJK fonts
 

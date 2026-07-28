@@ -11,12 +11,13 @@ namespace WeReadStore {
 constexpr const char* kRoot = "/.crosspoint/weread";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
-constexpr uint32_t kShelfMagic = 0x35535257;        // WRS5
-constexpr uint32_t kTocMagic = 0x31545257;          // WRT1
-constexpr uint32_t kImageMagic = 0x31495257;        // WRI1
-constexpr uint32_t kImageWorkMagic = 0x31504957;    // WIP1
-constexpr uint32_t kBookOptionsMagic = 0x314F5257;  // WRO1
-constexpr uint32_t kBookDetailMagic = 0x31444257;   // WBD1
+constexpr uint32_t kShelfMagic = 0x35535257;            // WRS5
+constexpr uint32_t kTocMagic = 0x32545257;              // WRT2
+constexpr uint32_t kImageMagic = 0x31495257;            // WRI1
+constexpr uint32_t kImageWorkMagic = 0x31504957;        // WIP1
+constexpr uint32_t kBookOptionsMagic = 0x314F5257;      // WRO1
+constexpr uint32_t kBookDetailMagic = 0x31444257;       // WBD1
+constexpr uint32_t kInitialProgressMagic = 0x31505257;  // WRP1
 constexpr uint16_t kIndexVersion = 1;
 constexpr uint16_t kBookOptionsVersion = 1;
 constexpr uint16_t kBookDetailVersion = 1;
@@ -36,6 +37,12 @@ struct BookOptions {
   uint8_t reserved = 0;
 };
 static_assert(sizeof(BookOptions) == 8);
+
+struct InitialProgress {
+  uint32_t magic = kInitialProgressMagic;
+  uint32_t millionths = 0;
+};
+static_assert(sizeof(InitialProgress) == 8);
 
 struct Session {
   char vid[64] = {};
@@ -83,10 +90,12 @@ static_assert(sizeof(BookDetailHeader) == kBookDetailHeaderSize);
 struct TocRecord {
   char chapterUid[64] = {};
   char title[192] = {};
+  uint32_t wordCount = 0;
   uint32_t chapterIdx = 0;
   uint8_t paid = 0;
   uint8_t reserved[3] = {};
 };
+static_assert(sizeof(TocRecord) == 268);
 
 struct ImageRecord {
   char href[64] = {};
@@ -167,12 +176,19 @@ std::string chapterPath(const std::string& bookDir, uint32_t chapterIndex);
 std::string imageIndexPath(const std::string& bookDir, uint32_t chapterIndex);
 std::string imageWorkPath(const std::string& bookDir);
 std::string optionsPath(const std::string& bookDir);
+std::string initialProgressPath(const char* bookId);
 std::string detailPath(const std::string& bookDir);
 std::string coverPath(const std::string& bookDir);
 std::string finalBookPath(const ShelfRecord& book);
+bool findBookIdForPath(const std::string& path, char* bookId, size_t bookIdSize);
+bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& chapter, uint32_t& chapterOffset);
+bool mapChapterToFraction(const std::string& path, const char* chapterUid, uint32_t chapterOffset, float& fraction);
 
 bool loadBookOptions(const std::string& bookDir, BookOptions& options);
 bool saveBookOptions(const std::string& bookDir, const BookOptions& options);
+bool loadInitialProgress(const char* bookId, float& fraction);
+bool saveInitialProgress(const char* bookId, float fraction);
+bool clearInitialProgress(const char* bookId);
 bool openBookDetail(const std::string& bookDir, BookDetailHeader& header, HalFile& file);
 bool atomicReplace(const std::string& partPath, const std::string& finalPath);
 bool looksLikeZip(const std::string& path);

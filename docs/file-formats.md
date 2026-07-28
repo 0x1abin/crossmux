@@ -360,12 +360,12 @@ location is not migrated or read.
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
   `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
-  Their magic values are `WRS5` (`0x35535257`) and `WRT1` (`0x31545257`);
+  Their magic values are `WRS5` (`0x35535257`) and `WRT2` (`0x32545257`);
   image indexes use `WRI1` (`0x31495257`) and image work indexes use `WIP1`
   (`0x31504957`). Version is currently `1`.
 - Shelf records contain fixed `bookId[64]`, `title[192]`, and `author[96]`
   fields followed by `uint32 readUpdateTime`. TOC records contain fixed
-  `chapterUid[64]`, `title[192]`,
+  `chapterUid[64]`, `title[192]`, `uint32 wordCount`,
   `uint32 chapterIdx`, and a paid flag.
 - `WRI1` records contain a generated EPUB-relative `href[64]` and the original
   HTTPS image URL in `url[512]`; both are NUL-terminated. TXT chapters have a
@@ -385,6 +385,16 @@ location is not migrated or read.
   existing image files. Missing, truncated, unknown-policy, or otherwise
   damaged records fall back to policy `0`. The record is replaced only after a
   generated EPUB succeeds; a directly returned complete EPUB remains unchanged.
+- Per-book `initial-progress.bin` is an atomic fixed 8-byte `WRP1` record:
+  `uint32 magic` (`0x31505257`) followed by a whole-book progress value as
+  `uint32 millionths` (`0`–`1000000`). It is written only after the cached EPUB
+  is atomically replaced. The value is fetched after a valid `WRT2` catalog and
+  before chapter or image downloads; a failed prefetch does not block caching,
+  and a successful recache without a usable remote value removes any stale
+  record. On first open, a valid reader `progress.bin` takes precedence and
+  removes this record; otherwise a positive value is applied once and removed
+  after the resulting reader progress is saved atomically. Invalid and
+  zero-valued records are removed and use the normal EPUB text start.
 - Per-book `detail.bin` starts with a fixed 1024-byte `WBD1` header followed
   immediately by the decoded UTF-8 introduction. The version-1 header contains
   `uint32 magic` (`0x31444257`), `uint16 version`, `uint16 headerSize`,
@@ -416,3 +426,8 @@ downloaded again so pre-image-support chapter caches cannot silently lose
 figures. Existing `/WeRead/*.epub` files remain readable and are not upgraded
 automatically; cache a book again to embed its available cover and selected
 chapter images.
+
+`WRT2` rejects `WRT1` TOC indexes because TOC records now include
+`wordCount`, used to map local whole-book progress to WeRead chapter offsets.
+Manual progress sync refreshes only an old or invalid TOC; an existing
+`/WeRead/*.epub` is retained.

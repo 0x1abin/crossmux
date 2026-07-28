@@ -5,6 +5,7 @@
 #include <ObfuscationUtils.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -425,6 +426,8 @@ std::string imageWorkPath(const std::string& bookDir) { return bookDir + "/image
 
 std::string optionsPath(const std::string& bookDir) { return bookDir + "/options.bin"; }
 
+std::string initialProgressPath(const char* bookId) { return bookDirectory(bookId) + "/initial-progress.bin"; }
+
 std::string detailPath(const std::string& bookDir) { return bookDir + "/detail.bin"; }
 
 std::string coverPath(const std::string& bookDir) { return bookDir + "/cover.bmp"; }
@@ -433,6 +436,90 @@ std::string finalBookPath(const ShelfRecord& book) {
   const std::string title = StringUtils::sanitizeFilename(book.title, 80);
   const std::string id = StringUtils::sanitizeFilename(book.bookId, 40);
   return "/WeRead/" + title + "-" + id + ".epub";
+}
+
+bool findBookIdForPath(const std::string& path, char* bookId, const size_t bookIdSize) {
+  if (!bookId || bookIdSize == 0) return false;
+  bookId[0] = '\0';
+  HalFile shelf;
+  uint32_t count = 0;
+  if (!openShelf(shelf, count)) return false;
+  ShelfRecord record;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (!readShelfRecord(shelf, i, record)) return false;
+    // Cold reader-entry path: finalBookPath uses bounded title/id components
+    // and the temporary is released before the next shelf record.
+    if (path != finalBookPath(record)) continue;
+    const size_t length = strnlen(record.bookId, sizeof(record.bookId));
+    if (length == sizeof(record.bookId) || length >= bookIdSize) return false;
+    memcpy(bookId, record.bookId, length + 1);
+    return true;
+  }
+  return false;
+}
+
+bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& chapter, uint32_t& chapterOffset) {
+  HalFile toc;
+  uint32_t count = 0;
+  if (!openToc(path, toc, count) || count == 0) return false;
+
+  uint64_t totalWords = 0;
+  TocRecord record;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (!readTocRecord(toc, i, record)) return false;
+    totalWords += record.wordCount;
+  }
+  if (totalWords == 0) return false;
+
+  fraction = std::max(0.0f, std::min(1.0f, fraction));
+  const uint64_t target = static_cast<uint64_t>(fraction * static_cast<double>(totalWords));
+  uint64_t before = 0;
+  TocRecord lastNonEmpty;
+  uint64_t lastBefore = 0;
+  bool foundNonEmpty = false;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (!readTocRecord(toc, i, record)) return false;
+    if (record.wordCount > 0) {
+      lastNonEmpty = record;
+      lastBefore = before;
+      foundNonEmpty = true;
+      if (target < before + record.wordCount) {
+        chapter = record;
+        chapterOffset = static_cast<uint32_t>(target - before);
+        return true;
+      }
+    }
+    before += record.wordCount;
+  }
+  if (!foundNonEmpty) return false;
+  chapter = lastNonEmpty;
+  chapterOffset =
+      static_cast<uint32_t>(std::min<uint64_t>(lastNonEmpty.wordCount, target > lastBefore ? target - lastBefore : 0));
+  return true;
+}
+
+bool mapChapterToFraction(const std::string& path, const char* chapterUid, const uint32_t chapterOffset,
+                          float& fraction) {
+  if (!chapterUid || !chapterUid[0]) return false;
+  HalFile toc;
+  uint32_t count = 0;
+  if (!openToc(path, toc, count) || count == 0) return false;
+
+  uint64_t totalWords = 0;
+  uint64_t matchedWords = 0;
+  bool matched = false;
+  TocRecord record;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (!readTocRecord(toc, i, record)) return false;
+    if (!matched && strcmp(record.chapterUid, chapterUid) == 0 && record.wordCount > 0) {
+      matchedWords = totalWords + std::min(chapterOffset, record.wordCount);
+      matched = true;
+    }
+    totalWords += record.wordCount;
+  }
+  if (!matched || totalWords == 0) return false;
+  fraction = static_cast<float>(static_cast<double>(matchedWords) / static_cast<double>(totalWords));
+  return true;
 }
 
 bool loadBookOptions(const std::string& bookDir, BookOptions& options) {
@@ -467,6 +554,52 @@ bool saveBookOptions(const std::string& bookDir, const BookOptions& options) {
   file.flush();
   file.close();
   return atomicReplace(partPath, finalPath);
+}
+
+bool loadInitialProgress(const char* bookId, float& fraction) {
+  fraction = 0.0f;
+  if (!bookId || !bookId[0]) return false;
+  InitialProgress progress;
+  HalFile file;
+  if (!Storage.openFileForRead("WR", initialProgressPath(bookId), file) || file.fileSize64() != sizeof(progress) ||
+      file.read(&progress, sizeof(progress)) != static_cast<int>(sizeof(progress)) ||
+      progress.magic != kInitialProgressMagic || progress.millionths > 1000000) {
+    return false;
+  }
+  fraction = static_cast<float>(progress.millionths) / 1000000.0f;
+  return true;
+}
+
+bool saveInitialProgress(const char* bookId, const float fraction) {
+  if (!bookId || !bookId[0] || !std::isfinite(fraction) || fraction < 0.0f || fraction > 1.0f) return false;
+  const std::string bookDir = bookDirectory(bookId);
+  if (!ensureRoot() || !Storage.ensureDirectoryExists(bookDir.c_str())) return false;
+  const std::string finalPath = initialProgressPath(bookId);
+  const std::string partPath = finalPath + ".part";
+  if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+  const InitialProgress progress{kInitialProgressMagic, static_cast<uint32_t>(fraction * 1000000.0f + 0.5f)};
+  bool written = false;
+  {
+    HalFile file;
+    written =
+        Storage.openFileForWrite("WR", partPath, file) && file.write(&progress, sizeof(progress)) == sizeof(progress);
+    if (written) file.flush();
+  }
+  if (!written) {
+    if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+    return false;
+  }
+  return atomicReplace(partPath, finalPath);
+}
+
+bool clearInitialProgress(const char* bookId) {
+  if (!bookId || !bookId[0]) return false;
+  const std::string finalPath = initialProgressPath(bookId);
+  const std::string partPath = finalPath + ".part";
+  bool cleared = true;
+  if (Storage.exists(finalPath.c_str())) cleared = Storage.remove(finalPath.c_str());
+  if (Storage.exists(partPath.c_str())) cleared = Storage.remove(partPath.c_str()) && cleared;
+  return cleared;
 }
 
 bool openBookDetail(const std::string& bookDir, BookDetailHeader& header, HalFile& file) {

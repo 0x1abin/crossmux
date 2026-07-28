@@ -12,6 +12,8 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -36,6 +38,8 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #ifdef ENABLE_CHINESE_VERSION
+#include "activities/apps/weread/WeReadProgressSyncActivity.h"
+#include "activities/apps/weread/WeReadStore.h"
 #include "activities/settings/FontDownloadActivity.h"
 #endif
 #include "components/UITheme.h"
@@ -206,11 +210,25 @@ void EpubReaderActivity::onEnter() {
 
   epub->setupCacheDir();
 
+#ifdef ENABLE_CHINESE_VERSION
+  wereadBookId_[0] = '\0';
+  if (WeReadStore::findBookIdForPath(epub->getPath(), wereadBookId_, sizeof(wereadBookId_)) &&
+      strncmp(wereadBookId_, "MP_WXS_", 7) == 0) {
+    wereadBookId_[0] = '\0';
+  }
+#endif
+
+#ifdef ENABLE_CHINESE_VERSION
+  bool hasSavedProgress = false;
+#endif
   HalFile f;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
     uint8_t data[6];
     int dataSize = f.read(data, 6);
     if (dataSize == 4 || dataSize == 6) {
+#ifdef ENABLE_CHINESE_VERSION
+      hasSavedProgress = true;
+#endif
       currentSpineIndex = data[0] + (data[1] << 8);
       nextPageNumber = data[2] + (data[3] << 8);
       if (nextPageNumber == UINT16_MAX) {
@@ -236,6 +254,20 @@ void EpubReaderActivity::onEnter() {
       LOG_DBG("ERS", "Opened for first time, navigating to text reference at index %d", textSpineIndex);
     }
   }
+
+#ifdef ENABLE_CHINESE_VERSION
+  if (wereadBookId_[0]) {
+    float initialProgress = 0.0f;
+    const bool loaded = WeReadStore::loadInitialProgress(wereadBookId_, initialProgress);
+    if (hasSavedProgress || !loaded || initialProgress <= 0.0f) {
+      WeReadStore::clearInitialProgress(wereadBookId_);
+    } else if (jumpToFraction(initialProgress)) {
+      clearInitialProgressAfterSave_ = true;
+    } else {
+      WeReadStore::clearInitialProgress(wereadBookId_);
+    }
+  }
+#endif
 
   // Save current epub as last opened epub and add to recent books
   APP_STATE.openEpubPath = epub->getPath();
@@ -749,34 +781,21 @@ void EpubReaderActivity::loop() {
   }
 }
 
-// Translate an absolute percent into a spine index plus a normalized position
+// Translate an absolute fraction into a spine index plus a normalized position
 // within that spine so we can jump after the section is loaded.
-void EpubReaderActivity::jumpToPercent(int percent) {
-  if (!epub) {
-    return;
-  }
+bool EpubReaderActivity::jumpToFraction(float fraction) {
+  if (!epub || !std::isfinite(fraction)) return false;
 
   const size_t bookSize = epub->getBookSize();
-  if (bookSize == 0) {
-    return;
-  }
-
-  // Normalize input to 0-100 to avoid invalid jumps.
-  percent = clampPercent(percent);
+  if (bookSize == 0) return false;
+  fraction = std::max(0.0f, std::min(1.0f, fraction));
 
   // Convert percent into a byte-like absolute position across the spine sizes.
-  // Use an overflow-safe computation: (bookSize / 100) * percent + (bookSize % 100) * percent / 100
-  size_t targetSize =
-      (bookSize / 100) * static_cast<size_t>(percent) + (bookSize % 100) * static_cast<size_t>(percent) / 100;
-  if (percent >= 100) {
-    // Ensure the final percent lands inside the last spine item.
-    targetSize = bookSize - 1;
-  }
+  const size_t targetSize =
+      fraction >= 1.0f ? bookSize - 1 : static_cast<size_t>(static_cast<double>(bookSize) * fraction);
 
   const int spineCount = epub->getSpineItemsCount();
-  if (spineCount == 0) {
-    return;
-  }
+  if (spineCount == 0) return false;
 
   int targetSpineIndex = spineCount - 1;
   size_t prevCumulative = 0;
@@ -810,6 +829,11 @@ void EpubReaderActivity::jumpToPercent(int percent) {
     pendingPercentJump = true;
     section.reset();
   }
+  return true;
+}
+
+void EpubReaderActivity::jumpToPercent(const int percent) {
+  jumpToFraction(static_cast<float>(clampPercent(percent)) / 100.0f);
 }
 
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
@@ -949,6 +973,12 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {
+#ifdef ENABLE_CHINESE_VERSION
+      if (wereadBookId_[0]) {
+        launchWeReadSync();
+        break;
+      }
+#endif
       launchKOReaderSync();
       break;
     }
@@ -1020,6 +1050,48 @@ bool EpubReaderActivity::launchKOReaderSync() {
       std::move(localChapterName), paragraphIndex));
   return true;  // acted: launched the sync activity
 }
+
+#ifdef ENABLE_CHINESE_VERSION
+bool EpubReaderActivity::launchWeReadSync() {
+  if (!wereadBookId_[0]) return false;
+  const int currentPage = section ? section->currentPage : nextPageNumber;
+  const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+  const SavedProgressPosition localProgress = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
+  std::string savedEpubPath = epub->getPath();
+
+  if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
+    LOG_ERR("WRSync", "Aborting sync because current progress could not be saved");
+    pendingSyncSaveError = true;
+    requestUpdate();
+    return true;
+  }
+
+  // The activity owns the existing 4 KB WeRead workspace. Allocate it before
+  // releasing the reader so OOM can leave the current page intact.
+  auto sync =
+      makeUniqueNoThrow<WeReadProgressSyncActivity>(renderer, mappedInput, std::move(savedEpubPath), wereadBookId_,
+                                                    localProgress.percentage, currentSpineIndex, totalPages);
+  if (!sync) {
+    LOG_ERR("WRSync", "OOM: WeReadProgressSyncActivity (%u bytes)",
+            static_cast<unsigned>(sizeof(WeReadProgressSyncActivity)));
+    pendingSyncLaunchError = true;
+    requestUpdate();
+    return true;
+  }
+
+  LOG_DBG("WRSync", "Releasing epub for sync (heap before: %u)", static_cast<unsigned>(ESP.getFreeHeap()));
+  {
+    RenderLock lock(*this);
+    if (section) nextPageNumber = section->currentPage;
+    ImageBlock::setExtractor(nullptr, nullptr);
+    section.reset();
+    epub.reset();
+  }
+  LOG_DBG("WRSync", "Epub released (heap after: %u)", static_cast<unsigned>(ESP.getFreeHeap()));
+  activityManager.replaceActivity(std::move(sync));
+  return true;
+}
+#endif
 
 void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
   // No-op if the selected orientation matches current settings.
@@ -1117,9 +1189,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 
   const auto showPendingSyncSaveError = [this]() {
-    if (!pendingSyncSaveError) return;
-    pendingSyncSaveError = false;
-    GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
+    if (pendingSyncSaveError) {
+      pendingSyncSaveError = false;
+      GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
+    } else if (pendingSyncLaunchError) {
+      pendingSyncLaunchError = false;
+      GUI.drawPopup(renderer, tr(STR_SYNC_FAILED_MSG));
+    }
   };
 
   // A section build failure (e.g. an invalid/corrupt EPUB that fails XML parsing) leaves the
@@ -1548,7 +1624,13 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   READING_STATS.updateProgress(static_cast<uint8_t>(progressPercent), progressPercent >= 100,
                                getStatsChapterTitle(*epub, spineIndex),
                                getStatsChapterProgressPercent(currentPage, pageCount));
-  return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
+  const bool saved = EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
+#ifdef ENABLE_CHINESE_VERSION
+  if (saved && clearInitialProgressAfterSave_ && WeReadStore::clearInitialProgress(wereadBookId_)) {
+    clearInitialProgressAfterSave_ = false;
+  }
+#endif
+  return saved;
 }
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,

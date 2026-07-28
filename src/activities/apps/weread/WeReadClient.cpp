@@ -10,10 +10,12 @@
 #include <Memory.h>
 #include <PngToBmpConverter.h>
 #include <StreamingJsonParser.h>
+#include <mbedtls/sha256.h>
 #include <strings.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -85,6 +87,132 @@ bool md5Hex(const uint8_t* data, const size_t len, char out[33]) {
   if (value.length() != 32) return false;
   memcpy(out, value.c_str(), 32);
   out[32] = '\0';
+  return true;
+}
+
+bool appendText(char* out, const size_t outSize, size_t& position, const char* value, const size_t length) {
+  if (!out || !value || position + length >= outSize) return false;
+  memcpy(out + position, value, length);
+  position += length;
+  out[position] = '\0';
+  return true;
+}
+
+bool appendText(char* out, const size_t outSize, size_t& position, const char* value) {
+  return value && appendText(out, outSize, position, value, strlen(value));
+}
+
+bool appendUnsigned(char* out, const size_t outSize, size_t& position, const uint64_t value) {
+  char number[24];
+  const int length = snprintf(number, sizeof(number), "%llu", static_cast<unsigned long long>(value));
+  return length > 0 && static_cast<size_t>(length) < sizeof(number) &&
+         appendText(out, outSize, position, number, static_cast<size_t>(length));
+}
+
+bool appendUrlEncodedPrefix(char* out, const size_t outSize, size_t& position, const char* value,
+                            const size_t maxCodepoints) {
+  if (!value) return false;
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  size_t codepoints = 0;
+  const auto* cursor = reinterpret_cast<const uint8_t*>(value);
+  while (*cursor && codepoints < maxCodepoints) {
+    size_t width = 1;
+    if ((*cursor & 0xE0) == 0xC0) {
+      width = 2;
+    } else if ((*cursor & 0xF0) == 0xE0) {
+      width = 3;
+    } else if ((*cursor & 0xF8) == 0xF0) {
+      width = 4;
+    } else if (*cursor >= 0x80) {
+      return false;
+    }
+    for (size_t i = 1; i < width; ++i) {
+      if ((cursor[i] & 0xC0) != 0x80) return false;
+    }
+    for (size_t i = 0; i < width; ++i) {
+      const uint8_t c = cursor[i];
+      if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+          c == '.' || c == '~') {
+        const char plain = static_cast<char>(c);
+        if (!appendText(out, outSize, position, &plain, 1)) return false;
+      } else {
+        const char encoded[] = {'%', kHex[c >> 4], kHex[c & 0x0F]};
+        if (!appendText(out, outSize, position, encoded, sizeof(encoded))) return false;
+      }
+    }
+    cursor += width;
+    ++codepoints;
+  }
+  return true;
+}
+
+bool appendJsonPrefix(char* out, const size_t outSize, size_t& position, const char* value,
+                      const size_t maxCodepoints) {
+  if (!value) return false;
+  size_t codepoints = 0;
+  const auto* cursor = reinterpret_cast<const uint8_t*>(value);
+  while (*cursor && codepoints < maxCodepoints) {
+    size_t width = 1;
+    if ((*cursor & 0xE0) == 0xC0) {
+      width = 2;
+    } else if ((*cursor & 0xF0) == 0xE0) {
+      width = 3;
+    } else if ((*cursor & 0xF8) == 0xF0) {
+      width = 4;
+    } else if (*cursor >= 0x80) {
+      return false;
+    }
+    for (size_t i = 1; i < width; ++i) {
+      if ((cursor[i] & 0xC0) != 0x80) return false;
+    }
+    if (width == 1 && (*cursor == '"' || *cursor == '\\')) {
+      const char escaped[] = {'\\', static_cast<char>(*cursor)};
+      if (!appendText(out, outSize, position, escaped, sizeof(escaped))) return false;
+    } else if (width == 1 && *cursor < 0x20) {
+      // Chapter titles are metadata, so dropping control bytes is safer than
+      // spending payload space on invisible JSON escapes.
+    } else if (!appendText(out, outSize, position, reinterpret_cast<const char*>(cursor), width)) {
+      return false;
+    }
+    cursor += width;
+    ++codepoints;
+  }
+  return true;
+}
+
+bool makeWebAppId(char* out, const size_t outSize) {
+  if (!out || outSize == 0) return false;
+  char prefix[13] = {};
+  size_t prefixLength = 0;
+  const char* cursor = kUserAgent;
+  while (*cursor && prefixLength < 12) {
+    while (*cursor == ' ') ++cursor;
+    const char* start = cursor;
+    while (*cursor && *cursor != ' ') ++cursor;
+    if (cursor == start) break;
+    prefix[prefixLength++] = static_cast<char>('0' + ((cursor - start) % 10));
+  }
+  uint32_t hash = 0;
+  for (const auto* p = reinterpret_cast<const uint8_t*>(kUserAgent); *p; ++p) {
+    hash = (131U * hash + *p) & 0x7fffffffU;
+  }
+  const int length =
+      snprintf(out, outSize, "wb%.*sh%u", static_cast<int>(prefixLength), prefix, static_cast<unsigned>(hash));
+  return length > 0 && static_cast<size_t>(length) < outSize;
+}
+
+bool sha256Hex(const char* value, char* out, const size_t outSize) {
+  if (!value || !out || outSize < 65) return false;
+  uint8_t digest[32];
+  mbedtls_sha256_context context;
+  mbedtls_sha256_init(&context);
+  const bool ok = mbedtls_sha256_starts(&context, 0) == 0 &&
+                  mbedtls_sha256_update(&context, reinterpret_cast<const uint8_t*>(value), strlen(value)) == 0 &&
+                  mbedtls_sha256_finish(&context, digest) == 0;
+  mbedtls_sha256_free(&context);
+  if (!ok) return false;
+  for (size_t i = 0; i < sizeof(digest); ++i) snprintf(out + i * 2, outSize - i * 2, "%02x", digest[i]);
+  out[64] = '\0';
   return true;
 }
 
@@ -195,6 +323,7 @@ enum class SimpleField : uint8_t {
   LogicCode,
   ErrorCode,
   Success,
+  SyncKey,
 };
 
 struct SimpleJsonContext {
@@ -206,6 +335,7 @@ struct SimpleJsonContext {
   char logicCode[64] = {};
   int errorCode = 0;
   bool succeed = false;
+  bool hasSyncKey = false;
   bool rootClosed = false;
   int depth = 0;
 };
@@ -227,6 +357,8 @@ void simpleKey(void* raw, const char* key, size_t) {
     ctx.field = SimpleField::ErrorCode;
   } else if (strcmp(key, "succ") == 0) {
     ctx.field = SimpleField::Success;
+  } else if (strcmp(key, "synckey") == 0) {
+    ctx.field = SimpleField::SyncKey;
   } else {
     ctx.field = SimpleField::None;
   }
@@ -258,6 +390,9 @@ void simpleString(void* raw, const char* value, const size_t len) {
     case SimpleField::Success:
       ctx.succeed = strcmp(value, "1") == 0 || strcmp(value, "true") == 0;
       break;
+    case SimpleField::SyncKey:
+      ctx.hasSyncKey = len > 0;
+      break;
     case SimpleField::None:
       break;
   }
@@ -274,6 +409,8 @@ void simpleNumber(void* raw, const char* value, const size_t len) {
     ctx.errorCode = atoi(value);
   } else if (ctx.field == SimpleField::Succeed || ctx.field == SimpleField::Success) {
     ctx.succeed = atoi(value) != 0;
+  } else if (ctx.field == SimpleField::SyncKey) {
+    ctx.hasSyncKey = len > 0;
   }
   ctx.field = SimpleField::None;
 }
@@ -324,6 +461,7 @@ bool resetSimple(void* raw) {
   ctx.logicCode[0] = '\0';
   ctx.errorCode = 0;
   ctx.succeed = false;
+  ctx.hasSyncKey = false;
   ctx.rootClosed = false;
   ctx.depth = 0;
   ctx.parser->reset();
@@ -334,6 +472,12 @@ bool feedSimple(void* raw, const uint8_t* data, const size_t len) {
   auto& ctx = *static_cast<SimpleJsonContext*>(raw);
   ctx.parser->feed(reinterpret_cast<const char*>(data), len);
   return !ctx.parser->hasError();
+}
+
+bool resetRemoteProgress(void* raw) { return static_cast<WeReadProtocol::RemoteProgressParser*>(raw)->reset(); }
+
+bool feedRemoteProgress(void* raw, const uint8_t* data, const size_t len) {
+  return static_cast<WeReadProtocol::RemoteProgressParser*>(raw)->feed(data, len);
 }
 
 enum class ShelfField : uint8_t { None, Books, BookId, Title, Author, ReadUpdateTime, ErrorCode };
@@ -473,7 +617,7 @@ bool feedShelf(void* raw, const uint8_t* data, const size_t len) {
   return !ctx.parser->hasError() && !ctx.writeFailed;
 }
 
-enum class TocField : uint8_t { None, Chapters, ChapterUid, Title, ChapterIdx, Paid, ErrorCode };
+enum class TocField : uint8_t { None, Chapters, ChapterUid, Title, WordCount, ChapterIdx, Paid, ErrorCode };
 
 struct TocJsonContext {
   StreamingJsonParser* parser = nullptr;
@@ -499,6 +643,8 @@ void tocKey(void* raw, const char* key, size_t) {
     ctx.field = TocField::ChapterUid;
   } else if (strcmp(key, "title") == 0) {
     ctx.field = TocField::Title;
+  } else if (strcmp(key, "wordCount") == 0) {
+    ctx.field = TocField::WordCount;
   } else if (strcmp(key, "chapterIdx") == 0) {
     ctx.field = TocField::ChapterIdx;
   } else if (strcmp(key, "paid") == 0) {
@@ -519,6 +665,9 @@ void tocValue(void* raw, const char* value, const size_t len) {
         break;
       case TocField::Title:
         copyDecoded(value, len, ctx.current.title, sizeof(ctx.current.title));
+        break;
+      case TocField::WordCount:
+        ctx.current.wordCount = WeReadProtocol::parseUint32OrZero(value, len);
         break;
       case TocField::ChapterIdx:
         ctx.current.chapterIdx = static_cast<uint32_t>(strtoul(value, nullptr, 10));
@@ -943,6 +1092,26 @@ bool extractPsvts(void* raw, const uint8_t* data, const size_t len) {
   return static_cast<WeReadProtocol::PsvtsExtractor*>(raw)->feed(data, len);
 }
 
+struct ReaderContextSink {
+  WeReadProtocol::PsvtsExtractor psvts;
+  WeReadProtocol::PsvtsExtractor pclts;
+  WeReadProtocol::PsvtsExtractor token;
+
+  ReaderContextSink(char* psvtsOut, const size_t psvtsSize, char* pcltsOut, const size_t pcltsSize, char* tokenOut,
+                    const size_t tokenSize)
+      : psvts(psvtsOut, psvtsSize), pclts(pcltsOut, pcltsSize, "pclts"), token(tokenOut, tokenSize, "token") {}
+};
+
+bool resetReaderContext(void* raw) {
+  auto& context = *static_cast<ReaderContextSink*>(raw);
+  return context.psvts.reset() && context.pclts.reset() && context.token.reset();
+}
+
+bool extractReaderContext(void* raw, const uint8_t* data, const size_t len) {
+  auto& context = *static_cast<ReaderContextSink*>(raw);
+  return context.psvts.feed(data, len) && context.pclts.feed(data, len) && context.token.feed(data, len);
+}
+
 bool isSafeProtocolToken(const char* value) {
   if (!value || !value[0]) return false;
   for (const auto* p = reinterpret_cast<const uint8_t*>(value); *p; ++p) {
@@ -1113,6 +1282,130 @@ bool makeContentBody(const char* bookId, const char* chapterUid, const char* psv
                                static_cast<unsigned>(timestamp), psvts, encodedTimestamp, signature);
   if (jsonLen <= 0 || static_cast<size_t>(jsonLen) >= scratchSize) return false;
   bodySize = static_cast<size_t>(jsonLen);
+  return true;
+}
+
+bool appendEncodedId(char* out, const size_t outSize, size_t& position, char* work, const size_t workSize,
+                     const char* value) {
+  return WeReadProtocol::encodeId(value, md5Hex, work, workSize) && appendText(out, outSize, position, work);
+}
+
+bool appendProgressQuery(char* out, const size_t outSize, char* work, const size_t workSize, const char* bookId,
+                         const WeReadStore::TocRecord& chapter, const uint32_t chapterOffset, const uint32_t progress,
+                         const uint32_t now, const char* psvts, const char* pclts, const char* token, const bool report,
+                         const uint64_t timestampMs, const uint32_t randomNumber) {
+  size_t position = 0;
+  out[0] = '\0';
+  if (!makeWebAppId(work, workSize) || !appendText(out, outSize, position, "appId=") ||
+      !appendText(out, outSize, position, work) || !appendText(out, outSize, position, "&b=") ||
+      !appendEncodedId(out, outSize, position, work, workSize, bookId) || !appendText(out, outSize, position, "&c=") ||
+      !appendEncodedId(out, outSize, position, work, workSize, chapter.chapterUid) ||
+      !appendText(out, outSize, position, "&ci=") || !appendUnsigned(out, outSize, position, chapter.chapterIdx) ||
+      !appendText(out, outSize, position, "&co=") || !appendUnsigned(out, outSize, position, chapterOffset) ||
+      !appendText(out, outSize, position, "&ct=") || !appendUnsigned(out, outSize, position, now) ||
+      !appendText(out, outSize, position, "&pc=")) {
+    return false;
+  }
+  if (WeReadProtocol::hasUsablePclts(pclts)) {
+    if (!appendText(out, outSize, position, pclts)) return false;
+  } else {
+    char nowText[16];
+    snprintf(nowText, sizeof(nowText), "%u", static_cast<unsigned>(now));
+    if (!appendEncodedId(out, outSize, position, work, workSize, nowText)) return false;
+  }
+  if (!appendText(out, outSize, position, "&pr=") || !appendUnsigned(out, outSize, position, progress) ||
+      !appendText(out, outSize, position, "&ps=") || !appendUrlEncodedPrefix(out, outSize, position, psvts, SIZE_MAX)) {
+    return false;
+  }
+  if (report) {
+    if (!appendText(out, outSize, position, "&rn=") || !appendUnsigned(out, outSize, position, randomNumber) ||
+        !appendText(out, outSize, position, "&rt=0&sg=")) {
+      return false;
+    }
+    const int sourceLength = snprintf(work, workSize, "%llu%u%s", static_cast<unsigned long long>(timestampMs),
+                                      static_cast<unsigned>(randomNumber), token);
+    if (sourceLength <= 0 || static_cast<size_t>(sourceLength) >= workSize || !sha256Hex(work, work, workSize) ||
+        !appendText(out, outSize, position, work)) {
+      return false;
+    }
+  }
+  if (!appendText(out, outSize, position, "&sm=") ||
+      !appendUrlEncodedPrefix(out, outSize, position, chapter.title, 20)) {
+    return false;
+  }
+  return !report || (appendText(out, outSize, position, "&ts=") && appendUnsigned(out, outSize, position, timestampMs));
+}
+
+bool makeProgressBody(const char* bookId, const WeReadStore::TocRecord& chapter, const uint32_t chapterOffset,
+                      const float localFraction, const char* psvts, const char* pclts, const char* readerToken,
+                      const bool report, char* body, const size_t bodySize, char* work, const size_t workSize,
+                      size_t& written) {
+  static constexpr char kDefaultReaderToken[] = "3c5c8717f3daf09iop3423zafeqoi";
+  const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+  if (now == 0 || !isSafeProtocolToken(bookId) || !isSafeProtocolToken(chapter.chapterUid) ||
+      !isSafeProtocolToken(psvts)) {
+    return false;
+  }
+  const char* token = readerToken && readerToken[0] ? readerToken : kDefaultReaderToken;
+  if (!isSafeProtocolToken(token) || (pclts && pclts[0] && !isSafeProtocolToken(pclts))) return false;
+  const float clampedFraction = std::max(0.0f, std::min(1.0f, localFraction));
+  const uint32_t progress = static_cast<uint32_t>(clampedFraction * 100.0f);
+  const uint32_t randomNumber = report ? static_cast<uint32_t>(random(0, 1000)) : 0;
+  const uint64_t timestampMs =
+      report ? static_cast<uint64_t>(now) * 1000ULL + static_cast<uint32_t>(random(0, 1000)) : 0;
+
+  if (!appendProgressQuery(body, bodySize, work, workSize, bookId, chapter, chapterOffset, progress, now, psvts, pclts,
+                           token, report, timestampMs, randomNumber)) {
+    return false;
+  }
+  char signature[24];
+  if (!WeReadProtocol::signQuery(body, signature, sizeof(signature))) return false;
+
+  size_t position = 0;
+  body[0] = '\0';
+  if (!makeWebAppId(work, workSize) || !appendText(body, bodySize, position, "{\"appId\":\"") ||
+      !appendText(body, bodySize, position, work) || !appendText(body, bodySize, position, "\",\"b\":\"") ||
+      !appendEncodedId(body, bodySize, position, work, workSize, bookId) ||
+      !appendText(body, bodySize, position, "\",\"c\":\"") ||
+      !appendEncodedId(body, bodySize, position, work, workSize, chapter.chapterUid) ||
+      !appendText(body, bodySize, position, "\",\"ci\":") ||
+      !appendUnsigned(body, bodySize, position, chapter.chapterIdx) ||
+      !appendText(body, bodySize, position, ",\"co\":") || !appendUnsigned(body, bodySize, position, chapterOffset) ||
+      !appendText(body, bodySize, position, ",\"sm\":\"") ||
+      !appendJsonPrefix(body, bodySize, position, chapter.title, 20) ||
+      !appendText(body, bodySize, position, "\",\"pr\":") || !appendUnsigned(body, bodySize, position, progress) ||
+      !appendText(body, bodySize, position, ",\"ct\":") || !appendUnsigned(body, bodySize, position, now) ||
+      !appendText(body, bodySize, position, ",\"ps\":\"") || !appendText(body, bodySize, position, psvts) ||
+      !appendText(body, bodySize, position, "\",\"pc\":\"")) {
+    return false;
+  }
+  if (WeReadProtocol::hasUsablePclts(pclts)) {
+    if (!appendText(body, bodySize, position, pclts)) return false;
+  } else {
+    char nowText[16];
+    snprintf(nowText, sizeof(nowText), "%u", static_cast<unsigned>(now));
+    if (!appendEncodedId(body, bodySize, position, work, workSize, nowText)) return false;
+  }
+  if (!appendText(body, bodySize, position, "\"")) return false;
+  if (report) {
+    if (!appendText(body, bodySize, position, ",\"rt\":0,\"ts\":") ||
+        !appendUnsigned(body, bodySize, position, timestampMs) || !appendText(body, bodySize, position, ",\"rn\":") ||
+        !appendUnsigned(body, bodySize, position, randomNumber)) {
+      return false;
+    }
+    const int sourceLength = snprintf(work, workSize, "%llu%u%s", static_cast<unsigned long long>(timestampMs),
+                                      static_cast<unsigned>(randomNumber), token);
+    if (sourceLength <= 0 || static_cast<size_t>(sourceLength) >= workSize || !sha256Hex(work, work, workSize) ||
+        !appendText(body, bodySize, position, ",\"sg\":\"") || !appendText(body, bodySize, position, work) ||
+        !appendText(body, bodySize, position, "\"")) {
+      return false;
+    }
+  }
+  if (!appendText(body, bodySize, position, ",\"s\":\"") || !appendText(body, bodySize, position, signature) ||
+      !appendText(body, bodySize, position, "\"}")) {
+    return false;
+  }
+  written = position;
   return true;
 }
 
@@ -1785,6 +2078,12 @@ bool Operation::active() const {
     case Phase::ConvertCover:
     case Phase::PrepareDownload:
     case Phase::FetchToc:
+    case Phase::PrepareProgressSync:
+    case Phase::FetchProgress:
+    case Phase::DecideProgress:
+    case Phase::FetchProgressReader:
+    case Phase::SendProgressEnter:
+    case Phase::SendProgressReport:
     case Phase::OpenToc:
     case Phase::LoadChapter:
     case Phase::SyncClock:
@@ -1818,6 +2117,8 @@ void Operation::reset() {
   error_ = Error::Ok;
   progressStage_ = ProgressStage::Chapters;
   options_ = {};
+  progressSyncInput_ = {};
+  progressSyncResult_ = {};
   session_.clear();
   book_ = {};
   chapter_ = {};
@@ -1825,6 +2126,7 @@ void Operation::reset() {
   chapterIndex_ = 0;
   progressCompleted_ = 0;
   progressTotal_ = 0;
+  progressChapterOffset_ = 0;
   imageWorkCount_ = 0;
   imageWorkCursor_ = 0;
   imageDownloaded_ = 0;
@@ -1850,6 +2152,11 @@ void Operation::reset() {
   previousVid_[0] = '\0';
   loginUid_[0] = '\0';
   psvts_[0] = '\0';
+  remoteRawFraction_ = 0.0f;
+  initialProgressFraction_ = 0.0f;
+  remoteHasChapterOffset_ = false;
+  initialProgressValid_ = false;
+  remoteChapterOffset_ = 0;
   imageHost_[0] = '\0';
   coverType_ = WeReadProtocol::ImageType::None;
   // Shelf sync and download are separate jobs on the same account.
@@ -1864,6 +2171,11 @@ void Operation::reset() {
 
 bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options) {
   reset();
+  if (kind == Kind::ProgressSync) {
+    error_ = Error::Protocol;
+    phase_ = Phase::Failed;
+    return false;
+  }
   kind_ = kind;
   if (kind != Kind::Sync) {
     if (!book || !isSafeProtocolToken(book->bookId)) {
@@ -1897,6 +2209,8 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
     case Kind::Download:
       first = Phase::PrepareDownload;
       break;
+    case Kind::ProgressSync:
+      break;
   }
   if (session_.valid()) {
     phase_ = first;
@@ -1904,6 +2218,33 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
     startLogin(first);
   }
   logMemory("job start");
+  return true;
+}
+
+bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input) {
+  reset();
+  if (!isSafeProtocolToken(bookId) || !std::isfinite(input.localFraction)) {
+    error_ = Error::Protocol;
+    phase_ = Phase::Failed;
+    return false;
+  }
+  kind_ = Kind::ProgressSync;
+  strncpy(book_.bookId, bookId, sizeof(book_.bookId) - 1);
+  progressSyncInput_.localFraction = std::max(0.0f, std::min(1.0f, input.localFraction));
+  WeReadStore::loadSession(session_);
+  if (!session_.valid()) {
+    error_ = Error::SessionExpired;
+    phase_ = Phase::Failed;
+    return false;
+  }
+  if (session_.rt[0]) {
+    renewalAttempted_ = true;
+    resumePhase_ = Phase::PrepareProgressSync;
+    phase_ = Phase::Renew;
+  } else {
+    phase_ = Phase::PrepareProgressSync;
+  }
+  logMemory("progress sync start");
   return true;
 }
 
@@ -1946,6 +2287,11 @@ void Operation::requestAuthentication(const Phase resume) {
   if (session_.rt[0] && !renewalAttempted_) {
     renewalAttempted_ = true;
     phase_ = Phase::Renew;
+    return;
+  }
+  if (kind_ == Kind::ProgressSync) {
+    error_ = Error::SessionExpired;
+    phase_ = Phase::Failed;
     return;
   }
   if (!loginRecoveryAttempted_) {
@@ -2014,8 +2360,10 @@ Operation::Event Operation::reauthenticateChapter() {
 void Operation::requestSucceeded() {
   requestAttempt_ = 0;
   nextActionAt_ = 0;
-  renewalAttempted_ = false;
-  loginRecoveryAttempted_ = false;
+  if (kind_ != Kind::ProgressSync) {
+    renewalAttempted_ = false;
+    loginRecoveryAttempted_ = false;
+  }
 }
 
 void Operation::guardBookSession(const char* phase) {
@@ -2212,6 +2560,117 @@ Error Operation::fetchTocOnce() {
   return context.writer.finish() ? Error::Ok : Error::SdCard;
 }
 
+Error Operation::fetchProgressOnce() {
+  WeReadProtocol::RemoteProgressParser parser(book_.bookId);
+  ResponseSink sink{&parser, resetRemoteProgress, feedRemoteProgress, noOpFinish, Error::Protocol};
+  if (!WeReadProtocol::urlEncode(book_.bookId, url_, sizeof(url_))) return Error::Protocol;
+  referer_ = "/web/book/getProgress?bookId=";
+  referer_ += url_;
+  const Error error =
+      requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
+                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  if (error != Error::Ok) return error;
+  if (responseStatus_ == 401 || responseStatus_ == 403 || parser.errorCode() == -2012) {
+    return Error::SessionExpired;
+  }
+  if (responseStatus_ != 200 || parser.errorCode() != 0 || !parser.complete()) {
+    return Error::Protocol;
+  }
+  const auto& remote = parser.progress();
+  remoteRawFraction_ = remote.percent / 100.0f;
+  // Progress fetch is serialized before chapter/image work, so reuse login scratch.
+  memcpy(loginUid_, remote.chapterUid, sizeof(remote.chapterUid));
+  loginUid_[sizeof(remote.chapterUid) - 1] = '\0';
+  remoteChapterOffset_ = remote.chapterOffset;
+  remoteHasChapterOffset_ = remote.hasChapterOffset;
+  return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+}
+
+float Operation::normalizedRemoteProgress() const {
+  float remoteFraction = remoteRawFraction_;
+  if (remoteHasChapterOffset_) {
+    float mapped = 0.0f;
+    if (WeReadStore::mapChapterToFraction(tocPath_, loginUid_, remoteChapterOffset_, mapped)) {
+      remoteFraction = mapped;
+    }
+  }
+  return std::max(0.0f, std::min(1.0f, remoteFraction));
+}
+
+void Operation::persistInitialProgress() {
+  const bool saved = initialProgressValid_ && initialProgressFraction_ > 0.0f
+                         ? WeReadStore::saveInitialProgress(book_.bookId, initialProgressFraction_)
+                         : WeReadStore::clearInitialProgress(book_.bookId);
+  if (saved) return;
+  LOG_ERR("WR", "Failed to update initial progress for %s", book_.bookId);
+  WeReadStore::clearInitialProgress(book_.bookId);
+}
+
+Error Operation::decideProgress() {
+  static constexpr float kSameProgressThreshold = 0.02f;
+  const float remoteFraction = normalizedRemoteProgress();
+  progressSyncResult_.remoteFraction = remoteFraction;
+  const float delta = progressSyncInput_.localFraction - remoteFraction;
+  LOG_INF("WR", "progress decision: local=%.4f remote=%.4f delta=%.4f", progressSyncInput_.localFraction,
+          remoteFraction, delta);
+  if (std::fabs(delta) <= kSameProgressThreshold) {
+    progressSyncResult_.outcome = ProgressSyncOutcome::AlreadySynced;
+    return Error::Ok;
+  }
+  if (delta < 0.0f) {
+    progressSyncResult_.outcome = ProgressSyncOutcome::RemoteAhead;
+    return Error::Ok;
+  }
+  if (!WeReadStore::mapFractionToChapter(tocPath_, progressSyncInput_.localFraction, chapter_,
+                                         progressChapterOffset_) ||
+      !makeReaderReferer(book_.bookId, chapter_.chapterUid, referer_)) {
+    return Error::Unavailable;
+  }
+  return Error::Ok;
+}
+
+Error Operation::fetchProgressReaderOnce() {
+  const size_t hostLength = strlen(kHost);
+  if (referer_.compare(0, hostLength, kHost) != 0) return Error::Protocol;
+  // Image downloads and login are inactive here; reuse their fixed scratch buffers.
+  ReaderContextSink context(psvts_, sizeof(psvts_), imageHost_, sizeof(imageHost_), previousVid_, sizeof(previousVid_));
+  ResponseSink sink{&context, resetReaderContext, extractReaderContext, noOpFinish, Error::Protocol};
+  const Error error =
+      requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink, responseStatus_,
+                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  if (error != Error::Ok) return error;
+  if (responseStatus_ == 401 || responseStatus_ == 403) return Error::SessionExpired;
+  if (responseStatus_ != 200 || !context.psvts.complete() || !isSafeProtocolToken(psvts_)) return Error::Protocol;
+  if (imageHost_[0] && !isSafeProtocolToken(imageHost_)) imageHost_[0] = '\0';
+  if (previousVid_[0] && !isSafeProtocolToken(previousVid_)) previousVid_[0] = '\0';
+  return Error::Ok;
+}
+
+Error Operation::sendProgressOnce(const bool report) {
+  size_t bodySize = 0;
+  if (!makeProgressBody(book_.bookId, chapter_, progressChapterOffset_, progressSyncInput_.localFraction, psvts_,
+                        imageHost_, previousVid_, report, reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_), url_,
+                        sizeof(url_), bodySize)) {
+    return Error::Clock;
+  }
+  SimpleJsonContext context;
+  StreamingJsonParser parser(simpleCallbacks(&context));
+  context.parser = &parser;
+  ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
+  const Error error =
+      requestOnce("POST", "/web/book/read", ioBuffer_, bodySize, &session_, referer_.c_str(), sink, responseStatus_,
+                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  if (error != Error::Ok) return error;
+  if (responseStatus_ == 401 || responseStatus_ == 403 || context.errorCode == -2012) {
+    return Error::SessionExpired;
+  }
+  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser.hasError() ||
+      (!context.succeed && !context.hasSyncKey)) {
+    return Error::Protocol;
+  }
+  return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+}
+
 Error Operation::fetchReaderOnce() {
   const size_t hostLength = strlen(kHost);
   if (referer_.compare(0, hostLength, kHost) != 0) return Error::Protocol;
@@ -2259,6 +2718,7 @@ Operation::Event Operation::finishWholeBook(const std::string& source) {
   }
   cleanupTransient(bookDir_, "");
   if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);
+  persistInitialProgress();
   if (tocFile_.isOpen()) tocFile_.close();
   phase_ = Phase::Complete;
   logJobComplete();
@@ -2756,6 +3216,7 @@ Operation::Event Operation::step() {
       if (error == Error::Network) return handleRequestError(error, Phase::Renew);
       if (error == Error::SdCard) return fail(error);
       WeReadStore::clearSession();
+      if (kind_ == Kind::ProgressSync) return fail(Error::SessionExpired);
       if (loginRecoveryAttempted_) return fail(Error::SessionExpired);
       loginRecoveryAttempted_ = true;
       startLogin(resumePhase_);
@@ -2846,8 +3307,96 @@ Operation::Event Operation::step() {
       }
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchToc);
       requestSucceeded();
-      phase_ = Phase::OpenToc;
+      phase_ = (kind_ == Kind::ProgressSync || (kind_ == Kind::Download && strncmp(book_.bookId, "MP_WXS_", 7) != 0))
+                   ? Phase::FetchProgress
+                   : Phase::OpenToc;
       return Event::None;
+    }
+
+    case Phase::PrepareProgressSync: {
+      bookDir_ = WeReadStore::bookDirectory(book_.bookId);
+      tocPath_ = WeReadStore::tocPath(book_.bookId);
+      if (!WeReadStore::ensureRoot() || !Storage.ensureDirectoryExists(bookDir_.c_str())) return fail(Error::SdCard);
+      HalFile toc;
+      uint32_t count = 0;
+      phase_ = WeReadStore::openToc(tocPath_, toc, count) && count > 0 ? Phase::FetchProgress : Phase::FetchToc;
+      return Event::None;
+    }
+
+    case Phase::FetchProgress: {
+      const Error error = fetchProgressOnce();
+      if (kind_ == Kind::Download) {
+        if (error == Error::Ok) {
+          initialProgressFraction_ = normalizedRemoteProgress();
+          initialProgressValid_ = true;
+          requestSucceeded();
+          LOG_INF("WR", "prefetched initial progress: %.4f", initialProgressFraction_);
+        } else {
+          LOG_INF("WR", "initial progress prefetch skipped: error=%u", static_cast<unsigned>(error));
+        }
+        phase_ = Phase::OpenToc;
+        return Event::None;
+      }
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::FetchProgress);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::FetchProgress);
+      requestSucceeded();
+      phase_ = Phase::DecideProgress;
+      return Event::None;
+    }
+
+    case Phase::DecideProgress: {
+      const Error error = decideProgress();
+      if (error != Error::Ok) return fail(error);
+      if (progressSyncResult_.outcome != ProgressSyncOutcome::None) {
+        bookSession_.reset();
+        phase_ = Phase::Complete;
+        logJobComplete();
+        return Event::Complete;
+      }
+      phase_ = Phase::FetchProgressReader;
+      return Event::None;
+    }
+
+    case Phase::FetchProgressReader: {
+      const Error error = fetchProgressReaderOnce();
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::FetchProgressReader);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::FetchProgressReader);
+      requestSucceeded();
+      phase_ = Phase::SendProgressEnter;
+      return Event::None;
+    }
+
+    case Phase::SendProgressEnter: {
+      const Error error = sendProgressOnce(false);
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::FetchProgressReader);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::SendProgressEnter);
+      requestSucceeded();
+      phase_ = Phase::SendProgressReport;
+      return Event::None;
+    }
+
+    case Phase::SendProgressReport: {
+      const Error error = sendProgressOnce(true);
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::FetchProgressReader);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::SendProgressReport);
+      requestSucceeded();
+      progressSyncResult_.outcome = ProgressSyncOutcome::LocalUploaded;
+      bookSession_.reset();
+      phase_ = Phase::Complete;
+      logJobComplete();
+      return Event::Complete;
     }
 
     case Phase::OpenToc:
@@ -3093,6 +3642,7 @@ Operation::Event Operation::step() {
               static_cast<unsigned long long>(packageBytes),
               options_.imagePolicy == WeReadStore::ImagePolicy::Embed ? "embed" : "exclude");
       cleanupTransient(bookDir_, "");
+      persistInitialProgress();
       phase_ = Phase::Complete;
       logJobComplete();
       return Event::Complete;

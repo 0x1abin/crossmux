@@ -38,6 +38,7 @@ class EpubReaderActivity final : public Activity {
   float pendingSpineProgress = 0.0f;
   bool pendingScreenshot = false;
   bool pendingSyncSaveError = false;
+  bool pendingSyncLaunchError = false;
   // Consecutive page-load failures. Each failure drops the section and rebuilds on the next render,
   // which recovers a transiently corrupt cache; capped so a persistently bad page can't spin forever.
   uint8_t pageLoadRetryCount = 0;
@@ -96,6 +97,8 @@ class EpubReaderActivity final : public Activity {
 
 #ifdef ENABLE_CHINESE_VERSION
   std::atomic<uint32_t> pendingMissingChineseCodepoint_{0};
+  char wereadBookId_[64] = {};
+  bool clearInitialProgressAfterSave_ = false;
   bool maybeOfferCompleteChineseFont();
 #endif
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
@@ -172,6 +175,7 @@ class EpubReaderActivity final : public Activity {
   // No-op while the section is still building or when the pagination is unchanged (plain resume).
   bool applyDeferredReposition();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
+  bool jumpToFraction(float fraction);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
@@ -181,6 +185,9 @@ class EpubReaderActivity final : public Activity {
   // Returns true if sync acted (launched, or surfaced a save error); false if it was a no-op
   // because no KOReader credentials are stored.
   bool launchKOReaderSync();
+#ifdef ENABLE_CHINESE_VERSION
+  bool launchWeReadSync();
+#endif
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);

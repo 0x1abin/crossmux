@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -117,6 +118,7 @@ TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
     WeReadStore::TocRecord record;
     snprintf(record.chapterUid, sizeof(record.chapterUid), "chapter-%03u", i);
     snprintf(record.title, sizeof(record.title), "章节-%03u", i);
+    record.wordCount = 1000 + i;
     record.chapterIdx = i;
     record.paid = i % 2;
     ASSERT_TRUE(toc.append(&record));
@@ -129,6 +131,7 @@ TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
   WeReadStore::TocRecord tocRecord;
   ASSERT_TRUE(WeReadStore::readTocRecord(tocFile, 524, tocRecord));
   EXPECT_STREQ(tocRecord.chapterUid, "chapter-524");
+  EXPECT_EQ(tocRecord.wordCount, 1524U);
   EXPECT_EQ(tocRecord.chapterIdx, 524U);
 
   std::ofstream corrupt(hostPath(WeReadStore::kShelfPath), std::ios::binary | std::ios::app);
@@ -137,6 +140,67 @@ TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
   corrupt.close();
   HalFile rejected;
   EXPECT_FALSE(WeReadStore::openShelf(rejected, count));
+}
+
+TEST_F(WeReadStoreTest, RejectsWrt1AndMapsProgressWithoutLoadingTheCatalog) {
+  const std::string bookDir = WeReadStore::bookDirectory("progress-book");
+  const std::string tocPath = WeReadStore::tocPath("progress-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists(bookDir.c_str()));
+
+  {
+    constexpr uint32_t kLegacyTocMagic = 0x31545257;  // WRT1
+    WeReadStore::IndexWriter legacy;
+    ASSERT_TRUE(legacy.begin(tocPath, kLegacyTocMagic, 264));
+    std::array<uint8_t, 264> record = {};
+    ASSERT_TRUE(legacy.append(record.data()));
+    ASSERT_TRUE(legacy.finish());
+    HalFile rejected;
+    uint32_t count = 0;
+    EXPECT_FALSE(WeReadStore::openToc(tocPath, rejected, count));
+  }
+
+  WeReadStore::IndexWriter writer;
+  ASSERT_TRUE(writer.begin(tocPath, WeReadStore::kTocMagic, sizeof(WeReadStore::TocRecord)));
+  const uint32_t words[] = {100, 0, 300};
+  for (uint32_t i = 0; i < 3; ++i) {
+    WeReadStore::TocRecord record;
+    snprintf(record.chapterUid, sizeof(record.chapterUid), "chapter-%u", i);
+    record.wordCount = words[i];
+    record.chapterIdx = i;
+    ASSERT_TRUE(writer.append(&record));
+  }
+  ASSERT_TRUE(writer.finish());
+
+  WeReadStore::TocRecord chapter;
+  uint32_t offset = 0;
+  ASSERT_TRUE(WeReadStore::mapFractionToChapter(tocPath, 0.5f, chapter, offset));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-2");
+  EXPECT_EQ(offset, 100U);
+
+  float fraction = 0.0f;
+  ASSERT_TRUE(WeReadStore::mapChapterToFraction(tocPath, "chapter-2", 100, fraction));
+  EXPECT_FLOAT_EQ(fraction, 0.5f);
+  ASSERT_TRUE(WeReadStore::mapFractionToChapter(tocPath, 1.0f, chapter, offset));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-2");
+  EXPECT_EQ(offset, 300U);
+  EXPECT_FALSE(WeReadStore::mapChapterToFraction(tocPath, "chapter-1", 0, fraction));
+  EXPECT_FALSE(WeReadStore::mapChapterToFraction(tocPath, "missing", 0, fraction));
+}
+
+TEST_F(WeReadStoreTest, FindsOnlyTheExactGeneratedBookPath) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  WeReadStore::ShelfRecord record;
+  strcpy(record.bookId, "book-1");
+  strcpy(record.title, "Test Book");
+  ASSERT_TRUE(shelf.append(&record));
+  ASSERT_TRUE(shelf.finish());
+
+  char bookId[64] = {};
+  EXPECT_TRUE(WeReadStore::findBookIdForPath("/WeRead/Test Book-book-1.epub", bookId, sizeof(bookId)));
+  EXPECT_STREQ(bookId, "book-1");
+  EXPECT_FALSE(WeReadStore::findBookIdForPath("/WeRead/Renamed-book-1.epub", bookId, sizeof(bookId)));
 }
 
 TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLast) {
@@ -310,6 +374,48 @@ TEST_F(WeReadStoreTest, PersistsFixedBookOptionsAndDefaultsOnMissingOrCorruptFil
   corrupt.close();
   EXPECT_FALSE(WeReadStore::loadBookOptions("/work", loaded));
   EXPECT_EQ(loaded.imagePolicy, WeReadStore::ImagePolicy::Embed);
+}
+
+TEST_F(WeReadStoreTest, PersistsAndValidatesOneShotInitialProgress) {
+  float loaded = -1.0f;
+  EXPECT_FALSE(WeReadStore::loadInitialProgress("progress-book", loaded));
+  EXPECT_FLOAT_EQ(loaded, 0.0f);
+
+  for (const float fraction : {0.0f, 0.456789f, 1.0f}) {
+    ASSERT_TRUE(WeReadStore::saveInitialProgress("progress-book", fraction));
+    EXPECT_EQ(std::filesystem::file_size(hostPath(WeReadStore::initialProgressPath("progress-book").c_str())), 8U);
+    EXPECT_FALSE(Storage.exists((WeReadStore::initialProgressPath("progress-book") + ".part").c_str()));
+    ASSERT_TRUE(WeReadStore::loadInitialProgress("progress-book", loaded));
+    EXPECT_NEAR(loaded, fraction, 0.000001f);
+  }
+
+  EXPECT_FALSE(WeReadStore::saveInitialProgress("progress-book", -0.01f));
+  EXPECT_FALSE(WeReadStore::saveInitialProgress("progress-book", 1.01f));
+  EXPECT_FALSE(WeReadStore::saveInitialProgress("progress-book", std::numeric_limits<float>::quiet_NaN()));
+  ASSERT_TRUE(WeReadStore::loadInitialProgress("progress-book", loaded));
+  EXPECT_FLOAT_EQ(loaded, 1.0f);
+
+  const auto path = hostPath(WeReadStore::initialProgressPath("progress-book").c_str());
+  WeReadStore::InitialProgress corrupt;
+  corrupt.magic = 0;
+  {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file.write(reinterpret_cast<const char*>(&corrupt), sizeof(corrupt));
+  }
+  EXPECT_FALSE(WeReadStore::loadInitialProgress("progress-book", loaded));
+  corrupt.magic = WeReadStore::kInitialProgressMagic;
+  corrupt.millionths = 1000001;
+  {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file.write(reinterpret_cast<const char*>(&corrupt), sizeof(corrupt));
+  }
+  EXPECT_FALSE(WeReadStore::loadInitialProgress("progress-book", loaded));
+  std::filesystem::resize_file(path, 7);
+  EXPECT_FALSE(WeReadStore::loadInitialProgress("progress-book", loaded));
+
+  EXPECT_TRUE(WeReadStore::clearInitialProgress("progress-book"));
+  EXPECT_FALSE(Storage.exists(WeReadStore::initialProgressPath("progress-book").c_str()));
+  EXPECT_TRUE(WeReadStore::clearInitialProgress("progress-book"));
 }
 
 TEST_F(WeReadStoreTest, StreamsAndValidatesAtomicBookDetailFiles) {

@@ -1,5 +1,6 @@
 add_executable(WeReadProtocolTest
   WeReadProtocolTest.cpp
+  ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
   ${REPO_ROOT}/src/activities/apps/weread/WeReadProtocol.cpp
 )
 
@@ -8,6 +9,7 @@ target_include_directories(WeReadProtocolTest PRIVATE
   ${REPO_ROOT}/src/activities/apps/weread
   ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/hal
+  ${REPO_ROOT}/lib/JsonParser
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/simulator/shims
 )
@@ -27,6 +29,7 @@ endif()
 
 add_executable(WeReadStoreTest
   WeReadStoreTest.cpp
+  ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
   ${REPO_ROOT}/src/activities/apps/weread/WeReadProtocol.cpp
   ${REPO_ROOT}/src/activities/apps/weread/WeReadStore.cpp
   ${REPO_ROOT}/src/util/StringUtils.cpp
@@ -39,6 +42,7 @@ target_include_directories(WeReadStoreTest PRIVATE
   ${REPO_ROOT}/src/activities/apps/weread
   ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/hal
+  ${REPO_ROOT}/lib/JsonParser
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
