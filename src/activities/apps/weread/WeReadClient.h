@@ -109,6 +109,9 @@ class Operation {
   static constexpr Event detailCompletionEvent(const bool coverPending) {
     return coverPending ? Event::DetailReady : Event::Complete;
   }
+  static constexpr bool detailCoverPending(const bool hasBmp, const bool hasSource, const bool hasUrl) {
+    return hasUrl && (!hasBmp || !hasSource);
+  }
   static constexpr Phase chapterResponseRetryPhase() { return Phase::FetchReader; }
   static constexpr bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
     return paid && !plainText && !hasXhtmlTag;

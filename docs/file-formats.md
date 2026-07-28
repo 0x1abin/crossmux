@@ -397,8 +397,10 @@ location is not migrated or read.
   unterminated fixed strings invalidate the cache. The file is committed from
   `detail.bin.part` only after the complete response parses successfully.
 - A successfully converted 96×140 2-bit cover is stored as
-  `<bookId>/cover.bmp`. Its JPEG/PNG source and `cover.bmp.part` are transient;
-  a failed fetch or conversion does not replace an existing BMP.
+  `<bookId>/cover.bmp`. Its validated JPEG/PNG source is retained as
+  `<bookId>/cover.source.jpg` or `<bookId>/cover.source.png` and embedded as the
+  generated EPUB's `cover-image`; only source `.part` files and `cover.bmp.part`
+  are transient. A failed fetch or conversion does not replace an existing BMP.
 Readers reject a wrong magic, version, record size, or total file length.
 Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.
@@ -412,4 +414,5 @@ titles could be overwritten by nested category titles. A cached chapter
 without a valid `WRI1` index is
 downloaded again so pre-image-support chapter caches cannot silently lose
 figures. Existing `/WeRead/*.epub` files remain readable and are not upgraded
-automatically; delete and download one again to embed its images.
+automatically; cache a book again to embed its available cover and selected
+chapter images.
