@@ -40,6 +40,29 @@ FetchContent_Declare(
 # and still sets qrcode_SOURCE_DIR. Replaces the deprecated FetchContent_Populate().
 FetchContent_MakeAvailable(qrcode)
 
+# JPEGDEC backs the firmware's existing JPEG-to-BMP cover converter. Keep it
+# native-only: WeRead is excluded from the offline WASM simulator.
+if(NOT EMSCRIPTEN)
+    FetchContent_Declare(
+        jpegdec
+        GIT_REPOSITORY https://github.com/bitbank2/JPEGDEC.git
+        GIT_TAG 86282979224c8a32fd51e091ed5a35b0c699a52b
+        SOURCE_SUBDIR cmake-unused
+        PATCH_COMMAND /bin/sh -c
+            "git apply --reverse --check '${REPO_ROOT}/scripts/jpegdec_patches/0001-redirect-pmcu-on-mcu-skip.patch' '${REPO_ROOT}/scripts/jpegdec_patches/0002-guard-dc-writes-on-mcu-skip.patch' || git apply '${REPO_ROOT}/scripts/jpegdec_patches/0001-redirect-pmcu-on-mcu-skip.patch' '${REPO_ROOT}/scripts/jpegdec_patches/0002-guard-dc-writes-on-mcu-skip.patch'"
+    )
+    # JPEGDEC's own CMakeLists is ESP-IDF-only. CMake 3.18+ can populate it
+    # without adding that subdirectory; retain the older path for our 3.16 minimum.
+    if(CMAKE_VERSION VERSION_LESS 3.18)
+        FetchContent_GetProperties(jpegdec)
+        if(NOT jpegdec_POPULATED)
+            FetchContent_Populate(jpegdec)
+        endif()
+    else()
+        FetchContent_MakeAvailable(jpegdec)
+    endif()
+endif()
+
 # libcurl — backs the native simulator's esp_http_client shim
 # (shims/esp_http_client.h), including WeRead's dedicated host transport.
 # AirPage and other included HTTPS paths use it as well. The WASM build is
@@ -109,10 +132,8 @@ endif()
 # Real HAL .cpp is replaced by simulator/hal/.
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/hal/Hal.*\\.cpp$")
 
-# Network / OTA / image-decoder .cpp files use APIs (real PNGdec / JPEGDEC / ESPmDNS /
-# precise WiFi calls) that are too deep to shim for first-version simulator scope.
-# Exclude them from sources; symbols their public classes expose are stubbed via
-# simulator/missing_symbols.cpp so the linker still resolves vtables and constructors.
+# Network / OTA / EPUB framebuffer decoders use APIs that remain outside the
+# simulator scope. Their public symbols are stubbed in missing_symbols.cpp.
 
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/network/")
 # ...but keep the real HttpDownloader for applications such as AirPage. WeRead's
@@ -127,10 +148,14 @@ list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderAuthActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderSettingsActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderSyncActivity")
 
-list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/JpegToBmpConverter/")
-list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/PngToBmpConverter/")
-list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Epub/Epub/converters/")
+list(FILTER CROSSPOINT_LIB EXCLUDE REGEX
+     "lib/Epub/Epub/converters/(ImageDecoderFactory|ImageToFramebufferDecoder|JpegToFramebufferConverter|PngToFramebufferConverter)\\.cpp$")
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Serialization/ObfuscationUtils")
+if(EMSCRIPTEN)
+    list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/(JpegToBmpConverter|PngToBmpConverter)/")
+else()
+    list(APPEND CROSSPOINT_LIB ${jpegdec_SOURCE_DIR}/src/JPEGDEC.cpp)
+endif()
 
 # KOReaderSync credential store referenced via the KOREADER_STORE singleton in main.cpp.
 # Its load/save backing now comes from the globbed PersistableStore.cpp.
@@ -263,6 +288,10 @@ target_include_directories(crosspoint_simulator PRIVATE
     ${REPO_ROOT}/lib/AvatarGen
     ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include
 )
+if(NOT EMSCRIPTEN)
+    # Prefer the fetched decoder over simulator/shims/JPEGDEC.h.
+    target_include_directories(crosspoint_simulator BEFORE PRIVATE ${jpegdec_SOURCE_DIR}/src)
+endif()
 
 # Rename Arduino entry points so the simulator entry can drive them explicitly.
 # ENABLE_CHINESE_VERSION includes WeRead on native builds; the browser build

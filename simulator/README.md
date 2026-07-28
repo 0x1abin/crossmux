@@ -19,7 +19,7 @@ filesystem for the "SD card".
 │   HalPower/Tilt/System: stubs (battery 87%, no IMU)        │
 │ simulator/missing_symbols.cpp — link glue:                 │
 │   • Activity vtables for excluded screens (WiFi/OTA/...)   │
-│   • Image-decoder + obfuscation symbols (excluded)         │
+│   • EPUB image-decoder + obfuscation symbols (excluded)    │
 │   • MySerialImpl::instance + uzlib checksum stubs          │
 │   • WiFi global instance                                   │
 └────────────────────────┬──────────────────────────────────┘
@@ -70,8 +70,8 @@ cmake -S simulator -B simulator/build
 cmake --build simulator/build -j
 ```
 
-CMake fetches ArduinoJson and `ricmoo/QRCode` via `FetchContent` on first configure
-(shallow clones, a few seconds).
+CMake fetches ArduinoJson, `ricmoo/QRCode`, and native JPEGDEC via `FetchContent`
+on first configure (shallow clones, a few seconds).
 
 ### WeRead
 
@@ -203,7 +203,8 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
 - 1-bpp framebuffer rendering and font system (text-only EPUBs)
 - **WeRead (微信读书): real HTTPS via its dedicated client and libcurl shim.**
   Scan to sign in, sync the account shelf, download books to SD, and open the
-  generated EPUB in Reader.
+  generated EPUB in Reader. Native builds also use the firmware's JPEG/PNG-to-BMP
+  converters, so downloaded shelf and detail covers appear progressively.
 - **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
   by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
   runs the real `HttpDownloader` over libcurl, saving the latest image to
@@ -217,7 +218,7 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
 ## What's out of scope (first version)
 
 - WiFi config UI / OPDS / KOReader sync / Calibre / file transfer / OTA / web server
-- Image rendering inside EPUBs (PNG/JPEG decoders are stubbed)
+- Image rendering inside EPUB bodies (`ImageDecoderFactory` remains stubbed)
 - 4-level grayscale (grayscale buffers fall through to 1-bpp — e.g. the AirPage
   image renders in plain B&W in the sim, though the BW frame still displays)
 - Real e-ink refresh timing / ghosting
@@ -243,13 +244,11 @@ user navigates into them.
   defined empty in `missing_symbols.cpp` so the vtable links. Navigating to those
   screens in the simulator shows an empty screen rather than crashing.
 - **`simulator/shims/` is mostly a parse-only layer.** Headers like `<PNGdec.h>`
-  or `<JPEGDEC.h>` exist so consumer `.cpp` files compile and link, but their
-  methods return an error / empty value. The exception is `<esp_http_client.h>`
-  (and its `<esp_crt_bundle.h>` companion), which is **libcurl-backed and does
-  real host network I/O** — that's what lets WeRead's dedicated client and the
-  AirPage fetch work.
-  Adding a real codec (libpng wrapper, etc.) would similarly light up the
-  stubbed features.
+  exist so consumer `.cpp` files compile and link, but their methods return an
+  error / empty value. Native WeRead cover conversion is the narrow exception:
+  it compiles the firmware converters with the same pinned, patched JPEGDEC.
+  `<esp_http_client.h>` (and its `<esp_crt_bundle.h>` companion) is also
+  **libcurl-backed and does real host network I/O**.
 
 ## Verifying arduino-host stays project-independent
 
