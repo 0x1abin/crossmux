@@ -27,6 +27,15 @@ struct OperationTestPeer {
   }
   static bool imageAttemptPending(const uint8_t attempts) { return Operation::imageAttemptPending(attempts); }
   static bool imageRedirectAllowed(const uint8_t redirects) { return Operation::imageRedirectAllowed(redirects); }
+  static bool validChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
+    return Operation::validChapterRange(first, last, count);
+  }
+  static uint32_t chapterRangeCount(const uint32_t first, const uint32_t last, const uint32_t count) {
+    return Operation::chapterRangeCount(first, last, count);
+  }
+  static bool wholeChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
+    return Operation::wholeChapterRange(first, last, count);
+  }
 };
 
 }  // namespace WeReadClient
@@ -280,6 +289,7 @@ TEST(WeReadClientState, RefreshesMissingOriginalCoverFromCachedDetail) {
 TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {
   const WeReadClient::DownloadOptions options;
   EXPECT_EQ(options.imagePolicy, WeReadStore::ImagePolicy::Embed);
+  EXPECT_EQ(options.chapterScope, WeReadClient::DownloadOptions::ChapterScope::WholeBook);
   EXPECT_EQ(WeReadClient::Operation::progressDecile(0, 100), 0U);
   EXPECT_EQ(WeReadClient::Operation::progressDecile(9, 100), 0U);
   EXPECT_EQ(WeReadClient::Operation::progressDecile(10, 100), 1U);
@@ -289,6 +299,18 @@ TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {
   EXPECT_FALSE(WeReadClient::OperationTestPeer::imageAttemptPending(2));
   EXPECT_TRUE(WeReadClient::OperationTestPeer::imageRedirectAllowed(4));
   EXPECT_FALSE(WeReadClient::OperationTestPeer::imageRedirectAllowed(5));
+}
+
+TEST(WeReadClientState, ValidatesInclusiveChapterRanges) {
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::validChapterRange(0, 0, 1));
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::validChapterRange(3, 7, 10));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::validChapterRange(7, 3, 10));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::validChapterRange(0, 10, 10));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::validChapterRange(0, 0, 0));
+  EXPECT_EQ(WeReadClient::OperationTestPeer::chapterRangeCount(3, 7, 10), 5U);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::chapterRangeCount(7, 3, 10), 0U);
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::wholeChapterRange(0, 9, 10));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::wholeChapterRange(1, 9, 10));
 }
 
 TEST(WeReadProtocol, EncodesNumericAndUtf8Ids) {

@@ -6,6 +6,7 @@
 #include "../../Activity.h"
 #include "WeReadClient.h"
 #include "WeReadStore.h"
+#include "components/OptionPopup.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -45,6 +46,7 @@ class WeReadActivity final : public Activity {
   static constexpr int kMaxIntroPages = 128;
 
   ButtonNavigator buttonNavigator_;
+  OptionPopup cacheScopePopup_;
   WeReadClient::Operation operation_;
   mutable HalFile shelfFile_;
   std::atomic<State> state_{State::Menu};
@@ -67,12 +69,15 @@ class WeReadActivity final : public Activity {
   uint32_t introPageOffsets_[kMaxIntroPages + 1] = {};
   WeReadStore::ImagePolicy detailImagePolicy_ = WeReadStore::ImagePolicy::Embed;
   WeReadStore::ImagePolicy detailSavedImagePolicy_ = WeReadStore::ImagePolicy::Embed;
+  WeReadClient::DownloadOptions::ChapterScope downloadChapterScope_ =
+      WeReadClient::DownloadOptions::ChapterScope::WholeBook;
   bool detailLoaded_ = false;
   bool detailLoadFailed_ = false;
   bool detailOptionsKnown_ = false;
   bool detailIntroTruncated_ = false;
   bool introPagesTruncated_ = false;
   bool shelfCoverStopped_ = false;
+  bool cacheScopePopupClosing_ = false;
   std::atomic<bool> downloadRenderPending_{false};
   std::atomic<bool> stageRenderPending_{false};
 
@@ -93,6 +98,11 @@ class WeReadActivity final : public Activity {
   bool detailActionEnabled(DetailAction action) const;
   void moveDetailSelection(int direction);
   void activateDetailSelection();
+  void showCacheScopePopup();
+  void startBookDownload();
+  void selectChapterRange();
+  void cancelChapterRangeSelection();
+  void failChapterRangeSelection(WeReadClient::Error error);
   void handleDetailInput();
   void handleIntroductionInput();
   void buildIntroductionPages();

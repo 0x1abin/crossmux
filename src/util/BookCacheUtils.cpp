@@ -20,15 +20,18 @@ bool isBookCacheDirectoryName(const char* name) {
          strncmp(name, XTC_PREFIX, std::size(XTC_PREFIX) - 1) == 0;
 }
 
-void clearBookCache(const std::string& path) {
+bool clearBookCache(const std::string& path) {
+  bool cleared = true;
   if (FsHelpers::hasEpubExtension(path)) {
-    Epub(path, "/.crosspoint").clearCache();
+    cleared = Epub(path, "/.crosspoint").clearCache();
   } else if (FsHelpers::hasXtcExtension(path)) {
-    Xtc(path, "/.crosspoint").clearCache();
+    cleared = Xtc(path, "/.crosspoint").clearCache();
   } else if (FsHelpers::hasTxtExtension(path)) {
-    Txt(path, "/.crosspoint").clearCache();
+    cleared = Txt(path, "/.crosspoint").clearCache();
   } else {
-    return;
+    return true;
   }
+  if (!cleared) return false;
   LOG_DBG("BookCache", "Done checking metadata cache for: %s", path.c_str());
+  return true;
 }

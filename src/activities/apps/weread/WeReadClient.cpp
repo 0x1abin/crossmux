@@ -19,6 +19,7 @@
 #include <string>
 
 #include "WeReadProtocol.h"
+#include "util/BookCacheUtils.h"
 #include "util/TimeUtils.h"
 
 namespace WeReadClient {
@@ -1570,9 +1571,9 @@ bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath
 }
 
 Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
-                        const uint32_t chapterCount, const WeReadStore::ImagePolicy imagePolicy,
-                        const std::string& workPath, const WeReadProtocol::ImageType coverType, std::string& navPath,
-                        std::string& opfPath) {
+                        const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
+                        const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath,
+                        const WeReadProtocol::ImageType coverType, std::string& navPath, std::string& opfPath) {
   navPath = bookDir + "/nav.part";
   opfPath = bookDir + "/content.part";
   if (Storage.exists(navPath.c_str())) Storage.remove(navPath.c_str());
@@ -1612,7 +1613,7 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
     return Error::SdCard;
   }
 
-  for (uint32_t i = 0; i < chapterCount; ++i) {
+  for (uint32_t i = firstChapter; i <= lastChapter; ++i) {
     WeReadStore::TocRecord record;
     if (!WeReadStore::readTocRecord(toc, i, record)) return Error::SdCard;
     char filename[32];
@@ -1653,7 +1654,7 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
   if (!writeLiteral(nav, "</ol></nav></body></html>") || !writeLiteral(opf, "</manifest><spine>")) {
     return Error::SdCard;
   }
-  for (uint32_t i = 0; i < chapterCount; ++i) {
+  for (uint32_t i = firstChapter; i <= lastChapter; ++i) {
     char item[64];
     snprintf(item, sizeof(item), "<itemref idref=\"ch%06u\"/>", static_cast<unsigned>(i));
     if (!writeLiteral(opf, item)) return Error::SdCard;
@@ -1665,14 +1666,15 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
 }
 
 Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookDir, const std::string& tocPath,
-                  const uint32_t chapterCount, const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath,
-                  uint8_t* buffer, const size_t bufferSize, const std::string& finalPartPath) {
+                  const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
+                  const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath, uint8_t* buffer,
+                  const size_t bufferSize, const std::string& finalPartPath) {
   std::string navPath;
   std::string opfPath;
   std::string coverSourcePath;
   const WeReadProtocol::ImageType coverType = findCoverSource(bookDir, coverSourcePath);
-  const Error packageFilesError =
-      writePackageFiles(bookDir, book, tocPath, chapterCount, imagePolicy, workPath, coverType, navPath, opfPath);
+  const Error packageFilesError = writePackageFiles(bookDir, book, tocPath, chapterCount, firstChapter, lastChapter,
+                                                    imagePolicy, workPath, coverType, navPath, opfPath);
   if (packageFilesError != Error::Ok) return packageFilesError;
 
   const std::string centralPath = bookDir + "/central.part";
@@ -1702,7 +1704,7 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
     zip.abort();
     return Error::SdCard;
   }
-  for (uint32_t i = 0; i < chapterCount; ++i) {
+  for (uint32_t i = firstChapter; i <= lastChapter; ++i) {
     WeReadStore::TocRecord record;
     if (!WeReadStore::readTocRecord(toc, i, record)) {
       zip.abort();
@@ -1786,6 +1788,7 @@ bool Operation::active() const {
     case Phase::PrepareDownload:
     case Phase::FetchToc:
     case Phase::OpenToc:
+    case Phase::AwaitChapterRange:
     case Phase::LoadChapter:
     case Phase::SyncClock:
     case Phase::FetchReader:
@@ -1822,6 +1825,8 @@ void Operation::reset() {
   book_ = {};
   chapter_ = {};
   chapterCount_ = 0;
+  firstChapterIndex_ = 0;
+  lastChapterIndex_ = 0;
   chapterIndex_ = 0;
   progressCompleted_ = 0;
   progressTotal_ = 0;
@@ -1905,6 +1910,23 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
   }
   logMemory("job start");
   return true;
+}
+
+bool Operation::setChapterRange(const uint32_t first, const uint32_t last) {
+  if (phase_ != Phase::AwaitChapterRange || !validChapterRange(first, last, chapterCount_)) return false;
+  firstChapterIndex_ = first;
+  lastChapterIndex_ = last;
+  chapterIndex_ = first;
+  progressCompleted_ = 0;
+  progressTotal_ = chapterRangeCount(first, last, chapterCount_);
+  psvts_[0] = '\0';
+  phase_ = Phase::LoadChapter;
+  return true;
+}
+
+bool Operation::readChapter(const uint32_t index, WeReadStore::TocRecord& record) {
+  return phase_ == Phase::AwaitChapterRange && index < chapterCount_ && tocFile_.isOpen() &&
+         WeReadStore::readTocRecord(tocFile_, index, record);
 }
 
 void Operation::cancel() {
@@ -2242,6 +2264,9 @@ Error Operation::fetchShardOnce(const char* endpoint, const std::string& destina
 
 Operation::Event Operation::finishWholeBook(const std::string& source) {
   bookSession_.reset();
+  if (!wholeChapterRange(firstChapterIndex_, lastChapterIndex_, chapterCount_)) {
+    return fail(Error::WholeBookOnly);
+  }
   if (!WeReadStore::looksLikeZip(source)) return fail(Error::Integrity);
   WeReadStore::BookOptions previousOptions;
   const bool hadPreviousOptions = WeReadStore::loadBookOptions(bookDir_, previousOptions);
@@ -2282,7 +2307,7 @@ Error Operation::prepareImageWork() {
   imageFilesCreated_ = 0;
   imageBytes_ = 0;
   imagePhaseStartedAt_ = millis();
-  for (uint32_t chapter = 0; chapter < chapterCount_; ++chapter) {
+  for (uint32_t chapter = firstChapterIndex_; chapter <= lastChapterIndex_; ++chapter) {
     HalFile images;
     uint32_t imageCount = 0;
     if (!WeReadStore::openImageIndex(WeReadStore::imageIndexPath(bookDir_, chapter), images, imageCount)) {
@@ -2709,6 +2734,7 @@ Operation::Event Operation::step() {
     case Phase::Complete:
     case Phase::Cancelled:
     case Phase::Failed:
+    case Phase::AwaitChapterRange:
       return Event::None;
 
     case Phase::LoginUid: {
@@ -2856,17 +2882,26 @@ Operation::Event Operation::step() {
       if (!WeReadStore::openToc(tocPath_, tocFile_, chapterCount_) || chapterCount_ == 0) {
         return fail(Error::Protocol);
       }
-      chapterIndex_ = 0;
+      firstChapterIndex_ = 0;
+      lastChapterIndex_ = chapterCount_ - 1;
+      chapterIndex_ = firstChapterIndex_;
       progressStage_ = ProgressStage::Chapters;
       progressCompleted_ = 0;
-      progressTotal_ = chapterCount_;
+      progressTotal_ = chapterRangeCount(firstChapterIndex_, lastChapterIndex_, chapterCount_);
       psvts_[0] = '\0';
       logMemory("toc parsed");
-      phase_ = Phase::LoadChapter;
-      return Event::None;
+      switch (options_.chapterScope) {
+        case DownloadOptions::ChapterScope::WholeBook:
+          phase_ = Phase::LoadChapter;
+          return Event::None;
+        case DownloadOptions::ChapterScope::SelectRange:
+          bookSession_.reset();
+          phase_ = Phase::AwaitChapterRange;
+          return Event::ChapterRangeReady;
+      }
 
     case Phase::LoadChapter: {
-      if (chapterIndex_ >= chapterCount_) {
+      if (chapterIndex_ > lastChapterIndex_) {
         if (tocFile_.isOpen()) tocFile_.close();
         phase_ = Phase::PrepareImages;
         return Event::None;
@@ -3028,7 +3063,7 @@ Operation::Event Operation::step() {
     case Phase::AdvanceChapter:
       guardBookSession("progress");
       ++chapterIndex_;
-      progressCompleted_ = chapterIndex_;
+      progressCompleted_ = chapterIndex_ - firstChapterIndex_;
       phase_ = Phase::LoadChapter;
       return Event::ChapterComplete;
 
@@ -3067,9 +3102,9 @@ Operation::Event Operation::step() {
       bookSession_.reset();
       logMemory("package start");
       const unsigned long packageStartedAt = millis();
-      const Error error =
-          packageBook(book_, bookDir_, tocPath_, chapterCount_, options_.imagePolicy,
-                      WeReadStore::imageWorkPath(bookDir_), ioBuffer_, sizeof(ioBuffer_), finalPartPath_);
+      const Error error = packageBook(book_, bookDir_, tocPath_, chapterCount_, firstChapterIndex_, lastChapterIndex_,
+                                      options_.imagePolicy, WeReadStore::imageWorkPath(bookDir_), ioBuffer_,
+                                      sizeof(ioBuffer_), finalPartPath_);
       logMemory("package end");
       if (error != Error::Ok) return fail(error);
       if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);
@@ -3085,6 +3120,9 @@ Operation::Event Operation::step() {
           const std::string path = WeReadStore::optionsPath(bookDir_);
           if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
         }
+        return fail(Error::SdCard);
+      }
+      if (!wholeChapterRange(firstChapterIndex_, lastChapterIndex_, chapterCount_) && !clearBookCache(outputPath_)) {
         return fail(Error::SdCard);
       }
       HalFile packaged;
