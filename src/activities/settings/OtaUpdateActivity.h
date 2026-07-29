@@ -1,10 +1,12 @@
 #pragma once
 
 #include "activities/Activity.h"
+#include "components/OptionPopup.h"
 #include "network/OtaUpdater.h"
 
 class OtaUpdateActivity : public Activity {
   enum State {
+    READY,
     WIFI_SELECTION,
     CHECKING_FOR_UPDATE,
     WAITING_CONFIRMATION,
@@ -18,10 +20,16 @@ class OtaUpdateActivity : public Activity {
   // Can't initialize this to 0 or the first render doesn't happen
   static constexpr unsigned int UNINITIALIZED_PERCENTAGE = 111;
 
-  State state = WIFI_SELECTION;
+  State state = READY;
+  OtaUpdater::Channel selectedChannel = OtaUpdater::Channel::Stable;
+  int selectedReadyRow = 0;
+  bool waitForConfirmRelease = false;
   unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
   OtaUpdater updater;
+  OptionPopup updateConfirmation;
 
+  void activateReadyRow();
+  void beginWifiSelection();
   void onWifiSelectionComplete(bool success);
   void runUpdateInstall();
 
