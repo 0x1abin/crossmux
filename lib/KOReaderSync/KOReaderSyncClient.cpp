@@ -30,19 +30,18 @@ constexpr char DEVICE_ID[] = "crosspoint-reader";
 // gate — the gate only needs to keep out states where a doomed handshake
 // would waste tens of seconds, not guarantee success.
 //
-// Free and largest-block have separate requirements: with SP ECC
-// (WOLFSSL_HAVE_SP_ECC) the handshake's crypto uses fixed 256-bit arrays, so
-// the largest single TLS allocation is the ~17 KB wolfSSL record buffer, not
-// a run of fast-math bignums. A handshake was measured succeeding inside a
-// 43 KB largest block; requiring 50 KB contiguous refused syncs that fit.
+// Free and largest-block have separate requirements: SP ECC and SP RSA keep
+// public-key crypto in fixed-width workspaces (the largest RSA-4096 temporary
+// is about 2.8 KB), so the largest single TLS allocation is the ~17 KB wolfSSL
+// record buffer. A handshake was measured succeeding inside a 43 KB largest
+// block; requiring 50 KB contiguous refused syncs that fit.
 //
-// The 35 KB free floor covers the measured peak of what remains after the SP
-// ECC + X25519 work: session object plus record buffer plus RSA cert-verify
-// temps (2 KB apiece at FP_MAX_BITS 8192) totals ~30-40 KB transient. The old
-// 50 KB floor was calibrated against the fast-math bignum failure mode that
-// SP ECC removed, and sat inside the 51.9-58.2 KB band a reading session
-// normally leaves, refusing syncs that would have succeeded. A wrong guess
-// here fails soft: MEMORY_E aborts the handshake within its 15 s deadline.
+// Keep the measured 35 KB free floor until field data establishes a lower
+// bound for the session object, record buffer, parser, and fixed SP workspaces.
+// The old 50 KB floor was calibrated against fast-math bignums and sat inside
+// the 51.9-58.2 KB band a reading session normally leaves, refusing syncs that
+// fit. A wrong guess here fails soft: MEMORY_E aborts the handshake within its
+// 15 s deadline.
 constexpr uint32_t MIN_FREE_FOR_TLS = 35000;
 constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
 

@@ -22,13 +22,18 @@ bool isAllowedXhtmlTag(const char* name);
 bool extractImageAttributes(const char* tag, char* source, size_t sourceSize, char* alt, size_t altSize);
 ImageType normalizeImageUrl(const char* source, char* output, size_t outputSize);
 uint32_t parseUint32OrZero(const char* value, size_t len);
+uint32_t hashAppId(const char* value, size_t len);
 bool hasUsablePclts(const char* value);
 
 struct RemoteProgress {
   char chapterUid[64] = {};
   float percent = 0.0f;
+  uint32_t appIdHash = 0;
   uint32_t chapterOffset = 0;
+  uint32_t updateTime = 0;
   bool hasChapterOffset = false;
+  bool hasUpdateTime = false;
+  bool hasAppId = false;
 };
 
 class RemoteProgressParser {
@@ -50,6 +55,8 @@ class RemoteProgressParser {
     Progress,
     ChapterUid,
     ChapterOffset,
+    UpdateTime,
+    AppId,
     ErrorCode,
   };
 
@@ -57,10 +64,14 @@ class RemoteProgressParser {
     char bookId[64] = {};
     char chapterUid[64] = {};
     float progress = 0.0f;
+    uint32_t appIdHash = 0;
     uint32_t chapterOffset = 0;
+    uint32_t updateTime = 0;
     bool hasBookId = false;
     bool hasProgress = false;
     bool hasChapterOffset = false;
+    bool hasUpdateTime = false;
+    bool hasAppId = false;
   };
 
   static JsonCallbacks callbacks(RemoteProgressParser* parser);

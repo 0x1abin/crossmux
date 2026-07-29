@@ -338,6 +338,7 @@ struct SimpleJsonContext {
   bool succeed = false;
   bool hasSyncKey = false;
   bool rootClosed = false;
+  size_t bytesReceived = 0;
   int depth = 0;
 };
 
@@ -464,6 +465,7 @@ bool resetSimple(void* raw) {
   ctx.succeed = false;
   ctx.hasSyncKey = false;
   ctx.rootClosed = false;
+  ctx.bytesReceived = 0;
   ctx.depth = 0;
   ctx.parser->reset();
   return true;
@@ -471,6 +473,7 @@ bool resetSimple(void* raw) {
 
 bool feedSimple(void* raw, const uint8_t* data, const size_t len) {
   auto& ctx = *static_cast<SimpleJsonContext*>(raw);
+  ctx.bytesReceived += len;
   ctx.parser->feed(reinterpret_cast<const char*>(data), len);
   return !ctx.parser->hasError();
 }
@@ -2086,6 +2089,7 @@ bool Operation::active() const {
     case Phase::FetchProgressReader:
     case Phase::SendProgressEnter:
     case Phase::SendProgressReport:
+    case Phase::VerifyProgress:
     case Phase::OpenToc:
     case Phase::AwaitChapterRange:
     case Phase::LoadChapter:
@@ -2121,6 +2125,7 @@ void Operation::reset() {
   progressStage_ = ProgressStage::Chapters;
   options_ = {};
   progressSyncInput_ = {};
+  progressSyncMode_ = ProgressSyncMode::Compare;
   progressSyncResult_ = {};
   session_.clear();
   book_ = {};
@@ -2141,6 +2146,7 @@ void Operation::reset() {
   imageFilesCreated_ = 0;
   imageBytes_ = 0;
   requestAttempt_ = 0;
+  progressVerifyAttempts_ = 0;
   chapterResponseAttempts_ = 0;
   coverAttempts_ = 0;
   coverRedirects_ = 0;
@@ -2154,14 +2160,12 @@ void Operation::reset() {
   lastShardRequestAt_ = 0;
   imagePhaseStartedAt_ = 0;
   responseStatus_ = 0;
+  progressUploadStartedAt_ = 0;
   previousVid_[0] = '\0';
   loginUid_[0] = '\0';
   psvts_[0] = '\0';
-  remoteRawFraction_ = 0.0f;
   initialProgressFraction_ = 0.0f;
-  remoteHasChapterOffset_ = false;
   initialProgressValid_ = false;
-  remoteChapterOffset_ = 0;
   imageHost_[0] = '\0';
   coverType_ = WeReadProtocol::ImageType::None;
   // Shelf sync and download are separate jobs on the same account.
@@ -2226,7 +2230,7 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
   return true;
 }
 
-bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input) {
+bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input, const ProgressSyncMode mode) {
   reset();
   if (!isSafeProtocolToken(bookId) || !std::isfinite(input.localFraction)) {
     error_ = Error::Protocol;
@@ -2235,6 +2239,8 @@ bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input) {
   }
   kind_ = Kind::ProgressSync;
   strncpy(book_.bookId, bookId, sizeof(book_.bookId) - 1);
+  progressSyncInput_ = input;
+  progressSyncMode_ = mode;
   progressSyncInput_.localFraction = std::max(0.0f, std::min(1.0f, input.localFraction));
   WeReadStore::loadSession(session_);
   if (!session_.valid()) {
@@ -2582,12 +2588,19 @@ Error Operation::fetchTocOnce() {
   return context.writer.finish() ? Error::Ok : Error::SdCard;
 }
 
-Error Operation::fetchProgressOnce() {
+Error Operation::fetchProgressOnce(const bool bypassCache) {
   WeReadProtocol::RemoteProgressParser parser(book_.bookId);
   ResponseSink sink{&parser, resetRemoteProgress, feedRemoteProgress, noOpFinish, Error::Protocol};
   if (!WeReadProtocol::urlEncode(book_.bookId, url_, sizeof(url_))) return Error::Protocol;
   referer_ = "/web/book/getProgress?bookId=";
   referer_ += url_;
+  if (bypassCache) {
+    const uint64_t cacheKey = static_cast<uint64_t>(TimeUtils::getCurrentValidTimestamp()) * 1000ULL + millis() % 1000;
+    char suffix[32];
+    const int length = snprintf(suffix, sizeof(suffix), "&_=%llu", static_cast<unsigned long long>(cacheKey));
+    if (length <= 0 || static_cast<size_t>(length) >= sizeof(suffix)) return Error::Protocol;
+    referer_ += suffix;
+  }
   const Error error =
       requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
                   sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
@@ -2598,25 +2611,39 @@ Error Operation::fetchProgressOnce() {
   if (responseStatus_ != 200 || parser.errorCode() != 0 || !parser.complete()) {
     return Error::Protocol;
   }
-  const auto& remote = parser.progress();
-  remoteRawFraction_ = remote.percent / 100.0f;
-  // Progress fetch is serialized before chapter/image work, so reuse login scratch.
-  memcpy(loginUid_, remote.chapterUid, sizeof(remote.chapterUid));
-  loginUid_[sizeof(remote.chapterUid) - 1] = '\0';
-  remoteChapterOffset_ = remote.chapterOffset;
-  remoteHasChapterOffset_ = remote.hasChapterOffset;
+  progressSyncResult_.remote = parser.progress();
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
 }
 
 float Operation::normalizedRemoteProgress() const {
-  float remoteFraction = remoteRawFraction_;
-  if (remoteHasChapterOffset_) {
+  const auto& remote = progressSyncResult_.remote;
+  float remoteFraction = remote.percent / 100.0f;
+  if (remote.hasChapterOffset) {
     float mapped = 0.0f;
-    if (WeReadStore::mapChapterToFraction(tocPath_, loginUid_, remoteChapterOffset_, mapped)) {
+    if (WeReadStore::mapChapterToFraction(tocPath_, remote.chapterUid, remote.chapterOffset, mapped)) {
       remoteFraction = mapped;
     }
   }
   return std::max(0.0f, std::min(1.0f, remoteFraction));
+}
+
+bool Operation::sameRemotePosition() const {
+  const auto& remote = progressSyncResult_.remote;
+  if (remote.hasChapterOffset && remote.chapterUid[0] && chapter_.chapterUid[0]) {
+    return strcmp(remote.chapterUid, chapter_.chapterUid) == 0 && remote.chapterOffset == progressChapterOffset_;
+  }
+  const uint32_t localMillionths =
+      static_cast<uint32_t>(std::max(0.0f, std::min(1.0f, progressSyncInput_.localFraction)) * 1000000.0f + 0.5f);
+  const uint32_t remoteMillionths = static_cast<uint32_t>(normalizedRemoteProgress() * 1000000.0f + 0.5f);
+  return localMillionths == remoteMillionths;
+}
+
+bool Operation::remoteAppIdMatchesLocal() const {
+  const auto& remote = progressSyncResult_.remote;
+  if (!remote.hasAppId) return false;
+  char localAppId[64];
+  return makeWebAppId(localAppId, sizeof(localAppId)) &&
+         remote.appIdHash == WeReadProtocol::hashAppId(localAppId, strlen(localAppId));
 }
 
 void Operation::persistInitialProgress() {
@@ -2629,26 +2656,41 @@ void Operation::persistInitialProgress() {
 }
 
 Error Operation::decideProgress() {
-  static constexpr float kSameProgressThreshold = 0.02f;
   const float remoteFraction = normalizedRemoteProgress();
-  progressSyncResult_.remoteFraction = remoteFraction;
-  const float delta = progressSyncInput_.localFraction - remoteFraction;
-  LOG_INF("WR", "progress decision: local=%.4f remote=%.4f delta=%.4f", progressSyncInput_.localFraction,
-          remoteFraction, delta);
-  if (std::fabs(delta) <= kSameProgressThreshold) {
-    progressSyncResult_.outcome = ProgressSyncOutcome::AlreadySynced;
-    return Error::Ok;
-  }
-  if (delta < 0.0f) {
-    progressSyncResult_.outcome = ProgressSyncOutcome::RemoteAhead;
-    return Error::Ok;
-  }
-  if (!WeReadStore::mapFractionToChapter(tocPath_, progressSyncInput_.localFraction, chapter_,
-                                         progressChapterOffset_) ||
-      !makeReaderReferer(book_.bookId, chapter_.chapterUid, referer_)) {
+  progressSyncResult_.remote.percent = remoteFraction * 100.0f;
+  const bool preciseLocal =
+      progressSyncInput_.hasLocalTocIndex &&
+      WeReadStore::mapPageToChapter(tocPath_, progressSyncInput_.localTocIndex, progressSyncInput_.localPageNumber,
+                                    progressSyncInput_.localPageCount, chapter_, progressChapterOffset_,
+                                    progressSyncInput_.localFraction);
+  if (!preciseLocal && !WeReadStore::mapFractionToChapter(tocPath_, progressSyncInput_.localFraction, chapter_,
+                                                          progressChapterOffset_)) {
     return Error::Unavailable;
   }
-  return Error::Ok;
+  LOG_INF("WR", "local progress mapping: precise=%u toc=%u chapter=%s offset=%u fraction=%lu",
+          static_cast<unsigned>(preciseLocal), static_cast<unsigned>(progressSyncInput_.localTocIndex),
+          chapter_.chapterUid, static_cast<unsigned>(progressChapterOffset_),
+          static_cast<unsigned long>(progressSyncInput_.localFraction * 1000000.0f + 0.5f));
+  const bool samePosition = sameRemotePosition();
+  const ProgressAction action = progressAction(progressSyncMode_, samePosition);
+  LOG_INF("WR", "progress decision: mode=%u same=%u action=%u", static_cast<unsigned>(progressSyncMode_),
+          static_cast<unsigned>(samePosition), static_cast<unsigned>(action));
+  switch (action) {
+    case ProgressAction::AlreadySynced:
+      progressSyncResult_.outcome = ProgressSyncOutcome::AlreadySynced;
+      return Error::Ok;
+    case ProgressAction::SelectDirection:
+      progressSyncResult_.outcome = ProgressSyncOutcome::SelectionRequired;
+      return Error::Ok;
+    case ProgressAction::ApplyRemote:
+      progressSyncResult_.outcome = ProgressSyncOutcome::ApplyRemote;
+      return Error::Ok;
+    case ProgressAction::UploadLocal:
+      if (!makeReaderReferer(book_.bookId, chapter_.chapterUid, referer_)) return Error::Unavailable;
+      progressUploadStartedAt_ = TimeUtils::getCurrentValidTimestamp();
+      return progressUploadStartedAt_ == 0 ? Error::Clock : Error::Ok;
+  }
+  return Error::Protocol;
 }
 
 Error Operation::fetchProgressReaderOnce() {
@@ -2686,8 +2728,9 @@ Error Operation::sendProgressOnce(const bool report) {
   if (responseStatus_ == 401 || responseStatus_ == 403 || context.errorCode == -2012) {
     return Error::SessionExpired;
   }
-  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser.hasError() ||
-      (!context.succeed && !context.hasSyncKey)) {
+  const bool emptyBody = context.bytesReceived == 0;
+  if (responseStatus_ != 200 || context.errorCode != 0 || parser.hasError() ||
+      (!emptyBody && (!context.rootClosed || (!context.succeed && !context.hasSyncKey)))) {
     return Error::Protocol;
   }
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
@@ -3184,7 +3227,7 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
 Operation::Event Operation::step() {
   if (!active()) return Event::None;
   if (cancelRequested_) return cancelNow();
-  if ((requestAttempt_ > 0 || chapterResponseAttempts_ > 0) && nextActionAt_ != 0 &&
+  if ((requestAttempt_ > 0 || chapterResponseAttempts_ > 0 || phase_ == Phase::VerifyProgress) && nextActionAt_ != 0 &&
       static_cast<long>(millis() - nextActionAt_) < 0) {
     return Event::None;
   }
@@ -3350,7 +3393,7 @@ Operation::Event Operation::step() {
     }
 
     case Phase::FetchProgress: {
-      const Error error = fetchProgressOnce();
+      const Error error = fetchProgressOnce(kind_ == Kind::ProgressSync);
       if (kind_ == Kind::Download) {
         if (error == Error::Ok) {
           initialProgressFraction_ = normalizedRemoteProgress();
@@ -3376,7 +3419,7 @@ Operation::Event Operation::step() {
     case Phase::DecideProgress: {
       const Error error = decideProgress();
       if (error != Error::Ok) return fail(error);
-      if (progressSyncResult_.outcome != ProgressSyncOutcome::None) {
+      if (progressSyncResult_.outcome != ProgressSyncOutcome::Pending) {
         bookSession_.reset();
         phase_ = Phase::Complete;
         logJobComplete();
@@ -3418,7 +3461,48 @@ Operation::Event Operation::step() {
       }
       if (error != Error::Ok) return handleRequestError(error, Phase::SendProgressReport);
       requestSucceeded();
-      progressSyncResult_.outcome = ProgressSyncOutcome::LocalUploaded;
+      progressVerifyAttempts_ = 0;
+      nextActionAt_ = millis() + kNetworkRetryBaseMs;
+      phase_ = Phase::VerifyProgress;
+      return Event::None;
+    }
+
+    case Phase::VerifyProgress: {
+      const Error error = fetchProgressOnce(true);
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::VerifyProgress);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::VerifyProgress);
+      requestSucceeded();
+      ++progressVerifyAttempts_;
+      progressSyncResult_.remote.percent = normalizedRemoteProgress() * 100.0f;
+      const bool samePosition = sameRemotePosition();
+      const bool sameAppId = remoteAppIdMatchesLocal();
+      const auto& remote = progressSyncResult_.remote;
+      const ProgressSyncOutcome outcome = progressVerification(
+          samePosition, remote.hasAppId, sameAppId, remote.hasUpdateTime, remote.updateTime, progressUploadStartedAt_);
+      LOG_INF("WR", "progress verify: attempt=%u same=%u time=%u sameApp=%u outcome=%u",
+              static_cast<unsigned>(progressVerifyAttempts_), static_cast<unsigned>(samePosition),
+              static_cast<unsigned>(remote.updateTime), static_cast<unsigned>(sameAppId),
+              static_cast<unsigned>(outcome));
+      switch (outcome) {
+        case ProgressSyncOutcome::LocalUploaded:
+        case ProgressSyncOutcome::AlreadySynced:
+          progressSyncResult_.outcome = outcome;
+          break;
+        case ProgressSyncOutcome::SelectionRequired:
+          progressSyncResult_.outcome = outcome;
+          break;
+        case ProgressSyncOutcome::ApplyRemote:
+          return fail(Error::Protocol);
+        case ProgressSyncOutcome::Pending:
+          if (progressVerifyAttempts_ < kMaxRequestAttempts) {
+            nextActionAt_ = millis() + kNetworkRetryBaseMs;
+            return Event::None;
+          }
+          return fail(Error::Unavailable);
+      }
       bookSession_.reset();
       phase_ = Phase::Complete;
       logJobComplete();

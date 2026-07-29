@@ -36,6 +36,16 @@ struct OperationTestPeer {
   static bool wholeChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
     return Operation::wholeChapterRange(first, last, count);
   }
+  using ProgressAction = Operation::ProgressAction;
+  static ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition) {
+    return Operation::progressAction(mode, samePosition);
+  }
+  static ProgressSyncOutcome progressVerification(const bool samePosition, const bool remoteHasAppId,
+                                                  const bool sameAppId, const bool remoteHasUpdateTime,
+                                                  const uint32_t remoteUpdateTime, const uint32_t uploadStartedAt) {
+    return Operation::progressVerification(samePosition, remoteHasAppId, sameAppId, remoteHasUpdateTime,
+                                           remoteUpdateTime, uploadStartedAt);
+  }
 };
 
 }  // namespace WeReadClient
@@ -132,7 +142,7 @@ TEST(WeReadProtocol, UsesOnlyARealReaderCursor) {
 
 TEST(WeReadProtocol, ParsesNestedRemoteProgressAcrossEveryChunkBoundary) {
   constexpr char json[] =
-      R"({"ignored":{"bookId":"other-book","progress":99},"payload":{"bookId":"book-1","progress":"40.5","chapterUid":"chapter-2","metadata":{"progress":77},"chapterOffset":150}})";
+      R"({"ignored":{"bookId":"other-book","progress":99},"payload":{"bookId":"book-1","progress":"40.5","chapterUid":"chapter-2","metadata":{"progress":77},"chapterOffset":150,"updateTime":1785301234,"appId":"wb123h456"}})";
   for (size_t split = 0; split <= sizeof(json) - 1; ++split) {
     WeReadProtocol::RemoteProgressParser parser("book-1");
     ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(json), split));
@@ -143,6 +153,10 @@ TEST(WeReadProtocol, ParsesNestedRemoteProgressAcrossEveryChunkBoundary) {
     EXPECT_STREQ(parser.progress().chapterUid, "chapter-2");
     EXPECT_EQ(parser.progress().chapterOffset, 150U);
     EXPECT_TRUE(parser.progress().hasChapterOffset);
+    EXPECT_EQ(parser.progress().updateTime, 1785301234U);
+    EXPECT_TRUE(parser.progress().hasUpdateTime);
+    EXPECT_TRUE(parser.progress().hasAppId);
+    EXPECT_EQ(parser.progress().appIdHash, WeReadProtocol::hashAppId("wb123h456", 9));
   }
 }
 
@@ -381,6 +395,34 @@ TEST(WeReadClientState, ValidatesInclusiveChapterRanges) {
   EXPECT_EQ(WeReadClient::OperationTestPeer::chapterRangeCount(7, 3, 10), 0U);
   EXPECT_TRUE(WeReadClient::OperationTestPeer::wholeChapterRange(0, 9, 10));
   EXPECT_FALSE(WeReadClient::OperationTestPeer::wholeChapterRange(1, 9, 10));
+}
+
+TEST(WeReadClientState, RequiresDirectionSelectionOnlyWhenComparedPositionsDiffer) {
+  using Mode = WeReadClient::ProgressSyncMode;
+  using Action = WeReadClient::OperationTestPeer::ProgressAction;
+  const auto action = WeReadClient::OperationTestPeer::progressAction;
+
+  EXPECT_EQ(action(Mode::Compare, true), Action::AlreadySynced);
+  EXPECT_EQ(action(Mode::Compare, false), Action::SelectDirection);
+  EXPECT_EQ(action(Mode::ApplyRemote, true), Action::AlreadySynced);
+  EXPECT_EQ(action(Mode::ApplyRemote, false), Action::ApplyRemote);
+  EXPECT_EQ(action(Mode::UploadLocal, true), Action::AlreadySynced);
+  EXPECT_EQ(action(Mode::UploadLocal, false), Action::UploadLocal);
+}
+
+TEST(WeReadClientState, RequiresAReadBackBeforeReportingProgressUpload) {
+  using Outcome = WeReadClient::ProgressSyncOutcome;
+  const auto verify = WeReadClient::OperationTestPeer::progressVerification;
+
+  EXPECT_EQ(verify(true, true, true, true, 101, 100), Outcome::LocalUploaded);
+  EXPECT_EQ(verify(true, false, false, false, 0, 100), Outcome::Pending);
+  EXPECT_EQ(verify(true, true, true, false, 0, 100), Outcome::Pending);
+  EXPECT_EQ(verify(true, false, false, true, 101, 100), Outcome::Pending);
+  EXPECT_EQ(verify(true, true, false, true, 101, 100), Outcome::AlreadySynced);
+  EXPECT_EQ(verify(false, true, false, true, 101, 100), Outcome::SelectionRequired);
+  EXPECT_EQ(verify(false, true, true, true, 101, 100), Outcome::Pending);
+  EXPECT_EQ(verify(false, true, false, true, 99, 100), Outcome::Pending);
+  EXPECT_EQ(verify(false, false, false, false, 0, 100), Outcome::Pending);
 }
 
 TEST(WeReadProtocol, EncodesNumericAndUtf8Ids) {
