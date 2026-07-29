@@ -31,10 +31,19 @@ constexpr char latestReleaseUrl[] =
 #else
     "https://crossmux.com/api/ota/manifest?variant=global";
 #endif
+constexpr char nightlyReleaseUrl[] =
+#ifdef ENABLE_CHINESE_VERSION
+    "https://crossmux.yunhug.com/api/ota/manifest?variant=cn&channel=nightly";
+#else
+    "https://crossmux.com/api/ota/manifest?variant=global&channel=nightly";
+#endif
 }  // namespace
 
-OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
-  LOG_DBG("OTA", "Checking for update (current: %s)", CROSSPOINT_VERSION);
+OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedChannel) {
+  channel = requestedChannel;
+  const char* releaseUrl = channel == Channel::Nightly ? nightlyReleaseUrl : latestReleaseUrl;
+  LOG_DBG("OTA", "Checking %s channel (current: %s)", channel == Channel::Nightly ? "nightly" : "stable",
+          CROSSPOINT_VERSION);
 
   // Stream the ~32KB release JSON straight into the parser as it arrives.
   // Buffering the whole body in a std::string would add a growing allocation
@@ -42,7 +51,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   // OOM there aborts. fetchUrl handles the configured secure GET transport,
   // redirects, and User-Agent (see HttpDownloader).
   ReleaseJsonParser releaseParser;
-  const bool ok = HttpDownloader::fetchUrl(latestReleaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
+  const bool ok = HttpDownloader::fetchUrl(releaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
     releaseParser.feed(reinterpret_cast<const char*>(data), len);
     return true;
   });
@@ -76,9 +85,11 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 }
 
 bool OtaUpdater::isUpdateNewer() const {
-  if (!updateAvailable || latestVersion.empty() || latestVersion == CROSSPOINT_VERSION) {
+  if (!updateAvailable || latestVersion.empty()) {
     return false;
   }
+  if (channel == Channel::Nightly) return true;
+  if (latestVersion == CROSSPOINT_VERSION) return false;
 
   int currentMajor, currentMinor, currentPatch;
   int latestMajor, latestMinor, latestPatch;
