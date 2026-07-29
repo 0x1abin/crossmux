@@ -23,6 +23,7 @@ class WeReadActivity final : public Activity {
 
  private:
   enum class State : uint8_t {
+    Disclaimer,
     Menu,
     Shelf,
     Connecting,
@@ -49,7 +50,7 @@ class WeReadActivity final : public Activity {
   OptionPopup cacheScopePopup_;
   WeReadClient::Operation operation_;
   mutable HalFile shelfFile_;
-  std::atomic<State> state_{State::Menu};
+  std::atomic<State> state_{State::Disclaimer};
   std::atomic<WeReadClient::Operation::ProgressStage> progressStage_{WeReadClient::Operation::ProgressStage::Chapters};
   std::atomic<uint32_t> progressCompleted_{0};
   std::atomic<uint32_t> progressTotal_{0};
@@ -57,6 +58,7 @@ class WeReadActivity final : public Activity {
   WeReadStore::ShelfRecord pendingBook_;
   char qrUrl_[256] = {};
   uint32_t shelfCount_ = 0;
+  int disclaimerSelected_ = 0;
   int menuSelected_ = 0;
   int shelfSelected_ = 0;
   int shelfCoverPageStart_ = -1;
@@ -78,12 +80,16 @@ class WeReadActivity final : public Activity {
   bool introPagesTruncated_ = false;
   bool shelfCoverStopped_ = false;
   bool cacheScopePopupClosing_ = false;
+  bool disclaimerSaveFailed_ = false;
   std::atomic<bool> downloadRenderPending_{false};
   std::atomic<bool> stageRenderPending_{false};
 
   bool refreshShelf();
   bool readShelf(int index, WeReadStore::ShelfRecord& record) const;
   Rect contentBounds() const;
+  Rect disclaimerSafeBounds() const;
+  Rect disclaimerContentBounds() const;
+  Rect disclaimerActionsBounds() const;
   int shelfItemsPerPage() const;
   void resetShelfCoverLoading();
   void advanceShelfCovers();
@@ -108,14 +114,18 @@ class WeReadActivity final : public Activity {
   void buildIntroductionPages();
   bool drawDetailIntroduction(const Rect& bounds, bool selected);
   void drawShelfGrid(const Rect& content);
+  void drawDisclaimer(const Rect& content);
   void drawBookDetail(const Rect& content, bool coverLoading = false);
   void drawIntroduction(const Rect& content);
   void advanceJob();
   void openBook(const char* path);
   void openShelf();
   void syncShelf();
+  void enterApp();
+  void activateDisclaimerSelection();
   void promptLogout();
   void performLogout();
+  void handleDisclaimerInput();
   void handleMenuInput();
   void handleShelfInput();
   void handleErrorInput();

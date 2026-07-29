@@ -363,6 +363,10 @@ location is not migrated or read.
   payload starts with `WRA1\n`, followed by bounded `wr_vid`, `wr_skey`, and
   `wr_rt` lines. No response body, signature, or complete Cookie header is
   stored.
+- `disclaimer.accepted` records that the user accepted the WeRead disclaimer.
+  Its complete contents must be the five bytes `WRD1\n`; a missing, truncated,
+  or unknown marker shows the disclaimer again. Logging out preserves this
+  file.
 - `shelf.bin`, `<bookId>/toc.bin`, per-chapter
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
