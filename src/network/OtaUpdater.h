@@ -1,9 +1,15 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 class OtaUpdater {
+ public:
+  enum class Channel : uint8_t { Stable, Nightly };
+
+ private:
   bool updateAvailable = false;
+  Channel channel = Channel::Stable;
   std::string latestVersion;
   std::string otaUrl;
   size_t otaSize = 0;
@@ -32,6 +38,6 @@ class OtaUpdater {
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
-  OtaUpdaterError checkForUpdate();
+  OtaUpdaterError checkForUpdate(Channel requestedChannel);
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
 };

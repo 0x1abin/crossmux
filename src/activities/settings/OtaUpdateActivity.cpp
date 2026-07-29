@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
@@ -11,21 +12,19 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
+#include "util/ButtonNavigator.h"
 
 namespace {
-struct OtaActionRects {
-  Rect cancel;
-  Rect update;
+enum ReadyRow {
+  CHECK_UPDATES_ROW,
+  NIGHTLY_ROW,
+  READY_ROW_COUNT,
 };
 
-OtaActionRects getOtaActionRects(const GfxRenderer& renderer) {
-  const int top = renderer.getScreenHeight() - 80;
-  const int width = renderer.getScreenWidth() / 2;
-  return {Rect{0, top, width, 80}, Rect{width, top, renderer.getScreenWidth() - width, 80}};
-}
-
-bool contains(const Rect& rect, const int x, const int y) {
-  return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+Rect getReadyListRect(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int top = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  return Rect{0, top, renderer.getScreenWidth(), GUI.getListRowStep(false) * READY_ROW_COUNT};
 }
 }  // namespace
 
@@ -44,7 +43,7 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdateAndWait();
 
-  const auto res = updater.checkForUpdate();
+  const auto res = updater.checkForUpdate(selectedChannel);
   if (res != OtaUpdater::OK) {
     LOG_DBG("OTA", "Update check failed: %d", res);
     {
@@ -63,6 +62,14 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
     return;
   }
 
+  const char* options[] = {tr(STR_CANCEL), tr(STR_UPDATE)};
+  updateConfirmation.show(tr(STR_NEW_UPDATE), options, 2, 0, [this](const int index) {
+    if (index == 0) {
+      finish();
+      return;
+    }
+    runUpdateInstall();
+  });
   {
     RenderLock lock(*this);
     state = WAITING_CONFIRMATION;
@@ -72,13 +79,44 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
-  // Turn on WiFi immediately
+  state = READY;
+  selectedChannel = OtaUpdater::Channel::Stable;
+  selectedReadyRow = CHECK_UPDATES_ROW;
+  waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  requestUpdate();
+}
+
+void OtaUpdateActivity::activateReadyRow() {
+  switch (static_cast<ReadyRow>(selectedReadyRow)) {
+    case CHECK_UPDATES_ROW:
+      beginWifiSelection();
+      break;
+    case NIGHTLY_ROW:
+      selectedChannel =
+          selectedChannel == OtaUpdater::Channel::Stable ? OtaUpdater::Channel::Nightly : OtaUpdater::Channel::Stable;
+      requestUpdate();
+      break;
+    case READY_ROW_COUNT:
+      break;
+  }
+}
+
+void OtaUpdateActivity::beginWifiSelection() {
+  // ActivityManager owns the child across frames, so stack/static lifetime is invalid.
+  auto wifiSelection = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
+  if (!wifiSelection) {
+    LOG_ERR("OTA", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
+    state = FAILED;
+    requestUpdate();
+    return;
+  }
+
+  state = WIFI_SELECTION;
   LOG_DBG("OTA", "Turning on WiFi...");
   WiFi.mode(WIFI_STA);
 
-  // Launch WiFi selection subactivity
   LOG_DBG("OTA", "Launching WifiSelectionActivity...");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+  startActivityForResult(std::move(wifiSelection),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
@@ -118,25 +156,42 @@ void OtaUpdateActivity::render(RenderLock&&) {
     lastUpdaterPercentage = static_cast<int>(updaterProgress * 100);
   }
 
-  if (state == CHECKING_FOR_UPDATE) {
+  if (state == READY) {
+    GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
+                      tr(STR_CURRENT_VERSION), CROSSPOINT_VERSION);
+
+    const Rect readyList = getReadyListRect(renderer);
+    GUI.drawList(
+        renderer, readyList, READY_ROW_COUNT, selectedReadyRow,
+        [](const int index) {
+          return std::string(index == CHECK_UPDATES_ROW ? tr(STR_CHECK_UPDATES) : tr(STR_UPDATE_NIGHTLY));
+        },
+        nullptr, nullptr,
+        [this](const int index) {
+          if (index != NIGHTLY_ROW) return std::string();
+          return selectedChannel == OtaUpdater::Channel::Nightly ? std::string(tr(STR_STATE_ON))
+                                                                 : std::string(tr(STR_STATE_OFF));
+        },
+        true);
+    if (selectedChannel == OtaUpdater::Channel::Nightly) {
+      const int warningTop = readyList.y + readyList.height + metrics.verticalSpacing;
+      renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, warningTop, tr(STR_NIGHTLY_WARNING));
+      renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding,
+                        warningTop + renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing,
+                        tr(STR_NIGHTLY_LOCKED_WARNING));
+    }
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else if (state == CHECKING_FOR_UPDATE) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_CHECKING_UPDATE));
   } else if (state == WAITING_CONFIRMATION) {
-    renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NEW_UPDATE), true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, top + height + metrics.verticalSpacing,
-                      (std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION).c_str());
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, top + height * 2 + metrics.verticalSpacing * 2,
-                      (std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion()).c_str());
-
-    const auto actionRects = getOtaActionRects(renderer);
-    const int cancelTextWidth = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_CANCEL));
-    renderer.drawText(UI_10_FONT_ID, actionRects.cancel.x + (actionRects.cancel.width - cancelTextWidth) / 2,
-                      actionRects.cancel.y + 28, tr(STR_CANCEL));
-    const int updateTextWidth = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_UPDATE));
-    renderer.drawText(UI_10_FONT_ID, actionRects.update.x + (actionRects.update.width - updateTextWidth) / 2,
-                      actionRects.update.y + 28, tr(STR_UPDATE));
-
-    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_UPDATE), "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    const int versionTop = metrics.topPadding + metrics.headerHeight;
+    GUI.drawSubHeader(renderer, Rect{0, versionTop, pageWidth, metrics.tabBarHeight}, tr(STR_CURRENT_VERSION),
+                      CROSSPOINT_VERSION);
+    GUI.drawSubHeader(renderer, Rect{0, versionTop + metrics.tabBarHeight, pageWidth, metrics.tabBarHeight},
+                      tr(STR_NEW_VERSION), updater.getLatestVersion().c_str());
+    if (updateConfirmation.processRender(renderer, mappedInput)) return;
   } else if (state == UPDATE_IN_PROGRESS) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING));
 
@@ -211,30 +266,48 @@ void OtaUpdateActivity::runUpdateInstall() {
 }
 
 void OtaUpdateActivity::loop() {
-  if (state == WAITING_CONFIRMATION) {
-    int x = 0;
-    int y = 0;
-    if (mappedInput.wasScreenTapped(x, y)) {
-      const auto actionRects = getOtaActionRects(renderer);
-      if (contains(actionRects.cancel, x, y)) {
-        finish();
-        return;
+  if (state == READY) {
+    if (waitForConfirmRelease) {
+      if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+        waitForConfirmRelease = false;
       }
-      if (contains(actionRects.update, x, y)) {
-        runUpdateInstall();
-        return;
-      }
+      return;
     }
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      runUpdateInstall();
+    const Rect readyList = getReadyListRect(renderer);
+    const auto touch = handleListTouch(selectedReadyRow, READY_ROW_COUNT, readyList.y, readyList.height, false);
+    if (touch == ListTouchResult::Activated) {
+      activateReadyRow();
+      return;
+    }
+    if (touch == ListTouchResult::Consumed) {
       return;
     }
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
       finish();
+      return;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      activateReadyRow();
+      return;
     }
 
+    if (mappedInput.wasPressed(MappedInputManager::Button::NavPrevious)) {
+      selectedReadyRow = ButtonNavigator::previousIndex(selectedReadyRow, READY_ROW_COUNT);
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::NavNext)) {
+      selectedReadyRow = ButtonNavigator::nextIndex(selectedReadyRow, READY_ROW_COUNT);
+      requestUpdate();
+    }
+    return;
+  }
+
+  if (state == WAITING_CONFIRMATION) {
+    if (updateConfirmation.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+    finish();
     return;
   }
 
