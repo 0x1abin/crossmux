@@ -12,10 +12,10 @@
 
 What CrossMux adds on top of upstream:
 
-- **Apps hub** (the `Apps` menu): 2048, Minesweeper, Sudoku, Gomoku (五子棋), Chinese Chess / Xiangqi (象棋), and a procedural "Ugly Avatar" generator. The menu paginates with page dots once the apps overflow a single screen.
+- **Apps hub** (the `Apps` menu): 2048, Minesweeper, Sudoku, Gomoku (五子棋), Chinese Chess / Xiangqi (象棋), a procedural "Ugly Avatar" generator, and **AirPage** — scan its QR upload page, then fetch and display cloud-rendered images manually or through live MQTT push. The menu paginates with page dots once the apps overflow a single screen.
 - **WeRead** (微信读书): scan to sign in, browse your shelf, download books, read them offline as EPUBs, and sync reading progress. The reader keeps one **Sync Progress** action: recognized standard WeRead books use WeRead sync, while other EPUBs keep KOReader sync. New WeRead downloads also make a best-effort cloud-progress fetch before caching content so the first open can start at the remote position.
 - **Reading analytics**: reading stats, a monthly reading heatmap, a reading profile, and achievements — backed by an SD-stored JSON history.
-- **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), plus **AirPage** — a cloud-backed face that shows a QR code to its upload page and fetches a cloud-rendered image over Wi-Fi (manual or live MQTT push), shown full-screen in 4-level grayscale and cached on SD. Optional 4-level grayscale and inverse display modes throughout.
+- **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), with optional 4-level grayscale enhancement and inverse display.
 - **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
 - **Desktop / WebAssembly simulator** for developing and previewing the UI on the host.
 

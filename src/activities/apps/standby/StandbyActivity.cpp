@@ -19,7 +19,6 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
-#include "AirPageFace.h"
 #include "SloppyClockFace.h"
 #include "StandbyTime.h"
 #include "WifiCredentialStore.h"
@@ -47,9 +46,6 @@ constexpr FaceEntry kFaces[] = {
     {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<ChineseCalendarFace>(); },
      [](int sw, int sh) { return sh > sw; }},  // portrait only
 #endif
-    // AirPage: cloud-rendered image pages. Available in every build; sits after
-    // the Chinese calendar entry when that is compiled in, else after the clock.
-    {[]() -> std::unique_ptr<StandbyFace> { return makeUniqueNoThrow<AirPageFace>(); }, [](int, int) { return true; }},
 };
 constexpr uint8_t kFaceCount = static_cast<uint8_t>(sizeof(kFaces) / sizeof(kFaces[0]));
 
@@ -340,13 +336,6 @@ void StandbyActivity::finishTimeSync() {
 
 void StandbyActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    // A face with a modal overlay (airpage mode menu) keeps Back for itself:
-    // it closes the overlay instead of leaving Standby.
-    if (currentFace_ && currentFace_->wantsExclusiveInput()) {
-      lastInputMs_ = millis();
-      if (currentFace_->handleBack()) requestUpdate();
-      return;
-    }
     activityManager.goHome();
     return;
   }
@@ -378,8 +367,6 @@ void StandbyActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Left) ||
       mappedInput.wasReleased(MappedInputManager::Button::Right)) {
     lastInputMs_ = millis();
-    // While a face's modal overlay is open, Left/Right do not switch faces.
-    if (currentFace_ && currentFace_->wantsExclusiveInput()) return;
     if (mode_ == DisplayMode::Immersive) {
       mode_ = DisplayMode::Normal;
       requestUpdate();
@@ -401,19 +388,10 @@ void StandbyActivity::loop() {
     return;
   }
 
-  // Confirm: toggle inverse (black background / white content) regardless of
-  // Normal vs. Immersive. invertScreen() flips the whole framebuffer right
-  // before displayBuffer(), so title / battery / face dots / face content all
-  // invert together — no per-face plumbing required.
+  // Confirm toggles inverse (black background / white content) regardless of
+  // Normal vs. Immersive.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     lastInputMs_ = millis();
-    // Interactive faces (airpage) own Confirm: it opens their mode menu (or
-    // selects a menu row when their overlay is open) rather than the global
-    // inverse mode.
-    if (currentFace_ && currentFace_->isInteractive()) {
-      if (currentFace_->handleConfirm()) requestUpdate();
-      return;
-    }
     inverseMode_ = !inverseMode_;
     requestUpdate();
     return;
@@ -428,11 +406,8 @@ void StandbyActivity::loop() {
   // the time. The deep-sleep timer is short-circuited in main.cpp via
   // preventAutoSleep(); downclocking is unaffected because main.cpp only
   // resets lastActivityTime on real user input, not on preventAutoSleep().
-  // Interactive faces (airpage) stay in Normal mode so they keep their chrome
-  // (QR title/dots) and receive Up/Down/Confirm on the first press.
-  const bool interactive = currentFace_ && currentFace_->isInteractive();
   const uint32_t idle = millis() - lastInputMs_;
-  if (!interactive && mode_ == DisplayMode::Normal && idle >= 5000u) {
+  if (mode_ == DisplayMode::Normal && idle >= 5000u) {
     mode_ = DisplayMode::Immersive;
     requestUpdate();
   }
@@ -455,15 +430,6 @@ void StandbyActivity::render(RenderLock&&) {
   // dot indicator) is drawn as overlay on top in Normal mode only, so the face
   // content doesn't re-flow when transitioning to Immersive.
   currentFace_->render(renderer, Rect{0, 0, sw, sh});
-
-  // Interactive faces (airpage) that render full-screen (image view) paint
-  // edge-to-edge with no chrome in a single BW pass — not gated on the 5s-idle
-  // Immersive transition. Their QR / loading views fall through to the
-  // Normal-mode chrome path below.
-  if (currentFace_->isInteractive() && currentFace_->rendersFullScreen()) {
-    renderer.displayBuffer();
-    return;
-  }
 
   if (mode_ != DisplayMode::Normal) {
     if (inverseMode_) renderer.invertScreen();

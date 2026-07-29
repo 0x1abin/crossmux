@@ -13,6 +13,7 @@ apps/
 ├── AppsMenuActivity.{h,cpp}   # dispatcher — see "Adding a new app" below
 ├── GameUi.{h,cpp}             # shared helpers, game-only (centering math, elapsed-time format)
 ├── GameSaveDebouncer.h        # 1.5s save debounce, used by sudoku/gomoku/minesweeper
+├── airpage/                    # cloud image display app
 ├── sudoku/                    # one subdirectory per app, files keep the app-name prefix
 ├── gomoku/
 ├── chinese-chess/             # conditional — gated by ENABLE_CHINESE_VERSION (see "Conditional apps" below)
@@ -144,7 +145,7 @@ Home  ──Confirm "Apps"──▶  AppsMenu  ──Confirm row──▶  <App>
   └──────Back──────────────────┘    ◀──Back──  <App>  (returns to AppsMenu, not Home)
 ```
 
-Every sub-app's Back button must call `activityManager.goToApps()`. This mirrors how Sudoku and Gomoku already behave, and how Ugly Avatar was wired up when it moved under `apps/`.
+Every sub-app's Back button must call `activityManager.goToApps()`. This mirrors how Sudoku, Gomoku, Ugly Avatar, and AirPage behave.
 
 ## Resource budget
 

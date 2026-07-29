@@ -16,8 +16,8 @@ const std::string& deviceId();
 // /.crosspoint/airpage/mode ("1"/missing = live MQTT push, "0" = manual).
 // Default is ON: a fresh device (no file yet) boots into live push. Kept out of
 // CrossPointSettings on purpose: it is AirPage-internal state (like the device
-// id), toggled only from the AirPage face menu, and must not surface in the
-// global Settings UI. Read once on face entry; written immediately on every
+// id), toggled only from the AirPage mode menu, and must not surface in the
+// global Settings UI. Read once on app entry; written immediately on every
 // toggle so it survives reboot.
 bool loadRealtimeMode();
 void saveRealtimeMode(bool enabled);

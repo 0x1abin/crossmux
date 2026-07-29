@@ -205,10 +205,11 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
   Scan to sign in, sync the account shelf, download books to SD, and open the
   generated EPUB in Reader. Native builds also use the firmware's JPEG/PNG-to-BMP
   converters, so downloaded shelf and detail covers appear progressively.
-- **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
-  by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
-  runs the real `HttpDownloader` over libcurl, saving the latest image to
-  `sd_root/.crosspoint/airpage/latest.bmp`, then Confirm toggles QR ⇄ image.
+- **AirPage app: real QR + real cloud image fetch.** Open **Apps → AirPage**.
+  The QR (rendered by the real `ricmoo/QRCode` lib) encodes the device's upload
+  URL. Pressing ▼ runs the real `HttpDownloader` over libcurl, saving the latest
+  image to `sd_root/.crosspoint/airpage/latest.bmp`; ▲ toggles QR ⇄ image, and
+  Confirm opens the manual/live mode menu.
   The 16-char device id is a random nanoid minted on first run via `esp_random()`
   and persisted to `sd_root/.crosspoint/airpage_device_id` — it is **not** derived
   from the MAC. It stays the same across runs only as long as you keep that file

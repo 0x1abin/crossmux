@@ -1,9 +1,10 @@
 #pragma once
 // Host stub for knolleary/PubSubClient. The simulator has no MQTT broker, so
 // AirPage's live-push mode never connects (connect()/connected() return false)
-// and the face behaves exactly like manual mode. Including NetworkClient.h also
-// brings the WiFiClient type into scope for AirPageFace's member declaration
-// (the device pulls WiFiClient from <WiFi.h>, which the host shim omits).
+// or receives push messages; manual refresh still works. Including
+// NetworkClient.h also brings the WiFiClient type into scope for
+// AirPageActivity's member declaration (the device pulls WiFiClient from
+// <WiFi.h>, which the host shim omits).
 
 #include <NetworkClient.h>
 
