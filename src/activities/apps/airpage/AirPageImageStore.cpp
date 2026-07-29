@@ -522,8 +522,7 @@ uint32_t AirPageImageStore::nextHistorySequence() const {
         if (!file.getName(name, sizeof(name))) continue;
         const char* base = strrchr(name, '/');
         base = base ? base + 1 : name;
-        if (strlen(base) != 12 || base[8] != '.' ||
-            (strcmp(base + 9, "bmp") != 0 && strcmp(base + 9, "jpg") != 0)) {
+        if (strlen(base) != 12 || base[8] != '.' || (strcmp(base + 9, "bmp") != 0 && strcmp(base + 9, "jpg") != 0)) {
           continue;
         }
         uint32_t sequence = 0;

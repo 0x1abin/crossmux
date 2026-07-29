@@ -93,9 +93,7 @@ void AirPageActivity::onExit() {
   Activity::onExit();
 }
 
-bool AirPageActivity::preventAutoSleep() {
-  return phase_ != Phase::Idle || connection_.preventsAutoSleep();
-}
+bool AirPageActivity::preventAutoSleep() { return phase_ != Phase::Idle || connection_.preventsAutoSleep(); }
 
 bool AirPageActivity::processImageDisplayResult() {
   const ImageDisplayResult result = imageDisplayResult_.exchange(ImageDisplayResult::None, std::memory_order_acquire);
@@ -126,8 +124,7 @@ bool AirPageActivity::processImageDisplayResult() {
           break;
         case airpage::AirPageImageStore::RejectResult::HistoryInvalid:
           if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
-            historySelection_ =
-                imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
+            historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
           }
           screen_ = Screen::History;
           break;
@@ -256,8 +253,7 @@ void AirPageActivity::loop() {
       }
       const size_t historyCount = imageStore_.historyCount();
       if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
-        historySelection_ =
-            (historySelection_ + static_cast<int>(historyCount) - 1) % static_cast<int>(historyCount);
+        historySelection_ = (historySelection_ + static_cast<int>(historyCount) - 1) % static_cast<int>(historyCount);
         requestUpdate();
         return;
       }
@@ -272,8 +268,7 @@ void AirPageActivity::loop() {
       }
 
       const Rect content = contentViewport();
-      switch (
-          handleListTouch(historySelection_, static_cast<int>(historyCount), content.y, content.height, true)) {
+      switch (handleListTouch(historySelection_, static_cast<int>(historyCount), content.y, content.height, true)) {
         case ListTouchResult::Activated:
           openSelectedHistoryImage();
           return;
@@ -308,8 +303,8 @@ void AirPageActivity::loop() {
   }
   if (phase_ == Phase::WallpaperRequested) {
     phase_ = Phase::WallpaperWriting;
-    wallpaperResult_ = airpage::AirPageWallpaper::install(selectedImage_) ? WallpaperResult::Saved
-                                                                          : WallpaperResult::Failed;
+    wallpaperResult_ =
+        airpage::AirPageWallpaper::install(selectedImage_) ? WallpaperResult::Saved : WallpaperResult::Failed;
     phase_ = Phase::Idle;
     imageNeedsDisplay_ = true;
     requestUpdate();
@@ -368,11 +363,9 @@ void AirPageActivity::openHistory() {
 }
 
 void AirPageActivity::openSelectedHistoryImage() {
-  if (historySelection_ < 0 ||
-      !imageStore_.selectHistory(static_cast<size_t>(historySelection_), selectedImage_)) {
+  if (historySelection_ < 0 || !imageStore_.selectHistory(static_cast<size_t>(historySelection_), selectedImage_)) {
     if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
-      historySelection_ =
-          imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
+      historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
     }
     notice_ = Notice::InvalidImage;
     requestUpdate();
@@ -604,9 +597,8 @@ void AirPageActivity::render(RenderLock&&) {
     }
     case Screen::History: {
       const bool hasHistory = imageStore_.historyCount() != 0;
-      const auto labels =
-          mappedInput.mapLabels(tr(STR_BACK), hasHistory ? tr(STR_OPEN) : "", hasHistory ? tr(STR_DIR_UP) : "",
-                                hasHistory ? tr(STR_DIR_DOWN) : "");
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), hasHistory ? tr(STR_OPEN) : "",
+                                                hasHistory ? tr(STR_DIR_UP) : "", hasHistory ? tr(STR_DIR_DOWN) : "");
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       break;
     }
@@ -715,8 +707,7 @@ void AirPageActivity::renderSettings(const Rect& viewport) {
       nullptr, nullptr,
       [this](int index) {
         if (index == 0) {
-          const StrId id =
-              connection_.realtime() ? StrId::STR_AIRPAGE_MODE_REALTIME : StrId::STR_AIRPAGE_MODE_MANUAL;
+          const StrId id = connection_.realtime() ? StrId::STR_AIRPAGE_MODE_REALTIME : StrId::STR_AIRPAGE_MODE_MANUAL;
           return std::string(I18N.get(id));
         }
         const StrId id = autoSleepWallpaper_ ? StrId::STR_AIRPAGE_SETTING_ON : StrId::STR_AIRPAGE_SETTING_OFF;

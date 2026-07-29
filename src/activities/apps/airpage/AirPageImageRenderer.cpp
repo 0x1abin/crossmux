@@ -56,8 +56,8 @@ Rect AirPageImageRenderer::fittedBounds(const Rect& viewport, const ImageInfo& i
       height = static_cast<int>(std::max<int64_t>(1, widthLimitedHeight));
     } else {
       height = viewport.height;
-      width = static_cast<int>(
-          std::max<int64_t>(1, static_cast<int64_t>(image.width) * viewport.height / image.height));
+      width =
+          static_cast<int>(std::max<int64_t>(1, static_cast<int64_t>(image.width) * viewport.height / image.height));
     }
   }
 

@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <HalStorage.h>
+#include <gtest/gtest.h>
 
 #include <array>
 #include <atomic>
@@ -75,8 +75,7 @@ class AirPageImageStoreTest : public ::testing::Test {
 
   void writeJpegHeader(const char* path, const uint16_t width = 2, const uint16_t height = 3) {
     writeBytes(path, {0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x0B, 0x08, static_cast<uint8_t>(height >> 8),
-                      static_cast<uint8_t>(height), static_cast<uint8_t>(width >> 8),
-                      static_cast<uint8_t>(width)});
+                      static_cast<uint8_t>(height), static_cast<uint8_t>(width >> 8), static_cast<uint8_t>(width)});
   }
 
   void writePixelCache(const char* path, const uint16_t width = 2, const uint16_t height = 3) {
