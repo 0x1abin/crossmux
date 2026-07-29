@@ -35,7 +35,15 @@ constexpr char DEVICE_ID[] = "crosspoint-reader";
 // the largest single TLS allocation is the ~17 KB wolfSSL record buffer, not
 // a run of fast-math bignums. A handshake was measured succeeding inside a
 // 43 KB largest block; requiring 50 KB contiguous refused syncs that fit.
-constexpr uint32_t MIN_FREE_FOR_TLS = 50000;
+//
+// The 35 KB free floor covers the measured peak of what remains after the SP
+// ECC + X25519 work: session object plus record buffer plus RSA cert-verify
+// temps (2 KB apiece at FP_MAX_BITS 8192) totals ~30-40 KB transient. The old
+// 50 KB floor was calibrated against the fast-math bignum failure mode that
+// SP ECC removed, and sat inside the 51.9-58.2 KB band a reading session
+// normally leaves, refusing syncs that would have succeeded. A wrong guess
+// here fails soft: MEMORY_E aborts the handshake within its 15 s deadline.
+constexpr uint32_t MIN_FREE_FOR_TLS = 35000;
 constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
 
 // Apply the shared KOSync auth headers after begin(). x-auth-* is the native
@@ -175,22 +183,23 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     outProgress.deviceId = doc["device_id"].as<std::string>();
     outProgress.timestamp = doc["timestamp"].as<int64_t>();
 
-    // Extended crosspoint-sync field; absent on plain kosync servers.
     outProgress.position.reset();
-    const JsonObjectConst pos = doc["position"].as<JsonObjectConst>();
-    if (!pos.isNull()) {
-      KOReaderRichPosition rich;
-      rich.pctQ = pos["pctQ"].as<uint32_t>();
-      rich.spineIndex = pos["spine"].as<uint16_t>();
-      rich.pageNumber = pos["page"].as<uint16_t>();
-      const uint16_t pages = pos["pages"].as<uint16_t>();
-      rich.totalPages = pages > 0 ? pages : 1;
-      const uint16_t para = pos["para"].as<uint16_t>();
-      if (para > 0) rich.paragraphIndex = para;
-      rich.xpath = pos["xpath"].as<const char*>() ? pos["xpath"].as<const char*>() : "";
-      LOG_DBG("KOSync", "Got rich position: spine=%u page=%u/%u para=%u", rich.spineIndex, rich.pageNumber,
-              rich.totalPages, para);
-      outProgress.position = std::move(rich);
+    if (KOREADER_STORE.usesCrossPointSyncServer()) {
+      const JsonObjectConst pos = doc["position"].as<JsonObjectConst>();
+      if (!pos.isNull()) {
+        KOReaderRichPosition rich;
+        rich.pctQ = pos["pctQ"].as<uint32_t>();
+        rich.spineIndex = pos["spine"].as<uint16_t>();
+        rich.pageNumber = pos["page"].as<uint16_t>();
+        const uint16_t pages = pos["pages"].as<uint16_t>();
+        rich.totalPages = pages > 0 ? pages : 1;
+        const uint16_t para = pos["para"].as<uint16_t>();
+        if (para > 0) rich.paragraphIndex = para;
+        rich.xpath = pos["xpath"].as<const char*>() ? pos["xpath"].as<const char*>() : "";
+        LOG_DBG("KOSync", "Got rich position: spine=%u page=%u/%u para=%u", rich.spineIndex, rich.pageNumber,
+                rich.totalPages, para);
+        outProgress.position = std::move(rich);
+      }
     }
 
     LOG_DBG("KOSync", "Got progress: %.2f%% at %s", outProgress.percentage * 100, outProgress.progress.c_str());
@@ -227,8 +236,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   doc["percentage"] = progress.percentage;
   doc["device"] = DEVICE_NAME;
   doc["device_id"] = DEVICE_ID;
-  if (progress.position.has_value()) {
-    // Extended crosspoint-sync field; kosync servers ignore unknown keys.
+  if (progress.position.has_value() && KOREADER_STORE.usesCrossPointSyncServer()) {
+    // CrossPoint-specific extension: do not send it to third-party KOSync servers.
     const auto& p = *progress.position;
     auto pos = doc["position"].to<JsonObject>();
     pos["pctQ"] = p.pctQ;
