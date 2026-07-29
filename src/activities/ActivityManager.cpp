@@ -9,6 +9,7 @@
 #include "OpdsServerStore.h"
 #include "apps/2048/Game2048Activity.h"
 #include "apps/AppsMenuActivity.h"
+#include "apps/airpage/AirPageActivity.h"
 #include "apps/avatar/UglyAvatarActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
@@ -285,6 +286,17 @@ void ActivityManager::goToMinesweeper() {
 }
 
 void ActivityManager::goToGame2048() { replaceActivity(std::make_unique<Game2048Activity>(renderer, mappedInput)); }
+
+void ActivityManager::goToAirPage() {
+  // Activities must outlive this call; ActivityManager takes ownership of this
+  // single allocation and releases it on navigation.
+  auto activity = makeUniqueNoThrow<AirPageActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: AirPageActivity (%u bytes)", static_cast<unsigned>(sizeof(AirPageActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
 void ActivityManager::goToStandby() { replaceActivity(std::make_unique<StandbyActivity>(renderer, mappedInput)); }
 

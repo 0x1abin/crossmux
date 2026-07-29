@@ -25,7 +25,8 @@ enum class AppId : uint8_t {
   Game2048 = 6,
   UglyAvatar = 7,
   Standby = 8,
-  Count = 9,
+  AirPage = 9,
+  Count = 10,
 };
 
 struct AppEntry {
@@ -48,6 +49,7 @@ constexpr AppEntry kAppEntries[] = {
     {AppId::Minesweeper, StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
     {AppId::Game2048, StrId::STR_2048_TITLE, UIIcon::Game2048, &ActivityManager::goToGame2048},
     {AppId::UglyAvatar, StrId::STR_UGLY_AVATAR, UIIcon::Avatar, &ActivityManager::goToUglyAvatar},
+    {AppId::AirPage, StrId::STR_AIRPAGE_TITLE, UIIcon::Wifi, &ActivityManager::goToAirPage},
     {AppId::Standby, StrId::STR_STANDBY_TITLE, UIIcon::Standby, &ActivityManager::goToStandby},
 };
 

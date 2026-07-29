@@ -1,6 +1,7 @@
 #pragma once
 #include <HalStorage.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -8,6 +9,11 @@
 
 class ImageBlock final : public Block {
  public:
+  enum class PixelCachePolicy : uint8_t {
+    LoadIntoRam,
+    Stream,
+  };
+
   ImageBlock(const std::string& imagePath, const std::string& srcPath, int16_t width, int16_t height);
   ~ImageBlock() override = default;
 
@@ -40,6 +46,7 @@ class ImageBlock final : public Block {
   bool isEmpty() override { return false; }
 
   void render(GfxRenderer& renderer, const int x, const int y);
+  bool render(GfxRenderer& renderer, int x, int y, PixelCachePolicy cachePolicy);
   bool serialize(HalFile& file);
   static std::unique_ptr<ImageBlock> deserialize(HalFile& file);
 

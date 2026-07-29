@@ -205,20 +205,32 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
   Scan to sign in, sync the account shelf, download books to SD, and open the
   generated EPUB in Reader. Native builds also use the firmware's JPEG/PNG-to-BMP
   converters, so downloaded shelf and detail covers appear progressively.
-- **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
-  by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
-  runs the real `HttpDownloader` over libcurl, saving the latest image to
-  `sd_root/.crosspoint/airpage/latest.bmp`, then Confirm toggles QR ⇄ image.
+- **AirPage app: real QR + real cloud image fetch.** Open **Apps → AirPage**.
+  The QR (rendered by the real `ricmoo/QRCode` lib) encodes the device's upload
+  URL. Use the mapped **Refresh** action (front-right or the corresponding side
+  key) to run the real `HttpDownloader` over libcurl, saving the latest BMP or
+  JPEG body to a validated temporary file before replacing
+  `sd_root/.crosspoint/airpage/latest.bmp` or `latest.jpg`; a failed or damaged
+  download keeps the previous image. Native builds decode JPEG through the same
+  EPUB framebuffer and pixel-cache path as firmware. AirPage always opens on
+  the QR page; **Settings** controls manual/live mode and automatic sleep-screen
+  updates, while **Images** lists the current image plus the latest archived
+  deliveries. Confirm on a full-screen image offers to install it as
+  `sd_root/sleep.bmp`. Connecting or reconnecting does not fetch an image;
+  downloads start only from **Refresh** or a real MQTT push.
   The 16-char device id is a random nanoid minted on first run via `esp_random()`
   and persisted to `sd_root/.crosspoint/airpage_device_id` — it is **not** derived
   from the MAC. It stays the same across runs only as long as you keep that file
   (delete it to mint a fresh id). Read the current id off the QR page or serial
-  log, then upload to that id to see your image.
+  log, then upload to that id to see your image. The simulator has no MQTT
+  broker, so live mode exercises retry/pause UI but cannot receive pushes;
+  manual refresh remains fully functional.
 
 ## What's out of scope (first version)
 
 - WiFi config UI / OPDS / KOReader sync / Calibre / file transfer / OTA / web server
-- Image rendering inside EPUB bodies (`ImageDecoderFactory` remains stubbed)
+- PNG rendering inside EPUB bodies; native builds provide the JPEG decoder,
+  while the offline WASM build keeps the image decoder factory stubbed
 - 4-level grayscale (grayscale buffers fall through to 1-bpp — e.g. the AirPage
   image renders in plain B&W in the sim, though the BW frame still displays)
 - Real e-ink refresh timing / ghosting

@@ -13,6 +13,7 @@ apps/
 ├── AppsMenuActivity.{h,cpp}   # dispatcher — see "Adding a new app" below
 ├── GameUi.{h,cpp}             # shared helpers, game-only (centering math, elapsed-time format)
 ├── GameSaveDebouncer.h        # 1.5s save debounce, used by sudoku/gomoku/minesweeper
+├── airpage/                    # cloud image display app
 ├── sudoku/                    # one subdirectory per app, files keep the app-name prefix
 ├── gomoku/
 ├── chinese-chess/             # conditional — gated by ENABLE_CHINESE_VERSION (see "Conditional apps" below)
@@ -144,7 +145,28 @@ Home  ──Confirm "Apps"──▶  AppsMenu  ──Confirm row──▶  <App>
   └──────Back──────────────────┘    ◀──Back──  <App>  (returns to AppsMenu, not Home)
 ```
 
-Every sub-app's Back button must call `activityManager.goToApps()`. This mirrors how Sudoku and Gomoku already behave, and how Ugly Avatar was wired up when it moved under `apps/`.
+Every sub-app's Back button must call `activityManager.goToApps()`. This mirrors how Sudoku, Gomoku, Ugly Avatar, and AirPage behave.
+
+AirPage always enters on its QR page and silently connects the last saved Wi-Fi.
+Its mapped bottom actions are Back, Settings, Images, and Refresh; logical
+previous/next also map the side buttons to Images/Refresh in every orientation.
+Connecting or reconnecting never downloads an image by itself; only Refresh or
+a live MQTT push starts a download.
+Settings uses the standard themed list for manual/live mode and the optional
+"set downloads as sleep screen" toggle. Images opens a newest-first list of the
+current image plus up to 19 archived deliveries; selecting one displays it
+full-screen, where Confirm offers the standard sleep-screen confirmation and
+Back returns to the QR page.
+
+Live mode runs only while AirPage is foregrounded, backs off failed
+connections, and allows normal auto-sleep again after the retry window expires.
+Manual mode keeps foreground Wi-Fi available but permits idle auto-sleep.
+Downloads are identified by signature and accept BMP or JPEG from the same
+endpoint. Exact duplicates reuse the current entry. Unique downloads are
+validated transactionally before the old image is archived; JPEG uses the EPUB
+aspect-fit, dithering, streamed pixel-cache, and 4-level grayscale path without
+loading the full pixel cache into RAM. A selected JPEG is converted to a
+fit-without-cropping BMP before atomically replacing `/sleep.bmp`.
 
 ## Resource budget
 

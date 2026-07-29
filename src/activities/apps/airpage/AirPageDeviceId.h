@@ -16,10 +16,15 @@ const std::string& deviceId();
 // /.crosspoint/airpage/mode ("1"/missing = live MQTT push, "0" = manual).
 // Default is ON: a fresh device (no file yet) boots into live push. Kept out of
 // CrossPointSettings on purpose: it is AirPage-internal state (like the device
-// id), toggled only from the AirPage face menu, and must not surface in the
-// global Settings UI. Read once on face entry; written immediately on every
+// id), toggled only from the AirPage settings page, and must not surface in the
+// global Settings UI. Read once on app entry; written immediately on every
 // toggle so it survives reboot.
 bool loadRealtimeMode();
-void saveRealtimeMode(bool enabled);
+bool saveRealtimeMode(bool enabled);
+
+// Whether a successfully downloaded AirPage image should replace the system
+// custom sleep screen. Missing or invalid state defaults to OFF.
+bool loadAutoSleepWallpaper();
+bool saveAutoSleepWallpaper(bool enabled);
 
 }  // namespace airpage
