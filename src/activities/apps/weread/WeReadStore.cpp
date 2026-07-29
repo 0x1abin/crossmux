@@ -31,6 +31,7 @@ struct ShelfSortKey {
 static_assert(sizeof(ShelfSortKey) == 8);
 
 constexpr size_t kMaxSessionFileSize = 2048;
+constexpr char kDisclaimerAcceptanceMarker[] = "WRD1\n";
 constexpr char kSessionMagic[] = "WRA1\n";
 constexpr char kShelfPartPath[] = "/.crosspoint/weread/shelf.bin.part";
 
@@ -151,6 +152,29 @@ bool Session::cookieHeader(char* out, const size_t outSize) const {
 }
 
 bool ensureRoot() { return Storage.ensureDirectoryExists("/.crosspoint") && Storage.ensureDirectoryExists(kRoot); }
+
+bool hasAcceptedDisclaimer() {
+  HalFile file;
+  char marker[sizeof(kDisclaimerAcceptanceMarker) - 1];
+  return Storage.openFileForRead("WR", kDisclaimerAcceptancePath, file) && file.fileSize() == sizeof(marker) &&
+         file.read(marker, sizeof(marker)) == static_cast<int>(sizeof(marker)) &&
+         memcmp(marker, kDisclaimerAcceptanceMarker, sizeof(marker)) == 0;
+}
+
+bool acceptDisclaimer() {
+  if (!ensureRoot()) return false;
+
+  {
+    HalFile file;
+    if (!Storage.openFileForWrite("WR", kDisclaimerAcceptancePath, file) ||
+        file.write(kDisclaimerAcceptanceMarker, sizeof(kDisclaimerAcceptanceMarker) - 1) !=
+            sizeof(kDisclaimerAcceptanceMarker) - 1) {
+      return false;
+    }
+    file.flush();
+  }
+  return hasAcceptedDisclaimer();
+}
 
 bool loadSession(Session& session) {
   session.clear();

@@ -9,6 +9,7 @@
 namespace WeReadStore {
 
 constexpr const char* kRoot = "/.crosspoint/weread";
+constexpr const char* kDisclaimerAcceptancePath = "/.crosspoint/weread/disclaimer.accepted";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
 constexpr uint32_t kShelfMagic = 0x35535257;            // WRS5
@@ -153,6 +154,8 @@ class BookDetailWriter {
 };
 
 bool ensureRoot();
+bool hasAcceptedDisclaimer();
+bool acceptDisclaimer();
 bool loadSession(Session& session);
 bool saveSession(const Session& session);
 bool clearSession();

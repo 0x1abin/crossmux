@@ -42,14 +42,73 @@ constexpr MenuEntry kMenuEntries[] = {
     {StrId::STR_WEREAD_MENU_LOGOUT, MenuAction::Logout},
 };
 
+constexpr StrId kDisclaimerPortraitLines[] = {
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_1,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_2,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_3,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_4,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_5,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_6,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_7,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_8,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_9,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_10,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_11, StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_12,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_13, StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_14,
+    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_15, StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_16,
+};
+
+constexpr StrId kDisclaimerLandscapeLines[] = {
+    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_1, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_2,
+    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_3, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_4,
+    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_5, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_6,
+    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_7, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_8,
+    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_9, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_10,
+};
+
+constexpr StrId kDisclaimerActions[] = {
+    StrId::STR_WEREAD_DISCLAIMER_CANCEL,
+    StrId::STR_WEREAD_DISCLAIMER_CONFIRM,
+};
+
 constexpr StrId kCacheScopeOptions[] = {
     StrId::STR_WEREAD_CACHE_WHOLE_BOOK,
     StrId::STR_WEREAD_CACHE_CHAPTER_RANGE,
 };
 
+constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerActions) / sizeof(kDisclaimerActions[0]));
+constexpr int kDisclaimerActionOffsetY = 10;
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
 constexpr int kCoverWidth = 96;
 constexpr int kCoverHeight = 140;
+
+struct DisclaimerTextLayout {
+  const StrId* lines;
+  int lineCount;
+  int firstParagraphLast;
+  int secondParagraphLast;
+};
+
+constexpr DisclaimerTextLayout kDisclaimerPortraitLayout = {
+    kDisclaimerPortraitLines,
+    static_cast<int>(sizeof(kDisclaimerPortraitLines) / sizeof(kDisclaimerPortraitLines[0])),
+    3,
+    11,
+};
+
+constexpr DisclaimerTextLayout kDisclaimerLandscapeLayout = {
+    kDisclaimerLandscapeLines,
+    static_cast<int>(sizeof(kDisclaimerLandscapeLines) / sizeof(kDisclaimerLandscapeLines[0])),
+    1,
+    6,
+};
+
+const DisclaimerTextLayout& disclaimerTextLayout(const GfxRenderer::Orientation orientation) {
+  switch (orientation) {
+    case GfxRenderer::Orientation::Portrait:
+    case GfxRenderer::Orientation::PortraitInverted:
+      return kDisclaimerPortraitLayout;
+    case GfxRenderer::Orientation::LandscapeClockwise:
+    case GfxRenderer::Orientation::LandscapeCounterClockwise:
+      return kDisclaimerLandscapeLayout;
+  }
+  return kDisclaimerPortraitLayout;
+}
 
 struct ShelfGridLayout {
   int columns = 1;
@@ -296,6 +355,8 @@ void WeReadActivity::onEnter() {
     sdFontSystem.releaseLoadedFont(renderer);
     if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
   }
+  disclaimerSelected_ = 0;
+  disclaimerSaveFailed_ = false;
   menuSelected_ = 0;
   shelfSelected_ = 0;
   resetShelfCoverLoading();
@@ -310,6 +371,16 @@ void WeReadActivity::onEnter() {
   introPagesTruncated_ = false;
   downloadChapterScope_ = WeReadClient::DownloadOptions::ChapterScope::WholeBook;
   cacheScopePopupClosing_ = false;
+  if (!WeReadStore::hasAcceptedDisclaimer()) {
+    state_.store(State::Disclaimer);
+    requestUpdate();
+    return;
+  }
+  enterApp();
+}
+
+void WeReadActivity::enterApp() {
+  disclaimerSaveFailed_ = false;
   // This bounded 832-byte probe is gone before TLS and avoids a transient heap
   // allocation that could fragment the ESP32-C3 heap.
   WeReadStore::Session session;
@@ -357,6 +428,43 @@ Rect WeReadActivity::contentBounds() const {
   const int contentY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentH = renderer.getScreenHeight() - contentY - metrics.buttonHintsHeight - metrics.verticalSpacing;
   return Rect{0, contentY, renderer.getScreenWidth(), std::max(0, contentH)};
+}
+
+Rect WeReadActivity::disclaimerSafeBounds() const {
+  return UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+}
+
+Rect WeReadActivity::disclaimerContentBounds() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safe = disclaimerSafeBounds();
+  const int contentY = safe.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentBottom = safe.y + safe.height - metrics.verticalSpacing;
+  return Rect{safe.x, contentY, safe.width, std::max(0, contentBottom - contentY)};
+}
+
+Rect WeReadActivity::disclaimerActionsBounds() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& layout = disclaimerTextLayout(renderer.getOrientation());
+  const Rect safe = disclaimerSafeBounds();
+  const Rect content = disclaimerContentBounds();
+  const int minimumHeight = renderer.getLineHeight(UI_10_FONT_ID) + metrics.verticalSpacing;
+  const int height = std::min(content.height, std::max(GUI.getListRowStep(false), minimumHeight));
+  const int paragraphSpacing = std::max(1, metrics.verticalSpacing / 8);
+  const int textHeight = layout.lineCount * renderer.getLineHeight(UI_10_FONT_ID) + paragraphSpacing * 2;
+  const int actionGap = metrics.verticalSpacing;
+  const int groupHeight = textHeight + actionGap + height;
+  const int freeHeight = std::max(0, content.height - groupHeight);
+  const int baseY = std::min(content.y + content.height - height, content.y + freeHeight / 3 + textHeight + actionGap);
+  const int y = std::min(safe.y + safe.height - height, baseY + kDisclaimerActionOffsetY);
+  const int availableWidth = std::max(0, content.width - metrics.contentSidePadding * 2);
+  int labelWidth = 0;
+  for (const StrId action : kDisclaimerActions) {
+    labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(action)));
+  }
+  const int targetWidth = (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount +
+                          metrics.verticalSpacing * (kDisclaimerActionCount - 1);
+  const int width = std::min(availableWidth, targetWidth);
+  return Rect{content.x + (content.width - width) / 2, y, width, height};
 }
 
 int WeReadActivity::shelfItemsPerPage() const {
@@ -950,6 +1058,58 @@ void WeReadActivity::syncShelf() {
   }
 }
 
+void WeReadActivity::activateDisclaimerSelection() {
+  if (disclaimerSelected_ == 0) {
+    activityManager.goToApps();
+    return;
+  }
+  if (!WeReadStore::acceptDisclaimer()) {
+    LOG_ERR("WR", "Failed to persist disclaimer acceptance");
+    disclaimerSaveFailed_ = true;
+    requestUpdate();
+    return;
+  }
+  enterApp();
+}
+
+void WeReadActivity::handleDisclaimerInput() {
+  const Rect actions = disclaimerActionsBounds();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int gap = std::min(metrics.verticalSpacing, std::max(0, actions.width - kDisclaimerActionCount));
+  const int buttonWidth = std::max(1, (actions.width - gap) / kDisclaimerActionCount);
+  int touched = -1;
+  switch (mappedInput.colTouch(touched, actions.x, buttonWidth + gap, kDisclaimerActionCount, actions.y,
+                               actions.y + actions.height, buttonWidth)) {
+    case MappedInputManager::RowTouch::Tap:
+      disclaimerSelected_ = touched;
+      activateDisclaimerSelection();
+      return;
+    case MappedInputManager::RowTouch::Down:
+      if (disclaimerSelected_ != touched) {
+        disclaimerSelected_ = touched;
+        requestUpdate();
+      }
+      return;
+    case MappedInputManager::RowTouch::None:
+      break;
+  }
+
+  buttonNavigator_.onNextRelease([this] {
+    disclaimerSelected_ = ButtonNavigator::nextIndex(disclaimerSelected_, kDisclaimerActionCount);
+    requestUpdate();
+  });
+  buttonNavigator_.onPreviousRelease([this] {
+    disclaimerSelected_ = ButtonNavigator::previousIndex(disclaimerSelected_, kDisclaimerActionCount);
+    requestUpdate();
+  });
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    activateDisclaimerSelection();
+  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    activityManager.goToApps();
+  }
+}
+
 void WeReadActivity::promptLogout() {
   // ActivityManager owns the confirmation across frames, so this must be a
   // fallible heap allocation rather than a stack object.
@@ -1108,6 +1268,9 @@ void WeReadActivity::loop() {
 
   const State state = state_.load();
   switch (state) {
+    case State::Disclaimer:
+      handleDisclaimerInput();
+      return;
     case State::Menu:
       handleMenuInput();
       return;
@@ -1260,6 +1423,58 @@ bool WeReadActivity::drawDetailIntroduction(const Rect& bounds, const bool selec
     if (truncated) return true;
   }
   return false;
+}
+
+void WeReadActivity::drawDisclaimer(const Rect& content) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& layout = disclaimerTextLayout(renderer.getOrientation());
+  const Rect actions = disclaimerActionsBounds();
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int paragraphSpacing = std::max(1, metrics.verticalSpacing / 8);
+  const int textHeight = layout.lineCount * lineHeight + paragraphSpacing * 2;
+  const int actionGap = metrics.verticalSpacing + kDisclaimerActionOffsetY;
+  const int textY = std::max(content.y, actions.y - actionGap - textHeight);
+  const Rect textBounds{
+      content.x + metrics.contentSidePadding,
+      textY,
+      content.width - metrics.contentSidePadding * 2,
+      std::min(textHeight, std::max(0, actions.y - actionGap - textY)),
+  };
+  int blockWidth = 0;
+  for (int i = 0; i < layout.lineCount; ++i) {
+    blockWidth = std::max(blockWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(layout.lines[i])));
+  }
+  blockWidth = std::min(blockWidth, textBounds.width);
+  const int textX = textBounds.x + (textBounds.width - blockWidth) / 2;
+  int y = textBounds.y;
+  {
+    GfxRenderer::ClipScope clip(renderer, textBounds.x, textBounds.y, textBounds.width, textBounds.height);
+    for (int i = 0; i < layout.lineCount; ++i) {
+      renderer.drawText(UI_10_FONT_ID, textX, y, I18N.get(layout.lines[i]));
+      y += lineHeight;
+      if (i == layout.firstParagraphLast || i == layout.secondParagraphLast) y += paragraphSpacing;
+    }
+  }
+
+  const int buttonGap = std::min(metrics.verticalSpacing, std::max(0, actions.width - kDisclaimerActionCount));
+  const int buttonWidth = std::max(1, (actions.width - buttonGap) / kDisclaimerActionCount);
+  const int buttonRadius = std::min(metrics.popupCornerRadius, actions.height / 2);
+  const int buttonLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  for (int i = 0; i < kDisclaimerActionCount; ++i) {
+    const int buttonX = actions.x + i * (buttonWidth + buttonGap);
+    const bool selected = disclaimerSelected_ == i;
+    renderer.fillRoundedRect(buttonX, actions.y, buttonWidth, actions.height, buttonRadius,
+                             selected ? Color::Black : Color::White);
+    renderer.drawRoundedRect(buttonX, actions.y, buttonWidth, actions.height, 1, buttonRadius, true);
+    const char* label = I18N.get(kDisclaimerActions[i]);
+    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
+    renderer.drawText(UI_10_FONT_ID, buttonX + (buttonWidth - textWidth) / 2,
+                      actions.y + (actions.height - buttonLineHeight) / 2, label, !selected);
+  }
+
+  if (disclaimerSaveFailed_) {
+    GUI.drawPopup(renderer, tr(STR_WEREAD_DISCLAIMER_SAVE_FAILED));
+  }
 }
 
 void WeReadActivity::drawShelfGrid(const Rect& content) {
@@ -1493,12 +1708,15 @@ void WeReadActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const int height = renderer.getScreenHeight();
-  const Rect content = contentBounds();
   const State state = state_.load();
+  const Rect content = state == State::Disclaimer ? disclaimerContentBounds() : contentBounds();
 
   renderer.clearScreen();
   const char* header = tr(STR_WEREAD_TITLE);
   switch (state) {
+    case State::Disclaimer:
+      header = tr(STR_WEREAD_DISCLAIMER_TITLE);
+      break;
     case State::Shelf:
     case State::Downloading:
       header = tr(STR_WEREAD_MENU_SHELF);
@@ -1520,9 +1738,13 @@ void WeReadActivity::render(RenderLock&&) {
     case State::LogoutError:
       break;
   }
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, width, metrics.headerHeight}, header);
+  const Rect safe = state == State::Disclaimer ? disclaimerSafeBounds() : Rect{0, 0, width, height};
+  GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight}, header);
 
   switch (state) {
+    case State::Disclaimer:
+      drawDisclaimer(content);
+      break;
     case State::Menu:
       GUI.drawButtonMenu(
           renderer, content, kMenuEntryCount, menuSelected_,
@@ -1624,6 +1846,12 @@ void WeReadActivity::render(RenderLock&&) {
   const char* previous = "";
   const char* next = "";
   switch (state) {
+    case State::Disclaimer:
+      back = tr(STR_CANCEL);
+      confirm = tr(STR_SELECT);
+      previous = tr(STR_DIR_LEFT);
+      next = tr(STR_DIR_RIGHT);
+      break;
     case State::Menu:
       back = tr(STR_BACK);
       confirm = tr(STR_SELECT);

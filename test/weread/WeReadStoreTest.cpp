@@ -592,8 +592,29 @@ TEST_F(WeReadStoreTest, SessionRoundTripsOnlyWhitelistedCookiesAndRejectsBadMagi
   EXPECT_FALSE(WeReadStore::loadSession(loaded));
 }
 
+TEST_F(WeReadStoreTest, DisclaimerAcceptanceRequiresExactMarker) {
+  EXPECT_FALSE(WeReadStore::hasAcceptedDisclaimer());
+  ASSERT_TRUE(WeReadStore::acceptDisclaimer());
+  EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
+
+  const auto overwriteMarker = [this](const char* value, const size_t size) {
+    std::ofstream file(hostPath(WeReadStore::kDisclaimerAcceptancePath), std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(file.good());
+    file.write(value, static_cast<std::streamsize>(size));
+    file.close();
+  };
+
+  overwriteMarker("", 0);
+  EXPECT_FALSE(WeReadStore::hasAcceptedDisclaimer());
+  overwriteMarker("WRD1", 4);
+  EXPECT_FALSE(WeReadStore::hasAcceptedDisclaimer());
+  overwriteMarker("BAD1\n", 5);
+  EXPECT_FALSE(WeReadStore::hasAcceptedDisclaimer());
+}
+
 TEST_F(WeReadStoreTest, ClearsSessionAndShelfButPreservesDownloadedContent) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
+  ASSERT_TRUE(WeReadStore::acceptDisclaimer());
   WeReadStore::Session session;
   ASSERT_TRUE(session.setCookie("wr_vid", "12345", 5));
   ASSERT_TRUE(session.setCookie("wr_skey", "secret", 6));
@@ -621,6 +642,7 @@ TEST_F(WeReadStoreTest, ClearsSessionAndShelfButPreservesDownloadedContent) {
   EXPECT_FALSE(Storage.exists(WeReadStore::kSessionPath));
   EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
+  EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
   EXPECT_TRUE(Storage.exists("/.crosspoint/weread/book-1/toc.bin"));
   EXPECT_TRUE(Storage.exists("/.crosspoint/weread/book-1/chapters/000000.xhtml"));
   EXPECT_TRUE(Storage.exists(bookPath.c_str()));
