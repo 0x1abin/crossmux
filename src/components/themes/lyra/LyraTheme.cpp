@@ -53,8 +53,9 @@ constexpr int mainMenuIconSize = 32;
 constexpr int listIconSize = 24;
 constexpr int mainMenuColumns = 2;
 int coverWidth = 0;
+}  // namespace
 
-const uint8_t* iconForName(UIIcon icon, int size) {
+const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
   if (size == 24) {
     switch (icon) {
       case UIIcon::Folder:
@@ -118,7 +119,6 @@ const uint8_t* iconForName(UIIcon icon, int size) {
   }
   return nullptr;
 }
-}  // namespace
 
 void LyraTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const {
   const bool charging = gpio.isUsbConnected();
@@ -280,43 +280,53 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed) const {
-  int rowHeight =
-      (rowSubtitle != nullptr) ? LyraMetrics::values.listWithSubtitleRowHeight : LyraMetrics::values.listRowHeight;
-  int pageItems = rowHeight > 0 ? std::max(1, rect.height / rowHeight) : 1;
+  drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
+                      highlightValue, rowDimmed, LyraMetrics::values, false);
+}
+
+void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                                    const std::function<std::string(int index)>& rowTitle,
+                                    const std::function<std::string(int index)>& rowSubtitle,
+                                    const std::function<UIIcon(int index)>& rowIcon,
+                                    const std::function<std::string(int index)>& rowValue, bool highlightValue,
+                                    const std::function<bool(int index)>& rowDimmed, const ThemeMetrics& metrics,
+                                    bool invertSelectedRows) const {
+  if (itemCount <= 0) return;
+
+  const int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
+  const int pageItems = rowHeight > 0 ? std::max(1, rect.height / rowHeight) : 1;
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
-  const int pageStartIndex = selectedIndex / pageItems * pageItems;
+  const int pageStartIndex = std::max(0, selectedIndex) / pageItems * pageItems;
   drawSideScrollBar(renderer, rect, itemCount, pageStartIndex, pageItems);
 
-  // Draw selection
   int contentWidth =
-      rect.width -
-      (totalPages > 1 ? (LyraMetrics::values.scrollBarWidth + LyraMetrics::values.scrollBarRightOffset) : 1);
+      rect.width - (totalPages > 1 ? (metrics.scrollBarWidth + metrics.scrollBarRightOffset) : 1);
   if (selectedIndex >= 0) {
-    renderer.fillRoundedRect(
-        rect.x + LyraMetrics::values.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
-        contentWidth - LyraMetrics::values.contentSidePadding * 2, rowHeight, cornerRadius, Color::LightGray);
+    renderer.fillRoundedRect(rect.x + metrics.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
+                             contentWidth - metrics.contentSidePadding * 2, rowHeight, cornerRadius,
+                             invertSelectedRows ? Color::Black : Color::LightGray);
   }
 
-  int textX = rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection;
-  int textWidth = contentWidth - LyraMetrics::values.contentSidePadding * 2 - hPaddingInSelection * 2;
-  int iconSize;
+  int textX = rect.x + metrics.contentSidePadding + hPaddingInSelection;
+  int textWidth = contentWidth - metrics.contentSidePadding * 2 - hPaddingInSelection * 2;
+  int iconSize = 0;
   if (rowIcon != nullptr) {
     iconSize = (rowSubtitle != nullptr) ? mainMenuIconSize : listIconSize;
     textX += iconSize + hPaddingInSelection;
     textWidth -= iconSize + hPaddingInSelection;
   }
 
-  // Draw all items
-  int iconY = (rowSubtitle != nullptr) ? 16 : 10;
+  const int iconY = (rowSubtitle != nullptr) ? 16 : 10;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
+    const bool selected = i == selectedIndex;
+    const bool foregroundBlack = !(invertSelectedRows && selected);
     const bool dimmed = rowDimmed && rowDimmed(i) && i != selectedIndex;
     int rowTextWidth = textWidth;
 
-    // Draw name
     int valueWidth = 0;
-    std::string valueText = "";
+    std::string valueText;
     if (rowValue != nullptr) {
       valueText = rowValue(i);
       valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxListValueWidth);
@@ -326,7 +336,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     auto itemName = rowTitle(i);
     auto item = renderer.truncatedText(UI_10_FONT_ID, itemName.c_str(), rowTextWidth);
-    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), true);
+    renderer.drawText(UI_10_FONT_ID, textX, itemY + 7, item.c_str(), foregroundBlack);
     if (dimmed) {
       drawDitherMask(renderer, textX, itemY + 7, renderer.getTextWidth(UI_10_FONT_ID, item.c_str()),
                      renderer.getLineHeight(UI_10_FONT_ID));
@@ -336,30 +346,33 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       UIIcon icon = rowIcon(i);
       const uint8_t* iconBitmap = iconForName(icon, iconSize);
       if (iconBitmap != nullptr) {
-        renderer.drawIcon(iconBitmap, rect.x + LyraMetrics::values.contentSidePadding + hPaddingInSelection,
-                          itemY + iconY, iconSize);
+        const int iconX = rect.x + metrics.contentSidePadding + hPaddingInSelection;
+        if (invertSelectedRows && selected) {
+          renderer.drawIconInverted(iconBitmap, iconX, itemY + iconY, iconSize);
+        } else {
+          renderer.drawIcon(iconBitmap, iconX, itemY + iconY, iconSize);
+        }
       }
     }
 
     std::string subtitleText;
     if (rowSubtitle != nullptr) {
-      // Draw subtitle
       subtitleText = rowSubtitle(i);
       auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
-      renderer.drawText(SMALL_FONT_ID, textX, itemY + 30, subtitle.c_str(), true);
+      renderer.drawText(SMALL_FONT_ID, textX, itemY + 30, subtitle.c_str(), foregroundBlack);
     }
 
-    // Draw value
     if (!valueText.empty()) {
-      if (i == selectedIndex && highlightValue) {
+      if (selected && highlightValue && !invertSelectedRows) {
         renderer.fillRoundedRect(
-            rect.x + contentWidth - LyraMetrics::values.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
+            rect.x + contentWidth - metrics.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
             valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
       }
 
-      const int valueX = rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth;
+      const int valueX = rect.x + contentWidth - metrics.contentSidePadding - valueWidth;
       const int valueY = itemY + (subtitleText.empty() ? 7 : 16);
-      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), !(i == selectedIndex && highlightValue));
+      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(),
+                        foregroundBlack && !(selected && highlightValue));
       if (dimmed) {
         drawDitherMask(renderer, valueX, valueY, renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()),
                        renderer.getLineHeight(UI_10_FONT_ID));

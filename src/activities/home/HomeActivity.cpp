@@ -6,9 +6,11 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <Utf8.h>
 #include <Xtc.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -118,6 +120,7 @@ void HomeActivity::onEnter() {
 
   const auto base = static_cast<int>(recentBooks.size());
   selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
+  lastCarouselBookIndex = 0;
 
   // Trigger first update
   requestUpdate();
@@ -134,19 +137,23 @@ bool HomeActivity::storeCoverBuffer() {
   // render() must have already set the cover rect; without it we'd be back to
   // cloning the whole framebuffer.
   if (coverRectW <= 0 || coverRectH <= 0) return false;
-  freeCoverBuffer();
   const size_t needed = renderer.getRegionByteSize(coverRectX, coverRectY, coverRectW, coverRectH);
   if (needed == 0) return false;
-  coverBuffer = static_cast<uint8_t*>(malloc(needed));
-  if (!coverBuffer) {
-    LOG_ERR("HOME", "OOM: cover buffer (%u bytes)", (unsigned)needed);
-    return false;
+
+  if (!coverBuffer || coverBufferSize < needed) {
+    // The carousel region is up to ~44 KB, too large for the task stack. Allocate
+    // once and reuse it for every selection during this HomeActivity lifetime.
+    auto replacement = makeUniqueNoThrow<uint8_t[]>(needed);
+    if (!replacement) {
+      LOG_ERR("HOME", "OOM: cover buffer (%u bytes)", (unsigned)needed);
+      return false;
+    }
+    coverBuffer = std::move(replacement);
+    coverBufferSize = needed;
   }
-  coverBufferSize = needed;
-  if (!renderer.copyRegionToBuffer(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer, coverBufferSize)) {
-    free(coverBuffer);
-    coverBuffer = nullptr;
-    coverBufferSize = 0;
+
+  if (!renderer.copyRegionToBuffer(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer.get(),
+                                   coverBufferSize)) {
     return false;
   }
   return true;
@@ -154,14 +161,12 @@ bool HomeActivity::storeCoverBuffer() {
 
 bool HomeActivity::restoreCoverBuffer() {
   if (!coverBuffer || coverRectW <= 0 || coverRectH <= 0) return false;
-  return renderer.copyBufferToRegion(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer, coverBufferSize);
+  return renderer.copyBufferToRegion(coverRectX, coverRectY, coverRectW, coverRectH, coverBuffer.get(),
+                                     coverBufferSize);
 }
 
 void HomeActivity::freeCoverBuffer() {
-  if (coverBuffer) {
-    free(coverBuffer);
-    coverBuffer = nullptr;
-  }
+  coverBuffer.reset();
   coverBufferSize = 0;
   coverBufferStored = false;
 }
@@ -169,6 +174,10 @@ void HomeActivity::freeCoverBuffer() {
 void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const int bookCount = static_cast<int>(recentBooks.size());
+  const int renderedMenuCount = menuCount - (metrics.homeContinueReadingInMenu ? 0 : bookCount);
+  const bool isCarousel =
+      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
   auto activateSelection = [this] {
     if (selectorIndex < recentBooks.size()) {
@@ -200,34 +209,125 @@ void HomeActivity::loop() {
     }
   };
 
-  buttonNavigator.onNext([this, menuCount] {
-    selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
-    requestUpdate();
-  });
+  if (isCarousel) {
+    const bool coversFocused = selectorIndex < bookCount;
+    const int rowIndex = coversFocused ? selectorIndex : selectorIndex - bookCount;
 
-  buttonNavigator.onPrevious([this, menuCount] {
-    selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
-    requestUpdate();
-  });
+    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+      if (coversFocused) {
+        selectorIndex = ButtonNavigator::nextIndex(rowIndex, bookCount);
+        lastCarouselBookIndex = selectorIndex;
+      } else {
+        selectorIndex = bookCount + ButtonNavigator::nextIndex(rowIndex, renderedMenuCount);
+      }
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+      if (coversFocused) {
+        selectorIndex = ButtonNavigator::previousIndex(rowIndex, bookCount);
+        lastCarouselBookIndex = selectorIndex;
+      } else {
+        selectorIndex = bookCount + ButtonNavigator::previousIndex(rowIndex, renderedMenuCount);
+      }
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+        mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+      if (bookCount > 0) {
+        if (coversFocused) {
+          lastCarouselBookIndex = selectorIndex;
+          selectorIndex = bookCount;
+        } else {
+          selectorIndex = std::clamp(lastCarouselBookIndex, 0, bookCount - 1);
+        }
+        requestUpdate();
+      }
+      return;
+    }
+  } else {
+    buttonNavigator.onNext([this, menuCount] {
+      selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
+      requestUpdate();
+    });
+
+    buttonNavigator.onPrevious([this, menuCount] {
+      selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
+      requestUpdate();
+    });
+  }
 
   const auto swipe = mappedInput.wasSwipe();
-  if (swipe == MappedInputManager::SwipeDir::Up) {
-    selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
-    requestUpdate();
-    return;
-  }
-  if (swipe == MappedInputManager::SwipeDir::Down) {
-    selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
-    requestUpdate();
-    return;
+  if (isCarousel) {
+    const bool coversFocused = selectorIndex < bookCount;
+    const int rowIndex = coversFocused ? selectorIndex : selectorIndex - bookCount;
+    switch (swipe) {
+      case MappedInputManager::SwipeDir::Left:
+        if (coversFocused) {
+          selectorIndex = ButtonNavigator::nextIndex(rowIndex, bookCount);
+          lastCarouselBookIndex = selectorIndex;
+        } else {
+          selectorIndex = bookCount + ButtonNavigator::nextIndex(rowIndex, renderedMenuCount);
+        }
+        requestUpdate();
+        return;
+      case MappedInputManager::SwipeDir::Right:
+        if (coversFocused) {
+          selectorIndex = ButtonNavigator::previousIndex(rowIndex, bookCount);
+          lastCarouselBookIndex = selectorIndex;
+        } else {
+          selectorIndex = bookCount + ButtonNavigator::previousIndex(rowIndex, renderedMenuCount);
+        }
+        requestUpdate();
+        return;
+      case MappedInputManager::SwipeDir::Up:
+      case MappedInputManager::SwipeDir::Down:
+        if (bookCount > 0) {
+          if (coversFocused) {
+            lastCarouselBookIndex = selectorIndex;
+            selectorIndex = bookCount;
+          } else {
+            selectorIndex = std::clamp(lastCarouselBookIndex, 0, bookCount - 1);
+          }
+          requestUpdate();
+        }
+        return;
+      case MappedInputManager::SwipeDir::None:
+        break;
+    }
+  } else {
+    if (swipe == MappedInputManager::SwipeDir::Up) {
+      selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
+      requestUpdate();
+      return;
+    }
+    if (swipe == MappedInputManager::SwipeDir::Down) {
+      selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
+      requestUpdate();
+      return;
+    }
   }
 
   int tx = 0;
   int ty = 0;
   if (!recentBooks.empty() && mappedInput.wasScreenTouchDown(tx, ty) && tx >= 0 && tx < renderer.getScreenWidth() &&
       ty >= metrics.homeTopPadding && ty < metrics.homeTopPadding + metrics.homeCoverTileHeight) {
-    if (selectorIndex != 0) {
-      selectorIndex = 0;
+    int touchedBook = 0;
+    if (isCarousel) {
+      const int centerBook =
+          selectorIndex < bookCount ? selectorIndex : std::clamp(lastCarouselBookIndex, 0, bookCount - 1);
+      if (tx < renderer.getScreenWidth() / 3) {
+        touchedBook = ButtonNavigator::previousIndex(centerBook, bookCount);
+      } else if (tx >= renderer.getScreenWidth() * 2 / 3) {
+        touchedBook = ButtonNavigator::nextIndex(centerBook, bookCount);
+      } else {
+        touchedBook = centerBook;
+      }
+      lastCarouselBookIndex = touchedBook;
+    }
+    if (selectorIndex != touchedBook) {
+      selectorIndex = touchedBook;
       requestUpdate();
     }
     return;
@@ -235,7 +335,7 @@ void HomeActivity::loop() {
 
   if (!recentBooks.empty() &&
       mappedInput.wasTapInRect(0, metrics.homeTopPadding, renderer.getScreenWidth(), metrics.homeCoverTileHeight)) {
-    selectorIndex = 0;
+    if (!isCarousel) selectorIndex = 0;
     activateSelection();
     return;
   }
@@ -243,11 +343,19 @@ void HomeActivity::loop() {
   const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
   const int renderedMenuSelection =
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size();
-  const int renderedMenuCount =
-      menuCount - (metrics.homeContinueReadingInMenu ? 0 : static_cast<int>(recentBooks.size()));
   int menuRow = -1;
-  const auto menuTouch = mappedInput.rowTouch(menuRow, menuTop, metrics.menuRowHeight + metrics.menuSpacing,
-                                              renderedMenuCount, 0, INT32_MAX, metrics.menuRowHeight);
+  MappedInputManager::RowTouch menuTouch = MappedInputManager::RowTouch::None;
+  if (isCarousel) {
+    const int menuBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
+    const int columnWidth = renderer.getScreenWidth() / renderedMenuCount;
+    menuTouch =
+        mappedInput.colTouch(menuRow, 0, columnWidth, renderedMenuCount, menuBottom - metrics.menuRowHeight, menuBottom,
+                             columnWidth);
+  } else {
+    menuTouch =
+        mappedInput.rowTouch(menuRow, menuTop, metrics.menuRowHeight + metrics.menuSpacing, renderedMenuCount, 0,
+                             INT32_MAX, metrics.menuRowHeight);
+  }
   if (menuTouch != MappedInputManager::RowTouch::None) {
     const int touchedIndex =
         metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size());
@@ -315,7 +423,7 @@ void HomeActivity::render(RenderLock&&) {
     menuIcons.insert(menuIcons.begin(), Book);
   }
 
-  GUI.drawButtonMenu(
+  GUI.drawHomeMenu(
       renderer,
       Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
            pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
@@ -325,7 +433,12 @@ void HomeActivity::render(RenderLock&&) {
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 
-  const auto labels = mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const bool isCarousel =
+      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
+  const auto labels =
+      isCarousel
+          ? mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
+          : mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();
