@@ -1015,15 +1015,27 @@ void WeReadActivity::handleMenuInput() {
 void WeReadActivity::handleShelfInput() {
   const int count = static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX));
   const int itemsPerPage = shelfItemsPerPage();
-  buttonNavigator_.onNext([this, count, itemsPerPage] {
+  buttonNavigator_.onNextRelease([this, count, itemsPerPage] {
     const int previousPage = shelfSelected_ / itemsPerPage;
     shelfSelected_ = ButtonNavigator::nextIndex(shelfSelected_, count);
     if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
     requestUpdate();
   });
-  buttonNavigator_.onPrevious([this, count, itemsPerPage] {
+  buttonNavigator_.onPreviousRelease([this, count, itemsPerPage] {
     const int previousPage = shelfSelected_ / itemsPerPage;
     shelfSelected_ = ButtonNavigator::previousIndex(shelfSelected_, count);
+    if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
+    requestUpdate();
+  });
+  buttonNavigator_.onNextContinuous([this, count, itemsPerPage] {
+    const int previousPage = shelfSelected_ / itemsPerPage;
+    shelfSelected_ = ButtonNavigator::nextPageIndex(shelfSelected_, count, itemsPerPage);
+    if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
+    requestUpdate();
+  });
+  buttonNavigator_.onPreviousContinuous([this, count, itemsPerPage] {
+    const int previousPage = shelfSelected_ / itemsPerPage;
+    shelfSelected_ = ButtonNavigator::previousPageIndex(shelfSelected_, count, itemsPerPage);
     if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
     requestUpdate();
   });
