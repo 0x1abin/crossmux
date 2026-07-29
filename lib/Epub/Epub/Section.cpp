@@ -11,33 +11,24 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-// Cache layout version. Latin and Chinese builds emit different word streams
-// (per-character CJK tokenization + 禁则 + full-width padding live behind
-// ENABLE_CHINESE_VERSION in ParsedText.cpp), so cached pages from one flavor
-// cannot be reused by the other. Carry separate version counters per flavor;
-// each can bump independently. Cache invalidation is automatic on mismatch
-// (no migration code needed — version mismatch triggers a clean re-parse).
-// Values are kept distinct across flavors and above every previously-shipped
-// number (Latin: 24/26/30/32/34, Chinese: 27/29/31/33/35, upstream single: 26/27/29/30)
-// so a firmware flavor swap can never read the other flavor's stale cache.
-// v34/v35: TextBlock word data is stored as one flat arena (offset table +
-// NUL-terminated text blob) instead of length-prefixed strings and per-field arrays.
-// v36/v37: Arabic shaping changed both drawing and measurement; cached word
-// positions from the previous versions no longer match what drawText renders.
-// v38/v39: Upstream section-cache changes after the last CrossMux sync include
-// line-through word styles and resumable partial builds. Keep the flavors on
-// distinct values so a firmware flavor swap always invalidates stale pages.
-// v40/v41: Compressed line heights are rounded instead of truncated. Although
-// the byte layout is unchanged, the resulting pagination differs.
-// v42/v43: Images persist their book-internal source href for lazy extraction,
-// and TextBlocks serialize ruby annotations and group-continuation styles.
-// v44/v45: Closed HTML tags split adjacent text blocks, changing pagination.
-// v46/v47: Oversized tokens use UTF-8-safe emergency wrapping without inserting
-// synthetic hyphens, changing cached word positions and pagination.
+// Keep separate cache-version sequences for the Latin and Chinese builds.
+// The same built-in font IDs resolve to different font data and metrics in the
+// two firmware flavors, so sharing a cache version could reuse pagination
+// produced by the other flavor after reflashing.
+//
+// History:
+//   34 / 35 - flat parsed-text arena and bounded HTML parsing spans
+//   36 / 37 - unified CJK shaping
+//   38 / 39 - line-through decoration and resumable HTML reading
+//   40 / 41 - line-height rounding
+//   42 / 43 - image hrefs and ruby annotations
+//   44 / 45 - closed-tag pagination state
+//   46 / 47 - UTF-8 emergency wrapping for oversized tokens
+//   48 / 49 - source-space-aware CJK gaps, ruby continuation, and <br> margins
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 47;
+constexpr uint8_t SECTION_FILE_VERSION = 49;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 46;
+constexpr uint8_t SECTION_FILE_VERSION = 48;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /

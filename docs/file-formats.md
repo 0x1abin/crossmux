@@ -95,13 +95,12 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 46 / 47
+### Versions 48 / 49
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **47**; Latin builds use **46**. The byte layout is identical between
-> flavors; only
-> the word-stream contents differ (per-character CJK tokenization), so caches are
-> not reusable across flavors.
+> currently **49**; Latin builds use **48**. The byte layout is identical between
+> flavors, but the same built-in font IDs resolve to different font data and
+> metrics, so pagination caches are not reusable across firmware flavors.
 >
 > Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37
 > invalidated cached word positions after Arabic contextual shaping began measuring
@@ -113,15 +112,21 @@ if (parsedSize != fileSize) {
 > Versions 44/45 invalidate pagination after closed HTML tags began splitting
 > adjacent text blocks. Versions 46/47 keep the byte layout unchanged but
 > invalidate pagination because oversized tokens now wrap at UTF-8 boundaries
-> without inserting synthetic hyphens. The counters remain
-> distinct and above every previously shipped value so a firmware-flavor swap
-> cannot read the other flavor's stale cache. `lib/Epub/Epub/Section.cpp` is the
-> source of truth.
+> without inserting synthetic hyphens. Versions 48/49 invalidate pagination
+> because source whitespace now controls CJK gaps, ruby boundaries retain inline
+> continuation, and `<br>` no longer re-applies container margins. The counters
+> remain distinct and above every previously shipped value so a firmware-flavor
+> swap cannot read the other flavor's stale cache.
+> `lib/Epub/Epub/Section.cpp` is the source of truth.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
 
+Version 30 is binary-identical to version 29. The version was bumped because
+Arabic contextual shaping changed text measurement (`getTextAdvanceX` now
+measures the shaped visual text), so word positions cached by v29 no longer
+match what `drawText` renders.
 Version 28 introduced serialized word style bits for underline, strikethrough,
 superscript, and subscript. The format also includes:
 
@@ -148,7 +153,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 46
+#define EXPECTED_VERSION 48
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
