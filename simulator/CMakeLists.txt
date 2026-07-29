@@ -132,8 +132,9 @@ endif()
 # Real HAL .cpp is replaced by simulator/hal/.
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/hal/Hal.*\\.cpp$")
 
-# Network / OTA / EPUB framebuffer decoders use APIs that remain outside the
-# simulator scope. Their public symbols are stubbed in missing_symbols.cpp.
+# Network / OTA and PNG framebuffer decoding use APIs that remain outside the
+# simulator scope. Native builds keep the existing JPEGDEC-backed framebuffer
+# decoder so AirPage exercises the same path as firmware.
 
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/network/")
 # ...but keep the real HttpDownloader for applications such as AirPage. WeRead's
@@ -149,9 +150,11 @@ list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderSettingsActivity")
 list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "KOReaderSyncActivity")
 
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX
-     "lib/Epub/Epub/converters/(ImageDecoderFactory|ImageToFramebufferDecoder|JpegToFramebufferConverter|PngToFramebufferConverter)\\.cpp$")
+     "lib/Epub/Epub/converters/(ImageDecoderFactory|PngToFramebufferConverter)\\.cpp$")
 list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/Serialization/ObfuscationUtils")
 if(EMSCRIPTEN)
+    list(FILTER CROSSPOINT_LIB EXCLUDE REGEX
+         "lib/Epub/Epub/converters/(ImageToFramebufferDecoder|JpegToFramebufferConverter)\\.cpp$")
     list(FILTER CROSSPOINT_LIB EXCLUDE REGEX "lib/(JpegToBmpConverter|PngToBmpConverter)/")
 else()
     list(APPEND CROSSPOINT_LIB ${jpegdec_SOURCE_DIR}/src/JPEGDEC.cpp)

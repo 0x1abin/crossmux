@@ -1,19 +1,21 @@
 #include "AirPageActivity.h"
 
 #include <Arduino.h>
-#include <Bitmap.h>
 #include <GfxRenderer.h>
-#include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <WiFi.h>
-#include <esp_wifi.h>
+#include <Memory.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <string>
+#include <utility>
 
 #include "AirPageDeviceId.h"
-#include "WifiCredentialStore.h"
+#include "AirPageImageRenderer.h"
+#include "AirPageWallpaper.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
@@ -28,351 +30,672 @@ constexpr char kAirPageBase[] =
     "airpage.crossmux.com";
 #endif
 
-// Topic convention is shared with the cloud companion and must stay in sync:
-// airpage/device/<deviceId>/refresh.
-constexpr char kMqttHost[] = "mqtt-cn.uipcat.com";
-constexpr uint16_t kMqttPort = 1883;
-constexpr uint32_t kReconnectMs = 5000u;
-
-constexpr char kCacheDir[] = "/.crosspoint/airpage";
-constexpr char kImagePath[] = "/.crosspoint/airpage/latest.bmp";
-constexpr uint32_t kWifiConnectTimeoutMs = 15000u;
-
-constexpr uint8_t kMenuRows = 2;
-constexpr StrId kMenuRowIds[kMenuRows] = {StrId::STR_AIRPAGE_MODE_MANUAL, StrId::STR_AIRPAGE_MODE_REALTIME};
-
-// PubSubClient invokes this from mqtt_.loop() on the main task, so one flag is
-// sufficient for the single foreground AirPageActivity instance.
-volatile bool s_refreshFromPush = false;
-
-void onMqttMessage(char* /*topic*/, uint8_t* /*payload*/, unsigned int /*len*/) { s_refreshFromPush = true; }
-
-std::string refreshTopic() { return std::string("airpage/device/") + airpage::deviceId() + "/refresh"; }
-
 }  // namespace
 
 void AirPageActivity::onEnter() {
   Activity::onEnter();
-  view_ = View::Qr;
+
   phase_ = Phase::Idle;
-  pendingError_ = false;
-  haveCachedImage_ = Storage.exists(kImagePath);
-  menuOpen_ = false;
-  menuSel_ = 0;
-  mqttState_ = MqttState::Off;
-  s_refreshFromPush = false;
-  mqtt_.setServer(kMqttHost, kMqttPort);
-  mqtt_.setCallback(&onMqttMessage);
-  realtimeMode_ = airpage::loadRealtimeMode();
-  LOG_DBG("AIRP", "onEnter free=%u largest=%u id=%s cached=%d realtime=%d",
-          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
-          airpage::deviceId().c_str(), haveCachedImage_ ? 1 : 0, realtimeMode_ ? 1 : 0);
-  if (realtimeMode_) enterLiveMode();
+  screen_ = Screen::Qr;
+  notice_ = Notice::None;
+  wallpaperResult_ = WallpaperResult::None;
+  imageDisplayResult_.store(ImageDisplayResult::None, std::memory_order_relaxed);
+  selectedImage_ = {};
+  imageNeedsDisplay_ = true;
+  waitForInputRelease_ = false;
+  displayedScreenWidth_ = 0;
+  displayedScreenHeight_ = 0;
+  settingsSelection_ = 0;
+  historySelection_ = 0;
+  airpage::AirPageImageRenderer::resetSessionFailures();
+
+  switch (imageStore_.initialize()) {
+    case airpage::AirPageImageStore::InitializationResult::Empty:
+      notice_ = Notice::NoImage;
+      break;
+    case airpage::AirPageImageStore::InitializationResult::Ready:
+      notice_ = Notice::None;
+      break;
+    case airpage::AirPageImageStore::InitializationResult::Invalid:
+      notice_ = Notice::InvalidImage;
+      break;
+  }
+  autoSleepWallpaper_ = airpage::loadAutoSleepWallpaper();
+  airpage::AirPageWallpaper::recoverInterruptedTransaction();
+
+  const std::string& deviceId = airpage::deviceId();
+  uploadUrl_.reserve(64 + deviceId.size());
+  uploadUrl_ = "https://";
+  uploadUrl_ += kAirPageBase;
+  uploadUrl_ += "/?id=";
+  uploadUrl_ += deviceId;
+  uploadUrl_ += "&type=x4";
+
+  downloadUrl_.reserve(64 + deviceId.size());
+  downloadUrl_ = "https://";
+  downloadUrl_ += kAirPageBase;
+  downloadUrl_ += "/api/device/";
+  downloadUrl_ += deviceId;
+  downloadUrl_ += "/latest.bmp";
+
+  applyConnectionEvent(connection_.begin(airpage::loadRealtimeMode()));
+  LOG_DBG("AIRP", "onEnter free=%u largest=%u id=%s cached=%d realtime=%d", static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMaxAllocHeap()), deviceId.c_str(), imageStore_.hasImage() ? 1 : 0,
+          connection_.realtime() ? 1 : 0);
   requestUpdate();
 }
 
 void AirPageActivity::onExit() {
-  if (mqtt_.connected()) mqtt_.disconnect();
-  mqttState_ = MqttState::Off;
-  teardownWifi();
+  connection_.stop();
+  airpage::AirPageImageRenderer::releaseSessionResources();
   LOG_DBG("AIRP", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()));
   Activity::onExit();
 }
 
+bool AirPageActivity::preventAutoSleep() {
+  return phase_ != Phase::Idle || connection_.preventsAutoSleep();
+}
+
+bool AirPageActivity::processImageDisplayResult() {
+  const ImageDisplayResult result = imageDisplayResult_.exchange(ImageDisplayResult::None, std::memory_order_acquire);
+  switch (result) {
+    case ImageDisplayResult::None:
+      return false;
+
+    case ImageDisplayResult::Success: {
+      const bool newlyDownloaded = selectedImage_.current && imageStore_.hasPendingDownload();
+      if (newlyDownloaded) {
+        imageStore_.commitDisplayedDownload();
+        imageStore_.selectCurrent(selectedImage_);
+        if (autoSleepWallpaper_ && !airpage::AirPageWallpaper::install(selectedImage_)) {
+          notice_ = Notice::WallpaperFailed;
+          wallpaperResult_ = WallpaperResult::Failed;
+          requestUpdate();
+        }
+      }
+      return true;
+    }
+
+    case ImageDisplayResult::Failure:
+      airpage::AirPageImageRenderer::resetSessionFailures();
+      switch (imageStore_.rejectDisplayedImage(selectedImage_)) {
+        case airpage::AirPageImageStore::RejectResult::CurrentRestored:
+        case airpage::AirPageImageStore::RejectResult::CurrentInvalid:
+          screen_ = Screen::Qr;
+          break;
+        case airpage::AirPageImageStore::RejectResult::HistoryInvalid:
+          if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
+            historySelection_ =
+                imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
+          }
+          screen_ = Screen::History;
+          break;
+      }
+      notice_ = Notice::InvalidImage;
+      imageNeedsDisplay_ = true;
+      requestUpdate();
+      return true;
+  }
+  return false;
+}
+
+void AirPageActivity::applyConnectionEvent(const airpage::AirPageConnection::Event event) {
+  switch (event) {
+    case airpage::AirPageConnection::Event::None:
+      return;
+    case airpage::AirPageConnection::Event::StateChanged:
+      notice_ = Notice::None;
+      break;
+    case airpage::AirPageConnection::Event::WifiRequired:
+      notice_ = Notice::WifiRequired;
+      screen_ = Screen::Qr;
+      break;
+    case airpage::AirPageConnection::Event::WifiFailed:
+      notice_ = Notice::WifiFailed;
+      screen_ = Screen::Qr;
+      break;
+    case airpage::AirPageConnection::Event::RealtimeRetrying:
+      notice_ = Notice::RealtimeRetrying;
+      screen_ = Screen::Qr;
+      break;
+    case airpage::AirPageConnection::Event::RealtimePaused:
+      notice_ = Notice::RealtimePaused;
+      screen_ = Screen::Qr;
+      break;
+    case airpage::AirPageConnection::Event::PushRequested:
+      queueFetch();
+      return;
+  }
+  requestUpdate();
+}
+
+void AirPageActivity::clearConnectionNotice() {
+  switch (notice_) {
+    case Notice::WifiRequired:
+    case Notice::WifiFailed:
+    case Notice::RealtimeRetrying:
+    case Notice::RealtimePaused:
+      notice_ = imageStore_.hasImage() ? Notice::None : Notice::NoImage;
+      break;
+    case Notice::None:
+    case Notice::NoImage:
+    case Notice::InvalidImage:
+    case Notice::DownloadFailed:
+    case Notice::SettingsSaveFailed:
+    case Notice::WallpaperFailed:
+      break;
+  }
+}
+
 void AirPageActivity::loop() {
-  if (menuOpen_) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      menuOpen_ = false;
-      requestUpdate();
-      return;
+  if (processImageDisplayResult()) return;
+  if (consumeInputReleaseBarrier()) return;
+
+  switch (screen_) {
+    case Screen::Qr:
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        activityManager.goToApps();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        openSettings();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+        openHistory();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+        handleRefresh();
+        return;
+      }
+      break;
+
+    case Screen::Settings: {
+      if (mappedInput.wasAnyReleased() && notice_ == Notice::SettingsSaveFailed) notice_ = Notice::None;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        screen_ = Screen::Qr;
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+        settingsSelection_ = (settingsSelection_ + kSettingsRows - 1) % kSettingsRows;
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+        settingsSelection_ = (settingsSelection_ + 1) % kSettingsRows;
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        applySettingsSelection();
+        return;
+      }
+
+      const Rect content = contentViewport();
+      switch (handleListTouch(settingsSelection_, kSettingsRows, content.y, content.height, false)) {
+        case ListTouchResult::Activated:
+          applySettingsSelection();
+          return;
+        case ListTouchResult::Consumed:
+          return;
+        case ListTouchResult::None:
+          break;
+      }
+      break;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
-      menuSel_ = static_cast<uint8_t>((menuSel_ + kMenuRows - 1) % kMenuRows);
-      requestUpdate();
-      return;
+
+    case Screen::History: {
+      if (mappedInput.wasAnyReleased() && notice_ == Notice::InvalidImage) notice_ = Notice::None;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        screen_ = Screen::Qr;
+        requestUpdate();
+        return;
+      }
+      const size_t historyCount = imageStore_.historyCount();
+      if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+        historySelection_ =
+            (historySelection_ + static_cast<int>(historyCount) - 1) % static_cast<int>(historyCount);
+        requestUpdate();
+        return;
+      }
+      if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+        historySelection_ = (historySelection_ + 1) % static_cast<int>(historyCount);
+        requestUpdate();
+        return;
+      }
+      if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        openSelectedHistoryImage();
+        return;
+      }
+
+      const Rect content = contentViewport();
+      switch (
+          handleListTouch(historySelection_, static_cast<int>(historyCount), content.y, content.height, true)) {
+        case ListTouchResult::Activated:
+          openSelectedHistoryImage();
+          return;
+        case ListTouchResult::Consumed:
+          return;
+        case ListTouchResult::None:
+          break;
+      }
+      break;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
-      menuSel_ = static_cast<uint8_t>((menuSel_ + 1) % kMenuRows);
-      requestUpdate();
-      return;
-    }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      applyMenuSelection();
-    }
-    return;
+
+    case Screen::Image:
+      if (mappedInput.wasAnyReleased()) wallpaperResult_ = WallpaperResult::None;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        screen_ = Screen::Qr;
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        openWallpaperConfirmation();
+        return;
+      }
+      break;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    activityManager.goToApps();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
-    toggleView();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
-    requestFetch();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    openModeMenu();
-    return;
-  }
-
-  if (phase_ == Phase::Requested) {
-    // The requested render paints the status before this blocking fetch.
+  if (phase_ == Phase::FetchRequested) {
     phase_ = Phase::Fetching;
     doFetch();
     phase_ = Phase::Idle;
     requestUpdate();
     return;
   }
-
-  if (realtimeMode_) pumpMqtt();
-}
-
-void AirPageActivity::toggleView() {
-  if (phase_ != Phase::Idle) return;
-  switch (view_) {
-    case View::Qr:
-      if (!haveCachedImage_) return;
-      view_ = View::Image;
-      break;
-    case View::Image:
-      view_ = View::Qr;
-      break;
-  }
-  pendingError_ = false;
-  requestUpdate();
-}
-
-void AirPageActivity::openModeMenu() {
-  if (phase_ != Phase::Idle) return;
-  menuOpen_ = true;
-  menuSel_ = realtimeMode_ ? 1 : 0;
-  requestUpdate();
-}
-
-void AirPageActivity::applyMenuSelection() {
-  const bool wantRealtime = (menuSel_ == 1);
-  menuOpen_ = false;
-  if (wantRealtime != realtimeMode_) {
-    airpage::saveRealtimeMode(wantRealtime);
-    if (wantRealtime) {
-      enterLiveMode();
-    } else {
-      exitLiveMode();
-    }
-  }
-  requestUpdate();
-}
-
-void AirPageActivity::requestFetch() {
-  if (phase_ != Phase::Idle || menuOpen_) return;
-  phase_ = Phase::Requested;
-  requestUpdate();
-}
-
-void AirPageActivity::enterLiveMode() {
-  realtimeMode_ = true;
-  mqttState_ = MqttState::Connecting;
-  lastConnectAttemptMs_ = millis() - kReconnectMs;
-  view_ = haveCachedImage_ ? View::Image : View::Qr;
-  requestUpdate();
-}
-
-void AirPageActivity::exitLiveMode() {
-  if (mqtt_.connected()) mqtt_.disconnect();
-  mqttState_ = MqttState::Off;
-  realtimeMode_ = false;
-  teardownWifi();
-  requestUpdate();
-}
-
-bool AirPageActivity::connectBroker() {
-  const std::string clientId = std::string("x4-") + airpage::deviceId();
-  if (!mqtt_.connect(clientId.c_str())) {
-    LOG_ERR("AIRP", "MQTT connect failed (state=%d)", mqtt_.state());
-    return false;
-  }
-  const std::string topic = refreshTopic();
-  if (!mqtt_.subscribe(topic.c_str())) {
-    LOG_ERR("AIRP", "MQTT subscribe failed: %s", topic.c_str());
-    mqtt_.disconnect();
-    return false;
-  }
-  LOG_INF("AIRP", "MQTT online, subscribed %s", topic.c_str());
-  return true;
-}
-
-void AirPageActivity::pumpMqtt() {
-  if (!mqtt_.connected()) {
-    mqttState_ = MqttState::Connecting;
-    const uint32_t now = millis();
-    if (now - lastConnectAttemptMs_ < kReconnectMs) return;
-    lastConnectAttemptMs_ = now;
-    if (WiFi.status() != WL_CONNECTED) {
-      startWifiAssociation();
-      return;
-    }
-    if (!connectBroker()) return;
-    mqttState_ = MqttState::Online;
+  if (phase_ == Phase::WallpaperRequested) {
+    phase_ = Phase::WallpaperWriting;
+    wallpaperResult_ = airpage::AirPageWallpaper::install(selectedImage_) ? WallpaperResult::Saved
+                                                                          : WallpaperResult::Failed;
+    phase_ = Phase::Idle;
+    imageNeedsDisplay_ = true;
     requestUpdate();
+    return;
   }
 
-  mqtt_.loop();
-  if (s_refreshFromPush) {
-    s_refreshFromPush = false;
-    LOG_INF("AIRP", "push received -> fetch");
-    requestFetch();
-  }
+  applyConnectionEvent(connection_.pump(phase_ == Phase::Idle && screen_ != Screen::Settings));
 }
 
-bool AirPageActivity::startWifiAssociation() {
-  std::string ssid;
-  std::string pass;
-  if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
-  const std::string& last = WIFI_STORE.getLastConnectedSsid();
-  if (!last.empty()) {
-    const WifiCredential* cred = WIFI_STORE.findCredential(last);
-    if (cred) {
-      ssid = cred->ssid;
-      pass = cred->password;
+void AirPageActivity::openSettings() {
+  if (phase_ != Phase::Idle) return;
+  screen_ = Screen::Settings;
+  settingsSelection_ = 0;
+  requestUpdate();
+}
+
+void AirPageActivity::applySettingsSelection() {
+  switch (static_cast<SettingRow>(settingsSelection_)) {
+    case SettingRow::Mode: {
+      const bool enabled = !connection_.realtime();
+      if (!airpage::saveRealtimeMode(enabled)) {
+        notice_ = Notice::SettingsSaveFailed;
+        requestUpdate();
+        return;
+      }
+      const auto event = connection_.setRealtime(enabled);
+      if (enabled) {
+        applyConnectionEvent(event);
+      } else {
+        clearConnectionNotice();
+        requestUpdate();
+      }
+      break;
     }
+    case SettingRow::AutoWallpaper: {
+      const bool enabled = !autoSleepWallpaper_;
+      if (!airpage::saveAutoSleepWallpaper(enabled)) {
+        notice_ = Notice::SettingsSaveFailed;
+        requestUpdate();
+        return;
+      }
+      autoSleepWallpaper_ = enabled;
+      requestUpdate();
+      break;
+    }
+    case SettingRow::Count:
+      return;
   }
-  if (ssid.empty()) {
-    LOG_ERR("AIRP", "No saved WiFi credential");
-    return false;
-  }
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true, true);
-  delay(100);
-  if (pass.empty()) {
-    WiFi.begin(ssid.c_str());
-  } else {
-    WiFi.begin(ssid.c_str(), pass.c_str());
-  }
-  weBroughtWifiUp_ = true;
-  return true;
 }
 
-bool AirPageActivity::ensureWifi() {
-  if (WiFi.status() == WL_CONNECTED) return true;
-  if (!startWifiAssociation()) return false;
-
-  const uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - start) < kWifiConnectTimeoutMs) {
-    delay(200);
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    LOG_ERR("AIRP", "WiFi connect failed");
-    return false;
-  }
-  return true;
+void AirPageActivity::openHistory() {
+  if (phase_ != Phase::Idle) return;
+  historySelection_ = 0;
+  screen_ = Screen::History;
+  requestUpdate();
 }
 
-void AirPageActivity::teardownWifi() {
-  // Do not tear down a connection established by another activity.
-  if (!weBroughtWifiUp_) return;
-  WiFi.disconnect(false);
-  delay(100);
-  WiFi.mode(WIFI_OFF);
-  esp_wifi_deinit();
-  weBroughtWifiUp_ = false;
+void AirPageActivity::openSelectedHistoryImage() {
+  if (historySelection_ < 0 ||
+      !imageStore_.selectHistory(static_cast<size_t>(historySelection_), selectedImage_)) {
+    if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
+      historySelection_ =
+          imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
+    }
+    notice_ = Notice::InvalidImage;
+    requestUpdate();
+    return;
+  }
+  wallpaperResult_ = WallpaperResult::None;
+  screen_ = Screen::Image;
+  imageNeedsDisplay_ = true;
+  requestUpdate();
+}
+
+void AirPageActivity::openWallpaperConfirmation() {
+  if (phase_ != Phase::Idle || selectedImage_.path[0] == '\0') return;
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(
+      renderer, mappedInput, tr(STR_AIRPAGE_SET_WALLPAPER_TITLE), tr(STR_AIRPAGE_SET_WALLPAPER_CONFIRM));
+  if (!confirmation) {
+    LOG_ERR("AIRP", "OOM: ConfirmationActivity (%u bytes)", static_cast<unsigned>(sizeof(ConfirmationActivity)));
+    wallpaperResult_ = WallpaperResult::Failed;
+    imageNeedsDisplay_ = true;
+    requestUpdate();
+    return;
+  }
+
+  imageNeedsDisplay_ = true;
+  startActivityForResult(std::move(confirmation),
+                         [this](const ActivityResult& result) { handleWallpaperResult(result); });
+}
+
+void AirPageActivity::handleWallpaperResult(const ActivityResult& result) {
+  waitForInputRelease_ = true;
+  imageNeedsDisplay_ = true;
+  if (result.isCancelled) {
+    requestUpdate();
+    return;
+  }
+
+  wallpaperResult_ = WallpaperResult::None;
+  phase_ = Phase::WallpaperRequested;
+  requestUpdate();
+}
+
+void AirPageActivity::handleRefresh() {
+  if (phase_ != Phase::Idle) return;
+  if (!connection_.wifiConnected()) {
+    openWifiSelection();
+    return;
+  }
+
+  connection_.prepareRefresh();
+  queueFetch();
+}
+
+void AirPageActivity::queueFetch() {
+  if (phase_ != Phase::Idle || screen_ == Screen::Settings) return;
+  phase_ = Phase::FetchRequested;
+  requestUpdate();
+}
+
+void AirPageActivity::openWifiSelection() {
+  auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, true);
+  if (!wifi) {
+    LOG_ERR("AIRP", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
+    notice_ = Notice::WifiFailed;
+    screen_ = Screen::Qr;
+    requestUpdate();
+    return;
+  }
+
+  imageNeedsDisplay_ = true;
+  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) { handleWifiResult(result); });
+}
+
+void AirPageActivity::handleWifiResult(const ActivityResult& result) {
+  waitForInputRelease_ = true;
+  imageNeedsDisplay_ = true;
+
+  const bool connected = !result.isCancelled && connection_.wifiConnected();
+  const auto event = connection_.acceptWifiSelection(connected);
+  if (!connected) {
+    if (connection_.realtime() || !imageStore_.hasImage()) applyConnectionEvent(event);
+    requestUpdate();
+    return;
+  }
+
+  notice_ = Notice::None;
+  applyConnectionEvent(event);
+  queueFetch();
+}
+
+bool AirPageActivity::consumeInputReleaseBarrier() {
+  if (!waitForInputRelease_) return false;
+  const bool anyPressed = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                          mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavNext);
+  if (!anyPressed) waitForInputRelease_ = false;
+  return true;
 }
 
 void AirPageActivity::doFetch() {
-  pendingError_ = false;
-  if (!ensureWifi()) {
-    pendingError_ = true;
-    view_ = View::Qr;
+  if (!connection_.wifiConnected()) {
+    applyConnectionEvent(connection_.handleWifiFailure());
     return;
   }
 
-  Storage.ensureDirectoryExists(kCacheDir);
-  const std::string url =
-      std::string("https://") + kAirPageBase + "/api/device/" + airpage::deviceId() + "/latest.bmp";
-  const HttpDownloader::DownloadError err = HttpDownloader::downloadToFile(url, kImagePath);
-  if (err != HttpDownloader::OK) {
-    LOG_ERR("AIRP", "Download failed: %d", static_cast<int>(err));
-    pendingError_ = true;
-    view_ = View::Qr;
+  if (!imageStore_.ensureDirectories()) {
+    notice_ = Notice::DownloadFailed;
+    screen_ = Screen::Qr;
     return;
   }
-  LOG_INF("AIRP", "Fetched latest image");
-  haveCachedImage_ = true;
-  view_ = View::Image;
+
+  const HttpDownloader::DownloadError error =
+      HttpDownloader::downloadToFile(downloadUrl_, airpage::AirPageImageStore::kDownloadPartPath);
+  if (error != HttpDownloader::OK) {
+    LOG_ERR("AIRP", "Download failed: %d", static_cast<int>(error));
+    notice_ = Notice::DownloadFailed;
+    screen_ = Screen::Qr;
+    return;
+  }
+
+  switch (imageStore_.stageDownloadedImage()) {
+    case airpage::AirPageImageStore::StageResult::Failed:
+      notice_ = Notice::DownloadFailed;
+      screen_ = Screen::Qr;
+      return;
+
+    case airpage::AirPageImageStore::StageResult::Unchanged:
+      airpage::AirPageImageRenderer::resetSessionFailures();
+      imageStore_.selectCurrent(selectedImage_);
+      screen_ = Screen::Image;
+      imageNeedsDisplay_ = true;
+      notice_ = Notice::None;
+      LOG_INF("AIRP", "Fetched image is unchanged");
+      return;
+
+    case airpage::AirPageImageStore::StageResult::PendingDisplay:
+      airpage::AirPageImageRenderer::resetSessionFailures();
+      imageStore_.selectCurrent(selectedImage_);
+      imageNeedsDisplay_ = true;
+      notice_ = Notice::None;
+      screen_ = Screen::Image;
+      LOG_INF("AIRP", "Fetched latest image; awaiting display validation");
+      return;
+  }
+}
+
+Rect AirPageActivity::contentViewport() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, true);
+  const int contentTop = safeArea.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight = safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.verticalSpacing * 2;
+  return Rect{safeArea.x, contentTop, safeArea.width, contentHeight};
 }
 
 void AirPageActivity::render(RenderLock&&) {
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
-  const Rect fullScreen{0, 0, screenWidth, screenHeight};
+  const Rect fullScreen{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
 
-  renderer.clearScreen();
-  if (!menuOpen_ && phase_ == Phase::Idle && view_ == View::Image && renderImage(fullScreen)) {
-    renderer.displayBuffer();
+  if (screen_ == Screen::Image && phase_ == Phase::Idle) {
+    const bool screenSizeChanged =
+        displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
+    if (imageNeedsDisplay_ || screenSizeChanged) {
+      const bool rendered = airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_);
+      if (rendered) {
+        imageNeedsDisplay_ = false;
+        displayedScreenWidth_ = fullScreen.width;
+        displayedScreenHeight_ = fullScreen.height;
+        if (wallpaperResult_ != WallpaperResult::None) {
+          const char* message = wallpaperResult_ == WallpaperResult::Saved ? tr(STR_AIRPAGE_WALLPAPER_SAVED)
+                                                                           : tr(STR_AIRPAGE_WALLPAPER_FAILED);
+          GUI.drawPopup(renderer, message);
+          renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+        }
+        imageDisplayResult_.store(ImageDisplayResult::Success, std::memory_order_release);
+      } else {
+        imageDisplayResult_.store(ImageDisplayResult::Failure, std::memory_order_release);
+      }
+      return;
+    }
+
+    if (wallpaperResult_ != WallpaperResult::None) {
+      const char* message = wallpaperResult_ == WallpaperResult::Saved ? tr(STR_AIRPAGE_WALLPAPER_SAVED)
+                                                                       : tr(STR_AIRPAGE_WALLPAPER_FAILED);
+      GUI.drawPopup(renderer, message);
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    }
     return;
   }
 
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, true);
-  const char* title = menuOpen_ ? tr(STR_AIRPAGE_MENU_TITLE) : tr(STR_AIRPAGE_TITLE);
   GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
-                 title);
+                 screenTitle());
 
-  const int contentTop = safeArea.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight =
-      safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.verticalSpacing * 2;
-  const Rect content{safeArea.x, contentTop, safeArea.width, contentHeight};
-
-  if (menuOpen_) {
-    renderMenu(content);
-  } else if (phase_ != Phase::Idle) {
+  const Rect content = contentViewport();
+  if (phase_ != Phase::Idle) {
     renderStatus(content, tr(STR_AIRPAGE_LOADING));
-  } else if (view_ == View::Image) {
-    renderStatus(content, tr(STR_AIRPAGE_NO_IMAGE));
   } else {
-    renderQr(content);
+    switch (screen_) {
+      case Screen::Qr:
+        renderQr(content);
+        break;
+      case Screen::Settings:
+        renderSettings(content);
+        break;
+      case Screen::History:
+        renderHistory(content);
+        break;
+      case Screen::Image:
+        renderStatus(content, tr(STR_AIRPAGE_INVALID_IMAGE));
+        break;
+    }
   }
 
-  if (menuOpen_) {
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  } else {
-    const char* previous = "";
-    if (view_ == View::Image) {
-      previous = tr(STR_AIRPAGE_SHOW_QR);
-    } else if (haveCachedImage_) {
-      previous = tr(STR_AIRPAGE_SHOW_IMAGE);
+  switch (screen_) {
+    case Screen::Qr: {
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_AIRPAGE_SETTINGS_ACTION),
+                                                tr(STR_AIRPAGE_IMAGES_ACTION), refreshActionText());
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      if (notice_ == Notice::InvalidImage) GUI.drawPopup(renderer, noticeText());
+      break;
     }
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_AIRPAGE_MODE_ACTION), previous,
-                                              tr(STR_AIRPAGE_REFRESH));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    case Screen::Settings: {
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      if (notice_ == Notice::SettingsSaveFailed) GUI.drawPopup(renderer, noticeText());
+      break;
+    }
+    case Screen::History: {
+      const bool hasHistory = imageStore_.historyCount() != 0;
+      const auto labels =
+          mappedInput.mapLabels(tr(STR_BACK), hasHistory ? tr(STR_OPEN) : "", hasHistory ? tr(STR_DIR_UP) : "",
+                                hasHistory ? tr(STR_DIR_DOWN) : "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      break;
+    }
+    case Screen::Image:
+      break;
   }
 
   renderer.displayBuffer();
+  imageNeedsDisplay_ = true;
+  displayedScreenWidth_ = 0;
+  displayedScreenHeight_ = 0;
+}
+
+const char* AirPageActivity::noticeText() const {
+  switch (notice_) {
+    case Notice::None:
+      return tr(STR_AIRPAGE_QR_HINT);
+    case Notice::NoImage:
+      return tr(STR_AIRPAGE_NO_IMAGE);
+    case Notice::InvalidImage:
+      return tr(STR_AIRPAGE_INVALID_IMAGE);
+    case Notice::WifiRequired:
+      return tr(STR_AIRPAGE_WIFI_REQUIRED);
+    case Notice::WifiFailed:
+      return tr(STR_AIRPAGE_WIFI_FAILED);
+    case Notice::DownloadFailed:
+      return imageStore_.hasImage() ? tr(STR_AIRPAGE_FETCH_FAILED_KEEPING_IMAGE) : tr(STR_AIRPAGE_FETCH_FAILED);
+    case Notice::RealtimeRetrying:
+      return tr(STR_AIRPAGE_REALTIME_RETRYING);
+    case Notice::RealtimePaused:
+      return tr(STR_AIRPAGE_REALTIME_PAUSED);
+    case Notice::SettingsSaveFailed:
+      return tr(STR_AIRPAGE_SETTINGS_SAVE_FAILED);
+    case Notice::WallpaperFailed:
+      return tr(STR_AIRPAGE_WALLPAPER_FAILED);
+  }
+  return "";
+}
+
+const char* AirPageActivity::connectionText() const {
+  switch (connection_.state()) {
+    case airpage::AirPageConnection::State::Off:
+    case airpage::AirPageConnection::State::Backoff:
+    case airpage::AirPageConnection::State::Paused:
+      return "";
+    case airpage::AirPageConnection::State::WifiConnecting:
+      return tr(STR_AIRPAGE_WIFI_CONNECTING);
+    case airpage::AirPageConnection::State::WifiOnline:
+      return tr(STR_CONNECTED);
+    case airpage::AirPageConnection::State::BrokerConnecting:
+      return tr(STR_AIRPAGE_REALTIME_CONNECTING);
+    case airpage::AirPageConnection::State::Online:
+      return tr(STR_AIRPAGE_REALTIME_LIVE);
+  }
+  return "";
+}
+
+const char* AirPageActivity::refreshActionText() const {
+  switch (connection_.state()) {
+    case airpage::AirPageConnection::State::Paused:
+      return connection_.wifiConnected() ? tr(STR_RETRY) : tr(STR_CONNECT);
+    case airpage::AirPageConnection::State::Backoff:
+      return tr(STR_RETRY);
+    case airpage::AirPageConnection::State::Off:
+      return connection_.wifiConnected() ? tr(STR_AIRPAGE_REFRESH) : tr(STR_CONNECT);
+    case airpage::AirPageConnection::State::WifiConnecting:
+      return tr(STR_CONNECT);
+    case airpage::AirPageConnection::State::WifiOnline:
+    case airpage::AirPageConnection::State::BrokerConnecting:
+    case airpage::AirPageConnection::State::Online:
+      return tr(STR_AIRPAGE_REFRESH);
+  }
+  return tr(STR_AIRPAGE_REFRESH);
 }
 
 void AirPageActivity::renderQr(const Rect& viewport) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int reservedTextHeight = lineHeight * 2 + metrics.verticalSpacing * 2;
-  const int qrSize = std::max(1, std::min(viewport.width - metrics.contentSidePadding * 2,
-                                         viewport.height - reservedTextHeight));
+  const int qrSize =
+      std::max(1, std::min(viewport.width - metrics.contentSidePadding * 2, viewport.height - reservedTextHeight));
   const Rect qrBounds{viewport.x + (viewport.width - qrSize) / 2, viewport.y, qrSize, qrSize};
-  const std::string url = std::string("https://") + kAirPageBase + "/?id=" + airpage::deviceId() + "&type=x4";
-  QrUtils::drawQrCode(renderer, qrBounds, url);
+  QrUtils::drawQrCode(renderer, qrBounds, uploadUrl_);
 
   const int hintY = qrBounds.y + qrBounds.height + metrics.verticalSpacing;
-  const char* hint = pendingError_ ? tr(STR_AIRPAGE_FETCH_FAILED) : tr(STR_AIRPAGE_QR_HINT);
-  GUI.drawHelpText(renderer, Rect{viewport.x, hintY, viewport.width, lineHeight}, hint);
+  GUI.drawHelpText(renderer, Rect{viewport.x, hintY, viewport.width, lineHeight}, noticeText());
 
-  if (realtimeMode_) {
-    const char* state =
-        mqttState_ == MqttState::Online ? tr(STR_AIRPAGE_REALTIME_LIVE) : tr(STR_AIRPAGE_REALTIME_CONNECTING);
+  const char* state = connectionText();
+  if (state[0] != '\0') {
     GUI.drawHelpText(renderer,
                      Rect{viewport.x, hintY + lineHeight + metrics.verticalSpacing, viewport.width, lineHeight}, state);
   }
@@ -382,26 +705,59 @@ void AirPageActivity::renderStatus(const Rect& viewport, const char* msg) {
   UITheme::drawCenteredWrappedText(renderer, viewport, UI_12_FONT_ID, msg, 2);
 }
 
-void AirPageActivity::renderMenu(const Rect& viewport) {
+void AirPageActivity::renderSettings(const Rect& viewport) {
   GUI.drawList(
-      renderer, viewport, kMenuRows, menuSel_,
-      [](int index) { return std::string(I18N.get(kMenuRowIds[index])); }, nullptr, nullptr,
+      renderer, viewport, kSettingsRows, settingsSelection_,
+      [](int index) {
+        const StrId id = index == 0 ? StrId::STR_AIRPAGE_MODE_SETTING : StrId::STR_AIRPAGE_AUTO_WALLPAPER;
+        return std::string(I18N.get(id));
+      },
+      nullptr, nullptr,
       [this](int index) {
-        const bool active = (index == 1) == realtimeMode_;
-        return active ? std::string(tr(STR_SELECTED)) : std::string();
+        if (index == 0) {
+          const StrId id =
+              connection_.realtime() ? StrId::STR_AIRPAGE_MODE_REALTIME : StrId::STR_AIRPAGE_MODE_MANUAL;
+          return std::string(I18N.get(id));
+        }
+        const StrId id = autoSleepWallpaper_ ? StrId::STR_AIRPAGE_SETTING_ON : StrId::STR_AIRPAGE_SETTING_OFF;
+        return std::string(I18N.get(id));
       });
 }
 
-bool AirPageActivity::renderImage(const Rect& viewport) {
-  HalFile file;
-  if (!Storage.openFileForRead("AIRP", kImagePath, file)) return false;
-  Bitmap bitmap(file, /*dithering=*/false);
-  if (bitmap.parseHeaders() != BmpReaderError::Ok) return false;
+void AirPageActivity::renderHistory(const Rect& viewport) {
+  const size_t historyCount = imageStore_.historyCount();
+  if (historyCount == 0) {
+    renderStatus(viewport, tr(STR_AIRPAGE_NO_IMAGE));
+    return;
+  }
 
-  int x = viewport.x + (viewport.width - bitmap.getWidth()) / 2;
-  int y = viewport.y + (viewport.height - bitmap.getHeight()) / 2;
-  if (x < viewport.x) x = viewport.x;
-  if (y < viewport.y) y = viewport.y;
-  renderer.drawBitmap(bitmap, x, y, viewport.width, viewport.height, 0, 0);
-  return true;
+  GUI.drawList(
+      renderer, viewport, static_cast<int>(historyCount), historySelection_,
+      [this](int index) {
+        const auto& entry = imageStore_.historyEntry(static_cast<size_t>(index));
+        if (entry.current) return std::string(tr(STR_AIRPAGE_CURRENT_IMAGE));
+        char label[32];
+        snprintf(label, sizeof(label), "%s %d", tr(STR_AIRPAGE_IMAGE_LABEL), index + 1);
+        return std::string(label);
+      },
+      [this](int index) {
+        const airpage::ImageInfo& image = imageStore_.historyEntry(static_cast<size_t>(index)).image;
+        const char* format = image.format == airpage::ImageFormat::Jpeg ? "JPEG" : "BMP";
+        char subtitle[40];
+        snprintf(subtitle, sizeof(subtitle), "%s · %d×%d", format, image.width, image.height);
+        return std::string(subtitle);
+      });
+}
+
+const char* AirPageActivity::screenTitle() const {
+  switch (screen_) {
+    case Screen::Qr:
+    case Screen::Image:
+      return tr(STR_AIRPAGE_TITLE);
+    case Screen::Settings:
+      return tr(STR_AIRPAGE_SETTINGS_TITLE);
+    case Screen::History:
+      return tr(STR_AIRPAGE_HISTORY_TITLE);
+  }
+  return tr(STR_AIRPAGE_TITLE);
 }

@@ -20,6 +20,8 @@ class PubSubClient {
 
   PubSubClient& setServer(const char*, uint16_t) { return *this; }
   PubSubClient& setCallback(Callback) { return *this; }
+  PubSubClient& setSocketTimeout(uint16_t) { return *this; }
+  PubSubClient& setKeepAlive(uint16_t) { return *this; }
   bool connect(const char*) { return false; }
   bool connect(const char*, const char*, const char*) { return false; }
   bool connected() { return false; }

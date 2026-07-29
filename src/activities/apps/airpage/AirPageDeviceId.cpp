@@ -30,6 +30,7 @@ constexpr char kIdPath[] = "/.crosspoint/airpage_device_id";
 // image fetch); we ensure it here too so the toggle works before any fetch.
 constexpr char kModeDir[] = "/.crosspoint/airpage";
 constexpr char kModePath[] = "/.crosspoint/airpage/mode";
+constexpr char kAutoSleepWallpaperPath[] = "/.crosspoint/airpage/auto_sleep_wallpaper";
 
 // Generate a random id with esp_random(). Mask-and-reject (nanoid style): take the
 // low 6 bits (0..63) and discard 62/63, so every accepted value is uniform over
@@ -88,11 +89,27 @@ bool loadRealtimeMode() {
   return v.empty() || v[0] != '0';
 }
 
-void saveRealtimeMode(bool enabled) {
+bool saveRealtimeMode(bool enabled) {
   Storage.ensureDirectoryExists(kModeDir);
   if (!Storage.writeFile(kModePath, String(enabled ? "1" : "0"))) {
     LOG_ERR("AIRP", "realtime mode persist failed (SD?)");
+    return false;
   }
+  return true;
+}
+
+bool loadAutoSleepWallpaper() {
+  const std::string value(Storage.readFile(kAutoSleepWallpaperPath).c_str());
+  return !value.empty() && value[0] == '1';
+}
+
+bool saveAutoSleepWallpaper(const bool enabled) {
+  Storage.ensureDirectoryExists(kModeDir);
+  if (!Storage.writeFile(kAutoSleepWallpaperPath, String(enabled ? "1" : "0"))) {
+    LOG_ERR("AIRP", "auto sleep wallpaper persist failed (SD?)");
+    return false;
+  }
+  return true;
 }
 
 }  // namespace airpage

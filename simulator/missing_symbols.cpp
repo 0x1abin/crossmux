@@ -9,9 +9,9 @@
 // and class statics that other reachable code names.
 //
 // None of these stubs are intended to be called at runtime. If the user navigates to
-// a screen that needs one (a WiFi prompt, OTA, image rendering), the stub will
-// silently return failure/empty values — fine for the first-version simulator scope
-// (boot → home → file browse → EPUB text without images).
+// a screen that needs one (such as WiFi or OTA), the stub will silently return
+// failure/empty values. Native JPEG framebuffer decoding is the exception: it is
+// linked below so AirPage exercises the firmware image path.
 
 #include <HalStorage.h>  // HalFile (alias of HalFile)
 #include <Logging.h>
@@ -65,8 +65,24 @@ bool JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(HalFile&, Print&, int, 
 
 #include "Epub/converters/ImageDecoderFactory.h"
 
+#ifdef __EMSCRIPTEN__
 ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string&) { return nullptr; }
 bool ImageDecoderFactory::isFormatSupported(const std::string&) { return false; }
+#else
+#include "Epub/converters/JpegToFramebufferConverter.h"
+
+namespace {
+JpegToFramebufferConverter jpegFramebufferDecoder;
+}
+
+ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string& imagePath) {
+  return JpegToFramebufferConverter::supportsFormat(imagePath) ? &jpegFramebufferDecoder : nullptr;
+}
+
+bool ImageDecoderFactory::isFormatSupported(const std::string& imagePath) {
+  return JpegToFramebufferConverter::supportsFormat(imagePath);
+}
+#endif
 
 // =============================================================================
 // Obfuscation utils (lib/Serialization/ObfuscationUtils excluded — pulls esp_mac.h
