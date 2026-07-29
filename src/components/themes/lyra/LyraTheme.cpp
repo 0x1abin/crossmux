@@ -300,8 +300,7 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
   const int pageStartIndex = std::max(0, selectedIndex) / pageItems * pageItems;
   drawSideScrollBar(renderer, rect, itemCount, pageStartIndex, pageItems);
 
-  int contentWidth =
-      rect.width - (totalPages > 1 ? (metrics.scrollBarWidth + metrics.scrollBarRightOffset) : 1);
+  int contentWidth = rect.width - (totalPages > 1 ? (metrics.scrollBarWidth + metrics.scrollBarRightOffset) : 1);
   if (selectedIndex >= 0) {
     renderer.fillRoundedRect(rect.x + metrics.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
                              contentWidth - metrics.contentSidePadding * 2, rowHeight, cornerRadius,
@@ -364,9 +363,8 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
 
     if (!valueText.empty()) {
       if (selected && highlightValue && !invertSelectedRows) {
-        renderer.fillRoundedRect(
-            rect.x + contentWidth - metrics.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
-            valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
+        renderer.fillRoundedRect(rect.x + contentWidth - metrics.contentSidePadding - hPaddingInSelection - valueWidth,
+                                 itemY, valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
       }
 
       const int valueX = rect.x + contentWidth - metrics.contentSidePadding - valueWidth;

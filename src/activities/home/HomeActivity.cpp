@@ -344,17 +344,15 @@ void HomeActivity::loop() {
   const int renderedMenuSelection =
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size();
   int menuRow = -1;
-  MappedInputManager::RowTouch menuTouch = MappedInputManager::RowTouch::None;
+  MappedInputManager::RowTouch menuTouch;
   if (isCarousel) {
     const int menuBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
     const int columnWidth = renderer.getScreenWidth() / renderedMenuCount;
-    menuTouch =
-        mappedInput.colTouch(menuRow, 0, columnWidth, renderedMenuCount, menuBottom - metrics.menuRowHeight, menuBottom,
-                             columnWidth);
+    menuTouch = mappedInput.colTouch(menuRow, 0, columnWidth, renderedMenuCount, menuBottom - metrics.menuRowHeight,
+                                     menuBottom, columnWidth);
   } else {
-    menuTouch =
-        mappedInput.rowTouch(menuRow, menuTop, metrics.menuRowHeight + metrics.menuSpacing, renderedMenuCount, 0,
-                             INT32_MAX, metrics.menuRowHeight);
+    menuTouch = mappedInput.rowTouch(menuRow, menuTop, metrics.menuRowHeight + metrics.menuSpacing, renderedMenuCount,
+                                     0, INT32_MAX, metrics.menuRowHeight);
   }
   if (menuTouch != MappedInputManager::RowTouch::None) {
     const int touchedIndex =
@@ -436,9 +434,8 @@ void HomeActivity::render(RenderLock&&) {
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
   const auto labels =
-      isCarousel
-          ? mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
-          : mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+      isCarousel ? mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
+                 : mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

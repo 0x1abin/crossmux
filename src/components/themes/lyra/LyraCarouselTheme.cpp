@@ -122,9 +122,8 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
       textY += renderer.getLineHeight(UI_10_FONT_ID) + 2;
     }
 
-    const std::string title =
-        renderer.truncatedText(UI_12_FONT_ID, recentBooks[centerIndex].title.c_str(), kCenterCoverWidth,
-                               EpdFontFamily::BOLD);
+    const std::string title = renderer.truncatedText(UI_12_FONT_ID, recentBooks[centerIndex].title.c_str(),
+                                                     kCenterCoverWidth, EpdFontFamily::BOLD);
     const int titleWidth = renderer.getTextWidth(UI_12_FONT_ID, title.c_str(), EpdFontFamily::BOLD);
     renderer.drawText(UI_12_FONT_ID, centerX + (kCenterCoverWidth - titleWidth) / 2, textY, title.c_str(), true,
                       EpdFontFamily::BOLD);
@@ -146,8 +145,7 @@ void LyraCarouselTheme::drawHomeMenu(GfxRenderer& renderer, Rect rect, int butto
 
   const int tileHeight = kMenuIconPadding * 2 + kMenuIconSize;
   const int tileWidth = renderer.getScreenWidth() / buttonCount;
-  const int rowY =
-      renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight - tileHeight;
+  const int rowY = renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight - tileHeight;
 
   for (int i = 0; i < buttonCount; ++i) {
     const int tileX = i * tileWidth;
