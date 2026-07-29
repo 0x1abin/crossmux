@@ -69,6 +69,14 @@ class ProgressMapper {
                                          int totalPagesInCurrentSpine = 0, int fallbackTotalPages = 0);
 
   /**
+   * Map a known spine and its intra-spine progress directly to a rendered page.
+   */
+  static CrossPointPosition fromSpineProgress(const std::shared_ptr<Epub>& epub, int spineIndex,
+                                              float intraSpineProgress, GfxRenderer& renderer,
+                                              int currentSpineIndex = -1, int totalPagesInCurrentSpine = 0,
+                                              int fallbackTotalPages = 0);
+
+  /**
    * Convert a rich CrossPoint position (downloaded from a crosspoint-sync
    * server) directly to a CrossPoint position, without XPath approximation.
    * When the local layout matches the uploader's (same spine page count) the
@@ -83,6 +91,10 @@ class ProgressMapper {
                                                             const KOReaderRichPosition& rich, GfxRenderer& renderer);
 
  private:
+  static CrossPointPosition toCrossPointImpl(const std::shared_ptr<Epub>& epub, const SavedProgressPosition& savedPos,
+                                             GfxRenderer& renderer, int currentSpineIndex, int totalPagesInCurrentSpine,
+                                             int fallbackTotalPages, int exactSpineIndex, float exactIntraSpine);
+
   /**
    * Generate a fallback XPath by streaming the spine item's XHTML and resolving
    * a paragraph/text position from intra-spine progress.

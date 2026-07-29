@@ -12,6 +12,7 @@
 #include <WiFi.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <utility>
@@ -34,13 +35,8 @@ static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead progress work
 
 WeReadProgressSyncActivity::WeReadProgressSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                        std::string epubPath, const char* bookId,
-                                                       const float localFraction, const int currentSpineIndex,
-                                                       const int currentPageCount)
-    : Activity("WeReadProgressSync", renderer, mappedInput),
-      epubPath_(std::move(epubPath)),
-      localFraction_(std::max(0.0f, std::min(1.0f, localFraction))),
-      currentSpineIndex_(currentSpineIndex),
-      currentPageCount_(currentPageCount) {
+                                                       WeReadClient::ProgressSyncInput input)
+    : Activity("WeReadProgressSync", renderer, mappedInput), epubPath_(std::move(epubPath)), input_(input) {
   if (bookId) strncpy(bookId_, bookId, sizeof(bookId_) - 1);
 }
 
@@ -110,9 +106,7 @@ void WeReadProgressSyncActivity::startSync() {
     requestUpdate();
     return;
   }
-  WeReadClient::ProgressSyncInput input;
-  input.localFraction = localFraction_;
-  if (!operation_.beginProgressSync(bookId_, input)) {
+  if (!operation_.beginProgressSync(bookId_, input_, syncMode_)) {
     error_ = operation_.error();
     state_ = error_ == WeReadClient::Error::SessionExpired ? State::LoginRequired : State::Failed;
     requestUpdate();
@@ -150,15 +144,37 @@ void WeReadProgressSyncActivity::advanceSync() {
   const auto result = operation_.progressSyncResult();
   outcome_ = result.outcome;
   operation_.reset();
-  if (outcome_ == WeReadClient::ProgressSyncOutcome::RemoteAhead) {
-    applyRemoteProgress(result.remoteFraction);
+  if (outcome_ == WeReadClient::ProgressSyncOutcome::SelectionRequired) {
+    remoteFraction_ = result.remote.percent / 100.0f;
+    uploadConflict_ = syncMode_ == WeReadClient::ProgressSyncMode::UploadLocal;
+    selectedDirection_ = DirectionOption::ApplyRemote;
+    syncMode_ = WeReadClient::ProgressSyncMode::Compare;
+    state_ = State::ChoosingDirection;
+    requestUpdate();
+    return;
+  }
+  if (outcome_ == WeReadClient::ProgressSyncOutcome::ApplyRemote) {
+    applyRemoteProgress(result.remote);
     return;
   }
   state_ = State::Success;
   requestUpdate();
 }
 
-void WeReadProgressSyncActivity::applyRemoteProgress(const float fraction) {
+void WeReadProgressSyncActivity::beginSelectedDirection() {
+  switch (selectedDirection_) {
+    case DirectionOption::ApplyRemote:
+      syncMode_ = WeReadClient::ProgressSyncMode::ApplyRemote;
+      break;
+    case DirectionOption::UploadLocal:
+      syncMode_ = WeReadClient::ProgressSyncMode::UploadLocal;
+      break;
+  }
+  state_ = State::Starting;
+  requestUpdate();
+}
+
+void WeReadProgressSyncActivity::applyRemoteProgress(const WeReadProtocol::RemoteProgress& remoteProgress) {
   // Mapping needs EPUB metadata after TLS has been released. The object is
   // fallible and activity-scoped; a task-stack Epub is too large.
   auto uniqueEpub = makeUniqueNoThrow<Epub>(epubPath_, "/.crosspoint");
@@ -177,12 +193,53 @@ void WeReadProgressSyncActivity::applyRemoteProgress(const float fraction) {
     requestUpdate();
     return;
   }
-  SavedProgressPosition remote{"", std::max(0.0f, std::min(1.0f, fraction))};
   // ProgressMapper currently accepts shared_ptr, but ownership stays here. The
   // aliasing view has no control block and therefore performs no allocation.
   const std::shared_ptr<Epub> epubView(std::shared_ptr<Epub>(), uniqueEpub.get());
+  SavedProgressPosition fallback{"", std::max(0.0f, std::min(100.0f, remoteProgress.percent)) / 100.0f};
+  bool preciseRemote = false;
+  uint32_t remoteTocIndex = 0;
+  float chapterFraction = 0.0f;
+  float remoteBookFraction = 0.0f;
+  int exactSpineIndex = -1;
+  WeReadStore::BookOptions options;
+  const bool generatedBook = WeReadStore::loadBookOptions(WeReadStore::bookDirectory(bookId_), options);
+  const bool canonicalRemote = generatedBook && remoteProgress.hasChapterOffset &&
+                               WeReadStore::mapChapterToPosition(
+                                   WeReadStore::tocPath(bookId_), remoteProgress.chapterUid,
+                                   remoteProgress.chapterOffset, remoteTocIndex, chapterFraction, remoteBookFraction);
+  if (canonicalRemote) {
+    for (int spine = 0; spine < uniqueEpub->getSpineItemsCount(); ++spine) {
+      uint32_t tocIndex = 0;
+      if (!WeReadStore::parseGeneratedChapterHref(uniqueEpub->getSpineItem(spine).href, tocIndex) ||
+          tocIndex != remoteTocIndex) {
+        continue;
+      }
+      exactSpineIndex = spine;
+      preciseRemote = true;
+      break;
+    }
+  }
+  if (canonicalRemote && exactSpineIndex < 0) {
+    LOG_ERR("WRSync", "Remote chapter %u is not present in the downloaded range",
+            static_cast<unsigned>(remoteTocIndex));
+    error_ = WeReadClient::Error::Unavailable;
+    state_ = State::Failed;
+    requestUpdate();
+    return;
+  }
+  LOG_INF("WRSync", "remote progress mapping: precise=%u toc=%u chapter=%s offset=%u fraction=%lu",
+          static_cast<unsigned>(preciseRemote), static_cast<unsigned>(remoteTocIndex), remoteProgress.chapterUid,
+          static_cast<unsigned>(remoteProgress.chapterOffset),
+          static_cast<unsigned long>(
+              (preciseRemote ? uniqueEpub->calculateProgress(exactSpineIndex, chapterFraction) : fallback.percentage) *
+                  1000000.0f +
+              0.5f));
   const CrossPointPosition target =
-      ProgressMapper::toCrossPoint(epubView, remote, renderer, currentSpineIndex_, currentPageCount_);
+      preciseRemote
+          ? ProgressMapper::fromSpineProgress(epubView, exactSpineIndex, chapterFraction, renderer,
+                                              input_.localSpineIndex, input_.localPageCount)
+          : ProgressMapper::toCrossPoint(epubView, fallback, renderer, input_.localSpineIndex, input_.localPageCount);
   if (target.totalPages <= 0) {
     error_ = WeReadClient::Error::Unavailable;
     state_ = State::Failed;
@@ -204,10 +261,12 @@ void WeReadProgressSyncActivity::returnToReader() { activityManager.goToReader(e
 
 const char* WeReadProgressSyncActivity::resultMessage() const {
   switch (outcome_) {
-    case WeReadClient::ProgressSyncOutcome::None:
+    case WeReadClient::ProgressSyncOutcome::Pending:
     case WeReadClient::ProgressSyncOutcome::AlreadySynced:
       return tr(STR_ALREADY_SYNCED);
-    case WeReadClient::ProgressSyncOutcome::RemoteAhead:
+    case WeReadClient::ProgressSyncOutcome::SelectionRequired:
+      return tr(STR_WEREAD_PROGRESS_CHANGED);
+    case WeReadClient::ProgressSyncOutcome::ApplyRemote:
       return tr(STR_WEREAD_REMOTE_PROGRESS_APPLIED);
     case WeReadClient::ProgressSyncOutcome::LocalUploaded:
       return tr(STR_WEREAD_LOCAL_PROGRESS_UPLOADED);
@@ -251,6 +310,39 @@ void WeReadProgressSyncActivity::loop() {
       }
       advanceSync();
       return;
+    case State::ChoosingDirection: {
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        returnToReader();
+        return;
+      }
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+      const int optionStep = metrics.menuRowHeight + metrics.menuSpacing;
+      const int optionTop = screen.y + screen.height - optionStep * 2;
+      int touchedOption = -1;
+      const auto touch = mappedInput.rowTouch(touchedOption, optionTop, optionStep, 2, screen.x,
+                                              screen.x + screen.width, metrics.menuRowHeight);
+      if (touch != MappedInputManager::RowTouch::None) {
+        selectedDirection_ = touchedOption == 0 ? DirectionOption::ApplyRemote : DirectionOption::UploadLocal;
+        if (touch == MappedInputManager::RowTouch::Tap) {
+          beginSelectedDirection();
+        } else {
+          requestUpdate();
+        }
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) ||
+          mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+        selectedDirection_ = selectedDirection_ == DirectionOption::ApplyRemote ? DirectionOption::UploadLocal
+                                                                                : DirectionOption::ApplyRemote;
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        beginSelectedDirection();
+      }
+      return;
+    }
     case State::Success:
     case State::LoginRequired:
       if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
@@ -288,6 +380,44 @@ void WeReadProgressSyncActivity::render(RenderLock&&) {
       UITheme::drawCenteredText(renderer, screen, UI_12_FONT_ID, middle, tr(STR_WEREAD_SYNCING_PROGRESS), true,
                                 EpdFontFamily::BOLD);
       break;
+    case State::ChoosingDirection: {
+      const int contentTop = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+      const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      const char* comparisonTitle = uploadConflict_ ? tr(STR_WEREAD_PROGRESS_CHANGED) : tr(STR_PROGRESS_FOUND);
+      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, contentTop, comparisonTitle, true,
+                                EpdFontFamily::BOLD);
+
+      char remoteValue[24];
+      snprintf(remoteValue, sizeof(remoteValue), "%.2f%%", remoteFraction_ * 100.0f);
+      char localValue[64];
+      snprintf(localValue, sizeof(localValue), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), input_.localPageNumber + 1,
+               input_.localPageCount, input_.localFraction * 100.0f);
+      const int remoteLabelY = contentTop + lineHeight * 2;
+      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, remoteLabelY, tr(STR_REMOTE_LABEL), true,
+                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, remoteLabelY + lineHeight, remoteValue);
+      const int localLabelY = remoteLabelY + lineHeight * 3;
+      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, localLabelY, tr(STR_LOCAL_LABEL), true,
+                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, localLabelY + lineHeight, localValue);
+
+      const int optionStep = metrics.menuRowHeight + metrics.menuSpacing;
+      const int optionTop = screen.y + screen.height - optionStep * 2;
+      const int optionTextOffset = (metrics.menuRowHeight - lineHeight) / 2;
+      const DirectionOption options[] = {DirectionOption::ApplyRemote, DirectionOption::UploadLocal};
+      for (int index = 0; index < 2; ++index) {
+        const int optionY = optionTop + optionStep * index;
+        const bool selected = selectedDirection_ == options[index];
+        if (selected) {
+          renderer.fillRect(screen.x + metrics.contentSidePadding, optionY,
+                            screen.width - metrics.contentSidePadding * 2, metrics.menuRowHeight);
+        }
+        const char* label =
+            options[index] == DirectionOption::ApplyRemote ? tr(STR_APPLY_REMOTE) : tr(STR_UPLOAD_LOCAL);
+        UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, optionY + optionTextOffset, label, !selected);
+      }
+      break;
+    }
     case State::Success:
       UITheme::drawCenteredText(renderer, screen, UI_12_FONT_ID, middle, resultMessage(), true, EpdFontFamily::BOLD);
       break;
@@ -300,7 +430,10 @@ void WeReadProgressSyncActivity::render(RenderLock&&) {
       break;
   }
 
-  if (state_ == State::Success || state_ == State::LoginRequired || state_ == State::Failed) {
+  if (state_ == State::ChoosingDirection) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else if (state_ == State::Success || state_ == State::LoginRequired || state_ == State::Failed) {
     const bool retryable =
         state_ == State::Failed && (error_ == WeReadClient::Error::Network || error_ == WeReadClient::Error::Clock ||
                                     error_ == WeReadClient::Error::Unavailable);

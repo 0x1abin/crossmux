@@ -39,18 +39,31 @@ struct DownloadOptions {
 
 struct ProgressSyncInput {
   float localFraction = 0.0f;
+  uint32_t localTocIndex = 0;
+  uint16_t localSpineIndex = 0;
+  uint16_t localPageNumber = 0;
+  uint16_t localPageCount = 0;
+  bool hasLocalTocIndex = false;
+};
+static_assert(sizeof(ProgressSyncInput) == 16);
+
+enum class ProgressSyncMode : uint8_t {
+  Compare,
+  ApplyRemote,
+  UploadLocal,
 };
 
 enum class ProgressSyncOutcome : uint8_t {
-  None,
+  Pending,
   AlreadySynced,
-  RemoteAhead,
+  SelectionRequired,
+  ApplyRemote,
   LocalUploaded,
 };
 
 struct ProgressSyncResult {
-  ProgressSyncOutcome outcome = ProgressSyncOutcome::None;
-  float remoteFraction = 0.0f;
+  ProgressSyncOutcome outcome = ProgressSyncOutcome::Pending;
+  WeReadProtocol::RemoteProgress remote;
 };
 
 class Operation {
@@ -70,7 +83,7 @@ class Operation {
   enum class ProgressStage : uint8_t { Chapters, Images, Packaging };
 
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {});
-  bool beginProgressSync(const char* bookId, ProgressSyncInput input);
+  bool beginProgressSync(const char* bookId, ProgressSyncInput input, ProgressSyncMode mode);
   Event step();
   void cancel();
   void reset();
@@ -93,6 +106,13 @@ class Operation {
  private:
   friend struct OperationTestPeer;
 
+  enum class ProgressAction : uint8_t {
+    AlreadySynced,
+    SelectDirection,
+    ApplyRemote,
+    UploadLocal,
+  };
+
   enum class Phase : uint8_t {
     Idle,
     LoginUid,
@@ -112,6 +132,7 @@ class Operation {
     FetchProgressReader,
     SendProgressEnter,
     SendProgressReport,
+    VerifyProgress,
     OpenToc,
     AwaitChapterRange,
     LoadChapter,
@@ -163,6 +184,31 @@ class Operation {
   static constexpr bool wholeChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
     return validChapterRange(first, last, count) && first == 0 && last == count - 1;
   }
+  static constexpr ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition) {
+    if (samePosition) return ProgressAction::AlreadySynced;
+    switch (mode) {
+      case ProgressSyncMode::Compare:
+        return ProgressAction::SelectDirection;
+      case ProgressSyncMode::ApplyRemote:
+        return ProgressAction::ApplyRemote;
+      case ProgressSyncMode::UploadLocal:
+        return ProgressAction::UploadLocal;
+    }
+    return ProgressAction::SelectDirection;
+  }
+  static constexpr ProgressSyncOutcome progressVerification(const bool samePosition, const bool remoteHasAppId,
+                                                            const bool sameAppId, const bool remoteHasUpdateTime,
+                                                            const uint32_t remoteUpdateTime,
+                                                            const uint32_t uploadStartedAt) {
+    const bool fresh = remoteHasUpdateTime && remoteUpdateTime >= uploadStartedAt;
+    if (samePosition && fresh && remoteHasAppId) {
+      return sameAppId ? ProgressSyncOutcome::LocalUploaded : ProgressSyncOutcome::AlreadySynced;
+    }
+    if (!samePosition && fresh && remoteHasAppId && !sameAppId) {
+      return ProgressSyncOutcome::SelectionRequired;
+    }
+    return ProgressSyncOutcome::Pending;
+  }
 
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
@@ -182,10 +228,12 @@ class Operation {
   Event fetchCover();
   Event convertCover();
   Error fetchTocOnce();
-  Error fetchProgressOnce();
+  Error fetchProgressOnce(bool bypassCache);
   Error fetchProgressReaderOnce();
   Error sendProgressOnce(bool report);
   float normalizedRemoteProgress() const;
+  bool sameRemotePosition() const;
+  bool remoteAppIdMatchesLocal() const;
   void persistInitialProgress();
   Error decideProgress();
   Error fetchReaderOnce();
@@ -206,6 +254,7 @@ class Operation {
   ProgressStage progressStage_ = ProgressStage::Chapters;
   DownloadOptions options_;
   ProgressSyncInput progressSyncInput_;
+  ProgressSyncMode progressSyncMode_ = ProgressSyncMode::Compare;
   ProgressSyncResult progressSyncResult_;
   WeReadStore::Session session_;
   WeReadStore::ShelfRecord book_;
@@ -228,6 +277,7 @@ class Operation {
   uint32_t imageFilesCreated_ = 0;
   uint64_t imageBytes_ = 0;
   uint8_t requestAttempt_ = 0;
+  uint8_t progressVerifyAttempts_ = 0;
   uint8_t chapterResponseAttempts_ = 0;
   uint8_t coverAttempts_ = 0;
   uint8_t coverRedirects_ = 0;
@@ -241,14 +291,12 @@ class Operation {
   unsigned long lastShardRequestAt_ = 0;
   unsigned long imagePhaseStartedAt_ = 0;
   int responseStatus_ = 0;
+  uint32_t progressUploadStartedAt_ = 0;
   char previousVid_[64] = {};
   char loginUid_[128] = {};
   char psvts_[128] = {};
-  float remoteRawFraction_ = 0.0f;
   float initialProgressFraction_ = 0.0f;
-  bool remoteHasChapterOffset_ = false;
   bool initialProgressValid_ = false;
-  uint32_t remoteChapterOffset_ = 0;
   char imageHost_[128] = {};
   WeReadProtocol::ImageType coverType_ = WeReadProtocol::ImageType::None;
   char cookie_[kCookieSize] = {};

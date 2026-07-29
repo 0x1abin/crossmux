@@ -458,6 +458,26 @@ bool findBookIdForPath(const std::string& path, char* bookId, const size_t bookI
   return false;
 }
 
+bool parseGeneratedChapterHref(const std::string& href, uint32_t& tocIndex) {
+  const size_t name = href.find_last_of('/');
+  size_t cursor = name == std::string::npos ? 0 : name + 1;
+  if (href.compare(cursor, 2, "ch") != 0) return false;
+  cursor += 2;
+
+  uint32_t value = 0;
+  size_t digits = 0;
+  while (cursor < href.size() && href[cursor] >= '0' && href[cursor] <= '9') {
+    const uint32_t digit = static_cast<uint32_t>(href[cursor] - '0');
+    if (value > (UINT32_MAX - digit) / 10) return false;
+    value = value * 10 + digit;
+    ++cursor;
+    ++digits;
+  }
+  if (digits == 0 || href.compare(cursor, 6, ".xhtml") != 0 || cursor + 6 != href.size()) return false;
+  tocIndex = value;
+  return true;
+}
+
 bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& chapter, uint32_t& chapterOffset) {
   HalFile toc;
   uint32_t count = 0;
@@ -498,8 +518,38 @@ bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& ch
   return true;
 }
 
-bool mapChapterToFraction(const std::string& path, const char* chapterUid, const uint32_t chapterOffset,
-                          float& fraction) {
+bool mapPageToChapter(const std::string& path, const uint32_t tocIndex, const uint16_t pageNumber,
+                      const uint16_t pageCount, TocRecord& chapter, uint32_t& chapterOffset, float& fraction) {
+  if (pageCount == 0 || pageNumber >= pageCount) return false;
+  HalFile toc;
+  uint32_t count = 0;
+  if (!openToc(path, toc, count) || tocIndex >= count) return false;
+
+  uint64_t totalWords = 0;
+  uint64_t wordsBefore = 0;
+  TocRecord record;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (!readTocRecord(toc, i, record)) return false;
+    if (i < tocIndex) wordsBefore += record.wordCount;
+    if (i == tocIndex) chapter = record;
+    totalWords += record.wordCount;
+  }
+  if (chapter.wordCount == 0 || totalWords == 0) return false;
+
+  if (pageCount <= 1) {
+    chapterOffset = 0;
+  } else {
+    const uint64_t denominator = static_cast<uint64_t>(pageCount - 1);
+    const uint64_t numerator = static_cast<uint64_t>(pageNumber) * chapter.wordCount;
+    chapterOffset =
+        static_cast<uint32_t>(std::min<uint64_t>(chapter.wordCount, (numerator + denominator / 2) / denominator));
+  }
+  fraction = static_cast<float>(static_cast<double>(wordsBefore + chapterOffset) / static_cast<double>(totalWords));
+  return true;
+}
+
+bool mapChapterToPosition(const std::string& path, const char* chapterUid, const uint32_t chapterOffset,
+                          uint32_t& tocIndex, float& chapterFraction, float& bookFraction) {
   if (!chapterUid || !chapterUid[0]) return false;
   HalFile toc;
   uint32_t count = 0;
@@ -507,19 +557,31 @@ bool mapChapterToFraction(const std::string& path, const char* chapterUid, const
 
   uint64_t totalWords = 0;
   uint64_t matchedWords = 0;
+  uint32_t matchedChapterWords = 0;
   bool matched = false;
   TocRecord record;
   for (uint32_t i = 0; i < count; ++i) {
     if (!readTocRecord(toc, i, record)) return false;
     if (!matched && strcmp(record.chapterUid, chapterUid) == 0 && record.wordCount > 0) {
       matchedWords = totalWords + std::min(chapterOffset, record.wordCount);
+      matchedChapterWords = record.wordCount;
+      tocIndex = i;
       matched = true;
     }
     totalWords += record.wordCount;
   }
   if (!matched || totalWords == 0) return false;
-  fraction = static_cast<float>(static_cast<double>(matchedWords) / static_cast<double>(totalWords));
+  chapterFraction = static_cast<float>(static_cast<double>(std::min(chapterOffset, matchedChapterWords)) /
+                                       static_cast<double>(matchedChapterWords));
+  bookFraction = static_cast<float>(static_cast<double>(matchedWords) / static_cast<double>(totalWords));
   return true;
+}
+
+bool mapChapterToFraction(const std::string& path, const char* chapterUid, const uint32_t chapterOffset,
+                          float& fraction) {
+  uint32_t tocIndex = 0;
+  float chapterFraction = 0.0f;
+  return mapChapterToPosition(path, chapterUid, chapterOffset, tocIndex, chapterFraction, fraction);
 }
 
 bool loadBookOptions(const std::string& bookDir, BookOptions& options) {

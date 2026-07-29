@@ -187,6 +187,66 @@ TEST_F(WeReadStoreTest, RejectsWrt1AndMapsProgressWithoutLoadingTheCatalog) {
   EXPECT_FALSE(WeReadStore::mapChapterToFraction(tocPath, "missing", 0, fraction));
 }
 
+TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  const std::string tocPath = WeReadStore::tocPath("precise-book");
+  WeReadStore::IndexWriter writer;
+  ASSERT_TRUE(writer.begin(tocPath, WeReadStore::kTocMagic, sizeof(WeReadStore::TocRecord)));
+  const uint32_t words[] = {100, 0, 300};
+  for (uint32_t i = 0; i < 3; ++i) {
+    WeReadStore::TocRecord record;
+    snprintf(record.chapterUid, sizeof(record.chapterUid), "chapter-%u", i);
+    record.wordCount = words[i];
+    record.chapterIdx = i;
+    ASSERT_TRUE(writer.append(&record));
+  }
+  ASSERT_TRUE(writer.finish());
+
+  WeReadStore::TocRecord chapter;
+  uint32_t offset = 0;
+  float fraction = 0.0f;
+  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 0, 1, 3, chapter, offset, fraction));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-0");
+  EXPECT_EQ(offset, 50U);
+  EXPECT_FLOAT_EQ(fraction, 0.125f);
+
+  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 1, 3, chapter, offset, fraction));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-2");
+  EXPECT_EQ(offset, 150U);
+  EXPECT_FLOAT_EQ(fraction, 0.625f);
+
+  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 0, 3, chapter, offset, fraction));
+  EXPECT_EQ(offset, 0U);
+  EXPECT_FLOAT_EQ(fraction, 0.25f);
+  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 2, 3, chapter, offset, fraction));
+  EXPECT_EQ(offset, 300U);
+  EXPECT_FLOAT_EQ(fraction, 1.0f);
+
+  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 1, 0, 1, chapter, offset, fraction));
+  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 3, 0, 1, chapter, offset, fraction));
+  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 0, 3, 3, chapter, offset, fraction));
+
+  uint32_t tocIndex = 0;
+  float chapterFraction = 0.0f;
+  ASSERT_TRUE(WeReadStore::mapChapterToPosition(tocPath, "chapter-2", 100, tocIndex, chapterFraction, fraction));
+  EXPECT_EQ(tocIndex, 2U);
+  EXPECT_NEAR(chapterFraction, 1.0f / 3.0f, 0.000001f);
+  EXPECT_FLOAT_EQ(fraction, 0.5f);
+}
+
+TEST(WeReadStore, ParsesOnlyGeneratedChapterHrefs) {
+  uint32_t tocIndex = 0;
+  EXPECT_TRUE(WeReadStore::parseGeneratedChapterHref("ch000042.xhtml", tocIndex));
+  EXPECT_EQ(tocIndex, 42U);
+  EXPECT_TRUE(WeReadStore::parseGeneratedChapterHref("OPS/text/ch1234567.xhtml", tocIndex));
+  EXPECT_EQ(tocIndex, 1234567U);
+
+  EXPECT_FALSE(WeReadStore::parseGeneratedChapterHref("chapter000042.xhtml", tocIndex));
+  EXPECT_FALSE(WeReadStore::parseGeneratedChapterHref("ch.xhtml", tocIndex));
+  EXPECT_FALSE(WeReadStore::parseGeneratedChapterHref("ch000042.xhtml#anchor", tocIndex));
+  EXPECT_FALSE(WeReadStore::parseGeneratedChapterHref("ch4294967296.xhtml", tocIndex));
+}
+
 TEST_F(WeReadStoreTest, FindsOnlyTheExactGeneratedBookPath) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   WeReadStore::IndexWriter shelf;

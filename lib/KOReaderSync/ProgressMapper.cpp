@@ -780,6 +780,26 @@ std::optional<CrossPointPosition> ProgressMapper::fromRichPosition(const std::sh
 CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epub, const SavedProgressPosition& koPos,
                                                 GfxRenderer& renderer, int currentSpineIndex,
                                                 int totalPagesInCurrentSpine, int fallbackTotalPages) {
+  return toCrossPointImpl(epub, koPos, renderer, currentSpineIndex, totalPagesInCurrentSpine, fallbackTotalPages, -1,
+                          -1.0f);
+}
+
+CrossPointPosition ProgressMapper::fromSpineProgress(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                                                     const float intraSpineProgress, GfxRenderer& renderer,
+                                                     const int currentSpineIndex, const int totalPagesInCurrentSpine,
+                                                     const int fallbackTotalPages) {
+  if (spineIndex < 0 || spineIndex >= epub->getSpineItemsCount()) return {};
+  const float intra = std::max(0.0f, std::min(1.0f, intraSpineProgress));
+  const SavedProgressPosition position{"", epub->calculateProgress(spineIndex, intra)};
+  return toCrossPointImpl(epub, position, renderer, currentSpineIndex, totalPagesInCurrentSpine, fallbackTotalPages,
+                          spineIndex, intra);
+}
+
+CrossPointPosition ProgressMapper::toCrossPointImpl(const std::shared_ptr<Epub>& epub,
+                                                    const SavedProgressPosition& koPos, GfxRenderer& renderer,
+                                                    const int currentSpineIndex, const int totalPagesInCurrentSpine,
+                                                    const int fallbackTotalPages, const int exactSpineIndex,
+                                                    const float exactIntraSpine) {
   CrossPointPosition result{};
   const size_t bookSize = epub->getBookSize();
   if (bookSize == 0) return result;
@@ -799,7 +819,9 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   // Use ancestry mode whenever the XPath has a structured path (always more accurate than global counting).
   const bool useAncestry = xpathStepCount > 0;
 
-  if (xpathSpine >= 0 && xpathSpine < spineCount) {
+  if (exactSpineIndex >= 0 && exactSpineIndex < spineCount) {
+    result.spineIndex = exactSpineIndex;
+  } else if (xpathSpine >= 0 && xpathSpine < spineCount) {
     result.spineIndex = xpathSpine;
   } else {
     for (int i = 0; i < spineCount; i++) {
@@ -836,7 +858,10 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
 
   float intra = 0.0f;
   bool resolvedIntra = false;
-  if (useAncestry) {
+  if (exactIntraSpine >= 0.0f) {
+    intra = exactIntraSpine;
+    resolvedIntra = true;
+  } else if (useAncestry) {
     ParagraphStreamer s(xpathSteps, xpathStepCount, xpathChar, xpathTextNode);
     if (streamSpine(epub, result.spineIndex, s) && s.found()) {
       intra = s.progress();
