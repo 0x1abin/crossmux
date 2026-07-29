@@ -132,6 +132,7 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
   const int tileHeight = rect.height;
   const int tileY = rect.y;
   const bool hasContinueReading = !recentBooks.empty();
+  const bool bookSelected = hasContinueReading && selectorIndex == 0;
   if (coverWidth == 0) {
     coverWidth = RoundedRaffMetrics::values.homeCoverHeight * 0.6;
   }
@@ -197,6 +198,9 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     renderer.fillRoundedRect(tileX, imgY + RoundedRaffMetrics::values.homeCoverHeight, tileWidth,
                              tileHeight - (imgY - tileY + RoundedRaffMetrics::values.homeCoverHeight), kRowRadius,
                              false, false, true, true, Color::LightGray);
+    if (bookSelected) {
+      renderer.drawRoundedRect(tileX, tileY, tileWidth, tileHeight, 2, kRowRadius, true);
+    }
   } else {
     renderer.fillRoundedRect(tileX, tileY, tileWidth, tileHeight, kRowRadius, Color::LightGray);
     renderer.drawCenteredText(kTitleFontId, rect.y + rect.height / 2 - renderer.getLineHeight(kTitleFontId) / 2,
