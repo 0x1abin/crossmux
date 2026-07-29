@@ -16,9 +16,10 @@ struct ImageInfo {
 };
 
 struct HistoryEntry {
-  uint32_t sequence = 0;
+  uint64_t archiveId = 0;
   ImageInfo image;
-  bool current = false;
+
+  bool isCurrent() const { return archiveId == 0 && image.format != ImageFormat::None; }
 };
 
 struct SelectedImage {
@@ -40,14 +41,14 @@ class AirPageImageStore final {
   enum class StageResult : uint8_t { Failed, Unchanged, PendingDisplay };
   enum class RejectResult : uint8_t { CurrentRestored, CurrentInvalid, HistoryInvalid };
 
-  InitializationResult initialize();
+  InitializationResult initialize(uint64_t archiveDateKey = 0);
   bool ensureDirectories() const;
-  StageResult stageDownloadedImage();
+  StageResult stageDownloadedImage(uint64_t archiveDateKey = 0);
 
   bool selectCurrent(SelectedImage& selected) const;
   bool selectHistory(size_t index, SelectedImage& selected);
   RejectResult rejectDisplayedImage(const SelectedImage& selected);
-  void commitDisplayedDownload();
+  void commitDisplayedDownload(uint64_t archiveDateKey = 0);
 
   bool hasImage() const { return currentImage_.format != ImageFormat::None; }
   bool hasPendingDownload() const { return pendingDisplayValidation_; }
@@ -66,8 +67,8 @@ class AirPageImageStore final {
   const char* currentImagePath() const;
   bool isValidPixelCache(const char* path) const;
   bool filesEqual(const char* lhsPath, const char* rhsPath) const;
-  bool installDownloadedImage(const ImageInfo& downloaded);
-  bool recoverCachedImage();
+  bool installDownloadedImage(const ImageInfo& downloaded, uint64_t archiveDateKey);
+  bool recoverCachedImage(uint64_t archiveDateKey);
   bool rollbackPendingImage();
   void discardPendingBackups();
 
@@ -75,12 +76,13 @@ class AirPageImageStore final {
   void setCurrentHistoryEntry();
   void removeCurrentHistoryEntry();
   void insertHistoryEntry(const HistoryEntry& entry);
-  void removeHistoryEntry(uint32_t sequence, ImageFormat format);
+  void removeHistoryEntry(uint64_t archiveId, ImageFormat format);
+  bool parseHistoryId(const char* name, uint64_t& archiveId) const;
   bool parseHistoryName(const char* name, HistoryEntry& entry) const;
-  bool formatHistoryPath(uint32_t sequence, ImageFormat format, char* path, size_t pathSize) const;
-  bool historyContains(uint32_t sequence, ImageFormat format) const;
-  uint32_t nextHistorySequence() const;
-  bool archivePendingBackup(HistoryEntry* archived);
+  bool formatHistoryPath(uint64_t archiveId, ImageFormat format, char* path, size_t pathSize) const;
+  bool historyContains(uint64_t archiveId, ImageFormat format) const;
+  uint64_t nextHistoryId(uint64_t archiveDateKey) const;
+  bool archivePendingBackup(uint64_t archiveDateKey, HistoryEntry* archived);
   void pruneHistoryFiles();
 
   ImageInfo currentImage_;

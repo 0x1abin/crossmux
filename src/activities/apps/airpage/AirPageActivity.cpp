@@ -20,6 +20,7 @@
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/QrUtils.h"
+#include "util/TimeUtils.h"
 
 namespace {
 
@@ -29,6 +30,37 @@ constexpr char kAirPageBase[] =
 #else
     "airpage.crossmux.com";
 #endif
+
+uint64_t currentArchiveDateKey() {
+  const uint32_t timestamp = TimeUtils::getCurrentValidTimestamp();
+  std::tm local{};
+  if (!TimeUtils::isClockValid(timestamp) || !TimeUtils::getLocalDateTime(timestamp, local)) return 0;
+  return static_cast<uint64_t>(local.tm_year + 1900) * 10000000000u +
+         static_cast<uint64_t>(local.tm_mon + 1) * 100000000u + static_cast<uint64_t>(local.tm_mday) * 1000000u +
+         static_cast<uint64_t>(local.tm_hour) * 10000u + static_cast<uint64_t>(local.tm_min) * 100u +
+         static_cast<uint64_t>(local.tm_sec);
+}
+
+bool formatArchiveDate(const uint64_t archiveId, char* buffer, const size_t bufferSize) {
+  if (archiveId < 2024010100000000u) return false;
+  const unsigned collision = static_cast<unsigned>(archiveId % 100u);
+  uint64_t dateKey = archiveId / 100u;
+  const unsigned second = static_cast<unsigned>(dateKey % 100u);
+  dateKey /= 100u;
+  const unsigned minute = static_cast<unsigned>(dateKey % 100u);
+  dateKey /= 100u;
+  const unsigned hour = static_cast<unsigned>(dateKey % 100u);
+  dateKey /= 100u;
+  const unsigned day = static_cast<unsigned>(dateKey % 100u);
+  dateKey /= 100u;
+  const unsigned month = static_cast<unsigned>(dateKey % 100u);
+  const unsigned year = static_cast<unsigned>(dateKey / 100u);
+  const int written = collision == 0 ? snprintf(buffer, bufferSize, "%04u-%02u-%02u %02u:%02u:%02u", year, month, day,
+                                                hour, minute, second)
+                                     : snprintf(buffer, bufferSize, "%04u-%02u-%02u %02u:%02u:%02u-%02u", year, month,
+                                                day, hour, minute, second, collision);
+  return written > 0 && static_cast<size_t>(written) < bufferSize;
+}
 
 }  // namespace
 
@@ -49,7 +81,7 @@ void AirPageActivity::onEnter() {
   historySelection_ = 0;
   airpage::AirPageImageRenderer::resetSessionFailures();
 
-  switch (imageStore_.initialize()) {
+  switch (imageStore_.initialize(currentArchiveDateKey())) {
     case airpage::AirPageImageStore::InitializationResult::Empty:
       notice_ = Notice::NoImage;
       break;
@@ -104,7 +136,7 @@ bool AirPageActivity::processImageDisplayResult() {
     case ImageDisplayResult::Success: {
       const bool newlyDownloaded = selectedImage_.current && imageStore_.hasPendingDownload();
       if (newlyDownloaded) {
-        imageStore_.commitDisplayedDownload();
+        imageStore_.commitDisplayedDownload(currentArchiveDateKey());
         imageStore_.selectCurrent(selectedImage_);
         if (autoSleepWallpaper_ && !airpage::AirPageWallpaper::install(selectedImage_)) {
           notice_ = Notice::WallpaperFailed;
@@ -486,7 +518,7 @@ void AirPageActivity::doFetch() {
     return;
   }
 
-  switch (imageStore_.stageDownloadedImage()) {
+  switch (imageStore_.stageDownloadedImage(currentArchiveDateKey())) {
     case airpage::AirPageImageStore::StageResult::Failed:
       notice_ = Notice::DownloadFailed;
       screen_ = Screen::Qr;
@@ -726,8 +758,9 @@ void AirPageActivity::renderHistory(const Rect& viewport) {
       renderer, viewport, static_cast<int>(historyCount), historySelection_,
       [this](int index) {
         const auto& entry = imageStore_.historyEntry(static_cast<size_t>(index));
-        if (entry.current) return std::string(tr(STR_AIRPAGE_CURRENT_IMAGE));
+        if (entry.isCurrent()) return std::string(tr(STR_AIRPAGE_CURRENT_IMAGE));
         char label[32];
+        if (formatArchiveDate(entry.archiveId, label, sizeof(label))) return std::string(label);
         snprintf(label, sizeof(label), "%s %d", tr(STR_AIRPAGE_IMAGE_LABEL), index + 1);
         return std::string(label);
       },
