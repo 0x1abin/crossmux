@@ -27,7 +27,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeCoverHeight = 300,
                                  .homeCoverTileHeight = 350,
                                  .homeRecentBooksCount = 1,
-                                 .homeContinueReadingInMenu = true,
+                                 .homeContinueReadingInMenu = false,
+                                 .homeShowRecentBookTitle = true,
                                  .homeMenuTopOffset = 20,
                                  .buttonHintsHeight = 40,
                                  .sideButtonHintsWidth = 30,
@@ -98,5 +99,4 @@ class RoundedRaffTheme : public BaseTheme {
                 const std::function<bool(int index)>& rowDimmed = nullptr) const override;
   void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                        const char* btn4) const override;
-  bool homeMenuShowsContinueReading() const { return true; }
 };
