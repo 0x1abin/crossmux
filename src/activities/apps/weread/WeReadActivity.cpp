@@ -454,8 +454,7 @@ Rect WeReadActivity::disclaimerActionsBounds() const {
   const int actionGap = metrics.verticalSpacing;
   const int groupHeight = textHeight + actionGap + height;
   const int freeHeight = std::max(0, content.height - groupHeight);
-  const int baseY =
-      std::min(content.y + content.height - height, content.y + freeHeight / 3 + textHeight + actionGap);
+  const int baseY = std::min(content.y + content.height - height, content.y + freeHeight / 3 + textHeight + actionGap);
   const int y = std::min(safe.y + safe.height - height, baseY + kDisclaimerActionOffsetY);
   const int availableWidth = std::max(0, content.width - metrics.contentSidePadding * 2);
   int labelWidth = 0;

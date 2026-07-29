@@ -156,8 +156,7 @@ bool ensureRoot() { return Storage.ensureDirectoryExists("/.crosspoint") && Stor
 bool hasAcceptedDisclaimer() {
   HalFile file;
   char marker[sizeof(kDisclaimerAcceptanceMarker) - 1];
-  return Storage.openFileForRead("WR", kDisclaimerAcceptancePath, file) &&
-         file.fileSize() == sizeof(marker) &&
+  return Storage.openFileForRead("WR", kDisclaimerAcceptancePath, file) && file.fileSize() == sizeof(marker) &&
          file.read(marker, sizeof(marker)) == static_cast<int>(sizeof(marker)) &&
          memcmp(marker, kDisclaimerAcceptanceMarker, sizeof(marker)) == 0;
 }
