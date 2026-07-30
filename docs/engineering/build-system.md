@@ -40,7 +40,6 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 
 ```cpp
 -DEINK_DISPLAY_SINGLE_BUFFER_MODE=1  // Single framebuffer (saves 48KB RAM!)
--DFREEINK_SSD1677_CONFIG=crossPointX4Ssd1677Config  // CrossPoint's X4 waveform tuning
 -DARDUINO_USB_MODE=1                 // Enable USB CDC
 -DARDUINO_USB_CDC_ON_BOOT=1          // Serial available immediately at boot
 -DXML_CONTEXT_BYTES=1024             // XML parser memory limit (EPUB parsing)
@@ -64,18 +63,16 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 - Must call `renderer.restoreBwBuffer()` to free temporary buffers
 - See [lib/GfxRenderer/GfxRenderer.cpp:439-440](../../lib/GfxRenderer/GfxRenderer.cpp) for malloc usage
 
-**X4 SSD1677 tuning implications**:
-- `crossPointX4Ssd1677Config()` is defined in `lib/hal/HalDisplay.cpp`, where the
-  X4 display bus is also raised from the SDK profile's conservative 5 MHz to the
-  SSD1677's in-spec 20 MHz limit before display initialization.
-- FAST refreshes use the driver's incremental DU sequence (`0x1C`) instead of
-  the SDK default absolute sequence (`0xFC`). This reduces BUSY time but may show
-  more ghosting on panel samples that need the stronger stock waveform.
+**X4 SSD1677 display implications**:
+- The application does not override display-driver configuration. The SDK's
+  active X4 board profile selects the SSD1677 and its in-spec 20 MHz SPI clock.
+- Refresh waveforms come from the SDK's active board config. X4 FAST refreshes
+  use the stock absolute sequence (`0xFC`), which includes the temperature and
+  power sequencing needed to avoid the persistent ghosting seen with the
+  weaker incremental `0x1C` path.
 - X3 is runtime-selected before display initialization and uses its UC81xx
-  driver and SPI configuration unchanged. Do not use this flag to introduce
-  compile-time X3/X4 firmware variants.
-- If hardware verification finds unacceptable persistent ghosting, keep the
-  20 MHz bus setting and remove this config flag/override to restore `0xFC`.
+  driver and SPI configuration unchanged. Sticky likewise retains its
+  board-specific SSD1677 waveform config.
 
 ---
 
