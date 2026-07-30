@@ -346,7 +346,7 @@ void HomeActivity::loop() {
   int menuRow = -1;
   MappedInputManager::RowTouch menuTouch;
   if (isCarousel) {
-    const int menuBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
+    const int menuBottom = renderer.getScreenHeight();
     const int columnWidth = renderer.getScreenWidth() / renderedMenuCount;
     menuTouch = mappedInput.colTouch(menuRow, 0, columnWidth, renderedMenuCount, menuBottom - metrics.menuRowHeight,
                                      menuBottom, columnWidth);
@@ -433,10 +433,11 @@ void HomeActivity::render(RenderLock&&) {
 
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
-  const auto labels =
-      isCarousel ? mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
-                 : mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (!isCarousel) {
+    const auto labels =
+        mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 
   renderer.displayBuffer();
 

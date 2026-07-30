@@ -19,7 +19,7 @@ constexpr int kCenterCoverHeight = 540;
 constexpr int kSideCoverWidth = 200;
 constexpr int kSideCoverHeight = 390;
 constexpr int kSideOverlap = 60;
-constexpr int kCoverTopPadding = 10;
+constexpr int kCoverTopPadding = 22;
 constexpr int kCornerRadius = 6;
 constexpr int kCenterOutlineWidth = 4;
 constexpr int kActiveOutlineWidth = 3;
@@ -145,7 +145,7 @@ void LyraCarouselTheme::drawHomeMenu(GfxRenderer& renderer, Rect rect, int butto
 
   const int tileHeight = kMenuIconPadding * 2 + kMenuIconSize;
   const int tileWidth = renderer.getScreenWidth() / buttonCount;
-  const int rowY = renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight - tileHeight;
+  const int rowY = renderer.getScreenHeight() - tileHeight;
 
   for (int i = 0; i < buttonCount; ++i) {
     const int tileX = i * tileWidth;
