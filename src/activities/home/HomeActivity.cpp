@@ -60,54 +60,89 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
   int progress = 0;
   for (RecentBook& book : recentBooks) {
-    if (!book.coverBmpPath.empty()) {
-      std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
-      if (!Storage.exists(coverPath.c_str())) {
-        // If epub, try to load the metadata for title/author and cover
-        if (FsHelpers::hasEpubExtension(book.path)) {
-          Epub epub(book.path, "/.crosspoint");
-          // Skip loading css since we only need metadata here
-          epub.load(false, true);
+    const int currentProgress = progress++;
+    const bool isEpub = FsHelpers::hasEpubExtension(book.path);
+    const bool isXtc = FsHelpers::hasXtcExtension(book.path);
 
-          // Try to generate thumbnail image for Continue Reading card
-          if (!showingLoading) {
-            showingLoading = true;
-            popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-          }
-          GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
-          bool success = epub.generateThumbBmp(coverHeight);
-          if (!success) {
-            RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
-            book.coverBmpPath = "";
-          }
-          coverRendered = false;
-          requestUpdate();
-        } else if (FsHelpers::hasXtcExtension(book.path)) {
-          // Handle XTC file
-          Xtc xtc(book.path, "/.crosspoint");
-          if (xtc.load()) {
-            // Try to generate thumbnail image for Continue Reading card
-            if (!showingLoading) {
-              showingLoading = true;
-              popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-            }
-            GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
-            bool success = xtc.generateThumbBmp(coverHeight);
-            if (!success) {
-              RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
-              book.coverBmpPath = "";
-            }
-            coverRendered = false;
-            requestUpdate();
-          }
+    // Recover entries whose thumbnail template was cleared by an earlier
+    // transient generation failure.
+    if (book.coverBmpPath.empty()) {
+      if (isEpub) {
+        book.coverBmpPath = Epub(book.path, "/.crosspoint").getThumbBmpPath();
+      } else if (isXtc) {
+        book.coverBmpPath = Xtc(book.path, "/.crosspoint").getThumbBmpPath();
+      } else {
+        continue;
+      }
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.coverBmpPath);
+    }
+
+    const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
+    if (Storage.exists(coverPath.c_str())) {
+      bool invalidCache = false;
+      {
+        HalFile cachedCover;
+        if (!Storage.openFileForRead("HOME", coverPath, cachedCover)) {
+          LOG_ERR("HOME", "Failed to open cached cover: %s", coverPath.c_str());
+          continue;
+        }
+        if (cachedCover.fileSize() == 0) {
+          // EPUB uses an empty thumbnail as a persistent "no supported cover" marker.
+          if (isEpub) continue;
+          invalidCache = true;
+        } else {
+          Bitmap bitmap(cachedCover);
+          invalidCache =
+              bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0;
         }
       }
+      if (!invalidCache) continue;
+      LOG_ERR("HOME", "Removing invalid cached cover: %s", coverPath.c_str());
+      if (!Storage.remove(coverPath.c_str())) {
+        LOG_ERR("HOME", "Failed to remove invalid cached cover: %s", coverPath.c_str());
+        continue;
+      }
     }
-    progress++;
+
+    if (isEpub) {
+      Epub epub(book.path, "/.crosspoint");
+      // Skip loading css since we only need metadata here.
+      if (!epub.load(false, true)) {
+        LOG_ERR("HOME", "Failed to load EPUB metadata for thumbnail: %s", book.path.c_str());
+        continue;
+      }
+
+      if (!showingLoading) {
+        showingLoading = true;
+        popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+      }
+      GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
+      // Keep the template on failure so transient OOM/SD errors can retry.
+      // Epub writes an empty marker when the book has no supported cover.
+      epub.generateThumbBmp(coverHeight);
+    } else if (isXtc) {
+      Xtc xtc(book.path, "/.crosspoint");
+      if (!xtc.load()) {
+        LOG_ERR("HOME", "Failed to load XTC for thumbnail: %s", book.path.c_str());
+        continue;
+      }
+
+      if (!showingLoading) {
+        showingLoading = true;
+        popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+      }
+      GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
+      if (!xtc.generateThumbBmp(coverHeight)) {
+        LOG_ERR("HOME", "Failed to generate XTC thumbnail: %s", book.path.c_str());
+      }
+    }
   }
 
   recentsLoaded = true;
   recentsLoading = false;
+  coverRendered = false;
+  coverBufferStored = false;
+  requestUpdate();
 }
 
 void HomeActivity::onEnter() {
@@ -134,6 +169,10 @@ void HomeActivity::onExit() {
 }
 
 bool HomeActivity::storeCoverBuffer() {
+  // Keep the carousel's ~40-44 KB snapshot out of the heap while missing
+  // thumbnails are decoded; the final cover render will cache it instead.
+  if (!recentsLoaded) return false;
+
   // render() must have already set the cover rect; without it we'd be back to
   // cloning the whole framebuffer.
   if (coverRectW <= 0 || coverRectH <= 0) return false;
