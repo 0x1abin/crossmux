@@ -10,5 +10,9 @@ void checkPanic() {}
 void clearPanic() {}
 std::string getPanicInfo(bool /*full*/) { return std::string(); }
 bool isRebootFromPanic() { return false; }
+bool getDeviceId(DeviceId& out) {
+  out = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+  return true;
+}
 
 }  // namespace HalSystem

@@ -18,6 +18,7 @@
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
 #include "components/icons/bookmark.h"
+#include "components/icons/buddy.h"
 #include "components/icons/sokoban.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "components/icons/chinese_chess.h"
@@ -116,6 +117,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return StandbyIcon;
       case UIIcon::Game2048:
         return Game2048Icon;
+      case UIIcon::Buddy:
+        return BuddyIcon;
       default:
         return nullptr;
     }
