@@ -80,11 +80,11 @@ class Operation {
     Cancelled,
     Failed
   };
-  enum class ProgressStage : uint8_t { Chapters, Images, Packaging };
+  enum class ProgressStage : uint8_t { Chapters, Preparing, Images, Packaging };
 
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {});
   bool beginProgressSync(const char* bookId, ProgressSyncInput input, ProgressSyncMode mode);
-  Event step();
+  Event step(WeReadStore::WorkCallback callback = nullptr, void* callbackContext = nullptr);
   void cancel();
   void reset();
   bool readChapter(uint32_t index, WeReadStore::TocRecord& record);
@@ -242,7 +242,7 @@ class Operation {
   Event decodeChapter(bool plainText);
   Event finishWholeBook(const std::string& source);
   Event cancelNow();
-  Error prepareImageWork();
+  Error prepareImageWork(WeReadStore::WorkCallback callback, void* callbackContext);
   Event downloadNextImage();
   Error requestImage(WeReadStore::ImageRecord& image, WeReadStore::ImageWorkState& state, uint8_t& attempts,
                      uint8_t& redirects, bool trackProgress);
