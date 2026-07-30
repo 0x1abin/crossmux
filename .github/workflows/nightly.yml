@@ -5,7 +5,7 @@ name: Nightly
 # assets. The website's Insider/Nightly reads the newest prerelease.
 on:
   schedule:
-    - cron: '0 18 * * *' # daily 18:00 UTC
+    - cron: '0 23 * * *' # daily 07:00 Asia/Shanghai
   workflow_dispatch:
 
 permissions:
