@@ -417,6 +417,38 @@ location is not migrated or read.
   must equal `1024 + introLength`; unknown flags, non-zero reserved bytes, and
   unterminated fixed strings invalidate the cache. The file is committed from
   `detail.bin.part` only after the complete response parses successfully.
+- Highlight and review caches are stored below
+  `/.crosspoint/weread/browse-cache/<bookId>/`. The fixed 100-byte
+  `cache.bin` manifest is `WRC1`: `uint32 magic` (`0x31435257`),
+  `uint16 version` (`1`), `uint16 size` (`100`), NUL-terminated
+  `ownerVid[64]`, three `uint32 pageCounts`, three `uint32 recordCounts`,
+  `uint16 flags`, `uint8 activeSlot`, and one zero reserved byte. Counts are
+  ordered as popular highlights, personal highlights, and popular reviews.
+  Manifest flag bit 0 means the popular-review result was limited to the first
+  50 records. Only `slot0` or `slot1` selected by `activeSlot` is readable.
+- Each cached server page has a `*.idx` index and a `*.txt` UTF-8 body file in
+  the selected slot. The 32-byte aligned `WRB1` index header stores, in order,
+  `uint64 nextSyncKey`, `uint32 magic` (`0x31425257`),
+  `uint32 recordCount`, `uint32 textBytes`, `uint32 nextMaxIdx`,
+  `uint16 version` (`1`), `uint16 recordSize` (`312`), `uint16 flags`,
+  `uint8 kind`, and one zero reserved byte. Header flag bit 0 marks a response
+  truncated by the 4 MiB/4096-record limits; bit 1 records that the server
+  advertised another review page. A valid empty API object (`{}`) is committed
+  as a zero-record page so an empty category does not invalidate the complete
+  three-category snapshot.
+- A `WRB1` record contains `uint32 textOffset`, `uint32 textLength`,
+  `uint32 heat`, `uint32 createTime`, `uint32 idx`, `uint16 rating`,
+  `uint16 flags`, then fixed NUL-terminated `chapterUid[64]`, `chapter[128]`,
+  and `author[96]`. Record flag bit 0 marks a body truncated at 64 KiB.
+  Offsets address the matching `*.txt` file. Both files are written through
+  `.part` replacements and validated together before reading. A refresh writes
+  only the inactive slot; after every page validates, `cache.bin.part`
+  atomically replaces the manifest and the old slot is removed. Interrupted,
+  cancelled, or failed refreshes leave the prior manifest and slot readable.
+  The manifest is accepted only for the current session's `wr_vid`; logout or
+  an account change removes the entire browse-cache root. The old disposable
+  `/.crosspoint/weread/browse/` directory is deleted as legacy data and is not
+  migrated. These files do not change any book or EPUB cache version.
 - A successfully converted 96×140 2-bit cover is stored as
   `<bookId>/cover.bmp`. Its validated JPEG/PNG source is retained as
   `<bookId>/cover.source.jpg` or `<bookId>/cover.source.png` and embedded as the

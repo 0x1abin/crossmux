@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "WeReadBrowse.h"
 #include "WeReadStore.h"
 
 std::string g_simulator_sd_root;
@@ -49,6 +50,9 @@ uint32_t readLe32(const std::vector<uint8_t>& data, const size_t offset) {
 
 class WeReadStoreTest : public ::testing::Test {
  protected:
+  static constexpr const char* kBrowseBook = "browse-book";
+  static constexpr const char* kBrowseOwner = "123456";
+
   void SetUp() override {
     static std::atomic<unsigned> serial{0};
     root_ = std::filesystem::temp_directory_path() / ("crossmux-weread-store-" + std::to_string(serial.fetch_add(1)));
@@ -68,6 +72,26 @@ class WeReadStoreTest : public ::testing::Test {
   std::filesystem::path hostPath(const char* sdPath) const {
     while (*sdPath == '/') ++sdPath;
     return root_ / sdPath;
+  }
+
+  void beginBrowseCache(WeReadBrowse::CacheManifest& manifest) {
+    ASSERT_TRUE(WeReadBrowse::beginCache(kBrowseBook, kBrowseOwner, manifest));
+  }
+
+  void writeBrowsePage(WeReadBrowse::CacheManifest& manifest, const WeReadBrowse::Kind kind, const uint32_t page,
+                       const char* json, const uint32_t maxRecords = WeReadBrowse::kMaxRecords) {
+    WeReadBrowse::ResponseParser parser(kBrowseBook, manifest.activeSlot, kind, page, maxRecords);
+    ASSERT_TRUE(parser.reset());
+    const size_t length = strlen(json);
+    for (size_t offset = 0; offset < length;) {
+      const size_t chunk = std::min<size_t>((offset % 7) + 1, length - offset);
+      ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(json + offset), chunk));
+      offset += chunk;
+    }
+    ASSERT_TRUE(parser.finish());
+    manifest.pageCounts[WeReadBrowse::kindIndex(kind)] =
+        std::max(manifest.pageCounts[WeReadBrowse::kindIndex(kind)], page + 1);
+    manifest.recordCounts[WeReadBrowse::kindIndex(kind)] += parser.count();
   }
 
   std::filesystem::path root_;
@@ -822,6 +846,207 @@ TEST_F(WeReadStoreTest, WritesJpegCoverWithExcludedBodyImagesAndAllowsCoverlessE
       coverless.addBuffer("OEBPS/content.opf", reinterpret_cast<const uint8_t*>(kCoverlessOpf), strlen(kCoverlessOpf)));
   ASSERT_TRUE(coverless.finish());
   EXPECT_TRUE(WeReadStore::looksLikeZip("/work/coverless.epub"));
+}
+
+TEST_F(WeReadStoreTest, StreamsAllBrowseResponseShapesAcrossArbitraryChunks) {
+  struct Case {
+    WeReadBrowse::Kind kind;
+    const char* json;
+    const char* text;
+  };
+  const Case cases[] = {
+      {WeReadBrowse::Kind::PopularHighlights,
+       R"({"bestBookMarks":{"items":[{"chapterUid":"c1","markText":"热门\u5212线","totalCount":12}],"chapters":[]}})",
+       "热门划线"},
+      {WeReadBrowse::Kind::MyHighlights,
+       R"({"updated":[{"chapterUid":"c2","markText":"我的划线","createTime":1700000000}],"chapters":[]})", "我的划线"},
+      {WeReadBrowse::Kind::PopularReviews,
+       R"({"reviewsHasMore":true,"reviews":[{"idx":9,"review":{"review":{"htmlContent":"<p>好 &amp; \uD83D\uDE00 &#x1F680;</p>","star":50,"author":{"name":"读者"}}}}],"synckey":123456})",
+       "好 & 😀 🚀"},
+  };
+
+  WeReadBrowse::CacheManifest manifest;
+  beginBrowseCache(manifest);
+  for (size_t caseIndex = 0; caseIndex < std::size(cases); ++caseIndex) {
+    writeBrowsePage(manifest, cases[caseIndex].kind, 0, cases[caseIndex].json);
+
+    WeReadBrowse::PageHeader header;
+    HalFile index;
+    HalFile text;
+    ASSERT_TRUE(WeReadBrowse::openPage(kBrowseBook, manifest, cases[caseIndex].kind, 0, header, index, text));
+    ASSERT_EQ(header.count, 1U);
+    WeReadBrowse::Record record;
+    ASSERT_TRUE(WeReadBrowse::readRecord(index, header, 0, record));
+    std::string body(record.textLength, '\0');
+    ASSERT_TRUE(text.seek(record.textOffset));
+    ASSERT_EQ(text.read(body.data(), body.size()), static_cast<int>(body.size()));
+    EXPECT_EQ(body, cases[caseIndex].text);
+    if (cases[caseIndex].kind == WeReadBrowse::Kind::PopularReviews) {
+      EXPECT_STREQ(record.author, "读者");
+      EXPECT_EQ(record.rating, 50U);
+      EXPECT_EQ(header.nextMaxIdx, 9U);
+      EXPECT_EQ(header.nextSyncKey, 123456U);
+    }
+  }
+}
+
+TEST_F(WeReadStoreTest, BrowseParserHandlesEmptyMissingFieldsAndExpiredSession) {
+  WeReadBrowse::CacheManifest manifest;
+  beginBrowseCache(manifest);
+  static constexpr char kEmpty[] = R"({})";
+  writeBrowsePage(manifest, WeReadBrowse::Kind::MyHighlights, 0, kEmpty);
+  EXPECT_EQ(manifest.recordCounts[WeReadBrowse::kindIndex(WeReadBrowse::Kind::MyHighlights)], 0U);
+
+  static constexpr char kMissing[] = R"({"items":[{"totalCount":2},{"markText":"可读"}]})";
+  writeBrowsePage(manifest, WeReadBrowse::Kind::PopularHighlights, 0, kMissing);
+  EXPECT_EQ(manifest.recordCounts[WeReadBrowse::kindIndex(WeReadBrowse::Kind::PopularHighlights)], 1U);
+
+  WeReadBrowse::ResponseParser expired(kBrowseBook, manifest.activeSlot, WeReadBrowse::Kind::PopularReviews, 0);
+  ASSERT_TRUE(expired.reset());
+  static constexpr char kExpired[] = R"({"errCode":-2012})";
+  ASSERT_TRUE(expired.feed(reinterpret_cast<const uint8_t*>(kExpired), sizeof(kExpired) - 1));
+  ASSERT_TRUE(expired.finish());
+  EXPECT_EQ(expired.errorCode(), -2012);
+  EXPECT_FALSE(Storage.exists(
+      WeReadBrowse::indexPath(kBrowseBook, manifest.activeSlot, WeReadBrowse::Kind::PopularReviews, 0).c_str()));
+
+  WeReadBrowse::ResponseParser unexpected(kBrowseBook, manifest.activeSlot, WeReadBrowse::Kind::MyHighlights, 1);
+  ASSERT_TRUE(unexpected.reset());
+  static constexpr char kUnexpected[] = R"({"book":{}})";
+  ASSERT_TRUE(unexpected.feed(reinterpret_cast<const uint8_t*>(kUnexpected), sizeof(kUnexpected) - 1));
+  EXPECT_FALSE(unexpected.finish());
+  EXPECT_FALSE(unexpected.storageFailed());
+}
+
+TEST_F(WeReadStoreTest, BrowseCacheCommitIsAtomicAndBoundToAccount) {
+  WeReadBrowse::CacheManifest first;
+  beginBrowseCache(first);
+  writeBrowsePage(first, WeReadBrowse::Kind::PopularHighlights, 0, R"({"items":[{"markText":"old mark"}]})");
+  writeBrowsePage(first, WeReadBrowse::Kind::MyHighlights, 0, R"({"updated":[]})");
+  writeBrowsePage(first, WeReadBrowse::Kind::PopularReviews, 0,
+                  R"({"reviewsHasMore":false,"reviews":[{"idx":1,"review":{"content":"kept"}}],"synckey":3})");
+  ASSERT_TRUE(WeReadBrowse::commitCache(kBrowseBook, first));
+
+  WeReadBrowse::CacheManifest loaded;
+  ASSERT_TRUE(WeReadBrowse::loadCache(kBrowseBook, kBrowseOwner, loaded));
+  EXPECT_EQ(loaded.activeSlot, first.activeSlot);
+  EXPECT_FALSE(WeReadBrowse::loadCache(kBrowseBook, "different-owner", loaded));
+
+  WeReadBrowse::CacheManifest replacement;
+  beginBrowseCache(replacement);
+  ASSERT_NE(replacement.activeSlot, first.activeSlot);
+  writeBrowsePage(replacement, WeReadBrowse::Kind::PopularHighlights, 0, R"({"items":[{"markText":"new mark"}]})");
+  WeReadBrowse::ResponseParser interrupted(kBrowseBook, replacement.activeSlot, WeReadBrowse::Kind::MyHighlights, 0);
+  ASSERT_TRUE(interrupted.reset());
+  static constexpr char kBroken[] = R"({"reviews":[{"review":{"content":"replacement)";
+  ASSERT_TRUE(interrupted.feed(reinterpret_cast<const uint8_t*>(kBroken), sizeof(kBroken) - 1));
+  EXPECT_FALSE(interrupted.finish());
+  WeReadBrowse::abortCache(kBrowseBook, replacement.activeSlot);
+
+  ASSERT_TRUE(WeReadBrowse::loadCache(kBrowseBook, kBrowseOwner, loaded));
+  EXPECT_EQ(loaded.activeSlot, first.activeSlot);
+  {
+    WeReadBrowse::PageHeader header;
+    HalFile index;
+    HalFile text;
+    ASSERT_TRUE(
+        WeReadBrowse::openPage(kBrowseBook, loaded, WeReadBrowse::Kind::PopularReviews, 0, header, index, text));
+    ASSERT_EQ(header.count, 1U);
+    WeReadBrowse::Record record;
+    ASSERT_TRUE(WeReadBrowse::readRecord(index, header, 0, record));
+    std::string body(record.textLength, '\0');
+    ASSERT_TRUE(text.seek(record.textOffset));
+    ASSERT_EQ(text.read(body.data(), body.size()), static_cast<int>(body.size()));
+    EXPECT_EQ(body, "kept");
+  }
+
+  WeReadBrowse::CacheManifest completedReplacement;
+  beginBrowseCache(completedReplacement);
+  ASSERT_NE(completedReplacement.activeSlot, first.activeSlot);
+  writeBrowsePage(completedReplacement, WeReadBrowse::Kind::PopularHighlights, 0,
+                  R"({"items":[{"markText":"new mark"}]})");
+  writeBrowsePage(completedReplacement, WeReadBrowse::Kind::MyHighlights, 0, R"({"updated":[]})");
+  writeBrowsePage(completedReplacement, WeReadBrowse::Kind::PopularReviews, 0,
+                  R"({"reviewsHasMore":false,"reviews":[{"idx":2,"review":{"content":"fresh"}}],"synckey":4})");
+  ASSERT_TRUE(WeReadBrowse::commitCache(kBrowseBook, completedReplacement));
+  ASSERT_TRUE(WeReadBrowse::loadCache(kBrowseBook, kBrowseOwner, loaded));
+  EXPECT_EQ(loaded.activeSlot, completedReplacement.activeSlot);
+  EXPECT_FALSE(Storage.exists(
+      WeReadBrowse::indexPath(kBrowseBook, first.activeSlot, WeReadBrowse::Kind::PopularReviews, 0).c_str()));
+
+  const auto manifestPath = hostPath("/.crosspoint/weread/browse-cache/browse-book/cache.bin");
+  const auto backupPath = hostPath("/.crosspoint/weread/browse-cache/browse-book/cache.bin.bak");
+  std::filesystem::rename(manifestPath, backupPath);
+  ASSERT_TRUE(WeReadBrowse::loadCache(kBrowseBook, kBrowseOwner, loaded));
+  EXPECT_TRUE(std::filesystem::exists(manifestPath));
+  EXPECT_FALSE(std::filesystem::exists(backupPath));
+
+  {
+    HalFile damaged = Storage.open(
+        WeReadBrowse::indexPath(kBrowseBook, loaded.activeSlot, WeReadBrowse::Kind::PopularReviews, 0).c_str(), O_RDWR);
+    ASSERT_TRUE(damaged.isOpen());
+    const uint32_t badMagic = 0;
+    ASSERT_TRUE(damaged.seek(offsetof(WeReadBrowse::PageHeader, magic)));
+    ASSERT_EQ(damaged.write(&badMagic, sizeof(badMagic)), sizeof(badMagic));
+  }
+  EXPECT_FALSE(WeReadBrowse::loadCache(kBrowseBook, kBrowseOwner, loaded));
+  EXPECT_TRUE(WeReadBrowse::clearAllCaches());
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/browse-cache"));
+}
+
+TEST_F(WeReadStoreTest, BrowseParserCapsOversizedRecordText) {
+  WeReadBrowse::CacheManifest manifest;
+  beginBrowseCache(manifest);
+  WeReadBrowse::ResponseParser parser(kBrowseBook, manifest.activeSlot, WeReadBrowse::Kind::PopularReviews, 2);
+  ASSERT_TRUE(parser.reset());
+  std::string response = R"({"reviews":[{"idx":7,"review":{"content":")";
+  response.append(WeReadBrowse::kMaxResponseBytes + 1024, 'x');
+  response += R"("}}]})";
+  for (size_t offset = 0; offset < response.size(); offset += 257) {
+    const size_t chunk = std::min<size_t>(257, response.size() - offset);
+    ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(response.data() + offset), chunk));
+  }
+  ASSERT_TRUE(parser.finish());
+
+  WeReadBrowse::PageHeader header;
+  HalFile index;
+  HalFile text;
+  manifest.pageCounts[WeReadBrowse::kindIndex(WeReadBrowse::Kind::PopularReviews)] = 3;
+  ASSERT_TRUE(
+      WeReadBrowse::openPage(kBrowseBook, manifest, WeReadBrowse::Kind::PopularReviews, 2, header, index, text));
+  ASSERT_EQ(header.count, 1U);
+  EXPECT_NE(header.flags & WeReadBrowse::kPageResponseTruncated, 0U);
+  WeReadBrowse::Record record;
+  ASSERT_TRUE(WeReadBrowse::readRecord(index, header, 0, record));
+  EXPECT_EQ(record.textLength, WeReadBrowse::kMaxItemTextBytes);
+  EXPECT_NE(record.flags & WeReadBrowse::kRecordTextTruncated, 0U);
+}
+
+TEST_F(WeReadStoreTest, BrowseParserCapsTheFinalReviewPageAtTenRecords) {
+  WeReadBrowse::CacheManifest manifest;
+  beginBrowseCache(manifest);
+  WeReadBrowse::ResponseParser parser(kBrowseBook, manifest.activeSlot, WeReadBrowse::Kind::PopularReviews, 2, 10);
+  ASSERT_TRUE(parser.reset());
+  std::string response = R"({"reviewsHasMore":true,"reviews":[)";
+  for (uint32_t index = 0; index < 12; ++index) {
+    if (index != 0) response += ',';
+    response += R"({"idx":)" + std::to_string(index + 1) + R"(,"review":{"content":"review"}})";
+  }
+  response += R"(],"synckey":99})";
+  ASSERT_TRUE(parser.feed(reinterpret_cast<const uint8_t*>(response.data()), response.size()));
+  ASSERT_TRUE(parser.finish());
+  EXPECT_EQ(parser.count(), 10U);
+  EXPECT_TRUE(parser.responseTruncated());
+
+  manifest.pageCounts[WeReadBrowse::kindIndex(WeReadBrowse::Kind::PopularReviews)] = 3;
+  WeReadBrowse::PageHeader header;
+  HalFile index;
+  HalFile text;
+  ASSERT_TRUE(
+      WeReadBrowse::openPage(kBrowseBook, manifest, WeReadBrowse::Kind::PopularReviews, 2, header, index, text));
+  EXPECT_EQ(header.count, 10U);
+  EXPECT_NE(header.flags & WeReadBrowse::kPageResponseTruncated, 0U);
+  EXPECT_NE(header.flags & WeReadBrowse::kPageHasMore, 0U);
 }
 
 }  // namespace

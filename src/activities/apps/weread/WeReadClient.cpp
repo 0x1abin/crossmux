@@ -308,7 +308,7 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
                           ? WeReadHttpClient::request(*reusableSession, url, options, onData, onHeader, status)
                           : WeReadHttpClient::request(url, options, onData, onHeader, status);
   if (result == WeReadHttpClient::Result::Ok) {
-    if (!sink.finish(sink.ctx)) return Error::SdCard;
+    if (!sink.finish(sink.ctx)) return sink.writeError;
     return cookiesOk ? Error::Ok : Error::Protocol;
   }
   if (result == WeReadHttpClient::Result::Aborted) return sink.writeError;
@@ -2095,6 +2095,8 @@ bool Operation::active() const {
     case Phase::Renew:
     case Phase::PrepareDetail:
     case Phase::FetchDetail:
+    case Phase::PrepareBrowseCache:
+    case Phase::FetchBrowse:
     case Phase::FetchCover:
     case Phase::ConvertCover:
     case Phase::PrepareDownload:
@@ -2127,8 +2129,15 @@ bool Operation::active() const {
   return false;
 }
 
+void Operation::abortBrowseCache() {
+  if (kind_ != Kind::Browse || !browseCacheActive_) return;
+  WeReadBrowse::abortCache(book_.bookId, browseManifest_.activeSlot);
+  browseCacheActive_ = false;
+}
+
 void Operation::reset() {
   bookSession_.reset();
+  abortBrowseCache();
   if (kind_ == Kind::Download && active() && !bookDir_.empty()) {
     cleanupTransient(bookDir_, finalPartPath_);
   }
@@ -2182,6 +2191,11 @@ void Operation::reset() {
   psvts_[0] = '\0';
   initialProgressFraction_ = 0.0f;
   initialProgressValid_ = false;
+  browseKind_ = WeReadBrowse::Kind::PopularHighlights;
+  browseCursor_ = {};
+  browseFirstReviewCursor_ = {};
+  browseManifest_ = {};
+  browseCacheActive_ = false;
   imageHost_[0] = '\0';
   coverType_ = WeReadProtocol::ImageType::None;
   // Shelf sync and download are separate jobs on the same account.
@@ -2196,7 +2210,7 @@ void Operation::reset() {
 
 bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options) {
   reset();
-  if (kind == Kind::ProgressSync) {
+  if (kind == Kind::ProgressSync || kind == Kind::Browse) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;
     return false;
@@ -2235,6 +2249,7 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
       first = Phase::PrepareDownload;
       break;
     case Kind::ProgressSync:
+    case Kind::Browse:
       break;
   }
   if (session_.valid()) {
@@ -2243,6 +2258,27 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
     startLogin(first);
   }
   logMemory("job start");
+  return true;
+}
+
+bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
+  reset();
+  if (!isSafeProtocolToken(book.bookId)) {
+    error_ = Error::Protocol;
+    phase_ = Phase::Failed;
+    return false;
+  }
+  kind_ = Kind::Browse;
+  book_ = book;
+  browseKind_ = WeReadBrowse::Kind::PopularHighlights;
+  browseCursor_ = {};
+  WeReadStore::loadSession(session_);
+  if (session_.valid()) {
+    phase_ = Phase::PrepareBrowseCache;
+  } else {
+    startLogin(Phase::PrepareBrowseCache);
+  }
+  logMemory("browse start");
   return true;
 }
 
@@ -2298,6 +2334,7 @@ void Operation::cancel() {
 
 Operation::Event Operation::cancelNow() {
   bookSession_.reset();
+  abortBrowseCache();
   if (tocFile_.isOpen()) tocFile_.close();
   if (kind_ == Kind::Download && !bookDir_.empty()) {
     cleanupTransient(bookDir_, finalPartPath_);
@@ -2350,6 +2387,7 @@ void Operation::requestAuthentication(const Phase resume) {
 Operation::Event Operation::fail(const Error error) {
   const Phase failedPhase = phase_;
   bookSession_.reset();
+  abortBrowseCache();
   error_ = error;
   if (tocFile_.isOpen()) tocFile_.close();
   if (kind_ == Kind::Download && !bookDir_.empty()) {
@@ -2478,8 +2516,16 @@ Error Operation::pollLogin() {
       !session_.setCookie("wr_skey", context.token, strlen(context.token))) {
     return Error::LoginFailed;
   }
-  if ((!previousVid_[0] || strcmp(previousVid_, session_.vid) != 0) && !WeReadStore::clearShelf()) {
-    return Error::SdCard;
+  const bool accountChanged = !previousVid_[0] || strcmp(previousVid_, session_.vid) != 0;
+  if (accountChanged) {
+    const bool shelfCleared = WeReadStore::clearShelf();
+    const bool browseCachesCleared = WeReadBrowse::clearAllCaches();
+    if (!shelfCleared || !browseCachesCleared) return Error::SdCard;
+  }
+  if (accountChanged && kind_ == Kind::Browse) {
+    browseCacheActive_ = false;
+    browseManifest_ = {};
+    resumePhase_ = Phase::PrepareBrowseCache;
   }
   if (!WeReadStore::saveSession(session_)) return Error::SdCard;
   loginConfirmed_ = true;
@@ -2574,6 +2620,107 @@ Error Operation::fetchDetailOnce() {
   if (coverType_ == WeReadProtocol::ImageType::None) url_[0] = '\0';
   logMemory("detail parsed");
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+}
+
+Error Operation::fetchBrowseOnce() {
+  const uint32_t recordLimit =
+      browseKind_ == WeReadBrowse::Kind::PopularReviews
+          ? browseReviewRequestCount(browseManifest_.recordCounts[WeReadBrowse::kindIndex(browseKind_)])
+          : WeReadBrowse::kMaxRecords;
+  if (recordLimit == 0) return Error::Protocol;
+  WeReadBrowse::ResponseParser parser(book_.bookId, browseManifest_.activeSlot, browseKind_, browseCursor_.page,
+                                      recordLimit);
+  ResponseSink sink{
+      &parser,
+      [](void* raw) { return static_cast<WeReadBrowse::ResponseParser*>(raw)->reset(); },
+      [](void* raw, const uint8_t* data, const size_t len) {
+        return static_cast<WeReadBrowse::ResponseParser*>(raw)->feed(data, len);
+      },
+      [](void* raw) { return static_cast<WeReadBrowse::ResponseParser*>(raw)->finish(); },
+      Error::Protocol,
+  };
+
+  char encodedBookId[192];
+  if (!WeReadProtocol::urlEncode(book_.bookId, encodedBookId, sizeof(encodedBookId))) return Error::Protocol;
+  auto* path = reinterpret_cast<char*>(ioBuffer_ + sizeof(ioBuffer_) - kUrlSize);
+  int length = 0;
+  switch (browseKind_) {
+    case WeReadBrowse::Kind::PopularHighlights:
+      length = snprintf(path, kUrlSize, "/web/book/bestbookmarks?bookId=%s", encodedBookId);
+      break;
+    case WeReadBrowse::Kind::MyHighlights:
+      length = snprintf(path, kUrlSize, "/web/book/bookmarklist?bookId=%s", encodedBookId);
+      break;
+    case WeReadBrowse::Kind::PopularReviews:
+      length =
+          snprintf(path, kUrlSize, "/web/review/list?bookId=%s&listType=3&listMode=2&maxIdx=%u&count=%u&synckey=%llu",
+                   encodedBookId, static_cast<unsigned>(browseCursor_.maxIdx), static_cast<unsigned>(recordLimit),
+                   static_cast<unsigned long long>(browseCursor_.syncKey));
+      break;
+  }
+  if (length <= 0 || static_cast<size_t>(length) >= kUrlSize) return Error::Protocol;
+
+  Error error =
+      requestOnce("GET", path, nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_, sizeof(cookie_),
+                  url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_) - kUrlSize, &bookSession_);
+  if (error != Error::Ok && parser.storageFailed()) error = Error::SdCard;
+  if (error != Error::Ok) {
+    LOG_ERR("WR", "browse request failed: kind=%u page=%u status=%d error=%u", static_cast<unsigned>(browseKind_),
+            static_cast<unsigned>(browseCursor_.page), responseStatus_, static_cast<unsigned>(error));
+    return error;
+  }
+  if (parser.errorCode() == -2012 || responseStatus_ == 401 || responseStatus_ == 403) {
+    return Error::SessionExpired;
+  }
+  if (responseStatus_ != 200 || parser.errorCode() != 0) return Error::Protocol;
+  if (!WeReadStore::saveSession(session_)) return Error::SdCard;
+
+  const size_t kind = WeReadBrowse::kindIndex(browseKind_);
+  if (browseManifest_.recordCounts[kind] > UINT32_MAX - parser.count()) return Error::Protocol;
+  browseManifest_.recordCounts[kind] += parser.count();
+  browseManifest_.pageCounts[kind] = browseCursor_.page + 1;
+
+  switch (browseKind_) {
+    case WeReadBrowse::Kind::PopularHighlights:
+      browseKind_ = WeReadBrowse::Kind::MyHighlights;
+      browseCursor_ = {};
+      return Error::Ok;
+    case WeReadBrowse::Kind::MyHighlights:
+      browseKind_ = WeReadBrowse::Kind::PopularReviews;
+      browseCursor_ = {};
+      return Error::Ok;
+    case WeReadBrowse::Kind::PopularReviews:
+      break;
+  }
+
+  const uint32_t reviewCount = browseManifest_.recordCounts[WeReadBrowse::kindIndex(browseKind_)];
+  if (parser.hasMore()) {
+    const WeReadBrowse::Cursor nextCursor{
+        browseCursor_.page + 1,
+        parser.nextMaxIdx(),
+        parser.nextSyncKey(),
+    };
+    if (!browseReviewCursorAdvances(browseCursor_, browseFirstReviewCursor_, nextCursor, parser.count())) {
+      return Error::Protocol;
+    }
+    if (browseCursor_.page == 0) {
+      browseFirstReviewCursor_ = nextCursor;
+    }
+    if (reviewCount < WeReadBrowse::kMaxCachedReviews) {
+      browseCursor_ = nextCursor;
+      return Error::Ok;
+    }
+  }
+  if (reviewCount == WeReadBrowse::kMaxCachedReviews && (parser.hasMore() || parser.responseTruncated())) {
+    browseManifest_.flags |= WeReadBrowse::kCacheReviewsLimited;
+  }
+  if (!WeReadBrowse::commitCache(book_.bookId, browseManifest_)) return Error::SdCard;
+  browseCacheActive_ = false;
+  LOG_INF("WR", "browse TLS: new=%u reused=%u", static_cast<unsigned>(bookSession_.newConnections()),
+          static_cast<unsigned>(bookSession_.reusedRequests()));
+  bookSession_.reset();
+  phase_ = Phase::Complete;
+  return Error::Ok;
 }
 
 Error Operation::fetchTocOnce() {
@@ -3366,6 +3513,28 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       }
       phase_ = Phase::FetchCover;
       return detailCompletionEvent(true);
+    }
+
+    case Phase::PrepareBrowseCache:
+      if (!WeReadBrowse::beginCache(book_.bookId, session_.vid, browseManifest_)) return fail(Error::SdCard);
+      browseCacheActive_ = true;
+      browseKind_ = WeReadBrowse::Kind::PopularHighlights;
+      browseCursor_ = {};
+      browseFirstReviewCursor_ = {};
+      phase_ = Phase::FetchBrowse;
+      return Event::None;
+
+    case Phase::FetchBrowse: {
+      const Error error = fetchBrowseOnce();
+      if (error == Error::SessionExpired) {
+        requestAuthentication(Phase::FetchBrowse);
+        return phase_ == Phase::Failed ? fail(error_) : Event::None;
+      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::FetchBrowse);
+      requestSucceeded();
+      if (phase_ != Phase::Complete) return Event::None;
+      logJobComplete();
+      return Event::Complete;
     }
 
     case Phase::FetchCover: {
