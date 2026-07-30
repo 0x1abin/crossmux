@@ -748,11 +748,8 @@ void GfxRenderer::drawRect(const int x, const int y, const int width, const int 
 // Border is inside the rectangle
 void GfxRenderer::drawRect(const int x, const int y, const int width, const int height, const int lineWidth,
                            const bool state) const {
-  for (int i = 0; i < lineWidth; i++) {
-    drawLine(x + i, y + i, x + width - i, y + i, state);
-    drawLine(x + width - i, y + i, x + width - i, y + height - i, state);
-    drawLine(x + width - i, y + height - i, x + i, y + height - i, state);
-    drawLine(x + i, y + height - i, x + i, y + i, state);
+  for (int i = 0; i < lineWidth && width - 2 * i > 0 && height - 2 * i > 0; i++) {
+    drawRect(x + i, y + i, width - 2 * i, height - 2 * i, state);
   }
 }
 
