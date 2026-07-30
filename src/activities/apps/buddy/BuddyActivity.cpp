@@ -184,8 +184,8 @@ void drawStatRows(const GfxRenderer& renderer, const Rect& bounds, const buddy::
   const int rowGap = std::max(6, metrics.verticalSpacing / 2);
   const int columnGap = std::max(8, metrics.contentSidePadding / 2);
   int labelWidth = 0;
-  // cppcheck-suppress useStlAlgorithm
   for (const StrId label : kStatLabels) {
+    // cppcheck-suppress useStlAlgorithm
     labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(label)));
   }
   const int valueColumnWidth = renderer.getTextWidth(UI_10_FONT_ID, "100", EpdFontFamily::BOLD);
