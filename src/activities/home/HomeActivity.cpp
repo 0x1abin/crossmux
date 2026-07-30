@@ -434,8 +434,7 @@ void HomeActivity::render(RenderLock&&) {
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
   if (!isCarousel) {
-    const auto labels =
-        mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    const auto labels = mappedInput.mapLabels(tr(STR_STANDBY_TITLE), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
