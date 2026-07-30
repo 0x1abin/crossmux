@@ -1971,15 +1971,15 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
 Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookDir, const std::string& tocPath,
                   const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
                   const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath, uint8_t* buffer,
-                  const size_t bufferSize, const std::string& finalPartPath,
-                  const WeReadStore::WorkCallback callback, void* const callbackContext) {
+                  const size_t bufferSize, const std::string& finalPartPath, const WeReadStore::WorkCallback callback,
+                  void* const callbackContext) {
   std::string navPath;
   std::string opfPath;
   std::string coverSourcePath;
   const WeReadProtocol::ImageType coverType = findCoverSource(bookDir, coverSourcePath);
-  const Error packageFilesError = writePackageFiles(bookDir, book, tocPath, chapterCount, firstChapter, lastChapter,
-                                                    imagePolicy, workPath, coverType, navPath, opfPath, callback,
-                                                    callbackContext);
+  const Error packageFilesError =
+      writePackageFiles(bookDir, book, tocPath, chapterCount, firstChapter, lastChapter, imagePolicy, workPath,
+                        coverType, navPath, opfPath, callback, callbackContext);
   if (packageFilesError != Error::Ok) return packageFilesError;
 
   const std::string centralPath = bookDir + "/central.part";
@@ -1999,8 +1999,8 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
     return Error::SdCard;
   }
   if (coverType != WeReadProtocol::ImageType::None &&
-      !zip.addFile(coverType == WeReadProtocol::ImageType::Png ? "OEBPS/cover.png" : "OEBPS/cover.jpg",
-                   coverSourcePath, callback, callbackContext)) {
+      !zip.addFile(coverType == WeReadProtocol::ImageType::Png ? "OEBPS/cover.png" : "OEBPS/cover.jpg", coverSourcePath,
+                   callback, callbackContext)) {
     zip.abort();
     return Error::SdCard;
   }

@@ -629,8 +629,7 @@ void WeReadActivity::updatePostProcessNotice(const WeReadClient::Operation::Prog
 }
 
 void WeReadActivity::maybeShowLongWait(RenderLock& renderBarrier) {
-  if (postProcessNotice_.load() != PostProcessNotice::Waiting ||
-      millis() - postProcessStartedAt_ < kLongWaitMs) {
+  if (postProcessNotice_.load() != PostProcessNotice::Waiting || millis() - postProcessStartedAt_ < kLongWaitMs) {
     return;
   }
   postProcessNotice_.store(PostProcessNotice::LongWait);
@@ -1864,8 +1863,7 @@ void WeReadActivity::render(RenderLock&&) {
               break;
             case PostProcessNotice::LongWait:
               lines = kPostProcessLongWaitLines;
-              lineCount =
-                  static_cast<int>(sizeof(kPostProcessLongWaitLines) / sizeof(kPostProcessLongWaitLines[0]));
+              lineCount = static_cast<int>(sizeof(kPostProcessLongWaitLines) / sizeof(kPostProcessLongWaitLines[0]));
               break;
           }
           const int groupHeight = (lineCount + 1) * lineHeight + metrics.verticalSpacing;
@@ -1895,10 +1893,10 @@ void WeReadActivity::render(RenderLock&&) {
           renderer.drawCenteredText(UI_10_FONT_ID, centerY, status);
           if (total > 0) {
             const int barY = centerY + lineHeight + metrics.verticalSpacing;
-            GUI.drawProgressBar(
-                renderer,
-                Rect{metrics.contentSidePadding, barY, width - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-                completed, total);
+            GUI.drawProgressBar(renderer,
+                                Rect{metrics.contentSidePadding, barY, width - metrics.contentSidePadding * 2,
+                                     metrics.progressBarHeight},
+                                completed, total);
           }
           break;
         }

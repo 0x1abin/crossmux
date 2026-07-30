@@ -686,8 +686,7 @@ TEST_F(WeReadStoreTest, WritesPngCoverWithEmbeddedBodyImagesInReadingOrder) {
   static constexpr char kNav[] =
       "<html><nav><ol><li><a href=\"ch000000.xhtml\">一</a></li><li><a "
       "href=\"ch000001.xhtml\">二</a></li></ol></nav></html>";
-  std::string largeChapter =
-      "<html><body><p>一</p><img src=\"images/ch000000-0.png\" alt=\"插图\"/><p>";
+  std::string largeChapter = "<html><body><p>一</p><img src=\"images/ch000000-0.png\" alt=\"插图\"/><p>";
   largeChapter.append(8192, 'x');
   largeChapter += "</p></body></html>";
   {
