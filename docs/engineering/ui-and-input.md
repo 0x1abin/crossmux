@@ -7,6 +7,10 @@
 ## Orientation-Aware Logic
 * No Hardcoding: Never assume 800 or 480. Use renderer.getScreenWidth() and renderer.getScreenHeight().
 * Viewable Area: Use renderer.getOrientedViewableTRBL() to stay within physical bezel margins.
+* Safe Content: Start from `UITheme::getScreenSafeArea()`, then reserve the active theme's header, spacing, and
+  footer metrics before fitting custom boards or grids.
+* Coordinate Bounds: `drawLine()` endpoints are inclusive, while rectangle width and height are extents. A
+  full-width line therefore ends at `renderer.getScreenWidth() - 1`, never at the screen width itself.
 
 ## Logical Button Mapping
 

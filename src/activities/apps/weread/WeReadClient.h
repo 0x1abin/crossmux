@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 
+#include "WeReadBrowse.h"
 #include "WeReadHttpClient.h"
 #include "WeReadProtocol.h"
 #include "WeReadStore.h"
@@ -68,7 +69,7 @@ struct ProgressSyncResult {
 
 class Operation {
  public:
-  enum class Kind : uint8_t { Sync, Detail, Download, ProgressSync };
+  enum class Kind : uint8_t { Sync, Detail, Download, ProgressSync, Browse };
   enum class Event : uint8_t {
     None,
     QrReady,
@@ -84,6 +85,7 @@ class Operation {
 
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {});
   bool beginProgressSync(const char* bookId, ProgressSyncInput input, ProgressSyncMode mode);
+  bool beginBrowseCache(const WeReadStore::ShelfRecord& book);
   Event step(WeReadStore::WorkCallback callback = nullptr, void* callbackContext = nullptr);
   void cancel();
   void reset();
@@ -122,6 +124,8 @@ class Operation {
     Renew,
     PrepareDetail,
     FetchDetail,
+    PrepareBrowseCache,
+    FetchBrowse,
     FetchCover,
     ConvertCover,
     PrepareDownload,
@@ -209,9 +213,21 @@ class Operation {
     }
     return ProgressSyncOutcome::Pending;
   }
+  static constexpr uint32_t browseReviewRequestCount(const uint32_t cached) {
+    const uint32_t remaining = cached < WeReadBrowse::kMaxCachedReviews ? WeReadBrowse::kMaxCachedReviews - cached : 0;
+    return remaining < 20 ? remaining : 20;
+  }
+  static constexpr bool browseReviewCursorAdvances(const WeReadBrowse::Cursor& current,
+                                                   const WeReadBrowse::Cursor& first, const WeReadBrowse::Cursor& next,
+                                                   const uint32_t responseCount) {
+    const bool stalled = next.maxIdx == current.maxIdx && next.syncKey == current.syncKey;
+    const bool looped = current.page > 0 && next.maxIdx == first.maxIdx && next.syncKey == first.syncKey;
+    return responseCount > 0 && !stalled && !looped;
+  }
 
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
+  void abortBrowseCache();
   Event fail(Error error);
   Event handleRequestError(Error error, Phase retryPhase);
   Event retryChapterResponse();
@@ -225,6 +241,7 @@ class Operation {
   Error renewSession();
   Error syncShelfOnce();
   Error fetchDetailOnce();
+  Error fetchBrowseOnce();
   Event fetchCover();
   Event convertCover();
   Error fetchTocOnce();
@@ -297,6 +314,11 @@ class Operation {
   char psvts_[128] = {};
   float initialProgressFraction_ = 0.0f;
   bool initialProgressValid_ = false;
+  WeReadBrowse::Kind browseKind_ = WeReadBrowse::Kind::PopularHighlights;
+  WeReadBrowse::Cursor browseCursor_;
+  WeReadBrowse::Cursor browseFirstReviewCursor_;
+  WeReadBrowse::CacheManifest browseManifest_;
+  bool browseCacheActive_ = false;
   char imageHost_[128] = {};
   WeReadProtocol::ImageType coverType_ = WeReadProtocol::ImageType::None;
   char cookie_[kCookieSize] = {};
@@ -308,5 +330,6 @@ class Operation {
   std::string outputPath_;
   std::string finalPartPath_;
 };
+static_assert(sizeof(Operation) <= 8 * 1024, "WeRead operation exceeds its fixed heap budget");
 
 }  // namespace WeReadClient

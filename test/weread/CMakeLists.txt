@@ -30,6 +30,7 @@ endif()
 add_executable(WeReadStoreTest
   WeReadStoreTest.cpp
   ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
+  ${REPO_ROOT}/src/activities/apps/weread/WeReadBrowse.cpp
   ${REPO_ROOT}/src/activities/apps/weread/WeReadProtocol.cpp
   ${REPO_ROOT}/src/activities/apps/weread/WeReadStore.cpp
   ${REPO_ROOT}/src/util/StringUtils.cpp

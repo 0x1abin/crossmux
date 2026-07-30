@@ -41,9 +41,9 @@ class WeReadActivity final : public Activity {
     LogoutError
   };
   enum class Job : uint8_t { Sync, Detail, Download };
-  enum class DetailAction : uint8_t { Introduction, Read, Cache, Images };
+  enum class DetailAction : uint8_t { Introduction, Read, Browse, Cache, Images };
   enum class PostProcessNotice : uint8_t { None, Waiting, LongWait };
-  static constexpr int kDetailActionCount = 4;
+  static constexpr int kDetailActionCount = 5;
   static constexpr int kDetailListActionCount = kDetailActionCount - 1;
   static constexpr int kMaxIntroPages = 128;
   static constexpr uint32_t kLongWaitMs = 30000;

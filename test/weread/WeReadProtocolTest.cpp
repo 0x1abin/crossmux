@@ -46,6 +46,13 @@ struct OperationTestPeer {
     return Operation::progressVerification(samePosition, remoteHasAppId, sameAppId, remoteHasUpdateTime,
                                            remoteUpdateTime, uploadStartedAt);
   }
+  static uint32_t browseReviewRequestCount(const uint32_t cached) {
+    return Operation::browseReviewRequestCount(cached);
+  }
+  static bool browseReviewCursorAdvances(const WeReadBrowse::Cursor& current, const WeReadBrowse::Cursor& first,
+                                         const WeReadBrowse::Cursor& next, const uint32_t responseCount) {
+    return Operation::browseReviewCursorAdvances(current, first, next, responseCount);
+  }
 };
 
 }  // namespace WeReadClient
@@ -423,6 +430,30 @@ TEST(WeReadClientState, RequiresAReadBackBeforeReportingProgressUpload) {
   EXPECT_EQ(verify(false, true, true, true, 101, 100), Outcome::Pending);
   EXPECT_EQ(verify(false, true, false, true, 99, 100), Outcome::Pending);
   EXPECT_EQ(verify(false, false, false, false, 0, 100), Outcome::Pending);
+}
+
+TEST(WeReadClientState, CapsPopularReviewRequestsAtFifty) {
+  EXPECT_EQ(WeReadClient::OperationTestPeer::browseReviewRequestCount(0), 20U);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::browseReviewRequestCount(20), 20U);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::browseReviewRequestCount(40), 10U);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::browseReviewRequestCount(49), 1U);
+  EXPECT_EQ(WeReadClient::OperationTestPeer::browseReviewRequestCount(50), 0U);
+}
+
+TEST(WeReadClientState, RejectsEmptyStalledAndLoopingReviewPages) {
+  const WeReadBrowse::Cursor firstRequest{};
+  const WeReadBrowse::Cursor firstContinuation{1, 40, 100};
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::browseReviewCursorAdvances(firstRequest, {}, firstContinuation, 20));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::browseReviewCursorAdvances(firstRequest, {}, firstContinuation, 0));
+  EXPECT_FALSE(WeReadClient::OperationTestPeer::browseReviewCursorAdvances(firstContinuation, firstContinuation,
+                                                                           firstContinuation, 20));
+
+  const WeReadBrowse::Cursor secondContinuation{2, 20, 200};
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::browseReviewCursorAdvances(firstContinuation, firstContinuation,
+                                                                          secondContinuation, 20));
+  const WeReadBrowse::Cursor looped{3, firstContinuation.maxIdx, firstContinuation.syncKey};
+  EXPECT_FALSE(
+      WeReadClient::OperationTestPeer::browseReviewCursorAdvances(secondContinuation, firstContinuation, looped, 10));
 }
 
 TEST(WeReadProtocol, EncodesNumericAndUtf8Ids) {
