@@ -343,3 +343,4 @@ int MappedInputManager::getPressedFrontButton() const {
   }
   return -1;
 }
+bool MappedInputManager::isHeld(const Button button) const { return isPressed(button); }
