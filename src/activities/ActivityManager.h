@@ -100,6 +100,7 @@ class ActivityManager {
   void goToGomoku();
   void goToMinesweeper();
   void goToAirPage();
+  void goToBuddy();
   void goToStandby();
   void goToGame2048();
 #ifdef ENABLE_CHINESE_VERSION

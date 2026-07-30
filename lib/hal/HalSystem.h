@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -14,6 +15,9 @@ void begin();
 // Dump panic info to SD card if necessary
 void checkPanic();
 void clearPanic();
+
+using DeviceId = std::array<uint8_t, 6>;
+bool getDeviceId(DeviceId& out);
 
 std::string getPanicInfo(bool full = false);
 bool isRebootFromPanic();

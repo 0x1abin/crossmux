@@ -6,6 +6,7 @@
 #include "HalStorage.h"
 #include "Logging.h"
 #include "esp_debug_helpers.h"
+#include "esp_mac.h"
 #include "esp_private/esp_cpu_internal.h"
 #include "esp_private/esp_system_attr.h"
 #include "esp_private/panic_internal.h"
@@ -113,6 +114,15 @@ void clearPanic() {
     panicStack[i].sp = 0;
   }
   clearLastLogs();
+}
+
+bool getDeviceId(DeviceId& out) {
+  out.fill(0);
+  if (esp_efuse_mac_get_default(out.data()) != ESP_OK) {
+    LOG_ERR("SYS", "Failed to read eFuse device ID");
+    return false;
+  }
+  return true;
 }
 
 std::string getPanicInfo(bool full) {

@@ -11,6 +11,7 @@
 #include "apps/AppsMenuActivity.h"
 #include "apps/airpage/AirPageActivity.h"
 #include "apps/avatar/UglyAvatarActivity.h"
+#include "apps/buddy/BuddyActivity.h"
 #include "apps/sokoban/SokobanGameActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
@@ -296,6 +297,15 @@ void ActivityManager::goToAirPage() {
   auto activity = makeUniqueNoThrow<AirPageActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ACT", "OOM: AirPageActivity (%u bytes)", static_cast<unsigned>(sizeof(AirPageActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
+void ActivityManager::goToBuddy() {
+  auto activity = makeUniqueNoThrow<BuddyActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: BuddyActivity (%u bytes)", static_cast<unsigned>(sizeof(BuddyActivity)));
     return;
   }
   replaceActivity(std::move(activity));

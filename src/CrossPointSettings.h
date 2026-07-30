@@ -313,8 +313,13 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Short press Back goes to file browser instead of home (0 = disabled, 1 = enabled)
   uint8_t backShortToFileBrowser = 0;
   // Apps menu visibility. Set bits hide stable app IDs.
-  static constexpr uint16_t DEFAULT_HIDDEN_APPS_MASK = (uint16_t{1} << 4) | (uint16_t{1} << 5) | (uint16_t{1} << 6);
+  static constexpr uint8_t APPS_CATALOG_VERSION = 1;
+  static constexpr uint8_t BUDDY_APP_ID = 10;
+  static constexpr uint16_t DEFAULT_HIDDEN_APPS_MASK =
+      (uint16_t{1} << 4) | (uint16_t{1} << 5) | (uint16_t{1} << 6) | (uint16_t{1} << BUDDY_APP_ID);
   uint16_t hiddenAppsMask = DEFAULT_HIDDEN_APPS_MASK;
+  uint8_t appsCatalogVersion = APPS_CATALOG_VERSION;
+  uint8_t buddyClaimed = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Tilt-based page turning (X3 only — requires QMI8658 IMU)

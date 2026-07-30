@@ -1,8 +1,8 @@
 #include "ObfuscationUtils.h"
 
+#include <HalSystem.h>
 #include <Logging.h>
 #include <base64.h>
-#include <esp_mac.h>
 #include <mbedtls/base64.h>
 
 #include <cstring>
@@ -14,13 +14,15 @@ constexpr size_t HW_KEY_LEN = 6;
 
 // Simple lazy init — no thread-safety concern on single-core ESP32-C3.
 const uint8_t* getHwKey() {
-  static uint8_t key[HW_KEY_LEN] = {};
+  static HalSystem::DeviceId key{};
   static bool initialized = false;
   if (!initialized) {
-    esp_efuse_mac_get_default(key);
+    if (!HalSystem::getDeviceId(key)) {
+      LOG_ERR("OBF", "Using zero credential key because device ID is unavailable");
+    }
     initialized = true;
   }
-  return key;
+  return key.data();
 }
 }  // namespace
 
