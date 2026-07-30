@@ -686,8 +686,14 @@ TEST_F(WeReadStoreTest, WritesPngCoverWithEmbeddedBodyImagesInReadingOrder) {
   static constexpr char kNav[] =
       "<html><nav><ol><li><a href=\"ch000000.xhtml\">一</a></li><li><a "
       "href=\"ch000001.xhtml\">二</a></li></ol></nav></html>";
-  ASSERT_TRUE(Storage.writeFile(
-      "/work/ch0.xhtml", "<html><body><p>一</p><img src=\"images/ch000000-0.png\" alt=\"插图\"/></body></html>"));
+  std::string largeChapter = "<html><body><p>一</p><img src=\"images/ch000000-0.png\" alt=\"插图\"/><p>";
+  largeChapter.append(8192, 'x');
+  largeChapter += "</p></body></html>";
+  {
+    HalFile chapter;
+    ASSERT_TRUE(Storage.openFileForWrite("WR", "/work/ch0.xhtml", chapter));
+    ASSERT_EQ(chapter.write(largeChapter.data(), largeChapter.size()), largeChapter.size());
+  }
   ASSERT_TRUE(Storage.writeFile("/work/ch1.xhtml", "<html><body><p>二</p></body></html>"));
   static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
   {
@@ -710,10 +716,15 @@ TEST_F(WeReadStoreTest, WritesPngCoverWithEmbeddedBodyImagesInReadingOrder) {
   ASSERT_TRUE(zip.addBuffer("OEBPS/content.opf", reinterpret_cast<const uint8_t*>(kOpf), strlen(kOpf)));
   ASSERT_TRUE(zip.addBuffer("OEBPS/nav.xhtml", reinterpret_cast<const uint8_t*>(kNav), strlen(kNav)));
   ASSERT_TRUE(zip.addFile("OEBPS/cover.png", "/work/cover.png"));
-  ASSERT_TRUE(zip.addFile("OEBPS/ch000000.xhtml", "/work/ch0.xhtml"));
+  unsigned callbackCount = 0;
+  const auto countWork = [](void* context) { ++*static_cast<unsigned*>(context); };
+  ASSERT_TRUE(zip.addFile("OEBPS/ch000000.xhtml", "/work/ch0.xhtml", countWork, &callbackCount));
+  EXPECT_GE(callbackCount, 3U);
+  const unsigned copyCallbackCount = callbackCount;
   ASSERT_TRUE(zip.addFile("OEBPS/ch000001.xhtml", "/work/ch1.xhtml"));
   ASSERT_TRUE(zip.addFile("OEBPS/images/ch000000-0.png", "/work/image.png"));
-  ASSERT_TRUE(zip.finish());
+  ASSERT_TRUE(zip.finish(countWork, &callbackCount));
+  EXPECT_EQ(callbackCount, copyCallbackCount + 8);
   ASSERT_TRUE(WeReadStore::looksLikeZip("/work/book.epub"));
   EXPECT_FALSE(Storage.exists("/work/central.part"));
 

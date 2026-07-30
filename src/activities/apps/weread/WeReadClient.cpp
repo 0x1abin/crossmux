@@ -1869,7 +1869,8 @@ bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath
 Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
                         const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
                         const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath,
-                        const WeReadProtocol::ImageType coverType, std::string& navPath, std::string& opfPath) {
+                        const WeReadProtocol::ImageType coverType, std::string& navPath, std::string& opfPath,
+                        const WeReadStore::WorkCallback callback, void* const callbackContext) {
   navPath = bookDir + "/nav.part";
   opfPath = bookDir + "/content.part";
   if (Storage.exists(navPath.c_str())) Storage.remove(navPath.c_str());
@@ -1926,6 +1927,7 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
     if (opfLen <= 0 || static_cast<size_t>(opfLen) >= sizeof(item) || !writeLiteral(opf, item)) {
       return Error::SdCard;
     }
+    if (callback) callback(callbackContext);
   }
   if (imagePolicy == WeReadStore::ImagePolicy::Embed) {
     HalFile images;
@@ -1937,7 +1939,10 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
           record.state == WeReadStore::ImageWorkState::Pending) {
         return Error::Integrity;
       }
-      if (record.state != WeReadStore::ImageWorkState::Complete) continue;
+      if (record.state != WeReadStore::ImageWorkState::Complete) {
+        if (callback) callback(callbackContext);
+        continue;
+      }
       char item[256];
       const int length = snprintf(item, sizeof(item), "<item id=\"img%06u\" href=\"%s\" media-type=\"%s\"/>",
                                   static_cast<unsigned>(image), record.image.href,
@@ -1945,6 +1950,7 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
       if (length <= 0 || static_cast<size_t>(length) >= sizeof(item) || !writeLiteral(opf, item)) {
         return Error::SdCard;
       }
+      if (callback) callback(callbackContext);
     }
   }
   if (!writeLiteral(nav, "</ol></nav></body></html>") || !writeLiteral(opf, "</manifest><spine>")) {
@@ -1954,6 +1960,7 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
     char item[64];
     snprintf(item, sizeof(item), "<itemref idref=\"ch%06u\"/>", static_cast<unsigned>(i));
     if (!writeLiteral(opf, item)) return Error::SdCard;
+    if (callback) callback(callbackContext);
   }
   if (!writeLiteral(opf, "</spine></package>")) return Error::SdCard;
   nav.flush();
@@ -1964,13 +1971,15 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
 Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookDir, const std::string& tocPath,
                   const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
                   const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath, uint8_t* buffer,
-                  const size_t bufferSize, const std::string& finalPartPath) {
+                  const size_t bufferSize, const std::string& finalPartPath, const WeReadStore::WorkCallback callback,
+                  void* const callbackContext) {
   std::string navPath;
   std::string opfPath;
   std::string coverSourcePath;
   const WeReadProtocol::ImageType coverType = findCoverSource(bookDir, coverSourcePath);
-  const Error packageFilesError = writePackageFiles(bookDir, book, tocPath, chapterCount, firstChapter, lastChapter,
-                                                    imagePolicy, workPath, coverType, navPath, opfPath);
+  const Error packageFilesError =
+      writePackageFiles(bookDir, book, tocPath, chapterCount, firstChapter, lastChapter, imagePolicy, workPath,
+                        coverType, navPath, opfPath, callback, callbackContext);
   if (packageFilesError != Error::Ok) return packageFilesError;
 
   const std::string centralPath = bookDir + "/central.part";
@@ -1984,13 +1993,14 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>";
   if (!zip.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)) ||
       !zip.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)) ||
-      !zip.addFile("OEBPS/content.opf", opfPath) || !zip.addFile("OEBPS/nav.xhtml", navPath)) {
+      !zip.addFile("OEBPS/content.opf", opfPath, callback, callbackContext) ||
+      !zip.addFile("OEBPS/nav.xhtml", navPath, callback, callbackContext)) {
     zip.abort();
     return Error::SdCard;
   }
   if (coverType != WeReadProtocol::ImageType::None &&
-      !zip.addFile(coverType == WeReadProtocol::ImageType::Png ? "OEBPS/cover.png" : "OEBPS/cover.jpg",
-                   coverSourcePath)) {
+      !zip.addFile(coverType == WeReadProtocol::ImageType::Png ? "OEBPS/cover.png" : "OEBPS/cover.jpg", coverSourcePath,
+                   callback, callbackContext)) {
     zip.abort();
     return Error::SdCard;
   }
@@ -2008,10 +2018,11 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
     }
     char entryName[48];
     snprintf(entryName, sizeof(entryName), "OEBPS/ch%06u.xhtml", static_cast<unsigned>(i));
-    if (!zip.addFile(entryName, WeReadStore::chapterPath(bookDir, i))) {
+    if (!zip.addFile(entryName, WeReadStore::chapterPath(bookDir, i), callback, callbackContext)) {
       zip.abort();
       return Error::SdCard;
     }
+    if (callback) callback(callbackContext);
   }
   if (imagePolicy == WeReadStore::ImagePolicy::Embed) {
     HalFile images;
@@ -2027,17 +2038,22 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
         zip.abort();
         return Error::Integrity;
       }
-      if (record.state != WeReadStore::ImageWorkState::Complete) continue;
+      if (record.state != WeReadStore::ImageWorkState::Complete) {
+        if (callback) callback(callbackContext);
+        continue;
+      }
       const std::string sourcePath = bookDir + "/" + record.image.href;
       char entryName[96];
       const int length = snprintf(entryName, sizeof(entryName), "OEBPS/%s", record.image.href);
-      if (length <= 0 || static_cast<size_t>(length) >= sizeof(entryName) || !zip.addFile(entryName, sourcePath)) {
+      if (length <= 0 || static_cast<size_t>(length) >= sizeof(entryName) ||
+          !zip.addFile(entryName, sourcePath, callback, callbackContext)) {
         zip.abort();
         return Error::SdCard;
       }
+      if (callback) callback(callbackContext);
     }
   }
-  if (!zip.finish() || !WeReadStore::looksLikeZip(finalPartPath)) return Error::Integrity;
+  if (!zip.finish(callback, callbackContext) || !WeReadStore::looksLikeZip(finalPartPath)) return Error::Integrity;
   Storage.remove(navPath.c_str());
   Storage.remove(opfPath.c_str());
   return Error::Ok;
@@ -2793,14 +2809,13 @@ Operation::Event Operation::finishWholeBook(const std::string& source) {
   return Event::Complete;
 }
 
-Error Operation::prepareImageWork() {
+Error Operation::prepareImageWork(const WeReadStore::WorkCallback callback, void* const callbackContext) {
   const std::string workPath = WeReadStore::imageWorkPath(bookDir_);
   WeReadStore::IndexWriter writer;
   if (!writer.begin(workPath, WeReadStore::kImageWorkMagic, sizeof(WeReadStore::ImageWorkRecord))) {
     return Error::SdCard;
   }
 
-  progressStage_ = ProgressStage::Images;
   progressCompleted_ = 0;
   progressTotal_ = 0;
   imageDownloaded_ = 0;
@@ -2833,7 +2848,9 @@ Error Operation::prepareImageWork() {
         return Error::SdCard;
       }
       ++progressTotal_;
+      if (callback) callback(callbackContext);
     }
+    if (callback) callback(callbackContext);
   }
   if (!writer.finish()) return Error::SdCard;
   imageWorkCount_ = progressTotal_;
@@ -2847,6 +2864,7 @@ Error Operation::prepareImageWork() {
   }
   bookSession_.reset();
   bookSession_.clearStats();
+  progressStage_ = ProgressStage::Images;
   return Error::Ok;
 }
 
@@ -3224,7 +3242,7 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
   return Event::None;
 }
 
-Operation::Event Operation::step() {
+Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void* const callbackContext) {
   if (!active()) return Event::None;
   if (cancelRequested_) return cancelNow();
   if ((requestAttempt_ > 0 || chapterResponseAttempts_ > 0 || phase_ == Phase::VerifyProgress) && nextActionAt_ != 0 &&
@@ -3536,6 +3554,9 @@ Operation::Event Operation::step() {
     case Phase::LoadChapter: {
       if (chapterIndex_ > lastChapterIndex_) {
         if (tocFile_.isOpen()) tocFile_.close();
+        progressStage_ = ProgressStage::Preparing;
+        progressCompleted_ = 0;
+        progressTotal_ = 0;
         phase_ = Phase::PrepareImages;
         return Event::None;
       }
@@ -3710,7 +3731,7 @@ Operation::Event Operation::step() {
         LOG_INF("WR", "image phase excluded");
         return Event::None;
       }
-      const Error error = prepareImageWork();
+      const Error error = prepareImageWork(callback, callbackContext);
       if (error != Error::Ok) return fail(error);
       if (imageWorkCount_ == 0) {
         LOG_INF("WR",
@@ -3737,7 +3758,7 @@ Operation::Event Operation::step() {
       const unsigned long packageStartedAt = millis();
       const Error error = packageBook(book_, bookDir_, tocPath_, chapterCount_, firstChapterIndex_, lastChapterIndex_,
                                       options_.imagePolicy, WeReadStore::imageWorkPath(bookDir_), ioBuffer_,
-                                      sizeof(ioBuffer_), finalPartPath_);
+                                      sizeof(ioBuffer_), finalPartPath_, callback, callbackContext);
       logMemory("package end");
       if (error != Error::Ok) return fail(error);
       if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);

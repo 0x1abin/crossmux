@@ -8,6 +8,8 @@
 
 namespace WeReadStore {
 
+using WorkCallback = void (*)(void*);
+
 constexpr const char* kRoot = "/.crosspoint/weread";
 constexpr const char* kDisclaimerAcceptancePath = "/.crosspoint/weread/disclaimer.accepted";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
@@ -205,8 +207,9 @@ class StoreOnlyZipWriter {
  public:
   bool begin(const std::string& outputPath, const std::string& centralPath, uint8_t* buffer, size_t bufferSize);
   bool addBuffer(const char* name, const uint8_t* data, size_t len);
-  bool addFile(const char* name, const std::string& sourcePath);
-  bool finish();
+  bool addFile(const char* name, const std::string& sourcePath, WorkCallback callback = nullptr,
+               void* callbackContext = nullptr);
+  bool finish(WorkCallback callback = nullptr, void* callbackContext = nullptr);
   void abort();
 
  private:

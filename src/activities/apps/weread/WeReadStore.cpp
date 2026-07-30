@@ -846,7 +846,8 @@ bool StoreOnlyZipWriter::addBuffer(const char* name, const uint8_t* data, const 
          appendCentral(record);
 }
 
-bool StoreOnlyZipWriter::addFile(const char* name, const std::string& sourcePath) {
+bool StoreOnlyZipWriter::addFile(const char* name, const std::string& sourcePath, const WorkCallback callback,
+                                 void* const callbackContext) {
   if (!active_ || !name || output_.position() > UINT32_MAX) return false;
   HalFile source;
   if (!Storage.openFileForRead("WR", sourcePath, source) || source.fileSize64() > UINT32_MAX) return false;
@@ -867,6 +868,7 @@ bool StoreOnlyZipWriter::addFile(const char* name, const std::string& sourcePath
     if (got <= 0 || !writeBytes(output_, buffer_, static_cast<size_t>(got))) return false;
     crc = WeReadProtocol::crc32Update(crc, buffer_, static_cast<size_t>(got));
     copied += static_cast<uint32_t>(got);
+    if (callback) callback(callbackContext);
   }
   record.crc = crc ^ 0xFFFFFFFF;
   return writeU32(output_, 0x08074B50) && writeU32(output_, record.crc) && writeU32(output_, record.size) &&
@@ -883,7 +885,7 @@ bool StoreOnlyZipWriter::writeCentralHeader(const CentralRecord& record) {
          writeU32(output_, record.localOffset) && writeBytes(output_, record.name, nameLen);
 }
 
-bool StoreOnlyZipWriter::finish() {
+bool StoreOnlyZipWriter::finish(const WorkCallback callback, void* const callbackContext) {
   if (!active_) return false;
   central_.flush();
   central_.close();
@@ -904,6 +906,7 @@ bool StoreOnlyZipWriter::finish() {
           !writeCentralHeader(record)) {
         centralOk = false;
       }
+      if (callback) callback(callbackContext);
     }
   }
   if (!centralOk || output_.position() > UINT32_MAX) {

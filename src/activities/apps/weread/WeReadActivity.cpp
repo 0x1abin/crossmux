@@ -71,6 +71,18 @@ constexpr StrId kCacheScopeOptions[] = {
     StrId::STR_WEREAD_CACHE_CHAPTER_RANGE,
 };
 
+constexpr StrId kPostProcessWaitingLines[] = {
+    StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_1,
+    StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_2,
+};
+
+constexpr StrId kPostProcessLongWaitLines[] = {
+    StrId::STR_WEREAD_POST_PROCESS_LONG_WAIT_LINE_1,
+    StrId::STR_WEREAD_POST_PROCESS_LONG_WAIT_LINE_2,
+    StrId::STR_WEREAD_POST_PROCESS_LONG_WAIT_LINE_3,
+    StrId::STR_WEREAD_POST_PROCESS_LONG_WAIT_LINE_4,
+};
+
 constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerActions) / sizeof(kDisclaimerActions[0]));
 constexpr int kDisclaimerActionOffsetY = 10;
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
@@ -503,6 +515,18 @@ WeReadActivity::State WeReadActivity::stateForJob(const Job job) {
   return State::Error;
 }
 
+bool isPostProcessStage(const WeReadClient::Operation::ProgressStage stage) {
+  switch (stage) {
+    case WeReadClient::Operation::ProgressStage::Preparing:
+    case WeReadClient::Operation::ProgressStage::Packaging:
+      return true;
+    case WeReadClient::Operation::ProgressStage::Chapters:
+    case WeReadClient::Operation::ProgressStage::Images:
+      return false;
+  }
+  return false;
+}
+
 void WeReadActivity::connectThen(const Job job, const WeReadStore::ShelfRecord* book) {
   retryJob_ = job;
   if (book) pendingBook_ = *book;
@@ -534,6 +558,8 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
   progressStage_.store(WeReadClient::Operation::ProgressStage::Chapters);
   progressCompleted_.store(0);
   progressTotal_.store(0);
+  postProcessNotice_.store(PostProcessNotice::None);
+  postProcessStartedAt_ = 0;
   downloadRenderPending_.store(false);
   stageRenderPending_.store(job == Job::Download);
   qrUrl_[0] = '\0';
@@ -576,7 +602,39 @@ WeReadClient::Operation::Event WeReadActivity::stepOperation() {
   // with each synchronous protocol step so TLS never competes with a refresh.
   RenderLock renderBarrier(*this);
   if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
-  return operation_.step();
+  struct WorkContext {
+    WeReadActivity* activity;
+    RenderLock* renderBarrier;
+  } context{this, &renderBarrier};
+  return operation_.step(
+      [](void* rawContext) {
+        auto* work = static_cast<WorkContext*>(rawContext);
+        work->activity->maybeShowLongWait(*work->renderBarrier);
+      },
+      &context);
+}
+
+void WeReadActivity::updatePostProcessNotice(const WeReadClient::Operation::ProgressStage previous,
+                                             const WeReadClient::Operation::ProgressStage current) {
+  const bool wasPostProcessing = isPostProcessStage(previous);
+  const bool isPostProcessing = isPostProcessStage(current);
+  if (wasPostProcessing == isPostProcessing) return;
+  if (isPostProcessing) {
+    postProcessStartedAt_ = millis();
+    postProcessNotice_.store(PostProcessNotice::Waiting);
+  } else {
+    postProcessStartedAt_ = 0;
+    postProcessNotice_.store(PostProcessNotice::None);
+  }
+}
+
+void WeReadActivity::maybeShowLongWait(RenderLock& renderBarrier) {
+  if (postProcessNotice_.load() != PostProcessNotice::Waiting || millis() - postProcessStartedAt_ < kLongWaitMs) {
+    return;
+  }
+  postProcessNotice_.store(PostProcessNotice::LongWait);
+  renderBarrier.unlock();
+  requestUpdateAndWait();
 }
 
 void WeReadActivity::advanceShelfCovers() {
@@ -646,6 +704,7 @@ void WeReadActivity::advanceJob() {
                                     WeReadClient::Operation::progressDecile(previousCompleted, total) !=
                                         WeReadClient::Operation::progressDecile(completed, total);
     if (stageChanged) {
+      updatePostProcessNotice(previousStage, stage);
       stageRenderPending_.store(true);
       requestDownloadUpdate();
     } else if (totalChanged || (completedChanged && (stage == WeReadClient::Operation::ProgressStage::Chapters ||
@@ -1793,34 +1852,54 @@ void WeReadActivity::render(RenderLock&&) {
       const uint32_t completed = progressCompleted_.load();
       const uint32_t total = progressTotal_.load();
       const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-      const int centerY = (height - lineHeight) / 2;
-      char status[64];
-      const char* label = nullptr;
       switch (stage) {
+        case WeReadClient::Operation::ProgressStage::Preparing:
+        case WeReadClient::Operation::ProgressStage::Packaging: {
+          const StrId* lines = kPostProcessWaitingLines;
+          int lineCount = static_cast<int>(sizeof(kPostProcessWaitingLines) / sizeof(kPostProcessWaitingLines[0]));
+          switch (postProcessNotice_.load()) {
+            case PostProcessNotice::None:
+            case PostProcessNotice::Waiting:
+              break;
+            case PostProcessNotice::LongWait:
+              lines = kPostProcessLongWaitLines;
+              lineCount = static_cast<int>(sizeof(kPostProcessLongWaitLines) / sizeof(kPostProcessLongWaitLines[0]));
+              break;
+          }
+          const int groupHeight = (lineCount + 1) * lineHeight + metrics.verticalSpacing;
+          int y = content.y + std::max(0, (content.height - groupHeight) / 2);
+          UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, pendingBook_.title);
+          y += lineHeight + metrics.verticalSpacing;
+          for (int i = 0; i < lineCount; ++i) {
+            UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, I18N.get(lines[i]));
+            y += lineHeight;
+          }
+          break;
+        }
         case WeReadClient::Operation::ProgressStage::Chapters:
-          label = tr(STR_WEREAD_CACHING_CHAPTERS);
+        case WeReadClient::Operation::ProgressStage::Images: {
+          const char* label = stage == WeReadClient::Operation::ProgressStage::Chapters
+                                  ? tr(STR_WEREAD_CACHING_CHAPTERS)
+                                  : tr(STR_WEREAD_DOWNLOADING_IMAGES);
+          const int centerY = (height - lineHeight) / 2;
+          char status[64];
+          if (total == 0) {
+            snprintf(status, sizeof(status), "%s", label);
+          } else {
+            snprintf(status, sizeof(status), "%s %u/%u", label, static_cast<unsigned>(completed),
+                     static_cast<unsigned>(total));
+          }
+          renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight - metrics.verticalSpacing, pendingBook_.title);
+          renderer.drawCenteredText(UI_10_FONT_ID, centerY, status);
+          if (total > 0) {
+            const int barY = centerY + lineHeight + metrics.verticalSpacing;
+            GUI.drawProgressBar(renderer,
+                                Rect{metrics.contentSidePadding, barY, width - metrics.contentSidePadding * 2,
+                                     metrics.progressBarHeight},
+                                completed, total);
+          }
           break;
-        case WeReadClient::Operation::ProgressStage::Images:
-          label = tr(STR_WEREAD_DOWNLOADING_IMAGES);
-          break;
-        case WeReadClient::Operation::ProgressStage::Packaging:
-          label = tr(STR_WEREAD_PACKAGING_BOOK);
-          break;
-      }
-      if (total == 0 || stage == WeReadClient::Operation::ProgressStage::Packaging) {
-        snprintf(status, sizeof(status), "%s", label);
-      } else {
-        snprintf(status, sizeof(status), "%s %u/%u", label, static_cast<unsigned>(completed),
-                 static_cast<unsigned>(total));
-      }
-      renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight - metrics.verticalSpacing, pendingBook_.title);
-      renderer.drawCenteredText(UI_10_FONT_ID, centerY, status);
-      if (total > 0 && stage != WeReadClient::Operation::ProgressStage::Packaging) {
-        const int barY = centerY + lineHeight + metrics.verticalSpacing;
-        GUI.drawProgressBar(
-            renderer,
-            Rect{metrics.contentSidePadding, barY, width - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-            completed, total);
+        }
       }
       break;
     }
