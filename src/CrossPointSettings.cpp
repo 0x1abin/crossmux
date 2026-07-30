@@ -307,9 +307,8 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)FRONT_HW_RIGHT, FRONT_BUTTON_HARDWARE_COUNT, FRONT_HW_RIGHT);
   validateFrontButtonMapping(s);
-  hiddenAppsMask = doc["hiddenAppsMask"].isNull()
-                       ? DEFAULT_HIDDEN_APPS_MASK
-                       : static_cast<uint16_t>(doc["hiddenAppsMask"].as<uint16_t>());
+  hiddenAppsMask = doc["hiddenAppsMask"].isNull() ? DEFAULT_HIDDEN_APPS_MASK
+                                                  : static_cast<uint16_t>(doc["hiddenAppsMask"].as<uint16_t>());
   const uint8_t storedAppsCatalogVersion = doc["appsCatalogVersion"] | static_cast<uint8_t>(0);
   // Buddy was added at catalog version 1. Hide it exactly once during the
   // upgrade, then preserve the user's visibility choice on later boots.
@@ -318,8 +317,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
   appsCatalogVersion = APPS_CATALOG_VERSION;
-  buddyClaimed =
-      clamp(doc["buddyClaimed"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
+  buddyClaimed = clamp(doc["buddyClaimed"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
 
   // Reader font size — an actual point size since 1.5. Files written by 1.4 and
   // earlier hold the old SMALL/MEDIUM/LARGE/EXTRA_LARGE slot in 0..3; no font is

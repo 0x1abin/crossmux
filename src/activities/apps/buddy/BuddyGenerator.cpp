@@ -19,11 +19,11 @@ constexpr uint32_t kShinyThreshold = 42949673u;  // ceil(2^32 * 0.01)
 constexpr uint32_t kNameSeedMask = 0x0BADD1E5u;
 
 constexpr const char* kNamePrefixes[] = {
-    "Nib", "Pip", "Crum", "Sprig", "Tink", "Moss", "Quib", "Wob",
-    "Dusk", "Fizz", "Plop", "Brim", "Nox",  "Sprock", "Puck", "Mallow",
+    "Nib",  "Pip",  "Crum", "Sprig", "Tink", "Moss",   "Quib", "Wob",
+    "Dusk", "Fizz", "Plop", "Brim",  "Nox",  "Sprock", "Puck", "Mallow",
 };
 constexpr const char* kNameSuffixes[] = {
-    "let", "bit", "bun", "wick", "puff", "pod",  "kin",  "mote",
+    "let", "bit",   "bun",    "wick", "puff",  "pod",    "kin",   "mote",
     "zip", "snoot", "sprout", "fuzz", "blink", "pebble", "crumb", "bop",
 };
 
@@ -70,14 +70,12 @@ class Mulberry32 {
     state_ += 0x6D2B79F5u;
     uint32_t value = state_;
     value = static_cast<uint32_t>(static_cast<uint64_t>(value ^ (value >> 15)) * (1u | value));
-    value ^= value + static_cast<uint32_t>(
-                         static_cast<uint64_t>(value ^ (value >> 7)) * static_cast<uint32_t>(61u | value));
+    value ^=
+        value + static_cast<uint32_t>(static_cast<uint64_t>(value ^ (value >> 7)) * static_cast<uint32_t>(61u | value));
     return value ^ (value >> 14);
   }
 
-  uint32_t index(const uint32_t count) {
-    return static_cast<uint32_t>((static_cast<uint64_t>(next()) * count) >> 32);
-  }
+  uint32_t index(const uint32_t count) { return static_cast<uint32_t>((static_cast<uint64_t>(next()) * count) >> 32); }
 
  private:
   uint32_t state_;
@@ -116,8 +114,7 @@ uint64_t wyhash(const uint8_t* data, const size_t length, const uint64_t seed) {
       a = (readLittleEndian(data, 4) << 32) | readLittleEndian(data + quarter, 4);
       b = (readLittleEndian(data + end, 4) << 32) | readLittleEndian(data + end - quarter, 4);
     } else if (length > 0) {
-      a = (static_cast<uint64_t>(data[0]) << 16) | (static_cast<uint64_t>(data[length >> 1]) << 8) |
-          data[length - 1];
+      a = (static_cast<uint64_t>(data[0]) << 16) | (static_cast<uint64_t>(data[length >> 1]) << 8) | data[length - 1];
     }
   } else {
     size_t offset = 0;
@@ -125,8 +122,7 @@ uint64_t wyhash(const uint8_t* data, const size_t length, const uint64_t seed) {
       uint64_t state1 = state;
       uint64_t state2 = state;
       while (offset + 48 < length) {
-        state = mix(readLittleEndian(data + offset, 8) ^ kWySecret[1],
-                    readLittleEndian(data + offset + 8, 8) ^ state);
+        state = mix(readLittleEndian(data + offset, 8) ^ kWySecret[1], readLittleEndian(data + offset + 8, 8) ^ state);
         state1 = mix(readLittleEndian(data + offset + 16, 8) ^ kWySecret[2],
                      readLittleEndian(data + offset + 24, 8) ^ state1);
         state2 = mix(readLittleEndian(data + offset + 32, 8) ^ kWySecret[3],
@@ -136,8 +132,7 @@ uint64_t wyhash(const uint8_t* data, const size_t length, const uint64_t seed) {
       state ^= state1 ^ state2;
     }
     while (offset + 16 < length) {
-      state = mix(readLittleEndian(data + offset, 8) ^ kWySecret[1],
-                  readLittleEndian(data + offset + 8, 8) ^ state);
+      state = mix(readLittleEndian(data + offset, 8) ^ kWySecret[1], readLittleEndian(data + offset + 8, 8) ^ state);
       offset += 16;
     }
     a = readLittleEndian(data + length - 16, 8);
@@ -171,11 +166,9 @@ Traits generateTraits(const uint32_t seed) {
   const uint8_t floor = rarityFloor(traits.rarity);
   for (size_t i = 0; i < statCount; ++i) {
     if (i == peak) {
-      traits.stats[i] =
-          static_cast<uint8_t>(std::min<uint32_t>(100, floor + 50U + rng.index(30)));
+      traits.stats[i] = static_cast<uint8_t>(std::min<uint32_t>(100, floor + 50U + rng.index(30)));
     } else if (i == dump) {
-      const int dumpValue =
-          static_cast<int>(floor) - 10 + static_cast<int>(rng.index(15));
+      const int dumpValue = static_cast<int>(floor) - 10 + static_cast<int>(rng.index(15));
       traits.stats[i] = static_cast<uint8_t>(std::max(1, dumpValue));
     } else {
       traits.stats[i] = static_cast<uint8_t>(floor + rng.index(40));

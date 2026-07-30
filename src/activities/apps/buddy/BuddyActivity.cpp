@@ -33,49 +33,47 @@ struct Sprite {
 // portraits preserve the reference project's idle silhouettes without runtime
 // asset decoding or a second framebuffer.
 constexpr Sprite kSprites[] = {
-    {{"            ", "    __      ", "  <(? )___  ", "   (  ._>   ", "    `--'    "}},  // Duck
-    {{"            ", "    (?>     ", "    ||      ", "  _(__)_    ", "   ^^^^     "}},  // Goose
-    {{"            ", "   .----.   ", "  ( ?  ? )  ", "  (      )  ", "   `----'   "}},  // Blob
+    {{"            ", "    __      ", "  <(? )___  ", "   (  ._>   ", "    `--'    "}},      // Duck
+    {{"            ", "    (?>     ", "    ||      ", "  _(__)_    ", "   ^^^^     "}},      // Goose
+    {{"            ", "   .----.   ", "  ( ?  ? )  ", "  (      )  ", "   `----'   "}},      // Blob
     {{"            ", "   /\\_/\\    ", "  ( ?   ? ) ", "  (  w   )  ", "  (\")_(\")   "}},  // Cat
-    {{"            ", "  /^\\  /^\\  ", " <  ?    ? >", " (   ww   ) ", "  `-vvvv-'  "}},  // Dragon
+    {{"            ", "  /^\\  /^\\  ", " <  ?    ? >", " (   ww   ) ", "  `-vvvv-'  "}},    // Dragon
     {{"            ", "   .----.   ", "  ( ?  ? )  ", "  (______)  ", "  /\\/\\/\\/\\  "}},  // Octopus
-    {{"            ", "   /\\  /\\   ", "  ((?)(?))  ", "  (  ><  )  ", "   `----'   "}},  // Owl
-    {{"   .---.    ", "  ( ?>? )   ", " /(     )\\  ", "  `-----'   ", "   J   L    "}},  // Penguin
-    {{"            ", "   _,--._   ", "  ( ?    ?) ", " /[______]\\ ", "  ``    ``  "}},  // Turtle
-    {{"  \\\\  /     ", "    .--.    ", "  _( ?? )_  ", " (___@@___) ", "  ~~~~~~~~  "}},  // Snail
-    {{"            ", "   .----.   ", "  ( ?    ? )", "  |   __   |", "  ~`~``~`~  "}},  // Ghost
-    {{"            ", "}~(______)~{", "}~( ?  ? )~{", "  ( .--. )  ", "  (_/  \\_)  "}},  // Axolotl
-    {{"            ", "  n______n  ", " ( ?    ? ) ", " (   oo   ) ", "  `------'  "}},  // Capybara
-    {{"            ", " n  ____  n ", " | |?  ?| | ", " |_|    |_| ", "   |    |   "}},  // Cactus
-    {{"            ", "   .[||].   ", "  [ ?    ? ]", "  [ ==== ]  ", "  `------'  "}},  // Robot
-    {{"    (\\_/)   ", "   ( ? ? )  ", "  =(  v  )= ", "   (\")_(\")  ", "            "}},  // Rabbit
-    {{"            ", " .-o-OO-o-. ", "(__________)", "   |?   ?|  ", "   |____|   "}},  // Mushroom
-    {{"            ", "  /\\____/\\  ", " ( ?    ? ) ", " (   ..   ) ", "  `------'  "}},  // Chonk
+    {{"            ", "   /\\  /\\   ", "  ((?)(?))  ", "  (  ><  )  ", "   `----'   "}},    // Owl
+    {{"   .---.    ", "  ( ?>? )   ", " /(     )\\  ", "  `-----'   ", "   J   L    "}},     // Penguin
+    {{"            ", "   _,--._   ", "  ( ?    ?) ", " /[______]\\ ", "  ``    ``  "}},     // Turtle
+    {{"  \\\\  /     ", "    .--.    ", "  _( ?? )_  ", " (___@@___) ", "  ~~~~~~~~  "}},    // Snail
+    {{"            ", "   .----.   ", "  ( ?    ? )", "  |   __   |", "  ~`~``~`~  "}},      // Ghost
+    {{"            ", "}~(______)~{", "}~( ?  ? )~{", "  ( .--. )  ", "  (_/  \\_)  "}},     // Axolotl
+    {{"            ", "  n______n  ", " ( ?    ? ) ", " (   oo   ) ", "  `------'  "}},      // Capybara
+    {{"            ", " n  ____  n ", " | |?  ?| | ", " |_|    |_| ", "   |    |   "}},      // Cactus
+    {{"            ", "   .[||].   ", "  [ ?    ? ]", "  [ ==== ]  ", "  `------'  "}},      // Robot
+    {{"    (\\_/)   ", "   ( ? ? )  ", "  =(  v  )= ", "   (\")_(\")  ", "            "}},   // Rabbit
+    {{"            ", " .-o-OO-o-. ", "(__________)", "   |?   ?|  ", "   |____|   "}},      // Mushroom
+    {{"            ", "  /\\____/\\  ", " ( ?    ? ) ", " (   ..   ) ", "  `------'  "}},    // Chonk
 };
 
 constexpr char kEyeGlyphs[] = {'.', '*', 'x', 'O', '@', 'o'};
 constexpr const char* kHatRows[] = {
-    "", "    /\\     ", "   [___]    ", "   _/|\\_    ",
-    "   (---)    ", "    /\\     ", "   (___)    ", "    <(')    ",
+    "", "    /\\     ", "   [___]    ", "   _/|\\_    ", "   (---)    ", "    /\\     ", "   (___)    ", "    <(')    ",
 };
 
 constexpr StrId kRarityLabels[] = {
-    StrId::STR_BUDDY_RARITY_COMMON, StrId::STR_BUDDY_RARITY_UNCOMMON, StrId::STR_BUDDY_RARITY_RARE,
-    StrId::STR_BUDDY_RARITY_EPIC, StrId::STR_BUDDY_RARITY_LEGENDARY,
+    StrId::STR_BUDDY_RARITY_COMMON, StrId::STR_BUDDY_RARITY_UNCOMMON,  StrId::STR_BUDDY_RARITY_RARE,
+    StrId::STR_BUDDY_RARITY_EPIC,   StrId::STR_BUDDY_RARITY_LEGENDARY,
 };
 
 constexpr StrId kSpeciesLabels[] = {
-    StrId::STR_BUDDY_SPECIES_DUCK,     StrId::STR_BUDDY_SPECIES_GOOSE,   StrId::STR_BUDDY_SPECIES_BLOB,
-    StrId::STR_BUDDY_SPECIES_CAT,      StrId::STR_BUDDY_SPECIES_DRAGON,  StrId::STR_BUDDY_SPECIES_OCTOPUS,
-    StrId::STR_BUDDY_SPECIES_OWL,      StrId::STR_BUDDY_SPECIES_PENGUIN, StrId::STR_BUDDY_SPECIES_TURTLE,
-    StrId::STR_BUDDY_SPECIES_SNAIL,    StrId::STR_BUDDY_SPECIES_GHOST,   StrId::STR_BUDDY_SPECIES_AXOLOTL,
-    StrId::STR_BUDDY_SPECIES_CAPYBARA, StrId::STR_BUDDY_SPECIES_CACTUS,  StrId::STR_BUDDY_SPECIES_ROBOT,
-    StrId::STR_BUDDY_SPECIES_RABBIT,   StrId::STR_BUDDY_SPECIES_MUSHROOM,
-    StrId::STR_BUDDY_SPECIES_CHONK,
+    StrId::STR_BUDDY_SPECIES_DUCK,     StrId::STR_BUDDY_SPECIES_GOOSE,    StrId::STR_BUDDY_SPECIES_BLOB,
+    StrId::STR_BUDDY_SPECIES_CAT,      StrId::STR_BUDDY_SPECIES_DRAGON,   StrId::STR_BUDDY_SPECIES_OCTOPUS,
+    StrId::STR_BUDDY_SPECIES_OWL,      StrId::STR_BUDDY_SPECIES_PENGUIN,  StrId::STR_BUDDY_SPECIES_TURTLE,
+    StrId::STR_BUDDY_SPECIES_SNAIL,    StrId::STR_BUDDY_SPECIES_GHOST,    StrId::STR_BUDDY_SPECIES_AXOLOTL,
+    StrId::STR_BUDDY_SPECIES_CAPYBARA, StrId::STR_BUDDY_SPECIES_CACTUS,   StrId::STR_BUDDY_SPECIES_ROBOT,
+    StrId::STR_BUDDY_SPECIES_RABBIT,   StrId::STR_BUDDY_SPECIES_MUSHROOM, StrId::STR_BUDDY_SPECIES_CHONK,
 };
 
 constexpr StrId kStatLabels[] = {
-    StrId::STR_BUDDY_STAT_FOCUS, StrId::STR_BUDDY_STAT_PATIENCE, StrId::STR_BUDDY_STAT_LUCK,
+    StrId::STR_BUDDY_STAT_FOCUS,  StrId::STR_BUDDY_STAT_PATIENCE, StrId::STR_BUDDY_STAT_LUCK,
     StrId::STR_BUDDY_STAT_WISDOM, StrId::STR_BUDDY_STAT_COURAGE,
 };
 
@@ -92,8 +90,8 @@ Rect buddyContentBounds(const GfxRenderer& renderer, const bool hasFrontButtonHi
   const Rect safe = theme.getScreenSafeArea(renderer, hasFrontButtonHints, false);
   const int horizontalInset = std::max(8, metrics.contentSidePadding / 2);
   const int verticalInset = std::max(6, metrics.verticalSpacing / 2);
-  return Rect{safe.x + horizontalInset, safe.y + verticalInset,
-              std::max(1, safe.width - horizontalInset * 2), std::max(1, safe.height - verticalInset * 2)};
+  return Rect{safe.x + horizontalInset, safe.y + verticalInset, std::max(1, safe.width - horizontalInset * 2),
+              std::max(1, safe.height - verticalInset * 2)};
 }
 
 void drawCentered(const GfxRenderer& renderer, const int fontId, const Rect& bounds, const int y, const char* text,
@@ -186,6 +184,7 @@ void drawStatRows(const GfxRenderer& renderer, const Rect& bounds, const buddy::
   const int rowGap = std::max(6, metrics.verticalSpacing / 2);
   const int columnGap = std::max(8, metrics.contentSidePadding / 2);
   int labelWidth = 0;
+  // cppcheck-suppress useStlAlgorithm
   for (const StrId label : kStatLabels) {
     labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(label)));
   }
@@ -355,8 +354,7 @@ void BuddyActivity::drawRevealFrame() {
       drawEgg(renderer, centerX, eggTop, eggScale, false);
       {
         const int mysteryY = eggTop + eggScale * 12;
-        drawCentered(renderer, NOTOSANS_18_FONT_ID, content, mysteryY, tr(STR_BUDDY_MYSTERY),
-                     EpdFontFamily::BOLD);
+        drawCentered(renderer, NOTOSANS_18_FONT_ID, content, mysteryY, tr(STR_BUDDY_MYSTERY), EpdFontFamily::BOLD);
         drawCentered(renderer, UI_10_FONT_ID, content,
                      mysteryY + renderer.getLineHeight(NOTOSANS_18_FONT_ID) + metrics.verticalSpacing,
                      tr(STR_BUDDY_CLAIM_PROMPT), EpdFontFamily::BOLD);
@@ -378,8 +376,8 @@ void BuddyActivity::drawRevealFrame() {
       drawPixelStar(renderer, content.x + content.width / 4, content.y + content.height * 3 / 4);
       drawPixelStar(renderer, content.x + content.width * 3 / 4, content.y + content.height * 2 / 3, 2);
       drawCentered(renderer, UI_12_FONT_ID, content,
-                   content.y + content.height - renderer.getLineHeight(UI_12_FONT_ID) - 8,
-                   tr(STR_BUDDY_REVEAL), EpdFontFamily::BOLD);
+                   content.y + content.height - renderer.getLineHeight(UI_12_FONT_ID) - 8, tr(STR_BUDDY_REVEAL),
+                   EpdFontFamily::BOLD);
       break;
     case Stage::RevealCard:
     case Stage::Card:
@@ -431,6 +429,6 @@ void BuddyActivity::drawCard(const bool clear) {
 
 void BuddyActivity::drawError() {
   renderer.clearScreen();
-  UITheme::drawCenteredWrappedText(renderer, buddyContentBounds(renderer), UI_12_FONT_ID,
-                                   tr(STR_BUDDY_DEVICE_ID_ERROR), 3);
+  UITheme::drawCenteredWrappedText(renderer, buddyContentBounds(renderer), UI_12_FONT_ID, tr(STR_BUDDY_DEVICE_ID_ERROR),
+                                   3);
 }
