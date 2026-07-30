@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
+
+if git submodule status --recursive | grep -q '^-'; then
+  echo "Error: Git submodules are not initialized."
+  echo "Run: git submodule update --init --recursive"
+  exit 1
+fi
+
+echo "Checking formatting..."
+./bin/clang-format-fix --check
+
+echo "Running cppcheck..."
+pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+
+echo "Building default and sticky firmware..."
+pio run -e default -e sticky
+
+echo "Running host unit tests..."
+cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/test
+ctest --test-dir build/test --output-on-failure -j
+
+echo "Local CI checks passed."
+echo "Remember to use a semantic PR title, for example: fix: handle malformed epub"
