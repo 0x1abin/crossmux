@@ -102,16 +102,13 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 | Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp:194](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp:399](../../src/components/themes/lyra/LyraTheme.cpp) |
 | Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [EInkDisplay.h:56-94](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
 
-The X4 FAST path is tuned in the application HAL rather than by modifying the
-SDK gitlink: `crossPointX4Ssd1677Config()` selects the SSD1677 driver's
-incremental DU sequence (`0x1C`), and `HalDisplay::begin()` selects a 20 MHz SPI
-clock before the driver starts. The setting stays within the controller limit
-and does not change the single-framebuffer RAM budget. Its tradeoff is panel
-quality: the weaker DU waveform can leave more ghosting than the SDK's stock
-`0xFC` sequence on some panel samples. Verify menus, text pages, high-contrast
-borders, and grayscale images on real X4 hardware; if persistent residue is
-unacceptable, retain 20 MHz but restore the stock waveform override. X3 never
-constructs the SSD1677 driver, so neither tuning applies to it.
+The application HAL does not override the display bus or refresh waveform.
+`HalDisplay::begin()` only selects the X3 panel before the SDK driver starts.
+For X4, the SDK's active board profile selects a 20 MHz SPI clock and the stock
+absolute FAST sequence (`0xFC`) with its temperature and power sequencing. This
+avoids the persistent ghosting observed with the weaker incremental `0x1C`
+path. X3 never constructs the SSD1677 driver, and Sticky retains its own
+board-specific SSD1677 waveform config.
 
 ### Unified system clock and optional RTC
 
