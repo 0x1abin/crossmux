@@ -39,7 +39,6 @@ class SokobanGameActivity final : public Activity {
 
   int selectedLevel = 0;
   int scrollOffset = 0;
-  static constexpr int MENU_VISIBLE_ITEMS = 10;
 
   void handleInput();
   void move(int dr, int dc);
@@ -52,12 +51,10 @@ class SokobanGameActivity final : public Activity {
 
   void drawBoard();
   void drawHUD();
+  void drawFooter();
   void drawWinScreen();
   void drawLevelSelect();
 
-  static constexpr int TITLE_BAR_H = 34;
-  static constexpr int BOARD_TOP = TITLE_BAR_H + 4;
-  static constexpr int BOARD_BOTTOM = 780;
   static constexpr int MAX_LEVELS = 160;
   const uint8_t* builtinLevels = kLevelsBin;
   size_t builtinLevelsSize = kLevelsBinSize;

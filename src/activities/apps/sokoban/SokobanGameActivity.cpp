@@ -3,11 +3,75 @@
 #include <I18n.h>
 #include <Logging.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
 #include "../GameUi.h"
+
+namespace {
+constexpr int kMaxCellSize = 48;
+constexpr int kMinCellSize = 8;
+
+struct BoardLayout {
+  int cellSize = 0;
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+
+  constexpr bool valid() const { return cellSize >= kMinCellSize; }
+};
+
+constexpr BoardLayout fitBoard(const int left, const int top, const int right, const int bottom, const int rows,
+                               const int cols) {
+  if (rows <= 0 || cols <= 0 || right <= left || bottom <= top) return {};
+
+  int cellSize = (right - left) / cols;
+  const int rowCellSize = (bottom - top) / rows;
+  if (rowCellSize < cellSize) cellSize = rowCellSize;
+  if (cellSize > kMaxCellSize) cellSize = kMaxCellSize;
+  if (cellSize < kMinCellSize) return {};
+
+  const int width = cols * cellSize;
+  const int height = rows * cellSize;
+  return {cellSize, left + (right - left - width) / 2, top + (bottom - top - height) / 2, width, height};
+}
+
+// X4 portrait with the tallest themed header and the widest built-in level (30x17).
+constexpr BoardLayout kX4MaxLevelLayout = fitBoard(20, 145, 460, 744, 17, 30);
+static_assert(kX4MaxLevelLayout.valid());
+static_assert(kX4MaxLevelLayout.x >= 0 && kX4MaxLevelLayout.x + kX4MaxLevelLayout.width <= 480);
+static_assert(kX4MaxLevelLayout.y >= 0 && kX4MaxLevelLayout.y + kX4MaxLevelLayout.height <= 800);
+
+struct LevelSelectLayout {
+  Rect content;
+  int rowStep;
+  int visibleCount;
+};
+
+Rect getContentArea(const GfxRenderer& renderer, const bool hasSubHeader) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  int viewTop, viewRight, viewBottom, viewLeft;
+  renderer.getOrientedViewableTRBL(&viewTop, &viewRight, &viewBottom, &viewLeft);
+
+  const int left = safeArea.x + std::max(metrics.contentSidePadding, viewLeft);
+  const int top = safeArea.y + std::max(metrics.topPadding + metrics.headerHeight +
+                                            (hasSubHeader ? metrics.tabBarHeight : 0) + metrics.verticalSpacing,
+                                        viewTop);
+  const int right = safeArea.x + safeArea.width - std::max(metrics.contentSidePadding, viewRight);
+  const int bottom = safeArea.y + safeArea.height - std::max(metrics.verticalSpacing, viewBottom);
+  return Rect{left, top, std::max(0, right - left), std::max(0, bottom - top)};
+}
+
+LevelSelectLayout getLevelSelectLayout(const GfxRenderer& renderer) {
+  const Rect content = getContentArea(renderer, false);
+  const int rowStep = std::max(1, GUI.getListRowStep(false));
+  return {content, rowStep, GUI.getListPageItems(content.height, false)};
+}
+}  // namespace
 
 SokobanGameActivity::SokobanGameActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("Sokoban", renderer, mappedInput), board(), levelOffsets{} {
@@ -113,6 +177,8 @@ void SokobanGameActivity::loop() {
   }
 
   if (state == State::LevelSelect) {
+    const int visibleCount = getLevelSelectLayout(renderer).visibleCount;
+
     if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
       if (selectedLevel > 0) {
         selectedLevel--;
@@ -125,7 +191,7 @@ void SokobanGameActivity::loop() {
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
       if (selectedLevel < totalLevels - 1) {
         selectedLevel++;
-        if (selectedLevel >= scrollOffset + MENU_VISIBLE_ITEMS) scrollOffset++;
+        if (selectedLevel >= scrollOffset + visibleCount) scrollOffset++;
         requestUpdate();
       }
       heldLevelSelectDir = 1;
@@ -138,8 +204,8 @@ void SokobanGameActivity::loop() {
         selectedLevel = newLevel;
         if (selectedLevel < scrollOffset)
           scrollOffset = selectedLevel;
-        else if (selectedLevel >= scrollOffset + MENU_VISIBLE_ITEMS)
-          scrollOffset = selectedLevel - MENU_VISIBLE_ITEMS + 1;
+        else if (selectedLevel >= scrollOffset + visibleCount)
+          scrollOffset = selectedLevel - visibleCount + 1;
         requestUpdate();
       }
       heldLevelSelectDir = -20;
@@ -152,8 +218,8 @@ void SokobanGameActivity::loop() {
         selectedLevel = newLevel;
         if (selectedLevel < scrollOffset)
           scrollOffset = selectedLevel;
-        else if (selectedLevel >= scrollOffset + MENU_VISIBLE_ITEMS)
-          scrollOffset = selectedLevel - MENU_VISIBLE_ITEMS + 1;
+        else if (selectedLevel >= scrollOffset + visibleCount)
+          scrollOffset = selectedLevel - visibleCount + 1;
         requestUpdate();
       }
       heldLevelSelectDir = 20;
@@ -183,8 +249,8 @@ void SokobanGameActivity::loop() {
             selectedLevel = newLevel;
             if (selectedLevel < scrollOffset)
               scrollOffset = selectedLevel;
-            else if (selectedLevel >= scrollOffset + MENU_VISIBLE_ITEMS)
-              scrollOffset = selectedLevel - MENU_VISIBLE_ITEMS + 1;
+            else if (selectedLevel >= scrollOffset + visibleCount)
+              scrollOffset = selectedLevel - visibleCount + 1;
             requestUpdate();
           }
           lastLevelSelectScrollTime = now;
@@ -270,7 +336,8 @@ void SokobanGameActivity::handleInput() {
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     selectedLevel = currentLevel;
-    scrollOffset = (selectedLevel / MENU_VISIBLE_ITEMS) * MENU_VISIBLE_ITEMS;
+    const int visibleCount = getLevelSelectLayout(renderer).visibleCount;
+    scrollOffset = (selectedLevel / visibleCount) * visibleCount;
     state = State::LevelSelect;
     requestUpdate();
   }
@@ -340,20 +407,23 @@ void SokobanGameActivity::render(RenderLock&&) {
     drawBoard();
   }
 
+  drawFooter();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 
 void SokobanGameActivity::drawHUD() {
-  const int sw = renderer.getScreenWidth();
-  renderer.drawLine(0, TITLE_BAR_H + 8, sw, TITLE_BAR_H + 8, true);
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                 tr(STR_SOKOBAN_TITLE));
 
-  char buf[64];
-  snprintf(buf, sizeof(buf), "%s %d/%d", tr(STR_SOKOBAN_TITLE), currentLevel + 1, totalLevels);
-  renderer.drawText(UI_12_FONT_ID, 12, 8, buf);
-
-  snprintf(buf, sizeof(buf), "%s:%d %s:%d", tr(STR_SOKOBAN_MOVES), moves, tr(STR_SOKOBAN_PUSHES), board.pushes);
-  int tw = renderer.getTextWidth(UI_12_FONT_ID, buf);
-  renderer.drawText(UI_12_FONT_ID, sw - 12 - tw, 8, buf);
+  char status[96];
+  snprintf(status, sizeof(status), "%s %d/%d · %s:%d %s:%d", tr(STR_SOKOBAN_LEVEL), currentLevel + 1, totalLevels,
+           tr(STR_SOKOBAN_MOVES), moves, tr(STR_SOKOBAN_PUSHES), board.pushes);
+  GUI.drawSubHeader(
+      renderer,
+      Rect{safeArea.x, safeArea.y + metrics.topPadding + metrics.headerHeight, safeArea.width, metrics.tabBarHeight},
+      status);
 }
 
 void SokobanGameActivity::drawBoard() {
@@ -362,24 +432,20 @@ void SokobanGameActivity::drawBoard() {
     return;
   }
 
-  int availH = BOARD_BOTTOM - BOARD_TOP;
-  int availW = renderer.getScreenWidth() - 16;
-  int cellSize = 48;
-  int maxCellByRows = availH / board.rows;
-  int maxCellByCols = availW / board.cols;
-  cellSize = (maxCellByRows < maxCellByCols) ? maxCellByRows : maxCellByCols;
-  if (cellSize > 48) cellSize = 48;
-  if (cellSize < 8) cellSize = 8;
-
-  int boardPixelW = board.cols * cellSize;
-  int boardPixelH = board.rows * cellSize;
-  int startX = (renderer.getScreenWidth() - boardPixelW) / 2;
-  int startY = BOARD_TOP + (availH - boardPixelH) / 2;
+  const Rect content = getContentArea(renderer, true);
+  const BoardLayout layout =
+      fitBoard(content.x, content.y, content.x + content.width, content.y + content.height, board.rows, board.cols);
+  if (!layout.valid()) {
+    LOG_ERR("SOK", "Board %dx%d does not fit content (%d,%d,%d,%d)", board.cols, board.rows, content.x, content.y,
+            content.width, content.height);
+    return;
+  }
 
   for (int r = 0; r < board.rows; ++r) {
     for (int c = 0; c < board.cols; ++c) {
-      int x = startX + c * cellSize;
-      int y = startY + r * cellSize;
+      const int cellSize = layout.cellSize;
+      int x = layout.x + c * cellSize;
+      int y = layout.y + r * cellSize;
       SokobanBoard::Cell cell = board.cells[r][c];
 
       switch (cell) {
@@ -420,6 +486,15 @@ void SokobanGameActivity::drawBoard() {
   }
 }
 
+void SokobanGameActivity::drawFooter() {
+  if (state == State::Won) return;
+
+  const char* previous = state == State::LevelSelect ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT);
+  const char* next = state == State::LevelSelect ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT);
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), previous, next);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
 void SokobanGameActivity::drawWinScreen() {
   const int sh = renderer.getScreenHeight();
   renderer.drawCenteredText(NOTOSERIF_14_FONT_ID, sh / 2 - 30, tr(STR_SOKOBAN_WIN));
@@ -430,32 +505,28 @@ void SokobanGameActivity::drawWinScreen() {
 }
 
 void SokobanGameActivity::drawLevelSelect() {
-  const int sw = renderer.getScreenWidth();
-  const int sh = renderer.getScreenHeight();
-  const int itemH = 30;
-  const int listTop = 36;
-  const int listBottom = sh - 62;
-  const int visibleCount = (listBottom - listTop) / itemH;
-  if (visibleCount <= 0) return;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const LevelSelectLayout layout = getLevelSelectLayout(renderer);
 
-  char buf[64];
-  snprintf(buf, sizeof(buf), "%s (%d)", tr(STR_SOKOBAN_TITLE), totalLevels);
-  renderer.drawCenteredText(UI_12_FONT_ID, 8, buf);
+  char title[64];
+  snprintf(title, sizeof(title), "%s (%d)", tr(STR_SOKOBAN_TITLE), totalLevels);
+  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                 title);
 
-  renderer.drawLine(0, 35, sw, 35, true);
-
-  for (int i = 0; i < visibleCount && (scrollOffset + i) < totalLevels; ++i) {
+  const int textHeight = renderer.getTextHeight(UI_12_FONT_ID);
+  for (int i = 0; i < layout.visibleCount && (scrollOffset + i) < totalLevels; ++i) {
     int levelIdx = scrollOffset + i;
-    int y = listTop + i * itemH;
+    int y = layout.content.y + i * layout.rowStep;
 
     if (levelIdx == selectedLevel) {
-      renderer.fillRect(10, y, 4, itemH - 2, true);
+      renderer.fillRect(layout.content.x, y + 2, 4, std::max(1, layout.rowStep - 4), true);
     }
 
+    char buf[32];
     snprintf(buf, sizeof(buf), "%s %d", tr(STR_SOKOBAN_LEVEL), levelIdx + 1);
-    renderer.drawText(UI_12_FONT_ID, 22, y + 4, buf);
+    renderer.drawText(UI_12_FONT_ID, layout.content.x + 12, y + gameCenterY(layout.rowStep, textHeight), buf);
   }
 
-  renderer.drawLine(0, sh - 49, sw, sh - 49, true);
-  renderer.drawCenteredText(UI_10_FONT_ID, sh - 35, tr(STR_SOKOBAN_SELECT_HINT));
+  GUI.drawSideScrollBar(renderer, layout.content, totalLevels, scrollOffset, layout.visibleCount);
 }
