@@ -49,6 +49,7 @@ class MappedInputManager {
   bool wasMenuGesture() const;
   bool wasAnyPressed() const;
   bool wasAnyReleased() const;
+  bool isHeld(const Button button) const;
   unsigned long getHeldTime() const;
   const GfxRenderer& getRenderer() const { return renderer; }
   Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next) const;

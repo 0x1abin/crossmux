@@ -18,6 +18,7 @@
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
 #include "components/icons/bookmark.h"
+#include "components/icons/sokoban.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "components/icons/chinese_chess.h"
 #endif
@@ -95,6 +96,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return AppsIcon;
       case UIIcon::Sudoku:
         return SudokuIcon;
+      case UIIcon::Sokoban:
+        return SokobanIcon;
       case UIIcon::Gomoku:
         return GomokuIcon;
 #ifdef ENABLE_CHINESE_VERSION
