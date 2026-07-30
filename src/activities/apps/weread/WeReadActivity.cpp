@@ -24,6 +24,7 @@
 #include "../../../util/QrUtils.h"
 #include "../../network/WifiSelectionActivity.h"
 #include "../../util/ConfirmationActivity.h"
+#include "WeReadBrowseActivity.h"
 
 namespace {
 
@@ -362,6 +363,7 @@ static_assert(sizeof(WeReadChapterRangeActivity) <= 1024, "WeRead chapter select
 
 void WeReadActivity::onEnter() {
   Activity::onEnter();
+  if (!WeReadBrowse::clearLegacyWorkspace()) LOG_ERR("WR", "legacy browse workspace cleanup failed");
   {
     RenderLock lock(*this);
     sdFontSystem.releaseLoadedFont(renderer);
@@ -859,6 +861,7 @@ bool WeReadActivity::detailActionEnabled(const DetailAction action) const {
     case DetailAction::Read:
       return Storage.exists(WeReadStore::finalBookPath(pendingBook_).c_str());
     case DetailAction::Cache:
+    case DetailAction::Browse:
     case DetailAction::Images:
       return true;
   }
@@ -894,6 +897,20 @@ void WeReadActivity::activateDetailSelection() {
     case DetailAction::Cache:
       showCacheScopePopup();
       return;
+    case DetailAction::Browse: {
+      // The Activity stack requires heap ownership; the child keeps only a
+      // reference to this Activity's fixed Operation workspace.
+      auto browse = makeUniqueNoThrow<WeReadBrowseActivity>(renderer, mappedInput, operation_, pendingBook_);
+      if (!browse) {
+        LOG_ERR("WR", "OOM: browse activity (%zu bytes)", sizeof(WeReadBrowseActivity));
+        error_ = WeReadClient::Error::OutOfMemory;
+        state_.store(State::Error);
+        requestUpdate();
+        return;
+      }
+      startActivityForResult(std::move(browse), [](const ActivityResult&) {});
+      return;
+    }
     case DetailAction::Images:
       detailImagePolicy_ = detailImagePolicy_ == WeReadStore::ImagePolicy::Embed ? WeReadStore::ImagePolicy::Exclude
                                                                                  : WeReadStore::ImagePolicy::Embed;
@@ -1192,9 +1209,10 @@ void WeReadActivity::performLogout() {
   if (shelfFile_.isOpen()) shelfFile_.close();
   const bool sessionCleared = WeReadStore::clearSession();
   const bool shelfCleared = WeReadStore::clearShelf();
+  const bool browseCacheCleared = WeReadBrowse::clearAllCaches();
   shelfCount_ = 0;
   shelfSelected_ = 0;
-  if (!sessionCleared || !shelfCleared) {
+  if (!sessionCleared || !shelfCleared || !browseCacheCleared) {
     LOG_ERR("WR", "Failed to clear local login state");
     state_.store(State::LogoutError);
     requestUpdate();
@@ -1678,6 +1696,8 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
             if (!cached) return std::string(tr(STR_WEREAD_CACHE_BOOK));
             return std::string(
                 I18N.get(policyChanged ? StrId::STR_WEREAD_UPDATE_CACHE : StrId::STR_WEREAD_RECACHE_BOOK));
+          case DetailAction::Browse:
+            return std::string(tr(STR_WEREAD_BROWSE_ENTRY));
           case DetailAction::Images:
             return std::string(tr(STR_WEREAD_CACHE_IMAGES));
         }
@@ -1687,6 +1707,7 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
       [this, cached](const int index) {
         switch (static_cast<DetailAction>(index + 1)) {
           case DetailAction::Introduction:
+          case DetailAction::Browse:
           case DetailAction::Cache:
             return std::string();
           case DetailAction::Read:
