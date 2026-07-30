@@ -19,40 +19,24 @@ SokobanGameActivity::SokobanGameActivity(GfxRenderer& renderer, MappedInputManag
 void SokobanGameActivity::onEnter() {
   Activity::onEnter();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-
-  if (!Storage.exists(SD_LEVEL_PATH)) {
-    LOG_ERR("SOK", "SD card level file not found");
-    activityManager.goToApps();
-    return;
-  }
-
   totalLevels = 0;
-  HalFile f;
-  if (!Storage.openFileForRead("SDK", SD_LEVEL_PATH, f)) {
-    LOG_ERR("SOK", "Cannot open level file");
-    activityManager.goToApps();
-    return;
-  }
-
-  uint32_t offset = 0;
-  while (totalLevels < MAX_LEVELS) {
+  size_t offset = 0;
+  while (offset + 2 <= builtinLevelsSize && totalLevels < MAX_LEVELS) {
     levelOffsets[totalLevels] = offset;
-    uint8_t h, w;
-    if (f.read(&h, 1) != 1 || f.read(&w, 1) != 1) break;
+    uint8_t h = builtinLevels[offset];
+    uint8_t w = builtinLevels[offset + 1];
     uint32_t dataSize = w * h;
     offset += 2 + dataSize;
-    f.seek(offset);
+    if (offset > builtinLevelsSize) break;
     totalLevels++;
   }
-  f.close();
 
   if (totalLevels == 0) {
-    LOG_ERR("SOK", "No levels found");
+    LOG_ERR("SOK", "No levels found in builtin data");
     activityManager.goToApps();
     return;
   }
 
-  // 读取存档...
   SokobanSaveSlot slot;
   if (SokobanStore::load(slot)) {
     currentLevel = slot.currentLevel;
@@ -75,22 +59,34 @@ void SokobanGameActivity::loadLevel(int idx) {
   if (idx < 0 || idx >= totalLevels) idx = 0;
   currentLevel = idx;
 
-  HalFile f;
-  if (!Storage.openFileForRead("SDK", SD_LEVEL_PATH, f)) {
-    LOG_ERR("SOK", "Cannot open level file");
+  uint32_t offset = levelOffsets[idx];
+  if (offset + 2 > builtinLevelsSize) {
+    LOG_ERR("SOK", "Level offset out of bounds");
     activityManager.goToApps();
     return;
   }
 
-  f.seek(levelOffsets[idx]);
-
-  if (!board.loadFromFile(f)) {
-    LOG_ERR("SOK", "Failed to load level %d", idx);
-    f.close();
+  uint8_t h = builtinLevels[offset];
+  uint8_t w = builtinLevels[offset + 1];
+  if (h == 0 || w == 0 || h > SokobanBoard::MAX_ROWS || w > SokobanBoard::MAX_COLS) {
+    LOG_ERR("SOK", "Invalid level dimensions");
     activityManager.goToApps();
     return;
   }
-  f.close();
+
+  board.clear();
+  board.rows = h;
+  board.cols = w;
+  const uint8_t* cellData = builtinLevels + offset + 2;
+  for (int r = 0; r < h; ++r) {
+    for (int c = 0; c < w; ++c) {
+      board.cells[r][c] = static_cast<SokobanBoard::Cell>(cellData[r * w + c]);
+      if (board.cells[r][c] == SokobanBoard::PLAYER || board.cells[r][c] == SokobanBoard::PLAYER_ON_TARGET) {
+        board.playerR = r;
+        board.playerC = c;
+      }
+    }
+  }
 
   moves = 0;
   state = State::Playing;

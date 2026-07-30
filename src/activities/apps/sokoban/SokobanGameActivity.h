@@ -6,6 +6,7 @@
 #include "../GameSaveDebouncer.h"
 #include "SokobanBoard.h"
 #include "SokobanStore.h"
+#include "levels_data.h"
 
 class SokobanGameActivity final : public Activity {
  public:
@@ -57,8 +58,9 @@ class SokobanGameActivity final : public Activity {
   static constexpr int TITLE_BAR_H = 34;
   static constexpr int BOARD_TOP = TITLE_BAR_H + 4;
   static constexpr int BOARD_BOTTOM = 780;
-  static constexpr const char* SD_LEVEL_PATH = "/sokoban/levels.bin";
-  static constexpr int MAX_LEVELS = 3000;
+  static constexpr int MAX_LEVELS = 160;
+  const uint8_t* builtinLevels = kLevelsBin;
+  size_t builtinLevelsSize = kLevelsBinSize;
   int totalLevels = 0;
   uint32_t levelOffsets[MAX_LEVELS];
 };
