@@ -22,12 +22,11 @@ class ChineseChessGameActivity final : public Activity {
  private:
   enum class State : uint8_t { Playing, GameMenu, GameOver };
 
-  // Layout (Portrait 480×800).
+  // Portrait layout.
   static constexpr int CONTENT_X = 24;
   static constexpr int TITLE_BAR_H = 36;
   static constexpr int BOARD_AREA_Y = 60;
   static constexpr int BOARD_PITCH = 48;
-  static constexpr int BOARD_ORIGIN_X = (480 - BOARD_PITCH * (ChineseChessBoard::FILES - 1)) / 2;  // 40
   static constexpr int BOARD_ORIGIN_Y = BOARD_AREA_Y + 30;
   static constexpr int PIECE_RADIUS = 22;
   static constexpr int INFO_PANEL_Y = 602;
@@ -65,6 +64,7 @@ class ChineseChessGameActivity final : public Activity {
   ChineseChessBoard::Side resignWinner = ChineseChessBoard::Side::Red;
 
   // Geometry helpers
+  int boardOriginX() const;
   void cellXY(uint8_t r, uint8_t c, int* x, int* y) const;
 
   // Drawing

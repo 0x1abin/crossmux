@@ -386,7 +386,7 @@ void MinesweeperGameActivity::drawTitleBar() {
 
 void MinesweeperGameActivity::drawBoard() {
   const int size = cellSize();
-  const int x0 = BOARD_X;
+  const int x0 = (renderer.getScreenWidth() - BOARD_W) / 2;
   const int y0 = BOARD_Y;
 
   // Cells. The cursor frame is drawn separately below so cell content

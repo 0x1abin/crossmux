@@ -140,7 +140,9 @@ void GomokuGameActivity::loop() {
 // ---------- Geometry ----------
 
 int GomokuGameActivity::boardPitch() const { return (board.boardSize == 15) ? 30 : 50; }
-int GomokuGameActivity::boardOriginX() const { return (board.boardSize == 15) ? 30 : 40; }
+int GomokuGameActivity::boardOriginX() const {
+  return (renderer.getScreenWidth() - (board.boardSize - 1) * boardPitch()) / 2;
+}
 int GomokuGameActivity::boardOriginY() const { return BOARD_AREA_Y + boardPitch() / 2; }
 int GomokuGameActivity::stoneRadius() const { return (board.boardSize == 15) ? 12 : 20; }
 
