@@ -91,6 +91,7 @@ void enterNewActivity(Activity* activity) {
 - Any memory allocated in `onEnter()` MUST be freed in `onExit()`
 - FreeRTOS tasks MUST be deleted in `onExit()` before activity destruction
 - Member `FsFile` handles MUST be closed in `onExit()` (local `FsFile` variables auto-close via destructor)
+- `ActivityManager` calls `onExit()` while already holding `RenderLock`; never acquire a second render lock there
 
 **Activity Pattern**:
 ```cpp

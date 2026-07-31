@@ -94,10 +94,8 @@ void WeReadBrowseActivity::onEnter() {
 void WeReadBrowseActivity::onExit() {
   operation_.reset();
   closePage();
-  {
-    RenderLock renderBarrier(*this);
-    releaseReaderFont();
-  }
+  // ActivityManager invokes onExit() while holding RenderLock.
+  releaseReaderFont();
   Activity::onExit();
 }
 
