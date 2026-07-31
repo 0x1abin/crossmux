@@ -19,7 +19,7 @@ constexpr int kCenterCoverHeight = 540;
 constexpr int kSideCoverWidth = 200;
 constexpr int kSideCoverHeight = 390;
 constexpr int kSideOverlap = 60;
-constexpr int kCoverTopPadding = 22;
+constexpr int kCoverTopPadding = 32;
 constexpr int kCornerRadius = 6;
 constexpr int kCenterOutlineWidth = 4;
 constexpr int kActiveOutlineWidth = 3;
@@ -68,6 +68,7 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     return;
   }
 
+  const GfxRenderer::ClipScope clip(renderer, rect.x, rect.y, rect.width, rect.height);
   const int bookCount = static_cast<int>(recentBooks.size());
   const bool coversFocused = selectorIndex >= 0 && selectorIndex < bookCount;
   int centerIndex = coversFocused ? selectorIndex : lastCenterIndex_;
