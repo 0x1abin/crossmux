@@ -440,6 +440,8 @@ Child calls: setResult(MyResult{...}); finish();
 
 **Calling `finish()` and continuing to access `this`**: `finish()` sets `pendingAction = Pop` but does not immediately destroy the activity. The activity is destroyed on the next `ActivityManager::loop()` iteration. It's safe to access member variables after `finish()` within the same function, but don't rely on the activity surviving past the current `loop()` call.
 
+**Acquiring `RenderLock` from `onExit()`**: `ActivityManager` already holds the render mutex while it calls `onExit()` and destroys the Activity. Cleanup that requires exclusive renderer access may run directly there; constructing another `RenderLock` self-deadlocks because the mutex is not recursive. Child-result handlers and the next Activity's `onEnter()` run only after the manager releases the lock.
+
 **Modifying shared state without `RenderLock`**: If `render()` reads a variable and `loop()` writes it, the write must be under a `RenderLock`. Without it, `render()` could see a half-written value (e.g., a partially updated string or struct).
 
 **Creating background tasks that outlive the activity**: Any FreeRTOS task created in `onEnter()` must be deleted in `onExit()` before the activity is destroyed. The `ActivityManager` does not track or clean up background tasks.
