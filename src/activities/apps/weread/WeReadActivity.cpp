@@ -1675,7 +1675,7 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
     renderer.drawText(SMALL_FONT_ID, metaX, minorY, text.c_str());
   }
 
-  const int actionHeight = kDetailListActionCount * GUI.getListRowStep(true);
+  const int actionHeight = kDetailListActionCount * GUI.getListRowStep(false);
   const Rect actions{0, content.y + content.height - actionHeight, content.width, actionHeight};
   const int summaryY = cover.y + cover.height + metrics.verticalSpacing;
   const int summaryBottom = actions.y - metrics.verticalSpacing;
@@ -1703,7 +1703,7 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
         }
         return std::string();
       },
-      [](const int) { return std::string(); }, nullptr,
+      nullptr, nullptr,
       [this, cached](const int index) {
         switch (static_cast<DetailAction>(index + 1)) {
           case DetailAction::Introduction:
