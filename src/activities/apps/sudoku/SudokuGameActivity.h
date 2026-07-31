@@ -81,12 +81,12 @@ class SudokuGameActivity final : public Activity {
   static constexpr int CONTENT_X = 24;
   static constexpr int TITLE_BAR_H = 36;
   static constexpr int CELL_PX = 48;
-  static constexpr int GRID_SIZE_PX = CELL_PX * 9;  // 432
+  static constexpr int GRID_SIZE_PX = CELL_PX * 9;        // 432
   static constexpr int GRID_Y = TITLE_BAR_H + CONTENT_X;  // 60: gap below title bar matches left margin
   static constexpr int PALETTE_CELL_W = 80;
   static constexpr int PALETTE_CELL_H = PALETTE_CELL_W;  // square palette cells
   static constexpr int PALETTE_GAP = 8;
   static constexpr int PALETTE_W = PALETTE_CELL_W * 5 + PALETTE_GAP * 4;  // 432
   static constexpr int PALETTE_H = PALETTE_CELL_H * 2 + PALETTE_GAP;      // 168
-  static constexpr int PALETTE_Y = GRID_Y + GRID_SIZE_PX + CONTENT_X;  // 516: gap below grid matches left margin
+  static constexpr int PALETTE_Y = GRID_Y + GRID_SIZE_PX + CONTENT_X;     // 516: gap below grid matches left margin
 };
