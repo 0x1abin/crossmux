@@ -40,12 +40,11 @@ class MinesweeperGameActivity final : public Activity {
   uint8_t menuSel = 0;
   static constexpr uint8_t MENU_ITEM_COUNT = 7;
 
-  // Layout (logical 480×800 portrait). Board occupies the same vertical slot
-  // as Sudoku's grid for visual consistency; cell pixel size varies by board
-  // dimensions so the total 432 px width is preserved.
+  // Portrait layout. Board occupies the same vertical slot as Sudoku's grid
+  // for visual consistency; cell pixel size varies by board dimensions so the
+  // total 432 px width is preserved.
   static constexpr int CONTENT_X = 24;
   static constexpr int TITLE_BAR_H = 36;
-  static constexpr int BOARD_X = 24;
   static constexpr int BOARD_Y = 60;   // matches Sudoku GRID_Y
   static constexpr int BOARD_W = 432;  // matches Sudoku GRID_SIZE_PX
   // End-game screen anchors. The Playing screen only uses the board area and

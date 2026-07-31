@@ -406,8 +406,9 @@ void SudokuGameActivity::renderGenerating() {
 
 void SudokuGameActivity::renderPlaying() {
   drawTitleBar();
-  drawGrid(GRID_X, GRID_Y);
-  drawPalette(PALETTE_X, PALETTE_Y);
+  const int screenWidth = renderer.getScreenWidth();
+  drawGrid((screenWidth - GRID_SIZE_PX) / 2, GRID_Y);
+  drawPalette((screenWidth - PALETTE_W) / 2, PALETTE_Y);
   drawFooter();
 }
 

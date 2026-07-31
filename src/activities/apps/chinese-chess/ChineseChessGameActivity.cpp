@@ -151,8 +151,12 @@ void ChineseChessGameActivity::loop() {
 
 // ---------- Geometry ----------
 
+int ChineseChessGameActivity::boardOriginX() const {
+  return (renderer.getScreenWidth() - BOARD_PITCH * (ChineseChessBoard::FILES - 1)) / 2;
+}
+
 void ChineseChessGameActivity::cellXY(uint8_t r, uint8_t c, int* x, int* y) const {
-  *x = BOARD_ORIGIN_X + static_cast<int>(c) * BOARD_PITCH;
+  *x = boardOriginX() + static_cast<int>(c) * BOARD_PITCH;
   *y = BOARD_ORIGIN_Y + static_cast<int>(r) * BOARD_PITCH;
 }
 
@@ -465,7 +469,7 @@ void ChineseChessGameActivity::drawTitleBar() {
 // ---------- Board ----------
 
 void ChineseChessGameActivity::drawBoard() {
-  const int ox = BOARD_ORIGIN_X;
+  const int ox = boardOriginX();
   const int oy = BOARD_ORIGIN_Y;
   const int width = BOARD_PITCH * (ChineseChessBoard::FILES - 1);
   const int height = BOARD_PITCH * (ChineseChessBoard::RANKS - 1);
@@ -495,7 +499,7 @@ void ChineseChessGameActivity::drawBoard() {
 }
 
 void ChineseChessGameActivity::drawPalaceLines() {
-  const int ox = BOARD_ORIGIN_X;
+  const int ox = boardOriginX();
   const int oy = BOARD_ORIGIN_Y;
   // Black palace: rows 0..2, cols 3..5.
   {
@@ -520,7 +524,7 @@ void ChineseChessGameActivity::drawPalaceLines() {
 void ChineseChessGameActivity::drawRiver() {
   // The river sits between rows 4 and 5. Add two short horizontal lines and
   // a centered text label (using ASCII to avoid extra CJK glyph dependency).
-  const int ox = BOARD_ORIGIN_X;
+  const int ox = boardOriginX();
   const int oy = BOARD_ORIGIN_Y;
   const int yMid = oy + 4 * BOARD_PITCH + BOARD_PITCH / 2;
   const int width = BOARD_PITCH * (ChineseChessBoard::FILES - 1);
