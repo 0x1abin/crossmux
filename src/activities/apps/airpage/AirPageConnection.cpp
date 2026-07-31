@@ -1,6 +1,7 @@
 #include "AirPageConnection.h"
 
 #include <Arduino.h>
+#include <HalGPIO.h>
 #include <Logging.h>
 #include <esp_wifi.h>
 
@@ -151,7 +152,7 @@ AirPageConnection::Event AirPageConnection::pause(const Event event) {
 
 bool AirPageConnection::connectBroker() {
   char clientId[24];
-  snprintf(clientId, sizeof(clientId), "x4-%s", deviceId().c_str());
+  snprintf(clientId, sizeof(clientId), "%s-%s", gpio.deviceIsX3() ? "x3" : "x4", deviceId().c_str());
   if (!mqtt_.connect(clientId)) {
     LOG_ERR("AIRP", "MQTT connect failed (state=%d)", mqtt_.state());
     return false;

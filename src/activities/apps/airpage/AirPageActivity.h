@@ -91,4 +91,5 @@ class AirPageActivity final : public Activity {
   // once per activity lifetime and reused.
   std::string uploadUrl_;
   std::string downloadUrl_;
+  std::string legacyDownloadUrl_;
 };
