@@ -8,6 +8,9 @@
 #include <Serialization.h>
 #include <Utf8.h>
 
+#include <cassert>
+#include <cstring>
+
 #include "AchievementsStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -24,7 +27,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
-constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
+constexpr uint8_t CACHE_VERSION = 4;          // Increment when pagination or cache format changes
 }  // namespace
 
 void TxtReaderActivity::onEnter() {
@@ -200,6 +203,14 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
   }
   buffer[chunkSize] = '\0';
 
+  // Leave an incomplete UTF-8 sequence at a non-final chunk boundary for the
+  // next read instead of measuring or indexing a partial codepoint.
+  if (offset + chunkSize < fileSize) {
+    chunkSize =
+        static_cast<size_t>(utf8SafeTruncateBuffer(reinterpret_cast<const char*>(buffer), static_cast<int>(chunkSize)));
+    buffer[chunkSize] = '\0';
+  }
+
   // Prime the SD card font's advance table with this chunk's codepoints.
   // Without this, every getTextAdvanceX() call in the wrap loop below triggers
   // on-demand glyph loads through the 8-slot overflow ring buffer, which
@@ -220,9 +231,10 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     while (lineEnd < chunkSize && buffer[lineEnd] != '\n') {
       lineEnd++;
     }
+    const bool hasNewline = lineEnd < chunkSize;
 
     // Check if we have a complete line
-    bool lineComplete = (lineEnd < chunkSize) || (offset + lineEnd >= fileSize);
+    const bool lineComplete = hasNewline || (offset + lineEnd >= fileSize);
 
     if (!lineComplete && static_cast<int>(outLines.size()) > 0) {
       // Incomplete line and we already have some lines, stop here
@@ -236,66 +248,100 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     bool hasCR = (lineContentLen > 0 && buffer[pos + lineContentLen - 1] == '\r');
     size_t displayLen = hasCR ? lineContentLen - 1 : lineContentLen;
 
-    // Extract line content for display (without CR/LF)
-    std::string line(reinterpret_cast<char*>(buffer + pos), displayLen);
-
     // Track position within this source line (in bytes from pos)
     size_t lineBytePos = 0;
 
-    // Emit at least one visual line for each source line (including blank lines),
-    // then continue with wrapping when needed.
-    do {
-      if (line.empty()) {
-        outLines.emplace_back();
-        break;
-      }
+    if (displayLen == 0) {
+      // Emit one visual line for an empty source line.
+      outLines.emplace_back();
+    } else {
+      char* const line = reinterpret_cast<char*>(buffer + pos);
+      const char lineTerminator = line[displayLen];
+      line[displayLen] = '\0';
 
-      int lineWidth = renderer.getTextAdvanceX(cachedFontId, line.c_str(), EpdFontFamily::REGULAR);
+      while (lineBytePos < displayLen && static_cast<int>(outLines.size()) < linesPerPage) {
+        size_t scanPos = lineBytePos;
+        size_t lastFittingPos = lineBytePos;
+        size_t lastFittingSpace = std::string::npos;
+        int cjkWidth = 0;
+        bool cjkFastPath = true;
+        bool overflowed = false;
 
-      if (lineWidth <= viewportWidth) {
-        outLines.push_back(line);
-        lineBytePos = displayLen;  // Consumed entire display content
-        line.clear();
-        break;
-      }
+        while (scanPos < displayLen) {
+          const size_t codepointStart = scanPos;
+          const auto* codepointPtr = reinterpret_cast<const unsigned char*>(line + scanPos);
+          const uint32_t codepoint = utf8NextCodepoint(&codepointPtr);
+          size_t codepointEnd = static_cast<size_t>(reinterpret_cast<const char*>(codepointPtr) - line);
 
-      // Find break point
-      size_t breakPos = line.length();
-      while (breakPos > 0 && renderer.getTextAdvanceX(cachedFontId, line.substr(0, breakPos).c_str(),
-                                                      EpdFontFamily::REGULAR) > viewportWidth) {
-        // Try to break at space
-        size_t spacePos = line.rfind(' ', breakPos - 1);
-        if (spacePos != std::string::npos && spacePos > 0) {
-          breakPos = spacePos;
-        } else {
-          // Break at character boundary for UTF-8
-          breakPos--;
-          // Make sure we don't break in the middle of a UTF-8 sequence
-          while (breakPos > 0 && (line[breakPos] & 0xC0) == 0x80) {
-            breakPos--;
+          // Embedded NUL is not valid TXT content, but still consume it as one
+          // byte so malformed input cannot stall pagination.
+          if (codepointEnd <= codepointStart) {
+            codepointEnd = codepointStart + 1;
           }
+          if (codepointEnd > displayLen) {
+            codepointEnd = displayLen;
+          }
+
+          int candidateWidth;
+          if (cjkFastPath && (utf8IsCjkBreakable(codepoint) || utf8IsCombiningMark(codepoint))) {
+            char codepointText[5];
+            const size_t codepointBytes = codepointEnd - codepointStart;
+            assert(codepointBytes <= 4);
+            memcpy(codepointText, line + codepointStart, codepointBytes);
+            codepointText[codepointBytes] = '\0';
+            cjkWidth += renderer.getTextAdvanceX(cachedFontId, codepointText, EpdFontFamily::REGULAR);
+            candidateWidth = cjkWidth;
+          } else {
+            cjkFastPath = false;
+            char saved = '\0';
+            if (codepointEnd < displayLen) {
+              saved = line[codepointEnd];
+              line[codepointEnd] = '\0';
+            }
+            candidateWidth = renderer.getTextAdvanceX(cachedFontId, line + lineBytePos, EpdFontFamily::REGULAR);
+            if (codepointEnd < displayLen) {
+              line[codepointEnd] = saved;
+            }
+          }
+
+          if (candidateWidth > viewportWidth) {
+            if (codepoint == ' ' && codepointStart > lineBytePos) {
+              lastFittingSpace = codepointStart;
+            }
+            // A single over-wide glyph still has to be consumed as one complete
+            // UTF-8 codepoint so the page index always makes progress.
+            if (lastFittingPos == lineBytePos) {
+              lastFittingPos = codepointEnd;
+            }
+            overflowed = true;
+            break;
+          }
+
+          lastFittingPos = codepointEnd;
+          if (codepoint == ' ' && codepointStart > lineBytePos) {
+            lastFittingSpace = codepointStart;
+          }
+          scanPos = codepointEnd;
+        }
+
+        const size_t breakPos = overflowed && lastFittingSpace != std::string::npos ? lastFittingSpace : lastFittingPos;
+        assert(breakPos > lineBytePos && breakPos <= displayLen);
+        assert(breakPos == displayLen || (static_cast<uint8_t>(line[breakPos]) & 0xC0) != 0x80);
+
+        outLines.emplace_back(line + lineBytePos, breakPos - lineBytePos);
+        lineBytePos = breakPos;
+        if (lineBytePos < displayLen && line[lineBytePos] == ' ') {
+          lineBytePos++;
         }
       }
 
-      if (breakPos == 0) {
-        breakPos = 1;
-      }
-
-      outLines.push_back(line.substr(0, breakPos));
-
-      // Skip space at break point
-      size_t skipChars = breakPos;
-      if (breakPos < line.length() && line[breakPos] == ' ') {
-        skipChars++;
-      }
-      lineBytePos += skipChars;
-      line = line.substr(skipChars);
-    } while (!line.empty() && static_cast<int>(outLines.size()) < linesPerPage);
+      line[displayLen] = lineTerminator;
+    }
 
     // Determine how much of the source buffer we consumed
-    if (line.empty()) {
-      // Fully consumed this source line, move past the newline
-      pos = lineEnd + 1;
+    if (lineBytePos >= displayLen) {
+      // Fully consumed this source line. Only skip a byte when it is an actual newline.
+      pos = lineEnd + (hasNewline ? 1 : 0);
     } else {
       // Partially consumed - page is full mid-line
       // Move pos to where we stopped in the line (NOT past the line)
@@ -306,8 +352,12 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
 
   // Ensure we make progress even if calculations go wrong
   if (pos == 0 && !outLines.empty()) {
-    // Fallback: at minimum, consume something to avoid infinite loop
-    pos = 1;
+    const auto* nextCodepoint = buffer;
+    utf8NextCodepoint(&nextCodepoint);
+    pos = static_cast<size_t>(nextCodepoint - buffer);
+    if (pos == 0) {
+      pos = 1;  // Embedded NUL: consume the invalid byte.
+    }
   }
 
   nextOffset = offset + pos;
