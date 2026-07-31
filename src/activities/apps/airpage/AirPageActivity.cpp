@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -101,14 +102,21 @@ void AirPageActivity::onEnter() {
   uploadUrl_ += kAirPageBase;
   uploadUrl_ += "/?id=";
   uploadUrl_ += deviceId;
-  uploadUrl_ += "&type=x4";
+  uploadUrl_ += gpio.deviceIsX3() ? "&type=xteink-x3" : "&type=xteink-x4";
 
   downloadUrl_.reserve(64 + deviceId.size());
   downloadUrl_ = "https://";
   downloadUrl_ += kAirPageBase;
   downloadUrl_ += "/api/device/";
   downloadUrl_ += deviceId;
-  downloadUrl_ += "/latest.bmp";
+  downloadUrl_ += "/latest";
+
+  legacyDownloadUrl_.reserve(64 + deviceId.size());
+  legacyDownloadUrl_ = "https://";
+  legacyDownloadUrl_ += kAirPageBase;
+  legacyDownloadUrl_ += "/api/device/";
+  legacyDownloadUrl_ += deviceId;
+  legacyDownloadUrl_ += "/latest.bmp";
 
   applyConnectionEvent(connection_.begin(airpage::loadRealtimeMode()));
   LOG_DBG("AIRP", "onEnter free=%u largest=%u id=%s cached=%d realtime=%d", static_cast<unsigned>(ESP.getFreeHeap()),
@@ -509,8 +517,11 @@ void AirPageActivity::doFetch() {
     return;
   }
 
-  const HttpDownloader::DownloadError error =
+  HttpDownloader::DownloadError error =
       HttpDownloader::downloadToFile(downloadUrl_, airpage::AirPageImageStore::kDownloadPartPath);
+  if (error != HttpDownloader::OK) {
+    error = HttpDownloader::downloadToFile(legacyDownloadUrl_, airpage::AirPageImageStore::kDownloadPartPath);
+  }
   if (error != HttpDownloader::OK) {
     LOG_ERR("AIRP", "Download failed: %d", static_cast<int>(error));
     notice_ = Notice::DownloadFailed;
