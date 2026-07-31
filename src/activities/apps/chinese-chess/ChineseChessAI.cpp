@@ -62,6 +62,12 @@ class Searcher {
       return Move{};  // signal: no legal move
     }
 
+    uint8_t nonRepeatingCount = 0;
+    for (uint8_t i = 0; i < rootCount; i++) {
+      if (!repeatsPriorPosition(rootMoves[i])) rootMoves[nonRepeatingCount++] = rootMoves[i];
+    }
+    if (nonRepeatingCount > 0) rootCount = nonRepeatingCount;
+
     orderMoves(rootMoves, rootCount, /*ordering*/ true);
 
     Move bestMove = rootMoves[0];
@@ -164,6 +170,30 @@ class Searcher {
       return true;
     }
     return false;
+  }
+
+  bool repeatsPriorPosition(const Move& candidate) {
+    board.makeMove(candidate);
+    uint8_t candidateCells[ChineseChessBoard::CELLS];
+    std::memcpy(candidateCells, board.cells, sizeof(candidateCells));
+    const uint16_t candidateMoveCount = board.moveCount;
+    bool repeated = false;
+
+    while (board.moveCount >= 2) {
+      const bool crossedCapture = board.moveHistory[board.moveCount - 1].captured != ChineseChessBoard::Empty ||
+                                  board.moveHistory[board.moveCount - 2].captured != ChineseChessBoard::Empty;
+      board.undo();
+      board.undo();
+      repeated = std::memcmp(candidateCells, board.cells, sizeof(candidateCells)) == 0;
+      if (repeated || crossedCapture) break;
+    }
+
+    while (board.moveCount < candidateMoveCount) {
+      const Move replay = board.moveHistory[board.moveCount];
+      board.makeMove(replay);
+    }
+    board.undo();
+    return repeated;
   }
 
   // MVV-LVA: rank captures by victim value descending, then attacker value ascending.
