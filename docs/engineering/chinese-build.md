@@ -233,8 +233,9 @@ loop opens the activity. A reader session prompts once, and an active SD font
 is never rechecked. After confirmation it opens the ordinary **Manage Fonts**
 flow, preserving install/update/delete and batch-download behavior. Downloads
 never change `sdFontFamilyName`; the user selects an installed family later in
-the reader's text settings. Font sources and catalog-generation configuration
-remain outside this repository.
+**Settings > Reader > Text Settings > Font**. The download-complete screen
+shows that path before the existing silent restart. Font sources and
+catalog-generation configuration remain outside this repository.
 
 ## Known limitations
 

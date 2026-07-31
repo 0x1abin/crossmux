@@ -10,9 +10,11 @@ There are three ways to install fonts:
 ### Option 1: Download from device (recommended)
 
 1. Connect your CrossPoint reader to Wi-Fi
-2. Go to **Settings > System > Manage Fonts**
+2. Go to **Settings > Reader > Manage Fonts**
 3. Browse available font families and tap to download
-4. Downloaded fonts appear immediately in **Settings > Reader > Font Family**
+4. Downloading does not change the reader font selection. After the font
+   manager restarts the device, choose the installed family under
+   **Settings > Reader > Text Settings > Font**
 
 ### Option 2: Upload via web browser
 
@@ -130,8 +132,9 @@ the catalog maintainer. Font sources and catalog-generation configuration are
 not kept in this repository.
 
 The incomplete-font prompt opens the same font manager described above.
-Downloading does not change the selected reader font; choose the installed
-family later in the reader's text settings.
+The download-complete screen reminds the user that downloading does not change
+the selected reader font and shows the path
+**Settings > Reader > Text Settings > Font**.
 
 ## Converting Custom Fonts
 
