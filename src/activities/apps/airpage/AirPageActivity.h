@@ -23,7 +23,7 @@ class AirPageActivity final : public Activity {
 
  private:
   enum class Screen : uint8_t { Qr, Settings, History, Image };
-  enum class Phase : uint8_t { Idle, FetchRequested, Fetching, WallpaperRequested, WallpaperWriting };
+  enum class Phase : uint8_t { Idle, FetchRequested, Fetching, WallpaperWriting, WallpaperNotice };
   enum class Notice : uint8_t {
     None,
     NoImage,
