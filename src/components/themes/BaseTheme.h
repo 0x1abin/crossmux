@@ -131,6 +131,7 @@ enum UIIcon {
   Standby,
   Game2048,
   Buddy,
+  PixelSwitch,
 };
 
 // Default theme implementation (Classic Theme)

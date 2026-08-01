@@ -36,6 +36,7 @@
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
 #include "components/icons/minesweeper.h"
+#include "components/icons/pixel_switch.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
 #include "components/icons/standby.h"
@@ -119,6 +120,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return Game2048Icon;
       case UIIcon::Buddy:
         return BuddyIcon;
+      case UIIcon::PixelSwitch:
+        return PixelSwitchIcon;
       default:
         return nullptr;
     }

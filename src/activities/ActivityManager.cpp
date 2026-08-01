@@ -21,6 +21,7 @@
 #endif
 #include "apps/gomoku/GomokuMenuActivity.h"
 #include "apps/minesweeper/MinesweeperMenuActivity.h"
+#include "apps/pixel-switch/PixelSwitchActivity.h"
 #include "apps/reading-stats/ReadingStatsMenuActivity.h"
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
@@ -287,6 +288,17 @@ void ActivityManager::goToGomoku() { replaceActivity(std::make_unique<GomokuMenu
 
 void ActivityManager::goToMinesweeper() {
   replaceActivity(std::make_unique<MinesweeperMenuActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToPixelSwitch() {
+  // ActivityManager owns this 1500-byte inline canvas across frames, so it
+  // cannot live on the caller's stack. Failure must not abort under -fno-exceptions.
+  auto activity = makeUniqueNoThrow<PixelSwitchActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: PixelSwitchActivity (%u bytes)", static_cast<unsigned>(sizeof(PixelSwitchActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
 }
 
 void ActivityManager::goToGame2048() { replaceActivity(std::make_unique<Game2048Activity>(renderer, mappedInput)); }

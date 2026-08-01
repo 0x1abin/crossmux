@@ -100,6 +100,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Project source globs
 # -----------------------------------------------------------------------------
 file(GLOB_RECURSE CROSSPOINT_SRC "${REPO_ROOT}/src/*.cpp")
+list(FILTER CROSSPOINT_SRC EXCLUDE REGEX "src/platform/wolfssl_max_fragment\\.cpp$")
 file(GLOB_RECURSE CROSSPOINT_LIB
     "${REPO_ROOT}/lib/Epub/*.cpp"
     "${REPO_ROOT}/lib/EpdFont/*.cpp"
