@@ -11,9 +11,35 @@
 #include <esp_wifi.h>
 // clang-format on
 
+#include <algorithm>
 #include <string>
+#include <string_view>
 
 namespace {
+constexpr std::string_view nightlyTagPrefix = "nightly-";
+constexpr size_t nightlyShaLength = 7;
+
+constexpr bool isSameNightlyBuild(const std::string_view currentVersion, const std::string_view latestTag) {
+  if (!latestTag.starts_with(nightlyTagPrefix) || latestTag.size() != nightlyTagPrefix.size() + nightlyShaLength) {
+    return false;
+  }
+
+  const std::string_view latestSha = latestTag.substr(nightlyTagPrefix.size());
+  const bool validSha = std::all_of(latestSha.begin(), latestSha.end(), [](const char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+  });
+  if (!validSha) return false;
+
+  const size_t separator = currentVersion.rfind('+');
+  return separator != std::string_view::npos && currentVersion.substr(separator + 1) == latestSha;
+}
+
+static_assert(isSameNightlyBuild("1.5.2-rc+5064d90", "nightly-5064d90"));
+static_assert(isSameNightlyBuild("1.5.2-cn-rc+5064d90", "nightly-5064d90"));
+static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly-1234567"));
+static_assert(!isSameNightlyBuild("1.5.2", "nightly-5064d90"));
+static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly"));
+
 // OTA manifest endpoint. The global build uses crossmux.com; the Chinese build
 // (ENABLE_CHINESE_VERSION) uses crossmux.yunhug.com, the yunhug-hosted domain
 // with a more reliable mainland-China path. Either way the web proxy picks the
@@ -88,7 +114,12 @@ bool OtaUpdater::isUpdateNewer() const {
   if (!updateAvailable || latestVersion.empty()) {
     return false;
   }
-  if (channel == Channel::Nightly) return true;
+  switch (channel) {
+    case Channel::Stable:
+      break;
+    case Channel::Nightly:
+      return !isSameNightlyBuild(CROSSPOINT_VERSION, latestVersion);
+  }
   if (latestVersion == CROSSPOINT_VERSION) return false;
 
   int currentMajor, currentMinor, currentPatch;
