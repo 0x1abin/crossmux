@@ -164,6 +164,7 @@ bool loadSession(Session& session);
 bool saveSession(const Session& session);
 bool clearSession();
 bool clearShelf();
+bool clearCache();
 
 bool openShelf(HalFile& file, uint32_t& count);
 ShelfSortResult sortShelfByRecent();
@@ -186,7 +187,6 @@ std::string optionsPath(const std::string& bookDir);
 std::string initialProgressPath(const char* bookId);
 std::string detailPath(const std::string& bookDir);
 std::string coverPath(const std::string& bookDir);
-std::string legacyCoverPath(const std::string& bookDir);
 std::string finalBookPath(const ShelfRecord& book);
 bool findBookIdForPath(const std::string& path, char* bookId, size_t bookIdSize);
 bool parseGeneratedChapterHref(const std::string& href, uint32_t& tocIndex);

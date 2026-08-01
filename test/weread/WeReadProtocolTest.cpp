@@ -371,7 +371,7 @@ TEST(WeReadClientState, ExposesDetailBeforePendingCover) {
   EXPECT_EQ(WeReadClient::OperationTestPeer::detailCompletionEvent(false), Event::Complete);
 }
 
-TEST(WeReadClientState, SelectsCoverCacheMigrationAction) {
+TEST(WeReadClientState, SelectsCoverPreparationAction) {
   using Action = WeReadClient::OperationTestPeer::CoverCacheAction;
   const auto action = WeReadClient::OperationTestPeer::coverCacheAction;
 

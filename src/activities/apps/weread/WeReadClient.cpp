@@ -2071,8 +2071,8 @@ void cleanupTransient(const std::string& bookDir, const std::string& finalPartPa
 }
 
 void cleanupDetailTransient(const std::string& bookDir) {
-  static constexpr const char* kNames[] = {"/detail.bin.part", "/cover.v2.bmp.part", "/cover.bmp.part",
-                                           "/cover.source.jpg.part", "/cover.source.png.part"};
+  static constexpr const char* kNames[] = {"/detail.bin.part", "/cover.v2.bmp.part", "/cover.source.jpg.part",
+                                           "/cover.source.png.part"};
   for (const char* name : kNames) {
     const std::string path = bookDir + name;
     if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
@@ -3225,10 +3225,6 @@ Operation::Event Operation::convertCover() {
     return Event::Complete;
   }
   if (!WeReadStore::atomicReplace(part, final)) return fail(Error::SdCard);
-  const std::string legacy = WeReadStore::legacyCoverPath(bookDir_);
-  if (Storage.exists(legacy.c_str()) && !Storage.remove(legacy.c_str())) {
-    LOG_ERR("WR", "failed to remove legacy cover");
-  }
   const std::string alternate =
       bookDir_ + "/" +
       coverSourceName(coverType_ == WeReadProtocol::ImageType::Png ? WeReadProtocol::ImageType::Jpeg

@@ -38,7 +38,10 @@ class WeReadActivity final : public Activity {
     Cancelling,
     OpenBook,
     Error,
-    LogoutError
+    LogoutError,
+    ClearingCache,
+    CacheCleared,
+    CacheClearError
   };
   enum class Job : uint8_t { Sync, Detail, Download };
   enum class DetailAction : uint8_t { Introduction, Read, Browse, Cache, Images };
@@ -131,6 +134,8 @@ class WeReadActivity final : public Activity {
   void syncShelf();
   void enterApp();
   void activateDisclaimerSelection();
+  void promptClearCache();
+  void performClearCache();
   void promptLogout();
   void performLogout();
   void handleDisclaimerInput();

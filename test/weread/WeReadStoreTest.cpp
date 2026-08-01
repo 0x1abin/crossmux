@@ -346,9 +346,8 @@ TEST_F(WeReadStoreTest, OpensValidEmptyShelfIndex) {
   EXPECT_EQ(count, 0U);
 }
 
-TEST(WeReadStorePaths, VersionsCoverThumbnailWithoutChangingLegacyPath) {
+TEST(WeReadStorePaths, UsesVersionedCoverThumbnailPath) {
   EXPECT_EQ(WeReadStore::coverPath("/book"), "/book/cover.v2.bmp");
-  EXPECT_EQ(WeReadStore::legacyCoverPath("/book"), "/book/cover.bmp");
   EXPECT_EQ(WeReadStore::kCoverThumbWidth, 112);
   EXPECT_EQ(WeReadStore::kCoverThumbHeight, 164);
 }
@@ -683,6 +682,49 @@ TEST_F(WeReadStoreTest, ClearsSessionAndShelfButPreservesDownloadedContent) {
   EXPECT_FALSE(WeReadStore::openShelf(missingShelf, count));
   EXPECT_TRUE(WeReadStore::clearSession());
   EXPECT_TRUE(WeReadStore::clearShelf());
+}
+
+TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountShelfAndDownloadedBooks) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  ASSERT_TRUE(WeReadStore::acceptDisclaimer());
+  WeReadStore::Session session;
+  ASSERT_TRUE(session.setCookie("wr_vid", "12345", 5));
+  ASSERT_TRUE(session.setCookie("wr_skey", "secret", 6));
+  ASSERT_TRUE(WeReadStore::saveSession(session));
+
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  ASSERT_TRUE(shelf.finish());
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/shelf.bin.part", "partial"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/book-1/chapters"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/cover.bmp", "legacy"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/cover.v2.bmp", "current"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/chapters/000000.xhtml", "chapter"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/browse-cache/book-1/slot0"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/browse-cache/book-1/slot0/page.txt", "review"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/detail.bin.part", "partial"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/WeRead"));
+  ASSERT_TRUE(Storage.writeFile("/WeRead/Cached Book.epub", "epub"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub_123"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/epub_123/progress.bin", "progress"));
+
+  ASSERT_TRUE(WeReadStore::clearCache());
+  EXPECT_TRUE(Storage.exists(WeReadStore::kSessionPath));
+  EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
+  EXPECT_TRUE(Storage.exists(WeReadStore::kShelfPath));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/book-1"));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/browse-cache"));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/detail.bin.part"));
+  EXPECT_TRUE(Storage.exists("/WeRead/Cached Book.epub"));
+  EXPECT_TRUE(Storage.exists("/.crosspoint/epub_123/progress.bin"));
+  EXPECT_TRUE(WeReadStore::clearCache());
+}
+
+TEST_F(WeReadStoreTest, ClearingMissingWeReadCacheIsIdempotent) {
+  EXPECT_TRUE(WeReadStore::clearCache());
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  EXPECT_TRUE(WeReadStore::clearCache());
 }
 
 TEST_F(WeReadStoreTest, AtomicReplaceRecoversInterruptedBackupBeforeReplacing) {

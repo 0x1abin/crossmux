@@ -31,7 +31,7 @@ namespace {
 
 static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead workspace exceeds its fixed heap budget");
 
-enum class MenuAction : uint8_t { Shelf, Refresh, Logout };
+enum class MenuAction : uint8_t { Shelf, Refresh, ClearCache, Logout };
 
 struct MenuEntry {
   StrId title;
@@ -41,6 +41,7 @@ struct MenuEntry {
 constexpr MenuEntry kMenuEntries[] = {
     {StrId::STR_WEREAD_MENU_SHELF, MenuAction::Shelf},
     {StrId::STR_WEREAD_MENU_REFRESH, MenuAction::Refresh},
+    {StrId::STR_WEREAD_MENU_CLEAR_CACHE, MenuAction::ClearCache},
     {StrId::STR_WEREAD_MENU_LOGOUT, MenuAction::Logout},
 };
 
@@ -124,8 +125,7 @@ ShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content, cons
 }
 
 bool drawCachedCover(GfxRenderer& renderer, const std::string& bookDir, const Rect& bounds) {
-  std::string path = WeReadStore::coverPath(bookDir);
-  if (!Storage.exists(path.c_str())) path = WeReadStore::legacyCoverPath(bookDir);
+  const std::string path = WeReadStore::coverPath(bookDir);
   if (!Storage.exists(path.c_str())) return false;
 
   HalFile file;
@@ -1189,6 +1189,42 @@ void WeReadActivity::promptLogout() {
   });
 }
 
+void WeReadActivity::promptClearCache() {
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_WEREAD_MENU_CLEAR_CACHE),
+                                                              tr(STR_WEREAD_CLEAR_CACHE_KEEP_BOOKS));
+  if (!confirmation) {
+    LOG_ERR("WR", "OOM: clear cache confirmation (%zu bytes)", sizeof(ConfirmationActivity));
+    return;
+  }
+  startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
+    if (result.isCancelled) {
+      requestUpdate();
+      return;
+    }
+    performClearCache();
+  });
+}
+
+void WeReadActivity::performClearCache() {
+  operation_.reset();
+  if (shelfFile_.isOpen()) shelfFile_.close();
+  state_.store(State::ClearingCache);
+  requestUpdateAndWait();
+
+  const bool cleared = WeReadStore::clearCache();
+  refreshShelf();
+  resetShelfCoverLoading();
+  detail_ = {};
+  detailLoaded_ = false;
+  detailLoadFailed_ = false;
+  detailOptionsKnown_ = false;
+  detailIntroTruncated_ = false;
+  introPage_ = 0;
+  introPageCount_ = 1;
+  state_.store(cleared ? State::CacheCleared : State::CacheClearError);
+  requestUpdate();
+}
+
 void WeReadActivity::performLogout() {
   operation_.reset();
   if (shelfFile_.isOpen()) shelfFile_.close();
@@ -1223,6 +1259,9 @@ void WeReadActivity::handleMenuInput() {
         return;
       case MenuAction::Refresh:
         syncShelf();
+        return;
+      case MenuAction::ClearCache:
+        promptClearCache();
         return;
       case MenuAction::Logout:
         promptLogout();
@@ -1358,6 +1397,23 @@ void WeReadActivity::loop() {
     case State::LogoutError:
       handleLogoutErrorInput();
       return;
+    case State::CacheCleared:
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+          mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        state_.store(State::Menu);
+        requestUpdate();
+      }
+      return;
+    case State::CacheClearError:
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        performClearCache();
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        state_.store(State::Menu);
+        requestUpdate();
+      }
+      return;
+    case State::ClearingCache:
+      return;
     case State::LoginConfirmed:
       requestUpdateAndWait();
       state_.store(retryJob_ == Job::Detail && detailLoaded_ ? State::DetailCoverLoading : stateForJob(retryJob_));
@@ -1388,7 +1444,7 @@ void WeReadActivity::loop() {
 bool WeReadActivity::isBusy(const State state) {
   return state == State::Connecting || state == State::Qr || state == State::LoginConfirmed ||
          state == State::Syncing || state == State::DetailLoading || state == State::DetailCoverLoading ||
-         state == State::Downloading || state == State::Cancelling;
+         state == State::Downloading || state == State::Cancelling || state == State::ClearingCache;
 }
 
 const char* WeReadActivity::errorMessage() const {
@@ -1805,6 +1861,9 @@ void WeReadActivity::render(RenderLock&&) {
     case State::OpenBook:
     case State::Error:
     case State::LogoutError:
+    case State::ClearingCache:
+    case State::CacheCleared:
+    case State::CacheClearError:
       break;
   }
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
@@ -1919,6 +1978,15 @@ void WeReadActivity::render(RenderLock&&) {
     case State::LogoutError:
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGOUT_FAILED));
       break;
+    case State::ClearingCache:
+      GUI.drawPopup(renderer, tr(STR_CLEARING_CACHE));
+      break;
+    case State::CacheCleared:
+      GUI.drawPopup(renderer, tr(STR_CACHE_CLEARED));
+      break;
+    case State::CacheClearError:
+      GUI.drawPopup(renderer, tr(STR_CLEAR_CACHE_FAILED));
+      break;
     case State::LoginConfirmed:
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGIN_CONFIRMED));
       break;
@@ -1970,6 +2038,13 @@ void WeReadActivity::render(RenderLock&&) {
       back = tr(STR_BACK);
       confirm = state == State::Error && error_ == WeReadClient::Error::WholeBookOnly ? tr(STR_SELECT) : tr(STR_RETRY);
       break;
+    case State::CacheCleared:
+      back = tr(STR_BACK);
+      break;
+    case State::CacheClearError:
+      back = tr(STR_BACK);
+      confirm = tr(STR_RETRY);
+      break;
     case State::Connecting:
     case State::Qr:
     case State::Syncing:
@@ -1980,6 +2055,7 @@ void WeReadActivity::render(RenderLock&&) {
       break;
     case State::LoginConfirmed:
     case State::OpenBook:
+    case State::ClearingCache:
       break;
   }
   const auto labels = mappedInput.mapLabels(back, confirm, previous, next);

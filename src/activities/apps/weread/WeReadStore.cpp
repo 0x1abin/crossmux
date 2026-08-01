@@ -239,6 +239,48 @@ bool clearShelf() {
   return ok;
 }
 
+bool clearCache() {
+  if (!Storage.exists(kRoot)) return true;
+
+  HalFile root = Storage.open(kRoot);
+  if (!root || !root.isDirectory()) return false;
+
+  bool ok = true;
+  while (true) {
+    char name[64] = {};
+    bool isDirectory = false;
+    {
+      HalFile entry = root.openNextFile();
+      if (!entry) break;
+      const size_t length = entry.getName(name, sizeof(name));
+      if (length == 0 || length >= sizeof(name) - 1) {
+        LOG_ERR("WR", "Invalid cache entry name");
+        ok = false;
+        continue;
+      }
+      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0 ||
+          strcmp(name, "shelf.bin") == 0) {
+        continue;
+      }
+      isDirectory = entry.isDirectory();
+    }
+
+    char path[96];
+    const int written = snprintf(path, sizeof(path), "%s/%s", kRoot, name);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(path)) {
+      LOG_ERR("WR", "Cache entry path is too long");
+      ok = false;
+      continue;
+    }
+    const bool removed = isDirectory ? Storage.removeDir(path) : Storage.remove(path);
+    if (!removed) {
+      LOG_ERR("WR", "Failed to remove cache entry: %s", path);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
 bool IndexWriter::begin(const std::string& finalPath, const uint32_t magic, const uint16_t recordSize) {
   abort();
   finalPath_ = finalPath;
@@ -455,8 +497,6 @@ std::string initialProgressPath(const char* bookId) { return bookDirectory(bookI
 std::string detailPath(const std::string& bookDir) { return bookDir + "/detail.bin"; }
 
 std::string coverPath(const std::string& bookDir) { return bookDir + "/cover.v2.bmp"; }
-
-std::string legacyCoverPath(const std::string& bookDir) { return bookDir + "/cover.bmp"; }
 
 std::string finalBookPath(const ShelfRecord& book) {
   const std::string title = StringUtils::sanitizeFilename(book.title, 80);
