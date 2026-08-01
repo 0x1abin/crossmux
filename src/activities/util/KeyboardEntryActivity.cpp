@@ -110,23 +110,11 @@ const fui::KeyboardLayout URL_SHIFT_LAYOUT{URL_SHIFT_ROWS, 5};
 const fui::KeyboardLayout URL_SNIPPET_LAYOUT{URL_SNIP_ROWS, 4};
 
 fui::KeyboardLayoutId layoutForLanguage(const Language language) {
-#ifdef ENABLE_CHINESE_VERSION
-  // The CN firmware intentionally generates only EN and ZH_CN enum values.
-  // Neither language needs one of the Latin alternate keyboard layouts.
-  (void)language;
+  const char* code = LANGUAGE_CODES[static_cast<uint8_t>(language)];
+  if (strcmp(code, "FR") == 0) return fui::KeyboardLayoutId::AzertyFr;
+  if (strcmp(code, "DE") == 0) return fui::KeyboardLayoutId::QwertzDe;
+  if (strcmp(code, "ES") == 0) return fui::KeyboardLayoutId::SpanishEs;
   return fui::KeyboardLayoutId::QwertyEn;
-#else
-  switch (language) {
-    case Language::FR:
-      return fui::KeyboardLayoutId::AzertyFr;
-    case Language::DE:
-      return fui::KeyboardLayoutId::QwertzDe;
-    case Language::ES:
-      return fui::KeyboardLayoutId::SpanishEs;
-    default:
-      return fui::KeyboardLayoutId::QwertyEn;
-  }
-#endif
 }
 
 }  // namespace
