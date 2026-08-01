@@ -136,6 +136,7 @@ i18n keys (`STR_<APP>_*` in `english.yaml`) are **not** ifdef-guarded: the i18n 
 - **Renderer**: the Apps menu uses `GUI.drawButtonMenu`, not `GUI.drawList`. That gives 32px icons, UI_12 font, 64px rows, vertically centered text — matching the home screen tile style. The Apps menu passes a halved inter-row gap (`metrics.menuSpacing / 2`, i.e. 4px on LYRA) to tighten the list; other callers keep the theme default.
 - **Pagination**: when the list overflows one screen, the Apps menu renders only the current page's slice (offsetting `drawButtonMenu`'s index callbacks). Lyra-family themes use the shared right-side scrollbar; Classic and RoundedRaff retain Standby-style page dots. Item navigation flips pages automatically; no separate page-turn key.
 - **Header**: each app draws its own header via `GUI.drawHeader(... tr(STR_<APP>_TITLE))`.
+- **Result layouts**: center multi-line status/result blocks from measured font heights with `gameCenteredBlockY`; reserve the title bar and button-hint area instead of relying on fixed Y offsets.
 - **Back button labels**: the four button hints follow the project standard — `STR_BACK / STR_SELECT / STR_DIR_UP / STR_DIR_DOWN` for menu rows; app-specific actions for in-game screens.
 
 ## Navigation flow

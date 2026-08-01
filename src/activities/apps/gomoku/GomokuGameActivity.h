@@ -63,8 +63,6 @@ class GomokuGameActivity final : public Activity {
   int boardOriginY() const;
   int stoneRadius() const;
   void intersectionXY(uint8_t r, uint8_t c, int* x, int* y) const;
-  // Format intersection as "K10" (column letter A-O + 1-indexed row from bottom).
-  void coordToText(uint8_t r, uint8_t c, char* out, size_t outLen) const;
 
   // Drawing
   void renderPlaying();

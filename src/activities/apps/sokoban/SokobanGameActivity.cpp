@@ -497,11 +497,17 @@ void SokobanGameActivity::drawFooter() {
 
 void SokobanGameActivity::drawWinScreen() {
   const int sh = renderer.getScreenHeight();
-  renderer.drawCenteredText(NOTOSERIF_14_FONT_ID, sh / 2 - 30, tr(STR_SOKOBAN_WIN));
   char buf[64];
   snprintf(buf, sizeof(buf), "%s %d %s %d", tr(STR_SOKOBAN_MOVES), moves, tr(STR_SOKOBAN_PUSHES), board.pushes);
-  renderer.drawCenteredText(UI_12_FONT_ID, sh / 2 + 10, buf);
-  renderer.drawCenteredText(UI_12_FONT_ID, sh / 2 + 35, tr(STR_SOKOBAN_WIN_HINT));
+
+  constexpr int gap = 12;
+  const int titleH = renderer.getTextHeight(NOTOSERIF_14_FONT_ID);
+  const int bodyH = renderer.getTextHeight(UI_12_FONT_ID);
+  const int blockH = titleH + gap + bodyH + gap + bodyH;
+  const int titleY = gameCenteredBlockY(0, sh, blockH);
+  renderer.drawCenteredText(NOTOSERIF_14_FONT_ID, titleY, tr(STR_SOKOBAN_WIN));
+  renderer.drawCenteredText(UI_12_FONT_ID, titleY + titleH + gap, buf);
+  renderer.drawCenteredText(UI_12_FONT_ID, titleY + titleH + gap + bodyH + gap, tr(STR_SOKOBAN_WIN_HINT));
 }
 
 void SokobanGameActivity::drawLevelSelect() {
