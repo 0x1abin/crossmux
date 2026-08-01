@@ -88,8 +88,9 @@ constexpr AppEntry kAppEntries[] = {
 ```
 
 The ID is the persisted bit position in `hiddenAppsMask`: allocate the next unused value, never reuse or change existing
-values, and keep conditional-app IDs outside their `#ifdef`. New bits default to visible. The menu, launcher, and App
-Visibility settings all read this same table; no `switch` or `buildItems()` is needed.
+values, and keep conditional-app IDs outside their `#ifdef`. New bits default to visible. Fresh settings hide Chinese
+Chess, Minesweeper, 2048, Standby, and Buddy; existing masks are never overwritten. The menu, launcher, and App Visibility
+settings all read this same table; no `switch` or `buildItems()` is needed.
 
 ### 4. Add the i18n key and icon
 
