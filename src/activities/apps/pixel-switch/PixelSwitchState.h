@@ -74,8 +74,8 @@ bool importCanvasMessage(PixelSwitchState& state, const char* topic, const uint8
 
 class PixelSwitchRateLimiter {
  public:
-  static constexpr uint8_t LIMIT = 10;
-  static constexpr uint32_t WINDOW_MS = 60000u;
+  static constexpr uint8_t LIMIT = 5;
+  static constexpr uint32_t WINDOW_MS = 30000u;
 
   bool record(uint32_t now);
   uint8_t remaining(uint32_t now);

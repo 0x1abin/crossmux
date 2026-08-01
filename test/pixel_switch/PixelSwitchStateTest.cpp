@@ -194,6 +194,8 @@ TEST(PixelSwitchState, ValidatesTopicAndPayloadLength) {
 
 TEST(PixelSwitchRateLimiter, EnforcesRollingWindow) {
   PixelSwitchRateLimiter limiter;
+  EXPECT_EQ(PixelSwitchRateLimiter::LIMIT, 5u);
+  EXPECT_EQ(PixelSwitchRateLimiter::WINDOW_MS, 30000u);
   for (uint32_t i = 0; i < PixelSwitchRateLimiter::LIMIT; ++i) {
     EXPECT_TRUE(limiter.record(i * 100u));
   }
@@ -256,11 +258,13 @@ TEST(PixelSwitchBatch, CombinesCommittedAndPendingQuota) {
   PixelSwitchRateLimiter limiter;
   PixelSwitchPendingBatch batch;
 
-  for (uint8_t i = 0; i < 5; ++i) EXPECT_TRUE(limiter.record(i));
-  for (int x = 0; x < 5; ++x) {
+  constexpr uint8_t committedCount = 2;
+  for (uint8_t i = 0; i < committedCount; ++i) EXPECT_TRUE(limiter.record(i));
+  for (int x = 0; x < PixelSwitchRateLimiter::LIMIT - committedCount; ++x) {
     EXPECT_EQ(batch.place(state, limiter, x, 0, Shade::Black, 100), pixel_switch::PlacementResult::Changed);
   }
-  EXPECT_EQ(batch.place(state, limiter, 5, 0, Shade::Black, 100), pixel_switch::PlacementResult::RateLimited);
+  EXPECT_EQ(batch.place(state, limiter, PixelSwitchRateLimiter::LIMIT, 0, Shade::Black, 100),
+            pixel_switch::PlacementResult::RateLimited);
   EXPECT_EQ(limiter.retryAfterMs(100, batch.size()), PixelSwitchRateLimiter::WINDOW_MS - 100u);
 }
 
