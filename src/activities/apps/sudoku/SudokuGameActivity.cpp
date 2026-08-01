@@ -399,9 +399,12 @@ void SudokuGameActivity::render(RenderLock&&) {
 
 void SudokuGameActivity::renderGenerating() {
   drawTitleBar();
-  const int h = renderer.getScreenHeight();
-  renderer.drawCenteredText(NOTOSANS_16_FONT_ID, h / 2 - 16, tr(STR_SUDOKU_GENERATING));
-  renderer.drawCenteredText(kStatusFont, h / 2 + 14, tr(STR_SUDOKU_GENERATING_HINT));
+  constexpr int gap = 12;
+  const int titleH = renderer.getTextHeight(NOTOSANS_16_FONT_ID);
+  const int hintH = renderer.getTextHeight(kStatusFont);
+  const int titleY = gameCenteredBlockY(TITLE_BAR_H, renderer.getScreenHeight(), titleH + gap + hintH);
+  renderer.drawCenteredText(NOTOSANS_16_FONT_ID, titleY, tr(STR_SUDOKU_GENERATING));
+  renderer.drawCenteredText(kStatusFont, titleY + titleH + gap, tr(STR_SUDOKU_GENERATING_HINT));
 }
 
 void SudokuGameActivity::renderPlaying() {
@@ -583,23 +586,41 @@ void SudokuGameActivity::renderWon() {
   drawTitleBar();
   const int sw = renderer.getScreenWidth();
 
-  // Big title
-  const int titleY = 200;
-  renderer.drawCenteredText(kHeroFont, titleY, tr(STR_SUDOKU_SOLVED), true, EpdFontFamily::BOLD);
-
   // Subtitle: difficulty · time · errors
   char timeBuf[8];
   gameFormatElapsed(elapsedMs, timeBuf, sizeof(timeBuf));
   char sub[64];
   snprintf(sub, sizeof(sub), "%s · %s · %s %u/3", difficultyName(difficulty), timeBuf, tr(STR_SUDOKU_ERRORS),
            static_cast<unsigned>(mistakes));
-  renderer.drawCenteredText(kStatusFont, titleY + 36, sub);
-
-  // Three-column stats row.
   const int diffIdx = static_cast<int>(difficulty);
   const SudokuStats stats = SudokuStore::loadStats();
-  const int statsY = titleY + 100;
-  constexpr int statsH = 80;
+
+  char rateBuf[32];
+  const bool showRate = diffIdx >= 0 && diffIdx < 3 && stats.startedCount[diffIdx] > 0;
+  if (showRate) {
+    const int rate = (stats.completedCount[diffIdx] * 100) / stats.startedCount[diffIdx];
+    snprintf(rateBuf, sizeof(rateBuf), "%s %d%%", tr(STR_SUDOKU_WIN_RATE), rate);
+  }
+
+  constexpr int titleGap = 12;
+  constexpr int sectionGap = 36;
+  constexpr int statPadding = 16;
+  constexpr int statTextGap = 12;
+  constexpr int footnoteGap = 16;
+  const int titleH = renderer.getTextHeight(kHeroFont);
+  const int statusH = renderer.getTextHeight(kStatusFont);
+  const int valueH = renderer.getTextHeight(kStatValueFont);
+  const int statsH = statPadding + valueH + statTextGap + statusH + statPadding;
+  const int blockH = titleH + titleGap + statusH + sectionGap + statsH + (showRate ? footnoteGap + statusH : 0);
+  const int availableBottom = renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight;
+  const int titleY = gameCenteredBlockY(TITLE_BAR_H, availableBottom, blockH);
+  const int subtitleY = titleY + titleH + titleGap;
+  const int statsY = subtitleY + statusH + sectionGap;
+
+  renderer.drawCenteredText(kHeroFont, titleY, tr(STR_SUDOKU_SOLVED), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(kStatusFont, subtitleY, sub);
+
+  // Three-column stats row.
   const int sx = CONTENT_X;
   const int sw2 = sw - 2 * CONTENT_X;
   const int colW = sw2 / 3;
@@ -611,8 +632,8 @@ void SudokuGameActivity::renderWon() {
     const int cx = sx + col * colW;
     const int valW = renderer.getTextWidth(kStatValueFont, value);
     const int labW = renderer.getTextWidth(kStatusFont, label);
-    renderer.drawText(kStatValueFont, cx + (colW - valW) / 2, statsY + 28, value, true);
-    renderer.drawText(kStatusFont, cx + (colW - labW) / 2, statsY + 56, label, true);
+    renderer.drawText(kStatValueFont, cx + (colW - valW) / 2, statsY + statPadding, value, true);
+    renderer.drawText(kStatusFont, cx + (colW - labW) / 2, statsY + statPadding + valueH + statTextGap, label, true);
   };
 
   // Col 0: time.
@@ -637,12 +658,8 @@ void SudokuGameActivity::renderWon() {
   }
   drawStatCol(2, tr(STR_SUDOKU_COMPLETED), totalBuf);
 
-  // Optional win-rate footnote.
-  if (diffIdx >= 0 && diffIdx < 3 && stats.startedCount[diffIdx] > 0) {
-    const int rate = (stats.completedCount[diffIdx] * 100) / stats.startedCount[diffIdx];
-    char rateBuf[32];
-    snprintf(rateBuf, sizeof(rateBuf), "%s %d%%", tr(STR_SUDOKU_WIN_RATE), rate);
-    renderer.drawCenteredText(kStatusFont, statsY + statsH + 24, rateBuf);
+  if (showRate) {
+    renderer.drawCenteredText(kStatusFont, statsY + statsH + footnoteGap, rateBuf);
   }
 
   drawFooter();

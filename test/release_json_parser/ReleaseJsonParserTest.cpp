@@ -146,6 +146,19 @@ TEST(ReleaseJsonParser, RealisticMinified) {
   EXPECT_EQ(p.getFirmwareSize(), 1572864u);
 }
 
+TEST(ReleaseJsonParser, NightlyBuildTag) {
+  const char* json =
+      R"({"tag_name":"nightly-5064d90","assets":[{"name":"firmware.bin","size":5839088,"browser_download_url":"https://example.com/firmware.bin"}]})";
+  ReleaseJsonParser p;
+  p.feed(json, strlen(json));
+
+  EXPECT_TRUE(p.foundTag());
+  EXPECT_TRUE(p.foundFirmware());
+  EXPECT_STREQ(p.getTagName(), "nightly-5064d90");
+  EXPECT_STREQ(p.getFirmwareUrl(), "https://example.com/firmware.bin");
+  EXPECT_EQ(p.getFirmwareSize(), 5839088u);
+}
+
 TEST(ReleaseJsonParser, PrettyAndMinifiedAgree) {
   ReleaseJsonParser pretty;
   pretty.feed(kRealisticPretty, strlen(kRealisticPretty));

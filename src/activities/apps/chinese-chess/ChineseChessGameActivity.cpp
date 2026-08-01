@@ -625,7 +625,6 @@ void ChineseChessGameActivity::drawCursor() {
 void ChineseChessGameActivity::drawInfoPanel() {
   const int sw = renderer.getScreenWidth();
   const int statY = INFO_PANEL_Y;
-  constexpr int statH = 60;
   constexpr int cellW = 180;
   constexpr int cellGap = 16;
   const int totalW = 2 * cellW + cellGap;
@@ -635,7 +634,7 @@ void ChineseChessGameActivity::drawInfoPanel() {
   const Side activeSide = gameLive ? board.nextTurn() : Side::Red;
 
   auto drawCell = [&](int xLeft, Side s) {
-    renderer.drawRect(xLeft, statY, cellW, statH, true);
+    renderer.drawRect(xLeft, statY, cellW, INFO_PANEL_H, true);
     // Per-side elapsed clock (chess-clock style: only the side to move ticks).
     char timeBuf[8];
     gameFormatElapsed((s == Side::Red) ? redElapsedMs : blackElapsedMs, timeBuf, sizeof(timeBuf));
@@ -648,7 +647,7 @@ void ChineseChessGameActivity::drawInfoPanel() {
     constexpr int gap = 12;
     const int groupW = labelW + gap + valW;
     const int gx = xLeft + (cellW - groupW) / 2;
-    const int cy = statY + statH / 2;
+    const int cy = statY + INFO_PANEL_H / 2;
     renderer.drawText(CHINESE_CHESS_FONT_ID, gx, cy - labelH / 2, labelText, true);
     renderer.drawText(kStatValueFont, gx + labelW + gap, cy - valH / 2 - 2, timeBuf);
 
@@ -656,7 +655,7 @@ void ChineseChessGameActivity::drawInfoPanel() {
       constexpr int triW = 8;
       constexpr int triH = 12;
       const int tx = xLeft + 10;
-      const int ty = statY + (statH - triH) / 2;
+      const int ty = statY + (INFO_PANEL_H - triH) / 2;
       const int xs[3] = {tx, tx + triW, tx};
       const int ys[3] = {ty, ty + triH / 2, ty + triH};
       renderer.fillPolygon(xs, ys, 3, true);
@@ -670,22 +669,21 @@ void ChineseChessGameActivity::drawInfoPanel() {
 // ---------- Mode line ----------
 
 void ChineseChessGameActivity::drawModeLine() {
-  const int y = MODE_LINE_Y;
-  if (mode == ChineseChessMode::VsAi && aiThinkingShown) {
-    const char* label = tr(STR_CHINESE_CHESS_AI_THINKING);
-    const int tw = renderer.getTextWidth(kStatusFont, label);
-    renderer.drawText(kStatusFont, (renderer.getScreenWidth() - tw) / 2, y, label);
-    return;
-  }
-  // Selection hint.
+  const char* label;
   char buf[64];
-  if (hasSelection) {
+  if (mode == ChineseChessMode::VsAi && aiThinkingShown) {
+    label = tr(STR_CHINESE_CHESS_AI_THINKING);
+  } else if (hasSelection) {
     snprintf(buf, sizeof(buf), "%s · %s", tr(STR_CHINESE_CHESS_MOVE), tr(STR_CHINESE_CHESS_CANCEL));
+    label = buf;
   } else {
-    snprintf(buf, sizeof(buf), "%s", tr(STR_CHINESE_CHESS_SELECT));
+    label = tr(STR_CHINESE_CHESS_SELECT);
   }
-  const int tw = renderer.getTextWidth(kStatusFont, buf);
-  renderer.drawText(kStatusFont, (renderer.getScreenWidth() - tw) / 2, y, buf);
+
+  const int contentTop = INFO_PANEL_Y + INFO_PANEL_H;
+  const int contentBottom = renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight;
+  const int y = gameCenteredBlockY(contentTop, contentBottom, renderer.getTextHeight(kStatusFont));
+  renderer.drawCenteredText(kStatusFont, y, label);
 }
 
 void ChineseChessGameActivity::drawFooter() {

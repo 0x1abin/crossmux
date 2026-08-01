@@ -2,15 +2,17 @@ name: CI (build)
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   clang-format:
-    runs-on: ubuntu-latest
+    # Public PRs stay isolated on GitHub-hosted runners; only trusted main runs use H2O.
+    runs-on: ${{ github.ref == 'refs/heads/main' && 'h2o' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -21,6 +23,7 @@ jobs:
           python-version: '3.14'
 
       - name: Install clang-format-21
+        if: github.ref != 'refs/heads/main'
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -34,7 +37,7 @@ jobs:
           git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
 
   cppcheck:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.ref == 'refs/heads/main' && 'h2o' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -64,7 +67,7 @@ jobs:
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.ref == 'refs/heads/main' && 'h2o' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -121,13 +124,14 @@ jobs:
           if-no-files-found: error
 
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.ref == 'refs/heads/main' && 'h2o' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
 
       - name: Install build tools
+        if: github.ref != 'refs/heads/main'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libcurl4-openssl-dev libssl-dev
