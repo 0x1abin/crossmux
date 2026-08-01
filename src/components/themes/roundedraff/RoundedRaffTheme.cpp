@@ -66,11 +66,12 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
   int batteryGroupLeftX = batteryIconX;
   if (showBatteryPercentage) {
     // Clear a fixed-width area for the battery percentage to avoid ghosting when digit count changes (e.g. 100% -> 99%)
-    const int maxTextWidth = renderer.getTextWidth(SMALL_FONT_ID, "100%");
+    const int maxTextWidth = renderer.getTextWidth(STATUS_NUMERIC_FONT_ID, "100%");
     batteryGroupLeftX -= maxTextWidth + batteryPercentSpacing;
 
     const int clearW = maxTextWidth + batteryPercentSpacing + RoundedRaffMetrics::values.batteryWidth;
-    const int clearH = std::max(renderer.getTextHeight(SMALL_FONT_ID), RoundedRaffMetrics::values.batteryHeight + 8);
+    const int clearH =
+        std::max(renderer.getTextHeight(STATUS_NUMERIC_FONT_ID), RoundedRaffMetrics::values.batteryHeight + 8);
     renderer.fillRect(batteryIconX - maxTextWidth - batteryPercentSpacing, rect.y + 14, clearW, clearH, false);
   }
 

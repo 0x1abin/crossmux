@@ -1,5 +1,7 @@
 #pragma once
 
+#include <builtinFonts/notosans_8_regular.h>
+
 #ifdef ENABLE_CHINESE_VERSION
 // Chinese build: one CJK font header per UI/reader point size. All sizes are
 // raw 2-bit bitmaps (fontconvert.py's --compress is NOT used because the
@@ -39,7 +41,6 @@
 #include <builtinFonts/notoserif_18_bolditalic.h>
 #include <builtinFonts/notoserif_18_italic.h>
 #include <builtinFonts/notoserif_18_regular.h>
-#include <builtinFonts/notosans_8_regular.h>
 #include <builtinFonts/notosans_12_bold.h>
 #include <builtinFonts/notosans_12_bolditalic.h>
 #include <builtinFonts/notosans_12_italic.h>

@@ -23,14 +23,14 @@ void drawHeaderTopLine(const GfxRenderer& renderer, const ThemeMetrics& metrics,
 
   if (showBatteryPercentage) {
     const std::string batteryText = std::to_string(powerManager.getBatteryPercentage()) + "%";
-    rightEdge -= renderer.getTextWidth(SMALL_FONT_ID, batteryText.c_str()) + 4;
+    rightEdge -= renderer.getTextWidth(BaseTheme::STATUS_NUMERIC_FONT_ID, batteryText.c_str()) + 4;
   }
 
   int dateX = rightEdge;
   if (!dateText.empty()) {
-    const int dateWidth = renderer.getTextWidth(SMALL_FONT_ID, dateText.c_str());
+    const int dateWidth = renderer.getTextWidth(BaseTheme::STATUS_NUMERIC_FONT_ID, dateText.c_str());
     dateX = std::max(metrics.contentSidePadding, rightEdge - dateWidth);
-    renderer.drawText(SMALL_FONT_ID, dateX, metrics.topPadding + 5, dateText.c_str());
+    renderer.drawText(BaseTheme::STATUS_NUMERIC_FONT_ID, dateX, metrics.topPadding + 5, dateText.c_str());
   }
 
   if (!reminderText.empty()) {

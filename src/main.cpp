@@ -145,6 +145,10 @@ EpdFontFamily opendyslexic14FontFamily(&opendyslexic14RegularFont, &opendyslexic
 EpdFont smallFont(&notosans_cjk_8);
 EpdFontFamily smallFontFamily(&smallFont);
 
+// Keep status digits and symbols pixel-identical to the international build.
+EpdFont statusNumericFont(&notosans_8_regular);
+EpdFontFamily statusNumericFontFamily(&statusNumericFont);
+
 // UI fonts: 10pt status bar uses the 10pt CJK header so glyphs match the
 // surrounding chrome size; 12pt menu uses the 12pt CJK header.
 EpdFont ui10RegularFont(&notosans_cjk_10);
@@ -373,6 +377,8 @@ bool setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
 #ifdef ENABLE_CHINESE_VERSION
+  // One boot-time map node (<100 bytes including font objects); glyph data stays in flash.
+  renderer.insertFont(BaseTheme::STATUS_NUMERIC_FONT_ID, statusNumericFontFamily);
   renderer.insertFont(CHINESE_CHESS_FONT_ID, chineseChessPieceFontFamily);
 #endif
 

@@ -107,7 +107,8 @@ void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bo
 
   if (showPercentage) {
     const auto percentageText = std::to_string(percentage) + "%";
-    renderer.drawText(SMALL_FONT_ID, rect.x + batteryPercentSpacing + rect.width, rect.y, percentageText.c_str());
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x + batteryPercentSpacing + rect.width, rect.y,
+                      percentageText.c_str());
   }
 
   const Rect iconRect{rect.x, y, rect.width, rect.height};
@@ -123,8 +124,9 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
 
   if (showPercentage) {
     const auto percentageText = std::to_string(percentage) + "%";
-    const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, percentageText.c_str());
-    renderer.drawText(SMALL_FONT_ID, rect.x - textWidth - batteryPercentSpacing, rect.y, percentageText.c_str());
+    const int textWidth = renderer.getTextWidth(STATUS_NUMERIC_FONT_ID, percentageText.c_str());
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x - textWidth - batteryPercentSpacing, rect.y,
+                      percentageText.c_str());
   }
 
   const Rect iconRect{rect.x, y, rect.width, rect.height};
@@ -841,8 +843,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       snprintf(progressStr, sizeof(progressStr), "%s%d/%d", estimatePrefix, currentPage, pageCount);
     }
 
-    int progressTextWidth = renderer.getTextWidth(SMALL_FONT_ID, progressStr);
-    renderer.drawText(SMALL_FONT_ID, rightClusterX - progressTextWidth, textY, progressStr);
+    int progressTextWidth = renderer.getTextWidth(STATUS_NUMERIC_FONT_ID, progressStr);
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, rightClusterX - progressTextWidth, textY, progressStr);
 
     rightClusterWidth += progressTextWidth;
   }
@@ -878,8 +880,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     if (showBatteryPercentage) {
       const uint16_t percentage = powerManager.getBatteryPercentage();
       // width of icon + spacing + text for layout purposes
-      batteryWidth +=
-          batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, (std::to_string(percentage) + "%").c_str());
+      batteryWidth += batteryPercentSpacing +
+                      renderer.getTextWidth(STATUS_NUMERIC_FONT_ID, (std::to_string(percentage) + "%").c_str());
     }
 
     leftClusterWidth += batteryWidth;
@@ -890,7 +892,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     char timeBuf[9];
     if (!TimeUtils::formatCurrentTime(timeBuf, sizeof(timeBuf), sb.clock12h))
       snprintf(timeBuf, sizeof(timeBuf), "--:--");
-    const int clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
+    const int clockTextWidth = renderer.getTextWidth(STATUS_NUMERIC_FONT_ID, timeBuf);
     int clockX = 0;
     // Position to the left or right of the progress text (with a small gap)
     if (sb.clockMode == CrossPointSettings::STATUS_BAR_CLOCK_LEFT) {
@@ -900,7 +902,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       clockX = rightClusterX - rightClusterWidth - (rightClusterWidth > 0 ? 10 : 0) - clockTextWidth;
       rightClusterWidth += clockTextWidth + 10;
     }
-    renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, clockX, textY, timeBuf);
   }
 
   // Draw Bookmark
