@@ -96,11 +96,13 @@ static_assert(kAppCount <= 16, "the app catalog must fit hiddenAppsMask");
 static_assert(static_cast<uint8_t>(AppId::Count) <= 16, "hiddenAppsMask supports at most 16 stable app IDs");
 static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_APP_ID,
               "the Buddy app ID must remain stable");
+static_assert(static_cast<uint8_t>(AppId::PixelSwitch) == CrossPointSettings::PIXEL_SWITCH_APP_ID,
+              "the Pixel Switch app ID must remain stable");
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
 static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
                   (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |
-                   appBit(AppId::Buddy)),
-              "the default mask must hide Chinese chess, Minesweeper, 2048, and Buddy");
+                   appBit(AppId::Buddy) | appBit(AppId::PixelSwitch)),
+              "the default mask must hide Chinese chess, Minesweeper, 2048, Buddy, and Pixel Switch");
 static_assert(visibleAppCount(0) == kAppCount, "a zero mask must show every compiled app");
 static_assert(visibleAppCount(UINT16_MAX) == 0, "a full mask must hide every compiled app");
 static_assert(appIndexForVisibleIndex(appBit(kAppEntries[1].id), 1) == 2,

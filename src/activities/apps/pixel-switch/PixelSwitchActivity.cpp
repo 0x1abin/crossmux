@@ -453,19 +453,27 @@ void PixelSwitchActivity::drawIntro() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   int marginTop, marginRight, marginBottom, marginLeft;
   renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
+  const int hintsReservedHeight =
+      metrics.buttonHintsHeight > 0 ? metrics.buttonHintsHeight + metrics.verticalSpacing : 0;
   const Rect view{marginLeft, marginTop, renderer.getScreenWidth() - marginLeft - marginRight,
-                  renderer.getScreenHeight() - marginTop - marginBottom};
+                  renderer.getScreenHeight() - marginTop - marginBottom - hintsReservedHeight};
   const char* lines[INTRO_LINE_COUNT] = {tr(STR_PIXEL_SWITCH_INTRO_SHARED), tr(STR_PIXEL_SWITCH_INTRO_MOVE),
                                          tr(STR_PIXEL_SWITCH_INTRO_PLACE), tr(STR_PIXEL_SWITCH_INTRO_SHADE),
                                          tr(STR_PIXEL_SWITCH_INTRO_START)};
   const int padding = metrics.contentSidePadding;
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int bodyLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int startLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
   int textWidth = renderer.getTextWidth(UI_12_FONT_ID, tr(STR_PIXEL_SWITCH_TITLE), EpdFontFamily::BOLD);
-  for (const char* line : lines) textWidth = std::max(textWidth, renderer.getTextWidth(UI_10_FONT_ID, line));
+  for (int i = 0; i < INTRO_LINE_COUNT - 1; ++i) {
+    textWidth = std::max(textWidth, renderer.getTextWidth(UI_10_FONT_ID, lines[i]));
+  }
+  textWidth =
+      std::max(textWidth, renderer.getTextWidth(UI_12_FONT_ID, lines[INTRO_LINE_COUNT - 1], EpdFontFamily::BOLD));
 
   const int boxWidth = std::min(view.width, textWidth + padding * 2);
-  const int boxHeight = padding * 2 + titleHeight + metrics.verticalSpacing + lineHeight * INTRO_LINE_COUNT;
+  const int boxHeight = padding * 2 + titleHeight + metrics.verticalSpacing * 2 +
+                        bodyLineHeight * (INTRO_LINE_COUNT - 1) + startLineHeight;
   const int boxX = view.x + (view.width - boxWidth) / 2;
   const int boxY = view.y + (view.height - boxHeight) / 2;
   renderer.fillRoundedRect(boxX, boxY, boxWidth, boxHeight, metrics.popupCornerRadius, Color::White);
@@ -476,10 +484,13 @@ void PixelSwitchActivity::drawIntro() const {
   UITheme::drawCenteredText(renderer, Rect{boxX, y, boxWidth, titleHeight}, UI_12_FONT_ID, y,
                             tr(STR_PIXEL_SWITCH_TITLE), true, EpdFontFamily::BOLD);
   y += titleHeight + metrics.verticalSpacing;
-  for (const char* line : lines) {
-    UITheme::drawCenteredText(renderer, Rect{boxX, y, boxWidth, lineHeight}, UI_10_FONT_ID, y, line);
-    y += lineHeight;
+  for (int i = 0; i < INTRO_LINE_COUNT - 1; ++i) {
+    UITheme::drawCenteredText(renderer, Rect{boxX, y, boxWidth, bodyLineHeight}, UI_10_FONT_ID, y, lines[i]);
+    y += bodyLineHeight;
   }
+  y += metrics.verticalSpacing;
+  UITheme::drawCenteredText(renderer, Rect{boxX, y, boxWidth, startLineHeight}, UI_12_FONT_ID, y,
+                            lines[INTRO_LINE_COUNT - 1], true, EpdFontFamily::BOLD);
 }
 
 void PixelSwitchActivity::drawCooldown() const {
@@ -495,6 +506,10 @@ void PixelSwitchActivity::render(RenderLock&&) {
   switch (view_) {
     case View::Intro:
       drawIntro();
+      {
+        const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), "", "");
+        GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      }
       break;
     case View::Canvas:
       break;
