@@ -31,6 +31,7 @@ constexpr char kAirPageBase[] =
 #else
     "airpage.crossmux.com";
 #endif
+constexpr uint32_t kWallpaperNoticeDurationMs = 1000u;
 
 uint64_t currentArchiveDateKey() {
   const uint32_t timestamp = TimeUtils::getCurrentValidTimestamp();
@@ -341,16 +342,6 @@ void AirPageActivity::loop() {
     requestUpdate();
     return;
   }
-  if (phase_ == Phase::WallpaperRequested) {
-    phase_ = Phase::WallpaperWriting;
-    wallpaperResult_ =
-        airpage::AirPageWallpaper::install(selectedImage_) ? WallpaperResult::Saved : WallpaperResult::Failed;
-    phase_ = Phase::Idle;
-    imageNeedsDisplay_ = true;
-    requestUpdate();
-    return;
-  }
-
   applyConnectionEvent(connection_.pump(phase_ == Phase::Idle && screen_ != Screen::Settings));
 }
 
@@ -442,9 +433,16 @@ void AirPageActivity::handleWallpaperResult(const ActivityResult& result) {
     return;
   }
 
+  phase_ = Phase::WallpaperWriting;
+  wallpaperResult_ =
+      airpage::AirPageWallpaper::install(selectedImage_) ? WallpaperResult::Saved : WallpaperResult::Failed;
+  phase_ = Phase::WallpaperNotice;
+  requestUpdateAndWait();
+  delay(kWallpaperNoticeDurationMs);
+
   wallpaperResult_ = WallpaperResult::None;
-  phase_ = Phase::WallpaperRequested;
-  requestUpdate();
+  phase_ = Phase::Idle;
+  requestUpdateAndWait();
 }
 
 void AirPageActivity::handleRefresh() {
@@ -565,6 +563,16 @@ Rect AirPageActivity::contentViewport() const {
 
 void AirPageActivity::render(RenderLock&&) {
   const Rect fullScreen{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
+
+  if (phase_ == Phase::WallpaperNotice) {
+    renderer.setRenderMode(GfxRenderer::BW);
+    renderer.clearScreen();
+    const char* message =
+        wallpaperResult_ == WallpaperResult::Saved ? tr(STR_AIRPAGE_WALLPAPER_SAVED) : tr(STR_AIRPAGE_WALLPAPER_FAILED);
+    GUI.drawPopup(renderer, message);
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
 
   if (screen_ == Screen::Image && phase_ == Phase::Idle) {
     const bool screenSizeChanged =
