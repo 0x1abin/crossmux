@@ -449,11 +449,20 @@ location is not migrated or read.
   an account change removes the entire browse-cache root. The old disposable
   `/.crosspoint/weread/browse/` directory is deleted as legacy data and is not
   migrated. These files do not change any book or EPUB cache version.
-- A successfully converted 96×140 2-bit cover is stored as
-  `<bookId>/cover.bmp`. Its validated JPEG/PNG source is retained as
+- A successfully converted, aspect-preserving 2-bit cover of at most 112×164 is stored as
+  `<bookId>/cover.v2.bmp`. Its validated JPEG/PNG source is retained as
   `<bookId>/cover.source.jpg` or `<bookId>/cover.source.png` and embedded as the
-  generated EPUB's `cover-image`; only source `.part` files and `cover.bmp.part`
-  are transient. A failed fetch or conversion does not replace an existing BMP.
+  generated EPUB's `cover-image`; only source `.part` files and `cover.v2.bmp.part`
+  are transient. The pre-v2 `<bookId>/cover.bmp` is not read or migrated. A failed
+  fetch or conversion does not replace an existing v2 BMP.
+- The WeRead menu's cache-clear action preserves `session.bin`,
+  `disclaimer.accepted`, `shelf.bin`, `/WeRead/*.epub`, and the reader caches for
+  those EPUB files. It recursively removes every other entry below
+  `/.crosspoint/weread/`, including per-book data, browse caches, and partial files.
+- A login shelf sync or explicit shelf refresh prepares missing covers in three
+  streaming passes: detail metadata, original images, then v2 BMP conversion.
+  Existing v2 BMPs are skipped; cancellation and per-book failures preserve every
+  atomically completed cache file. No shelf or detail record layout changes.
 Readers reject a wrong magic, version, record size, or total file length.
 Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.

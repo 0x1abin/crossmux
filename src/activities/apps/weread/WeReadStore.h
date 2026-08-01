@@ -27,6 +27,8 @@ constexpr uint16_t kBookDetailVersion = 1;
 constexpr uint16_t kBookDetailHeaderSize = 1024;
 constexpr uint32_t kMaxBookIntroBytes = 64 * 1024;
 constexpr uint16_t kBookDetailIntroTruncated = 1U << 0;
+constexpr int kCoverThumbWidth = 112;
+constexpr int kCoverThumbHeight = 164;
 
 enum class ImagePolicy : uint8_t {
   Embed,
@@ -162,6 +164,7 @@ bool loadSession(Session& session);
 bool saveSession(const Session& session);
 bool clearSession();
 bool clearShelf();
+bool clearCache();
 
 bool openShelf(HalFile& file, uint32_t& count);
 ShelfSortResult sortShelfByRecent();
