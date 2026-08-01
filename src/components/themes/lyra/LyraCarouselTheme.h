@@ -7,7 +7,7 @@ class GfxRenderer;
 namespace LyraCarouselMetrics {
 constexpr ThemeMetrics values = [] {
   ThemeMetrics v = LyraMetrics::values;
-  v.homeTopPadding = 28;
+  v.homeTopPadding = 34;
   v.homeCoverHeight = 600;
   v.homeCoverTileHeight = 660;
   v.homeRecentBooksCount = 3;

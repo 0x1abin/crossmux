@@ -22,6 +22,61 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+namespace {
+struct HomeMenuEntry {
+  HomeMenuItem item;
+  StrId label;
+  UIIcon icon;
+};
+
+constexpr HomeMenuEntry kDefaultMenuOrder[] = {
+    {HomeMenuItem::FILE_BROWSER, StrId::STR_BROWSE_FILES, Folder},
+    {HomeMenuItem::RECENTS, StrId::STR_MENU_RECENT_BOOKS, Recent},
+    {HomeMenuItem::OPDS_BROWSER, StrId::STR_OPDS_BROWSER, Library},
+    {HomeMenuItem::FILE_TRANSFER, StrId::STR_FILE_TRANSFER, Transfer},
+    {HomeMenuItem::SETTINGS_MENU, StrId::STR_SETTINGS_TITLE, Settings},
+    {HomeMenuItem::APPS, StrId::STR_APPS_TITLE, Apps},
+};
+constexpr HomeMenuEntry kCarouselMenuOrder[] = {
+    {HomeMenuItem::FILE_BROWSER, StrId::STR_BROWSE_FILES, Folder},
+    {HomeMenuItem::RECENTS, StrId::STR_MENU_RECENT_BOOKS, Recent},
+    {HomeMenuItem::OPDS_BROWSER, StrId::STR_OPDS_BROWSER, Library},
+    {HomeMenuItem::APPS, StrId::STR_APPS_TITLE, Apps},
+    {HomeMenuItem::FILE_TRANSFER, StrId::STR_FILE_TRANSFER, Transfer},
+    {HomeMenuItem::SETTINGS_MENU, StrId::STR_SETTINGS_TITLE, Settings},
+};
+constexpr int kHomeMenuItemCount = 6;
+
+constexpr const HomeMenuEntry* menuEntryAtIndex(int index, bool hasOpds, bool carousel) {
+  if (index < 0) return nullptr;
+  if (!hasOpds && index >= 2) ++index;
+  if (index >= kHomeMenuItemCount) return nullptr;
+  return &(carousel ? kCarouselMenuOrder : kDefaultMenuOrder)[index];
+}
+
+constexpr HomeMenuItem indexToMenuItem(int index, bool hasOpds, bool carousel) {
+  const HomeMenuEntry* entry = menuEntryAtIndex(index, hasOpds, carousel);
+  return entry == nullptr ? HomeMenuItem::NONE : entry->item;
+}
+
+constexpr int menuItemToIndex(HomeMenuItem item, bool hasOpds, bool carousel) {
+  const int count = hasOpds ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
+  for (int i = 0; i < count; ++i) {
+    if (indexToMenuItem(i, hasOpds, carousel) == item) return i;
+  }
+  return 0;
+}
+
+static_assert(indexToMenuItem(2, false, true) == HomeMenuItem::APPS);
+static_assert(indexToMenuItem(4, false, true) == HomeMenuItem::SETTINGS_MENU);
+static_assert(indexToMenuItem(3, true, true) == HomeMenuItem::APPS);
+static_assert(indexToMenuItem(5, true, true) == HomeMenuItem::SETTINGS_MENU);
+static_assert(indexToMenuItem(2, false, false) == HomeMenuItem::FILE_TRANSFER);
+static_assert(indexToMenuItem(4, false, false) == HomeMenuItem::APPS);
+static_assert(menuItemToIndex(HomeMenuItem::APPS, false, true) == 2);
+static_assert(menuItemToIndex(HomeMenuItem::SETTINGS_MENU, true, true) == 5);
+}  // namespace
+
 int HomeActivity::getMenuItemCount() const {
   int count = 5;  // File Browser, Recents, File transfer, Settings, Apps
   if (!recentBooks.empty()) {
@@ -154,7 +209,10 @@ void HomeActivity::onEnter() {
   loadRecentBooks(metrics.homeRecentBooksCount);
 
   const auto base = static_cast<int>(recentBooks.size());
-  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
+  const bool isCarousel =
+      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
+  selectorIndex =
+      initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers, isCarousel);
   lastCarouselBookIndex = 0;
 
   // Trigger first update
@@ -218,13 +276,13 @@ void HomeActivity::loop() {
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
-  auto activateSelection = [this] {
+  auto activateSelection = [this, isCarousel] {
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
       return;
     }
     const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    switch (indexToMenuItem(menuIndex, hasOpdsServers)) {
+    switch (indexToMenuItem(menuIndex, hasOpdsServers, isCarousel)) {
       case HomeMenuItem::FILE_BROWSER:
         onFileBrowserOpen();
         break;
@@ -429,6 +487,8 @@ void HomeActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
+  const bool isCarousel =
+      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
   renderer.clearScreen();
   bool bufferRestored = coverBufferStored && restoreCoverBuffer();
@@ -448,17 +508,19 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_SETTINGS_TITLE), tr(STR_APPS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings, Apps};
-
-  if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Library);
+  const int homeMenuItemCount = hasOpdsServers ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
+  const bool showContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
+  std::vector<const char*> menuItems;
+  std::vector<UIIcon> menuIcons;
+  menuItems.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
+  menuIcons.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
+  for (int i = 0; i < homeMenuItemCount; ++i) {
+    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasOpdsServers, isCarousel);
+    menuItems.push_back(I18N.get(entry->label));
+    menuIcons.push_back(entry->icon);
   }
 
-  if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
+  if (showContinueReading) {
     // Insert Continue Reading at the top if enabled in theme
     menuItems.insert(menuItems.begin(), tr(STR_CONTINUE_READING));
     menuIcons.insert(menuIcons.begin(), Book);
@@ -474,8 +536,6 @@ void HomeActivity::render(RenderLock&&) {
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 
-  const bool isCarousel =
-      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
   if (!isCarousel) {
     const auto labels = mappedInput.mapLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "",
                                               tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
