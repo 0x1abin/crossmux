@@ -99,6 +99,7 @@ class ActivityManager {
   void goToSokoban();
   void goToGomoku();
   void goToMinesweeper();
+  void goToPixelSwitch();
   void goToAirPage();
   void goToBuddy();
   void goToStandby();

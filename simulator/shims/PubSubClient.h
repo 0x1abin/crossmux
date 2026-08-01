@@ -20,6 +20,7 @@ class PubSubClient {
 
   PubSubClient& setServer(const char*, uint16_t) { return *this; }
   PubSubClient& setCallback(Callback) { return *this; }
+  bool setBufferSize(uint16_t) { return true; }
   PubSubClient& setSocketTimeout(uint16_t) { return *this; }
   PubSubClient& setKeepAlive(uint16_t) { return *this; }
   bool connect(const char*) { return false; }
@@ -28,6 +29,7 @@ class PubSubClient {
   bool loop() { return false; }
   bool subscribe(const char*) { return false; }
   bool publish(const char*, const char*) { return false; }
+  bool publish(const char*, const uint8_t*, unsigned int, bool) { return false; }
   void disconnect() {}
   int state() { return -1; }
 };
