@@ -57,6 +57,7 @@ class WeReadActivity final : public Activity {
   std::atomic<uint32_t> progressCompleted_{0};
   std::atomic<uint32_t> progressTotal_{0};
   std::atomic<PostProcessNotice> postProcessNotice_{PostProcessNotice::None};
+  std::atomic<int> disclaimerActionsY_{-1};
   WeReadClient::Error error_ = WeReadClient::Error::Ok;
   WeReadStore::ShelfRecord pendingBook_;
   char qrUrl_[256] = {};
