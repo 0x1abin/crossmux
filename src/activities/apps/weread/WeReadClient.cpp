@@ -2071,8 +2071,8 @@ void cleanupTransient(const std::string& bookDir, const std::string& finalPartPa
 }
 
 void cleanupDetailTransient(const std::string& bookDir) {
-  static constexpr const char* kNames[] = {"/detail.bin.part", "/cover.bmp.part", "/cover.source.jpg.part",
-                                           "/cover.source.png.part"};
+  static constexpr const char* kNames[] = {"/detail.bin.part", "/cover.v2.bmp.part", "/cover.bmp.part",
+                                           "/cover.source.jpg.part", "/cover.source.png.part"};
   for (const char* name : kNames) {
     const std::string path = bookDir + name;
     if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
@@ -3211,8 +3211,10 @@ Operation::Event Operation::convertCover() {
     return Event::Complete;
   }
   const bool converted = coverType_ == WeReadProtocol::ImageType::Png
-                             ? PngToBmpConverter::pngFileToBmpStreamWithSize(input, output, 96, 140)
-                             : JpegToBmpConverter::jpegFileToBmpStreamWithSize(input, output, 96, 140);
+                             ? PngToBmpConverter::pngFileToBmpStreamWithSize(
+                                   input, output, WeReadStore::kCoverThumbWidth, WeReadStore::kCoverThumbHeight)
+                             : JpegToBmpConverter::jpegFileToBmpStreamWithSize(
+                                   input, output, WeReadStore::kCoverThumbWidth, WeReadStore::kCoverThumbHeight);
   input.close();
   output.close();
   if (!converted) {
@@ -3223,6 +3225,10 @@ Operation::Event Operation::convertCover() {
     return Event::Complete;
   }
   if (!WeReadStore::atomicReplace(part, final)) return fail(Error::SdCard);
+  const std::string legacy = WeReadStore::legacyCoverPath(bookDir_);
+  if (Storage.exists(legacy.c_str()) && !Storage.remove(legacy.c_str())) {
+    LOG_ERR("WR", "failed to remove legacy cover");
+  }
   const std::string alternate =
       bookDir_ + "/" +
       coverSourceName(coverType_ == WeReadProtocol::ImageType::Png ? WeReadProtocol::ImageType::Jpeg
@@ -3477,22 +3483,30 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       HalFile detail;
       if (WeReadStore::openBookDetail(bookDir_, cached, detail)) {
         std::string coverSource;
-        const bool hasCoverSource = findCoverSource(bookDir_, coverSource) != WeReadProtocol::ImageType::None;
-        if (!detailCoverPending(Storage.exists(WeReadStore::coverPath(bookDir_).c_str()), hasCoverSource,
-                                cached.coverUrl[0])) {
-          phase_ = Phase::Complete;
-          logJobComplete();
-          return Event::Complete;
+        const WeReadProtocol::ImageType sourceType = findCoverSource(bookDir_, coverSource);
+        const CoverCacheAction action =
+            coverCacheAction(Storage.exists(WeReadStore::coverPath(bookDir_).c_str()),
+                             sourceType != WeReadProtocol::ImageType::None, cached.coverUrl[0]);
+        switch (action) {
+          case CoverCacheAction::Complete:
+            phase_ = Phase::Complete;
+            logJobComplete();
+            return Event::Complete;
+          case CoverCacheAction::ConvertSource:
+            coverType_ = sourceType;
+            phase_ = Phase::ConvertCover;
+            return detailCompletionEvent(true);
+          case CoverCacheAction::FetchSource:
+            coverType_ = WeReadProtocol::normalizeImageUrl(cached.coverUrl, url_, sizeof(url_));
+            if (coverType_ == WeReadProtocol::ImageType::None) {
+              phase_ = Phase::Complete;
+              return Event::Complete;
+            }
+            requestAttempt_ = 0;
+            chapterResponseAttempts_ = 0;
+            phase_ = Phase::FetchCover;
+            return detailCompletionEvent(true);
         }
-        coverType_ = WeReadProtocol::normalizeImageUrl(cached.coverUrl, url_, sizeof(url_));
-        if (coverType_ == WeReadProtocol::ImageType::None) {
-          phase_ = Phase::Complete;
-          return Event::Complete;
-        }
-        requestAttempt_ = 0;
-        chapterResponseAttempts_ = 0;
-        phase_ = Phase::FetchCover;
-        return detailCompletionEvent(true);
       }
       phase_ = Phase::FetchDetail;
       return Event::None;

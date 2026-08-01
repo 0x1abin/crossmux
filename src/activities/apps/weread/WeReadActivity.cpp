@@ -76,36 +76,70 @@ constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerAction
 constexpr int kDisclaimerParagraphCount =
     static_cast<int>(sizeof(kDisclaimerParagraphs) / sizeof(kDisclaimerParagraphs[0]));
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
-constexpr int kCoverWidth = 96;
-constexpr int kCoverHeight = 140;
+constexpr int kDetailCoverWidth = 96;
+constexpr int kDetailCoverHeight = 140;
+constexpr int kPortraitShelfColumns = 3;
+constexpr int kPortraitShelfRows = 3;
+constexpr int kLandscapeShelfColumns = 5;
+constexpr int kLandscapeShelfRows = 2;
 
 struct ShelfGridLayout {
   int columns = 1;
   int rows = 1;
   int itemsPerPage = 1;
-  int tileWidth = kCoverWidth;
-  int tileHeight = kCoverHeight;
-  int startX = 0;
-  int startY = 0;
-  int spacing = 0;
+  int coverWidth = WeReadStore::kCoverThumbWidth;
+  int coverHeight = WeReadStore::kCoverThumbHeight;
+  int itemHeight = WeReadStore::kCoverThumbHeight;
+  int columnGap = 0;
+  int rowGap = 0;
+  int titleGap = 0;
+  int availableX = 0;
+  int availableWidth = 0;
 };
 
 ShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content, const int sidePadding, const int spacing) {
   ShelfGridLayout layout;
   const int titleHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  layout.spacing = std::max(2, spacing);
-  layout.tileWidth = kCoverWidth + layout.spacing * 2;
-  layout.tileHeight = kCoverHeight + layout.spacing + titleHeight;
-  const int availableWidth = std::max(1, content.width - sidePadding * 2);
-  const int availableHeight = std::max(1, content.height);
-  layout.columns = std::max(1, availableWidth / layout.tileWidth);
-  layout.rows = std::max(1, (availableHeight + layout.spacing) / (layout.tileHeight + layout.spacing));
+  const int minimumGap = std::max(4, spacing / 2);
+  const bool landscape = renderer.getOrientation() == GfxRenderer::Orientation::LandscapeClockwise ||
+                         renderer.getOrientation() == GfxRenderer::Orientation::LandscapeCounterClockwise;
+  layout.columns = landscape ? kLandscapeShelfColumns : kPortraitShelfColumns;
+  layout.rows = landscape ? kLandscapeShelfRows : kPortraitShelfRows;
   layout.itemsPerPage = layout.columns * layout.rows;
-  const int gridWidth = layout.columns * layout.tileWidth;
-  const int gridHeight = layout.rows * layout.tileHeight + (layout.rows - 1) * layout.spacing;
-  layout.startX = content.x + (content.width - gridWidth) / 2;
-  layout.startY = content.y + std::max(0, (availableHeight - gridHeight) / 2);
+  layout.titleGap = minimumGap;
+  layout.availableX = content.x + sidePadding;
+  layout.availableWidth = std::max(1, content.width - sidePadding * 2);
+  const int availableHeight = std::max(1, content.height);
+  const int maxCoverWidth = std::max(1, (layout.availableWidth - minimumGap * (layout.columns + 1)) / layout.columns);
+  const int maxCoverHeight =
+      std::max(1, (availableHeight - minimumGap * (layout.rows + 1)) / layout.rows - layout.titleGap - titleHeight);
+  const float scale = std::min({1.0f, static_cast<float>(maxCoverWidth) / WeReadStore::kCoverThumbWidth,
+                                static_cast<float>(maxCoverHeight) / WeReadStore::kCoverThumbHeight});
+  layout.coverWidth = std::max(1, static_cast<int>(WeReadStore::kCoverThumbWidth * scale));
+  layout.coverHeight = std::max(1, static_cast<int>(WeReadStore::kCoverThumbHeight * scale));
+  layout.itemHeight = layout.coverHeight + layout.titleGap + titleHeight;
+  layout.columnGap = std::max(0, (layout.availableWidth - layout.columns * layout.coverWidth) / (layout.columns + 1));
+  layout.rowGap = std::max(0, (availableHeight - layout.rows * layout.itemHeight) / (layout.rows + 1));
   return layout;
+}
+
+bool drawCachedCover(GfxRenderer& renderer, const std::string& bookDir, const Rect& bounds) {
+  std::string path = WeReadStore::coverPath(bookDir);
+  if (!Storage.exists(path.c_str())) path = WeReadStore::legacyCoverPath(bookDir);
+  if (!Storage.exists(path.c_str())) return false;
+
+  HalFile file;
+  if (!Storage.openFileForRead("WR", path, file)) return false;
+  Bitmap bitmap(file);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok) return false;
+
+  const float scale = std::min({1.0f, static_cast<float>(bounds.width) / bitmap.getWidth(),
+                                static_cast<float>(bounds.height) / bitmap.getHeight()});
+  const int width = std::max(1, static_cast<int>(bitmap.getWidth() * scale));
+  const int height = std::max(1, static_cast<int>(bitmap.getHeight() * scale));
+  renderer.drawBitmap(bitmap, bounds.x + (bounds.width - width) / 2, bounds.y + (bounds.height - height) / 2,
+                      bounds.width, bounds.height);
+  return true;
 }
 
 struct Utf8Glyph {
@@ -395,9 +429,10 @@ bool WeReadActivity::readShelf(const int index, WeReadStore::ShelfRecord& record
 
 Rect WeReadActivity::contentBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int contentY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentH = renderer.getScreenHeight() - contentY - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  return Rect{0, contentY, renderer.getScreenWidth(), std::max(0, contentH)};
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const int contentY = safe.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentBottom = safe.y + safe.height - metrics.verticalSpacing;
+  return Rect{safe.x, contentY, safe.width, std::max(0, contentBottom - contentY)};
 }
 
 Rect WeReadActivity::disclaimerSafeBounds() const {
@@ -1527,39 +1562,37 @@ void WeReadActivity::drawShelfGrid(const Rect& content) {
   const int page = shelfSelected_ / layout.itemsPerPage;
   const int pageStart = page * layout.itemsPerPage;
   const int pageEnd = std::min(pageStart + layout.itemsPerPage, count);
+  const int pageCount = pageEnd - pageStart;
+  const int visibleRows = (pageCount + layout.columns - 1) / layout.columns;
+  const int visibleHeight = visibleRows * layout.itemHeight + std::max(0, visibleRows - 1) * layout.rowGap;
+  const int startY = content.y + std::max(0, (content.height - visibleHeight) / 2);
 
   for (int index = pageStart; index < pageEnd; ++index) {
     WeReadStore::ShelfRecord book;
     if (!readShelf(index, book)) continue;
 
     const int item = index - pageStart;
-    const int tileX = layout.startX + item % layout.columns * layout.tileWidth;
-    const int tileY = layout.startY + item / layout.columns * (layout.tileHeight + layout.spacing);
-    const int coverX = tileX + (layout.tileWidth - kCoverWidth) / 2;
-    bool coverDrawn = false;
-    const std::string coverPath = WeReadStore::coverPath(WeReadStore::bookDirectory(book.bookId));
-    if (Storage.exists(coverPath.c_str())) {
-      HalFile file;
-      if (Storage.openFileForRead("WR", coverPath, file)) {
-        Bitmap bitmap(file);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-          renderer.drawBitmap(bitmap, coverX, tileY, kCoverWidth, kCoverHeight);
-          coverDrawn = true;
-        }
-      }
-    }
-    renderer.drawRect(coverX, tileY, kCoverWidth, kCoverHeight);
+    const int row = item / layout.columns;
+    const int column = item % layout.columns;
+    const int rowItems = std::min(layout.columns, pageCount - row * layout.columns);
+    const int rowWidth = rowItems * layout.coverWidth + std::max(0, rowItems - 1) * layout.columnGap;
+    const int coverX = layout.availableX + std::max(0, (layout.availableWidth - rowWidth) / 2) +
+                       column * (layout.coverWidth + layout.columnGap);
+    const int coverY = startY + row * (layout.itemHeight + layout.rowGap);
+    const Rect cover{coverX, coverY, layout.coverWidth, layout.coverHeight};
+    const bool coverDrawn = drawCachedCover(renderer, WeReadStore::bookDirectory(book.bookId), cover);
+    renderer.drawRect(cover.x, cover.y, cover.width, cover.height);
     if (!coverDrawn) {
-      renderer.drawIcon(CoverIcon, coverX + (kCoverWidth - 32) / 2, tileY + (kCoverHeight - 32) / 2, 32);
+      renderer.drawIcon(CoverIcon, cover.x + (cover.width - 32) / 2, cover.y + (cover.height - 32) / 2, 32);
     }
 
-    const std::string title = renderer.truncatedText(SMALL_FONT_ID, book.title, layout.tileWidth - 4);
+    const std::string title = renderer.truncatedText(SMALL_FONT_ID, book.title, layout.coverWidth);
     const int titleWidth = renderer.getTextAdvanceX(SMALL_FONT_ID, title.c_str(), EpdFontFamily::REGULAR);
-    renderer.drawText(SMALL_FONT_ID, tileX + std::max(0, (layout.tileWidth - titleWidth) / 2),
-                      tileY + kCoverHeight + layout.spacing, title.c_str());
+    renderer.drawText(SMALL_FONT_ID, cover.x + std::max(0, (cover.width - titleWidth) / 2),
+                      cover.y + cover.height + layout.titleGap, title.c_str());
     if (index == shelfSelected_) {
-      renderer.drawRect(tileX, tileY - 2, layout.tileWidth, layout.tileHeight + 4);
-      renderer.drawRect(tileX + 1, tileY - 1, layout.tileWidth - 2, layout.tileHeight + 2);
+      renderer.drawRect(cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4);
+      renderer.drawRect(cover.x - 1, cover.y - 1, cover.width + 2, layout.itemHeight + 2);
     }
   }
 
@@ -1569,20 +1602,10 @@ void WeReadActivity::drawShelfGrid(const Rect& content) {
 void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int side = metrics.contentSidePadding;
-  const Rect cover{side, content.y, kCoverWidth, kCoverHeight};
+  const Rect cover{content.x + side, content.y, kDetailCoverWidth, kDetailCoverHeight};
   renderer.drawRect(cover.x, cover.y, cover.width, cover.height);
-  bool coverDrawn = false;
-  const std::string coverFile = WeReadStore::coverPath(WeReadStore::bookDirectory(pendingBook_.bookId));
-  if (Storage.exists(coverFile.c_str())) {
-    HalFile file;
-    if (Storage.openFileForRead("WR", coverFile, file)) {
-      Bitmap bitmap(file);
-      if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-        renderer.drawBitmap(bitmap, cover.x + 2, cover.y + 2, cover.width - 4, cover.height - 4);
-        coverDrawn = true;
-      }
-    }
-  }
+  const bool coverDrawn = drawCachedCover(renderer, WeReadStore::bookDirectory(pendingBook_.bookId),
+                                          Rect{cover.x + 2, cover.y + 2, cover.width - 4, cover.height - 4});
   if (!coverDrawn) {
     UITheme::drawCenteredWrappedText(
         renderer, cover, UI_10_FONT_ID,
@@ -1590,7 +1613,7 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
   }
 
   const int metaX = cover.x + cover.width + 16;
-  const int metaWidth = std::max(1, content.width - metaX - side);
+  const int metaWidth = std::max(1, content.x + content.width - metaX - side);
   const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int detailLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int smallLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
@@ -1642,10 +1665,10 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
   }
 
   const int actionHeight = kDetailListActionCount * GUI.getListRowStep(false);
-  const Rect actions{0, content.y + content.height - actionHeight, content.width, actionHeight};
+  const Rect actions{content.x, content.y + content.height - actionHeight, content.width, actionHeight};
   const int summaryY = cover.y + cover.height + metrics.verticalSpacing;
   const int summaryBottom = actions.y - metrics.verticalSpacing;
-  const Rect introduction{side, summaryY, content.width - side * 2, std::max(1, summaryBottom - summaryY)};
+  const Rect introduction{content.x + side, summaryY, content.width - side * 2, std::max(1, summaryBottom - summaryY)};
   detailIntroTruncated_ =
       drawDetailIntroduction(introduction, detailSelected_ == static_cast<int>(DetailAction::Introduction));
 
@@ -1702,7 +1725,7 @@ void WeReadActivity::drawIntroduction(const Rect& content) {
   WeReadStore::BookDetailHeader header;
   if (!WeReadStore::openBookDetail(WeReadStore::bookDirectory(pendingBook_.bookId), header, file) ||
       !file.seek(WeReadStore::kBookDetailHeaderSize + start)) {
-    renderer.drawText(UI_10_FONT_ID, side, content.y, tr(STR_WEREAD_DETAIL_UNAVAILABLE));
+    renderer.drawText(UI_10_FONT_ID, content.x + side, content.y, tr(STR_WEREAD_DETAIL_UNAVAILABLE));
     return;
   }
 
@@ -1713,7 +1736,7 @@ void WeReadActivity::drawIntroduction(const Rect& content) {
   uint32_t offset = start;
   const auto flushLine = [&]() {
     line[lineLength] = '\0';
-    if (lineLength > 0) renderer.drawText(UI_10_FONT_ID, side, y, line);
+    if (lineLength > 0) renderer.drawText(UI_10_FONT_ID, content.x + side, y, line);
     lineLength = 0;
     lineWidth = 0;
     y += lineHeight;
@@ -1739,7 +1762,7 @@ void WeReadActivity::drawIntroduction(const Rect& content) {
   }
   if (lineLength > 0 && y < footerY) flushLine();
   if (introPagesTruncated_ && introPage_ + 1 == introPageCount_ && y < footerY) {
-    renderer.drawText(UI_10_FONT_ID, side, y, "...");
+    renderer.drawText(UI_10_FONT_ID, content.x + side, y, "...");
   }
   char page[32];
   snprintf(page, sizeof(page), tr(STR_WEREAD_PAGE_FMT), static_cast<unsigned>(introPage_ + 1),
@@ -1784,7 +1807,7 @@ void WeReadActivity::render(RenderLock&&) {
     case State::LogoutError:
       break;
   }
-  const Rect safe = state == State::Disclaimer ? disclaimerSafeBounds() : Rect{0, 0, width, height};
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight}, header);
 
   switch (state) {

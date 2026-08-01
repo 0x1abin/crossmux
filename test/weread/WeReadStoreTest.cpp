@@ -346,6 +346,13 @@ TEST_F(WeReadStoreTest, OpensValidEmptyShelfIndex) {
   EXPECT_EQ(count, 0U);
 }
 
+TEST(WeReadStorePaths, VersionsCoverThumbnailWithoutChangingLegacyPath) {
+  EXPECT_EQ(WeReadStore::coverPath("/book"), "/book/cover.v2.bmp");
+  EXPECT_EQ(WeReadStore::legacyCoverPath("/book"), "/book/cover.bmp");
+  EXPECT_EQ(WeReadStore::kCoverThumbWidth, 112);
+  EXPECT_EQ(WeReadStore::kCoverThumbHeight, 164);
+}
+
 TEST_F(WeReadStoreTest, WritesEmptyAndPopulatedImageIndexesAndRejectsCorruption) {
   ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
   const std::string path = WeReadStore::imageIndexPath("/work", 7);

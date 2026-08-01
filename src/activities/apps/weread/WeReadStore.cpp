@@ -454,7 +454,9 @@ std::string initialProgressPath(const char* bookId) { return bookDirectory(bookI
 
 std::string detailPath(const std::string& bookDir) { return bookDir + "/detail.bin"; }
 
-std::string coverPath(const std::string& bookDir) { return bookDir + "/cover.bmp"; }
+std::string coverPath(const std::string& bookDir) { return bookDir + "/cover.v2.bmp"; }
+
+std::string legacyCoverPath(const std::string& bookDir) { return bookDir + "/cover.bmp"; }
 
 std::string finalBookPath(const ShelfRecord& book) {
   const std::string title = StringUtils::sanitizeFilename(book.title, 80);

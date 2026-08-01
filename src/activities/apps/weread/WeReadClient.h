@@ -115,6 +115,12 @@ class Operation {
     UploadLocal,
   };
 
+  enum class CoverCacheAction : uint8_t {
+    Complete,
+    ConvertSource,
+    FetchSource,
+  };
+
   enum class Phase : uint8_t {
     Idle,
     LoginUid,
@@ -170,8 +176,11 @@ class Operation {
   static constexpr Event detailCompletionEvent(const bool coverPending) {
     return coverPending ? Event::DetailReady : Event::Complete;
   }
-  static constexpr bool detailCoverPending(const bool hasBmp, const bool hasSource, const bool hasUrl) {
-    return hasUrl && (!hasBmp || !hasSource);
+  static constexpr CoverCacheAction coverCacheAction(const bool hasCurrentBmp, const bool hasSource,
+                                                     const bool hasUrl) {
+    if (hasCurrentBmp && hasSource) return CoverCacheAction::Complete;
+    if (hasSource) return CoverCacheAction::ConvertSource;
+    return hasUrl ? CoverCacheAction::FetchSource : CoverCacheAction::Complete;
   }
   static constexpr Phase chapterResponseRetryPhase() { return Phase::FetchReader; }
   static constexpr bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {

@@ -449,11 +449,13 @@ location is not migrated or read.
   an account change removes the entire browse-cache root. The old disposable
   `/.crosspoint/weread/browse/` directory is deleted as legacy data and is not
   migrated. These files do not change any book or EPUB cache version.
-- A successfully converted 96×140 2-bit cover is stored as
-  `<bookId>/cover.bmp`. Its validated JPEG/PNG source is retained as
+- A successfully converted, aspect-preserving 2-bit cover of at most 112×164 is stored as
+  `<bookId>/cover.v2.bmp`. Its validated JPEG/PNG source is retained as
   `<bookId>/cover.source.jpg` or `<bookId>/cover.source.png` and embedded as the
-  generated EPUB's `cover-image`; only source `.part` files and `cover.bmp.part`
-  are transient. A failed fetch or conversion does not replace an existing BMP.
+  generated EPUB's `cover-image`; only source `.part` files and `cover.v2.bmp.part`
+  are transient. The pre-v2 `<bookId>/cover.bmp` remains a display fallback until
+  the v2 conversion is atomically committed, then it is removed. A failed fetch or
+  conversion does not replace an existing BMP or remove the legacy fallback.
 Readers reject a wrong magic, version, record size, or total file length.
 Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.

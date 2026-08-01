@@ -16,8 +16,9 @@ struct OperationTestPeer {
   static Operation::Event detailCompletionEvent(const bool coverPending) {
     return Operation::detailCompletionEvent(coverPending);
   }
-  static bool detailCoverPending(const bool hasBmp, const bool hasSource, const bool hasUrl) {
-    return Operation::detailCoverPending(hasBmp, hasSource, hasUrl);
+  using CoverCacheAction = Operation::CoverCacheAction;
+  static CoverCacheAction coverCacheAction(const bool hasCurrentBmp, const bool hasSource, const bool hasUrl) {
+    return Operation::coverCacheAction(hasCurrentBmp, hasSource, hasUrl);
   }
   static bool chapterResponseRetryRestartsReader() {
     return Operation::chapterResponseRetryPhase() == Operation::Phase::FetchReader;
@@ -370,11 +371,18 @@ TEST(WeReadClientState, ExposesDetailBeforePendingCover) {
   EXPECT_EQ(WeReadClient::OperationTestPeer::detailCompletionEvent(false), Event::Complete);
 }
 
-TEST(WeReadClientState, RefreshesMissingOriginalCoverFromCachedDetail) {
-  EXPECT_TRUE(WeReadClient::OperationTestPeer::detailCoverPending(true, false, true));
-  EXPECT_TRUE(WeReadClient::OperationTestPeer::detailCoverPending(false, false, true));
-  EXPECT_FALSE(WeReadClient::OperationTestPeer::detailCoverPending(true, true, true));
-  EXPECT_FALSE(WeReadClient::OperationTestPeer::detailCoverPending(true, false, false));
+TEST(WeReadClientState, SelectsCoverCacheMigrationAction) {
+  using Action = WeReadClient::OperationTestPeer::CoverCacheAction;
+  const auto action = WeReadClient::OperationTestPeer::coverCacheAction;
+
+  EXPECT_EQ(action(true, true, true), Action::Complete);
+  EXPECT_EQ(action(true, true, false), Action::Complete);
+  EXPECT_EQ(action(false, true, true), Action::ConvertSource);
+  EXPECT_EQ(action(false, true, false), Action::ConvertSource);
+  EXPECT_EQ(action(true, false, true), Action::FetchSource);
+  EXPECT_EQ(action(false, false, true), Action::FetchSource);
+  EXPECT_EQ(action(true, false, false), Action::Complete);
+  EXPECT_EQ(action(false, false, false), Action::Complete);
 }
 
 TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {
