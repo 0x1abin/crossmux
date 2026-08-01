@@ -128,6 +128,7 @@ class WeReadActivity final : public Activity {
   void drawDisclaimer(const Rect& content);
   void drawBookDetail(const Rect& content, bool coverLoading = false);
   void drawIntroduction(const Rect& content);
+  void updateJobProgress();
   void advanceJob();
   void openBook(const char* path);
   void openShelf();

@@ -142,6 +142,25 @@ bool drawCachedCover(GfxRenderer& renderer, const std::string& bookDir, const Re
   return true;
 }
 
+void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* title, const char* status,
+                        const uint32_t completed, const uint32_t total) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int barBlockHeight = total > 0 ? metrics.verticalSpacing + metrics.progressBarHeight : 0;
+  const int groupHeight = lineHeight * 2 + metrics.verticalSpacing + barBlockHeight;
+  int y = content.y + std::max(0, (content.height - groupHeight) / 2);
+  UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, title);
+  y += lineHeight + metrics.verticalSpacing;
+  UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, status);
+  if (total == 0) return;
+
+  const int sidePadding = std::min(metrics.contentSidePadding, content.width / 4);
+  GUI.drawProgressBar(renderer,
+                      Rect{content.x + sidePadding, y + lineHeight + metrics.verticalSpacing,
+                           std::max(1, content.width - sidePadding * 2), metrics.progressBarHeight},
+                      completed, total);
+}
+
 struct Utf8Glyph {
   char text[5] = {};
   uint8_t fileBytes = 0;
@@ -675,30 +694,65 @@ void WeReadActivity::advanceShelfCovers() {
   }
 }
 
-void WeReadActivity::advanceJob() {
-  const auto event = stepOperation();
-  if (retryJob_ == Job::Download) {
-    const auto stage = operation_.progressStage();
-    const uint32_t completed = operation_.progressCompleted();
-    const uint32_t total = operation_.progressTotal();
-    const auto previousStage = progressStage_.exchange(stage);
-    const uint32_t previousCompleted = progressCompleted_.exchange(completed);
-    const uint32_t previousTotal = progressTotal_.exchange(total);
-    const bool stageChanged = previousStage != stage;
-    const bool totalChanged = previousTotal != total;
-    const bool completedChanged = previousCompleted != completed;
-    const bool imageDecileChanged = stage == WeReadClient::Operation::ProgressStage::Images &&
-                                    WeReadClient::Operation::progressDecile(previousCompleted, total) !=
-                                        WeReadClient::Operation::progressDecile(completed, total);
-    if (stageChanged) {
-      updatePostProcessNotice(previousStage, stage);
-      stageRenderPending_.store(true);
-      requestDownloadUpdate();
-    } else if (totalChanged || (completedChanged && (stage == WeReadClient::Operation::ProgressStage::Chapters ||
-                                                     imageDecileChanged || completed == total))) {
-      requestDownloadUpdate();
+void WeReadActivity::updateJobProgress() {
+  switch (retryJob_) {
+    case Job::Detail:
+      return;
+    case Job::Sync:
+    case Job::Download:
+      break;
+  }
+
+  const auto stage = operation_.progressStage();
+  const uint32_t completed = operation_.progressCompleted();
+  const uint32_t total = operation_.progressTotal();
+  const auto previousStage = progressStage_.exchange(stage);
+  const uint32_t previousCompleted = progressCompleted_.exchange(completed);
+  const uint32_t previousTotal = progressTotal_.exchange(total);
+  const bool stageChanged = previousStage != stage;
+  const bool totalChanged = previousTotal != total;
+  const bool completedChanged = previousCompleted != completed;
+  const bool decileChanged = WeReadClient::Operation::progressDecile(previousCompleted, total) !=
+                             WeReadClient::Operation::progressDecile(completed, total);
+
+  if (retryJob_ == Job::Sync && stage != WeReadClient::Operation::ProgressStage::Chapters) {
+    state_.store(State::Syncing);
+  }
+  if (stageChanged && retryJob_ == Job::Download) {
+    updatePostProcessNotice(previousStage, stage);
+    stageRenderPending_.store(true);
+  }
+
+  bool requestRender = stageChanged || totalChanged;
+  if (!requestRender && completedChanged) {
+    switch (retryJob_) {
+      case Job::Sync:
+        requestRender = decileChanged || completed == total;
+        break;
+      case Job::Download:
+        switch (stage) {
+          case WeReadClient::Operation::ProgressStage::Chapters:
+            requestRender = true;
+            break;
+          case WeReadClient::Operation::ProgressStage::Images:
+            requestRender = decileChanged || completed == total;
+            break;
+          case WeReadClient::Operation::ProgressStage::Preparing:
+          case WeReadClient::Operation::ProgressStage::Packaging:
+            requestRender = completed == total;
+            break;
+        }
+        break;
+      case Job::Detail:
+        break;
     }
   }
+  if (requestRender) requestJobUpdate();
+}
+
+void WeReadActivity::advanceJob() {
+  const auto event = stepOperation();
+  updateJobProgress();
 
   switch (event) {
     case WeReadClient::Operation::Event::None:
@@ -731,6 +785,7 @@ void WeReadActivity::advanceJob() {
       switch (retryJob_) {
         case Job::Sync:
           refreshShelf();
+          shelfCoverStopped_ = true;
           state_.store(State::Shelf);
           requestJobUpdate();
           return;
@@ -749,8 +804,12 @@ void WeReadActivity::advanceJob() {
       }
       return;
     case WeReadClient::Operation::Event::Cancelled:
-      refreshShelf();
-      state_.store(retryJob_ == Job::Sync ? State::Menu : State::Shelf);
+      if (refreshShelf()) {
+        shelfCoverStopped_ = retryJob_ == Job::Sync;
+        state_.store(State::Shelf);
+      } else {
+        state_.store(State::Menu);
+      }
       requestJobUpdate();
       return;
     case WeReadClient::Operation::Event::Failed:
@@ -1832,7 +1891,6 @@ void WeReadActivity::render(RenderLock&&) {
   if (cacheScopePopup_.processRender(renderer, mappedInput)) return;
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
   const State state = state_.load();
   const Rect content = state == State::Disclaimer ? disclaimerContentBounds() : contentBounds();
 
@@ -1916,6 +1974,34 @@ void WeReadActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_10_FONT_ID, qrY + qrSide + textGap + lineHeight, target);
       break;
     }
+    case State::Syncing: {
+      const auto stage = progressStage_.load();
+      const uint32_t completed = progressCompleted_.load();
+      const uint32_t total = progressTotal_.load();
+      if (stage == WeReadClient::Operation::ProgressStage::Chapters || total == 0) {
+        GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));
+        break;
+      }
+      const char* label = nullptr;
+      switch (stage) {
+        case WeReadClient::Operation::ProgressStage::Preparing:
+          label = tr(STR_WEREAD_FETCHING_COVER_INFO);
+          break;
+        case WeReadClient::Operation::ProgressStage::Images:
+          label = tr(STR_WEREAD_DOWNLOADING_SHELF_COVERS);
+          break;
+        case WeReadClient::Operation::ProgressStage::Packaging:
+          label = tr(STR_WEREAD_GENERATING_COVER_THUMBNAILS);
+          break;
+        case WeReadClient::Operation::ProgressStage::Chapters:
+          break;
+      }
+      char status[64];
+      snprintf(status, sizeof(status), "%s %u/%u", label ? label : "", static_cast<unsigned>(completed),
+               static_cast<unsigned>(total));
+      drawProgressStatus(renderer, content, operation_.progressTitle(), status, completed, total);
+      break;
+    }
     case State::Downloading: {
       const auto stage = progressStage_.load();
       const uint32_t completed = progressCompleted_.load();
@@ -1950,7 +2036,6 @@ void WeReadActivity::render(RenderLock&&) {
           const char* label = stage == WeReadClient::Operation::ProgressStage::Chapters
                                   ? tr(STR_WEREAD_CACHING_CHAPTERS)
                                   : tr(STR_WEREAD_DOWNLOADING_IMAGES);
-          const int centerY = (height - lineHeight) / 2;
           char status[64];
           if (total == 0) {
             snprintf(status, sizeof(status), "%s", label);
@@ -1958,15 +2043,7 @@ void WeReadActivity::render(RenderLock&&) {
             snprintf(status, sizeof(status), "%s %u/%u", label, static_cast<unsigned>(completed),
                      static_cast<unsigned>(total));
           }
-          renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight - metrics.verticalSpacing, pendingBook_.title);
-          renderer.drawCenteredText(UI_10_FONT_ID, centerY, status);
-          if (total > 0) {
-            const int barY = centerY + lineHeight + metrics.verticalSpacing;
-            GUI.drawProgressBar(renderer,
-                                Rect{metrics.contentSidePadding, barY, width - metrics.contentSidePadding * 2,
-                                     metrics.progressBarHeight},
-                                completed, total);
-          }
+          drawProgressStatus(renderer, content, pendingBook_.title, status, completed, total);
           break;
         }
       }
@@ -1991,7 +2068,6 @@ void WeReadActivity::render(RenderLock&&) {
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGIN_CONFIRMED));
       break;
     case State::Connecting:
-    case State::Syncing:
     case State::Cancelling:
     case State::OpenBook:
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));

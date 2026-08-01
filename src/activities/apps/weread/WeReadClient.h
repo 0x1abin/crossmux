@@ -97,6 +97,7 @@ class Operation {
   ProgressStage progressStage() const { return progressStage_; }
   uint32_t progressCompleted() const { return progressCompleted_; }
   uint32_t progressTotal() const { return progressTotal_; }
+  const char* progressTitle() const { return book_.title; }
   static constexpr uint8_t progressDecile(const uint32_t completed, const uint32_t total) {
     return total == 0 ? 0 : static_cast<uint8_t>((static_cast<uint64_t>(completed) * 10) / total);
   }
@@ -121,12 +122,33 @@ class Operation {
     FetchSource,
   };
 
+  enum class ShelfCoverAction : uint8_t {
+    Complete,
+    FetchDetail,
+    FetchSource,
+    ConvertSource,
+  };
+
+  enum class CoverWorkResult : uint8_t {
+    Pending,
+    Complete,
+    Skipped,
+  };
+
+  enum class ShelfCoverPassAction : uint8_t {
+    StartSources,
+    StartThumbnails,
+    Complete,
+    Invalid,
+  };
+
   enum class Phase : uint8_t {
     Idle,
     LoginUid,
     LoginPollWait,
     LoginPoll,
     SyncShelf,
+    ShelfCovers,
     Renew,
     PrepareDetail,
     FetchDetail,
@@ -182,6 +204,29 @@ class Operation {
     if (hasSource) return CoverCacheAction::ConvertSource;
     return hasUrl ? CoverCacheAction::FetchSource : CoverCacheAction::Complete;
   }
+  static constexpr ShelfCoverAction shelfCoverAction(const bool hasCurrentBmp, const bool hasSource,
+                                                     const bool hasUrl) {
+    if (hasCurrentBmp) return ShelfCoverAction::Complete;
+    if (hasSource) return ShelfCoverAction::ConvertSource;
+    return hasUrl ? ShelfCoverAction::FetchSource : ShelfCoverAction::FetchDetail;
+  }
+  static constexpr ShelfCoverPassAction shelfCoverPassAction(const ProgressStage stage) {
+    switch (stage) {
+      case ProgressStage::Preparing:
+        return ShelfCoverPassAction::StartSources;
+      case ProgressStage::Images:
+        return ShelfCoverPassAction::StartThumbnails;
+      case ProgressStage::Packaging:
+        return ShelfCoverPassAction::Complete;
+      case ProgressStage::Chapters:
+        return ShelfCoverPassAction::Invalid;
+    }
+    return ShelfCoverPassAction::Invalid;
+  }
+  static constexpr uint32_t remainingShelfCoverItems(const uint32_t cursor, const uint32_t total) {
+    return cursor < total ? total - cursor : 0;
+  }
+  static constexpr Phase shelfCoverResumePhase() { return Phase::ShelfCovers; }
   static constexpr Phase chapterResponseRetryPhase() { return Phase::FetchReader; }
   static constexpr bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
     return paid && !plainText && !hasXhtmlTag;
@@ -249,10 +294,16 @@ class Operation {
   Error pollLogin();
   Error renewSession();
   Error syncShelfOnce();
+  Event stepShelfCovers();
+  bool loadShelfCoverBook(ShelfCoverAction& action);
+  void beginShelfCoverPass(ProgressStage stage);
+  void advanceShelfCoverItem();
+  void skipRemainingShelfCoverItems();
+  void logShelfCoverPass(const char* stage) const;
   Error fetchDetailOnce();
   Error fetchBrowseOnce();
-  Event fetchCover();
-  Event convertCover();
+  Error fetchCoverSource(CoverWorkResult& result);
+  Error convertCoverSource(bool& converted);
   Error fetchTocOnce();
   Error fetchProgressOnce(bool bypassCache);
   Error fetchProgressReaderOnce();
@@ -286,7 +337,7 @@ class Operation {
   WeReadStore::ShelfRecord book_;
   WeReadStore::TocRecord chapter_;
   WeReadHttpClient::Session bookSession_;
-  HalFile tocFile_;
+  HalFile indexFile_;
   uint32_t chapterCount_ = 0;
   uint32_t firstChapterIndex_ = 0;
   uint32_t lastChapterIndex_ = 0;
@@ -294,11 +345,11 @@ class Operation {
   uint32_t progressCompleted_ = 0;
   uint32_t progressTotal_ = 0;
   uint32_t progressChapterOffset_ = 0;
-  uint32_t imageWorkCount_ = 0;
-  uint32_t imageWorkCursor_ = 0;
-  uint32_t imageDownloaded_ = 0;
-  uint32_t imageCached_ = 0;
-  uint32_t imageSkipped_ = 0;
+  uint32_t workCount_ = 0;
+  uint32_t workCursor_ = 0;
+  uint32_t workCompleted_ = 0;
+  uint32_t workCached_ = 0;
+  uint32_t workSkipped_ = 0;
   uint32_t imageRedirects_ = 0;
   uint32_t imageFilesCreated_ = 0;
   uint64_t imageBytes_ = 0;
@@ -315,7 +366,7 @@ class Operation {
   unsigned long loginStartedAt_ = 0;
   unsigned long nextActionAt_ = 0;
   unsigned long lastShardRequestAt_ = 0;
-  unsigned long imagePhaseStartedAt_ = 0;
+  unsigned long workStartedAt_ = 0;
   int responseStatus_ = 0;
   uint32_t progressUploadStartedAt_ = 0;
   char previousVid_[64] = {};

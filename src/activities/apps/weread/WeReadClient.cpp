@@ -2092,6 +2092,7 @@ bool Operation::active() const {
     case Phase::LoginPollWait:
     case Phase::LoginPoll:
     case Phase::SyncShelf:
+    case Phase::ShelfCovers:
     case Phase::Renew:
     case Phase::PrepareDetail:
     case Phase::FetchDetail:
@@ -2141,8 +2142,8 @@ void Operation::reset() {
   if (kind_ == Kind::Download && active() && !bookDir_.empty()) {
     cleanupTransient(bookDir_, finalPartPath_);
   }
-  if (kind_ == Kind::Detail && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
-  if (tocFile_.isOpen()) tocFile_.close();
+  if ((kind_ == Kind::Detail || kind_ == Kind::Sync) && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
+  if (indexFile_.isOpen()) indexFile_.close();
   phase_ = Phase::Idle;
   resumePhase_ = Phase::Idle;
   kind_ = Kind::Sync;
@@ -2162,11 +2163,11 @@ void Operation::reset() {
   progressCompleted_ = 0;
   progressTotal_ = 0;
   progressChapterOffset_ = 0;
-  imageWorkCount_ = 0;
-  imageWorkCursor_ = 0;
-  imageDownloaded_ = 0;
-  imageCached_ = 0;
-  imageSkipped_ = 0;
+  workCount_ = 0;
+  workCursor_ = 0;
+  workCompleted_ = 0;
+  workCached_ = 0;
+  workSkipped_ = 0;
   imageRedirects_ = 0;
   imageFilesCreated_ = 0;
   imageBytes_ = 0;
@@ -2183,7 +2184,7 @@ void Operation::reset() {
   loginStartedAt_ = 0;
   nextActionAt_ = 0;
   lastShardRequestAt_ = 0;
-  imagePhaseStartedAt_ = 0;
+  workStartedAt_ = 0;
   responseStatus_ = 0;
   progressUploadStartedAt_ = 0;
   previousVid_[0] = '\0';
@@ -2324,8 +2325,8 @@ bool Operation::setChapterRange(const uint32_t first, const uint32_t last) {
 }
 
 bool Operation::readChapter(const uint32_t index, WeReadStore::TocRecord& record) {
-  return phase_ == Phase::AwaitChapterRange && index < chapterCount_ && tocFile_.isOpen() &&
-         WeReadStore::readTocRecord(tocFile_, index, record);
+  return phase_ == Phase::AwaitChapterRange && index < chapterCount_ && indexFile_.isOpen() &&
+         WeReadStore::readTocRecord(indexFile_, index, record);
 }
 
 void Operation::cancel() {
@@ -2335,11 +2336,11 @@ void Operation::cancel() {
 Operation::Event Operation::cancelNow() {
   bookSession_.reset();
   abortBrowseCache();
-  if (tocFile_.isOpen()) tocFile_.close();
+  if (indexFile_.isOpen()) indexFile_.close();
   if (kind_ == Kind::Download && !bookDir_.empty()) {
     cleanupTransient(bookDir_, finalPartPath_);
   }
-  if (kind_ == Kind::Detail && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
+  if ((kind_ == Kind::Detail || kind_ == Kind::Sync) && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
   error_ = Error::Cancelled;
   phase_ = Phase::Cancelled;
   logMemory("job cancelled");
@@ -2389,14 +2390,14 @@ Operation::Event Operation::fail(const Error error) {
   bookSession_.reset();
   abortBrowseCache();
   error_ = error;
-  if (tocFile_.isOpen()) tocFile_.close();
+  if (indexFile_.isOpen()) indexFile_.close();
   if (kind_ == Kind::Download && !bookDir_.empty()) {
     const std::string chapterPart = WeReadStore::chapterPath(bookDir_, chapterIndex_) + ".part";
     const std::string imageIndexPart = WeReadStore::imageIndexPath(bookDir_, chapterIndex_) + ".part";
     if (Storage.exists(chapterPart.c_str())) Storage.remove(chapterPart.c_str());
     if (Storage.exists(imageIndexPart.c_str())) Storage.remove(imageIndexPart.c_str());
     cleanupTransient(bookDir_, finalPartPath_);
-  } else if (kind_ == Kind::Detail && !bookDir_.empty()) {
+  } else if ((kind_ == Kind::Detail || kind_ == Kind::Sync) && !bookDir_.empty()) {
     cleanupDetailTransient(bookDir_);
   }
   phase_ = Phase::Failed;
@@ -2583,6 +2584,256 @@ Error Operation::syncShelfOnce() {
   }
   logMemory("shelf parsed");
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+}
+
+bool Operation::loadShelfCoverBook(ShelfCoverAction& action) {
+  if (!indexFile_.isOpen() || workCursor_ >= workCount_ ||
+      !WeReadStore::readShelfRecord(indexFile_, workCursor_, book_)) {
+    return false;
+  }
+
+  bookDir_ = WeReadStore::bookDirectory(book_.bookId);
+  url_[0] = '\0';
+  const bool hasCurrentBmp = Storage.exists(WeReadStore::coverPath(bookDir_).c_str());
+  coverType_ = hasCurrentBmp ? WeReadProtocol::ImageType::None : findCoverSource(bookDir_, outputPath_);
+  const bool hasSource = coverType_ != WeReadProtocol::ImageType::None;
+  bool hasUrl = false;
+  if (!hasCurrentBmp && !hasSource) {
+    WeReadStore::BookDetailHeader cached;
+    HalFile detail;
+    if (WeReadStore::openBookDetail(bookDir_, cached, detail) && cached.coverUrl[0]) {
+      coverType_ = WeReadProtocol::normalizeImageUrl(cached.coverUrl, url_, sizeof(url_));
+      hasUrl = coverType_ != WeReadProtocol::ImageType::None;
+    }
+  }
+  action = shelfCoverAction(hasCurrentBmp, hasSource, hasUrl);
+  return true;
+}
+
+void Operation::beginShelfCoverPass(const ProgressStage stage) {
+  workCursor_ = 0;
+  progressStage_ = stage;
+  progressCompleted_ = 0;
+  progressTotal_ = workCount_;
+  workCompleted_ = 0;
+  workCached_ = 0;
+  workSkipped_ = 0;
+  requestAttempt_ = 0;
+  nextActionAt_ = 0;
+  coverAttempts_ = 0;
+  coverRedirects_ = 0;
+  coverState_ = WeReadStore::ImageWorkState::Pending;
+  imageHost_[0] = '\0';
+  coverType_ = WeReadProtocol::ImageType::None;
+  url_[0] = '\0';
+  workStartedAt_ = millis();
+  bookSession_.clearStats();
+  phase_ = Phase::ShelfCovers;
+}
+
+void Operation::advanceShelfCoverItem() {
+  ++workCursor_;
+  progressCompleted_ = workCursor_;
+  requestAttempt_ = 0;
+  nextActionAt_ = 0;
+  coverAttempts_ = 0;
+  coverRedirects_ = 0;
+  coverState_ = WeReadStore::ImageWorkState::Pending;
+  coverType_ = WeReadProtocol::ImageType::None;
+  url_[0] = '\0';
+}
+
+void Operation::skipRemainingShelfCoverItems() {
+  workSkipped_ += remainingShelfCoverItems(workCursor_, workCount_);
+  workCursor_ = workCount_;
+  progressCompleted_ = progressTotal_;
+}
+
+void Operation::logShelfCoverPass(const char* stage) const {
+  LOG_INF("WR", "shelf covers: stage=%s ms=%lu total=%u complete=%u cached=%u skipped=%u tlsNew=%u tlsReused=%u",
+          stage ? stage : "?", millis() - workStartedAt_, static_cast<unsigned>(workCount_),
+          static_cast<unsigned>(workCompleted_), static_cast<unsigned>(workCached_),
+          static_cast<unsigned>(workSkipped_), static_cast<unsigned>(bookSession_.newConnections()),
+          static_cast<unsigned>(bookSession_.reusedRequests()));
+}
+
+Operation::Event Operation::stepShelfCovers() {
+  if (workCursor_ >= workCount_) {
+    switch (shelfCoverPassAction(progressStage_)) {
+      case ShelfCoverPassAction::StartSources:
+        logShelfCoverPass("details");
+        bookSession_.reset();
+        beginShelfCoverPass(ProgressStage::Images);
+        return Event::None;
+      case ShelfCoverPassAction::StartThumbnails:
+        logShelfCoverPass("sources");
+        bookSession_.reset();
+        beginShelfCoverPass(ProgressStage::Packaging);
+        return Event::None;
+      case ShelfCoverPassAction::Complete:
+        logShelfCoverPass("thumbnails");
+        if (indexFile_.isOpen()) indexFile_.close();
+        phase_ = Phase::Complete;
+        logJobComplete();
+        return Event::Complete;
+      case ShelfCoverPassAction::Invalid:
+        return fail(Error::Protocol);
+    }
+  }
+
+  switch (progressStage_) {
+    case ProgressStage::Preparing: {
+      if (!WeReadHttpClient::networkReady()) {
+        skipRemainingShelfCoverItems();
+        return Event::None;
+      }
+
+      ShelfCoverAction action;
+      if (!loadShelfCoverBook(action)) return fail(Error::SdCard);
+      switch (action) {
+        case ShelfCoverAction::Complete:
+        case ShelfCoverAction::ConvertSource:
+        case ShelfCoverAction::FetchSource:
+          ++workCached_;
+          advanceShelfCoverItem();
+          return Event::None;
+        case ShelfCoverAction::FetchDetail:
+          break;
+      }
+
+      if (!WeReadStore::ensureRoot() || !Storage.ensureDirectoryExists(bookDir_.c_str())) {
+        return fail(Error::SdCard);
+      }
+      const Error error = fetchDetailOnce();
+      switch (error) {
+        case Error::Ok:
+          requestSucceeded();
+          ++workCompleted_;
+          advanceShelfCoverItem();
+          return Event::None;
+        case Error::SessionExpired:
+          requestAuthentication(shelfCoverResumePhase());
+          return phase_ == Phase::Failed ? fail(error_) : Event::None;
+        case Error::Network:
+          if (requestAttempt_ < kMaxRequestAttempts - 1) {
+            ++requestAttempt_;
+            nextActionAt_ = millis() + kNetworkRetryBaseMs * requestAttempt_;
+            return Event::None;
+          }
+          break;
+        case Error::Cancelled:
+          return cancelNow();
+        case Error::SdCard:
+        case Error::OutOfMemory:
+        case Error::LoginFailed:
+          return fail(error);
+        case Error::Protocol:
+        case Error::Integrity:
+        case Error::Unavailable:
+        case Error::Clock:
+        case Error::WholeBookOnly:
+          break;
+      }
+      cleanupDetailTransient(bookDir_);
+      ++workSkipped_;
+      advanceShelfCoverItem();
+      return Event::None;
+    }
+
+    case ProgressStage::Images: {
+      if (!WeReadHttpClient::networkReady()) {
+        skipRemainingShelfCoverItems();
+        return Event::None;
+      }
+
+      if (!url_[0]) {
+        ShelfCoverAction action;
+        if (!loadShelfCoverBook(action)) return fail(Error::SdCard);
+        switch (action) {
+          case ShelfCoverAction::Complete:
+          case ShelfCoverAction::ConvertSource:
+            ++workCached_;
+            advanceShelfCoverItem();
+            return Event::None;
+          case ShelfCoverAction::FetchDetail:
+            ++workSkipped_;
+            advanceShelfCoverItem();
+            return Event::None;
+          case ShelfCoverAction::FetchSource:
+            break;
+        }
+      }
+
+      CoverWorkResult result;
+      const Error error = fetchCoverSource(result);
+      switch (error) {
+        case Error::Ok:
+          break;
+        case Error::Cancelled:
+          return cancelNow();
+        case Error::SdCard:
+        case Error::OutOfMemory:
+        case Error::LoginFailed:
+        case Error::SessionExpired:
+          return fail(error);
+        case Error::Network:
+        case Error::Protocol:
+        case Error::Integrity:
+        case Error::Unavailable:
+        case Error::Clock:
+        case Error::WholeBookOnly:
+          ++workSkipped_;
+          advanceShelfCoverItem();
+          return Event::None;
+      }
+      switch (result) {
+        case CoverWorkResult::Pending:
+          return Event::None;
+        case CoverWorkResult::Complete:
+          ++workCompleted_;
+          advanceShelfCoverItem();
+          return Event::None;
+        case CoverWorkResult::Skipped:
+          ++workSkipped_;
+          advanceShelfCoverItem();
+          return Event::None;
+      }
+      return fail(Error::Protocol);
+    }
+
+    case ProgressStage::Packaging: {
+      ShelfCoverAction action;
+      if (!loadShelfCoverBook(action)) return fail(Error::SdCard);
+      switch (action) {
+        case ShelfCoverAction::Complete:
+          ++workCached_;
+          advanceShelfCoverItem();
+          return Event::None;
+        case ShelfCoverAction::FetchDetail:
+        case ShelfCoverAction::FetchSource:
+          ++workSkipped_;
+          advanceShelfCoverItem();
+          return Event::None;
+        case ShelfCoverAction::ConvertSource:
+          break;
+      }
+
+      bool converted = false;
+      const Error error = convertCoverSource(converted);
+      if (error != Error::Ok) return fail(error);
+      if (converted) {
+        ++workCompleted_;
+      } else {
+        ++workSkipped_;
+      }
+      advanceShelfCoverItem();
+      return Event::None;
+    }
+
+    case ProgressStage::Chapters:
+      return fail(Error::Protocol);
+  }
+  return fail(Error::Protocol);
 }
 
 Error Operation::fetchDetailOnce() {
@@ -2950,7 +3201,7 @@ Operation::Event Operation::finishWholeBook(const std::string& source) {
   cleanupTransient(bookDir_, "");
   if (!WeReadStore::saveSession(session_)) return fail(Error::SdCard);
   persistInitialProgress();
-  if (tocFile_.isOpen()) tocFile_.close();
+  if (indexFile_.isOpen()) indexFile_.close();
   phase_ = Phase::Complete;
   logJobComplete();
   return Event::Complete;
@@ -2965,13 +3216,13 @@ Error Operation::prepareImageWork(const WeReadStore::WorkCallback callback, void
 
   progressCompleted_ = 0;
   progressTotal_ = 0;
-  imageDownloaded_ = 0;
-  imageCached_ = 0;
-  imageSkipped_ = 0;
+  workCompleted_ = 0;
+  workCached_ = 0;
+  workSkipped_ = 0;
   imageRedirects_ = 0;
   imageFilesCreated_ = 0;
   imageBytes_ = 0;
-  imagePhaseStartedAt_ = millis();
+  workStartedAt_ = millis();
   for (uint32_t chapter = firstChapterIndex_; chapter <= lastChapterIndex_; ++chapter) {
     HalFile images;
     uint32_t imageCount = 0;
@@ -2987,7 +3238,7 @@ Error Operation::prepareImageWork(const WeReadStore::WorkCallback callback, void
       }
       if (validImageFile(bookDir_ + "/" + work.image.href, imageTypeFromHref(work.image.href))) {
         work.state = WeReadStore::ImageWorkState::Complete;
-        ++imageCached_;
+        ++workCached_;
         ++progressCompleted_;
       }
       if (!writer.append(&work)) {
@@ -3000,13 +3251,12 @@ Error Operation::prepareImageWork(const WeReadStore::WorkCallback callback, void
     if (callback) callback(callbackContext);
   }
   if (!writer.finish()) return Error::SdCard;
-  imageWorkCount_ = progressTotal_;
-  imageWorkCursor_ = 0;
+  workCount_ = progressTotal_;
+  workCursor_ = 0;
   imageHost_[0] = '\0';
-  if (tocFile_.isOpen()) tocFile_.close();
+  if (indexFile_.isOpen()) indexFile_.close();
   uint32_t verifiedCount = 0;
-  if (!WeReadStore::openImageWorkIndexForUpdate(workPath, tocFile_, verifiedCount) ||
-      verifiedCount != imageWorkCount_) {
+  if (!WeReadStore::openImageWorkIndexForUpdate(workPath, indexFile_, verifiedCount) || verifiedCount != workCount_) {
     return Error::Integrity;
   }
   bookSession_.reset();
@@ -3022,7 +3272,7 @@ Error Operation::requestImage(WeReadStore::ImageRecord& image, WeReadStore::Imag
   if (validImageFile(destination, type)) {
     state = WeReadStore::ImageWorkState::Complete;
     if (trackProgress) {
-      ++imageCached_;
+      ++workCached_;
       ++progressCompleted_;
     }
     return Error::Ok;
@@ -3103,7 +3353,7 @@ Error Operation::requestImage(WeReadStore::ImageRecord& image, WeReadStore::Imag
     if (imageAttemptPending(attempts)) return;
     state = WeReadStore::ImageWorkState::Skipped;
     if (trackProgress) {
-      ++imageSkipped_;
+      ++workSkipped_;
       ++progressCompleted_;
     }
   };
@@ -3152,16 +3402,16 @@ Error Operation::requestImage(WeReadStore::ImageRecord& image, WeReadStore::Imag
   if (!WeReadStore::atomicReplace(partPath, destination)) return Error::SdCard;
   state = WeReadStore::ImageWorkState::Complete;
   if (trackProgress) {
-    ++imageDownloaded_;
+    ++workCompleted_;
     ++progressCompleted_;
   }
   return Error::Ok;
 }
 
-Operation::Event Operation::fetchCover() {
+Error Operation::fetchCoverSource(CoverWorkResult& workResult) {
+  workResult = CoverWorkResult::Skipped;
   if (coverType_ == WeReadProtocol::ImageType::None || !url_[0]) {
-    phase_ = Phase::Complete;
-    return Event::Complete;
+    return Error::Ok;
   }
 
   WeReadStore::ImageRecord image;
@@ -3169,32 +3419,29 @@ Operation::Event Operation::fetchCover() {
   memcpy(image.href, href, strlen(href) + 1);
   memcpy(image.url, url_, strlen(url_) + 1);
   if (!WeReadHttpClient::extractHttpsHost(image.url, imageHost_, sizeof(imageHost_))) {
-    phase_ = Phase::Complete;
-    return Event::Complete;
+    return Error::Ok;
   }
 
   const Error error = requestImage(image, coverState_, coverAttempts_, coverRedirects_, false);
   if (image.url[0]) memcpy(url_, image.url, strlen(image.url) + 1);
-  if (error == Error::Cancelled) return cancelNow();
-  if (error != Error::Ok) return fail(error);
+  if (error != Error::Ok) return error;
 
   switch (coverState_) {
     case WeReadStore::ImageWorkState::Pending:
-      return Event::None;
+      workResult = CoverWorkResult::Pending;
+      return Error::Ok;
     case WeReadStore::ImageWorkState::Skipped:
-      phase_ = Phase::Complete;
-      logMemory("cover skipped");
-      return Event::Complete;
+      workResult = CoverWorkResult::Skipped;
+      return Error::Ok;
     case WeReadStore::ImageWorkState::Complete:
-      phase_ = Phase::ConvertCover;
-      return Event::None;
+      workResult = CoverWorkResult::Complete;
+      return Error::Ok;
   }
-  return fail(Error::Protocol);
+  return Error::Protocol;
 }
 
-Operation::Event Operation::convertCover() {
-  bookSession_.reset();
-  logMemory("cover convert start");
+Error Operation::convertCoverSource(bool& converted) {
+  converted = false;
   const std::string source = bookDir_ + "/" + coverSourceName(coverType_);
   const std::string final = WeReadStore::coverPath(bookDir_);
   const std::string part = final + ".part";
@@ -3207,60 +3454,55 @@ Operation::Event Operation::convertCover() {
     if (output.isOpen()) output.close();
     if (Storage.exists(part.c_str())) Storage.remove(part.c_str());
     if (Storage.exists(source.c_str())) Storage.remove(source.c_str());
-    phase_ = Phase::Complete;
-    return Event::Complete;
+    return Error::Ok;
   }
-  const bool converted = coverType_ == WeReadProtocol::ImageType::Png
-                             ? PngToBmpConverter::pngFileToBmpStreamWithSize(
-                                   input, output, WeReadStore::kCoverThumbWidth, WeReadStore::kCoverThumbHeight)
-                             : JpegToBmpConverter::jpegFileToBmpStreamWithSize(
-                                   input, output, WeReadStore::kCoverThumbWidth, WeReadStore::kCoverThumbHeight);
+  converted = coverType_ == WeReadProtocol::ImageType::Png
+                  ? PngToBmpConverter::pngFileToBmpStreamWithSize(input, output, WeReadStore::kCoverThumbWidth,
+                                                                  WeReadStore::kCoverThumbHeight)
+                  : JpegToBmpConverter::jpegFileToBmpStreamWithSize(input, output, WeReadStore::kCoverThumbWidth,
+                                                                    WeReadStore::kCoverThumbHeight);
   input.close();
   output.close();
   if (!converted) {
     Storage.remove(part.c_str());
     Storage.remove(source.c_str());
-    phase_ = Phase::Complete;
-    logMemory("cover convert skipped");
-    return Event::Complete;
+    return Error::Ok;
   }
-  if (!WeReadStore::atomicReplace(part, final)) return fail(Error::SdCard);
+  if (!WeReadStore::atomicReplace(part, final)) return Error::SdCard;
   const std::string alternate =
       bookDir_ + "/" +
       coverSourceName(coverType_ == WeReadProtocol::ImageType::Png ? WeReadProtocol::ImageType::Jpeg
                                                                    : WeReadProtocol::ImageType::Png);
-  if (Storage.exists(alternate.c_str()) && !Storage.remove(alternate.c_str())) return fail(Error::SdCard);
-  phase_ = Phase::Complete;
-  logMemory("cover convert complete");
-  return Event::Complete;
+  if (Storage.exists(alternate.c_str()) && !Storage.remove(alternate.c_str())) return Error::SdCard;
+  return Error::Ok;
 }
 
 Operation::Event Operation::downloadNextImage() {
   WeReadStore::ImageWorkRecord selected;
   uint32_t selectedIndex = 0;
   bool found = false;
-  if (!tocFile_.isOpen()) return fail(Error::Integrity);
+  if (!indexFile_.isOpen()) return fail(Error::Integrity);
 
   if (!imageHost_[0]) {
-    for (uint32_t i = 0; i < imageWorkCount_; ++i) {
+    for (uint32_t i = 0; i < workCount_; ++i) {
       WeReadStore::ImageWorkRecord record;
-      if (!WeReadStore::readImageWorkRecord(tocFile_, i, record) || !validImageWorkRecord(record)) {
+      if (!WeReadStore::readImageWorkRecord(indexFile_, i, record) || !validImageWorkRecord(record)) {
         return fail(Error::Integrity);
       }
       if (record.state != WeReadStore::ImageWorkState::Pending) continue;
       if (!WeReadHttpClient::extractHttpsHost(record.image.url, imageHost_, sizeof(imageHost_))) {
         return fail(Error::Integrity);
       }
-      imageWorkCursor_ = 0;
+      workCursor_ = 0;
       LOG_INF("WR", "image host batch: host=%s", imageHost_);
       break;
     }
   }
 
-  while (imageHost_[0] && imageWorkCursor_ < imageWorkCount_) {
-    const uint32_t current = imageWorkCursor_++;
+  while (imageHost_[0] && workCursor_ < workCount_) {
+    const uint32_t current = workCursor_++;
     WeReadStore::ImageWorkRecord record;
-    if (!WeReadStore::readImageWorkRecord(tocFile_, current, record) || !validImageWorkRecord(record)) {
+    if (!WeReadStore::readImageWorkRecord(indexFile_, current, record) || !validImageWorkRecord(record)) {
       return fail(Error::Integrity);
     }
     if (record.state != WeReadStore::ImageWorkState::Pending) continue;
@@ -3277,7 +3519,7 @@ Operation::Event Operation::downloadNextImage() {
     const Error error = requestImage(selected.image, selected.state, selected.attempts, selected.redirects, true);
     if (error == Error::Cancelled) return cancelNow();
     if (error != Error::Ok) return fail(error);
-    if (!WeReadStore::updateImageWorkRecord(tocFile_, imageWorkCount_, selectedIndex, selected)) {
+    if (!WeReadStore::updateImageWorkRecord(indexFile_, workCount_, selectedIndex, selected)) {
       return fail(Error::SdCard);
     }
     if (selected.state == WeReadStore::ImageWorkState::Skipped) {
@@ -3294,13 +3536,13 @@ Operation::Event Operation::downloadNextImage() {
     LOG_INF("WR",
             "image phase complete: ms=%lu total=%u downloaded=%u cached=%u skipped=%u bytes=%llu redirects=%u "
             "files=%u tlsNew=%u tlsReused=%u",
-            millis() - imagePhaseStartedAt_, static_cast<unsigned>(progressTotal_),
-            static_cast<unsigned>(imageDownloaded_), static_cast<unsigned>(imageCached_),
-            static_cast<unsigned>(imageSkipped_), static_cast<unsigned long long>(imageBytes_),
-            static_cast<unsigned>(imageRedirects_), static_cast<unsigned>(imageFilesCreated_),
-            static_cast<unsigned>(bookSession_.newConnections()), static_cast<unsigned>(bookSession_.reusedRequests()));
+            millis() - workStartedAt_, static_cast<unsigned>(progressTotal_), static_cast<unsigned>(workCompleted_),
+            static_cast<unsigned>(workCached_), static_cast<unsigned>(workSkipped_),
+            static_cast<unsigned long long>(imageBytes_), static_cast<unsigned>(imageRedirects_),
+            static_cast<unsigned>(imageFilesCreated_), static_cast<unsigned>(bookSession_.newConnections()),
+            static_cast<unsigned>(bookSession_.reusedRequests()));
     bookSession_.reset();
-    tocFile_.close();
+    indexFile_.close();
     progressStage_ = ProgressStage::Packaging;
     progressCompleted_ = 0;
     progressTotal_ = 0;
@@ -3309,7 +3551,7 @@ Operation::Event Operation::downloadNextImage() {
   }
 
   imageHost_[0] = '\0';
-  imageWorkCursor_ = 0;
+  workCursor_ = 0;
   return Event::None;
 }
 
@@ -3467,10 +3709,14 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       }
       if (error != Error::Ok) return handleRequestError(error, Phase::SyncShelf);
       requestSucceeded();
-      phase_ = Phase::Complete;
-      logJobComplete();
-      return Event::Complete;
+      if (indexFile_.isOpen()) indexFile_.close();
+      if (!WeReadStore::openShelf(indexFile_, workCount_)) return fail(Error::SdCard);
+      beginShelfCoverPass(ProgressStage::Preparing);
+      return Event::None;
     }
+
+    case Phase::ShelfCovers:
+      return stepShelfCovers();
 
     case Phase::PrepareDetail: {
       bookDir_ = WeReadStore::bookDirectory(book_.bookId);
@@ -3548,15 +3794,34 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     }
 
     case Phase::FetchCover: {
-      const Event event = fetchCover();
-      if (event == Event::Complete) logJobComplete();
-      return event;
+      CoverWorkResult result;
+      const Error error = fetchCoverSource(result);
+      if (error == Error::Cancelled) return cancelNow();
+      if (error != Error::Ok) return fail(error);
+      switch (result) {
+        case CoverWorkResult::Pending:
+          return Event::None;
+        case CoverWorkResult::Complete:
+          phase_ = Phase::ConvertCover;
+          return Event::None;
+        case CoverWorkResult::Skipped:
+          phase_ = Phase::Complete;
+          logMemory("cover skipped");
+          logJobComplete();
+          return Event::Complete;
+      }
     }
 
     case Phase::ConvertCover: {
-      const Event event = convertCover();
-      if (event == Event::Complete) logJobComplete();
-      return event;
+      bookSession_.reset();
+      logMemory("cover convert start");
+      bool converted = false;
+      const Error error = convertCoverSource(converted);
+      if (error != Error::Ok) return fail(error);
+      phase_ = Phase::Complete;
+      logMemory(converted ? "cover convert complete" : "cover convert skipped");
+      logJobComplete();
+      return Event::Complete;
     }
 
     case Phase::PrepareDownload: {
@@ -3708,8 +3973,8 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::OpenToc:
       guardBookSession("toc");
-      if (tocFile_.isOpen()) tocFile_.close();
-      if (!WeReadStore::openToc(tocPath_, tocFile_, chapterCount_) || chapterCount_ == 0) {
+      if (indexFile_.isOpen()) indexFile_.close();
+      if (!WeReadStore::openToc(tocPath_, indexFile_, chapterCount_) || chapterCount_ == 0) {
         return fail(Error::Protocol);
       }
       firstChapterIndex_ = 0;
@@ -3732,14 +3997,14 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::LoadChapter: {
       if (chapterIndex_ > lastChapterIndex_) {
-        if (tocFile_.isOpen()) tocFile_.close();
+        if (indexFile_.isOpen()) indexFile_.close();
         progressStage_ = ProgressStage::Preparing;
         progressCompleted_ = 0;
         progressTotal_ = 0;
         phase_ = Phase::PrepareImages;
         return Event::None;
       }
-      if (!WeReadStore::readTocRecord(tocFile_, chapterIndex_, chapter_)) return fail(Error::SdCard);
+      if (!WeReadStore::readTocRecord(indexFile_, chapterIndex_, chapter_)) return fail(Error::SdCard);
       chapterResponseAttempts_ = 0;
       HalFile imageIndex;
       uint32_t imageCount = 0;
@@ -3912,12 +4177,12 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       }
       const Error error = prepareImageWork(callback, callbackContext);
       if (error != Error::Ok) return fail(error);
-      if (imageWorkCount_ == 0) {
+      if (workCount_ == 0) {
         LOG_INF("WR",
                 "image phase complete: ms=%lu total=0 downloaded=0 cached=0 skipped=0 bytes=0 redirects=0 files=0 "
                 "tlsNew=0 tlsReused=0",
-                millis() - imagePhaseStartedAt_);
-        tocFile_.close();
+                millis() - workStartedAt_);
+        indexFile_.close();
         progressStage_ = ProgressStage::Packaging;
         progressCompleted_ = 0;
         progressTotal_ = 0;

@@ -20,6 +20,20 @@ struct OperationTestPeer {
   static CoverCacheAction coverCacheAction(const bool hasCurrentBmp, const bool hasSource, const bool hasUrl) {
     return Operation::coverCacheAction(hasCurrentBmp, hasSource, hasUrl);
   }
+  using ShelfCoverAction = Operation::ShelfCoverAction;
+  static ShelfCoverAction shelfCoverAction(const bool hasCurrentBmp, const bool hasSource, const bool hasUrl) {
+    return Operation::shelfCoverAction(hasCurrentBmp, hasSource, hasUrl);
+  }
+  using ShelfCoverPassAction = Operation::ShelfCoverPassAction;
+  static ShelfCoverPassAction shelfCoverPassAction(const Operation::ProgressStage stage) {
+    return Operation::shelfCoverPassAction(stage);
+  }
+  static uint32_t remainingShelfCoverItems(const uint32_t cursor, const uint32_t total) {
+    return Operation::remainingShelfCoverItems(cursor, total);
+  }
+  static bool shelfCoverAuthenticationResumesBatch() {
+    return Operation::shelfCoverResumePhase() == Operation::Phase::ShelfCovers;
+  }
   static bool chapterResponseRetryRestartsReader() {
     return Operation::chapterResponseRetryPhase() == Operation::Phase::FetchReader;
   }
@@ -383,6 +397,37 @@ TEST(WeReadClientState, SelectsCoverPreparationAction) {
   EXPECT_EQ(action(false, false, true), Action::FetchSource);
   EXPECT_EQ(action(true, false, false), Action::Complete);
   EXPECT_EQ(action(false, false, false), Action::Complete);
+}
+
+TEST(WeReadClientState, SelectsShelfCoverBatchAction) {
+  using Action = WeReadClient::OperationTestPeer::ShelfCoverAction;
+  const auto action = WeReadClient::OperationTestPeer::shelfCoverAction;
+
+  EXPECT_EQ(action(true, true, true), Action::Complete);
+  EXPECT_EQ(action(true, true, false), Action::Complete);
+  EXPECT_EQ(action(true, false, true), Action::Complete);
+  EXPECT_EQ(action(true, false, false), Action::Complete);
+  EXPECT_EQ(action(false, true, true), Action::ConvertSource);
+  EXPECT_EQ(action(false, true, false), Action::ConvertSource);
+  EXPECT_EQ(action(false, false, true), Action::FetchSource);
+  EXPECT_EQ(action(false, false, false), Action::FetchDetail);
+}
+
+TEST(WeReadClientState, AdvancesShelfCoverPassesAndBoundsRemainingWork) {
+  using Action = WeReadClient::OperationTestPeer::ShelfCoverPassAction;
+  using Stage = WeReadClient::Operation::ProgressStage;
+  const auto action = WeReadClient::OperationTestPeer::shelfCoverPassAction;
+  const auto remaining = WeReadClient::OperationTestPeer::remainingShelfCoverItems;
+
+  EXPECT_EQ(action(Stage::Preparing), Action::StartSources);
+  EXPECT_EQ(action(Stage::Images), Action::StartThumbnails);
+  EXPECT_EQ(action(Stage::Packaging), Action::Complete);
+  EXPECT_EQ(action(Stage::Chapters), Action::Invalid);
+  EXPECT_EQ(remaining(0, 4), 4U);
+  EXPECT_EQ(remaining(1, 4), 3U);
+  EXPECT_EQ(remaining(4, 4), 0U);
+  EXPECT_EQ(remaining(5, 4), 0U);
+  EXPECT_TRUE(WeReadClient::OperationTestPeer::shelfCoverAuthenticationResumesBatch());
 }
 
 TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {
