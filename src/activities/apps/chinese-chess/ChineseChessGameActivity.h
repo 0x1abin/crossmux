@@ -30,7 +30,7 @@ class ChineseChessGameActivity final : public Activity {
   static constexpr int BOARD_ORIGIN_Y = BOARD_AREA_Y + 30;
   static constexpr int PIECE_RADIUS = 22;
   static constexpr int INFO_PANEL_Y = 602;
-  static constexpr int MODE_LINE_Y = 720;
+  static constexpr int INFO_PANEL_H = 60;
   static constexpr uint8_t MENU_ITEM_COUNT = 5;  // Resume / Undo / Resign / New Game / Exit
 
   // AI plays Black (player is Red, who moves first).

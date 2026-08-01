@@ -90,6 +90,19 @@ constexpr bool appIdsAreUnique() {
   return true;
 }
 
+constexpr bool usesSideScrollBar(const CrossPointSettings::UI_THEME theme) {
+  switch (theme) {
+    case CrossPointSettings::LYRA:
+    case CrossPointSettings::LYRA_3_COVERS:
+    case CrossPointSettings::LYRA_CAROUSEL:
+      return true;
+    case CrossPointSettings::CLASSIC:
+    case CrossPointSettings::ROUNDEDRAFF:
+      return false;
+  }
+  return false;
+}
+
 static_assert(kAppCount <= 16, "the app catalog must fit hiddenAppsMask");
 static_assert(static_cast<uint8_t>(AppId::Count) <= 16, "hiddenAppsMask supports at most 16 stable app IDs");
 static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_APP_ID,
@@ -97,8 +110,8 @@ static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_AP
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
 static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
                   (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |
-                   appBit(AppId::Buddy)),
-              "the default mask must hide Chinese chess, Minesweeper, 2048, and Buddy");
+                   appBit(AppId::Standby) | appBit(AppId::Buddy)),
+              "the default mask must hide Chinese chess, Minesweeper, 2048, Standby, and Buddy");
 static_assert(visibleAppCount(0) == kAppCount, "a zero mask must show every compiled app");
 static_assert(visibleAppCount(UINT16_MAX) == 0, "a full mask must hide every compiled app");
 static_assert(appIndexForVisibleIndex(appBit(kAppEntries[1].id), 1) == 2,
@@ -174,6 +187,7 @@ void AppsMenuActivity::render(RenderLock&&) {
   const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const int visibleCount = getVisibleAppCount();
+  const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
 
   if (visibleCount == 0) {
     UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
@@ -202,8 +216,12 @@ void AppsMenuActivity::render(RenderLock&&) {
         spacing);
 
     if (totalPages > 1) {
-      const int dotsY = listY + listH - 8;
-      drawPaginationDots(renderer, sw, dotsY, totalPages, page);
+      if (usesSideScrollBar(theme)) {
+        GUI.drawSideScrollBar(renderer, Rect{0, listY, sw, listH}, visibleCount, pageStart, perPage);
+      } else {
+        const int dotsY = listY + listH - 8;
+        drawPaginationDots(renderer, sw, dotsY, totalPages, page);
+      }
     }
   }
 

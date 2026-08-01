@@ -77,7 +77,8 @@ OPDS server.
 
 ## Web Interface
 
-The browser UI has four primary pages.
+The browser UI has four primary pages. They currently use the original English-only HTML in every firmware build,
+including `gh_release_cn`; browser-language localization is deferred until its device-memory cost can be validated.
 
 ### Home
 

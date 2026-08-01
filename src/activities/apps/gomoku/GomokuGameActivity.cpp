@@ -20,7 +20,6 @@ constexpr int kModalItemFont = UI_12_FONT_ID;        // game-menu modal rows
 constexpr int kModalHintFont = UI_10_FONT_ID;        // game-menu modal right-side hints
 constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;      // win-screen big title
 constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;  // win-screen stat values + info-panel stat values
-constexpr int kRecentFont = UI_12_FONT_ID;           // recent moves list
 
 const char* modeLabel(GomokuMode m) {
   return (m == GomokuMode::VsAi) ? tr(STR_GOMOKU_MODE_AI) : tr(STR_GOMOKU_MODE_2P);
@@ -149,14 +148,6 @@ int GomokuGameActivity::stoneRadius() const { return (board.boardSize == 15) ? 1
 void GomokuGameActivity::intersectionXY(uint8_t r, uint8_t c, int* x, int* y) const {
   *x = boardOriginX() + static_cast<int>(c) * boardPitch();
   *y = boardOriginY() + static_cast<int>(r) * boardPitch();
-}
-
-void GomokuGameActivity::coordToText(uint8_t r, uint8_t c, char* out, size_t outLen) const {
-  // Column: Go-style — skip 'I' to avoid confusion with '1' / '|'.
-  // 0..7 → A..H,  8..14 → J..P (15×15);  9×9 max col 8 → J.
-  // Row:  boardSize - r so the top row prints as the largest number.
-  const char letter = (c < 8) ? static_cast<char>('A' + c) : static_cast<char>('A' + c + 1);
-  snprintf(out, outLen, "%c%u", letter, static_cast<unsigned>(board.boardSize - r));
 }
 
 // ---------- Input ----------
@@ -517,7 +508,6 @@ void GomokuGameActivity::drawWinLine() {
 
 void GomokuGameActivity::drawInfoPanel() {
   const int sw = renderer.getScreenWidth();
-  const int innerW = sw - 2 * CONTENT_X;
 
   // Two stat cells, narrower and shorter than v3, centered horizontally.
   // Inside each: a board-sized stone icon next to the count — the colour
@@ -566,31 +556,6 @@ void GomokuGameActivity::drawInfoPanel() {
 
   drawStatCell(statXStart, GomokuBoard::Stone::Black);
   drawStatCell(statXStart + cellW + cellGap, GomokuBoard::Stone::White);
-
-  // Recent-moves strip beneath the stat cells (3 most recent, evenly spaced).
-  // Step number lives in the title bar, so each slot just shows
-  // [stone-icon] [coord] in a clearly readable size.
-  const int recentY = statY + statH + 16;
-  const int textH = renderer.getTextHeight(kRecentFont);
-  const int slotW = innerW / 3;
-  const int firstShown = (board.moveCount >= 3) ? (board.moveCount - 3) : 0;
-  for (uint16_t i = firstShown; i < board.moveCount; i++) {
-    const uint8_t cellIdx = board.moveHistory[i];
-    const uint8_t r = board.rowOf(cellIdx);
-    const uint8_t c = board.colOf(cellIdx);
-    const bool isBlack = (i % 2 == 0);
-    char coord[8];
-    coordToText(r, c, coord, sizeof(coord));
-    const int slotIdx = static_cast<int>(i - firstShown);
-    const int sx = CONTENT_X + slotIdx * slotW;
-    constexpr int dotR = 6;
-    constexpr int dotGap = 6;
-    const int tw = renderer.getTextWidth(kRecentFont, coord);
-    const int groupW = 2 * dotR + dotGap + tw;
-    const int gx = sx + (slotW - groupW) / 2;
-    drawStone(gx + dotR, recentY + textH / 2, dotR, isBlack);
-    renderer.drawText(kRecentFont, gx + 2 * dotR + dotGap, recentY, coord);
-  }
 }
 
 // ---------- Mode line ----------
@@ -693,13 +658,6 @@ void GomokuGameActivity::renderGameOver() {
     titleStr = tr(STR_GOMOKU_DRAW);
   }
 
-  // Win line drawn on top of the (already-rendered) board only matters if we
-  // also draw the board behind the title — to avoid clutter we keep the
-  // title-screen layout purely textual, mirroring SudokuGameActivity::renderWon.
-
-  const int titleY = 200;
-  renderer.drawCenteredText(kHeroFont, titleY, titleStr, true, EpdFontFamily::BOLD);
-
   // Subtitle: mode · size · time · N moves
   char timeBuf[8];
   gameFormatElapsed(elapsedMs, timeBuf, sizeof(timeBuf));
@@ -707,15 +665,36 @@ void GomokuGameActivity::renderGameOver() {
   char sub[96];
   snprintf(sub, sizeof(sub), "%s · %s · %s · %u %s", modeLabel(mode), sizeLabel, timeBuf,
            static_cast<unsigned>(board.moveCount), tr(STR_GOMOKU_MOVES_SUFFIX));
-  renderer.drawCenteredText(kStatusFont, titleY + 48, sub);
 
-  // Three-column stats row (Time / Best Time / Played).
-  // Spacing relaxed (v4) so the title / subtitle / stats / footnote read as
-  // four distinct sections rather than a single dense block.
   const uint8_t s = GomokuStore::sizeIndex(board.boardSize);
   const GomokuStats stats = GomokuStore::loadStats();
-  const int statsY = titleY + 120;
-  constexpr int statsH = 96;
+
+  char rec[64];
+  const bool showRecord = s <= 1;
+  if (showRecord) {
+    snprintf(rec, sizeof(rec), tr(STR_GOMOKU_RECORD_FMT), static_cast<unsigned>(stats.blackWins[s]),
+             static_cast<unsigned>(stats.whiteWins[s]), static_cast<unsigned>(stats.draws[s]));
+  }
+
+  constexpr int titleGap = 12;
+  constexpr int sectionGap = 36;
+  constexpr int statPadding = 16;
+  constexpr int statTextGap = 12;
+  constexpr int footnoteGap = 16;
+  const int titleH = renderer.getTextHeight(kHeroFont);
+  const int statusH = renderer.getTextHeight(kStatusFont);
+  const int valueH = renderer.getTextHeight(kStatValueFont);
+  const int statsH = statPadding + valueH + statTextGap + statusH + statPadding;
+  const int blockH = titleH + titleGap + statusH + sectionGap + statsH + (showRecord ? footnoteGap + statusH : 0);
+  const int availableBottom = renderer.getScreenHeight() - UITheme::getInstance().getMetrics().buttonHintsHeight;
+  const int titleY = gameCenteredBlockY(TITLE_BAR_H, availableBottom, blockH);
+  const int subtitleY = titleY + titleH + titleGap;
+  const int statsY = subtitleY + statusH + sectionGap;
+
+  renderer.drawCenteredText(kHeroFont, titleY, titleStr, true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(kStatusFont, subtitleY, sub);
+
+  // Three-column stats row (Time / Best Time / Played).
   const int sx = CONTENT_X;
   const int sw2 = sw - 2 * CONTENT_X;
   const int colW = sw2 / 3;
@@ -727,10 +706,8 @@ void GomokuGameActivity::renderGameOver() {
     const int cx = sx + col * colW;
     const int valW = renderer.getTextWidth(kStatValueFont, value);
     const int labW = renderer.getTextWidth(kStatusFont, label);
-    // Inside statsH=96: value top at +24, label top at +64 — 40px between
-    // tops keeps NOTOSANS_16 descenders clear and matches the relaxed rhythm.
-    renderer.drawText(kStatValueFont, cx + (colW - valW) / 2, statsY + 24, value, true);
-    renderer.drawText(kStatusFont, cx + (colW - labW) / 2, statsY + 64, label, true);
+    renderer.drawText(kStatValueFont, cx + (colW - valW) / 2, statsY + statPadding, value, true);
+    renderer.drawText(kStatusFont, cx + (colW - labW) / 2, statsY + statPadding + valueH + statTextGap, label, true);
   };
 
   drawStatCol(0, tr(STR_GAME_TIME), timeBuf);
@@ -752,12 +729,8 @@ void GomokuGameActivity::renderGameOver() {
   snprintf(playedBuf, sizeof(playedBuf), "%u", static_cast<unsigned>(played));
   drawStatCol(2, tr(STR_GOMOKU_PLAYED), playedBuf);
 
-  // Footnote: cumulative record.
-  if (s <= 1) {
-    char rec[64];
-    snprintf(rec, sizeof(rec), tr(STR_GOMOKU_RECORD_FMT), static_cast<unsigned>(stats.blackWins[s]),
-             static_cast<unsigned>(stats.whiteWins[s]), static_cast<unsigned>(stats.draws[s]));
-    renderer.drawCenteredText(kStatusFont, statsY + statsH + 28, rec);
+  if (showRecord) {
+    renderer.drawCenteredText(kStatusFont, statsY + statsH + footnoteGap, rec);
   }
 
   drawFooter();
