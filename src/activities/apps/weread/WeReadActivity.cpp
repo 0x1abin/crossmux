@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Bitmap.h>
 #include <FontCacheManager.h>
+#include <FreeInkUIGfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -43,23 +44,10 @@ constexpr MenuEntry kMenuEntries[] = {
     {StrId::STR_WEREAD_MENU_LOGOUT, MenuAction::Logout},
 };
 
-constexpr StrId kDisclaimerPortraitLines[] = {
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_1,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_2,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_3,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_4,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_5,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_6,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_7,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_8,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_9,  StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_10,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_11, StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_12,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_13, StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_14,
-    StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_15, StrId::STR_WEREAD_DISCLAIMER_PORTRAIT_LINE_16,
-};
-
-constexpr StrId kDisclaimerLandscapeLines[] = {
-    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_1, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_2,
-    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_3, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_4,
-    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_5, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_6,
-    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_7, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_8,
-    StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_9, StrId::STR_WEREAD_DISCLAIMER_LANDSCAPE_LINE_10,
+constexpr StrId kDisclaimerParagraphs[] = {
+    StrId::STR_WEREAD_DISCLAIMER_PARAGRAPH_1,
+    StrId::STR_WEREAD_DISCLAIMER_PARAGRAPH_2,
+    StrId::STR_WEREAD_DISCLAIMER_PARAGRAPH_3,
 };
 
 constexpr StrId kDisclaimerActions[] = {
@@ -85,43 +73,11 @@ constexpr StrId kPostProcessLongWaitLines[] = {
 };
 
 constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerActions) / sizeof(kDisclaimerActions[0]));
-constexpr int kDisclaimerActionOffsetY = 10;
+constexpr int kDisclaimerParagraphCount =
+    static_cast<int>(sizeof(kDisclaimerParagraphs) / sizeof(kDisclaimerParagraphs[0]));
 constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
 constexpr int kCoverWidth = 96;
 constexpr int kCoverHeight = 140;
-
-struct DisclaimerTextLayout {
-  const StrId* lines;
-  int lineCount;
-  int firstParagraphLast;
-  int secondParagraphLast;
-};
-
-constexpr DisclaimerTextLayout kDisclaimerPortraitLayout = {
-    kDisclaimerPortraitLines,
-    static_cast<int>(sizeof(kDisclaimerPortraitLines) / sizeof(kDisclaimerPortraitLines[0])),
-    3,
-    11,
-};
-
-constexpr DisclaimerTextLayout kDisclaimerLandscapeLayout = {
-    kDisclaimerLandscapeLines,
-    static_cast<int>(sizeof(kDisclaimerLandscapeLines) / sizeof(kDisclaimerLandscapeLines[0])),
-    1,
-    6,
-};
-
-const DisclaimerTextLayout& disclaimerTextLayout(const GfxRenderer::Orientation orientation) {
-  switch (orientation) {
-    case GfxRenderer::Orientation::Portrait:
-    case GfxRenderer::Orientation::PortraitInverted:
-      return kDisclaimerPortraitLayout;
-    case GfxRenderer::Orientation::LandscapeClockwise:
-    case GfxRenderer::Orientation::LandscapeCounterClockwise:
-      return kDisclaimerLandscapeLayout;
-  }
-  return kDisclaimerPortraitLayout;
-}
 
 struct ShelfGridLayout {
   int columns = 1;
@@ -458,18 +414,9 @@ Rect WeReadActivity::disclaimerContentBounds() const {
 
 Rect WeReadActivity::disclaimerActionsBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto& layout = disclaimerTextLayout(renderer.getOrientation());
-  const Rect safe = disclaimerSafeBounds();
   const Rect content = disclaimerContentBounds();
   const int minimumHeight = renderer.getLineHeight(UI_10_FONT_ID) + metrics.verticalSpacing;
   const int height = std::min(content.height, std::max(GUI.getListRowStep(false), minimumHeight));
-  const int paragraphSpacing = std::max(1, metrics.verticalSpacing / 8);
-  const int textHeight = layout.lineCount * renderer.getLineHeight(UI_10_FONT_ID) + paragraphSpacing * 2;
-  const int actionGap = metrics.verticalSpacing;
-  const int groupHeight = textHeight + actionGap + height;
-  const int freeHeight = std::max(0, content.height - groupHeight);
-  const int baseY = std::min(content.y + content.height - height, content.y + freeHeight / 3 + textHeight + actionGap);
-  const int y = std::min(safe.y + safe.height - height, baseY + kDisclaimerActionOffsetY);
   const int availableWidth = std::max(0, content.width - metrics.contentSidePadding * 2);
   int labelWidth = 0;
   for (const StrId action : kDisclaimerActions) {
@@ -478,6 +425,9 @@ Rect WeReadActivity::disclaimerActionsBounds() const {
   const int targetWidth = (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount +
                           metrics.verticalSpacing * (kDisclaimerActionCount - 1);
   const int width = std::min(availableWidth, targetWidth);
+  const int bottomY = content.y + content.height - height;
+  const int cachedY = disclaimerActionsY_.load();
+  const int y = cachedY >= content.y ? std::min(cachedY, bottomY) : bottomY;
   return Rect{content.x + (content.width - width) / 2, y, width, height};
 }
 
@@ -1504,32 +1454,48 @@ bool WeReadActivity::drawDetailIntroduction(const Rect& bounds, const bool selec
 
 void WeReadActivity::drawDisclaimer(const Rect& content) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto& layout = disclaimerTextLayout(renderer.getOrientation());
-  const Rect actions = disclaimerActionsBounds();
-  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int paragraphSpacing = std::max(1, metrics.verticalSpacing / 8);
-  const int textHeight = layout.lineCount * lineHeight + paragraphSpacing * 2;
-  const int actionGap = metrics.verticalSpacing + kDisclaimerActionOffsetY;
-  const int textY = std::max(content.y, actions.y - actionGap - textHeight);
+  Rect actions = disclaimerActionsBounds();
+  const int paragraphSpacing = metrics.verticalSpacing;
+  const int textWidth = std::max(0, content.width - metrics.contentSidePadding * 2);
+  freeink::ui::GfxRendererTarget target(renderer);
+  target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
+  freeink::ui::TextStyle textStyle;
+  textStyle.font = freeink::ui::GfxRendererTarget::FONT_BODY;
+  textStyle.maxLines = 16;
+  int paragraphHeights[kDisclaimerParagraphCount] = {};
+  int textHeight = paragraphSpacing * (kDisclaimerParagraphCount - 1);
+  for (int i = 0; i < kDisclaimerParagraphCount; ++i) {
+    paragraphHeights[i] =
+        freeink::ui::measureWrappedText(target, I18N.get(kDisclaimerParagraphs[i]), textStyle, textWidth).height;
+    textHeight += paragraphHeights[i];
+  }
+  const int freeHeight = std::max(0, content.height - textHeight - actions.height);
+  const int actionGap = std::min(freeHeight, std::max(metrics.verticalSpacing, freeHeight / 3));
+  actions.y = std::min(content.y + content.height - actions.height, content.y + textHeight + actionGap);
+  disclaimerActionsY_.store(actions.y);
   const Rect textBounds{
       content.x + metrics.contentSidePadding,
-      textY,
-      content.width - metrics.contentSidePadding * 2,
-      std::min(textHeight, std::max(0, actions.y - actionGap - textY)),
+      content.y,
+      textWidth,
+      std::max(0, actions.y - actionGap - content.y),
   };
-  int blockWidth = 0;
-  for (int i = 0; i < layout.lineCount; ++i) {
-    blockWidth = std::max(blockWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(layout.lines[i])));
-  }
-  blockWidth = std::min(blockWidth, textBounds.width);
-  const int textX = textBounds.x + (textBounds.width - blockWidth) / 2;
   int y = textBounds.y;
   {
     GfxRenderer::ClipScope clip(renderer, textBounds.x, textBounds.y, textBounds.width, textBounds.height);
-    for (int i = 0; i < layout.lineCount; ++i) {
-      renderer.drawText(UI_10_FONT_ID, textX, y, I18N.get(layout.lines[i]));
-      y += lineHeight;
-      if (i == layout.firstParagraphLast || i == layout.secondParagraphLast) y += paragraphSpacing;
+    for (int i = 0; i < kDisclaimerParagraphCount; ++i) {
+      const char* paragraph = I18N.get(kDisclaimerParagraphs[i]);
+      const freeink::ui::Rect paragraphBounds{
+          static_cast<int16_t>(textBounds.x),
+          static_cast<int16_t>(y),
+          static_cast<int16_t>(textBounds.width),
+          static_cast<int16_t>(paragraphHeights[i]),
+      };
+      freeink::ui::layoutText(target, paragraphBounds, paragraph, textStyle,
+                              [&](const char* line, const freeink::ui::Rect lineBounds) {
+                                renderer.drawText(UI_10_FONT_ID, lineBounds.x, lineBounds.y, line);
+                              });
+      y += paragraphHeights[i];
+      if (i + 1 < kDisclaimerParagraphCount) y += paragraphSpacing;
     }
   }
 
