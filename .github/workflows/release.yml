@@ -5,17 +5,15 @@ on:
       - '*'
 
 permissions:
-  contents: write
-  models: read
+  contents: read
 
 jobs:
   build-release:
-    runs-on: ubuntu-latest
+    runs-on: h2o
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
@@ -30,13 +28,6 @@ jobs:
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
-      - name: Cache PlatformIO packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
-
       - name: Build CrossMux (international + Chinese)
         run: pio run -e gh_release -e gh_release_cn
 
@@ -47,6 +38,39 @@ jobs:
           cp .pio/build/gh_release/bootloader.bin   dist/bootloader.bin
           cp .pio/build/gh_release/partitions.bin   dist/partitions.bin
           cp .pio/build/gh_release_cn/firmware.bin  dist/firmware-cn.bin
+
+      - name: Upload release build
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: |
+            dist/*
+            .pio/build/gh_release/bootloader.bin
+            .pio/build/gh_release/firmware.bin
+            .pio/build/gh_release/firmware.elf
+            .pio/build/gh_release/firmware.map
+            .pio/build/gh_release/partitions.bin
+            .pio/build/gh_release_cn/firmware.bin
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  publish-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      models: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download release build
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build
+          path: .
 
       - name: Generate OTA summary
         continue-on-error: true
