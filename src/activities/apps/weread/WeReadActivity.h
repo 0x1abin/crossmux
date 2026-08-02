@@ -2,11 +2,13 @@
 
 #include <atomic>
 #include <cstdint>
+#include <vector>
 
 #include "../../Activity.h"
 #include "WeReadClient.h"
 #include "WeReadStore.h"
 #include "components/OptionPopup.h"
+#include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -24,8 +26,7 @@ class WeReadActivity final : public Activity {
  private:
   enum class State : uint8_t {
     Disclaimer,
-    Menu,
-    Shelf,
+    Home,
     Connecting,
     Qr,
     LoginConfirmed,
@@ -43,6 +44,8 @@ class WeReadActivity final : public Activity {
     CacheCleared,
     CacheClearError
   };
+  enum class MainTab : uint8_t { Shelf, Manage };
+  enum class MainFocus : uint8_t { Tabs, Content };
   enum class Job : uint8_t { Sync, Detail, Download };
   enum class DetailAction : uint8_t { Introduction, Read, Browse, Cache, Images };
   enum class PostProcessNotice : uint8_t { None, Waiting, LongWait };
@@ -55,6 +58,7 @@ class WeReadActivity final : public Activity {
   ButtonNavigator buttonNavigator_;
   OptionPopup cacheScopePopup_;
   WeReadClient::Operation operation_;
+  std::vector<TabInfo> mainTabs_;
   mutable HalFile shelfFile_;
   std::atomic<State> state_{State::Disclaimer};
   std::atomic<WeReadClient::Operation::ProgressStage> progressStage_{WeReadClient::Operation::ProgressStage::Chapters};
@@ -67,7 +71,7 @@ class WeReadActivity final : public Activity {
   char qrUrl_[256] = {};
   uint32_t shelfCount_ = 0;
   int disclaimerSelected_ = 0;
-  int menuSelected_ = 0;
+  int manageSelected_ = 0;
   std::atomic<int> shelfSelected_{0};
   int shelfFrameSelection_ = -1;
   int shelfFrameItemsPerPage_ = 0;
@@ -79,6 +83,8 @@ class WeReadActivity final : public Activity {
   int introPage_ = 0;
   int introPageCount_ = 1;
   uint32_t postProcessStartedAt_ = 0;
+  std::atomic<MainTab> mainTab_{MainTab::Shelf};
+  std::atomic<MainFocus> mainFocus_{MainFocus::Content};
   Job retryJob_ = Job::Sync;
   WeReadStore::BookDetailHeader detail_;
   uint32_t introPageOffsets_[kMaxIntroPages + 1] = {};
@@ -100,6 +106,7 @@ class WeReadActivity final : public Activity {
   bool refreshShelf();
   bool readShelf(int index, WeReadStore::ShelfRecord& record) const;
   Rect contentBounds() const;
+  Rect mainContentBounds() const;
   Rect disclaimerSafeBounds() const;
   Rect disclaimerContentBounds() const;
   Rect disclaimerActionsBounds() const;
@@ -129,7 +136,7 @@ class WeReadActivity final : public Activity {
   void handleIntroductionInput();
   void buildIntroductionPages();
   bool drawDetailIntroduction(const Rect& bounds, bool selected);
-  void drawShelfGrid(const Rect& content, int selectedIndex, int frameSelection);
+  void drawShelfGrid(const Rect& content, int selectedIndex, int frameSelection, bool contentFocused);
   void drawDisclaimer(const Rect& content);
   void drawBookDetail(const Rect& content, bool coverLoading = false);
   void drawIntroduction(const Rect& content);
@@ -145,8 +152,11 @@ class WeReadActivity final : public Activity {
   void promptLogout();
   void performLogout();
   void handleDisclaimerInput();
-  void handleMenuInput();
+  void handleMainInput();
+  void handleMainTabInput();
+  void handleManageInput();
   void handleShelfInput();
+  void selectMainTab(MainTab tab);
   void moveShelfSelection(int index, int itemsPerPage);
   void handleErrorInput();
   void handleLogoutErrorInput();
