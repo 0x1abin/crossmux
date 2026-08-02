@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <esp_wifi.h>
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include "../../../WifiCredentialStore.h"
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
+#include "../../network/WifiSelectionActivity.h"
 #include "../airpage/AirPageDeviceId.h"
 
 namespace {
@@ -62,6 +64,8 @@ void PixelSwitchActivity::onEnter() {
   broughtWifiUp_ = false;
   snapshotReady_ = false;
   ignoreConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  waitForWifiInputRelease_ = false;
+  returnToAppsAfterWifi_ = false;
   showCooldown_ = false;
   subscribedAtMs_ = 0;
   cooldownStartedMs_ = 0;
@@ -70,14 +74,15 @@ void PixelSwitchActivity::onEnter() {
 
   mqtt_.setServer(MQTT_HOST, MQTT_PORT);
   mqtt_.setCallback(&PixelSwitchActivity::mqttCallback);
-  // Whole-canvas Retain needs one bounded activity-lifetime buffer; 1600 bytes
-  // cannot live on the task stack and PubSubClient reports allocation failure.
-  mqttBufferReady_ = mqtt_.setBufferSize(MQTT_BUFFER_SIZE);
-  if (!mqttBufferReady_) {
-    LOG_ERR("PXSW", "OOM: MQTT buffer (%u bytes)", static_cast<unsigned>(MQTT_BUFFER_SIZE));
+  lastConnectAttemptMs_ = millis() - MQTT_RECONNECT_MS;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    launchWifiSelection();
+    requestUpdate();
+    return;
   }
 
-  lastConnectAttemptMs_ = millis() - MQTT_RECONNECT_MS;
+  prepareMqttBuffer();
   requestUpdate();
 }
 
@@ -118,6 +123,47 @@ void PixelSwitchActivity::handleMqttMessage(const char* topic, const uint8_t* pa
 }
 
 bool PixelSwitchActivity::canPublish() { return snapshotReady_ && mqtt_.connected(); }
+
+bool PixelSwitchActivity::prepareMqttBuffer() {
+  if (mqttBufferReady_) return true;
+
+  // Whole-canvas Retain needs one bounded activity-lifetime buffer; 1600 bytes
+  // cannot live on the task stack and PubSubClient reports allocation failure.
+  mqttBufferReady_ = mqtt_.setBufferSize(MQTT_BUFFER_SIZE);
+  if (!mqttBufferReady_) {
+    LOG_ERR("PXSW", "OOM: MQTT buffer (%u bytes)", static_cast<unsigned>(MQTT_BUFFER_SIZE));
+  }
+  return mqttBufferReady_;
+}
+
+void PixelSwitchActivity::launchWifiSelection() {
+  // ActivityManager owns the picker across frames; stack lifetime is insufficient.
+  auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, true);
+  if (!wifi) {
+    LOG_ERR("PXSW", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
+    activityManager.goToApps();
+    return;
+  }
+
+  broughtWifiUp_ = true;
+  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
+    waitForWifiInputRelease_ = true;
+    returnToAppsAfterWifi_ = result.isCancelled || WiFi.status() != WL_CONNECTED;
+    if (!returnToAppsAfterWifi_) prepareMqttBuffer();
+    requestUpdate();
+  });
+}
+
+bool PixelSwitchActivity::consumeWifiInputReleaseBarrier() {
+  if (!waitForWifiInputRelease_) return false;
+
+  const bool anyPressed = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                          mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavNext);
+  if (!anyPressed) waitForWifiInputRelease_ = false;
+  return true;
+}
 
 bool PixelSwitchActivity::connectBroker() {
   char clientId[40];
@@ -211,6 +257,12 @@ void PixelSwitchActivity::pumpNetwork() {
 }
 
 void PixelSwitchActivity::loop() {
+  if (consumeWifiInputReleaseBarrier()) return;
+  if (returnToAppsAfterWifi_) {
+    activityManager.goToApps();
+    return;
+  }
+
   pumpNetwork();
   const uint32_t now = millis();
   if (showCooldown_ && pixel_switch::hasElapsed(cooldownStartedMs_, now, COOLDOWN_POPUP_MS)) {
