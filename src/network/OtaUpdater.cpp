@@ -12,6 +12,7 @@
 // clang-format on
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -76,7 +77,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
   // on top of the TLS session's heap during the fetch; with -fno-exceptions an
   // OOM there aborts. fetchUrl handles the configured secure GET transport,
   // redirects, and User-Agent (see HttpDownloader).
-  ReleaseJsonParser releaseParser;
+  ReleaseJsonParser releaseParser(summaryLines);
   const bool ok = HttpDownloader::fetchUrl(releaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
     releaseParser.feed(reinterpret_cast<const char*>(data), len);
     return true;
@@ -105,7 +106,8 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
   totalSize = otaSize;
   updateAvailable = true;
 
-  LOG_DBG("OTA", "Found update: tag=%s size=%zu", latestVersion.c_str(), otaSize);
+  LOG_DBG("OTA", "Found update: tag=%s size=%zu summary=%s", latestVersion.c_str(), otaSize,
+          releaseParser.foundSummary() ? "yes" : "no");
   LOG_DBG("OTA", "Firmware URL: %s", otaUrl.c_str());
   return OK;
 }
@@ -161,6 +163,10 @@ bool OtaUpdater::isUpdateNewer() const {
 }
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
+
+const char* OtaUpdater::getSummaryLine(const size_t index) const {
+  return index < SUMMARY_LINE_COUNT ? summaryLines[index] : "";
+}
 
 OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx) {
   if (!isUpdateNewer()) {

@@ -191,6 +191,15 @@ void OtaUpdateActivity::render(RenderLock&&) {
                       CROSSPOINT_VERSION);
     GUI.drawSubHeader(renderer, Rect{0, versionTop + metrics.tabBarHeight, pageWidth, metrics.tabBarHeight},
                       tr(STR_NEW_VERSION), updater.getLatestVersion().c_str());
+    const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const int summaryTop = pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing * 2 - summaryLineHeight * 2;
+    for (size_t i = 0; i < OtaUpdater::SUMMARY_LINE_COUNT; ++i) {
+      const char* line = updater.getSummaryLine(i);
+      if (*line != '\0') {
+        renderer.drawCenteredText(
+            UI_10_FONT_ID, summaryTop + static_cast<int>(i) * (summaryLineHeight + metrics.verticalSpacing), line);
+      }
+    }
     if (updateConfirmation.processRender(renderer, mappedInput)) return;
   } else if (state == UPDATE_IN_PROGRESS) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING));

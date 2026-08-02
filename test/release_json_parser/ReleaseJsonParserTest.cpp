@@ -159,6 +159,58 @@ TEST(ReleaseJsonParser, NightlyBuildTag) {
   EXPECT_EQ(p.getFirmwareSize(), 5839088u);
 }
 
+TEST(ReleaseJsonParser, OtaSummary) {
+  const char* json =
+      R"({"tag_name":"v2.4.1","summary":"Faster book opening\nMore reliable OTA","assets":[{"name":"firmware.bin","size":1,"browser_download_url":"https://example.com/fw"}]})";
+  ReleaseJsonParser::SummaryLine summaryLines[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
+  ReleaseJsonParser p(summaryLines);
+  p.feed(json, strlen(json));
+
+  EXPECT_TRUE(p.foundSummary());
+  EXPECT_STREQ(p.getSummaryLine(0), "Faster book opening");
+  EXPECT_STREQ(p.getSummaryLine(1), "More reliable OTA");
+  EXPECT_STREQ(p.getSummaryLine(2), "");
+}
+
+TEST(ReleaseJsonParser, OtaSummaryChunkedByteByByte) {
+  const char* json = R"({"summary":"加快图书打开速度\n提升OTA更新可靠性"})";
+  ReleaseJsonParser::SummaryLine summaryLines[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
+  ReleaseJsonParser p(summaryLines);
+  feedChunked(p, json, 1);
+
+  EXPECT_TRUE(p.foundSummary());
+  EXPECT_STREQ(p.getSummaryLine(0), "加快图书打开速度");
+  EXPECT_STREQ(p.getSummaryLine(1), "提升OTA更新可靠性");
+}
+
+TEST(ReleaseJsonParser, MissingOrInvalidOtaSummary) {
+  ReleaseJsonParser missing;
+  const char* oldJson = R"({"tag_name":"v1.0.0","assets":[]})";
+  missing.feed(oldJson, strlen(oldJson));
+  EXPECT_FALSE(missing.foundSummary());
+
+  ReleaseJsonParser::SummaryLine singleLineSummary[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
+  ReleaseJsonParser singleLine(singleLineSummary);
+  const char* oneLine = R"({"summary":"Only one line"})";
+  singleLine.feed(oneLine, strlen(oneLine));
+  EXPECT_FALSE(singleLine.foundSummary());
+
+  ReleaseJsonParser::SummaryLine threeLineSummary[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
+  ReleaseJsonParser threeLines(threeLineSummary);
+  const char* tooMany = R"({"summary":"One\nTwo\nThree"})";
+  threeLines.feed(tooMany, strlen(tooMany));
+  EXPECT_FALSE(threeLines.foundSummary());
+}
+
+TEST(ReleaseJsonParser, RejectsOversizedOtaSummaryLine) {
+  const std::string json = R"({"summary":")" + std::string(64, 'x') + R"(\nValid"})";
+  ReleaseJsonParser::SummaryLine summaryLines[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
+  ReleaseJsonParser p(summaryLines);
+  p.feed(json.c_str(), json.size());
+
+  EXPECT_FALSE(p.foundSummary());
+}
+
 TEST(ReleaseJsonParser, PrettyAndMinifiedAgree) {
   ReleaseJsonParser pretty;
   pretty.feed(kRealisticPretty, strlen(kRealisticPretty));

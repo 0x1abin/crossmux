@@ -7,7 +7,11 @@
 
 class ReleaseJsonParser {
  public:
-  ReleaseJsonParser();
+  static constexpr size_t SUMMARY_LINE_COUNT = 2;
+  static constexpr size_t SUMMARY_LINE_SIZE = 64;
+  using SummaryLine = char[SUMMARY_LINE_SIZE];
+
+  explicit ReleaseJsonParser(SummaryLine* summaryLines = nullptr);
 
   ReleaseJsonParser(const ReleaseJsonParser&) = delete;
   ReleaseJsonParser& operator=(const ReleaseJsonParser&) = delete;
@@ -17,8 +21,10 @@ class ReleaseJsonParser {
 
   bool foundTag() const;
   bool foundFirmware() const;
+  bool foundSummary() const;
   const char* getTagName() const;
   const char* getFirmwareUrl() const;
+  const char* getSummaryLine(size_t index) const;
   size_t getFirmwareSize() const;
 
  private:
@@ -31,6 +37,7 @@ class ReleaseJsonParser {
   enum class LastKey : uint8_t {
     NONE,
     TAG_NAME,
+    SUMMARY,
     ASSETS,
     ASSET_NAME,
     ASSET_URL,
@@ -61,6 +68,8 @@ class ReleaseJsonParser {
   size_t firmwareSize;
   bool tagFound;
   bool firmwareFound;
+  bool summaryFound;
+  SummaryLine* summaryLines;
 
   char currentAssetName[32];
   char currentAssetUrl[512];
