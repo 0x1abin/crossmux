@@ -22,6 +22,12 @@ class TxtReaderActivity final : public Activity {
   int linesPerPage = 0;
   int viewportWidth = 0;
   bool initialized = false;
+  bool indexComplete = false;
+  bool indexCacheDirty = false;
+  size_t currentPageEndOffset = 0;
+
+  // Reused for the Activity lifetime: 8KB is too large for the render task's 8KB stack.
+  std::unique_ptr<uint8_t[]> pageBuffer;
 
   // Cached settings for cache validation (different fonts/margins require re-indexing)
   int cachedFontId = 0;
@@ -37,9 +43,11 @@ class TxtReaderActivity final : public Activity {
 
   void initializeReader();
   bool loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset);
-  void buildPageIndex();
+  bool extendIndexToPage(size_t targetPage);
+  void updateTotalPages();
+  int getProgressPercent() const;
   bool loadPageIndexCache();
-  void savePageIndexCache() const;
+  bool savePageIndexCache();
   void saveProgress() const;
   void loadProgress();
 

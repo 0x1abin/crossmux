@@ -353,6 +353,32 @@ if (parsedSize != fileSize) {
 }
 ```
 
+## TXT reader cache
+
+TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
+
+`index.bin` version 5 is a little-endian page-offset checkpoint. Its fixed
+header contains, in order: `uint32 magic` (`TXTI`, `0x54585449`), `uint8
+version` (`5`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
+`int32 fontId`, `int32 screenMargin`, `uint8 paragraphAlignment`, `uint8
+complete`, and `uint32 knownPageCount`. It is followed by `knownPageCount`
+strictly increasing `uint32` byte offsets; the first offset is zero and every
+offset is smaller than `fileSize`. An empty file has no offsets and must be
+marked complete.
+
+An incomplete index contains only pages discovered while reading. It is
+checkpointed every 32 known page starts and when the reader exits; the final
+page marks it complete and makes `knownPageCount` exact. Version 4 indexes use
+the same header without `complete` and are accepted as complete. A wrong magic,
+unsupported version, truncated payload, changed file size, changed layout
+setting, non-monotonic offset, or out-of-range offset invalidates the index.
+Writers flush `index.bin.tmp` before replacing the prior checkpoint.
+
+`progress.bin` is an atomic four-byte little-endian zero-based `uint32` page
+number. Records produced by older firmware used only the low 16 bits and remain
+compatible. When progress is newer than the last partial-index checkpoint, at
+most the next 31 pages are recalculated before rendering resumes.
+
 ## WeRead cache
 
 The Simplified Chinese build keeps WeRead's private data below `/.crosspoint/weread/`.
