@@ -1,13 +1,17 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 class OtaUpdater {
  public:
   enum class Channel : uint8_t { Stable, Nightly };
+  static constexpr size_t SUMMARY_LINE_COUNT = 2;
 
  private:
+  static constexpr size_t SUMMARY_LINE_SIZE = 64;
+
   bool updateAvailable = false;
   Channel channel = Channel::Stable;
   std::string latestVersion;
@@ -15,6 +19,7 @@ class OtaUpdater {
   size_t otaSize = 0;
   size_t processedSize = 0;
   size_t totalSize = 0;
+  char summaryLines[SUMMARY_LINE_COUNT][SUMMARY_LINE_SIZE] = {};
 
  public:
   using ProgressCallback = void (*)(void* ctx);
@@ -38,6 +43,7 @@ class OtaUpdater {
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
+  const char* getSummaryLine(size_t index) const { return index < SUMMARY_LINE_COUNT ? summaryLines[index] : ""; }
   OtaUpdaterError checkForUpdate(Channel requestedChannel);
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
 };

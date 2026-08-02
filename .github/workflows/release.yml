@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  models: read
 
 jobs:
   build-release:
@@ -47,6 +48,14 @@ jobs:
           cp .pio/build/gh_release/partitions.bin   dist/partitions.bin
           cp .pio/build/gh_release_cn/firmware.bin  dist/firmware-cn.bin
 
+      - name: Generate OTA summary
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD^ 2>/dev/null || true)
+          python3 scripts/generate_ota_summary.py --base "$PREV_TAG" --output ota-summary.md
+
       # Prefer curated notes for a named release. When none are checked in,
       # build a complete commit-level changelog. GitHub's built-in
       # generate_release_notes only lists PR merges, so any commit pushed
@@ -71,6 +80,10 @@ jobs:
                 echo "## Initial release ${{ github.ref_name }}"
               fi
             } > release-body.md
+          fi
+          if [ -s ota-summary.md ]; then
+            printf '\n' >> release-body.md
+            cat ota-summary.md >> release-body.md
           fi
           echo "---- release-body.md ----"
           cat release-body.md

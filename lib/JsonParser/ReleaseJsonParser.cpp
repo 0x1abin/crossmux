@@ -13,9 +13,10 @@ void safeCopy(char* dst, size_t dstSize, const char* src, size_t srcLen) {
 
 }  // namespace
 
-ReleaseJsonParser::ReleaseJsonParser()
+ReleaseJsonParser::ReleaseJsonParser(SummaryLine* summaryLines)
     : parser(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
-                           sOnArrayStart, sOnArrayEnd, nullptr}) {
+                           sOnArrayStart, sOnArrayEnd, nullptr}),
+      summaryLines(summaryLines) {
   reset();
 }
 
@@ -30,6 +31,10 @@ void ReleaseJsonParser::reset() {
   firmwareSize = 0;
   tagFound = false;
   firmwareFound = false;
+  summaryFound = false;
+  if (summaryLines) {
+    for (size_t i = 0; i < SUMMARY_LINE_COUNT; ++i) summaryLines[i][0] = '\0';
+  }
   currentAssetName[0] = '\0';
   currentAssetUrl[0] = '\0';
   currentAssetSize = 0;
@@ -39,8 +44,12 @@ void ReleaseJsonParser::feed(const char* data, size_t len) { parser.feed(data, l
 
 bool ReleaseJsonParser::foundTag() const { return tagFound; }
 bool ReleaseJsonParser::foundFirmware() const { return firmwareFound; }
+bool ReleaseJsonParser::foundSummary() const { return summaryFound; }
 const char* ReleaseJsonParser::getTagName() const { return tagName; }
 const char* ReleaseJsonParser::getFirmwareUrl() const { return firmwareUrl; }
+const char* ReleaseJsonParser::getSummaryLine(const size_t index) const {
+  return summaryLines && index < SUMMARY_LINE_COUNT ? summaryLines[index] : "";
+}
 size_t ReleaseJsonParser::getFirmwareSize() const { return firmwareSize; }
 
 void ReleaseJsonParser::commitAsset() {
@@ -64,6 +73,8 @@ void ReleaseJsonParser::sOnKey(void* ctx, const char* key, size_t len) {
       if (self->depth == 1) {
         if (len == 8 && memcmp(key, "tag_name", 8) == 0)
           self->lastKey = LastKey::TAG_NAME;
+        else if (len == 7 && memcmp(key, "summary", 7) == 0)
+          self->lastKey = LastKey::SUMMARY;
         else if (len == 6 && memcmp(key, "assets", 6) == 0)
           self->lastKey = LastKey::ASSETS;
         else
@@ -95,6 +106,19 @@ void ReleaseJsonParser::sOnString(void* ctx, const char* value, size_t len) {
       if (self->position == Position::TOP_LEVEL && self->depth == 1) {
         safeCopy(self->tagName, sizeof(self->tagName), value, len);
         self->tagFound = true;
+      }
+      break;
+    case LastKey::SUMMARY:
+      if (self->summaryLines && self->position == Position::TOP_LEVEL && self->depth == 1) {
+        const char* separator = static_cast<const char*>(memchr(value, '\n', len));
+        const size_t firstLen = separator ? static_cast<size_t>(separator - value) : 0;
+        const size_t secondLen = separator ? len - firstLen - 1 : 0;
+        if (separator && firstLen > 0 && firstLen < SUMMARY_LINE_SIZE && secondLen > 0 &&
+            secondLen < SUMMARY_LINE_SIZE && memchr(separator + 1, '\n', secondLen) == nullptr) {
+          safeCopy(self->summaryLines[0], sizeof(self->summaryLines[0]), value, firstLen);
+          safeCopy(self->summaryLines[1], sizeof(self->summaryLines[1]), separator + 1, secondLen);
+          self->summaryFound = true;
+        }
       }
       break;
     case LastKey::ASSET_NAME:
