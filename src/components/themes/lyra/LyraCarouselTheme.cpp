@@ -14,37 +14,48 @@
 #include "fontIds.h"
 
 namespace {
-constexpr int kCenterCoverWidth = 340;
+constexpr int kCenterCoverWidth = 380;
 constexpr int kCenterCoverHeight = 540;
-constexpr int kSideCoverWidth = 200;
-constexpr int kSideCoverHeight = 390;
-constexpr int kSideOverlap = 60;
 constexpr int kCoverTopPadding = 32;
 constexpr int kCornerRadius = 6;
-constexpr int kCenterOutlineWidth = 4;
 constexpr int kActiveOutlineWidth = 3;
-constexpr int kInactiveOutlineWidth = 1;
 constexpr int kDotSize = 8;
 constexpr int kDotGap = 6;
 constexpr int kMenuIconSize = 32;
 constexpr int kMenuIconPadding = 14;
 constexpr int kMenuHighlightPadding = 7;
 
-bool drawCover(const GfxRenderer& renderer, const RecentBook& book, int x, int y, int width, int height) {
+void drawAppsMenuIcon(const GfxRenderer& renderer, int x, int y, bool selected) {
+  constexpr int kInset = 2;
+  constexpr int kCellSize = 13;
+  constexpr int kCellGap = 2;
+  static_assert(kInset * 2 + kCellSize * 2 + kCellGap == kMenuIconSize);
+
+  for (int row = 0; row < 2; ++row) {
+    for (int column = 0; column < 2; ++column) {
+      renderer.drawRoundedRect(x + kInset + column * (kCellSize + kCellGap), y + kInset + row * (kCellSize + kCellGap),
+                               kCellSize, kCellSize, 2, 2, !selected);
+    }
+  }
+}
+
+void drawCover(const GfxRenderer& renderer, const RecentBook& book, int x, int y, int width, int height) {
   if (!book.coverBmpPath.empty()) {
-    const std::string thumbPath =
+    const std::string coverPath =
         UITheme::getCoverThumbPath(book.coverBmpPath, LyraCarouselMetrics::values.homeCoverHeight);
     HalFile file;
-    if (Storage.openFileForRead("HOME", thumbPath, file)) {
+    if (Storage.openFileForRead("HOME", coverPath, file)) {
       Bitmap bitmap(file);
       if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-        const float sourceRatio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-        const float targetRatio = static_cast<float>(width) / static_cast<float>(height);
-        const float cropX = sourceRatio > targetRatio ? 1.0f - targetRatio / sourceRatio : 0.0f;
-        const float cropY = sourceRatio < targetRatio ? 1.0f - sourceRatio / targetRatio : 0.0f;
-        renderer.drawBitmap(bitmap, x, y, width, height, cropX, cropY);
-        renderer.maskRoundedRectOutsideCorners(x, y, width, height, kCornerRadius, Color::White);
-        return true;
+        const float scale = std::min(
+            {1.0f, static_cast<float>(width) / bitmap.getWidth(), static_cast<float>(height) / bitmap.getHeight()});
+        const int drawWidth = std::max(1, static_cast<int>(bitmap.getWidth() * scale));
+        const int drawHeight = std::max(1, static_cast<int>(bitmap.getHeight() * scale));
+        const int drawX = x + (width - drawWidth) / 2;
+        const int drawY = y + (height - drawHeight) / 2;
+        renderer.drawBitmap(bitmap, drawX, drawY, drawWidth, drawHeight);
+        renderer.maskRoundedRectOutsideCorners(drawX, drawY, drawWidth, drawHeight, kCornerRadius, Color::White);
+        return;
       }
     }
   }
@@ -53,7 +64,6 @@ bool drawCover(const GfxRenderer& renderer, const RecentBook& book, int x, int y
   renderer.fillRoundedRect(x, y + height / 3, width, 2 * height / 3, kCornerRadius, false, false, true, true,
                            Color::Black);
   renderer.drawIcon(CoverIcon, x + (width - kMenuIconSize) / 2, y + height / 6 - kMenuIconSize / 2, kMenuIconSize);
-  return false;
 }
 }  // namespace
 
@@ -82,24 +92,10 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
 
   const int centerX = (renderer.getScreenWidth() - kCenterCoverWidth) / 2;
   const int centerY = rect.y + kCoverTopPadding;
-  const int sideY = centerY + (kCenterCoverHeight - kSideCoverHeight) / 2;
-  const int leftX = centerX - kSideCoverWidth + kSideOverlap;
-  const int rightX = centerX + kCenterCoverWidth - kSideOverlap;
 
   if (!coverRendered) {
     renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
 
-    const int previousIndex = (centerIndex + bookCount - 1) % bookCount;
-    const int nextIndex = (centerIndex + 1) % bookCount;
-    if (bookCount >= 3) {
-      drawCover(renderer, recentBooks[previousIndex], leftX, sideY, kSideCoverWidth, kSideCoverHeight);
-    }
-    if (bookCount >= 2) {
-      drawCover(renderer, recentBooks[nextIndex], rightX, sideY, kSideCoverWidth, kSideCoverHeight);
-    }
-
-    renderer.fillRect(centerX - kCenterOutlineWidth, centerY - kCenterOutlineWidth,
-                      kCenterCoverWidth + kCenterOutlineWidth * 2, kCenterCoverHeight + kCenterOutlineWidth * 2, false);
     drawCover(renderer, recentBooks[centerIndex], centerX, centerY, kCenterCoverWidth, kCenterCoverHeight);
 
     const int dotsY = centerY + kCenterCoverHeight + 8;
@@ -133,8 +129,10 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     coverRendered = coverBufferStored;
   }
 
-  renderer.drawRoundedRect(centerX, centerY, kCenterCoverWidth, kCenterCoverHeight,
-                           coversFocused ? kActiveOutlineWidth : kInactiveOutlineWidth, kCornerRadius, true);
+  if (coversFocused) {
+    renderer.drawRoundedRect(centerX, centerY, kCenterCoverWidth, kCenterCoverHeight, kActiveOutlineWidth,
+                             kCornerRadius, true);
+  }
 }
 
 void LyraCarouselTheme::drawHomeMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
@@ -160,7 +158,13 @@ void LyraCarouselTheme::drawHomeMenu(GfxRenderer& renderer, Rect rect, int butto
     }
 
     if (rowIcon == nullptr) continue;
-    const uint8_t* icon = iconForName(rowIcon(i), kMenuIconSize);
+    const UIIcon iconName = rowIcon(i);
+    if (iconName == UIIcon::Apps) {
+      drawAppsMenuIcon(renderer, iconX, iconY, selected);
+      continue;
+    }
+
+    const uint8_t* icon = iconForName(iconName, kMenuIconSize);
     if (icon == nullptr) continue;
     if (selected) {
       renderer.drawIconInverted(icon, iconX, iconY, kMenuIconSize);
