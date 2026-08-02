@@ -84,6 +84,7 @@ constexpr int kPortraitShelfRows = 3;
 constexpr int kLandscapeShelfColumns = 5;
 constexpr int kLandscapeShelfRows = 2;
 constexpr unsigned long kShelfPageHoldMs = 700;
+constexpr int kNoShelfSelection = -1;
 
 enum class ShelfVerticalDirection : uint8_t { Up, Down };
 
@@ -121,6 +122,19 @@ static_assert(shelfVerticalIndex(1, 20, 3, 9, ShelfVerticalDirection::Up) == 1);
 static_assert(shelfVerticalIndex(10, 11, 3, 9, ShelfVerticalDirection::Down) == 10);
 static_assert(shelfVerticalIndex(10, 13, 3, 9, ShelfVerticalDirection::Down) == 12);
 static_assert(shelfVerticalIndex(7, 14, 5, 10, ShelfVerticalDirection::Down) == 12);
+
+constexpr bool canIncrementShelfFrame(const int frameSelection, const int frameItemsPerPage, const int selectedIndex,
+                                      const int itemsPerPage) {
+  return frameItemsPerPage == itemsPerPage && frameSelection >= 0 && selectedIndex >= 0 &&
+         frameSelection != selectedIndex && itemsPerPage > 0 &&
+         frameSelection / itemsPerPage == selectedIndex / itemsPerPage;
+}
+
+static_assert(!canIncrementShelfFrame(kNoShelfSelection, 9, 0, 9));
+static_assert(!canIncrementShelfFrame(3, 9, 3, 9));
+static_assert(canIncrementShelfFrame(3, 9, 4, 9));
+static_assert(!canIncrementShelfFrame(8, 9, 9, 9));
+static_assert(!canIncrementShelfFrame(3, 9, 4, 10));
 
 struct ShelfGridLayout {
   int columns = 1;
@@ -419,7 +433,8 @@ void WeReadActivity::onEnter() {
   disclaimerSelected_ = 0;
   disclaimerSaveFailed_ = false;
   menuSelected_ = 0;
-  shelfSelected_ = 0;
+  shelfSelected_.store(0);
+  shelfFrameInvalidated_.store(true);
   resetShelfCoverLoading();
   detailSelected_ = 0;
   introPage_ = 0;
@@ -464,6 +479,7 @@ void WeReadActivity::onExit() {
 }
 
 bool WeReadActivity::refreshShelf() {
+  shelfFrameInvalidated_.store(true);
   if (shelfFile_.isOpen()) shelfFile_.close();
   shelfCount_ = 0;
   if (!WeReadStore::openShelf(shelfFile_, shelfCount_)) {
@@ -471,9 +487,9 @@ bool WeReadActivity::refreshShelf() {
     return false;
   }
   if (shelfCount_ == 0) {
-    shelfSelected_ = 0;
-  } else if (shelfSelected_ >= static_cast<int>(shelfCount_)) {
-    shelfSelected_ = static_cast<int>(shelfCount_ - 1);
+    shelfSelected_.store(0);
+  } else if (shelfSelected_.load() >= static_cast<int>(shelfCount_)) {
+    shelfSelected_.store(static_cast<int>(shelfCount_ - 1));
   }
   resetShelfCoverLoading();
   return true;
@@ -684,7 +700,7 @@ void WeReadActivity::maybeShowLongWait(RenderLock& renderBarrier) {
 void WeReadActivity::advanceShelfCovers() {
   if (shelfCoverStopped_ || shelfCount_ == 0 || WiFi.status() != WL_CONNECTED) return;
   const int itemsPerPage = shelfItemsPerPage();
-  const int pageStart = shelfSelected_ / itemsPerPage * itemsPerPage;
+  const int pageStart = shelfSelected_.load() / itemsPerPage * itemsPerPage;
   if (pageStart != shelfCoverPageStart_) {
     operation_.reset();
     shelfCoverPageStart_ = pageStart;
@@ -698,6 +714,7 @@ void WeReadActivity::advanceShelfCovers() {
         return;
       case WeReadClient::Operation::Event::Complete:
         ++shelfCoverCursor_;
+        shelfFrameInvalidated_.store(true);
         requestUpdate();
         return;
       case WeReadClient::Operation::Event::QrReady:
@@ -933,7 +950,7 @@ void WeReadActivity::openSelectedDetail(const WeReadStore::ShelfRecord& book) {
 
 void WeReadActivity::activateSelected() {
   WeReadStore::ShelfRecord book;
-  if (readShelf(shelfSelected_, book)) openSelectedDetail(book);
+  if (readShelf(shelfSelected_.load(), book)) openSelectedDetail(book);
 }
 
 bool WeReadActivity::detailActionEnabled(const DetailAction action) const {
@@ -1329,7 +1346,8 @@ void WeReadActivity::performLogout() {
   const bool shelfCleared = WeReadStore::clearShelf();
   const bool browseCacheCleared = WeReadBrowse::clearAllCaches();
   shelfCount_ = 0;
-  shelfSelected_ = 0;
+  shelfSelected_.store(0);
+  shelfFrameInvalidated_.store(true);
   if (!sessionCleared || !shelfCleared || !browseCacheCleared) {
     LOG_ERR("WR", "Failed to clear local login state");
     state_.store(State::LogoutError);
@@ -1394,14 +1412,16 @@ void WeReadActivity::handleShelfInput() {
       const auto direction = movingUp ? ShelfVerticalDirection::Up : ShelfVerticalDirection::Down;
       if (mappedInput.wasReleased(button)) {
         shelfSideGesture_ = ShelfSideGesture::Idle;
-        moveShelfSelection(shelfVerticalIndex(shelfSelected_, count, columns, itemsPerPage, direction), itemsPerPage);
+        moveShelfSelection(shelfVerticalIndex(shelfSelected_.load(), count, columns, itemsPerPage, direction),
+                           itemsPerPage);
         return;
       }
       if (mappedInput.isPressed(button) && mappedInput.getHeldTime() >= kShelfPageHoldMs) {
         shelfSideGesture_ = ShelfSideGesture::PageHandled;
         if (count > itemsPerPage) {
-          const int target = movingUp ? ButtonNavigator::previousPageIndex(shelfSelected_, count, itemsPerPage)
-                                      : ButtonNavigator::nextPageIndex(shelfSelected_, count, itemsPerPage);
+          const int selected = shelfSelected_.load();
+          const int target = movingUp ? ButtonNavigator::previousPageIndex(selected, count, itemsPerPage)
+                                      : ButtonNavigator::nextPageIndex(selected, count, itemsPerPage);
           moveShelfSelection(target, itemsPerPage);
         }
       }
@@ -1420,10 +1440,10 @@ void WeReadActivity::handleShelfInput() {
       swapFrontDirections ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
   const auto nextButton = swapFrontDirections ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
   buttonNavigator_.onPressAndContinuous({previousButton}, [this, count, itemsPerPage] {
-    moveShelfSelection(ButtonNavigator::previousIndex(shelfSelected_, count), itemsPerPage);
+    moveShelfSelection(ButtonNavigator::previousIndex(shelfSelected_.load(), count), itemsPerPage);
   });
   buttonNavigator_.onPressAndContinuous({nextButton}, [this, count, itemsPerPage] {
-    moveShelfSelection(ButtonNavigator::nextIndex(shelfSelected_, count), itemsPerPage);
+    moveShelfSelection(ButtonNavigator::nextIndex(shelfSelected_.load(), count), itemsPerPage);
   });
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     resetShelfCoverLoading();
@@ -1436,10 +1456,9 @@ void WeReadActivity::handleShelfInput() {
 }
 
 void WeReadActivity::moveShelfSelection(const int index, const int itemsPerPage) {
-  if (index == shelfSelected_) return;
-  const int previousPage = shelfSelected_ / itemsPerPage;
-  shelfSelected_ = index;
-  if (shelfSelected_ / itemsPerPage != previousPage) resetShelfCoverLoading();
+  const int previousIndex = shelfSelected_.exchange(index);
+  if (index == previousIndex) return;
+  if (index / itemsPerPage != previousIndex / itemsPerPage) resetShelfCoverLoading();
   requestUpdate();
 }
 
@@ -1756,22 +1775,20 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
   }
 }
 
-void WeReadActivity::drawShelfGrid(const Rect& content) {
+void WeReadActivity::drawShelfGrid(const Rect& content, const int selectedIndex, const int frameSelection) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto layout = shelfGridLayout(renderer, content, metrics.contentSidePadding, metrics.verticalSpacing);
   const int count = static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX));
-  const int page = shelfSelected_ / layout.itemsPerPage;
+  const int page = selectedIndex / layout.itemsPerPage;
   const int pageStart = page * layout.itemsPerPage;
   const int pageEnd = std::min(pageStart + layout.itemsPerPage, count);
   const int pageCount = pageEnd - pageStart;
   const int visibleRows = (pageCount + layout.columns - 1) / layout.columns;
   const int visibleHeight = visibleRows * layout.itemHeight + std::max(0, visibleRows - 1) * layout.rowGap;
   const int startY = content.y + std::max(0, (content.height - visibleHeight) / 2);
+  const bool incrementalFrame = frameSelection >= pageStart && frameSelection < pageEnd;
 
-  for (int index = pageStart; index < pageEnd; ++index) {
-    WeReadStore::ShelfRecord book;
-    if (!readShelf(index, book)) continue;
-
+  const auto drawItem = [&](const int index, const bool selected) {
     const int item = index - pageStart;
     const int row = item / layout.columns;
     const int column = item % layout.columns;
@@ -1781,13 +1798,17 @@ void WeReadActivity::drawShelfGrid(const Rect& content) {
                        column * (layout.coverWidth + layout.columnGap);
     const int coverY = startY + row * (layout.itemHeight + layout.rowGap);
     const Rect cover{coverX, coverY, layout.coverWidth, layout.coverHeight};
-    const bool selected = index == shelfSelected_;
+    const Rect itemBounds{cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4};
     bool foregroundBlack = true;
     if (selected) {
-      foregroundBlack =
-          GUI.drawSelectionBackground(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4});
+      foregroundBlack = GUI.drawSelectionBackground(renderer, itemBounds);
       renderer.fillRect(cover.x, cover.y, cover.width, cover.height, false);
+    } else if (incrementalFrame) {
+      renderer.fillRect(itemBounds.x, itemBounds.y, itemBounds.width, itemBounds.height, false);
     }
+
+    WeReadStore::ShelfRecord book;
+    if (!readShelf(index, book)) return;
 
     const bool coverDrawn = drawCachedCover(renderer, WeReadStore::bookDirectory(book.bookId), cover);
     renderer.drawRect(cover.x, cover.y, cover.width, cover.height);
@@ -1799,6 +1820,13 @@ void WeReadActivity::drawShelfGrid(const Rect& content) {
     const int titleWidth = renderer.getTextAdvanceX(SMALL_FONT_ID, title.c_str(), EpdFontFamily::REGULAR);
     renderer.drawText(SMALL_FONT_ID, cover.x + std::max(0, (cover.width - titleWidth) / 2),
                       cover.y + cover.height + layout.titleGap, title.c_str(), foregroundBlack);
+  };
+
+  if (incrementalFrame) {
+    drawItem(frameSelection, false);
+    drawItem(selectedIndex, true);
+  } else {
+    for (int index = pageStart; index < pageEnd; ++index) drawItem(index, index == selectedIndex);
   }
 
   GUI.drawSideScrollBar(renderer, content, count, pageStart, layout.itemsPerPage);
@@ -1982,9 +2010,17 @@ void WeReadActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const State state = state_.load();
+  const int shelfSelection = shelfSelected_.load();
   const Rect content = state == State::Disclaimer ? disclaimerContentBounds() : contentBounds();
+  const int shelfItems = state == State::Shelf && shelfCount_ > 0 ? shelfItemsPerPage() : 0;
+  const int shelfFrameSelection = shelfFrameSelection_;
+  const int shelfFrameItems = shelfFrameItemsPerPage_;
+  const bool shelfFrameInvalidated = state == State::Shelf && shelfFrameInvalidated_.exchange(false);
+  const bool incrementalShelfFrame =
+      state == State::Shelf && !shelfFrameInvalidated &&
+      canIncrementShelfFrame(shelfFrameSelection, shelfFrameItems, shelfSelection, shelfItems);
 
-  renderer.clearScreen();
+  if (!incrementalShelfFrame) renderer.clearScreen();
   const char* header = tr(STR_WEREAD_TITLE);
   switch (state) {
     case State::Disclaimer:
@@ -2030,7 +2066,7 @@ void WeReadActivity::render(RenderLock&&) {
       if (shelfCount_ == 0) {
         GUI.drawPopup(renderer, tr(STR_WEREAD_SHELF_EMPTY));
       } else {
-        drawShelfGrid(content);
+        drawShelfGrid(content, shelfSelection, incrementalShelfFrame ? shelfFrameSelection : kNoShelfSelection);
       }
       break;
     case State::Detail:
@@ -2226,6 +2262,29 @@ void WeReadActivity::render(RenderLock&&) {
   }
   const auto labels = mappedInput.mapLabels(back, confirm, previous, next);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (state == State::Shelf) {
+    if (shelfFrameInvalidated_.load() || state_.load() != State::Shelf) {
+      shelfFrameSelection_ = kNoShelfSelection;
+      shelfFrameItemsPerPage_ = 0;
+      requestUpdate(true);
+      return;
+    }
+    if (shelfCount_ > 0) {
+      // The framebuffer contains this snapshot even when the stale panel update below is skipped.
+      shelfFrameSelection_ = shelfSelection;
+      shelfFrameItemsPerPage_ = shelfItems;
+      if (shelfSelected_.load() != shelfSelection) {
+        requestUpdate(true);
+        return;
+      }
+    } else {
+      shelfFrameSelection_ = kNoShelfSelection;
+      shelfFrameItemsPerPage_ = 0;
+    }
+  } else {
+    shelfFrameSelection_ = kNoShelfSelection;
+    shelfFrameItemsPerPage_ = 0;
+  }
   renderer.displayBuffer();
 }
 
