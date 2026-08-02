@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>字体管理 - CrossMux</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --font-color: #292524;
+        --bg: #f7f4ef;
+        --title-color: #292524;
+        --card-bg: #fffdf9;
+        --label-color: #78716c;
+        --border-color: #e7e1d8;
+        --accent-color: #a8502f;
+        --accent-hover-color: #883f27;
+        --danger-color: #b4483e;
+        --danger-hover: #923a32;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --font-color: #fafaf9;
+          --bg: #1c1917;
+          --title-color: #fafaf9;
+          --card-bg: #292524;
+          --label-color: #d6d3d1;
+          --border-color: #44403c;
+          --accent-color: #d59475;
+          --accent-hover-color: #e6bba4;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        max-width: 960px;
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 0 12px 24px;
+        overflow-x: hidden;
+        background: var(--bg);
+        color: var(--font-color);
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      h2, h3 { font-family: "Songti SC", STSong, "Noto Serif CJK SC", serif; }
+      h2 { margin-top: 0; color: var(--title-color); font-size: 1.15rem; }
+      h3 { margin: 0 0 8px; }
+      .card {
+        margin: 10px 0;
+        padding: 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        background: var(--card-bg);
+      }
+      .nav-links {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+        margin: 0 -12px 12px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg);
+      }
+      .nav-links a {
+        min-width: 0;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 4px;
+        border-radius: 8px;
+        color: var(--font-color);
+        font-size: 0.92rem;
+        font-weight: 650;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .nav-links a.active { background: var(--accent-color); color: #fff; }
+      .nav-links a:not(.active):hover { background: var(--accent-hover-color); color: #fff; }
+      .family {
+        border-bottom: 1px solid var(--border-color);
+        padding: 12px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .family:last-child { border-bottom: none; }
+      .family-info { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+      .family-meta { color: var(--label-color); font-size: 0.9em; }
+      .btn {
+        min-height: 44px;
+        padding: 8px 18px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9em;
+        font-weight: 650;
+      }
+      .btn-danger {
+        background: var(--danger-color);
+        color: white;
+      }
+      .btn-danger:hover { background: var(--danger-hover); }
+      .btn-primary {
+        background: var(--accent-color);
+        color: white;
+      }
+      .btn-primary:hover { background: var(--accent-hover-color); }
+      .upload-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+      }
+      .upload-form input[type="text"] {
+        padding: 6px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--font-color);
+      }
+      .upload-form input[type="file"] { width: 100%; min-width: 0; min-height: 44px; }
+      .upload-form .btn { width: 100%; }
+      #status {
+        margin-top: 10px;
+        padding: 8px;
+        border-radius: 4px;
+        display: none;
+      }
+      .status-ok { background: #d4edda; color: #155724; display: block !important; }
+      .status-err { background: #f8d7da; color: #721c24; display: block !important; }
+      .empty { color: var(--label-color); text-align: center; padding: 20px; }
+      @media (min-width: 700px) {
+        body { padding: 0 20px 32px; }
+        .nav-links { margin: 0 -20px 20px; padding: 10px 20px; }
+        .card { margin: 15px 0; padding: 20px; border-radius: 14px; }
+        .upload-form { flex-direction: row; align-items: center; }
+        .upload-form input[type="file"] { width: auto; min-width: 200px; }
+        .upload-form .btn { width: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="/">主页</a>
+      <a href="/files">文件</a>
+      <a href="/settings">设置</a>
+      <a href="/fonts" class="active" aria-current="page">字体</a>
+    </nav>
+
+    <div class="card">
+      <h2>已安装字体</h2>
+      <div id="families"><p class="empty">正在读取…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>上传字体</h2>
+      <form class="upload-form" id="uploadForm">
+        <input type="file" id="fontFiles" webkitdirectory directory multiple required />
+        <button type="submit" class="btn btn-primary">上传</button>
+      </form>
+      <p id="pickedInfo" class="family-meta" style="margin: 8px 0 0;"></p>
+      <div id="status"></div>
+    </div>
+
+  <script>
+    function formatSize(bytes) {
+      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+      if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return bytes + ' B';
+    }
+
+    async function loadFonts() {
+      const el = document.getElementById('families');
+      try {
+        const res = await fetch('/api/fonts');
+        const data = await res.json();
+        // Build rows with DOM APIs and textContent so on-device family names
+        // (which can contain arbitrary characters) cannot break markup or
+        // execute script via innerHTML / inline onclick interpolation.
+        el.replaceChildren();
+        if (!data.families || data.families.length === 0) {
+          const p = document.createElement('p');
+          p.className = 'empty';
+          p.textContent = '尚未安装自定义字体';
+          el.appendChild(p);
+          return;
+        }
+        for (const f of data.families) {
+          const row = document.createElement('div');
+          row.className = 'family';
+
+          const info = document.createElement('div');
+          info.className = 'family-info';
+          const h3 = document.createElement('h3');
+          h3.textContent = f.name;
+          info.appendChild(h3);
+          const meta = document.createElement('span');
+          meta.className = 'family-meta';
+          const sizes = (f.sizes || []).join(', ');
+          const filesSizes = (f.files || []).map(fi => formatSize(fi.size)).join(' + ');
+          meta.textContent = sizes + 'pt · ' + filesSizes;
+          info.appendChild(meta);
+
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-danger';
+          btn.textContent = '删除';
+          // Capture name in the closure rather than interpolating into onclick.
+          const familyName = f.name;
+          btn.addEventListener('click', () => deleteFamily(familyName));
+
+          row.appendChild(info);
+          row.appendChild(btn);
+          el.appendChild(row);
+        }
+      } catch (e) {
+        el.replaceChildren();
+        const p = document.createElement('p');
+        p.className = 'empty';
+        p.textContent = '无法读取字体列表';
+        el.appendChild(p);
+      }
+    }
+
+    async function deleteFamily(name) {
+      if (!confirm('确定删除字体家族“' + name + '”吗？')) return;
+      const status = document.getElementById('status');
+      status.className = '';
+      status.style.display = 'block';
+      status.textContent = '正在删除“' + name + '”…';
+      try {
+        const res = await fetch('/api/fonts/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({family: name})
+        });
+        if (res.ok) {
+          status.className = 'status-ok';
+          status.textContent = '已删除“' + name + '”。';
+        } else {
+          status.className = 'status-err';
+          status.textContent = '删除“' + name + '”失败。';
+        }
+      } catch (err) {
+        status.className = 'status-err';
+        status.textContent = '删除出错：' + err.message;
+      }
+      await loadFonts();
+    }
+
+    // Derive family name from a .cpfont filename: take everything before the
+    // last '-' or '_' (that separator precedes the size suffix, e.g. Bookerly_12.cpfont).
+    function familyFromFilename(name) {
+      const stem = name.replace(/\.cpfont$/i, '');
+      const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
+      return cut > 0 ? stem.slice(0, cut) : stem;
+    }
+
+    // Sanitize to match firmware's [A-Za-z0-9_-]+ pattern.
+    function sanitizeFamily(raw) {
+      return raw.replace(/[^A-Za-z0-9_-]/g, '_');
+    }
+
+    function cpfontFilesOnly(fileList) {
+      return Array.from(fileList).filter(f => /\.cpfont$/i.test(f.name));
+    }
+
+    document.getElementById('fontFiles').addEventListener('change', function() {
+      const info = document.getElementById('pickedInfo');
+      const files = cpfontFilesOnly(this.files);
+      if (files.length === 0) {
+        info.textContent = '所选文件夹中没有 .cpfont 文件。';
+        return;
+      }
+      const family = sanitizeFamily(familyFromFilename(files[0].name));
+      info.textContent = files.length + ' 个文件 → 字体家族“' + family + '”';
+    });
+
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const status = document.getElementById('status');
+      const files = cpfontFilesOnly(document.getElementById('fontFiles').files);
+      if (files.length === 0) {
+        status.className = 'status-err';
+        status.style.display = 'block';
+        status.textContent = '尚未选择 .cpfont 文件。';
+        return;
+      }
+
+      // A directory picker may include files from multiple family subfolders.
+      // Reject that up front — otherwise files[0]'s family is silently reused
+      // for every upload, corrupting the install layout.
+      const families = [...new Set(files.map(f => sanitizeFamily(familyFromFilename(f.name))))];
+      if (families.length !== 1) {
+        status.className = 'status-err';
+        status.style.display = 'block';
+        status.textContent = '请只选择同一个字体家族的文件。';
+        return;
+      }
+      const family = families[0];
+
+      status.className = '';
+      status.style.display = 'block';
+
+      let uploaded = 0;
+      for (const file of files) {
+        status.textContent = '正在上传 ' + (uploaded + 1) + '/' + files.length + '：' + file.name;
+        const formData = new FormData();
+        formData.append('family', family);
+        formData.append('file', file, file.name);
+        try {
+          const res = await fetch('/api/fonts/upload', { method: 'POST', body: formData });
+          const data = await res.json();
+          if (!data.ok) {
+            status.className = 'status-err';
+            status.textContent = file.name + ' 上传失败：' + (data.error || '未知错误');
+            await loadFonts();
+            return;
+          }
+        } catch (err) {
+          status.className = 'status-err';
+          status.textContent = file.name + ' 上传出错：' + err.message;
+          await loadFonts();
+          return;
+        }
+        uploaded++;
+      }
+
+      status.className = 'status-ok';
+      status.textContent = '已将 ' + uploaded + ' 个文件上传到字体家族“' + family + '”。';
+      await loadFonts();
+    });
+
+    loadFonts();
+  </script>
+  </body>
+</html>

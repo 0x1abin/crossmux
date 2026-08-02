@@ -19,10 +19,17 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
-#include "html/FilesPageHtml.generated.h"
-#include "html/FontsPageHtml.generated.h"
-#include "html/HomePageHtml.generated.h"
-#include "html/SettingsPageHtml.generated.h"
+#ifdef ENABLE_CHINESE_VERSION
+#include "html/zh-CN/FilesPageHtml.generated.h"
+#include "html/zh-CN/FontsPageHtml.generated.h"
+#include "html/zh-CN/HomePageHtml.generated.h"
+#include "html/zh-CN/SettingsPageHtml.generated.h"
+#else
+#include "html/en/FilesPageHtml.generated.h"
+#include "html/en/FontsPageHtml.generated.h"
+#include "html/en/HomePageHtml.generated.h"
+#include "html/en/SettingsPageHtml.generated.h"
+#endif
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
