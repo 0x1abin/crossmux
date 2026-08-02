@@ -59,7 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      models: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -74,14 +73,6 @@ jobs:
       - name: Extract short SHA
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Generate OTA summary
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          STABLE_TAG=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
-          python3 scripts/generate_ota_summary.py --base "$STABLE_TAG" --output ota-summary.md
-
       - name: Build nightly release notes
         run: |
           {
@@ -89,10 +80,6 @@ jobs:
             printf '%s\n' '- `firmware.bin` — international'
             printf '%s\n' '- `firmware-cn.bin` — Chinese (中文)'
           } > nightly-body.md
-          if [ -s ota-summary.md ]; then
-            printf '\n' >> nightly-body.md
-            cat ota-summary.md >> nightly-body.md
-          fi
 
       # Roll the single `nightly` release/tag forward to the current commit.
       - name: Remove previous nightly release

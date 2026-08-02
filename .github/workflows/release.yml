@@ -60,7 +60,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      models: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,13 +71,14 @@ jobs:
           name: release-build
           path: .
 
-      - name: Generate OTA summary
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Read OTA summary from tag
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD^ 2>/dev/null || true)
-          python3 scripts/generate_ota_summary.py --base "$PREV_TAG" --output ota-summary.md
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
+            git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > ota-tag-message.txt
+            python3 scripts/generate_ota_summary.py --input ota-tag-message.txt --output ota-summary.md
+          else
+            echo "::notice::OTA summary omitted: release tag is not annotated"
+          fi
 
       # Prefer curated notes for a named release. When none are checked in,
       # build a complete commit-level changelog. GitHub's built-in
