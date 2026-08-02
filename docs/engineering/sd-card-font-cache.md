@@ -138,14 +138,19 @@ after the new firmware is confirmed.
 
 The hidden `sdFontFlashPreload` setting stores the user's preference:
 
-- Confirming an SD reader family with “Preload to internal Flash?” set to Yes
-  copies that family and point size immediately.
-- Changing the point size while the preference is enabled replaces the cache.
+- Font and point-size changes in Text Settings load only the data needed for
+  preview from SD; they do not rebuild the cache.
+- Leaving Text Settings normally by Back or Home enables acceleration for an
+  SD font and caches only the final family and nearest installed point size.
+  A matching cache is reused without rewriting Flash. Selecting a built-in
+  font disables the preference and exits without a cache write.
 - A newly installed OTA image automatically rebuilds once, after successful
   firmware confirmation, when the selected SD font exists and the cache is
   invalid.
 - An ordinary boot does not retry a failed post-OTA rebuild. Reconfirming the
-  font or changing its point size provides the next explicit retry.
+  final font by normally leaving Text Settings provides the next explicit
+  retry. Sleep, power loss, and forced activity destruction do not start a
+  write.
 
 Manual preloads and post-OTA rebuilds share the same storage-neutral
 preprocessing page. It shows the selected family and physical point size,
@@ -155,9 +160,10 @@ OTA, copying, or verification.
 Internally, copying still occupies total progress 0-50% and read-back
 verification occupies 50-100%. The page uses fast refreshes at the pass
 transition and 10% increments. Both entry points physically complete the
-verified 100% frame and the Ready page. Manual preloads then return to Text
-Settings; post-OTA rebuilds continue to Home without clearing the last-open
-book or its reading position.
+verified 100% frame and the Ready page. Text Settings reloads the final font
+afterward so a reader that opened the screen can resume rendering immediately;
+post-OTA rebuilds continue to Home without clearing the last-open book or its
+reading position.
 
 Automatic sleep and cancellation are disabled during the operation. Failures
 are grouped as source too large, OOM, SD read, Flash erase/write, or

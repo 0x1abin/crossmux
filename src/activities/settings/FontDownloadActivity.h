@@ -61,9 +61,13 @@ class FontDownloadActivity : public Activity {
     LOADING_MANIFEST,
     FAMILY_LIST,
     DOWNLOADING,
+    SELECTING_FONT,
     COMPLETE,
     ERROR,
   };
+
+  enum class DownloadOperation : uint8_t { None, Single, DownloadAll, UpdateAll };
+  enum class DownloadResult : uint8_t { Success, Cancelled, Failed };
 
   struct ManifestFile {
     std::string name;
@@ -100,13 +104,19 @@ class FontDownloadActivity : public Activity {
   std::string errorMessage_;
   bool cancelRequested_ = false;
   bool waitForConfirmRelease_ = false;
+  DownloadOperation operation_ = DownloadOperation::None;
+  bool selectionUpdated_ = false;
+  bool accelerationCompleted_ = false;
 
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();
-  void downloadFamily(ManifestFamily& family);
+  DownloadResult downloadFamily(ManifestFamily& family);
+  void downloadSingle(int familyIndex);
   void downloadAll();
   void updateAll();
+  void retryDownloadOperation();
+  void selectDownloadedFontAndPreview(const char* familyName);
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);
   bool showDownloadAllRow() const;
   bool showUpdateAllRow() const;

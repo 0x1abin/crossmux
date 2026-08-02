@@ -255,7 +255,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontButtonLeft = FRONT_HW_LEFT;
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
   // Reader font settings
+#ifdef ENABLE_CHINESE_VERSION
+  uint8_t fontFamily = NOTOSANS;
+#else
   uint8_t fontFamily = NOTOSERIF;
+#endif
   // Point size of the reader font. Only sizes the active family actually ships
   // are selectable; SdCardFontSystem::ensureLoaded() snaps this to the nearest
   // available size (and persists the snap) whenever the family changes.

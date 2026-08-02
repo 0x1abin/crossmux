@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 
+#include <cstring>
 #include <iterator>
 
 #include "CrossPointSettings.h"
@@ -40,6 +41,7 @@ constexpr UiFontSize kUiFontSizes[] = {
 
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   registry_.discover();
+  adoptCompleteChineseNotoSans();
 
   // Register this system as the SD font ID resolver in settings.
   // Uses a static trampoline since CrossPointSettings stores a plain function pointer.
@@ -78,6 +80,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache)
   if (registryWasDirty) {
     LOG_DBG("SDFS", "Registry dirty — re-discovering fonts");
     registry_.discover();
+    adoptCompleteChineseNotoSans();
   }
 
   const char* wantedFamily = SETTINGS.sdFontFamilyName;
@@ -138,6 +141,24 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache)
 }
 
 void SdCardFontSystem::releaseLoadedFont(GfxRenderer& renderer) { manager_.unloadAll(renderer); }
+
+bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
+#ifdef ENABLE_CHINESE_VERSION
+  if (SETTINGS.sdFontFamilyName[0] != '\0' || !registry_.findFamily(COMPLETE_CHINESE_NOTO_SANS_FAMILY)) return false;
+
+  strncpy(SETTINGS.sdFontFamilyName, COMPLETE_CHINESE_NOTO_SANS_FAMILY, sizeof(SETTINGS.sdFontFamilyName) - 1);
+  SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+  SETTINGS.fontFamily = CrossPointSettings::NOTOSANS;
+  SETTINGS.sdFontFlashPreload = 0;
+  if (!SETTINGS.saveToFile()) {
+    LOG_ERR("SDFS", "Failed to save automatic NotoSansSC selection");
+  }
+  LOG_INF("SDFS", "Using installed NotoSansSC in place of the Chinese built-in font");
+  return true;
+#else
+  return false;
+#endif
+}
 
 void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
 #ifdef ENABLE_CHINESE_VERSION
