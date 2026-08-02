@@ -398,6 +398,18 @@ number. Records produced by older firmware used only the low 16 bits and remain
 compatible. When progress is newer than the last partial-index checkpoint, at
 most the next 31 pages are recalculated before rendering resumes.
 
+`chapters.bin` version 1 is a little-endian, fixed-record chapter index. Its
+16-byte header stores, in order: `uint32 magic` (`TXTC`, `0x43545854`), `uint32
+fileSize`, `uint32 chapterCount`, `uint16 recordSize` (`196`), `uint8 version`
+(`1`), and `uint8 encoding` (`0` unknown/ASCII, `1` UTF-8, `2` GBK). Each record
+contains a `uint32` source-file byte offset followed by a NUL-terminated
+`char title[192]` in UTF-8. The file is built on first chapter-menu use through
+`chapters.bin.tmp`, flushed, and swapped into place with a recoverable `.bak`.
+A wrong header, unsupported encoding, changed file size, record-size mismatch,
+truncated payload, invalid offset, or unterminated title rejects the cache.
+Chapter offsets are independent of pagination; selecting one extends the lazy
+page index only until that source offset is covered.
+
 ## WeRead cache
 
 The Simplified Chinese build keeps WeRead's private data below `/.crosspoint/weread/`.

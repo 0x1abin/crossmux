@@ -36,3 +36,16 @@ TEST(TxtPageIndex, BoundsRecoveryAndAcceptsTheCompleteV4Cache) {
   EXPECT_FALSE(shouldCheckpoint(33, false));
   EXPECT_TRUE(shouldCheckpoint(1, true));
 }
+
+TEST(TxtPageIndex, MapsSourceOffsetsToKnownPages) {
+  using namespace txt_page_index;
+
+  const std::vector<size_t> offsets{0, 100, 240, 400};
+  EXPECT_EQ(pageForOffset(offsets, 0), 0U);
+  EXPECT_EQ(pageForOffset(offsets, 99), 0U);
+  EXPECT_EQ(pageForOffset(offsets, 100), 1U);
+  EXPECT_EQ(pageForOffset(offsets, 399), 2U);
+  EXPECT_EQ(pageForOffset(offsets, 400), 3U);
+  EXPECT_EQ(pageForOffset(offsets, 999), 3U);
+  EXPECT_EQ(pageForOffset({}, 20), 0U);
+}

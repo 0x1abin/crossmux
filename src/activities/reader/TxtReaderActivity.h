@@ -52,6 +52,8 @@ class TxtReaderActivity final : public Activity {
   bool loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset);
   bool advancePageIndex(size_t nextOffset);
   bool extendIndexToPage(size_t targetPage);
+  bool extendIndexToOffset(size_t targetOffset);
+  void openChapterSelection();
   void updateTotalPages();
   int getProgressPercent() const;
   bool loadPageIndexCache();

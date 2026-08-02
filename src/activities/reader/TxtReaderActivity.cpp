@@ -23,6 +23,7 @@
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
+#include "TxtReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/AchievementPopupUtils.h"
@@ -96,6 +97,12 @@ void TxtReaderActivity::onExit() {
 void TxtReaderActivity::loop() {
   READING_STATS.tickActiveSession();
 
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || ReaderUtils::isTouchMenuGesture(mappedInput)) {
+    READING_STATS.noteActivity();
+    openChapterSelection();
+    return;
+  }
+
   if (ReaderUtils::handleBackNavigation(mappedInput, activityManager, txt ? txt->getPath().c_str() : "",
                                         {this, [](void* ctx) { static_cast<TxtReaderActivity*>(ctx)->onGoHome(); }})) {
     return;
@@ -133,6 +140,55 @@ void TxtReaderActivity::loop() {
   } else if (reachedEnd) {
     onGoHome();
   }
+}
+
+void TxtReaderActivity::openChapterSelection() {
+  if (!txt || !pageBuffer || pageOffsets.empty()) return;
+
+  uint32_t chapterCount = 0;
+  bool hasCachedIndex = false;
+  {
+    HalFile chapterFile;
+    hasCachedIndex = txt->openChapterIndex(chapterFile, textEncoding, chapterCount);
+  }
+  if (!hasCachedIndex) {
+    RenderLock lock(*this);
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
+    pagesUntilFullRefresh = 1;
+    if (!txt->buildChapterIndex(textEncoding, pageBuffer.get(), CHUNK_SIZE + 1, chapterCount)) {
+      LOG_ERR("TRS", "Failed to build TXT chapter index");
+      renderer.clearScreen();
+      GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
+      return;
+    }
+  }
+
+  const uint32_t currentOffset = static_cast<uint32_t>(pageOffsets[currentPage]);
+  // The selector outlives this call and therefore cannot live on the stack.
+  auto selector = makeUniqueNoThrow<TxtReaderChapterSelectionActivity>(renderer, mappedInput, *txt, currentOffset);
+  if (!selector) {
+    LOG_ERR("TRS", "OOM: TxtReaderChapterSelectionActivity (%u bytes)",
+            static_cast<unsigned>(sizeof(TxtReaderChapterSelectionActivity)));
+    requestUpdate();
+    return;
+  }
+  startActivityForResult(std::move(selector), [this](const ActivityResult& result) {
+    READING_STATS.resumeSession();
+    const auto* selected = std::get_if<TxtOffsetResult>(&result.data);
+    if (result.isCancelled || !selected) return;
+
+    RenderLock lock(*this);
+    if (!indexComplete && !pageOffsets.empty() && pageOffsets.back() < selected->sourceOffset) {
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
+      pagesUntilFullRefresh = 1;
+    }
+    if (!extendIndexToOffset(selected->sourceOffset)) {
+      LOG_ERR("TRS", "Failed to extend page index to TXT offset %u", selected->sourceOffset);
+      return;
+    }
+    currentPage = static_cast<int>(txt_page_index::pageForOffset(pageOffsets, selected->sourceOffset));
+    currentPageEndOffset = pageOffsets[currentPage];
+  });
 }
 
 void TxtReaderActivity::initializeReader() {
@@ -415,6 +471,16 @@ bool TxtReaderActivity::extendIndexToPage(const size_t targetPage) {
     if (!advancePageIndex(nextOffset)) return false;
   }
   return targetPage < pageOffsets.size();
+}
+
+bool TxtReaderActivity::extendIndexToOffset(const size_t targetOffset) {
+  if (pageOffsets.empty() || targetOffset >= txt->getFileSize()) return false;
+  while (!indexComplete && pageOffsets.back() < targetOffset) {
+    const size_t offset = pageOffsets.back();
+    size_t nextOffset = offset;
+    if (!loadPageAtOffset(offset, currentPageLines, nextOffset) || !advancePageIndex(nextOffset)) return false;
+  }
+  return true;
 }
 
 bool TxtReaderActivity::advancePageIndex(const size_t nextOffset) {

@@ -71,4 +71,10 @@ inline size_t recoveryTargetPage(const size_t savedPage, const size_t knownPageC
   return std::min(savedPage, lastKnownPage + recoverablePages);
 }
 
+inline size_t pageForOffset(const std::vector<size_t>& offsets, const size_t sourceOffset) {
+  if (offsets.empty()) return 0;
+  const auto nextPage = std::upper_bound(offsets.begin(), offsets.end(), sourceOffset);
+  return nextPage == offsets.begin() ? 0 : static_cast<size_t>(nextPage - offsets.begin() - 1);
+}
+
 }  // namespace txt_page_index
