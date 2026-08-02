@@ -10,6 +10,7 @@
 #include <TxtPageIndex.h>
 #include <Utf8.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <limits>
@@ -205,7 +206,7 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
 
   const size_t readLimit = textEncoding == txt_encoding::Encoding::Gbk ? GBK_RAW_CHUNK_SIZE : CHUNK_SIZE;
   size_t rawChunkSize = std::min(readLimit, fileSize - offset);
-  auto* const buffer = pageBuffer.get();
+  uint8_t* const buffer = pageBuffer.get();
 
   if (!txt->readContent(buffer, offset, rawChunkSize)) {
     return false;
@@ -785,7 +786,9 @@ bool TxtReaderActivity::savePageIndexCache() {
       return false;
     }
 
-    for (size_t offset : pageOffsets) {
+    // Cache offsets must be written in order and stop at the first failure.
+    // cppcheck-suppress useStlAlgorithm
+    for (const size_t offset : pageOffsets) {
       if (!writePodChecked(f, static_cast<uint32_t>(offset))) {
         LOG_ERR("TRS", "Short write saving page index offsets");
         return false;
