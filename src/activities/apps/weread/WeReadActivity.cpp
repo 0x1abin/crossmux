@@ -31,18 +31,17 @@ namespace {
 
 static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead workspace exceeds its fixed heap budget");
 
-enum class MenuAction : uint8_t { Shelf, Refresh, ClearCache, Logout };
+enum class ManageAction : uint8_t { Refresh, ClearCache, Logout };
 
-struct MenuEntry {
+struct ManageEntry {
   StrId title;
-  MenuAction action;
+  ManageAction action;
 };
 
-constexpr MenuEntry kMenuEntries[] = {
-    {StrId::STR_WEREAD_MENU_SHELF, MenuAction::Shelf},
-    {StrId::STR_WEREAD_MENU_REFRESH, MenuAction::Refresh},
-    {StrId::STR_WEREAD_MENU_CLEAR_CACHE, MenuAction::ClearCache},
-    {StrId::STR_WEREAD_MENU_LOGOUT, MenuAction::Logout},
+constexpr ManageEntry kManageEntries[] = {
+    {StrId::STR_WEREAD_MENU_REFRESH, ManageAction::Refresh},
+    {StrId::STR_WEREAD_MENU_CLEAR_CACHE, ManageAction::ClearCache},
+    {StrId::STR_WEREAD_MENU_LOGOUT, ManageAction::Logout},
 };
 
 constexpr StrId kDisclaimerParagraphs[] = {
@@ -76,7 +75,8 @@ constexpr StrId kPostProcessLongWaitLines[] = {
 constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerActions) / sizeof(kDisclaimerActions[0]));
 constexpr int kDisclaimerParagraphCount =
     static_cast<int>(sizeof(kDisclaimerParagraphs) / sizeof(kDisclaimerParagraphs[0]));
-constexpr int kMenuEntryCount = static_cast<int>(sizeof(kMenuEntries) / sizeof(kMenuEntries[0]));
+constexpr int kManageEntryCount = static_cast<int>(sizeof(kManageEntries) / sizeof(kManageEntries[0]));
+constexpr size_t kMainTabCount = 2;
 constexpr int kDetailCoverWidth = 96;
 constexpr int kDetailCoverHeight = 140;
 constexpr int kPortraitShelfColumns = 3;
@@ -432,9 +432,17 @@ void WeReadActivity::onEnter() {
   }
   disclaimerSelected_ = 0;
   disclaimerSaveFailed_ = false;
-  menuSelected_ = 0;
+  manageSelected_ = 0;
   shelfSelected_.store(0);
   shelfFrameInvalidated_.store(true);
+  mainTab_.store(MainTab::Shelf);
+  mainFocus_.store(MainFocus::Content);
+  // drawTabBar requires a vector; reserve its fixed 16-byte ESP32-C3 payload
+  // once for the Activity lifetime instead of allocating in the render path.
+  mainTabs_.clear();
+  mainTabs_.reserve(kMainTabCount);
+  mainTabs_.push_back({tr(STR_WEREAD_TAB_SHELF), true});
+  mainTabs_.push_back({tr(STR_WEREAD_TAB_MANAGE), false});
   resetShelfCoverLoading();
   detailSelected_ = 0;
   introPage_ = 0;
@@ -463,8 +471,7 @@ void WeReadActivity::enterApp() {
   const bool loggedIn = WeReadStore::loadSession(session);
   session.clear();
   if (loggedIn) {
-    state_.store(State::Menu);
-    requestUpdate();
+    openShelf();
   } else {
     syncShelf();
   }
@@ -475,6 +482,7 @@ void WeReadActivity::onExit() {
   downloadRenderPending_.store(false);
   stageRenderPending_.store(false);
   if (shelfFile_.isOpen()) shelfFile_.close();
+  std::vector<TabInfo>().swap(mainTabs_);
   Activity::onExit();
 }
 
@@ -506,6 +514,14 @@ Rect WeReadActivity::contentBounds() const {
   const int contentY = safe.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentBottom = safe.y + safe.height - metrics.verticalSpacing;
   return Rect{safe.x, contentY, safe.width, std::max(0, contentBottom - contentY)};
+}
+
+Rect WeReadActivity::mainContentBounds() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  Rect content = contentBounds();
+  content.y += metrics.tabBarHeight;
+  content.height = std::max(0, content.height - metrics.tabBarHeight);
+  return content;
 }
 
 Rect WeReadActivity::disclaimerSafeBounds() const {
@@ -541,11 +557,12 @@ Rect WeReadActivity::disclaimerActionsBounds() const {
 
 int WeReadActivity::shelfItemsPerPage() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  return shelfGridLayout(renderer, contentBounds(), metrics.contentSidePadding, metrics.verticalSpacing).itemsPerPage;
+  return shelfGridLayout(renderer, mainContentBounds(), metrics.contentSidePadding, metrics.verticalSpacing)
+      .itemsPerPage;
 }
 
 void WeReadActivity::resetShelfCoverLoading() {
-  if (state_.load() == State::Shelf) operation_.reset();
+  if (state_.load() == State::Home) operation_.reset();
   shelfCoverPageStart_ = -1;
   shelfCoverCursor_ = 0;
   shelfCoverStopped_ = false;
@@ -841,7 +858,9 @@ void WeReadActivity::advanceJob() {
         case Job::Sync:
           refreshShelf();
           shelfCoverStopped_ = true;
-          state_.store(State::Shelf);
+          mainTab_.store(MainTab::Shelf);
+          mainFocus_.store(MainFocus::Content);
+          state_.store(State::Home);
           requestJobUpdate();
           return;
         case Job::Detail: {
@@ -859,12 +878,9 @@ void WeReadActivity::advanceJob() {
       }
       return;
     case WeReadClient::Operation::Event::Cancelled:
-      if (refreshShelf()) {
-        shelfCoverStopped_ = retryJob_ == Job::Sync;
-        state_.store(State::Shelf);
-      } else {
-        state_.store(State::Menu);
-      }
+      refreshShelf();
+      shelfCoverStopped_ = retryJob_ == Job::Sync;
+      state_.store(State::Home);
       requestJobUpdate();
       return;
     case WeReadClient::Operation::Event::Failed:
@@ -1109,7 +1125,9 @@ void WeReadActivity::handleDetailInput() {
     activateDetailSelection();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (state_.load() == State::DetailCoverLoading) operation_.reset();
-    state_.store(State::Shelf);
+    mainTab_.store(MainTab::Shelf);
+    mainFocus_.store(MainFocus::Content);
+    state_.store(State::Home);
     requestUpdate();
   }
 }
@@ -1218,7 +1236,7 @@ void WeReadActivity::openBook(const char* path) {
 
 void WeReadActivity::openShelf() {
   if (refreshShelf()) {
-    state_.store(State::Shelf);
+    state_.store(State::Home);
     requestUpdate();
     return;
   }
@@ -1354,44 +1372,109 @@ void WeReadActivity::performLogout() {
     requestUpdate();
     return;
   }
-  menuSelected_ = 0;
+  mainTab_.store(MainTab::Shelf);
+  mainFocus_.store(MainFocus::Content);
   syncShelf();
 }
 
-void WeReadActivity::handleMenuInput() {
-  buttonNavigator_.onNext([this] {
-    menuSelected_ = ButtonNavigator::nextIndex(menuSelected_, kMenuEntryCount);
+void WeReadActivity::selectMainTab(const MainTab tab) {
+  if (mainTab_.load() == tab) return;
+  resetShelfCoverLoading();
+  mainTab_.store(tab);
+  requestUpdate();
+}
+
+void WeReadActivity::handleMainTabInput() {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+    mainFocus_.store(MainFocus::Content);
     requestUpdate();
-  });
-  buttonNavigator_.onPrevious([this] {
-    menuSelected_ = ButtonNavigator::previousIndex(menuSelected_, kMenuEntryCount);
-    requestUpdate();
-  });
+    return;
+  }
+
+  const bool swapFrontDirections = mappedInput.isNavDirectionSwapped();
+  const auto previousButton =
+      swapFrontDirections ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
+  const auto nextButton = swapFrontDirections ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
+  if (!mappedInput.wasReleased(previousButton) && !mappedInput.wasReleased(nextButton)) return;
+
+  selectMainTab(mainTab_.load() == MainTab::Shelf ? MainTab::Manage : MainTab::Shelf);
+}
+
+void WeReadActivity::handleManageInput() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    switch (kMenuEntries[menuSelected_].action) {
-      case MenuAction::Shelf:
-        openShelf();
-        return;
-      case MenuAction::Refresh:
+    switch (kManageEntries[manageSelected_].action) {
+      case ManageAction::Refresh:
         syncShelf();
         return;
-      case MenuAction::ClearCache:
+      case ManageAction::ClearCache:
         promptClearCache();
         return;
-      case MenuAction::Logout:
+      case ManageAction::Logout:
         promptLogout();
         return;
     }
   }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+    if (manageSelected_ == 0) {
+      mainFocus_.store(MainFocus::Tabs);
+    } else {
+      --manageSelected_;
+    }
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+    manageSelected_ = ButtonNavigator::nextIndex(manageSelected_, kManageEntryCount);
+    requestUpdate();
+    return;
+  }
+
+  const bool swapFrontDirections = mappedInput.isNavDirectionSwapped();
+  const auto previousButton =
+      swapFrontDirections ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
+  const auto nextButton = swapFrontDirections ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
+  if (mappedInput.wasReleased(previousButton)) {
+    if (manageSelected_ == 0) {
+      mainFocus_.store(MainFocus::Tabs);
+    } else {
+      --manageSelected_;
+    }
+    requestUpdate();
+  } else if (mappedInput.wasReleased(nextButton)) {
+    manageSelected_ = ButtonNavigator::nextIndex(manageSelected_, kManageEntryCount);
+    requestUpdate();
+  }
+}
+
+void WeReadActivity::handleMainInput() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    resetShelfCoverLoading();
     activityManager.goToApps();
+    return;
+  }
+  if (mainFocus_.load() == MainFocus::Tabs) {
+    handleMainTabInput();
+    return;
+  }
+
+  switch (mainTab_.load()) {
+    case MainTab::Shelf:
+      handleShelfInput();
+      if (state_.load() == State::Home && mainTab_.load() == MainTab::Shelf) advanceShelfCovers();
+      return;
+    case MainTab::Manage:
+      handleManageInput();
+      return;
   }
 }
 
 void WeReadActivity::handleShelfInput() {
   const int count = static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX));
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto layout = shelfGridLayout(renderer, contentBounds(), metrics.contentSidePadding, metrics.verticalSpacing);
+  const auto layout =
+      shelfGridLayout(renderer, mainContentBounds(), metrics.contentSidePadding, metrics.verticalSpacing);
   const int itemsPerPage = layout.itemsPerPage;
   const int columns = layout.columns;
 
@@ -1412,8 +1495,13 @@ void WeReadActivity::handleShelfInput() {
       const auto direction = movingUp ? ShelfVerticalDirection::Up : ShelfVerticalDirection::Down;
       if (mappedInput.wasReleased(button)) {
         shelfSideGesture_ = ShelfSideGesture::Idle;
-        moveShelfSelection(shelfVerticalIndex(shelfSelected_.load(), count, columns, itemsPerPage, direction),
-                           itemsPerPage);
+        const int selected = shelfSelected_.load();
+        if (movingUp && selected < columns) {
+          mainFocus_.store(MainFocus::Tabs);
+          requestUpdate();
+          return;
+        }
+        moveShelfSelection(shelfVerticalIndex(selected, count, columns, itemsPerPage, direction), itemsPerPage);
         return;
       }
       if (mappedInput.isPressed(button) && mappedInput.getHeldTime() >= kShelfPageHoldMs) {
@@ -1448,10 +1536,6 @@ void WeReadActivity::handleShelfInput() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     resetShelfCoverLoading();
     activateSelected();
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    resetShelfCoverLoading();
-    state_.store(State::Menu);
-    requestUpdate();
   }
 }
 
@@ -1500,7 +1584,11 @@ void WeReadActivity::handleErrorInput() {
     }
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     operation_.reset();
-    state_.store(retryJob_ == Job::Sync ? State::Menu : State::Shelf);
+    if (retryJob_ != Job::Sync) {
+      mainTab_.store(MainTab::Shelf);
+      mainFocus_.store(MainFocus::Content);
+    }
+    state_.store(State::Home);
     requestJobUpdate();
   }
 }
@@ -1509,7 +1597,7 @@ void WeReadActivity::handleLogoutErrorInput() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     performLogout();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    state_.store(State::Menu);
+    state_.store(State::Home);
     requestUpdate();
   }
 }
@@ -1536,12 +1624,8 @@ void WeReadActivity::loop() {
     case State::Disclaimer:
       handleDisclaimerInput();
       return;
-    case State::Menu:
-      handleMenuInput();
-      return;
-    case State::Shelf:
-      handleShelfInput();
-      if (state_.load() == State::Shelf) advanceShelfCovers();
+    case State::Home:
+      handleMainInput();
       return;
     case State::Detail:
       handleDetailInput();
@@ -1564,7 +1648,7 @@ void WeReadActivity::loop() {
     case State::CacheCleared:
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
           mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-        state_.store(State::Menu);
+        state_.store(State::Home);
         requestUpdate();
       }
       return;
@@ -1572,7 +1656,7 @@ void WeReadActivity::loop() {
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
         performClearCache();
       } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-        state_.store(State::Menu);
+        state_.store(State::Home);
         requestUpdate();
       }
       return;
@@ -1775,7 +1859,8 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
   }
 }
 
-void WeReadActivity::drawShelfGrid(const Rect& content, const int selectedIndex, const int frameSelection) {
+void WeReadActivity::drawShelfGrid(const Rect& content, const int selectedIndex, const int frameSelection,
+                                   const bool contentFocused) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto layout = shelfGridLayout(renderer, content, metrics.contentSidePadding, metrics.verticalSpacing);
   const int count = static_cast<int>(std::min<uint32_t>(shelfCount_, INT32_MAX));
@@ -1799,8 +1884,9 @@ void WeReadActivity::drawShelfGrid(const Rect& content, const int selectedIndex,
     const int coverY = startY + row * (layout.itemHeight + layout.rowGap);
     const Rect cover{coverX, coverY, layout.coverWidth, layout.coverHeight};
     const Rect itemBounds{cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4};
+    const bool focused = selected && contentFocused;
     bool foregroundBlack = true;
-    if (selected) {
+    if (focused) {
       foregroundBlack = GUI.drawSelectionBackground(renderer, itemBounds);
       renderer.fillRect(cover.x, cover.y, cover.width, cover.height, false);
     } else if (incrementalFrame) {
@@ -2010,14 +2096,18 @@ void WeReadActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const State state = state_.load();
+  const MainTab mainTab = mainTab_.load();
+  const MainFocus mainFocus = mainFocus_.load();
   const int shelfSelection = shelfSelected_.load();
-  const Rect content = state == State::Disclaimer ? disclaimerContentBounds() : contentBounds();
-  const int shelfItems = state == State::Shelf && shelfCount_ > 0 ? shelfItemsPerPage() : 0;
+  const Rect content = state == State::Disclaimer ? disclaimerContentBounds()
+                                                  : (state == State::Home ? mainContentBounds() : contentBounds());
+  const bool showingShelf = state == State::Home && mainTab == MainTab::Shelf;
+  const int shelfItems = showingShelf && shelfCount_ > 0 ? shelfItemsPerPage() : 0;
   const int shelfFrameSelection = shelfFrameSelection_;
   const int shelfFrameItems = shelfFrameItemsPerPage_;
-  const bool shelfFrameInvalidated = state == State::Shelf && shelfFrameInvalidated_.exchange(false);
+  const bool shelfFrameInvalidated = showingShelf && shelfFrameInvalidated_.exchange(false);
   const bool incrementalShelfFrame =
-      state == State::Shelf && !shelfFrameInvalidated &&
+      showingShelf && !shelfFrameInvalidated &&
       canIncrementShelfFrame(shelfFrameSelection, shelfFrameItems, shelfSelection, shelfItems);
 
   if (!incrementalShelfFrame) renderer.clearScreen();
@@ -2026,9 +2116,8 @@ void WeReadActivity::render(RenderLock&&) {
     case State::Disclaimer:
       header = tr(STR_WEREAD_DISCLAIMER_TITLE);
       break;
-    case State::Shelf:
     case State::Downloading:
-      header = tr(STR_WEREAD_MENU_SHELF);
+      header = tr(STR_WEREAD_TAB_SHELF);
       break;
     case State::DetailLoading:
     case State::DetailCoverLoading:
@@ -2036,7 +2125,7 @@ void WeReadActivity::render(RenderLock&&) {
     case State::Introduction:
       header = tr(STR_WEREAD_BOOK_DETAIL);
       break;
-    case State::Menu:
+    case State::Home:
     case State::Connecting:
     case State::Qr:
     case State::LoginConfirmed:
@@ -2052,21 +2141,33 @@ void WeReadActivity::render(RenderLock&&) {
   }
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight}, header);
+  if (state == State::Home) {
+    mainTabs_[0].selected = mainTab == MainTab::Shelf;
+    mainTabs_[1].selected = mainTab == MainTab::Manage;
+    GUI.drawTabBar(renderer,
+                   Rect{safe.x, safe.y + metrics.topPadding + metrics.headerHeight, safe.width, metrics.tabBarHeight},
+                   mainTabs_, mainFocus == MainFocus::Tabs);
+  }
 
   switch (state) {
     case State::Disclaimer:
       drawDisclaimer(content);
       break;
-    case State::Menu:
-      GUI.drawButtonMenu(
-          renderer, content, kMenuEntryCount, menuSelected_,
-          [](const int index) { return std::string(I18N.get(kMenuEntries[index].title)); }, nullptr);
-      break;
-    case State::Shelf:
-      if (shelfCount_ == 0) {
-        GUI.drawPopup(renderer, tr(STR_WEREAD_SHELF_EMPTY));
-      } else {
-        drawShelfGrid(content, shelfSelection, incrementalShelfFrame ? shelfFrameSelection : kNoShelfSelection);
+    case State::Home:
+      switch (mainTab) {
+        case MainTab::Shelf:
+          if (shelfCount_ == 0) {
+            GUI.drawPopup(renderer, tr(STR_WEREAD_SHELF_EMPTY));
+          } else {
+            drawShelfGrid(content, shelfSelection, incrementalShelfFrame ? shelfFrameSelection : kNoShelfSelection,
+                          mainFocus == MainFocus::Content);
+          }
+          break;
+        case MainTab::Manage:
+          GUI.drawButtonMenu(
+              renderer, content, kManageEntryCount, mainFocus == MainFocus::Content ? manageSelected_ : -1,
+              [](const int index) { return std::string(I18N.get(kManageEntries[index].title)); }, nullptr);
+          break;
       }
       break;
     case State::Detail:
@@ -2211,17 +2312,29 @@ void WeReadActivity::render(RenderLock&&) {
       previous = tr(STR_DIR_LEFT);
       next = tr(STR_DIR_RIGHT);
       break;
-    case State::Menu:
+    case State::Home:
       back = tr(STR_BACK);
-      confirm = tr(STR_SELECT);
-      previous = tr(STR_DIR_UP);
-      next = tr(STR_DIR_DOWN);
-      break;
-    case State::Shelf:
-      back = tr(STR_BACK);
-      confirm = tr(STR_OPEN);
-      previous = tr(STR_DIR_LEFT);
-      next = tr(STR_DIR_RIGHT);
+      switch (mainFocus) {
+        case MainFocus::Tabs:
+          confirm = tr(STR_SELECT);
+          previous = tr(STR_DIR_LEFT);
+          next = tr(STR_DIR_RIGHT);
+          break;
+        case MainFocus::Content:
+          switch (mainTab) {
+            case MainTab::Shelf:
+              confirm = tr(STR_OPEN);
+              previous = tr(STR_DIR_LEFT);
+              next = tr(STR_DIR_RIGHT);
+              break;
+            case MainTab::Manage:
+              confirm = tr(STR_SELECT);
+              previous = tr(STR_DIR_UP);
+              next = tr(STR_DIR_DOWN);
+              break;
+          }
+          break;
+      }
       break;
     case State::Detail:
     case State::DetailCoverLoading:
@@ -2262,8 +2375,8 @@ void WeReadActivity::render(RenderLock&&) {
   }
   const auto labels = mappedInput.mapLabels(back, confirm, previous, next);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  if (state == State::Shelf) {
-    if (shelfFrameInvalidated_.load() || state_.load() != State::Shelf) {
+  if (showingShelf) {
+    if (shelfFrameInvalidated_.load()) {
       shelfFrameSelection_ = kNoShelfSelection;
       shelfFrameItemsPerPage_ = 0;
       requestUpdate(true);
@@ -2285,10 +2398,15 @@ void WeReadActivity::render(RenderLock&&) {
     shelfFrameSelection_ = kNoShelfSelection;
     shelfFrameItemsPerPage_ = 0;
   }
+  if (state == State::Home &&
+      (state_.load() != State::Home || mainTab_.load() != mainTab || mainFocus_.load() != mainFocus)) {
+    requestUpdate(true);
+    return;
+  }
   renderer.displayBuffer();
 }
 
 bool WeReadActivity::preventAutoSleep() {
   const State state = state_.load();
-  return isBusy(state) || (state == State::Shelf && operation_.active());
+  return isBusy(state) || (state == State::Home && operation_.active());
 }
