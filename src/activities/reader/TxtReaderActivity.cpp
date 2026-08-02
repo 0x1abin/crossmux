@@ -786,13 +786,13 @@ bool TxtReaderActivity::savePageIndexCache() {
       return false;
     }
 
-    // Cache offsets must be written in order and stop at the first failure.
-    // cppcheck-suppress useStlAlgorithm
-    for (const size_t offset : pageOffsets) {
-      if (!writePodChecked(f, static_cast<uint32_t>(offset))) {
-        LOG_ERR("TRS", "Short write saving page index offsets");
-        return false;
-      }
+    // The sequential overload preserves offset order and stops at the first failed write.
+    const bool shortWrite = std::any_of(pageOffsets.begin(), pageOffsets.end(), [&f](const size_t offset) {
+      return !writePodChecked(f, static_cast<uint32_t>(offset));
+    });
+    if (shortWrite) {
+      LOG_ERR("TRS", "Short write saving page index offsets");
+      return false;
     }
     f.flush();
   }
