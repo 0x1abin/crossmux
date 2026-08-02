@@ -112,6 +112,8 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   recentsLoading = true;
   bool showingLoading = false;
   Rect popupRect;
+  const bool useFullCover =
+      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
   int progress = 0;
   for (RecentBook& book : recentBooks) {
@@ -119,18 +121,35 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     const bool isEpub = FsHelpers::hasEpubExtension(book.path);
     const bool isXtc = FsHelpers::hasXtcExtension(book.path);
 
-    // Recover entries whose thumbnail template was cleared by an earlier
-    // transient generation failure.
-    if (book.coverBmpPath.empty()) {
-      if (isEpub) {
-        book.coverBmpPath = Epub(book.path, "/.crosspoint").getThumbBmpPath();
-      } else if (isXtc) {
-        book.coverBmpPath = Xtc(book.path, "/.crosspoint").getThumbBmpPath();
-      } else {
-        continue;
+    // Keep the persisted path theme-neutral; Carousel redirects only this activity's copy.
+    if (isEpub) {
+      const Epub epub(book.path, "/.crosspoint");
+      if (useFullCover) {
+        const std::string thumbPath = epub.getThumbBmpPath();
+        if (book.coverBmpPath != thumbPath) {
+          RECENT_BOOKS.updateBook(book.path, book.title, book.author, thumbPath);
+        }
+        book.coverBmpPath = epub.getCoverBmpPath();
+      } else if (book.coverBmpPath.empty()) {
+        book.coverBmpPath = epub.getThumbBmpPath();
+        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.coverBmpPath);
       }
-      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.coverBmpPath);
+    } else if (isXtc) {
+      const Xtc xtc(book.path, "/.crosspoint");
+      if (useFullCover) {
+        const std::string thumbPath = xtc.getThumbBmpPath();
+        if (book.coverBmpPath != thumbPath) {
+          RECENT_BOOKS.updateBook(book.path, book.title, book.author, thumbPath);
+        }
+        book.coverBmpPath = xtc.getCoverBmpPath();
+      } else if (book.coverBmpPath.empty()) {
+        book.coverBmpPath = xtc.getThumbBmpPath();
+        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.coverBmpPath);
+      }
+    } else {
+      continue;
     }
+    if (book.coverBmpPath.empty()) continue;
 
     const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
     if (Storage.exists(coverPath.c_str())) {
@@ -143,7 +162,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         }
         if (cachedCover.fileSize() == 0) {
           // EPUB uses an empty thumbnail as a persistent "no supported cover" marker.
-          if (isEpub) continue;
+          if (isEpub && !useFullCover) continue;
           invalidCache = true;
         } else {
           Bitmap bitmap(cachedCover);
@@ -172,9 +191,12 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       }
       GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
-      // Keep the template on failure so transient OOM/SD errors can retry.
-      // Epub writes an empty marker when the book has no supported cover.
-      epub.generateThumbBmp(coverHeight);
+      if (useFullCover) {
+        epub.generateCoverBmp();
+      } else {
+        // Epub writes an empty thumbnail as a persistent "no supported cover" marker.
+        epub.generateThumbBmp(coverHeight);
+      }
     } else if (isXtc) {
       Xtc xtc(book.path, "/.crosspoint");
       if (!xtc.load()) {
@@ -187,8 +209,9 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
       }
       GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
-      if (!xtc.generateThumbBmp(coverHeight)) {
-        LOG_ERR("HOME", "Failed to generate XTC thumbnail: %s", book.path.c_str());
+      const bool generated = useFullCover ? xtc.generateCoverBmp() : xtc.generateThumbBmp(coverHeight);
+      if (!generated) {
+        LOG_ERR("HOME", "Failed to generate XTC cover: %s", book.path.c_str());
       }
     }
   }
