@@ -1695,6 +1695,14 @@ void WeReadActivity::drawShelfGrid(const Rect& content) {
                        column * (layout.coverWidth + layout.columnGap);
     const int coverY = startY + row * (layout.itemHeight + layout.rowGap);
     const Rect cover{coverX, coverY, layout.coverWidth, layout.coverHeight};
+    const bool selected = index == shelfSelected_;
+    bool foregroundBlack = true;
+    if (selected) {
+      foregroundBlack =
+          GUI.drawSelectionBackground(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4});
+      renderer.fillRect(cover.x, cover.y, cover.width, cover.height, false);
+    }
+
     const bool coverDrawn = drawCachedCover(renderer, WeReadStore::bookDirectory(book.bookId), cover);
     renderer.drawRect(cover.x, cover.y, cover.width, cover.height);
     if (!coverDrawn) {
@@ -1704,11 +1712,7 @@ void WeReadActivity::drawShelfGrid(const Rect& content) {
     const std::string title = renderer.truncatedText(SMALL_FONT_ID, book.title, layout.coverWidth);
     const int titleWidth = renderer.getTextAdvanceX(SMALL_FONT_ID, title.c_str(), EpdFontFamily::REGULAR);
     renderer.drawText(SMALL_FONT_ID, cover.x + std::max(0, (cover.width - titleWidth) / 2),
-                      cover.y + cover.height + layout.titleGap, title.c_str());
-    if (index == shelfSelected_) {
-      renderer.drawRect(cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4);
-      renderer.drawRect(cover.x - 1, cover.y - 1, cover.width + 2, layout.itemHeight + 2);
-    }
+                      cover.y + cover.height + layout.titleGap, title.c_str(), foregroundBlack);
   }
 
   GUI.drawSideScrollBar(renderer, content, count, pageStart, layout.itemsPerPage);
