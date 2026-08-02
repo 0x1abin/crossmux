@@ -21,7 +21,7 @@
 - **阅读分析**：阅读统计、按月阅读热力图、阅读档案与成就，数据以 JSON 存于 SD 卡。
 - **待机表盘**：手绘风格的「潦草时钟」与中式老黄历表盘，并提供可选的 4 级灰度增强与反色显示模式。
 - **简体中文固件**（`gh_release_cn`）：中文 UI + i18n、内嵌 CJK 字体、面向中文的 EPUB 排版（断词与禁则等）。详见下方 [编译简体中文固件](#编译简体中文固件)。
-- **桌面 / WebAssembly 模拟器**：可在电脑上开发与预览 UI。
+- **桌面模拟器**：可在电脑上开发与预览 UI。
 
 > **微信读书安全提示**：微信读书使用可能随时变化的非公开 Web 协议。真机通过
 > wolfSSL 加密传输，但调用 `setInsecure()`，不会验证服务器 CA 与主机身份，存在
@@ -150,6 +150,21 @@ pio run --target upload
 pio check -e default
 pio run -e default
 ```
+
+安装 SDL2 与 `curl`（Linux 还需 OpenSSL 开发头文件）后，可把 EPUB 放入
+`fs_/books/`，再运行 CrossMux 使用的桌面模拟器：
+
+```bash
+# X4
+pio run -e simulator -t run_simulator
+
+# X3
+pio run -e simulator_x3 -t run_simulator
+```
+
+模拟器由固定版本的
+[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1)
+作为原生 PlatformIO 依赖提供。
 
 调试日志（先 `python3 -m pip install pyserial colorama matplotlib`）：
 

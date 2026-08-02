@@ -16,7 +16,7 @@ gates every CN-only resource:
 | `src/main.cpp` font globals | Each Latin `EpdFont`/`EpdFontFamily` global is aliased to the matching-size CJK header. Bold/italic variants all point at the Regular OTF (no style data in the subset). SD-card fonts still provide style variants when the user loads them. |
 | EPUB layout ([lib/Epub/Epub/ParsedText.cpp](../../lib/Epub/Epub/ParsedText.cpp)) | All firmware flavors use the same Unicode-aware CJK splitting, punctuation, line-breaking, and source-space rules. The CN build changes the bundled font data and metrics, not tokenization or inter-word spacing behavior. |
 | Activities (`src/activities/apps/chinese-chess/`) | Compiled in (also gated by `build_src_filter +<activities/apps/chinese-chess/>`). |
-| WeRead (`src/activities/apps/weread/`) | Compiled into native CN builds through `build_src_filter`. Device requests use the app-local `WeReadHttpClient` over wolfSSL; the native simulator uses the `esp_http_client` shim over libcurl; WASM excludes the app. |
+| WeRead (`src/activities/apps/weread/`) | Compiled into native CN builds through `build_src_filter`. Device requests use the app-local `WeReadHttpClient` over wolfSSL; the native simulator uses the pinned simulator fork's `esp_http_client` shim over the host `curl`. |
 | First-boot locale defaults (`src/CrossPointSettings.h`) | A fresh CN build starts with `Language::ZH_CN` and UTC+8 (`clockUtcOffsetQ = 80`); non-CN builds default to `Language::EN` and UTC+0. Saved UTC offsets are preserved across reflashes. When switching CN → global, the existing SKU/renderability guard resets Chinese to English, including legacy settings without a `langSku` marker. |
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
@@ -83,8 +83,8 @@ when free heap falls below 20 KB or the largest block falls below 8 KB.
 Device requests call `setInsecure()`: traffic is encrypted, but the CA and host
 identity are not verified. This makes session credentials and downloaded
 content vulnerable to a man-in-the-middle attacker. The native simulator takes
-a different path, `WeReadHttpClient -> esp_http_client shim -> libcurl`, and
-uses libcurl's host trust store for certificate verification. WeRead uses an
+a different path, `WeReadHttpClient -> simulator esp_http_client shim -> curl`,
+and uses the host trust store for certificate verification. WeRead uses an
 unofficial Web protocol and may stop working when the service changes.
 
 ## WeRead progress sync

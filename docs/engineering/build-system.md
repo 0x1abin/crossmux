@@ -34,6 +34,23 @@
   * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
   * `slim`: Minimal build (no serial logging)
   * `gh_release_cn`: Simplified-Chinese-only release with embedded CJK fonts (see [chinese-build.md](chinese-build.md))
+  * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
+  * `simulator_x3`: Native X3 desktop simulator
+
+## Desktop Simulator
+
+Install SDL2 and `curl` (plus OpenSSL development headers on Linux), place EPUB
+files under `fs_/books/`, and run:
+
+```bash
+pio run -e simulator -t run_simulator
+pio run -e simulator_x3 -t run_simulator
+```
+
+The simulator implementation and launcher come from the pinned
+[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1)
+fork.
+The firmware repository does not carry a second host implementation.
 
 ## Critical Build Flags
 These flags in `platformio.ini` fundamentally affect firmware behavior:

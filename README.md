@@ -17,7 +17,7 @@ What CrossMux adds on top of upstream:
 - **Reading analytics**: reading stats, a monthly reading heatmap, a reading profile, and achievements — backed by an SD-stored JSON history.
 - **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), with optional 4-level grayscale enhancement and inverse display.
 - **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
-- **Desktop / WebAssembly simulator** for developing and previewing the UI on the host.
+- **Desktop simulator** for developing and previewing the UI on the host.
 
 > **WeRead security notice:** WeRead uses an unofficial Web protocol that may
 > change without notice. Device builds encrypt traffic with wolfSSL but call
@@ -223,6 +223,24 @@ pio run -e gh_release_cn -t upload
 The resulting `firmware.bin` is written to `.pio/build/gh_release_cn/firmware.bin`; it can also be flashed with the web installer (see [Install firmware](#install-firmware)).
 
 You only need to regenerate the CJK bitmap headers when changing the character set or updating the embedded fonts — see [docs/engineering/chinese-build.md](./docs/engineering/chinese-build.md) for the font toolchain and flash-budget details.
+
+### Run the desktop simulator
+
+Install SDL2 and `curl` (plus OpenSSL development headers on Linux), place EPUB
+files in `fs_/books/`, then run:
+
+```bash
+# X4
+pio run -e simulator -t run_simulator
+
+# X3
+pio run -e simulator_x3 -t run_simulator
+```
+
+The simulator is provided by the pinned
+[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1);
+its framebuffer, storage, input, network, and screenshot automation run as a
+native PlatformIO dependency.
 
 ### Contributor pre-PR checks
 
