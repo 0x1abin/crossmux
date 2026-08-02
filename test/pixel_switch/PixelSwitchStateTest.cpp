@@ -194,8 +194,8 @@ TEST(PixelSwitchState, ValidatesTopicAndPayloadLength) {
 
 TEST(PixelSwitchRateLimiter, EnforcesRollingWindow) {
   PixelSwitchRateLimiter limiter;
-  EXPECT_EQ(PixelSwitchRateLimiter::LIMIT, 5u);
-  EXPECT_EQ(PixelSwitchRateLimiter::WINDOW_MS, 30000u);
+  EXPECT_EQ(PixelSwitchRateLimiter::LIMIT, 10u);
+  EXPECT_EQ(PixelSwitchRateLimiter::WINDOW_MS, 10000u);
   for (uint32_t i = 0; i < PixelSwitchRateLimiter::LIMIT; ++i) {
     EXPECT_TRUE(limiter.record(i * 100u));
   }
