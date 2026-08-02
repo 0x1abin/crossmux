@@ -164,10 +164,6 @@ bool OtaUpdater::isUpdateNewer() const {
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 
-const char* OtaUpdater::getSummaryLine(const size_t index) const {
-  return index < SUMMARY_LINE_COUNT ? summaryLines[index] : "";
-}
-
 OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx) {
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;

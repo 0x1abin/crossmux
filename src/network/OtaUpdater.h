@@ -43,7 +43,7 @@ class OtaUpdater {
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
-  const char* getSummaryLine(size_t index) const;
+  const char* getSummaryLine(size_t index) const { return index < SUMMARY_LINE_COUNT ? summaryLines[index] : ""; }
   OtaUpdaterError checkForUpdate(Channel requestedChannel);
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
 };
