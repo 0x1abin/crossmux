@@ -68,7 +68,10 @@ class WeReadActivity final : public Activity {
   uint32_t shelfCount_ = 0;
   int disclaimerSelected_ = 0;
   int menuSelected_ = 0;
-  int shelfSelected_ = 0;
+  std::atomic<int> shelfSelected_{0};
+  int shelfFrameSelection_ = -1;
+  int shelfFrameItemsPerPage_ = 0;
+  std::atomic<bool> shelfFrameInvalidated_{true};
   int shelfCoverPageStart_ = -1;
   int shelfCoverCursor_ = 0;
   ShelfSideGesture shelfSideGesture_ = ShelfSideGesture::Idle;
@@ -126,7 +129,7 @@ class WeReadActivity final : public Activity {
   void handleIntroductionInput();
   void buildIntroductionPages();
   bool drawDetailIntroduction(const Rect& bounds, bool selected);
-  void drawShelfGrid(const Rect& content);
+  void drawShelfGrid(const Rect& content, int selectedIndex, int frameSelection);
   void drawDisclaimer(const Rect& content);
   void drawBookDetail(const Rect& content, bool coverLoading = false);
   void drawIntroduction(const Rect& content);

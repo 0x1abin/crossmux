@@ -130,6 +130,30 @@ action**.
   count, page start, and page capacity so the active theme controls the bar
   dimensions and placement.
 
+## Retained Framebuffer Updates
+
+The firmware has one framebuffer, and its contents remain available after
+`displayBuffer()`. A hot UI path may redraw only the changed items, but only
+when it can identify the exact frame already in that buffer:
+
+- Snapshot cross-task UI state once at the start of `render()`; never read a
+  mutable selection again inside an item loop.
+- Track the framebuffer's selection/page in render-task-owned state. Invalidate
+  that state before shelf/list content changes, an asset finishes loading, or
+  the layout changes.
+- Clear and redraw the full screen when the retained frame is invalid or the
+  target is on another page. Otherwise restore the old item and draw the new
+  item; do not allocate a second buffer.
+- After drawing, record what the framebuffer now contains, then re-read the
+  cross-task state. If it changed, request an immediate render and return before
+  `displayBuffer()` so the stale frame never reaches the panel. Keep the recorded
+  framebuffer state even for that skipped panel update, because the next render
+  builds from it.
+
+Incremental drawing does not imply a different panel waveform or windowed
+refresh. Those are display-driver decisions and require separate hardware
+measurement.
+
 ### Lyra Carousel home
 
 Lyra Carousel displays one centered recent-book cover in a `380x540` frame.
