@@ -444,7 +444,7 @@ void SettingsActivity::toggleCurrentSetting() {
         if (auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
                                                                         TextSettingsActivity::Tab::Family)) {
           startActivityForResult(std::move(textSettings), [this](const ActivityResult&) {
-            SETTINGS.saveToFile();
+            // TextSettingsActivity persists every change before returning.
             rebuildSettingsLists();
           });
         } else {

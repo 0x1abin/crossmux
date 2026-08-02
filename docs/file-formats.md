@@ -95,10 +95,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 48 / 49
+### Versions 50 / 51
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **49**; Latin builds use **48**. The byte layout is identical between
+> currently **51**; Latin builds use **50**. The byte layout is identical between
 > flavors, but the same built-in font IDs resolve to different font data and
 > metrics, so pagination caches are not reusable across firmware flavors.
 >
@@ -114,7 +114,9 @@ if (parsedSize != fileSize) {
 > invalidate pagination because oversized tokens now wrap at UTF-8 boundaries
 > without inserting synthetic hyphens. Versions 48/49 invalidate pagination
 > because source whitespace now controls CJK gaps, ruby boundaries retain inline
-> continuation, and `<br>` no longer re-applies container margins. The counters
+> continuation, and `<br>` no longer re-applies container margins. Versions 50/51
+> add a per-page visible-text offset LUT so progress and bookmarks survive
+> re-pagination. The counters
 > remain distinct and above every previously shipped value so a firmware-flavor
 > swap cannot read the other flavor's stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
@@ -122,6 +124,9 @@ if (parsedSize != fileSize) {
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Versions 50/51 add a header offset and a `uint32_t` entry per page for the
+visible-text offset LUT. The other section LUTs remain unchanged.
 
 Version 30 is binary-identical to version 29. The version was bumped because
 Arabic contextual shaping changed text measurement (`getTextAdvanceX` now
@@ -133,8 +138,9 @@ superscript, and subscript. The format also includes:
 - cache-busting fields for paragraph alignment, hyphenation, embedded CSS,
   image rendering mode, and Focus Reading
 - page offset LUT
+- per-page visible-text offset LUT (zero-based Unicode codepoints in `<body>`)
 - anchor-to-page map for fragment and footnote navigation
-- paragraph and list-item LUTs used by KOReader sync page refinement
+- paragraph and list-item LUTs retained for navigation and legacy sync fallback
 - optional per-word Focus Reading split metadata
 - per-page footnote entries
 - serialized word style bits for underline, strikethrough, superscript, and
@@ -153,7 +159,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 48
+#define EXPECTED_VERSION 50
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96
@@ -321,6 +327,7 @@ struct SectionBin {
     u32 anchorMapOffset;
     u32 paragraphLutOffset;
     u32 listItemLutOffset;
+    u32 visibleTextLutOffset;
 
     Page pages[pageCount];
 
@@ -341,6 +348,10 @@ struct SectionBin {
 
     if (listItemLutOffset != 0 && paragraphLutOffset != 0) {
         u16 listItemIndex[paragraphLut.count] @ listItemLutOffset;
+    }
+
+    if (visibleTextLutOffset != 0) {
+	u32 visibleTextOffset[pageCount] @ visibleTextLutOffset;
     }
 };
 
