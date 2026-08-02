@@ -347,6 +347,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   } else if (storedFontFamily >= BUILTIN_FONT_COUNT) {
     needsResave = true;
   }
+#ifdef ENABLE_CHINESE_VERSION
+  if (sdFontFamilyName[0] == '\0' && fontFamily != NOTOSANS) {
+    fontFamily = NOTOSANS;
+    needsResave = true;
+  }
+#endif
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
   copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
 
@@ -634,6 +640,9 @@ int CrossPointSettings::getRefreshFrequency() const {
 void CrossPointSettings::clearSdFontFamily() {
   sdFontFamilyName[0] = '\0';
   sdFontFlashPreload = 0;
+#ifdef ENABLE_CHINESE_VERSION
+  fontFamily = NOTOSANS;
+#endif
   fontPointSize =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
   saveToFile();

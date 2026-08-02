@@ -30,6 +30,7 @@ class TextSettingsActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return fontLoadState_.load() != FontLoadState::Idle; }
+  bool handleHomeGesture() override;
 
  private:
   // Row indices per tab. enum class (not plain enum) so a LayoutRow can't be
@@ -38,14 +39,13 @@ class TextSettingsActivity final : public Activity {
   enum class StyleRow { FocusReading, Hyphenation, EmbeddedStyle, AntiAliasing, Count };
 
   enum class FontLoadState : uint8_t { Idle, Preloading, Ready };
+  enum class ExitDestination : uint8_t { Previous, Home };
 
-  void applyFamily(int listIndex, bool forceReload = false);
+  void applyFamily(int listIndex);
   void applySize(int listIndex);
-  void promptSdFamily(int listIndex);
-  void selectSdFamily(int listIndex, bool preload);
   bool preloadFont(const SdCardFontFileInfo& file, const char* familyName);
-  void finishPreload(bool succeeded);
-  void showPreloadFailure();
+  void exitAfterFinalFont(ExitDestination destination);
+  void completeExit();
   const SdCardFontFileInfo* fontFileForFamily(int listIndex, uint8_t pointSize) const;
 #ifdef ENABLE_CHINESE_VERSION
   void maybeOfferCompleteChineseFont();
@@ -118,4 +118,6 @@ class TextSettingsActivity final : public Activity {
   uint8_t preloadPointSize_ = 0;
   bool preloadVerifying_ = false;
   unsigned lastPreloadPercent_ = 101;
+  ExitDestination exitDestination_ = ExitDestination::Previous;
+  bool exitInProgress_ = false;
 };

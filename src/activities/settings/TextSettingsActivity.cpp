@@ -32,26 +32,12 @@ namespace {
 // Tab labels for Font | Size | Layout | Style (shared by render and loop touch hit-testing).
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
-int findCurrentFontIndex(const SdCardFontRegistry* registry, const char* sdFontFamilyName, uint8_t fontFamily) {
-  if (sdFontFamilyName[0] != '\0' && registry) {
-    const auto& families = registry->getFamilies();
-    for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      if (families[i].name == sdFontFamilyName) {
-        return CrossPointSettings::BUILTIN_FONT_COUNT + i;
-      }
-    }
-  }
-
-  return fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? fontFamily : 0;
-}
-
 constexpr StrId LINE_SPACING_IDS[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
 constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                    StrId::STR_BOOK_S_STYLE};
 constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
 constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;
-constexpr StrId PRELOAD_OPTIONS[] = {StrId::STR_NO, StrId::STR_YES};
 constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 }  // namespace
 
@@ -68,10 +54,22 @@ void TextSettingsActivity::onEnter() {
   usableHeight = renderer.getScreenHeight() - afterHeader - bottomReserved;
   previewHeight = usableHeight * metrics_.previewHeightPercent / 100;
 
+  sdFontSystem.adoptCompleteChineseNotoSans();
+  {
+    RenderLock lock(*this);
+    sdFontSystem.ensureLoaded(renderer, false);
+  }
+
   fonts_.clear();
   fonts_.reserve(CrossPointSettings::BUILTIN_FONT_COUNT + (registry_ ? registry_->getFamilyCount() : 0));
+#ifdef ENABLE_CHINESE_VERSION
+  if (!registry_ || !registry_->findFamily(SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY)) {
+    fonts_.push_back({I18N.get(StrId::STR_NOTO_SANS), true, static_cast<uint8_t>(CrossPointSettings::NOTOSANS)});
+  }
+#else
   fonts_.push_back({I18N.get(StrId::STR_NOTO_SERIF), true, static_cast<uint8_t>(CrossPointSettings::NOTOSERIF)});
   fonts_.push_back({I18N.get(StrId::STR_NOTO_SANS), true, static_cast<uint8_t>(CrossPointSettings::NOTOSANS)});
+#endif
   if (registry_) {
     const auto& families = registry_->getFamilies();
     for (int i = 0; i < static_cast<int>(families.size()); i++) {
@@ -89,7 +87,17 @@ void TextSettingsActivity::onEnter() {
 
   if (tab_ == Tab::Count) tab_ = Tab::Family;
   updateTabs();
-  currentFamilyIndex_ = findCurrentFontIndex(registry_, SETTINGS.sdFontFamilyName, SETTINGS.fontFamily);
+  currentFamilyIndex_ = 0;
+  for (int i = 0; i < static_cast<int>(fonts_.size()); i++) {
+    const auto& font = fonts_[i];
+    const bool selected = font.isBuiltin
+                              ? SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily
+                              : font.name == SETTINGS.sdFontFamilyName;
+    if (selected) {
+      currentFamilyIndex_ = i;
+      break;
+    }
+  }
   std::fill(std::begin(selectedIndex_), std::end(selectedIndex_), 1);       // default to the first list row
   selectedIndex_[static_cast<int>(Tab::Family)] = currentFamilyIndex_ + 1;  // Family/Size open on current selection
   selectedIndex_[static_cast<int>(Tab::Size)] = currentSizeIndex_ + 1;
@@ -188,10 +196,13 @@ bool TextSettingsActivity::handleTouch() {
 }
 
 void TextSettingsActivity::loop() {
-  if (optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); })) return;  // picker owns input while open
+  if (optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); })) {
+    if (exitInProgress_ && !optionPopup_.isActive()) completeExit();
+    return;
+  }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
+    exitAfterFinalFont(ExitDestination::Previous);
     return;
   }
 
@@ -221,6 +232,11 @@ void TextSettingsActivity::loop() {
 
   buttonNavigator_.onNextContinuous([this] { switchTab(); });
   buttonNavigator_.onPreviousContinuous([this] { switchTab(-1); });
+}
+
+bool TextSettingsActivity::handleHomeGesture() {
+  exitAfterFinalFont(ExitDestination::Home);
+  return true;
 }
 
 void TextSettingsActivity::render(RenderLock&&) {
@@ -322,9 +338,8 @@ void TextSettingsActivity::render(RenderLock&&) {
 // next one, and the render task walks that same object inside the preview's
 // prewarmCache() — so without this lock a font switch can free the mini glyph
 // arrays out from under prewarmStyle() (crash: null s.miniGlyphs mid-read/sort).
-void TextSettingsActivity::applyFamily(int listIndex, bool forceReload) {
+void TextSettingsActivity::applyFamily(int listIndex) {
   RenderLock lock;
-  if (forceReload) sdFontSystem.releaseLoadedFont(renderer);
   const auto& font = fonts_[listIndex];
   if (font.isBuiltin) {
     SETTINGS.fontFamily = font.settingIndex;
@@ -338,6 +353,7 @@ void TextSettingsActivity::applyFamily(int listIndex, bool forceReload) {
     if (sdIdx < static_cast<int>(families.size())) {
       strncpy(SETTINGS.sdFontFamilyName, families[sdIdx].name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
       SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+      SETTINGS.sdFontFlashPreload = 0;
       sdFontSystem.ensureLoaded(renderer);
       currentFamilyIndex_ = listIndex;
     }
@@ -355,19 +371,11 @@ void TextSettingsActivity::applyFamily(int listIndex, bool forceReload) {
 void TextSettingsActivity::activateRow(int row) {
   switch (tab_) {
     case Tab::Family:
-      if (!fonts_[row].isBuiltin) {
-        promptSdFamily(row);
-        requestUpdate();
-      } else if (row != currentFamilyIndex_) {
+      if (row != currentFamilyIndex_) {
         applyFamily(row);
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
 #endif
-        // Persist immediately (like SettingsActivity's per-change saves): the
-        // parent's result callback only runs on a normal finish(), so relying
-        // on it loses the change when this screen is left via the home
-        // gesture/key or a sleep. Saved here, not inside applyFamily, so the
-        // SD write happens outside its RenderLock.
         if (currentFamilyIndex_ == row) {
           SETTINGS.saveToFile();
         }
@@ -376,13 +384,7 @@ void TextSettingsActivity::activateRow(int row) {
       break;
     case Tab::Size:
       if (row != currentSizeIndex_) {
-        bool preloadSucceeded = true;
-        if (SETTINGS.sdFontFamilyName[0] != '\0' && SETTINGS.sdFontFlashPreload != 0) {
-          const auto* file = fontFileForFamily(currentFamilyIndex_, sizes_[row].pointSize);
-          preloadSucceeded = file && preloadFont(*file, fonts_[currentFamilyIndex_].name.c_str());
-        }
         applySize(row);
-        finishPreload(preloadSucceeded);
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
 #endif
@@ -408,12 +410,12 @@ void TextSettingsActivity::applySize(int listIndex) {
 
   currentSizeIndex_ = listIndex;
   SETTINGS.fontPointSize = sizes_[listIndex].pointSize;
+  if (SETTINGS.sdFontFamilyName[0] != '\0') SETTINGS.sdFontFlashPreload = 0;
   sdFontSystem.ensureLoaded(renderer);
 }
 
 const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(int listIndex, uint8_t pointSize) const {
-  if (!registry_ || listIndex < CrossPointSettings::BUILTIN_FONT_COUNT ||
-      listIndex >= static_cast<int>(fonts_.size())) {
+  if (!registry_ || listIndex < 0 || listIndex >= static_cast<int>(fonts_.size()) || fonts_[listIndex].isBuiltin) {
     return nullptr;
   }
   const int familyIndex = fonts_[listIndex].settingIndex - CrossPointSettings::BUILTIN_FONT_COUNT;
@@ -421,27 +423,6 @@ const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(int listIndex,
   return familyIndex >= 0 && familyIndex < static_cast<int>(families.size())
              ? families[familyIndex].findNearestSize(pointSize)
              : nullptr;
-}
-
-void TextSettingsActivity::promptSdFamily(int listIndex) {
-  optionPopup_.show(StrId::STR_FONT_PRELOAD_PROMPT, PRELOAD_OPTIONS, static_cast<int>(std::size(PRELOAD_OPTIONS)), 0,
-                    [this, listIndex](int selected) { selectSdFamily(listIndex, selected == 1); });
-}
-
-void TextSettingsActivity::selectSdFamily(int listIndex, bool preload) {
-  SETTINGS.sdFontFlashPreload = preload ? 1 : 0;
-  bool preloadSucceeded = true;
-  if (preload) {
-    const auto* file = fontFileForFamily(listIndex, SETTINGS.fontPointSize);
-    preloadSucceeded = file && preloadFont(*file, fonts_[listIndex].name.c_str());
-  }
-
-  applyFamily(listIndex, true);
-  finishPreload(preloadSucceeded);
-#ifdef ENABLE_CHINESE_VERSION
-  maybeOfferCompleteChineseFont();
-#endif
-  requestUpdate();
 }
 
 bool TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const char* familyName) {
@@ -508,14 +489,48 @@ bool TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const cha
   return succeeded;
 }
 
-void TextSettingsActivity::finishPreload(bool succeeded) {
-  RenderLock lock(*this);
-  fontLoadState_.store(FontLoadState::Idle);
-  if (!succeeded) showPreloadFailure();
+void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination) {
+  if (exitInProgress_) return;
+  exitInProgress_ = true;
+  exitDestination_ = destination;
+
+  if (SETTINGS.sdFontFamilyName[0] == '\0') {
+    SETTINGS.sdFontFlashPreload = 0;
+    SETTINGS.saveToFile();
+    completeExit();
+    return;
+  }
+
+  SETTINGS.sdFontFlashPreload = 1;
+  SETTINGS.saveToFile();
+  const auto* file = fontFileForFamily(currentFamilyIndex_, SETTINGS.fontPointSize);
+  const bool succeeded = file && preloadFont(*file, SETTINGS.sdFontFamilyName);
+  {
+    RenderLock lock(*this);
+    fontLoadState_.store(FontLoadState::Idle);
+    sdFontSystem.ensureLoaded(renderer, succeeded);
+  }
+  if (succeeded) {
+    completeExit();
+    return;
+  }
+
+  ActivityResult result;
+  result.isCancelled = true;
+  setResult(std::move(result));
+  optionPopup_.show(StrId::STR_FONT_PRELOAD_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+  requestUpdate();
 }
 
-void TextSettingsActivity::showPreloadFailure() {
-  optionPopup_.show(StrId::STR_FONT_PRELOAD_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+void TextSettingsActivity::completeExit() {
+  switch (exitDestination_) {
+    case ExitDestination::Previous:
+      finish();
+      return;
+    case ExitDestination::Home:
+      onGoHome();
+      return;
+  }
 }
 
 #ifdef ENABLE_CHINESE_VERSION

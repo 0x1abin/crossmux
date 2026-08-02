@@ -12,9 +12,11 @@ There are three ways to install fonts:
 1. Connect your CrossPoint reader to Wi-Fi
 2. Go to **Settings > Reader > Manage Fonts**
 3. Browse available font families and tap to download
-4. Downloading does not change the reader font selection. After the font
-   manager restarts the device, choose the installed family under
-   **Settings > Reader > Text Settings > Font**
+4. A single download selects that family and opens **Text Settings** for
+   preview. **Download All** prefers `NotoSansSC` (or the first valid catalog
+   family when it is absent); **Update All** keeps the current selection.
+5. Preview any family or size you want. Leaving **Text Settings** caches only
+   the final SD font and size in internal Flash.
 
 ### Option 2: Upload via web browser
 
@@ -131,10 +133,9 @@ asset must be cpfont v4 and provide the complete Chinese coverage promised by
 the catalog maintainer. Font sources and catalog-generation configuration are
 not kept in this repository.
 
-The incomplete-font prompt opens the same font manager described above.
-The download-complete screen reminds the user that downloading does not change
-the selected reader font and shows the path
-**Settings > Reader > Text Settings > Font**.
+The incomplete-font prompt opens the same font manager described above. A
+successful single or batch download selects a default and opens the font
+preview before the download-complete screen.
 
 ## Converting Custom Fonts
 

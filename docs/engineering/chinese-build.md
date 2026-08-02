@@ -11,7 +11,7 @@ gates every CN-only resource:
 | Resource | Behavior under ENABLE_CHINESE_VERSION |
 |---|---|
 | i18n string table (`gen_i18n.py`) | Pre-script auto-detects the flag via `env.subst("$BUILD_FLAGS")` and emits **only EN + ZH_CN** into `I18nStrings.cpp` (saves ~144 KB vs the full 23-language table). Detection logs `[gen_i18n] ENABLE_CHINESE_VERSION detected …` during the build. |
-| Built-in fonts ([lib/EpdFont/builtinFonts/all.h](../../lib/EpdFont/builtinFonts/all.h)) | Latin headers are skipped. Six per-size CJK headers (`notosans_cjk_{8,10,12,14,16,18}.h`) replace them — raw 2-bit bitmaps. **Character coverage is tiered by point size**: 8/10/12/14pt carry all 3500 chars from `chars_3500_common.txt` plus every CJK glyph found in `chinese.yaml` and feature-specific require-from files (3517 CJK glyphs total); 16/18pt carry only the require-from set (733 CJK glyphs). Every size also includes the standard ASCII, Latin-1, and CJK punctuation ranges. The 16/18pt sizes are tuned for reader LARGE/EXTRA_LARGE (intended for English EPUB) while still rendering every built-in Chinese UI string; Chinese EPUB text at 16/18pt shows blank for chars outside the i18n subset. |
+| Built-in fonts ([lib/EpdFont/builtinFonts/all.h](../../lib/EpdFont/builtinFonts/all.h)) | Latin headers are skipped. The reader UI exposes one built-in **Noto Sans** because the legacy Serif/Sans IDs both reference the same six per-size CJK headers (`notosans_cjk_{8,10,12,14,16,18}.h`). The old IDs remain valid for settings compatibility. The headers use raw 2-bit bitmaps. **Character coverage is tiered by point size**: 8/10/12/14pt carry all 3500 chars from `chars_3500_common.txt` plus every CJK glyph found in `chinese.yaml` and feature-specific require-from files (3517 CJK glyphs total); 16/18pt carry only the require-from set (733 CJK glyphs). Every size also includes the standard ASCII, Latin-1, and CJK punctuation ranges. The 16/18pt sizes are tuned for reader LARGE/EXTRA_LARGE (intended for English EPUB) while still rendering every built-in Chinese UI string; Chinese EPUB text at 16/18pt shows blank for chars outside the i18n subset. |
 | Downloadable fonts | The Chinese build uses the same manifest-v1 font manager as global builds; only its catalog URL points to an externally maintained Gitee release. Its embedded 8/10/12pt fonts already cover the Simplified-Chinese UI, so it keeps only the selected reader-size SD font resident and does not load the global build's three size-matched UI fallbacks. This preserves contiguous heap for EPUB image decoding and glyph prewarm. |
 | `src/main.cpp` font globals | Each Latin `EpdFont`/`EpdFontFamily` global is aliased to the matching-size CJK header. Bold/italic variants all point at the Regular OTF (no style data in the subset). SD-card fonts still provide style variants when the user loads them. |
 | EPUB layout ([lib/Epub/Epub/ParsedText.cpp](../../lib/Epub/Epub/ParsedText.cpp)) | All firmware flavors use the same Unicode-aware CJK splitting, punctuation, line-breaking, and source-space rules. The CN build changes the bundled font data and metrics, not tokenization or inter-word spacing behavior. |
@@ -231,11 +231,19 @@ The firmware offers the guided downloader when a built-in font is changed to
 U+F900–U+FAFF glyph. The render task only records the first codepoint; the main
 loop opens the activity. A reader session prompts once, and an active SD font
 is never rechecked. After confirmation it opens the ordinary **Manage Fonts**
-flow, preserving install/update/delete and batch-download behavior. Downloads
-never change `sdFontFamilyName`; the user selects an installed family later in
-**Settings > Reader > Text Settings > Font**. The download-complete screen
-shows that path before the existing silent restart. Font sources and
-catalog-generation configuration remain outside this repository.
+flow, preserving install/update/delete and batch-download behavior. A single
+download selects that family and opens the text preview; **Download All**
+prefers the stable `NotoSansSC` family, while **Update All** preserves the
+current selection. Preview changes read from SD without rebuilding the Flash
+cache. Leaving Text Settings caches only the final family and point size.
+
+When `NotoSansSC` is discovered through download, web upload, or an SD-card
+copy, it replaces the active built-in face and the built-in row is hidden. If
+the family disappears, the existing missing-font fallback clears the SD
+selection and the single built-in Noto Sans row becomes visible again. Legacy
+Chinese settings that selected the duplicate built-in Serif ID migrate to the
+Sans ID. Font sources and catalog-generation configuration remain outside this
+repository.
 
 ## Known limitations
 
