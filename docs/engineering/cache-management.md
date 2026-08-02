@@ -10,8 +10,15 @@
 **Location**: `.crosspoint/` directory on SD card root
 
 **Structure**:
-- EPUB: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, sections/*.bin}`
+- EPUB: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, thumb_<height>.bmp, sections/*.bin}`
+- XTC: `.crosspoint/xtc_<hash>/{cover.bmp, thumb_<height>.bmp}`
 - TXT: `.crosspoint/txt_<hash>/{index.bin, progress.bin}`
+
+`recent.json` stores the theme-neutral `thumb_[HEIGHT].bmp` path template for
+EPUB and XTC entries. Home themes replace `[HEIGHT]` with their requested
+thumbnail height. Lyra Carousel redirects only its in-memory `RecentBook` copy
+to `cover.bmp`, generating that full cover when missing; switching themes must
+not replace the persisted template.
 
 TXT `index.bin` version 6 stores a partial or complete lazy page index and the
 detected source encoding. It is invalidated by file-size, viewport, font,

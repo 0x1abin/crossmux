@@ -130,6 +130,15 @@ action**.
   count, page start, and page capacity so the active theme controls the bar
   dimensions and placement.
 
+### Lyra Carousel home
+
+Lyra Carousel displays one centered recent-book cover in a `380x540` frame.
+The complete image is scaled proportionally to fit and centered with white
+letterboxing when its aspect ratio differs; it is never cropped or stretched.
+The frame is drawn only while the cover row has focus. Its Apps menu icon uses
+a theme-local `28x28` four-cell drawing inside the standard `32x32` icon slot;
+shared icon assets and other themes remain unchanged.
+
 > User-facing text must use the `tr()` macro — see
 > [hardware-constraints.md](hardware-constraints.md) → Resource Protocol rule 5,
 > and the i18n workflow in [generated-files.md](generated-files.md).
