@@ -4,6 +4,9 @@
 .vscode
 open-x4-sdk
 fs_
+/simulator/build*/
+/simulator/arduino-host/build/
+/simulator/sd_root/
 lib/EpdFont/fontsrc
 lib/I18n/I18nKeys.h
 lib/I18n/I18nStrings.h

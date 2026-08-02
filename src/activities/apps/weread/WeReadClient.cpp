@@ -1,6 +1,6 @@
 #include "WeReadClient.h"
 
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#ifdef ENABLE_CHINESE_VERSION
 
 #include <Arduino.h>
 #include <HalClock.h>

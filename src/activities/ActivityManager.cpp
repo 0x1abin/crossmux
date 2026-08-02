@@ -16,7 +16,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
 #endif
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#ifdef ENABLE_CHINESE_VERSION
 #include "apps/weread/WeReadActivity.h"
 #endif
 #include "apps/gomoku/GomokuMenuActivity.h"
@@ -331,7 +331,7 @@ void ActivityManager::goToChineseChess() {
 }
 #endif
 
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#ifdef ENABLE_CHINESE_VERSION
 void ActivityManager::goToWeRead() {
   auto activity = makeUniqueNoThrow<WeReadActivity>(renderer, mappedInput);
   if (!activity) {

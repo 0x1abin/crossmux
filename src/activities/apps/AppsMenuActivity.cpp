@@ -40,7 +40,7 @@ struct AppEntry {
 };
 
 constexpr AppEntry kAppEntries[] = {
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#ifdef ENABLE_CHINESE_VERSION
     {AppId::WeRead, StrId::STR_WEREAD_TITLE, UIIcon::WeRead, &ActivityManager::goToWeRead},
 #endif
     {AppId::ReadingStats, StrId::STR_READING_STATS, UIIcon::Library, &ActivityManager::goToReadingStatsMenu},

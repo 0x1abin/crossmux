@@ -123,7 +123,7 @@ When adding such an app, wrap every line in the four standard add-an-app edits w
 | `lib/EpdFont/builtinFonts/all.h` | `#include` of the app's font header |
 | `platformio.ini` (base) | Add `-<activities/apps/<app>/>` to the default `build_src_filter` |
 | `platformio.ini` (the gated env) | Add `-D<FLAG>` to `build_flags` and `+<activities/apps/<app>/>` to `build_src_filter` |
-| `simulator/CMakeLists.txt` | Optionally add `-D<FLAG>=1` to `target_compile_definitions` so host debugging always covers the app |
+| `platformio.ini` (simulator) | Add `-D<FLAG>=1` to `env:simulator` so X4/X3 host builds cover the app |
 
 **Do not** add inner `#ifdef <FLAG>` guards inside the app's own `*.cpp` / `*.h` files — `build_src_filter` already excludes the whole directory, and inner guards would just clutter the source. The app source code stays plain.
 

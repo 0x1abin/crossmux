@@ -159,14 +159,17 @@ That selector drives per-silicon image **patching**
 does **not** select a different firmware. Pick the target that matches the
 physical device.
 
-## Testing X3 without hardware — known limitation
+## Testing X3 without hardware
 
-You currently **cannot** exercise X3 geometry in the desktop / WASM simulator.
-`simulator/shims/EInkDisplay.h` hardcodes 800×480 and makes `setDisplayX3()` a
-no-op ([simulator/shims/EInkDisplay.h:12-18](../../simulator/shims/EInkDisplay.h)),
-so the simulator always renders as X4. X3's 792×528 panel and its I²C
-peripherals are not modeled. **Real X3 verification needs X3 hardware.** (Adding
-X3 to the simulator is possible but out of scope here.)
+The pinned desktop simulator fork provides an X3 environment with the 792×528
+framebuffer, X3 board profile, and simulated tilt input:
+
+```bash
+pio run -e simulator_x3 -t run_simulator
+```
+
+Use real X3 hardware for final electrical, sensor, power, and display-waveform
+verification.
 
 ## Verifying which device you're on
 

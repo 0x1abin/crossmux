@@ -1,6 +1,6 @@
 #include "WeReadProgressSyncActivity.h"
 
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#ifdef ENABLE_CHINESE_VERSION
 
 #include <Epub.h>
 #include <FontCacheManager.h>

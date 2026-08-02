@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -14,8 +15,6 @@
 
 #include "WeReadBrowse.h"
 #include "WeReadStore.h"
-
-std::string g_simulator_sd_root;
 
 namespace obfuscation {
 
@@ -60,11 +59,12 @@ class WeReadStoreTest : public ::testing::Test {
     std::filesystem::remove_all(root_, error);
     ASSERT_TRUE(std::filesystem::create_directories(root_, error));
     ASSERT_FALSE(error);
-    g_simulator_sd_root = root_.string();
+    ASSERT_EQ(setenv("CROSSPOINT_SIM_SD", root_.c_str(), 1), 0);
     ASSERT_TRUE(Storage.begin());
   }
 
   void TearDown() override {
+    unsetenv("CROSSPOINT_SIM_SD");
     std::error_code error;
     std::filesystem::remove_all(root_, error);
   }
