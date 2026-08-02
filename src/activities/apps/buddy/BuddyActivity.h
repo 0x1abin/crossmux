@@ -17,12 +17,16 @@ class BuddyActivity final : public Activity {
 
  private:
   enum class Stage : uint8_t { WaitingForClaim, Crack, Burst, RevealCard, Card, Error };
+  enum class IdleFrame : uint8_t { RestBeforeBlink, Blink, RestBeforeLift, Lift };
 
   buddy::Traits traits_{};
   Stage stage_ = Stage::Error;
-  uint32_t nextStageAt_ = 0;
+  IdleFrame idleFrame_ = IdleFrame::RestBeforeBlink;
+  uint32_t nextFrameAt_ = 0;
+  bool cardRendered_ = false;
 
   void advanceReveal();
+  void advanceIdleFrame();
   void finishClaim();
   void drawRevealFrame();
   void drawCard(bool clear = true);
