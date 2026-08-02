@@ -25,6 +25,20 @@ constexpr int kMenuIconSize = 32;
 constexpr int kMenuIconPadding = 14;
 constexpr int kMenuHighlightPadding = 7;
 
+void drawAppsMenuIcon(const GfxRenderer& renderer, int x, int y, bool selected) {
+  constexpr int kInset = 2;
+  constexpr int kCellSize = 13;
+  constexpr int kCellGap = 2;
+  static_assert(kInset * 2 + kCellSize * 2 + kCellGap == kMenuIconSize);
+
+  for (int row = 0; row < 2; ++row) {
+    for (int column = 0; column < 2; ++column) {
+      renderer.drawRoundedRect(x + kInset + column * (kCellSize + kCellGap), y + kInset + row * (kCellSize + kCellGap),
+                               kCellSize, kCellSize, 2, 2, !selected);
+    }
+  }
+}
+
 void drawCover(const GfxRenderer& renderer, const RecentBook& book, int x, int y, int width, int height) {
   if (!book.coverBmpPath.empty()) {
     const std::string coverPath =
@@ -144,7 +158,13 @@ void LyraCarouselTheme::drawHomeMenu(GfxRenderer& renderer, Rect rect, int butto
     }
 
     if (rowIcon == nullptr) continue;
-    const uint8_t* icon = iconForName(rowIcon(i), kMenuIconSize);
+    const UIIcon iconName = rowIcon(i);
+    if (iconName == UIIcon::Apps) {
+      drawAppsMenuIcon(renderer, iconX, iconY, selected);
+      continue;
+    }
+
+    const uint8_t* icon = iconForName(iconName, kMenuIconSize);
     if (icon == nullptr) continue;
     if (selected) {
       renderer.drawIconInverted(icon, iconX, iconY, kMenuIconSize);
