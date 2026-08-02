@@ -972,6 +972,13 @@ void BaseTheme::drawTextField(const GfxRenderer& renderer, Rect rect, const int 
   }
 }
 
+bool BaseTheme::drawSelectionBackground(const GfxRenderer& renderer, const Rect rect) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  renderer.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, metrics.optionPopupSelectionRadius,
+                           metrics.optionPopupSelectionLight ? Color::LightGray : Color::Black);
+  return metrics.optionPopupSelectionLight;
+}
+
 void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
                                 int selectedIndex) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -1036,34 +1043,23 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
 
   const int itemRectX = dialogX + innerPadding;
   const int itemRectW = dialogW - innerPadding * 2;
-  const int selectionRadius = metrics.optionPopupSelectionRadius;
 
   for (int i = 0; i < optionCount; i++) {
     const int itemY = y + i * (rowHeight + itemSpacing);
     const bool selected = (i == selectedIndex);
     const char* labelText = options[i].c_str();
 
-    if (metrics.optionPopupDrawAllRows || selected) {
-      Color rowColor;
-      if (selected) {
-        rowColor = metrics.optionPopupSelectionLight ? Color::LightGray : Color::Black;
-      } else {
-        rowColor = Color::White;
-      }
-      if (selectionRadius > 0) {
-        renderer.fillRoundedRect(itemRectX, itemY, itemRectW, rowHeight, selectionRadius, rowColor);
-      } else {
-        renderer.fillRect(itemRectX, itemY, itemRectW, rowHeight, rowColor == Color::Black);
-      }
+    bool foregroundBlack = true;
+    if (selected) {
+      foregroundBlack = drawSelectionBackground(renderer, Rect{itemRectX, itemY, itemRectW, rowHeight});
+    } else if (metrics.optionPopupDrawAllRows) {
+      renderer.fillRoundedRect(itemRectX, itemY, itemRectW, rowHeight, metrics.optionPopupSelectionRadius,
+                               Color::White);
     }
 
     const int textW = renderer.getTextWidth(optionFontId, labelText, optionStyle);
     const int textY = itemY + (rowHeight - optionLineHeight) / 2;
     const int textX = itemRectX + (itemRectW - textW) / 2;
-    // Unselected items: text is dark (invert=true means draw on white bg).
-    // Selected on dark bg: text must be white (invert=false).
-    // Selected on light bg: text stays dark (invert=true).
-    const bool invertText = selected ? metrics.optionPopupSelectionLight : true;
-    renderer.drawText(optionFontId, textX, textY, labelText, invertText, optionStyle);
+    renderer.drawText(optionFontId, textX, textY, labelText, foregroundBlack, optionStyle);
   }
 }
