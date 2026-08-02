@@ -32,7 +32,20 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Source and worst-case 1.5x UTF-8 output coexist in the existing buffer.
 constexpr size_t GBK_RAW_CHUNK_SIZE = CHUNK_SIZE * 2 / 5;
-constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
+constexpr uint32_t CACHE_MAGIC = 0x54585449;            // "TXTI"
+constexpr uint32_t PROGRESS_OFFSET_MAGIC = 0x4F545854;  // "TXTO"
+
+uint32_t readLittleEndianU32(const uint8_t* data) {
+  return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
+         (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
+}
+
+void writeLittleEndianU32(uint8_t* data, const uint32_t value) {
+  data[0] = value & 0xFF;
+  data[1] = (value >> 8) & 0xFF;
+  data[2] = (value >> 16) & 0xFF;
+  data[3] = (value >> 24) & 0xFF;
+}
 
 template <typename T>
 bool readPodChecked(HalFile& file, T& value) {
@@ -84,6 +97,7 @@ void TxtReaderActivity::onExit() {
     savePageIndexCache();
   }
   pageOffsets.clear();
+  directPageCount = 0;
   currentPageLines.clear();
   pageBuffer.reset();
   APP_STATE.readerActivityLoadCount = 0;
@@ -122,16 +136,47 @@ void TxtReaderActivity::loop() {
   bool reachedEnd = false;
   {
     RenderLock lock(*this);
-    if (prevTriggered && currentPage > 0) {
-      currentPage--;
-      pageChanged = true;
-    } else if (nextTriggered) {
-      if (static_cast<size_t>(currentPage + 1) < pageOffsets.size()) {
-        currentPage++;
-        pageChanged = true;
-      } else if (indexComplete) {
-        reachedEnd = true;
-      }
+    switch (pageMode) {
+      case PageMode::Indexed:
+        if (prevTriggered && currentPage > 0) {
+          currentPage--;
+          pageChanged = true;
+        } else if (nextTriggered) {
+          if (static_cast<size_t>(currentPage + 1) < pageOffsets.size()) {
+            currentPage++;
+            pageChanged = true;
+          } else if (indexComplete) {
+            reachedEnd = true;
+          }
+        }
+        break;
+      case PageMode::Direct:
+        if (prevTriggered) {
+          if (directPageIndex > 0) {
+            directPageIndex--;
+          } else {
+            pageMode = PageMode::Indexed;
+            currentPage = directReturnPage;
+          }
+          pageChanged = true;
+        } else if (nextTriggered) {
+          if (directPageIndex + 1 < directPageCount) {
+            directPageIndex++;
+            pageChanged = true;
+          } else if (currentPageEndOffset >= txt->getFileSize()) {
+            reachedEnd = true;
+          } else {
+            if (directPageCount < directPageOffsets.size()) {
+              directPageOffsets[directPageCount++] = currentPageEndOffset;
+              directPageIndex++;
+            } else {
+              std::move(directPageOffsets.begin() + 1, directPageOffsets.end(), directPageOffsets.begin());
+              directPageOffsets.back() = currentPageEndOffset;
+            }
+            pageChanged = true;
+          }
+        }
+        break;
     }
   }
 
@@ -163,7 +208,7 @@ void TxtReaderActivity::openChapterSelection() {
     }
   }
 
-  const uint32_t currentOffset = static_cast<uint32_t>(pageOffsets[currentPage]);
+  const uint32_t currentOffset = static_cast<uint32_t>(getCurrentSourceOffset());
   // The selector outlives this call and therefore cannot live on the stack.
   auto selector = makeUniqueNoThrow<TxtReaderChapterSelectionActivity>(renderer, mappedInput, *txt, currentOffset);
   if (!selector) {
@@ -178,16 +223,8 @@ void TxtReaderActivity::openChapterSelection() {
     if (result.isCancelled || !selected) return;
 
     RenderLock lock(*this);
-    if (!indexComplete && !pageOffsets.empty() && pageOffsets.back() < selected->sourceOffset) {
-      GUI.drawPopup(renderer, tr(STR_INDEXING));
-      pagesUntilFullRefresh = 1;
-    }
-    if (!extendIndexToOffset(selected->sourceOffset)) {
-      LOG_ERR("TRS", "Failed to extend page index to TXT offset %u", selected->sourceOffset);
-      return;
-    }
-    currentPage = static_cast<int>(txt_page_index::pageForOffset(pageOffsets, selected->sourceOffset));
-    currentPageEndOffset = pageOffsets[currentPage];
+    const int returnPage = pageMode == PageMode::Indexed ? currentPage : directReturnPage;
+    goToSourceOffset(selected->sourceOffset, returnPage);
   });
 }
 
@@ -473,14 +510,36 @@ bool TxtReaderActivity::extendIndexToPage(const size_t targetPage) {
   return targetPage < pageOffsets.size();
 }
 
-bool TxtReaderActivity::extendIndexToOffset(const size_t targetOffset) {
-  if (pageOffsets.empty() || targetOffset >= txt->getFileSize()) return false;
-  while (!indexComplete && pageOffsets.back() < targetOffset) {
-    const size_t offset = pageOffsets.back();
-    size_t nextOffset = offset;
-    if (!loadPageAtOffset(offset, currentPageLines, nextOffset) || !advancePageIndex(nextOffset)) return false;
+void TxtReaderActivity::goToSourceOffset(const size_t sourceOffset, const int returnPage) {
+  if (pageOffsets.empty() || sourceOffset >= txt->getFileSize()) return;
+
+  if (indexComplete || sourceOffset <= pageOffsets.back()) {
+    pageMode = PageMode::Indexed;
+    currentPage = static_cast<int>(txt_page_index::pageForOffset(pageOffsets, sourceOffset));
+    directPageCount = 0;
+  } else {
+    pageMode = PageMode::Direct;
+    directPageOffsets[0] = sourceOffset;
+    directPageIndex = 0;
+    directPageCount = 1;
+    directReturnPage = std::clamp(returnPage, 0, static_cast<int>(pageOffsets.size() - 1));
   }
-  return true;
+  currentPageEndOffset = sourceOffset;
+}
+
+size_t TxtReaderActivity::getCurrentSourceOffset() const {
+  switch (pageMode) {
+    case PageMode::Indexed:
+      return pageOffsets[currentPage];
+    case PageMode::Direct:
+      return directPageOffsets[directPageIndex];
+  }
+  return 0;
+}
+
+int TxtReaderActivity::getDisplayPageNumber() const {
+  if (pageMode == PageMode::Indexed) return currentPage + 1;
+  return txt_page_index::estimatedPageNumber(txt->getFileSize(), getCurrentSourceOffset(), totalPages);
 }
 
 bool TxtReaderActivity::advancePageIndex(const size_t nextOffset) {
@@ -537,13 +596,18 @@ void TxtReaderActivity::render(RenderLock&&) {
   }
 
   // Bounds check
-  if (currentPage < 0) currentPage = 0;
-  if (static_cast<size_t>(currentPage) >= pageOffsets.size()) {
-    currentPage = static_cast<int>(pageOffsets.size() - 1);
+  if (pageMode == PageMode::Indexed) {
+    if (currentPage < 0) currentPage = 0;
+    if (static_cast<size_t>(currentPage) >= pageOffsets.size()) {
+      currentPage = static_cast<int>(pageOffsets.size() - 1);
+    }
+  } else if (directPageCount == 0 || directPageIndex >= directPageCount) {
+    pageMode = PageMode::Indexed;
+    currentPage = std::clamp(directReturnPage, 0, static_cast<int>(pageOffsets.size() - 1));
   }
 
   // Load current page content
-  size_t offset = pageOffsets[currentPage];
+  const size_t offset = getCurrentSourceOffset();
   size_t nextOffset = offset;
   currentPageLines.clear();
   if (!loadPageAtOffset(offset, currentPageLines, nextOffset)) {
@@ -554,7 +618,7 @@ void TxtReaderActivity::render(RenderLock&&) {
   }
   currentPageEndOffset = nextOffset;
 
-  advancePageIndex(nextOffset);
+  if (pageMode == PageMode::Indexed) advancePageIndex(nextOffset);
 
   renderer.clearScreen();
   renderPage();
@@ -642,34 +706,45 @@ void TxtReaderActivity::renderStatusBar() const {
   if (SETTINGS.statusBarSpec().showsTitle()) {
     title = txt->getTitle();
   }
-  GUI.drawStatusBar(renderer, getProgressPercent(), currentPage + 1, totalPages, title, 0, 0, true, false,
-                    !indexComplete);
+  GUI.drawStatusBar(renderer, getProgressPercent(), getDisplayPageNumber(), totalPages, title, 0, 0, true, false,
+                    !indexComplete || pageMode == PageMode::Direct);
 }
 
 void TxtReaderActivity::saveProgress() const {
   const int progressPercent = getProgressPercent();
-  const bool completed = indexComplete && static_cast<size_t>(currentPage + 1) == pageOffsets.size();
+  const bool completed = txt && currentPageEndOffset >= txt->getFileSize();
   READING_STATS.updateProgress(static_cast<uint8_t>(progressPercent), completed, "",
                                static_cast<uint8_t>(progressPercent));
 
-  const uint32_t page = static_cast<uint32_t>(currentPage);
-  uint8_t data[4];
-  data[0] = page & 0xFF;
-  data[1] = (page >> 8) & 0xFF;
-  data[2] = (page >> 16) & 0xFF;
-  data[3] = (page >> 24) & 0xFF;
+  const uint32_t sourceOffset = static_cast<uint32_t>(getCurrentSourceOffset());
+  uint8_t data[8];
+  writeLittleEndianU32(data, PROGRESS_OFFSET_MAGIC);
+  writeLittleEndianU32(data + sizeof(uint32_t), sourceOffset);
   if (!ProgressFile::writeAtomic(txt->getCachePath(), data, sizeof(data))) {
-    LOG_ERR("TRS", "Failed to save progress: page %d", currentPage);
+    LOG_ERR("TRS", "Failed to save progress: offset %u", static_cast<unsigned>(sourceOffset));
   }
 }
 
 void TxtReaderActivity::loadProgress() {
   HalFile f;
   if (Storage.openFileForRead("TRS", txt->getCachePath() + "/progress.bin", f)) {
+    if (f.fileSize64() == 8) {
+      uint8_t data[8];
+      if (f.read(data, sizeof(data)) == static_cast<int>(sizeof(data)) &&
+          readLittleEndianU32(data) == PROGRESS_OFFSET_MAGIC) {
+        const uint32_t sourceOffset = readLittleEndianU32(data + sizeof(uint32_t));
+        if (!pageOffsets.empty() && sourceOffset < txt->getFileSize()) {
+          goToSourceOffset(sourceOffset, static_cast<int>(pageOffsets.size() - 1));
+          LOG_DBG("TRS", "Loaded progress: offset %u", static_cast<unsigned>(sourceOffset));
+        }
+      }
+      return;
+    }
+
+    if (f.fileSize64() != 4) return;
     uint8_t data[4];
     if (f.read(data, 4) == 4) {
-      const uint32_t savedPage = static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
-                                 (static_cast<uint32_t>(data[2]) << 16) | (static_cast<uint32_t>(data[3]) << 24);
+      const uint32_t savedPage = readLittleEndianU32(data);
       if (pageOffsets.empty()) {
         currentPage = 0;
         return;
@@ -881,7 +956,7 @@ ScreenshotInfo TxtReaderActivity::getScreenshotInfo() const {
     const std::string t = txt->getTitle();
     snprintf(info.title, sizeof(info.title), "%s", t.c_str());
   }
-  info.currentPage = currentPage + 1;
+  info.currentPage = getDisplayPageNumber();
   info.totalPages = totalPages;
   info.progressPercent = getProgressPercent();
   return info;

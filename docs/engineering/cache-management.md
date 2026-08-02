@@ -30,6 +30,10 @@ TXT `chapters.bin` version 1 is an optional source-offset chapter index built
 the first time the chapter list opens. It is independent of pagination and is
 invalidated by file size, encoding, or chapter-index version.
 
+TXT `progress.bin` stores the current source offset so a chapter jump can be
+restored without extending the page index through all intervening text. Legacy
+four-byte page-number records remain readable.
+
 **Hash**: `std::hash<std::string>{}(filepath)` → Moving/renaming file = new hash = lost progress
 
 ## Cache Invalidation Rules

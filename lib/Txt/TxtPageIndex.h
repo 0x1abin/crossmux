@@ -57,6 +57,13 @@ inline int progressPercent(const size_t pageEndOffset, const size_t fileSize) {
   return static_cast<int>(std::min<uint64_t>(percent, 100));
 }
 
+inline int estimatedPageNumber(const size_t fileSize, const size_t pageStartOffset, const int totalPages) {
+  if (totalPages <= 0) return 0;
+  if (fileSize == 0) return 1;
+  const uint64_t page = static_cast<uint64_t>(std::min(pageStartOffset, fileSize)) * totalPages / fileSize + 1;
+  return static_cast<int>(std::min<uint64_t>(page, totalPages));
+}
+
 inline bool shouldCheckpoint(const size_t knownPageCount, const bool complete) {
   return complete || (knownPageCount > 0 && knownPageCount % CHECKPOINT_PAGE_COUNT == 0);
 }

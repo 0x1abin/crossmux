@@ -393,10 +393,12 @@ first encounters non-ASCII bytes. GBK is decoded to UTF-8 in the existing TXT
 page buffer while page offsets remain byte positions in the source file.
 Four-byte GB18030 sequences are not supported.
 
-`progress.bin` is an atomic four-byte little-endian zero-based `uint32` page
-number. Records produced by older firmware used only the low 16 bits and remain
-compatible. When progress is newer than the last partial-index checkpoint, at
-most the next 31 pages are recalculated before rendering resumes.
+`progress.bin` is an atomic eight-byte little-endian record containing `uint32
+magic` (`TXTO`, `0x4F545854`) followed by the `uint32` source-file byte offset
+of the current page. Legacy four-byte zero-based page numbers remain readable;
+records produced by still older firmware used only the low 16 bits. Legacy
+progress newer than the last partial-index checkpoint recalculates at most the
+next 31 pages before rendering resumes.
 
 `chapters.bin` version 1 is a little-endian, fixed-record chapter index. Its
 16-byte header stores, in order: `uint32 magic` (`TXTC`, `0x43545854`), `uint32
@@ -407,8 +409,10 @@ contains a `uint32` source-file byte offset followed by a NUL-terminated
 `chapters.bin.tmp`, flushed, and swapped into place with a recoverable `.bak`.
 A wrong header, unsupported encoding, changed file size, record-size mismatch,
 truncated payload, invalid offset, or unterminated title rejects the cache.
-Chapter offsets are independent of pagination; selecting one extends the lazy
-page index only until that source offset is covered.
+Chapter offsets are independent of pagination. Selecting an offset outside the
+known page-index prefix opens it directly and keeps a fixed 32-page local
+navigation history, so jumping does not synchronously paginate the intervening
+text or grow RAM with book length.
 
 ## WeRead cache
 

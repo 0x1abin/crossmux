@@ -3,12 +3,17 @@
 #include <Txt.h>
 #include <TxtEncoding.h>
 
+#include <array>
 #include <vector>
 
 #include "CrossPointSettings.h"
 #include "activities/Activity.h"
 
 class TxtReaderActivity final : public Activity {
+  enum class PageMode : uint8_t { Indexed, Direct };
+
+  static constexpr size_t DIRECT_PAGE_HISTORY_SIZE = 32;
+
   std::unique_ptr<Txt> txt;
 
   int currentPage = 0;
@@ -19,6 +24,13 @@ class TxtReaderActivity final : public Activity {
 
   // Streaming text reader - stores file offsets for each page
   std::vector<size_t> pageOffsets;  // File offset for start of each page
+  // Chapter jumps use a bounded local history instead of paginating from the
+  // start of the book. On ESP32 this adds a fixed 128 bytes to the Activity.
+  std::array<size_t, DIRECT_PAGE_HISTORY_SIZE> directPageOffsets{};
+  size_t directPageIndex = 0;
+  size_t directPageCount = 0;
+  int directReturnPage = 0;
+  PageMode pageMode = PageMode::Indexed;
   std::vector<std::string> currentPageLines;
   int linesPerPage = 0;
   int viewportWidth = 0;
@@ -52,7 +64,9 @@ class TxtReaderActivity final : public Activity {
   bool loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset);
   bool advancePageIndex(size_t nextOffset);
   bool extendIndexToPage(size_t targetPage);
-  bool extendIndexToOffset(size_t targetOffset);
+  void goToSourceOffset(size_t sourceOffset, int returnPage);
+  size_t getCurrentSourceOffset() const;
+  int getDisplayPageNumber() const;
   void openChapterSelection();
   void updateTotalPages();
   int getProgressPercent() const;

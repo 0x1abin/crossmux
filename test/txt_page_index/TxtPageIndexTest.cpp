@@ -49,3 +49,14 @@ TEST(TxtPageIndex, MapsSourceOffsetsToKnownPages) {
   EXPECT_EQ(pageForOffset(offsets, 999), 3U);
   EXPECT_EQ(pageForOffset({}, 20), 0U);
 }
+
+TEST(TxtPageIndex, EstimatesDisplayPageForDirectSourceOffset) {
+  using namespace txt_page_index;
+
+  EXPECT_EQ(estimatedPageNumber(1000, 0, 10), 1);
+  EXPECT_EQ(estimatedPageNumber(1000, 500, 10), 6);
+  EXPECT_EQ(estimatedPageNumber(1000, 999, 10), 10);
+  EXPECT_EQ(estimatedPageNumber(1000, 1000, 10), 10);
+  EXPECT_EQ(estimatedPageNumber(0, 0, 1), 1);
+  EXPECT_EQ(estimatedPageNumber(1000, 500, 0), 0);
+}
