@@ -373,23 +373,30 @@ bool TxtReaderActivity::extendIndexToPage(const size_t targetPage) {
       return false;
     }
 
-    switch (txt_page_index::recordNextOffset(pageOffsets, txt->getFileSize(), nextOffset)) {
-      case txt_page_index::AdvanceResult::Unchanged:
-        return false;
-      case txt_page_index::AdvanceResult::PageAdded:
-        indexCacheDirty = true;
-        break;
-      case txt_page_index::AdvanceResult::Completed:
-        indexComplete = true;
-        indexCacheDirty = true;
-        break;
-    }
-    if (indexCacheDirty && txt_page_index::shouldCheckpoint(pageOffsets.size(), indexComplete)) {
-      savePageIndexCache();
-    }
+    if (!advancePageIndex(nextOffset)) return false;
+  }
+  return targetPage < pageOffsets.size();
+}
+
+bool TxtReaderActivity::advancePageIndex(const size_t nextOffset) {
+  const auto result = indexComplete ? txt_page_index::AdvanceResult::Unchanged
+                                    : txt_page_index::recordNextOffset(pageOffsets, txt->getFileSize(), nextOffset);
+  switch (result) {
+    case txt_page_index::AdvanceResult::Unchanged:
+      break;
+    case txt_page_index::AdvanceResult::PageAdded:
+      indexCacheDirty = true;
+      break;
+    case txt_page_index::AdvanceResult::Completed:
+      indexComplete = true;
+      indexCacheDirty = true;
+      break;
   }
   updateTotalPages();
-  return targetPage < pageOffsets.size();
+  if (indexCacheDirty && txt_page_index::shouldCheckpoint(pageOffsets.size(), indexComplete)) {
+    savePageIndexCache();
+  }
+  return result != txt_page_index::AdvanceResult::Unchanged;
 }
 
 void TxtReaderActivity::updateTotalPages() {
@@ -442,23 +449,7 @@ void TxtReaderActivity::render(RenderLock&&) {
   }
   currentPageEndOffset = nextOffset;
 
-  const auto advance = indexComplete ? txt_page_index::AdvanceResult::Unchanged
-                                     : txt_page_index::recordNextOffset(pageOffsets, txt->getFileSize(), nextOffset);
-  switch (advance) {
-    case txt_page_index::AdvanceResult::Unchanged:
-      break;
-    case txt_page_index::AdvanceResult::PageAdded:
-      indexCacheDirty = true;
-      break;
-    case txt_page_index::AdvanceResult::Completed:
-      indexComplete = true;
-      indexCacheDirty = true;
-      break;
-  }
-  updateTotalPages();
-  if (indexCacheDirty && txt_page_index::shouldCheckpoint(pageOffsets.size(), indexComplete)) {
-    savePageIndexCache();
-  }
+  advancePageIndex(nextOffset);
 
   renderer.clearScreen();
   renderPage();
