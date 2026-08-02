@@ -159,6 +159,29 @@ void AppsMenuActivity::onEnter() {
 
 void AppsMenuActivity::onExit() { Activity::onExit(); }
 
+AppsMenuActivity::MenuLayout AppsMenuActivity::menuLayout(const int visibleCount) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  MenuLayout layout{};
+  layout.listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  layout.listH = renderer.getScreenHeight() - layout.listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
+  layout.spacing = metrics.menuSpacing / 2;
+  layout.rowStep = metrics.menuRowHeight + layout.spacing;
+  // Number of rows that fit: n rows occupy n*rowHeight + (n-1)*spacing <= listH.
+  layout.perPage = std::max(1, (layout.listH + layout.spacing) / layout.rowStep);
+  layout.page = selected / layout.perPage;
+  layout.pageStart = layout.page * layout.perPage;
+  layout.pageCount = std::max(0, std::min(layout.perPage, visibleCount - layout.pageStart));
+  return layout;
+}
+
+void AppsMenuActivity::activateSelected() {
+  const int appIndex = getAppIndexForVisibleIndex(selected);
+  if (appIndex >= 0) {
+    (activityManager.*kAppEntries[appIndex].open)();
+  }
+}
+
 void AppsMenuActivity::loop() {
   const int visibleCount = getVisibleAppCount();
   buttonNavigator.onNext([this, visibleCount] {
@@ -170,11 +193,32 @@ void AppsMenuActivity::loop() {
     requestUpdate();
   });
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const int appIndex = getAppIndexForVisibleIndex(selected);
-    if (appIndex >= 0) {
-      (activityManager.*kAppEntries[appIndex].open)();
+  // Touch on a menu row. Rows are drawn by drawButtonMenu at menuRowHeight with a
+  // halved gap, which is not the standard themed-list geometry that
+  // handleListTouch() assumes, so hit-test the band directly like HomeActivity
+  // does. Down highlights, Tap activates: on e-ink the repaint is slow enough
+  // that immediate touch-down feedback matters.
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const MenuLayout layout = menuLayout(visibleCount);
+  int row = -1;
+  const auto rowTouch =
+      mappedInput.rowTouch(row, layout.listY, layout.rowStep, layout.pageCount, 0, INT32_MAX, metrics.menuRowHeight);
+  if (rowTouch != MappedInputManager::RowTouch::None) {
+    const int touchedIndex = layout.pageStart + row;
+    if (rowTouch == MappedInputManager::RowTouch::Down) {
+      if (selected != touchedIndex) {
+        selected = touchedIndex;
+        requestUpdate();
+      }
+    } else {
+      selected = touchedIndex;
+      activateSelected();
     }
+    return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    activateSelected();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     activityManager.goHome();
   }
@@ -188,23 +232,21 @@ void AppsMenuActivity::render(RenderLock&&) {
   renderer.clearScreen();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, sw, metrics.headerHeight}, tr(STR_APPS_TITLE));
 
-  const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const int visibleCount = getVisibleAppCount();
+  const MenuLayout layout = menuLayout(visibleCount);
+  const int listY = layout.listY;
+  const int listH = layout.listH;
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
 
   if (visibleCount == 0) {
     UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
   } else {
-    // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
-    const int spacing = metrics.menuSpacing / 2;
-    const int rowStep = metrics.menuRowHeight + spacing;
-    // Number of rows that fit: n rows occupy n*rowHeight + (n-1)*spacing <= listH.
-    const int perPage = std::max(1, (listH + spacing) / rowStep);
+    const int spacing = layout.spacing;
+    const int perPage = layout.perPage;
     const int totalPages = (visibleCount + perPage - 1) / perPage;
-    const int page = selected / perPage;
-    const int pageStart = page * perPage;
-    const int pageCount = std::min(perPage, visibleCount - pageStart);
+    const int page = layout.page;
+    const int pageStart = layout.pageStart;
+    const int pageCount = layout.pageCount;
 
     // ponytail: scan at most 16 entries instead of keeping a RAM-backed filtered list.
     GUI.drawButtonMenu(

@@ -29,6 +29,21 @@ class AppsMenuActivity final : public Activity {
   static int getVisibleAppCount();
   static int getAppIndexForVisibleIndex(int visibleIndex);
 
+  // Geometry of the paginated app list. Shared by render() and touch
+  // hit-testing so the drawn rows and the tappable rows cannot drift apart.
+  struct MenuLayout {
+    int listY;
+    int listH;
+    int spacing;
+    int rowStep;
+    int perPage;
+    int page;
+    int pageStart;
+    int pageCount;
+  };
+  MenuLayout menuLayout(int visibleCount) const;
+  void activateSelected();
+
   ButtonNavigator buttonNavigator;
   int selected = 0;
 };
