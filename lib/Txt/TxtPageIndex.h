@@ -57,6 +57,13 @@ inline int progressPercent(const size_t pageEndOffset, const size_t fileSize) {
   return static_cast<int>(std::min<uint64_t>(percent, 100));
 }
 
+inline int estimatedPageNumber(const size_t fileSize, const size_t pageStartOffset, const int totalPages) {
+  if (totalPages <= 0) return 0;
+  if (fileSize == 0) return 1;
+  const uint64_t page = static_cast<uint64_t>(std::min(pageStartOffset, fileSize)) * totalPages / fileSize + 1;
+  return static_cast<int>(std::min<uint64_t>(page, totalPages));
+}
+
 inline bool shouldCheckpoint(const size_t knownPageCount, const bool complete) {
   return complete || (knownPageCount > 0 && knownPageCount % CHECKPOINT_PAGE_COUNT == 0);
 }
@@ -69,6 +76,12 @@ inline size_t recoveryTargetPage(const size_t savedPage, const size_t knownPageC
   const size_t recoverablePages =
       std::min(CHECKPOINT_PAGE_COUNT - 1, std::numeric_limits<size_t>::max() - lastKnownPage);
   return std::min(savedPage, lastKnownPage + recoverablePages);
+}
+
+inline size_t pageForOffset(const std::vector<size_t>& offsets, const size_t sourceOffset) {
+  if (offsets.empty()) return 0;
+  const auto nextPage = std::upper_bound(offsets.begin(), offsets.end(), sourceOffset);
+  return nextPage == offsets.begin() ? 0 : static_cast<size_t>(nextPage - offsets.begin() - 1);
 }
 
 }  // namespace txt_page_index

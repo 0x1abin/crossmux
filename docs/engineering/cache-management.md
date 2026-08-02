@@ -12,7 +12,7 @@
 **Structure**:
 - EPUB: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, thumb_<height>.bmp, sections/*.bin}`
 - XTC: `.crosspoint/xtc_<hash>/{cover.bmp, thumb_<height>.bmp}`
-- TXT: `.crosspoint/txt_<hash>/{index.bin, progress.bin}`
+- TXT: `.crosspoint/txt_<hash>/{index.bin, chapters.bin, progress.bin}`
 
 `recent.json` stores the theme-neutral `thumb_[HEIGHT].bmp` path template for
 EPUB and XTC entries. Home themes replace `[HEIGHT]` with their requested
@@ -25,6 +25,14 @@ detected source encoding. It is invalidated by file-size, viewport, font,
 margin, or alignment changes; see
 [file-formats.md](../file-formats.md#txt-reader-cache) for its byte layout and
 version-4 migration behavior.
+
+TXT `chapters.bin` version 1 is an optional source-offset chapter index built
+the first time the chapter list opens. It is independent of pagination and is
+invalidated by file size, encoding, or chapter-index version.
+
+TXT `progress.bin` stores the current source offset so a chapter jump can be
+restored without extending the page index through all intervening text. Legacy
+four-byte page-number records remain readable.
 
 **Hash**: `std::hash<std::string>{}(filepath)` → Moving/renaming file = new hash = lost progress
 
