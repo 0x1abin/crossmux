@@ -364,6 +364,40 @@ if (parsedSize != fileSize) {
 }
 ```
 
+## TXT reader cache
+
+TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
+
+`index.bin` version 6 is a little-endian page-offset checkpoint. Its fixed
+header contains, in order: `uint32 magic` (`TXTI`, `0x54585449`), `uint8
+version` (`6`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
+`int32 fontId`, `int32 screenMargin`, `uint8 paragraphAlignment`, `uint8
+complete`, `uint8 encoding` (`0` unknown/ASCII, `1` UTF-8, `2` GBK), and `uint32
+knownPageCount`. It is followed by `knownPageCount`
+strictly increasing `uint32` byte offsets; the first offset is zero and every
+offset is smaller than `fileSize`. An empty file has no offsets and must be
+marked complete.
+
+An incomplete index contains only pages discovered while reading. It is
+checkpointed every 32 known page starts and when the reader exits; the final
+page marks it complete and makes `knownPageCount` exact. Version 4 indexes omit
+`complete`; version 5 indexes omit `encoding`. These legacy indexes are reused
+only when the file prefix is confirmed UTF-8, because offsets produced before
+GBK decoding are not valid GBK page boundaries. A wrong magic, unsupported
+version, truncated payload, changed file size, changed layout setting,
+non-monotonic offset, or out-of-range offset invalidates the index. Writers
+flush `index.bin.tmp` before replacing the prior checkpoint.
+
+The Chinese firmware detects strict UTF-8 first and strict GBK second when it
+first encounters non-ASCII bytes. GBK is decoded to UTF-8 in the existing TXT
+page buffer while page offsets remain byte positions in the source file.
+Four-byte GB18030 sequences are not supported.
+
+`progress.bin` is an atomic four-byte little-endian zero-based `uint32` page
+number. Records produced by older firmware used only the low 16 bits and remain
+compatible. When progress is newer than the last partial-index checkpoint, at
+most the next 31 pages are recalculated before rendering resumes.
+
 ## WeRead cache
 
 The Simplified Chinese build keeps WeRead's private data below `/.crosspoint/weread/`.
