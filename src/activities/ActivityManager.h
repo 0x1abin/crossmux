@@ -107,7 +107,7 @@ class ActivityManager {
 #ifdef ENABLE_CHINESE_VERSION
   void goToChineseChess();
 #endif
-#if defined(ENABLE_CHINESE_VERSION) && !defined(__EMSCRIPTEN__)
+#ifdef ENABLE_CHINESE_VERSION
   void goToWeRead();
 #endif
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
