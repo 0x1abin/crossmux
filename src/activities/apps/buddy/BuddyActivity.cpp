@@ -22,8 +22,10 @@
 namespace {
 
 constexpr uint32_t kRevealFrameHoldMs = 1500;
+constexpr uint32_t kIdleFrameHoldMs = 1500;
 constexpr int kSpriteRows = 5;
 constexpr int kCardBodyOffsetY = -10;
+constexpr int kIdleLiftPx = 2;
 
 struct Sprite {
   const char* rows[kSpriteRows];
@@ -145,12 +147,13 @@ void drawSilhouette(const GfxRenderer& renderer, const Rect& bounds) {
   renderer.fillRect(cx + 3 * unit, cy + 7 * unit, 4 * unit, 3 * unit);
 }
 
-void drawSprite(const GfxRenderer& renderer, const Rect& bounds, const buddy::Traits& traits) {
+void drawSprite(const GfxRenderer& renderer, const Rect& bounds, const buddy::Traits& traits, const bool blinking,
+                const int yOffset) {
   const int fontId = bounds.width >= 250 && bounds.height >= 150 ? NOTOSANS_18_FONT_ID : UI_12_FONT_ID;
   const int lineHeight = renderer.getLineHeight(fontId);
   const int hatRows = traits.hat == buddy::Hat::None ? 0 : 1;
   const int totalHeight = (kSpriteRows + hatRows) * lineHeight;
-  int y = bounds.y + std::max(0, (bounds.height - totalHeight) / 2);
+  int y = bounds.y + std::max(0, (bounds.height - totalHeight) / 2) + yOffset;
 
   if (hatRows != 0) {
     drawCenteredGridRow(renderer, fontId, bounds, y, kHatRows[static_cast<size_t>(traits.hat)]);
@@ -158,7 +161,7 @@ void drawSprite(const GfxRenderer& renderer, const Rect& bounds, const buddy::Tr
   }
 
   const Sprite& sprite = kSprites[static_cast<size_t>(traits.species)];
-  const char eye = kEyeGlyphs[static_cast<size_t>(traits.eye)];
+  const char eye = blinking ? '-' : kEyeGlyphs[static_cast<size_t>(traits.eye)];
   for (const char* source : sprite.rows) {
     char row[16];
     snprintf(row, sizeof(row), "%s", source);
@@ -258,12 +261,17 @@ void BuddyActivity::loop() {
       break;
     case Stage::Crack:
     case Stage::Burst:
-      if (static_cast<int32_t>(millis() - nextStageAt_) >= 0) {
+      if (static_cast<int32_t>(millis() - nextFrameAt_) >= 0) {
         advanceReveal();
       }
       break;
     case Stage::RevealCard:
+      break;
     case Stage::Card:
+      if (cardRendered_ && static_cast<int32_t>(millis() - nextFrameAt_) >= 0) {
+        advanceIdleFrame();
+      }
+      break;
     case Stage::Error:
       break;
   }
@@ -290,12 +298,32 @@ void BuddyActivity::advanceReveal() {
   if (stage_ == Stage::RevealCard) {
     finishClaim();
   } else {
-    nextStageAt_ = millis() + kRevealFrameHoldMs;
+    nextFrameAt_ = millis() + kRevealFrameHoldMs;
   }
+}
+
+void BuddyActivity::advanceIdleFrame() {
+  switch (idleFrame_) {
+    case IdleFrame::RestBeforeBlink:
+      idleFrame_ = IdleFrame::Blink;
+      break;
+    case IdleFrame::Blink:
+      idleFrame_ = IdleFrame::RestBeforeLift;
+      break;
+    case IdleFrame::RestBeforeLift:
+      idleFrame_ = IdleFrame::Lift;
+      break;
+    case IdleFrame::Lift:
+      idleFrame_ = IdleFrame::RestBeforeBlink;
+      break;
+  }
+
+  requestUpdate();
 }
 
 void BuddyActivity::finishClaim() {
   stage_ = Stage::Card;
+  nextFrameAt_ = millis() + kIdleFrameHoldMs;
   SETTINGS.buddyClaimed = 1;
   if (!SETTINGS.saveToFile()) {
     SETTINGS.buddyClaimed = 0;
@@ -316,7 +344,7 @@ void BuddyActivity::render(RenderLock&&) {
     case Stage::Card:
       drawCard();
       renderer.displayBuffer(stage_ == Stage::RevealCard ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-      if (SETTINGS.textAntiAliasing) {
+      if (SETTINGS.textAntiAliasing && !cardRendered_) {
         renderer.clearScreen(0x00);
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
         drawCard(false);
@@ -332,6 +360,8 @@ void BuddyActivity::render(RenderLock&&) {
         drawCard();
         renderer.cleanupGrayscaleWithFrameBuffer();
       }
+      if (stage_ == Stage::Card) nextFrameAt_ = millis() + kIdleFrameHoldMs;
+      cardRendered_ = true;
       break;
     case Stage::Error:
       drawError();
@@ -423,7 +453,9 @@ void BuddyActivity::drawCard(const bool clear) {
   const int statsY = card.y + card.height - statsHeight - metrics.verticalSpacing * 3 + kCardBodyOffsetY;
   const Rect art{card.x, bodyTop, card.width, std::max(1, statsY - bodyTop - 8)};
   const Rect stats{card.x + statsInset, statsY, card.width - statsInset * 2, statsHeight};
-  drawSprite(renderer, art, traits_);
+  const bool blinking = idleFrame_ == IdleFrame::Blink;
+  const int spriteYOffset = idleFrame_ == IdleFrame::Lift ? -kIdleLiftPx : 0;
+  drawSprite(renderer, art, traits_, blinking, spriteYOffset);
   drawStatRows(renderer, stats, traits_);
 }
 
