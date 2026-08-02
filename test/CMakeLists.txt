@@ -17,10 +17,16 @@ FetchContent_Declare(
   GIT_TAG v1.17.0
 )
 
+FetchContent_Declare(
+  crosspoint_simulator
+  GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
+  GIT_TAG 26010239491941025ccdd55da8eab6a7d36d5cc1
+)
+
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+FetchContent_MakeAvailable(googletest crosspoint_simulator)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 

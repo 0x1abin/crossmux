@@ -1,20 +1,15 @@
-if(NOT TARGET arduino_host)
-  add_subdirectory(${REPO_ROOT}/simulator/arduino-host
-                   ${CMAKE_CURRENT_BINARY_DIR}/arduino-host)
-endif()
-
 add_executable(ChineseChessAITest
   ChineseChessAITest.cpp
   ${REPO_ROOT}/src/activities/apps/chinese-chess/ChineseChessAI.cpp
   ${REPO_ROOT}/src/activities/apps/chinese-chess/ChineseChessBoard.cpp
-  ${REPO_ROOT}/simulator/hal/HalStorage.cpp
+  ${crosspoint_simulator_SOURCE_DIR}/src/HalStorage.cpp
 )
 
 target_include_directories(ChineseChessAITest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${crosspoint_simulator_SOURCE_DIR}/src
   ${REPO_ROOT}/src/activities/apps/chinese-chess
   ${REPO_ROOT}/lib/hal
-  ${REPO_ROOT}/simulator/shims
 )
 
 target_compile_definitions(ChineseChessAITest PRIVATE
@@ -23,7 +18,6 @@ target_compile_definitions(ChineseChessAITest PRIVATE
 )
 
 target_link_libraries(ChineseChessAITest PRIVATE
-  arduino_host
   crosspoint_test_common
   GTest::gtest_main
 )
