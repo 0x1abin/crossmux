@@ -13,8 +13,9 @@
 - EPUB: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, sections/*.bin}`
 - TXT: `.crosspoint/txt_<hash>/{index.bin, progress.bin}`
 
-TXT `index.bin` version 5 stores a partial or complete lazy page index. It is
-invalidated by file-size, viewport, font, margin, or alignment changes; see
+TXT `index.bin` version 6 stores a partial or complete lazy page index and the
+detected source encoding. It is invalidated by file-size, viewport, font,
+margin, or alignment changes; see
 [file-formats.md](../file-formats.md#txt-reader-cache) for its byte layout and
 version-4 migration behavior.
 

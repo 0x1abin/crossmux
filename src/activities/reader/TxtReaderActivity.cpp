@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Memory.h>
+#include <TxtEncoding.h>
 #include <TxtPageIndex.h>
 #include <Utf8.h>
 
@@ -26,7 +27,9 @@
 #include "util/AchievementPopupUtils.h"
 
 namespace {
-constexpr size_t CHUNK_SIZE = 8 * 1024;       // 8KB chunk for reading
+constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
+// Source and worst-case 1.5x UTF-8 output coexist in the existing buffer.
+constexpr size_t GBK_RAW_CHUNK_SIZE = CHUNK_SIZE * 2 / 5;
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
 
 template <typename T>
@@ -182,6 +185,16 @@ void TxtReaderActivity::initializeReader() {
   initialized = true;
 }
 
+void TxtReaderActivity::probeTextEncoding() {
+#ifdef ENABLE_CHINESE_VERSION
+  if (!pageBuffer || txt->getFileSize() == 0) return;
+  const size_t sampleLength = std::min(CHUNK_SIZE, txt->getFileSize());
+  if (!txt->readContent(pageBuffer.get(), 0, sampleLength)) return;
+  textEncoding = txt_encoding::detect(pageBuffer.get(), sampleLength, sampleLength == txt->getFileSize());
+  LOG_DBG("TRS", "TXT encoding probe: %u", static_cast<unsigned>(textEncoding));
+#endif
+}
+
 bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset) {
   outLines.clear();
   const size_t fileSize = txt->getFileSize();
@@ -190,20 +203,43 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     return false;
   }
 
-  size_t chunkSize = std::min(CHUNK_SIZE, fileSize - offset);
+  const size_t readLimit = textEncoding == txt_encoding::Encoding::Gbk ? GBK_RAW_CHUNK_SIZE : CHUNK_SIZE;
+  size_t rawChunkSize = std::min(readLimit, fileSize - offset);
   auto* const buffer = pageBuffer.get();
 
-  if (!txt->readContent(buffer, offset, chunkSize)) {
+  if (!txt->readContent(buffer, offset, rawChunkSize)) {
     return false;
   }
-  buffer[chunkSize] = '\0';
 
-  // Leave an incomplete UTF-8 sequence at a non-final chunk boundary for the
-  // next read instead of measuring or indexing a partial codepoint.
-  if (offset + chunkSize < fileSize) {
-    chunkSize =
-        static_cast<size_t>(utf8SafeTruncateBuffer(reinterpret_cast<const char*>(buffer), static_cast<int>(chunkSize)));
+#ifdef ENABLE_CHINESE_VERSION
+  if (textEncoding == txt_encoding::Encoding::Unknown) {
+    const auto detected = txt_encoding::detect(buffer, rawChunkSize, offset + rawChunkSize == fileSize);
+    if (detected != txt_encoding::Encoding::Unknown) {
+      textEncoding = detected;
+      indexCacheDirty = true;
+    }
+  }
+#endif
+
+  size_t chunkSize = rawChunkSize;
+  if (textEncoding == txt_encoding::Encoding::Gbk) {
+    rawChunkSize = std::min(rawChunkSize, GBK_RAW_CHUNK_SIZE);
+    const auto result =
+        txt_encoding::transcodeGbkInPlace(buffer, rawChunkSize, CHUNK_SIZE + 1, offset + rawChunkSize == fileSize);
+    if (result.rawLength == 0 || result.utf8Length == 0) return false;
+    rawChunkSize = result.rawLength;
+    chunkSize = result.utf8Length;
+  } else {
     buffer[chunkSize] = '\0';
+
+    // Leave an incomplete UTF-8 sequence at a non-final chunk boundary for the
+    // next read instead of measuring or indexing a partial codepoint.
+    if (offset + chunkSize < fileSize) {
+      chunkSize = static_cast<size_t>(
+          utf8SafeTruncateBuffer(reinterpret_cast<const char*>(buffer), static_cast<int>(chunkSize)));
+      rawChunkSize = chunkSize;
+      buffer[chunkSize] = '\0';
+    }
   }
 
   // Prime the SD card font's advance table with this chunk's codepoints.
@@ -229,7 +265,7 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     const bool hasNewline = lineEnd < chunkSize;
 
     // Check if we have a complete line
-    const bool lineComplete = hasNewline || (offset + lineEnd >= fileSize);
+    const bool lineComplete = hasNewline || (offset + rawChunkSize >= fileSize && lineEnd == chunkSize);
 
     if (!lineComplete && static_cast<int>(outLines.size()) > 0) {
       // Incomplete line and we already have some lines, stop here
@@ -355,7 +391,9 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     }
   }
 
-  nextOffset = offset + pos;
+  const size_t sourceBytes =
+      textEncoding == txt_encoding::Encoding::Gbk ? txt_encoding::gbkSourceLength(buffer, pos) : pos;
+  nextOffset = offset + sourceBytes;
 
   // Make sure we don't go past the file
   if (nextOffset > fileSize) {
@@ -593,7 +631,8 @@ bool TxtReaderActivity::loadPageIndexCache() {
   // - int32_t: font ID (to invalidate cache on font change)
   // - int32_t: screen margin (to invalidate cache on margin change)
   // - uint8_t: paragraph alignment (to invalidate cache on alignment change)
-  // - uint8_t: index complete (v5 only; v4 indexes are always complete)
+  // - uint8_t: index complete (v5+; v4 indexes are always complete)
+  // - uint8_t: text encoding (v6+)
   // - uint32_t: known pages count
   // - N * uint32_t: page offsets
 
@@ -660,9 +699,30 @@ bool TxtReaderActivity::loadPageIndexCache() {
     return false;
   }
 
+  probeTextEncoding();
+  if (!txt_page_index::canReuseCacheVersion(version, textEncoding == txt_encoding::Encoding::Utf8)) {
+    LOG_DBG("TRS", "Cache encoding is incompatible with version %d, rebuilding", version);
+    return false;
+  }
+
   uint8_t complete = 1;
-  if (version == txt_page_index::CACHE_VERSION && !readPodChecked(f, complete)) return false;
+  if (version >= txt_page_index::LAZY_CACHE_VERSION && !readPodChecked(f, complete)) return false;
   if (complete > 1) return false;
+
+  txt_encoding::Encoding cachedEncoding = txt_encoding::Encoding::Utf8;
+  if (version >= txt_page_index::CACHE_VERSION) {
+    uint8_t serializedEncoding = 0;
+    if (!readPodChecked(f, serializedEncoding) || !txt_encoding::isSerializedValueValid(serializedEncoding))
+      return false;
+    cachedEncoding = static_cast<txt_encoding::Encoding>(serializedEncoding);
+    if (!txt_encoding::isSupported(cachedEncoding)) return false;
+    if (textEncoding != txt_encoding::Encoding::Unknown && cachedEncoding != txt_encoding::Encoding::Unknown &&
+        textEncoding != cachedEncoding) {
+      LOG_DBG("TRS", "Cache encoding mismatch, rebuilding");
+      return false;
+    }
+    if (textEncoding == txt_encoding::Encoding::Unknown) textEncoding = cachedEncoding;
+  }
 
   uint32_t numPages = 0;
   if (!readPodChecked(f, numPages)) return false;
@@ -692,7 +752,7 @@ bool TxtReaderActivity::loadPageIndexCache() {
   }
 
   indexComplete = complete != 0;
-  indexCacheDirty = version == txt_page_index::LEGACY_CACHE_VERSION;
+  indexCacheDirty = version != txt_page_index::CACHE_VERSION || cachedEncoding != textEncoding;
   updateTotalPages();
   LOG_DBG("TRS", "Loaded page index cache: %u known pages, complete=%d", static_cast<unsigned>(pageOffsets.size()),
           indexComplete);
@@ -715,11 +775,12 @@ bool TxtReaderActivity::savePageIndexCache() {
     const int32_t fontId = cachedFontId;
     const int32_t margin = cachedScreenMargin;
     const uint8_t complete = static_cast<uint8_t>(indexComplete);
+    const uint8_t encoding = static_cast<uint8_t>(textEncoding);
     const uint32_t pageCount = static_cast<uint32_t>(pageOffsets.size());
     if (!writePodChecked(f, CACHE_MAGIC) || !writePodChecked(f, txt_page_index::CACHE_VERSION) ||
         !writePodChecked(f, fileSize) || !writePodChecked(f, width) || !writePodChecked(f, pageLines) ||
         !writePodChecked(f, fontId) || !writePodChecked(f, margin) || !writePodChecked(f, cachedParagraphAlignment) ||
-        !writePodChecked(f, complete) || !writePodChecked(f, pageCount)) {
+        !writePodChecked(f, complete) || !writePodChecked(f, encoding) || !writePodChecked(f, pageCount)) {
       LOG_ERR("TRS", "Short write saving page index header");
       return false;
     }
