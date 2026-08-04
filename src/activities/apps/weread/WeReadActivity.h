@@ -56,7 +56,7 @@ class WeReadActivity final : public Activity {
   static constexpr uint32_t kLongWaitMs = 30000;
 
   ButtonNavigator buttonNavigator_;
-  OptionPopup cacheScopePopup_;
+  OptionPopup optionPopup_;
   WeReadClient::Operation operation_;
   std::vector<TabInfo> mainTabs_;
   mutable HalFile shelfFile_;
@@ -86,6 +86,7 @@ class WeReadActivity final : public Activity {
   std::atomic<MainTab> mainTab_{MainTab::Shelf};
   std::atomic<MainFocus> mainFocus_{MainFocus::Content};
   Job retryJob_ = Job::Sync;
+  WeReadClient::Operation::ShelfCoverScope syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::FirstTen;
   WeReadStore::BookDetailHeader detail_;
   uint32_t introPageOffsets_[kMaxIntroPages + 1] = {};
   WeReadStore::ImagePolicy detailImagePolicy_ = WeReadStore::ImagePolicy::Embed;
@@ -98,7 +99,7 @@ class WeReadActivity final : public Activity {
   bool detailIntroTruncated_ = false;
   bool introPagesTruncated_ = false;
   bool shelfCoverStopped_ = false;
-  bool cacheScopePopupClosing_ = false;
+  bool optionPopupClosing_ = false;
   bool disclaimerSaveFailed_ = false;
   std::atomic<bool> downloadRenderPending_{false};
   std::atomic<bool> stageRenderPending_{false};
@@ -128,6 +129,7 @@ class WeReadActivity final : public Activity {
   void moveDetailSelection(int direction);
   void activateDetailSelection();
   void showCacheScopePopup();
+  void showShelfRefreshPopup();
   void startBookDownload();
   void selectChapterRange();
   void cancelChapterRangeSelection();
@@ -144,7 +146,7 @@ class WeReadActivity final : public Activity {
   void advanceJob();
   void openBook(const char* path);
   void openShelf();
-  void syncShelf();
+  void syncShelf(WeReadClient::Operation::ShelfCoverScope scope = WeReadClient::Operation::ShelfCoverScope::FirstTen);
   void enterApp();
   void activateDisclaimerSelection();
   void promptClearCache();

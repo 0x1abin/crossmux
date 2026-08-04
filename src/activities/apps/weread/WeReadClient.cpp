@@ -2147,6 +2147,7 @@ void Operation::reset() {
   phase_ = Phase::Idle;
   resumePhase_ = Phase::Idle;
   kind_ = Kind::Sync;
+  shelfCoverScope_ = ShelfCoverScope::FirstTen;
   error_ = Error::Ok;
   progressStage_ = ProgressStage::Chapters;
   options_ = {};
@@ -2209,7 +2210,8 @@ void Operation::reset() {
   finalPartPath_.clear();
 }
 
-bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options) {
+bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options,
+                      const ShelfCoverScope shelfCoverScope) {
   reset();
   if (kind == Kind::ProgressSync || kind == Kind::Browse) {
     error_ = Error::Protocol;
@@ -2217,6 +2219,7 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
     return false;
   }
   kind_ = kind;
+  shelfCoverScope_ = shelfCoverScope;
   if (kind != Kind::Sync) {
     if (!book || !isSafeProtocolToken(book->bookId)) {
       error_ = Error::Protocol;
@@ -3711,6 +3714,13 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       requestSucceeded();
       if (indexFile_.isOpen()) indexFile_.close();
       if (!WeReadStore::openShelf(indexFile_, workCount_)) return fail(Error::SdCard);
+      workCount_ = shelfCoverWorkCount(shelfCoverScope_, workCount_);
+      if (workCount_ == 0) {
+        indexFile_.close();
+        phase_ = Phase::Complete;
+        logJobComplete();
+        return Event::Complete;
+      }
       beginShelfCoverPass(ProgressStage::Preparing);
       return Event::None;
     }

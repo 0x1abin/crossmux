@@ -60,6 +60,11 @@ constexpr StrId kCacheScopeOptions[] = {
     StrId::STR_WEREAD_CACHE_CHAPTER_RANGE,
 };
 
+constexpr StrId kShelfRefreshOptions[] = {
+    StrId::STR_NO,
+    StrId::STR_YES,
+};
+
 constexpr StrId kPostProcessWaitingLines[] = {
     StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_1,
     StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_2,
@@ -454,7 +459,8 @@ void WeReadActivity::onEnter() {
   detailIntroTruncated_ = false;
   introPagesTruncated_ = false;
   downloadChapterScope_ = WeReadClient::DownloadOptions::ChapterScope::WholeBook;
-  cacheScopePopupClosing_ = false;
+  optionPopupClosing_ = false;
+  syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::FirstTen;
   if (!WeReadStore::hasAcceptedDisclaimer()) {
     state_.store(State::Disclaimer);
     requestUpdate();
@@ -657,7 +663,7 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
     options.imagePolicy = detailImagePolicy_;
     options.chapterScope = downloadChapterScope_;
   }
-  if (!operation_.begin(kind, book, options)) {
+  if (!operation_.begin(kind, book, options, syncShelfCoverScope_)) {
     error_ = operation_.error();
     state_.store(State::Error);
     requestJobUpdate();
@@ -857,7 +863,7 @@ void WeReadActivity::advanceJob() {
       switch (retryJob_) {
         case Job::Sync:
           refreshShelf();
-          shelfCoverStopped_ = true;
+          shelfCoverStopped_ = syncShelfCoverScope_ != WeReadClient::Operation::ShelfCoverScope::None;
           mainTab_.store(MainTab::Shelf);
           mainFocus_.store(MainFocus::Content);
           state_.store(State::Home);
@@ -879,7 +885,8 @@ void WeReadActivity::advanceJob() {
       return;
     case WeReadClient::Operation::Event::Cancelled:
       refreshShelf();
-      shelfCoverStopped_ = retryJob_ == Job::Sync;
+      shelfCoverStopped_ =
+          retryJob_ == Job::Sync && syncShelfCoverScope_ != WeReadClient::Operation::ShelfCoverScope::None;
       state_.store(State::Home);
       requestJobUpdate();
       return;
@@ -1035,18 +1042,28 @@ void WeReadActivity::activateDetailSelection() {
 }
 
 void WeReadActivity::showCacheScopePopup() {
-  cacheScopePopup_.show(StrId::STR_WEREAD_CACHE_BOOK, kCacheScopeOptions,
-                        static_cast<int>(sizeof(kCacheScopeOptions) / sizeof(kCacheScopeOptions[0])), 0,
-                        [this](const int index) {
-                          const auto scope = static_cast<WeReadClient::DownloadOptions::ChapterScope>(index);
-                          switch (scope) {
-                            case WeReadClient::DownloadOptions::ChapterScope::WholeBook:
-                            case WeReadClient::DownloadOptions::ChapterScope::SelectRange:
-                              downloadChapterScope_ = scope;
-                              startBookDownload();
-                              return;
-                          }
-                        });
+  optionPopup_.show(StrId::STR_WEREAD_CACHE_BOOK, kCacheScopeOptions,
+                    static_cast<int>(sizeof(kCacheScopeOptions) / sizeof(kCacheScopeOptions[0])), 0,
+                    [this](const int index) {
+                      const auto scope = static_cast<WeReadClient::DownloadOptions::ChapterScope>(index);
+                      switch (scope) {
+                        case WeReadClient::DownloadOptions::ChapterScope::WholeBook:
+                        case WeReadClient::DownloadOptions::ChapterScope::SelectRange:
+                          downloadChapterScope_ = scope;
+                          startBookDownload();
+                          return;
+                      }
+                    });
+  requestUpdate();
+}
+
+void WeReadActivity::showShelfRefreshPopup() {
+  optionPopup_.show(StrId::STR_WEREAD_CACHE_ALL_COVERS_CONFIRM, kShelfRefreshOptions,
+                    static_cast<int>(sizeof(kShelfRefreshOptions) / sizeof(kShelfRefreshOptions[0])), 0,
+                    [this](const int index) {
+                      syncShelf(index == 0 ? WeReadClient::Operation::ShelfCoverScope::None
+                                           : WeReadClient::Operation::ShelfCoverScope::All);
+                    });
   requestUpdate();
 }
 
@@ -1243,7 +1260,8 @@ void WeReadActivity::openShelf() {
   syncShelf();
 }
 
-void WeReadActivity::syncShelf() {
+void WeReadActivity::syncShelf(const WeReadClient::Operation::ShelfCoverScope scope) {
+  syncShelfCoverScope_ = scope;
   if (WiFi.status() == WL_CONNECTED) {
     startJob(Job::Sync);
   } else {
@@ -1405,7 +1423,7 @@ void WeReadActivity::handleManageInput() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     switch (kManageEntries[manageSelected_].action) {
       case ManageAction::Refresh:
-        syncShelf();
+        showShelfRefreshPopup();
         return;
       case ManageAction::ClearCache:
         promptClearCache();
@@ -1603,16 +1621,16 @@ void WeReadActivity::handleLogoutErrorInput() {
 }
 
 void WeReadActivity::loop() {
-  if (cacheScopePopup_.handleInput(mappedInput, [this] { requestUpdate(); })) {
-    cacheScopePopupClosing_ = !cacheScopePopup_.isActive();
+  if (optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); })) {
+    optionPopupClosing_ = !optionPopup_.isActive();
     return;
   }
-  if (cacheScopePopupClosing_) {
+  if (optionPopupClosing_) {
     if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
         mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
       return;
     }
-    cacheScopePopupClosing_ = false;
+    optionPopupClosing_ = false;
     if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
         mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       return;
@@ -2092,7 +2110,7 @@ void WeReadActivity::drawIntroduction(const Rect& content) {
 void WeReadActivity::render(RenderLock&&) {
   downloadRenderPending_.store(false);
   stageRenderPending_.store(false);
-  if (cacheScopePopup_.processRender(renderer, mappedInput)) return;
+  if (optionPopup_.processRender(renderer, mappedInput)) return;
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const State state = state_.load();
