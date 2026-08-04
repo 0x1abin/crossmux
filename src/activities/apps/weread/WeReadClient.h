@@ -303,7 +303,6 @@ class Operation {
   void requestSucceeded();
   void guardBookSession(const char* phase);
   bool preparePaths();
-  bool waitForShardPace();
   Error fetchLoginUid();
   Error pollLogin();
   Error renewSession();
@@ -380,7 +379,6 @@ class Operation {
   bool loginConfirmed_ = false;
   unsigned long loginStartedAt_ = 0;
   unsigned long nextActionAt_ = 0;
-  unsigned long lastShardRequestAt_ = 0;
   unsigned long workStartedAt_ = 0;
   int responseStatus_ = 0;
   uint32_t progressUploadStartedAt_ = 0;
