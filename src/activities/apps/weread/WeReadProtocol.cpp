@@ -380,6 +380,18 @@ bool isAllowedXhtmlTag(const char* name) {
                      [name](const char* allowed) { return strcmp(name, allowed) == 0; });
 }
 
+size_t safeXhtmlTextRunLength(const uint8_t* data, const size_t len, const bool plainText) {
+  if (!data) return 0;
+  size_t run = 0;
+  while (run < len) {
+    const uint8_t value = data[run];
+    const bool safeControl = value == '\t' || (!plainText && value == '\n');
+    if (value == '&' || value == '<' || value == '>' || (value < 0x20 && !safeControl)) break;
+    ++run;
+  }
+  return run;
+}
+
 bool extractImageAttributes(const char* tag, char* source, const size_t sourceSize, char* alt, const size_t altSize) {
   if (!tag || !source || sourceSize < 2 || !alt || altSize == 0) return false;
   source[0] = '\0';

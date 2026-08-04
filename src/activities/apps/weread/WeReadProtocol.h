@@ -19,6 +19,7 @@ bool isEmptyJsonObject(const uint8_t* data, size_t len);
 bool mergeRuntimeCookie(char* header, size_t headerSize, const char* name, size_t nameLen, const char* value,
                         size_t valueLen);
 bool isAllowedXhtmlTag(const char* name);
+size_t safeXhtmlTextRunLength(const uint8_t* data, size_t len, bool plainText);
 bool extractImageAttributes(const char* tag, char* source, size_t sourceSize, char* alt, size_t altSize);
 ImageType normalizeImageUrl(const char* source, char* output, size_t outputSize);
 uint32_t parseUint32OrZero(const char* value, size_t len);

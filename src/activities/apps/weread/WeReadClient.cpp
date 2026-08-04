@@ -1825,8 +1825,17 @@ bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath
     while (input.available()) {
       const int got = input.read(readBuffer, readBufferSize);
       if (got <= 0) return false;
-      for (int i = 0; i < got; ++i) {
-        const uint8_t value = readBuffer[i];
+      for (int i = 0; i < got;) {
+        if (!sanitizer.inTag && !sanitizer.inEntity && !sanitizer.skip && !sanitizer.skipHead) {
+          const size_t run =
+              WeReadProtocol::safeXhtmlTextRunLength(readBuffer + i, static_cast<size_t>(got - i), plainText);
+          if (run > 0) {
+            if (output.write(readBuffer + i, run) != run) return false;
+            i += static_cast<int>(run);
+            continue;
+          }
+        }
+        const uint8_t value = readBuffer[i++];
         if (!plainText && sanitizer.inTag) {
           if (value == '>') {
             if (!processTag(sanitizer)) return false;

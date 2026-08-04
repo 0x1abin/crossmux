@@ -368,6 +368,22 @@ TEST(WeReadProtocol, DetectsAllowedXhtmlTagsAcrossEveryChunkBoundary) {
   EXPECT_FALSE(ignored.complete());
 }
 
+TEST(WeReadProtocol, FindsTextRunsThatCanBeWrittenWithoutEscaping) {
+  const uint8_t utf8[] = "中文 text\tline";
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(utf8, sizeof(utf8) - 1, false), sizeof(utf8) - 1);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc&def"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc<def"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc>def"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc\ndef"), 7, false), 7U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc\ndef"), 7, true), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc\rdef"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("\x01"
+                                                                                    "abc"),
+                                                   4, false),
+            0U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(nullptr, 1, false), 0U);
+}
+
 TEST(WeReadClientState, RetryableChapterResponsesNeverSignalCompletion) {
   using Event = WeReadClient::Operation::Event;
   EXPECT_EQ(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(1), Event::None);
