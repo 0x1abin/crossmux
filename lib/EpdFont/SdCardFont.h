@@ -111,6 +111,10 @@ class SdCardFont {
   struct Stats {
     uint32_t prewarmTotalMs = 0;
     uint32_t sdReadTimeMs = 0;
+    uint32_t collectionTimeUs = 0;
+    uint32_t glyphPrepareTimeUs = 0;
+    uint32_t bitmapTimeUs = 0;
+    uint32_t kernTimeUs = 0;
     uint32_t seekCount = 0;
     uint32_t uniqueGlyphs = 0;
     uint32_t bitmapBytes = 0;
