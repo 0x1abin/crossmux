@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xteink View Prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Avenir Next", Futura, "Trebuchet MS", sans-serif;
+      background: #111311;
+      color: #e8e9e2;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background:
+        linear-gradient(rgba(255, 255, 255, .025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .025) 1px, transparent 1px),
+        #111311;
+      background-size: 32px 32px;
+    }
+
+    button, select, input { font: inherit; }
+
+    .prototype-lab {
+      --accent: #e66f3a;
+      --screen-width: 480px;
+      --screen-height: 800px;
+      --safe-top: 9px;
+      --safe-right: 3px;
+      --safe-bottom: 3px;
+      --safe-left: 3px;
+      --shell: #171917;
+      --shell-edge: #343833;
+      --control: #090a09;
+      --control-edge: #555b53;
+      --ink: #161714;
+      --paper: #efeee7;
+      display: grid;
+      min-height: 100vh;
+      grid-template-rows: auto 1fr;
+    }
+
+    .prototype-lab[data-shell="white"] {
+      --shell: #deddd6;
+      --shell-edge: #f6f4eb;
+      --control: #b8b8b0;
+      --control-edge: #f5f3eb;
+    }
+
+    .lab-header {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      padding: 22px 28px;
+      border-bottom: 1px solid #32352f;
+      background: rgba(17, 19, 17, .94);
+    }
+
+    .identity { display: flex; gap: 14px; align-items: center; }
+    .identity-mark {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #6f756c;
+      color: var(--accent);
+      font: 800 13px/1 Georgia, serif;
+      letter-spacing: -.08em;
+      transform: rotate(-2deg);
+    }
+    .identity p, .identity h1 { margin: 0; }
+    .identity p {
+      color: #888e84;
+      font-size: 10px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .identity h1 {
+      margin-top: 4px;
+      font: 500 20px/1.1 "Avenir Next", Futura, sans-serif;
+      letter-spacing: .02em;
+    }
+
+    .controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+    .control { display: grid; gap: 5px; }
+    .control label {
+      color: #7f857b;
+      font-size: 9px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    .control select {
+      min-height: 34px;
+      padding: 0 34px 0 11px;
+      border: 1px solid #44483f;
+      border-radius: 0;
+      background: #1c1f1b;
+      color: #f1f1eb;
+    }
+    .safe-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 11px;
+      border: 1px solid #44483f;
+      background: #1c1f1b;
+      color: #c8cbc2;
+      font-size: 12px;
+    }
+    .safe-toggle input { accent-color: var(--accent); }
+
+    .lab-body {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .readout {
+      padding: 24px 20px;
+      border-right: 1px solid #32352f;
+      background: rgba(20, 23, 20, .82);
+    }
+    .readout h2 {
+      margin: 0 0 22px;
+      color: #8d9388;
+      font-size: 10px;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+    .metric {
+      padding: 12px 0;
+      border-top: 1px solid #343830;
+    }
+    .metric span { display: block; }
+    .metric .label {
+      color: #70766d;
+      font-size: 9px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .metric .value {
+      margin-top: 5px;
+      color: #edece4;
+      font: 500 16px/1.25 "Avenir Next", Futura, sans-serif;
+    }
+    .metric .note {
+      margin-top: 5px;
+      color: #8a9086;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .button-map { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 10px; }
+    .button-map span {
+      padding: 6px 2px;
+      border: 1px solid #484c44;
+      color: #c6cac0;
+      font: 700 9px/1 "Avenir Next", sans-serif;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .warning {
+      margin: 18px 0 0;
+      padding-left: 10px;
+      border-left: 2px solid var(--accent);
+      color: #969c91;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .stage-viewport {
+      position: relative;
+      min-width: 0;
+      min-height: 620px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+    }
+    .stage-viewport::before {
+      content: "NATIVE PIXEL CANVAS / AUTO SCALE";
+      position: absolute;
+      top: 15px;
+      right: 19px;
+      color: #555b52;
+      font-size: 9px;
+      letter-spacing: .16em;
+    }
+    .device-sizer { position: relative; }
+    .device-frame {
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: max-content;
+      height: max-content;
+      padding: 34px;
+      border: 1px solid var(--shell-edge);
+      border-radius: 22px;
+      background: var(--shell);
+      box-shadow: 0 26px 70px rgba(0, 0, 0, .48), inset 0 0 0 2px rgba(0, 0, 0, .28);
+      transform-origin: top left;
+      transition: background-color .18s ease, border-color .18s ease;
+    }
+    .prototype-lab[data-orientation="portrait"] .device-frame { padding-bottom: 78px; }
+    .prototype-lab[data-orientation="portrait-inverted"] .device-frame { padding-top: 78px; }
+    .prototype-lab[data-orientation="landscape-cw"] .device-frame { padding-left: 78px; }
+    .prototype-lab[data-orientation="landscape-ccw"] .device-frame { padding-right: 78px; }
+
+    #prototype-screen {
+      position: relative;
+      isolation: isolate;
+      width: var(--screen-width);
+      height: var(--screen-height);
+      overflow: hidden;
+      border: 2px solid #050605;
+      border-radius: 3px;
+      background: var(--paper);
+      color: var(--ink);
+      container-type: size;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    }
+    #prototype-screen::after {
+      content: "";
+      position: absolute;
+      z-index: 20;
+      inset: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+      border: 1px dashed rgba(215, 76, 33, .78);
+      pointer-events: none;
+      opacity: 0;
+    }
+    .prototype-lab[data-show-safe="true"] #prototype-screen::after { opacity: 1; }
+
+    .screen-status {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      border-bottom: 2px solid var(--ink);
+      font: 700 15px/1 "Avenir Next", Futura, sans-serif;
+      letter-spacing: .04em;
+    }
+    .battery { display: inline-flex; align-items: center; gap: 7px; }
+    .battery-shape {
+      width: 27px;
+      height: 12px;
+      padding: 2px;
+      border: 2px solid currentColor;
+    }
+    .battery-shape::before { content: ""; display: block; width: 74%; height: 100%; background: currentColor; }
+    .screen-layout { min-height: calc(100% - 42px); display: grid; grid-template-rows: auto 1fr auto; }
+    .screen-heading { padding: 30px 28px 18px; }
+    .screen-heading p, .screen-heading h2 { margin: 0; }
+    .screen-heading p {
+      font: 700 12px/1 "Avenir Next", Futura, sans-serif;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .screen-heading h2 { margin-top: 9px; font-size: 34px; line-height: 1.05; }
+    .settings-list { padding: 0 28px; }
+    .setting-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 18px;
+      align-items: center;
+      min-height: 74px;
+      border-top: 1px solid rgba(22, 23, 20, .34);
+    }
+    .setting-row:first-child { border-top: 2px solid var(--ink); }
+    .setting-row strong { display: block; font-size: 20px; }
+    .setting-row small { display: block; margin-top: 4px; font: 12px/1.3 "Avenir Next", sans-serif; color: #5c5e58; }
+    .setting-value {
+      min-width: 96px;
+      padding: 9px 12px;
+      border: 2px solid var(--ink);
+      font: 700 13px/1 "Avenir Next", sans-serif;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .screen-hints {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      padding: 16px 22px 20px;
+      font: 700 11px/1 "Avenir Next", Futura, sans-serif;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .screen-hints span { padding-top: 9px; border-top: 3px solid var(--ink); }
+
+    [data-orientation^="landscape"] .screen-layout {
+      grid-template-columns: .8fr 1.2fr;
+      grid-template-rows: 1fr auto;
+    }
+    [data-orientation^="landscape"] .screen-heading { padding: 26px 24px; border-right: 2px solid var(--ink); }
+    [data-orientation^="landscape"] .screen-heading h2 { font-size: 31px; }
+    [data-orientation^="landscape"] .settings-list { padding: 20px 24px 0; }
+    [data-orientation^="landscape"] .setting-row { min-height: 64px; }
+    [data-orientation^="landscape"] .screen-hints { grid-column: 1 / -1; padding: 12px 22px 16px; }
+
+    .front-controls { position: absolute; display: flex; gap: 12px; }
+    .front-key {
+      width: 76px;
+      height: 16px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--control-edge);
+      border-radius: 8px;
+      background: var(--control);
+      color: #8c9188;
+      font: 700 8px/1 "Avenir Next", sans-serif;
+    }
+    [data-orientation="portrait"] .front-controls { left: 50%; bottom: 24px; transform: translateX(-50%); }
+    [data-orientation="portrait-inverted"] .front-controls { left: 50%; top: 24px; flex-direction: row-reverse; transform: translateX(-50%); }
+    [data-orientation="landscape-cw"] .front-controls { left: 24px; top: 50%; flex-direction: column; transform: translateY(-50%); }
+    [data-orientation="landscape-ccw"] .front-controls { right: 24px; top: 50%; flex-direction: column-reverse; transform: translateY(-50%); }
+    [data-orientation^="landscape"] .front-key { width: 16px; height: 76px; }
+
+    .edge-control {
+      position: absolute;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--control-edge);
+      background: var(--control);
+      color: #9aa096;
+      font: 800 8px/1 "Avenir Next", sans-serif;
+    }
+    .x4-rocker { position: absolute; display: flex; gap: 2px; }
+    .x4-rocker .edge-control { position: static; width: 14px; height: 50px; }
+    [data-orientation="portrait"] .x4-rocker { right: -8px; top: 43%; flex-direction: column; }
+    [data-orientation="portrait-inverted"] .x4-rocker { left: -8px; top: 43%; flex-direction: column-reverse; }
+    [data-orientation="landscape-cw"] .x4-rocker { right: 36%; bottom: -8px; flex-direction: row-reverse; }
+    [data-orientation="landscape-ccw"] .x4-rocker { left: 36%; top: -8px; flex-direction: row; }
+    [data-orientation^="landscape"] .x4-rocker .edge-control { width: 50px; height: 14px; }
+
+    [data-orientation="portrait"] .x4-power { right: -7px; top: 18%; width: 13px; height: 31px; }
+    [data-orientation="portrait-inverted"] .x4-power { left: -7px; bottom: 18%; width: 13px; height: 31px; }
+    [data-orientation="landscape-cw"] .x4-power { right: 18%; bottom: -7px; width: 31px; height: 13px; }
+    [data-orientation="landscape-ccw"] .x4-power { left: 18%; top: -7px; width: 31px; height: 13px; }
+
+    [data-orientation="portrait"] .x3-up { left: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait"] .x3-down { right: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait"] .x3-power { left: 50%; top: -7px; width: 38px; height: 13px; transform: translateX(-50%); }
+    [data-orientation="portrait-inverted"] .x3-up { right: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait-inverted"] .x3-down { left: -8px; top: 40%; width: 14px; height: 62px; }
+    [data-orientation="portrait-inverted"] .x3-power { left: 50%; bottom: -7px; width: 38px; height: 13px; transform: translateX(-50%); }
+    [data-orientation="landscape-cw"] .x3-up { left: 40%; top: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-cw"] .x3-down { left: 40%; bottom: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-cw"] .x3-power { right: -7px; top: 50%; width: 13px; height: 38px; transform: translateY(-50%); }
+    [data-orientation="landscape-ccw"] .x3-up { left: 40%; bottom: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-ccw"] .x3-down { left: 40%; top: -8px; width: 62px; height: 14px; }
+    [data-orientation="landscape-ccw"] .x3-power { left: -7px; top: 50%; width: 13px; height: 38px; transform: translateY(-50%); }
+
+    [data-device="x3"] .x4-only, [data-device="x4"] .x3-only { display: none; }
+
+    @media (max-width: 900px) {
+      .lab-header { grid-template-columns: 1fr; align-items: start; }
+      .controls { justify-content: flex-start; }
+      .lab-body { grid-template-columns: 1fr; }
+      .readout { border-right: 0; border-bottom: 1px solid #32352f; }
+      .stage-viewport { min-height: 560px; }
+    }
+    @media (max-width: 560px) {
+      .lab-header { padding: 18px; }
+      .controls { display: grid; grid-template-columns: 1fr 1fr; }
+      .control select, .safe-toggle { width: 100%; }
+      .stage-viewport { min-height: 500px; padding: 20px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .device-frame { transition: none; } }
+  </style>
+</head>
+<body>
+  <main class="prototype-lab" data-device="x4" data-orientation="portrait" data-shell="black" data-show-safe="true">
+    <header class="lab-header">
+      <div class="identity">
+        <div class="identity-mark" aria-hidden="true">XT</div>
+        <div>
+          <p>CrossPoint interface rig</p>
+          <h1>Xteink View Protocol</h1>
+        </div>
+      </div>
+      <div class="controls" aria-label="Prototype configuration">
+        <div class="control">
+          <label for="device-select">Device</label>
+          <select id="device-select">
+            <option value="x4">Xteink X4</option>
+            <option value="x3">Xteink X3</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="orientation-select">Orientation</label>
+          <select id="orientation-select">
+            <option value="portrait">Portrait</option>
+            <option value="landscape-cw">Landscape CW</option>
+            <option value="portrait-inverted">Portrait inverted</option>
+            <option value="landscape-ccw">Landscape CCW</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="shell-select">Shell</label>
+          <select id="shell-select">
+            <option value="black">Black</option>
+            <option value="white">White</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="safe-toggle">Overlay</label>
+          <label class="safe-toggle"><input id="safe-toggle" type="checkbox" checked> Safe area</label>
+        </div>
+      </div>
+    </header>
+
+    <div class="lab-body">
+      <aside class="readout" aria-label="Device specification">
+        <h2>Active specification</h2>
+        <div class="metric"><span class="label">Target</span><span class="value" id="target-readout">Xteink X4</span><span class="note" id="product-readout">4.3 in · 5.98 mm · ≈75 g</span></div>
+        <div class="metric"><span class="label">Logical canvas</span><span class="value" id="canvas-readout">480 × 800</span><span class="note">1 CSS px = 1 logical device px before preview scaling.</span></div>
+        <div class="metric"><span class="label">Safe TRBL</span><span class="value" id="safe-readout">9 / 3 / 3 / 3</span></div>
+        <div class="metric">
+          <span class="label">Front defaults</span>
+          <div class="button-map" aria-label="Default front button mapping"><span>Back</span><span>OK</span><span>Left</span><span>Right</span></div>
+          <span class="note">User-remappable; treat these as defaults.</span>
+        </div>
+        <div class="metric"><span class="label">Side controls</span><span class="value" id="side-readout">Right rocker</span><span class="note" id="page-readout">Up = PageBack · Down = PageForward</span></div>
+        <p class="warning">Physical markers describe hardware position. In-screen labels describe logical actions and must survive remapping.</p>
+      </aside>
+
+      <section class="stage-viewport" aria-label="Device preview">
+        <div class="device-sizer">
+          <div class="device-frame" id="device-frame">
+            <div id="prototype-screen">
+              <div class="screen-status"><span>09:41</span><span class="battery">82% <i class="battery-shape" aria-hidden="true"></i></span></div>
+              <div class="screen-layout">
+                <header class="screen-heading"><p>Reader / View</p><h2>Reading<br>comfort</h2></header>
+                <section class="settings-list">
+                  <div class="setting-row"><div><strong>Typeface</strong><small>Book text family</small></div><span class="setting-value">Serif</span></div>
+                  <div class="setting-row"><div><strong>Margins</strong><small>Safe content inset</small></div><span class="setting-value">Medium</span></div>
+                  <div class="setting-row"><div><strong>Line spacing</strong><small>Baseline rhythm</small></div><span class="setting-value">1.45</span></div>
+                  <div class="setting-row"><div><strong>Page keys</strong><small>Logical side actions</small></div><span class="setting-value">Prev / Next</span></div>
+                </section>
+                <footer class="screen-hints"><span>Back</span><span>Select</span><span>−</span><span>+</span></footer>
+              </div>
+            </div>
+
+            <div class="front-controls" aria-label="Four remappable front controls">
+              <span class="front-key" title="Default Back">1</span><span class="front-key" title="Default Confirm">2</span><span class="front-key" title="Default Left">3</span><span class="front-key" title="Default Right">4</span>
+            </div>
+            <div class="x4-only x4-rocker" aria-label="X4 right-side rocker"><span class="edge-control" title="Raw Up">U</span><span class="edge-control" title="Raw Down">D</span></div>
+            <span class="x4-only x4-power edge-control" title="Power">P</span>
+            <span class="x3-only x3-up edge-control" title="Raw Up: physical left in portrait">U</span>
+            <span class="x3-only x3-down edge-control" title="Raw Down: physical right in portrait">D</span>
+            <span class="x3-only x3-power edge-control" title="Power">P</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const DEVICE_PROFILES = Object.freeze({
+        x4: Object.freeze({ name: "Xteink X4", panel: [800, 480], product: "4.3 in · 5.98 mm · ≈75 g", side: "Right rocker" }),
+        x3: Object.freeze({ name: "Xteink X3", panel: [792, 528], product: "3.7 in · 4.98 mm · ≈58 g", side: "Left / right edges" })
+      });
+      const ORIENTATIONS = Object.freeze({
+        portrait: Object.freeze({ swap: true, safe: [9, 3, 3, 3] }),
+        "landscape-cw": Object.freeze({ swap: false, safe: [3, 9, 3, 3] }),
+        "portrait-inverted": Object.freeze({ swap: true, safe: [3, 3, 9, 3] }),
+        "landscape-ccw": Object.freeze({ swap: false, safe: [3, 3, 3, 9] })
+      });
+      const FRONT_BUTTONS = Object.freeze(["Back", "Confirm", "Left", "Right"]);
+
+      const lab = document.querySelector(".prototype-lab");
+      const frame = document.querySelector("#device-frame");
+      const sizer = document.querySelector(".device-sizer");
+      const viewport = document.querySelector(".stage-viewport");
+      const deviceSelect = document.querySelector("#device-select");
+      const orientationSelect = document.querySelector("#orientation-select");
+      const shellSelect = document.querySelector("#shell-select");
+      const safeToggle = document.querySelector("#safe-toggle");
+
+      function logicalCanvas(device, orientation) {
+        const [panelWidth, panelHeight] = DEVICE_PROFILES[device].panel;
+        return ORIENTATIONS[orientation].swap ? [panelHeight, panelWidth] : [panelWidth, panelHeight];
+      }
+
+      function syncScale() {
+        frame.style.transform = "none";
+        const naturalWidth = frame.offsetWidth;
+        const naturalHeight = frame.offsetHeight;
+        const scale = Math.min((viewport.clientWidth - 48) / naturalWidth, (viewport.clientHeight - 48) / naturalHeight, 1);
+        frame.style.transform = `scale(${Math.max(scale, .1)})`;
+        sizer.style.width = `${naturalWidth * scale}px`;
+        sizer.style.height = `${naturalHeight * scale}px`;
+      }
+
+      function applyConfiguration() {
+        const device = deviceSelect.value;
+        const orientation = orientationSelect.value;
+        const profile = DEVICE_PROFILES[device];
+        const [width, height] = logicalCanvas(device, orientation);
+        const safe = ORIENTATIONS[orientation].safe;
+
+        lab.dataset.device = device;
+        lab.dataset.orientation = orientation;
+        lab.dataset.shell = shellSelect.value;
+        lab.dataset.showSafe = String(safeToggle.checked);
+        lab.style.setProperty("--screen-width", `${width}px`);
+        lab.style.setProperty("--screen-height", `${height}px`);
+        ["top", "right", "bottom", "left"].forEach((edge, index) => lab.style.setProperty(`--safe-${edge}`, `${safe[index]}px`));
+
+        document.querySelector("#target-readout").textContent = profile.name;
+        document.querySelector("#product-readout").textContent = profile.product;
+        document.querySelector("#canvas-readout").textContent = `${width} × ${height}`;
+        document.querySelector("#safe-readout").textContent = safe.join(" / ");
+        document.querySelector("#side-readout").textContent = profile.side;
+        document.querySelector("#page-readout").textContent = device === "x3"
+          ? "Left raw Up · Right raw Down"
+          : "Up = PageBack · Down = PageForward";
+        requestAnimationFrame(syncScale);
+      }
+
+      [deviceSelect, orientationSelect, shellSelect, safeToggle].forEach(control => control.addEventListener("change", applyConfiguration));
+      new ResizeObserver(syncScale).observe(viewport);
+      window.addEventListener("resize", syncScale);
+
+      const expectedCanvases = Object.freeze({
+        "x4/portrait": [480, 800], "x4/landscape-cw": [800, 480],
+        "x4/portrait-inverted": [480, 800], "x4/landscape-ccw": [800, 480],
+        "x3/portrait": [528, 792], "x3/landscape-cw": [792, 528],
+        "x3/portrait-inverted": [528, 792], "x3/landscape-ccw": [792, 528]
+      });
+      Object.entries(expectedCanvases).forEach(([key, expected]) => {
+        const [device, orientation] = key.split("/");
+        console.assert(logicalCanvas(device, orientation).join("×") === expected.join("×"), `Canvas mismatch: ${key}`);
+      });
+      console.assert(ORIENTATIONS.portrait.safe.join("/") === "9/3/3/3", "Portrait safe margins changed");
+      console.assert(ORIENTATIONS["landscape-cw"].safe.join("/") === "3/9/3/3", "CW safe margins changed");
+      console.assert(ORIENTATIONS["portrait-inverted"].safe.join("/") === "3/3/9/3", "Inverted safe margins changed");
+      console.assert(ORIENTATIONS["landscape-ccw"].safe.join("/") === "3/3/3/9", "CCW safe margins changed");
+      console.assert(FRONT_BUTTONS.join("/") === "Back/Confirm/Left/Right", "Default front button order changed");
+
+      applyConfiguration();
+    })();
+  </script>
+</body>
+</html>
