@@ -9,9 +9,8 @@
 # This publishes the SAME binaries GitHub Actions just built — it does NOT
 # rebuild on Gitee — so the firmware is byte-identical across both hosts.
 #
-# Best-effort by design: the calling workflow step uses `continue-on-error: true`
-# so a Gitee outage never blocks the GitHub release. Real API errors still exit
-# non-zero so the step surfaces as failed (visible) without failing the job.
+# The stable-release workflow treats mirror failures as errors; nightly remains
+# best-effort at the workflow level.
 #
 # Usage:
 #   GITEE_TOKEN=... scripts/publish-gitee-release.sh \
@@ -39,8 +38,28 @@ ASSETS=("$@")
 API="https://gitee.com/api/v5/repos/${REPO}"
 
 if [ -z "${GITEE_TOKEN:-}" ]; then
-  echo "::warning::GITEE_TOKEN not set — skipping Gitee mirror"
-  exit 0
+  echo "::error::GITEE_TOKEN not set"
+  exit 1
+fi
+
+if [ "$TAG" != "nightly" ]; then
+  gitee_git="https://gitee.com/${REPO}.git"
+  for attempt in $(seq 1 30); do
+    synced_commit="$(git ls-remote "$gitee_git" "refs/tags/${TAG}^{}" 2>/dev/null | cut -f1)"
+    if [ -z "$synced_commit" ]; then
+      synced_commit="$(git ls-remote "$gitee_git" "refs/tags/${TAG}" 2>/dev/null | cut -f1)"
+    fi
+    if [ "$synced_commit" = "$COMMITISH" ]; then
+      echo "Gitee tag ${TAG} synced to ${COMMITISH}"
+      break
+    fi
+    if [ "$attempt" -eq 30 ]; then
+      echo "::error::Gitee tag ${TAG} did not sync to ${COMMITISH}"
+      exit 1
+    fi
+    echo "Waiting for Gitee tag ${TAG} (${attempt}/30)"
+    sleep 10
+  done
 fi
 
 # Roll a pre-existing release for this tag (e.g. nightly) forward: delete it so
@@ -53,16 +72,19 @@ if [ -n "$existing_id" ]; then
     -o /dev/null -w "  delete: HTTP %{http_code}\n" || true
 fi
 
-# Create the release. Gitee creates the tag at target_commitish if it doesn't
-# already exist; if it exists (mirror-synced from GitHub) Gitee reuses it.
+# Stable releases reuse the mirror-synced tag. Nightly keeps its rolling-tag
+# behavior by supplying target_commitish.
 echo "Creating Gitee release for tag ${TAG}"
-create_resp="$(curl -sS -X POST "${API}/releases" \
-  --data-urlencode "access_token=${GITEE_TOKEN}" \
-  --data-urlencode "tag_name=${TAG}" \
-  --data-urlencode "name=${NAME}" \
-  --data-urlencode "body@${BODY_FILE}" \
-  --data-urlencode "prerelease=${PRERELEASE}" \
-  --data-urlencode "target_commitish=${COMMITISH}")"
+create_args=(-sS -X POST "${API}/releases"
+  --data-urlencode "access_token=${GITEE_TOKEN}"
+  --data-urlencode "tag_name=${TAG}"
+  --data-urlencode "name=${NAME}"
+  --data-urlencode "body@${BODY_FILE}"
+  --data-urlencode "prerelease=${PRERELEASE}")
+if [ "$TAG" = "nightly" ]; then
+  create_args+=(--data-urlencode "target_commitish=${COMMITISH}")
+fi
+create_resp="$(curl "${create_args[@]}")"
 
 release_id="$(echo "$create_resp" | jq -r '.id // empty' 2>/dev/null || true)"
 if [ -z "$release_id" ]; then
@@ -74,7 +96,8 @@ echo "Created Gitee release id=${release_id}"
 rc=0
 for f in "${ASSETS[@]}"; do
   if [ ! -f "$f" ]; then
-    echo "::warning::asset not found, skipping: ${f}"
+    echo "::error::asset not found: ${f}"
+    rc=1
     continue
   fi
   echo "Uploading $(basename "$f") ($(du -h "$f" | cut -f1))"

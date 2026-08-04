@@ -122,10 +122,9 @@ jobs:
 
       # Mirror the SAME binaries to Gitee so mainland-China users / device OTA
       # download from Gitee's CN CDN (see scripts/publish-gitee-release.sh).
-      # Best-effort: never blocks the GitHub release. Needs the GITEE_TOKEN
-      # secret (Gitee private token, `projects` scope).
+      # GitHub is published first, but an incomplete China mirror fails this
+      # workflow. Needs the GITEE_TOKEN secret (`projects` scope).
       - name: Mirror release to Gitee (China)
-        continue-on-error: true
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
