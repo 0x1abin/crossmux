@@ -31,6 +31,9 @@ struct OperationTestPeer {
   static uint32_t remainingShelfCoverItems(const uint32_t cursor, const uint32_t total) {
     return Operation::remainingShelfCoverItems(cursor, total);
   }
+  static uint32_t shelfCoverWorkCount(const Operation::ShelfCoverScope scope, const uint32_t total) {
+    return Operation::shelfCoverWorkCount(scope, total);
+  }
   static bool shelfCoverAuthenticationResumesBatch() {
     return Operation::shelfCoverResumePhase() == Operation::Phase::ShelfCovers;
   }
@@ -365,6 +368,22 @@ TEST(WeReadProtocol, DetectsAllowedXhtmlTagsAcrossEveryChunkBoundary) {
   EXPECT_FALSE(ignored.complete());
 }
 
+TEST(WeReadProtocol, FindsTextRunsThatCanBeWrittenWithoutEscaping) {
+  const uint8_t utf8[] = "中文 text\tline";
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(utf8, sizeof(utf8) - 1, false), sizeof(utf8) - 1);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc&def"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc<def"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc>def"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc\ndef"), 7, false), 7U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc\ndef"), 7, true), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("abc\rdef"), 7, false), 3U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(reinterpret_cast<const uint8_t*>("\x01"
+                                                                                    "abc"),
+                                                   4, false),
+            0U);
+  EXPECT_EQ(WeReadProtocol::safeXhtmlTextRunLength(nullptr, 1, false), 0U);
+}
+
 TEST(WeReadClientState, RetryableChapterResponsesNeverSignalCompletion) {
   using Event = WeReadClient::Operation::Event;
   EXPECT_EQ(WeReadClient::OperationTestPeer::chapterResponseRetryEvent(1), Event::None);
@@ -428,6 +447,24 @@ TEST(WeReadClientState, AdvancesShelfCoverPassesAndBoundsRemainingWork) {
   EXPECT_EQ(remaining(4, 4), 0U);
   EXPECT_EQ(remaining(5, 4), 0U);
   EXPECT_TRUE(WeReadClient::OperationTestPeer::shelfCoverAuthenticationResumesBatch());
+}
+
+TEST(WeReadClientState, BoundsShelfCoverWorkToTheSelectedScope) {
+  using Scope = WeReadClient::Operation::ShelfCoverScope;
+  const auto count = WeReadClient::OperationTestPeer::shelfCoverWorkCount;
+
+  EXPECT_EQ(count(Scope::None, 0), 0U);
+  EXPECT_EQ(count(Scope::None, 9), 0U);
+  EXPECT_EQ(count(Scope::None, 10), 0U);
+  EXPECT_EQ(count(Scope::None, 11), 0U);
+  EXPECT_EQ(count(Scope::FirstTen, 0), 0U);
+  EXPECT_EQ(count(Scope::FirstTen, 9), 9U);
+  EXPECT_EQ(count(Scope::FirstTen, 10), 10U);
+  EXPECT_EQ(count(Scope::FirstTen, 11), 10U);
+  EXPECT_EQ(count(Scope::All, 0), 0U);
+  EXPECT_EQ(count(Scope::All, 9), 9U);
+  EXPECT_EQ(count(Scope::All, 10), 10U);
+  EXPECT_EQ(count(Scope::All, 11), 11U);
 }
 
 TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {

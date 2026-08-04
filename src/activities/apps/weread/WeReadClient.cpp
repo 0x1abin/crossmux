@@ -37,7 +37,6 @@ constexpr const char* kUserAgent =
 constexpr int kRequestTimeoutMs = 20000;
 constexpr unsigned long kLoginTimeoutMs = 240000;
 constexpr unsigned long kLoginPollMs = 2000;
-constexpr unsigned long kShardPaceMs = 400;
 constexpr unsigned long kClockSyncTimeoutMs = 12000;
 constexpr unsigned long kNetworkRetryBaseMs = 1000;
 constexpr size_t kTransferBufferSize = 1024;
@@ -1826,8 +1825,17 @@ bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath
     while (input.available()) {
       const int got = input.read(readBuffer, readBufferSize);
       if (got <= 0) return false;
-      for (int i = 0; i < got; ++i) {
-        const uint8_t value = readBuffer[i];
+      for (int i = 0; i < got;) {
+        if (!sanitizer.inTag && !sanitizer.inEntity && !sanitizer.skip && !sanitizer.skipHead) {
+          const size_t run =
+              WeReadProtocol::safeXhtmlTextRunLength(readBuffer + i, static_cast<size_t>(got - i), plainText);
+          if (run > 0) {
+            if (output.write(readBuffer + i, run) != run) return false;
+            i += static_cast<int>(run);
+            continue;
+          }
+        }
+        const uint8_t value = readBuffer[i++];
         if (!plainText && sanitizer.inTag) {
           if (value == '>') {
             if (!processTag(sanitizer)) return false;
@@ -2147,6 +2155,7 @@ void Operation::reset() {
   phase_ = Phase::Idle;
   resumePhase_ = Phase::Idle;
   kind_ = Kind::Sync;
+  shelfCoverScope_ = ShelfCoverScope::FirstTen;
   error_ = Error::Ok;
   progressStage_ = ProgressStage::Chapters;
   options_ = {};
@@ -2183,7 +2192,6 @@ void Operation::reset() {
   loginConfirmed_ = false;
   loginStartedAt_ = 0;
   nextActionAt_ = 0;
-  lastShardRequestAt_ = 0;
   workStartedAt_ = 0;
   responseStatus_ = 0;
   progressUploadStartedAt_ = 0;
@@ -2209,7 +2217,8 @@ void Operation::reset() {
   finalPartPath_.clear();
 }
 
-bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options) {
+bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options,
+                      const ShelfCoverScope shelfCoverScope) {
   reset();
   if (kind == Kind::ProgressSync || kind == Kind::Browse) {
     error_ = Error::Protocol;
@@ -2217,6 +2226,7 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
     return false;
   }
   kind_ = kind;
+  shelfCoverScope_ = shelfCoverScope;
   if (kind != Kind::Sync) {
     if (!book || !isSafeProtocolToken(book->bookId)) {
       error_ = Error::Protocol;
@@ -2472,13 +2482,6 @@ bool Operation::preparePaths() {
   return WeReadStore::ensureRoot() && Storage.ensureDirectoryExists(bookDir_.c_str()) &&
          Storage.ensureDirectoryExists(chaptersDir.c_str()) && Storage.ensureDirectoryExists(imagesDir.c_str()) &&
          Storage.ensureDirectoryExists("/WeRead");
-}
-
-bool Operation::waitForShardPace() {
-  const unsigned long now = millis();
-  if (lastShardRequestAt_ && now - lastShardRequestAt_ < kShardPaceMs) return false;
-  lastShardRequestAt_ = now;
-  return true;
 }
 
 Error Operation::fetchLoginUid() {
@@ -3711,6 +3714,13 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       requestSucceeded();
       if (indexFile_.isOpen()) indexFile_.close();
       if (!WeReadStore::openShelf(indexFile_, workCount_)) return fail(Error::SdCard);
+      workCount_ = shelfCoverWorkCount(shelfCoverScope_, workCount_);
+      if (workCount_ == 0) {
+        indexFile_.close();
+        phase_ = Phase::Complete;
+        logJobComplete();
+        return Event::Complete;
+      }
       beginShelfCoverPass(ProgressStage::Preparing);
       return Event::None;
     }
@@ -4044,7 +4054,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       return fail(Error::Clock);
 
     case Phase::FetchReader: {
-      if (!waitForShardPace()) return Event::None;
       const Error error = fetchReaderOnce();
       if (error == Error::SessionExpired) return reauthenticateChapter();
       if (error == Error::Unavailable) return retryChapterResponse();
@@ -4057,7 +4066,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     }
 
     case Phase::FetchPrimary: {
-      if (!waitForShardPace()) return Event::None;
       const Error error = fetchShardOnce("/web/book/chapter/e_0", bookDir_ + "/shard0.part");
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchPrimary);
       requestAttempt_ = 0;
@@ -4066,7 +4074,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     }
 
     case Phase::FetchText0: {
-      if (!waitForShardPace()) return Event::None;
       const std::string raw0 = bookDir_ + "/shard0.part";
       const Error error = fetchShardOnce("/web/book/chapter/t_0", raw0);
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchText0);
@@ -4085,7 +4092,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     }
 
     case Phase::FetchText1: {
-      if (!waitForShardPace()) return Event::None;
       const std::string raw1 = bookDir_ + "/shard1.part";
       const Error error = fetchShardOnce("/web/book/chapter/t_1", raw1);
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchText1);
@@ -4106,7 +4112,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     }
 
     case Phase::FetchEpub1: {
-      if (!waitForShardPace()) return Event::None;
       const std::string raw1 = bookDir_ + "/shard1.part";
       const Error error = fetchShardOnce("/web/book/chapter/e_1", raw1);
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchEpub1);
@@ -4125,7 +4130,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     }
 
     case Phase::FetchEpub3: {
-      if (!waitForShardPace()) return Event::None;
       const std::string raw1 = bookDir_ + "/shard1.part";
       const std::string raw3 = bookDir_ + "/shard3.part";
       const Error error = fetchShardOnce("/web/book/chapter/e_3", raw3);

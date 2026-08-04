@@ -466,7 +466,6 @@ bool updateImageWorkRecord(HalFile& file, const uint32_t count, const uint32_t i
       file.write(&record, sizeof(record)) != sizeof(record)) {
     return false;
   }
-  file.flush();
   return true;
 }
 

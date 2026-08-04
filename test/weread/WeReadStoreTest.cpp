@@ -430,6 +430,16 @@ TEST_F(WeReadStoreTest, UpdatesTransientImageWorkIndexAndRebuildsCorruption) {
     EXPECT_EQ(loaded.redirects, 2U);
   }
 
+  {
+    HalFile file;
+    ASSERT_TRUE(WeReadStore::openImageWorkIndex(path, file, count));
+    WeReadStore::ImageWorkRecord loaded;
+    ASSERT_TRUE(WeReadStore::readImageWorkRecord(file, 0, loaded));
+    EXPECT_STREQ(loaded.image.url, first.image.url);
+    EXPECT_EQ(loaded.attempts, 1U);
+    EXPECT_EQ(loaded.redirects, 2U);
+  }
+
   std::ofstream corrupt(hostPath(path.c_str()), std::ios::binary | std::ios::app);
   ASSERT_TRUE(corrupt.good());
   corrupt.put('\0');
