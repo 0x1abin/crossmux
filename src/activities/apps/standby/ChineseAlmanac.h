@@ -44,8 +44,8 @@ struct AlmanacDay {
 
 namespace chinese_almanac {
 
-// String tables (all CJK chars guaranteed by the CN-build 8/10/12/14pt bitmap
-// subset; see lib/EpdFont/scripts/cn_common_chars.txt).
+// String tables (all CJK chars are force-included in both CN-build subsets;
+// see lib/EpdFont/scripts/cn_almanac_chars.txt).
 extern const char* const kStemNames[10];        // "甲".."癸"
 extern const char* const kBranchNames[12];      // "子".."亥"
 extern const char* const kZodiacNames[12];      // "鼠".."猪"

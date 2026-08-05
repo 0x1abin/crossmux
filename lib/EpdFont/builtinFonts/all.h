@@ -9,13 +9,12 @@
 // build-cn-builtin-fonts.sh).
 //
 // Character coverage is non-uniform across sizes:
-//   - 8/10/12/14pt: full frequency-ranked subset (top-N of
-//     现代汉语常用字表 + i18n require-from chars) — sized for reader
-//     SMALL/MEDIUM and UI at all readable sizes.
-//   - 16/18pt: i18n-only subset (just the CJK chars used by UI strings,
-//     plus ASCII + Latin-1 + CJK punctuation) — sized for reader
-//     LARGE/EXTRA_LARGE (intended for English EPUB). Chinese EPUB text
-//     at these sizes shows blank for any char outside the i18n subset;
+//   - 8/10/12pt: full frequency-ranked subset (top-N of
+//     现代汉语常用字表 + i18n require-from chars) — sized for reader SMALL
+//     and UI at all readable sizes.
+//   - 14/16/18pt: i18n-only subset (just the CJK chars used by UI strings,
+//     plus ASCII + Latin-1 + CJK punctuation). Chinese EPUB text at these
+//     sizes relies on an SD-card font for characters outside the subset;
 //     UI strings still render because their chars are always included.
 #include <builtinFonts/chinese_chess_16.h>
 #include <builtinFonts/notosans_cjk_8.h>

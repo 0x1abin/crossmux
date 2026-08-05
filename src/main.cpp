@@ -56,13 +56,11 @@ static unsigned long allowSleepAt = 0;
 //
 // CJK character coverage is non-uniform across sizes (see
 // build-cn-builtin-fonts.sh):
-//   - 8/10/12/14pt: full subset (top-3500 现代汉语常用字表 by Zipf, ∪
-//     i18n require-from chars). Sized for reader SMALL/MEDIUM and all UI.
-//   - 16/18pt: i18n-only subset (~650 chars from chinese.yaml + feature
-//     requirements). Sized for reader LARGE/EXTRA_LARGE (intended for
-//     English EPUB) while still letting UI strings render — game win
-//     banners etc. Chinese EPUB text at 16/18pt renders blank for chars
-//     outside the subset.
+//   - 8/10/12pt: full subset (top-3500 现代汉语常用字表 by Zipf, ∪
+//     i18n require-from chars). Sized for reader SMALL and all UI.
+//   - 14/16/18pt: i18n-only subset (747 chars from chinese.yaml + feature
+//     requirements). UI strings still render, while Chinese EPUB text relies
+//     on an SD-card font for characters outside the subset.
 EpdFont notoserif14RegularFont(&notosans_cjk_14);
 EpdFont notoserif14BoldFont(&notosans_cjk_14);
 EpdFont notoserif14ItalicFont(&notosans_cjk_14);

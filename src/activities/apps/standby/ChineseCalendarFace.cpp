@@ -18,22 +18,17 @@
 
 // CN font-coverage rule (drives every fontId choice in this file):
 //
-//   8 / 10 / 12 / 14 pt  → CN bitmap built from cn_common_chars.txt (~3500
-//                          chars).  Safe for any CJK glyph used in the design.
-//   16 / 18 pt           → CN bitmap built from cn_i18n_chars.txt (~650 chars,
-//                          chinese.yaml + feature requirements). Glyphs absent
-//                          from that file render as no-ops (getGlyph returns
-//                          nullptr → silent skip).
+//   8 / 10 / 12 pt  → CN bitmap built from cn_common_chars.txt (~3500 chars).
+//   14 / 16 / 18 pt → CN bitmap built from cn_i18n_chars.txt (747 chars from
+//                     chinese.yaml + feature requirements). Glyphs absent from
+//                     that file render as no-ops (getGlyph returns nullptr →
+//                     silent skip).
 //
-// Therefore: every Chinese-text drawText / drawCenteredText / drawCenteredRow
-// call in this file uses ≤14pt, with one exception — the lunar row uses 18pt
-// for visual emphasis.  Every CJK char this face renders that isn't naturally
-// in the 3500 SC pool *or* in a chinese.yaml STR_ value (i.e. wouldn't end up
-// in cn_i18n_chars.txt) is listed in lib/EpdFont/scripts/cn_almanac_chars.txt
-// — currently 戊庚壬癸寅卯巳酉戌廿蛰 (ganzhi + 惊蛰, ≤14pt) and 闰初七八九
-// 十冬腊 (lunar row, 18pt).  When new vocabulary is added, append the new
-// chars to that file and regenerate the CJK fonts.  ASCII digits at any size
-// are fine because basic Latin (U+0020-007E) is always in the OTF subset.
+// Every CJK char this face renders that isn't in a chinese.yaml STR_ value is
+// therefore listed in lib/EpdFont/scripts/cn_almanac_chars.txt. This keeps the
+// 14pt rows and 18pt lunar row complete. When new vocabulary is added, append
+// it there and regenerate the CJK fonts. ASCII digits at any size are covered
+// because basic Latin (U+0020-007E) is always in the OTF subset.
 
 namespace {
 
