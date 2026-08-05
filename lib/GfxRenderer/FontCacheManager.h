@@ -51,9 +51,17 @@ class FontCacheManager {
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
+  // Per-style scan buffers (index = base Style: 0=Regular, 1=Bold, 2=Italic,
+  // 3=Bold-Italic). Each page render prewarms every style ONLY against the text
+  // actually drawn in that style, not the whole page. Prewarming a secondary style
+  // over the entire page produced a full-page-sized FontDecompressor page-slot
+  // buffer per style; with the BLE stack resident the later styles' malloc failed,
+  // dropping bold/italic onto the hot-group fallback (which also OOM'd) so those
+  // glyphs rendered blank. Bucketing by style keeps each secondary buffer as small
+  // as the bold/italic text present, so every style reliably gets its slot.
   static constexpr size_t SCAN_TEXT_CAPACITY = 2048;
-  char scanText_[SCAN_TEXT_CAPACITY] = {};
-  size_t scanTextLen_ = 0;
-  uint32_t scanStyleCounts_[4] = {};
+  static constexpr uint8_t STYLE_COUNT = 4;
+  char scanText_[STYLE_COUNT][SCAN_TEXT_CAPACITY] = {};
+  size_t scanTextLen_[STYLE_COUNT] = {};
   int scanFontId_ = -1;
 };

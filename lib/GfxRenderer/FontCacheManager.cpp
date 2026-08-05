@@ -63,22 +63,18 @@ bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanni
 
 void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
   if (!text) return;
-  const size_t remaining = (scanTextLen_ < SCAN_TEXT_CAPACITY - 1) ? (SCAN_TEXT_CAPACITY - 1 - scanTextLen_) : 0;
+  // Bucket the text under its base style so each style is prewarmed only for what
+  // it actually renders (see the header comment on scanText_).
+  const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
+  size_t& len = scanTextLen_[baseStyle];
+  const size_t remaining = (len < SCAN_TEXT_CAPACITY - 1) ? (SCAN_TEXT_CAPACITY - 1 - len) : 0;
   if (remaining > 0) {
     const size_t textLen = strnlen(text, remaining);
-    memcpy(scanText_ + scanTextLen_, text, textLen);
-    scanTextLen_ += textLen;
-    scanText_[scanTextLen_] = '\0';
+    memcpy(scanText_[baseStyle] + len, text, textLen);
+    len += textLen;
+    scanText_[baseStyle][len] = '\0';
   }
   if (scanFontId_ < 0) scanFontId_ = fontId;
-  const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
-  uint32_t cpCount = 0;
-  while (*p) {
-    if ((*p & 0xC0) != 0x80) cpCount++;
-    p++;
-  }
-  scanStyleCounts_[baseStyle] += cpCount;
 }
 
 // --- PrewarmScope implementation ---
@@ -87,27 +83,28 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
   manager_->scanMode_ = ScanMode::Scanning;
   manager_->clearCache();
   manager_->resetStats();
-  manager_->scanTextLen_ = 0;
-  manager_->scanText_[0] = '\0';
-  memset(manager_->scanStyleCounts_, 0, sizeof(manager_->scanStyleCounts_));
+  for (uint8_t i = 0; i < STYLE_COUNT; i++) {
+    manager_->scanTextLen_[i] = 0;
+    manager_->scanText_[i][0] = '\0';
+  }
   manager_->scanFontId_ = -1;
 }
 
 void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   manager_->scanMode_ = ScanMode::None;
-  if (manager_->scanTextLen_ == 0) return;
+  if (manager_->scanFontId_ < 0) return;  // nothing recorded (also the "already ran" no-op)
 
-  // Build style bitmask from all styles that appeared during the scan
-  uint8_t styleMask = 0;
-  for (uint8_t i = 0; i < 4; i++) {
-    if (manager_->scanStyleCounts_[i] > 0) styleMask |= (1 << i);
+  // Prewarm each style separately, against only the text drawn in that style, so a
+  // secondary style's page-slot buffer stays as small as its actual usage. A single
+  // per-style bit mask routes prewarmCache() to exactly that style on both the SD
+  // and compressed-font paths.
+  for (uint8_t i = 0; i < STYLE_COUNT; i++) {
+    if (manager_->scanTextLen_[i] == 0) continue;
+    manager_->prewarmCache(manager_->scanFontId_, manager_->scanText_[i], static_cast<uint8_t>(1u << i));
+    manager_->scanTextLen_[i] = 0;
+    manager_->scanText_[i][0] = '\0';
   }
-  if (styleMask == 0) styleMask = 1;  // default to regular
-
-  manager_->prewarmCache(manager_->scanFontId_, manager_->scanText_, styleMask);
-
-  manager_->scanTextLen_ = 0;
-  manager_->scanText_[0] = '\0';
+  manager_->scanFontId_ = -1;  // makes the dtor's second call a no-op
 }
 
 FontCacheManager::PrewarmScope::~PrewarmScope() {
