@@ -74,7 +74,10 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
     len += textLen;
     scanText_[baseStyle][len] = '\0';
   }
-  if (scanFontId_ < 0) scanFontId_ = fontId;
+  if (!scanRecorded_) {
+    scanFontId_ = fontId;  // capture the first drawn font; may be negative (SD font)
+    scanRecorded_ = true;
+  }
 }
 
 // --- PrewarmScope implementation ---
@@ -88,11 +91,12 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
     manager_->scanText_[i][0] = '\0';
   }
   manager_->scanFontId_ = -1;
+  manager_->scanRecorded_ = false;
 }
 
 void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   manager_->scanMode_ = ScanMode::None;
-  if (manager_->scanFontId_ < 0) return;  // nothing recorded (also the "already ran" no-op)
+  if (!manager_->scanRecorded_) return;  // nothing recorded (also the "already ran" no-op)
 
   // Prewarm each style separately, against only the text drawn in that style, so a
   // secondary style's page-slot buffer stays as small as its actual usage. A single
@@ -100,11 +104,19 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   // and compressed-font paths.
   for (uint8_t i = 0; i < STYLE_COUNT; i++) {
     if (manager_->scanTextLen_[i] == 0) continue;
+    const unsigned long tStyle = millis();
     manager_->prewarmCache(manager_->scanFontId_, manager_->scanText_[i], static_cast<uint8_t>(1u << i));
+    // Per-style prewarm cost + text volume: on a heap-pressured build (BLE resident)
+    // a cold chapter-opening page can touch several styles, each paying SD reads for
+    // bitmaps + kern/ligature tables. This line attributes a slow page to the styles
+    // and byte volume actually loaded, so the wall-clock spike is not a guess.
+    LOG_DBG("FCM", "prewarm style%u: %lums (%u text bytes)", i, millis() - tStyle,
+            (unsigned)manager_->scanTextLen_[i]);
     manager_->scanTextLen_[i] = 0;
     manager_->scanText_[i][0] = '\0';
   }
-  manager_->scanFontId_ = -1;  // makes the dtor's second call a no-op
+  manager_->scanFontId_ = -1;
+  manager_->scanRecorded_ = false;  // makes the dtor's second call a no-op
 }
 
 FontCacheManager::PrewarmScope::~PrewarmScope() {

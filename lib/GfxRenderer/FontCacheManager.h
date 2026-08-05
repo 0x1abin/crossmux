@@ -63,5 +63,10 @@ class FontCacheManager {
   static constexpr uint8_t STYLE_COUNT = 4;
   char scanText_[STYLE_COUNT][SCAN_TEXT_CAPACITY] = {};
   size_t scanTextLen_[STYLE_COUNT] = {};
+  // Font id recorded during the scan pass. SD-card font ids are negative
+  // (std::hash-derived), so "nothing recorded" CANNOT be sentinelled as < 0 --
+  // that would swallow every SD font and skip its prewarm entirely. Track
+  // whether anything was recorded with an explicit flag instead.
   int scanFontId_ = -1;
+  bool scanRecorded_ = false;
 };

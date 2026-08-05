@@ -1944,8 +1944,24 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
               "wait=%lums gray_write=%lums gray_display=%lums cleanup=%lums total=%lums (planes buffered: %d)",
               tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tGrayRender - tDisplay, tWait - tGrayRender,
               tGrayWrite - tWait, tGrayDisplay - tGrayWrite, tEnd - tGrayDisplay, tEnd - t0, msbPlaneBuf ? 2 : 1);
+    } else if (overlapRefresh) {
+      // We wanted the overlapped whole-plane path (async panel, text AA) but the
+      // plane buffers didn't fit — low/fragmented heap, typically with BLE
+      // resident (~57 KB free). The per-strip fallback below renders the page
+      // ~6x per plane and, without an async refresh to hide under, runs serially:
+      // ~20 s per plane / ~40 s per page on the X4, which reads as a locked-up
+      // device. Skip text AA for this page instead. The BW frame was already
+      // rendered and its refresh is in flight; the result is fully readable, just
+      // without gray edge smoothing. Resync controller RAM from the intact BW
+      // framebuffer so the next differential page turn has a valid baseline.
+      LOG_DBG("ERS",
+              "Skip AA: plane buffers unaffordable (free=%d maxAlloc=%d); BW only this page "
+              "(prewarm=%lums bw_render=%lums)",
+              ESP.getFreeHeap(), ESP.getMaxAllocHeap(), tPrewarm - t0, tBwRender - tPrewarm);
+      renderer.waitRefreshComplete();
+      renderer.cleanupGrayscaleWithFrameBuffer();
     } else {
-      // Per-strip scratch tier: blocking panels (X3) and the OOM fallback.
+      // Per-strip scratch tier: blocking panels (X3) and image pages.
       // The strip writes below need the panel idle, so wait out any pending
       // async refresh first (no-op on blocking panels).
       auto scratch = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(gwBytes) * STRIP_ROWS);
