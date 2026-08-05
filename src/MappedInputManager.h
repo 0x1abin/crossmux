@@ -6,10 +6,26 @@ class GfxRenderer;
 
 class MappedInputManager {
  public:
-  enum class Button { Back, Confirm, Left, Right, Up, Down, Power, PageBack, PageForward, NavNext, NavPrevious };
-  // Number of values in Button (Back..NavPrevious). Used to size the BLE overlay and
+  enum class Button {
+    Back,
+    Confirm,
+    Left,
+    Right,
+    Up,
+    Down,
+    Power,
+    PageBack,
+    PageForward,
+    NavNext,
+    NavPrevious,
+    ScreenLeft,
+    ScreenRight,
+    ScreenUp,
+    ScreenDown
+  };
+  // Number of values in Button (Back..ScreenDown). Used to size the BLE overlay and
   // to clamp persisted BLE mappings. Keep in sync with the enum above.
-  static constexpr uint8_t kButtonCount = 11;
+  static constexpr uint8_t kButtonCount = 15;
   enum class SwipeDir { None, Left, Right, Up, Down };
 
   struct Labels {
@@ -55,6 +71,10 @@ class MappedInputManager {
   unsigned long getHeldTime() const;
   const GfxRenderer& getRenderer() const { return renderer; }
   Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next) const;
+  // Maps four screen-direction labels onto the two physical front-button roles
+  // using the same live-orientation transform as ScreenLeft/Right/Up/Down.
+  Labels mapDirectionalLabels(const char* back, const char* confirm, const char* left, const char* right,
+                              const char* up, const char* down) const;
   // Returns the raw front button index that was pressed this frame (or -1 if none).
   int getPressedFrontButton() const;
 
@@ -90,6 +110,8 @@ class MappedInputManager {
   // preference and stays "rotated" even while portrait UI like home/settings is on screen.
   const GfxRenderer& renderer;
 
+  Button mapScreenDirection(Button button) const;
+  Labels mapFrontLabels(const char* back, const char* confirm, const char* left, const char* right) const;
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
   // OR-in the BLE overlay for a logical button, mirroring mapButton()'s composite
   // handling of NavNext/NavPrevious so a remote key bound to Up/Down/Left/Right also
