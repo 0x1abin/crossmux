@@ -38,19 +38,11 @@
 #include <Memory.h>
 #include "HeapMap.h"
 
-// BT controller memory-retention symbol for the controller-only NimBLE-Arduino
-// setup. arduino-esp32's esp32-hal-bt-mem.h emits a constructor referencing
-// _btLibraryInUse whenever BLE hardware is present, but the core only DEFINES the
-// symbol when an IDF host stack (Bluedroid/NimBLE) is enabled -- and we run the IDF
-// BLE controller only, with NimBLE-Arduino supplying the host. Without this the link
-// fails with "undefined reference to `_btLibraryInUse'". We use the controller, so it
-// stays true (the core's constructor would set it true regardless); weak so any
-// config where the core defines it wins with no duplicate-symbol error. Defined in
-// main.cpp (always compiled) rather than a standalone TU: the hybrid custom_sdkconfig
-// build did not reliably compile a newly-added src file.
-#if defined(FREEINK_CAP_BLE_HID_HOST)
-extern "C" __attribute__((weak)) bool _btLibraryInUse = true;
-#endif
+// NOTE: the controller-only _btLibraryInUse fix lives in scripts/patch_bt_mem.py,
+// which weak-defines the symbol in arduino-esp32's esp32-hal-bt-mem.h. It must be
+// in that header (not here) so NimBLE's own translation unit provides the symbol in
+// every link that pulls in NimBLE -- including the arduino-lib-builder core-rebuild's
+// dummy firmware, which no application source reaches.
 
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
