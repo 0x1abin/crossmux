@@ -162,6 +162,7 @@ struct SettingInfo {
 class SettingsActivity final : public Activity {
   ButtonNavigator buttonNavigator;
 
+  const SettingAction initialAction;
   int selectedCategoryIndex = 0;  // Currently selected category
   int selectedSettingIndex = 0;
   int settingsCount = 0;
@@ -188,8 +189,9 @@ class SettingsActivity final : public Activity {
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 
  public:
-  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("Settings", renderer, mappedInput) {}
+  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                            SettingAction initialActionValue = SettingAction::None)
+      : Activity("Settings", renderer, mappedInput), initialAction(initialActionValue) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

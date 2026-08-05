@@ -42,8 +42,12 @@ constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 }  // namespace
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const SdCardFontRegistry* registry, Tab initialTab)
-    : Activity("TextSettings", renderer, mappedInput), registry_(registry), tab_(initialTab) {}
+                                           const SdCardFontRegistry* registry, const Tab initialTab,
+                                           const SilentRestartTarget restartTarget)
+    : Activity("TextSettings", renderer, mappedInput),
+      registry_(registry),
+      restartTarget_(restartTarget),
+      tab_(initialTab) {}
 
 void TextSettingsActivity::onEnter() {
   Activity::onEnter();
@@ -545,8 +549,8 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   }
 
   // ActivityManager owns the downloader across frames, so it must live on the heap.
-  auto downloader =
-      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage);
+  auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
+      renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage, restartTarget_);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return;

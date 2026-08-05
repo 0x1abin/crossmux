@@ -38,8 +38,11 @@ std::atomic<bool> chineseFontPromptShownThisBoot{false};
 }  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const Purpose purpose)
-    : Activity("FontDownload", renderer, mappedInput), purpose_(purpose), fontInstaller_(sdFontSystem.registry()) {}
+                                           const Purpose purpose, const SilentRestartTarget restartTarget)
+    : Activity("FontDownload", renderer, mappedInput),
+      purpose_(purpose),
+      restartTarget_(restartTarget),
+      fontInstaller_(sdFontSystem.registry()) {}
 
 #ifdef ENABLE_CHINESE_VERSION
 bool FontDownloadActivity::wasChineseFontPromptShownThisBoot() {
@@ -100,7 +103,7 @@ void FontDownloadActivity::onExit() {
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
-    silentRestart();
+    silentRestart(restartTarget_);
   }
 }
 
@@ -505,7 +508,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
 
 void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName) {
   auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                              TextSettingsActivity::Tab::Family);
+                                                              TextSettingsActivity::Tab::Family, restartTarget_);
 
   strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
   SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';

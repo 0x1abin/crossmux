@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "SilentRestart.h"
 #include "TextSettingsPreview.h"
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
@@ -23,7 +24,7 @@ class TextSettingsActivity final : public Activity {
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
 
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
-                       Tab initialTab = Tab::Family);
+                       Tab initialTab, SilentRestartTarget restartTarget);
 
   void onEnter() override;
   void onExit() override;
@@ -93,6 +94,7 @@ class TextSettingsActivity final : public Activity {
   };
 
   const SdCardFontRegistry* registry_;
+  const SilentRestartTarget restartTarget_;
   ButtonNavigator buttonNavigator_;
   OptionPopup optionPopup_;
   std::vector<TabInfo> tabs_;

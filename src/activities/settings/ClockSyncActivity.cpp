@@ -37,7 +37,7 @@ void ClockSyncActivity::onExit() {
   if (shouldTearDownWifiOnExit && WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
-    silentRestart();
+    silentRestart(SilentRestartTarget::SettingsDateTime);
   }
 }
 

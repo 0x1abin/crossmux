@@ -412,8 +412,8 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
   LOG_INF("FONT", "Missing built-in Chinese glyph U+%04X; offering SD fonts", static_cast<unsigned>(codepoint));
 
   // ActivityManager owns the downloader across frames, so it must live on the heap.
-  auto downloader =
-      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage);
+  auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
+      renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage, SilentRestartTarget::Reader);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return false;
@@ -936,8 +936,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::TEXT_SETTINGS: {
-      auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                                  TextSettingsActivity::Tab::Family);
+      auto textSettings =
+          makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
+                                                  TextSettingsActivity::Tab::Family, SilentRestartTarget::Reader);
       if (!textSettings) {
         LOG_ERR("ERS", "OOM: TextSettingsActivity (%u bytes)", static_cast<unsigned>(sizeof(TextSettingsActivity)));
         requestUpdate();

@@ -68,7 +68,7 @@ void WeReadProgressSyncActivity::onExit() {
   if (!wifiActivated_) return;
   WiFi.disconnect(false);
   delay(30);
-  silentRestartToReader();
+  silentRestart(SilentRestartTarget::Reader);
 }
 
 bool WeReadProgressSyncActivity::preventAutoSleep() { return state_ == State::Starting || state_ == State::Syncing; }

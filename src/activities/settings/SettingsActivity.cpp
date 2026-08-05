@@ -130,6 +130,23 @@ void SettingsActivity::onEnter() {
 
   rebuildSettingsLists();
 
+  if (initialAction != SettingAction::None) {
+    const std::vector<SettingInfo>* categories[] = {&displaySettings, &readerSettings, &controlsSettings,
+                                                    &systemSettings};
+    for (int category = 0; category < categoryCount; ++category) {
+      const auto& settings = *categories[category];
+      const auto setting = std::find_if(settings.begin(), settings.end(),
+                                        [this](const SettingInfo& info) { return info.action == initialAction; });
+      if (setting == settings.end()) continue;
+
+      selectedCategoryIndex = category;
+      selectedSettingIndex = static_cast<int>(setting - settings.begin()) + 1;
+      currentSettings = categories[category];
+      settingsCount = static_cast<int>(settings.size());
+      break;
+    }
+  }
+
   // Trigger first update
   requestUpdate();
 }
@@ -432,17 +449,20 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::DownloadFonts:
-        startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
-                               [this](const ActivityResult&) {
-                                 SETTINGS.saveToFile();
-                                 rebuildSettingsLists();
-                               });
+        startActivityForResult(
+            std::make_unique<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::Manage,
+                                                   SilentRestartTarget::SettingsManageFonts),
+            [this](const ActivityResult&) {
+              SETTINGS.saveToFile();
+              rebuildSettingsLists();
+            });
         break;
       case SettingAction::TextSettings:
         // ActivityManager owns this across render-loop frames, so it cannot be a
         // stack object. Use the nothrow factory because ESP32 builds disable exceptions.
         if (auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                                        TextSettingsActivity::Tab::Family)) {
+                                                                        TextSettingsActivity::Tab::Family,
+                                                                        SilentRestartTarget::SettingsText)) {
           startActivityForResult(std::move(textSettings), [this](const ActivityResult&) {
             // TextSettingsActivity persists every change before returning.
             rebuildSettingsLists();

@@ -1247,7 +1247,7 @@ void WeReadActivity::openBook(const char* path) {
 
   WiFi.disconnect(false);
   delay(30);
-  silentRestartToReader();
+  silentRestart(SilentRestartTarget::Reader);
 #endif
 }
 

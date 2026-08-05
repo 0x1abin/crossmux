@@ -5,6 +5,7 @@
 
 #include "FontInstaller.h"
 #include "SdCardFont.h"
+#include "SilentRestart.h"
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
@@ -35,8 +36,8 @@ class FontDownloadActivity : public Activity {
  public:
   enum class Purpose : uint8_t { Manage, PromptThenManage };
 
-  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                Purpose purpose = Purpose::Manage);
+  explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Purpose purpose,
+                                SilentRestartTarget restartTarget);
 
 #ifdef ENABLE_CHINESE_VERSION
   static bool wasChineseFontPromptShownThisBoot();
@@ -87,6 +88,7 @@ class FontDownloadActivity : public Activity {
 
   State state_ = WIFI_SELECTION;
   Purpose purpose_;
+  const SilentRestartTarget restartTarget_;
   FontInstaller fontInstaller_;
   ButtonNavigator buttonNavigator_;
 

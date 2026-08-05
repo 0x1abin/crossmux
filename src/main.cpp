@@ -29,9 +29,11 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "SilentRestart.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#include "activities/settings/SettingsActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
@@ -238,8 +240,6 @@ unsigned long t2 = 0;
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
-constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
-constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -258,28 +258,57 @@ enum class BootResume : uint8_t {
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
 static bool deepSleepInProgress = false;
 
-void silentRestart() {
+void silentRestart(const SilentRestartTarget target) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
+  silentRebootTarget = static_cast<uint32_t>(target);
   silentRebootMagic = SILENT_REBOOT_MAGIC;
-  LOG_DBG("MAIN", "Silent restart (target=home)");
-  // E-ink retains the previous frame until Home's first paint lands (~2-3s).
+  LOG_DBG("MAIN", "Silent restart (target=%u)", static_cast<unsigned>(target));
+  // E-ink retains the previous frame until the target's first paint lands (~2-3s).
   // Without an overlay, users don't see the reboot and fire input through to
-  // Home. Select on the default selectorIndex=0 then opens the most-recent
-  // book, looking like a trampoline back to the reader they just exited.
+  // the target. On Home, Select on the default selectorIndex=0 can then open
+  // the most-recent book, looking like a trampoline back to the reader.
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   ESP.restart();
 }
 
-void silentRestartToReader() {
-  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  silentRebootTarget = SILENT_REBOOT_TARGET_READER;
-  silentRebootMagic = SILENT_REBOOT_MAGIC;
-  LOG_DBG("MAIN", "Silent restart (target=reader)");
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  delay(50);
-  ESP.restart();
+static void goToSilentRestartTarget(const SilentRestartTarget target) {
+  switch (target) {
+    case SilentRestartTarget::Home:
+      activityManager.goHome();
+      return;
+    case SilentRestartTarget::HomeOpds:
+      activityManager.goHome(HomeMenuItem::OPDS_BROWSER);
+      return;
+    case SilentRestartTarget::HomeFileTransfer:
+      activityManager.goHome(HomeMenuItem::FILE_TRANSFER);
+      return;
+    case SilentRestartTarget::SettingsCheckUpdates:
+      activityManager.goToSettings(SettingAction::CheckForUpdates);
+      return;
+    case SilentRestartTarget::SettingsManageFonts:
+      activityManager.goToSettings(SettingAction::DownloadFonts);
+      return;
+    case SilentRestartTarget::SettingsText:
+      activityManager.goToSettings(SettingAction::TextSettings);
+      return;
+    case SilentRestartTarget::SettingsDateTime:
+      activityManager.goToSettings(SettingAction::DateTime);
+      return;
+    case SilentRestartTarget::SettingsKOReader:
+      activityManager.goToSettings(SettingAction::KOReaderSync);
+      return;
+    case SilentRestartTarget::Reader:
+      if (!APP_STATE.openEpubPath.empty() && Storage.exists(APP_STATE.openEpubPath.c_str())) {
+        activityManager.goToReader(APP_STATE.openEpubPath);
+      } else {
+        activityManager.goHome();
+      }
+      return;
+    case SilentRestartTarget::Count:
+      activityManager.goHome();
+      return;
+  }
 }
 
 void waitForPowerRelease() {
@@ -413,8 +442,8 @@ void setup() {
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
-  const uint32_t snapshotTarget =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
+  const SilentRestartTarget snapshotTarget =
+      isSilentReboot ? decodeSilentRestartTarget(silentRebootTarget) : SilentRestartTarget::Home;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
 
@@ -558,14 +587,10 @@ void setup() {
     activityManager.goToCrashReport();
   } else if (postOtaBoot) {
     activityManager.goHome();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
-             !APP_STATE.openEpubPath.empty()) {
-    activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent) {
-    // target == home (or reader with no open book): land on home — don't fall
-    // through to the sleep-wake "resume reader" logic, which fires on stale
-    // openEpubPath + lastSleepFromReader from a prior session.
-    activityManager.goHome();
+    // Don't fall through to the sleep-wake reader-resume logic, which can fire
+    // on stale openEpubPath + lastSleepFromReader from a prior session.
+    goToSilentRestartTarget(snapshotTarget);
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity

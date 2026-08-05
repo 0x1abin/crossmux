@@ -209,6 +209,10 @@ void ActivityManager::goToFileTransfer() {
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
+void ActivityManager::goToSettings(const SettingAction initialAction) {
+  replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput, initialAction));
+}
+
 void ActivityManager::goToUglyAvatar() { replaceActivity(std::make_unique<UglyAvatarActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
