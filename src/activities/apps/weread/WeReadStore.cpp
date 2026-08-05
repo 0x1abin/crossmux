@@ -258,8 +258,7 @@ bool clearCache() {
         ok = false;
         continue;
       }
-      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0 ||
-          strcmp(name, "shelf.bin") == 0) {
+      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0) {
         continue;
       }
       isDirectory = entry.isDirectory();
