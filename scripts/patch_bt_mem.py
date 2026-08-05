@@ -11,26 +11,23 @@ CrossPoint runs the ESP-IDF BLE *controller* only, with NimBLE-Arduino supplying
 the host (both IDF host stacks are disabled in custom_sdkconfig to avoid duplicate
 npl_freertos_* symbols). In that configuration the core never defines the symbol,
 so NimBLE's constructor link-fails with "undefined reference to `_btLibraryInUse'"
--- and it fails in TWO links that application source cannot reach:
-  1. the final firmware link, and
-  2. the arduino-lib-builder core-rebuild's dummy firmware (custom_sdkconfig),
-     which links NimBLE but none of our src/.
+-- and it fails in links that application source cannot reach (the final firmware
+link and the arduino-lib-builder core-rebuild's dummy firmware).
 
 Fix: turn the header's `extern bool _btLibraryInUse;` DECLARATION into a weak
 DEFINITION. Every translation unit that includes the header (NimBLE) then provides
 the symbol itself; the linker merges the duplicate weak defs, and the core's own
-strong definition still wins whenever a host stack is actually enabled. This is why
-it must live in the header rather than in our src -- only the header is seen by
-NimBLE's TU in every link.
+strong definition still wins whenever a host stack is actually enabled. It must
+live in the header, not our src, because only the header is seen by NimBLE's TU in
+every link.
 
-Idempotent text edit, re-applied every build (the framework package is a plain
-extracted tarball, not a git checkout, so the git-apply pattern used for JPEGDEC
-does not apply here; and PlatformIO may re-extract the package on reinstall).
+Idempotent text edit. Patching bumps the header mtime, so NimBLE recompiles
+against it on the next build.
 """
 
 Import("env")  # noqa: F821 (SCons-injected global)
+import glob
 import os
-import sys
 
 EXTERN_DECL = "extern bool _btLibraryInUse;"
 MARKER = "patch_bt_mem.py"
@@ -39,35 +36,60 @@ WEAK_DEF = (
 )
 
 
+def _find_header(env):
+    rel = os.path.join("cores", "esp32", "esp32-hal-bt-mem.h")
+    candidates = []
+
+    # 1) Ask the platform for the framework package dir (works when the name matches).
+    try:
+        fw = env.PioPlatform().get_package_dir("framework-arduinoespressif32")  # noqa: F821
+        if fw:
+            candidates.append(os.path.join(fw, rel))
+    except Exception:
+        pass
+
+    # 2) Glob the packages dir(s) -- robust to the exact package name/version.
+    pkg_dirs = []
+    for key in ("PROJECT_PACKAGES_DIR", "PROJECT_CORE_DIR"):
+        try:
+            d = env.subst("$%s" % key)  # noqa: F821
+            if d:
+                pkg_dirs.append(d)
+        except Exception:
+            pass
+    pkg_dirs.append(os.path.expanduser(os.path.join("~", ".platformio", "packages")))
+    for base in pkg_dirs:
+        pattern = os.path.join(base, "**", "framework-arduinoespressif32*", rel)
+        candidates.extend(glob.glob(pattern, recursive=True))
+
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
 def patch_bt_mem(env):
-    fw_dir = env.PioPlatform().get_package_dir("framework-arduinoespressif32")  # noqa: F821
-    if not fw_dir:
-        return
-    header = os.path.join(fw_dir, "cores", "esp32", "esp32-hal-bt-mem.h")
-    if not os.path.isfile(header):
+    header = _find_header(env)
+    if not header:
+        print("patch_bt_mem: esp32-hal-bt-mem.h not found; skipping (controller-only "
+              "link may fail on _btLibraryInUse)")
         return
 
     with open(header, "r") as f:
         text = f.read()
 
     if MARKER in text:
-        return  # already patched this checkout of the package
-
+        print("patch_bt_mem: already patched (%s)" % header)
+        return
     if EXTERN_DECL not in text:
-        # Upstream header changed shape -- do not blindly rewrite it. Warn loudly:
-        # if the controller-only link then fails on _btLibraryInUse, this script
-        # needs updating for the new arduino-esp32 version.
-        sys.stderr.write(
-            "WARNING: patch_bt_mem.py could not find '%s' in %s; "
-            "_btLibraryInUse may be left undefined for the controller-only build.\n"
-            % (EXTERN_DECL, header)
-        )
+        print("patch_bt_mem: '%s' not found in %s; NOT patching (upstream header "
+              "changed -- update this script)" % (EXTERN_DECL, header))
         return
 
     text = text.replace(EXTERN_DECL, WEAK_DEF, 1)
     with open(header, "w") as f:
         f.write(text)
-    print("Patched esp32-hal-bt-mem.h: _btLibraryInUse now defined weakly")
+    print("patch_bt_mem: patched %s (_btLibraryInUse now weak-defined)" % header)
 
 
 patch_bt_mem(env)  # noqa: F821
