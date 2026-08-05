@@ -694,7 +694,7 @@ TEST_F(WeReadStoreTest, ClearsSessionAndShelfButPreservesDownloadedContent) {
   EXPECT_TRUE(WeReadStore::clearShelf());
 }
 
-TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountShelfAndDownloadedBooks) {
+TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   ASSERT_TRUE(WeReadStore::acceptDisclaimer());
   WeReadStore::Session session;
@@ -721,7 +721,7 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountShelfAndDownloadedBo
   ASSERT_TRUE(WeReadStore::clearCache());
   EXPECT_TRUE(Storage.exists(WeReadStore::kSessionPath));
   EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
-  EXPECT_TRUE(Storage.exists(WeReadStore::kShelfPath));
+  EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/book-1"));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/browse-cache"));
