@@ -260,6 +260,20 @@ class SdCardFont {
   uint32_t overflowCount_ = 0;
   uint32_t overflowNext_ = 0;
 
+  // Single pre-reserved fallback buffer for the on-demand overflow path.
+  // onGlyphMiss() normally mallocs each glyph's bitmap; under heap pressure (BLE
+  // resident) that per-glyph malloc fails and the glyph -- and thus the whole
+  // last-loaded style, in practice bold-italic -- renders blank. This buffer is
+  // reserved once at load(), when the heap is healthy. When the per-glyph malloc
+  // fails, the current glyph is read into this buffer and rendered directly. It is
+  // NOT part of the cache ring above (it is overwritten on every use), which is
+  // fine: getGlyphBitmap() consumes the bitmap immediately after the miss handler
+  // returns, before the next glyph is fetched.
+  static constexpr uint32_t OVERFLOW_EMERGENCY_BYTES = 1024;
+  uint8_t* overflowEmergencyBuf_ = nullptr;
+  uint32_t overflowEmergencyCap_ = 0;
+  OverflowEntry overflowEmergency_ = {};
+
   // Compact advance-only table for layout measurement (per-style).
   // Built by buildAdvanceTable(), queried by getAdvance().
   struct AdvanceEntry {

@@ -188,6 +188,10 @@ void SdCardFont::freeStyleAll(PerStyle& s) {
 void SdCardFont::freeAll() {
   clearOverflow();
   clearPersistentCache();
+  delete[] overflowEmergencyBuf_;
+  overflowEmergencyBuf_ = nullptr;
+  overflowEmergencyCap_ = 0;
+  overflowEmergency_ = {};
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
     freeStyleAll(styles_[i]);
   }
@@ -703,6 +707,12 @@ bool SdCardFont::load(const char* path) {
     s.epdFont.data = &s.stubData;
     applyGlyphMissCallback(i);
   }
+
+  // Reserve the overflow fallback buffer now, while the heap is at its healthiest
+  // (font load runs before the per-page render allocations). Best-effort: if it
+  // can't allocate, onGlyphMiss() simply keeps its per-glyph malloc path.
+  overflowEmergencyBuf_ = new (std::nothrow) uint8_t[OVERFLOW_EMERGENCY_BYTES];
+  overflowEmergencyCap_ = overflowEmergencyBuf_ ? OVERFLOW_EMERGENCY_BYTES : 0;
 
   loaded_ = true;
 
@@ -1464,23 +1474,43 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
 
   // Read bitmap data into temporary (if any)
   uint8_t* tempBitmap = nullptr;
+  bool usingEmergency = false;
   if (tempGlyph.dataLength > 0) {
     tempBitmap = new (std::nothrow) uint8_t[tempGlyph.dataLength];
     if (!tempBitmap) {
-      LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
-      return nullptr;
+      // Per-glyph malloc failed under heap pressure. Fall back to the pre-reserved
+      // emergency buffer so the glyph still renders instead of blanking (the whole
+      // last-loaded style, in practice bold-italic, otherwise disappears while BLE
+      // is resident). Read directly into it; this path bypasses the cache ring.
+      if (self->overflowEmergencyBuf_ && tempGlyph.dataLength <= self->overflowEmergencyCap_) {
+        tempBitmap = self->overflowEmergencyBuf_;
+        usingEmergency = true;
+      } else {
+        LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
+        return nullptr;
+      }
     }
     if (!file.seekSet(s.bitmapFileOffset + tempGlyph.dataOffset)) {
       LOG_ERR("SDCF", "Overflow: failed to seek to bitmap for U+%04X", codepoint);
-      delete[] tempBitmap;
+      if (!usingEmergency) delete[] tempBitmap;
       file.close();
       return nullptr;
     }
     if (file.read(tempBitmap, tempGlyph.dataLength) != static_cast<int>(tempGlyph.dataLength)) {
       LOG_ERR("SDCF", "Overflow: failed to read bitmap for U+%04X", codepoint);
-      delete[] tempBitmap;
+      if (!usingEmergency) delete[] tempBitmap;
       return nullptr;
     }
+  }
+
+  // Emergency-buffer path: return the glyph directly, without touching the ring
+  // (the buffer is a single shared slot, overwritten on the next miss).
+  if (usingEmergency) {
+    self->overflowEmergency_.glyph = tempGlyph;
+    self->overflowEmergency_.bitmap = tempBitmap;
+    self->overflowEmergency_.codepoint = codepoint;
+    self->overflowEmergency_.styleIdx = styleIdx;
+    return &self->overflowEmergency_.glyph;
   }
 
   // All reads succeeded — commit to slot and advance ring buffer
@@ -1495,8 +1525,9 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   self->overflow_[slot].codepoint = codepoint;
   self->overflow_[slot].styleIdx = styleIdx;
 
-  LOG_DBG("SDCF", "Overflow: loaded U+%04X style %u on demand (slot %u/%u)", codepoint, styleIdx, slot,
-          OVERFLOW_CAPACITY);
+  // No per-glyph log here: when the prewarm mini-data doesn't cover a page every
+  // glyph takes this path, which floods the console. Overflow-heavy pages are
+  // instead visible as slow renders.
 
   return &self->overflow_[slot].glyph;
 }
@@ -1529,6 +1560,7 @@ size_t SdCardFont::reportMemory() const {
 }
 
 bool SdCardFont::isOverflowGlyph(const EpdGlyph* glyph) const {
+  if (glyph == &overflowEmergency_.glyph) return true;
   for (uint32_t i = 0; i < overflowCount_; i++) {
     if (&overflow_[i].glyph == glyph) return true;
   }
@@ -1536,6 +1568,7 @@ bool SdCardFont::isOverflowGlyph(const EpdGlyph* glyph) const {
 }
 
 const uint8_t* SdCardFont::getOverflowBitmap(const EpdGlyph* glyph) const {
+  if (glyph == &overflowEmergency_.glyph) return overflowEmergency_.bitmap;
   for (uint32_t i = 0; i < overflowCount_; i++) {
     if (&overflow_[i].glyph == glyph) {
       return overflow_[i].bitmap;
