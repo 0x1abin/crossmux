@@ -227,7 +227,7 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "RoundedRaff" - A rounded theme with additional visual styling
   - "INX" - A five-tab e-ink interface with a Recent home screen, icon/list Library and Apps layouts, and expandable Settings categories
 
-- **INX Recent Layout**: Choose Flow, Grid, List, Icons, or Cover for the INX home screen. The default is Flow.
+- **INX Home Layout**: Choose Flow, Grid, List, Icons, or Cover for the INX home screen. The default is Flow.
 - **INX Library Layout**: Choose Icons or List for the INX Library. The default is Icons.
 - **INX Apps Layout**: Choose Icons or List for the INX Apps hub. The default is Icons.
 
