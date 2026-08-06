@@ -9,6 +9,8 @@ enum class InxItemLayout : uint8_t { Icons, List, Count };
 namespace InxCoverGeometry {
 inline constexpr int sourceWidth = 170;
 inline constexpr int sourceHeight = 250;
+inline constexpr int thumbnailSourceWidth = 3;
+inline constexpr int thumbnailSourceHeight = 5;
 
 struct Size {
   int width = 0;
@@ -30,6 +32,12 @@ constexpr Size fit(const int maxWidth, const int maxHeight) {
     if (width < 1) width = 1;
   }
   return {width, height};
+}
+
+constexpr int thumbnailHeightForCropFill(const int displayHeight) {
+  if (displayHeight <= 0) return 0;
+  constexpr int denominator = sourceHeight * thumbnailSourceWidth;
+  return (displayHeight * sourceWidth * thumbnailSourceHeight + denominator - 1) / denominator;
 }
 }  // namespace InxCoverGeometry
 

@@ -19,6 +19,7 @@ class InxRecentActivity final : public Activity {
   bool firstRenderDone = false;
   bool waitingForCoverRender = false;
   size_t nextCoverIndex = 0;
+  int thumbnailHeight = 0;
 
   InxRecentLayout layout() const;
   const ReadingBookStats* statsAt(int index) const;
@@ -26,11 +27,11 @@ class InxRecentActivity final : public Activity {
   void openSelected();
   void prepareNextCover();
 
-  void drawFlow(const Rect& content) const;
-  void drawGrid(const Rect& content) const;
-  void drawList(const Rect& content) const;
-  void drawIcons(const Rect& content) const;
-  void drawCover(const Rect& content) const;
+  void drawFlow(const Rect& content);
+  void drawGrid(const Rect& content);
+  void drawList(const Rect& content);
+  void drawIcons(const Rect& content);
+  void drawCover(const Rect& content);
 
  public:
   explicit InxRecentActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

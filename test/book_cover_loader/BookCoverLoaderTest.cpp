@@ -69,6 +69,27 @@ TEST_F(BookCoverLoaderTest, ReplacesCorruptThumbnail) {
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
 }
 
+TEST_F(BookCoverLoaderTest, KeepsLayoutThumbnailSizesIndependent) {
+  writeBook("/book.epub");
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 146, &generated), "/.crosspoint/epub/thumb_146.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 685, &generated), "/.crosspoint/epub/thumb_685.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 2);
+
+  {
+    std::ofstream output(hostPath("/.crosspoint/epub/thumb_146.bmp"), std::ios::binary | std::ios::trunc);
+    output << "broken";
+  }
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 685, &generated), "/.crosspoint/epub/thumb_685.bmp");
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 2);
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 146, &generated), "/.crosspoint/epub/thumb_146.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 3);
+}
+
 TEST_F(BookCoverLoaderTest, PreservesCoverlessEpubMarker) {
   writeBook("/coverless.epub");
   bool generated = true;

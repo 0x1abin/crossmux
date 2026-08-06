@@ -42,6 +42,16 @@ TEST(InxNavigation, FitsOriginalCoverRatioInsideBounds) {
   EXPECT_EQ(InxCoverGeometry::fit(96, 140).height, 140);
 }
 
+TEST(InxNavigation, SizesRecentThumbnailsForCropFillWithoutUpscaling) {
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(0), 0);
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(128), 146);
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(209), 237);
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(318), 361);
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(326), 370);
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(550), 624);
+  EXPECT_EQ(InxCoverGeometry::thumbnailHeightForCropFill(604), 685);
+}
+
 TEST(InxNavigation, ValidatesItemLayoutsAndGridBounds) {
   EXPECT_EQ(InxGridGeometry::layoutFrom(0), InxItemLayout::Icons);
   EXPECT_EQ(InxGridGeometry::layoutFrom(1), InxItemLayout::List);
