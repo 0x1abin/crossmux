@@ -283,16 +283,20 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   const auto sideSize = InxCoverGeometry::fit(carousel.width, std::max(1, center.height * 90 / 100));
   const int sideTop = center.y + (center.height - sideSize.height) / 2;
   const int sideGap = std::max(kGap, content.width * 4 / 100);
-  if (selected > 0) {
-    drawBookCover(renderer, (*books)[selected - 1],
-                  Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height}, thumbnailHeight);
+  {
+    const GfxRenderer::ClipScope clip(renderer, carousel.x, carousel.y, carousel.width, carousel.height);
+    if (selected > 0) {
+      drawBookCover(renderer, (*books)[selected - 1],
+                    Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height},
+                    thumbnailHeight);
+    }
+    if (selected + 1 < count) {
+      drawBookCover(renderer, (*books)[selected + 1],
+                    Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height}, thumbnailHeight);
+    }
+    drawBookCover(renderer, book, center, thumbnailHeight);
+    if (showSelection) drawThickFrame(renderer, center);
   }
-  if (selected + 1 < count) {
-    drawBookCover(renderer, (*books)[selected + 1],
-                  Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height}, thumbnailHeight);
-  }
-  drawBookCover(renderer, book, center, thumbnailHeight);
-  if (showSelection) drawThickFrame(renderer, center);
 
   const int dividerY = carousel.y + carousel.height + 10;
   renderer.drawLine(content.x, dividerY, content.x + content.width - 1, dividerY, true);
