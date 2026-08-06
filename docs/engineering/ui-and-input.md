@@ -129,6 +129,19 @@ action**.
 * Paginated custom grids should call `GUI.drawSideScrollBar()` with their item
   count, page start, and page capacity so the active theme controls the bar
   dimensions and placement.
+* INX top-level tabs are owned by `ActivityManager`; only Activities with a
+  non-`None` `MainTab` participate. Left/Right and tab touches are consumed
+  before the page sees them, while reader and feature subpages remain outside
+  the top-level loop.
+* `GUI.drawProgressBar()` returns the first free Y coordinate after the bar and
+  optional percentage line. Callers place following text from that value rather
+  than reproducing the theme's font or spacing calculations.
+* Cover views that must fill a fixed frame call
+  `GfxRenderer::drawBitmapCropToFill()`. It scales and center-crops through two
+  bounded row buffers and returns `false` on invalid input, read failure, or OOM
+  so the caller can draw its fallback cover.
+* INX front-button hints use black text above a 50% gray bottom line. Empty
+  actions draw neither label nor line; directional actions use `<` and `>`.
 
 ## Retained Framebuffer Updates
 

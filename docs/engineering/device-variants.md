@@ -100,6 +100,7 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 | Clock persistence | ESP system clock; survives deep sleep/reset, not full power loss | ESP system clock plus DS3231 UTC backup — [HalClock.cpp](../../lib/hal/HalClock.cpp) |
 | Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp:55](../../lib/hal/HalTiltSensor.cpp) |
 | Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp:194](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp:399](../../src/components/themes/lyra/LyraTheme.cpp) |
+| INX front-button hints | four bottom segments aligned to the X4 keys | four bottom segments using the wider X3 spacing; labels remain orientation-aware — [InxTheme.cpp](../../src/components/themes/inx/InxTheme.cpp) |
 | Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [EInkDisplay.h:56-94](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
 
 The application HAL does not override the display bus or refresh waveform.
