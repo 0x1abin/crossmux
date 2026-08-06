@@ -16,11 +16,15 @@ class InxRecentActivity final : public Activity {
   std::array<const ReadingBookStats*, kMaxRecentBooks> bookStats{};
   int selected = 0;
   bool sawBackPress = false;
+  bool firstRenderDone = false;
+  bool waitingForCoverRender = false;
+  size_t nextCoverIndex = 0;
 
   InxRecentLayout layout() const;
   const ReadingBookStats* statsAt(int index) const;
   int indexFromPoint(int x, int y) const;
   void openSelected();
+  void prepareNextCover();
 
   void drawFlow(const Rect& content) const;
   void drawGrid(const Rect& content) const;

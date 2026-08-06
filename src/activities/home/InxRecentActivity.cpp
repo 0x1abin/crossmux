@@ -16,6 +16,7 @@
 #include "components/icons/cover.h"
 #include "components/themes/inx/InxTheme.h"
 #include "fontIds.h"
+#include "util/BookCoverLoader.h"
 #include "util/ReadingStatsAnalytics.h"
 
 namespace {
@@ -88,6 +89,7 @@ void drawMetric(const GfxRenderer& renderer, const int x, const int y, const cha
 }
 
 bool drawBookCover(const GfxRenderer& renderer, const RecentBook& book, const Rect bounds) {
+  renderer.fillRect(bounds.x, bounds.y, bounds.width, bounds.height, false);
   if (!book.coverBmpPath.empty()) {
     const std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, InxMetrics::values.homeCoverHeight);
     HalFile file;
@@ -140,18 +142,38 @@ void InxRecentActivity::onEnter() {
   }
   selected = 0;
   sawBackPress = false;
+  firstRenderDone = false;
+  waitingForCoverRender = false;
+  nextCoverIndex = 0;
   requestUpdate();
 }
 
 void InxRecentActivity::onExit() {
   books = nullptr;
   bookStats.fill(nullptr);
+  firstRenderDone = false;
+  waitingForCoverRender = false;
+  nextCoverIndex = 0;
   Activity::onExit();
 }
 
 void InxRecentActivity::openSelected() {
   if (!books || selected < 0 || selected >= static_cast<int>(books->size())) return;
   onSelectBook((*books)[selected].path);
+}
+
+void InxRecentActivity::prepareNextCover() {
+  if (!firstRenderDone || waitingForCoverRender || !books) return;
+  const size_t count = std::min(books->size(), kMaxRecentBooks);
+  if (nextCoverIndex >= count) return;
+
+  const RecentBook& book = (*books)[nextCoverIndex++];
+  bool generated = false;
+  BookCoverLoader::ensureThumbnail(book.path, InxMetrics::values.homeCoverHeight, &generated);
+  if (generated) {
+    waitingForCoverRender = true;
+    requestUpdate();
+  }
 }
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
@@ -234,7 +256,10 @@ void InxRecentActivity::loop() {
       swipe == MappedInputManager::SwipeDir::Right) {
     selected = (selected + count - 1) % count;
     requestUpdate();
+    return;
   }
+
+  prepareNextCover();
 }
 
 void InxRecentActivity::drawFlow(const Rect& content) const {
@@ -406,4 +431,6 @@ void InxRecentActivity::render(RenderLock&&) {
                             renderer.getScreenHeight() - 30, kHomeBatteryWidth, kHomeBatteryHeight},
                        SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   renderer.displayBuffer();
+  firstRenderDone = true;
+  waitingForCoverRender = false;
 }

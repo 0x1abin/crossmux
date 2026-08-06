@@ -22,6 +22,7 @@
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
+#include "util/BookCoverLoader.h"
 #include "util/HeaderDateUtils.h"
 #include "util/ReadingStatsAnalytics.h"
 
@@ -240,7 +241,7 @@ bool resolveCoverPath(const std::string& source, const int height, char* output,
   return true;
 }
 
-void drawCover(const GfxRenderer& renderer, const ReadingBookStats& book, const Rect bounds) {
+bool drawCover(const GfxRenderer& renderer, const ReadingBookStats& book, const Rect bounds) {
   renderer.drawRect(bounds.x, bounds.y, bounds.width, bounds.height, 2, true);
   const auto tryDraw = [&renderer, &book, &bounds](const int height) {
     char path[256];
@@ -257,15 +258,16 @@ void drawCover(const GfxRenderer& renderer, const ReadingBookStats& book, const 
   };
 
   if (book.coverBmpPath.find("[HEIGHT]") == std::string::npos) {
-    if (tryDraw(bounds.height)) return;
+    if (tryDraw(bounds.height)) return true;
   } else {
     const std::array candidateHeights = {bounds.height, 140, 160, 226, 240, 400};
-    if (std::any_of(candidateHeights.begin(), candidateHeights.end(), tryDraw)) return;
+    if (std::any_of(candidateHeights.begin(), candidateHeights.end(), tryDraw)) return true;
   }
 
   constexpr int iconSize = 32;
   renderer.drawIcon(CoverIcon, bounds.x + (bounds.width - iconSize) / 2, bounds.y + (bounds.height - iconSize) / 2,
                     iconSize);
+  return false;
 }
 }  // namespace
 
@@ -275,11 +277,19 @@ void ReadingStatsActivity::onEnter() {
   selectedIndex = usesInxLayout() ? 0 : (READING_STATS.getBooks().empty() ? 0 : 1);
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForBackRelease = false;
+  waitingForCoverRender = false;
+  renderedCoverMissing = false;
+  renderedCoverView = -1;
+  attemptedCoverView = -1;
   requestUpdate();
 }
 
 void ReadingStatsActivity::onExit() {
   // No refresh override here: returning to the Reading Stats menu stays on FAST_REFRESH (no flash).
+  waitingForCoverRender = false;
+  renderedCoverMissing = false;
+  renderedCoverView = -1;
+  attemptedCoverView = -1;
   Activity::onExit();
 }
 
@@ -327,6 +337,7 @@ void ReadingStatsActivity::loop() {
     buttonNavigator.onPreviousRelease([moveSelection] { moveSelection(-1); });
     buttonNavigator.onNextContinuous([moveSelection] { moveSelection(1); });
     buttonNavigator.onPreviousContinuous([moveSelection] { moveSelection(-1); });
+    prepareVisibleCover();
     return;
   }
 
@@ -413,13 +424,44 @@ void ReadingStatsActivity::confirmRemoveSelectedBook() {
                          });
 }
 
-void ReadingStatsActivity::guardBackReturn() { waitForBackRelease = true; }
+void ReadingStatsActivity::guardBackReturn() {
+  waitForBackRelease = true;
+  attemptedCoverView = -1;
+}
+
+void ReadingStatsActivity::prepareVisibleCover() {
+  if (waitingForCoverRender || !renderedCoverMissing || renderedCoverView != selectedIndex ||
+      attemptedCoverView == selectedIndex)
+    return;
+
+  const auto& books = READING_STATS.getBooks();
+  if (books.empty()) return;
+  const int bookIndex = selectedIndex == 0 ? 0 : selectedIndex - 1;
+  if (bookIndex < 0 || bookIndex >= static_cast<int>(books.size())) return;
+
+  attemptedCoverView = selectedIndex;
+  const ReadingBookStats& book = books[bookIndex];
+  std::string title;
+  std::string author;
+  bool generated = false;
+  const std::string coverPath = BookCoverLoader::ensureFullCover(book.path, &title, &author, &generated);
+  if (coverPath.empty()) return;
+
+  const bool pathChanged = coverPath != book.coverBmpPath;
+  READING_STATS.updateBookMetadata(book.path, title, author, coverPath);
+  if (generated || pathChanged) {
+    waitingForCoverRender = true;
+    requestUpdate();
+  }
+}
 
 bool ReadingStatsActivity::usesInxLayout() const { return UITheme::getInstance().hasMainTabs(); }
 
 void ReadingStatsActivity::render(RenderLock&&) {
   if (usesInxLayout()) {
     renderInx();
+    renderedCoverView = selectedIndex;
+    waitingForCoverRender = false;
     return;
   }
 
@@ -497,6 +539,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
 void ReadingStatsActivity::renderInx() {
   renderer.clearScreen();
+  renderedCoverMissing = false;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int screenWidth = renderer.getScreenWidth();
@@ -542,7 +585,7 @@ void ReadingStatsActivity::renderInx() {
       const auto coverSize = InxCoverGeometry::fit(recent.width * 28 / 100, recent.height - 12);
       const Rect cover{recent.x + 4, recent.y + (recent.height - coverSize.height) / 2, coverSize.width,
                        coverSize.height};
-      drawCover(renderer, recentBook, cover);
+      renderedCoverMissing = !drawCover(renderer, recentBook, cover);
 
       const int textX = cover.x + cover.width + 18;
       const int textWidth = recent.x + recent.width - textX;
@@ -620,9 +663,10 @@ void ReadingStatsActivity::renderInx() {
     }
 
     const auto coverSize = InxCoverGeometry::fit(hero.width * 34 / 100, hero.height - 20);
-    drawCover(renderer, book,
-              Rect{hero.x + hero.width / 4 - coverSize.width / 2, hero.y + (hero.height - coverSize.height) / 2,
-                   coverSize.width, coverSize.height});
+    renderedCoverMissing =
+        !drawCover(renderer, book,
+                   Rect{hero.x + hero.width / 4 - coverSize.width / 2, hero.y + (hero.height - coverSize.height) / 2,
+                        coverSize.width, coverSize.height});
     const int donutBounds = std::min(hero.width / 2, hero.height);
     const int donutRadius = std::min(std::max(18, donutBounds * 31 / 100), std::max(18, donutBounds / 2 - 4));
     drawDonut(renderer, hero.x + hero.width * 3 / 4, hero.y + hero.height / 2, donutRadius, book.lastProgressPercent);

@@ -35,22 +35,27 @@ CachedCoverState inspectCachedCover(const std::string& path, const bool emptyIsT
 }
 
 template <typename Generate>
-std::string ensureCachedCover(const std::string& path, const bool emptyIsTerminal, Generate&& generate) {
+std::string ensureCachedCover(const std::string& path, const bool emptyIsTerminal, bool* generated,
+                              Generate&& generate) {
+  if (generated) *generated = false;
   const CachedCoverState state = inspectCachedCover(path, emptyIsTerminal);
   if (state == CachedCoverState::Ready) return path;
   if (state == CachedCoverState::Terminal || !generate()) return "";
-  return inspectCachedCover(path, emptyIsTerminal) == CachedCoverState::Ready ? path : "";
+  if (inspectCachedCover(path, emptyIsTerminal) != CachedCoverState::Ready) return "";
+  if (generated) *generated = true;
+  return path;
 }
 
 }  // namespace
 
-std::string ensureThumbnail(const std::string& bookPath, const int height) {
+std::string ensureThumbnail(const std::string& bookPath, const int height, bool* generated) {
+  if (generated) *generated = false;
   if (height <= 0 || !Storage.exists(bookPath.c_str())) return "";
 
   if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");
     const std::string path = epub.getThumbBmpPath(height);
-    return ensureCachedCover(path, true, [&]() {
+    return ensureCachedCover(path, true, generated, [&]() {
       if (!epub.load(false, true)) return false;
       epub.setupCacheDir();
       return epub.generateThumbBmp(height);
@@ -60,7 +65,7 @@ std::string ensureThumbnail(const std::string& bookPath, const int height) {
   if (FsHelpers::hasXtcExtension(bookPath)) {
     Xtc xtc(bookPath, "/.crosspoint");
     const std::string path = xtc.getThumbBmpPath(height);
-    return ensureCachedCover(path, false, [&]() {
+    return ensureCachedCover(path, false, generated, [&]() {
       if (!xtc.load()) return false;
       xtc.setupCacheDir();
       return xtc.generateThumbBmp(height);
@@ -70,15 +75,16 @@ std::string ensureThumbnail(const std::string& bookPath, const int height) {
   return "";
 }
 
-std::string ensureFullCover(const std::string& bookPath, std::string* title, std::string* author) {
+std::string ensureFullCover(const std::string& bookPath, std::string* title, std::string* author, bool* generated) {
   if (title) title->clear();
   if (author) author->clear();
+  if (generated) *generated = false;
   if (!Storage.exists(bookPath.c_str())) return "";
 
   if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");
     const std::string path = epub.getCoverBmpPath();
-    return ensureCachedCover(path, false, [&]() {
+    return ensureCachedCover(path, false, generated, [&]() {
       if (!epub.load(true, true)) return false;
       epub.setupCacheDir();
       if (title) *title = epub.getTitle();
@@ -90,7 +96,7 @@ std::string ensureFullCover(const std::string& bookPath, std::string* title, std
   if (FsHelpers::hasXtcExtension(bookPath)) {
     Xtc xtc(bookPath, "/.crosspoint");
     const std::string path = xtc.getCoverBmpPath();
-    return ensureCachedCover(path, false, [&]() {
+    return ensureCachedCover(path, false, generated, [&]() {
       if (!xtc.load()) return false;
       xtc.setupCacheDir();
       if (title) *title = xtc.getTitle();
@@ -102,7 +108,7 @@ std::string ensureFullCover(const std::string& bookPath, std::string* title, std
   if (FsHelpers::hasTxtExtension(bookPath) || FsHelpers::hasMarkdownExtension(bookPath)) {
     Txt txt(bookPath, "/.crosspoint");
     const std::string path = txt.getCoverBmpPath();
-    return ensureCachedCover(path, false, [&]() {
+    return ensureCachedCover(path, false, generated, [&]() {
       if (!txt.load()) return false;
       txt.setupCacheDir();
       if (title) *title = txt.getTitle();

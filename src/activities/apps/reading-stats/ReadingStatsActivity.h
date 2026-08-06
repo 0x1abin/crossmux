@@ -11,9 +11,14 @@ class ReadingStatsActivity final : public Activity {
   bool waitForConfirmRelease = false;
   bool waitForBackRelease = false;
   bool mainTabEnabled = false;
+  bool waitingForCoverRender = false;
+  bool renderedCoverMissing = false;
+  int renderedCoverView = -1;
+  int attemptedCoverView = -1;
   void openSelectedEntry();
   void confirmRemoveSelectedBook();
   void guardBackReturn();
+  void prepareVisibleCover();
   bool usesInxLayout() const;
   void renderInx();
 
