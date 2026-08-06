@@ -22,6 +22,7 @@
 #include "apps/gomoku/GomokuMenuActivity.h"
 #include "apps/minesweeper/MinesweeperMenuActivity.h"
 #include "apps/pixel-switch/PixelSwitchActivity.h"
+#include "apps/reading-stats/ReadingStatsActivity.h"
 #include "apps/reading-stats/ReadingStatsMenuActivity.h"
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
@@ -31,6 +32,7 @@
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
+#include "home/InxRecentActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "reader/ReaderActivity.h"
@@ -85,6 +87,8 @@ void ActivityManager::renderTaskLoop() {
 
 void ActivityManager::loop() {
   if (currentActivity) {
+    if (handleMainTabInput()) return;
+
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
       if (currentActivity->handleHomeGesture()) {
         return;
@@ -181,6 +185,107 @@ void ActivityManager::loop() {
   }
 }
 
+bool ActivityManager::handleMainTabInput() {
+  if (!currentActivity || !currentActivity->usesMainTabBar()) return false;
+
+  const MainTab currentTab = currentActivity->mainTab();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int tabTop = metrics.topPadding;
+  const int tabBottom = tabTop + metrics.headerHeight;
+
+  int x = 0;
+  int y = 0;
+  if (mappedInput.wasScreenTapped(x, y)) {
+    if (y >= tabTop && y < tabBottom) {
+      const MainTab target = MainTabs::fromX(x, renderer.getScreenWidth());
+      if (target != MainTab::None) {
+        mainTabFocus = MainTabFocus::Content;
+        if (target != currentTab)
+          goToMainTab(target);
+        else
+          requestUpdate();
+      }
+      return true;
+    }
+    if (mainTabFocus == MainTabFocus::Tabs) {
+      mainTabFocus = MainTabFocus::Content;
+      requestUpdate();
+    }
+    return false;
+  }
+
+  if (mainTabFocus == MainTabFocus::Tabs && mappedInput.wasScreenTouchDown(x, y) && (y < tabTop || y >= tabBottom)) {
+    mainTabFocus = MainTabFocus::Content;
+    requestUpdate();
+    return false;
+  }
+
+  if (mainTabEntryReleasePending) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Down))
+      mainTabEntryReleasePending = false;
+    return true;
+  }
+
+  switch (mainTabFocus) {
+    case MainTabFocus::Tabs:
+      if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+        goToMainTab(MainTabs::adjacent(currentTab, -1));
+        return true;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+        goToMainTab(MainTabs::adjacent(currentTab, 1));
+        return true;
+      }
+      if (mappedInput.isPressed(MappedInputManager::Button::Left) ||
+          mappedInput.isPressed(MappedInputManager::Button::Right)) {
+        return true;
+      }
+
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        mainTabFocus = MainTabFocus::Content;
+        requestUpdate();
+        return true;
+      }
+      if (mappedInput.isPressed(MappedInputManager::Button::Confirm)) return true;
+
+      if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+        mainTabFocus = MainTabFocus::Content;
+        mainTabEntryReleasePending = true;
+        currentActivity->selectMainTabContentEdge(MainTabContentEdge::First);
+        requestUpdate();
+        return true;
+      }
+      if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+        mainTabFocus = MainTabFocus::Content;
+        mainTabEntryReleasePending = true;
+        currentActivity->selectMainTabContentEdge(MainTabContentEdge::Last);
+        requestUpdate();
+        return true;
+      }
+
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        const MainTab target = MainTabs::backTarget(currentTab);
+        if (target != MainTab::None)
+          goToMainTab(target);
+        else if (SETTINGS.standbyShortcutEnabled)
+          goToStandby();
+        return true;
+      }
+      return mappedInput.isPressed(MappedInputManager::Button::Back);
+
+    case MainTabFocus::Content:
+      if (!currentActivity->mainTabBackReturnsToTabs()) return false;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        mainTabFocus = MainTabFocus::Tabs;
+        requestUpdate();
+        return true;
+      }
+      return mappedInput.isPressed(MappedInputManager::Button::Back);
+  }
+  return false;
+}
+
 void ActivityManager::exitActivity(const RenderLock& lock) {
   // Note: lock must be held by the caller
   if (currentActivity) {
@@ -217,6 +322,38 @@ void ActivityManager::goToFileBrowser(std::string path) {
 
 void ActivityManager::goToRecentBooks() {
   replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToInxRecent() {
+  auto activity = makeUniqueNoThrow<InxRecentActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: InxRecentActivity (%u bytes)", static_cast<unsigned>(sizeof(InxRecentActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
+void ActivityManager::goToMainTab(const MainTab tab) {
+  mainTabEntryReleasePending = false;
+  switch (tab) {
+    case MainTab::Recent:
+      goToInxRecent();
+      return;
+    case MainTab::Library:
+      goToFileBrowser();
+      return;
+    case MainTab::Settings:
+      goToSettings();
+      return;
+    case MainTab::Statistics:
+      goToReadingStats();
+      return;
+    case MainTab::Apps:
+      goToApps();
+      return;
+    case MainTab::None:
+      return;
+  }
 }
 
 void ActivityManager::goToBrowser() {
@@ -256,6 +393,12 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 }
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
+  if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+    mainTabFocus = MainTabFocus::Tabs;
+    mainTabEntryReleasePending = false;
+    goToInxRecent();
+    return;
+  }
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
     if (activityName == "FileBrowser") {
@@ -278,6 +421,15 @@ void ActivityManager::goToApps() { replaceActivity(std::make_unique<AppsMenuActi
 
 void ActivityManager::goToReadingStatsMenu() {
   replaceActivity(std::make_unique<ReadingStatsMenuActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToReadingStats() {
+  auto activity = makeUniqueNoThrow<ReadingStatsActivity>(renderer, mappedInput, true);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: ReadingStatsActivity (%u bytes)", static_cast<unsigned>(sizeof(ReadingStatsActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
 }
 
 void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }

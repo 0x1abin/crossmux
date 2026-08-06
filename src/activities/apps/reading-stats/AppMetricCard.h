@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 
+#include <cstdint>
 #include <string>
 
 #include "components/themes/BaseTheme.h"
@@ -31,5 +32,14 @@ struct Options {
 
 void draw(const GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value,
           const Options& options = Options{});
+
+// Shared Statistics chrome. Theme selection stays here so leaf Activities only
+// describe their content and interaction.
+bool drawSelectablePanel(const GfxRenderer& renderer, const Rect& rect, bool selected, bool darkSelected = false,
+                         bool ditherUnselected = false);
+bool drawListRow(const GfxRenderer& renderer, const Rect& rect, bool selected);
+void drawProgressBar(const GfxRenderer& renderer, const Rect& rect, uint8_t percent);
+void drawListScrollBar(const GfxRenderer& renderer, const Rect& rect, int itemCount, int pageStart, int pageItems);
+UIIcon menuIcon(UIIcon icon);
 
 }  // namespace AppMetricCard

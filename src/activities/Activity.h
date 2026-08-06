@@ -11,7 +11,10 @@
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
 #include "RenderLock.h"
+#include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
+
+struct Rect;
 
 class Activity {
   friend class ActivityManager;
@@ -48,6 +51,10 @@ class Activity {
   virtual bool handleForcedRefresh() { return false; }
   virtual bool isHomeActivity() const { return false; }
   virtual bool handleHomeGesture() { return false; }
+  virtual MainTab mainTab() const { return MainTab::None; }
+  virtual bool mainTabBackReturnsToTabs() const { return true; }
+  virtual void selectMainTabContentEdge(MainTabContentEdge) {}
+  bool usesMainTabBar() const;
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
   // Start a new activity without destroying the current one
@@ -66,6 +73,11 @@ class Activity {
   void onSelectBook(const std::string& path);
 
  protected:
+  MappedInputManager::Labels mainTabButtonLabels(const char* back, const char* confirm, bool canMove,
+                                                 bool showTabDirections = true) const;
+  bool showMainTabContentSelection() const;
+  void drawPageHeader(const Rect& rect, const char* title, const char* subtitle = nullptr) const;
+
   enum class ListTouchResult : uint8_t {
     None,      // touch did not hit the list
     Consumed,  // touchdown moved the highlight (repaint already requested)

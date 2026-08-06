@@ -9,6 +9,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -78,25 +79,32 @@ void KOReaderAuthActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
+  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
                  mode == Mode::SIGN_UP ? tr(STR_SIGN_UP) : tr(STR_KOREADER_AUTH));
-  const auto height = renderer.getLineHeight(UI_10_FONT_ID);
-  const auto top = (pageHeight - height) / 2;
+  const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+  const Rect textBounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int relatedGap = SubpageLayout::relatedGap(metrics);
 
   if (state == AUTHENTICATING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, top, statusMessage.c_str());
+    UITheme::drawCenteredWrappedText(renderer, textBounds, UI_10_FONT_ID, statusMessage.c_str(), 2);
   } else if (state == SUCCESS) {
-    renderer.drawCenteredText(UI_10_FONT_ID, top,
+    const int top = SubpageLayout::centeredTop(content, titleHeight + relatedGap + lineHeight);
+    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top,
                               mode == Mode::SIGN_UP ? tr(STR_ACCOUNT_CREATED) : tr(STR_AUTH_SUCCESS), true,
                               EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, top + height + 10, tr(STR_SYNC_READY));
+    UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, top + titleHeight + relatedGap, tr(STR_SYNC_READY));
   } else if (state == FAILED) {
-    renderer.drawCenteredText(UI_10_FONT_ID, top, mode == Mode::SIGN_UP ? tr(STR_SIGNUP_FAILED) : tr(STR_AUTH_FAILED),
-                              true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, top + height + 10, errorMessage.c_str());
+    const int top = SubpageLayout::centeredTop(content, titleHeight + relatedGap + lineHeight * 2);
+    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top,
+                              mode == Mode::SIGN_UP ? tr(STR_SIGNUP_FAILED) : tr(STR_AUTH_FAILED), true,
+                              EpdFontFamily::BOLD);
+    UITheme::drawCenteredWrappedText(
+        renderer, Rect{textBounds.x, top + titleHeight + relatedGap, textBounds.width, lineHeight * 2}, UI_10_FONT_ID,
+        errorMessage.c_str(), 2, true, EpdFontFamily::REGULAR, UITheme::TextVerticalAlignment::TOP);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");

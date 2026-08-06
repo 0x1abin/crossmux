@@ -20,6 +20,7 @@ class UITheme {
 
   const ThemeMetrics& getMetrics() const;
   const BaseTheme& getTheme() const { return *currentTheme; }
+  bool hasMainTabs() const { return currentType == CrossPointSettings::UI_THEME::INX; }
   Rect getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints = false,
                          bool hasSideButtonHints = false);
   static void drawCenteredText(const GfxRenderer& renderer, Rect screen, int fontId, int y, const char* text,
@@ -39,8 +40,11 @@ class UITheme {
   static int getProgressBarHeight();
 
  private:
-  const ThemeMetrics* currentMetrics;
-  std::unique_ptr<BaseTheme> currentTheme;
+  BaseTheme fallbackTheme;
+  const ThemeMetrics* currentMetrics = &BaseMetrics::values;
+  std::unique_ptr<BaseTheme> ownedTheme;
+  BaseTheme* currentTheme = &fallbackTheme;
+  CrossPointSettings::UI_THEME currentType = CrossPointSettings::UI_THEME::CLASSIC;
   mutable ThemeMetrics adjustedMetrics;
   mutable bool metricsValid = false;
   mutable bool metricsForTouch = false;

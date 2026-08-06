@@ -13,6 +13,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TimeUtils.h"
@@ -107,36 +108,49 @@ void ClockSyncActivity::loop() {
 
 void ClockSyncActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
 
   renderer.clearScreen();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_CLOCK_SYNC));
-
-  const int midY = pageHeight / 2;
+  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                 tr(STR_CLOCK_SYNC));
+  const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+  const Rect textBounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
+  const int detailHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int relatedGap = SubpageLayout::relatedGap(metrics);
 
   switch (state) {
     case State::Syncing:
-      renderer.drawCenteredText(UI_12_FONT_ID, midY, tr(STR_CLOCK_SYNCING));
+      UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
+                                tr(STR_CLOCK_SYNCING));
       break;
     case State::Success: {
-      renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_OK), true, EpdFontFamily::BOLD);
+      const int top =
+          SubpageLayout::centeredTop(content, titleHeight + (syncedTime[0] != '\0' ? relatedGap + detailHeight : 0));
+      UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top, tr(STR_CLOCK_SYNC_OK), true,
+                                EpdFontFamily::BOLD);
       if (syncedTime[0] != '\0') {
         char line[32];
         snprintf(line, sizeof(line), "%s %s", tr(STR_CURRENT_TIME), syncedTime);
-        renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, line);
+        UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, top + titleHeight + relatedGap, line);
       }
       break;
     }
-    case State::NoWifi:
-      renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_NO_WIFI), true, EpdFontFamily::BOLD);
-      renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, tr(STR_CLOCK_SYNC_NO_WIFI_HINT));
-      break;
-    case State::Failed:
-      renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_FAIL), true, EpdFontFamily::BOLD);
-      renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, tr(STR_CHECK_SERIAL_OUTPUT));
-      break;
+    case State::NoWifi: {
+      const int top = SubpageLayout::centeredTop(content, titleHeight + relatedGap + detailHeight);
+      UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top, tr(STR_CLOCK_SYNC_NO_WIFI), true,
+                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, top + titleHeight + relatedGap,
+                                tr(STR_CLOCK_SYNC_NO_WIFI_HINT));
+    } break;
+    case State::Failed: {
+      const int top = SubpageLayout::centeredTop(content, titleHeight + relatedGap + detailHeight);
+      UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top, tr(STR_CLOCK_SYNC_FAIL), true,
+                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, top + titleHeight + relatedGap,
+                                tr(STR_CHECK_SERIAL_OUTPUT));
+    } break;
   }
 
   if (state != State::Syncing) {

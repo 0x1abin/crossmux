@@ -12,6 +12,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
@@ -41,8 +42,11 @@ class ActivityManager {
   MappedInputManager& mappedInput;
   std::vector<std::unique_ptr<Activity>> stackActivities;
   std::unique_ptr<Activity> currentActivity;
+  MainTabFocus mainTabFocus = MainTabFocus::Tabs;
+  bool mainTabEntryReleasePending = false;
 
   void exitActivity(const RenderLock& lock);
+  bool handleMainTabInput();
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
@@ -85,6 +89,9 @@ class ActivityManager {
   void goToSettings();
   void goToUglyAvatar();
   void goToReadingStatsMenu();
+  void goToReadingStats();
+  void goToInxRecent();
+  void goToMainTab(MainTab tab);
   void goToFileBrowser(std::string path = {});
   void goToRecentBooks();
   void goToBrowser();
@@ -111,6 +118,7 @@ class ActivityManager {
   void goToWeRead();
 #endif
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
+  MainTabFocus getMainTabFocus() const { return mainTabFocus; }
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);

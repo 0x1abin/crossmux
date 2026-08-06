@@ -13,6 +13,7 @@
 
 #include "../../../CrossPointSettings.h"
 #include "../../../SdCardFontSystem.h"
+#include "../../../components/SubpageLayout.h"
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
 #include "../../../util/QrUtils.h"
@@ -104,9 +105,8 @@ bool WeReadBrowseActivity::preventAutoSleep() { return state_ == State::Loading;
 Rect WeReadBrowseActivity::contentBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  const int top = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int bottom = screen.y + screen.height - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  return Rect{screen.x, top, screen.width, std::max(1, bottom - top)};
+  const Rect content = SubpageLayout::contentRect(screen, metrics);
+  return Rect{content.x, content.y, content.width, std::max(1, content.height)};
 }
 
 int WeReadBrowseActivity::pageItemCount() const {

@@ -15,6 +15,7 @@
 #include "CrossPointSettings.h"
 #include "DateTimeSettingsActivity.h"
 #include "FontDownloadActivity.h"
+#include "InxItemLayout.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "MappedInputManager.h"
@@ -34,6 +35,11 @@
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
 
+void SettingsActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
+  const int visibleCount = InxAccordionGeometry::visibleCount(accordionSettingCounts(), expandedCategories);
+  accordionSelectedIndex = MainTabs::contentEdgeIndex(edge, visibleCount);
+}
+
 void SettingsActivity::rebuildSettingsLists() {
   displaySettings.clear();
   readerSettings.clear();
@@ -51,6 +57,11 @@ void SettingsActivity::rebuildSettingsLists() {
 
   for (auto& setting : getSettingsList(&sdFontSystem.registry(), &dictionaries)) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
+    if (!usesAccordion() && (setting.valuePtr == &CrossPointSettings::inxRecentLayout ||
+                             setting.valuePtr == &CrossPointSettings::inxLibraryLayout ||
+                             setting.valuePtr == &CrossPointSettings::inxAppsLayout)) {
+      continue;
+    }
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
@@ -123,6 +134,8 @@ void SettingsActivity::onEnter() {
   // Reset selection to first category
   selectedCategoryIndex = 0;
   selectedSettingIndex = 0;
+  accordionSelectedIndex = 0;
+  expandedCategories = 0;
   preserveQuickResumeTimeoutOn =
       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
   quickResumeTimeoutAutoEnabled = false;
@@ -142,6 +155,10 @@ void SettingsActivity::onExit() {
 
 void SettingsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+  if (usesAccordion()) {
+    loopAccordion();
+    return;
+  }
 
   bool hasChangedCategory = false;
 
@@ -310,6 +327,187 @@ void SettingsActivity::loop() {
     selectedSettingIndex = (selectedSettingIndex == 0) ? 0 : 1;
     applyCategorySelection();
   }
+}
+
+bool SettingsActivity::usesAccordion() const { return UITheme::getInstance().hasMainTabs(); }
+
+const std::vector<SettingInfo>& SettingsActivity::settingsForCategory(const int categoryIndex) const {
+  switch (categoryIndex) {
+    case 0:
+      return displaySettings;
+    case 1:
+      return readerSettings;
+    case 2:
+      return controlsSettings;
+    case 3:
+      return systemSettings;
+  }
+  return displaySettings;
+}
+
+std::array<int, SettingsActivity::categoryCount> SettingsActivity::accordionSettingCounts() const {
+  return {static_cast<int>(displaySettings.size()), static_cast<int>(readerSettings.size()),
+          static_cast<int>(controlsSettings.size()), static_cast<int>(systemSettings.size())};
+}
+
+void SettingsActivity::toggleAccordionCategory(const int categoryIndex) {
+  if (categoryIndex < 0 || categoryIndex >= categoryCount) return;
+  expandedCategories ^= uint8_t{1} << categoryIndex;
+  accordionSelectedIndex =
+      InxAccordionGeometry::categoryRow(accordionSettingCounts(), expandedCategories, categoryIndex);
+  requestUpdate();
+}
+
+void SettingsActivity::toggleAccordionSetting(const int categoryIndex, const int settingIndex) {
+  if (categoryIndex < 0 || categoryIndex >= categoryCount) return;
+  const auto& settings = settingsForCategory(categoryIndex);
+  if (settingIndex < 0 || settingIndex >= static_cast<int>(settings.size())) return;
+
+  selectedCategoryIndex = categoryIndex;
+  currentSettings = &settings;
+  settingsCount = static_cast<int>(settings.size());
+  selectedSettingIndex = settingIndex + 1;
+  toggleCurrentSetting();
+
+  const auto counts = accordionSettingCounts();
+  const int keptSetting = std::min(settingIndex, std::max(0, counts[categoryIndex] - 1));
+  accordionSelectedIndex =
+      InxAccordionGeometry::categoryRow(counts, expandedCategories, categoryIndex) + 1 + keptSetting;
+  requestUpdate();
+}
+
+void SettingsActivity::loopAccordion() {
+  const auto counts = accordionSettingCounts();
+  const int visibleCount = InxAccordionGeometry::visibleCount(counts, expandedCategories);
+  const auto selectedRow = InxAccordionGeometry::rowAt(counts, expandedCategories, accordionSelectedIndex);
+
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    if (selectedRow.isCategory())
+      toggleAccordionCategory(selectedRow.category);
+    else
+      toggleAccordionSetting(selectedRow.category, selectedRow.setting);
+    return;
+  }
+
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    if (!selectedRow.isCategory()) {
+      expandedCategories &= ~(uint8_t{1} << selectedRow.category);
+      accordionSelectedIndex = InxAccordionGeometry::categoryRow(counts, expandedCategories, selectedRow.category);
+      requestUpdate();
+    } else if ((expandedCategories & (uint8_t{1} << selectedRow.category)) != 0) {
+      toggleAccordionCategory(selectedRow.category);
+    } else {
+      SETTINGS.saveToFile();
+      onGoHome();
+    }
+    return;
+  }
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  switch (handleListTouch(accordionSelectedIndex, visibleCount, listTop, listHeight, false)) {
+    case ListTouchResult::Activated: {
+      const auto touchedRow = InxAccordionGeometry::rowAt(counts, expandedCategories, accordionSelectedIndex);
+      if (touchedRow.isCategory())
+        toggleAccordionCategory(touchedRow.category);
+      else
+        toggleAccordionSetting(touchedRow.category, touchedRow.setting);
+      return;
+    }
+    case ListTouchResult::Consumed:
+      return;
+    case ListTouchResult::None:
+      break;
+  }
+
+  const int pageItems = GUI.getListPageItems(listHeight, false);
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up) {
+    accordionSelectedIndex = ButtonNavigator::nextPageIndex(accordionSelectedIndex, visibleCount, pageItems);
+    requestUpdate();
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Down) {
+    accordionSelectedIndex = ButtonNavigator::previousPageIndex(accordionSelectedIndex, visibleCount, pageItems);
+    requestUpdate();
+    return;
+  }
+
+  buttonNavigator.onNextRelease([this, visibleCount] {
+    accordionSelectedIndex = ButtonNavigator::nextIndex(accordionSelectedIndex, visibleCount);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousRelease([this, visibleCount] {
+    accordionSelectedIndex = ButtonNavigator::previousIndex(accordionSelectedIndex, visibleCount);
+    requestUpdate();
+  });
+}
+
+std::string SettingsActivity::settingValueText(const SettingInfo& setting) const {
+  if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
+    return SETTINGS.*(setting.valuePtr) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+  }
+  if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
+    const uint8_t value = SETTINGS.*(setting.valuePtr);
+    return value < setting.enumValues.size() ? I18N.get(setting.enumValues[value]) : std::string();
+  }
+  if (setting.type == SettingType::ENUM && setting.valueGetter) {
+    const uint8_t value = setting.valueGetter();
+    if (!setting.enumStringValues.empty() && value < setting.enumStringValues.size()) {
+      return setting.enumStringValues[value];
+    }
+    return value < setting.enumValues.size() ? I18N.get(setting.enumValues[value]) : std::string();
+  }
+  if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
+    if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
+      if (SETTINGS.sleepTimeoutMinutes >= CrossPointSettings::SLEEP_TIMEOUT_NEVER_MINUTES) return tr(STR_SLEEP_NEVER);
+      char valueBuffer[32];
+      snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
+               static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
+      return valueBuffer;
+    }
+    return std::to_string(SETTINGS.*(setting.valuePtr));
+  }
+  return {};
+}
+
+void SettingsActivity::renderAccordion() {
+  renderer.clearScreen();
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  drawPageHeader(Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SETTINGS_TITLE),
+                 CROSSPOINT_VERSION);
+
+  const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = pageHeight - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const auto counts = accordionSettingCounts();
+  const int visibleCount = InxAccordionGeometry::visibleCount(counts, expandedCategories);
+  GUI.drawList(
+      renderer, Rect{0, listTop, pageWidth, listHeight}, visibleCount, accordionSelectedIndex,
+      [this, counts](const int index) {
+        const auto row = InxAccordionGeometry::rowAt(counts, expandedCategories, index);
+        if (row.isCategory()) return std::string(I18N.get(categoryNames[row.category]));
+        return std::string("  ") + I18N.get(settingsForCategory(row.category)[row.setting].nameId);
+      },
+      nullptr, nullptr,
+      [this, counts](const int index) {
+        const auto row = InxAccordionGeometry::rowAt(counts, expandedCategories, index);
+        if (row.isCategory()) {
+          return std::string((expandedCategories & (uint8_t{1} << row.category)) != 0 ? "-" : "+");
+        }
+        return settingValueText(settingsForCategory(row.category)[row.setting]);
+      },
+      true, nullptr, showMainTabContentSelection(),
+      [this](const int index) {
+        return InxAccordionGeometry::rowAt(accordionSettingCounts(), expandedCategories, index).isCategory();
+      });
+
+  const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_TOGGLE), visibleCount > 1);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderer.displayBuffer();
 }
 
 void SettingsActivity::toggleCurrentSetting() {
@@ -509,6 +707,10 @@ void SettingsActivity::openSleepTimeoutPicker() {
 
 void SettingsActivity::render(RenderLock&&) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
+  if (usesAccordion()) {
+    renderAccordion();
+    return;
+  }
 
   renderer.clearScreen();
 
@@ -517,7 +719,7 @@ void SettingsActivity::render(RenderLock&&) {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SETTINGS_TITLE),
+  drawPageHeader(Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SETTINGS_TITLE),
                  CROSSPOINT_VERSION);
 
   std::vector<TabInfo> tabs;
@@ -536,39 +738,7 @@ void SettingsActivity::render(RenderLock&&) {
                          metrics.verticalSpacing * 2)},
       settingsCount, selectedSettingIndex - 1,
       [&settings](int index) { return std::string(I18N.get(settings[index].nameId)); }, nullptr, nullptr,
-      [&settings](int i) {
-        const auto& setting = settings[i];
-        std::string valueText = "";
-        if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
-          const bool value = SETTINGS.*(setting.valuePtr);
-          valueText = value ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-        } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
-          const uint8_t value = SETTINGS.*(setting.valuePtr);
-          valueText = I18N.get(setting.enumValues[value]);
-        } else if (setting.type == SettingType::ENUM && setting.valueGetter) {
-          const uint8_t value = setting.valueGetter();
-          if (!setting.enumStringValues.empty() && value < setting.enumStringValues.size()) {
-            valueText = setting.enumStringValues[value];
-          } else if (value < setting.enumValues.size()) {
-            valueText = I18N.get(setting.enumValues[value]);
-          }
-        } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-          if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
-            char valueBuffer[32];
-            if (SETTINGS.sleepTimeoutMinutes >= CrossPointSettings::SLEEP_TIMEOUT_NEVER_MINUTES) {
-              valueText = tr(STR_SLEEP_NEVER);
-            } else {
-              snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
-                       static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
-              valueText = valueBuffer;
-            }
-          } else {
-            valueText = std::to_string(SETTINGS.*(setting.valuePtr));
-          }
-        }
-        return valueText;
-      },
-      true);
+      [this, &settings](int i) { return settingValueText(settings[i]); }, true);
 
   // Draw help text
   const auto confirmLabel =

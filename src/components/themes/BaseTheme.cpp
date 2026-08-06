@@ -134,10 +134,15 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   fillBatteryIcon(renderer, iconRect, percentage);
 }
 
-void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const size_t current, const size_t total,
-                                const bool showPercentage) const {
+int BaseTheme::measureProgressBarHeight(const GfxRenderer& renderer, const int barHeight,
+                                        const bool showPercentage) const {
+  return ProgressBarGeometry::contentHeight(barHeight, renderer.getLineHeight(UI_10_FONT_ID), showPercentage);
+}
+
+int BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const size_t current, const size_t total,
+                               const bool showPercentage) const {
   if (total == 0) {
-    return;
+    return rect.y;
   }
 
   // Use 64-bit arithmetic to avoid overflow for large files
@@ -157,8 +162,11 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
     // Draw percentage text centered below bar without a temporary heap allocation.
     char percentText[16];
     snprintf(percentText, sizeof(percentText), "%d%%", percent);
-    renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + 15, percentText);
+    const int percentageY = rect.y + rect.height + ProgressBarGeometry::percentageGap;
+    renderer.drawCenteredText(UI_10_FONT_ID, percentageY, percentText);
+    return rect.y + measureProgressBarHeight(renderer, rect.height, true);
   }
+  return rect.y + rect.height;
 }
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
@@ -298,7 +306,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                         const std::function<bool(int index)>& rowDimmed) const {
+                         const std::function<bool(int index)>& rowDimmed, const bool showSelection,
+                         const std::function<bool(int index)>&) const {
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rowHeight > 0 ? std::max(1, rect.height / rowHeight) : 1;
@@ -331,7 +340,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
   // Draw selection
   int contentWidth = rect.width - 5;
-  if (selectedIndex >= 0) {
+  if (showSelection && selectedIndex >= 0) {
     renderer.fillRect(rect.x, rect.y + selectedIndex % pageItems * rowHeight - 2, rect.width, rowHeight);
   }
   constexpr int minValueGap = 10;
@@ -340,7 +349,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
-    const bool dimmed = rowDimmed && rowDimmed(i) && i != selectedIndex;
+    const bool selected = showSelection && i == selectedIndex;
+    const bool dimmed = rowDimmed && rowDimmed(i) && !selected;
     int rowTextWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2;
     std::string valueText;
     if (rowValue != nullptr) {
@@ -357,7 +367,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     auto font = UI_10_FONT_ID;
     auto item = renderer.truncatedText(font, itemName.c_str(), rowTextWidth);
     const int titleX = rect.x + BaseMetrics::values.contentSidePadding;
-    renderer.drawText(font, titleX, itemY, item.c_str(), i != selectedIndex);
+    renderer.drawText(font, titleX, itemY, item.c_str(), !selected);
     if (dimmed) {
       drawDitherMask(renderer, titleX, itemY, renderer.getTextWidth(font, item.c_str()), renderer.getLineHeight(font));
     }
@@ -368,7 +378,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (!subtitleText.empty()) {
         auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
         renderer.drawText(SMALL_FONT_ID, rect.x + BaseMetrics::values.contentSidePadding, itemY + 22, subtitle.c_str(),
-                          i != selectedIndex);
+                          !selected);
       }
     }
 
@@ -376,7 +386,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       const auto valueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
       const int valueX = rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth;
       const int valueY = itemY + (subtitleText.empty() ? 0 : 10);
-      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), i != selectedIndex);
+      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), !selected);
       if (dimmed) drawDitherMask(renderer, valueX, valueY, valueTextWidth, renderer.getLineHeight(UI_10_FONT_ID));
     }
   }
@@ -413,6 +423,8 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
                       truncatedSubtitle.c_str(), true);
   }
 }
+
+void BaseTheme::drawMainTabBar(const GfxRenderer&, Rect, MainTab) const {}
 
 void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {
   constexpr int maxListValueWidth = 200;

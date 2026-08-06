@@ -17,10 +17,12 @@
 
 #include "AppMetricCard.h"
 #include "BookReadingAdjustmentActivity.h"
+#include "InxItemLayout.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "components/icons/settings2.h"
 #include "fontIds.h"
+#include "util/BookCoverLoader.h"
 #include "util/HeaderDateUtils.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
@@ -135,65 +137,14 @@ std::string ensureCoverPath(const ReadingBookStats& book) {
     return resolved;
   }
 
-  if (!Storage.exists(book.path.c_str())) {
-    return "";
-  }
+  std::string title;
+  std::string author;
+  const std::string coverPath = BookCoverLoader::ensureFullCover(book.path, &title, &author);
+  if (coverPath.empty()) return "";
 
-  if (FsHelpers::hasEpubExtension(book.path)) {
-    Epub epub(book.path, "/.crosspoint");
-    if (!epub.load(true, true)) {
-      return "";
-    }
-    epub.setupCacheDir();
-    const std::string coverPath = epub.getCoverBmpPath();
-    if (!Storage.exists(coverPath.c_str()) && !epub.generateCoverBmp()) {
-      return "";
-    }
-    if (!Storage.exists(coverPath.c_str())) {
-      return "";
-    }
-    READING_STATS.updateBookMetadata(book.path, epub.getTitle(), epub.getAuthor(), coverPath);
-    rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
-    return coverPath;
-  }
-
-  if (FsHelpers::hasXtcExtension(book.path)) {
-    Xtc xtc(book.path, "/.crosspoint");
-    if (!xtc.load()) {
-      return "";
-    }
-    xtc.setupCacheDir();
-    const std::string coverPath = xtc.getCoverBmpPath();
-    if (!Storage.exists(coverPath.c_str()) && !xtc.generateCoverBmp()) {
-      return "";
-    }
-    if (!Storage.exists(coverPath.c_str())) {
-      return "";
-    }
-    READING_STATS.updateBookMetadata(book.path, xtc.getTitle(), xtc.getAuthor(), coverPath);
-    rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
-    return coverPath;
-  }
-
-  if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-    Txt txt(book.path, "/.crosspoint");
-    if (!txt.load()) {
-      return "";
-    }
-    txt.setupCacheDir();
-    const std::string coverPath = txt.getCoverBmpPath();
-    if (!Storage.exists(coverPath.c_str()) && !txt.generateCoverBmp()) {
-      return "";
-    }
-    if (!Storage.exists(coverPath.c_str())) {
-      return "";
-    }
-    READING_STATS.updateBookMetadata(book.path, txt.getTitle(), "", coverPath);
-    rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
-    return coverPath;
-  }
-
-  return "";
+  READING_STATS.updateBookMetadata(book.path, title, author, coverPath);
+  rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
+  return coverPath;
 }
 
 std::string findFastCoverPath(const ReadingBookStats& book) {
@@ -303,15 +254,15 @@ void drawMetricCard(const GfxRenderer& renderer, const Rect& rect, const char* l
 }
 
 void drawAdjustTimeButton(const GfxRenderer& renderer, const Rect& rect, const bool selected) {
-  if (selected) {
-    renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
-  }
-  renderer.drawRect(rect.x, rect.y, rect.width, rect.height, selected ? 2 : 1, true);
+  const bool foregroundBlack = AppMetricCard::drawSelectablePanel(renderer, rect, selected);
 
   constexpr int iconSize = 32;
   const int iconX = rect.x + (rect.width - iconSize) / 2;
   const int iconY = rect.y + (rect.height - iconSize) / 2;
-  renderer.drawIcon(Settings2Icon, iconX, iconY, iconSize);
+  if (foregroundBlack)
+    renderer.drawIcon(Settings2Icon, iconX, iconY, iconSize);
+  else
+    renderer.drawIconInverted(Settings2Icon, iconX, iconY, iconSize);
 }
 
 Rect offsetRect(Rect rect, const int dy) {
@@ -321,19 +272,14 @@ Rect offsetRect(Rect rect, const int dy) {
 
 void drawSummaryBanner(const GfxRenderer& renderer, const Rect& rect, const char* title, const std::string& summary,
                        const bool inverted = false) {
-  if (inverted) {
-    renderer.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, 6, Color::Black);
-  } else {
-    renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
-    renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
-  }
+  const bool foregroundBlack = AppMetricCard::drawSelectablePanel(renderer, rect, inverted, true, true);
 
-  renderer.drawText(UI_10_FONT_ID, rect.x + 10, rect.y + 6, title, !inverted, EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, rect.x + 10, rect.y + 6, title, foregroundBlack, EpdFontFamily::BOLD);
   const auto summaryLines =
       renderer.wrappedText(UI_10_FONT_ID, summary.c_str(), rect.width - 20, 2, EpdFontFamily::REGULAR);
   int summaryY = rect.y + 23;
   for (const auto& line : summaryLines) {
-    renderer.drawText(UI_10_FONT_ID, rect.x + 10, summaryY, line.c_str(), !inverted, EpdFontFamily::REGULAR);
+    renderer.drawText(UI_10_FONT_ID, rect.x + 10, summaryY, line.c_str(), foregroundBlack, EpdFontFamily::REGULAR);
     summaryY += renderer.getLineHeight(UI_10_FONT_ID);
   }
 }
@@ -349,11 +295,7 @@ void drawProgressBlock(const GfxRenderer& renderer, const Rect& rect, const char
   // Place the bar a line-height below the label row so CJK text doesn't overlap it.
   const int barTop = rect.y + renderer.getLineHeight(UI_10_FONT_ID) + 4;
   const Rect barRect{rect.x, barTop, rect.width, 10};
-  renderer.drawRect(barRect.x, barRect.y, barRect.width, barRect.height);
-  const int fillWidth = std::max(0, barRect.width - 4) * std::min<int>(percent, 100) / 100;
-  if (fillWidth > 0) {
-    renderer.fillRect(barRect.x + 2, barRect.y + 2, fillWidth, std::max(0, barRect.height - 4));
-  }
+  AppMetricCard::drawProgressBar(renderer, barRect, percent);
 }
 
 void drawCover(const GfxRenderer& renderer, const Rect& rect, const std::string& coverPath) {
@@ -379,7 +321,13 @@ void drawCover(const GfxRenderer& renderer, const Rect& rect, const std::string&
 
   Bitmap bitmap(file);
   if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-    renderer.drawBitmap(bitmap, rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4);
+    if (UITheme::getInstance().hasMainTabs()) {
+      if (!renderer.drawBitmapCropToFill(bitmap, rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4)) {
+        drawFallback();
+      }
+    } else {
+      renderer.drawBitmap(bitmap, rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4);
+    }
   } else {
     drawFallback();
   }
@@ -592,7 +540,9 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
   const int pageHeight = renderer.getScreenHeight();
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int viewportBottom = pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  const Rect coverBaseRect{metrics.contentSidePadding, contentTop, COVER_WIDTH, COVER_HEIGHT};
+  const auto coverSize = UITheme::getInstance().hasMainTabs() ? InxCoverGeometry::fit(COVER_WIDTH, COVER_HEIGHT)
+                                                              : InxCoverGeometry::Size{COVER_WIDTH, COVER_HEIGHT};
+  const Rect coverBaseRect{metrics.contentSidePadding, contentTop, coverSize.width, coverSize.height};
   const Rect adjustButtonBaseRect{coverBaseRect.x + (coverBaseRect.width - ADJUST_BUTTON_SIZE) / 2,
                                   coverBaseRect.y + coverBaseRect.height + metrics.verticalSpacing, ADJUST_BUTTON_SIZE,
                                   ADJUST_BUTTON_SIZE};

@@ -6,6 +6,7 @@
 #include <I18n.h>
 #include <WiFi.h>
 
+#include <algorithm>
 #include <cstddef>
 
 #include "MappedInputManager.h"
@@ -13,6 +14,7 @@
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
@@ -372,20 +374,19 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
   // Subactivities handle their own rendering
   if (state == WebServerActivityState::SERVER_RUNNING || state == WebServerActivityState::AP_STARTING) {
     renderer.clearScreen();
-    const auto& metrics = UITheme::getInstance().getMetrics();
-    const auto pageWidth = renderer.getScreenWidth();
-    const auto pageHeight = renderer.getScreenHeight();
-
-    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle(), nullptr);
 
     if (state == WebServerActivityState::SERVER_RUNNING) {
-      GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
-                        connectedSSID.c_str());
       renderServerRunning();
     } else {
-      const auto height = renderer.getLineHeight(UI_10_FONT_ID);
-      const auto top = (pageHeight - height) / 2;
-      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_STARTING_HOTSPOT));
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+      GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                     headerTitle(), nullptr);
+      const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+      const Rect text = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+      const int height = renderer.getLineHeight(UI_12_FONT_ID);
+      UITheme::drawCenteredText(renderer, text, UI_12_FONT_ID, SubpageLayout::centeredTop(content, height),
+                                tr(STR_STARTING_HOTSPOT));
     }
     renderer.displayBuffer();
   }
@@ -393,73 +394,80 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 
 void CrossPointWebServerActivity::renderServerRunning() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const auto pageWidth = renderer.getScreenWidth();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const int pageWidth = safeArea.width;
 
   constexpr const char* urlSuffix = "/";
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle(), nullptr);
-  GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
-                    connectedSSID.c_str());
+  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                 headerTitle(), nullptr);
+  GUI.drawSubHeader(
+      renderer,
+      Rect{safeArea.x, safeArea.y + metrics.topPadding + metrics.headerHeight, safeArea.width, metrics.tabBarHeight},
+      connectedSSID.c_str());
 
   if (!isApMode) {
-    renderWifiIndicator(metrics.topPadding + metrics.headerHeight);
+    renderWifiIndicator(safeArea.y + metrics.topPadding + metrics.headerHeight);
   }
 
-  int startY = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
-  int height10 = renderer.getLineHeight(UI_10_FONT_ID);
+  const Rect body = SubpageLayout::contentRect(safeArea, metrics, true);
+  const int relatedGap = SubpageLayout::relatedGap(metrics);
+  const int sectionGap = SubpageLayout::sectionGap(metrics);
+  int startY = body.y + sectionGap;
+  const int height10 = renderer.getLineHeight(UI_10_FONT_ID);
   if (isApMode) {
     // AP mode display
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, startY, tr(STR_CONNECT_WIFI_HINT), true,
+    renderer.drawText(UI_10_FONT_ID, body.x + metrics.contentSidePadding, startY, tr(STR_CONNECT_WIFI_HINT), true,
                       EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
+    startY += height10 + sectionGap;
 
     // Show QR code for Wifi
     // follows spec at https://github.com/zxing/zxing/wiki/Barcode-Contents#wi-fi-network-config-android-ios-11
     const std::string wifiConfig = std::string("WIFI:T:nopass;S:") + connectedSSID + ";;";
-    const Rect qrBoundsWifi(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
+    const Rect qrBoundsWifi(body.x + metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsWifi, wifiConfig);
 
     // Show network name
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      connectedSSID.c_str());
+    const int sideTextX = body.x + metrics.contentSidePadding + QR_CODE_WIDTH + sectionGap;
+    const int sideTextWidth = std::max(1, body.x + body.width - metrics.contentSidePadding - sideTextX);
+    const std::string shownSsid = renderer.truncatedText(UI_10_FONT_ID, connectedSSID.c_str(), sideTextWidth);
+    renderer.drawText(UI_10_FONT_ID, sideTextX, startY + 80, shownSsid.c_str());
 
-    startY += QR_CODE_HEIGHT + 2 * metrics.verticalSpacing;
+    startY += QR_CODE_HEIGHT + sectionGap;
 
     // Show primary URL (hostname)
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, startY, tr(STR_OPEN_URL_HINT), true,
+    renderer.drawText(UI_10_FONT_ID, body.x + metrics.contentSidePadding, startY, tr(STR_OPEN_URL_HINT), true,
                       EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
+    startY += height10 + sectionGap;
 
     std::string hostnameUrl = std::string("http://") + AP_HOSTNAME + ".local" + urlSuffix;
     std::string ipUrl = tr(STR_OR_HTTP_PREFIX) + connectedIP + urlSuffix;
 
     // Show QR code for URL
-    const Rect qrBoundsUrl(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
+    const Rect qrBoundsUrl(body.x + metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsUrl, hostnameUrl);
 
     // Show IP address as fallback
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      hostnameUrl.c_str());
-    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 100,
-                      ipUrl.c_str());
+    const std::string shownHost = renderer.truncatedText(UI_10_FONT_ID, hostnameUrl.c_str(), sideTextWidth);
+    const std::string shownIp = renderer.truncatedText(SMALL_FONT_ID, ipUrl.c_str(), sideTextWidth);
+    renderer.drawText(UI_10_FONT_ID, sideTextX, startY + 80, shownHost.c_str());
+    renderer.drawText(SMALL_FONT_ID, sideTextX, startY + 80 + height10 + relatedGap, shownIp.c_str());
   } else {
-    startY += metrics.verticalSpacing * 2;
-
     // STA mode display (original behavior)
     // std::string ipInfo = "IP Address: " + connectedIP;
     renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_OPEN_URL_HINT), true, EpdFontFamily::BOLD);
     startY += height10;
     renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_SCAN_QR_HINT), true, EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
+    startY += height10 + sectionGap;
 
     // Show QR code for URL
     std::string webInfo = std::string("http://") + connectedIP + urlSuffix;
-    const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
+    const Rect qrBounds(safeArea.x + (pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBounds, webInfo);
-    startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
+    startY += QR_CODE_HEIGHT + sectionGap;
 
     // Show web server URL prominently
     renderer.drawCenteredText(UI_10_FONT_ID, startY, webInfo.c_str(), true);
-    startY += height10 + 5;
+    startY += height10 + relatedGap;
 
     // Also show hostname URL
     std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local" + urlSuffix;
@@ -476,10 +484,11 @@ void CrossPointWebServerActivity::renderWifiIndicator(int subHeaderTop) const {
   constexpr int BAR_GAP = 2;
   constexpr int ICON_HEIGHT = 14;
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   const int iconWidth = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP;
-  const int iconRight = renderer.getScreenWidth() - metrics.contentSidePadding;
+  const int iconRight = safeArea.x + safeArea.width - metrics.contentSidePadding;
   const int iconLeft = iconRight - iconWidth;
-  const int iconBottom = subHeaderTop + metrics.tabBarHeight - metrics.verticalSpacing;
+  const int iconBottom = subHeaderTop + metrics.tabBarHeight - SubpageLayout::relatedGap(metrics);
 
   const bool wifiUp = (WiFi.status() == WL_CONNECTED) && (consecutiveDisconnects == 0);
   if (wifiUp) {

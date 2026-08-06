@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
+#include "activities/MainTab.h"
 #include "fontIds.h"
 
 class GfxRenderer;
@@ -19,6 +21,15 @@ struct Rect {
 
   explicit Rect(int x = 0, int y = 0, int width = 0, int height = 0) : x(x), y(y), width(width), height(height) {}
 };
+
+namespace ProgressBarGeometry {
+inline constexpr int percentageGap = 15;
+
+constexpr int contentHeight(const int barHeight, const int percentageLineHeight, const bool showPercentage = true) {
+  if (barHeight <= 0) return 0;
+  return barHeight + (showPercentage ? percentageGap + std::max(0, percentageLineHeight) : 0);
+}
+}  // namespace ProgressBarGeometry
 
 struct TabInfo {
   const char* label;
@@ -132,6 +143,12 @@ enum UIIcon {
   Game2048,
   Buddy,
   PixelSwitch,
+  Opds,
+  ReadingStats,
+  AirPage,
+  ReadingHeatmap,
+  ReadingProfile,
+  Achievements,
 };
 
 // Default theme implementation (Classic Theme)
@@ -216,8 +233,9 @@ class BaseTheme {
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
-  void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total,
-                       bool showPercentage = true) const;
+  int measureProgressBarHeight(const GfxRenderer& renderer, int barHeight, bool showPercentage = true) const;
+  int drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total,
+                      bool showPercentage = true) const;
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect,
                        bool showPercentage = true) const;  // Left aligned (reader mode)
   void drawBatteryRight(const GfxRenderer& renderer, Rect rect,
@@ -235,9 +253,11 @@ class BaseTheme {
                         const std::function<std::string(int index)>& rowSubtitle = nullptr,
                         const std::function<UIIcon(int index)>& rowIcon = nullptr,
                         const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
-                        const std::function<bool(int index)>& rowDimmed = nullptr) const;
+                        const std::function<bool(int index)>& rowDimmed = nullptr, bool showSelection = true,
+                        const std::function<bool(int index)>& rowHeading = nullptr) const;
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
                           const char* subtitle = nullptr) const;
+  virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
   virtual void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,

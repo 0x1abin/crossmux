@@ -37,6 +37,9 @@ class FileBrowserActivity final : public Activity {
   // Data loading
   void loadFiles();
   size_t findEntry(const std::string& name) const;
+  bool usesIconLayout() const;
+  int iconIndexFromPoint(int x, int y, int contentTop, int contentHeight) const;
+  void drawIconGrid(const Rect& rect, bool showSelection) const;
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",
@@ -48,4 +51,7 @@ class FileBrowserActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  MainTab mainTab() const override { return mode == Mode::Books ? MainTab::Library : MainTab::None; }
+  bool mainTabBackReturnsToTabs() const override { return basepath == "/"; }
+  void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };

@@ -9,9 +9,11 @@
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "InxItemLayout.h"
 #include "MappedInputManager.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
+#include "components/icons/inx_library.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
 
@@ -19,6 +21,12 @@ namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
 constexpr size_t NAME_BUFFER_SIZE = 500;
 }  // namespace
+
+std::string getFileName(std::string filename);
+
+void FileBrowserActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
+  selectorIndex = static_cast<size_t>(MainTabs::contentEdgeIndex(edge, static_cast<int>(files.size())));
+}
 
 void FileBrowserActivity::loadFiles() {
   files.clear();
@@ -103,6 +111,18 @@ void FileBrowserActivity::onExit() {
   Activity::onExit();
   files.clear();
   fileNameBuffer.reset();
+}
+
+bool FileBrowserActivity::usesIconLayout() const {
+  return mode == Mode::Books && UITheme::getInstance().hasMainTabs() &&
+         InxGridGeometry::layoutFrom(SETTINGS.inxLibraryLayout) == InxItemLayout::Icons;
+}
+
+int FileBrowserActivity::iconIndexFromPoint(const int x, const int y, const int contentTop,
+                                            const int contentHeight) const {
+  return InxGridGeometry::indexFromPoint(x, y - contentTop, renderer.getScreenWidth(), contentHeight,
+                                         InxGridGeometry::pageStart(static_cast<int>(selectorIndex), files.size()),
+                                         static_cast<int>(files.size()));
 }
 
 // To avoid traversing directories twice (once for cache clearing, once for deletion),
@@ -204,7 +224,9 @@ void FileBrowserActivity::loop() {
   }
 
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + UITheme::getInstance().getMetrics().verticalSpacing;
-  const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, pathReserved);
+  const int pageItems = usesIconLayout()
+                            ? InxGridGeometry::itemsPerPage
+                            : UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, pathReserved);
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight =
@@ -284,12 +306,33 @@ void FileBrowserActivity::loop() {
     return;
   };
 
-  int touchSel = static_cast<int>(selectorIndex);
-  const auto listTouch = handleListTouch(touchSel, static_cast<int>(files.size()), contentTop, contentHeight, false);
-  if (listTouch != ListTouchResult::None) {
-    selectorIndex = static_cast<size_t>(touchSel);
-    if (listTouch == ListTouchResult::Activated) activateSelected();
-    return;
+  if (usesIconLayout()) {
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasScreenTouchDown(x, y)) {
+      const int touched = iconIndexFromPoint(x, y, contentTop, contentHeight);
+      if (touched >= 0 && touched != static_cast<int>(selectorIndex)) {
+        selectorIndex = static_cast<size_t>(touched);
+        requestUpdate();
+      }
+      return;
+    }
+    if (mappedInput.wasScreenTapped(x, y)) {
+      const int touched = iconIndexFromPoint(x, y, contentTop, contentHeight);
+      if (touched >= 0) {
+        selectorIndex = static_cast<size_t>(touched);
+        activateSelected();
+      }
+      return;
+    }
+  } else {
+    int touchSel = static_cast<int>(selectorIndex);
+    const auto listTouch = handleListTouch(touchSel, static_cast<int>(files.size()), contentTop, contentHeight, false);
+    if (listTouch != ListTouchResult::None) {
+      selectorIndex = static_cast<size_t>(touchSel);
+      if (listTouch == ListTouchResult::Activated) activateSelected();
+      return;
+    }
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -358,6 +401,39 @@ void FileBrowserActivity::loop() {
   });
 }
 
+void FileBrowserActivity::drawIconGrid(const Rect& rect, const bool showSelection) const {
+  const int start = InxGridGeometry::pageStart(static_cast<int>(selectorIndex), files.size());
+  const int cellWidth = rect.width / InxGridGeometry::columns;
+  const int cellHeight = rect.height / InxGridGeometry::rows;
+  constexpr int iconSize = 72;
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+
+  for (int slot = 0; slot < InxGridGeometry::itemsPerPage && start + slot < static_cast<int>(files.size()); ++slot) {
+    const int index = start + slot;
+    const int column = slot % InxGridGeometry::columns;
+    const int row = slot / InxGridGeometry::columns;
+    const Rect cell{rect.x + column * cellWidth + 4, rect.y + row * cellHeight + 4, cellWidth - 8, cellHeight - 8};
+    const bool selected = showSelection && index == static_cast<int>(selectorIndex);
+    if (selected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
+
+    const UIIcon type = UITheme::getFileIcon(files[index]);
+    const uint8_t* icon = type == UIIcon::Folder ? FolderLarge : (type == UIIcon::Image ? ImageLarge : BookLarge);
+    const int iconX = cell.x + (cell.width - iconSize) / 2;
+    const int iconY = cell.y + std::max(4, (cell.height - iconSize - lineHeight - 6) / 2);
+    if (selected)
+      renderer.drawIconInverted(icon, iconX, iconY, iconSize);
+    else
+      renderer.drawIcon(icon, iconX, iconY, iconSize);
+
+    const std::string label =
+        renderer.truncatedText(UI_10_FONT_ID, getFileName(files[index]).c_str(), std::max(1, cell.width - 8));
+    const int labelX = cell.x + (cell.width - renderer.getTextWidth(UI_10_FONT_ID, label.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, labelX, iconY + iconSize + 6, label.c_str(), !selected);
+  }
+
+  GUI.drawSideScrollBar(renderer, rect, files.size(), start, InxGridGeometry::itemsPerPage);
+}
+
 std::string getFileName(std::string filename) {
   if (filename.back() == '/') {
     filename.pop_back();
@@ -389,22 +465,25 @@ void FileBrowserActivity::render(RenderLock&&) {
       (mode == Mode::PickFirmware)
           ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
           : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
+  drawPageHeader(Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
 
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int pathReserved = pathLineHeight + metrics.verticalSpacing;
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight =
       pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
+  const bool showSelection = showMainTabContentSelection();
   if (files.empty()) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
+  } else if (usesIconLayout()) {
+    drawIconGrid(Rect{0, contentTop, pageWidth, contentHeight}, showSelection);
   } else {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
         [this](int index) { return getFileName(files[index]); }, nullptr,
         [this](int index) { return UITheme::getFileIcon(files[index]); },
-        [this](int index) { return getFileExtension(files[index]); }, false);
+        [this](int index) { return getFileExtension(files[index]); }, false, nullptr, showSelection);
   }
 
   // Full path display
@@ -440,8 +519,10 @@ void FileBrowserActivity::render(RenderLock&&) {
   // STR_SELECT instead. Directories in the same picker still descend, so keep STR_OPEN there.
   const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
   const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
-  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
-                                            files.empty() ? "" : tr(STR_DIR_DOWN));
+  const auto labels = usesMainTabBar()
+                          ? mainTabButtonLabels(backLabel, confirmLabel, files.size() > 1)
+                          : mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
+                                                  files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();
