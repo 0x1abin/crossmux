@@ -13,6 +13,7 @@
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/search24.h"
 #include "fontIds.h"
@@ -23,18 +24,22 @@
 #include "util/UrlUtils.h"
 
 namespace {
-constexpr int PAGE_ITEMS = 23;
-constexpr int HEADER_Y = 15;
-constexpr int HEADER_X = 16;
 constexpr int SEARCH_ICON_SIZE = 24;
-constexpr int SEARCH_ICON_MARGIN = 14;
-constexpr int SEARCH_ICON_Y = 15;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
 
 Rect searchIconRect(const GfxRenderer& renderer) {
-  return Rect{renderer.getScreenWidth() - SEARCH_ICON_SIZE - SEARCH_ICON_MARGIN, SEARCH_ICON_Y, SEARCH_ICON_SIZE + 8,
-              SEARCH_ICON_SIZE + 8};
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  constexpr int touchSize = SEARCH_ICON_SIZE + 8;
+  const int titleBandHeight = std::max(0, metrics.headerHeight - metrics.batteryBarHeight);
+  const int y = safe.y + metrics.topPadding + metrics.batteryBarHeight + std::max(0, (titleBandHeight - touchSize) / 2);
+  return Rect{safe.x + safe.width - metrics.contentSidePadding - touchSize, y, touchSize, touchSize};
+}
+
+Rect browserContentRect(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return SubpageLayout::contentRect(UITheme::getInstance().getScreenSafeArea(renderer, true, false), metrics);
 }
 
 bool contains(const Rect& rect, const int x, const int y) {
@@ -137,32 +142,24 @@ void OpdsBookBrowserActivity::loop() {
     }
 
     if (!entries.empty()) {
-      int row = -1;
-      const auto touch = mappedInput.rowTouch(row, /*top=*/60, /*rowStep=*/30, PAGE_ITEMS);
-      if (touch != MappedInputManager::RowTouch::None) {
-        const int touched = selectorIndex / PAGE_ITEMS * PAGE_ITEMS + row;
-        if (touched >= 0 && touched < static_cast<int>(entries.size())) {
-          if (touch == MappedInputManager::RowTouch::Down) {
-            if (selectorIndex != touched) {
-              selectorIndex = touched;
-              requestUpdate();
-            }
-          } else {
-            selectorIndex = touched;
-            activateSelected();
-          }
-          return;
-        }
+      const Rect content = browserContentRect(renderer);
+      int touched = selectorIndex;
+      const auto touch = handleListTouch(touched, static_cast<int>(entries.size()), content.y, content.height, false);
+      if (touch != ListTouchResult::None) {
+        selectorIndex = touched;
+        if (touch == ListTouchResult::Activated) activateSelected();
+        return;
       }
 
+      const int pageItems = GUI.getListPageItems(content.height, false);
       const auto swipe = mappedInput.wasSwipe();
       if (swipe == MappedInputManager::SwipeDir::Up) {
-        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
+        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), pageItems);
         requestUpdate();
         return;
       }
       if (swipe == MappedInputManager::SwipeDir::Down) {
-        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
+        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), pageItems);
         requestUpdate();
         return;
       }
@@ -176,11 +173,13 @@ void OpdsBookBrowserActivity::loop() {
         requestUpdate();
       });
       buttonNavigator.onNextContinuous([this] {
-        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
+        const int pageItems = GUI.getListPageItems(browserContentRect(renderer).height, false);
+        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), pageItems);
         requestUpdate();
       });
       buttonNavigator.onPreviousContinuous([this] {
-        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
+        const int pageItems = GUI.getListPageItems(browserContentRect(renderer).height, false);
+        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), pageItems);
         requestUpdate();
       });
     }
@@ -189,22 +188,32 @@ void OpdsBookBrowserActivity::loop() {
 
 void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+  const Rect textBounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int smallHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  const int relatedGap = SubpageLayout::relatedGap(metrics);
+  const int sectionGap = SubpageLayout::sectionGap(metrics);
 
   // Show server name in header if available, otherwise generic title
   const char* headerTitle = server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str();
-  const int headerRightInset = searchTemplate.empty() ? HEADER_X : (SEARCH_ICON_SIZE + SEARCH_ICON_MARGIN * 2 + 8);
-  const auto clippedHeader =
-      renderer.truncatedText(UI_12_FONT_ID, headerTitle, pageWidth - HEADER_X - headerRightInset, EpdFontFamily::BOLD);
-  renderer.drawText(UI_12_FONT_ID, HEADER_X, HEADER_Y, clippedHeader.c_str(), true, EpdFontFamily::BOLD);
+  const Rect searchRect = searchIconRect(renderer);
+  const int headerTextWidth = searchTemplate.empty() ? safeArea.width - metrics.contentSidePadding * 2
+                                                     : searchRect.x - safeArea.x - metrics.contentSidePadding * 2;
+  const std::string clippedHeader =
+      renderer.truncatedText(UI_12_FONT_ID, headerTitle, std::max(1, headerTextWidth), EpdFontFamily::BOLD);
+  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                 clippedHeader.c_str());
   if (!searchTemplate.empty()) {
-    const auto rect = searchIconRect(renderer);
-    renderer.drawIcon(Search24Icon.bits, rect.x + 4, rect.y + 4, Search24Icon.w);
+    renderer.drawIcon(Search24Icon.bits, searchRect.x + 4, searchRect.y + 4, Search24Icon.w);
   }
 
   if (state == BrowserState::CHECK_WIFI || state == BrowserState::LOADING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
+    UITheme::drawCenteredWrappedText(renderer, textBounds, UI_12_FONT_ID, statusMessage.c_str(), 2, true,
+                                     EpdFontFamily::BOLD);
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
@@ -212,10 +221,16 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   }
 
   if (state == BrowserState::ERROR) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 20, tr(STR_ERROR_MSG));
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 10, errorMessage.c_str());
+    const int retryHeight = mappedInput.hasTouch() ? relatedGap + smallHeight : 0;
+    const int blockHeight = titleHeight + relatedGap + lineHeight * 2 + retryHeight;
+    const int top = SubpageLayout::centeredTop(content, blockHeight);
+    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top, tr(STR_ERROR_MSG), true, EpdFontFamily::BOLD);
+    UITheme::drawCenteredWrappedText(
+        renderer, Rect{textBounds.x, top + titleHeight + relatedGap, textBounds.width, lineHeight * 2}, UI_10_FONT_ID,
+        errorMessage.c_str(), 2, true, EpdFontFamily::REGULAR, UITheme::TextVerticalAlignment::TOP);
     if (mappedInput.hasTouch()) {
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 40, tr(STR_TAP_TO_RETRY));
+      UITheme::drawCenteredText(renderer, textBounds, SMALL_FONT_ID,
+                                top + titleHeight + relatedGap + lineHeight * 2 + relatedGap, tr(STR_TAP_TO_RETRY));
     }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -224,12 +239,18 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   }
 
   if (state == BrowserState::DOWNLOADING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 40, tr(STR_DOWNLOADING));
-    auto title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), pageWidth - 40);
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 10, title.c_str());
+    const int progressHeight =
+        downloadTotal > 0 ? sectionGap + GUI.measureProgressBarHeight(renderer, metrics.progressBarHeight) : 0;
+    const int blockHeight = titleHeight + relatedGap + lineHeight + progressHeight;
+    int y = SubpageLayout::centeredTop(content, blockHeight);
+    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, y, tr(STR_DOWNLOADING), true, EpdFontFamily::BOLD);
+    y += titleHeight + relatedGap;
+    const std::string title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), textBounds.width);
+    UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, y, title.c_str());
     if (downloadTotal > 0) {
-      GUI.drawProgressBar(renderer, Rect{50, pageHeight / 2 + 20, pageWidth - 100, 20}, downloadProgress,
-                          downloadTotal);
+      GUI.drawProgressBar(renderer,
+                          Rect{textBounds.x, y + lineHeight + sectionGap, textBounds.width, metrics.progressBarHeight},
+                          downloadProgress, downloadTotal);
     }
     renderer.displayBuffer();
     return;
@@ -242,19 +263,14 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (entries.empty()) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NO_ENTRIES));
+    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
+                              tr(STR_NO_ENTRIES));
   } else {
-    const auto pageStartIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS;
-    renderer.fillRect(0, 60 + (selectorIndex % PAGE_ITEMS) * 30 - 2, pageWidth - 1, 30);
-
-    for (size_t i = pageStartIndex; i < entries.size() && i < static_cast<size_t>(pageStartIndex + PAGE_ITEMS); i++) {
-      const auto& entry = entries[i];
-      std::string displayText = (entry.type == OpdsEntryType::NAVIGATION) ? "> " + entry.title : entry.title;
-      if (entry.type == OpdsEntryType::BOOK && !entry.author.empty()) displayText += " - " + entry.author;
-      auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), pageWidth - 40);
-      renderer.drawText(UI_10_FONT_ID, 20, 60 + (i % PAGE_ITEMS) * 30, item.c_str(),
-                        i != static_cast<size_t>(selectorIndex));
-    }
+    GUI.drawList(
+        renderer, content, static_cast<int>(entries.size()), selectorIndex,
+        [this](const int index) { return entries[index].title; },
+        [this](const int index) { return entries[index].type == OpdsEntryType::BOOK ? entries[index].author : ""; },
+        [this](const int index) { return entries[index].type == OpdsEntryType::BOOK ? UIIcon::Book : UIIcon::Folder; });
   }
   renderer.displayBuffer();
 }

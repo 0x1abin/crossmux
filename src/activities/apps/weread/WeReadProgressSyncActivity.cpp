@@ -25,6 +25,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/EpubReaderUtils.h"
 #include "activities/reader/ReaderUtils.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TimeUtils.h"
@@ -317,11 +318,12 @@ void WeReadProgressSyncActivity::loop() {
       }
       const auto& metrics = UITheme::getInstance().getMetrics();
       const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+      const Rect content = SubpageLayout::contentRect(screen, metrics);
       const int optionStep = metrics.menuRowHeight + metrics.menuSpacing;
-      const int optionTop = screen.y + screen.height - optionStep * 2;
+      const int optionTop = content.y + content.height - optionStep * 2;
       int touchedOption = -1;
-      const auto touch = mappedInput.rowTouch(touchedOption, optionTop, optionStep, 2, screen.x,
-                                              screen.x + screen.width, metrics.menuRowHeight);
+      const auto touch = mappedInput.rowTouch(touchedOption, optionTop, optionStep, 2, content.x,
+                                              content.x + content.width, metrics.menuRowHeight);
       if (touch != MappedInputManager::RowTouch::None) {
         selectedDirection_ = touchedOption == 0 ? DirectionOption::ApplyRemote : DirectionOption::UploadLocal;
         if (touch == MappedInputManager::RowTouch::Tap) {
@@ -371,20 +373,22 @@ void WeReadProgressSyncActivity::render(RenderLock&&) {
   const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight},
                  tr(STR_WEREAD_SYNC_PROGRESS));
-  const int middle = screen.y + screen.height / 2;
+  const Rect content = SubpageLayout::contentRect(screen, metrics);
+  const Rect textBounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
 
   switch (state_) {
     case State::WifiSelection:
     case State::Starting:
     case State::Syncing:
-      UITheme::drawCenteredText(renderer, screen, UI_12_FONT_ID, middle, tr(STR_WEREAD_SYNCING_PROGRESS), true,
-                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
+                                tr(STR_WEREAD_SYNCING_PROGRESS), true, EpdFontFamily::BOLD);
       break;
     case State::ChoosingDirection: {
-      const int contentTop = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+      const int contentTop = content.y + SubpageLayout::sectionGap(metrics);
       const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
       const char* comparisonTitle = uploadConflict_ ? tr(STR_WEREAD_PROGRESS_CHANGED) : tr(STR_PROGRESS_FOUND);
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, contentTop, comparisonTitle, true,
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, contentTop, comparisonTitle, true,
                                 EpdFontFamily::BOLD);
 
       char remoteValue[24];
@@ -393,40 +397,41 @@ void WeReadProgressSyncActivity::render(RenderLock&&) {
       snprintf(localValue, sizeof(localValue), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), input_.localPageNumber + 1,
                input_.localPageCount, input_.localFraction * 100.0f);
       const int remoteLabelY = contentTop + lineHeight * 2;
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, remoteLabelY, tr(STR_REMOTE_LABEL), true,
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, remoteLabelY, tr(STR_REMOTE_LABEL), true,
                                 EpdFontFamily::BOLD);
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, remoteLabelY + lineHeight, remoteValue);
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, remoteLabelY + lineHeight, remoteValue);
       const int localLabelY = remoteLabelY + lineHeight * 3;
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, localLabelY, tr(STR_LOCAL_LABEL), true,
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, localLabelY, tr(STR_LOCAL_LABEL), true,
                                 EpdFontFamily::BOLD);
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, localLabelY + lineHeight, localValue);
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, localLabelY + lineHeight, localValue);
 
       const int optionStep = metrics.menuRowHeight + metrics.menuSpacing;
-      const int optionTop = screen.y + screen.height - optionStep * 2;
+      const int optionTop = content.y + content.height - optionStep * 2;
       const int optionTextOffset = (metrics.menuRowHeight - lineHeight) / 2;
       const DirectionOption options[] = {DirectionOption::ApplyRemote, DirectionOption::UploadLocal};
       for (int index = 0; index < 2; ++index) {
         const int optionY = optionTop + optionStep * index;
         const bool selected = selectedDirection_ == options[index];
         if (selected) {
-          renderer.fillRect(screen.x + metrics.contentSidePadding, optionY,
-                            screen.width - metrics.contentSidePadding * 2, metrics.menuRowHeight);
+          renderer.fillRect(textBounds.x, optionY, textBounds.width, metrics.menuRowHeight);
         }
         const char* label =
             options[index] == DirectionOption::ApplyRemote ? tr(STR_APPLY_REMOTE) : tr(STR_UPLOAD_LOCAL);
-        UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, optionY + optionTextOffset, label, !selected);
+        UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, optionY + optionTextOffset, label, !selected);
       }
       break;
     }
     case State::Success:
-      UITheme::drawCenteredText(renderer, screen, UI_12_FONT_ID, middle, resultMessage(), true, EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
+                                resultMessage(), true, EpdFontFamily::BOLD);
       break;
     case State::LoginRequired:
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, middle, tr(STR_WEREAD_LOGIN_REQUIRED), true,
-                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredWrappedText(renderer, textBounds, UI_10_FONT_ID, tr(STR_WEREAD_LOGIN_REQUIRED), 2, true,
+                                       EpdFontFamily::BOLD);
       break;
     case State::Failed:
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, middle, errorMessage(), true, EpdFontFamily::BOLD);
+      UITheme::drawCenteredWrappedText(renderer, textBounds, UI_10_FONT_ID, errorMessage(), 2, true,
+                                       EpdFontFamily::BOLD);
       break;
   }
 

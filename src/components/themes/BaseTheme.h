@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -20,6 +21,15 @@ struct Rect {
 
   explicit Rect(int x = 0, int y = 0, int width = 0, int height = 0) : x(x), y(y), width(width), height(height) {}
 };
+
+namespace ProgressBarGeometry {
+inline constexpr int percentageGap = 15;
+
+constexpr int contentHeight(const int barHeight, const int percentageLineHeight, const bool showPercentage = true) {
+  if (barHeight <= 0) return 0;
+  return barHeight + (showPercentage ? percentageGap + std::max(0, percentageLineHeight) : 0);
+}
+}  // namespace ProgressBarGeometry
 
 struct TabInfo {
   const char* label;
@@ -223,6 +233,7 @@ class BaseTheme {
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
+  int measureProgressBarHeight(const GfxRenderer& renderer, int barHeight, bool showPercentage = true) const;
   int drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total,
                       bool showPercentage = true) const;
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect,

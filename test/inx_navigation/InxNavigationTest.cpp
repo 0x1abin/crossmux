@@ -3,6 +3,7 @@
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
 #include "activities/MainTab.h"
+#include "components/SubpageLayout.h"
 #include "components/themes/BaseTheme.h"
 
 TEST(InxNavigation, WrapsAcrossFiveTabs) {
@@ -116,4 +117,36 @@ TEST(InxNavigation, PaginatesButtonMenusAndKeepsIconIdsStable) {
   EXPECT_EQ(static_cast<int>(UIIcon::ReadingHeatmap), static_cast<int>(UIIcon::AirPage) + 1);
   EXPECT_EQ(static_cast<int>(UIIcon::ReadingProfile), static_cast<int>(UIIcon::ReadingHeatmap) + 1);
   EXPECT_EQ(static_cast<int>(UIIcon::Achievements), static_cast<int>(UIIcon::ReadingProfile) + 1);
+}
+
+TEST(InxNavigation, KeepsSubpageContentInsideChrome) {
+  ThemeMetrics metrics{};
+  metrics.topPadding = 0;
+  metrics.headerHeight = 66;
+  metrics.tabBarHeight = 40;
+  metrics.verticalSpacing = 0;
+
+  EXPECT_EQ(SubpageLayout::relatedGap(metrics), 4);
+  EXPECT_EQ(SubpageLayout::sectionGap(metrics), 12);
+
+  const Rect body = SubpageLayout::contentRect(Rect{0, 0, 480, 760}, metrics, true, 24);
+  EXPECT_EQ(body.y, 106);
+  EXPECT_EQ(body.height, 630);
+
+  const Rect inset = SubpageLayout::insetHorizontal(body, 20);
+  EXPECT_EQ(inset.x, 20);
+  EXPECT_EQ(inset.width, 440);
+  EXPECT_EQ(SubpageLayout::centeredTop(body, 200), 321);
+  EXPECT_EQ(SubpageLayout::centeredTop(body, 900), body.y);
+
+  metrics.verticalSpacing = 16;
+  const Rect spacedBody = SubpageLayout::contentRect(Rect{0, 0, 480, 760}, metrics, false);
+  EXPECT_EQ(spacedBody.y, 82);
+  EXPECT_EQ(spacedBody.height, 662);
+}
+
+TEST(InxNavigation, MeasuresCompleteProgressBlock) {
+  EXPECT_EQ(ProgressBarGeometry::contentHeight(16, 24), 55);
+  EXPECT_EQ(ProgressBarGeometry::contentHeight(16, 24, false), 16);
+  EXPECT_EQ(ProgressBarGeometry::contentHeight(0, 24), 0);
 }

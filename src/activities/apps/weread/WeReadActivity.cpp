@@ -19,6 +19,7 @@
 #include "../../../CrossPointState.h"
 #include "../../../SdCardFontSystem.h"
 #include "../../../SilentRestart.h"
+#include "../../../components/SubpageLayout.h"
 #include "../../../components/UITheme.h"
 #include "../../../components/icons/cover.h"
 #include "../../../fontIds.h"
@@ -202,18 +203,22 @@ bool drawCachedCover(GfxRenderer& renderer, const std::string& bookDir, const Re
 void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* title, const char* status,
                         const uint32_t completed, const uint32_t total) {
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int barBlockHeight = total > 0 ? metrics.verticalSpacing + metrics.progressBarHeight : 0;
-  const int groupHeight = lineHeight * 2 + metrics.verticalSpacing + barBlockHeight;
+  const int relatedGap = SubpageLayout::relatedGap(metrics);
+  const int sectionGap = SubpageLayout::sectionGap(metrics);
+  const int barBlockHeight =
+      total > 0 ? sectionGap + GUI.measureProgressBarHeight(renderer, metrics.progressBarHeight) : 0;
+  const int groupHeight = titleHeight + relatedGap + lineHeight + barBlockHeight;
   int y = content.y + std::max(0, (content.height - groupHeight) / 2);
-  UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, title);
-  y += lineHeight + metrics.verticalSpacing;
+  UITheme::drawCenteredText(renderer, content, UI_12_FONT_ID, y, title, true, EpdFontFamily::BOLD);
+  y += titleHeight + relatedGap;
   UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, status);
   if (total == 0) return;
 
   const int sidePadding = std::min(metrics.contentSidePadding, content.width / 4);
   GUI.drawProgressBar(renderer,
-                      Rect{content.x + sidePadding, y + lineHeight + metrics.verticalSpacing,
+                      Rect{content.x + sidePadding, y + lineHeight + sectionGap,
                            std::max(1, content.width - sidePadding * 2), metrics.progressBarHeight},
                       completed, total);
 }
@@ -299,12 +304,11 @@ class WeReadChapterRangeActivity final : public Activity {
       return;
     }
 
-    const int pageItems = UITheme::getInstance().getNumberOfItemsPerPage(renderer, true, false, true, false);
     const auto& metrics = UITheme::getInstance().getMetrics();
     const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-    const int contentTop = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-    const int contentHeight = screen.height - contentTop - metrics.verticalSpacing;
-    switch (handleListTouch(selectedIndex_, chapterCount_, contentTop, contentHeight, false)) {
+    const Rect content = SubpageLayout::contentRect(screen, metrics);
+    const int pageItems = GUI.getListPageItems(content.height, false);
+    switch (handleListTouch(selectedIndex_, chapterCount_, content.y, content.height, false)) {
       case ListTouchResult::Activated:
         selectCurrent();
         return;
@@ -356,10 +360,8 @@ class WeReadChapterRangeActivity final : public Activity {
     GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight},
                    I18N.get(stageTitle()));
 
-    const int contentTop = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-    const int contentHeight = screen.height - contentTop - metrics.verticalSpacing;
     GUI.drawList(
-        renderer, Rect{screen.x, contentTop, screen.width, contentHeight}, chapterCount_, selectedIndex_,
+        renderer, SubpageLayout::contentRect(screen, metrics), chapterCount_, selectedIndex_,
         [this](const int index) { return rowTitle(index); }, nullptr, nullptr,
         [this](const int index) {
           return stage_ == Stage::End && index == firstIndex_ ? std::string(tr(STR_WEREAD_CACHE_RANGE_START_MARK))
@@ -517,17 +519,12 @@ bool WeReadActivity::readShelf(const int index, WeReadStore::ShelfRecord& record
 Rect WeReadActivity::contentBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  const int contentY = safe.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentBottom = safe.y + safe.height - metrics.verticalSpacing;
-  return Rect{safe.x, contentY, safe.width, std::max(0, contentBottom - contentY)};
+  return SubpageLayout::contentRect(safe, metrics);
 }
 
 Rect WeReadActivity::mainContentBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  Rect content = contentBounds();
-  content.y += metrics.tabBarHeight;
-  content.height = std::max(0, content.height - metrics.tabBarHeight);
-  return content;
+  return SubpageLayout::contentRect(UITheme::getInstance().getScreenSafeArea(renderer, true, false), metrics, true);
 }
 
 Rect WeReadActivity::disclaimerSafeBounds() const {
@@ -536,10 +533,7 @@ Rect WeReadActivity::disclaimerSafeBounds() const {
 
 Rect WeReadActivity::disclaimerContentBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect safe = disclaimerSafeBounds();
-  const int contentY = safe.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentBottom = safe.y + safe.height - metrics.verticalSpacing;
-  return Rect{safe.x, contentY, safe.width, std::max(0, contentBottom - contentY)};
+  return SubpageLayout::contentRect(disclaimerSafeBounds(), metrics);
 }
 
 Rect WeReadActivity::disclaimerActionsBounds() const {
@@ -2207,7 +2201,7 @@ void WeReadActivity::render(RenderLock&&) {
         break;
       }
       const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-      const int textGap = metrics.verticalSpacing;
+      const int textGap = SubpageLayout::relatedGap(metrics);
       const int qrLimit = content.height - textGap - lineHeight * 2;
       const int qrSide = std::max(1, std::min(content.width * 4 / 5, qrLimit));
       const int groupHeight = qrSide + textGap + lineHeight * 2;
@@ -2266,10 +2260,11 @@ void WeReadActivity::render(RenderLock&&) {
               lineCount = static_cast<int>(sizeof(kPostProcessLongWaitLines) / sizeof(kPostProcessLongWaitLines[0]));
               break;
           }
-          const int groupHeight = (lineCount + 1) * lineHeight + metrics.verticalSpacing;
+          const int textGap = SubpageLayout::relatedGap(metrics);
+          const int groupHeight = (lineCount + 1) * lineHeight + textGap;
           int y = content.y + std::max(0, (content.height - groupHeight) / 2);
           UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, pendingBook_.title);
-          y += lineHeight + metrics.verticalSpacing;
+          y += lineHeight + textGap;
           for (int i = 0; i < lineCount; ++i) {
             UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, I18N.get(lines[i]));
             y += lineHeight;

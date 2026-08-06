@@ -134,6 +134,11 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   fillBatteryIcon(renderer, iconRect, percentage);
 }
 
+int BaseTheme::measureProgressBarHeight(const GfxRenderer& renderer, const int barHeight,
+                                        const bool showPercentage) const {
+  return ProgressBarGeometry::contentHeight(barHeight, renderer.getLineHeight(UI_10_FONT_ID), showPercentage);
+}
+
 int BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const size_t current, const size_t total,
                                const bool showPercentage) const {
   if (total == 0) {
@@ -157,9 +162,9 @@ int BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const siz
     // Draw percentage text centered below bar without a temporary heap allocation.
     char percentText[16];
     snprintf(percentText, sizeof(percentText), "%d%%", percent);
-    const int percentageY = rect.y + rect.height + 15;
+    const int percentageY = rect.y + rect.height + ProgressBarGeometry::percentageGap;
     renderer.drawCenteredText(UI_10_FONT_ID, percentageY, percentText);
-    return percentageY + renderer.getLineHeight(UI_10_FONT_ID);
+    return rect.y + measureProgressBarHeight(renderer, rect.height, true);
   }
   return rect.y + rect.height;
 }
