@@ -500,7 +500,10 @@ void SettingsActivity::renderAccordion() {
         }
         return settingValueText(settingsForCategory(row.category)[row.setting]);
       },
-      true, nullptr, showMainTabContentSelection());
+      true, nullptr, showMainTabContentSelection(),
+      [this](const int index) {
+        return InxAccordionGeometry::rowAt(accordionSettingCounts(), expandedCategories, index).isCategory();
+      });
 
   const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_TOGGLE), visibleCount > 1);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

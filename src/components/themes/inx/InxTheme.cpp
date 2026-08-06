@@ -224,7 +224,8 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
                         const std::function<std::string(int index)>& rowSubtitle,
                         const std::function<UIIcon(int index)>& rowIcon,
                         const std::function<std::string(int index)>& rowValue, const bool,
-                        const std::function<bool(int index)>& rowDimmed, const bool showSelection) const {
+                        const std::function<bool(int index)>& rowDimmed, const bool showSelection,
+                        const std::function<bool(int index)>& rowHeading) const {
   if (itemCount <= 0 || rect.height <= 0) return;
 
   const int pageItems = getListPageItems(rect.height, rowSubtitle != nullptr);
@@ -258,10 +259,13 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
       value = renderer.truncatedText(UI_10_FONT_ID, rowValue(index).c_str(), kMaxValueWidth);
       valueWidth = value.empty() ? 0 : renderer.getTextWidth(UI_10_FONT_ID, value.c_str()) + kIconGap;
     }
+    const bool heading = rowHeading && rowHeading(index);
+    const int titleFont = heading ? UI_12_FONT_ID : UI_10_FONT_ID;
+    const auto titleStyle = heading ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
     const int textWidth = std::max(1, contentRight - kRowPadding - textX - valueWidth);
-    const std::string title = renderer.truncatedText(UI_10_FONT_ID, rowTitle(index).c_str(), textWidth);
-    const int titleY = rowY + (rowSubtitle ? 12 : (kRowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2);
-    renderer.drawText(UI_10_FONT_ID, textX, titleY, title.c_str(), !selected);
+    const std::string title = renderer.truncatedText(titleFont, rowTitle(index).c_str(), textWidth, titleStyle);
+    const int titleY = rowY + (rowSubtitle ? 12 : (kRowHeight - renderer.getLineHeight(titleFont)) / 2);
+    renderer.drawText(titleFont, textX, titleY, title.c_str(), !selected, titleStyle);
 
     if (rowSubtitle) {
       const std::string subtitle = renderer.truncatedText(SMALL_FONT_ID, rowSubtitle(index).c_str(), textWidth);

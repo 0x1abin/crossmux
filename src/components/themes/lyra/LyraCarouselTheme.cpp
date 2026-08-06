@@ -179,7 +179,8 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
                                  const std::function<std::string(int index)>& rowSubtitle,
                                  const std::function<UIIcon(int index)>& rowIcon,
                                  const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                                 const std::function<bool(int index)>& rowDimmed, const bool showSelection) const {
+                                 const std::function<bool(int index)>& rowDimmed, const bool showSelection,
+                                 const std::function<bool(int index)>&) const {
   drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
                       highlightValue, rowDimmed, LyraCarouselMetrics::values, true, showSelection);
 }

@@ -253,7 +253,8 @@ class BaseTheme {
                         const std::function<std::string(int index)>& rowSubtitle = nullptr,
                         const std::function<UIIcon(int index)>& rowIcon = nullptr,
                         const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
-                        const std::function<bool(int index)>& rowDimmed = nullptr, bool showSelection = true) const;
+                        const std::function<bool(int index)>& rowDimmed = nullptr, bool showSelection = true,
+                        const std::function<bool(int index)>& rowHeading = nullptr) const;
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
                           const char* subtitle = nullptr) const;
   virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;

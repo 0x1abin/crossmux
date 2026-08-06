@@ -40,7 +40,7 @@ class InxTheme final : public LyraTheme {
                 const std::function<std::string(int index)>& rowSubtitle,
                 const std::function<UIIcon(int index)>& rowIcon, const std::function<std::string(int index)>& rowValue,
                 bool highlightValue, const std::function<bool(int index)>& rowDimmed = nullptr,
-                bool showSelection = true) const override;
+                bool showSelection = true, const std::function<bool(int index)>& rowHeading = nullptr) const override;
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon, int rowSpacing = -1) const override;
