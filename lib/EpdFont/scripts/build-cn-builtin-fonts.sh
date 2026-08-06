@@ -3,10 +3,10 @@
 # Generates the per-size CJK font headers used by the ENABLE_CHINESE_VERSION
 # build. Coverage tiers per point size:
 #
-#   8/10/12/14pt (COMMON, UI + reader) : 3500 常用字 ∪ i18n
-#                                         (cn_common_chars.txt)
-#   16/18pt   (I18N, reader LARGE/EXTRA_LARGE) : ~650 i18n-only chars
-#                                                (cn_i18n_chars.txt)
+#   8/10/12pt (COMMON, UI + reader SMALL) : 3500 常用字 ∪ i18n
+#                                            (cn_common_chars.txt)
+#   14/16/18pt (I18N, reader MEDIUM/LARGE/EXTRA_LARGE) : UI-only chars
+#                                                          (cn_i18n_chars.txt)
 #
 # Every tier also ships ASCII + Latin-1 + CJK punctuation + full-width forms.
 #
@@ -45,18 +45,18 @@ CHARSET_FILE="cn_common_chars.txt"
 REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt)
 TMP_DIR="instanced_fonts/NotoSansSC"
 SUBSET_OTF="$TMP_DIR/NotoSansSC-Regular.cncommon.otf"
-# Tiny OTF holding only the CJK chars that appear in i18n YAML files (~650
-# chars). Used to build the 16pt/18pt bitmap headers — those reader sizes are
-# meant for English EPUB, so we don't ship full GB2312 there, but UI strings
-# (game win banners etc.) still need to render at 16pt.
+# Tiny OTF holding only the CJK chars that appear in i18n/feature sources (747
+# chars). Used to build the 14pt/16pt/18pt bitmap headers — those reader sizes
+# rely on an SD-card font for broad Chinese EPUB coverage, but UI strings (game
+# win banners etc.) still need to render at every size.
 I18N_OTF="$TMP_DIR/NotoSansSC-Regular.i18nonly.otf"
 I18N_CHARSET_FILE="cn_i18n_chars.txt"
 
 # Font sizes split by character coverage:
 #   COMMON → cn_common_chars.txt subset (3500 common chars + required)
-#   I18N  → i18n-only subset (reader LARGE/EXTRA_LARGE + UI text fallback)
-CN_FONT_SIZES_SMALL=(8 10 12 14)
-CN_FONT_SIZES_I18N=(16 18)
+#   I18N  → i18n-only subset (reader MEDIUM/LARGE/EXTRA_LARGE + UI text)
+CN_FONT_SIZES_SMALL=(8 10 12)
+CN_FONT_SIZES_I18N=(14 16 18)
 
 if [ ! -f "$SOURCE_OTF" ]; then
   echo "Error: $SOURCE_OTF not found." >&2
@@ -85,10 +85,10 @@ fi
 mkdir -p "$TMP_DIR"
 
 # Note on charset files:
-#   - $CHARSET_FILE (cn_common_chars.txt): full subset for 8/10/12/14pt.
+#   - $CHARSET_FILE (cn_common_chars.txt): full subset for 8/10/12pt.
 #     Produced by build_cn_charset.py (Step 0 above) — pool ∪ required.
 #   - $I18N_CHARSET_FILE (cn_i18n_chars.txt): require-from only, for the
-#     tiny 16pt/18pt subset. Also produced by build_cn_charset.py as a side
+#     tiny 14pt/16pt/18pt subset. Also produced by build_cn_charset.py as a side
 #     output whenever --require-from is passed.
 if [ ! -f "$I18N_CHARSET_FILE" ]; then
   echo "Error: $I18N_CHARSET_FILE not found in $(pwd)." >&2
@@ -98,7 +98,7 @@ if [ ! -f "$I18N_CHARSET_FILE" ]; then
 fi
 
 # Step 1a: subset the OTF down to cn_common_chars (3500 ∪ required) + ASCII +
-# Latin-1 + CJK punctuation. Used by the 8/10/12/14pt bitmap headers.
+# Latin-1 + CJK punctuation. Used by the 8/10/12pt bitmap headers.
 echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$SUBSET_OTF") (common)..."
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$SUBSET_OTF" \
@@ -111,7 +111,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$SUBSET_OTF") (common
   --drop-tables+=DSIG,GSUB,GPOS
 
 # Step 1b: subset down to i18n-only CJK + ASCII + Latin-1 + CJK punctuation.
-# Used by the 16pt/18pt bitmap headers.
+# Used by the 14pt/16pt/18pt bitmap headers.
 echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)..."
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$I18N_OTF" \
@@ -126,7 +126,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)...
 # Step 2: emit one 2-bit raw bitmap header per requested point size.
 # (See file header for the rationale behind skipping --compress.)
 # fontconvert.py auto-skips code points missing from the source OTF, so passing
-# the broad CJK interval is fine — the i18n OTF will only emit ~650 glyphs.
+# the broad CJK interval is fine — the i18n OTF will only emit 747 CJK glyphs.
 emit_size() {
   local size="$1"
   local otf="$2"

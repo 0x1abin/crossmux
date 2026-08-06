@@ -536,7 +536,7 @@ void TextSettingsActivity::completeExit() {
 #ifdef ENABLE_CHINESE_VERSION
 void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   if (FontDownloadActivity::wasChineseFontPromptShownThisBoot() || SETTINGS.sdFontFamilyName[0] != '\0' ||
-      SETTINGS.fontPointSize < 16) {  // Legacy LARGE threshold.
+      SETTINGS.fontPointSize < 14) {  // 14/16/18pt built-ins contain only UI glyphs.
     return;
   }
 

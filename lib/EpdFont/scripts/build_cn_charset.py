@@ -55,7 +55,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SOURCE_FILE = SCRIPT_DIR / "chars_3500_common.txt"
 OUTPUT_FILE = SCRIPT_DIR / "cn_common_chars.txt"
 # Bonus output: just the --require-from CJK chars, single-line UTF-8. Used by
-# build-cn-builtin-fonts.sh to build the tiny 16pt/18pt i18n-only subset OTF.
+# build-cn-builtin-fonts.sh to build the tiny 14pt/16pt/18pt i18n-only subset OTF.
 # Only written when at least one --require-from file is provided.
 I18N_OUTPUT_FILE = SCRIPT_DIR / "cn_i18n_chars.txt"
 
