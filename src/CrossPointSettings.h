@@ -5,6 +5,9 @@
 
 #include <cstdint>
 
+#include "InxItemLayout.h"
+#include "InxRecentLayout.h"
+
 // I18nKeys.h is intentionally NOT included here. It is auto-generated and
 // changes on every translation edit; pulling it into this widely-included
 // settings header would force the entire project to recompile on i18n
@@ -182,7 +185,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, LYRA_CAROUSEL = 4 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, LYRA_CAROUSEL = 4, INX = 5 };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -294,6 +297,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // UI Theme
   uint8_t uiTheme = LYRA;
+  uint8_t inxRecentLayout = static_cast<uint8_t>(InxRecentLayout::Flow);
+  uint8_t inxLibraryLayout = static_cast<uint8_t>(InxItemLayout::Icons);
+  uint8_t inxAppsLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   // Show and enable the Standby shortcut on the home screen.
   uint8_t standbyShortcutEnabled = 1;
   // Sunlight fading compensation

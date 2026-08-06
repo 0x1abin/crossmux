@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "activities/MainTab.h"
 #include "fontIds.h"
 
 class GfxRenderer;
@@ -132,6 +133,12 @@ enum UIIcon {
   Game2048,
   Buddy,
   PixelSwitch,
+  Opds,
+  ReadingStats,
+  AirPage,
+  ReadingHeatmap,
+  ReadingProfile,
+  Achievements,
 };
 
 // Default theme implementation (Classic Theme)
@@ -238,6 +245,7 @@ class BaseTheme {
                         const std::function<bool(int index)>& rowDimmed = nullptr) const;
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
                           const char* subtitle = nullptr) const;
+  virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
   virtual void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,

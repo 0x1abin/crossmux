@@ -88,7 +88,14 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return TransferIcon;
       case UIIcon::Library:
         return LibraryIcon;
+      case UIIcon::Opds:
+      case UIIcon::ReadingStats:
+      case UIIcon::ReadingHeatmap:
+      case UIIcon::ReadingProfile:
+      case UIIcon::Achievements:
+        return LibraryIcon;
       case UIIcon::Wifi:
+      case UIIcon::AirPage:
         return WifiIcon;
       case UIIcon::Hotspot:
         return HotspotIcon;

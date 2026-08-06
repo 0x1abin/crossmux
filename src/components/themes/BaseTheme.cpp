@@ -414,6 +414,8 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   }
 }
 
+void BaseTheme::drawMainTabBar(const GfxRenderer&, Rect, MainTab) const {}
+
 void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {
   constexpr int maxListValueWidth = 200;
 

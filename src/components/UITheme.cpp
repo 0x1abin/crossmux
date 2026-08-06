@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <memory>
@@ -11,6 +12,7 @@
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/themes/BaseTheme.h"
+#include "components/themes/inx/InxTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
@@ -29,37 +31,56 @@ void UITheme::reload() {
 }
 
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
+  std::unique_ptr<BaseTheme> nextTheme;
+  const ThemeMetrics* nextMetrics = &BaseMetrics::values;
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
       LOG_DBG("UI", "Using Classic theme");
-      currentTheme = std::make_unique<BaseTheme>();
-      currentMetrics = &BaseMetrics::values;
+      nextTheme = makeUniqueNoThrow<BaseTheme>();
       break;
     case CrossPointSettings::UI_THEME::LYRA:
       LOG_DBG("UI", "Using Lyra theme");
-      currentTheme = std::make_unique<LyraTheme>();
-      currentMetrics = &LyraMetrics::values;
+      nextTheme = makeUniqueNoThrow<LyraTheme>();
+      nextMetrics = &LyraMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::ROUNDEDRAFF:
       LOG_DBG("UI", "Using RoundedRaff theme");
-      currentTheme = std::make_unique<RoundedRaffTheme>();
-      currentMetrics = &RoundedRaffMetrics::values;
+      nextTheme = makeUniqueNoThrow<RoundedRaffTheme>();
+      nextMetrics = &RoundedRaffMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA_3_COVERS:
       LOG_DBG("UI", "Using Lyra 3 Covers theme");
-      currentTheme = std::make_unique<Lyra3CoversTheme>();
-      currentMetrics = &Lyra3CoversMetrics::values;
+      nextTheme = makeUniqueNoThrow<Lyra3CoversTheme>();
+      nextMetrics = &Lyra3CoversMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA_CAROUSEL:
       LOG_DBG("UI", "Using Lyra Carousel theme");
-      currentTheme = std::make_unique<LyraCarouselTheme>();
-      currentMetrics = &LyraCarouselMetrics::values;
+      nextTheme = makeUniqueNoThrow<LyraCarouselTheme>();
+      nextMetrics = &LyraCarouselMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::INX:
+      LOG_DBG("UI", "Using INX theme");
+      nextTheme = makeUniqueNoThrow<InxTheme>();
+      nextMetrics = &InxMetrics::values;
       break;
     default:
       LOG_ERR("UI", "Unknown theme %d, falling back to Classic", static_cast<int>(type));
-      currentTheme = std::make_unique<BaseTheme>();
-      currentMetrics = &BaseMetrics::values;
+      nextTheme = makeUniqueNoThrow<BaseTheme>();
+      type = CrossPointSettings::UI_THEME::CLASSIC;
       break;
+  }
+
+  if (!nextTheme) {
+    LOG_ERR("UI", "OOM creating theme %d; using static Classic fallback", static_cast<int>(type));
+    ownedTheme.reset();
+    currentTheme = &fallbackTheme;
+    currentMetrics = &BaseMetrics::values;
+    currentType = CrossPointSettings::UI_THEME::CLASSIC;
+  } else {
+    ownedTheme = std::move(nextTheme);
+    currentTheme = ownedTheme.get();
+    currentMetrics = nextMetrics;
+    currentType = type;
   }
   metricsValid = false;
 }
