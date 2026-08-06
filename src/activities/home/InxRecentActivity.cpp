@@ -25,6 +25,7 @@ constexpr int kPagePadding = 18;
 constexpr int kProgressHeight = 6;
 constexpr int kHomeBatteryWidth = 15;
 constexpr int kHomeBatteryHeight = 12;
+constexpr int kHomeBatteryRightMargin = 12;
 
 Rect contentRect(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -444,7 +445,7 @@ void InxRecentActivity::render(RenderLock&&) {
                                           books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   GUI.drawBatteryRight(renderer,
-                       Rect{renderer.getScreenWidth() - kPagePadding - kHomeBatteryWidth,
+                       Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth,
                             renderer.getScreenHeight() - 30, kHomeBatteryWidth, kHomeBatteryHeight},
                        SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   renderer.displayBuffer();

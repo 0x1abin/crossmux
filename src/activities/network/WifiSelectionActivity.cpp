@@ -823,11 +823,11 @@ void WifiSelectionActivity::render(RenderLock&&) {
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
   GUI.drawHeader(renderer,
                  Rect{layout.safe.x, layout.safe.y + metrics.topPadding, layout.safe.width, metrics.headerHeight},
-                 tr(STR_WIFI_NETWORKS), countStr);
+                 tr(STR_WIFI_NETWORKS));
   GUI.drawSubHeader(renderer,
                     Rect{layout.safe.x, layout.safe.y + metrics.topPadding + metrics.headerHeight, layout.safe.width,
                          metrics.tabBarHeight},
-                    cachedMacAddress.c_str());
+                    cachedMacAddress.c_str(), countStr);
 
   switch (state) {
     case WifiSelectionState::AUTO_CONNECTING:
