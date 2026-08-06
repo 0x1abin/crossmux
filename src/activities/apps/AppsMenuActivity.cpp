@@ -11,6 +11,7 @@
 #include "../../util/PaginationDots.h"
 #include "CrossPointSettings.h"
 #include "InxItemLayout.h"
+#include "OpdsServerStore.h"
 #include "fontIds.h"
 
 namespace {
@@ -89,6 +90,10 @@ constexpr int appIndexForVisibleIndex(const uint16_t hiddenMask, const int visib
   return -1;
 }
 
+constexpr uint16_t effectiveHiddenMask(const uint16_t hiddenMask, const bool hasOpdsServers) {
+  return hasOpdsServers ? hiddenMask : hiddenMask | appBit(AppId::OpdsBrowser);
+}
+
 constexpr bool appIdsAreUnique() {
   for (int i = 0; i < kAppCount; ++i) {
     for (int j = i + 1; j < kAppCount; ++j) {
@@ -125,6 +130,8 @@ static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
               "the default mask must hide Chinese chess, Minesweeper, 2048, Standby, Buddy, and Pixel Switch");
 static_assert(visibleAppCount(0) == kAppCount, "a zero mask must show every compiled app");
 static_assert(visibleAppCount(UINT16_MAX) == 0, "a full mask must hide every compiled app");
+static_assert(visibleAppCount(effectiveHiddenMask(0, false)) == kAppCount - 1,
+              "OPDS must be hidden when no server is configured");
 static_assert(appIndexForVisibleIndex(appBit(kAppEntries[1].id), 1) == 2,
               "visible indices must skip a hidden middle app");
 
@@ -152,14 +159,16 @@ bool AppsMenuActivity::setAppVisible(const int appIndex, const bool visible) {
   return true;
 }
 
-int AppsMenuActivity::getVisibleAppCount() { return visibleAppCount(SETTINGS.hiddenAppsMask); }
+int AppsMenuActivity::getVisibleAppCount() {
+  return visibleAppCount(effectiveHiddenMask(SETTINGS.hiddenAppsMask, OPDS_STORE.hasServers()));
+}
 
 void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
   selected = MainTabs::contentEdgeIndex(edge, getVisibleAppCount());
 }
 
 int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
-  return appIndexForVisibleIndex(SETTINGS.hiddenAppsMask, visibleIndex);
+  return appIndexForVisibleIndex(effectiveHiddenMask(SETTINGS.hiddenAppsMask, OPDS_STORE.hasServers()), visibleIndex);
 }
 
 void AppsMenuActivity::onEnter() {
