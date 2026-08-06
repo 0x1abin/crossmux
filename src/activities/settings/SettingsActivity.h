@@ -1,6 +1,7 @@
 #pragma once
 #include <I18n.h>
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -165,6 +166,8 @@ class SettingsActivity final : public Activity {
   int selectedCategoryIndex = 0;  // Currently selected category
   int selectedSettingIndex = 0;
   int settingsCount = 0;
+  int accordionSelectedIndex = 0;
+  uint8_t expandedCategories = 0;
 
   // Per-category settings derived from shared list + device-only actions
   std::vector<SettingInfo> displaySettings;
@@ -183,6 +186,14 @@ class SettingsActivity final : public Activity {
 
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
+  void toggleAccordionSetting(int categoryIndex, int settingIndex);
+  void toggleAccordionCategory(int categoryIndex);
+  void loopAccordion();
+  void renderAccordion();
+  bool usesAccordion() const;
+  const std::vector<SettingInfo>& settingsForCategory(int categoryIndex) const;
+  std::array<int, categoryCount> accordionSettingCounts() const;
+  std::string settingValueText(const SettingInfo& setting) const;
   void openSleepTimeoutPicker();
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
@@ -194,4 +205,5 @@ class SettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  MainTab mainTab() const override { return MainTab::Settings; }
 };
