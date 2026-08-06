@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "AppMetricCard.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
@@ -210,17 +211,14 @@ void AchievementsActivity::render(RenderLock&&) {
       const auto& entry = achievements[visibleIndexes[visibleIndex]];
       const bool selected = visibleIndex == selectedIndex;
       const Rect rowRect{sidePadding, currentY, rowWidth, ROW_BOX_HEIGHT};
-      if (selected) {
-        renderer.fillRectDither(rowRect.x, rowRect.y, rowRect.width, rowRect.height, Color::LightGray);
-        renderer.drawRect(rowRect.x, rowRect.y, rowRect.width, rowRect.height);
-      }
+      const bool foregroundBlack = AppMetricCard::drawListRow(renderer, rowRect, selected);
 
       const int iconX = rowRect.x + 10;
       const int iconY = rowRect.y + (rowRect.height - ICON_BOX_SIZE) / 2;
       if (entry.state.unlocked) {
-        drawTrophyIcon(renderer, iconX, iconY, true);
+        drawTrophyIcon(renderer, iconX, iconY, foregroundBlack);
       } else {
-        drawLockIcon(renderer, iconX, iconY, true);
+        drawLockIcon(renderer, iconX, iconY, foregroundBlack);
       }
 
       const std::string title = ACHIEVEMENTS.getTitle(entry.definition->id);
@@ -236,17 +234,19 @@ void AchievementsActivity::render(RenderLock&&) {
           renderer.truncatedText(SMALL_FONT_ID, description.c_str(), textWidth, EpdFontFamily::REGULAR);
 
       const int titleTop = rowRect.y + 8;
-      renderer.drawText(UI_10_FONT_ID, textX, titleTop, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, textX, titleTop, truncatedTitle.c_str(), foregroundBlack, EpdFontFamily::BOLD);
       // Description sits one title-line below the title so the two never touch, derived
       // from the font metric instead of a hand-tuned offset.
       const int descriptionTop = titleTop + renderer.getLineHeight(UI_10_FONT_ID);
-      renderer.drawText(SMALL_FONT_ID, textX, descriptionTop, truncatedDescription.c_str(), true,
+      renderer.drawText(SMALL_FONT_ID, textX, descriptionTop, truncatedDescription.c_str(), foregroundBlack,
                         EpdFontFamily::REGULAR);
       renderer.drawText(UI_10_FONT_ID, rowRect.x + rowRect.width - progressWidth - 10, rowRect.y + 18, progress.c_str(),
-                        true, EpdFontFamily::REGULAR);
+                        foregroundBlack, EpdFontFamily::REGULAR);
 
       currentY += ROW_STEP;
     }
+    AppMetricCard::drawListScrollBar(renderer, Rect{0, contentTop, pageWidth, viewportHeight},
+                                     static_cast<int>(visibleIndexes.size()), firstVisibleIndex, maxVisibleRows);
   }
 
   const std::string nextTabLabel = tabLabel(selectedTab == FilterTab::Pending);

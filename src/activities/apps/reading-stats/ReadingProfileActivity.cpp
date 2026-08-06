@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "AppMetricCard.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -175,8 +176,7 @@ std::vector<std::string> getMetricCardLabelLines(const GfxRenderer& renderer, co
 
 void drawCompactMetricCard(const GfxRenderer& renderer, const Rect& rect, const std::string& value,
                            const std::vector<std::string>& labelLines) {
-  renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
-  renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
+  AppMetricCard::drawSelectablePanel(renderer, rect, false, false, true);
 
   const int valueFontId = renderer.getTextWidth(UI_12_FONT_ID, value.c_str(), EpdFontFamily::BOLD) <= rect.width - 20
                               ? UI_12_FONT_ID
@@ -635,8 +635,7 @@ void ReadingProfileActivity::render(RenderLock&&) {
     const int scoreCardHeight = metricCardHeight(renderer, 1, SCORE_VALUE_LABEL_GAP);
     if (intersectsVertical(scoreTop, scoreCardHeight, viewportTop, viewportBottom)) {
       const Rect scoreRect{sidePadding, scoreTop, pageWidth - sidePadding * 2, scoreCardHeight};
-      renderer.fillRectDither(scoreRect.x, scoreRect.y, scoreRect.width, scoreRect.height, Color::LightGray);
-      renderer.drawRect(scoreRect.x, scoreRect.y, scoreRect.width, scoreRect.height);
+      AppMetricCard::drawSelectablePanel(renderer, scoreRect, false, false, true);
       const std::string totalScoreLabel = std::to_string(profileSummary.totalScore);
       const int totalScoreWidth = renderer.getTextWidth(UI_12_FONT_ID, totalScoreLabel.c_str(), EpdFontFamily::BOLD);
       const int scoreValueY = scoreRect.y + CARD_TOP_PAD;

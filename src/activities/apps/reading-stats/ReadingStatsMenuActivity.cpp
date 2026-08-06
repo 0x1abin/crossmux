@@ -8,6 +8,7 @@
 #include "../../../CrossPointSettings.h"
 #include "../../../components/UITheme.h"
 #include "AchievementsActivity.h"
+#include "AppMetricCard.h"
 #include "ReadingHeatmapActivity.h"
 #include "ReadingProfileActivity.h"
 #include "ReadingStatsActivity.h"
@@ -21,13 +22,14 @@ enum class StatsScreen { Stats, Heatmap, Profile, Achievements };
 struct MenuEntry {
   StrId titleId;
   StatsScreen screen;
+  UIIcon icon;
 };
 
 constexpr MenuEntry kEntries[] = {
-    {StrId::STR_READING_STATS, StatsScreen::Stats},
-    {StrId::STR_READING_HEATMAP, StatsScreen::Heatmap},
-    {StrId::STR_READING_PROFILE, StatsScreen::Profile},
-    {StrId::STR_ACHIEVEMENTS, StatsScreen::Achievements},
+    {StrId::STR_READING_STATS, StatsScreen::Stats, UIIcon::ReadingStats},
+    {StrId::STR_READING_HEATMAP, StatsScreen::Heatmap, UIIcon::ReadingHeatmap},
+    {StrId::STR_READING_PROFILE, StatsScreen::Profile, UIIcon::ReadingProfile},
+    {StrId::STR_ACHIEVEMENTS, StatsScreen::Achievements, UIIcon::Achievements},
 };
 
 constexpr int kEntryCount = static_cast<int>(sizeof(kEntries) / sizeof(kEntries[0]));
@@ -100,10 +102,10 @@ void ReadingStatsMenuActivity::render(RenderLock&&) {
   const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
-  // No row icons in this sub-menu — pass nullptr so the theme renders text-only rows.
   GUI.drawButtonMenu(
       renderer, Rect{0, listY, sw, listH}, activeEntryCount(), selected,
-      [](int i) { return std::string(I18n::getInstance().get(kEntries[i].titleId)); }, nullptr);
+      [](int i) { return std::string(I18n::getInstance().get(kEntries[i].titleId)); },
+      [](int i) { return AppMetricCard::menuIcon(kEntries[i].icon); });
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
