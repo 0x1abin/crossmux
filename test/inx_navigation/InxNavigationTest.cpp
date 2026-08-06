@@ -4,7 +4,23 @@
 #include "InxRecentLayout.h"
 #include "activities/MainTab.h"
 #include "components/SubpageLayout.h"
+#include "components/icons/inx_apps.h"
 #include "components/themes/BaseTheme.h"
+
+namespace {
+constexpr uint32_t iconHash(const InxAppIcons::Icon& icon) {
+  uint32_t hash = 2166136261u;
+  for (const uint8_t byte : icon) hash = (hash ^ byte) * 16777619u;
+  return hash;
+}
+
+constexpr bool isSolid(const InxAppIcons::Icon& icon, const uint8_t value) {
+  for (const uint8_t byte : icon) {
+    if (byte != value) return false;
+  }
+  return true;
+}
+}  // namespace
 
 TEST(InxNavigation, WrapsAcrossFiveTabs) {
   EXPECT_EQ(MainTabs::adjacent(MainTab::Recent, -1), MainTab::Statistics);
@@ -117,6 +133,42 @@ TEST(InxNavigation, PaginatesButtonMenusAndKeepsIconIdsStable) {
   EXPECT_EQ(static_cast<int>(UIIcon::ReadingHeatmap), static_cast<int>(UIIcon::AirPage) + 1);
   EXPECT_EQ(static_cast<int>(UIIcon::ReadingProfile), static_cast<int>(UIIcon::ReadingHeatmap) + 1);
   EXPECT_EQ(static_cast<int>(UIIcon::Achievements), static_cast<int>(UIIcon::ReadingProfile) + 1);
+}
+
+TEST(InxNavigation, KeepsAppIconAssetsValidAndDistinct) {
+  constexpr std::array<const InxAppIcons::Icon*, 15> icons = {
+      &InxAppIcons::Transfer,    &InxAppIcons::Opds,        &InxAppIcons::WeRead,  &InxAppIcons::ReadingStats,
+      &InxAppIcons::Sudoku,      &InxAppIcons::Gomoku,      &InxAppIcons::Sokoban, &InxAppIcons::ChineseChess,
+      &InxAppIcons::Minesweeper, &InxAppIcons::Game2048,    &InxAppIcons::Avatar,  &InxAppIcons::AirPage,
+      &InxAppIcons::Buddy,       &InxAppIcons::PixelSwitch, &InxAppIcons::Standby,
+  };
+
+  for (size_t index = 0; index < icons.size(); ++index) {
+    EXPECT_EQ(icons[index]->size(), static_cast<size_t>(InxAppIcons::bytes));
+    EXPECT_FALSE(isSolid(*icons[index], 0xff));
+    EXPECT_FALSE(isSolid(*icons[index], 0x00));
+    for (size_t other = index + 1; other < icons.size(); ++other) {
+      EXPECT_NE(iconHash(*icons[index]), iconHash(*icons[other]));
+    }
+  }
+
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Transfer), InxAppIcons::Transfer.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Opds), InxAppIcons::Opds.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::ReadingStats), InxAppIcons::ReadingStats.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Sudoku), InxAppIcons::Sudoku.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Gomoku), InxAppIcons::Gomoku.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Sokoban), InxAppIcons::Sokoban.data());
+#ifdef ENABLE_CHINESE_VERSION
+  EXPECT_EQ(InxAppIcons::get(UIIcon::ChineseChess), InxAppIcons::ChineseChess.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::WeRead), InxAppIcons::WeRead.data());
+#endif
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Minesweeper), InxAppIcons::Minesweeper.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Avatar), InxAppIcons::Avatar.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Standby), InxAppIcons::Standby.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Game2048), InxAppIcons::Game2048.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Buddy), InxAppIcons::Buddy.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::PixelSwitch), InxAppIcons::PixelSwitch.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::AirPage), InxAppIcons::AirPage.data());
 }
 
 TEST(InxNavigation, KeepsSubpageContentInsideChrome) {
