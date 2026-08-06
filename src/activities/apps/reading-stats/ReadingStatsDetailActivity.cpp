@@ -22,6 +22,7 @@
 #include "components/UITheme.h"
 #include "components/icons/settings2.h"
 #include "fontIds.h"
+#include "util/BookCoverLoader.h"
 #include "util/HeaderDateUtils.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
@@ -136,65 +137,14 @@ std::string ensureCoverPath(const ReadingBookStats& book) {
     return resolved;
   }
 
-  if (!Storage.exists(book.path.c_str())) {
-    return "";
-  }
+  std::string title;
+  std::string author;
+  const std::string coverPath = BookCoverLoader::ensureFullCover(book.path, &title, &author);
+  if (coverPath.empty()) return "";
 
-  if (FsHelpers::hasEpubExtension(book.path)) {
-    Epub epub(book.path, "/.crosspoint");
-    if (!epub.load(true, true)) {
-      return "";
-    }
-    epub.setupCacheDir();
-    const std::string coverPath = epub.getCoverBmpPath();
-    if (!Storage.exists(coverPath.c_str()) && !epub.generateCoverBmp()) {
-      return "";
-    }
-    if (!Storage.exists(coverPath.c_str())) {
-      return "";
-    }
-    READING_STATS.updateBookMetadata(book.path, epub.getTitle(), epub.getAuthor(), coverPath);
-    rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
-    return coverPath;
-  }
-
-  if (FsHelpers::hasXtcExtension(book.path)) {
-    Xtc xtc(book.path, "/.crosspoint");
-    if (!xtc.load()) {
-      return "";
-    }
-    xtc.setupCacheDir();
-    const std::string coverPath = xtc.getCoverBmpPath();
-    if (!Storage.exists(coverPath.c_str()) && !xtc.generateCoverBmp()) {
-      return "";
-    }
-    if (!Storage.exists(coverPath.c_str())) {
-      return "";
-    }
-    READING_STATS.updateBookMetadata(book.path, xtc.getTitle(), xtc.getAuthor(), coverPath);
-    rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
-    return coverPath;
-  }
-
-  if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-    Txt txt(book.path, "/.crosspoint");
-    if (!txt.load()) {
-      return "";
-    }
-    txt.setupCacheDir();
-    const std::string coverPath = txt.getCoverBmpPath();
-    if (!Storage.exists(coverPath.c_str()) && !txt.generateCoverBmp()) {
-      return "";
-    }
-    if (!Storage.exists(coverPath.c_str())) {
-      return "";
-    }
-    READING_STATS.updateBookMetadata(book.path, txt.getTitle(), "", coverPath);
-    rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
-    return coverPath;
-  }
-
-  return "";
+  READING_STATS.updateBookMetadata(book.path, title, author, coverPath);
+  rememberResolvedCoverPath(withCoverPath(book, coverPath), coverPath);
+  return coverPath;
 }
 
 std::string findFastCoverPath(const ReadingBookStats& book) {

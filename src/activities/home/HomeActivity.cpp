@@ -21,6 +21,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookCoverLoader.h"
 
 namespace {
 struct HomeMenuEntry {
@@ -178,42 +179,14 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       }
     }
 
-    if (isEpub) {
-      Epub epub(book.path, "/.crosspoint");
-      // Skip loading css since we only need metadata here.
-      if (!epub.load(false, true)) {
-        LOG_ERR("HOME", "Failed to load EPUB metadata for thumbnail: %s", book.path.c_str());
-        continue;
-      }
-
-      if (!showingLoading) {
-        showingLoading = true;
-        popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-      }
-      GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
-      if (useFullCover) {
-        epub.generateCoverBmp();
-      } else {
-        // Epub writes an empty thumbnail as a persistent "no supported cover" marker.
-        epub.generateThumbBmp(coverHeight);
-      }
-    } else if (isXtc) {
-      Xtc xtc(book.path, "/.crosspoint");
-      if (!xtc.load()) {
-        LOG_ERR("HOME", "Failed to load XTC for thumbnail: %s", book.path.c_str());
-        continue;
-      }
-
-      if (!showingLoading) {
-        showingLoading = true;
-        popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-      }
-      GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
-      const bool generated = useFullCover ? xtc.generateCoverBmp() : xtc.generateThumbBmp(coverHeight);
-      if (!generated) {
-        LOG_ERR("HOME", "Failed to generate XTC cover: %s", book.path.c_str());
-      }
+    if (!showingLoading) {
+      showingLoading = true;
+      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
     }
+    GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
+    const std::string generatedPath = useFullCover ? BookCoverLoader::ensureFullCover(book.path)
+                                                   : BookCoverLoader::ensureThumbnail(book.path, coverHeight);
+    if (generatedPath.empty() && isXtc) LOG_ERR("HOME", "Failed to generate XTC cover: %s", book.path.c_str());
   }
 
   recentsLoaded = true;
