@@ -296,7 +296,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Defaults to Disabled so shortcut-based bookmark toggling remains opt-in.
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // UI Theme
-  uint8_t uiTheme = LYRA;
+  uint8_t uiTheme = INX;
   uint8_t inxRecentLayout = static_cast<uint8_t>(InxRecentLayout::Flow);
   uint8_t inxLibraryLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   uint8_t inxAppsLayout = static_cast<uint8_t>(InxItemLayout::Icons);
