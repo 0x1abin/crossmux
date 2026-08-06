@@ -223,8 +223,8 @@ class BaseTheme {
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
-  void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total,
-                       bool showPercentage = true) const;
+  int drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total,
+                      bool showPercentage = true) const;
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect,
                        bool showPercentage = true) const;  // Left aligned (reader mode)
   void drawBatteryRight(const GfxRenderer& renderer, Rect rect,

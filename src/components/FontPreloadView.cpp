@@ -36,19 +36,17 @@ void draw(const GfxRenderer& renderer, const char* familyName, const uint8_t poi
   const size_t phaseCompleted = boundedCompleted > sourceSize ? std::min(boundedCompleted - sourceSize, sourceSize)
                                                               : std::min(boundedCompleted, sourceSize);
   const int barY = centerY + metrics.verticalSpacing;
-  GUI.drawProgressBar(
-      renderer,
-      Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-      boundedCompleted, total);
+  const int detailY = GUI.drawProgressBar(renderer,
+                                          Rect{metrics.contentSidePadding, barY,
+                                               pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+                                          boundedCompleted, total) +
+                      4;
 
   char byteLine[40];
   snprintf(byteLine, sizeof(byteLine), "%u / %u KiB", static_cast<unsigned>((phaseCompleted + 1023) / 1024),
            static_cast<unsigned>((sourceSize + 1023) / 1024));
-  int detailY = barY + metrics.progressBarHeight + metrics.verticalSpacing;
-  detailY += lineHeight + metrics.verticalSpacing;  // Progress bar draws its percentage in this row.
   renderer.drawCenteredText(UI_10_FONT_ID, detailY, byteLine);
-  detailY += lineHeight + metrics.verticalSpacing;
-  renderer.drawCenteredText(UI_10_FONT_ID, detailY, tr(STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF));
+  renderer.drawCenteredText(UI_10_FONT_ID, detailY + lineHeight + 4, tr(STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF));
 }
 
 }  // namespace fontpreload

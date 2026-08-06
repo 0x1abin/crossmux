@@ -134,10 +134,10 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   fillBatteryIcon(renderer, iconRect, percentage);
 }
 
-void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const size_t current, const size_t total,
-                                const bool showPercentage) const {
+int BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const size_t current, const size_t total,
+                               const bool showPercentage) const {
   if (total == 0) {
-    return;
+    return rect.y;
   }
 
   // Use 64-bit arithmetic to avoid overflow for large files
@@ -157,8 +157,11 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
     // Draw percentage text centered below bar without a temporary heap allocation.
     char percentText[16];
     snprintf(percentText, sizeof(percentText), "%d%%", percent);
-    renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + 15, percentText);
+    const int percentageY = rect.y + rect.height + 15;
+    renderer.drawCenteredText(UI_10_FONT_ID, percentageY, percentText);
+    return percentageY + renderer.getLineHeight(UI_10_FONT_ID);
   }
+  return rect.y + rect.height;
 }
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
