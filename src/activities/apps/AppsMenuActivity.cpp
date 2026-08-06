@@ -154,6 +154,10 @@ bool AppsMenuActivity::setAppVisible(const int appIndex, const bool visible) {
 
 int AppsMenuActivity::getVisibleAppCount() { return visibleAppCount(SETTINGS.hiddenAppsMask); }
 
+void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
+  selected = MainTabs::contentEdgeIndex(edge, getVisibleAppCount());
+}
+
 int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
   return appIndexForVisibleIndex(SETTINGS.hiddenAppsMask, visibleIndex);
 }
@@ -235,7 +239,7 @@ void AppsMenuActivity::loop() {
   }
 }
 
-void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount) const {
+void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, const bool showSelection) const {
   const int start = InxGridGeometry::pageStart(selected, visibleCount);
   const int cellWidth = rect.width / InxGridGeometry::columns;
   const int cellHeight = rect.height / InxGridGeometry::rows;
@@ -250,7 +254,7 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount) co
     const int column = slot % InxGridGeometry::columns;
     const int row = slot / InxGridGeometry::columns;
     const Rect cell{rect.x + column * cellWidth + 4, rect.y + row * cellHeight + 4, cellWidth - 8, cellHeight - 8};
-    const bool isSelected = visibleIndex == selected;
+    const bool isSelected = showSelection && visibleIndex == selected;
     if (isSelected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
 
     const int iconX = cell.x + (cell.width - iconSize) / 2;
@@ -277,11 +281,12 @@ void AppsMenuActivity::render(RenderLock&&) {
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const int visibleCount = getVisibleAppCount();
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
+  const bool showSelection = showMainTabContentSelection();
 
   if (visibleCount == 0) {
     UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
   } else if (usesIconLayout()) {
-    drawIconGrid(Rect{0, listY, sw, listH}, visibleCount);
+    drawIconGrid(Rect{0, listY, sw, listH}, visibleCount, showSelection);
   } else {
     // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
     const int spacing = metrics.menuSpacing / 2;
@@ -295,7 +300,7 @@ void AppsMenuActivity::render(RenderLock&&) {
 
     // ponytail: scan at most 16 entries instead of keeping a RAM-backed filtered list.
     GUI.drawButtonMenu(
-        renderer, Rect{0, listY, sw, listH}, pageCount, selected - pageStart,
+        renderer, Rect{0, listY, sw, listH}, pageCount, showSelection ? selected - pageStart : -1,
         [pageStart](int i) {
           const int appIndex = getAppIndexForVisibleIndex(i + pageStart);
           return appIndex >= 0 ? std::string(I18N.get(kAppEntries[appIndex].titleId)) : std::string();
@@ -316,9 +321,7 @@ void AppsMenuActivity::render(RenderLock&&) {
     }
   }
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), usesMainTabBar() ? tr(STR_DIR_LEFT) : tr(STR_DIR_UP),
-                            usesMainTabBar() ? tr(STR_DIR_RIGHT) : tr(STR_DIR_DOWN));
+  const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_SELECT), visibleCount > 1);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

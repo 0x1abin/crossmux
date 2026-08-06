@@ -295,9 +295,9 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                         const std::function<bool(int index)>& rowDimmed) const {
+                         const std::function<bool(int index)>& rowDimmed, const bool showSelection) const {
   drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
-                      highlightValue, rowDimmed, LyraMetrics::values, false);
+                      highlightValue, rowDimmed, LyraMetrics::values, false, showSelection);
 }
 
 void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
@@ -306,7 +306,7 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
                                     const std::function<UIIcon(int index)>& rowIcon,
                                     const std::function<std::string(int index)>& rowValue, bool highlightValue,
                                     const std::function<bool(int index)>& rowDimmed, const ThemeMetrics& metrics,
-                                    bool invertSelectedRows) const {
+                                    bool invertSelectedRows, const bool showSelection) const {
   if (itemCount <= 0) return;
 
   const int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
@@ -317,7 +317,7 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
   drawSideScrollBar(renderer, rect, itemCount, pageStartIndex, pageItems);
 
   int contentWidth = rect.width - (totalPages > 1 ? (metrics.scrollBarWidth + metrics.scrollBarRightOffset) : 1);
-  if (selectedIndex >= 0) {
+  if (showSelection && selectedIndex >= 0) {
     renderer.fillRoundedRect(rect.x + metrics.contentSidePadding, rect.y + selectedIndex % pageItems * rowHeight,
                              contentWidth - metrics.contentSidePadding * 2, rowHeight, cornerRadius,
                              invertSelectedRows ? Color::Black : Color::LightGray);
@@ -335,9 +335,9 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
   const int iconY = (rowSubtitle != nullptr) ? 16 : 10;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
-    const bool selected = i == selectedIndex;
+    const bool selected = showSelection && i == selectedIndex;
     const bool foregroundBlack = !(invertSelectedRows && selected);
-    const bool dimmed = rowDimmed && rowDimmed(i) && i != selectedIndex;
+    const bool dimmed = rowDimmed && rowDimmed(i) && !selected;
     int rowTextWidth = textWidth;
 
     int valueWidth = 0;

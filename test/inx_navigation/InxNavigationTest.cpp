@@ -32,6 +32,12 @@ TEST(InxNavigation, WrapsAcrossFiveTabs) {
   EXPECT_EQ(MainTabs::fromX(300, 500), MainTab::Settings);
   EXPECT_EQ(MainTabs::fromX(499, 500), MainTab::Statistics);
   EXPECT_EQ(MainTabs::fromX(500, 500), MainTab::None);
+  EXPECT_EQ(MainTabs::backTarget(MainTab::Apps), MainTab::Recent);
+  EXPECT_EQ(MainTabs::backTarget(MainTab::Recent), MainTab::None);
+  EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::First, 0), 0);
+  EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::First, 10), 0);
+  EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 1), 0);
+  EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 10), 9);
 }
 
 TEST(InxNavigation, KeepsRecentPagesInsideBounds) {

@@ -129,6 +129,10 @@ void drawBookText(const GfxRenderer& renderer, const RecentBook& book, const int
 }
 }  // namespace
 
+void InxRecentActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
+  selected = MainTabs::contentEdgeIndex(edge, books ? static_cast<int>(books->size()) : 0);
+}
+
 InxRecentLayout InxRecentActivity::layout() const {
   const auto value = static_cast<InxRecentLayout>(SETTINGS.inxRecentLayout);
   return value < InxRecentLayout::Count ? value : InxRecentLayout::Flow;
@@ -148,7 +152,6 @@ void InxRecentActivity::onEnter() {
     bookStats[i] = READING_STATS.findMatchingBookForPath(book.path, book.title, book.author);
   }
   selected = 0;
-  sawBackPress = false;
   firstRenderDone = false;
   waitingForCoverRender = false;
   nextCoverIndex = 0;
@@ -220,13 +223,6 @@ int InxRecentActivity::indexFromPoint(const int x, const int y) const {
 }
 
 void InxRecentActivity::loop() {
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) sawBackPress = true;
-  if (sawBackPress && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    sawBackPress = false;
-    if (SETTINGS.standbyShortcutEnabled) activityManager.goToStandby();
-    return;
-  }
-
   if (!books || books->empty()) return;
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -255,13 +251,13 @@ void InxRecentActivity::loop() {
 
   const int count = static_cast<int>(books->size());
   const auto swipe = mappedInput.wasSwipe();
-  if (mappedInput.wasReleased(MappedInputManager::Button::Down) || swipe == MappedInputManager::SwipeDir::Up ||
+  if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) || swipe == MappedInputManager::SwipeDir::Up ||
       swipe == MappedInputManager::SwipeDir::Left) {
     selected = (selected + 1) % count;
     requestUpdate();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Up) || swipe == MappedInputManager::SwipeDir::Down ||
+  if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) || swipe == MappedInputManager::SwipeDir::Down ||
       swipe == MappedInputManager::SwipeDir::Right) {
     selected = (selected + count - 1) % count;
     requestUpdate();
@@ -272,6 +268,7 @@ void InxRecentActivity::loop() {
 }
 
 void InxRecentActivity::drawFlow(const Rect& content) {
+  const bool showSelection = showMainTabContentSelection();
   const int count = static_cast<int>(books->size());
   const RecentBook& book = (*books)[selected];
   const int carouselHeight = std::max(1, content.height * 50 / 100);
@@ -294,7 +291,7 @@ void InxRecentActivity::drawFlow(const Rect& content) {
                   Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height}, thumbnailHeight);
   }
   drawBookCover(renderer, book, center, thumbnailHeight);
-  drawThickFrame(renderer, center);
+  if (showSelection) drawThickFrame(renderer, center);
 
   const int dividerY = carousel.y + carousel.height + 10;
   renderer.drawLine(content.x, dividerY, content.x + content.width - 1, dividerY, true);
@@ -328,6 +325,7 @@ void InxRecentActivity::drawFlow(const Rect& content) {
 }
 
 void InxRecentActivity::drawGrid(const Rect& content) {
+  const bool showSelection = showMainTabContentSelection();
   const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), layout());
   const int cellWidth = content.width / 2;
   const int cellHeight = content.height / 2;
@@ -337,11 +335,11 @@ void InxRecentActivity::drawGrid(const Rect& content) {
     const int row = slot / 2;
     const Rect cell{content.x + column * cellWidth + kGap / 2, content.y + row * cellHeight + kGap / 2,
                     cellWidth - kGap, cellHeight - kGap};
-    if (index == selected) drawSparseInk(renderer, cell);
+    if (showSelection && index == selected) drawSparseInk(renderer, cell);
     const Rect cover = fitCoverRect(Rect{cell.x + kGap, cell.y + kGap, cell.width - kGap * 2, cell.height - kGap * 2});
     if (slot == 0) thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
     drawBookCover(renderer, (*books)[index], cover, thumbnailHeight);
-    if (index == selected) drawThickFrame(renderer, cover);
+    if (showSelection && index == selected) drawThickFrame(renderer, cover);
     const int barWidth = std::max(24, cover.width - 30);
     const int barX = cover.x + (cover.width - barWidth) / 2;
     const int barY = cover.y + cover.height - 18;
@@ -351,12 +349,13 @@ void InxRecentActivity::drawGrid(const Rect& content) {
 }
 
 void InxRecentActivity::drawList(const Rect& content) {
+  const bool showSelection = showMainTabContentSelection();
   const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), layout());
   const int rowHeight = content.height / 5;
   for (int slot = 0; slot < 5 && start + slot < static_cast<int>(books->size()); ++slot) {
     const int index = start + slot;
     const Rect row{content.x, content.y + slot * rowHeight, content.width, rowHeight};
-    if (index == selected) drawSparseInk(renderer, row);
+    if (showSelection && index == selected) drawSparseInk(renderer, row);
     const Rect cover = fitCoverRect(Rect{row.x + kPagePadding, row.y + 5, 88, row.height - 10});
     if (slot == 0) thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
     drawBookCover(renderer, (*books)[index], cover, thumbnailHeight);
@@ -373,6 +372,7 @@ void InxRecentActivity::drawList(const Rect& content) {
 }
 
 void InxRecentActivity::drawIcons(const Rect& content) {
+  const bool showSelection = showMainTabContentSelection();
   const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), layout());
   const int cellWidth = content.width / 3;
   const int cellHeight = content.height / 3;
@@ -386,11 +386,13 @@ void InxRecentActivity::drawIcons(const Rect& content) {
     if (slot == 0) thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
     drawBookCover(renderer, (*books)[index], cover, thumbnailHeight);
     drawProgressBadge(renderer, cover, progressOf(statsAt(index)));
-    if (index == selected) drawThickFrame(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, cover.height + 4});
+    if (showSelection && index == selected)
+      drawThickFrame(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, cover.height + 4});
   }
 }
 
 void InxRecentActivity::drawCover(const Rect& content) {
+  const bool showSelection = showMainTabContentSelection();
   const RecentBook& book = (*books)[selected];
   constexpr int progressGap = 10;
   const int progressBlockHeight = progressGap + 8;
@@ -399,7 +401,7 @@ void InxRecentActivity::drawCover(const Rect& content) {
                                        std::max(1, content.height - progressBlockHeight - 12)});
   thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
   drawBookCover(renderer, book, cover, thumbnailHeight);
-  drawThickFrame(renderer, cover);
+  if (showSelection) drawThickFrame(renderer, cover);
   const int barWidth = std::max(24, cover.width * 80 / 100);
   drawMiniProgress(renderer,
                    Rect{cover.x + (cover.width - barWidth) / 2, cover.y + cover.height + progressGap, barWidth, 8},
@@ -438,8 +440,8 @@ void InxRecentActivity::render(RenderLock&&) {
     }
   }
 
-  const auto labels =
-      mappedInput.mapLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN), "", "");
+  const auto labels = mainTabButtonLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN),
+                                          books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   GUI.drawBatteryRight(renderer,
                        Rect{renderer.getScreenWidth() - kPagePadding - kHomeBatteryWidth,

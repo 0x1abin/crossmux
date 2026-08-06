@@ -306,7 +306,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                         const std::function<bool(int index)>& rowDimmed) const {
+                         const std::function<bool(int index)>& rowDimmed, const bool showSelection) const {
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rowHeight > 0 ? std::max(1, rect.height / rowHeight) : 1;
@@ -339,7 +339,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
   // Draw selection
   int contentWidth = rect.width - 5;
-  if (selectedIndex >= 0) {
+  if (showSelection && selectedIndex >= 0) {
     renderer.fillRect(rect.x, rect.y + selectedIndex % pageItems * rowHeight - 2, rect.width, rowHeight);
   }
   constexpr int minValueGap = 10;
@@ -348,7 +348,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
-    const bool dimmed = rowDimmed && rowDimmed(i) && i != selectedIndex;
+    const bool selected = showSelection && i == selectedIndex;
+    const bool dimmed = rowDimmed && rowDimmed(i) && !selected;
     int rowTextWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2;
     std::string valueText;
     if (rowValue != nullptr) {
@@ -365,7 +366,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     auto font = UI_10_FONT_ID;
     auto item = renderer.truncatedText(font, itemName.c_str(), rowTextWidth);
     const int titleX = rect.x + BaseMetrics::values.contentSidePadding;
-    renderer.drawText(font, titleX, itemY, item.c_str(), i != selectedIndex);
+    renderer.drawText(font, titleX, itemY, item.c_str(), !selected);
     if (dimmed) {
       drawDitherMask(renderer, titleX, itemY, renderer.getTextWidth(font, item.c_str()), renderer.getLineHeight(font));
     }
@@ -376,7 +377,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (!subtitleText.empty()) {
         auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
         renderer.drawText(SMALL_FONT_ID, rect.x + BaseMetrics::values.contentSidePadding, itemY + 22, subtitle.c_str(),
-                          i != selectedIndex);
+                          !selected);
       }
     }
 
@@ -384,7 +385,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       const auto valueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
       const int valueX = rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth;
       const int valueY = itemY + (subtitleText.empty() ? 0 : 10);
-      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), i != selectedIndex);
+      renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), !selected);
       if (dimmed) drawDitherMask(renderer, valueX, valueY, valueTextWidth, renderer.getLineHeight(UI_10_FONT_ID));
     }
   }

@@ -1,6 +1,8 @@
 #include "Activity.h"
 
 #include "ActivityManager.h"
+#include "CrossPointSettings.h"
+#include "I18n.h"
 #include "components/UITheme.h"
 
 void Activity::onEnter() { LOG_DBG("ACT", "Entering activity: %s", name.c_str()); }
@@ -8,6 +10,26 @@ void Activity::onEnter() { LOG_DBG("ACT", "Entering activity: %s", name.c_str())
 void Activity::onExit() { LOG_DBG("ACT", "Exiting activity: %s", name.c_str()); }
 
 bool Activity::usesMainTabBar() const { return UITheme::getInstance().hasMainTabs() && mainTab() != MainTab::None; }
+
+MappedInputManager::Labels Activity::mainTabButtonLabels(const char* back, const char* confirm, const bool canMove,
+                                                         const bool showTabDirections) const {
+  if (!usesMainTabBar()) {
+    return mappedInput.mapLabels(back, confirm, canMove ? tr(STR_DIR_UP) : "", canMove ? tr(STR_DIR_DOWN) : "");
+  }
+
+  if (activityManager.getMainTabFocus() == MainTabFocus::Tabs) {
+    const char* tabBack =
+        mainTab() == MainTab::Recent ? (SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "") : tr(STR_BACK);
+    return mappedInput.mapLabels(tabBack, tr(STR_SELECT), showTabDirections ? tr(STR_DIR_LEFT) : "",
+                                 showTabDirections ? tr(STR_DIR_RIGHT) : "");
+  }
+
+  return mappedInput.mapLabels(tr(STR_BACK), confirm, canMove ? tr(STR_DIR_UP) : "", canMove ? tr(STR_DIR_DOWN) : "");
+}
+
+bool Activity::showMainTabContentSelection() const {
+  return !usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content;
+}
 
 void Activity::drawPageHeader(const Rect& rect, const char* title, const char* subtitle) const {
   if (usesMainTabBar()) {

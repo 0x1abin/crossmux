@@ -20,6 +20,7 @@ class AppsMenuActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   MainTab mainTab() const override { return MainTab::Apps; }
+  void selectMainTabContentEdge(MainTabContentEdge edge) override;
 
   static int getAppCount();
   static StrId getAppTitleId(int appIndex);
@@ -32,7 +33,7 @@ class AppsMenuActivity final : public Activity {
   bool usesIconLayout() const;
   int iconIndexFromPoint(int x, int y) const;
   void openSelected();
-  void drawIconGrid(const Rect& rect, int visibleCount) const;
+  void drawIconGrid(const Rect& rect, int visibleCount, bool showSelection) const;
 
   ButtonNavigator buttonNavigator;
   int selected = 0;

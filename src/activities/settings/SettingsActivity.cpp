@@ -35,6 +35,11 @@
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
 
+void SettingsActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
+  const int visibleCount = InxAccordionGeometry::visibleCount(accordionSettingCounts(), expandedCategories);
+  accordionSelectedIndex = MainTabs::contentEdgeIndex(edge, visibleCount);
+}
+
 void SettingsActivity::rebuildSettingsLists() {
   displaySettings.clear();
   readerSettings.clear();
@@ -495,11 +500,9 @@ void SettingsActivity::renderAccordion() {
         }
         return settingValueText(settingsForCategory(row.category)[row.setting]);
       },
-      true);
+      true, nullptr, showMainTabContentSelection());
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), usesMainTabBar() ? tr(STR_DIR_LEFT) : tr(STR_DIR_UP),
-                            usesMainTabBar() ? tr(STR_DIR_RIGHT) : tr(STR_DIR_DOWN));
+  const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_TOGGLE), visibleCount > 1);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

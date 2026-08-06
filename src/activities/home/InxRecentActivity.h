@@ -15,7 +15,6 @@ class InxRecentActivity final : public Activity {
   const std::vector<RecentBook>* books = nullptr;
   std::array<const ReadingBookStats*, kMaxRecentBooks> bookStats{};
   int selected = 0;
-  bool sawBackPress = false;
   bool firstRenderDone = false;
   bool waitingForCoverRender = false;
   size_t nextCoverIndex = 0;
@@ -42,4 +41,5 @@ class InxRecentActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   MainTab mainTab() const override { return MainTab::Recent; }
+  void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };

@@ -189,30 +189,101 @@ bool ActivityManager::handleMainTabInput() {
   if (!currentActivity || !currentActivity->usesMainTabBar()) return false;
 
   const MainTab currentTab = currentActivity->mainTab();
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-    goToMainTab(MainTabs::adjacent(currentTab, -1));
-    return true;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-    goToMainTab(MainTabs::adjacent(currentTab, 1));
-    return true;
-  }
-  // Front Left/Right also feed ButtonNavigator's combined axis. Keep the held
-  // gesture out of the page, then switch exactly once on release above.
-  if (mappedInput.isPressed(MappedInputManager::Button::Left) ||
-      mappedInput.isPressed(MappedInputManager::Button::Right)) {
-    return true;
-  }
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int tabTop = metrics.topPadding;
+  const int tabBottom = tabTop + metrics.headerHeight;
 
   int x = 0;
   int y = 0;
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  if (!mappedInput.wasScreenTapped(x, y) || y < metrics.topPadding || y >= metrics.topPadding + metrics.headerHeight) {
+  if (mappedInput.wasScreenTapped(x, y)) {
+    if (y >= tabTop && y < tabBottom) {
+      const MainTab target = MainTabs::fromX(x, renderer.getScreenWidth());
+      if (target != MainTab::None) {
+        mainTabFocus = MainTabFocus::Content;
+        if (target != currentTab)
+          goToMainTab(target);
+        else
+          requestUpdate();
+      }
+      return true;
+    }
+    if (mainTabFocus == MainTabFocus::Tabs) {
+      mainTabFocus = MainTabFocus::Content;
+      requestUpdate();
+    }
     return false;
   }
-  const MainTab target = MainTabs::fromX(x, renderer.getScreenWidth());
-  if (target != MainTab::None && target != currentTab) goToMainTab(target);
-  return true;
+
+  if (mainTabFocus == MainTabFocus::Tabs && mappedInput.wasScreenTouchDown(x, y) && (y < tabTop || y >= tabBottom)) {
+    mainTabFocus = MainTabFocus::Content;
+    requestUpdate();
+    return false;
+  }
+
+  if (mainTabEntryReleasePending) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Down))
+      mainTabEntryReleasePending = false;
+    return true;
+  }
+
+  switch (mainTabFocus) {
+    case MainTabFocus::Tabs:
+      if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+        goToMainTab(MainTabs::adjacent(currentTab, -1));
+        return true;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+        goToMainTab(MainTabs::adjacent(currentTab, 1));
+        return true;
+      }
+      if (mappedInput.isPressed(MappedInputManager::Button::Left) ||
+          mappedInput.isPressed(MappedInputManager::Button::Right)) {
+        return true;
+      }
+
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        mainTabFocus = MainTabFocus::Content;
+        requestUpdate();
+        return true;
+      }
+      if (mappedInput.isPressed(MappedInputManager::Button::Confirm)) return true;
+
+      if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+        mainTabFocus = MainTabFocus::Content;
+        mainTabEntryReleasePending = true;
+        currentActivity->selectMainTabContentEdge(MainTabContentEdge::First);
+        requestUpdate();
+        return true;
+      }
+      if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+        mainTabFocus = MainTabFocus::Content;
+        mainTabEntryReleasePending = true;
+        currentActivity->selectMainTabContentEdge(MainTabContentEdge::Last);
+        requestUpdate();
+        return true;
+      }
+
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        const MainTab target = MainTabs::backTarget(currentTab);
+        if (target != MainTab::None)
+          goToMainTab(target);
+        else if (SETTINGS.standbyShortcutEnabled)
+          goToStandby();
+        return true;
+      }
+      return mappedInput.isPressed(MappedInputManager::Button::Back);
+
+    case MainTabFocus::Content:
+      if (!currentActivity->mainTabBackReturnsToTabs()) return false;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+        mainTabFocus = MainTabFocus::Tabs;
+        requestUpdate();
+        return true;
+      }
+      return mappedInput.isPressed(MappedInputManager::Button::Back);
+  }
+  return false;
 }
 
 void ActivityManager::exitActivity(const RenderLock& lock) {
@@ -263,6 +334,7 @@ void ActivityManager::goToInxRecent() {
 }
 
 void ActivityManager::goToMainTab(const MainTab tab) {
+  mainTabEntryReleasePending = false;
   switch (tab) {
     case MainTab::Recent:
       goToInxRecent();
@@ -322,6 +394,8 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
   if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+    mainTabFocus = MainTabFocus::Tabs;
+    mainTabEntryReleasePending = false;
     goToInxRecent();
     return;
   }

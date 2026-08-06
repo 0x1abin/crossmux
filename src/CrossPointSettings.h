@@ -301,7 +301,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t inxLibraryLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   uint8_t inxAppsLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   // Show and enable the Standby shortcut on the home screen.
-  uint8_t standbyShortcutEnabled = 1;
+  uint8_t standbyShortcutEnabled = 0;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Power button return from footnotes (1 = enabled, 0 = disabled)

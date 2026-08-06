@@ -5,6 +5,8 @@
 #include <cstdint>
 
 enum class MainTab : uint8_t { None, Recent, Library, Apps, Settings, Statistics };
+enum class MainTabFocus : uint8_t { Tabs, Content };
+enum class MainTabContentEdge : uint8_t { First, Last };
 
 namespace MainTabs {
 inline constexpr std::array<MainTab, 5> values = {MainTab::Recent, MainTab::Library, MainTab::Apps, MainTab::Settings,
@@ -28,5 +30,18 @@ constexpr MainTab fromX(const int x, const int width) {
   if (x < 0 || width <= 0 || x >= width) return MainTab::None;
   const int index = x * static_cast<int>(values.size()) / width;
   return values[index];
+}
+
+constexpr MainTab backTarget(const MainTab tab) { return tab == MainTab::Recent ? MainTab::None : MainTab::Recent; }
+
+constexpr int contentEdgeIndex(const MainTabContentEdge edge, const int count) {
+  if (count <= 0) return 0;
+  switch (edge) {
+    case MainTabContentEdge::First:
+      return 0;
+    case MainTabContentEdge::Last:
+      return count - 1;
+  }
+  return 0;
 }
 }  // namespace MainTabs

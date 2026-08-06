@@ -42,8 +42,8 @@ void drawHintText(const GfxRenderer& renderer, const char* label, const int x, c
 }
 
 const char* hintLabel(const char* label) {
-  if (std::strcmp(label, tr(STR_DIR_LEFT)) == 0 || std::strcmp(label, tr(STR_DIR_UP)) == 0) return "<";
-  if (std::strcmp(label, tr(STR_DIR_RIGHT)) == 0 || std::strcmp(label, tr(STR_DIR_DOWN)) == 0) return ">";
+  if (std::strcmp(label, tr(STR_DIR_LEFT)) == 0) return "<";
+  if (std::strcmp(label, tr(STR_DIR_RIGHT)) == 0) return ">";
   return label;
 }
 
@@ -224,7 +224,7 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
                         const std::function<std::string(int index)>& rowSubtitle,
                         const std::function<UIIcon(int index)>& rowIcon,
                         const std::function<std::string(int index)>& rowValue, const bool,
-                        const std::function<bool(int index)>& rowDimmed) const {
+                        const std::function<bool(int index)>& rowDimmed, const bool showSelection) const {
   if (itemCount <= 0 || rect.height <= 0) return;
 
   const int pageItems = getListPageItems(rect.height, rowSubtitle != nullptr);
@@ -237,7 +237,7 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
   for (int index = pageStart; index < pageEnd; ++index) {
     const int slot = index - pageStart;
     const int rowY = rect.y + slot * kRowHeight;
-    const bool selected = index == selectedIndex;
+    const bool selected = showSelection && index == selectedIndex;
     if (selected) renderer.fillRect(rect.x, rowY, rect.width, kRowHeight, true);
 
     int textX = rect.x + kRowPadding;

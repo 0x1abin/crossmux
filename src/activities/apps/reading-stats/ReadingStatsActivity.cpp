@@ -271,6 +271,10 @@ bool drawCover(const GfxRenderer& renderer, const ReadingBookStats& book, const 
 }
 }  // namespace
 
+void ReadingStatsActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
+  selectedIndex = MainTabs::contentEdgeIndex(edge, static_cast<int>(READING_STATS.getBooks().size()) + 1);
+}
+
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
   renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
@@ -703,9 +707,7 @@ void ReadingStatsActivity::renderInx() {
                             EpdFontFamily::BOLD);
   }
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), usesMainTabBar() ? tr(STR_DIR_LEFT) : tr(STR_DIR_UP),
-                            usesMainTabBar() ? tr(STR_DIR_RIGHT) : tr(STR_DIR_DOWN));
+  const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_SELECT), !books.empty());
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

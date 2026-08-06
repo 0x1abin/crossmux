@@ -206,4 +206,5 @@ class SettingsActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   MainTab mainTab() const override { return MainTab::Settings; }
+  void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };
