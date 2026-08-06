@@ -7,8 +7,10 @@
 #include <string>
 
 #include "../../components/UITheme.h"
+#include "../../components/icons/inx_apps.h"
 #include "../../util/PaginationDots.h"
 #include "CrossPointSettings.h"
+#include "InxItemLayout.h"
 #include "fontIds.h"
 
 namespace {
@@ -29,7 +31,9 @@ enum class AppId : uint8_t {
   Buddy = 10,
   Sokoban = 11,
   PixelSwitch = 12,
-  Count = 13,
+  FileTransfer = 13,
+  OpdsBrowser = 14,
+  Count = 15,
 };
 
 struct AppEntry {
@@ -40,10 +44,12 @@ struct AppEntry {
 };
 
 constexpr AppEntry kAppEntries[] = {
+    {AppId::FileTransfer, StrId::STR_FILE_TRANSFER, UIIcon::Transfer, &ActivityManager::goToFileTransfer},
+    {AppId::OpdsBrowser, StrId::STR_OPDS_BROWSER, UIIcon::Opds, &ActivityManager::goToBrowser},
 #ifdef ENABLE_CHINESE_VERSION
     {AppId::WeRead, StrId::STR_WEREAD_TITLE, UIIcon::WeRead, &ActivityManager::goToWeRead},
 #endif
-    {AppId::ReadingStats, StrId::STR_READING_STATS, UIIcon::Library, &ActivityManager::goToReadingStatsMenu},
+    {AppId::ReadingStats, StrId::STR_READING_STATS, UIIcon::ReadingStats, &ActivityManager::goToReadingStatsMenu},
     {AppId::Sudoku, StrId::STR_SUDOKU_TITLE, UIIcon::Sudoku, &ActivityManager::goToSudoku},
     {AppId::Gomoku, StrId::STR_GOMOKU_TITLE, UIIcon::Gomoku, &ActivityManager::goToGomoku},
     {AppId::Sokoban, StrId::STR_SOKOBAN_TITLE, UIIcon::Sokoban, &ActivityManager::goToSokoban},
@@ -53,7 +59,7 @@ constexpr AppEntry kAppEntries[] = {
     {AppId::Minesweeper, StrId::STR_MINESWEEPER_TITLE, UIIcon::Minesweeper, &ActivityManager::goToMinesweeper},
     {AppId::Game2048, StrId::STR_2048_TITLE, UIIcon::Game2048, &ActivityManager::goToGame2048},
     {AppId::UglyAvatar, StrId::STR_UGLY_AVATAR, UIIcon::Avatar, &ActivityManager::goToUglyAvatar},
-    {AppId::AirPage, StrId::STR_AIRPAGE_TITLE, UIIcon::Wifi, &ActivityManager::goToAirPage},
+    {AppId::AirPage, StrId::STR_AIRPAGE_TITLE, UIIcon::AirPage, &ActivityManager::goToAirPage},
     {AppId::Buddy, StrId::STR_BUDDY_TITLE, UIIcon::Buddy, &ActivityManager::goToBuddy},
     {AppId::PixelSwitch, StrId::STR_PIXEL_SWITCH_TITLE, UIIcon::PixelSwitch, &ActivityManager::goToPixelSwitch},
     {AppId::Standby, StrId::STR_STANDBY_TITLE, UIIcon::Standby, &ActivityManager::goToStandby},
@@ -97,6 +103,7 @@ constexpr bool usesSideScrollBar(const CrossPointSettings::UI_THEME theme) {
     case CrossPointSettings::LYRA:
     case CrossPointSettings::LYRA_3_COVERS:
     case CrossPointSettings::LYRA_CAROUSEL:
+    case CrossPointSettings::INX:
       return true;
     case CrossPointSettings::CLASSIC:
     case CrossPointSettings::ROUNDEDRAFF:
@@ -159,8 +166,59 @@ void AppsMenuActivity::onEnter() {
 
 void AppsMenuActivity::onExit() { Activity::onExit(); }
 
+bool AppsMenuActivity::usesIconLayout() const {
+  return UITheme::getInstance().hasMainTabs() &&
+         InxGridGeometry::layoutFrom(SETTINGS.inxAppsLayout) == InxItemLayout::Icons;
+}
+
+int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int height = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return InxGridGeometry::indexFromPoint(x, y - top, renderer.getScreenWidth(), height,
+                                         InxGridGeometry::pageStart(selected, getVisibleAppCount()),
+                                         getVisibleAppCount());
+}
+
+void AppsMenuActivity::openSelected() {
+  const int appIndex = getAppIndexForVisibleIndex(selected);
+  if (appIndex >= 0) (activityManager.*kAppEntries[appIndex].open)();
+}
+
 void AppsMenuActivity::loop() {
   const int visibleCount = getVisibleAppCount();
+  if (usesIconLayout()) {
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasScreenTouchDown(x, y)) {
+      const int touched = iconIndexFromPoint(x, y);
+      if (touched >= 0 && touched != selected) {
+        selected = touched;
+        requestUpdate();
+      }
+      return;
+    }
+    if (mappedInput.wasScreenTapped(x, y)) {
+      const int touched = iconIndexFromPoint(x, y);
+      if (touched >= 0) {
+        selected = touched;
+        openSelected();
+      }
+      return;
+    }
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Up) {
+      selected = ButtonNavigator::nextPageIndex(selected, visibleCount, InxGridGeometry::itemsPerPage);
+      requestUpdate();
+      return;
+    }
+    if (swipe == MappedInputManager::SwipeDir::Down) {
+      selected = ButtonNavigator::previousPageIndex(selected, visibleCount, InxGridGeometry::itemsPerPage);
+      requestUpdate();
+      return;
+    }
+  }
+
   buttonNavigator.onNext([this, visibleCount] {
     selected = ButtonNavigator::nextIndex(selected, visibleCount);
     requestUpdate();
@@ -171,13 +229,40 @@ void AppsMenuActivity::loop() {
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const int appIndex = getAppIndexForVisibleIndex(selected);
-    if (appIndex >= 0) {
-      (activityManager.*kAppEntries[appIndex].open)();
-    }
+    openSelected();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     activityManager.goHome();
   }
+}
+
+void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount) const {
+  const int start = InxGridGeometry::pageStart(selected, visibleCount);
+  const int cellWidth = rect.width / InxGridGeometry::columns;
+  const int cellHeight = rect.height / InxGridGeometry::rows;
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  constexpr int iconScale = 2;
+  constexpr int iconSize = InxAppIcons::size * iconScale;
+
+  for (int slot = 0; slot < InxGridGeometry::itemsPerPage && start + slot < visibleCount; ++slot) {
+    const int visibleIndex = start + slot;
+    const int appIndex = getAppIndexForVisibleIndex(visibleIndex);
+    if (appIndex < 0) continue;
+    const int column = slot % InxGridGeometry::columns;
+    const int row = slot / InxGridGeometry::columns;
+    const Rect cell{rect.x + column * cellWidth + 4, rect.y + row * cellHeight + 4, cellWidth - 8, cellHeight - 8};
+    const bool isSelected = visibleIndex == selected;
+    if (isSelected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
+
+    const int iconX = cell.x + (cell.width - iconSize) / 2;
+    const int iconY = cell.y + std::max(5, (cell.height - iconSize - lineHeight - 8) / 2);
+    InxAppIcons::draw(renderer, kAppEntries[appIndex].icon, iconX, iconY, iconScale, isSelected);
+    const std::string label =
+        renderer.truncatedText(UI_10_FONT_ID, I18N.get(kAppEntries[appIndex].titleId), std::max(1, cell.width - 8));
+    const int labelX = cell.x + (cell.width - renderer.getTextWidth(UI_10_FONT_ID, label.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, labelX, iconY + iconSize + 8, label.c_str(), !isSelected);
+  }
+
+  GUI.drawSideScrollBar(renderer, rect, visibleCount, start, InxGridGeometry::itemsPerPage);
 }
 
 void AppsMenuActivity::render(RenderLock&&) {
@@ -186,7 +271,7 @@ void AppsMenuActivity::render(RenderLock&&) {
   const int sh = renderer.getScreenHeight();
 
   renderer.clearScreen();
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, sw, metrics.headerHeight}, tr(STR_APPS_TITLE));
+  drawPageHeader(Rect{0, metrics.topPadding, sw, metrics.headerHeight}, tr(STR_APPS_TITLE));
 
   const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
@@ -195,6 +280,8 @@ void AppsMenuActivity::render(RenderLock&&) {
 
   if (visibleCount == 0) {
     UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
+  } else if (usesIconLayout()) {
+    drawIconGrid(Rect{0, listY, sw, listH}, visibleCount);
   } else {
     // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
     const int spacing = metrics.menuSpacing / 2;
@@ -229,7 +316,9 @@ void AppsMenuActivity::render(RenderLock&&) {
     }
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), usesMainTabBar() ? tr(STR_DIR_LEFT) : tr(STR_DIR_UP),
+                            usesMainTabBar() ? tr(STR_DIR_RIGHT) : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

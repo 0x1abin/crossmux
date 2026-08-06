@@ -19,6 +19,7 @@ class AppsMenuActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  MainTab mainTab() const override { return MainTab::Apps; }
 
   static int getAppCount();
   static StrId getAppTitleId(int appIndex);
@@ -28,6 +29,10 @@ class AppsMenuActivity final : public Activity {
  private:
   static int getVisibleAppCount();
   static int getAppIndexForVisibleIndex(int visibleIndex);
+  bool usesIconLayout() const;
+  int iconIndexFromPoint(int x, int y) const;
+  void openSelected();
+  void drawIconGrid(const Rect& rect, int visibleCount) const;
 
   ButtonNavigator buttonNavigator;
   int selected = 0;
