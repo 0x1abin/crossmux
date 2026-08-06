@@ -1,10 +1,21 @@
 #include "Activity.h"
 
 #include "ActivityManager.h"
+#include "components/UITheme.h"
 
 void Activity::onEnter() { LOG_DBG("ACT", "Entering activity: %s", name.c_str()); }
 
 void Activity::onExit() { LOG_DBG("ACT", "Exiting activity: %s", name.c_str()); }
+
+bool Activity::usesMainTabBar() const { return UITheme::getInstance().hasMainTabs() && mainTab() != MainTab::None; }
+
+void Activity::drawPageHeader(const Rect& rect, const char* title, const char* subtitle) const {
+  if (usesMainTabBar()) {
+    GUI.drawMainTabBar(renderer, rect, mainTab());
+  } else {
+    GUI.drawHeader(renderer, rect, title, subtitle);
+  }
+}
 
 void Activity::requestUpdate(bool immediate) { activityManager.requestUpdate(immediate); }
 

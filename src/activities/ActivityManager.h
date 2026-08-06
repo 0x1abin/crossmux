@@ -12,6 +12,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
@@ -43,6 +44,7 @@ class ActivityManager {
   std::unique_ptr<Activity> currentActivity;
 
   void exitActivity(const RenderLock& lock);
+  bool handleMainTabInput();
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
@@ -85,6 +87,9 @@ class ActivityManager {
   void goToSettings();
   void goToUglyAvatar();
   void goToReadingStatsMenu();
+  void goToReadingStats();
+  void goToInxRecent();
+  void goToMainTab(MainTab tab);
   void goToFileBrowser(std::string path = {});
   void goToRecentBooks();
   void goToBrowser();

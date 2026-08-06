@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include "FontCacheManager.h"
+#include "Memory.h"
 
 namespace {
 
@@ -1278,6 +1279,87 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
       }
     }
   }
+}
+
+namespace {
+bool shouldDrawBitmapValue(const GfxRenderer::RenderMode mode, const uint8_t value) {
+  switch (mode) {
+    case GfxRenderer::BW:
+      return value < 3;
+    case GfxRenderer::GRAYSCALE_LSB:
+      return value == 1;
+    case GfxRenderer::GRAYSCALE_MSB:
+      return value == 1 || value == 2;
+  }
+  return false;
+}
+}  // namespace
+
+bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const int y, const int targetWidth,
+                                       const int targetHeight) const {
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
+  const int sourceWidth = bitmap.getWidth();
+  const int sourceHeight = bitmap.getHeight();
+  if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) return false;
+
+  int scaledWidth = targetWidth;
+  int scaledHeight =
+      static_cast<int>((static_cast<int64_t>(sourceHeight) * targetWidth + sourceWidth - 1) / sourceWidth);
+  if (scaledHeight < targetHeight) {
+    scaledHeight = targetHeight;
+    scaledWidth =
+        static_cast<int>((static_cast<int64_t>(sourceWidth) * targetHeight + sourceHeight - 1) / sourceHeight);
+  }
+  const int cropLeft = (scaledWidth - targetWidth) / 2;
+  const int cropTop = (scaledHeight - targetHeight) / 2;
+
+  // Same bounded two-row working set as drawBitmap(); a scaled image buffer would exceed the RAM budget.
+  const int outputRowSize = (sourceWidth + 3) / 4;
+  auto outputRow = makeUniqueNoThrow<uint8_t[]>(outputRowSize);
+  auto rowBytes = makeUniqueNoThrow<uint8_t[]>(bitmap.getRowBytes());
+  if (!outputRow || !rowBytes) {
+    LOG_ERR("GFX", "Failed to allocate crop-fill row buffers (%d + %u bytes)", outputRowSize,
+            static_cast<unsigned>(bitmap.getRowBytes()));
+    return false;
+  }
+
+  const GfxRenderer::RenderMode mode = getRenderMode();
+  const bool pixelState = mode == GfxRenderer::BW;
+  for (int sourceRow = 0; sourceRow < sourceHeight; ++sourceRow) {
+    if (bitmap.readNextRow(outputRow.get(), rowBytes.get()) != BmpReaderError::Ok) {
+      LOG_ERR("GFX", "Failed to read crop-fill row %d", sourceRow);
+      return false;
+    }
+
+    const int logicalRow = bitmap.isTopDown() ? sourceRow : sourceHeight - 1 - sourceRow;
+    const int rowTop = logicalRow * scaledHeight / sourceHeight - cropTop;
+    const int rowBottom = (logicalRow + 1) * scaledHeight / sourceHeight - cropTop;
+    const int clippedTop = std::max(0, rowTop);
+    const int clippedBottom = std::min(targetHeight, rowBottom);
+    if (clippedTop >= clippedBottom) continue;
+
+    int runStart = -1;
+    for (int sourceX = 0; sourceX <= sourceWidth; ++sourceX) {
+      bool draw = false;
+      if (sourceX < sourceWidth) {
+        const uint8_t value = outputRow[sourceX / 4] >> (6 - ((sourceX * 2) % 8)) & 0x3;
+        draw = shouldDrawBitmapValue(mode, value);
+      }
+      if (draw && runStart < 0) {
+        runStart = sourceX;
+      } else if (!draw && runStart >= 0) {
+        const int runLeft = runStart * scaledWidth / sourceWidth - cropLeft;
+        const int runRight = sourceX * scaledWidth / sourceWidth - cropLeft;
+        const int clippedLeft = std::max(0, runLeft);
+        const int clippedRight = std::min(targetWidth, runRight);
+        if (clippedLeft < clippedRight) {
+          fillRect(x + clippedLeft, y + clippedTop, clippedRight - clippedLeft, clippedBottom - clippedTop, pixelState);
+        }
+        runStart = -1;
+      }
+    }
+  }
+  return true;
 }
 
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
