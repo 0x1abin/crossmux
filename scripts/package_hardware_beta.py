@@ -92,7 +92,7 @@ def main():
     recovery_name = f'{args.device}-recovery-16mb.bin'
     subprocess.run(
         [
-            'pio', 'pkg', 'exec', '--package', 'tool-esptoolpy', '--', 'python', '-m', 'esptool',
+            'pio', 'pkg', 'exec', '--package', 'tool-esptoolpy', '--', 'esptool.py',
             '--chip', 'esp32s3', 'merge-bin', '--flash-mode', 'dio', '--flash-freq', '80m',
             '--flash-size', '16MB', '--pad-to-size', '16MB', '--output', str(output / recovery_name),
             '0x0', str(output / 'bootloader.bin'), '0x8000', str(output / 'partitions.bin'),
