@@ -77,7 +77,7 @@ const StrId titleNames[TITLE_ITEMS] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrI
 constexpr int XTC_STATUS_BAR_ITEMS = 3;
 const StrId xtcStatusBarNames[XTC_STATUS_BAR_ITEMS] = {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP};
 
-constexpr int STATUS_BAR_CLOCK_ITEMS = 3;
+constexpr int STATUS_BAR_CLOCK_ITEMS = CrossPointSettings::STATUS_BAR_CLOCK_MODE_COUNT;
 const StrId statusBarClockNames[STATUS_BAR_CLOCK_ITEMS] = {StrId::STR_HIDE, StrId::STR_DIR_RIGHT, StrId::STR_DIR_LEFT};
 
 const int verticalPreviewPadding = 50;
@@ -125,6 +125,23 @@ void StatusBarSettingsActivity::onEnter() {
 void StatusBarSettingsActivity::onExit() { Activity::onExit(); }
 
 void StatusBarSettingsActivity::loop() {
+  if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  switch (handleListTouch(selectedIndex, visibleItemCount, contentTop, contentHeight, false)) {
+    case ListTouchResult::Activated:
+      handleSelection();
+      requestUpdate();
+      return;
+    case ListTouchResult::Consumed:
+      return;
+    case ListTouchResult::None:
+      break;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
     return;
@@ -167,21 +184,35 @@ void StatusBarSettingsActivity::handleSelection() {
       SETTINGS.statusBarBookProgressPercentage = (SETTINGS.statusBarBookProgressPercentage + 1) % 2;
       break;
     case ITEM_PROGRESS_BAR:
-      SETTINGS.statusBarProgressBar = (SETTINGS.statusBarProgressBar + 1) % PROGRESS_BAR_ITEMS;
-      break;
+      optionPopup.show(StrId::STR_PROGRESS_BAR, progressBarNames, PROGRESS_BAR_ITEMS, SETTINGS.statusBarProgressBar,
+                       [this](int idx) {
+                         SETTINGS.statusBarProgressBar = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_PROGRESS_BAR_THICKNESS:
-      SETTINGS.statusBarProgressBarThickness =
-          (SETTINGS.statusBarProgressBarThickness + 1) % PROGRESS_BAR_THICKNESS_ITEMS;
-      break;
+      optionPopup.show(StrId::STR_PROGRESS_BAR_THICKNESS, progressBarThicknessNames, PROGRESS_BAR_THICKNESS_ITEMS,
+                       SETTINGS.statusBarProgressBarThickness, [this](int idx) {
+                         SETTINGS.statusBarProgressBarThickness = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_TITLE:
-      SETTINGS.statusBarTitle = (SETTINGS.statusBarTitle + 1) % TITLE_ITEMS;
-      break;
+      optionPopup.show(StrId::STR_TITLE, titleNames, TITLE_ITEMS, SETTINGS.statusBarTitle, [this](int idx) {
+        SETTINGS.statusBarTitle = idx;
+        SETTINGS.saveToFile();
+      });
+      return;
     case ITEM_BATTERY:
       SETTINGS.statusBarBattery = (SETTINGS.statusBarBattery + 1) % 2;
       break;
     case ITEM_XTC_STATUS_BAR:
-      SETTINGS.xtcStatusBarMode = (SETTINGS.xtcStatusBarMode + 1) % XTC_STATUS_BAR_ITEMS;
-      break;
+      optionPopup.show(StrId::STR_XTC_STATUS_BAR, xtcStatusBarNames, XTC_STATUS_BAR_ITEMS, SETTINGS.xtcStatusBarMode,
+                       [this](int idx) {
+                         SETTINGS.xtcStatusBarMode = idx;
+                         SETTINGS.saveToFile();
+                       });
+      return;
     case ITEM_CLOCK:
       SETTINGS.statusBarClock = (SETTINGS.statusBarClock + 1) % STATUS_BAR_CLOCK_ITEMS;
       break;
@@ -202,6 +233,8 @@ void StatusBarSettingsActivity::handleSelection() {
 }
 
 void StatusBarSettingsActivity::render(RenderLock&&) {
+  if (optionPopup.processRender(renderer, mappedInput)) return;
+
   renderer.clearScreen();
 
   auto metrics = UITheme::getInstance().getMetrics();

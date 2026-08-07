@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "components/OptionPopup.h"
 #include "util/ButtonNavigator.h"
 
 class EpubReaderMenuActivity final : public Activity {
@@ -14,6 +15,7 @@ class EpubReaderMenuActivity final : public Activity {
   enum class MenuAction {
     SELECT_CHAPTER,
     FOOTNOTES,
+    TEXT_SETTINGS,
     GO_TO_PERCENT,
     AUTO_PAGE_TURN,
     ROTATE_SCREEN,
@@ -23,7 +25,8 @@ class EpubReaderMenuActivity final : public Activity {
     DISPLAY_QR,
     GO_HOME,
     SYNC,
-    DELETE_CACHE
+    DELETE_CACHE,
+    DICTIONARY
   };
 
   explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,
@@ -34,6 +37,7 @@ class EpubReaderMenuActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handleHomeGesture() override;
 
  private:
   struct MenuItem {
@@ -42,6 +46,7 @@ class EpubReaderMenuActivity final : public Activity {
   };
 
   static std::vector<MenuItem> buildMenuItems(bool hasFootnotes, bool hasBookmarks);
+  void closeCancelled();
 
   // Fixed menu layout
   const std::vector<MenuItem> menuItems;
@@ -49,6 +54,10 @@ class EpubReaderMenuActivity final : public Activity {
   int selectedIndex = 0;
 
   ButtonNavigator buttonNavigator;
+  OptionPopup optionPopup;
+  // True while the button press that closed the popup is still held; its release
+  // must not fall through to the menu's own Back/Confirm handlers.
+  bool popupClosing = false;
   std::string title = "Reader Menu";
   uint8_t pendingOrientation = 0;
   uint8_t selectedPageTurnOption = 0;

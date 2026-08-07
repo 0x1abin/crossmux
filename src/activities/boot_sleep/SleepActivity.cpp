@@ -3,6 +3,7 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Txt.h>
@@ -149,6 +150,10 @@ void SleepActivity::renderCustomSleepScreen() const {
   renderDefaultSleepScreen();
 }
 
+// Sleep screens paint with a single HALF refresh (stock parity): the OEM X4
+// firmware's only clean refresh in normal operation is the single-pass 0xD7
+// sequence, used once for the sleep image. It never runs the multi-flash GC
+// waveform (0xF7) that FULL_REFRESH selects (#2471's blinking complaint).
 void SleepActivity::renderDefaultSleepScreen() const {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -219,10 +224,10 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
   }
 
   if (hasGreyscale) {
-    // OEM grayscale pipeline base: on X3 this displays the frame with the
-    // dedicated "AA-pre-BW(mid)" differential waveform, leaving every pixel
-    // in the calibrated state the gray nudge refresh expects; on X4 it is a
-    // plain HALF refresh (previous behavior).
+    // OEM grayscale pipeline base. Must stay HALF: the gray nudge LUT is
+    // calibrated against the pixel state the single-pass HALF waveform leaves
+    // behind. A FULL (GC) base parks pixels in a different charge state and
+    // the differential nudge then lands unevenly (blotchy noise in gray areas).
     renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
   } else {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
@@ -328,7 +333,13 @@ void SleepActivity::renderCoverSleepScreen() const {
 void SleepActivity::renderLastScreenSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  if (gpio.deviceIsX3()) {
+    // The controller still holds the displayed page, so its differential base
+    // waveform can add the moon without a full-screen flash.
+    renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+  } else {
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  }
 }
 
 void SleepActivity::renderBlankSleepScreen() const {
