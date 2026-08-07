@@ -229,8 +229,15 @@ void OtaUpdateActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FAILED) {
-    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
-                              tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+    const int detailHeight = failedDetail != nullptr ? height : 0;
+    const int failedTop =
+        SubpageLayout::centeredTop(content, titleHeight + (detailHeight > 0 ? relatedGap : 0) + detailHeight);
+    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, failedTop, tr(STR_UPDATE_FAILED), true,
+                              EpdFontFamily::BOLD);
+    if (failedDetail != nullptr) {
+      UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, failedTop + titleHeight + relatedGap,
+                                failedDetail);
+    }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FINISHED) {
@@ -266,6 +273,7 @@ void OtaUpdateActivity::runUpdateInstall() {
     {
       RenderLock lock(*this);
       sdFontSystem.ensureLoaded(renderer, false);
+      failedDetail = res == OtaUpdater::WRONG_DEVICE_ERROR ? tr(STR_FIRMWARE_WRONG_DEVICE) : nullptr;
       state = FAILED;
     }
     requestUpdate();
