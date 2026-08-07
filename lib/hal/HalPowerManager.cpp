@@ -84,6 +84,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // button. Must run after display.deepSleep() so the panel controller gets its
   // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
   // guarantees that ordering).
+  gpio.prepareForDeepSleep();
   freeink::PowerManager::powerDownRailsForSleep();
 
   // Waits for the power button to be physically released (so holding it doesn't

@@ -2,6 +2,7 @@
 
 #include <BidiUtils.h>
 #include <BuildScratch.h>
+#include <BoardConfig.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
@@ -2322,6 +2323,10 @@ void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
 }
 
 void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const {
+#if FREEINK_DEVICE_EEGO_A4
+  *outTop = *outRight = *outBottom = *outLeft = 28;
+  return;
+#endif
   switch (orientation) {
     case Portrait:
       *outTop = VIEWABLE_MARGIN_TOP;

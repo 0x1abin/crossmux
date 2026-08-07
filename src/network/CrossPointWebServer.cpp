@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <FsHelpers.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -414,7 +415,7 @@ void CrossPointWebServer::handleStatus() const {
   doc["rssi"] = apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
-  doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
+  doc["device"] = BoardConfig::ACTIVE.name;
 
   char snBuf[33] = {0};
   bool valid = false;
@@ -1330,6 +1331,8 @@ void CrossPointWebServer::handlePostSettings() {
   });
 
   SETTINGS.saveToFile();
+  Frontlight.setWarmth(SETTINGS.frontlightWarmth);
+  Frontlight.setBrightness(SETTINGS.frontlightBrightness);
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");

@@ -181,6 +181,10 @@ bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEn
 
 bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
 
+bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
+
+void HalGPIO::prepareForDeepSleep() { inputMgr.prepareForDeepSleep(); }
+
 void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
 }
