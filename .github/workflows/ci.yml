@@ -106,7 +106,13 @@ jobs:
         # before the artifact upload.
         run: |
           set -euo pipefail
-          pio run -e default -e sticky -e simulator -e simulator_x3 | tee pio.log
+          pio run -e default -e sticky -e eego_a4 -e mofei_m4 -e simulator -e simulator_x3 | tee pio.log
+
+      - name: Package experimental eego A4 images
+        run: python3 scripts/package_hardware_beta.py eego-a4
+
+      - name: Package experimental Mofei M4 images
+        run: python3 scripts/package_hardware_beta.py mofei-m4
 
       - name: Extract firmware stats
 
@@ -127,6 +133,20 @@ jobs:
         with:
           name: firmware.bin
           path: .pio/build/default/firmware.bin
+          if-no-files-found: error
+
+      - name: Upload experimental eego A4 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eego-a4-experimental
+          path: dist/eego-a4
+          if-no-files-found: error
+
+      - name: Upload experimental Mofei M4 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: mofei-m4-experimental
+          path: dist/mofei-m4
           if-no-files-found: error
 
   unit-tests:
@@ -155,6 +175,14 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build/test --output-on-failure -j
+
+      - name: Run FreeInk SDK host tests
+        run: |
+          bash freeink-sdk/libs/book/FreeInkBook/test/host/run.sh
+          bash freeink-sdk/libs/ui/FreeInkUI/test/host/run.sh
+
+      - name: Run sync workflow state tests
+        run: python3 -m unittest discover -v -s .claude/skills/sync-upstream/tests
 
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.
