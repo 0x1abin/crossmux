@@ -26,10 +26,16 @@ namespace bleinput {
 inline constexpr const char* kHostName = "CrossPoint";
 
 // Heap floor for starting the NimBLE stack (measured begin() cost: ~52-57 KB).
-// The reader now lends the framebuffer to section builds, so BLE startup no
-// longer needs to reserve the old full build headroom. Keep a modest margin and
-// let the render/build shed paths handle genuinely tight moments.
-inline constexpr size_t kStartMinFreeHeap = 56 * 1024;
+// This must leave the reader usable AFTER the stack is resident, not merely fit the
+// stack itself. Framebuffer lending covers a section build's one big inflate window,
+// but NOT its storm of small allocations (CSS/sscanf/strings) which draw from the
+// general heap; at 56 KB the stack started with ~2 KB general heap left and the next
+// build abort()ed inside sscanf (We_baseline from a cleared cache, BLE connected).
+// 80 KB is reachable at steady-state reading (~84 KB idle with an SD font + section)
+// and leaves ~26 KB general heap after startup; the build pre-flight
+// (BUILD_MIN_FREE_HEAP) frees BLE and retries when a build still needs more, and the
+// render shed (RENDER_MIN_FREE_HEAP) backstops tight renders.
+inline constexpr size_t kStartMinFreeHeap = 80 * 1024;
 
 // Lower floor for the Bluetooth settings screen, where the user has explicitly asked
 // for BLE right now (scanning/pairing is dead without the stack). No page renders or

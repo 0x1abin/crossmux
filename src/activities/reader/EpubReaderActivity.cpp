@@ -1294,11 +1294,21 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // the build: pre-flight the floor and take the recovery path up front instead of
       // crashing mid-parse. Field data: builds succeed at ~46 KB free with BLE resident;
       // abort() observed at ~11 KB free.
-      const size_t lendableFrameBuffer = renderer.hasFrameBuffer() ? renderer.getBufferSize() : 0;
-      const bool heapTooLow = ESP.getFreeHeap() + lendableFrameBuffer < BUILD_MIN_FREE_HEAP;
+      // BUILD_MIN_FREE_HEAP is the *general* small-allocation headroom a build needs
+      // (CSS parsing, sscanf temporaries, layout strings, etc.). Do NOT add the
+      // lendable framebuffer here: the loan (taken inside the build) supplies one big
+      // contiguous block for the inflate window, but it cannot satisfy the storm of
+      // small allocations, which draw from the general heap and abort() under
+      // -fno-exceptions when it is exhausted. Counting the framebuffer made this test
+      // effectively always-false (48 KB alone exceeds the 40 KB floor), so a build ran
+      // at ~3 KB free with BLE resident and abort()ed inside sscanf mid-parse (crash:
+      // We_baseline opened from a cleared cache with BLE connected). Gate on the
+      // general heap alone so the recovery below (free the ~54 KB NimBLE stack, then
+      // retry) runs BEFORE the build instead of the build crashing inside it.
+      const bool heapTooLow = ESP.getFreeHeap() < BUILD_MIN_FREE_HEAP;
       if (heapTooLow) {
-        LOG_ERR("ERS", "Pre-build heap %u (+fb %u) below floor %u; entering build recovery",
-                (unsigned)ESP.getFreeHeap(), (unsigned)lendableFrameBuffer, (unsigned)BUILD_MIN_FREE_HEAP);
+        LOG_ERR("ERS", "Pre-build heap %u below floor %u; entering build recovery (frees BLE)",
+                (unsigned)ESP.getFreeHeap(), (unsigned)BUILD_MIN_FREE_HEAP);
       }
 
       // Building a section needs a large contiguous inflate (deflate) window that the
