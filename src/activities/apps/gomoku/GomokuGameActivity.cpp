@@ -153,6 +153,27 @@ void GomokuGameActivity::intersectionXY(uint8_t r, uint8_t c, int* x, int* y) co
 // ---------- Input ----------
 
 void GomokuGameActivity::handleInputPlaying() {
+  int touchX = 0;
+  int touchY = 0;
+  int row = 0;
+  int column = 0;
+  if (mappedInput.wasScreenTouchDown(touchX, touchY) &&
+      gameIntersectionFromPoint(boardOriginX(), boardOriginY(), boardPitch(), board.boardSize, board.boardSize, touchX,
+                                touchY, row, column)) {
+    cursorR = static_cast<uint8_t>(row);
+    cursorC = static_cast<uint8_t>(column);
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasScreenTapped(touchX, touchY) &&
+      gameIntersectionFromPoint(boardOriginX(), boardOriginY(), boardPitch(), board.boardSize, board.boardSize, touchX,
+                                touchY, row, column)) {
+    cursorR = static_cast<uint8_t>(row);
+    cursorC = static_cast<uint8_t>(column);
+    doPlace();
+    requestUpdate();
+    return;
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     moveCursor(-1, 0);
     requestUpdate();
@@ -175,6 +196,20 @@ void GomokuGameActivity::handleInputPlaying() {
 }
 
 void GomokuGameActivity::handleInputGameMenu() {
+  constexpr int titleHeight = 28;
+  constexpr int rowHeight = 32;
+  constexpr int width = 320;
+  const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), width, titleHeight,
+                                       rowHeight, MENU_ITEM_COUNT);
+  int touched = -1;
+  const auto touch = mappedInput.rowTouch(touched, panel.y + titleHeight, rowHeight, MENU_ITEM_COUNT, panel.x,
+                                          panel.x + panel.width, rowHeight);
+  if (touch != MappedInputManager::RowTouch::None) {
+    menuSel = static_cast<uint8_t>(touched);
+    requestUpdate();
+    if (touch == MappedInputManager::RowTouch::Tap) runMenuItem(menuSel);
+    return;
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
       mappedInput.wasPressed(MappedInputManager::Button::Left)) {
     menuSel = static_cast<uint8_t>((menuSel + MENU_ITEM_COUNT - 1) % MENU_ITEM_COUNT);
@@ -193,12 +228,19 @@ void GomokuGameActivity::handleInputGameMenu() {
 }
 
 void GomokuGameActivity::handleInputGameOver() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const auto m = mode;
-    const uint8_t bs = board.boardSize;
-    const auto lv = aiLevel;
-    activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, m, bs, false, lv));
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect again = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                         metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 0, 2);
+  const Rect home = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                        metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 1, 2);
+  if (mappedInput.wasTapInRect(again.x, again.y, again.width, again.height) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    activityManager.replaceActivity(
+        std::make_unique<GomokuGameActivity>(renderer, mappedInput, mode, board.boardSize, false, aiLevel));
+    return;
+  }
+  if (mappedInput.wasTapInRect(home.x, home.y, home.width, home.height) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     activityManager.replaceActivity(std::make_unique<GomokuMenuActivity>(renderer, mappedInput));
   }
 }
@@ -600,10 +642,12 @@ void GomokuGameActivity::renderGameMenu() {
   // Compact modal: title 28 + 5 rows × 32 + 4 = 192 px tall, 320 px wide. Mirrors Sudoku.
   constexpr int titleH = 28;
   constexpr int rowH = 32;
-  const int w = 320;
-  const int h = titleH + rowH * MENU_ITEM_COUNT + 4;
-  const int x = (renderer.getScreenWidth() - w) / 2;
-  const int y = (renderer.getScreenHeight() - h) / 2;
+  const Rect panel =
+      gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 320, titleH, rowH, MENU_ITEM_COUNT);
+  const int x = panel.x;
+  const int y = panel.y;
+  const int w = panel.width;
+  const int h = panel.height;
 
   renderer.fillRect(x, y, w, h, false);
   renderer.drawRect(x, y, w, h, 2, true);
@@ -731,6 +775,20 @@ void GomokuGameActivity::renderGameOver() {
 
   if (showRecord) {
     renderer.drawCenteredText(kStatusFont, statsY + statsH + footnoteGap, rec);
+  }
+
+  if (mappedInput.hasTouch()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    GUI.drawActionButton(
+        renderer,
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 0, 2),
+        tr(STR_GOMOKU_AGAIN));
+    GUI.drawActionButton(
+        renderer,
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 1, 2),
+        tr(STR_GAME_HOME));
   }
 
   drawFooter();

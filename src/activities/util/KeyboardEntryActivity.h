@@ -90,7 +90,7 @@ class KeyboardEntryActivity : public Activity {
 
   void onComplete(std::string text);
   void onCancel();
-  bool cursorPositionFromPoint(int x, int y, size_t& position) const;
+  bool cursorPositionFromPoint(int x, int y, size_t& position, bool& passwordToggle) const;
   std::string displayTextForCurrentState() const;
   // Advance of s[start, end) measured in place by temporarily null-terminating
   // at `end` — avoids a substr temporary per measurement.

@@ -270,6 +270,22 @@ Rect offsetRect(Rect rect, const int dy) {
   return rect;
 }
 
+struct DetailHeroLayout {
+  Rect coverBase;
+  Rect adjustBase;
+  Rect cover;
+  Rect adjust;
+};
+
+DetailHeroLayout detailHeroLayout(const ThemeMetrics& metrics, const int contentTop, const int coverWidth,
+                                  const int coverHeight, const int scrollOffset) {
+  const Rect coverBase{metrics.contentSidePadding, contentTop, coverWidth, coverHeight};
+  const Rect adjustBase{coverBase.x + (coverBase.width - ADJUST_BUTTON_SIZE) / 2,
+                        coverBase.y + coverBase.height + metrics.verticalSpacing, ADJUST_BUTTON_SIZE,
+                        ADJUST_BUTTON_SIZE};
+  return {coverBase, adjustBase, offsetRect(coverBase, -scrollOffset), offsetRect(adjustBase, -scrollOffset)};
+}
+
 void drawSummaryBanner(const GfxRenderer& renderer, const Rect& rect, const char* title, const std::string& summary,
                        const bool inverted = false) {
   const bool foregroundBlack = AppMetricCard::drawSelectablePanel(renderer, rect, inverted, true, true);
@@ -464,6 +480,16 @@ void ReadingStatsDetailActivity::loop() {
     return true;
   };
 
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up) {
+    scrollBy(DETAIL_SCROLL_STEP);
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Down) {
+    scrollBy(-DETAIL_SCROLL_STEP);
+    return;
+  }
+
   buttonNavigator.onNextPress([&]() {
     if (maxScrollOffset > 0) {
       if (scrollOffset == 0 && selectedStatsItem == 0) {
@@ -507,6 +533,38 @@ void ReadingStatsDetailActivity::loop() {
     return;
   }
 
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const auto coverSize = UITheme::getInstance().hasMainTabs() ? InxCoverGeometry::fit(COVER_WIDTH, COVER_HEIGHT)
+                                                              : InxCoverGeometry::Size{COVER_WIDTH, COVER_HEIGHT};
+  const DetailHeroLayout hero = detailHeroLayout(metrics, contentTop, coverSize.width, coverSize.height, scrollOffset);
+  const auto contains = [](const Rect& rect, const int x, const int y) {
+    return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+  };
+
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasScreenTouchDown(touchX, touchY)) {
+    const int touchedItem = contains(hero.adjust, touchX, touchY) ? DETAIL_ADJUST_FOCUS_INDEX : 0;
+    if ((contains(hero.cover, touchX, touchY) || touchedItem == DETAIL_ADJUST_FOCUS_INDEX) &&
+        selectedStatsItem != touchedItem) {
+      selectedStatsItem = touchedItem;
+      requestUpdate();
+    }
+  }
+  if (mappedInput.wasScreenTapped(touchX, touchY)) {
+    if (contains(hero.adjust, touchX, touchY)) {
+      selectedStatsItem = DETAIL_ADJUST_FOCUS_INDEX;
+      openAdjustment();
+      return;
+    }
+    if (contains(hero.cover, touchX, touchY) && Storage.exists(bookPath.c_str())) {
+      selectedStatsItem = 0;
+      onSelectBook(bookPath);
+      return;
+    }
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && selectedStatsItem == DETAIL_ADJUST_FOCUS_INDEX) {
     openAdjustment();
     return;
@@ -542,10 +600,9 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
   const int viewportBottom = pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const auto coverSize = UITheme::getInstance().hasMainTabs() ? InxCoverGeometry::fit(COVER_WIDTH, COVER_HEIGHT)
                                                               : InxCoverGeometry::Size{COVER_WIDTH, COVER_HEIGHT};
-  const Rect coverBaseRect{metrics.contentSidePadding, contentTop, coverSize.width, coverSize.height};
-  const Rect adjustButtonBaseRect{coverBaseRect.x + (coverBaseRect.width - ADJUST_BUTTON_SIZE) / 2,
-                                  coverBaseRect.y + coverBaseRect.height + metrics.verticalSpacing, ADJUST_BUTTON_SIZE,
-                                  ADJUST_BUTTON_SIZE};
+  const DetailHeroLayout hero = detailHeroLayout(metrics, contentTop, coverSize.width, coverSize.height, scrollOffset);
+  const Rect coverBaseRect = hero.coverBase;
+  const Rect adjustButtonBaseRect = hero.adjustBase;
   const int textX = coverBaseRect.x + coverBaseRect.width + 16;
   const int textWidth = pageWidth - textX - metrics.contentSidePadding;
 

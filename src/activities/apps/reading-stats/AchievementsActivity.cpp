@@ -135,6 +135,47 @@ void AchievementsActivity::loop() {
     return;
   }
 
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int pageWidth = renderer.getScreenWidth();
+  const int tabTop = metrics.topPadding + metrics.headerHeight;
+  int tab = -1;
+  if (mappedInput.colTouch(tab, 0, pageWidth / 2, 2, tabTop, tabTop + metrics.tabBarHeight, pageWidth / 2) ==
+      MappedInputManager::RowTouch::Tap) {
+    selectedTab = tab == 0 ? FilterTab::Pending : FilterTab::Completed;
+    selectedIndex = 0;
+    rebuildVisibleIndexes();
+    requestUpdate();
+    return;
+  }
+
+  const int contentTop = tabTop + metrics.tabBarHeight + metrics.verticalSpacing;
+  const int viewportHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const int maxVisibleRows = std::max(1, viewportHeight / ROW_STEP);
+  const int firstVisibleIndex = selectedIndex >= maxVisibleRows ? selectedIndex - maxVisibleRows + 1 : 0;
+  int touchedRow = -1;
+  const auto rowTouch =
+      mappedInput.rowTouch(touchedRow, contentTop, ROW_STEP,
+                           std::min(maxVisibleRows, static_cast<int>(visibleIndexes.size()) - firstVisibleIndex),
+                           metrics.contentSidePadding, pageWidth - metrics.contentSidePadding, ROW_BOX_HEIGHT);
+  if (rowTouch != MappedInputManager::RowTouch::None) {
+    selectedIndex = firstVisibleIndex + touchedRow;
+    requestUpdate();
+    return;
+  }
+
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up && !visibleIndexes.empty()) {
+    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, static_cast<int>(visibleIndexes.size()));
+    requestUpdate();
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Down && !visibleIndexes.empty()) {
+    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, static_cast<int>(visibleIndexes.size()));
+    requestUpdate();
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     selectedTab = (selectedTab == FilterTab::Pending) ? FilterTab::Completed : FilterTab::Pending;
     selectedIndex = 0;

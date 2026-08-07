@@ -43,6 +43,45 @@ struct MonthSummary {
   unsigned bestDayOfMonth = 0;
 };
 
+struct HeatmapLayout {
+  int sidePadding;
+  int contentTop;
+  int summaryTop;
+  int gridTop;
+  int legendTop;
+  int cellWidth;
+  int cellHeight;
+};
+
+HeatmapLayout heatmapLayout(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int summaryTop = contentTop + MONTH_HEADER_HEIGHT + 4;
+  const int gridTop = summaryTop + (SUMMARY_CARD_HEIGHT + SUMMARY_CARD_GAP) * 2 + SECTION_GAP;
+  const int legendTop = renderer.getScreenHeight() - metrics.buttonHintsHeight - LEGEND_HEIGHT - 4;
+  const int gridHeight = std::max(120, legendTop - gridTop - SECTION_GAP);
+  return {metrics.contentSidePadding,
+          contentTop,
+          summaryTop,
+          gridTop,
+          legendTop,
+          (renderer.getScreenWidth() - metrics.contentSidePadding * 2 - HEATMAP_GRID_GAP * 6) / 7,
+          (gridHeight - HEATMAP_GRID_GAP * 5) / 6};
+}
+
+int heatmapCellAt(const HeatmapLayout& layout, const int x, const int y) {
+  const int relativeX = x - layout.sidePadding;
+  const int relativeY = y - layout.gridTop;
+  if (relativeX < 0 || relativeY < 0) return -1;
+  const int column = relativeX / (layout.cellWidth + HEATMAP_GRID_GAP);
+  const int row = relativeY / (layout.cellHeight + HEATMAP_GRID_GAP);
+  if (column >= 7 || row >= 6 || relativeX % (layout.cellWidth + HEATMAP_GRID_GAP) >= layout.cellWidth ||
+      relativeY % (layout.cellHeight + HEATMAP_GRID_GAP) >= layout.cellHeight) {
+    return -1;
+  }
+  return row * 7 + column;
+}
+
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
 
 unsigned getDaysInMonth(const int year, const unsigned month) {
@@ -421,6 +460,42 @@ void ReadingHeatmapActivity::loop() {
     return;
   }
 
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Left) {
+    goToAdjacentMonth(1);
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Right) {
+    goToAdjacentMonth(-1);
+    return;
+  }
+
+  int touchX = 0;
+  int touchY = 0;
+  const bool touchDown = mappedInput.wasScreenTouchDown(touchX, touchY);
+  const bool tapped = !touchDown && mappedInput.wasScreenTapped(touchX, touchY);
+  if (touchDown || tapped) {
+    const int index = heatmapCellAt(heatmapLayout(renderer), touchX, touchY);
+    if (index >= 0) {
+      const uint32_t referenceTimestamp = getReferenceDisplayTimestamp();
+      const uint32_t referenceDayOrdinal =
+          TimeUtils::isClockValid(referenceTimestamp)
+              ? TimeUtils::getLocalDayOrdinal(referenceTimestamp)
+              : (READING_STATS.hasReadingDays() ? READING_STATS.getReadingDays().back().dayOrdinal : 0);
+      const auto cells = buildHeatmapCells(viewedYear, viewedMonth, referenceDayOrdinal, selectedDayOrdinal);
+      if (cells[static_cast<size_t>(index)].inViewedMonth) {
+        selectedDayOrdinal = cells[static_cast<size_t>(index)].dayOrdinal;
+        if (tapped) {
+          startActivityForResult(std::make_unique<ReadingDayDetailActivity>(renderer, mappedInput, selectedDayOrdinal),
+                                 [this](const ActivityResult&) { requestUpdate(); });
+        } else {
+          requestUpdate();
+        }
+      }
+    }
+    if (touchDown || index >= 0) return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     startActivityForResult(std::make_unique<ReadingDayDetailActivity>(renderer, mappedInput, selectedDayOrdinal),
                            [this](const ActivityResult&) { requestUpdate(); });
@@ -436,11 +511,8 @@ void ReadingHeatmapActivity::loop() {
 void ReadingHeatmapActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
-  const int sidePadding = metrics.contentSidePadding;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const HeatmapLayout layout = heatmapLayout(renderer);
 
   HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_READING_HEATMAP));
 
@@ -454,42 +526,38 @@ void ReadingHeatmapActivity::render(RenderLock&&) {
   const std::string monthLabel = formatMonthLabel(viewedYear, viewedMonth);
   const std::string selectedDateLabel = ReadingStatsAnalytics::formatDayOrdinalLabel(selectedDayOrdinal);
 
-  GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, MONTH_HEADER_HEIGHT}, monthLabel.c_str(),
+  GUI.drawSubHeader(renderer, Rect{0, layout.contentTop, pageWidth, MONTH_HEADER_HEIGHT}, monthLabel.c_str(),
                     selectedDateLabel.empty() ? nullptr : selectedDateLabel.c_str());
 
-  const int summaryTop = contentTop + MONTH_HEADER_HEIGHT + 4;
-  const int cardWidth = (pageWidth - sidePadding * 2 - SUMMARY_CARD_GAP) / 2;
+  const int cardWidth = (pageWidth - layout.sidePadding * 2 - SUMMARY_CARD_GAP) / 2;
   const std::string bestDayValue = monthSummary.bestDayOfMonth > 0
                                        ? ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs) + " (" +
                                              std::to_string(monthSummary.bestDayOfMonth) + ")"
                                        : ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs);
-  drawMetricCard(renderer, Rect{sidePadding, summaryTop, cardWidth, SUMMARY_CARD_HEIGHT}, tr(STR_MONTH_TOTAL),
-                 ReadingStatsAnalytics::formatDurationHm(monthSummary.totalReadingMs));
-  drawMetricCard(renderer, Rect{sidePadding + cardWidth + SUMMARY_CARD_GAP, summaryTop, cardWidth, SUMMARY_CARD_HEIGHT},
-                 tr(STR_DAYS_READ), std::to_string(monthSummary.daysRead));
+  drawMetricCard(renderer, Rect{layout.sidePadding, layout.summaryTop, cardWidth, SUMMARY_CARD_HEIGHT},
+                 tr(STR_MONTH_TOTAL), ReadingStatsAnalytics::formatDurationHm(monthSummary.totalReadingMs));
+  drawMetricCard(
+      renderer,
+      Rect{layout.sidePadding + cardWidth + SUMMARY_CARD_GAP, layout.summaryTop, cardWidth, SUMMARY_CARD_HEIGHT},
+      tr(STR_DAYS_READ), std::to_string(monthSummary.daysRead));
   drawMetricCard(renderer,
-                 Rect{sidePadding, summaryTop + SUMMARY_CARD_HEIGHT + SUMMARY_CARD_GAP, cardWidth, SUMMARY_CARD_HEIGHT},
+                 Rect{layout.sidePadding, layout.summaryTop + SUMMARY_CARD_HEIGHT + SUMMARY_CARD_GAP, cardWidth,
+                      SUMMARY_CARD_HEIGHT},
                  tr(STR_BEST_DAY), bestDayValue);
   drawMetricCard(renderer,
-                 Rect{sidePadding + cardWidth + SUMMARY_CARD_GAP, summaryTop + SUMMARY_CARD_HEIGHT + SUMMARY_CARD_GAP,
-                      cardWidth, SUMMARY_CARD_HEIGHT},
+                 Rect{layout.sidePadding + cardWidth + SUMMARY_CARD_GAP,
+                      layout.summaryTop + SUMMARY_CARD_HEIGHT + SUMMARY_CARD_GAP, cardWidth, SUMMARY_CARD_HEIGHT},
                  tr(STR_STREAK), std::to_string(READING_STATS.getCurrentStreakDays()));
-
-  const int gridTop = summaryTop + (SUMMARY_CARD_HEIGHT + SUMMARY_CARD_GAP) * 2 + SECTION_GAP;
-  const int legendTop = pageHeight - metrics.buttonHintsHeight - LEGEND_HEIGHT - 4;
-  const int gridHeight = std::max(120, legendTop - gridTop - SECTION_GAP);
-  const int cellWidth = (pageWidth - sidePadding * 2 - HEATMAP_GRID_GAP * 6) / 7;
-  const int cellHeight = (gridHeight - HEATMAP_GRID_GAP * 5) / 6;
 
   for (int index = 0; index < 42; ++index) {
     const int row = index / 7;
     const int col = index % 7;
-    const int x = sidePadding + col * (cellWidth + HEATMAP_GRID_GAP);
-    const int y = gridTop + row * (cellHeight + HEATMAP_GRID_GAP);
-    drawHeatCell(renderer, Rect{x, y, cellWidth, cellHeight}, cells[static_cast<size_t>(index)]);
+    const int x = layout.sidePadding + col * (layout.cellWidth + HEATMAP_GRID_GAP);
+    const int y = layout.gridTop + row * (layout.cellHeight + HEATMAP_GRID_GAP);
+    drawHeatCell(renderer, Rect{x, y, layout.cellWidth, layout.cellHeight}, cells[static_cast<size_t>(index)]);
   }
 
-  drawLegend(renderer, Rect{sidePadding, legendTop, pageWidth - sidePadding * 2, LEGEND_HEIGHT});
+  drawLegend(renderer, Rect{layout.sidePadding, layout.legendTop, pageWidth - layout.sidePadding * 2, LEGEND_HEIGHT});
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

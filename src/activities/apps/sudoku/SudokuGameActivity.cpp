@@ -118,10 +118,19 @@ void SudokuGameActivity::resumeFromMenu() {
 }
 
 void SudokuGameActivity::handleInputWon() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect again = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                         metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 0, 2);
+  const Rect home = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                        metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 1, 2);
+  if (mappedInput.wasTapInRect(again.x, again.y, again.width, again.height) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     const auto diff = difficulty;
     activityManager.replaceActivity(std::make_unique<SudokuGameActivity>(renderer, mappedInput, diff, false));
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    return;
+  }
+  if (mappedInput.wasTapInRect(home.x, home.y, home.width, home.height) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     activityManager.replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput));
   }
 }
@@ -132,6 +141,20 @@ void SudokuGameActivity::enterGameMenu() {
 }
 
 void SudokuGameActivity::handleInputGameMenu() {
+  constexpr int titleHeight = 28;
+  constexpr int rowHeight = 32;
+  constexpr int width = 320;
+  const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), width, titleHeight,
+                                       rowHeight, MENU_ITEM_COUNT);
+  int touched = -1;
+  const auto touch = mappedInput.rowTouch(touched, panel.y + titleHeight, rowHeight, MENU_ITEM_COUNT, panel.x,
+                                          panel.x + panel.width, rowHeight);
+  if (touch != MappedInputManager::RowTouch::None) {
+    menuSel = static_cast<uint8_t>(touched);
+    requestUpdate();
+    if (touch == MappedInputManager::RowTouch::Tap) runMenuItem(menuSel);
+    return;
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
       mappedInput.wasPressed(MappedInputManager::Button::Left)) {
     menuSel = static_cast<uint8_t>((menuSel + MENU_ITEM_COUNT - 1) % MENU_ITEM_COUNT);
@@ -214,6 +237,40 @@ void SudokuGameActivity::resetGame() {
 }
 
 void SudokuGameActivity::handleInputPlaying() {
+  int touchX = 0;
+  int touchY = 0;
+  const int gridX = (renderer.getScreenWidth() - GRID_SIZE_PX) / 2;
+  const int paletteX = (renderer.getScreenWidth() - PALETTE_W) / 2;
+  const auto updateTouchFocus = [&](const int x, const int y, const bool activate) {
+    int row = 0;
+    int column = 0;
+    if (gameGridCellFromPoint(Rect{gridX, GRID_Y, GRID_SIZE_PX, GRID_SIZE_PX}, 9, 9, x, y, row, column)) {
+      cursorR = static_cast<uint8_t>(row);
+      cursorC = static_cast<uint8_t>(column);
+      focus = Focus::Grid;
+      if (activate && !board.isFixed(cursorR, cursorC)) enterPaletteFocus();
+      requestUpdate();
+      return true;
+    }
+
+    const int relativeX = x - paletteX;
+    const int relativeY = y - PALETTE_Y;
+    if (relativeX < 0 || relativeY < 0) return false;
+    column = relativeX / (PALETTE_CELL_W + PALETTE_GAP);
+    row = relativeY / (PALETTE_CELL_H + PALETTE_GAP);
+    if (column >= 5 || row >= 2 || relativeX % (PALETTE_CELL_W + PALETTE_GAP) >= PALETTE_CELL_W ||
+        relativeY % (PALETTE_CELL_H + PALETTE_GAP) >= PALETTE_CELL_H) {
+      return false;
+    }
+    paletteIdx = static_cast<uint8_t>(row * 5 + column);
+    focus = Focus::Palette;
+    if (activate) exitPaletteFocus(true);
+    requestUpdate();
+    return true;
+  };
+  if (mappedInput.wasScreenTouchDown(touchX, touchY) && updateTouchFocus(touchX, touchY, false)) return;
+  if (mappedInput.wasScreenTapped(touchX, touchY) && updateTouchFocus(touchX, touchY, true)) return;
+
   if (focus == Focus::Grid) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
       moveCursor(-1, 0);
@@ -662,6 +719,20 @@ void SudokuGameActivity::renderWon() {
     renderer.drawCenteredText(kStatusFont, statsY + statsH + footnoteGap, rateBuf);
   }
 
+  if (mappedInput.hasTouch()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    GUI.drawActionButton(
+        renderer,
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 0, 2),
+        tr(STR_SUDOKU_PLAY_AGAIN));
+    GUI.drawActionButton(
+        renderer,
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 1, 2),
+        tr(STR_GAME_HOME));
+  }
+
   drawFooter();
 }
 
@@ -669,10 +740,12 @@ void SudokuGameActivity::renderGameMenu() {
   // Compact modal sized for English; 7 rows × rowH + title.
   constexpr int titleH = 28;
   constexpr int rowH = 32;
-  const int w = 320;
-  const int h = titleH + rowH * MENU_ITEM_COUNT + 4;
-  const int x = (renderer.getScreenWidth() - w) / 2;
-  const int y = (renderer.getScreenHeight() - h) / 2;
+  const Rect panel =
+      gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 320, titleH, rowH, MENU_ITEM_COUNT);
+  const int x = panel.x;
+  const int y = panel.y;
+  const int w = panel.width;
+  const int h = panel.height;
 
   renderer.fillRect(x, y, w, h, false);
   renderer.drawRect(x, y, w, h, 2, true);

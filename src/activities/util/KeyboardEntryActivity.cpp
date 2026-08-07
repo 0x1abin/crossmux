@@ -384,7 +384,9 @@ int KeyboardEntryActivity::lineBreakEnd(std::string& s, const int start, const i
   return best;
 }
 
-bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, size_t& position) const {
+bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, size_t& position,
+                                                    bool& passwordToggle) const {
+  passwordToggle = false;
   // Key taps are the overwhelmingly common case; they land on the keyboard,
   // never the text field, so skip the wrap/measure work entirely.
   if (y >= keyboardRect().y) return false;
@@ -459,6 +461,16 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
     lineStartIdx = lineEndIdx;
   }
 
+  if (inputType == InputType::Password) {
+    const int toggleWidth =
+        std::max(renderer.getTextWidth(UI_12_FONT_ID, "[abc]"), renderer.getTextWidth(UI_12_FONT_ID, "[***]"));
+    const int toggleX = pageWidth - effectiveMargin - toggleWidth;
+    if (x >= toggleX - 4 && x < pageWidth - effectiveMargin + 4 && y >= lineY - 2 && y < lineY + lineHeight + 5) {
+      passwordToggle = true;
+      return true;
+    }
+  }
+
   const int underlineBottom = lineY + lineHeight + metrics.verticalSpacing + 8;
   if (y >= inputStartY - metrics.verticalSpacing && y < underlineBottom && x >= effectiveMargin &&
       x < effectiveMargin + maxLineWidth + toggleReserve) {
@@ -490,7 +502,17 @@ void KeyboardEntryActivity::loop() {
   int ty = 0;
 
   size_t touchedCursorPos = 0;
-  if (mappedInput.wasScreenTapped(tx, ty) && cursorPositionFromPoint(tx, ty, touchedCursorPos)) {
+  bool touchedPasswordToggle = false;
+  if (mappedInput.wasScreenTapped(tx, ty) && cursorPositionFromPoint(tx, ty, touchedCursorPos, touchedPasswordToggle)) {
+    if (touchedPasswordToggle) {
+      passwordVisible = !passwordVisible;
+      cursorMode = false;
+      togglePos = false;
+      hintVisible = false;
+      touchRouter.reset();
+      requestUpdate();
+      return;
+    }
     cursorPos = std::min(touchedCursorPos, text.length());
     // The masked text field maps taps per byte; snap back to a boundary so
     // the cursor never lands inside a multi-byte character.
@@ -824,7 +846,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  if (hintVisible && !text.empty()) {
+  if (!mappedInput.hasTouch() && hintVisible && !text.empty()) {
     const int hintLh = renderer.getLineHeight(SMALL_FONT_ID);
     const int underlineY = inputStartY + inputHeight + lineHeight + metrics.verticalSpacing;
     const int hintY = underlineY + 4;
@@ -866,7 +888,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     tipCount = 1 + (inputType == InputType::Url ? 1 : 0) + (!text.empty() ? 1 : 0);
   }
 
-  if (tipCount > 0) {
+  if (!mappedInput.hasTouch() && tipCount > 0) {
     int y = (underlineBottom + kbRect.y) / 2 - (tipCount + 1) * tipsLh / 2;
     drawTip(tr(STR_KB_TIPS), y);
     y += tipsLh;

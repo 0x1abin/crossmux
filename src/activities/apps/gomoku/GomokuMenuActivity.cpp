@@ -7,6 +7,7 @@
 
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
+#include "../GameUi.h"
 #include "GomokuGameActivity.h"
 
 GomokuMenuActivity::GomokuMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -62,6 +63,13 @@ void GomokuMenuActivity::buildItems() {
 
 void GomokuMenuActivity::loop() {
   if (showingStats) {
+    int touchX = 0;
+    int touchY = 0;
+    if (mappedInput.wasScreenTapped(touchX, touchY)) {
+      showingStats = false;
+      requestUpdate();
+      return;
+    }
     if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
         mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       showingStats = false;
@@ -76,6 +84,14 @@ void GomokuMenuActivity::loop() {
   }
 
   const int n = static_cast<int>(items.size());
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  if (handleListTouch(selected, n, listTop, listHeight, true) == ListTouchResult::Activated) {
+    onSelect();
+    return;
+  }
+
   buttonNavigator.onNext([this, n] {
     selected = ButtonNavigator::nextIndex(selected, n);
     requestUpdate();
@@ -94,6 +110,25 @@ void GomokuMenuActivity::loop() {
 
 void GomokuMenuActivity::handleAiDifficultyInput() {
   constexpr int kNumLevels = 3;
+  constexpr int titleHeight = 28;
+  constexpr int rowHeight = 32;
+  constexpr int width = 320;
+  const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), width, titleHeight,
+                                       rowHeight, kNumLevels);
+  int touched = -1;
+  const auto touch = mappedInput.rowTouch(touched, panel.y + titleHeight, rowHeight, kNumLevels, panel.x,
+                                          panel.x + panel.width, rowHeight);
+  if (touch != MappedInputManager::RowTouch::None) {
+    aiDifficultySel = touched;
+    requestUpdate();
+    if (touch == MappedInputManager::RowTouch::Tap) {
+      GomokuStore::clear();
+      activityManager.replaceActivity(
+          std::make_unique<GomokuGameActivity>(renderer, mappedInput, GomokuMode::VsAi, pendingAiBoardSize, false,
+                                               static_cast<GomokuAiLevel>(aiDifficultySel)));
+    }
+    return;
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
       mappedInput.wasPressed(MappedInputManager::Button::Left)) {
     aiDifficultySel = (aiDifficultySel + kNumLevels - 1) % kNumLevels;
@@ -274,10 +309,11 @@ void GomokuMenuActivity::renderAiDifficulty() {
   constexpr int titleH = 28;
   constexpr int rowH = 32;
   constexpr int kRows = 3;
-  const int w = 320;
-  const int h = titleH + rowH * kRows + 4;
-  const int x = (renderer.getScreenWidth() - w) / 2;
-  const int y = (renderer.getScreenHeight() - h) / 2;
+  const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 320, titleH, rowH, kRows);
+  const int x = panel.x;
+  const int y = panel.y;
+  const int w = panel.width;
+  const int h = panel.height;
 
   renderer.fillRect(x, y, w, h, false);
   renderer.drawRect(x, y, w, h, 2, true);
