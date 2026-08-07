@@ -1,6 +1,6 @@
 ---
 name: sync-upstream
-description: Automate and review CrossMux/CrossPoint upstream repository synchronization. Use when the user asks to sync, update, compare, or merge upstream changes, especially upstream/develop, into this repo through a new branch and pull request instead of committing directly on main or the active target branch. Covers overlap review, upstream-preferred conflict policy, remote/base detection, agent sync branch creation, squash-sync fallback, validation builds, pushing to origin, and opening a draft PR.
+description: Automate and review CrossMux/CrossPoint plus FreeInk SDK upstream synchronization. Use when the user asks to sync, update, compare, or merge upstream changes. Covers the SDK-first two-PR gate, CrossMux merge, validation, and draft PR creation.
 ---
 
 # Sync Upstream
@@ -19,15 +19,18 @@ python3 .claude/skills/sync-upstream/scripts/sync_upstream.py inspect
 python3 .claude/skills/sync-upstream/scripts/sync_upstream.py run --draft
 ```
 
-`run --draft` does the whole happy path:
+`run --draft` uses a two-stage gate:
 
-1. Reads the super.engineering target branch with `sc worktree status --json`
+1. Compares `Free-Ink/freeink-sdk/main` with `0x1abin/freeink-sdk/main`.
+2. If the fork is behind, creates `agent/sync-freeink-sdk-main-<sha>`, runs both
+   SDK host suites and CrossMux `default`, `sticky`, `eego_a4`, and `mofei_m4` builds, opens
+   an SDK draft PR, then stops without changing CrossMux.
+3. After that PR is merged, reads the super.engineering target branch with `sc worktree status --json`
    when available.
-2. Fetches `origin/<base>` and `upstream/develop`.
-3. Creates a new `agent/sync-upstream-develop-<sha>` branch from `origin/<base>`.
-4. Merges upstream without committing yet.
-5. Runs repository sanity checks and both build commands.
-6. Commits, pushes to `origin`, and opens a draft PR.
+4. Fetches `origin/<base>` and `upstream/develop`, verifies the upstream SDK
+   gitlink exists in the fork, and stages the CrossMux merge.
+5. Preserves the fork URL in `.gitmodules`, updates the gitlink to fork `main`,
+   validates, and opens the CrossMux draft PR.
 
 Check the `inspect` output before `run`. If `base_branch` is not the intended
 CrossMux integration branch, pass `--base-branch main` or set the worktree target
@@ -75,8 +78,7 @@ used:
 ```bash
 git diff --check
 git diff --cached --check
-pio run
-pio run -e gh_release_cn
+pio run -e default -e sticky -e eego_a4 -e mofei_m4
 ```
 
 It also checks for unresolved index entries and conflict markers in tracked
@@ -90,6 +92,6 @@ files.
 - [ ] `.skills/SKILL.md` still follows the thin-map policy.
 - [ ] Submodules are initialized and no stale SDK directory was staged by
       accident.
-- [ ] Both build commands passed, or the PR explicitly explains why they were
+- [ ] SDK host tests and all four device builds passed, or the PR explicitly explains why they were
       skipped.
 - [ ] The PR is a draft unless the user requested a ready-for-review PR.
