@@ -1,8 +1,8 @@
 #include "GfxRenderer.h"
 
 #include <BidiUtils.h>
-#include <BuildScratch.h>
 #include <BoardConfig.h>
+#include <BuildScratch.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>

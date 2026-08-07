@@ -445,8 +445,7 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
-  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth,
-                   SETTINGS.frontlightBrightness != 0);
+  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightBrightness != 0);
   halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
