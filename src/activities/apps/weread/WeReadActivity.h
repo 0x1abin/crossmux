@@ -49,7 +49,13 @@ class WeReadActivity final : public Activity {
   enum class Job : uint8_t { Sync, Detail, Download };
   enum class DetailAction : uint8_t { Introduction, Read, Browse, Cache, Images };
   enum class PostProcessNotice : uint8_t { None, Waiting, LongWait };
-  enum class ShelfSideGesture : uint8_t { Idle, UpPressed, DownPressed, PageHandled };
+  enum class ShelfNavigationGesture : uint8_t {
+    Idle,
+    PreviousPressed,
+    NextPressed,
+    PreviousPageHandled,
+    NextPageHandled
+  };
   static constexpr int kDetailActionCount = 5;
   static constexpr int kDetailListActionCount = kDetailActionCount - 1;
   static constexpr int kMaxIntroPages = 128;
@@ -78,7 +84,8 @@ class WeReadActivity final : public Activity {
   std::atomic<bool> shelfFrameInvalidated_{true};
   int shelfCoverPageStart_ = -1;
   int shelfCoverCursor_ = 0;
-  ShelfSideGesture shelfSideGesture_ = ShelfSideGesture::Idle;
+  ShelfNavigationGesture shelfNavigationGesture_ = ShelfNavigationGesture::Idle;
+  uint32_t shelfLastPageTurnAt_ = 0;
   int detailSelected_ = 0;
   int introPage_ = 0;
   int introPageCount_ = 1;
