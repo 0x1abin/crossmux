@@ -34,7 +34,8 @@ enum class AppId : uint8_t {
   PixelSwitch = 12,
   FileTransfer = 13,
   OpdsBrowser = 14,
-  Count = 15,
+  Calculator = 15,
+  Count = 16,
 };
 
 struct AppEntry {
@@ -63,6 +64,7 @@ constexpr AppEntry kAppEntries[] = {
     {AppId::AirPage, StrId::STR_AIRPAGE_TITLE, UIIcon::AirPage, &ActivityManager::goToAirPage},
     {AppId::Buddy, StrId::STR_BUDDY_TITLE, UIIcon::Buddy, &ActivityManager::goToBuddy},
     {AppId::PixelSwitch, StrId::STR_PIXEL_SWITCH_TITLE, UIIcon::PixelSwitch, &ActivityManager::goToPixelSwitch},
+    {AppId::Calculator, StrId::STR_CALCULATOR_TITLE, UIIcon::Calculator, &ActivityManager::goToCalculator},
     {AppId::Standby, StrId::STR_STANDBY_TITLE, UIIcon::Standby, &ActivityManager::goToStandby},
 };
 
@@ -123,6 +125,7 @@ static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_AP
               "the Buddy app ID must remain stable");
 static_assert(static_cast<uint8_t>(AppId::PixelSwitch) == CrossPointSettings::PIXEL_SWITCH_APP_ID,
               "the Pixel Switch app ID must remain stable");
+static_assert(static_cast<uint8_t>(AppId::Calculator) == 15, "the Calculator app ID must remain stable");
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
 static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
                   (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |

@@ -12,6 +12,7 @@
 #include "apps/airpage/AirPageActivity.h"
 #include "apps/avatar/UglyAvatarActivity.h"
 #include "apps/buddy/BuddyActivity.h"
+#include "apps/calculator/CalculatorActivity.h"
 #include "apps/sokoban/SokobanGameActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
@@ -448,6 +449,15 @@ void ActivityManager::goToPixelSwitch() {
   auto activity = makeUniqueNoThrow<PixelSwitchActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ACT", "OOM: PixelSwitchActivity (%u bytes)", static_cast<unsigned>(sizeof(PixelSwitchActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
+void ActivityManager::goToCalculator() {
+  auto activity = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: CalculatorActivity (%u bytes)", static_cast<unsigned>(sizeof(CalculatorActivity)));
     return;
   }
   replaceActivity(std::move(activity));

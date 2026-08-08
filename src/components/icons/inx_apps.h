@@ -244,9 +244,20 @@ constexpr Bitmap achievements() {
   return icon;
 }
 
+constexpr Bitmap calculator() {
+  Bitmap icon;
+  icon.rect(5, 3, 22, 26);
+  icon.rect(8, 7, 16, 6);
+  for (int y = 16; y <= 22; y += 6) {
+    for (int x = 8; x <= 20; x += 6) icon.filledRect(x, y, 3, 3);
+  }
+  return icon;
+}
+
 inline constexpr Icon ReadingHeatmap = readingHeatmap().data;
 inline constexpr Icon ReadingProfile = readingProfile().data;
 inline constexpr Icon Achievements = achievements().data;
+inline constexpr Icon Calculator = calculator().data;
 
 constexpr const uint8_t* get(const UIIcon icon) {
   switch (icon) {
@@ -288,6 +299,8 @@ constexpr const uint8_t* get(const UIIcon icon) {
       return PixelSwitch.data();
     case UIIcon::AirPage:
       return AirPage.data();
+    case UIIcon::Calculator:
+      return Calculator.data();
     default:
       return nullptr;
   }
