@@ -103,16 +103,44 @@ for f in "${ASSETS[@]}"; do
     rc=1
     continue
   fi
-  echo "Uploading $(basename "$f") ($(du -h "$f" | cut -f1))"
-  up="$(curl -sS -X POST "${API}/releases/${release_id}/attach_files" \
-    -F "access_token=${GITEE_TOKEN}" \
-    -F "file=@${f}")"
-  if echo "$up" | jq -e '.browser_download_url' >/dev/null 2>&1; then
-    echo "  ok: $(echo "$up" | jq -r '.browser_download_url')"
-  else
-    echo "::error::upload failed for ${f}: ${up}"
+  asset_name="$(basename "$f")"
+  echo "Uploading ${asset_name} ($(du -h "$f" | cut -f1))"
+  uploaded=false
+  for attempt in 1 2 3; do
+    up="$(curl -sS --connect-timeout 20 --max-time 600 \
+      --speed-limit 1024 --speed-time 120 \
+      -X POST "${API}/releases/${release_id}/attach_files" \
+      -F "access_token=${GITEE_TOKEN}" \
+      -F "file=@${f}")"
+    if echo "$up" | jq -e '.browser_download_url' >/dev/null 2>&1; then
+      echo "  ok: $(echo "$up" | jq -r '.browser_download_url')"
+      uploaded=true
+      break
+    fi
+
+    # A timed-out response may still leave a completed upload on Gitee. Check
+    # before retrying so the release never gains duplicate attachments.
+    uploaded_url="$(curl -fsS --connect-timeout 20 --max-time 60 \
+      "${API}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" 2>/dev/null \
+      | jq -r --arg name "$asset_name" \
+        '.assets[]? | select(.name == $name) | .browser_download_url' \
+      | head -n 1 || true)"
+    if [ -n "$uploaded_url" ]; then
+      echo "  ok after response timeout: ${uploaded_url}"
+      uploaded=true
+      break
+    fi
+
+    echo "  upload attempt ${attempt}/3 failed: ${up}"
+    if [ "$attempt" -lt 3 ]; then
+      sleep 10
+    fi
+  done
+  if [ "$uploaded" != true ]; then
+    echo "::error::upload failed for ${f} after 3 attempts"
     rc=1
   fi
+  sleep 2
 done
 
 exit $rc
