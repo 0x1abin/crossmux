@@ -74,6 +74,14 @@ void ReadingStatsMenuActivity::openSelected() {
 
 void ReadingStatsMenuActivity::loop() {
   const int count = activeEntryCount();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  if (handleListTouch(selected, count, listTop, listHeight, false) == ListTouchResult::Activated) {
+    openSelected();
+    return;
+  }
+
   buttonNavigator.onNext([this, count] {
     selected = ButtonNavigator::nextIndex(selected, count);
     requestUpdate();

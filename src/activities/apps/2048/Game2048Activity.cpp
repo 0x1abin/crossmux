@@ -82,6 +82,21 @@ void Game2048Activity::loop() {
     activityManager.goToApps();
     return;
   }
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect newButton =
+      gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                          metrics.menuSpacing, metrics.menuRowHeight, 0, 1);
+  if (mappedInput.wasTapInRect(newButton.x, newButton.y, newButton.width, newButton.height)) {
+    if (gameOver_) {
+      newGame();
+      persistNow();
+      requestUpdate();
+    } else {
+      promptNewGameConfirm();
+    }
+    return;
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (gameOver_) {
       // Board stuck — banner already says "Press New to start again", no need to ask again.
@@ -95,6 +110,23 @@ void Game2048Activity::loop() {
   }
 
   if (gameOver_) return;  // No swipes when stuck — Confirm restarts.
+
+  switch (mappedInput.wasSwipe()) {
+    case MappedInputManager::SwipeDir::Up:
+      handleSlide(Game2048Board::Direction::Up);
+      return;
+    case MappedInputManager::SwipeDir::Down:
+      handleSlide(Game2048Board::Direction::Down);
+      return;
+    case MappedInputManager::SwipeDir::Left:
+      handleSlide(Game2048Board::Direction::Left);
+      return;
+    case MappedInputManager::SwipeDir::Right:
+      handleSlide(Game2048Board::Direction::Right);
+      return;
+    case MappedInputManager::SwipeDir::None:
+      break;
+  }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
     handleSlide(Game2048Board::Direction::Up);
@@ -156,6 +188,15 @@ void Game2048Activity::render(RenderLock&&) {
   drawTitleBar();
   drawGrid();
   if (won_ || gameOver_) drawOverlayBanner();
+  if (mappedInput.hasTouch()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect action =
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 0, 1);
+    renderer.drawCenteredText(UI_10_FONT_ID, action.y - renderer.getLineHeight(UI_10_FONT_ID) - metrics.menuSpacing,
+                              tr(STR_2048_TOUCH_HINT));
+    GUI.drawActionButton(renderer, action, tr(STR_2048_NEW));
+  }
   drawFooter();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
@@ -215,7 +256,8 @@ void Game2048Activity::drawOverlayBanner() {
   const int sh = renderer.getScreenHeight();
 
   const char* title = gameOver_ ? tr(STR_2048_GAME_OVER) : tr(STR_2048_YOU_WIN);
-  const char* hint = tr(STR_2048_HINT_RESTART);
+  const char* hint =
+      I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_2048_TOUCH_HINT : StrId::STR_2048_HINT_RESTART);
 
   const int titleH = renderer.getTextHeight(kBannerFont);
   const int hintH = renderer.getTextHeight(kBannerHintFont);

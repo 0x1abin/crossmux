@@ -991,6 +991,25 @@ bool BaseTheme::drawSelectionBackground(const GfxRenderer& renderer, const Rect 
   return metrics.optionPopupSelectionLight;
 }
 
+void BaseTheme::drawActionButton(const GfxRenderer& renderer, const Rect rect, const char* label,
+                                 const bool active) const {
+  if (rect.width <= 0 || rect.height <= 0 || !label || !*label) return;
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  bool foregroundBlack = true;
+  if (active) {
+    foregroundBlack = drawSelectionBackground(renderer, rect);
+  } else {
+    renderer.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, metrics.optionPopupSelectionRadius, Color::White);
+    renderer.drawRoundedRect(rect.x, rect.y, rect.width, rect.height, 1, metrics.optionPopupSelectionRadius, true);
+  }
+
+  const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD);
+  const int textX = rect.x + (rect.width - textWidth) / 2;
+  const int textY = rect.y + (rect.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+  renderer.drawText(UI_10_FONT_ID, textX, textY, label, foregroundBlack, EpdFontFamily::BOLD);
+}
+
 void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
                                 int selectedIndex) const {
   const auto& metrics = UITheme::getInstance().getMetrics();

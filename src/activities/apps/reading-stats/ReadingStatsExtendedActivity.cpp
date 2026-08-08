@@ -299,22 +299,27 @@ void ReadingStatsExtendedActivity::loop() {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int maxScrollOffset = getMaxScrollOffset(renderer, metrics);
-
-  buttonNavigator.onPreviousRelease([&]() {
-    const int nextOffset = std::max(0, scrollOffset - CHART_SCROLL_STEP);
+  const auto scrollBy = [this, maxScrollOffset](const int delta) {
+    const int nextOffset = std::clamp(scrollOffset + delta, 0, maxScrollOffset);
     if (nextOffset != scrollOffset) {
       scrollOffset = nextOffset;
       requestUpdate();
     }
-  });
+  };
 
-  buttonNavigator.onNextRelease([&]() {
-    const int nextOffset = std::min(maxScrollOffset, scrollOffset + CHART_SCROLL_STEP);
-    if (nextOffset != scrollOffset) {
-      scrollOffset = nextOffset;
-      requestUpdate();
-    }
-  });
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up) {
+    scrollBy(CHART_SCROLL_STEP);
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Down) {
+    scrollBy(-CHART_SCROLL_STEP);
+    return;
+  }
+
+  buttonNavigator.onPreviousRelease([&]() { scrollBy(-CHART_SCROLL_STEP); });
+
+  buttonNavigator.onNextRelease([&]() { scrollBy(CHART_SCROLL_STEP); });
 }
 
 void ReadingStatsExtendedActivity::render(RenderLock&&) {

@@ -63,6 +63,16 @@ void ReadingDayDetailActivity::loop() {
     return;
   }
 
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + SUMMARY_CARD_HEIGHT +
+                      metrics.verticalSpacing + 34 + 10;
+  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  if (handleListTouch(selectedIndex, static_cast<int>(entries.size()), listTop, listHeight, false) ==
+      ListTouchResult::Activated) {
+    openSelectedBook();
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     openSelectedBook();
     return;

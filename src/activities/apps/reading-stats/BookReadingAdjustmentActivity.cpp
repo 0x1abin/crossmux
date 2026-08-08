@@ -11,6 +11,7 @@
 #include "AchievementsStore.h"
 #include "ReadingDateSelectionActivity.h"
 #include "ReadingStatsStore.h"
+#include "activities/apps/GameUi.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
@@ -202,6 +203,43 @@ void BookReadingAdjustmentActivity::loop() {
     return;
   }
 
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = metrics.listWithSubtitleRowHeight * FIELD_COUNT;
+  const auto listTouch = handleListTouch(selectedField, FIELD_COUNT, contentTop, listHeight, true);
+  if (listTouch == ListTouchResult::Activated && selectedField == 1) {
+    openDateSelection();
+    return;
+  }
+  if (listTouch != ListTouchResult::None) {
+    lastApplyFailed = false;
+    return;
+  }
+
+  const Rect minus = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                         metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 0, 3);
+  const Rect plus = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                        metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 1, 3);
+  const Rect confirm =
+      gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                          metrics.menuSpacing, metrics.menuRowHeight, 2, 3);
+  if (mappedInput.wasTapInRect(minus.x, minus.y, minus.width, minus.height)) {
+    adjustSelectedValue(-1);
+    return;
+  }
+  if (mappedInput.wasTapInRect(plus.x, plus.y, plus.width, plus.height)) {
+    adjustSelectedValue(1);
+    return;
+  }
+  if (mappedInput.wasTapInRect(confirm.x, confirm.y, confirm.width, confirm.height)) {
+    if (selectedField == 1) {
+      openDateSelection();
+    } else {
+      applyAdjustment();
+    }
+    return;
+  }
+
   buttonNavigator.onRelease({MappedInputManager::Button::Down}, [this] {
     selectedField = ButtonNavigator::nextIndex(selectedField, FIELD_COUNT);
     lastApplyFailed = false;
@@ -258,6 +296,21 @@ void BookReadingAdjustmentActivity::render(RenderLock&&) {
   renderer.drawText(UI_10_FONT_ID, sidePadding, infoTop, shortInfo.c_str());
   const std::string shortHint = renderer.truncatedText(UI_10_FONT_ID, hint.c_str(), infoWidth);
   renderer.drawText(UI_10_FONT_ID, sidePadding, infoTop + renderer.getLineHeight(UI_10_FONT_ID), shortHint.c_str());
+
+  if (mappedInput.hasTouch()) {
+    GUI.drawActionButton(renderer,
+                         gameTouchActionRect(pageWidth, renderer.getScreenHeight(), metrics.contentSidePadding,
+                                             metrics.menuSpacing, metrics.menuRowHeight, 0, 3),
+                         "-");
+    GUI.drawActionButton(renderer,
+                         gameTouchActionRect(pageWidth, renderer.getScreenHeight(), metrics.contentSidePadding,
+                                             metrics.menuSpacing, metrics.menuRowHeight, 1, 3),
+                         "+");
+    GUI.drawActionButton(renderer,
+                         gameTouchActionRect(pageWidth, renderer.getScreenHeight(), metrics.contentSidePadding,
+                                             metrics.menuSpacing, metrics.menuRowHeight, 2, 3),
+                         selectedField == 1 ? tr(STR_SELECT) : tr(STR_CONFIRM));
+  }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), selectedField == 1 ? tr(STR_SELECT) : tr(STR_CONFIRM),
                                             tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));

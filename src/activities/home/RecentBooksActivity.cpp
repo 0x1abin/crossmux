@@ -81,8 +81,12 @@ void RecentBooksActivity::loop() {
   if (listTouch != ListTouchResult::None) {
     selectorIndex = static_cast<size_t>(touchSel);
     if (listTouch == ListTouchResult::Activated) {
-      LOG_DBG("RBA", "Tapped recent book: %s", recentBooks[selectorIndex].path.c_str());
-      onSelectBook(recentBooks[selectorIndex].path);
+      if (mappedInput.getHeldTime() >= LONG_PRESS_MS) {
+        promptRemoveBook(recentBooks[selectorIndex].path, recentBooks[selectorIndex].title);
+      } else {
+        LOG_DBG("RBA", "Tapped recent book: %s", recentBooks[selectorIndex].path.c_str());
+        onSelectBook(recentBooks[selectorIndex].path);
+      }
     }
     return;
   }

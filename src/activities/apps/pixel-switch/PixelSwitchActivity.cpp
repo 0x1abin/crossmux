@@ -47,6 +47,41 @@ Color shadeColor(const pixel_switch::Shade shade) {
   return Color::White;
 }
 
+Rect canvasRect(const GfxRenderer& renderer) {
+  int marginTop = 0;
+  int marginRight = 0;
+  int marginBottom = 0;
+  int marginLeft = 0;
+  renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
+  const int viewWidth = std::max(0, renderer.getScreenWidth() - marginLeft - marginRight);
+  const int viewHeight = std::max(0, renderer.getScreenHeight() - marginTop - marginBottom);
+  const auto size = pixel_switch::fitDisplaySize(viewWidth, viewHeight);
+  return Rect{marginLeft + (viewWidth - size.width) / 2, marginTop + (viewHeight - size.height) / 2, size.width,
+              size.height};
+}
+
+struct PaletteLayout {
+  Rect panel;
+  Rect cells;
+  int cellSize;
+  int gap;
+};
+
+PaletteLayout paletteLayout(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int cellSize =
+      std::max(metrics.menuRowHeight, std::min(renderer.getScreenWidth(), renderer.getScreenHeight()) / 8);
+  const int gap = std::max(2, metrics.menuSpacing / 2);
+  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID) + metrics.verticalSpacing;
+  const int width = metrics.contentSidePadding * 2 + cellSize * 2 + gap;
+  const int height = metrics.contentSidePadding * 2 + titleHeight + cellSize * 2 + gap;
+  const Rect panel{(renderer.getScreenWidth() - width) / 2, (renderer.getScreenHeight() - height) / 2, width, height};
+  return {panel,
+          Rect{panel.x + metrics.contentSidePadding, panel.y + metrics.contentSidePadding + titleHeight,
+               cellSize * 2 + gap, cellSize * 2 + gap},
+          cellSize, gap};
+}
+
 }  // namespace
 
 PixelSwitchActivity* PixelSwitchActivity::active_ = nullptr;
@@ -315,6 +350,13 @@ void PixelSwitchActivity::loop() {
 }
 
 void PixelSwitchActivity::handleIntroInput() {
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasScreenTapped(touchX, touchY)) {
+    view_ = View::Canvas;
+    requestUpdate();
+    return;
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     view_ = View::Canvas;
     requestUpdate();
@@ -330,6 +372,33 @@ void PixelSwitchActivity::moveCursor(const int dx, const int dy) {
 }
 
 void PixelSwitchActivity::handleCanvasInput() {
+  const Rect board = canvasRect(renderer);
+  const auto selectPixel = [&](const int x, const int y) {
+    if (board.width <= 0 || board.height <= 0 || x < board.x || x >= board.x + board.width || y < board.y ||
+        y >= board.y + board.height) {
+      return false;
+    }
+    cursorX_ = std::min(pixel_switch::DISPLAY_WIDTH - 1, (x - board.x) * pixel_switch::DISPLAY_WIDTH / board.width);
+    cursorY_ = std::min(pixel_switch::DISPLAY_HEIGHT - 1, (y - board.y) * pixel_switch::DISPLAY_HEIGHT / board.height);
+    return true;
+  };
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasScreenTouchDown(touchX, touchY) && selectPixel(touchX, touchY)) {
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasScreenTapped(touchX, touchY) && selectPixel(touchX, touchY)) {
+    if (mappedInput.getHeldTime() >= PALETTE_LONG_PRESS_MS) {
+      paletteSelection_ = defaultShade_;
+      view_ = View::Palette;
+      requestUpdate();
+    } else {
+      attemptPlacement(defaultShade_);
+    }
+    return;
+  }
+
   if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
       mappedInput.getHeldTime() >= PALETTE_LONG_PRESS_MS) {
     paletteSelection_ = defaultShade_;
@@ -361,6 +430,32 @@ void PixelSwitchActivity::movePalette(const int delta) {
 }
 
 void PixelSwitchActivity::handlePaletteInput() {
+  const PaletteLayout layout = paletteLayout(renderer);
+  const auto selectShade = [&](const int x, const int y) {
+    const int relativeX = x - layout.cells.x;
+    const int relativeY = y - layout.cells.y;
+    if (relativeX < 0 || relativeY < 0) return false;
+    const int column = relativeX / (layout.cellSize + layout.gap);
+    const int row = relativeY / (layout.cellSize + layout.gap);
+    if (column >= 2 || row >= 2 || relativeX % (layout.cellSize + layout.gap) >= layout.cellSize ||
+        relativeY % (layout.cellSize + layout.gap) >= layout.cellSize) {
+      return false;
+    }
+    paletteSelection_ = static_cast<pixel_switch::Shade>(row * 2 + column);
+    return true;
+  };
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasScreenTouchDown(touchX, touchY) && selectShade(touchX, touchY)) {
+    requestUpdate();
+    return;
+  }
+  if (mappedInput.wasScreenTapped(touchX, touchY) && selectShade(touchX, touchY)) {
+    defaultShade_ = paletteSelection_;
+    attemptPlacement(defaultShade_);
+    return;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     movePalette(-1);
   } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
@@ -426,19 +521,12 @@ pixel_switch::FlushResult PixelSwitchActivity::flushPending(const uint32_t now) 
 }
 
 void PixelSwitchActivity::drawCanvas() const {
-  int marginTop, marginRight, marginBottom, marginLeft;
-  renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
-  const int viewWidth = std::max(0, renderer.getScreenWidth() - marginLeft - marginRight);
-  const int viewHeight = std::max(0, renderer.getScreenHeight() - marginTop - marginBottom);
-  const auto boardSize = pixel_switch::fitDisplaySize(viewWidth, viewHeight);
-  if (boardSize.width == 0 || boardSize.height == 0) return;
-
-  const int boardX = marginLeft + (viewWidth - boardSize.width) / 2;
-  const int boardY = marginTop + (viewHeight - boardSize.height) / 2;
+  const Rect board = canvasRect(renderer);
+  if (board.width == 0 || board.height == 0) return;
 
   for (int y = 0; y < pixel_switch::DISPLAY_HEIGHT; ++y) {
-    const int top = boardY + pixel_switch::scaledDisplayEdge(y, boardSize.height, pixel_switch::DISPLAY_HEIGHT);
-    const int bottom = boardY + pixel_switch::scaledDisplayEdge(y + 1, boardSize.height, pixel_switch::DISPLAY_HEIGHT);
+    const int top = board.y + pixel_switch::scaledDisplayEdge(y, board.height, pixel_switch::DISPLAY_HEIGHT);
+    const int bottom = board.y + pixel_switch::scaledDisplayEdge(y + 1, board.height, pixel_switch::DISPLAY_HEIGHT);
     int x = 0;
     while (x < pixel_switch::DISPLAY_WIDTH) {
       const auto point = pixel_switch::displayToCanvas(x, y);
@@ -449,54 +537,45 @@ void PixelSwitchActivity::drawCanvas() const {
         if (canvas_.shadeAt(runPoint.x, runPoint.y) != shade) break;
         ++runEnd;
       }
-      const int left = boardX + pixel_switch::scaledDisplayEdge(x, boardSize.width, pixel_switch::DISPLAY_WIDTH);
-      const int right = boardX + pixel_switch::scaledDisplayEdge(runEnd, boardSize.width, pixel_switch::DISPLAY_WIDTH);
+      const int left = board.x + pixel_switch::scaledDisplayEdge(x, board.width, pixel_switch::DISPLAY_WIDTH);
+      const int right = board.x + pixel_switch::scaledDisplayEdge(runEnd, board.width, pixel_switch::DISPLAY_WIDTH);
       renderer.fillRectDither(left, top, right - left, bottom - top, shadeColor(shade));
       x = runEnd;
     }
   }
 
-  const int cursorLeft =
-      boardX + pixel_switch::scaledDisplayEdge(cursorX_, boardSize.width, pixel_switch::DISPLAY_WIDTH);
+  const int cursorLeft = board.x + pixel_switch::scaledDisplayEdge(cursorX_, board.width, pixel_switch::DISPLAY_WIDTH);
   const int cursorRight =
-      boardX + pixel_switch::scaledDisplayEdge(cursorX_ + 1, boardSize.width, pixel_switch::DISPLAY_WIDTH);
-  const int cursorTop =
-      boardY + pixel_switch::scaledDisplayEdge(cursorY_, boardSize.height, pixel_switch::DISPLAY_HEIGHT);
+      board.x + pixel_switch::scaledDisplayEdge(cursorX_ + 1, board.width, pixel_switch::DISPLAY_WIDTH);
+  const int cursorTop = board.y + pixel_switch::scaledDisplayEdge(cursorY_, board.height, pixel_switch::DISPLAY_HEIGHT);
   const int cursorBottom =
-      boardY + pixel_switch::scaledDisplayEdge(cursorY_ + 1, boardSize.height, pixel_switch::DISPLAY_HEIGHT);
+      board.y + pixel_switch::scaledDisplayEdge(cursorY_ + 1, board.height, pixel_switch::DISPLAY_HEIGHT);
   renderer.drawRect(cursorLeft - 2, cursorTop - 2, cursorRight - cursorLeft + 4, cursorBottom - cursorTop + 4, 2, true);
   renderer.drawRect(cursorLeft - 1, cursorTop - 1, cursorRight - cursorLeft + 2, cursorBottom - cursorTop + 2, false);
 }
 
 void PixelSwitchActivity::drawPalette() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
-  const int cellSize = std::max(metrics.menuRowHeight, std::min(screenWidth, screenHeight) / 8);
-  const int gap = std::max(2, metrics.menuSpacing / 2);
-  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID) + metrics.verticalSpacing;
-  const int padding = metrics.contentSidePadding;
-  const int boxWidth = padding * 2 + cellSize * 2 + gap;
-  const int boxHeight = padding * 2 + titleHeight + cellSize * 2 + gap;
-  const int boxX = (screenWidth - boxWidth) / 2;
-  const int boxY = (screenHeight - boxHeight) / 2;
+  const PaletteLayout layout = paletteLayout(renderer);
 
-  renderer.fillRoundedRect(boxX, boxY, boxWidth, boxHeight, metrics.popupCornerRadius, Color::White);
-  renderer.drawRoundedRect(boxX, boxY, boxWidth, boxHeight, 2, metrics.popupCornerRadius, true);
-  renderer.drawCenteredText(UI_12_FONT_ID, boxY + padding / 2, tr(STR_PIXEL_SWITCH_CHOOSE_SHADE));
+  renderer.fillRoundedRect(layout.panel.x, layout.panel.y, layout.panel.width, layout.panel.height,
+                           metrics.popupCornerRadius, Color::White);
+  renderer.drawRoundedRect(layout.panel.x, layout.panel.y, layout.panel.width, layout.panel.height, 2,
+                           metrics.popupCornerRadius, true);
+  renderer.drawCenteredText(UI_12_FONT_ID, layout.panel.y + metrics.contentSidePadding / 2,
+                            tr(STR_PIXEL_SWITCH_CHOOSE_SHADE));
 
-  const int paletteTop = boxY + padding + titleHeight;
   for (uint8_t i = 0; i < 4; ++i) {
     const auto shade = static_cast<pixel_switch::Shade>(i);
     const int row = i / 2;
     const int column = i % 2;
-    const int x = boxX + padding + column * (cellSize + gap);
-    const int y = paletteTop + row * (cellSize + gap);
-    renderer.fillRectDither(x, y, cellSize, cellSize, shadeColor(shade));
-    renderer.drawRect(x, y, cellSize, cellSize, true);
+    const int x = layout.cells.x + column * (layout.cellSize + layout.gap);
+    const int y = layout.cells.y + row * (layout.cellSize + layout.gap);
+    renderer.fillRectDither(x, y, layout.cellSize, layout.cellSize, shadeColor(shade));
+    renderer.drawRect(x, y, layout.cellSize, layout.cellSize, true);
     if (shade == paletteSelection_) {
-      renderer.drawRect(x - 3, y - 3, cellSize + 6, cellSize + 6, 2, true);
-      renderer.drawRect(x - 1, y - 1, cellSize + 2, cellSize + 2, false);
+      renderer.drawRect(x - 3, y - 3, layout.cellSize + 6, layout.cellSize + 6, 2, true);
+      renderer.drawRect(x - 1, y - 1, layout.cellSize + 2, layout.cellSize + 2, false);
     }
   }
 }
@@ -509,9 +588,16 @@ void PixelSwitchActivity::drawIntro() const {
       metrics.buttonHintsHeight > 0 ? metrics.buttonHintsHeight + metrics.verticalSpacing : 0;
   const Rect view{marginLeft, marginTop, renderer.getScreenWidth() - marginLeft - marginRight,
                   renderer.getScreenHeight() - marginTop - marginBottom - hintsReservedHeight};
-  const char* lines[INTRO_LINE_COUNT] = {tr(STR_PIXEL_SWITCH_INTRO_SHARED), tr(STR_PIXEL_SWITCH_INTRO_MOVE),
-                                         tr(STR_PIXEL_SWITCH_INTRO_PLACE), tr(STR_PIXEL_SWITCH_INTRO_SHADE),
-                                         tr(STR_PIXEL_SWITCH_INTRO_START)};
+  const char* lines[INTRO_LINE_COUNT] = {
+      tr(STR_PIXEL_SWITCH_INTRO_SHARED),
+      I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_PIXEL_SWITCH_TOUCH_MOVE
+                                                     : StrId::STR_PIXEL_SWITCH_INTRO_MOVE),
+      I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_PIXEL_SWITCH_TOUCH_PLACE
+                                                     : StrId::STR_PIXEL_SWITCH_INTRO_PLACE),
+      I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_PIXEL_SWITCH_TOUCH_SHADE
+                                                     : StrId::STR_PIXEL_SWITCH_INTRO_SHADE),
+      I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_PIXEL_SWITCH_TOUCH_START
+                                                     : StrId::STR_PIXEL_SWITCH_INTRO_START)};
   const int padding = metrics.contentSidePadding;
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int bodyLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
