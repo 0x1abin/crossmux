@@ -38,6 +38,7 @@
 namespace {
 
 enum class AboutRow : uint8_t {
+  FirmwareName,
   FirmwareVersion,
   DeviceModel,
   HeapFreeTotal,
@@ -77,8 +78,8 @@ class AboutActivity final : public Activity {
         renderer, content, static_cast<int>(AboutRow::Count), -1,
         [](const int index) {
           static constexpr StrId LABELS[] = {
-              StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,  StrId::STR_ABOUT_HEAP_FREE_TOTAL,
-              StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
+              StrId::STR_ABOUT_FIRMWARE_NAME,   StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,
+              StrId::STR_ABOUT_HEAP_FREE_TOTAL, StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
           };
           return std::string(I18N.get(LABELS[index]));
         },
@@ -94,6 +95,8 @@ class AboutActivity final : public Activity {
   std::string rowValue(const AboutRow row) const {
     char value[48];
     switch (row) {
+      case AboutRow::FirmwareName:
+        return tr(STR_CROSSPOINT);
       case AboutRow::FirmwareVersion:
         return CROSSPOINT_VERSION;
       case AboutRow::DeviceModel:
