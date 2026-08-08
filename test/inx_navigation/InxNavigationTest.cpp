@@ -142,11 +142,11 @@ TEST(InxNavigation, PaginatesButtonMenusAndKeepsIconIdsStable) {
 }
 
 TEST(InxNavigation, KeepsAppIconAssetsValidAndDistinct) {
-  constexpr std::array<const InxAppIcons::Icon*, 15> icons = {
-      &InxAppIcons::Transfer,    &InxAppIcons::Opds,        &InxAppIcons::WeRead,  &InxAppIcons::ReadingStats,
-      &InxAppIcons::Sudoku,      &InxAppIcons::Gomoku,      &InxAppIcons::Sokoban, &InxAppIcons::ChineseChess,
-      &InxAppIcons::Minesweeper, &InxAppIcons::Game2048,    &InxAppIcons::Avatar,  &InxAppIcons::AirPage,
-      &InxAppIcons::Buddy,       &InxAppIcons::PixelSwitch, &InxAppIcons::Standby,
+  constexpr std::array<const InxAppIcons::Icon*, 16> icons = {
+      &InxAppIcons::Transfer,    &InxAppIcons::Opds,        &InxAppIcons::WeRead,     &InxAppIcons::ReadingStats,
+      &InxAppIcons::Sudoku,      &InxAppIcons::Gomoku,      &InxAppIcons::Sokoban,    &InxAppIcons::ChineseChess,
+      &InxAppIcons::Minesweeper, &InxAppIcons::Game2048,    &InxAppIcons::Avatar,     &InxAppIcons::AirPage,
+      &InxAppIcons::Buddy,       &InxAppIcons::PixelSwitch, &InxAppIcons::Calculator, &InxAppIcons::Standby,
   };
 
   for (size_t index = 0; index < icons.size(); ++index) {
@@ -175,6 +175,7 @@ TEST(InxNavigation, KeepsAppIconAssetsValidAndDistinct) {
   EXPECT_EQ(InxAppIcons::get(UIIcon::Buddy), InxAppIcons::Buddy.data());
   EXPECT_EQ(InxAppIcons::get(UIIcon::PixelSwitch), InxAppIcons::PixelSwitch.data());
   EXPECT_EQ(InxAppIcons::get(UIIcon::AirPage), InxAppIcons::AirPage.data());
+  EXPECT_EQ(InxAppIcons::get(UIIcon::Calculator), InxAppIcons::Calculator.data());
 }
 
 TEST(InxNavigation, KeepsSubpageContentInsideChrome) {

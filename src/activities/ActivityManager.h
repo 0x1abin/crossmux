@@ -107,6 +107,7 @@ class ActivityManager {
   void goToGomoku();
   void goToMinesweeper();
   void goToPixelSwitch();
+  void goToCalculator();
   void goToAirPage();
   void goToBuddy();
   void goToStandby();

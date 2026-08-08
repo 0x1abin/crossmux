@@ -149,6 +149,7 @@ enum UIIcon {
   ReadingHeatmap,
   ReadingProfile,
   Achievements,
+  Calculator,
 };
 
 // Default theme implementation (Classic Theme)
