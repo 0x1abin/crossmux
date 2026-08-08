@@ -36,12 +36,21 @@ shasum -a 256 eego-a4-backup.bin
 ```
 
 CI publishes an experimental artifact containing the app-only
-`firmware.bin`, bootloader, partition table, a padded 16 MB
-`eego-a4-recovery-16mb.bin`, SHA-256 sums, and this recovery guide. Restore a
-backup with:
+`firmware.bin`, bootloader, partition table, a gzip-compressed padded 16 MB
+`eego-a4-recovery-16mb.bin.gz`, SHA-256 sums, and this recovery guide. Verify
+and unpack the release recovery image with:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+gzip -t eego-a4-recovery-16mb.bin.gz
+gzip -dk eego-a4-recovery-16mb.bin.gz
+```
+
+Restore a backup or the unpacked release recovery image with:
 
 ```bash
 esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 eego-a4-backup.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 eego-a4-recovery-16mb.bin
 ```
 
 The merged recovery image contains bootloader at `0x0`, partition table at

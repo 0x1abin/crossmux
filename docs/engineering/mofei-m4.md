@@ -37,11 +37,21 @@ esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 0x1000000 mofei-m4-backu
 shasum -a 256 mofei-m4-backup.bin
 ```
 
-CI publishes the app-only firmware, bootloader, partition table, a padded
-16 MB `mofei-m4-recovery-16mb.bin`, SHA-256 sums, and this guide. Restore with:
+CI publishes the app-only firmware, bootloader, partition table, a
+gzip-compressed padded 16 MB `mofei-m4-recovery-16mb.bin.gz`, SHA-256 sums,
+and this guide. Verify and unpack the release recovery image with:
+
+```bash
+shasum -a 256 -c SHA256SUMS
+gzip -t mofei-m4-recovery-16mb.bin.gz
+gzip -dk mofei-m4-recovery-16mb.bin.gz
+```
+
+Restore a backup or the unpacked release recovery image with:
 
 ```bash
 esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 mofei-m4-backup.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 mofei-m4-recovery-16mb.bin
 ```
 
 Do not flash an ESP32-C3 or eego A4 artifact. The merged recovery image puts
