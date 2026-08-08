@@ -26,7 +26,7 @@ Power, `H` for Home/Back, and `S` for sleep. It does not replace hardware tests
 for display waveforms/ghosting, GSL polling, bus timing, PSRAM, or standby
 current.
 
-## First flash and recovery
+## First flash and backup
 
 Before the first flash, back up the complete device flash:
 
@@ -35,27 +35,17 @@ esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 0x1000000 eego-a4-backup
 shasum -a 256 eego-a4-backup.bin
 ```
 
-CI publishes an experimental artifact containing the app-only
-`firmware.bin`, bootloader, partition table, a gzip-compressed padded 16 MB
-`eego-a4-recovery-16mb.bin.gz`, SHA-256 sums, and this recovery guide. Verify
-and unpack the release recovery image with:
-
-```bash
-shasum -a 256 -c SHA256SUMS
-gzip -t eego-a4-recovery-16mb.bin.gz
-gzip -dk eego-a4-recovery-16mb.bin.gz
-```
-
-Restore a backup or the unpacked release recovery image with:
+Keep that backup outside the device. It is the only full-flash recovery image;
+the Beta release contains only the four segments required by the Web installer.
+Restore the original backup with:
 
 ```bash
 esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 eego-a4-backup.bin
-esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 eego-a4-recovery-16mb.bin
 ```
 
-The merged recovery image contains bootloader at `0x0`, partition table at
-`0x8000`, `boot_app0.bin` at `0xe000`, and the app at `0x10000`. Do not use the
-C3 release artifacts.
+The first-install flow writes the bootloader at `0x0`, partition table at
+`0x8000`, `boot_app0.bin` at `0xe000`, and the app at `0x10000` without
+overwriting NVS. Do not use the C3 release artifacts.
 
 ## Hardware release gate
 

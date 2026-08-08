@@ -4,7 +4,6 @@
 import argparse
 import configparser
 import csv
-import gzip
 import hashlib
 import json
 import shutil
@@ -13,8 +12,8 @@ from pathlib import Path
 
 
 DEVICES = {
-    'eego-a4': ('eego_a4', 'docs/engineering/eego-a4.md'),
-    'mofei-m4': ('mofei_m4', 'docs/engineering/mofei-m4.md'),
+    'eego-a4': 'eego_a4',
+    'mofei-m4': 'mofei_m4',
 }
 SEGMENTS = (
     ('bootloader', 'bootloader.bin', 0x0000),
@@ -27,7 +26,6 @@ EXPECTED_PARTITIONS = {
     'app0': (0x10000, 0x640000),
     'app1': (0x650000, 0x640000),
 }
-RECOVERY_SIZE = 16 * 1024 * 1024
 
 
 def sha256(path):
@@ -68,20 +66,6 @@ def copy_asset(source, destination):
     shutil.copyfile(source, destination)
 
 
-def compress_recovery(source, destination):
-    with source.open('rb') as raw, destination.open('wb') as output:
-        with gzip.GzipFile(
-            filename='', mode='wb', fileobj=output, compresslevel=9, mtime=0
-        ) as compressed:
-            shutil.copyfileobj(raw, compressed, length=1024 * 1024)
-
-    with gzip.open(destination, 'rb') as compressed:
-        unpacked_size = sum(len(chunk) for chunk in iter(lambda: compressed.read(1024 * 1024), b''))
-    if unpacked_size != RECOVERY_SIZE:
-        raise SystemExit(f'{destination.name} expands to {unpacked_size} bytes; expected {RECOVERY_SIZE}')
-    source.unlink()
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('device', choices=DEVICES)
@@ -89,7 +73,7 @@ def main():
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent.parent
-    environment, recovery_doc = DEVICES[args.device]
+    environment = DEVICES[args.device]
     build = root / '.pio/build' / environment
     output = (args.output or root / 'dist' / args.device).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -99,27 +83,10 @@ def main():
     copy_asset(build / 'partitions.bin', output / 'partitions.bin')
     copy_asset(build / 'firmware.bin', output / 'firmware.bin')
     copy_asset(find_boot_app0(), output / 'boot_app0.bin')
-    copy_asset(root / recovery_doc, output / 'RECOVERY.md')
 
     firmware_size = (output / 'firmware.bin').stat().st_size
     if firmware_size > EXPECTED_PARTITIONS['app0'][1]:
         raise SystemExit(f'firmware.bin is {firmware_size} bytes; app slot is 0x640000 bytes')
-
-    recovery_raw = output / f'{args.device}-recovery-16mb.bin'
-    recovery_name = f'{recovery_raw.name}.gz'
-    subprocess.run(
-        [
-            'pio', 'pkg', 'exec', '--package', 'tool-esptoolpy', '--', 'esptool.py',
-            '--chip', 'esp32s3', 'merge-bin', '--flash-mode', 'dio', '--flash-freq', '80m',
-            '--flash-size', '16MB', '--pad-to-size', '16MB', '--output', str(recovery_raw),
-            '0x0', str(output / 'bootloader.bin'), '0x8000', str(output / 'partitions.bin'),
-            '0xe000', str(output / 'boot_app0.bin'), '0x10000', str(output / 'firmware.bin'),
-        ],
-        cwd=root,
-        check=True,
-    )
-    recovery = output / recovery_name
-    compress_recovery(recovery_raw, recovery)
 
     config = configparser.ConfigParser()
     config.read(root / 'platformio.ini')
@@ -135,14 +102,6 @@ def main():
             'size': path.stat().st_size,
             'sha256': sha256(path),
         })
-    assets.append({
-        'role': 'recovery',
-        'name': recovery_name,
-        'size': recovery.stat().st_size,
-        'sha256': sha256(recovery),
-        'downloadOnly': True,
-    })
-
     manifest = {
         'schemaVersion': 1,
         'device': args.device,
@@ -160,7 +119,7 @@ def main():
     manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
 
     checksum_paths = [output / name for _, name, _ in SEGMENTS]
-    checksum_paths += [recovery, manifest_path, output / 'RECOVERY.md']
+    checksum_paths.append(manifest_path)
     (output / 'SHA256SUMS').write_text(
         ''.join(f'{sha256(path)}  {path.name}\n' for path in checksum_paths)
     )

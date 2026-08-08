@@ -28,7 +28,7 @@ first no-R13 batch, add `-DFREEINK_MOFEI_M4_BATCH1=1` in
 `platformio.local.ini`; this selects `0x3C`. Keep this compile-time until both
 batches pass the display gate.
 
-## First flash and recovery
+## First flash and backup
 
 Back up the complete flash before the first write:
 
@@ -37,26 +37,17 @@ esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 0x1000000 mofei-m4-backu
 shasum -a 256 mofei-m4-backup.bin
 ```
 
-CI publishes the app-only firmware, bootloader, partition table, a
-gzip-compressed padded 16 MB `mofei-m4-recovery-16mb.bin.gz`, SHA-256 sums,
-and this guide. Verify and unpack the release recovery image with:
-
-```bash
-shasum -a 256 -c SHA256SUMS
-gzip -t mofei-m4-recovery-16mb.bin.gz
-gzip -dk mofei-m4-recovery-16mb.bin.gz
-```
-
-Restore a backup or the unpacked release recovery image with:
+Keep that backup outside the device. It is the only full-flash recovery image;
+the Beta release contains only the four segments required by the Web installer.
+Restore the original backup with:
 
 ```bash
 esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 mofei-m4-backup.bin
-esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 mofei-m4-recovery-16mb.bin
 ```
 
-Do not flash an ESP32-C3 or eego A4 artifact. The merged recovery image puts
-the bootloader at `0x0`, partition table at `0x8000`, `boot_app0.bin` at
-`0xe000`, and app at `0x10000`.
+Do not flash an ESP32-C3 or eego A4 artifact. The first-install flow writes the
+bootloader at `0x0`, partition table at `0x8000`, `boot_app0.bin` at `0xe000`,
+and app at `0x10000` without overwriting NVS.
 
 ## Hardware release gate
 
