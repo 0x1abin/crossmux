@@ -109,14 +109,6 @@ jobs:
           name: hardware-beta-${{ inputs.device }}
           path: dist
 
-      - name: Verify compressed recovery image
-        run: |
-          set -euo pipefail
-          set -- dist/*-recovery-16mb.bin.gz
-          [ "$#" -eq 1 ] && [ -f "$1" ]
-          gzip -t "$1"
-          [ "$(gzip -dc "$1" | wc -c)" -eq 16777216 ]
-
       - name: Build release notes
         run: |
           cat > release-body.md <<EOF
@@ -128,7 +120,7 @@ jobs:
           - Partition profile: \`crossmux-sticky-v1\`
           - Flash: ESP32-S3, DIO, 80 MHz, 16 MB
 
-          Back up the complete 16 MB flash before first installation. The recovery image is download-only.
+          Back up the complete 16 MB flash before first installation.
           EOF
 
       - name: Publish rolling GitHub prerelease
@@ -157,9 +149,6 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          # Gitee community releases accept six custom attachments. Keep the
-          # flasher assets on the rolling tag and put the download-only
-          # recovery payload on a companion tag at the same commit.
           bash scripts/publish-gitee-release.sh \
             "$GITEE_REPO" \
             "$RELEASE_TAG" \
@@ -173,15 +162,6 @@ jobs:
             dist/firmware.bin \
             dist/manifest.json \
             dist/partitions.bin
-          bash scripts/publish-gitee-release.sh \
-            "$GITEE_REPO" \
-            "${RELEASE_TAG}-recovery" \
-            "CrossMux ${{ inputs.device }} Hardware Beta Recovery" \
-            "true" \
-            "${{ needs.build.outputs.crossmux_sha }}" \
-            release-body.md \
-            dist/RECOVERY.md \
-            dist/*-recovery-16mb.bin.gz
 
       - name: Verify Gitee release assets
         env:
@@ -189,11 +169,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir gitee-assets
-          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
-            api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${tag}?access_token=${GITEE_TOKEN}"
-            curl -fsS "$api" | jq -r \
-              '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv'
-          done | while IFS=$'\t' read -r name url; do
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
+          curl -fsS "$api" | jq -r \
+            '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv' \
+          | while IFS=$'\t' read -r name url; do
             curl -fsSL "$url" -o "gitee-assets/$name"
           done
           (cd gitee-assets && sha256sum --check SHA256SUMS)
@@ -206,13 +185,11 @@ jobs:
         run: |
           gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
           api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
-          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
-            release_api="${api}/releases/tags/${tag}?access_token=${GITEE_TOKEN}"
-            release_id="$(curl -fsS "$release_api" | jq -r '.id // empty' || true)"
-            if [ -n "$release_id" ]; then
-              curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}" || true
-            fi
-          done
+          release_api="${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
+          release_id="$(curl -fsS "$release_api" | jq -r '.id // empty' || true)"
+          if [ -n "$release_id" ]; then
+            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}" || true
+          fi
 
   unpublish:
     if: inputs.action == 'unpublish'
@@ -229,9 +206,7 @@ jobs:
         run: |
           set -euo pipefail
           api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
-          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
-            release_id="$(curl -fsS "${api}/releases/tags/${tag}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
-            if [ -n "$release_id" ]; then
-              curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
-            fi
-          done
+          release_id="$(curl -fsS "${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
+          if [ -n "$release_id" ]; then
+            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
+          fi
