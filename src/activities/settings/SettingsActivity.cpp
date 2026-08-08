@@ -2,6 +2,8 @@
 
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
+#include <HalStorage.h>
+#include <HalSystem.h>
 #include <Logging.h>
 #include <Memory.h>
 
@@ -29,8 +31,103 @@
 #include "TextSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+namespace {
+
+enum class AboutRow : uint8_t {
+  FirmwareVersion,
+  DeviceModel,
+  HeapFreeTotal,
+  LargestHeapBlock,
+  SdUsedTotal,
+  Count,
+};
+
+constexpr uint64_t BYTES_PER_TENTH_GB = 100000000ULL;
+
+class AboutActivity final : public Activity {
+ public:
+  AboutActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("About", renderer, mappedInput) {}
+
+  void onEnter() override {
+    Activity::onEnter();
+    heapInfo = HalSystem::getHeapInfo();
+    deviceName = BoardConfig::ACTIVE.name;
+    storageAvailable = Storage.getSpace(sdTotalBytes, sdFreeBytes);
+    requestUpdate();
+  }
+
+  void loop() override {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) finish();
+  }
+
+  void render(RenderLock&&) override {
+    renderer.clearScreen();
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
+                   tr(STR_ABOUT));
+
+    const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+    GUI.drawList(
+        renderer, content, static_cast<int>(AboutRow::Count), -1,
+        [](const int index) {
+          static constexpr StrId LABELS[] = {
+              StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,  StrId::STR_ABOUT_HEAP_FREE_TOTAL,
+              StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
+          };
+          return std::string(I18N.get(LABELS[index]));
+        },
+        nullptr, nullptr, [this](const int index) { return rowValue(static_cast<AboutRow>(index)); }, false, nullptr,
+        false);
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+  }
+
+ private:
+  std::string rowValue(const AboutRow row) const {
+    char value[48];
+    switch (row) {
+      case AboutRow::FirmwareVersion:
+        return CROSSPOINT_VERSION;
+      case AboutRow::DeviceModel:
+        return deviceName ? deviceName : tr(STR_NOT_AVAILABLE);
+      case AboutRow::HeapFreeTotal:
+        snprintf(value, sizeof(value), "%lu / %lu", static_cast<unsigned long>(heapInfo.freeBytes / 1024),
+                 static_cast<unsigned long>(heapInfo.totalBytes / 1024));
+        return value;
+      case AboutRow::LargestHeapBlock:
+        snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(heapInfo.largestFreeBlockBytes / 1024));
+        return value;
+      case AboutRow::SdUsedTotal: {
+        if (!storageAvailable) return tr(STR_NOT_AVAILABLE);
+        const uint64_t usedTenths = (sdTotalBytes - sdFreeBytes + BYTES_PER_TENTH_GB / 2) / BYTES_PER_TENTH_GB;
+        const uint64_t totalTenths = (sdTotalBytes + BYTES_PER_TENTH_GB / 2) / BYTES_PER_TENTH_GB;
+        snprintf(value, sizeof(value), "%llu.%llu / %llu.%llu", static_cast<unsigned long long>(usedTenths / 10),
+                 static_cast<unsigned long long>(usedTenths % 10), static_cast<unsigned long long>(totalTenths / 10),
+                 static_cast<unsigned long long>(totalTenths % 10));
+        return value;
+      }
+      case AboutRow::Count:
+        return {};
+    }
+    return {};
+  }
+
+  HalSystem::HeapInfo heapInfo{};
+  const char* deviceName = nullptr;
+  uint64_t sdTotalBytes = 0;
+  uint64_t sdFreeBytes = 0;
+  bool storageAvailable = false;
+};
+
+}  // namespace
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
@@ -103,6 +200,7 @@ void SettingsActivity::rebuildSettingsLists() {
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
   readerSettings.insert(readerSettings.begin() + 1,
@@ -651,6 +749,14 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::About:
+        // ActivityManager owns this across frames; stack/static lifetime is invalid.
+        if (auto about = makeUniqueNoThrow<AboutActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(about), [](const ActivityResult&) {});
+        } else {
+          LOG_ERR("SET", "OOM: AboutActivity (%u bytes)", static_cast<unsigned>(sizeof(AboutActivity)));
+        }
         break;
       case SettingAction::None:
         // Do nothing
