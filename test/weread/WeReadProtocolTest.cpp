@@ -345,6 +345,41 @@ TEST(WeReadProtocol, RejectsMissingInvalidAndOversizedPsvts) {
   EXPECT_STREQ(shortOutput, "");
 }
 
+TEST(WeReadProtocol, ProbesLargeTxtMetadataWithoutMisclassifyingShards) {
+  constexpr size_t markerOffset = 9 * 256 - 1;
+  std::string metadata = R"({"padding":")";
+  metadata.append(markerOffset - metadata.size() - 2, 'x');
+  metadata += R"(","bookId":"CB_GAm03Y0342QR75T75MEvp9F5"})";
+  ASSERT_EQ(metadata.find("\"bookId\""), markerOffset);
+  ASSERT_GT(metadata.size(), 2048U);
+
+  char bookId[64];
+  WeReadProtocol::PrimaryResponseProbe probe(bookId, sizeof(bookId));
+  ASSERT_TRUE(probe.reset());
+  for (size_t offset = 0; offset < metadata.size(); offset += 256) {
+    const size_t count = std::min<size_t>(256, metadata.size() - offset);
+    ASSERT_TRUE(probe.feed(reinterpret_cast<const uint8_t*>(metadata.data() + offset), count));
+  }
+  EXPECT_TRUE(probe.jsonObject());
+  EXPECT_TRUE(probe.textMetadata());
+  EXPECT_FALSE(probe.sessionExpired());
+  EXPECT_STREQ(bookId, "CB_GAm03Y0342QR75T75MEvp9F5");
+
+  constexpr char shard[] = R"(0123456789abcdef0123456789abcdefbody "bookId":"fake")";
+  ASSERT_TRUE(probe.reset());
+  ASSERT_TRUE(probe.feed(reinterpret_cast<const uint8_t*>(shard), sizeof(shard) - 1));
+  EXPECT_TRUE(probe.finished());
+  EXPECT_FALSE(probe.jsonObject());
+  EXPECT_FALSE(probe.textMetadata());
+
+  constexpr char expired[] = R"(
+    {"bookId":"CB_GAm03Y0342QR75T75MEvp9F5","errCode":-2012})";
+  ASSERT_TRUE(probe.reset());
+  ASSERT_TRUE(probe.feed(reinterpret_cast<const uint8_t*>(expired), sizeof(expired) - 1));
+  EXPECT_TRUE(probe.jsonObject());
+  EXPECT_TRUE(probe.sessionExpired());
+}
+
 TEST(WeReadProtocol, DetectsAllowedXhtmlTagsAcrossEveryChunkBoundary) {
   constexpr char xhtml[] = "preview text<div class=\"chapter\">full text</div>";
   for (size_t split = 0; split <= sizeof(xhtml) - 1; ++split) {
