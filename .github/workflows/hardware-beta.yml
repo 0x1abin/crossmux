@@ -149,6 +149,9 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
+          # Gitee community releases accept six custom attachments. Keep the
+          # flasher assets on the rolling tag and put the download-only
+          # recovery payload on a companion tag at the same commit.
           bash scripts/publish-gitee-release.sh \
             "$GITEE_REPO" \
             "$RELEASE_TAG" \
@@ -156,19 +159,35 @@ jobs:
             "true" \
             "${{ needs.build.outputs.crossmux_sha }}" \
             release-body.md \
-            dist/*
+            dist/SHA256SUMS \
+            dist/boot_app0.bin \
+            dist/bootloader.bin \
+            dist/firmware.bin \
+            dist/manifest.json \
+            dist/partitions.bin
+          bash scripts/publish-gitee-release.sh \
+            "$GITEE_REPO" \
+            "${RELEASE_TAG}-recovery" \
+            "CrossMux ${{ inputs.device }} Hardware Beta Recovery" \
+            "true" \
+            "${{ needs.build.outputs.crossmux_sha }}" \
+            release-body.md \
+            dist/RECOVERY.md \
+            dist/*-recovery-16mb.bin
 
       - name: Verify Gitee release assets
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           set -euo pipefail
-          api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
           mkdir gitee-assets
-          curl -fsS "$api" > gitee-release.json
-          while IFS=$'\t' read -r name url; do
+          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
+            api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${tag}?access_token=${GITEE_TOKEN}"
+            curl -fsS "$api" | jq -r \
+              '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv'
+          done | while IFS=$'\t' read -r name url; do
             curl -fsSL "$url" -o "gitee-assets/$name"
-          done < <(jq -r '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv' gitee-release.json)
+          done
           (cd gitee-assets && sha256sum --check SHA256SUMS)
 
   unpublish:
@@ -186,7 +205,9 @@ jobs:
         run: |
           set -euo pipefail
           api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
-          release_id="$(curl -fsS "${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
-          if [ -n "$release_id" ]; then
-            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
-          fi
+          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
+            release_id="$(curl -fsS "${api}/releases/tags/${tag}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
+            if [ -n "$release_id" ]; then
+              curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
+            fi
+          done
