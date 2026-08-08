@@ -14,6 +14,7 @@ constexpr int kColumns = 4;
 constexpr int kRows = 5;
 constexpr int kKeyCount = kColumns * kRows;
 constexpr int kInitialSelection = 9;
+constexpr int kMinimumRoundedKeyGap = 4;
 
 constexpr std::array<calculator::Key, kKeyCount> kKeys = {
     calculator::Key::Clear,  calculator::Key::ToggleSign, calculator::Key::Percent,   calculator::Key::Divide,
@@ -53,8 +54,9 @@ CalculatorLayout layoutFor(const GfxRenderer& renderer) {
   const Rect displayArea{left, displayTop, width, displayHeight};
 
   const int gridTop = displayArea.y + displayArea.height + metrics.verticalSpacing;
-  const int gap =
-      metrics.optionPopupSelectionRadius > 0 ? std::max(metrics.menuSpacing, metrics.keyboardKeySpacing) : 0;
+  const int gap = metrics.optionPopupSelectionRadius > 0
+                      ? std::max({kMinimumRoundedKeyGap, metrics.menuSpacing, metrics.keyboardKeySpacing})
+                      : 0;
   const int availableGridHeight = std::max(0, bottom - gridTop);
   const int keyWidth = std::max(1, (width - gap * (kColumns - 1)) / kColumns);
   const int keyHeight = std::max(1, (availableGridHeight - gap * (kRows - 1)) / kRows);
