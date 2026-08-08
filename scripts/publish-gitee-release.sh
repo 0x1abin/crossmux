@@ -43,6 +43,10 @@ if [ -z "${GITEE_TOKEN:-}" ]; then
 fi
 
 if [ "$TAG" != "nightly" ]; then
+  echo "Triggering Gitee pull mirror for ${TAG}"
+  if ! curl -fsS -X POST "${API}/remote_mirror/pull?access_token=${GITEE_TOKEN}" -o /dev/null; then
+    echo "::warning::Gitee pull mirror trigger failed; waiting in case a sync is already running"
+  fi
   gitee_git="https://gitee.com/${REPO}.git"
   for attempt in $(seq 1 30); do
     synced_commit="$(git ls-remote "$gitee_git" "refs/tags/${TAG}^{}" 2>/dev/null | cut -f1)"
