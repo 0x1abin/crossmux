@@ -5,6 +5,7 @@ This document shows common issues and possible solutions while using the device 
 - [Troubleshooting](#troubleshooting)
     - [Cannot See the Device on the Network](#cannot-see-the-device-on-the-network)
     - [Connection Drops or Times Out](#connection-drops-or-times-out)
+    - [Large File List Stalls](#large-file-list-stalls)
     - [Upload Fails](#upload-fails)
     - [Saved Password Not Working](#saved-password-not-working)
 
@@ -35,6 +36,27 @@ This document shows common issues and possible solutions while using the device 
 2. Check signal strength on the device (should be at least `||` or better)
 3. Avoid interference from other devices
 4. Try a different Wi-Fi network if available
+
+### Large File List Stalls
+
+**Problem:** The file manager remains loading, disconnects, or the device
+restarts when the SD card contains hundreds of entries.
+
+**Checks:**
+
+1. Keep a serial monitor open and look for a task-watchdog banner, panic, or an
+   unexpected boot sequence. Record the current free heap and largest
+   allocatable block before and after repeated requests.
+2. In the browser Network panel, confirm `/api/status` completes before
+   `/api/files` begins. Inspect the `/api/files` status and whether its chunked
+   response finishes.
+3. Repeat with a small directory and a 200--500 entry directory. A valid
+   response must parse as one JSON array, including empty directories.
+4. To diagnose a slow client, pause reading an HTTP response for more than ten
+   seconds. A compressed page response may be aborted, but the device should
+   remain running and accept a later request.
+5. If `/api/files` returns HTTP `503`, restart network mode and inspect the
+   startup log for failure to reserve the 1400-byte file-list buffer.
 
 ### Upload Fails
 

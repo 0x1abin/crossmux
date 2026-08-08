@@ -5,12 +5,19 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
+#ifndef SIMULATOR
+#include <lwip/sockets.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
+#ifndef SIMULATOR
+#include <cerrno>
+#endif
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
@@ -40,6 +47,7 @@ namespace {
 constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
 constexpr uint16_t UDP_PORTS[] = {54982, 48123, 39001, 44044, 59678};
 constexpr uint16_t LOCAL_UDP_PORT = 8134;
+constexpr size_t FILE_LIST_BATCH_CAPACITY = 1400;
 
 // Static pointer for WebSocket callback (WebSocketsServer requires C-style callback)
 CrossPointWebServer* wsInstance = nullptr;
@@ -212,12 +220,10 @@ void CrossPointWebServer::begin() {
   udpActive = udp.begin(LOCAL_UDP_PORT);
   LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
 
-  // All request handlers run on the task that calls handleClient(). Register
-  // that task before any handler can call esp_task_wdt_reset().
-  const esp_err_t watchdogResult = esp_task_wdt_add(nullptr);
-  watchdogTaskRegistered = watchdogResult == ESP_OK;
-  if (!watchdogTaskRegistered) {
-    LOG_ERR("WEB", "Failed to register web server task with watchdog: %s", esp_err_to_name(watchdogResult));
+  // Reuse one request buffer for the server lifetime to avoid repeated heap churn.
+  fileListBatch = makeUniqueNoThrow<char[]>(FILE_LIST_BATCH_CAPACITY);
+  if (!fileListBatch) {
+    LOG_ERR("WEB", "OOM: %zu-byte file list response buffer", FILE_LIST_BATCH_CAPACITY);
   }
 
   running = true;
@@ -249,10 +255,7 @@ void CrossPointWebServer::abortWsUpload(const char* tag) {
 void CrossPointWebServer::stop() {
   if (!running || !server) {
     LOG_DBG("WEB", "stop() called but already stopped (running=%d, server=%p)", running, server.get());
-    if (watchdogTaskRegistered) {
-      esp_task_wdt_delete(nullptr);
-      watchdogTaskRegistered = false;
-    }
+    fileListBatch.reset();
     return;
   }
 
@@ -290,13 +293,9 @@ void CrossPointWebServer::stop() {
   delay(10);
 
   server.reset();
+  fileListBatch.reset();
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
-
-  if (watchdogTaskRegistered) {
-    esp_task_wdt_delete(nullptr);
-    watchdogTaskRegistered = false;
-  }
 
   // Note: Static upload variables (uploadFileName, uploadPath, uploadError) are declared
   // later in the file and will be cleared when they go out of scope or on next upload
@@ -365,20 +364,76 @@ CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() con
   return status;
 }
 
-static void sendHtmlContent(WebServer* server, const char* data, size_t len) {
+#ifndef SIMULATOR
+static bool writeClientWithDeadline(NetworkClient& client, const char* data, size_t length,
+                                    unsigned long responseStart) {
+  constexpr unsigned long SEND_STALL_MS = 10000;
+  constexpr unsigned long RESPONSE_DEADLINE_MS = 60000;
+  size_t offset = 0;
+  unsigned long lastProgress = millis();
+
+  while (offset < length) {
+    const unsigned long now = millis();
+    if (now - lastProgress >= SEND_STALL_MS || now - responseStart >= RESPONSE_DEADLINE_MS) return false;
+
+    const int socketFd = client.fd();
+    if (socketFd < 0) return false;
+
+    const ssize_t written = ::send(socketFd, data + offset, length - offset, MSG_DONTWAIT);
+    if (written > 0) {
+      offset += static_cast<size_t>(written);
+      lastProgress = millis();
+      continue;
+    }
+    if (written == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR && errno != ENOMEM)) {
+      return false;
+    }
+    delay(1);
+  }
+  return true;
+}
+#endif
+
+static bool sendCompressedContent(WebServer* server, const char* contentType, const char* data, size_t len) {
+#ifdef SIMULATOR
   server->sendHeader("Content-Encoding", "gzip");
-  server->send_P(200, "text/html", data, len);
+  server->send_P(200, contentType, data, len);
+  return true;
+#else
+  constexpr size_t CHUNK_SIZE = 1400;
+  server->sendHeader("Content-Encoding", "gzip");
+  server->setContentLength(len);
+
+  const unsigned long responseStart = millis();
+  server->send(200, contentType, "");
+  if (!server->client().connected()) {
+    LOG_ERR("WEB", "Aborting %s response header after %lu ms", server->uri().c_str(), millis() - responseStart);
+    server->client().stop();
+    return false;
+  }
+
+  for (size_t offset = 0; offset < len; offset += CHUNK_SIZE) {
+    const size_t chunkLength = std::min(CHUNK_SIZE, len - offset);
+    if (!writeClientWithDeadline(server->client(), data + offset, chunkLength, responseStart)) {
+      LOG_ERR("WEB", "Aborting %s response body after %lu ms", server->uri().c_str(), millis() - responseStart);
+      server->client().stop();
+      return false;
+    }
+  }
+  return true;
+#endif
 }
 
 void CrossPointWebServer::handleRoot() const {
-  sendHtmlContent(server.get(), HomePageHtml, sizeof(HomePageHtml));
-  LOG_DBG("WEB", "Served root page");
+  if (sendCompressedContent(server.get(), "text/html", HomePageHtml, sizeof(HomePageHtml))) {
+    LOG_DBG("WEB", "Served root page");
+  }
 }
 
 void CrossPointWebServer::handleJszip() const {
-  server->sendHeader("Content-Encoding", "gzip");
-  server->send_P(200, "application/javascript", jszip_minJs, jszip_minJsCompressedSize);
-  LOG_DBG("WEB", "Served jszip.min.js");
+  if (sendCompressedContent(server.get(), "application/javascript", jszip_minJs, jszip_minJsCompressedSize)) {
+    LOG_DBG("WEB", "Served jszip.min.js");
+  }
 }
 
 void CrossPointWebServer::handleNotFound() const {
@@ -442,7 +497,7 @@ void CrossPointWebServer::handleStatus() const {
   server->send(200, "application/json", response);
 }
 
-void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
+void CrossPointWebServer::scanFiles(const char* path, const std::function<bool(const FileInfo&)>& callback) const {
   HalFile root = Storage.open(path);
   if (!root) {
     LOG_DBG("WEB", "Failed to open directory: %s", path);
@@ -460,6 +515,7 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
   HalFile file = root.openNextFile();
   char name[500];
   while (file) {
+    bool keepScanning = true;
     file.getName(name, sizeof(name));
     auto fileName = String(name);
 
@@ -489,10 +545,11 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
         info.isEpub = isEpubFile(info.name);
       }
 
-      callback(info);
+      keepScanning = callback(info);
     }
 
     file.close();
+    if (!keepScanning) break;
     yield();                          // Yield to allow WiFi and other tasks to process during long scans
     resetTaskWatchdogIfSubscribed();  // Reset watchdog to prevent timeout on large directories
     file = root.openNextFile();
@@ -503,7 +560,7 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
 bool CrossPointWebServer::isEpubFile(const String& filename) const { return FsHelpers::hasEpubExtension(filename); }
 
 void CrossPointWebServer::handleFileList() const {
-  sendHtmlContent(server.get(), FilesPageHtml, sizeof(FilesPageHtml));
+  sendCompressedContent(server.get(), "text/html", FilesPageHtml, sizeof(FilesPageHtml));
 }
 
 void CrossPointWebServer::handleFileListData() const {
@@ -521,39 +578,98 @@ void CrossPointWebServer::handleFileListData() const {
     }
   }
 
-  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server->send(200, "application/json", "");
-  server->sendContent("[");
+  if (!fileListBatch) {
+    LOG_ERR("WEB", "Cannot serve file list: %zu-byte response buffer unavailable", FILE_LIST_BATCH_CAPACITY);
+    server->send(503, "application/json", "{\"error\":\"Insufficient memory\"}");
+    return;
+  }
+
   char output[512];
   constexpr size_t outputSize = sizeof(output);
-  bool seenFirst = false;
   JsonDocument doc;
-
-  scanFiles(currentPath.c_str(), [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
+  const auto serializeFileInfo = [&](const FileInfo& info) {
     doc.clear();
     doc["name"] = info.name;
     doc["size"] = info.size;
     doc["isDirectory"] = info.isDirectory;
     doc["isEpub"] = info.isEpub;
 
-    const size_t written = serializeJson(doc, output, outputSize);
-    if (written >= outputSize) {
-      // JSON output truncated; skip this entry to avoid sending malformed JSON
+    const size_t measured = measureJson(doc);
+    if (measured >= outputSize) {
       LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
-      return;
+      return static_cast<size_t>(0);
     }
 
-    if (seenFirst) {
-      server->sendContent(",");
-    } else {
-      seenFirst = true;
-    }
-    server->sendContent(output);
-  });
-  server->sendContent("]");
-  // End of streamed response, empty chunk to signal client
+    const size_t written = serializeJson(doc, output, outputSize);
+    return written;
+  };
+
+  const unsigned long responseStart = millis();
+#ifdef SIMULATOR
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+#else
+  server->chunkResponseBegin("application/json");
+#endif
+
+  char* batch = fileListBatch.get();
+  size_t batchLen = 0;
+  size_t entryCount = 0;
+  size_t responseBytes = 0;
+  bool responseOpen = server->client().connected();
+  const auto flushBatch = [&]() {
+    if (batchLen == 0) return true;
+#ifdef SIMULATOR
+    server->sendContent(batch, batchLen);
+#else
+    server->chunkWrite(batch, batchLen);
+#endif
+    responseBytes += batchLen;
+    batchLen = 0;
+    responseOpen = server->client().connected();
+    return responseOpen;
+  };
+
+  batch[batchLen++] = '[';
+
+  if (responseOpen)
+    scanFiles(currentPath.c_str(), [&](const FileInfo& info) {
+      if (!server->client().connected()) {
+        responseOpen = false;
+        return false;
+      }
+      const size_t written = serializeFileInfo(info);
+      if (written == 0) return true;
+
+      const size_t required = written + (entryCount > 0 ? 1 : 0);
+      if (batchLen + required > FILE_LIST_BATCH_CAPACITY && !flushBatch()) return false;
+      if (entryCount > 0) batch[batchLen++] = ',';
+      memcpy(batch + batchLen, output, written);
+      batchLen += written;
+      ++entryCount;
+      return true;
+    });
+
+  if (responseOpen) {
+    if (batchLen + 1 > FILE_LIST_BATCH_CAPACITY) flushBatch();
+  }
+  if (responseOpen) {
+    batch[batchLen++] = ']';
+    flushBatch();
+  }
+
+  // Always finish the framework's chunked-response state, including disconnects.
+#ifdef SIMULATOR
   server->sendContent("");
-  LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
+#else
+  server->chunkResponseEnd();
+#endif
+  const unsigned long elapsed = millis() - responseStart;
+  if (responseOpen) {
+    LOG_INF("WEB", "Served %zu file entries (%zu bytes) in %lu ms", entryCount, responseBytes, elapsed);
+  } else {
+    LOG_ERR("WEB", "File list client disconnected after %zu entries and %lu ms", entryCount, elapsed);
+  }
 }
 
 void CrossPointWebServer::handleDownload() const {
@@ -1166,8 +1282,9 @@ void CrossPointWebServer::handleDelete() const {
 }
 
 void CrossPointWebServer::handleSettingsPage() const {
-  sendHtmlContent(server.get(), SettingsPageHtml, sizeof(SettingsPageHtml));
-  LOG_DBG("WEB", "Served settings page");
+  if (sendCompressedContent(server.get(), "text/html", SettingsPageHtml, sizeof(SettingsPageHtml))) {
+    LOG_DBG("WEB", "Served settings page");
+  }
 }
 
 void CrossPointWebServer::handleGetSettings() const {
@@ -1779,8 +1896,9 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 // --- Font management handlers ---
 
 void CrossPointWebServer::handleFontsPage() const {
-  sendHtmlContent(server.get(), FontsPageHtml, sizeof(FontsPageHtml));
-  LOG_DBG("WEB", "Served fonts page");
+  if (sendCompressedContent(server.get(), "text/html", FontsPageHtml, sizeof(FontsPageHtml))) {
+    LOG_DBG("WEB", "Served fonts page");
+  }
 }
 
 void CrossPointWebServer::handleFontList() const {
