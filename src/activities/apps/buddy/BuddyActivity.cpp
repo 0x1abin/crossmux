@@ -254,7 +254,14 @@ void BuddyActivity::loop() {
   }
 
   switch (stage_) {
-    case Stage::WaitingForClaim:
+    case Stage::WaitingForClaim: {
+      int touchX = 0;
+      int touchY = 0;
+      if (mappedInput.wasScreenTapped(touchX, touchY)) {
+        advanceReveal();
+        break;
+      }
+    }
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
         advanceReveal();
       }
@@ -387,7 +394,9 @@ void BuddyActivity::drawRevealFrame() {
         drawCentered(renderer, NOTOSANS_18_FONT_ID, content, mysteryY, tr(STR_BUDDY_MYSTERY), EpdFontFamily::BOLD);
         drawCentered(renderer, UI_10_FONT_ID, content,
                      mysteryY + renderer.getLineHeight(NOTOSANS_18_FONT_ID) + metrics.verticalSpacing,
-                     tr(STR_BUDDY_CLAIM_PROMPT), EpdFontFamily::BOLD);
+                     I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_BUDDY_TOUCH_CLAIM_PROMPT
+                                                                    : StrId::STR_BUDDY_CLAIM_PROMPT),
+                     EpdFontFamily::BOLD);
         const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), "", "");
         GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       }

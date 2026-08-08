@@ -1432,21 +1432,17 @@ bool containsAllowedXhtmlTag(const std::string& path, uint8_t* buffer, const siz
   return true;
 }
 
-bool smallFileContains(const std::string& path, const char* needle) {
+bool probePrimaryResponse(const std::string& path, WeReadProtocol::PrimaryResponseProbe& probe, uint8_t* buffer,
+                          const size_t bufferSize, uint64_t& responseBytes) {
   HalFile file;
-  if (!needle || !needle[0] || !Storage.openFileForRead("WR", path, file) || file.fileSize() > 2048) return false;
-  char buffer[256] = {};
-  size_t carry = 0;
-  while (file.available()) {
-    const int got = file.read(buffer + carry, sizeof(buffer) - 1 - carry);
-    if (got <= 0) break;
-    buffer[carry + static_cast<size_t>(got)] = '\0';
-    if (strstr(buffer, needle)) return true;
-    const size_t keep = std::min(strlen(needle) - 1, carry + static_cast<size_t>(got));
-    memmove(buffer, buffer + carry + static_cast<size_t>(got) - keep, keep);
-    carry = keep;
+  if (!buffer || bufferSize == 0 || !Storage.openFileForRead("WR", path, file)) return false;
+  responseBytes = file.fileSize64();
+  if (!probe.reset()) return false;
+  while (file.available() && !probe.finished()) {
+    const int got = file.read(buffer, bufferSize);
+    if (got <= 0 || !probe.feed(buffer, static_cast<size_t>(got))) return false;
   }
-  return false;
+  return true;
 }
 
 bool smallFileIsEmptyObject(const std::string& path) {
@@ -1908,7 +1904,8 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
       !writeLiteral(opf,
                     "</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest>"
                     "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" "
-                    "properties=\"nav\"/>")) {
+                    "properties=\"nav\"/>"
+                    "<item id=\"style\" href=\"styles.css\" media-type=\"text/css\"/>")) {
     return Error::SdCard;
   }
   if (coverType != WeReadProtocol::ImageType::None &&
@@ -1999,10 +1996,12 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
       "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
       "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>";
+  static constexpr char kStylesheet[] = "p{text-indent:2em}";
   if (!zip.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)) ||
       !zip.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)) ||
       !zip.addFile("OEBPS/content.opf", opfPath, callback, callbackContext) ||
-      !zip.addFile("OEBPS/nav.xhtml", navPath, callback, callbackContext)) {
+      !zip.addFile("OEBPS/nav.xhtml", navPath, callback, callbackContext) ||
+      !zip.addBuffer("OEBPS/styles.css", reinterpret_cast<const uint8_t*>(kStylesheet), strlen(kStylesheet))) {
     zip.abort();
     return Error::SdCard;
   }
@@ -3560,7 +3559,6 @@ Operation::Event Operation::downloadNextImage() {
 
 Operation::Event Operation::inspectPrimary() {
   const std::string raw0 = bookDir_ + "/shard0.part";
-  if (smallFileContains(raw0, "-2012")) return reauthenticateChapter();
   switch (WeReadProtocol::classifyChapterResponse(responseStatus_, smallFileIsEmptyObject(raw0))) {
     case WeReadProtocol::ChapterResponse::Content:
       break;
@@ -3571,16 +3569,32 @@ Operation::Event Operation::inspectPrimary() {
     case WeReadProtocol::ChapterResponse::Error:
       return fail(Error::Protocol);
   }
-  uint8_t prefix[4] = {};
-  if (!readPrefix(raw0, prefix, sizeof(prefix))) return fail(Error::Integrity);
-  if (prefix[0] == 'P' && prefix[1] == 'K' && prefix[2] == 3 && prefix[3] == 4) {
-    return finishWholeBook(raw0);
+
+  WeReadProtocol::PrimaryResponseProbe probe(url_, sizeof(url_));
+  uint64_t responseBytes = 0;
+  const auto integrityFailure = [this, &responseBytes](const char* classification) {
+    LOG_ERR("WR", "primary invalid: chapter=%u status=%d bytes=%llu class=%s", static_cast<unsigned>(chapterIndex_),
+            responseStatus_, static_cast<unsigned long long>(responseBytes), classification);
+    return fail(Error::Integrity);
+  };
+  if (!probePrimaryResponse(raw0, probe, ioBuffer_, sizeof(ioBuffer_), responseBytes)) {
+    return integrityFailure("read");
   }
-  if (smallFileContains(raw0, "\"bookId\"")) {
+  if (probe.sessionExpired()) return reauthenticateChapter();
+  if (probe.textMetadata()) {
+    LOG_DBG("WR", "primary classified: chapter=%u status=%d bytes=%llu format=txt",
+            static_cast<unsigned>(chapterIndex_), responseStatus_, static_cast<unsigned long long>(responseBytes));
     phase_ = Phase::FetchText0;
     return Event::None;
   }
-  if (!validateShard(raw0)) return fail(Error::Integrity);
+  if (probe.jsonObject()) return integrityFailure("json");
+
+  uint8_t prefix[4] = {};
+  if (!readPrefix(raw0, prefix, sizeof(prefix))) return integrityFailure("short");
+  if (prefix[0] == 'P' && prefix[1] == 'K' && prefix[2] == 3 && prefix[3] == 4) {
+    return finishWholeBook(raw0);
+  }
+  if (!validateShard(raw0)) return integrityFailure("shard");
   phase_ = Phase::FetchEpub1;
   return Event::None;
 }

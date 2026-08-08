@@ -99,6 +99,25 @@ clang-format -i src/**/*.cpp src/**/*.h
    - Add `vTaskDelay(1)` in tight loops
    - Check for blocking I/O operations
 
+### Distinguishing TCP Stalls, Watchdogs, and Restarts
+
+- A task-watchdog failure prints the task watchdog banner and subscribed task
+  names before the register dump. A later `RTC_SW_CPU_RST` is the panic restart
+  path; it does not make the original failure an intentional software restart.
+- A normal software restart has no preceding watchdog or panic report. Check
+  the earlier application log for an expected transition such as leaving
+  network mode before treating the reset reason itself as a crash.
+- A slow HTTP reader can fill the TCP send window and keep a synchronous SDK
+  write waiting for several seconds. Correlate the request URI and elapsed
+  time with the serial log. Do not classify this as OOM solely from the minimum
+  historical heap value; also inspect current free heap and the largest
+  allocatable block.
+- Web request handlers execute on the task that calls `handleClient()`. Do not
+  subscribe that task to the task watchdog merely so handlers can feed it: a
+  legitimate SDK network wait can then be misclassified as a CPU lockup. Keep
+  explicit watchdog resets conditional so other platform configurations remain
+  compatible.
+
 **Verification Steps**:
 1. Check serial output for stack traces
 2. Monitor heap with `ESP.getFreeHeap()` before/after operations

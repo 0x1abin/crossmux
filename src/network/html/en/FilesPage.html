@@ -1934,8 +1934,8 @@
   }
 
   async function hydrate() {
-    // Fetch CrossPoint version
-    fetchVersion();
+    // Sequential: parallel connections can stall the device's single-client web server.
+    await fetchVersion();
 
     // Close modals when clicking overlay - call proper cleanup functions
     document.querySelectorAll('.modal-overlay').forEach(function(overlay) {

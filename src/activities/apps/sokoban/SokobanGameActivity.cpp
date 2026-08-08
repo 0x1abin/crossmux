@@ -51,7 +51,7 @@ struct LevelSelectLayout {
   int visibleCount;
 };
 
-Rect getContentArea(const GfxRenderer& renderer, const bool hasSubHeader) {
+Rect getContentArea(const GfxRenderer& renderer, const bool hasSubHeader, const bool hasTouch) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   int viewTop, viewRight, viewBottom, viewLeft;
@@ -62,12 +62,15 @@ Rect getContentArea(const GfxRenderer& renderer, const bool hasSubHeader) {
                                             (hasSubHeader ? metrics.tabBarHeight : 0) + metrics.verticalSpacing,
                                         viewTop);
   const int right = safeArea.x + safeArea.width - std::max(metrics.contentSidePadding, viewRight);
-  const int bottom = safeArea.y + safeArea.height - std::max(metrics.verticalSpacing, viewBottom);
+  const int touchActions = hasTouch ? metrics.menuRowHeight + renderer.getLineHeight(UI_10_FONT_ID) +
+                                          metrics.verticalSpacing + metrics.menuSpacing
+                                    : 0;
+  const int bottom = safeArea.y + safeArea.height - std::max(metrics.verticalSpacing, viewBottom) - touchActions;
   return Rect{left, top, std::max(0, right - left), std::max(0, bottom - top)};
 }
 
-LevelSelectLayout getLevelSelectLayout(const GfxRenderer& renderer) {
-  const Rect content = getContentArea(renderer, false);
+LevelSelectLayout getLevelSelectLayout(const GfxRenderer& renderer, const bool hasTouch) {
+  const Rect content = getContentArea(renderer, false, hasTouch);
   const int rowStep = std::max(1, GUI.getListRowStep(false));
   return {content, rowStep, GUI.getListPageItems(content.height, false)};
 }
@@ -162,6 +165,19 @@ void SokobanGameActivity::loop() {
   const uint32_t now = millis();
 
   if (state == State::Won) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect next = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                          metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 0, 1);
+    if (mappedInput.wasTapInRect(next.x, next.y, next.width, next.height)) {
+      if (currentLevel + 1 < totalLevels) {
+        loadLevel(currentLevel + 1);
+        scheduleSave();
+        requestUpdate();
+      } else {
+        activityManager.goToApps();
+      }
+      return;
+    }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
         mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       if (currentLevel + 1 < totalLevels) {
@@ -177,7 +193,46 @@ void SokobanGameActivity::loop() {
   }
 
   if (state == State::LevelSelect) {
-    const int visibleCount = getLevelSelectLayout(renderer).visibleCount;
+    const LevelSelectLayout layout = getLevelSelectLayout(renderer, mappedInput.hasTouch());
+    const int visibleCount = layout.visibleCount;
+    int touched = -1;
+    const auto touch = mappedInput.rowTouch(touched, layout.content.y, layout.rowStep,
+                                            std::min(visibleCount, totalLevels - scrollOffset), layout.content.x,
+                                            layout.content.x + layout.content.width, layout.rowStep);
+    if (touch != MappedInputManager::RowTouch::None) {
+      selectedLevel = scrollOffset + touched;
+      requestUpdate();
+      if (touch == MappedInputManager::RowTouch::Tap) {
+        loadLevel(selectedLevel);
+        scheduleSave();
+      }
+      return;
+    }
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect select =
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 0, 1);
+    if (mappedInput.wasTapInRect(select.x, select.y, select.width, select.height)) {
+      loadLevel(selectedLevel);
+      scheduleSave();
+      requestUpdate();
+      return;
+    }
+
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Up && selectedLevel < totalLevels - 1) {
+      selectedLevel++;
+      if (selectedLevel >= scrollOffset + visibleCount) scrollOffset++;
+      requestUpdate();
+      return;
+    }
+    if (swipe == MappedInputManager::SwipeDir::Down && selectedLevel > 0) {
+      selectedLevel--;
+      if (selectedLevel < scrollOffset) scrollOffset--;
+      requestUpdate();
+      return;
+    }
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
       if (selectedLevel > 0) {
@@ -281,6 +336,43 @@ void SokobanGameActivity::loop() {
 void SokobanGameActivity::handleInput() {
   const uint32_t now = millis();
 
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect undoButton =
+      gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                          metrics.menuSpacing, metrics.menuRowHeight, 0, 2);
+  const Rect levelButton =
+      gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                          metrics.menuSpacing, metrics.menuRowHeight, 1, 2);
+  if (mappedInput.wasTapInRect(undoButton.x, undoButton.y, undoButton.width, undoButton.height)) {
+    undo();
+    return;
+  }
+  if (mappedInput.wasTapInRect(levelButton.x, levelButton.y, levelButton.width, levelButton.height)) {
+    selectedLevel = currentLevel;
+    const int visibleCount = getLevelSelectLayout(renderer, mappedInput.hasTouch()).visibleCount;
+    scrollOffset = (selectedLevel / visibleCount) * visibleCount;
+    state = State::LevelSelect;
+    requestUpdate();
+    return;
+  }
+
+  switch (mappedInput.wasSwipe()) {
+    case MappedInputManager::SwipeDir::Up:
+      move(-1, 0);
+      return;
+    case MappedInputManager::SwipeDir::Down:
+      move(1, 0);
+      return;
+    case MappedInputManager::SwipeDir::Left:
+      move(0, -1);
+      return;
+    case MappedInputManager::SwipeDir::Right:
+      move(0, 1);
+      return;
+    case MappedInputManager::SwipeDir::None:
+      break;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     move(-1, 0);
     heldDr = -1;
@@ -336,7 +428,7 @@ void SokobanGameActivity::handleInput() {
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     selectedLevel = currentLevel;
-    const int visibleCount = getLevelSelectLayout(renderer).visibleCount;
+    const int visibleCount = getLevelSelectLayout(renderer, mappedInput.hasTouch()).visibleCount;
     scrollOffset = (selectedLevel / visibleCount) * visibleCount;
     state = State::LevelSelect;
     requestUpdate();
@@ -407,6 +499,34 @@ void SokobanGameActivity::render(RenderLock&&) {
     drawBoard();
   }
 
+  if (mappedInput.hasTouch()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect firstAction =
+        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                            metrics.menuSpacing, metrics.menuRowHeight, 0, state == State::Playing ? 2 : 1);
+    renderer.drawCenteredText(UI_10_FONT_ID,
+                              firstAction.y - renderer.getLineHeight(UI_10_FONT_ID) - metrics.menuSpacing,
+                              tr(STR_SOKOBAN_TOUCH_HINT));
+    if (state == State::Playing) {
+      GUI.drawActionButton(
+          renderer,
+          gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                              metrics.menuSpacing, metrics.menuRowHeight, 0, 2),
+          tr(STR_GOMOKU_UNDO));
+      GUI.drawActionButton(
+          renderer,
+          gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                              metrics.menuSpacing, metrics.menuRowHeight, 1, 2),
+          tr(STR_SOKOBAN_LEVEL));
+    } else {
+      GUI.drawActionButton(
+          renderer,
+          gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                              metrics.menuSpacing, metrics.menuRowHeight, 0, 1),
+          tr(STR_SELECT));
+    }
+  }
+
   drawFooter();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
@@ -432,7 +552,7 @@ void SokobanGameActivity::drawBoard() {
     return;
   }
 
-  const Rect content = getContentArea(renderer, true);
+  const Rect content = getContentArea(renderer, true, mappedInput.hasTouch());
   const BoardLayout layout =
       fitBoard(content.x, content.y, content.x + content.width, content.y + content.height, board.rows, board.cols);
   if (!layout.valid()) {
@@ -513,7 +633,7 @@ void SokobanGameActivity::drawWinScreen() {
 void SokobanGameActivity::drawLevelSelect() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  const LevelSelectLayout layout = getLevelSelectLayout(renderer);
+  const LevelSelectLayout layout = getLevelSelectLayout(renderer, mappedInput.hasTouch());
 
   char title[64];
   snprintf(title, sizeof(title), "%s (%d)", tr(STR_SOKOBAN_TITLE), totalLevels);

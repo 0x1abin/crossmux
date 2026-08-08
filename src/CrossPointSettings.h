@@ -331,10 +331,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static constexpr uint8_t APPS_CATALOG_VERSION = 1;
   static constexpr uint8_t BUDDY_APP_ID = 10;
   static constexpr uint8_t PIXEL_SWITCH_APP_ID = 12;
-  static constexpr uint16_t DEFAULT_HIDDEN_APPS_MASK = (uint16_t{1} << 4) | (uint16_t{1} << 5) | (uint16_t{1} << 6) |
-                                                       (uint16_t{1} << 8) | (uint16_t{1} << BUDDY_APP_ID) |
-                                                       (uint16_t{1} << PIXEL_SWITCH_APP_ID);
-  uint16_t hiddenAppsMask = DEFAULT_HIDDEN_APPS_MASK;
+  static constexpr uint32_t DEFAULT_HIDDEN_APPS_MASK = (uint32_t{1} << 4) | (uint32_t{1} << 5) | (uint32_t{1} << 6) |
+                                                       (uint32_t{1} << 8) | (uint32_t{1} << BUDDY_APP_ID) |
+                                                       (uint32_t{1} << PIXEL_SWITCH_APP_ID);
+  uint32_t hiddenAppsMask = DEFAULT_HIDDEN_APPS_MASK;
   uint8_t appsCatalogVersion = APPS_CATALOG_VERSION;
   uint8_t buddyClaimed = 0;
   // Image rendering mode in EPUB reader

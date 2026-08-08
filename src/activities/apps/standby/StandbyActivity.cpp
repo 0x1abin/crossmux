@@ -340,6 +340,42 @@ void StandbyActivity::loop() {
     return;
   }
 
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe != MappedInputManager::SwipeDir::None) {
+    lastInputMs_ = millis();
+    if (mode_ == DisplayMode::Immersive) {
+      mode_ = DisplayMode::Normal;
+      requestUpdate();
+      return;
+    }
+    if (swipe == MappedInputManager::SwipeDir::Left) {
+      switchFace(1);
+    } else if (swipe == MappedInputManager::SwipeDir::Right) {
+      switchFace(-1);
+    } else if (currentFace_) {
+      if (swipe == MappedInputManager::SwipeDir::Up) {
+        currentFace_->onPageNext();
+      } else {
+        currentFace_->onPagePrev();
+      }
+      requestUpdate();
+    }
+    return;
+  }
+
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasScreenTapped(touchX, touchY)) {
+    lastInputMs_ = millis();
+    if (mode_ == DisplayMode::Immersive) {
+      mode_ = DisplayMode::Normal;
+    } else {
+      inverseMode_ = !inverseMode_;
+    }
+    requestUpdate();
+    return;
+  }
+
   // Up/Down: page navigation, dispatched to the current face.
   //   - SloppyClock: each press rerolls the style (treated as a shake).
   //   - ChineseCalendar: Up = previous day, Down = next day.

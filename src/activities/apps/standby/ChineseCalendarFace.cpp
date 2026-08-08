@@ -13,7 +13,6 @@
 #include "../../../util/TimeUtils.h"
 #include "ChineseAlmanac.h"
 #include "I18nKeys.h"
-#include "SloppyAlphabets.h"
 #include "fontIds.h"
 
 // CN font-coverage rule (drives every fontId choice in this file):
@@ -50,7 +49,7 @@ constexpr const char* kCjkDigits[10] = {
 //          divider Y is the anchor; 农历 + 生肖 hang off it.
 //   Lower: 节气 / 宜·忌 boxes / footer
 //          pinned to their own ratios so upper edits don't push them.
-// Hero geometry: SloppyEngine is width-bound on "18" (template aspect 1.36
+// Hero geometry: SloppyDigits is width-bound on "18" (template aspect 1.36
 // > 1.0), so the visible digit size is governed by kHeroWidthRatio; the
 // height ratio only sizes the bounding box and affects divider clearance.
 constexpr float kHeroTopRatio = 0.18f;
@@ -172,7 +171,7 @@ void drawYiJiBox(const GfxRenderer& renderer, int x, int y, int w, int h, const 
 }
 
 // Renders the full almanac page within `viewport`. Caller has already
-// cleared the screen.  `heroStyle`/`heroSeeds` parameterize the SloppyEngine
+// cleared the screen.  `heroStyle`/`heroSeeds` parameterize SloppyDigits
 // rendering of the big公历日 digit.
 void drawAlmanacPage(GfxRenderer& renderer, const Rect& viewport, const AlmanacDay& day, const sloppy::Style& heroStyle,
                      const sloppy::Seeds& heroSeeds) {
@@ -199,7 +198,7 @@ void drawAlmanacPage(GfxRenderer& renderer, const Rect& viewport, const AlmanacD
     drawCenteredRow(renderer, NOTOSANS_14_FONT_ID, viewport, viewport.y + 80, row, 2, /*gap=*/40);
   }
 
-  // Hero day digit — SloppyEngine fits to the bounding rect; width-bound.
+  // Hero day digit — SloppyDigits fits to the bounding rect; width-bound.
   {
     const int heroW = static_cast<int>(vw * kHeroWidthRatio);
     const int heroH = static_cast<int>(vh * kHeroHeightRatio);
@@ -207,7 +206,7 @@ void drawAlmanacPage(GfxRenderer& renderer, const Rect& viewport, const AlmanacD
     const int heroY = viewport.y + static_cast<int>(vh * kHeroTopRatio);
     char buf[4];
     std::snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(day.gregDay));
-    sloppy::draw(renderer, heroStyle, heroSeeds, buf, Rect{heroX, heroY, heroW, heroH});
+    sloppy::draw(renderer, heroStyle, heroSeeds, buf, sloppy::Bounds{heroX, heroY, heroW, heroH});
   }
 
   // Bold divider — sits on the screen's vertical midline.
@@ -320,7 +319,7 @@ void ChineseCalendarFace::onEnter() {
   heroStyle_->digitRotateMax = 0.0f;
   heroStyle_->digitGap = 18;
   heroStyle_->oneIsPlain = false;
-  sloppy::preRollSeeds(/*seed=*/1u, sloppy::getAlphabet(heroStyle_->alphabet), *heroSeeds_);
+  sloppy::prepareSeeds(/*seed=*/1u, *heroStyle_, *heroSeeds_);
 
   dayOffset_ = 0;
   refreshCachedDay();

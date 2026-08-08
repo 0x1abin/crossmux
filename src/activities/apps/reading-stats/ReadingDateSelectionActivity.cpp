@@ -9,6 +9,7 @@
 #include <string>
 
 #include "ReadingStatsStore.h"
+#include "activities/apps/GameUi.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
@@ -120,6 +121,33 @@ void ReadingDateSelectionActivity::loop() {
     return;
   }
 
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = metrics.listWithSubtitleRowHeight * FIELD_COUNT;
+  if (handleListTouch(selectedField, FIELD_COUNT, contentTop, listHeight, true) != ListTouchResult::None) {
+    return;
+  }
+
+  const Rect minus = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                         metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 0, 3);
+  const Rect plus = gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(),
+                                        metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 1, 3);
+  const Rect confirm =
+      gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
+                          metrics.menuSpacing, metrics.menuRowHeight, 2, 3);
+  if (mappedInput.wasTapInRect(minus.x, minus.y, minus.width, minus.height)) {
+    adjustSelectedField(-1);
+    return;
+  }
+  if (mappedInput.wasTapInRect(plus.x, plus.y, plus.width, plus.height)) {
+    adjustSelectedField(1);
+    return;
+  }
+  if (mappedInput.wasTapInRect(confirm.x, confirm.y, confirm.width, confirm.height)) {
+    finishWithDate();
+    return;
+  }
+
   buttonNavigator.onRelease({MappedInputManager::Button::Down}, [this] {
     selectedField = ButtonNavigator::nextIndex(selectedField, FIELD_COUNT);
     requestUpdate();
@@ -161,8 +189,26 @@ void ReadingDateSelectionActivity::render(RenderLock&&) {
 
   const int hintTop = contentTop + listHeight + metrics.verticalSpacing;
   const int hintWidth = pageWidth - sidePadding * 2;
-  const std::string hint = renderer.truncatedText(UI_10_FONT_ID, tr(STR_SET_DATE_HINT), hintWidth);
+  const std::string hint = renderer.truncatedText(
+      UI_10_FONT_ID,
+      I18n::getInstance().get(mappedInput.hasTouch() ? StrId::STR_SET_DATE_TOUCH_HINT : StrId::STR_SET_DATE_HINT),
+      hintWidth);
   renderer.drawText(UI_10_FONT_ID, sidePadding, hintTop, hint.c_str());
+
+  if (mappedInput.hasTouch()) {
+    GUI.drawActionButton(renderer,
+                         gameTouchActionRect(pageWidth, renderer.getScreenHeight(), metrics.contentSidePadding,
+                                             metrics.menuSpacing, metrics.menuRowHeight, 0, 3),
+                         "-");
+    GUI.drawActionButton(renderer,
+                         gameTouchActionRect(pageWidth, renderer.getScreenHeight(), metrics.contentSidePadding,
+                                             metrics.menuSpacing, metrics.menuRowHeight, 1, 3),
+                         "+");
+    GUI.drawActionButton(renderer,
+                         gameTouchActionRect(pageWidth, renderer.getScreenHeight(), metrics.contentSidePadding,
+                                             metrics.menuSpacing, metrics.menuRowHeight, 2, 3),
+                         tr(STR_CONFIRM));
+  }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

@@ -122,6 +122,26 @@ class PsvtsExtractor {
   State state_ = State::SearchKey;
 };
 
+class PrimaryResponseProbe {
+ public:
+  PrimaryResponseProbe(char* bookId, size_t bookIdSize) : bookId_(bookId, bookIdSize, "bookId") {}
+
+  bool reset();
+  bool feed(const uint8_t* data, size_t len);
+  bool finished() const { return state_ == State::NonJson || sessionExpired_; }
+  bool jsonObject() const { return state_ == State::Json; }
+  bool textMetadata() const { return jsonObject() && bookId_.complete(); }
+  bool sessionExpired() const { return jsonObject() && sessionExpired_; }
+
+ private:
+  enum class State : uint8_t { LeadingWhitespace, Json, NonJson };
+
+  PsvtsExtractor bookId_;
+  size_t sessionErrorOffset_ = 0;
+  State state_ = State::LeadingWhitespace;
+  bool sessionExpired_ = false;
+};
+
 class XhtmlTagProbe {
  public:
   bool reset();

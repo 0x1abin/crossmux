@@ -149,6 +149,8 @@ enum UIIcon {
   ReadingHeatmap,
   ReadingProfile,
   Achievements,
+  Calculator,
+  Woodfish,
 };
 
 // Default theme implementation (Classic Theme)
@@ -243,6 +245,7 @@ class BaseTheme {
   virtual void fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const;
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
+  void drawActionButton(const GfxRenderer& renderer, Rect rect, const char* label, bool active = false) const;
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   virtual int getListRowStep(bool hasSubtitle) const;
   virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;

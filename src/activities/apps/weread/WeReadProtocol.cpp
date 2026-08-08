@@ -596,6 +596,43 @@ bool PsvtsExtractor::feed(const uint8_t* data, const size_t len) {
   return true;
 }
 
+bool PrimaryResponseProbe::reset() {
+  sessionErrorOffset_ = 0;
+  state_ = State::LeadingWhitespace;
+  sessionExpired_ = false;
+  return bookId_.reset();
+}
+
+bool PrimaryResponseProbe::feed(const uint8_t* data, const size_t len) {
+  if (!data && len != 0) return false;
+  size_t jsonOffset = 0;
+  switch (state_) {
+    case State::LeadingWhitespace:
+      while (jsonOffset < len && std::isspace(data[jsonOffset])) ++jsonOffset;
+      if (jsonOffset == len) return true;
+      state_ = data[jsonOffset] == '{' ? State::Json : State::NonJson;
+      if (state_ == State::NonJson) return true;
+      break;
+    case State::Json:
+      break;
+    case State::NonJson:
+      return true;
+  }
+
+  if (!bookId_.feed(data + jsonOffset, len - jsonOffset)) return false;
+  static constexpr char kSessionError[] = "-2012";
+  for (size_t i = jsonOffset; i < len && !sessionExpired_; ++i) {
+    const uint8_t value = data[i];
+    if (value == static_cast<uint8_t>(kSessionError[sessionErrorOffset_])) {
+      ++sessionErrorOffset_;
+      sessionExpired_ = sessionErrorOffset_ == sizeof(kSessionError) - 1;
+    } else {
+      sessionErrorOffset_ = value == static_cast<uint8_t>(kSessionError[0]) ? 1 : 0;
+    }
+  }
+  return true;
+}
+
 bool XhtmlTagProbe::reset() {
   nameLength_ = 0;
   state_ = State::SearchOpen;

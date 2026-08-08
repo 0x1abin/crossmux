@@ -126,7 +126,18 @@ void EpubReaderBookmarksActivity::loop() {
       mappedInput.wasListItemTapped(tapped, static_cast<int>(bookmarks.size()), selectorIndex, listY, listHeight,
                                     true)) {
     selectorIndex = tapped;
-    openBookmark();
+    if (mappedInput.getHeldTime() > ENTER_DELETE_MODE_MS) {
+      confirmingDelete = true;
+      const char* options[] = {tr(STR_CANCEL), tr(STR_DELETE)};
+      confirmPopup.show(tr(STR_CONFIRM_DELETE_BOOKMARK), options, 2, 0, [this](int idx) {
+        confirmingDelete = false;
+        if (idx == 1) deleteSelectedBookmark();
+        requestUpdate();
+      });
+      requestUpdate();
+    } else {
+      openBookmark();
+    }
     return;
   }
 

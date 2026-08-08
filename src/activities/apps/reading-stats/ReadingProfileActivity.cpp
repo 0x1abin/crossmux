@@ -538,6 +538,16 @@ void ReadingProfileActivity::loop() {
     }
   };
 
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up) {
+    scrollBy(CONTENT_SCROLL_STEP);
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Down) {
+    scrollBy(-CONTENT_SCROLL_STEP);
+    return;
+  }
+
   int requestedDirection = 0;
   if (mappedInput.isPressed(MappedInputManager::Button::Up) ||
       mappedInput.isPressed(MappedInputManager::Button::Left)) {

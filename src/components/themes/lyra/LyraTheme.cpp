@@ -19,6 +19,7 @@
 #include "components/icons/book24.h"
 #include "components/icons/bookmark.h"
 #include "components/icons/buddy.h"
+#include "components/icons/calculator.h"
 #include "components/icons/sokoban.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "components/icons/chinese_chess.h"
@@ -44,6 +45,7 @@
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
+#include "components/icons/woodfish.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -129,6 +131,10 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return BuddyIcon;
       case UIIcon::PixelSwitch:
         return PixelSwitchIcon;
+      case UIIcon::Calculator:
+        return CalculatorIcon;
+      case UIIcon::Woodfish:
+        return WoodfishIcon;
       default:
         return nullptr;
     }

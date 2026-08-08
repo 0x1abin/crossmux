@@ -125,6 +125,11 @@ bool getDeviceId(DeviceId& out) {
   return true;
 }
 
+HeapInfo getHeapInfo() {
+  return {static_cast<uint32_t>(ESP.getFreeHeap()), static_cast<uint32_t>(ESP.getHeapSize()),
+          static_cast<uint32_t>(ESP.getMaxAllocHeap())};
+}
+
 std::string getPanicInfo(bool full) {
   if (!full) {
     return panicMessage;

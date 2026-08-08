@@ -63,13 +63,30 @@ jobs:
             exit 0
           fi
 
-          # 2. Existing sync branch already contains both tips -> PR is current, don't clobber.
+          owner="$GITHUB_REPOSITORY_OWNER"
+          repo="${GITHUB_REPOSITORY#*/}"
+
+          find_open_pr() {
+            gh api --method GET "repos/${owner}/${repo}/pulls" \
+              -f state=open \
+              -f head="${owner}:${SYNC_BRANCH}" \
+              -f base="$BASE" \
+              --jq '.[0].number // empty'
+          }
+
+          # 2. Existing sync branch already contains both tips and has an open PR ->
+          # the sync is current, so don't clobber it. Rebuild a current branch when
+          # its PR is missing so ensure_pr can restore the review surface.
           if git ls-remote --exit-code --heads origin "$SYNC_BRANCH" >/dev/null 2>&1; then
             git fetch origin "$SYNC_BRANCH" --no-tags
             if git merge-base --is-ancestor upstream/master "origin/${SYNC_BRANCH}" \
                && git merge-base --is-ancestor "origin/${BASE}" "origin/${SYNC_BRANCH}"; then
-              echo "Sync branch already up to date (contains latest master + ${BASE}); skipping."
-              exit 0
+              current_pr="$(find_open_pr)"
+              if [ -n "$current_pr" ]; then
+                echo "Sync branch and PR #${current_pr} are already up to date; skipping."
+                exit 0
+              fi
+              echo "Sync branch is current but has no open PR; rebuilding it to restore the PR."
             fi
           fi
 
@@ -86,33 +103,53 @@ jobs:
           ensure_pr() {
             # Echoes the PR number, creating the PR if none is open.
             local n body
-            n="$(gh pr list --base "$BASE" --head "$SYNC_BRANCH" --state open \
-                  --json number --jq '.[0].number')"
+            n="$(find_open_pr)"
             if [ -z "$n" ]; then
               body="$(printf '%s\n' \
                 "Automated daily merge of upstream \`master\` into \`${BASE}\`." \
                 "" \
                 "Maintained by \`.github/workflows/sync-upstream.yml\`. Review and merge when green." \
                 "Conflicts (if any) are resolved automatically by the scheduled Claude routine.")"
-              n="$(gh pr create --base "$BASE" --head "$SYNC_BRANCH" \
-                    --title "chore: sync upstream master into ${BASE}" \
-                    --body "$body" | grep -oE '[0-9]+$')"
+              n="$(gh api --method POST "repos/${owner}/${repo}/pulls" \
+                    -f head="${owner}:${SYNC_BRANCH}" \
+                    -f base="$BASE" \
+                    -f title="chore: sync upstream master into ${BASE}" \
+                    -f body="$body" \
+                    --jq '.number')"
             fi
             echo "$n"
+          }
+
+          add_pr_label() {
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${1}/labels" \
+              -f "labels[]=$LABEL" >/dev/null
+          }
+
+          remove_pr_label() {
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${1}/labels/${LABEL}" \
+              >/dev/null 2>&1 || true
+          }
+
+          comment_on_pr() {
+            local body
+            body="$(cat)"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${1}/comments" \
+              -f body="$body" >/dev/null
           }
 
           if git merge --no-ff --no-edit upstream/master; then
             echo "Clean merge."
             git push --force-with-lease origin "$SYNC_BRANCH"
             pr="$(ensure_pr)"
-            gh pr edit "$pr" --remove-label "$LABEL" 2>/dev/null || true
-            gh pr comment "$pr" --body "✅ Clean merge of upstream \`master\` ($(git rev-parse --short upstream/master)). Ready for review & merge."
+            remove_pr_label "$pr"
+            printf '%s\n' "✅ Clean merge of upstream \`master\` ($(git rev-parse --short upstream/master)). Ready for review & merge." \
+              | comment_on_pr "$pr"
             echo "PR #${pr} updated (clean)."
           else
             echo "Merge conflicts detected."
             conflicts="$(git diff --name-only --diff-filter=U)"
             # Seal the conflicted merge (markers stay in the tree) so the sync branch
-            # has a real diff vs main; otherwise `gh pr create` rejects an empty PR and
+            # has a real diff vs main; otherwise GitHub rejects an empty PR and
             # no sync PR can ever be opened when there are conflicts (which is every
             # sync, since .skills/SKILL.md always conflicts). The Claude routine
             # re-merges from scratch and force-pushes the clean resolution — this commit
@@ -140,7 +177,7 @@ jobs:
             git push --force origin "$SYNC_BRANCH"
             ensure_label
             pr="$(ensure_pr)"
-            gh pr edit "$pr" --add-label "$LABEL"
+            add_pr_label "$pr"
             {
               echo "⏳ Merge of upstream \`master\` ($(git rev-parse --short upstream/master)) has conflicts. Awaiting the scheduled Claude routine."
               echo ""
@@ -152,6 +189,6 @@ jobs:
                 echo ""
                 echo "⚠️ \`.skills/SKILL.md\` (= \`CLAUDE.md\`) conflicted. Resolve it per **\`docs/engineering/upstream-merge-policy.md\`**: keep main's thin map and route the upstream delta into \`docs/engineering/\` — do NOT merge the monolith back into the map."
               fi
-            } | gh pr comment "$pr" --body-file -
+            } | comment_on_pr "$pr"
             echo "PR #${pr} flagged for resolution."
           fi

@@ -1,0 +1,213 @@
+name: Hardware Beta
+run-name: Hardware Beta / ${{ inputs.device }} / ${{ inputs.action }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: Hardware target
+        required: true
+        type: choice
+        options:
+          - eego-a4
+          - mofei-m4
+      action:
+        description: Publish or remove the rolling prerelease
+        required: true
+        type: choice
+        options:
+          - publish
+          - unpublish
+
+permissions:
+  contents: write
+
+env:
+  BETA_REF: beta/s3-hardware
+  RELEASE_TAG: hardware-beta-${{ inputs.device }}
+  GITEE_REPO: x1abin/crossmux
+
+jobs:
+  build:
+    if: inputs.action == 'publish'
+    runs-on: h2o
+    outputs:
+      crossmux_sha: ${{ steps.source.outputs.crossmux_sha }}
+      can_publish: ${{ steps.source.outputs.can_publish }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BETA_REF }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Record and validate source
+        id: source
+        env:
+          A4_REDISTRIBUTION_APPROVED: ${{ vars.A4_REDISTRIBUTION_APPROVED }}
+        run: |
+          set -euo pipefail
+          can_publish=true
+          if [ "${{ inputs.device }}" = "eego-a4" ] && [ "$A4_REDISTRIBUTION_APPROVED" != "true" ]; then
+            echo "::warning::A4 redistribution review is not approved; only the private artifact will be created"
+            can_publish=false
+          fi
+          git -C freeink-sdk fetch origin main:refs/remotes/origin/main
+          sdk_sha="$(git -C freeink-sdk rev-parse HEAD)"
+          if ! git -C freeink-sdk merge-base --is-ancestor "$sdk_sha" origin/main; then
+            echo "::error::SDK gitlink $sdk_sha is not contained in 0x1abin/freeink-sdk main"
+            exit 1
+          fi
+          echo "crossmux_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "can_publish=$can_publish" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: false
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          case "${{ inputs.device }}" in
+            eego-a4) environment=eego_a4 ;;
+            mofei-m4) environment=mofei_m4 ;;
+            *) exit 2 ;;
+          esac
+          pio run -e "$environment"
+          python3 scripts/package_hardware_beta.py "${{ inputs.device }}"
+          (cd "dist/${{ inputs.device }}" && sha256sum --check SHA256SUMS)
+
+      - name: Upload private build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hardware-beta-${{ inputs.device }}
+          path: dist/${{ inputs.device }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: inputs.action == 'publish' && needs.build.outputs.can_publish == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: hardware-beta-${{ inputs.device }}
+          path: dist
+
+      - name: Build release notes
+        run: |
+          cat > release-body.md <<EOF
+          # CrossMux ${{ inputs.device }} hardware beta
+
+          Simplified Chinese experimental build from \`${{ env.BETA_REF }}\`.
+
+          - CrossMux: \`${{ needs.build.outputs.crossmux_sha }}\`
+          - Partition profile: \`crossmux-sticky-v1\`
+          - Flash: ESP32-S3, DIO, 80 MHz, 16 MB
+
+          Back up the complete 16 MB flash before first installation. The recovery image is download-only.
+          EOF
+
+      - name: Publish rolling GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create "$RELEASE_TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "${{ needs.build.outputs.crossmux_sha }}" \
+            --title "CrossMux ${{ inputs.device }} Hardware Beta" \
+            --notes-file release-body.md \
+            --prerelease
+
+      - name: Verify GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir github-assets
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir github-assets
+          (cd github-assets && sha256sum --check SHA256SUMS)
+
+      - name: Mirror prerelease to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          # Gitee community releases accept six custom attachments. Keep the
+          # flasher assets on the rolling tag and put the download-only
+          # recovery payload on a companion tag at the same commit.
+          bash scripts/publish-gitee-release.sh \
+            "$GITEE_REPO" \
+            "$RELEASE_TAG" \
+            "CrossMux ${{ inputs.device }} Hardware Beta" \
+            "true" \
+            "${{ needs.build.outputs.crossmux_sha }}" \
+            release-body.md \
+            dist/SHA256SUMS \
+            dist/boot_app0.bin \
+            dist/bootloader.bin \
+            dist/firmware.bin \
+            dist/manifest.json \
+            dist/partitions.bin
+          bash scripts/publish-gitee-release.sh \
+            "$GITEE_REPO" \
+            "${RELEASE_TAG}-recovery" \
+            "CrossMux ${{ inputs.device }} Hardware Beta Recovery" \
+            "true" \
+            "${{ needs.build.outputs.crossmux_sha }}" \
+            release-body.md \
+            dist/RECOVERY.md \
+            dist/*-recovery-16mb.bin
+
+      - name: Verify Gitee release assets
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir gitee-assets
+          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
+            api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${tag}?access_token=${GITEE_TOKEN}"
+            curl -fsS "$api" | jq -r \
+              '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv'
+          done | while IFS=$'\t' read -r name url; do
+            curl -fsSL "$url" -o "gitee-assets/$name"
+          done
+          (cd gitee-assets && sha256sum --check SHA256SUMS)
+
+  unpublish:
+    if: inputs.action == 'unpublish'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+
+      - name: Remove Gitee prerelease
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
+            release_id="$(curl -fsS "${api}/releases/tags/${tag}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
+            if [ -n "$release_id" ]; then
+              curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
+            fi
+          done

@@ -81,6 +81,7 @@ constexpr StrId kPostProcessLongWaitLines[] = {
 constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerActions) / sizeof(kDisclaimerActions[0]));
 constexpr int kDisclaimerParagraphCount =
     static_cast<int>(sizeof(kDisclaimerParagraphs) / sizeof(kDisclaimerParagraphs[0]));
+constexpr int kMinimumDisclaimerActionGap = 4;
 constexpr int kManageEntryCount = static_cast<int>(sizeof(kManageEntries) / sizeof(kManageEntries[0]));
 constexpr size_t kMainTabCount = 2;
 constexpr int kDetailCoverWidth = 96;
@@ -92,42 +93,20 @@ constexpr int kLandscapeShelfRows = 2;
 constexpr unsigned long kShelfPageHoldMs = 700;
 constexpr int kNoShelfSelection = -1;
 
-enum class ShelfVerticalDirection : uint8_t { Up, Down };
-
-constexpr int shelfVerticalIndex(const int currentIndex, const int totalItems, const int columns,
-                                 const int itemsPerPage, const ShelfVerticalDirection direction) {
-  if (currentIndex < 0 || currentIndex >= totalItems || columns <= 0 || itemsPerPage < columns) return 0;
-
-  const int pageStart = currentIndex / itemsPerPage * itemsPerPage;
-  const int pageEnd = std::min(pageStart + itemsPerPage, totalItems);
-  const int pageIndex = currentIndex - pageStart;
-  const int column = pageIndex % columns;
-
-  switch (direction) {
-    case ShelfVerticalDirection::Up:
-      if (pageIndex >= columns) return currentIndex - columns;
-      return pageStart > 0 ? pageStart - columns + column : currentIndex;
-    case ShelfVerticalDirection::Down: {
-      const int nextRowIndex = currentIndex + columns;
-      if (nextRowIndex < pageEnd) return nextRowIndex;
-      const int currentRowStart = pageStart + pageIndex / columns * columns;
-      const int lastRowStart = pageStart + (pageEnd - pageStart - 1) / columns * columns;
-      if (currentRowStart < lastRowStart) return pageEnd - 1;
-      if (pageEnd >= totalItems) return currentIndex;
-      return std::min(pageEnd + column, totalItems - 1);
-    }
-  }
-  return currentIndex;
+constexpr int disclaimerActionGap(const int width, const int themeSpacing) {
+  return std::min(std::max(kMinimumDisclaimerActionGap, themeSpacing), std::max(0, width - kDisclaimerActionCount));
 }
 
-static_assert(shelfVerticalIndex(1, 20, 3, 9, ShelfVerticalDirection::Down) == 4);
-static_assert(shelfVerticalIndex(7, 20, 3, 9, ShelfVerticalDirection::Down) == 10);
-static_assert(shelfVerticalIndex(8, 11, 3, 9, ShelfVerticalDirection::Down) == 10);
-static_assert(shelfVerticalIndex(10, 20, 3, 9, ShelfVerticalDirection::Up) == 7);
-static_assert(shelfVerticalIndex(1, 20, 3, 9, ShelfVerticalDirection::Up) == 1);
-static_assert(shelfVerticalIndex(10, 11, 3, 9, ShelfVerticalDirection::Down) == 10);
-static_assert(shelfVerticalIndex(10, 13, 3, 9, ShelfVerticalDirection::Down) == 12);
-static_assert(shelfVerticalIndex(7, 14, 5, 10, ShelfVerticalDirection::Down) == 12);
+static_assert(disclaimerActionGap(200, 0) == kMinimumDisclaimerActionGap);
+static_assert(disclaimerActionGap(200, 16) == 16);
+static_assert(disclaimerActionGap(kDisclaimerActionCount, 0) == 0);
+
+constexpr int previousShelfIndexOrTab(const int currentIndex) {
+  return currentIndex > 0 ? currentIndex - 1 : kNoShelfSelection;
+}
+
+static_assert(previousShelfIndexOrTab(0) == kNoShelfSelection);
+static_assert(previousShelfIndexOrTab(4) == 3);
 
 constexpr bool canIncrementShelfFrame(const int frameSelection, const int frameItemsPerPage, const int selectedIndex,
                                       const int itemsPerPage) {
@@ -546,8 +525,9 @@ Rect WeReadActivity::disclaimerActionsBounds() const {
   for (const StrId action : kDisclaimerActions) {
     labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(action)));
   }
-  const int targetWidth = (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount +
-                          metrics.verticalSpacing * (kDisclaimerActionCount - 1);
+  const int gap = disclaimerActionGap(availableWidth, metrics.verticalSpacing);
+  const int targetWidth =
+      (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount + gap * (kDisclaimerActionCount - 1);
   const int width = std::min(availableWidth, targetWidth);
   const int bottomY = content.y + content.height - height;
   const int cachedY = disclaimerActionsY_.load();
@@ -1280,7 +1260,7 @@ void WeReadActivity::activateDisclaimerSelection() {
 void WeReadActivity::handleDisclaimerInput() {
   const Rect actions = disclaimerActionsBounds();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int gap = std::min(metrics.verticalSpacing, std::max(0, actions.width - kDisclaimerActionCount));
+  const int gap = disclaimerActionGap(actions.width, metrics.verticalSpacing);
   const int buttonWidth = std::max(1, (actions.width - gap) / kDisclaimerActionCount);
   int touched = -1;
   switch (mappedInput.colTouch(touched, actions.x, buttonWidth + gap, kDisclaimerActionCount, actions.y,
@@ -1488,63 +1468,67 @@ void WeReadActivity::handleShelfInput() {
   const auto layout =
       shelfGridLayout(renderer, mainContentBounds(), metrics.contentSidePadding, metrics.verticalSpacing);
   const int itemsPerPage = layout.itemsPerPage;
-  const int columns = layout.columns;
 
-  switch (shelfSideGesture_) {
-    case ShelfSideGesture::Idle:
-      if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-        shelfSideGesture_ = ShelfSideGesture::UpPressed;
-      } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-        shelfSideGesture_ = ShelfSideGesture::DownPressed;
+  switch (shelfNavigationGesture_) {
+    case ShelfNavigationGesture::Idle:
+      if (mappedInput.wasPressed(MappedInputManager::Button::NavPrevious)) {
+        shelfNavigationGesture_ = ShelfNavigationGesture::PreviousPressed;
+      } else if (mappedInput.wasPressed(MappedInputManager::Button::NavNext)) {
+        shelfNavigationGesture_ = ShelfNavigationGesture::NextPressed;
       } else {
         break;
       }
       return;
-    case ShelfSideGesture::UpPressed:
-    case ShelfSideGesture::DownPressed: {
-      const bool movingUp = shelfSideGesture_ == ShelfSideGesture::UpPressed;
-      const auto button = movingUp ? MappedInputManager::Button::Up : MappedInputManager::Button::Down;
-      const auto direction = movingUp ? ShelfVerticalDirection::Up : ShelfVerticalDirection::Down;
+    case ShelfNavigationGesture::PreviousPressed:
+    case ShelfNavigationGesture::NextPressed:
+    case ShelfNavigationGesture::PreviousPageHandled:
+    case ShelfNavigationGesture::NextPageHandled: {
+      const bool previous = shelfNavigationGesture_ == ShelfNavigationGesture::PreviousPressed ||
+                            shelfNavigationGesture_ == ShelfNavigationGesture::PreviousPageHandled;
+      const bool pageHandled = shelfNavigationGesture_ == ShelfNavigationGesture::PreviousPageHandled ||
+                               shelfNavigationGesture_ == ShelfNavigationGesture::NextPageHandled;
+      const auto button = previous ? MappedInputManager::Button::NavPrevious : MappedInputManager::Button::NavNext;
       if (mappedInput.wasReleased(button)) {
-        shelfSideGesture_ = ShelfSideGesture::Idle;
+        shelfNavigationGesture_ = ShelfNavigationGesture::Idle;
+        shelfLastPageTurnAt_ = 0;
+        if (pageHandled) return;
+
         const int selected = shelfSelected_.load();
-        if (movingUp && selected < columns) {
+        const int target = previous ? previousShelfIndexOrTab(selected) : ButtonNavigator::nextIndex(selected, count);
+        if (target == kNoShelfSelection) {
           mainFocus_.store(MainFocus::Tabs);
           requestUpdate();
           return;
         }
-        moveShelfSelection(shelfVerticalIndex(selected, count, columns, itemsPerPage, direction), itemsPerPage);
+        moveShelfSelection(target, itemsPerPage);
         return;
       }
-      if (mappedInput.isPressed(button) && mappedInput.getHeldTime() >= kShelfPageHoldMs) {
-        shelfSideGesture_ = ShelfSideGesture::PageHandled;
-        if (count > itemsPerPage) {
-          const int selected = shelfSelected_.load();
-          const int target = movingUp ? ButtonNavigator::previousPageIndex(selected, count, itemsPerPage)
-                                      : ButtonNavigator::nextPageIndex(selected, count, itemsPerPage);
-          moveShelfSelection(target, itemsPerPage);
-        }
+
+      if (!mappedInput.isPressed(button)) {
+        shelfNavigationGesture_ = ShelfNavigationGesture::Idle;
+        shelfLastPageTurnAt_ = 0;
+        return;
+      }
+
+      const uint32_t now = millis();
+      if ((!pageHandled && mappedInput.getHeldTime() < kShelfPageHoldMs) ||
+          (pageHandled && now - shelfLastPageTurnAt_ < kShelfPageHoldMs)) {
+        return;
+      }
+
+      shelfNavigationGesture_ =
+          previous ? ShelfNavigationGesture::PreviousPageHandled : ShelfNavigationGesture::NextPageHandled;
+      shelfLastPageTurnAt_ = now;
+      if (count > itemsPerPage) {
+        const int selected = shelfSelected_.load();
+        const int target = previous ? ButtonNavigator::previousPageIndex(selected, count, itemsPerPage)
+                                    : ButtonNavigator::nextPageIndex(selected, count, itemsPerPage);
+        moveShelfSelection(target, itemsPerPage);
       }
       return;
     }
-    case ShelfSideGesture::PageHandled:
-      if (!mappedInput.isPressed(MappedInputManager::Button::Up) &&
-          !mappedInput.isPressed(MappedInputManager::Button::Down)) {
-        shelfSideGesture_ = ShelfSideGesture::Idle;
-      }
-      return;
   }
 
-  const bool swapFrontDirections = mappedInput.isNavDirectionSwapped();
-  const auto previousButton =
-      swapFrontDirections ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
-  const auto nextButton = swapFrontDirections ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
-  buttonNavigator_.onPressAndContinuous({previousButton}, [this, count, itemsPerPage] {
-    moveShelfSelection(ButtonNavigator::previousIndex(shelfSelected_.load(), count), itemsPerPage);
-  });
-  buttonNavigator_.onPressAndContinuous({nextButton}, [this, count, itemsPerPage] {
-    moveShelfSelection(ButtonNavigator::nextIndex(shelfSelected_.load(), count), itemsPerPage);
-  });
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     resetShelfCoverLoading();
     activateSelected();
@@ -1850,7 +1834,7 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
     }
   }
 
-  const int buttonGap = std::min(metrics.verticalSpacing, std::max(0, actions.width - kDisclaimerActionCount));
+  const int buttonGap = disclaimerActionGap(actions.width, metrics.verticalSpacing);
   const int buttonWidth = std::max(1, (actions.width - buttonGap) / kDisclaimerActionCount);
   const int buttonRadius = std::min(metrics.popupCornerRadius, actions.height / 2);
   const int buttonLineHeight = renderer.getLineHeight(UI_10_FONT_ID);

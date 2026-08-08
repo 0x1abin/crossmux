@@ -34,7 +34,9 @@ enum class AppId : uint8_t {
   PixelSwitch = 12,
   FileTransfer = 13,
   OpdsBrowser = 14,
-  Count = 15,
+  Calculator = 15,
+  Woodfish = 16,
+  Count = 17,
 };
 
 struct AppEntry {
@@ -65,14 +67,16 @@ constexpr AppEntry kAppEntries[] = {
 #endif
     {AppId::Buddy, StrId::STR_BUDDY_TITLE, UIIcon::Buddy, &ActivityManager::goToBuddy},
     {AppId::PixelSwitch, StrId::STR_PIXEL_SWITCH_TITLE, UIIcon::PixelSwitch, &ActivityManager::goToPixelSwitch},
+    {AppId::Calculator, StrId::STR_CALCULATOR_TITLE, UIIcon::Calculator, &ActivityManager::goToCalculator},
+    {AppId::Woodfish, StrId::STR_WOODFISH_TITLE, UIIcon::Woodfish, &ActivityManager::goToWoodfish},
     {AppId::Standby, StrId::STR_STANDBY_TITLE, UIIcon::Standby, &ActivityManager::goToStandby},
 };
 
 constexpr int kAppCount = static_cast<int>(sizeof(kAppEntries) / sizeof(kAppEntries[0]));
 
-constexpr uint16_t appBit(const AppId id) { return uint16_t{1} << static_cast<uint8_t>(id); }
+constexpr uint32_t appBit(const AppId id) { return uint32_t{1} << static_cast<uint8_t>(id); }
 
-constexpr int visibleAppCount(const uint16_t hiddenMask) {
+constexpr int visibleAppCount(const uint32_t hiddenMask) {
   int count = 0;
   for (const auto& app : kAppEntries) {
     if ((hiddenMask & appBit(app.id)) == 0) {
@@ -83,7 +87,7 @@ constexpr int visibleAppCount(const uint16_t hiddenMask) {
   return count;
 }
 
-constexpr int appIndexForVisibleIndex(const uint16_t hiddenMask, const int visibleIndex) {
+constexpr int appIndexForVisibleIndex(const uint32_t hiddenMask, const int visibleIndex) {
   int visible = 0;
   for (int appIndex = 0; appIndex < kAppCount; ++appIndex) {
     if ((hiddenMask & appBit(kAppEntries[appIndex].id)) != 0) continue;
@@ -92,7 +96,7 @@ constexpr int appIndexForVisibleIndex(const uint16_t hiddenMask, const int visib
   return -1;
 }
 
-constexpr uint16_t effectiveHiddenMask(const uint16_t hiddenMask, const bool hasOpdsServers) {
+constexpr uint32_t effectiveHiddenMask(const uint32_t hiddenMask, const bool hasOpdsServers) {
   return hasOpdsServers ? hiddenMask : hiddenMask | appBit(AppId::OpdsBrowser);
 }
 
@@ -119,19 +123,23 @@ constexpr bool usesSideScrollBar(const CrossPointSettings::UI_THEME theme) {
   return false;
 }
 
-static_assert(kAppCount <= 16, "the app catalog must fit hiddenAppsMask");
-static_assert(static_cast<uint8_t>(AppId::Count) <= 16, "hiddenAppsMask supports at most 16 stable app IDs");
+static_assert(kAppCount <= 32, "the app catalog must fit hiddenAppsMask");
+static_assert(static_cast<uint8_t>(AppId::Count) <= 32, "hiddenAppsMask supports at most 32 stable app IDs");
 static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_APP_ID,
               "the Buddy app ID must remain stable");
 static_assert(static_cast<uint8_t>(AppId::PixelSwitch) == CrossPointSettings::PIXEL_SWITCH_APP_ID,
               "the Pixel Switch app ID must remain stable");
+static_assert(static_cast<uint8_t>(AppId::Calculator) == 15, "the Calculator app ID must remain stable");
+static_assert(static_cast<uint8_t>(AppId::Woodfish) == 16, "the Woodfish app ID must remain stable");
+static_assert(appBit(AppId::Woodfish) == (uint32_t{1} << 16), "Woodfish visibility must use the first widened bit");
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
 static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
                   (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |
                    appBit(AppId::Standby) | appBit(AppId::Buddy) | appBit(AppId::PixelSwitch)),
               "the default mask must hide Chinese chess, Minesweeper, 2048, Standby, Buddy, and Pixel Switch");
 static_assert(visibleAppCount(0) == kAppCount, "a zero mask must show every compiled app");
-static_assert(visibleAppCount(UINT16_MAX) == 0, "a full mask must hide every compiled app");
+static_assert(visibleAppCount(UINT32_MAX) == 0, "a full mask must hide every compiled app");
+static_assert(visibleAppCount(appBit(AppId::Woodfish)) == kAppCount - 1, "the widened mask must hide Woodfish");
 static_assert(visibleAppCount(effectiveHiddenMask(0, false)) == kAppCount - 1,
               "OPDS must be hidden when no server is configured");
 static_assert(appIndexForVisibleIndex(appBit(kAppEntries[1].id), 1) == 2,
@@ -152,9 +160,8 @@ bool AppsMenuActivity::isAppVisible(const int appIndex) {
 bool AppsMenuActivity::setAppVisible(const int appIndex, const bool visible) {
   if (appIndex < 0 || appIndex >= kAppCount) return false;
 
-  const uint16_t bit = appBit(kAppEntries[appIndex].id);
-  const uint16_t updatedMask =
-      visible ? static_cast<uint16_t>(SETTINGS.hiddenAppsMask & ~bit) : SETTINGS.hiddenAppsMask | bit;
+  const uint32_t bit = appBit(kAppEntries[appIndex].id);
+  const uint32_t updatedMask = visible ? SETTINGS.hiddenAppsMask & ~bit : SETTINGS.hiddenAppsMask | bit;
   if (updatedMask == SETTINGS.hiddenAppsMask) return false;
 
   SETTINGS.hiddenAppsMask = updatedMask;
@@ -309,7 +316,7 @@ void AppsMenuActivity::render(RenderLock&&) {
     const int pageStart = page * perPage;
     const int pageCount = std::min(perPage, visibleCount - pageStart);
 
-    // ponytail: scan at most 16 entries instead of keeping a RAM-backed filtered list.
+    // ponytail: scan at most 32 entries instead of keeping a RAM-backed filtered list.
     GUI.drawButtonMenu(
         renderer, Rect{0, listY, sw, listH}, pageCount, showSelection ? selected - pageStart : -1,
         [pageStart](int i) {

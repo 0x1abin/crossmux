@@ -337,6 +337,28 @@ void ReadingStatsActivity::loop() {
       selectedIndex = InxStatisticsGeometry::adjacentView(selectedIndex, bookCount, delta);
       requestUpdate();
     };
+
+    int touchX = 0;
+    int touchY = 0;
+    if (mappedInput.wasScreenTapped(touchX, touchY)) {
+      if (selectedIndex > 0 && mappedInput.getHeldTime() >= BOOK_LONG_PRESS_MS) {
+        confirmRemoveSelectedBook();
+      } else {
+        openSelectedEntry();
+      }
+      return;
+    }
+
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Left) {
+      moveSelection(1);
+      return;
+    }
+    if (swipe == MappedInputManager::SwipeDir::Right) {
+      moveSelection(-1);
+      return;
+    }
+
     buttonNavigator.onNextRelease([moveSelection] { moveSelection(1); });
     buttonNavigator.onPreviousRelease([moveSelection] { moveSelection(-1); });
     buttonNavigator.onNextContinuous([moveSelection] { moveSelection(1); });

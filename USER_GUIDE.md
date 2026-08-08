@@ -95,7 +95,7 @@ Upon turning the device on for the first time, you will be placed on the **[Home
 
 The Home screen is the main entry point to the firmware. From here you can navigate to **[Reading Mode](#4-reading-mode)** with the most recently read book, the **[Browse Files](#33-browse-files-screen)** screen, the **[Recent Books](#34-recent-books-screen)** screen, the **[File Transfer](#35-file-transfer-screen)** screen, or **[Settings](#36-settings)**.
 
-With the optional **INX** theme, Recent becomes the home screen and the top bar switches between **Recent**, **Library**, **Apps**, **Settings**, and **Statistics**. Apps contains the existing File Transfer and OPDS Browser entries; INX does not add a Sync screen or new transfer protocols. The Recent screen supports Flow, Grid, List, Icons, and Cover layouts, while Library and Apps can independently use Icons or List layouts. INX Settings shows the existing four settings categories as expandable sections on one page.
+With the optional **Inx** theme, Recent becomes the home screen and the top bar switches between **Recent**, **Library**, **Apps**, **Settings**, and **Statistics**. Apps contains the existing File Transfer and OPDS Browser entries; Inx does not add a Sync screen or new transfer protocols. The Recent screen supports Flow, Grid, List, Icons, and Cover layouts, while Library and Apps can independently use Icons or List layouts. Inx Settings shows the existing four settings categories as expandable sections on one page.
 
 ### 3.2 Reading Mode
 
@@ -225,11 +225,11 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
   - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
   - "RoundedRaff" - A rounded theme with additional visual styling
-  - "INX" - A five-tab e-ink interface with a Recent home screen, icon/list Library and Apps layouts, and expandable Settings categories
+  - "Inx" - A five-tab e-ink interface with a Recent home screen, icon/list Library and Apps layouts, and expandable Settings categories
 
-- **INX Home Layout**: Choose Flow, Grid, List, Icons, or Cover for the INX home screen. The default is Flow.
-- **INX Library Layout**: Choose Icons or List for the INX Library. The default is Icons.
-- **INX Apps Layout**: Choose Icons or List for the INX Apps hub. The default is Icons.
+- **Inx Home Layout**: Choose Flow, Grid, List, Icons, or Cover for the Inx home screen. The default is Flow.
+- **Inx Library Layout**: Choose Icons or List for the Inx Library. The default is Icons.
+- **Inx Apps Layout**: Choose Icons or List for the Inx Apps hub. The default is Icons.
 
 - **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
   
