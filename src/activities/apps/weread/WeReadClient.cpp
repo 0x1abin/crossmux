@@ -1908,7 +1908,8 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfReco
       !writeLiteral(opf,
                     "</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest>"
                     "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" "
-                    "properties=\"nav\"/>")) {
+                    "properties=\"nav\"/>"
+                    "<item id=\"style\" href=\"styles.css\" media-type=\"text/css\"/>")) {
     return Error::SdCard;
   }
   if (coverType != WeReadProtocol::ImageType::None &&
@@ -1999,10 +2000,12 @@ Error packageBook(const WeReadStore::ShelfRecord& book, const std::string& bookD
       "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
       "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
       "media-type=\"application/oebps-package+xml\"/></rootfiles></container>";
+  static constexpr char kStylesheet[] = "p{text-indent:2em}";
   if (!zip.addBuffer("mimetype", reinterpret_cast<const uint8_t*>(kMimetype), strlen(kMimetype)) ||
       !zip.addBuffer("META-INF/container.xml", reinterpret_cast<const uint8_t*>(kContainer), strlen(kContainer)) ||
       !zip.addFile("OEBPS/content.opf", opfPath, callback, callbackContext) ||
-      !zip.addFile("OEBPS/nav.xhtml", navPath, callback, callbackContext)) {
+      !zip.addFile("OEBPS/nav.xhtml", navPath, callback, callbackContext) ||
+      !zip.addBuffer("OEBPS/styles.css", reinterpret_cast<const uint8_t*>(kStylesheet), strlen(kStylesheet))) {
     zip.abort();
     return Error::SdCard;
   }
