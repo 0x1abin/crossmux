@@ -234,8 +234,6 @@ void CalculatorActivity::render(RenderLock&&) {
   const int resultY = layout.display.y + layout.display.height - resultLineHeight - sectionSpacing;
   renderer.drawText(NOTOSANS_18_FONT_ID, layout.display.x + layout.display.width - resultWidth, resultY, result, true,
                     EpdFontFamily::BOLD);
-  renderer.drawLine(layout.display.x, layout.display.y + layout.display.height - 1,
-                    layout.display.x + layout.display.width - 1, layout.display.y + layout.display.height - 1, true);
 
   const EpdFontFamily::Style keyStyle =
       metrics.optionPopupOptionFontBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
