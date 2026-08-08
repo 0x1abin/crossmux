@@ -78,18 +78,15 @@ if [ -n "$existing_id" ]; then
     -o /dev/null -w "  delete: HTTP %{http_code}\n" || true
 fi
 
-# Stable releases reuse the mirror-synced tag. Nightly keeps its rolling-tag
-# behavior by supplying target_commitish.
+# Gitee requires target_commitish even when the verified tag already exists.
 echo "Creating Gitee release for tag ${TAG}"
 create_args=(-sS -X POST "${API}/releases"
   --data-urlencode "access_token=${GITEE_TOKEN}"
   --data-urlencode "tag_name=${TAG}"
   --data-urlencode "name=${NAME}"
   --data-urlencode "body@${BODY_FILE}"
-  --data-urlencode "prerelease=${PRERELEASE}")
-if [ "$TAG" = "nightly" ]; then
-  create_args+=(--data-urlencode "target_commitish=${COMMITISH}")
-fi
+  --data-urlencode "prerelease=${PRERELEASE}"
+  --data-urlencode "target_commitish=${COMMITISH}")
 create_resp="$(curl "${create_args[@]}")"
 
 release_id="$(echo "$create_resp" | jq -r '.id // empty' 2>/dev/null || true)"
