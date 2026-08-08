@@ -5,15 +5,17 @@
 #include <base64.h>
 #include <mbedtls/base64.h>
 
+#include <array>
 #include <cstring>
+#include <limits>
 
 namespace obfuscation {
 
 namespace {
 constexpr size_t HW_KEY_LEN = 6;
 
-// Simple lazy init — no thread-safety concern on single-core ESP32-C3.
 const uint8_t* getHwKey() {
+<<<<<<< HEAD
   static HalSystem::DeviceId key{};
   static bool initialized = false;
   if (!initialized) {
@@ -22,6 +24,16 @@ const uint8_t* getHwKey() {
     }
     initialized = true;
   }
+=======
+  // Function-local static initialization is synchronized by C++, including
+  // on dual-core targets. The previous hand-rolled boolean could expose a
+  // partially initialized key to another task.
+  static const std::array<uint8_t, HW_KEY_LEN> key = [] {
+    std::array<uint8_t, HW_KEY_LEN> value{};
+    esp_efuse_mac_get_default(value.data());
+    return value;
+  }();
+>>>>>>> upstream/master
   return key.data();
 }
 }  // namespace
@@ -48,6 +60,11 @@ String obfuscateToBase64(const std::string& plaintext) {
 }
 
 std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
+  return deobfuscateFromBase64(encoded, std::numeric_limits<size_t>::max(), ok, nullptr);
+}
+
+std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLength, bool* ok, bool* tooLong) {
+  if (tooLong) *tooLong = false;
   if (encoded == nullptr || encoded[0] == '\0') {
     if (ok) *ok = false;
     return "";
@@ -60,6 +77,11 @@ std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
   if (ret != 0 && ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
     LOG_ERR("OBF", "Base64 decode size query failed (ret=%d)", ret);
     if (ok) *ok = false;
+    return "";
+  }
+  if (decodedLen > maxDecodedLength) {
+    if (ok) *ok = false;
+    if (tooLong) *tooLong = true;
     return "";
   }
   std::string result(decodedLen, '\0');
