@@ -109,6 +109,14 @@ jobs:
           name: hardware-beta-${{ inputs.device }}
           path: dist
 
+      - name: Verify compressed recovery image
+        run: |
+          set -euo pipefail
+          set -- dist/*-recovery-16mb.bin.gz
+          [ "$#" -eq 1 ] && [ -f "$1" ]
+          gzip -t "$1"
+          [ "$(gzip -dc "$1" | wc -c)" -eq 16777216 ]
+
       - name: Build release notes
         run: |
           cat > release-body.md <<EOF
@@ -173,7 +181,7 @@ jobs:
             "${{ needs.build.outputs.crossmux_sha }}" \
             release-body.md \
             dist/RECOVERY.md \
-            dist/*-recovery-16mb.bin
+            dist/*-recovery-16mb.bin.gz
 
       - name: Verify Gitee release assets
         env:
@@ -189,6 +197,22 @@ jobs:
             curl -fsSL "$url" -o "gitee-assets/$name"
           done
           (cd gitee-assets && sha256sum --check SHA256SUMS)
+
+      - name: Clean up partial rolling releases
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
+            release_api="${api}/releases/tags/${tag}?access_token=${GITEE_TOKEN}"
+            release_id="$(curl -fsS "$release_api" | jq -r '.id // empty' || true)"
+            if [ -n "$release_id" ]; then
+              curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}" || true
+            fi
+          done
 
   unpublish:
     if: inputs.action == 'unpublish'
