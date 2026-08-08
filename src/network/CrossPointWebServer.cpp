@@ -8,9 +8,15 @@
 #include <WiFi.h>
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
+#ifndef SIMULATOR
+#include <lwip/sockets.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
+#ifndef SIMULATOR
+#include <cerrno>
+#endif
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
@@ -349,20 +355,76 @@ CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() con
   return status;
 }
 
-static void sendHtmlContent(WebServer* server, const char* data, size_t len) {
+#ifndef SIMULATOR
+static bool writeClientWithDeadline(NetworkClient& client, const char* data, size_t length,
+                                    unsigned long responseStart) {
+  constexpr unsigned long SEND_STALL_MS = 10000;
+  constexpr unsigned long RESPONSE_DEADLINE_MS = 60000;
+  size_t offset = 0;
+  unsigned long lastProgress = millis();
+
+  while (offset < length) {
+    const unsigned long now = millis();
+    if (now - lastProgress >= SEND_STALL_MS || now - responseStart >= RESPONSE_DEADLINE_MS) return false;
+
+    const int socketFd = client.fd();
+    if (socketFd < 0) return false;
+
+    const ssize_t written = ::send(socketFd, data + offset, length - offset, MSG_DONTWAIT);
+    if (written > 0) {
+      offset += static_cast<size_t>(written);
+      lastProgress = millis();
+      continue;
+    }
+    if (written == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR && errno != ENOMEM)) {
+      return false;
+    }
+    delay(1);
+  }
+  return true;
+}
+#endif
+
+static bool sendCompressedContent(WebServer* server, const char* contentType, const char* data, size_t len) {
+#ifdef SIMULATOR
   server->sendHeader("Content-Encoding", "gzip");
-  server->send_P(200, "text/html", data, len);
+  server->send_P(200, contentType, data, len);
+  return true;
+#else
+  constexpr size_t CHUNK_SIZE = 1400;
+  server->sendHeader("Content-Encoding", "gzip");
+  server->setContentLength(len);
+
+  const unsigned long responseStart = millis();
+  server->send(200, contentType, "");
+  if (!server->client().connected()) {
+    LOG_ERR("WEB", "Aborting %s response header after %lu ms", server->uri().c_str(), millis() - responseStart);
+    server->client().stop();
+    return false;
+  }
+
+  for (size_t offset = 0; offset < len; offset += CHUNK_SIZE) {
+    const size_t chunkLength = std::min(CHUNK_SIZE, len - offset);
+    if (!writeClientWithDeadline(server->client(), data + offset, chunkLength, responseStart)) {
+      LOG_ERR("WEB", "Aborting %s response body after %lu ms", server->uri().c_str(), millis() - responseStart);
+      server->client().stop();
+      return false;
+    }
+  }
+  return true;
+#endif
 }
 
 void CrossPointWebServer::handleRoot() const {
-  sendHtmlContent(server.get(), HomePageHtml, sizeof(HomePageHtml));
-  LOG_DBG("WEB", "Served root page");
+  if (sendCompressedContent(server.get(), "text/html", HomePageHtml, sizeof(HomePageHtml))) {
+    LOG_DBG("WEB", "Served root page");
+  }
 }
 
 void CrossPointWebServer::handleJszip() const {
-  server->sendHeader("Content-Encoding", "gzip");
-  server->send_P(200, "application/javascript", jszip_minJs, jszip_minJsCompressedSize);
-  LOG_DBG("WEB", "Served jszip.min.js");
+  if (sendCompressedContent(server.get(), "application/javascript", jszip_minJs, jszip_minJsCompressedSize)) {
+    LOG_DBG("WEB", "Served jszip.min.js");
+  }
 }
 
 void CrossPointWebServer::handleNotFound() const {
@@ -487,7 +549,7 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
 bool CrossPointWebServer::isEpubFile(const String& filename) const { return FsHelpers::hasEpubExtension(filename); }
 
 void CrossPointWebServer::handleFileList() const {
-  sendHtmlContent(server.get(), FilesPageHtml, sizeof(FilesPageHtml));
+  sendCompressedContent(server.get(), "text/html", FilesPageHtml, sizeof(FilesPageHtml));
 }
 
 void CrossPointWebServer::handleFileListData() const {
@@ -1150,8 +1212,9 @@ void CrossPointWebServer::handleDelete() const {
 }
 
 void CrossPointWebServer::handleSettingsPage() const {
-  sendHtmlContent(server.get(), SettingsPageHtml, sizeof(SettingsPageHtml));
-  LOG_DBG("WEB", "Served settings page");
+  if (sendCompressedContent(server.get(), "text/html", SettingsPageHtml, sizeof(SettingsPageHtml))) {
+    LOG_DBG("WEB", "Served settings page");
+  }
 }
 
 void CrossPointWebServer::handleGetSettings() const {
@@ -1763,8 +1826,9 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 // --- Font management handlers ---
 
 void CrossPointWebServer::handleFontsPage() const {
-  sendHtmlContent(server.get(), FontsPageHtml, sizeof(FontsPageHtml));
-  LOG_DBG("WEB", "Served fonts page");
+  if (sendCompressedContent(server.get(), "text/html", FontsPageHtml, sizeof(FontsPageHtml))) {
+    LOG_DBG("WEB", "Served fonts page");
+  }
 }
 
 void CrossPointWebServer::handleFontList() const {
