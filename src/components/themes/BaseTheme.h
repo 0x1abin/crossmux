@@ -150,6 +150,7 @@ enum UIIcon {
   ReadingProfile,
   Achievements,
   Calculator,
+  Woodfish,
 };
 
 // Default theme implementation (Classic Theme)

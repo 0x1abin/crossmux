@@ -27,6 +27,7 @@
 #include "apps/reading-stats/ReadingStatsMenuActivity.h"
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
+#include "apps/woodfish/WoodfishActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -458,6 +459,15 @@ void ActivityManager::goToCalculator() {
   auto activity = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ACT", "OOM: CalculatorActivity (%u bytes)", static_cast<unsigned>(sizeof(CalculatorActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
+void ActivityManager::goToWoodfish() {
+  auto activity = makeUniqueNoThrow<WoodfishActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: WoodfishActivity (%u bytes)", static_cast<unsigned>(sizeof(WoodfishActivity)));
     return;
   }
   replaceActivity(std::move(activity));

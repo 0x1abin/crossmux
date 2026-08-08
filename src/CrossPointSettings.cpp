@@ -309,13 +309,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)FRONT_HW_RIGHT, FRONT_BUTTON_HARDWARE_COUNT, FRONT_HW_RIGHT);
   validateFrontButtonMapping(s);
-  hiddenAppsMask = doc["hiddenAppsMask"].isNull() ? DEFAULT_HIDDEN_APPS_MASK
-                                                  : static_cast<uint16_t>(doc["hiddenAppsMask"].as<uint16_t>());
+  hiddenAppsMask = doc["hiddenAppsMask"].isNull() ? DEFAULT_HIDDEN_APPS_MASK : doc["hiddenAppsMask"].as<uint32_t>();
   const uint8_t storedAppsCatalogVersion = doc["appsCatalogVersion"] | static_cast<uint8_t>(0);
   // Buddy was added at catalog version 1. Hide it exactly once during the
   // upgrade, then preserve the user's visibility choice on later boots.
   if (storedAppsCatalogVersion < APPS_CATALOG_VERSION) {
-    hiddenAppsMask |= uint16_t{1} << BUDDY_APP_ID;
+    hiddenAppsMask |= uint32_t{1} << BUDDY_APP_ID;
     needsResave = true;
   }
   appsCatalogVersion = APPS_CATALOG_VERSION;

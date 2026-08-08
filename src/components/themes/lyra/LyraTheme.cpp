@@ -45,6 +45,7 @@
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
+#include "components/icons/woodfish.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -132,6 +133,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return PixelSwitchIcon;
       case UIIcon::Calculator:
         return CalculatorIcon;
+      case UIIcon::Woodfish:
+        return WoodfishIcon;
       default:
         return nullptr;
     }
