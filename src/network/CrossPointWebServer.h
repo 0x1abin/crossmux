@@ -71,6 +71,7 @@ class CrossPointWebServer {
  private:
   std::unique_ptr<WebServer> server = nullptr;
   std::unique_ptr<WebSocketsServer> wsServer = nullptr;
+  std::unique_ptr<char[]> fileListBatch = nullptr;
   bool running = false;
   bool apMode = false;  // true when running in AP mode, false for STA mode
   uint16_t port = 80;
@@ -84,7 +85,7 @@ class CrossPointWebServer {
   void abortWsUpload(const char* tag);
 
   // File scanning
-  void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;
+  void scanFiles(const char* path, const std::function<bool(const FileInfo&)>& callback) const;
   String formatFileSize(size_t bytes) const;
   bool isEpubFile(const String& filename) const;
 
