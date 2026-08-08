@@ -81,6 +81,7 @@ constexpr StrId kPostProcessLongWaitLines[] = {
 constexpr int kDisclaimerActionCount = static_cast<int>(sizeof(kDisclaimerActions) / sizeof(kDisclaimerActions[0]));
 constexpr int kDisclaimerParagraphCount =
     static_cast<int>(sizeof(kDisclaimerParagraphs) / sizeof(kDisclaimerParagraphs[0]));
+constexpr int kMinimumDisclaimerActionGap = 4;
 constexpr int kManageEntryCount = static_cast<int>(sizeof(kManageEntries) / sizeof(kManageEntries[0]));
 constexpr size_t kMainTabCount = 2;
 constexpr int kDetailCoverWidth = 96;
@@ -91,6 +92,14 @@ constexpr int kLandscapeShelfColumns = 5;
 constexpr int kLandscapeShelfRows = 2;
 constexpr unsigned long kShelfPageHoldMs = 700;
 constexpr int kNoShelfSelection = -1;
+
+constexpr int disclaimerActionGap(const int width, const int themeSpacing) {
+  return std::min(std::max(kMinimumDisclaimerActionGap, themeSpacing), std::max(0, width - kDisclaimerActionCount));
+}
+
+static_assert(disclaimerActionGap(200, 0) == kMinimumDisclaimerActionGap);
+static_assert(disclaimerActionGap(200, 16) == 16);
+static_assert(disclaimerActionGap(kDisclaimerActionCount, 0) == 0);
 
 constexpr int previousShelfIndexOrTab(const int currentIndex) {
   return currentIndex > 0 ? currentIndex - 1 : kNoShelfSelection;
@@ -516,8 +525,9 @@ Rect WeReadActivity::disclaimerActionsBounds() const {
   for (const StrId action : kDisclaimerActions) {
     labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(action)));
   }
-  const int targetWidth = (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount +
-                          metrics.verticalSpacing * (kDisclaimerActionCount - 1);
+  const int gap = disclaimerActionGap(availableWidth, metrics.verticalSpacing);
+  const int targetWidth =
+      (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount + gap * (kDisclaimerActionCount - 1);
   const int width = std::min(availableWidth, targetWidth);
   const int bottomY = content.y + content.height - height;
   const int cachedY = disclaimerActionsY_.load();
@@ -1250,7 +1260,7 @@ void WeReadActivity::activateDisclaimerSelection() {
 void WeReadActivity::handleDisclaimerInput() {
   const Rect actions = disclaimerActionsBounds();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int gap = std::min(metrics.verticalSpacing, std::max(0, actions.width - kDisclaimerActionCount));
+  const int gap = disclaimerActionGap(actions.width, metrics.verticalSpacing);
   const int buttonWidth = std::max(1, (actions.width - gap) / kDisclaimerActionCount);
   int touched = -1;
   switch (mappedInput.colTouch(touched, actions.x, buttonWidth + gap, kDisclaimerActionCount, actions.y,
@@ -1824,7 +1834,7 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
     }
   }
 
-  const int buttonGap = std::min(metrics.verticalSpacing, std::max(0, actions.width - kDisclaimerActionCount));
+  const int buttonGap = disclaimerActionGap(actions.width, metrics.verticalSpacing);
   const int buttonWidth = std::max(1, (actions.width - buttonGap) / kDisclaimerActionCount);
   const int buttonRadius = std::min(metrics.popupCornerRadius, actions.height / 2);
   const int buttonLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
