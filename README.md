@@ -4,7 +4,7 @@
 
 **CrossMux** is a community fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) that turns the device into more than a reader — it adds an Apps hub of mini-games and tools, richer standby faces, and a first-class Simplified Chinese build.
 
-**Version:** CrossMux 1.5.4 (based on CrossPoint Reader 1.5.0 plus upstream `develop` through `9c48609f`)
+**Version:** CrossMux 1.5.5 (based on CrossPoint Reader 1.5.0 plus upstream `develop` through `ba1b849f`)
 
 **Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
 
