@@ -40,7 +40,7 @@ void SloppyClockFace::onPageNext() { onShake(esp_random() ^ static_cast<uint32_t
 
 void SloppyClockFace::regenerate(uint32_t seed) {
   sloppy::rollStyle(seed, *style_);
-  sloppy::preRollSeeds(seed, sloppy::getAlphabet(style_->alphabet), *seeds_);
+  sloppy::prepareSeeds(seed, *style_, *seeds_);
   lastMin_ = -1;
 }
 
@@ -62,7 +62,8 @@ void SloppyClockFace::render(GfxRenderer& renderer, const Rect& viewport) {
   }
   char buf[8];
   std::snprintf(buf, sizeof(buf), "%02u\n%02u", hh, mm);
-  sloppy::draw(renderer, *style_, *seeds_, buf, viewport);
+  sloppy::draw(renderer, *style_, *seeds_, buf,
+               sloppy::Bounds{viewport.x, viewport.y, viewport.width, viewport.height});
 }
 
 uint32_t SloppyClockFace::secondsUntilNextWake() const {

@@ -1,8 +1,10 @@
-#include "SloppyEngine.h"
+#include "SloppyDigits.h"
 
 #include <GfxRenderer.h>
 
 #include <cmath>
+
+#include "SloppyDigitAlphabets.h"
 
 namespace sloppy {
 namespace {
@@ -139,42 +141,9 @@ inline bool clipSegmentToRect(int& x0, int& y0, int& x1, int& y1,  //
   return false;  // unreachable in practice; bail out instead of spinning
 }
 
-// ── Stroke segment ──────────────────────────────────────────────────────────
-//
-// In BW mode this is just `drawLine` with the requested thickness.  In
-// the LSB/MSB passes of a grayscale-AA standby render (where the same draw
-// sequence is replayed under storeBwBuffer / setRenderMode), we want each
-// stroke to contribute an annular halo to the gray scratch buffer rather
-// than a solid line.  Two-step technique:
-//
-//   1. drawLine(thickness+H, state=false)  → fills the halo+core with
-//      bit=1 in the scratch buffer.  In gray-buffer semantics, bit=1 means
-//      "this pixel contributes a gray level".
-//   2. drawLine(thickness,    state=true)  → clears the core back to bit=0.
-//      The remaining bit=1 region is an H/2-pixel annulus on each side of
-//      the original stroke.
-//
-// LSB halo is 1px on each side (dark gray), MSB halo is 2px on each side
-// (covers both light and dark gray) — composed by displayGrayBuffer with
-// the BW backup into 4 levels:
-//
-//   core         : BW=black, LSB=0, MSB=0 → black
-//   inner ring   : BW=white, LSB=1, MSB=1 → dark gray
-//   outer ring   : BW=white, LSB=0, MSB=1 → light gray
-//   beyond       : BW=white, LSB=0, MSB=0 → white
-//
-// The core MUST be cleared in the gray scratch; if BW=black and LSB/MSB=1
-// coincide at the same pixel, displayGrayBuffer composes it as gray, not
-// black — the font code at GfxRenderer.cpp:191-202 makes the same
-// exclusion (black glyph pixels are skipped in the LSB/MSB passes).
-//
-// Big procedural digits stay pure BW even when the standby face requests
-// 4-level grayscale enhancement. Adding antialiased gray halos around the
-// already low-res geometric strokes makes them look fuzzy / smudged, not
-// smoother — so skip the LSB/MSB scratch contributions entirely. The BW
-// stamp itself paints `strokeWidth` parallel copies of the segment in a
-// width × width centered grid, giving each sample a square-pen footprint
-// (verticals get proper weight, endpoints get symmetric square caps).
+// Procedural digits stay pure BW during grayscale replay; gray halos make
+// these deliberately rough strokes look blurred. Repeated offset lines give
+// each sample a square-pen footprint with symmetric caps.
 inline void drawStrokeSegment(const GfxRenderer& renderer, int x0, int y0, int x1, int y1, int strokeWidth) {
   if (renderer.getRenderMode() != GfxRenderer::BW) return;
 
@@ -254,15 +223,16 @@ void rollStyle(uint32_t seed, Style& out) {
   out.oneIsPlain = r.chance(0.5f);
 }
 
-void preRollSeeds(uint32_t seed, const Alphabet& alpha, Seeds& out) {
+void prepareSeeds(uint32_t seed, const Style& style, Seeds& out) {
+  const Alphabet& alpha = getAlphabet(style.alphabet);
   Xorshift32 r(seed ^ 0xA5A5A5A5u);
   for (int d = 0; d < 10; ++d) {
     const Glyph& g = alpha.glyphs[d];
     uint8_t count = 0;
-    for (uint8_t i = 0; i < g.cmdCount && count < MAX_GLYPH_CONTROL_POINTS; ++i) {
+    for (uint8_t i = 0; i < g.cmdCount && count < kMaxGlyphControlPoints; ++i) {
       const CmdKind k = g.cmds[i].kind;
       const int n = (k == CmdKind::Move) ? 1 : 3;
-      for (int j = 0; j < n && count < MAX_GLYPH_CONTROL_POINTS; ++j) {
+      for (int j = 0; j < n && count < kMaxGlyphControlPoints; ++j) {
         out.glyphSeeds[d][count].dx = r.nextSeedByte();
         out.glyphSeeds[d][count].dy = r.nextSeedByte();
         ++count;
@@ -270,26 +240,22 @@ void preRollSeeds(uint32_t seed, const Alphabet& alpha, Seeds& out) {
     }
     out.glyphSeedCount[d] = count;
   }
-  for (int i = 0; i < kMaxTimeSlots; ++i) {
+  for (int i = 0; i < kMaxDigitPositions; ++i) {
     out.positions[i].rotJitter = r.nextSeedByte();
     out.positions[i].sxJitter = r.nextSeedByte();
     out.positions[i].syJitter = r.nextSeedByte();
   }
 }
 
-void draw(GfxRenderer& renderer, const Style& style, const Seeds& seeds, const char* timeStr, Rect viewport) {
-  if (!timeStr || viewport.width <= 0 || viewport.height <= 0) return;
+void draw(GfxRenderer& renderer, const Style& style, const Seeds& seeds, const char* digitsText, Bounds viewport) {
+  if (!digitsText || viewport.width <= 0 || viewport.height <= 0) return;
   const Alphabet& alpha = getAlphabet(style.alphabet);
 
-  // Parse timeStr into rows of digits. '\n' separates rows; any other non-digit
-  // character is silently ignored. Typical input: "HH\nMM".
-  constexpr int kMaxRows = 4;
-  constexpr int kMaxDigitsPerRow = 8;
   uint8_t digits[kMaxRows][kMaxDigitsPerRow];
   uint8_t digitsPerRow[kMaxRows] = {0};
   int rowCount = 0;
   int curRow = 0;
-  for (const char* p = timeStr; *p; ++p) {
+  for (const char* p = digitsText; *p; ++p) {
     if (*p == '\n') {
       if (digitsPerRow[curRow] > 0) {
         if (curRow + 1 < kMaxRows) ++curRow;
@@ -340,7 +306,7 @@ void draw(GfxRenderer& renderer, const Style& style, const Seeds& seeds, const c
 
     float cursorTemplate = 0;
     for (int i = 0; i < n; ++i) {
-      const int pi = posIdx < kMaxTimeSlots ? posIdx : kMaxTimeSlots - 1;
+      const int pi = posIdx < kMaxDigitPositions ? posIdx : kMaxDigitPositions - 1;
       const PositionSeed& ps = seeds.positions[pi];
       const float rotRad = (ps.rotJitter / 127.0f) * style.digitRotateMax * 3.14159265f / 180.0f;
       const float aspectSx = 1.0f + (ps.sxJitter / 127.0f) * 0.08f;
