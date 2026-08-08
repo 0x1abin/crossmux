@@ -1,9 +1,10 @@
 #pragma once
 
+#include <SloppyDigits.h>
+
 #include <cstdint>
 #include <memory>
 
-#include "SloppyEngine.h"
 #include "StandbyFace.h"
 
 // "Sloppy clock" — the default Standby face. Renders the current HH:MM using

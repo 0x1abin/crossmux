@@ -1,10 +1,11 @@
 #pragma once
 
+#include <SloppyDigits.h>
+
 #include <cstdint>
 #include <memory>
 
 #include "ChineseAlmanac.h"
-#include "SloppyEngine.h"
 #include "StandbyFace.h"
 
 // "Chinese Traditional Calendar" — paper-黄历 standby face.
@@ -12,7 +13,7 @@
 // Portrait-only (StandbyActivity hides it in landscape) and CN-build-only
 // (`ENABLE_CHINESE_VERSION` gates registration; non-CN bitmap fonts have no
 // CJK glyphs). All date values come from `computeAlmanac()` (real lunar /
-// ganzhi / solar-term routine). The hero day digit reuses SloppyEngine
+// ganzhi / solar-term routine). The hero day digit reuses SloppyDigits
 // (zero-jitter Geometric style).
 //
 // Up/Down navigates `dayOffset_` (relative to today); Left/Right (handled by

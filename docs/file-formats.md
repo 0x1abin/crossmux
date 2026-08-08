@@ -414,6 +414,25 @@ known page-index prefix opens it directly and keeps a fixed 32-page local
 navigation history, so jumping does not synchronously paginate the intervening
 text or grow RAM with book length.
 
+## Electronic Woodfish counter
+
+`/.crosspoint/woodfish.bin` is a fixed 12-byte record:
+
+| Offset | Field |
+|---:|---|
+| 0 | `uint8 magic[4]` = `WDF1` |
+| 4 | little-endian `uint32 total` |
+| 8 | little-endian `uint32 complement` = `~total` |
+
+Readers require the exact length, magic, and complement. A valid canonical file
+wins; if it is missing or invalid, a valid `woodfish.bin.bak` is restored.
+Without either record the counter starts at zero. Writers flush
+`woodfish.bin.tmp`, move the previous canonical file to `.bak`, install the new
+record, and remove the backup only after success. The activity changes only RAM
+while it is being used, then checkpoints after 60 seconds without a knock or
+once on activity exit. A future layout change must use a new magic and update
+this section.
+
 ## WeRead cache
 
 The Simplified Chinese build keeps WeRead's private data below `/.crosspoint/weread/`.
