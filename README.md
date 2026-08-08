@@ -235,10 +235,16 @@ pio run -e simulator -t run_simulator
 
 # X3
 pio run -e simulator_x3 -t run_simulator
+
+# eego A4
+pio run -e simulator_eego_a4 -t run_simulator
+
+# Mofei M4
+pio run -e simulator_mofei_m4 -t run_simulator
 ```
 
 The simulator is provided by the pinned
-[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1);
+[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12);
 its framebuffer, storage, input, network, and screenshot automation run as a
 native PlatformIO dependency.
 

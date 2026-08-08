@@ -36,6 +36,8 @@
   * `gh_release_cn`: Simplified-Chinese-only release with embedded CJK fonts (see [chinese-build.md](chinese-build.md))
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
+  * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
+  * `simulator_mofei_m4`: Native 800x480 Mofei M4 product simulator
 
 ## Desktop Simulator
 
@@ -45,12 +47,22 @@ files under `fs_/books/`, and run:
 ```bash
 pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
+pio run -e simulator_eego_a4 -t run_simulator
+pio run -e simulator_mofei_m4 -t run_simulator
 ```
 
 The simulator implementation and launcher come from the pinned
-[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1)
+[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12)
 fork.
-The firmware repository does not carry a second host implementation.
+The firmware repository does not carry a second host implementation. A4 and M4
+inherit the Chinese simulator build. Arrow keys are Up/Down, `P` is Power,
+mouse input provides touch, and `S` sleeps. A4 additionally maps `H` to a short
+Back or one-shot Home after 700 ms; M4 ignores `H`. Once A4/M4 is asleep, only
+Power wakes it.
+
+This product-level simulator covers UI, input, RTC state, M4 frontlight state,
+and sleep/wake flows. It does not emulate EPD waveforms or ghosting, bus timing,
+SDMMC contention, PSRAM, or power consumption.
 
 ## Critical Build Flags
 These flags in `platformio.ini` fundamentally affect firmware behavior:

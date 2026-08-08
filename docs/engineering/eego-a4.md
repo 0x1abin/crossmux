@@ -8,6 +8,7 @@ writing the target partition.
 ```bash
 pio run -e eego_a4
 pio run -e eego_a4 -t upload
+pio run -e simulator_eego_a4 -t run_simulator
 ```
 
 The target inherits the normal DIO flash mode, 16 MB partition table, single
@@ -17,6 +18,13 @@ the board name comes from `BoardConfig::ACTIVE.name`, normal view content has a
 symmetric 28 px safe margin, and the experimental build hides AirPage and
 remote OTA. Reading, library, settings, Web file transfer, and same-target SD
 firmware update remain available.
+
+The desktop target models the 768x552 panel, `eego_a4` identity, symmetric
+28 px content margin, touch/rotation, RTC, buttons, the screen Home/Back key,
+and Power-only wake. Use the mouse for touch, arrows for Up/Down, `P` for
+Power, `H` for Home/Back, and `S` for sleep. It does not replace hardware tests
+for display waveforms/ghosting, GSL polling, bus timing, PSRAM, or standby
+current.
 
 ## First flash and recovery
 

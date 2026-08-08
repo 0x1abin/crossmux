@@ -106,7 +106,7 @@ jobs:
         # before the artifact upload.
         run: |
           set -euo pipefail
-          pio run -e default -e sticky -e eego_a4 -e mofei_m4 -e simulator -e simulator_x3 | tee pio.log
+          pio run -e default -e sticky -e eego_a4 -e mofei_m4 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_mofei_m4 | tee pio.log
 
       - name: Package experimental eego A4 images
         run: python3 scripts/package_hardware_beta.py eego-a4

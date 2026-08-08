@@ -7,12 +7,20 @@ USB CDC settings, and uses native 4-bit SDMMC storage.
 ```bash
 pio run -e mofei_m4
 pio run -e mofei_m4 -t upload
+pio run -e simulator_mofei_m4 -t run_simulator
 ```
 
 Hardware profiles and drivers live in the pinned `0x1abin/freeink-sdk`
 submodule. CrossMux adds only the build, frontlight settings, and experimental
 product gates: AirPage and remote OTA are hidden, while reading, library,
 settings, Web file transfer, and same-target SD firmware update remain.
+
+The desktop target models the 800x480 panel, `mofei_m4` identity, touch and
+rotation, RTC, buttons, dual-channel frontlight state, and Power-only wake. Use
+the mouse for touch, arrows for Up/Down, `P` for Power, and `S` for sleep; M4
+has no Home key, so `H` is ignored. It does not replace hardware tests for
+display batches/ghosting, FT6336 polling, SDMMC contention, PWM curves, PSRAM,
+or standby current.
 
 The default SSD1677 configuration targets the second production batch with
 R13 fitted and uses the verified `0x50` pseudo-temperature. To build for the
