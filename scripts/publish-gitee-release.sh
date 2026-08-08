@@ -43,11 +43,13 @@ if [ -z "${GITEE_TOKEN:-}" ]; then
 fi
 
 if [ "$TAG" != "nightly" ]; then
-  echo "Triggering Gitee pull mirror for ${TAG}"
-  if ! curl -fsS -X POST "${API}/remote_mirror/pull?access_token=${GITEE_TOKEN}" -o /dev/null; then
-    echo "::warning::Gitee pull mirror trigger failed; waiting in case a sync is already running"
-  fi
   gitee_git="https://gitee.com/${REPO}.git"
+  gitee_user="${REPO%%/*}"
+  auth_header="$(printf '%s:%s' "$gitee_user" "$GITEE_TOKEN" | base64 | tr -d '\n')"
+  git fetch origin "$COMMITISH"
+  git -c http.extraHeader="Authorization: Basic ${auth_header}" \
+    push --force "$gitee_git" "${COMMITISH}:refs/tags/${TAG}"
+  unset auth_header
   for attempt in $(seq 1 30); do
     synced_commit="$(git ls-remote "$gitee_git" "refs/tags/${TAG}^{}" 2>/dev/null | cut -f1)"
     if [ -z "$synced_commit" ]; then
