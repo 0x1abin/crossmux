@@ -85,6 +85,12 @@ Response:
 Hidden dotfiles are omitted unless the device setting `showHiddenFiles` is
 enabled. `System Volume Information` and `XTCache` are always hidden/protected.
 
+The response schema is unchanged for large directories. Entries are scanned
+once and streamed as a chunked response in bounded batches, so the complete
+listing is never retained in RAM. If the server could not reserve its 1400-byte
+batch buffer when network mode started, this endpoint returns HTTP `503` with
+`{"error":"Insufficient memory"}` instead of starting a partial JSON response.
+
 ### `GET /download`
 
 Downloads a file from the SD card.
