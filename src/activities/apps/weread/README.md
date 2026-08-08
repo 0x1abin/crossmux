@@ -21,7 +21,7 @@ pio run -e gh_release_cn
 ```
 
 原生模拟器的构建、运行和 SD 卡目录配置见
-[CrossMux simulator fork 文档](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1#setup)。
+[CrossMux simulator fork 文档](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12#setup)。
 
 ## 代码与数据
 
