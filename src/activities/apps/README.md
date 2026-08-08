@@ -18,6 +18,7 @@ apps/
 ├── gomoku/
 ├── chinese-chess/             # conditional — gated by ENABLE_CHINESE_VERSION (see "Conditional apps" below)
 ├── minesweeper/
+├── woodfish/                  # electronic woodfish with lazy SD checkpointing
 └── avatar/
 ```
 
@@ -58,9 +59,15 @@ In `src/activities/ActivityManager.{h,cpp}`:
 void goToMyApp();
 
 // .cpp
+#include <Memory.h>
 #include "apps/myapp/MyAppActivity.h"
 void ActivityManager::goToMyApp() {
-  replaceActivity(std::make_unique<MyAppActivity>(renderer, mappedInput));
+  auto activity = makeUniqueNoThrow<MyAppActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: MyAppActivity (%u bytes)", static_cast<unsigned>(sizeof(MyAppActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
 }
 ```
 
@@ -91,17 +98,19 @@ The ID is the persisted bit position in `hiddenAppsMask`: allocate the next unus
 values, and keep conditional-app IDs outside their `#ifdef`. New bits default to visible. Fresh settings hide Chinese
 Chess, Minesweeper, 2048, Standby, and Buddy; existing masks are never overwritten. The menu, launcher, and App Visibility
 settings all read this same table; no `switch` or `buildItems()` is needed.
+The visibility mask is 32-bit. `Calculator = 15` and `Woodfish = 16` are stable;
+IDs 17 through 31 remain available.
 
 ### 4. Add the i18n key and icon
 
 - **i18n**: add `STR_MYAPP_TITLE: "My App"` to `lib/I18n/translations/english.yaml`. Other languages fall back to English; translate selectively. Then run `python scripts/gen_i18n.py lib/I18n/translations lib/I18n/` once locally (regenerated at build time too).
-- **Icon**: add `MyApp` to the `UIIcon` enum in `src/components/themes/BaseTheme.h`, add a 32×32 1-bit bitmap header in `src/components/icons/`, and a `case UIIcon::MyApp:` branch in `src/components/themes/lyra/LyraTheme.cpp`'s `iconForName(size==32)` switch. The Apps menu uses `drawButtonMenu` which only reads the 32px variant — no 24px bitmap needed.
+- **Icon**: add `MyApp` to the `UIIcon` enum in `src/components/themes/BaseTheme.h` and add both 32×32 1-bit variants: the pre-rotated Lyra bitmap selected by `LyraTheme::iconForName(size==32)`, and the canonical-orientation bitmap selected by `InxAppIcons::get()`. No 24px bitmap is needed.
 
 ---
 
 ### 5. (Optional) Stateless toy apps
 
-Some apps have no save state at all. Ugly Avatar is a single-screen generator that creates a new avatar on entry and exits cleanly. It skips both `GameSaveDebouncer` and any `*Store.{h,cpp}` layer, and its `Activity` is launched directly (no `*MenuActivity`). Use this pattern when the app has no "in-progress game" worth resuming; it cuts a few hundred lines and avoids touching SPIFFS.
+Some apps have no save state at all. Ugly Avatar is a single-screen generator that creates a new avatar on entry and exits cleanly. It skips both `GameSaveDebouncer` and any `*Store.{h,cpp}` layer, and its `Activity` is launched directly (no `*MenuActivity`). Use this pattern when the app has no "in-progress game" worth resuming; it cuts a few hundred lines and avoids persistent writes.
 
 ---
 
@@ -149,6 +158,12 @@ Home  ──Confirm "Apps"──▶  AppsMenu  ──Confirm row──▶  <App>
 
 Every sub-app's Back button must call `activityManager.goToApps()`. This mirrors how Sudoku, Gomoku, Ugly Avatar, and AirPage behave.
 
+Electronic Woodfish accepts Confirm and all four logical directions on button
+release. Touch devices add taps on the rendered wooden body; whitespace,
+mallet, ripples, drags, and the system Back gesture are not knocks. Its
+`uint32_t` counter saturates, has no reset action, and is checkpointed to SD
+after 60 seconds idle or on exit.
+
 AirPage always enters on its QR page and silently connects the last saved Wi-Fi.
 Its mapped bottom actions are Back, Settings, Images, and Refresh; logical
 previous/next also map the side buttons to Images/Refresh in every orientation.
@@ -177,7 +192,7 @@ Apps run on the same 380KB RAM ceiling as the reader. Specifically:
 - **Heap**: allocate at `onEnter()`, free at `onExit()` (Activities are heap-allocated and `delete`d on exit). Don't hold buffers across navigation.
 - **Stack**: keep local function variables under 256 bytes; large buffers go on heap or `static`.
 - **Flash strings**: large constant tables must be `static constexpr` to stay in flash, not in DRAM.
-- **SPIFFS writes**: never save on every user interaction. Debounce save-on-activity-exit, or use `GameSaveDebouncer` (1.5s window). SPIFFS erase cycles are finite.
+- **Storage writes**: never save on every user interaction. Debounce save-on-activity-exit, or use `GameSaveDebouncer` (1.5s window). Electronic Woodfish checkpoints its SD-backed counter only after 60 seconds idle or on exit.
 - **Single-buffer framebuffer**: 48KB framebuffer is shared. If an app needs to overlay (modal save UI etc.), use `renderer.storeBwBuffer()` / `restoreBwBuffer()` — see `UglyAvatarActivity::onSave()` for a worked example.
 
 See the top-level `CLAUDE.md` for the full resource protocol; apps are not exempt.
