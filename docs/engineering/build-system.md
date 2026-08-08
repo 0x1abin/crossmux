@@ -48,7 +48,7 @@ pio run -e simulator_x3 -t run_simulator
 ```
 
 The simulator implementation and launcher come from the pinned
-[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1)
+[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/6f743c4d6a956bbb69ae3544e98168537b12ea1f)
 fork.
 The firmware repository does not carry a second host implementation.
 
