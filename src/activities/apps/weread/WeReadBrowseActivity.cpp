@@ -588,7 +588,9 @@ void WeReadBrowseActivity::handleDetailInput() {
 }
 
 void WeReadBrowseActivity::handleErrorInput() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  int x = 0;
+  int y = 0;
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) {
     connectThenCache();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     operation_.reset();

@@ -20,6 +20,21 @@ target_link_libraries(WeReadProtocolTest PRIVATE
 
 gtest_discover_tests(WeReadProtocolTest)
 
+add_executable(WeReadTouchGeometryTest
+  WeReadTouchGeometryTest.cpp
+)
+
+target_include_directories(WeReadTouchGeometryTest PRIVATE
+  ${REPO_ROOT}/src
+)
+
+target_link_libraries(WeReadTouchGeometryTest PRIVATE
+  crosspoint_test_common
+  GTest::gtest_main
+)
+
+gtest_discover_tests(WeReadTouchGeometryTest)
+
 add_executable(WeReadStoreTest
   WeReadStoreTest.cpp
   ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp

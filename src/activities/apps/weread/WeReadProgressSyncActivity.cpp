@@ -346,24 +346,31 @@ void WeReadProgressSyncActivity::loop() {
       return;
     }
     case State::Success:
-    case State::LoginRequired:
+    case State::LoginRequired: {
+      int x = 0;
+      int y = 0;
       if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
-          mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+          mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) {
         returnToReader();
       }
       return;
+    }
     case State::Failed:
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
         returnToReader();
         return;
       }
-      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) &&
-          (error_ == WeReadClient::Error::Network || error_ == WeReadClient::Error::Clock ||
-           error_ == WeReadClient::Error::Unavailable)) {
-        state_ = State::Starting;
-        requestUpdate();
+      {
+        int x = 0;
+        int y = 0;
+        if ((mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) &&
+            (error_ == WeReadClient::Error::Network || error_ == WeReadClient::Error::Clock ||
+             error_ == WeReadClient::Error::Unavailable)) {
+          state_ = State::Starting;
+          requestUpdate();
+        }
+        return;
       }
-      return;
   }
 }
 
