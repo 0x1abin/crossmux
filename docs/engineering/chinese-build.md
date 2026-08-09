@@ -109,9 +109,15 @@ Manual WeRead sync renews the saved Cookie, fetches the remote position, and
 maps it through the `WRT2` chapter word counts. Positions within two percentage
 points are left unchanged. Otherwise the farther position wins automatically:
 a remote position is applied locally, or the local position is sent with an
-enter/report pair and `rt=0`. The firmware does not synthesize or report reading
-time. An expired session directs the user back to **Apps → WeRead** to sign in;
-it does not open a QR flow from the reader.
+enter/report pair. For an exact WeRead EPUB, the report also includes the whole
+seconds recorded by the local reading session that ended when manual sync was
+opened. Equal positions report against the local position; when the remote
+position is selected, its exact chapter and offset are reported before being
+applied locally, so reporting time cannot move cloud progress backwards. A
+timed report is not automatically repeated after an ambiguous network failure;
+the current sync screen retains it for an explicit Retry, but no pending time is
+persisted after leaving the screen. An expired session directs the user back to
+**Apps → WeRead** to sign in; it does not open a QR flow from the reader.
 
 For a new standard-book cache, the downloader fetches cloud progress after the
 `WRT2` catalog and before any chapter or image. This request is best effort:
