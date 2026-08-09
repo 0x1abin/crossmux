@@ -18,6 +18,16 @@ from typing import Iterable, Sequence
 
 DEFAULT_UPSTREAM_BRANCH = "develop"
 DEFAULT_BRANCH_PREFIX = "agent/sync-upstream"
+SDK_FORK_URL = "https://github.com/0x1abin/freeink-sdk.git"
+SDK_UPSTREAM_URL = "https://github.com/Free-Ink/freeink-sdk.git"
+SDK_FORK_REF = "refs/sync-freeink-sdk/fork-main"
+SDK_UPSTREAM_REF = "refs/sync-freeink-sdk/upstream-main"
+SDK_BRANCH_PREFIX = "agent/sync-freeink-sdk-main"
+DEFAULT_CROSSMUX_ENVS = ("default", "sticky")
+FORK_HARDWARE_TARGETS = (
+    ("eego_a4", "FREEINK_DEVICE_EEGO_A4"),
+    ("mofei_m4", "FREEINK_DEVICE_MOFEI_M4"),
+)
 
 
 class CommandError(RuntimeError):
@@ -43,6 +53,25 @@ class Context:
     @property
     def origin_base_ref(self) -> str:
         return f"refs/remotes/{self.origin_remote}/{self.base_branch}"
+
+
+@dataclass(frozen=True)
+class SdkStatus:
+    fork_sha: str
+    upstream_sha: str
+    upstream_gitlink_sha: str
+    action: str
+
+
+def decide_sdk_action(
+    *, official_in_fork: bool, sdk_pr_open: bool, upstream_gitlink_in_fork: bool
+) -> str:
+    """Return the next phase; kept pure so the sync gate is cheap to test."""
+    if not official_in_fork:
+        return "wait-for-sdk-pr" if sdk_pr_open else "open-sdk-pr"
+    if not upstream_gitlink_in_fork:
+        return "official-gitlink-missing"
+    return "update-crossmux-gitlink"
 
 
 def run(
@@ -236,6 +265,60 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     return git_success(root, "merge-base", "--is-ancestor", ancestor, descendant)
 
 
+def fetch_sdk_refs(root: Path) -> None:
+    git(root, "fetch", SDK_FORK_URL, f"+refs/heads/main:{SDK_FORK_REF}")
+    git(root, "fetch", SDK_UPSTREAM_URL, f"+refs/heads/main:{SDK_UPSTREAM_REF}")
+
+
+def gitlink_sha(root: Path, treeish: str) -> str:
+    entry = git_output(root, "ls-tree", treeish, "freeink-sdk")
+    match = re.match(r"160000 commit ([0-9a-f]{40})\tfreeink-sdk$", entry)
+    if not match:
+        raise RuntimeError(f"{treeish} does not contain the freeink-sdk gitlink.")
+    return match.group(1)
+
+
+def sdk_pr_is_open(root: Path, upstream_sha: str) -> bool:
+    completed = run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            "0x1abin/freeink-sdk",
+            "--state",
+            "open",
+            "--json",
+            "headRefName",
+            "--limit",
+            "100",
+        ],
+        cwd=root,
+        check=False,
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return False
+    try:
+        expected = f"{SDK_BRANCH_PREFIX}-{upstream_sha[:8]}"
+        return any(item.get("headRefName") == expected for item in json.loads(completed.stdout))
+    except json.JSONDecodeError:
+        return False
+
+
+def inspect_sdk(root: Path, crossmux_upstream_ref: str) -> SdkStatus:
+    fetch_sdk_refs(root)
+    fork_sha = full_sha(root, SDK_FORK_REF)
+    upstream_sha = full_sha(root, SDK_UPSTREAM_REF)
+    upstream_gitlink_sha = gitlink_sha(root, crossmux_upstream_ref)
+    official_in_fork = is_ancestor(root, SDK_UPSTREAM_REF, SDK_FORK_REF)
+    action = decide_sdk_action(
+        official_in_fork=official_in_fork,
+        sdk_pr_open=sdk_pr_is_open(root, upstream_sha) if not official_in_fork else False,
+        upstream_gitlink_in_fork=is_ancestor(root, upstream_gitlink_sha, SDK_FORK_REF),
+    )
+    return SdkStatus(fork_sha, upstream_sha, upstream_gitlink_sha, action)
+
+
 def has_merge_head(root: Path) -> bool:
     return (root / ".git" / "MERGE_HEAD").exists() or bool(git_output(root, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False))
 
@@ -359,12 +442,24 @@ def sync_title(ctx: Context, upstream_short: str) -> str:
     return f"chore: sync upstream {ctx.upstream_branch} into {ctx.base_branch} ({upstream_short})"
 
 
-def pr_body(ctx: Context, upstream_full: str, skipped_builds: bool) -> str:
+def pr_body(
+    ctx: Context,
+    upstream_full: str,
+    skipped_builds: bool,
+    sdk_status: SdkStatus,
+    a4_conflict_note: str,
+) -> str:
     lines = [
         "## Summary",
         "",
         f"- Sync `{ctx.upstream_remote}/{ctx.upstream_branch}` at `{upstream_full}` into `{ctx.base_branch}`.",
+        f"- Official FreeInk SDK: `{sdk_status.upstream_sha}`.",
+        f"- Fork FreeInk SDK: `{sdk_status.fork_sha}`.",
         "- Keep the sync isolated on an agent branch for review.",
+        "",
+        "## Fork hardware overlap review",
+        "",
+        f"- {a4_conflict_note}",
         "",
         "## Validation",
         "",
@@ -374,7 +469,7 @@ def pr_body(ctx: Context, upstream_full: str, skipped_builds: bool) -> str:
     if skipped_builds:
         lines.append("- Builds skipped with `--skip-builds`")
     else:
-        lines.extend(["- `pio run`", "- `pio run -e gh_release_cn`"])
+        lines.extend(["- `pio run -e default -e sticky -e eego_a4 -e mofei_m4`"])
     return "\n".join(lines) + "\n"
 
 
@@ -403,12 +498,110 @@ def validate_index(root: Path) -> None:
     check_conflict_markers(root)
 
 
-def run_builds(root: Path, skip_builds: bool) -> None:
+def candidate_build_envs(board_config: str, platformio: str) -> tuple[str, ...]:
+    hardware = tuple(
+        environment
+        for environment, flag in FORK_HARDWARE_TARGETS
+        if flag in board_config and f"[env:{environment}]" in platformio
+    )
+    return DEFAULT_CROSSMUX_ENVS + hardware
+
+
+def run_builds(root: Path, skip_builds: bool, environments: Sequence[str] = DEFAULT_CROSSMUX_ENVS) -> None:
     if skip_builds:
         print("Skipping PlatformIO builds because --skip-builds was passed.")
         return
-    run(["pio", "run"], cwd=root, capture=False)
-    run(["pio", "run", "-e", "gh_release_cn"], cwd=root, capture=False)
+    command = ["pio", "run"]
+    for environment in environments:
+        command.extend(("-e", environment))
+    run(command, cwd=root, capture=False)
+
+
+def validate_sdk_candidate(sdk_root: Path, crossmux_root: Path, skip_builds: bool) -> None:
+    for test in (
+        "libs/book/FreeInkBook/test/host/run.sh",
+        "libs/ui/FreeInkUI/test/host/run.sh",
+    ):
+        run(["bash", test], cwd=sdk_root, capture=False)
+    if skip_builds:
+        print("Skipping CrossMux candidate builds because --skip-builds was passed.")
+        return
+    with tempfile.TemporaryDirectory(prefix="crossmux-sdk-check-") as temp_dir:
+        checkout = Path(temp_dir) / "crossmux"
+        run(["git", "clone", "--recurse-submodules", str(crossmux_root), str(checkout)], cwd=crossmux_root)
+        run(["git", "submodule", "deinit", "-f", "freeink-sdk"], cwd=checkout)
+        shutil.rmtree(checkout / "freeink-sdk", ignore_errors=True)
+        os.symlink(sdk_root, checkout / "freeink-sdk", target_is_directory=True)
+        board_config = (sdk_root / "libs/hardware/BoardConfig/include/BoardConfig.h").read_text()
+        platformio = (checkout / "platformio.ini").read_text()
+        run_builds(checkout, False, candidate_build_envs(board_config, platformio))
+
+
+def publish_sdk_sync(ctx: Context, status: SdkStatus, skip_builds: bool) -> None:
+    branch = f"{SDK_BRANCH_PREFIX}-{status.upstream_sha[:8]}"
+    with tempfile.TemporaryDirectory(prefix="freeink-sdk-sync-") as temp_dir:
+        sdk_root = Path(temp_dir) / "freeink-sdk"
+        run(["git", "clone", SDK_FORK_URL, str(sdk_root)], cwd=ctx.root)
+        git(sdk_root, "remote", "add", "upstream", SDK_UPSTREAM_URL)
+        git(sdk_root, "fetch", "upstream", "main")
+        git(sdk_root, "switch", "-c", branch, "origin/main")
+        board_config_path = sdk_root / "libs/hardware/BoardConfig/include/BoardConfig.h"
+        required_flags = tuple(flag for _, flag in FORK_HARDWARE_TARGETS if flag in board_config_path.read_text())
+        git(sdk_root, "merge", "--no-ff", "upstream/main", "-m", f"chore: sync upstream main ({status.upstream_sha[:8]})")
+        merged_board_config = board_config_path.read_text()
+        for device_flag in required_flags:
+            if device_flag not in merged_board_config:
+                raise RuntimeError(f"SDK merge lost existing {device_flag} support.")
+        validate_sdk_candidate(sdk_root, ctx.root, skip_builds)
+        git(sdk_root, "push", "-u", "origin", branch)
+        hardware_note = (f"Preserve fork hardware flags: {', '.join(required_flags)}."
+                         if required_flags else "Fork base has no private hardware flags to preserve.")
+        body = (
+            "## Summary\n\n"
+            f"- Merge `Free-Ink/freeink-sdk@{status.upstream_sha}` into the fork.\n"
+            f"- Fork base: `0x1abin/freeink-sdk@{status.fork_sha}`.\n"
+            f"- CrossMux upstream: `{ctx.upstream_remote}/{ctx.upstream_branch}@{full_sha(ctx.root, ctx.upstream_ref)}`.\n"
+            f"- {hardware_note}\n\n"
+            "## Validation\n\n"
+            "- SDK FreeInkBook host tests\n"
+            "- SDK FreeInkUI host tests\n"
+            + ("- CrossMux builds skipped with `--skip-builds`\n" if skip_builds else
+               "- CrossMux `default`, `sticky`, `eego_a4`, and `mofei_m4` builds\n")
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
+            handle.write(body)
+            body_path = handle.name
+        try:
+            run(
+                [
+                    "gh",
+                    "pr",
+                    "create",
+                    "--repo",
+                    "0x1abin/freeink-sdk",
+                    "--base",
+                    "main",
+                    "--head",
+                    branch,
+                    "--title",
+                    f"chore: sync FreeInk SDK upstream main ({status.upstream_sha[:8]})",
+                    "--body-file",
+                    body_path,
+                    "--draft",
+                ],
+                cwd=sdk_root,
+            )
+        finally:
+            os.unlink(body_path)
+
+
+def update_sdk_gitlink(root: Path, fork_sha: str) -> None:
+    git(root, "config", "-f", ".gitmodules", "submodule.freeink-sdk.url", SDK_FORK_URL)
+    git(root, "config", "-f", ".gitmodules", "submodule.freeink-sdk.branch", "main")
+    git(root, "add", ".gitmodules")
+    git(root / "freeink-sdk", "fetch", SDK_FORK_URL, "main")
+    git(root / "freeink-sdk", "checkout", "--detach", fork_sha)
+    git(root, "add", "freeink-sdk")
 
 
 def commit_if_needed(root: Path, ctx: Context) -> None:
@@ -428,7 +621,14 @@ def push_branch(root: Path, origin_remote: str) -> None:
     git(root, "push", "-u", origin_remote, branch)
 
 
-def create_or_show_pr(root: Path, ctx: Context, draft: bool, skip_builds: bool) -> None:
+def create_or_show_pr(
+    root: Path,
+    ctx: Context,
+    draft: bool,
+    skip_builds: bool,
+    sdk_status: SdkStatus,
+    a4_conflict_note: str,
+) -> None:
     repo = repo_slug_from_remote(root, ctx.origin_remote)
     if not repo:
         raise RuntimeError(f"Could not parse GitHub repo from remote {ctx.origin_remote!r}.")
@@ -445,7 +645,7 @@ def create_or_show_pr(root: Path, ctx: Context, draft: bool, skip_builds: bool) 
     upstream_short = short_sha(root, ctx.upstream_ref)
     upstream_full = full_sha(root, ctx.upstream_ref)
     title = sync_title(ctx, upstream_short)
-    body = pr_body(ctx, upstream_full, skip_builds)
+    body = pr_body(ctx, upstream_full, skip_builds, sdk_status, a4_conflict_note)
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
         handle.write(body)
         body_path = handle.name
@@ -498,6 +698,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         upstream_short,
         ctx.origin_remote,
     )
+    sdk_status = inspect_sdk(ctx.root, ctx.upstream_ref)
     summary = {
         "base_contains_skill": base_contains_script(ctx.root, ctx.origin_base_ref),
         "repo": str(ctx.root),
@@ -509,17 +710,36 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         "upstream_sha": upstream_full,
         "squash_from": auto_squash_base(ctx.root, ctx, args.squash_from),
         "suggested_branch": suggested,
+        "sdk": {
+            "action": sdk_status.action,
+            "fork_sha": sdk_status.fork_sha,
+            "official_sha": sdk_status.upstream_sha,
+            "crossmux_upstream_gitlink_sha": sdk_status.upstream_gitlink_sha,
+        },
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
 
-def cmd_start(args: argparse.Namespace) -> int:
+def start_crossmux(args: argparse.Namespace) -> bool:
     ctx = build_context(args)
     require_clean_worktree(ctx.root)
     fetch_branch(ctx.root, ctx.origin_remote, ctx.base_branch)
     fetch_branch(ctx.root, ctx.upstream_remote, ctx.upstream_branch)
     require_base_contains_script(ctx.root, ctx.origin_base_ref)
+    sdk_status = inspect_sdk(ctx.root, ctx.upstream_ref)
+    if sdk_status.action == "open-sdk-pr":
+        publish_sdk_sync(ctx, sdk_status, args.skip_builds)
+        print("SDK draft PR opened; rerun after it is merged. CrossMux was not modified.")
+        return False
+    if sdk_status.action == "wait-for-sdk-pr":
+        print("SDK sync PR is still open; CrossMux was not modified.")
+        return False
+    if sdk_status.action == "official-gitlink-missing":
+        raise RuntimeError(
+            "CrossPoint upstream references a FreeInk SDK commit absent from the fork. "
+            "Sync that commit into 0x1abin/freeink-sdk first."
+        )
     if args.squash_from == "auto" and ctx.upstream_branch == DEFAULT_UPSTREAM_BRANCH:
         git(
             ctx.root,
@@ -530,16 +750,24 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
 
     upstream_short = short_sha(ctx.root, ctx.upstream_ref)
-    if is_ancestor(ctx.root, ctx.upstream_ref, ctx.origin_base_ref):
+    upstream_already_synced = is_ancestor(ctx.root, ctx.upstream_ref, ctx.origin_base_ref)
+    if upstream_already_synced and gitlink_sha(ctx.root, ctx.origin_base_ref) == sdk_status.fork_sha:
         print(f"{ctx.origin_base_ref} already contains {ctx.upstream_ref}.")
-        return 0
+        return False
 
     branch = unique_branch_name(ctx.root, args.branch_prefix, ctx.upstream_branch, upstream_short, ctx.origin_remote)
     git(ctx.root, "switch", "-c", branch, ctx.origin_base_ref)
-    squash_from = auto_squash_base(ctx.root, ctx, args.squash_from)
-    create_merge(ctx.root, ctx, squash_from)
+    if not upstream_already_synced:
+        squash_from = auto_squash_base(ctx.root, ctx, args.squash_from)
+        create_merge(ctx.root, ctx, squash_from)
     git(ctx.root, "submodule", "update", "--init", "--recursive")
+    update_sdk_gitlink(ctx.root, sdk_status.fork_sha)
     print("Merge staged. Run publish after resolving any review concerns.")
+    return True
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    start_crossmux(args)
     return 0
 
 
@@ -547,18 +775,35 @@ def cmd_publish(args: argparse.Namespace) -> int:
     ctx = build_context(args)
     require_not_base_branch(ctx.root, ctx.base_branch)
     fetch_branch(ctx.root, ctx.upstream_remote, ctx.upstream_branch)
+    sdk_status = inspect_sdk(ctx.root, ctx.upstream_ref)
+    if sdk_status.action != "update-crossmux-gitlink":
+        raise RuntimeError(f"FreeInk SDK gate is not ready: {sdk_status.action}")
+    update_sdk_gitlink(ctx.root, sdk_status.fork_sha)
     validate_index(ctx.root)
-    run_builds(ctx.root, args.skip_builds)
+    run_builds(
+        ctx.root,
+        args.skip_builds,
+        candidate_build_envs(
+            (ctx.root / "freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h").read_text(),
+            (ctx.root / "platformio.ini").read_text(),
+        ),
+    )
     commit_if_needed(ctx.root, ctx)
     push_branch(ctx.root, ctx.origin_remote)
-    create_or_show_pr(ctx.root, ctx, args.draft, args.skip_builds)
+    create_or_show_pr(
+        ctx.root,
+        ctx,
+        args.draft,
+        args.skip_builds,
+        sdk_status,
+        args.a4_conflict_note,
+    )
     return 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    start_status = cmd_start(args)
-    if start_status != 0:
-        return start_status
+    if not start_crossmux(args):
+        return 0
     return cmd_publish(args)
 
 
@@ -579,6 +824,17 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_publish_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--draft", action="store_true", default=True, help="open the PR as draft")
+    parser.add_argument("--ready", action="store_false", dest="draft", help="open a ready-for-review PR")
+    parser.add_argument("--skip-builds", action="store_true", help="skip build validation")
+    parser.add_argument(
+        "--a4-conflict-note",
+        default="No eego-a4 or mofei-m4 conflicts were recorded by the automated merge.",
+        help="fork hardware conflict decisions recorded in the CrossMux PR body",
+    )
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -589,20 +845,17 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
     start_parser = subparsers.add_parser("start", help="create a sync branch and stage the upstream merge")
     add_common_options(start_parser)
+    start_parser.add_argument("--skip-builds", action="store_true", help="skip SDK candidate builds")
     start_parser.set_defaults(func=cmd_start)
 
     publish_parser = subparsers.add_parser("publish", help="validate, commit, push, and open a PR")
     add_common_options(publish_parser)
-    publish_parser.add_argument("--draft", action="store_true", default=True, help="open the PR as draft")
-    publish_parser.add_argument("--ready", action="store_false", dest="draft", help="open a ready-for-review PR")
-    publish_parser.add_argument("--skip-builds", action="store_true", help="skip PlatformIO build validation")
+    add_publish_options(publish_parser)
     publish_parser.set_defaults(func=cmd_publish)
 
     run_parser = subparsers.add_parser("run", help="start and publish the sync in one command")
     add_common_options(run_parser)
-    run_parser.add_argument("--draft", action="store_true", default=True, help="open the PR as draft")
-    run_parser.add_argument("--ready", action="store_false", dest="draft", help="open a ready-for-review PR")
-    run_parser.add_argument("--skip-builds", action="store_true", help="skip PlatformIO build validation")
+    add_publish_options(run_parser)
     run_parser.set_defaults(func=cmd_run)
     return parser.parse_args(argv)
 
