@@ -52,6 +52,7 @@ add_subdirectory(utf8_compose)
 add_subdirectory(opds_filename)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(combining_marks)
+<<<<<<< HEAD
 add_subdirectory(time_utils)
 add_subdirectory(weread)
 add_subdirectory(airpage)
@@ -67,3 +68,6 @@ add_subdirectory(txt_page_index)
 add_subdirectory(txt_encoding)
 add_subdirectory(txt_chapter_index)
 add_subdirectory(game_ui)
+=======
+add_subdirectory(credential_integrity)
+>>>>>>> upstream/master

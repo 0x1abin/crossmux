@@ -106,7 +106,8 @@ void WifiSelectionActivity::onEnter() {
   autoConnecting = false;
   manualNetworkListRequested = false;
   autoAttemptedSsids.clear();
-  autoAttemptedSsids.reserve(WIFI_STORE.getCredentials().size());
+  const size_t savedCredentialCount = WIFI_STORE.getCredentialCount();
+  autoAttemptedSsids.reserve(savedCredentialCount);
 
   // The STA netif does not exist until station mode is enabled.
   uint8_t mac[6] = {};
@@ -127,10 +128,10 @@ void WifiSelectionActivity::onEnter() {
   // Attempt to auto-connect to known networks. Try the last successful
   // network first for speed, then scan and try any visible saved networks by
   // signal strength. The user can interrupt this and show the scan result.
-  if (allowAutoConnect && !WIFI_STORE.getCredentials().empty()) {
+  if (allowAutoConnect && savedCredentialCount != 0) {
     const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
     if (!lastSsid.empty()) {
-      const auto* cred = WIFI_STORE.findCredential(lastSsid);
+      const auto cred = WIFI_STORE.findCredential(lastSsid);
       if (cred && tryAutoConnectCredential(*cred)) {
         return;
       }
@@ -281,7 +282,7 @@ void WifiSelectionActivity::selectNetwork(const int index) {
   autoConnecting = false;
 
   // Check if we have saved credentials for this network
-  const auto* savedCred = WIFI_STORE.findCredential(selectedSSID);
+  const auto savedCred = WIFI_STORE.findCredential(selectedSSID);
   if (savedCred && !savedCred->password.empty()) {
     // Use saved password - connect directly
     enteredPassword = savedCred->password;
@@ -371,7 +372,7 @@ bool WifiSelectionActivity::tryNextSavedNetworkFromScan() {
       continue;
     }
 
-    const auto* cred = WIFI_STORE.findCredential(network.ssid);
+    const auto cred = WIFI_STORE.findCredential(network.ssid);
     if (cred && tryAutoConnectCredential(*cred)) {
       return true;
     }
@@ -556,7 +557,7 @@ void WifiSelectionActivity::loop() {
 
   // Reached once the hidden-network SSID has been entered (and was non-empty).
   if (state == WifiSelectionState::HIDDEN_SSID_ENTRY) {
-    const auto* savedCred = WIFI_STORE.findCredential(selectedSSID);
+    const auto savedCred = WIFI_STORE.findCredential(selectedSSID);
     if (savedCred && !savedCred->password.empty()) {
       // We already know this hidden network - connect with the saved password
       enteredPassword = savedCred->password;
@@ -819,7 +820,9 @@ void WifiSelectionActivity::render(RenderLock&&) {
   const auto layout = pageLayout(renderer);
 
   // Draw header
-  char countStr[32];
+  // STR_NETWORKS_FOUND is ~37 bytes once the Arabic translation is substituted,
+  // so 32 truncated it. See ClockSyncActivity for the same class of bug.
+  char countStr[64];
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
   GUI.drawHeader(renderer,
                  Rect{layout.safe.x, layout.safe.y + metrics.topPadding, layout.safe.width, metrics.headerHeight},
