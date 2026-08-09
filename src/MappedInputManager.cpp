@@ -294,6 +294,7 @@ bool MappedInputManager::wasMenuGesture() const {
 }
 
 bool MappedInputManager::wasHomeGesture() const {
+  if (gpio.wasHomeKeyLongPressed()) return true;
   int sx = 0;
   int sy = 0;
   int ex = 0;

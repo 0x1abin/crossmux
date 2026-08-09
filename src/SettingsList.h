@@ -212,6 +212,10 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
                           {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                           StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_FRONTLIGHT_BRIGHTNESS, &CrossPointSettings::frontlightBrightness, {0, 100, 5},
+                           "frontlightBrightness", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_FRONTLIGHT_WARMTH, &CrossPointSettings::frontlightWarmth, {0, 100, 5},
+                           "frontlightWarmth", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(
             StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
             {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
@@ -430,8 +434,20 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
 }
 
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
-  if (!BoardConfig::hasTouch()) return setting.nameId != StrId::STR_TOUCH_READER_CONTROLS;
-  return setting.nameId != StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION && setting.nameId != StrId::STR_SUNLIGHT_FADING_FIX;
+  if (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS && !BoardConfig::hasTouch()) return false;
+#if defined(SIMULATOR)
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) {
+    return false;
+  }
+#else
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS && !BoardConfig::hasPwmFrontlight()) return false;
+  if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !BoardConfig::hasColorTemperatureFrontlight()) return false;
+#endif
+  if (BoardConfig::hasTouch() &&
+      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX)) {
+    return false;
+  }
+  return true;
 }
 
 // Visits the shared list without copying it. Dynamic font entries are built
