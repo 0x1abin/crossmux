@@ -115,6 +115,8 @@ class WeReadActivity final : public Activity {
   bool readShelf(int index, WeReadStore::ShelfRecord& record) const;
   Rect contentBounds() const;
   Rect mainContentBounds() const;
+  Rect detailActionsBounds(const Rect& content) const;
+  Rect detailIntroductionBounds(const Rect& content) const;
   Rect disclaimerSafeBounds() const;
   Rect disclaimerContentBounds() const;
   Rect disclaimerActionsBounds() const;

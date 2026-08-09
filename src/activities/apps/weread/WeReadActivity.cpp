@@ -27,6 +27,7 @@
 #include "../../network/WifiSelectionActivity.h"
 #include "../../util/ConfirmationActivity.h"
 #include "WeReadBrowseActivity.h"
+#include "WeReadTouchGeometry.h"
 
 namespace {
 
@@ -121,22 +122,9 @@ static_assert(canIncrementShelfFrame(3, 9, 4, 9));
 static_assert(!canIncrementShelfFrame(8, 9, 9, 9));
 static_assert(!canIncrementShelfFrame(3, 9, 4, 10));
 
-struct ShelfGridLayout {
-  int columns = 1;
-  int rows = 1;
-  int itemsPerPage = 1;
-  int coverWidth = WeReadStore::kCoverThumbWidth;
-  int coverHeight = WeReadStore::kCoverThumbHeight;
-  int itemHeight = WeReadStore::kCoverThumbHeight;
-  int columnGap = 0;
-  int rowGap = 0;
-  int titleGap = 0;
-  int availableX = 0;
-  int availableWidth = 0;
-};
-
-ShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content, const int sidePadding, const int spacing) {
-  ShelfGridLayout layout;
+WeReadShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content, const int sidePadding,
+                                      const int spacing) {
+  WeReadShelfGridLayout layout;
   const int titleHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int minimumGap = std::max(4, spacing / 2);
   const bool landscape = renderer.getOrientation() == GfxRenderer::Orientation::LandscapeClockwise ||
@@ -504,6 +492,19 @@ Rect WeReadActivity::contentBounds() const {
 Rect WeReadActivity::mainContentBounds() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   return SubpageLayout::contentRect(UITheme::getInstance().getScreenSafeArea(renderer, true, false), metrics, true);
+}
+
+Rect WeReadActivity::detailActionsBounds(const Rect& content) const {
+  const int height = kDetailListActionCount * GUI.getListRowStep(false);
+  return Rect{content.x, content.y + content.height - height, content.width, height};
+}
+
+Rect WeReadActivity::detailIntroductionBounds(const Rect& content) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect actions = detailActionsBounds(content);
+  const int y = content.y + kDetailCoverHeight + metrics.verticalSpacing;
+  return Rect{content.x + metrics.contentSidePadding, y, content.width - metrics.contentSidePadding * 2,
+              std::max(1, actions.y - metrics.verticalSpacing - y)};
 }
 
 Rect WeReadActivity::disclaimerSafeBounds() const {
@@ -1104,6 +1105,53 @@ void WeReadActivity::selectChapterRange() {
 }
 
 void WeReadActivity::handleDetailInput() {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    if (state_.load() == State::DetailCoverLoading) operation_.reset();
+    mainTab_.store(MainTab::Shelf);
+    mainFocus_.store(MainFocus::Content);
+    state_.store(State::Home);
+    requestUpdate();
+    return;
+  }
+
+  const Rect content = contentBounds();
+  const Rect actions = detailActionsBounds(content);
+  int touchedAction = -1;
+  const auto actionTouch = mappedInput.rowTouch(touchedAction, actions.y, GUI.getListRowStep(false),
+                                                kDetailListActionCount, actions.x, actions.x + actions.width);
+  if (actionTouch != MappedInputManager::RowTouch::None) {
+    const auto action = static_cast<DetailAction>(touchedAction + 1);
+    if (detailActionEnabled(action)) {
+      const int selection = touchedAction + 1;
+      if (detailSelected_ != selection) {
+        detailSelected_ = selection;
+        if (actionTouch == MappedInputManager::RowTouch::Down) requestUpdate();
+      }
+      if (actionTouch == MappedInputManager::RowTouch::Tap) activateDetailSelection();
+    }
+    return;
+  }
+
+  if (detailIntroTruncated_) {
+    const Rect introduction = detailIntroductionBounds(content);
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasScreenTouchDown(x, y) && x >= introduction.x && x < introduction.x + introduction.width &&
+        y >= introduction.y && y < introduction.y + introduction.height) {
+      if (detailSelected_ != static_cast<int>(DetailAction::Introduction)) {
+        detailSelected_ = static_cast<int>(DetailAction::Introduction);
+        requestUpdate();
+      }
+      return;
+    }
+    if (mappedInput.wasScreenTapped(x, y) && x >= introduction.x && x < introduction.x + introduction.width &&
+        y >= introduction.y && y < introduction.y + introduction.height) {
+      detailSelected_ = static_cast<int>(DetailAction::Introduction);
+      activateDetailSelection();
+      return;
+    }
+  }
+
   buttonNavigator_.onNext([this] {
     moveDetailSelection(1);
     requestUpdate();
@@ -1114,32 +1162,39 @@ void WeReadActivity::handleDetailInput() {
   });
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     activateDetailSelection();
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    if (state_.load() == State::DetailCoverLoading) operation_.reset();
-    mainTab_.store(MainTab::Shelf);
-    mainFocus_.store(MainFocus::Content);
-    state_.store(State::Home);
-    requestUpdate();
   }
 }
 
 void WeReadActivity::handleIntroductionInput() {
-  buttonNavigator_.onNext([this] {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    state_.store(retryJob_ == Job::Detail && operation_.active() ? State::DetailCoverLoading : State::Detail);
+    requestUpdate();
+    return;
+  }
+
+  const auto next = [this] {
     if (introPage_ + 1 < introPageCount_) {
       ++introPage_;
       requestUpdate();
     }
-  });
-  buttonNavigator_.onPrevious([this] {
+  };
+  const auto previous = [this] {
     if (introPage_ > 0) {
       --introPage_;
       requestUpdate();
     }
-  });
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    state_.store(retryJob_ == Job::Detail && operation_.active() ? State::DetailCoverLoading : State::Detail);
-    requestUpdate();
+  };
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up) {
+    next();
+    return;
   }
+  if (swipe == MappedInputManager::SwipeDir::Down) {
+    previous();
+    return;
+  }
+  buttonNavigator_.onNext(next);
+  buttonNavigator_.onPrevious(previous);
 }
 
 void WeReadActivity::buildIntroductionPages() {
@@ -1394,7 +1449,7 @@ void WeReadActivity::handleMainTabInput() {
 }
 
 void WeReadActivity::handleManageInput() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  const auto activate = [this] {
     switch (kManageEntries[manageSelected_].action) {
       case ManageAction::Refresh:
         showShelfRefreshPopup();
@@ -1406,6 +1461,28 @@ void WeReadActivity::handleManageInput() {
         promptLogout();
         return;
     }
+  };
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect content = mainContentBounds();
+  int touched = -1;
+  const auto touch = mappedInput.rowTouch(touched, content.y, metrics.menuRowHeight + metrics.menuSpacing,
+                                          kManageEntryCount, content.x, content.x + content.width);
+  if (touch != MappedInputManager::RowTouch::None) {
+    const bool changed = manageSelected_ != touched || mainFocus_.load() != MainFocus::Content;
+    manageSelected_ = touched;
+    mainFocus_.store(MainFocus::Content);
+    if (touch == MappedInputManager::RowTouch::Tap) {
+      activate();
+    } else if (changed) {
+      requestUpdate();
+    }
+    return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    activate();
+    return;
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
@@ -1446,6 +1523,21 @@ void WeReadActivity::handleMainInput() {
     activityManager.goToApps();
     return;
   }
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const Rect tabs{safe.x, safe.y + metrics.topPadding + metrics.headerHeight, safe.width, metrics.tabBarHeight};
+  int x = 0;
+  int y = 0;
+  int touchedTab = -1;
+  if ((mappedInput.wasScreenTouchDown(x, y) || mappedInput.wasScreenTapped(x, y)) &&
+      GUI.tabIndexFromPoint(renderer, tabs, mainTabs_, x, y, touchedTab)) {
+    mainFocus_.store(MainFocus::Content);
+    selectMainTab(touchedTab == 0 ? MainTab::Shelf : MainTab::Manage);
+    requestUpdate();
+    return;
+  }
+
   if (mainFocus_.load() == MainFocus::Tabs) {
     handleMainTabInput();
     return;
@@ -1468,6 +1560,7 @@ void WeReadActivity::handleShelfInput() {
   const auto layout =
       shelfGridLayout(renderer, mainContentBounds(), metrics.contentSidePadding, metrics.verticalSpacing);
   const int itemsPerPage = layout.itemsPerPage;
+  const Rect content = mainContentBounds();
 
   switch (shelfNavigationGesture_) {
     case ShelfNavigationGesture::Idle:
@@ -1529,6 +1622,35 @@ void WeReadActivity::handleShelfInput() {
     }
   }
 
+  int x = 0;
+  int y = 0;
+  if (mappedInput.wasScreenTouchDown(x, y)) {
+    const int touched = weReadShelfIndexFromPoint(content, layout, shelfSelected_.load(), count, x, y);
+    if (touched >= 0) {
+      moveShelfSelection(touched, itemsPerPage);
+      return;
+    }
+  }
+  if (mappedInput.wasScreenTapped(x, y)) {
+    const int touched = weReadShelfIndexFromPoint(content, layout, shelfSelected_.load(), count, x, y);
+    if (touched >= 0) {
+      moveShelfSelection(touched, itemsPerPage);
+      resetShelfCoverLoading();
+      activateSelected();
+      return;
+    }
+  }
+
+  const auto swipe = mappedInput.wasSwipe();
+  if (count > 0 && (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right)) {
+    const int selected = shelfSelected_.load();
+    const int target = swipe == MappedInputManager::SwipeDir::Left
+                           ? ButtonNavigator::nextPageIndex(selected, count, itemsPerPage)
+                           : ButtonNavigator::previousPageIndex(selected, count, itemsPerPage);
+    moveShelfSelection(target, itemsPerPage);
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     resetShelfCoverLoading();
     activateSelected();
@@ -1543,8 +1665,12 @@ void WeReadActivity::moveShelfSelection(const int index, const int itemsPerPage)
 }
 
 void WeReadActivity::handleErrorInput() {
+  int x = 0;
+  int y = 0;
+  const bool confirm =
+      mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y);
   if (error_ == WeReadClient::Error::WholeBookOnly) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (confirm) {
       operation_.reset();
       state_.store(State::Detail);
       showCacheScopePopup();
@@ -1556,7 +1682,7 @@ void WeReadActivity::handleErrorInput() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  if (confirm) {
     if (WiFi.status() == WL_CONNECTED) {
       switch (retryJob_) {
         case Job::Sync:
@@ -1590,7 +1716,9 @@ void WeReadActivity::handleErrorInput() {
 }
 
 void WeReadActivity::handleLogoutErrorInput() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  int x = 0;
+  int y = 0;
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) {
     performLogout();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     state_.store(State::Home);
@@ -1641,21 +1769,27 @@ void WeReadActivity::loop() {
     case State::LogoutError:
       handleLogoutErrorInput();
       return;
-    case State::CacheCleared:
+    case State::CacheCleared: {
+      int x = 0;
+      int y = 0;
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
-          mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+          mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasScreenTapped(x, y)) {
         state_.store(State::Home);
         requestUpdate();
       }
       return;
-    case State::CacheClearError:
-      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    }
+    case State::CacheClearError: {
+      int x = 0;
+      int y = 0;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) {
         performClearCache();
       } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
         state_.store(State::Home);
         requestUpdate();
       }
       return;
+    }
     case State::ClearingCache:
       return;
     case State::LoginConfirmed:
@@ -1863,23 +1997,12 @@ void WeReadActivity::drawShelfGrid(const Rect& content, const int selectedIndex,
   const int page = selectedIndex / layout.itemsPerPage;
   const int pageStart = page * layout.itemsPerPage;
   const int pageEnd = std::min(pageStart + layout.itemsPerPage, count);
-  const int pageCount = pageEnd - pageStart;
-  const int visibleRows = (pageCount + layout.columns - 1) / layout.columns;
-  const int visibleHeight = visibleRows * layout.itemHeight + std::max(0, visibleRows - 1) * layout.rowGap;
-  const int startY = content.y + std::max(0, (content.height - visibleHeight) / 2);
   const bool incrementalFrame = frameSelection >= pageStart && frameSelection < pageEnd;
 
   const auto drawItem = [&](const int index, const bool selected) {
-    const int item = index - pageStart;
-    const int row = item / layout.columns;
-    const int column = item % layout.columns;
-    const int rowItems = std::min(layout.columns, pageCount - row * layout.columns);
-    const int rowWidth = rowItems * layout.coverWidth + std::max(0, rowItems - 1) * layout.columnGap;
-    const int coverX = layout.availableX + std::max(0, (layout.availableWidth - rowWidth) / 2) +
-                       column * (layout.coverWidth + layout.columnGap);
-    const int coverY = startY + row * (layout.itemHeight + layout.rowGap);
-    const Rect cover{coverX, coverY, layout.coverWidth, layout.coverHeight};
-    const Rect itemBounds{cover.x - 2, cover.y - 2, cover.width + 4, layout.itemHeight + 4};
+    const auto geometry = weReadShelfItemGeometry(content, layout, pageStart, pageEnd, index);
+    const Rect cover = geometry.cover;
+    const Rect itemBounds = geometry.hit;
     const bool focused = selected && contentFocused;
     bool foregroundBlack = true;
     if (focused) {
@@ -1979,11 +2102,8 @@ void WeReadActivity::drawBookDetail(const Rect& content, const bool coverLoading
     renderer.drawText(SMALL_FONT_ID, metaX, minorY, text.c_str());
   }
 
-  const int actionHeight = kDetailListActionCount * GUI.getListRowStep(false);
-  const Rect actions{content.x, content.y + content.height - actionHeight, content.width, actionHeight};
-  const int summaryY = cover.y + cover.height + metrics.verticalSpacing;
-  const int summaryBottom = actions.y - metrics.verticalSpacing;
-  const Rect introduction{content.x + side, summaryY, content.width - side * 2, std::max(1, summaryBottom - summaryY)};
+  const Rect actions = detailActionsBounds(content);
+  const Rect introduction = detailIntroductionBounds(content);
   detailIntroTruncated_ =
       drawDetailIntroduction(introduction, detailSelected_ == static_cast<int>(DetailAction::Introduction));
 
