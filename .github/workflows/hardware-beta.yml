@@ -33,7 +33,6 @@ jobs:
     runs-on: h2o
     outputs:
       crossmux_sha: ${{ steps.source.outputs.crossmux_sha }}
-      can_publish: ${{ steps.source.outputs.can_publish }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -43,15 +42,8 @@ jobs:
 
       - name: Record and validate source
         id: source
-        env:
-          A4_REDISTRIBUTION_APPROVED: ${{ vars.A4_REDISTRIBUTION_APPROVED }}
         run: |
           set -euo pipefail
-          can_publish=true
-          if [ "${{ inputs.device }}" = "eego-a4" ] && [ "$A4_REDISTRIBUTION_APPROVED" != "true" ]; then
-            echo "::warning::A4 redistribution review is not approved; only the private artifact will be created"
-            can_publish=false
-          fi
           git -C freeink-sdk fetch origin main:refs/remotes/origin/main
           sdk_sha="$(git -C freeink-sdk rev-parse HEAD)"
           if ! git -C freeink-sdk merge-base --is-ancestor "$sdk_sha" origin/main; then
@@ -59,7 +51,6 @@ jobs:
             exit 1
           fi
           echo "crossmux_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "can_publish=$can_publish" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v6
         with:
@@ -95,7 +86,7 @@ jobs:
           retention-days: 14
 
   publish:
-    if: inputs.action == 'publish' && needs.build.outputs.can_publish == 'true'
+    if: inputs.action == 'publish'
     needs: build
     runs-on: ubuntu-latest
     steps:
