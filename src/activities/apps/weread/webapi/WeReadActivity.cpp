@@ -16,18 +16,18 @@
 #include <cstring>
 #include <string>
 
-#include "../../../CrossPointState.h"
-#include "../../../SdCardFontSystem.h"
-#include "../../../SilentRestart.h"
-#include "../../../components/SubpageLayout.h"
-#include "../../../components/UITheme.h"
-#include "../../../components/icons/cover.h"
-#include "../../../fontIds.h"
-#include "../../../util/QrUtils.h"
-#include "../../network/WifiSelectionActivity.h"
-#include "../../util/ConfirmationActivity.h"
+#include "CrossPointState.h"
+#include "SdCardFontSystem.h"
+#include "SilentRestart.h"
 #include "WeReadBrowseActivity.h"
-#include "WeReadTouchGeometry.h"
+#include "activities/apps/weread/WeReadTouchGeometry.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
+#include "components/SubpageLayout.h"
+#include "components/UITheme.h"
+#include "components/icons/cover.h"
+#include "fontIds.h"
+#include "util/QrUtils.h"
 
 namespace {
 
