@@ -9,6 +9,7 @@
 #include <Memory.h>
 #include <Utf8.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 #include <algorithm>
 #include <climits>
@@ -431,7 +432,11 @@ void WeReadActivity::onEnter() {
   introPagesTruncated_ = false;
   downloadChapterScope_ = WeReadClient::DownloadOptions::ChapterScope::WholeBook;
   optionPopupClosing_ = false;
+  wifiSessionActive_ = false;
+  wifiReleasePending_ = false;
   syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::FirstTen;
+  LOG_DBG("WR", "onEnter activity=%u free=%u largest=%u", static_cast<unsigned>(sizeof(*this)),
+          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
   if (!WeReadStore::hasAcceptedDisclaimer()) {
     state_.store(State::Disclaimer);
     requestUpdate();
@@ -460,6 +465,14 @@ void WeReadActivity::onExit() {
   stageRenderPending_.store(false);
   if (shelfFile_.isOpen()) shelfFile_.close();
   std::vector<TabInfo>().swap(mainTabs_);
+  if (wifiSessionActive_ && WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(false);
+    delay(100);
+    WiFi.mode(WIFI_OFF);
+    esp_wifi_deinit();
+  }
+  LOG_DBG("WR", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMaxAllocHeap()));
   Activity::onExit();
 }
 
@@ -598,9 +611,13 @@ void WeReadActivity::connectThen(const Job job, const WeReadStore::ShelfRecord* 
     requestJobUpdate();
     return;
   }
+  wifiSessionActive_ = true;
   startActivityForResult(std::move(wifi), [this, job](const ActivityResult& result) {
-    (void)result;
-    if (WiFi.status() == WL_CONNECTED) {
+    wifiReleasePending_ = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                          mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavNext);
+    if (!result.isCancelled && WiFi.status() == WL_CONNECTED) {
       startJob(job, job == Job::Sync ? nullptr : &pendingBook_);
       return;
     }
@@ -611,6 +628,7 @@ void WeReadActivity::connectThen(const Job job, const WeReadStore::ShelfRecord* 
 }
 
 void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* book) {
+  wifiSessionActive_ = true;
   if (job == Job::Sync && shelfFile_.isOpen()) shelfFile_.close();
   if (job != Job::Sync && book) pendingBook_ = *book;
   retryJob_ = job;
@@ -1007,7 +1025,9 @@ void WeReadActivity::activateDetailSelection() {
         requestUpdate();
         return;
       }
-      startActivityForResult(std::move(browse), [](const ActivityResult&) {});
+      startActivityForResult(std::move(browse), [this](const ActivityResult&) {
+        if (WiFi.getMode() != WIFI_MODE_NULL) wifiSessionActive_ = true;
+      });
       return;
     }
     case DetailAction::Images:
@@ -1729,6 +1749,15 @@ void WeReadActivity::handleLogoutErrorInput() {
 }
 
 void WeReadActivity::loop() {
+  if (wifiReleasePending_) {
+    const bool held = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                      mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                      mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                      mappedInput.isPressed(MappedInputManager::Button::NavNext);
+    if (!held) wifiReleasePending_ = false;
+    return;
+  }
+
   if (optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); })) {
     optionPopupClosing_ = !optionPopup_.isActive();
     return;

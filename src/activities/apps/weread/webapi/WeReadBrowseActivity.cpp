@@ -84,6 +84,7 @@ static_assert(sizeof(WeReadBrowseActivity) <= 2 * 1024, "WeRead browse activity 
 void WeReadBrowseActivity::onEnter() {
   Activity::onEnter();
   operation_.reset();
+  wifiReleasePending_ = false;
   if (reloadCache()) {
     state_ = State::Menu;
     requestUpdate();
@@ -219,8 +220,12 @@ void WeReadBrowseActivity::connectThenCache() {
     requestUpdate();
     return;
   }
-  startActivityForResult(std::move(wifi), [this](const ActivityResult&) {
-    if (WiFi.status() == WL_CONNECTED) {
+  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
+    wifiReleasePending_ = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                          mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                          mappedInput.isPressed(MappedInputManager::Button::NavNext);
+    if (!result.isCancelled && WiFi.status() == WL_CONNECTED) {
       startCache();
     } else {
       error_ = WeReadClient::Error::Network;
@@ -626,6 +631,15 @@ const char* WeReadBrowseActivity::errorMessage() const {
 }
 
 void WeReadBrowseActivity::loop() {
+  if (wifiReleasePending_) {
+    const bool held = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                      mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                      mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                      mappedInput.isPressed(MappedInputManager::Button::NavNext);
+    if (!held) wifiReleasePending_ = false;
+    return;
+  }
+
   switch (state_) {
     case State::Menu:
       handleMenuInput();

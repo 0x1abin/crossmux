@@ -48,6 +48,7 @@ class WeReadBrowseActivity final : public Activity {
   bool hasCache_ = false;
   bool textPagesTruncated_ = false;
   bool readerFontReady_ = false;
+  bool wifiReleasePending_ = false;
 
   Rect contentBounds() const;
   int pageItemCount() const;

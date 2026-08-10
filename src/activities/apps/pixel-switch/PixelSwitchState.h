@@ -8,6 +8,7 @@ namespace pixel_switch {
 
 inline constexpr char MQTT_TOPIC[] = "crossmux/pixel-switch/v1/canvas";
 inline constexpr uint32_t PUBLISH_DEBOUNCE_MS = 2000u;
+inline constexpr uint32_t RECONNECT_WINDOW_MS = 120000u;
 
 enum class Shade : uint8_t {
   White = 0,
@@ -67,6 +68,10 @@ constexpr int scaledDisplayEdge(const int index, const int extent, const int log
 
 constexpr bool hasElapsed(const uint32_t start, const uint32_t now, const uint32_t duration) {
   return static_cast<uint32_t>(now - start) >= duration;
+}
+
+constexpr bool reconnectWindowExpired(const uint32_t start, const uint32_t now) {
+  return hasElapsed(start, now, RECONNECT_WINDOW_MS);
 }
 
 bool isValidCanvasMessage(const char* topic, size_t payloadLength);

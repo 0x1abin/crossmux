@@ -100,6 +100,12 @@ TEST(PixelSwitchGeometry, ElapsedTimeHandlesMillisWraparound) {
   EXPECT_TRUE(pixel_switch::hasElapsed(laterPlacement, laterPlacement + 2000u, pixel_switch::PUBLISH_DEBOUNCE_MS));
 }
 
+TEST(PixelSwitchGeometry, ReconnectWindowExpiresAtTwoMinutesAcrossMillisWraparound) {
+  constexpr uint32_t start = UINT32_MAX - 1000u;
+  EXPECT_FALSE(pixel_switch::reconnectWindowExpired(start, start + pixel_switch::RECONNECT_WINDOW_MS - 1u));
+  EXPECT_TRUE(pixel_switch::reconnectWindowExpired(start, start + pixel_switch::RECONNECT_WINDOW_MS));
+}
+
 TEST(PixelSwitchGeometry, RetainedSnapshotDisplaysClockwise) {
   PixelSwitchState source;
   const auto topLeft = pixel_switch::displayToCanvas(0, 0);

@@ -33,7 +33,8 @@ class PixelSwitchActivity final : public Activity {
   void handleMqttMessage(const char* topic, const uint8_t* payload, size_t length);
   bool canPublish();
   bool prepareMqttBuffer();
-  void launchWifiSelection();
+  void startCanvas();
+  void launchWifiSelection(bool enterCanvasAfterConnect);
   bool consumeWifiInputReleaseBarrier();
   void pumpNetwork();
   bool connectBroker();
@@ -64,9 +65,12 @@ class PixelSwitchActivity final : public Activity {
   bool snapshotReady_ = false;
   bool ignoreConfirmRelease_ = false;
   bool waitForWifiInputRelease_ = false;
-  bool returnToAppsAfterWifi_ = false;
+  bool wifiSelectionFailed_ = false;
+  bool wifiRetryActive_ = false;
+  bool wifiRetryPaused_ = false;
   bool showCooldown_ = false;
   uint32_t lastConnectAttemptMs_ = 0;
+  uint32_t wifiRetryStartedMs_ = 0;
   uint32_t subscribedAtMs_ = 0;
   uint32_t cooldownStartedMs_ = 0;
   uint32_t lastPlacementMs_ = 0;
