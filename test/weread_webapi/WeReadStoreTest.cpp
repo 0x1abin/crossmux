@@ -326,10 +326,43 @@ TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLas
   EXPECT_STREQ(record.bookId, "book-000");
 }
 
+TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  for (uint32_t i = 0; i < 3; ++i) {
+    WeReadStore::ShelfRecord record;
+    snprintf(record.bookId, sizeof(record.bookId), "book-%u", static_cast<unsigned>(i));
+    record.readUpdateTime = 300 - i * 100;
+    ASSERT_TRUE(shelf.append(&record));
+  }
+  ASSERT_TRUE(shelf.finish());
+
+  EXPECT_EQ(WeReadStore::cachedShelfReadUpdateTime("book-1"), 200U);
+  EXPECT_EQ(WeReadStore::cachedShelfReadUpdateTime("missing"), 0U);
+  ASSERT_EQ(WeReadStore::promoteShelfBook("book-2", 300), WeReadStore::ShelfSortResult::Ok);
+
+  HalFile file;
+  uint32_t count = 0;
+  ASSERT_TRUE(WeReadStore::openShelf(file, count));
+  ASSERT_EQ(count, 3U);
+  WeReadStore::ShelfRecord record;
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 0, record));
+  EXPECT_STREQ(record.bookId, "book-2");
+  EXPECT_EQ(record.readUpdateTime, 300U);
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 1, record));
+  EXPECT_STREQ(record.bookId, "book-0");
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
+
+  EXPECT_EQ(WeReadStore::promoteShelfBook("missing", 400), WeReadStore::ShelfSortResult::Ok);
+  EXPECT_EQ(WeReadStore::promoteShelfBook("book-1", 0), WeReadStore::ShelfSortResult::Ok);
+}
+
 TEST_F(WeReadStoreTest, RejectsCorruptShelfSortWithoutLeavingPartialReplacement) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "corrupt"));
   EXPECT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::StorageError);
+  EXPECT_EQ(WeReadStore::promoteShelfBook("book", 100), WeReadStore::ShelfSortResult::StorageError);
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
   EXPECT_TRUE(Storage.exists(WeReadStore::kShelfPath));
 }

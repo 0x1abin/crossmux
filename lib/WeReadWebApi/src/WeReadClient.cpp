@@ -559,7 +559,11 @@ void shelfObjectStart(void* raw) {
 void shelfObjectEnd(void* raw) {
   auto& ctx = *static_cast<ShelfJsonContext*>(raw);
   if (ctx.inBook && ctx.depth == ctx.bookDepth) {
-    if (ctx.current.bookId[0] && !ctx.writer.append(&ctx.current)) ctx.writeFailed = true;
+    if (ctx.current.bookId[0]) {
+      ctx.current.readUpdateTime =
+          std::max(ctx.current.readUpdateTime, WeReadStore::cachedShelfReadUpdateTime(ctx.current.bookId));
+      if (!ctx.writer.append(&ctx.current)) ctx.writeFailed = true;
+    }
     ctx.inBook = false;
     ctx.bookDepth = -1;
   }
