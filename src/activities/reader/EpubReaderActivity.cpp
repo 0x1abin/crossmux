@@ -50,6 +50,7 @@
 #include "util/AchievementPopupUtils.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
+#include "util/TimeUtils.h"
 
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
@@ -218,6 +219,12 @@ void EpubReaderActivity::onEnter() {
   if (WeReadStore::findBookIdForPath(epub->getPath(), wereadBookId_, sizeof(wereadBookId_)) &&
       strncmp(wereadBookId_, "MP_WXS_", 7) == 0) {
     wereadBookId_[0] = '\0';
+  }
+  if (wereadBookId_[0]) {
+    const uint32_t timestamp = TimeUtils::getCurrentValidTimestamp();
+    if (timestamp != 0 && WeReadStore::promoteShelfBook(wereadBookId_, timestamp) != WeReadStore::ShelfSortResult::Ok) {
+      LOG_ERR("WR", "Failed to promote recently opened shelf book");
+    }
   }
 #endif
 
