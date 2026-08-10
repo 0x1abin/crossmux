@@ -63,6 +63,11 @@ Use one physical gesture for one semantic action:
 - After a long-press action fires, keep a handled flag until release and
   consume that release instead of also running the short action.
 
+In the main Settings menu, short presses move one item while a held
+`NavNext`/`NavPrevious` gesture moves by a full visible page at the shared
+continuous-navigation interval. Settings subpages retain their own input
+semantics.
+
 ## Activity and Popup Transitions
 
 An Activity, popup, and resumed parent are separate input owners. If ownership

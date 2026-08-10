@@ -412,15 +412,16 @@ void SettingsActivity::loop() {
     requestUpdate();
   });
 
-  buttonNavigator.onNextContinuous([this, &hasChangedCategory] {
-    hasChangedCategory = true;
-    selectedCategoryIndex = ButtonNavigator::nextIndex(selectedCategoryIndex, categoryCount);
+  buttonNavigator.onNextContinuous([this, settingsPageItems] {
+    selectedSettingIndex = selectedSettingIndex == 0 ? 1
+                                                     : ButtonNavigator::nextPageIndex(
+                                                           selectedSettingIndex, settingsCount + 1, settingsPageItems);
     requestUpdate();
   });
 
-  buttonNavigator.onPreviousContinuous([this, &hasChangedCategory] {
-    hasChangedCategory = true;
-    selectedCategoryIndex = ButtonNavigator::previousIndex(selectedCategoryIndex, categoryCount);
+  buttonNavigator.onPreviousContinuous([this, settingsPageItems] {
+    selectedSettingIndex =
+        ButtonNavigator::previousPageIndex(selectedSettingIndex, settingsCount + 1, settingsPageItems);
     requestUpdate();
   });
 
@@ -541,6 +542,14 @@ void SettingsActivity::loopAccordion() {
   });
   buttonNavigator.onPreviousRelease([this, visibleCount] {
     accordionSelectedIndex = ButtonNavigator::previousIndex(accordionSelectedIndex, visibleCount);
+    requestUpdate();
+  });
+  buttonNavigator.onNextContinuous([this, visibleCount, pageItems] {
+    accordionSelectedIndex = ButtonNavigator::nextPageIndex(accordionSelectedIndex, visibleCount, pageItems);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousContinuous([this, visibleCount, pageItems] {
+    accordionSelectedIndex = ButtonNavigator::previousPageIndex(accordionSelectedIndex, visibleCount, pageItems);
     requestUpdate();
   });
 }
