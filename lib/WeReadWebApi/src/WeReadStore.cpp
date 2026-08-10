@@ -10,8 +10,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../../src/util/StringUtils.h"
 #include "WeReadProtocol.h"
-#include "util/StringUtils.h"
 
 namespace WeReadStore {
 namespace {

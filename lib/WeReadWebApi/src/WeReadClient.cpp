@@ -20,9 +20,9 @@
 #include <cstring>
 #include <string>
 
+#include "../../../src/util/BookCacheUtils.h"
+#include "../../../src/util/TimeUtils.h"
 #include "WeReadProtocol.h"
-#include "util/BookCacheUtils.h"
-#include "util/TimeUtils.h"
 
 namespace WeReadClient {
 namespace {

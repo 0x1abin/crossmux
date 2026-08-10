@@ -40,8 +40,9 @@
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
+#include <WeReadStore.h>
+
 #include "activities/apps/weread/WeReadProgressSyncActivity.h"
-#include "activities/apps/weread/WeReadStore.h"
 #include "activities/settings/FontDownloadActivity.h"
 #endif
 #include "components/UITheme.h"
