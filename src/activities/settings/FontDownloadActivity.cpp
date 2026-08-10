@@ -191,12 +191,16 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   for (JsonObject fObj : familiesArr) {
     ManifestFamily family;
     family.name = fObj["name"] | "";
+    family.displayName = fObj["displayName"] | "";
     family.description = fObj["description"] | "";
     if (!FontInstaller::isValidFamilyName(family.name.c_str())) {
       LOG_ERR("FONT", "Malformed manifest family name: %s", family.name.c_str());
       families_.clear();
       errorMessage_ = "Invalid font manifest";
       return false;
+    }
+    if (!FontInstaller::isValidDisplayName(family.displayName.c_str())) {
+      family.displayName = family.name;
     }
 
     const JsonArray stylesArr = fObj["styles"].as<JsonArray>();
@@ -233,6 +237,11 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     }
 
     family.installed = fontInstaller_.isFamilyInstalled(family.name.c_str());
+    if (family.installed && family.displayName != family.name &&
+        FontInstaller::readDisplayName(family.name) == family.name &&
+        !fontInstaller_.writeDisplayName(family.name.c_str(), family.displayName.c_str())) {
+      LOG_ERR("FONT", "Failed to backfill display name for %s", family.name.c_str());
+    }
 
     // Detect updates by comparing manifest file sizes with files on disk.
     // Not a checksum, but a size mismatch reliably indicates a rebuild in practice.
@@ -497,6 +506,10 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
     currentFileIndex_++;
   }
 
+  if (family.displayName != family.name &&
+      !fontInstaller_.writeDisplayName(family.name.c_str(), family.displayName.c_str())) {
+    LOG_ERR("FONT", "Installed %s without display-name sidecar", family.name.c_str());
+  }
   fontInstaller_.refreshRegistry();
   family.installed = true;
   family.hasUpdate = false;
@@ -574,7 +587,7 @@ void FontDownloadActivity::promptDeleteSelectedFamily() {
 
   std::string heading = tr(STR_DELETE);
   const auto& family = families_[pendingDeleteFamilyIndex];
-  std::string body = family.name;
+  std::string body = displayNameFor(family);
   // ActivityManager owns the dialog across frames, so it must live on the heap.
   auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, heading, body);
   if (!confirmation) {
@@ -774,6 +787,10 @@ std::string FontDownloadActivity::formatSize(size_t bytes) {
   return buf;
 }
 
+const std::string& FontDownloadActivity::displayNameFor(const ManifestFamily& family) const {
+  return renderer.canRenderText(UI_12_FONT_ID, family.displayName.c_str()) ? family.displayName : family.name;
+}
+
 void FontDownloadActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
@@ -809,7 +826,7 @@ void FontDownloadActivity::render(RenderLock&&) {
             if (isUpdateAllRow(index)) {
               return std::string(tr(STR_UPDATE_ALL)) + " (" + formatSize(totalUpdateSize()) + ")";
             }
-            return families_[familyIndexFromList(index)].name;
+            return displayNameFor(families_[familyIndexFromList(index)]);
           },
           [this](int index) -> std::string {
             if (isDownloadAllRow(index) || isUpdateAllRow(index)) return "";
@@ -840,7 +857,7 @@ void FontDownloadActivity::render(RenderLock&&) {
   } else if (state_ == DOWNLOADING) {
     const auto& family = families_[downloadingFamilyIndex_];
 
-    std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + family.name + " (" +
+    std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + displayNameFor(family) + " (" +
                              std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
     float progress = 0;
     if (fileTotal_ > 0) {

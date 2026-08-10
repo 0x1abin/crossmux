@@ -172,6 +172,9 @@ class GfxRenderer {
   void ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
   void ensureSdCardFontReady(int fontId, const std::deque<std::string>& words, bool includeHyphen,
                              uint8_t styleMask = 0x0F) const;
+  // True only when every codepoint can be drawn by the resolved UI font.
+  // Used to fall back from optional metadata labels without rendering boxes.
+  bool canRenderText(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation = o; }

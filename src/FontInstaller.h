@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 /// Shared utility for font installation (device download + browser upload).
 /// Handles directory creation, file validation, deletion, and registry refresh.
@@ -27,6 +28,18 @@ class FontInstaller {
   /// + dot (only as the extension separator). Rejects "../foo.cpfont" and
   /// "evil/foo.cpfont".
   static bool isValidCpfontFilename(const char* name);
+
+  static constexpr size_t DISPLAY_NAME_MAX_BYTES = 63;
+  static constexpr const char* DISPLAY_NAME_FILENAME = "display-name.txt";
+
+  /// Validate a user-visible UTF-8 family name for the small sidecar file.
+  static bool isValidDisplayName(const char* name);
+
+  /// Read a family's display-name sidecar, falling back to its ASCII family ID.
+  static std::string readDisplayName(const std::string& familyName);
+
+  /// Write the display-name sidecar into the family's existing font directory.
+  bool writeDisplayName(const char* familyName, const char* displayName);
 
   /// Ensure /<root>/<family>/ exists, where <root> is /.fonts (preferred) or /fonts.
   /// Re-uses the existing root if the family is already installed; otherwise

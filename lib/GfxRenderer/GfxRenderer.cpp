@@ -210,6 +210,19 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
   return fontId;
 }
 
+bool GfxRenderer::canRenderText(const int fontId, const char* text, const EpdFontFamily::Style style) const {
+  if (!text || !*text) return false;
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return false;
+
+  const auto* cursor = reinterpret_cast<const unsigned char*>(text);
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(&cursor))) {
+    if (!fontIt->second.hasCodepoint(cp, style)) return false;
+  }
+  return true;
+}
+
 // Translate logical (x,y) coordinates to physical panel coordinates based on current orientation
 // This should always be inlined for better performance
 static inline void rotateCoordinates(const GfxRenderer::Orientation orientation, const int x, const int y, int* phyX,

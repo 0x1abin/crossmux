@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "FontInstaller.h"
 #include "KOReaderCredentialStore.h"
 #include "ReaderFontSizes.h"
 #include "SdCardFontSystem.h"
@@ -43,7 +44,7 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
     s.enumStringValues.reserve(builtinOptionCount + families.size());
     for (const StrId value : enumValues) s.enumStringValues.push_back(I18N.get(value));
     std::transform(families.begin(), families.end(), std::back_inserter(s.enumStringValues),
-                   [](const SdCardFontFamilyInfo& f) { return f.name; });
+                   [](const SdCardFontFamilyInfo& f) { return FontInstaller::readDisplayName(f.name); });
   } else {
     s.enumValues = std::move(enumValues);
   }

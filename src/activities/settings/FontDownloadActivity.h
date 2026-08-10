@@ -77,6 +77,7 @@ class FontDownloadActivity : public Activity {
 
   struct ManifestFamily {
     std::string name;
+    std::string displayName;
     std::string description;
     std::vector<std::string> styles;
     std::vector<ManifestFile> files;
@@ -130,5 +131,6 @@ class FontDownloadActivity : public Activity {
   int listItemCount() const;
   size_t totalDownloadSize() const;
   size_t totalUpdateSize() const;
+  const std::string& displayNameFor(const ManifestFamily& family) const;
   static std::string formatSize(size_t bytes);
 };
