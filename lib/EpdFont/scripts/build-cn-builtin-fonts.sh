@@ -42,11 +42,12 @@ CHARSET_FILE="cn_common_chars.txt"
 # feature that needs CJK glyphs not already covered at the point size where
 # it renders adds its own cn_<feature>_chars.txt here.
 # cn_almanac_chars.txt: ganzhi + lunar-row chars for ChineseCalendarFace.
-REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt)
+# cn_font_names_chars.txt: downloadable catalog display names used by the font UI.
+REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt cn_font_names_chars.txt)
 TMP_DIR="instanced_fonts/NotoSansSC"
 SUBSET_OTF="$TMP_DIR/NotoSansSC-Regular.cncommon.otf"
-# Tiny OTF holding only the CJK chars that appear in i18n/feature sources (747
-# chars). Used to build the 14pt/16pt/18pt bitmap headers — those reader sizes
+# Tiny OTF holding only the CJK chars that appear in i18n/feature sources.
+# Used to build the 14pt/16pt/18pt bitmap headers — those reader sizes
 # rely on an SD-card font for broad Chinese EPUB coverage, but UI strings (game
 # win banners etc.) still need to render at every size.
 I18N_OTF="$TMP_DIR/NotoSansSC-Regular.i18nonly.otf"
@@ -126,7 +127,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)...
 # Step 2: emit one 2-bit raw bitmap header per requested point size.
 # (See file header for the rationale behind skipping --compress.)
 # fontconvert.py auto-skips code points missing from the source OTF, so passing
-# the broad CJK interval is fine — the i18n OTF will only emit 747 CJK glyphs.
+# the broad CJK interval is fine — the i18n OTF only emits required CJK glyphs.
 emit_size() {
   local size="$1"
   local otf="$2"
