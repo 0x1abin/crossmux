@@ -115,8 +115,8 @@ void ChineseChessMenuActivity::handleAiDifficultyInput() {
     requestUpdate();
     if (touch == MappedInputManager::RowTouch::Tap) {
       ChineseChessStore::clear();
-      activityManager.replaceActivity(std::make_unique<ChineseChessGameActivity>(
-          renderer, mappedInput, ChineseChessMode::VsAi, false, static_cast<ChineseChessAiLevel>(aiDifficultySel)));
+      activityManager.replaceActivityWith<ChineseChessGameActivity>(
+          ChineseChessMode::VsAi, false, static_cast<ChineseChessAiLevel>(aiDifficultySel));
     }
     return;
   }
@@ -131,8 +131,7 @@ void ChineseChessMenuActivity::handleAiDifficultyInput() {
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     ChineseChessStore::clear();
     const auto level = static_cast<ChineseChessAiLevel>(aiDifficultySel);
-    activityManager.replaceActivity(
-        std::make_unique<ChineseChessGameActivity>(renderer, mappedInput, ChineseChessMode::VsAi, false, level));
+    activityManager.replaceActivityWith<ChineseChessGameActivity>(ChineseChessMode::VsAi, false, level);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     showingAiDifficulty = false;
     requestUpdate();
@@ -145,8 +144,7 @@ void ChineseChessMenuActivity::onSelect() {
   if (it.disabled) return;
   switch (it.kind) {
     case ItemKind::Continue:
-      activityManager.replaceActivity(
-          std::make_unique<ChineseChessGameActivity>(renderer, mappedInput, it.mode, true, resumeAiLevel));
+      activityManager.replaceActivityWith<ChineseChessGameActivity>(it.mode, true, resumeAiLevel);
       return;
     case ItemKind::NewGame:
       if (it.mode == ChineseChessMode::VsAi) {
@@ -156,8 +154,7 @@ void ChineseChessMenuActivity::onSelect() {
         return;
       }
       ChineseChessStore::clear();
-      activityManager.replaceActivity(
-          std::make_unique<ChineseChessGameActivity>(renderer, mappedInput, it.mode, false));
+      activityManager.replaceActivityWith<ChineseChessGameActivity>(it.mode, false);
       return;
     case ItemKind::Stats:
       showingStats = true;

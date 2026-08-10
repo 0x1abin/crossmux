@@ -486,8 +486,8 @@ void ReadingHeatmapActivity::loop() {
       if (cells[static_cast<size_t>(index)].inViewedMonth) {
         selectedDayOrdinal = cells[static_cast<size_t>(index)].dayOrdinal;
         if (tapped) {
-          startActivityForResult(std::make_unique<ReadingDayDetailActivity>(renderer, mappedInput, selectedDayOrdinal),
-                                 [this](const ActivityResult&) { requestUpdate(); });
+          startActivityForResultWith<ReadingDayDetailActivity>(
+              [this](const ActivityResult&) { requestUpdate(); }, selectedDayOrdinal);
         } else {
           requestUpdate();
         }
@@ -497,8 +497,8 @@ void ReadingHeatmapActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    startActivityForResult(std::make_unique<ReadingDayDetailActivity>(renderer, mappedInput, selectedDayOrdinal),
-                           [this](const ActivityResult&) { requestUpdate(); });
+    startActivityForResultWith<ReadingDayDetailActivity>([this](const ActivityResult&) { requestUpdate(); },
+                                                         selectedDayOrdinal);
     return;
   }
 

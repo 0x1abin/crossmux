@@ -18,7 +18,6 @@ using Kind = ChineseChessBoard::Kind;
 using Move = ChineseChessBoard::Move;
 
 constexpr int kStatusFont = UI_12_FONT_ID;
-constexpr int kModalItemFont = UI_12_FONT_ID;
 constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;
 constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;
 
@@ -216,29 +215,20 @@ void ChineseChessGameActivity::handleInputGameMenu() {
   constexpr int width = 320;
   const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), width, titleHeight,
                                        rowHeight, MENU_ITEM_COUNT);
-  int touched = -1;
-  const auto touch = mappedInput.rowTouch(touched, panel.y + titleHeight, rowHeight, MENU_ITEM_COUNT, panel.x,
-                                          panel.x + panel.width, rowHeight);
-  if (touch != MappedInputManager::RowTouch::None) {
-    menuSel = static_cast<uint8_t>(touched);
-    requestUpdate();
-    if (touch == MappedInputManager::RowTouch::Tap) runMenuItem(menuSel);
-    return;
-  }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-      mappedInput.wasPressed(MappedInputManager::Button::Left)) {
-    menuSel = static_cast<uint8_t>((menuSel + MENU_ITEM_COUNT - 1) % MENU_ITEM_COUNT);
-    requestUpdate();
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-             mappedInput.wasPressed(MappedInputManager::Button::Right)) {
-    menuSel = static_cast<uint8_t>((menuSel + 1) % MENU_ITEM_COUNT);
-    requestUpdate();
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    runMenuItem(menuSel);
-    requestUpdate();
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    resumeFromMenu();
-    requestUpdate();
+  switch (gameHandleMenuInput(mappedInput, panel, titleHeight, rowHeight, MENU_ITEM_COUNT, menuSel)) {
+    case GameMenuInputResult::None:
+      return;
+    case GameMenuInputResult::SelectionChanged:
+      requestUpdate();
+      return;
+    case GameMenuInputResult::Activated:
+      runMenuItem(menuSel);
+      requestUpdate();
+      return;
+    case GameMenuInputResult::Dismissed:
+      resumeFromMenu();
+      requestUpdate();
+      return;
   }
 }
 
@@ -250,13 +240,12 @@ void ChineseChessGameActivity::handleInputGameOver() {
                                         metrics.contentSidePadding, metrics.menuSpacing, metrics.menuRowHeight, 1, 2);
   if (mappedInput.wasTapInRect(again.x, again.y, again.width, again.height) ||
       mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    activityManager.replaceActivity(
-        std::make_unique<ChineseChessGameActivity>(renderer, mappedInput, mode, false, aiLevel));
+    activityManager.replaceActivityWith<ChineseChessGameActivity>(mode, false, aiLevel);
     return;
   }
   if (mappedInput.wasTapInRect(home.x, home.y, home.width, home.height) ||
       mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    activityManager.replaceActivity(std::make_unique<ChineseChessMenuActivity>(renderer, mappedInput));
+    activityManager.replaceActivityWith<ChineseChessMenuActivity>();
   }
 }
 
@@ -416,12 +405,12 @@ void ChineseChessGameActivity::runMenuItem(uint8_t i) {
       const auto m = mode;
       const auto lv = aiLevel;
       ChineseChessStore::clear();
-      activityManager.replaceActivity(std::make_unique<ChineseChessGameActivity>(renderer, mappedInput, m, false, lv));
+      activityManager.replaceActivityWith<ChineseChessGameActivity>(m, false, lv);
       return;
     }
     case 4:  // Exit to menu
       flushSave();
-      activityManager.replaceActivity(std::make_unique<ChineseChessMenuActivity>(renderer, mappedInput));
+      activityManager.replaceActivityWith<ChineseChessMenuActivity>();
       return;
   }
 }
@@ -743,30 +732,11 @@ void ChineseChessGameActivity::renderGameMenu() {
   constexpr int rowH = 32;
   const Rect panel =
       gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 320, titleH, rowH, MENU_ITEM_COUNT);
-  const int x = panel.x;
-  const int y = panel.y;
-  const int w = panel.width;
-  const int h = panel.height;
-
-  renderer.fillRect(x, y, w, h, false);
-  renderer.drawRect(x, y, w, h, 2, true);
-
-  const int titleTextH = renderer.getTextHeight(kModalItemFont);
-  renderer.fillRect(x + 2, y + titleH, w - 4, 1, true);
-  renderer.drawText(kModalItemFont, x + 12, y + (titleH - titleTextH) / 2, tr(STR_GAME_GAME_MENU));
-
-  const char* labels[MENU_ITEM_COUNT] = {
-      tr(STR_GAME_RESUME), tr(STR_GOMOKU_UNDO), tr(STR_GOMOKU_RESIGN), tr(STR_GAME_NEW_GAME), tr(STR_GAME_EXIT),
+  const GameMenuItem items[MENU_ITEM_COUNT] = {
+      {tr(STR_GAME_RESUME), ""},   {tr(STR_GOMOKU_UNDO), ""},      {tr(STR_GOMOKU_RESIGN), ""},
+      {tr(STR_GAME_NEW_GAME), ""}, {tr(STR_GAME_EXIT), ""},
   };
-
-  const int itemTextH = renderer.getTextHeight(kModalItemFont);
-  const int firstY = y + titleH;
-  for (int i = 0; i < MENU_ITEM_COUNT; i++) {
-    const int rowY = firstY + i * rowH;
-    const bool inverted = (i == menuSel);
-    if (inverted) renderer.fillRect(x + 1, rowY, w - 2, rowH, true);
-    renderer.drawText(kModalItemFont, x + 12, rowY + (rowH - itemTextH) / 2, labels[i], !inverted);
-  }
+  gameDrawMenu(renderer, panel, titleH, rowH, tr(STR_GAME_GAME_MENU), items, MENU_ITEM_COUNT, menuSel);
 
   const auto hints = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);

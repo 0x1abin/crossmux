@@ -311,29 +311,20 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
 }
 
 void ActivityManager::goToFileTransfer() {
-  replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput));
+  replaceActivityWith<CrossPointWebServerActivity>();
 }
 
-void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
+void ActivityManager::goToSettings() { replaceActivityWith<SettingsActivity>(); }
 
-void ActivityManager::goToUglyAvatar() { replaceActivity(std::make_unique<UglyAvatarActivity>(renderer, mappedInput)); }
+void ActivityManager::goToUglyAvatar() { replaceActivityWith<UglyAvatarActivity>(); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
-  replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
+  replaceActivityWith<FileBrowserActivity>(std::move(path));
 }
 
-void ActivityManager::goToRecentBooks() {
-  replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
-}
+void ActivityManager::goToRecentBooks() { replaceActivityWith<RecentBooksActivity>(); }
 
-void ActivityManager::goToInxRecent() {
-  auto activity = makeUniqueNoThrow<InxRecentActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: InxRecentActivity (%u bytes)", static_cast<unsigned>(sizeof(InxRecentActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToInxRecent() { replaceActivityWith<InxRecentActivity>(); }
 
 void ActivityManager::goToMainTab(const MainTab tab) {
   mainTabEntryReleasePending = false;
@@ -362,36 +353,30 @@ void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
   // Skip the server picker when there's only one server configured
   if (servers.size() == 1) {
-    replaceActivity(std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput, servers[0]));
+    replaceActivityWith<OpdsBookBrowserActivity>(servers[0]);
   } else {
-    replaceActivity(std::make_unique<OpdsServerListActivity>(renderer, mappedInput, true));
+    replaceActivityWith<OpdsServerListActivity>(true);
   }
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path), allowFastInitialRefresh));
+  replaceActivityWith<ReaderActivity>(std::move(path), allowFastInitialRefresh);
 }
 
 void ActivityManager::goToSleep(bool fromTimeout) {
-  replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
-  loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
+  if (replaceActivityWith<SleepActivity>(fromTimeout)) {
+    loop();  // The caller sleeps immediately after this returns, so render now.
+  }
 }
 
-void ActivityManager::goToBoot() { replaceActivity(std::make_unique<BootActivity>(renderer, mappedInput)); }
+void ActivityManager::goToBoot() { replaceActivityWith<BootActivity>(); }
 
 bool ActivityManager::goToPostOtaBoot(bool allowAutoPreload) {
-  // Activities outlive this call and are owned by ActivityManager, so this small allocation cannot use the stack.
-  auto activity = makeUniqueNoThrow<BootActivity>(renderer, mappedInput, BootActivity::Mode::PostOta, allowAutoPreload);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: BootActivity (%u bytes)", static_cast<unsigned>(sizeof(BootActivity)));
-    return false;
-  }
-  replaceActivity(std::move(activity));
-  return true;
+  return replaceActivityWith<BootActivity>(BootActivity::Mode::PostOta, allowAutoPreload);
 }
 
 void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::Style style) {
-  replaceActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, std::move(message), style));
+  replaceActivityWith<FullScreenMessageActivity>(std::move(message), style);
 }
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
@@ -415,102 +400,49 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }
   }
-  replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem));
+  replaceActivityWith<HomeActivity>(initialMenuItem);
 }
-void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
+void ActivityManager::goToCrashReport() { replaceActivityWith<CrashActivity>(); }
 
-void ActivityManager::goToApps() { replaceActivity(std::make_unique<AppsMenuActivity>(renderer, mappedInput)); }
+void ActivityManager::goToApps() { replaceActivityWith<AppsMenuActivity>(); }
 
-void ActivityManager::goToReadingStatsMenu() {
-  replaceActivity(std::make_unique<ReadingStatsMenuActivity>(renderer, mappedInput));
-}
+void ActivityManager::goToReadingStatsMenu() { replaceActivityWith<ReadingStatsMenuActivity>(); }
 
-void ActivityManager::goToReadingStats() {
-  auto activity = makeUniqueNoThrow<ReadingStatsActivity>(renderer, mappedInput, true);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: ReadingStatsActivity (%u bytes)", static_cast<unsigned>(sizeof(ReadingStatsActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToReadingStats() { replaceActivityWith<ReadingStatsActivity>(true); }
 
-void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }
+void ActivityManager::goToSudoku() { replaceActivityWith<SudokuMenuActivity>(); }
 
-void ActivityManager::goToSokoban() { replaceActivity(std::make_unique<SokobanGameActivity>(renderer, mappedInput)); }
+void ActivityManager::goToSokoban() { replaceActivityWith<SokobanGameActivity>(); }
 
-void ActivityManager::goToGomoku() { replaceActivity(std::make_unique<GomokuMenuActivity>(renderer, mappedInput)); }
+void ActivityManager::goToGomoku() { replaceActivityWith<GomokuMenuActivity>(); }
 
-void ActivityManager::goToMinesweeper() {
-  replaceActivity(std::make_unique<MinesweeperMenuActivity>(renderer, mappedInput));
-}
+void ActivityManager::goToMinesweeper() { replaceActivityWith<MinesweeperMenuActivity>(); }
 
 void ActivityManager::goToPixelSwitch() {
-  // ActivityManager owns this 1500-byte inline canvas across frames, so it
-  // cannot live on the caller's stack. Failure must not abort under -fno-exceptions.
-  auto activity = makeUniqueNoThrow<PixelSwitchActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: PixelSwitchActivity (%u bytes)", static_cast<unsigned>(sizeof(PixelSwitchActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
+  replaceActivityWith<PixelSwitchActivity>();
 }
 
-void ActivityManager::goToCalculator() {
-  auto activity = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: CalculatorActivity (%u bytes)", static_cast<unsigned>(sizeof(CalculatorActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToCalculator() { replaceActivityWith<CalculatorActivity>(); }
 
-void ActivityManager::goToWoodfish() {
-  auto activity = makeUniqueNoThrow<WoodfishActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: WoodfishActivity (%u bytes)", static_cast<unsigned>(sizeof(WoodfishActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); }
 
-void ActivityManager::goToGame2048() { replaceActivity(std::make_unique<Game2048Activity>(renderer, mappedInput)); }
+void ActivityManager::goToGame2048() { replaceActivityWith<Game2048Activity>(); }
 
-void ActivityManager::goToAirPage() {
-  // Activities must outlive this call; ActivityManager takes ownership of this
-  // single allocation and releases it on navigation.
-  auto activity = makeUniqueNoThrow<AirPageActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: AirPageActivity (%u bytes)", static_cast<unsigned>(sizeof(AirPageActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToAirPage() { replaceActivityWith<AirPageActivity>(); }
 
-void ActivityManager::goToBuddy() {
-  auto activity = makeUniqueNoThrow<BuddyActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: BuddyActivity (%u bytes)", static_cast<unsigned>(sizeof(BuddyActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
-}
+void ActivityManager::goToBuddy() { replaceActivityWith<BuddyActivity>(); }
 
-void ActivityManager::goToStandby() { replaceActivity(std::make_unique<StandbyActivity>(renderer, mappedInput)); }
+void ActivityManager::goToStandby() { replaceActivityWith<StandbyActivity>(); }
 
 #ifdef ENABLE_CHINESE_VERSION
 void ActivityManager::goToChineseChess() {
-  replaceActivity(std::make_unique<ChineseChessMenuActivity>(renderer, mappedInput));
+  replaceActivityWith<ChineseChessMenuActivity>();
 }
 #endif
 
 #ifdef ENABLE_CHINESE_VERSION
 void ActivityManager::goToWeRead() {
-  auto activity = makeUniqueNoThrow<WeReadActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: WeReadActivity");
-    return;
-  }
-  replaceActivity(std::move(activity));
+  replaceActivityWith<WeReadActivity>();
 }
 #endif
 

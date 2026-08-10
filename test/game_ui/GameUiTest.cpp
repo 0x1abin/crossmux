@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "GfxRenderer.h"
+#include "MappedInputManager.h"
 #include "activities/apps/GameUi.h"
 
 TEST(GameUiTouchGeometry, GridRejectsOutsideAndMapsEdges) {
@@ -60,4 +62,58 @@ TEST(GameUiTouchGeometry, MenuPanelCentersAndRejectsInvalidGeometry) {
 
   EXPECT_EQ(gameMenuPanelRect(480, 800, 0, 28, 32, 7).width, 0);
   EXPECT_EQ(gameMenuPanelRect(480, 100, 320, 28, 32, 7).height, 0);
+}
+
+TEST(GameUiMenuInput, RejectsEmptyAndHandlesTouch) {
+  MappedInputManager input;
+  const Rect panel{80, 272, 320, 256};
+  uint8_t selected = 0;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 0, selected), GameMenuInputResult::None);
+
+  input.touch = MappedInputManager::RowTouch::Down;
+  input.touchedRow = 2;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 4, selected), GameMenuInputResult::SelectionChanged);
+  EXPECT_EQ(selected, 2);
+
+  input.touch = MappedInputManager::RowTouch::Tap;
+  input.touchedRow = 3;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 4, selected), GameMenuInputResult::Activated);
+  EXPECT_EQ(selected, 3);
+}
+
+TEST(GameUiMenuInput, WrapsSelectionAndReportsActions) {
+  MappedInputManager input;
+  const Rect panel{80, 272, 320, 256};
+  uint8_t selected = 0;
+
+  input.hasPressed = true;
+  input.pressed = MappedInputManager::Button::Up;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 4, selected), GameMenuInputResult::SelectionChanged);
+  EXPECT_EQ(selected, 3);
+
+  input.pressed = MappedInputManager::Button::Down;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 4, selected), GameMenuInputResult::SelectionChanged);
+  EXPECT_EQ(selected, 0);
+
+  input.hasPressed = false;
+  input.hasReleased = true;
+  input.released = MappedInputManager::Button::Confirm;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 4, selected), GameMenuInputResult::Activated);
+  input.released = MappedInputManager::Button::Back;
+  EXPECT_EQ(gameHandleMenuInput(input, panel, 28, 32, 4, selected), GameMenuInputResult::Dismissed);
+}
+
+TEST(GameUiMenuDrawing, SkipsEmptyHints) {
+  GfxRenderer renderer;
+  const GameMenuItem items[] = {{"Resume", ""}, {"Exit", "Home"}};
+  gameDrawMenu(renderer, Rect{80, 300, 320, 96}, 28, 32, "Menu", items, 2, 1);
+
+  ASSERT_EQ(renderer.textCalls.size(), 4u);
+  EXPECT_EQ(renderer.textCalls[0].text, "Menu");
+  EXPECT_EQ(renderer.textCalls[1].text, "Resume");
+  EXPECT_EQ(renderer.textCalls[2].text, "Exit");
+  EXPECT_EQ(renderer.textCalls[3].text, "Home");
+  EXPECT_TRUE(renderer.textCalls[1].black);
+  EXPECT_FALSE(renderer.textCalls[2].black);
+  EXPECT_FALSE(renderer.textCalls[3].black);
 }
