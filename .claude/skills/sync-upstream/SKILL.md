@@ -19,6 +19,9 @@ python3 .claude/skills/sync-upstream/scripts/sync_upstream.py inspect
 python3 .claude/skills/sync-upstream/scripts/sync_upstream.py run --draft
 ```
 
+Private forks can append repeatable build environments, for example
+`--extra-build-env gh_weread_pro`.
+
 `run --draft` does the whole happy path:
 
 1. Reads the super.engineering target branch with `sc worktree status --json`
