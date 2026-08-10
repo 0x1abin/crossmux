@@ -164,7 +164,9 @@ mallet, ripples, drags, and the system Back gesture are not knocks. Its
 `uint32_t` counter saturates, has no reset action, and is checkpointed to SD
 after 60 seconds idle or on exit.
 
-AirPage always enters on its QR page and silently connects the last saved Wi-Fi.
+AirPage always enters on its QR page and stays offline until Refresh or live
+mode needs Wi-Fi. Network-dependent apps use the shared Wi-Fi picker on demand;
+cancelling it leaves the app on its current screen so the user can retry.
 Its mapped bottom actions are Back, Settings, Images, and Refresh; logical
 previous/next also map the side buttons to Images/Refresh in every orientation.
 Connecting or reconnecting never downloads an image by itself; only Refresh or

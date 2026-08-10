@@ -107,6 +107,8 @@ class WeReadActivity final : public Activity {
   bool shelfCoverStopped_ = false;
   bool optionPopupClosing_ = false;
   bool disclaimerSaveFailed_ = false;
+  bool wifiSessionActive_ = false;
+  bool wifiReleasePending_ = false;
   std::atomic<bool> downloadRenderPending_{false};
   std::atomic<bool> stageRenderPending_{false};
 

@@ -48,10 +48,10 @@ AirPageConnection::Event AirPageConnection::begin(const bool realtime) {
 
   resetRetryWindow();
   if (wifiConnected()) {
+    ownsWifi_ = realtime_;
     state_ = realtime_ ? State::BrokerConnecting : State::WifiOnline;
     return Event::StateChanged;
   }
-  if (startWifiAssociation()) return Event::StateChanged;
   state_ = State::Off;
   return Event::WifiRequired;
 }
@@ -88,7 +88,7 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
     if (mqtt_.connected()) mqtt_.disconnect();
     if (wifiConnected()) {
       state_ = State::WifiOnline;
-    } else if (!startWifiAssociation()) {
+    } else {
       state_ = State::Off;
     }
     return Event::StateChanged;
@@ -96,14 +96,15 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
 
   resetRetryWindow();
   if (wifiConnected()) {
+    ownsWifi_ = true;
     state_ = State::BrokerConnecting;
     return Event::StateChanged;
   }
-  if (startWifiAssociation()) return Event::StateChanged;
   return pause(Event::WifiRequired);
 }
 
 void AirPageConnection::prepareRefresh() {
+  if (wifiConnected()) ownsWifi_ = true;
   if (!realtime_ || state_ == State::Online) return;
   resetRetryWindow();
   state_ = State::BrokerConnecting;
