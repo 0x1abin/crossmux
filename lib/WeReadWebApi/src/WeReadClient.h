@@ -13,6 +13,11 @@ namespace WeReadClient {
 
 struct OperationTestPeer;
 
+constexpr uint32_t readingSecondsForSession(const bool valid, const bool pathMatches, const bool bookMatches,
+                                            const uint32_t sessionMs) {
+  return valid && pathMatches && bookMatches ? sessionMs / 1000 : 0;
+}
+
 enum class Error {
   Ok,
   Cancelled,
@@ -41,12 +46,13 @@ struct DownloadOptions {
 struct ProgressSyncInput {
   float localFraction = 0.0f;
   uint32_t localTocIndex = 0;
+  uint32_t readingSeconds = 0;
   uint16_t localSpineIndex = 0;
   uint16_t localPageNumber = 0;
   uint16_t localPageCount = 0;
   bool hasLocalTocIndex = false;
 };
-static_assert(sizeof(ProgressSyncInput) == 16);
+static_assert(sizeof(ProgressSyncInput) == 20);
 
 enum class ProgressSyncMode : uint8_t {
   Compare,
@@ -106,6 +112,7 @@ class Operation {
   const char* qrUrl() const { return url_; }
   const char* finalPath() const { return outputPath_.c_str(); }
   const ProgressSyncResult& progressSyncResult() const { return progressSyncResult_; }
+  uint32_t pendingReadingSeconds() const { return progressSyncInput_.readingSeconds; }
   bool active() const;
 
  private:
@@ -116,6 +123,8 @@ class Operation {
     SelectDirection,
     ApplyRemote,
     UploadLocal,
+    ReportSynced,
+    ReportRemote,
   };
 
   enum class CoverCacheAction : uint8_t {
@@ -256,13 +265,14 @@ class Operation {
   static constexpr bool wholeChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
     return validChapterRange(first, last, count) && first == 0 && last == count - 1;
   }
-  static constexpr ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition) {
-    if (samePosition) return ProgressAction::AlreadySynced;
+  static constexpr ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition,
+                                                 const bool hasReadingTime) {
+    if (samePosition) return hasReadingTime ? ProgressAction::ReportSynced : ProgressAction::AlreadySynced;
     switch (mode) {
       case ProgressSyncMode::Compare:
         return ProgressAction::SelectDirection;
       case ProgressSyncMode::ApplyRemote:
-        return ProgressAction::ApplyRemote;
+        return hasReadingTime ? ProgressAction::ReportRemote : ProgressAction::ApplyRemote;
       case ProgressSyncMode::UploadLocal:
         return ProgressAction::UploadLocal;
     }
@@ -280,6 +290,16 @@ class Operation {
       return ProgressSyncOutcome::SelectionRequired;
     }
     return ProgressSyncOutcome::Pending;
+  }
+  static constexpr ProgressSyncOutcome reportedProgressOutcome(const ProgressSyncOutcome verified,
+                                                               const ProgressSyncOutcome target) {
+    return target == ProgressSyncOutcome::Pending ? verified : target;
+  }
+  static constexpr bool ambiguousTimedReportFailure(const Error error, const uint32_t readingSeconds) {
+    return error == Error::Network && readingSeconds > 0;
+  }
+  static constexpr uint32_t readingSecondsAfterReport(const Error error, const uint32_t readingSeconds) {
+    return error == Error::Ok ? 0 : readingSeconds;
   }
   static constexpr uint32_t browseReviewRequestCount(const uint32_t cached) {
     const uint32_t remaining = cached < WeReadBrowse::kMaxCachedReviews ? WeReadBrowse::kMaxCachedReviews - cached : 0;
@@ -347,6 +367,7 @@ class Operation {
   ProgressSyncInput progressSyncInput_;
   ProgressSyncMode progressSyncMode_ = ProgressSyncMode::Compare;
   ProgressSyncResult progressSyncResult_;
+  ProgressSyncOutcome progressReportOutcome_ = ProgressSyncOutcome::Pending;
   WeReadStore::Session session_;
   WeReadStore::ShelfRecord book_;
   WeReadStore::TocRecord chapter_;
