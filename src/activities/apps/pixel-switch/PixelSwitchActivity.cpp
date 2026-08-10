@@ -231,12 +231,14 @@ bool PixelSwitchActivity::startSavedWifiAssociation() {
   std::string pass;
   {
     RenderLock lock(*this);
-    if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
-    const std::string& last = WIFI_STORE.getLastConnectedSsid();
-    const WifiCredential* credential = last.empty() ? nullptr : WIFI_STORE.findCredential(last);
-    if (credential) {
-      ssid = credential->ssid;
-      pass = credential->password;
+    if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
+    const std::string last = WIFI_STORE.getLastConnectedSsid();
+    if (!last.empty()) {
+      const auto credential = WIFI_STORE.findCredential(last);
+      if (credential) {
+        ssid = credential->ssid;
+        pass = credential->password;
+      }
     }
   }
 

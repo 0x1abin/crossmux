@@ -27,6 +27,10 @@ class OtaUpdateActivity : public Activity {
   unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
   OtaUpdater updater;
   OptionPopup updateConfirmation;
+  // Optional detail line shown under the generic "Update failed" heading.
+  // Points into the i18n string table (flash-resident, so no lifetime concern);
+  // nullptr means no extra detail.
+  const char* failedDetail = nullptr;
 
   void activateReadyRow();
   void beginWifiSelection();

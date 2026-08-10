@@ -334,7 +334,8 @@ void ClockOffsetActivity::render(RenderLock&&) {
   const uint8_t encoded = encodeOffset(sign, hours, minutesQuarter);
   if (TimeUtils::formatTime(TimeUtils::getCurrentValidTimestamp(), encoded, SETTINGS.clockFormat == 1, timeBuf,
                             sizeof(timeBuf))) {
-    char preview[24];
+    // The translated label alone can exceed the previous 24-byte buffer.
+    char preview[64];
     snprintf(preview, sizeof(preview), "%s %s", tr(STR_CURRENT_TIME), timeBuf);
     renderer.drawCenteredText(UI_10_FONT_ID, centreY + 60, preview);
   }
