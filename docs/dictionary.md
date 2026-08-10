@@ -24,6 +24,15 @@ Not supported: `.syn` synonym files (ignored), dictionaries with 64-bit index of
 
 Online dictionaries are installed under `/.dictionaries/`. Downloads are verified before the old version is replaced, and interrupted installations are recovered the next time the manager opens. Only folders carrying the manager's `.crossmux-resource` marker can be updated or deleted online.
 
+The firmware flavor selects the resource route at compile time. International builds request the
+catalog from `https://crossmux.com` and normally download from GitHub
+`0x1abin/crossmux-assets`; builds compiled with `ENABLE_CHINESE_VERSION` request
+`https://crossmux.yunhug.com` and download from Gitee `x1abin/crossmux-assets`. The current UI
+language is included as the `lang` query parameter but does not select the mirror. The existing
+Cloudflare mainland-China redirect for `crossmux.com` remains in effect, so an international build
+used in China may be redirected to the China API. Once an API deployment is selected, an upstream
+failure is reported without falling back to the other repository.
+
 ### Copy manually
 
 Copy each dictionary folder to `/dictionaries/` on the SD card, e.g. `/dictionaries/webster/webster.idx` + `webster.dict.dz`. A hidden `/.dictionaries/` folder works too. A manual folder whose name conflicts with an online dictionary is never overwritten by the manager.
