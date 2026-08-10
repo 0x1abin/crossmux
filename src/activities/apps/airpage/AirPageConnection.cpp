@@ -244,9 +244,9 @@ AirPageConnection::Event AirPageConnection::handleWifiFailure() {
 }
 
 bool AirPageConnection::startWifiAssociation() {
-  if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
-  const std::string& lastSsid = WIFI_STORE.getLastConnectedSsid();
-  const WifiCredential* credential = lastSsid.empty() ? nullptr : WIFI_STORE.findCredential(lastSsid);
+  if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  const auto credential = WIFI_STORE.findCredential(lastSsid);
   if (!credential) {
     LOG_ERR("AIRP", "No saved WiFi credential");
     return false;
