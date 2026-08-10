@@ -637,9 +637,8 @@ void GomokuGameActivity::renderGameMenu() {
     snprintf(undoHint, sizeof(undoHint), tr(STR_GOMOKU_MOVE_FMT), static_cast<unsigned>(board.moveCount));
   }
   const GameMenuItem items[MENU_ITEM_COUNT] = {
-      {tr(STR_GAME_RESUME), ""},          {tr(STR_GOMOKU_UNDO), undoHint},
-      {tr(STR_GOMOKU_RESIGN), ""},        {tr(STR_GAME_NEW_GAME), ""},
-      {tr(STR_GAME_EXIT), tr(STR_GAME_HOME)},
+      {tr(STR_GAME_RESUME), ""},   {tr(STR_GOMOKU_UNDO), undoHint},        {tr(STR_GOMOKU_RESIGN), ""},
+      {tr(STR_GAME_NEW_GAME), ""}, {tr(STR_GAME_EXIT), tr(STR_GAME_HOME)},
   };
   gameDrawMenu(renderer, panel, titleH, rowH, tr(STR_GAME_GAME_MENU), items, MENU_ITEM_COUNT, menuSel);
 }

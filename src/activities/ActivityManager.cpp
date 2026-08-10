@@ -310,17 +310,13 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   }
 }
 
-void ActivityManager::goToFileTransfer() {
-  replaceActivityWith<CrossPointWebServerActivity>();
-}
+void ActivityManager::goToFileTransfer() { replaceActivityWith<CrossPointWebServerActivity>(); }
 
 void ActivityManager::goToSettings() { replaceActivityWith<SettingsActivity>(); }
 
 void ActivityManager::goToUglyAvatar() { replaceActivityWith<UglyAvatarActivity>(); }
 
-void ActivityManager::goToFileBrowser(std::string path) {
-  replaceActivityWith<FileBrowserActivity>(std::move(path));
-}
+void ActivityManager::goToFileBrowser(std::string path) { replaceActivityWith<FileBrowserActivity>(std::move(path)); }
 
 void ActivityManager::goToRecentBooks() { replaceActivityWith<RecentBooksActivity>(); }
 
@@ -418,9 +414,7 @@ void ActivityManager::goToGomoku() { replaceActivityWith<GomokuMenuActivity>(); 
 
 void ActivityManager::goToMinesweeper() { replaceActivityWith<MinesweeperMenuActivity>(); }
 
-void ActivityManager::goToPixelSwitch() {
-  replaceActivityWith<PixelSwitchActivity>();
-}
+void ActivityManager::goToPixelSwitch() { replaceActivityWith<PixelSwitchActivity>(); }
 
 void ActivityManager::goToCalculator() { replaceActivityWith<CalculatorActivity>(); }
 
@@ -435,15 +429,11 @@ void ActivityManager::goToBuddy() { replaceActivityWith<BuddyActivity>(); }
 void ActivityManager::goToStandby() { replaceActivityWith<StandbyActivity>(); }
 
 #ifdef ENABLE_CHINESE_VERSION
-void ActivityManager::goToChineseChess() {
-  replaceActivityWith<ChineseChessMenuActivity>();
-}
+void ActivityManager::goToChineseChess() { replaceActivityWith<ChineseChessMenuActivity>(); }
 #endif
 
 #ifdef ENABLE_CHINESE_VERSION
-void ActivityManager::goToWeRead() {
-  replaceActivityWith<WeReadActivity>();
-}
+void ActivityManager::goToWeRead() { replaceActivityWith<WeReadActivity>(); }
 #endif
 
 void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {

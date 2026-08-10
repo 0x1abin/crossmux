@@ -687,9 +687,12 @@ void MinesweeperGameActivity::renderGameMenu() {
     snprintf(hintHint, sizeof(hintHint), "%s", tr(STR_MINESWEEPER_NO_HINTS));
   }
   const GameMenuItem items[MENU_ITEM_COUNT] = {
-      {tr(STR_GAME_RESUME), ""},                 {tr(STR_MINESWEEPER_TOGGLE_MODE), hintMode},
-      {flagItemLabel, ""},                       {tr(STR_MINESWEEPER_USE_HINT), hintHint},
-      {tr(STR_MINESWEEPER_RESTART), ""},         {tr(STR_GAME_NEW_GAME), ""},
+      {tr(STR_GAME_RESUME), ""},
+      {tr(STR_MINESWEEPER_TOGGLE_MODE), hintMode},
+      {flagItemLabel, ""},
+      {tr(STR_MINESWEEPER_USE_HINT), hintHint},
+      {tr(STR_MINESWEEPER_RESTART), ""},
+      {tr(STR_GAME_NEW_GAME), ""},
       {tr(STR_GAME_EXIT), tr(STR_GAME_HOME)},
   };
   gameDrawMenu(renderer, panel, titleH, rowH, tr(STR_GAME_GAME_MENU), items, MENU_ITEM_COUNT, menuSel);

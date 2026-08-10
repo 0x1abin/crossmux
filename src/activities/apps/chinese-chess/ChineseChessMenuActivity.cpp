@@ -115,8 +115,8 @@ void ChineseChessMenuActivity::handleAiDifficultyInput() {
     requestUpdate();
     if (touch == MappedInputManager::RowTouch::Tap) {
       ChineseChessStore::clear();
-      activityManager.replaceActivityWith<ChineseChessGameActivity>(
-          ChineseChessMode::VsAi, false, static_cast<ChineseChessAiLevel>(aiDifficultySel));
+      activityManager.replaceActivityWith<ChineseChessGameActivity>(ChineseChessMode::VsAi, false,
+                                                                    static_cast<ChineseChessAiLevel>(aiDifficultySel));
     }
     return;
   }

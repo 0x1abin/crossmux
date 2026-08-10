@@ -27,5 +27,5 @@ Rect gameTouchActionRect(int screenWidth, int screenHeight, int sidePadding, int
 Rect gameMenuPanelRect(int screenWidth, int screenHeight, int width, int titleHeight, int rowHeight, int rowCount);
 GameMenuInputResult gameHandleMenuInput(MappedInputManager& input, const Rect& panel, int titleHeight, int rowHeight,
                                         int itemCount, uint8_t& selected);
-void gameDrawMenu(GfxRenderer& renderer, const Rect& panel, int titleHeight, int rowHeight, const char* title,
+void gameDrawMenu(const GfxRenderer& renderer, const Rect& panel, int titleHeight, int rowHeight, const char* title,
                   const GameMenuItem* items, int itemCount, int selected);

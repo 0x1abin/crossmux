@@ -733,7 +733,7 @@ void ChineseChessGameActivity::renderGameMenu() {
   const Rect panel =
       gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 320, titleH, rowH, MENU_ITEM_COUNT);
   const GameMenuItem items[MENU_ITEM_COUNT] = {
-      {tr(STR_GAME_RESUME), ""},   {tr(STR_GOMOKU_UNDO), ""},      {tr(STR_GOMOKU_RESIGN), ""},
+      {tr(STR_GAME_RESUME), ""},   {tr(STR_GOMOKU_UNDO), ""}, {tr(STR_GOMOKU_RESIGN), ""},
       {tr(STR_GAME_NEW_GAME), ""}, {tr(STR_GAME_EXIT), ""},
   };
   gameDrawMenu(renderer, panel, titleH, rowH, tr(STR_GAME_GAME_MENU), items, MENU_ITEM_COUNT, menuSel);

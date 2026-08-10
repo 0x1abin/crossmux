@@ -66,8 +66,8 @@ GameMenuInputResult gameHandleMenuInput(MappedInputManager& input, const Rect& p
   }
 
   int touched = -1;
-  const auto touch = input.rowTouch(touched, panel.y + titleHeight, rowHeight, itemCount, panel.x,
-                                    panel.x + panel.width, rowHeight);
+  const auto touch =
+      input.rowTouch(touched, panel.y + titleHeight, rowHeight, itemCount, panel.x, panel.x + panel.width, rowHeight);
   if (touch != MappedInputManager::RowTouch::None) {
     selected = static_cast<uint8_t>(touched);
     return touch == MappedInputManager::RowTouch::Tap ? GameMenuInputResult::Activated
@@ -87,7 +87,7 @@ GameMenuInputResult gameHandleMenuInput(MappedInputManager& input, const Rect& p
   return GameMenuInputResult::None;
 }
 
-void gameDrawMenu(GfxRenderer& renderer, const Rect& panel, const int titleHeight, const int rowHeight,
+void gameDrawMenu(const GfxRenderer& renderer, const Rect& panel, const int titleHeight, const int rowHeight,
                   const char* title, const GameMenuItem* items, const int itemCount, const int selected) {
   if (panel.width <= 0 || panel.height <= 0 || titleHeight < 0 || rowHeight <= 0 || !title || !items ||
       itemCount <= 0) {

@@ -486,8 +486,8 @@ void ReadingHeatmapActivity::loop() {
       if (cells[static_cast<size_t>(index)].inViewedMonth) {
         selectedDayOrdinal = cells[static_cast<size_t>(index)].dayOrdinal;
         if (tapped) {
-          startActivityForResultWith<ReadingDayDetailActivity>(
-              [this](const ActivityResult&) { requestUpdate(); }, selectedDayOrdinal);
+          startActivityForResultWith<ReadingDayDetailActivity>([this](const ActivityResult&) { requestUpdate(); },
+                                                               selectedDayOrdinal);
         } else {
           requestUpdate();
         }

@@ -12,8 +12,8 @@
 
 #include "GfxRenderer.h"
 #include "Logging.h"
-#include "Memory.h"
 #include "MappedInputManager.h"
+#include "Memory.h"
 #include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
 

@@ -11,15 +11,15 @@ class GfxRenderer {
     bool black;
   };
 
-  std::vector<TextCall> textCalls;
-  int fillCount = 0;
-  int rectCount = 0;
+  mutable std::vector<TextCall> textCalls;
+  mutable int fillCount = 0;
+  mutable int rectCount = 0;
 
-  void fillRect(int, int, int, int, bool) { ++fillCount; }
-  void drawRect(int, int, int, int, int, bool) { ++rectCount; }
+  void fillRect(int, int, int, int, bool) const { ++fillCount; }
+  void drawRect(int, int, int, int, int, bool) const { ++rectCount; }
   int getTextHeight(int) const { return 12; }
   int getTextWidth(int, const char* text) const { return static_cast<int>(std::string(text).size()) * 6; }
-  void drawText(int font, int, int, const char* text, bool black = true) {
+  void drawText(int font, int, int, const char* text, bool black = true) const {
     textCalls.push_back({font, text, black});
   }
 };
