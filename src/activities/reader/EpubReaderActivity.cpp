@@ -1119,24 +1119,18 @@ bool EpubReaderActivity::launchWeReadSync() {
     return true;
   }
 
-  WeReadClient::ProgressSyncInput input;
-  input.localFraction = localFraction;
-  input.localSpineIndex = static_cast<uint16_t>(currentSpineIndex);
-  input.localPageNumber = static_cast<uint16_t>(currentPage);
-  input.localPageCount = static_cast<uint16_t>(totalPages);
-  WeReadStore::BookOptions options;
-  input.hasLocalTocIndex =
-      WeReadStore::loadBookOptions(WeReadStore::bookDirectory(wereadBookId_), options) &&
-      WeReadStore::parseGeneratedChapterHref(epub->getSpineItem(currentSpineIndex).href, input.localTocIndex);
+  const auto context = WeReadProgressSyncActivity::makeContext(
+      *epub, wereadBookId_, localFraction, static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(currentPage),
+      static_cast<uint16_t>(totalPages));
   LOG_INF("WRSync", "local chapter mapping: precise=%u spine=%u toc=%u page=%u/%u",
-          static_cast<unsigned>(input.hasLocalTocIndex), static_cast<unsigned>(input.localSpineIndex),
-          static_cast<unsigned>(input.localTocIndex), static_cast<unsigned>(input.localPageNumber),
-          static_cast<unsigned>(input.localPageCount));
+          static_cast<unsigned>(context.hasLocalTocIndex), static_cast<unsigned>(context.localSpineIndex),
+          static_cast<unsigned>(context.localTocIndex), static_cast<unsigned>(context.localPageNumber),
+          static_cast<unsigned>(context.localPageCount));
 
   // The activity owns the existing 4 KB WeRead workspace. Allocate it before
   // releasing the reader so OOM can leave the current page intact.
   auto sync = makeUniqueNoThrow<WeReadProgressSyncActivity>(renderer, mappedInput, std::move(savedEpubPath),
-                                                            wereadBookId_, input);
+                                                            wereadBookId_, context);
   if (!sync) {
     LOG_ERR("WRSync", "OOM: WeReadProgressSyncActivity (%u bytes)",
             static_cast<unsigned>(sizeof(WeReadProgressSyncActivity)));

@@ -4,12 +4,18 @@
 #include <string>
 
 #include "../WeReadBackend.h"
+#include "../WeReadProgressContext.h"
 #include "activities/Activity.h"
+
+class Epub;
 
 class WeReadProgressSyncActivity final : public Activity {
  public:
   WeReadProgressSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string epubPath,
-                             const char* bookId, WeReadClient::ProgressSyncInput input);
+                             const char* bookId, WeReadProgressContext context);
+
+  static WeReadProgressContext makeContext(const Epub& epub, const char* bookId, float localFraction,
+                                           uint16_t localSpineIndex, uint16_t localPageNumber, uint16_t localPageCount);
 
   void onEnter() override;
   void onExit() override;
