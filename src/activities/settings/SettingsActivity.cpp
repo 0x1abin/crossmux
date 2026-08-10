@@ -21,6 +21,7 @@
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
 #include "DateTimeSettingsActivity.h"
+#include "DictionaryDownloadActivity.h"
 #include "FontDownloadActivity.h"
 #include "InxItemLayout.h"
 #include "KOReaderSettingsActivity.h"
@@ -250,6 +251,8 @@ void SettingsActivity::rebuildSettingsLists() {
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
   readerSettings.insert(readerSettings.begin() + 1,
                         SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
+  readerSettings.insert(readerSettings.begin() + 2,
+                        SettingInfo::Action(StrId::STR_MANAGE_DICTIONARIES, SettingAction::ManageDictionaries));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStatsSettings));
 
@@ -787,6 +790,17 @@ void SettingsActivity::toggleCurrentSetting() {
                                  SETTINGS.saveToFile();
                                  rebuildSettingsLists();
                                });
+        break;
+      case SettingAction::ManageDictionaries:
+        if (auto dictionaries = makeUniqueNoThrow<DictionaryDownloadActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(dictionaries), [this](const ActivityResult&) {
+            SETTINGS.saveToFile();
+            rebuildSettingsLists();
+          });
+        } else {
+          LOG_ERR("SET", "OOM: DictionaryDownloadActivity (%u bytes)",
+                  static_cast<unsigned>(sizeof(DictionaryDownloadActivity)));
+        }
         break;
       case SettingAction::TextSettings:
         // ActivityManager owns this across render-loop frames, so it cannot be a

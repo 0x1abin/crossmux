@@ -16,9 +16,17 @@ Not supported: `.syn` synonym files (ignored), dictionaries with 64-bit index of
 
 ## Setting Up a Dictionary
 
-1. Copy your dictionary folder(s) to `/dictionaries/` on the SD card — one dictionary per folder, e.g. `/dictionaries/webster/webster.idx` + `webster.dict.dz`. A hidden `/.dictionaries/` folder (dot-prefixed) works the same way, for keeping it out of the file browser.
-2. Open **Settings → Reader → Dictionary** on the device.
-3. Select a dictionary from the list, or **None** to disable lookups.
+### Download over Wi-Fi
+
+1. Open **Settings → Reader → Manage Dictionaries** and connect to Wi-Fi.
+2. Download or update a dictionary. A single download is enabled automatically; **Update All** preserves the current selection.
+3. Use **Settings → Reader → Dictionary** to switch between installed dictionaries, or choose **None** to disable lookups.
+
+Online dictionaries are installed under `/.dictionaries/`. Downloads are verified before the old version is replaced, and interrupted installations are recovered the next time the manager opens. Only folders carrying the manager's `.crossmux-resource` marker can be updated or deleted online.
+
+### Copy manually
+
+Copy each dictionary folder to `/dictionaries/` on the SD card, e.g. `/dictionaries/webster/webster.idx` + `webster.dict.dz`. A hidden `/.dictionaries/` folder works too. A manual folder whose name conflicts with an online dictionary is never overwritten by the manager.
 
 The Dictionary setting only appears when at least one usable dictionary folder exists. Folders containing more than one dictionary (multiple `.idx` stems) are skipped as ambiguous.
 
