@@ -359,7 +359,7 @@ def sync_title(ctx: Context, upstream_short: str) -> str:
     return f"chore: sync upstream {ctx.upstream_branch} into {ctx.base_branch} ({upstream_short})"
 
 
-def pr_body(ctx: Context, upstream_full: str, skipped_builds: bool) -> str:
+def pr_body(ctx: Context, upstream_full: str, skipped_builds: bool, extra_build_envs: Sequence[str]) -> str:
     lines = [
         "## Summary",
         "",
@@ -375,6 +375,7 @@ def pr_body(ctx: Context, upstream_full: str, skipped_builds: bool) -> str:
         lines.append("- Builds skipped with `--skip-builds`")
     else:
         lines.extend(["- `pio run`", "- `pio run -e gh_release_cn`"])
+        lines.extend(f"- `pio run -e {env}`" for env in extra_build_envs)
     return "\n".join(lines) + "\n"
 
 
@@ -403,12 +404,14 @@ def validate_index(root: Path) -> None:
     check_conflict_markers(root)
 
 
-def run_builds(root: Path, skip_builds: bool) -> None:
+def run_builds(root: Path, skip_builds: bool, extra_build_envs: Sequence[str]) -> None:
     if skip_builds:
         print("Skipping PlatformIO builds because --skip-builds was passed.")
         return
     run(["pio", "run"], cwd=root, capture=False)
     run(["pio", "run", "-e", "gh_release_cn"], cwd=root, capture=False)
+    for env in extra_build_envs:
+        run(["pio", "run", "-e", env], cwd=root, capture=False)
 
 
 def commit_if_needed(root: Path, ctx: Context) -> None:
@@ -428,7 +431,9 @@ def push_branch(root: Path, origin_remote: str) -> None:
     git(root, "push", "-u", origin_remote, branch)
 
 
-def create_or_show_pr(root: Path, ctx: Context, draft: bool, skip_builds: bool) -> None:
+def create_or_show_pr(
+    root: Path, ctx: Context, draft: bool, skip_builds: bool, extra_build_envs: Sequence[str]
+) -> None:
     repo = repo_slug_from_remote(root, ctx.origin_remote)
     if not repo:
         raise RuntimeError(f"Could not parse GitHub repo from remote {ctx.origin_remote!r}.")
@@ -445,7 +450,7 @@ def create_or_show_pr(root: Path, ctx: Context, draft: bool, skip_builds: bool) 
     upstream_short = short_sha(root, ctx.upstream_ref)
     upstream_full = full_sha(root, ctx.upstream_ref)
     title = sync_title(ctx, upstream_short)
-    body = pr_body(ctx, upstream_full, skip_builds)
+    body = pr_body(ctx, upstream_full, skip_builds, extra_build_envs)
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
         handle.write(body)
         body_path = handle.name
@@ -548,10 +553,10 @@ def cmd_publish(args: argparse.Namespace) -> int:
     require_not_base_branch(ctx.root, ctx.base_branch)
     fetch_branch(ctx.root, ctx.upstream_remote, ctx.upstream_branch)
     validate_index(ctx.root)
-    run_builds(ctx.root, args.skip_builds)
+    run_builds(ctx.root, args.skip_builds, args.extra_build_env)
     commit_if_needed(ctx.root, ctx)
     push_branch(ctx.root, ctx.origin_remote)
-    create_or_show_pr(ctx.root, ctx, args.draft, args.skip_builds)
+    create_or_show_pr(ctx.root, ctx, args.draft, args.skip_builds, args.extra_build_env)
     return 0
 
 
@@ -596,6 +601,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     publish_parser.add_argument("--draft", action="store_true", default=True, help="open the PR as draft")
     publish_parser.add_argument("--ready", action="store_false", dest="draft", help="open a ready-for-review PR")
     publish_parser.add_argument("--skip-builds", action="store_true", help="skip PlatformIO build validation")
+    publish_parser.add_argument(
+        "--extra-build-env", action="append", default=[], metavar="ENV", help="also run `pio run -e ENV`; repeatable"
+    )
     publish_parser.set_defaults(func=cmd_publish)
 
     run_parser = subparsers.add_parser("run", help="start and publish the sync in one command")
@@ -603,6 +611,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     run_parser.add_argument("--draft", action="store_true", default=True, help="open the PR as draft")
     run_parser.add_argument("--ready", action="store_false", dest="draft", help="open a ready-for-review PR")
     run_parser.add_argument("--skip-builds", action="store_true", help="skip PlatformIO build validation")
+    run_parser.add_argument(
+        "--extra-build-env", action="append", default=[], metavar="ENV", help="also run `pio run -e ENV`; repeatable"
+    )
     run_parser.set_defaults(func=cmd_run)
     return parser.parse_args(argv)
 
