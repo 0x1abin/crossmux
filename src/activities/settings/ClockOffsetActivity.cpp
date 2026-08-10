@@ -330,6 +330,7 @@ void ClockOffsetActivity::render(RenderLock&&) {
   }
 
   // Live preview of the resulting wall-clock time, so users can verify against a watch.
+<<<<<<< HEAD
   char timeBuf[9];
   const uint8_t encoded = encodeOffset(sign, hours, minutesQuarter);
   if (TimeUtils::formatTime(TimeUtils::getCurrentValidTimestamp(), encoded, SETTINGS.clockFormat == 1, timeBuf,
@@ -337,6 +338,18 @@ void ClockOffsetActivity::render(RenderLock&&) {
     char preview[24];
     snprintf(preview, sizeof(preview), "%s %s", tr(STR_CURRENT_TIME), timeBuf);
     renderer.drawCenteredText(UI_10_FONT_ID, centreY + 60, preview);
+=======
+  if (halClock.isAvailable()) {
+    char timeBuf[9];
+    const uint8_t encoded = encodeOffset(sign, hours, minutesQuarter);
+    if (halClock.formatTime(timeBuf, sizeof(timeBuf), encoded, SETTINGS.clockFormat == 1)) {
+      // 24 bytes did not even hold the label itself once translated: STR_CURRENT_TIME
+      // is 26 bytes in Russian, 24 in Arabic and Ukrainian. See ClockSyncActivity.
+      char preview[64];
+      snprintf(preview, sizeof(preview), "%s %s", tr(STR_CURRENT_TIME), timeBuf);
+      renderer.drawCenteredText(UI_10_FONT_ID, centreY + 60, preview);
+    }
+>>>>>>> upstream/master
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_NEXT_FIELD), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

@@ -37,3 +37,7 @@ weread_apikey*.bin
 /CMakeLists.txt
 /dependencies.lock
 /sdkconfig.*
+<<<<<<< HEAD
+=======
+sdkconfig.sticky
+>>>>>>> upstream/master
