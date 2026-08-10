@@ -1,0 +1,9 @@
+{
+  "name": "WeReadWebApi",
+  "version": "1.0.0",
+  "description": "WeRead Web API protocol backend",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}

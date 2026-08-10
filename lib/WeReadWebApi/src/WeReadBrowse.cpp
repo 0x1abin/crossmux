@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "../../../util/StringUtils.h"
+#include "../../../src/util/StringUtils.h"
 
 namespace WeReadBrowse {
 namespace {

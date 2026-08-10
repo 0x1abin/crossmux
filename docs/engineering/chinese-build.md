@@ -76,7 +76,7 @@ DRAM use.
 
 ## WeRead transport
 
-WeRead owns its transport in `src/activities/apps/weread/WeReadHttpClient.*`;
+WeRead owns its transport in `lib/WeReadWebApi/src/WeReadHttpClient.*`;
 the public `HttpDownloader` has no WeRead-specific session, Cookie, or protocol
 logic. On device, the client uses wolfSSL through `freeink::SecureClient`, a
 caller-owned 4 KB work buffer, and one best-effort persistent connection.
