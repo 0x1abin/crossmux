@@ -8,8 +8,13 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+
+#ifdef SIMULATOR
+#include <Arduino.h>
+#endif
 
 #include "AppVisibilitySettingsActivity.h"
 #include "ButtonRemapActivity.h"
@@ -41,6 +46,9 @@ enum class AboutRow : uint8_t {
   FirmwareName,
   FirmwareVersion,
   DeviceModel,
+  WifiMacAddress,
+  ChipTemperature,
+  Uptime,
   HeapFreeTotal,
   LargestHeapBlock,
   SdUsedTotal,
@@ -58,6 +66,16 @@ class AboutActivity final : public Activity {
     heapInfo = HalSystem::getHeapInfo();
     deviceName = BoardConfig::ACTIVE.name;
     storageAvailable = Storage.getSpace(sdTotalBytes, sdFreeBytes);
+#ifdef SIMULATOR
+    wifiMacAvailable = HalSystem::getDeviceId(wifiMac);
+    uptimeSeconds = millis() / 1000;
+#else
+    wifiMacAvailable = HalSystem::getWifiStationMac(wifiMac);
+    float temperature = 0.0f;
+    temperatureAvailable = HalSystem::getChipTemperatureCelsius(temperature);
+    if (temperatureAvailable) chipTemperatureCelsius = static_cast<int>(std::lround(temperature));
+    uptimeSeconds = HalSystem::getUptimeSeconds();
+#endif
     requestUpdate();
   }
 
@@ -78,8 +96,9 @@ class AboutActivity final : public Activity {
         renderer, content, static_cast<int>(AboutRow::Count), -1,
         [](const int index) {
           static constexpr StrId LABELS[] = {
-              StrId::STR_ABOUT_FIRMWARE_NAME,   StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,
-              StrId::STR_ABOUT_HEAP_FREE_TOTAL, StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
+              StrId::STR_ABOUT_FIRMWARE_NAME,    StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,
+              StrId::STR_ABOUT_WIFI_MAC_ADDRESS, StrId::STR_ABOUT_CHIP_TEMPERATURE,   StrId::STR_ABOUT_UPTIME,
+              StrId::STR_ABOUT_HEAP_FREE_TOTAL,  StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
           };
           return std::string(I18N.get(LABELS[index]));
         },
@@ -101,6 +120,24 @@ class AboutActivity final : public Activity {
         return CROSSPOINT_VERSION;
       case AboutRow::DeviceModel:
         return deviceName ? deviceName : tr(STR_NOT_AVAILABLE);
+      case AboutRow::WifiMacAddress:
+        if (!wifiMacAvailable) return tr(STR_NOT_AVAILABLE);
+        snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X", wifiMac[0], wifiMac[1], wifiMac[2], wifiMac[3],
+                 wifiMac[4], wifiMac[5]);
+        return value;
+      case AboutRow::ChipTemperature:
+        if (!temperatureAvailable) return tr(STR_NOT_AVAILABLE);
+        snprintf(value, sizeof(value), "%d", chipTemperatureCelsius);
+        return value;
+      case AboutRow::Uptime: {
+        const uint64_t totalMinutes = uptimeSeconds / 60;
+        const uint64_t days = totalMinutes / (24 * 60);
+        const uint64_t hours = totalMinutes / 60 % 24;
+        const uint64_t minutes = totalMinutes % 60;
+        snprintf(value, sizeof(value), "%llu:%02llu:%02llu", static_cast<unsigned long long>(days),
+                 static_cast<unsigned long long>(hours), static_cast<unsigned long long>(minutes));
+        return value;
+      }
       case AboutRow::HeapFreeTotal:
         snprintf(value, sizeof(value), "%lu / %lu", static_cast<unsigned long>(heapInfo.freeBytes / 1024),
                  static_cast<unsigned long>(heapInfo.totalBytes / 1024));
@@ -124,9 +161,14 @@ class AboutActivity final : public Activity {
   }
 
   HalSystem::HeapInfo heapInfo{};
+  HalSystem::DeviceId wifiMac{};
   const char* deviceName = nullptr;
+  uint64_t uptimeSeconds = 0;
   uint64_t sdTotalBytes = 0;
   uint64_t sdFreeBytes = 0;
+  int chipTemperatureCelsius = 0;
+  bool wifiMacAvailable = false;
+  bool temperatureAvailable = false;
   bool storageAvailable = false;
 };
 
