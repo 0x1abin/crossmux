@@ -6,6 +6,10 @@
 
 namespace credential_integrity {
 
+inline constexpr size_t MAX_PASSWORD_BYTES = 64;
+
+constexpr bool isPasswordLengthValid(const size_t length) { return length <= MAX_PASSWORD_BYTES; }
+
 // IEEE CRC-32. This detects accidental credential corruption; it is not an
 // authentication mechanism and does not make the existing XOR obfuscation
 // cryptographically secure.

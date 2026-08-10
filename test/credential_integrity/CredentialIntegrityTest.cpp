@@ -29,6 +29,12 @@ std::string decodeBase64(const std::string_view encoded) {
   return decoded;
 }
 
+TEST(CredentialIntegrity, EnforcesPasswordLengthLimit) {
+  EXPECT_TRUE(credential_integrity::isPasswordLengthValid(0));
+  EXPECT_TRUE(credential_integrity::isPasswordLengthValid(credential_integrity::MAX_PASSWORD_BYTES));
+  EXPECT_FALSE(credential_integrity::isPasswordLengthValid(credential_integrity::MAX_PASSWORD_BYTES + 1));
+}
+
 TEST(CredentialIntegrity, RejectsSameLengthBase64Corruption) {
   const std::string encoded = "cGFzc3dvcmQ=";  // "password"
   const std::string plaintext = decodeBase64(encoded);

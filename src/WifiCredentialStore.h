@@ -33,7 +33,6 @@ class WifiCredentialStore : public PersistableStore<WifiCredentialStore> {
   mutable std::mutex credentialMutex;
 
   static constexpr size_t MAX_NETWORKS = 8;
-  static constexpr size_t MAX_PASSWORD_LENGTH = 64;
 
   // Private constructor for singleton
   WifiCredentialStore() = default;

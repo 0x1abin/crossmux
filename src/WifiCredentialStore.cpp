@@ -49,7 +49,7 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
         continue;
       }
       expectedLength = passwordLength.as<size_t>();
-      if (expectedLength > MAX_PASSWORD_LENGTH) {
+      if (!credential_integrity::isPasswordLengthValid(expectedLength)) {
         LOG_ERR("WCS", "Discarding oversized password for %s (%zu bytes)", cred.ssid.c_str(), expectedLength);
         needsResave = true;
         continue;
@@ -57,7 +57,7 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
     }
 
     bool passwordValid = false;
-    cred.password = extractPassword(obj, needsResave, MAX_PASSWORD_LENGTH, passwordValid);
+    cred.password = extractPassword(obj, needsResave, credential_integrity::MAX_PASSWORD_BYTES, passwordValid);
     if (!passwordValid) {
       LOG_ERR("WCS", "Discarding oversized password for %s", cred.ssid.c_str());
       needsResave = true;
@@ -110,6 +110,11 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
 }
 
 bool WifiCredentialStore::addCredential(const std::string& ssid, const std::string& password) {
+  if (!credential_integrity::isPasswordLengthValid(password.size())) {
+    LOG_ERR("WCS", "Cannot save oversized password for %s (%zu bytes)", ssid.c_str(), password.size());
+    return false;
+  }
+
   {
     std::lock_guard<std::mutex> lock(credentialMutex);
 
