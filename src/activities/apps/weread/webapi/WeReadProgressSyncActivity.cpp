@@ -36,9 +36,31 @@ static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead progress work
 
 WeReadProgressSyncActivity::WeReadProgressSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                        std::string epubPath, const char* bookId,
-                                                       WeReadClient::ProgressSyncInput input)
-    : Activity("WeReadProgressSync", renderer, mappedInput), epubPath_(std::move(epubPath)), input_(input) {
+                                                       const WeReadProgressContext context)
+    : Activity("WeReadProgressSync", renderer, mappedInput), epubPath_(std::move(epubPath)) {
   if (bookId) strncpy(bookId_, bookId, sizeof(bookId_) - 1);
+  input_.localFraction = context.localFraction;
+  input_.localTocIndex = context.localTocIndex;
+  input_.localSpineIndex = context.localSpineIndex;
+  input_.localPageNumber = context.localPageNumber;
+  input_.localPageCount = context.localPageCount;
+  input_.hasLocalTocIndex = context.hasLocalTocIndex;
+}
+
+WeReadProgressContext WeReadProgressSyncActivity::makeContext(const Epub& epub, const char* bookId,
+                                                              const float localFraction, const uint16_t localSpineIndex,
+                                                              const uint16_t localPageNumber,
+                                                              const uint16_t localPageCount) {
+  WeReadProgressContext context;
+  context.localFraction = localFraction;
+  context.localSpineIndex = localSpineIndex;
+  context.localPageNumber = localPageNumber;
+  context.localPageCount = localPageCount;
+  WeReadStore::BookOptions options;
+  context.hasLocalTocIndex =
+      WeReadStore::loadBookOptions(WeReadStore::bookDirectory(bookId), options) &&
+      WeReadStore::parseGeneratedChapterHref(epub.getSpineItem(localSpineIndex).href, context.localTocIndex);
+  return context;
 }
 
 void WeReadProgressSyncActivity::onEnter() {

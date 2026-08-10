@@ -2,10 +2,8 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "WeReadBrowse.h"
-#include "WeReadClient.h"
-#include "WeReadStore.h"
+#include "../WeReadBackend.h"
+#include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;

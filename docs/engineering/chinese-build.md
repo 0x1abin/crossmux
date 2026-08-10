@@ -76,6 +76,10 @@ DRAM use.
 
 ## WeRead transport
 
+The root headers below `src/activities/apps/weread/` are compile-time-only
+selection points. The public build uses the UI in `webapi/` with
+`lib/WeReadWebApi`; there is no runtime backend switch.
+
 WeRead owns its transport in `lib/WeReadWebApi/src/WeReadHttpClient.*`;
 the public `HttpDownloader` has no WeRead-specific session, Cookie, or protocol
 logic. On device, the client uses wolfSSL through `freeink::SecureClient`, a

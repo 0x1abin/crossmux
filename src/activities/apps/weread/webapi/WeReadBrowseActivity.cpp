@@ -11,13 +11,13 @@
 #include <cstring>
 #include <string>
 
-#include "../../../CrossPointSettings.h"
-#include "../../../SdCardFontSystem.h"
-#include "../../../components/SubpageLayout.h"
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../../../util/QrUtils.h"
-#include "../../network/WifiSelectionActivity.h"
+#include "CrossPointSettings.h"
+#include "SdCardFontSystem.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "components/SubpageLayout.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+#include "util/QrUtils.h"
 
 namespace {
 

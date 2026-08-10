@@ -27,13 +27,10 @@ pio run -e gh_release_cn
 
 | 文件 | 职责 |
 |---|---|
-| `WeReadActivity.*` | 界面、按键和任务状态流 |
-| `WeReadBrowseActivity.*` | 划线书评菜单、列表和正文浏览 |
-| `WeReadBrowse.*` | 浏览响应流式解析、双槽分页缓存及清单校验 |
-| `WeReadClient.*` | 登录、书架同步、划线书评批量拉取、章节获取和 EPUB 打包流程 |
-| `WeReadHttpClient.*` | 真机与模拟器的 HTTP/TLS 传输 |
-| `WeReadProtocol.*` | 协议数据处理和正文转换 |
-| `WeReadStore.*` | SD 卡会话、索引、章节缓存和 EPUB 存储 |
+| `webapi/WeReadActivity.*` | 界面、按键和任务状态流 |
+| `webapi/WeReadBrowseActivity.*` | 划线书评菜单、列表和正文浏览 |
+| `WeReadActivity.h`、`WeReadProgressSyncActivity.h`、`WeReadBackend.h` | 编译期选择入口 |
+| `lib/WeReadWebApi` | 登录、HTTP、协议解析、缓存、划线书评和 EPUB 打包 |
 
 登录会话、书架、详情、章节、图片和缓存中间数据保存在 SD 卡的 `/.crosspoint/weread/`。详情、原始封面和章节缓存可复用；最大 112×164 的封面只读取 `cover.v2.bmp`，旧 `cover.bmp` 不再读取或迁移。旧章节缺少图片索引时会重新拉取。每本书的图片策略只在 EPUB 成功生成后保存。`session.bin` 含登录会话信息，请妥善保管 SD 卡；退出登录会清除本地会话和书架索引，已缓存的 EPUB 会保留。
 

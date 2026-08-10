@@ -14,20 +14,21 @@
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <numeric>
 #include <string>
 
-#include "../../../CrossPointState.h"
-#include "../../../SdCardFontSystem.h"
-#include "../../../SilentRestart.h"
-#include "../../../components/SubpageLayout.h"
-#include "../../../components/UITheme.h"
-#include "../../../components/icons/cover.h"
-#include "../../../fontIds.h"
-#include "../../../util/QrUtils.h"
-#include "../../network/WifiSelectionActivity.h"
-#include "../../util/ConfirmationActivity.h"
+#include "CrossPointState.h"
+#include "SdCardFontSystem.h"
+#include "SilentRestart.h"
 #include "WeReadBrowseActivity.h"
-#include "WeReadTouchGeometry.h"
+#include "activities/apps/weread/WeReadTouchGeometry.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
+#include "components/SubpageLayout.h"
+#include "components/UITheme.h"
+#include "components/icons/cover.h"
+#include "fontIds.h"
+#include "util/QrUtils.h"
 
 namespace {
 
@@ -522,10 +523,10 @@ Rect WeReadActivity::disclaimerActionsBounds() const {
   const int minimumHeight = renderer.getLineHeight(UI_10_FONT_ID) + metrics.verticalSpacing;
   const int height = std::min(content.height, std::max(GUI.getListRowStep(false), minimumHeight));
   const int availableWidth = std::max(0, content.width - metrics.contentSidePadding * 2);
-  int labelWidth = 0;
-  for (const StrId action : kDisclaimerActions) {
-    labelWidth = std::max(labelWidth, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(action)));
-  }
+  const int labelWidth =
+      std::accumulate(std::begin(kDisclaimerActions), std::end(kDisclaimerActions), 0, [this](int width, StrId action) {
+        return std::max(width, renderer.getTextWidth(UI_10_FONT_ID, I18N.get(action)));
+      });
   const int gap = disclaimerActionGap(availableWidth, metrics.verticalSpacing);
   const int targetWidth =
       (labelWidth + metrics.contentSidePadding * 2) * kDisclaimerActionCount + gap * (kDisclaimerActionCount - 1);
@@ -1979,8 +1980,8 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
                              selected ? Color::Black : Color::White);
     renderer.drawRoundedRect(buttonX, actions.y, buttonWidth, actions.height, 1, buttonRadius, true);
     const char* label = I18N.get(kDisclaimerActions[i]);
-    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
-    renderer.drawText(UI_10_FONT_ID, buttonX + (buttonWidth - textWidth) / 2,
+    const int labelWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
+    renderer.drawText(UI_10_FONT_ID, buttonX + (buttonWidth - labelWidth) / 2,
                       actions.y + (actions.height - buttonLineHeight) / 2, label, !selected);
   }
 
