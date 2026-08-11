@@ -43,28 +43,25 @@ static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly-1234567"));
 static_assert(!isSameNightlyBuild("1.5.2", "nightly-5064d90"));
 static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly"));
 
-// OTA manifest endpoint. The global build uses crossmux.com; the Chinese build
-// (ENABLE_CHINESE_VERSION) uses crossmux.yunhug.com, the yunhug-hosted domain
-// with a more reliable mainland-China path. Either way the web proxy picks the
-// right release asset for this build's variant (firmware.bin for the global
-// build, firmware-cn.bin for the Chinese build) and re-exposes it as a minimal
-// GitHub-release-shaped JSON whose single asset is always named
-// "firmware.bin" — that's the literal ReleaseJsonParser matches on.
+// The build environment supplies the OTA host; ENABLE_CHINESE_VERSION selects
+// the matching release asset variant. The web proxy re-exposes it as a minimal
+// GitHub-release-shaped JSON whose single asset is always named "firmware.bin"
+// — that's the literal ReleaseJsonParser matches on.
 //
 // Going through the web instead of api.github.com directly avoids the
 // unauthenticated 60 req/hr/IP rate limit and the unstable mainland-China
 // path to api.github.com.
 constexpr char latestReleaseUrl[] =
 #ifdef ENABLE_CHINESE_VERSION
-    "https://crossmux.yunhug.com/api/ota/manifest?variant=cn";
+    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=cn";
 #else
-    "https://crossmux.com/api/ota/manifest?variant=global";
+    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=global";
 #endif
 constexpr char nightlyReleaseUrl[] =
 #ifdef ENABLE_CHINESE_VERSION
-    "https://crossmux.yunhug.com/api/ota/manifest?variant=cn&channel=nightly";
+    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=cn&channel=nightly";
 #else
-    "https://crossmux.com/api/ota/manifest?variant=global&channel=nightly";
+    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=global&channel=nightly";
 #endif
 }  // namespace
 

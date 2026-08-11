@@ -25,12 +25,7 @@
 
 namespace {
 
-constexpr char kAirPageBase[] =
-#ifdef ENABLE_CHINESE_VERSION
-    "airpage.yunhug.com";
-#else
-    "airpage.crossmux.com";
-#endif
+constexpr char kAirPageBase[] = "airpage." CROSSMUX_HOST;
 constexpr uint32_t kWallpaperNoticeDurationMs = 1000u;
 
 uint64_t currentArchiveDateKey() {
