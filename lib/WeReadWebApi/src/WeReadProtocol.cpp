@@ -132,6 +132,18 @@ uint32_t hashAppId(const char* value, const size_t len) {
 
 bool hasUsablePclts(const char* value) { return value && value[0] && strcmp(value, "0") != 0; }
 
+bool formatReadingTimeQuery(const uint32_t seconds, char* out, const size_t outSize) {
+  if (!out || outSize == 0) return false;
+  const int length = snprintf(out, outSize, "&rt=%u&sg=", static_cast<unsigned>(seconds));
+  return length > 0 && static_cast<size_t>(length) < outSize;
+}
+
+bool formatReadingTimeJson(const uint32_t seconds, char* out, const size_t outSize) {
+  if (!out || outSize == 0) return false;
+  const int length = snprintf(out, outSize, ",\"rt\":%u,\"ts\":", static_cast<unsigned>(seconds));
+  return length > 0 && static_cast<size_t>(length) < outSize;
+}
+
 RemoteProgressParser::RemoteProgressParser(const char* requestedBookId)
     : requestedBookId_(requestedBookId), parser_(callbacks(this)) {
   reset();

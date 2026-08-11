@@ -2,10 +2,8 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "WeReadBrowse.h"
-#include "WeReadClient.h"
-#include "WeReadStore.h"
+#include "../WeReadBackend.h"
+#include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -50,6 +48,7 @@ class WeReadBrowseActivity final : public Activity {
   bool hasCache_ = false;
   bool textPagesTruncated_ = false;
   bool readerFontReady_ = false;
+  bool wifiReleasePending_ = false;
 
   Rect contentBounds() const;
   int pageItemCount() const;

@@ -65,6 +65,7 @@ jobs:
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
   build:
+    name: Build full hardware beta matrix
     # Only trusted same-repository PRs and main builds may use the persistent H2O runner.
     runs-on: ${{ (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'h2o' || 'ubuntu-latest' }}
     steps:

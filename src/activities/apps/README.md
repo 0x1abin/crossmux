@@ -59,17 +59,16 @@ In `src/activities/ActivityManager.{h,cpp}`:
 void goToMyApp();
 
 // .cpp
-#include <Memory.h>
 #include "apps/myapp/MyAppActivity.h"
 void ActivityManager::goToMyApp() {
-  auto activity = makeUniqueNoThrow<MyAppActivity>(renderer, mappedInput);
-  if (!activity) {
-    LOG_ERR("ACT", "OOM: MyAppActivity (%u bytes)", static_cast<unsigned>(sizeof(MyAppActivity)));
-    return;
-  }
-  replaceActivity(std::move(activity));
+  replaceActivityWith<MyAppActivity>();
 }
 ```
+
+`replaceActivityWith<T>(...)` and `startActivityForResultWith<T>(handler, ...)`
+prepend `renderer` and `mappedInput` to the constructor arguments, allocate with
+`makeUniqueNoThrow`, log OOM, and leave the current Activity in place on
+failure. Do not construct Activities with `std::make_unique`.
 
 ### 3. Assign an ID and append one row to `kAppEntries`
 
@@ -111,6 +110,22 @@ IDs 17 through 31 remain available.
 ### 5. (Optional) Stateless toy apps
 
 Some apps have no save state at all. Ugly Avatar is a single-screen generator that creates a new avatar on entry and exits cleanly. It skips both `GameSaveDebouncer` and any `*Store.{h,cpp}` layer, and its `Activity` is launched directly (no `*MenuActivity`). Use this pattern when the app has no "in-progress game" worth resuming; it cuts a few hundred lines and avoids persistent writes.
+
+### Reusable implementation patterns
+
+Choose the smallest pattern that fits:
+
+| App shape | Reference | Reuse |
+|---|---|---|
+| Stateless, single screen | `avatar/UglyAvatarActivity` | `Activity`, `GameUi` action geometry; no Store or menu Activity |
+| Stateful, single screen | `2048/Game2048Activity`, `woodfish/WoodfishActivity` | Board/state object plus `GameSaveDebouncer` or an app-specific idle checkpoint |
+| Board game with launcher | `sudoku/` | Separate Board, Store, MenuActivity, GameActivity; `GameUi` menu/input helpers |
+
+`GameMenuItem` is a fixed-array row descriptor (`label` plus optional `hint`).
+Use `gameHandleMenuInput()` for touch and logical-button navigation and switch
+exhaustively on its result. Use `gameDrawMenu()` for the matching modal. Keep
+rules, win detection, AI, and persistence in the game: they are not framework
+concerns.
 
 ---
 
@@ -164,7 +179,9 @@ mallet, ripples, drags, and the system Back gesture are not knocks. Its
 `uint32_t` counter saturates, has no reset action, and is checkpointed to SD
 after 60 seconds idle or on exit.
 
-AirPage always enters on its QR page and silently connects the last saved Wi-Fi.
+AirPage always enters on its QR page and stays offline until Refresh or live
+mode needs Wi-Fi. Network-dependent apps use the shared Wi-Fi picker on demand;
+cancelling it leaves the app on its current screen so the user can retry.
 Its mapped bottom actions are Back, Settings, Images, and Refresh; logical
 previous/next also map the side buttons to Images/Refresh in every orientation.
 Connecting or reconnecting never downloads an image by itself; only Refresh or

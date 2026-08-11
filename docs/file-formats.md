@@ -95,10 +95,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 50 / 51
+### Versions 52 / 53
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **51**; Latin builds use **50**. The byte layout is identical between
+> currently **53**; Latin builds use **52**. The byte layout is identical between
 > flavors, but the same built-in font IDs resolve to different font data and
 > metrics, so pagination caches are not reusable across firmware flavors.
 >
@@ -116,7 +116,8 @@ if (parsedSize != fileSize) {
 > because source whitespace now controls CJK gaps, ruby boundaries retain inline
 > continuation, and `<br>` no longer re-applies container margins. Versions 50/51
 > add a per-page visible-text offset LUT so progress and bookmarks survive
-> re-pagination. The counters
+> re-pagination. Versions 52/53 reserve layout space for ruby/CJK justification
+> and expand serialized footnote hrefs from 96 to 256 bytes. The counters
 > remain distinct and above every previously shipped value so a firmware-flavor
 > swap cannot read the other flavor's stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
@@ -124,6 +125,13 @@ if (parsedSize != fileSize) {
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Versions 52/53 increase the fixed-size footnote href field from 96 to 256 bytes.
+This changes each serialized footnote record from 128 to 288 bytes, so older
+section caches must be discarded and rebuilt.
+
+Versions 52/53 also invalidate cached word positions after ruby and CJK justification
+layout changes.
 
 Versions 50/51 add a header offset and a `uint32_t` entry per page for the
 visible-text offset LUT. The other section LUTs remain unchanged.
@@ -159,10 +167,10 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 50
+#define EXPECTED_VERSION 52
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
-#define FOOTNOTE_HREF_LEN 96
+#define FOOTNOTE_HREF_LEN 256
 
 struct String {
     u32 length [[hidden, comment("String byte length")]];

@@ -24,6 +24,9 @@ void clearPanic();
 
 using DeviceId = std::array<uint8_t, 6>;
 bool getDeviceId(DeviceId& out);
+bool getWifiStationMac(DeviceId& out);
+bool getChipTemperatureCelsius(float& out);
+uint64_t getUptimeSeconds();
 HeapInfo getHeapInfo();
 
 std::string getPanicInfo(bool full = false);
