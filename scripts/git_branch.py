@@ -1,6 +1,6 @@
 """
 PlatformIO pre-build script: inject git branch and short SHA into
-CROSSPOINT_VERSION for the default (dev) environment.
+CROSSPOINT_VERSION for development environments.
 
 Results in a version string like:  1.1.0-dev-feat-kosync-xpath-05c6cf8
 Release environments are unaffected; they set CROSSPOINT_VERSION in the ini.
@@ -69,7 +69,7 @@ def get_base_version(project_dir):
         warn(f'platformio.ini not found at {ini_path}; base version will be "0.0.0"')
         return '0.0.0'
     config = configparser.ConfigParser()
-    config.read(ini_path)
+    config.read(ini_path, encoding='utf-8')
     if not config.has_option('crosspoint', 'version'):
         warn('No [crosspoint] version in platformio.ini; base version will be "0.0.0"')
         return '0.0.0'
@@ -77,18 +77,16 @@ def get_base_version(project_dir):
 
 
 def inject_version(env):
-    pioenv = env['PIOENV']
-    if pioenv not in ('default', 'eego_a4', 'mofei_m4'):
+    # Only applies to development environments; release envs set the
+    # version via build_flags in platformio.ini and are unaffected.
+    if env['PIOENV'] not in ('default', 'sticky'):
         return
 
     project_dir = env['PROJECT_DIR']
     base_version = get_base_version(project_dir)
+    branch = get_git_branch(project_dir)
     short_sha = get_git_short_sha(project_dir)
-    if pioenv == 'default':
-        version_string = f'{base_version}-dev-{get_git_branch(project_dir)}-{short_sha}'
-    else:
-        device = pioenv.replace('_', '-')
-        version_string = f'{base_version}-{device}-cn-beta+{short_sha}'
+    version_string = f'{base_version}-dev-{branch}-{short_sha}'
 
     env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
     print(f'CrossPoint build version: {version_string}')

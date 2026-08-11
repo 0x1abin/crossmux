@@ -1,29 +1,36 @@
 ## Summary
 
-Describe the problem and the chosen solution.
+* **What is the goal of this PR?** (e.g., Implements the new feature for file uploading.)
+* **What changes are included?**
 
-## Scope
+## Scope Check
 
-- Hardware revision(s):
-- Changed subsystem(s):
-- Partition/LUT/touch/power behavior changed: yes/no
+CrossPoint is intentionally narrow. See [SCOPE.md](../blob/master/SCOPE.md) and [ROADMAP.md](../blob/master/ROADMAP.md).
+Please confirm:
 
-## Validation
+- [ ] I have read SCOPE.md and ROADMAP.md.
+- [ ] This PR is **not** a new built-in theme (themes are temporarily closed pending the move to SD-loaded themes).
+- [ ] This PR is **not** a new external network connector (sync engine, cloud storage, remote file access, etc.).
+- [ ] This PR is **not** an interactive app, writing tool, RSS/news/browser, media playback, or PDF feature.
+- [ ] The stock firmware does not already handle this well, **and** no other popular CrossPoint fork already does
+      (or, if one does, I explain why CrossPoint still needs it below).
+- [ ] If this PR touches `freeink-sdk/`, `lib/hal/`, the bootloader, OTA, or recovery code, I have coordinated with
+      the relevant maintainer.
 
-- [ ] `python scripts/validate_project.py --quick`
-- [ ] All affected PlatformIO environments build
-- [ ] Full six-environment build (required for driver changes)
-- [ ] Relevant real-device tests recorded, or clearly marked not run
-- [ ] Documentation and changelog updated
-- [ ] No build products, credentials, MAC addresses, flash backups, or
-      unlicensed binary assets added
+**If this PR was opened against the previous (broader) scope and was already in flight under Phase 0, link the
+relevant Discussion or issue so reviewers can see the history.**
 
-## Safety and recovery
+## Additional Context
 
-State flashing risk, backup status, and recovery procedure. Write “not
-applicable” for documentation-only changes.
+* Add any other information that might be helpful for the reviewer (e.g., performance implications, potential risks,
+  specific areas to focus on).
+* Memory / flash impact, if known.
 
-## Provenance
+---
 
-List the source and license of any new code, waveform, firmware table, font, or
-other data.
+### AI Usage
+
+While CrossPoint doesn't have restrictions on AI tools in contributing, please be transparent about their usage as it
+helps set the right context for reviewers.
+
+Did you use AI tools to help write this code? _**< YES | PARTIALLY | NO >**_
