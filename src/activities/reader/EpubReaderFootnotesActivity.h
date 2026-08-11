@@ -4,7 +4,6 @@
 
 #include <cstring>
 #include <functional>
-#include <vector>
 
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
@@ -12,7 +11,7 @@
 class EpubReaderFootnotesActivity final : public Activity {
  public:
   explicit EpubReaderFootnotesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                       const std::vector<FootnoteEntry>& footnotes)
+                                       const FootnoteList& footnotes)
       : Activity("EpubReaderFootnotes", renderer, mappedInput), footnotes(footnotes) {}
 
   void onEnter() override;
@@ -21,7 +20,7 @@ class EpubReaderFootnotesActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  const std::vector<FootnoteEntry>& footnotes;
+  const FootnoteList& footnotes;
   int selectedIndex = 0;
   int scrollOffset = 0;
   ButtonNavigator buttonNavigator;
