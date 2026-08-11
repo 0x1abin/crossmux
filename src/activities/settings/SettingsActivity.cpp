@@ -2,19 +2,15 @@
 
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
 #include <Memory.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
-
-#ifdef SIMULATOR
-#include <Arduino.h>
-#endif
 
 #include "AppVisibilitySettingsActivity.h"
 #include "ButtonRemapActivity.h"
@@ -35,6 +31,7 @@
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/FrontlightAdjustmentActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
@@ -46,9 +43,6 @@ enum class AboutRow : uint8_t {
   FirmwareName,
   FirmwareVersion,
   DeviceModel,
-  WifiMacAddress,
-  ChipTemperature,
-  Uptime,
   HeapFreeTotal,
   LargestHeapBlock,
   SdUsedTotal,
@@ -66,16 +60,6 @@ class AboutActivity final : public Activity {
     heapInfo = HalSystem::getHeapInfo();
     deviceName = BoardConfig::ACTIVE.name;
     storageAvailable = Storage.getSpace(sdTotalBytes, sdFreeBytes);
-#ifdef SIMULATOR
-    wifiMacAvailable = HalSystem::getDeviceId(wifiMac);
-    uptimeSeconds = millis() / 1000;
-#else
-    wifiMacAvailable = HalSystem::getWifiStationMac(wifiMac);
-    float temperature = 0.0f;
-    temperatureAvailable = HalSystem::getChipTemperatureCelsius(temperature);
-    if (temperatureAvailable) chipTemperatureCelsius = static_cast<int>(std::lround(temperature));
-    uptimeSeconds = HalSystem::getUptimeSeconds();
-#endif
     requestUpdate();
   }
 
@@ -96,9 +80,8 @@ class AboutActivity final : public Activity {
         renderer, content, static_cast<int>(AboutRow::Count), -1,
         [](const int index) {
           static constexpr StrId LABELS[] = {
-              StrId::STR_ABOUT_FIRMWARE_NAME,    StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,
-              StrId::STR_ABOUT_WIFI_MAC_ADDRESS, StrId::STR_ABOUT_CHIP_TEMPERATURE,   StrId::STR_ABOUT_UPTIME,
-              StrId::STR_ABOUT_HEAP_FREE_TOTAL,  StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
+              StrId::STR_ABOUT_FIRMWARE_NAME,   StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,
+              StrId::STR_ABOUT_HEAP_FREE_TOTAL, StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
           };
           return std::string(I18N.get(LABELS[index]));
         },
@@ -120,24 +103,6 @@ class AboutActivity final : public Activity {
         return CROSSPOINT_VERSION;
       case AboutRow::DeviceModel:
         return deviceName ? deviceName : tr(STR_NOT_AVAILABLE);
-      case AboutRow::WifiMacAddress:
-        if (!wifiMacAvailable) return tr(STR_NOT_AVAILABLE);
-        snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X", wifiMac[0], wifiMac[1], wifiMac[2], wifiMac[3],
-                 wifiMac[4], wifiMac[5]);
-        return value;
-      case AboutRow::ChipTemperature:
-        if (!temperatureAvailable) return tr(STR_NOT_AVAILABLE);
-        snprintf(value, sizeof(value), "%d", chipTemperatureCelsius);
-        return value;
-      case AboutRow::Uptime: {
-        const uint64_t totalMinutes = uptimeSeconds / 60;
-        const uint64_t days = totalMinutes / (24 * 60);
-        const uint64_t hours = totalMinutes / 60 % 24;
-        const uint64_t minutes = totalMinutes % 60;
-        snprintf(value, sizeof(value), "%llu:%02llu:%02llu", static_cast<unsigned long long>(days),
-                 static_cast<unsigned long long>(hours), static_cast<unsigned long long>(minutes));
-        return value;
-      }
       case AboutRow::HeapFreeTotal:
         snprintf(value, sizeof(value), "%lu / %lu", static_cast<unsigned long>(heapInfo.freeBytes / 1024),
                  static_cast<unsigned long>(heapInfo.totalBytes / 1024));
@@ -161,14 +126,9 @@ class AboutActivity final : public Activity {
   }
 
   HalSystem::HeapInfo heapInfo{};
-  HalSystem::DeviceId wifiMac{};
   const char* deviceName = nullptr;
-  uint64_t uptimeSeconds = 0;
   uint64_t sdTotalBytes = 0;
   uint64_t sdFreeBytes = 0;
-  int chipTemperatureCelsius = 0;
-  bool wifiMacAvailable = false;
-  bool temperatureAvailable = false;
   bool storageAvailable = false;
 };
 
@@ -454,16 +414,15 @@ void SettingsActivity::loop() {
     requestUpdate();
   });
 
-  buttonNavigator.onNextContinuous([this, settingsPageItems] {
-    selectedSettingIndex = selectedSettingIndex == 0 ? 1
-                                                     : ButtonNavigator::nextPageIndex(
-                                                           selectedSettingIndex, settingsCount + 1, settingsPageItems);
+  buttonNavigator.onNextContinuous([this, &hasChangedCategory] {
+    hasChangedCategory = true;
+    selectedCategoryIndex = ButtonNavigator::nextIndex(selectedCategoryIndex, categoryCount);
     requestUpdate();
   });
 
-  buttonNavigator.onPreviousContinuous([this, settingsPageItems] {
-    selectedSettingIndex =
-        ButtonNavigator::previousPageIndex(selectedSettingIndex, settingsCount + 1, settingsPageItems);
+  buttonNavigator.onPreviousContinuous([this, &hasChangedCategory] {
+    hasChangedCategory = true;
+    selectedCategoryIndex = ButtonNavigator::previousIndex(selectedCategoryIndex, categoryCount);
     requestUpdate();
   });
 
@@ -586,14 +545,6 @@ void SettingsActivity::loopAccordion() {
     accordionSelectedIndex = ButtonNavigator::previousIndex(accordionSelectedIndex, visibleCount);
     requestUpdate();
   });
-  buttonNavigator.onNextContinuous([this, visibleCount, pageItems] {
-    accordionSelectedIndex = ButtonNavigator::nextPageIndex(accordionSelectedIndex, visibleCount, pageItems);
-    requestUpdate();
-  });
-  buttonNavigator.onPreviousContinuous([this, visibleCount, pageItems] {
-    accordionSelectedIndex = ButtonNavigator::previousPageIndex(accordionSelectedIndex, visibleCount, pageItems);
-    requestUpdate();
-  });
 }
 
 std::string SettingsActivity::settingValueText(const SettingInfo& setting) const {
@@ -650,12 +601,18 @@ void SettingsActivity::renderAccordion() {
         if (row.isCategory()) {
           return std::string((expandedCategories & (uint8_t{1} << row.category)) != 0 ? "-" : "+");
         }
-        return settingValueText(settingsForCategory(row.category)[row.setting]);
+        const auto& setting = settingsForCategory(row.category)[row.setting];
+        // Frontlight opens a dedicated slider page, so show the current value text.
+        if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS)
+          return std::to_string(SETTINGS.frontlightBrightness);
+        if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) return std::to_string(SETTINGS.frontlightWarmth);
+        return settingValueText(setting);
       },
       true, nullptr, showMainTabContentSelection(),
       [this](const int index) {
         return InxAccordionGeometry::rowAt(accordionSettingCounts(), expandedCategories, index).isCategory();
-      });
+      },
+      [](const int) { return -1; });
 
   const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_TOGGLE), visibleCount > 1);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -671,9 +628,24 @@ void SettingsActivity::toggleCurrentSetting() {
   const auto& setting = (*currentSettings)[selectedSetting];
   const bool sleepScreenChanged = setting.valuePtr == &CrossPointSettings::sleepScreen;
   const bool quickResumeTimeoutChanged = setting.valuePtr == &CrossPointSettings::quickResumeSleepScreen;
+  const bool frontlightChanged = setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
+                                 setting.valuePtr == &CrossPointSettings::frontlightWarmth;
 
   if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
     openSleepTimeoutPicker();
+    return;
+  }
+
+  // Frontlight brightness/warmth are adjusted on a dedicated page holding both
+  // sliders (brightness + warmth) on one screen.
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) {
+    startActivityForResult(
+        std::make_unique<FrontlightAdjustmentActivity>(renderer, mappedInput, "FrontlightAdjustment",
+                                                       StrId::STR_FRONTLIGHT),
+        [this](const ActivityResult&) {
+          SETTINGS.saveToFile();
+          requestUpdate();
+        });
     return;
   }
 
@@ -686,8 +658,13 @@ void SettingsActivity::toggleCurrentSetting() {
     if (setting.enumValues.size() > 2) {
       const auto valuePtr = setting.valuePtr;
       optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()),
-                       currentValue, [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+                       currentValue,
+                       [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged, frontlightChanged](int idx) {
                          SETTINGS.*valuePtr = idx;
+                         if (frontlightChanged) {
+                           Frontlight.setWarmth(SETTINGS.frontlightWarmth);
+                           Frontlight.setBrightness(SETTINGS.frontlightBrightness);
+                         }
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
                          SETTINGS.saveToFile();
                          rebuildSettingsLists();
@@ -822,6 +799,10 @@ void SettingsActivity::toggleCurrentSetting() {
   }
 
   syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+  if (frontlightChanged) {
+    Frontlight.setWarmth(SETTINGS.frontlightWarmth);
+    Frontlight.setBrightness(SETTINGS.frontlightBrightness);
+  }
   SETTINGS.saveToFile();
   rebuildSettingsLists();
   selectedSettingIndex = std::min(selectedSettingIndex, settingsCount);
@@ -898,7 +879,15 @@ void SettingsActivity::render(RenderLock&&) {
                          metrics.verticalSpacing * 2)},
       settingsCount, selectedSettingIndex - 1,
       [&settings](int index) { return std::string(I18N.get(settings[index].nameId)); }, nullptr, nullptr,
-      [this, &settings](int i) { return settingValueText(settings[i]); }, true);
+      [this, &settings](int i) {
+        const auto& setting = settings[i];
+        // Frontlight opens a dedicated slider page, so show the current value text.
+        if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS) return std::to_string(SETTINGS.frontlightBrightness);
+        if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) return std::to_string(SETTINGS.frontlightWarmth);
+        return settingValueText(setting);
+      },
+      true, nullptr, true, nullptr,
+      [](int) { return -1; });
 
   // Draw help text
   const auto confirmLabel =

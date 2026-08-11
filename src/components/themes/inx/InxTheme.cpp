@@ -169,7 +169,7 @@ bool InxTheme::tabIndexFromPoint(const GfxRenderer&, const Rect rect, const std:
 
 void InxTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const {
-  if (!buttonHintsVisible()) return;
+  if (gpio.hasTouch()) return;
 
   const GfxRenderer::Orientation original = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
@@ -225,7 +225,8 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
                         const std::function<UIIcon(int index)>& rowIcon,
                         const std::function<std::string(int index)>& rowValue, const bool,
                         const std::function<bool(int index)>& rowDimmed, const bool showSelection,
-                        const std::function<bool(int index)>& rowHeading) const {
+                        const std::function<bool(int index)>& rowHeading,
+                        const std::function<int(int index)>& rowProgress) const {
   if (itemCount <= 0 || rect.height <= 0) return;
 
   const int pageItems = getListPageItems(rect.height, rowSubtitle != nullptr);
@@ -255,7 +256,8 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
 
     std::string value;
     int valueWidth = 0;
-    if (rowValue) {
+    const int sliderProgress = (rowProgress != nullptr) ? rowProgress(index) : -1;
+    if (rowValue && sliderProgress < 0) {
       value = renderer.truncatedText(UI_10_FONT_ID, rowValue(index).c_str(), kMaxValueWidth);
       valueWidth = value.empty() ? 0 : renderer.getTextWidth(UI_10_FONT_ID, value.c_str()) + kIconGap;
     }
@@ -276,6 +278,10 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
       const int valueY = rowY + (kRowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
       renderer.drawText(UI_10_FONT_ID, valueX, valueY, value.c_str(), !selected);
     }
+    if (sliderProgress >= 0 && sliderProgress <= 100) {
+      const Rect sliderRect = getListSliderRect(rect, itemCount, selectedIndex, index);
+      if (sliderRect.width > 0) drawInlineSlider(renderer, sliderRect, sliderProgress, selected);
+    }
     if (rowDimmed && rowDimmed(index) && !selected) {
       drawDitherMask(renderer, textX, rowY, std::max(0, contentRight - textX), kRowHeight - 1);
     }
@@ -283,6 +289,21 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
   }
 
   drawSideScrollBar(renderer, rect, itemCount, pageStart, pageItems);
+}
+
+Rect InxTheme::getListSliderRect(const Rect& listRect, const int itemCount, const int selectedIndex,
+                                  const int rowIndex) const {
+  if (rowIndex < 0 || rowIndex >= itemCount || listRect.height <= 0) return {};
+  const int pageItems = getListPageItems(listRect.height, false);
+  const int pageStart = selectedIndex >= 0 ? selectedIndex / pageItems * pageItems : 0;
+  if (rowIndex < pageStart || rowIndex >= pageStart + pageItems) return {};
+  const int slot = rowIndex - pageStart;
+  const int rowY = listRect.y + slot * kRowHeight;
+  const bool hasScrollBar = itemCount > pageItems;
+  const int contentRight = listRect.x + listRect.width - (hasScrollBar ? 10 : 0);
+  const int sliderX = contentRight - kRowPadding - inlineSliderWidth;
+  const int sliderY = rowY + (kRowHeight - inlineSliderHeight) / 2;
+  return Rect{sliderX, sliderY, inlineSliderWidth, inlineSliderHeight};
 }
 
 void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int buttonCount, const int selectedIndex,
@@ -320,6 +341,36 @@ void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int 
     drawDottedSeparator(renderer, rect.x, rowY + kRowHeight - 1, rect.width);
   }
   drawSideScrollBar(renderer, rect, buttonCount, pageStart, pageItems);
+}
+
+std::vector<Rect> InxTheme::getOptionPopupOptionRects(const GfxRenderer& renderer, const int optionCount, const int selectedIndex) const {
+  // Must mirror drawOptionPopup's geometry exactly so touch hits line up with
+  // the rendered rows. Returns one Rect per option (optionCount entries); rows
+  // outside the visible window get an empty Rect (contains() is always false).
+  std::vector<Rect> rects;
+  if (optionCount <= 0) return rects;
+  rects.reserve(optionCount);
+
+  const int selected = std::clamp(selectedIndex, 0, optionCount - 1);
+  const int visibleRows = std::min(kOptionVisibleRows, optionCount);
+  const int maxStart = optionCount - visibleRows;
+  const int start = std::clamp(selected - visibleRows / 2, 0, maxStart);
+  const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
+  const int panelWidth = std::max(1, std::min(screenWidth - 24, 360));
+  const int panelHeight = kOptionHeaderHeight + visibleRows * kOptionRowHeight;
+  const int panelX = (screenWidth - panelWidth) / 2;
+  const int panelY = std::max(0, (screenHeight - panelHeight) / 2);
+
+  for (int i = 0; i < optionCount; ++i) {
+    if (i < start || i >= start + visibleRows) {
+      rects.push_back(Rect{0, 0, 0, 0});
+    } else {
+      const int rowY = panelY + kOptionHeaderHeight + (i - start) * kOptionRowHeight;
+      rects.push_back(Rect{panelX, rowY, panelWidth, kOptionRowHeight});
+    }
+  }
+  return rects;
 }
 
 void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,

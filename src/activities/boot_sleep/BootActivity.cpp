@@ -34,7 +34,9 @@ void BootActivity::renderSplash() {
   renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
-  renderer.displayBuffer();
+  // Full refresh so the e-ink panel is physically wiped on boot, not left with
+  // the retained pre-boot frame (FAST_REFRESH only does a differential update).
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
 }
 
 void BootActivity::runPostOta() {

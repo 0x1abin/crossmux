@@ -106,6 +106,12 @@ void TxtReaderActivity::onExit() {
   ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
   showPendingAchievementPopups(renderer);
   txt.reset();
+
+  // Leaving the reader: force the next activity's first frame to a full refresh
+  // so grayscale AA residue from the reading pages does not ghost into the file
+  // browser / home screen. Placed after the achievement popups so they don't
+  // consume the one-shot override.
+  renderer.requestNextFullRefresh();
 }
 
 void TxtReaderActivity::loop() {
@@ -576,6 +582,10 @@ void TxtReaderActivity::render(RenderLock&&) {
     return;
   }
 
+  // Serialize SD access in this render path against the main task's SD writes
+  // (progress, index cache) so they cannot interleave mid-FAT-op.
+  HalStorage::StorageLock storageLock;
+
   // Initialize reader if not done
   if (!initialized) {
     initializeReader();
@@ -689,12 +699,21 @@ void TxtReaderActivity::renderPage() {
   renderStatusBar();
   const auto tBwRender = millis();
 
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
-  const auto tDisplay = millis();
-
   if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+    // Single-refresh grayscale path: content + status bar are already in the
+    // framebuffer, so renderAntiAliased stores them, clears, re-renders the same
+    // content AND status bar in gray and displays once. We skip the BW display
+    // so there is no BW-then-AA double refresh (which flashed and left the bottom
+    // status bar wiped), and the gray pass includes the status bar so it stays
+    // visible on the final frame.
+    ReaderUtils::renderAntiAliased(renderer, [this, &renderLines]() {
+      renderLines();
+      renderStatusBar();
+    });
+  } else {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
+  const auto tDisplay = millis();
   const auto tEnd = millis();
   LOG_DBG("TRS", "Page render: prewarm=%lums bw_render=%lums display=%lums aa=%lums total=%lums", tPrewarm - t0,
           tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - tDisplay, tEnd - t0);

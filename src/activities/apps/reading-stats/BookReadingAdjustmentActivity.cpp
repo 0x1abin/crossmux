@@ -71,17 +71,16 @@ void BookReadingAdjustmentActivity::initializeSelectedDate() {
 }
 
 void BookReadingAdjustmentActivity::openDateSelection() {
-  startActivityForResultWith<ReadingDateSelectionActivity>(
-      [this](const ActivityResult& result) {
-        if (!result.isCancelled) {
-          if (const auto* page = std::get_if<PageResult>(&result.data)) {
-            selectedDayOrdinal = page->page;
-            lastApplyFailed = false;
-          }
-        }
-        requestUpdate();
-      },
-      selectedDayOrdinal);
+  startActivityForResult(std::make_unique<ReadingDateSelectionActivity>(renderer, mappedInput, selectedDayOrdinal),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             if (const auto* page = std::get_if<PageResult>(&result.data)) {
+                               selectedDayOrdinal = page->page;
+                               lastApplyFailed = false;
+                             }
+                           }
+                           requestUpdate();
+                         });
 }
 
 int32_t BookReadingAdjustmentActivity::getSelectedDeltaMs() const {

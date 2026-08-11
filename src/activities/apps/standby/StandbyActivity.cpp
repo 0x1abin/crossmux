@@ -191,13 +191,13 @@ bool StandbyActivity::trySilentWifiConnect() {
   std::string pass;
   {
     RenderLock lock(*this);
-    if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
-    const std::string last = WIFI_STORE.getLastConnectedSsid();
+    if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
+    const std::string& last = WIFI_STORE.getLastConnectedSsid();
     if (last.empty()) {
       LOG_DBG("STANDBY", "No lastConnectedSsid for silent connect");
       return false;
     }
-    const auto cred = WIFI_STORE.findCredential(last);
+    const WifiCredential* cred = WIFI_STORE.findCredential(last);
     if (!cred) {
       LOG_DBG("STANDBY", "lastConnectedSsid '%s' has no saved credential", last.c_str());
       return false;

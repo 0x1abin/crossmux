@@ -3,7 +3,9 @@
 #include <Print.h>
 #include <common/FsApiConstants.h>  // for oflag_t
 #include <freertos/semphr.h>
+#include <freertos/task.h>  // for TaskHandle_t
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -49,13 +51,31 @@ class HalStorage {
 
   static HalStorage& getInstance() { return instance; }
 
-  class StorageLock;  // private class, used internally
+  // Public RAII guard that keeps the SD/SPI transaction serialization lock held
+  // for the duration of a scope. Downstream code can hold it across a whole
+  // multi-step read (exists + open + read + draw) so the main task cannot
+  // interleave SD access mid-transaction and corrupt SdFat's m_spiActive.
+  class StorageLock {
+   public:
+    StorageLock();
+    ~StorageLock();
+    StorageLock(const StorageLock&) = delete;
+    StorageLock& operator=(const StorageLock&) = delete;
+  };
 
  private:
   static HalStorage instance;
 
   bool initialized = false;
+  // Counting semaphore (max=1, initial=1) providing mutual exclusion with NO
+  // priority inheritance. Used to be a recursive mutex, but the render task
+  // (core 1) and main task (core 0) hand StorageLock across cores, and a
+  // priority-inheriting recursive mutex trips ESP-IDF SMP's
+  // xTaskPriorityDisinherit assert. Recursion is implemented manually in
+  // StorageLock via storageHolder/storageDepth.
   SemaphoreHandle_t storageMutex = nullptr;
+  std::atomic<TaskHandle_t> storageHolder{nullptr};
+  std::atomic<uint32_t> storageDepth{0};
 };
 
 #define Storage HalStorage::getInstance()

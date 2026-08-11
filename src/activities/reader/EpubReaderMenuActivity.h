@@ -13,6 +13,7 @@ class EpubReaderMenuActivity final : public Activity {
  public:
   // Menu actions available from the reader menu.
   enum class MenuAction {
+    FRONTLIGHT,
     SELECT_CHAPTER,
     FOOTNOTES,
     TEXT_SETTINGS,
@@ -38,6 +39,7 @@ class EpubReaderMenuActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool handleHomeGesture() override;
+  bool skipLoopDelay() override { return true; }  // Keep CPU at full speed for responsive touch
 
  private:
   struct MenuItem {
@@ -67,4 +69,5 @@ class EpubReaderMenuActivity final : public Activity {
   int currentPage = 0;
   int totalPages = 0;
   int bookProgressPercent = 0;
+  bool firstRender = true;
 };

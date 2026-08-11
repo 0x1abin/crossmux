@@ -1,0 +1,54 @@
+name: Hardware evidence
+description: Contribute a verified pin, controller, waveform, or board-revision finding.
+title: "[Hardware] "
+labels: ["hardware", "evidence"]
+body:
+  - type: input
+    id: revision
+    attributes:
+      label: Device revision or visible board marking
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: Proposed hardware fact
+      description: State one precise claim and which current documentation it changes.
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence_type
+    attributes:
+      label: Evidence type
+      options:
+        - Schematic or datasheet
+        - Logic analyzer or oscilloscope
+        - Multimeter or power measurement
+        - Reproducible firmware experiment
+        - Binary analysis
+        - Visual board inspection
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reproduction and sanitized evidence
+      description: Include tools, commands, conditions, hashes, and observed result.
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk and recovery
+      description: Explain possible device impact and the recovery path.
+    validations:
+      required: true
+  - type: checkboxes
+    id: rights
+    attributes:
+      label: Publication
+      options:
+        - label: I have the right to publish the submitted material.
+          required: true
+        - label: I removed device identifiers, credentials, and private flash contents.
+          required: true

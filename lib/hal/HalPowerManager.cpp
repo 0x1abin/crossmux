@@ -2,10 +2,9 @@
 
 #include <BoardConfig.h>
 #include <Logging.h>
-#include <PowerManager.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_sleep.h>
-#include <soc/soc_caps.h>
 
 #include <cassert>
 
@@ -18,7 +17,12 @@ void HalPowerManager::begin() {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
   normalFreq = getCpuFrequencyMhz();
-  modeMutex = xSemaphoreCreateMutex();
+  // Counting semaphore (max=1) instead of a priority-inheriting mutex: the render
+  // task (core 1) and main task (core 0) both take HalPowerManager::Lock, and
+  // hand the mutex across cores. ESP-IDF SMP's priority-inheritance give path
+  // trips the xTaskPriorityDisinherit assert; a counting semaphore has no such
+  // path, so cross-core take/give is safe.
+  modeMutex = xSemaphoreCreateCounting(1, 1);
   assert(modeMutex != nullptr);
 }
 
@@ -66,29 +70,44 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   logSerial.end();
 #endif
 
-#if !SOC_PM_SUPPORT_EXT1_WAKEUP
-  if (gpio.isXteinkDevice() && !gpio.deviceIsX3()) {
-    // X4 GPIO13 is connected to the battery latch MOSFET. Keeping it low powers
-    // the MCU off on battery, while the SDK wake source still handles USB power.
-    constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
-    gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_SPIWP, 0);
-    gpio_hold_en(GPIO_SPIWP);
+  // Cut the gated peripheral rails (touch/SD/EPD enables) that the template
+  // display/input init may have asserted, so they don't drain the battery
+  // through "off". Wake is the power button. Must run after display.deepSleep()
+  // so the panel controller gets its deep-sleep command while its rail is still
+  // up (enterDeepSleep() in main.cpp guarantees that ordering).
+  gpio.prepareForDeepSleep();
+
+  // Wait for the power button to be physically released (so holding it doesn't
+  // immediately re-wake the device once the wake source is armed below).
+  const unsigned long releaseDeadline = millis() + 1000;
+  gpio.update();
+  while (gpio.isPressed(HalGPIO::BTN_POWER) && millis() < releaseDeadline) {
+    delay(10);
+    gpio.update();
   }
-#endif
 
-  // Cut the gated peripheral rails (touch/SD/EPD on boards like the Sticky) and
-  // hold the enables off through deep sleep — otherwise the GT911 and SD card
-  // stay powered all through "off" and drain the battery. No-op on boards with
-  // no switched rails (X4/X3). Trade-off: no touch-to-wake; wake is the power
-  // button. Must run after display.deepSleep() so the panel controller gets its
-  // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
-  // guarantees that ordering).
-  freeink::PowerManager::powerDownRailsForSleep();
+  // Keep the board's power-latch pin(s) asserted across deep sleep so the
+  // device stays powered on battery (EEGO A4: GPIO4). Drive each latch HIGH and
+  // hold it, then latch the holds across the reset that deep sleep entails.
+  BoardConfig::holdPowerRails();
+  for (const int8_t pin : {BoardConfig::ACTIVE.power.latch0, BoardConfig::ACTIVE.power.latch1}) {
+    if (pin >= 0) {
+      digitalWrite(pin, HIGH);
+      gpio_hold_en(static_cast<gpio_num_t>(pin));
+    }
+  }
+  gpio_deep_sleep_hold_en();
 
-  // Waits for the power button to be physically released (so holding it doesn't
-  // immediately wake the device again), then arms the wake source and sleeps.
-  freeink::PowerManager::deepSleepUntilPowerButton();
+  // Wake on the power button. EEGO A4's power key is active-high (GPIO8).
+  const int8_t powerPin = BoardConfig::ACTIVE.input.power;
+  if (powerPin >= 0) {
+    esp_sleep_enable_ext1_wakeup(1ULL << powerPin, ESP_EXT1_WAKEUP_ANY_HIGH);
+  }
+
+  esp_deep_sleep_start();
+  // esp_deep_sleep_start() does not return; keep the C++ contract explicit if a
+  // future SDK supplies a test stub.
+  for (;;) delay(1000);
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {

@@ -171,7 +171,7 @@ int BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const siz
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-  if (!buttonHintsVisible()) {
+  if (gpio.hasTouch()) {
     return;
   }
 
@@ -203,8 +203,6 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
   renderer.setOrientation(orig_orientation);
 }
-
-bool BaseTheme::buttonHintsVisible() const { return !gpio.hasTouch() && SETTINGS.showButtonHints; }
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
   if (gpio.hasTouch()) {
@@ -309,7 +307,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed, const bool showSelection,
-                         const std::function<bool(int index)>&) const {
+                         const std::function<bool(int index)>& rowHeading,
+                         const std::function<int(int index)>& rowProgress) const {
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rowHeight > 0 ? std::max(1, rect.height / rowHeight) : 1;
@@ -354,8 +353,9 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     const bool selected = showSelection && i == selectedIndex;
     const bool dimmed = rowDimmed && rowDimmed(i) && !selected;
     int rowTextWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2;
+    int sliderProgress = (rowProgress != nullptr) ? rowProgress(i) : -1;
     std::string valueText;
-    if (rowValue != nullptr) {
+    if (rowValue != nullptr && sliderProgress < 0) {
       valueText = rowValue(i);
       if (!valueText.empty()) {
         int maxValW = std::max(0, rowTextWidth - 40 - minValueGap);
@@ -391,7 +391,43 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       renderer.drawText(UI_10_FONT_ID, valueX, valueY, valueText.c_str(), !selected);
       if (dimmed) drawDitherMask(renderer, valueX, valueY, valueTextWidth, renderer.getLineHeight(UI_10_FONT_ID));
     }
+
+    if (sliderProgress >= 0 && sliderProgress <= 100) {
+      const Rect sliderRect = getListSliderRect(rect, itemCount, selectedIndex, i);
+      if (sliderRect.width > 0) drawInlineSlider(renderer, sliderRect, sliderProgress, selected);
+    }
   }
+}
+
+Rect BaseTheme::getListSliderRect(const Rect& listRect, const int itemCount, const int selectedIndex,
+                                  const int rowIndex) const {
+  if (rowIndex < 0 || rowIndex >= itemCount || listRect.height <= 0) return {};
+  const int rowHeight = BaseMetrics::values.listRowHeight;
+  const int pageItems = rowHeight > 0 ? std::max(1, listRect.height / rowHeight) : 1;
+  const int pageStart = selectedIndex >= 0 ? selectedIndex / pageItems * pageItems : 0;
+  if (rowIndex < pageStart || rowIndex >= pageStart + pageItems) return {};
+  const int slot = rowIndex - pageStart;
+  const int rowY = listRect.y + slot * rowHeight;
+  const int contentWidth = listRect.width - 5;
+  const int sliderX = listRect.x + contentWidth - BaseMetrics::values.contentSidePadding - inlineSliderWidth;
+  const int sliderY = rowY + (rowHeight - inlineSliderHeight) / 2;
+  return Rect{sliderX, sliderY, inlineSliderWidth, inlineSliderHeight};
+}
+
+void BaseTheme::drawInlineSlider(const GfxRenderer& renderer, const Rect& rect, int progress, const bool inverted) const {
+  if (rect.width <= 0 || rect.height <= 0) return;
+  progress = std::clamp(progress, 0, 100);
+  // Track outline (mirrors the IntervalSelection slider look).
+  renderer.drawRect(rect.x, rect.y, rect.width, rect.height, inverted);
+  // Filled portion.
+  const int fillWidth = (rect.width - 4) * progress / 100;
+  if (fillWidth > 0) {
+    renderer.fillRect(rect.x + 2, rect.y + 2, fillWidth, rect.height - 4, inverted);
+  }
+  // Knob: a vertical handle that extends above/below the bar, drawn in the fill
+  // color so it always reads as a visible handle even at the extremes.
+  const int knobX = std::max(rect.x + 2, rect.x + 2 + fillWidth - 2);
+  renderer.fillRect(knobX, rect.y - 4, 4, rect.height + 8, inverted);
 }
 
 void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
@@ -1010,6 +1046,13 @@ void BaseTheme::drawActionButton(const GfxRenderer& renderer, const Rect rect, c
   const int textX = rect.x + (rect.width - textWidth) / 2;
   const int textY = rect.y + (rect.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
   renderer.drawText(UI_10_FONT_ID, textX, textY, label, foregroundBlack, EpdFontFamily::BOLD);
+}
+
+std::vector<Rect> BaseTheme::getOptionPopupOptionRects(const GfxRenderer&, int, int) const {
+  // Base theme: OptionPopup computes its own rects from the same BaseMetrics, so
+  // return empty to let it take that path. Only themes that fully override
+  // drawOptionPopup (e.g. InxTheme) need to return matching rects here.
+  return {};
 }
 
 void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,

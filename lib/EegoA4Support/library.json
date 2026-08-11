@@ -1,0 +1,23 @@
+{
+  "name": "EegoA4Support",
+  "version": "1.0.0",
+  "description": "EEGO A4 hardware contract, safe board bootstrap, coordinate mapping, charge-polarity selection, and bounded deep-sleep helpers.",
+  "keywords": "eego-a4, board-support, bootstrap, power, touch",
+  "authors": [
+    {
+      "name": "EEGO A4 template contributors"
+    }
+  ],
+  "dependencies": {
+    "BoardConfig": "*",
+    "EInkDisplay": "*",
+    "FrontlightManager": "*",
+    "InputManager": "*",
+    "Rtc": "*",
+    "SDCardManager": "*"
+  },
+  "platforms": "espressif32",
+  "frameworks": [
+    "arduino"
+  ]
+}

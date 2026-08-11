@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <Memory.h>
 #include <Render.h>
 #include <esp_system.h>
 
@@ -14,16 +13,8 @@
 void UglyAvatarActivity::onEnter() {
   Activity::onEnter();
   LOG_DBG("AVATAR", "onEnter free heap=%u", static_cast<unsigned>(ESP.getFreeHeap()));
-  gen_ = makeUniqueNoThrow<avatar::AvatarGenerator>();
-  data_ = makeUniqueNoThrow<avatar::AvatarData>();
-  if (!gen_ || !data_) {
-    LOG_ERR("AVATAR", "OOM: generator=%u data=%u", static_cast<unsigned>(sizeof(avatar::AvatarGenerator)),
-            static_cast<unsigned>(sizeof(avatar::AvatarData)));
-    gen_.reset();
-    data_.reset();
-    activityManager.goToApps();
-    return;
-  }
+  gen_ = std::make_unique<avatar::AvatarGenerator>();
+  data_ = std::make_unique<avatar::AvatarData>();
   regenerate();
 }
 

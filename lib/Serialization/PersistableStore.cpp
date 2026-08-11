@@ -4,9 +4,6 @@
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
-#include <cstring>
-#include <limits>
-
 bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& doc) {
   const std::string targetPath = path ? path : "";
   if (targetPath.empty()) {
@@ -67,29 +64,11 @@ bool PersistableStoreBase::readDocFromFile(const char* path, JsonDocument& doc) 
 }
 
 std::string PersistableStoreBase::extractPassword(JsonVariantConst doc, bool& needsResave) {
-  bool valid = false;
-  return extractPassword(doc, needsResave, std::numeric_limits<size_t>::max(), valid);
-}
-
-std::string PersistableStoreBase::extractPassword(JsonVariantConst doc, bool& needsResave, const size_t maxLength,
-                                                  bool& valid) {
-  valid = true;
   bool ok = false;
-  bool tooLong = false;
-  std::string pass = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", maxLength, &ok, &tooLong);
-  if (tooLong) {
-    valid = false;
-    return "";
-  }
+  std::string pass = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok);
   if (!ok) {
     // Deobfuscation failed — fall back to legacy plaintext password.
-    const char* legacyPassword = doc["password"] | "";
-    const size_t legacyLength = strlen(legacyPassword);
-    if (legacyLength > maxLength) {
-      valid = false;
-      return "";
-    }
-    pass.assign(legacyPassword, legacyLength);
+    pass = doc["password"] | "";
     if (!pass.empty()) needsResave = true;
   }
   // A successfully decoded empty string is a legitimate value; preserve as-is.

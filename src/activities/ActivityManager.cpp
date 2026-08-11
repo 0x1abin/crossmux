@@ -1,6 +1,7 @@
 #include "ActivityManager.h"
 
 #include <FontCacheManager.h>
+#include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
 
@@ -42,7 +43,14 @@
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
 
+extern HalGPIO gpio;  // defined in main.cpp
+
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
+
+// How long the main task waits for the render task to advance its heartbeat
+// before declaring it dead and restarting it. Generous to tolerate slow renders
+// (cover decode, gray refresh) without false positives.
+static constexpr unsigned long kRenderWatchdogTimeoutMs = 10000;
 
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
@@ -51,7 +59,9 @@ void ActivityManager::begin() {
   constexpr BaseType_t renderTaskCore = 0;
 #endif
   xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
-                          8192,               // Stack size
+                          16384,              // Stack size (16KB: TXT/Epub render paths prewarm fonts, decode
+                                              // covers and run Bidi — a tight 8KB overflows and aborts the task,
+                                              // leaving a black panel that the heartbeat then restarts forever)
                           this,               // Parameters
                           1,                  // Priority
                           &renderTaskHandle,  // Task handle
@@ -71,10 +81,18 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
-    if (currentActivity) {
+    // Skip rendering when a Push/Pop/Replace is pending: the main task is
+    // waiting to acquire this lock to swap currentActivity. Rendering the
+    // old activity here would re-hold the lock for the entire render duration,
+    // starving the main task and freezing the device.
+    if (currentActivity && pendingAction == PendingAction::None) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
     }
+    // Advance the heartbeat so the main task's watchdog can tell this task is
+    // still alive (not crashed/aborted with a black, frozen panel).
+    renderHeartbeat = static_cast<uint32_t>(renderHeartbeat + 1);
+    renderRequestOutstanding = false;
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
     taskENTER_CRITICAL(&activityManagerSpinlock);
@@ -87,8 +105,45 @@ void ActivityManager::renderTaskLoop() {
   }
 }
 
+void ActivityManager::restartRenderTask() {
+  LOG_ERR("ACT", "Render task heartbeat stalled; restarting render task");
+  renderRequestOutstanding = false;
+
+  // The crashed task may have held the render semaphore when it died. Since a
+  // counting semaphore has no owner to release, recreate it so no task is stuck
+  // waiting forever.
+  if (renderingMutex) {
+    vSemaphoreDelete(renderingMutex);
+  }
+  renderingMutex = xSemaphoreCreateCounting(1, 1);
+  assert(renderingMutex && "Failed to recreate rendering semaphore");
+  renderLockHolder.store(nullptr);
+
+#if defined(configNUM_CORES) && configNUM_CORES > 1
+  constexpr BaseType_t renderTaskCore = 1;
+#else
+  constexpr BaseType_t renderTaskCore = 0;
+#endif
+
+  // Remove any leftover (dead) render task before creating a fresh one.
+  if (renderTaskHandle) {
+    vTaskDelete(renderTaskHandle);
+    renderTaskHandle = nullptr;
+  }
+  renderHeartbeat = 0;
+  lastRenderHeartbeatSeen = 0;
+
+  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender", 16384, this, 1, &renderTaskHandle, renderTaskCore);
+  assert(renderTaskHandle != nullptr && "Failed to recreate render task");
+
+  // Re-render the current activity so the panel recovers from the black screen.
+  renderRequestOutstanding = true;
+  lastRenderRequestMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+  xTaskNotify(renderTaskHandle, 1, eIncrement);
+}
+
 void ActivityManager::loop() {
-  if (currentActivity) {
+  if (currentActivity && pendingAction == PendingAction::None) {
     if (handleMainTabInput()) return;
 
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
@@ -105,6 +160,7 @@ void ActivityManager::loop() {
 
   while (pendingAction != PendingAction::None) {
     if (pendingAction == PendingAction::Pop) {
+      if (RenderLock::peek()) break;
       RenderLock lock;
 
       if (!currentActivity) {
@@ -152,6 +208,7 @@ void ActivityManager::loop() {
 
     } else if (pendingActivity) {
       // Current activity has requested a new activity to be launched
+      if (RenderLock::peek()) break;
       RenderLock lock;
 
       if (pendingAction == PendingAction::Replace) {
@@ -170,6 +227,14 @@ void ActivityManager::loop() {
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
 
+      // Drop any one-shot tap/release edge events the outgoing activity already
+      // consumed this frame. InputManager clears these in update(), but a
+      // pushActivity runs mid-frame; without this, the incoming activity re-reads
+      // the same tap and double-activates (observed crash with WeRead: the second
+      // activation hit WiFi/render-lock interleaving and tripped FreeRTOS
+      // xTaskPriorityDisinherit on the rendering mutex).
+      gpio.clearTouchTapEvent();
+
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
 
@@ -178,12 +243,43 @@ void ActivityManager::loop() {
     }
   }
 
-  if (requestedUpdate.exchange(false)) {
+  if (pendingAction == PendingAction::None && requestedUpdate.exchange(false)) {
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
+      // Record that a render is outstanding so the watchdog below can detect a
+      // render task that crashed mid-render and abandoned the panel.
+      lastRenderRequestMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+      renderRequestOutstanding = true;
     }
+  }
+
+  // Render task watchdog: if a render was requested but the render task never
+  // advanced its heartbeat (it crashed/aborted), restart it so the panel is not
+  // left frozen/black. A stalled low-power render that legitimately takes a while
+  // is tolerated by the generous timeout.
+  if (renderRequestOutstanding) {
+    const unsigned long nowMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    // The heartbeat only advances AFTER render() returns, so a render that is
+    // legitimately in progress (the render task is currently holding the render
+    // lock) can run longer than the watchdog timeout. Use a two-tier timeout:
+    //  - No lock held: short timeout (task died before acquiring lock)
+    //  - Lock held: long timeout (legitimate long render OR crashed task)
+    // The long timeout must exceed any legitimate render (AA grayscale: ~15s,
+    // plus one 30s waitBusy timeout = ~45s worst case).
+    constexpr unsigned long kRenderCrashTimeoutMs = 35000;  // 35s for lock-held crashes
+    const bool heartbeatStalled = (renderHeartbeat == lastRenderHeartbeatSeen);
+    if (heartbeatStalled) {
+      const unsigned long effectiveTimeout =
+          (renderLockHolder.load() != nullptr) ? kRenderCrashTimeoutMs : kRenderWatchdogTimeoutMs;
+      if ((nowMs - lastRenderRequestMs) > effectiveTimeout) {
+        restartRenderTask();
+      }
+    }
+    lastRenderHeartbeatSeen = renderHeartbeat;
+  } else {
+    lastRenderHeartbeatSeen = renderHeartbeat;
   }
 }
 
@@ -310,17 +406,30 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   }
 }
 
-void ActivityManager::goToFileTransfer() { replaceActivityWith<CrossPointWebServerActivity>(); }
+void ActivityManager::goToFileTransfer() {
+  replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput));
+}
 
-void ActivityManager::goToSettings() { replaceActivityWith<SettingsActivity>(); }
+void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToUglyAvatar() { replaceActivityWith<UglyAvatarActivity>(); }
+void ActivityManager::goToUglyAvatar() { replaceActivity(std::make_unique<UglyAvatarActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToFileBrowser(std::string path) { replaceActivityWith<FileBrowserActivity>(std::move(path)); }
+void ActivityManager::goToFileBrowser(std::string path) {
+  replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
+}
 
-void ActivityManager::goToRecentBooks() { replaceActivityWith<RecentBooksActivity>(); }
+void ActivityManager::goToRecentBooks() {
+  replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
+}
 
-void ActivityManager::goToInxRecent() { replaceActivityWith<InxRecentActivity>(); }
+void ActivityManager::goToInxRecent() {
+  auto activity = makeUniqueNoThrow<InxRecentActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: InxRecentActivity (%u bytes)", static_cast<unsigned>(sizeof(InxRecentActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
 void ActivityManager::goToMainTab(const MainTab tab) {
   mainTabEntryReleasePending = false;
@@ -349,30 +458,36 @@ void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
   // Skip the server picker when there's only one server configured
   if (servers.size() == 1) {
-    replaceActivityWith<OpdsBookBrowserActivity>(servers[0]);
+    replaceActivity(std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput, servers[0]));
   } else {
-    replaceActivityWith<OpdsServerListActivity>(true);
+    replaceActivity(std::make_unique<OpdsServerListActivity>(renderer, mappedInput, true));
   }
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  replaceActivityWith<ReaderActivity>(std::move(path), allowFastInitialRefresh);
+  replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path), allowFastInitialRefresh));
 }
 
 void ActivityManager::goToSleep(bool fromTimeout) {
-  if (replaceActivityWith<SleepActivity>(fromTimeout)) {
-    loop();  // The caller sleeps immediately after this returns, so render now.
-  }
+  replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
+  loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
 }
 
-void ActivityManager::goToBoot() { replaceActivityWith<BootActivity>(); }
+void ActivityManager::goToBoot() { replaceActivity(std::make_unique<BootActivity>(renderer, mappedInput)); }
 
 bool ActivityManager::goToPostOtaBoot(bool allowAutoPreload) {
-  return replaceActivityWith<BootActivity>(BootActivity::Mode::PostOta, allowAutoPreload);
+  // Activities outlive this call and are owned by ActivityManager, so this small allocation cannot use the stack.
+  auto activity = makeUniqueNoThrow<BootActivity>(renderer, mappedInput, BootActivity::Mode::PostOta, allowAutoPreload);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: BootActivity (%u bytes)", static_cast<unsigned>(sizeof(BootActivity)));
+    return false;
+  }
+  replaceActivity(std::move(activity));
+  return true;
 }
 
 void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::Style style) {
-  replaceActivityWith<FullScreenMessageActivity>(std::move(message), style);
+  replaceActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, std::move(message), style));
 }
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
@@ -396,44 +511,103 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }
   }
-  replaceActivityWith<HomeActivity>(initialMenuItem);
+  replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem));
 }
-void ActivityManager::goToCrashReport() { replaceActivityWith<CrashActivity>(); }
+void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToApps() { replaceActivityWith<AppsMenuActivity>(); }
+void ActivityManager::goToApps() { replaceActivity(std::make_unique<AppsMenuActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToReadingStatsMenu() { replaceActivityWith<ReadingStatsMenuActivity>(); }
+void ActivityManager::goToReadingStatsMenu() {
+  replaceActivity(std::make_unique<ReadingStatsMenuActivity>(renderer, mappedInput));
+}
 
-void ActivityManager::goToReadingStats() { replaceActivityWith<ReadingStatsActivity>(true); }
+void ActivityManager::goToReadingStats() {
+  auto activity = makeUniqueNoThrow<ReadingStatsActivity>(renderer, mappedInput, true);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: ReadingStatsActivity (%u bytes)", static_cast<unsigned>(sizeof(ReadingStatsActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
-void ActivityManager::goToSudoku() { replaceActivityWith<SudokuMenuActivity>(); }
+void ActivityManager::goToSudoku() { replaceActivity(std::make_unique<SudokuMenuActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToSokoban() { replaceActivityWith<SokobanGameActivity>(); }
+void ActivityManager::goToSokoban() { replaceActivity(std::make_unique<SokobanGameActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToGomoku() { replaceActivityWith<GomokuMenuActivity>(); }
+void ActivityManager::goToGomoku() { replaceActivity(std::make_unique<GomokuMenuActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToMinesweeper() { replaceActivityWith<MinesweeperMenuActivity>(); }
+void ActivityManager::goToMinesweeper() {
+  replaceActivity(std::make_unique<MinesweeperMenuActivity>(renderer, mappedInput));
+}
 
-void ActivityManager::goToPixelSwitch() { replaceActivityWith<PixelSwitchActivity>(); }
+void ActivityManager::goToPixelSwitch() {
+  // ActivityManager owns this 1500-byte inline canvas across frames, so it
+  // cannot live on the caller's stack. Failure must not abort under -fno-exceptions.
+  auto activity = makeUniqueNoThrow<PixelSwitchActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: PixelSwitchActivity (%u bytes)", static_cast<unsigned>(sizeof(PixelSwitchActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
-void ActivityManager::goToCalculator() { replaceActivityWith<CalculatorActivity>(); }
+void ActivityManager::goToCalculator() {
+  auto activity = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: CalculatorActivity (%u bytes)", static_cast<unsigned>(sizeof(CalculatorActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
-void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); }
+void ActivityManager::goToWoodfish() {
+  auto activity = makeUniqueNoThrow<WoodfishActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: WoodfishActivity (%u bytes)", static_cast<unsigned>(sizeof(WoodfishActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
-void ActivityManager::goToGame2048() { replaceActivityWith<Game2048Activity>(); }
+void ActivityManager::goToGame2048() { replaceActivity(std::make_unique<Game2048Activity>(renderer, mappedInput)); }
 
-void ActivityManager::goToAirPage() { replaceActivityWith<AirPageActivity>(); }
+void ActivityManager::goToAirPage() {
+  // Activities must outlive this call; ActivityManager takes ownership of this
+  // single allocation and releases it on navigation.
+  auto activity = makeUniqueNoThrow<AirPageActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: AirPageActivity (%u bytes)", static_cast<unsigned>(sizeof(AirPageActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
-void ActivityManager::goToBuddy() { replaceActivityWith<BuddyActivity>(); }
+void ActivityManager::goToBuddy() {
+  auto activity = makeUniqueNoThrow<BuddyActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: BuddyActivity (%u bytes)", static_cast<unsigned>(sizeof(BuddyActivity)));
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
-void ActivityManager::goToStandby() { replaceActivityWith<StandbyActivity>(); }
+void ActivityManager::goToStandby() { replaceActivity(std::make_unique<StandbyActivity>(renderer, mappedInput)); }
 
 #ifdef ENABLE_CHINESE_VERSION
-void ActivityManager::goToChineseChess() { replaceActivityWith<ChineseChessMenuActivity>(); }
+void ActivityManager::goToChineseChess() {
+  replaceActivity(std::make_unique<ChineseChessMenuActivity>(renderer, mappedInput));
+}
 #endif
 
 #ifdef ENABLE_CHINESE_VERSION
-void ActivityManager::goToWeRead() { replaceActivityWith<WeReadActivity>(); }
+void ActivityManager::goToWeRead() {
+  auto activity = makeUniqueNoThrow<WeReadActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: WeReadActivity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 #endif
 
 void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {
@@ -493,10 +667,12 @@ void ActivityManager::requestUpdateAndWait() {
   // Atomic section to perform checks
   taskENTER_CRITICAL(&activityManagerSpinlock);
   auto currTaskHandler = xTaskGetCurrentTaskHandle();
-  auto mutexHolder = xSemaphoreGetMutexHolder(renderingMutex);
+  // renderingMutex is now a counting semaphore (no priority inheritance), so
+  // xSemaphoreGetMutexHolder() can no longer report the owner. RenderLock
+  // records the holder in renderLockHolder instead.
+  bool holdingRenderLock = (renderLockHolder.load() == currTaskHandler);
   bool isRenderTask = (currTaskHandler == renderTaskHandle);
   bool alreadyWaiting = (waitingTaskHandle != nullptr);
-  bool holdingRenderLock = (mutexHolder == currTaskHandler);
   if (!alreadyWaiting && !isRenderTask && !holdingRenderLock) {
     waitingTaskHandle = currTaskHandler;
   }
@@ -519,17 +695,20 @@ void ActivityManager::requestUpdateAndWait() {
 
 RenderLock::RenderLock() {
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+  activityManager.renderLockHolder.store(xTaskGetCurrentTaskHandle());
   isLocked = true;
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+  activityManager.renderLockHolder.store(xTaskGetCurrentTaskHandle());
   isLocked = true;
 }
 
 RenderLock::~RenderLock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
+    activityManager.renderLockHolder.store(nullptr);
     isLocked = false;
   }
 }
@@ -537,6 +716,7 @@ RenderLock::~RenderLock() {
 void RenderLock::unlock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
+    activityManager.renderLockHolder.store(nullptr);
     isLocked = false;
   }
 }

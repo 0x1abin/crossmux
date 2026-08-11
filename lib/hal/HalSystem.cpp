@@ -5,13 +5,11 @@
 #include "Arduino.h"
 #include "HalStorage.h"
 #include "Logging.h"
-#include "driver/temperature_sensor.h"
 #include "esp_debug_helpers.h"
 #include "esp_mac.h"
 #include "esp_private/esp_cpu_internal.h"
 #include "esp_private/esp_system_attr.h"
 #include "esp_private/panic_internal.h"
-#include "esp_timer.h"
 
 #define MAX_PANIC_STACK_DEPTH 32
 
@@ -127,48 +125,6 @@ bool getDeviceId(DeviceId& out) {
   return true;
 }
 
-bool getWifiStationMac(DeviceId& out) {
-  out.fill(0);
-  if (esp_read_mac(out.data(), ESP_MAC_WIFI_STA) != ESP_OK) {
-    LOG_ERR("SYS", "Failed to read Wi-Fi station MAC address");
-    return false;
-  }
-  return true;
-}
-
-bool getChipTemperatureCelsius(float& out) {
-  out = 0.0f;
-  temperature_sensor_handle_t sensor = nullptr;
-  const temperature_sensor_config_t config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
-
-  // ESP-IDF owns two short-lived allocations here (about 112 bytes of payload);
-  // its opaque handle has no supported stack/static alternative.
-  if (temperature_sensor_install(&config, &sensor) != ESP_OK) {
-    LOG_ERR("SYS", "Failed to install chip temperature sensor");
-    return false;
-  }
-  if (temperature_sensor_enable(sensor) != ESP_OK) {
-    LOG_ERR("SYS", "Failed to enable chip temperature sensor");
-    if (temperature_sensor_uninstall(sensor) != ESP_OK) {
-      LOG_ERR("SYS", "Failed to uninstall chip temperature sensor after enable failure");
-    }
-    return false;
-  }
-
-  const bool readOk = temperature_sensor_get_celsius(sensor, &out) == ESP_OK;
-  if (!readOk) LOG_ERR("SYS", "Failed to read chip temperature");
-
-  const bool disableOk = temperature_sensor_disable(sensor) == ESP_OK;
-  if (!disableOk) LOG_ERR("SYS", "Failed to disable chip temperature sensor");
-
-  const bool uninstallOk = temperature_sensor_uninstall(sensor) == ESP_OK;
-  if (!uninstallOk) LOG_ERR("SYS", "Failed to uninstall chip temperature sensor");
-
-  return readOk && disableOk && uninstallOk;
-}
-
-uint64_t getUptimeSeconds() { return static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL; }
-
 HeapInfo getHeapInfo() {
   return {static_cast<uint32_t>(ESP.getFreeHeap()), static_cast<uint32_t>(ESP.getHeapSize()),
           static_cast<uint32_t>(ESP.getMaxAllocHeap())};
@@ -207,8 +163,7 @@ std::string getPanicInfo(bool full) {
 
 bool isRebootFromPanic() {
   const auto resetReason = esp_reset_reason();
-  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_INT_WDT ||
-         resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
+  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP;
 }
 
 }  // namespace HalSystem

@@ -1,0 +1,10 @@
+{
+  "name": "Icons",
+  "version": "1.0.0",
+  "description": "FreeInk icon assets: the freeink::Icon 1-bpp format with baked-in optical-center metadata (ported from crossmux freeink-sdk).",
+  "keywords": "icons, lucide, ui, bitmap",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {},
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

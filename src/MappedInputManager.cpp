@@ -1,6 +1,7 @@
 #include "MappedInputManager.h"
 
 #include <GfxRenderer.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -181,6 +182,8 @@ bool MappedInputManager::listItemFromPoint(const int x, const int y, int& index,
   const int pageStart = std::max(0, selectedIndex / pageItems) * pageItems;
   const int row = (y - listTop) / rowStep;
   const int tapped = pageStart + row;
+  LOG_DBG("TOUCH", "listItem y=%d listTop=%d step=%d row=%d pageStart=%d tapped=%d sel=%d",
+          y, listTop, rowStep, row, pageStart, tapped, selectedIndex);
   if (row < 0 || row >= pageItems || tapped >= itemCount) return false;
   index = tapped;
   return true;
@@ -280,6 +283,21 @@ bool MappedInputManager::wasBackGesture() const {
   return hit;
 }
 
+bool MappedInputManager::wasHeaderTapBack() const {
+  // Tap on the header (title bar) acts as Return on touch-only devices that
+  // lack a dedicated front Back key (eego-a4). The header occupies
+  // [topPadding, topPadding + headerHeight); tapping it pops the activity.
+  if (!gpio.hasTouch()) return false;
+  int x = 0;
+  int y = 0;
+  if (!wasScreenTapped(x, y)) return false;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int headerBottom = metrics.topPadding + metrics.headerHeight;
+  const bool hit = y >= metrics.topPadding && y < headerBottom;
+  if (hit) rememberTouchHeldTime();
+  return hit;
+}
+
 bool MappedInputManager::wasMenuGesture() const {
   // Downward swipe starting at the top edge (mirror of the bottom-edge home gesture).
   int sx = 0;
@@ -294,6 +312,7 @@ bool MappedInputManager::wasMenuGesture() const {
 }
 
 bool MappedInputManager::wasHomeGesture() const {
+  if (gpio.wasHomeKeyLongPressed()) return true;
   int sx = 0;
   int sy = 0;
   int ex = 0;
@@ -310,12 +329,17 @@ bool MappedInputManager::wasHomeGesture() const {
 }
 
 bool MappedInputManager::wasPressed(const Button button) const {
-  if (button == Button::Back && wasBackGesture()) return true;
+  // Back also fires on the front touch key (home key) short press, a tap on the
+  // header (title bar), or the left-edge swipe gesture — so touch-only devices
+  // without a dedicated Back key (eego-a4) still have an obvious Return target.
+  if (button == Button::Back &&
+      (wasBackGesture() || gpio.wasHomeKeyShortPressed() || wasHeaderTapBack())) return true;
   return mapButton(button, &HalGPIO::wasPressed);
 }
 
 bool MappedInputManager::wasReleased(const Button button) const {
-  if (button == Button::Back && wasBackGesture()) return true;
+  if (button == Button::Back &&
+      (wasBackGesture() || gpio.wasHomeKeyShortPressed() || wasHeaderTapBack())) return true;
   return mapButton(button, &HalGPIO::wasReleased);
 }
 

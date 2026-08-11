@@ -1,54 +1,66 @@
-name: Bug Report
-description: Report an issue or unexpected behavior
-title: "Short, descriptive title of the issue"
-labels: ["bug", "triage"]
+name: Bug report
+description: Report a reproducible firmware, build, or documentation defect.
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this bug! Please fill out the details below.
-
+        Do not attach full flash backups, device MAC addresses, credentials, or proprietary firmware.
   - type: input
     id: version
     attributes:
-      label: Affected Version
-      description: What version of the project/library are you using? (e.g., v1.2.3, master branch commit SHA)
-      placeholder: Ex. v1.2.3
+      label: Template version or commit
+      placeholder: 1.0.18 or commit SHA
     validations:
       required: true
-
-  - type: textarea
-    id: bug-description
+  - type: dropdown
+    id: area
     attributes:
-      label: Describe the Bug
-      description: A clear and concise description of what the bug is.
-      placeholder:
+      label: Area
+      options:
+        - Build/tooling
+        - Display/refresh
+        - Touch/input
+        - Storage/RTC/battery
+        - Wi-Fi/BLE/USB
+        - Sleep/power
+        - Documentation
+        - Other
     validations:
       required: true
-
   - type: textarea
-    id: steps-to-reproduce
+    id: hardware
     attributes:
-      label: Steps to Reproduce
-      description: Clearly list the steps necessary to reproduce the unexpected behavior.
-      placeholder: |
-        1. Go to '...'
-        2. Select '...'
-        3. Crash
+      label: Hardware and host
+      description: EEGO A4 variant, frontlight presence, OS, PlatformIO version.
     validations:
       required: true
-
   - type: textarea
-    id: expected-behavior
+    id: reproduce
     attributes:
-      label: Expected Behavior
-      description: A clear and concise description of what you expected to happen.
+      label: Reproduction steps
+      placeholder: Numbered, minimal steps.
     validations:
       required: true
-
   - type: textarea
-    id: logs
+    id: expected
     attributes:
-      label: Relevant Log Output/Screenshots
-      description: If applicable, error messages, or log output to help explain your problem. You can drag and drop images here.
-      render: shell
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checks
+      options:
+        - label: I have removed MAC addresses, credentials, and private flash data.
+          required: true
+        - label: I have a 16 MiB recovery backup if this involves flashing.
+          required: false

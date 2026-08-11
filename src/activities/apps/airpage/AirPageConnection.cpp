@@ -48,10 +48,10 @@ AirPageConnection::Event AirPageConnection::begin(const bool realtime) {
 
   resetRetryWindow();
   if (wifiConnected()) {
-    ownsWifi_ = realtime_;
     state_ = realtime_ ? State::BrokerConnecting : State::WifiOnline;
     return Event::StateChanged;
   }
+  if (startWifiAssociation()) return Event::StateChanged;
   state_ = State::Off;
   return Event::WifiRequired;
 }
@@ -88,7 +88,7 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
     if (mqtt_.connected()) mqtt_.disconnect();
     if (wifiConnected()) {
       state_ = State::WifiOnline;
-    } else {
+    } else if (!startWifiAssociation()) {
       state_ = State::Off;
     }
     return Event::StateChanged;
@@ -96,15 +96,14 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
 
   resetRetryWindow();
   if (wifiConnected()) {
-    ownsWifi_ = true;
     state_ = State::BrokerConnecting;
     return Event::StateChanged;
   }
+  if (startWifiAssociation()) return Event::StateChanged;
   return pause(Event::WifiRequired);
 }
 
 void AirPageConnection::prepareRefresh() {
-  if (wifiConnected()) ownsWifi_ = true;
   if (!realtime_ || state_ == State::Online) return;
   resetRetryWindow();
   state_ = State::BrokerConnecting;
@@ -245,9 +244,9 @@ AirPageConnection::Event AirPageConnection::handleWifiFailure() {
 }
 
 bool AirPageConnection::startWifiAssociation() {
-  if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
-  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
-  const auto credential = WIFI_STORE.findCredential(lastSsid);
+  if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
+  const std::string& lastSsid = WIFI_STORE.getLastConnectedSsid();
+  const WifiCredential* credential = lastSsid.empty() ? nullptr : WIFI_STORE.findCredential(lastSsid);
   if (!credential) {
     LOG_ERR("AIRP", "No saved WiFi credential");
     return false;

@@ -245,7 +245,6 @@ class BaseTheme {
   virtual void fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const;
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
-  bool buttonHintsVisible() const;
   void drawActionButton(const GfxRenderer& renderer, Rect rect, const char* label, bool active = false) const;
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   virtual int getListRowStep(bool hasSubtitle) const;
@@ -258,7 +257,17 @@ class BaseTheme {
                         const std::function<UIIcon(int index)>& rowIcon = nullptr,
                         const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
                         const std::function<bool(int index)>& rowDimmed = nullptr, bool showSelection = true,
-                        const std::function<bool(int index)>& rowHeading = nullptr) const;
+                        const std::function<bool(int index)>& rowHeading = nullptr,
+                        const std::function<int(int index)>& rowProgress = nullptr) const;
+  // Returns the inline slider bar rect for visible list row `rowIndex`, or an empty
+  // Rect when that row is not on the current page. Mirrors drawList()'s geometry so
+  // touch hit-testing lines up with the rendered bar.
+  virtual Rect getListSliderRect(const Rect& listRect, int itemCount, int selectedIndex, int rowIndex) const;
+  // Draws an inline slider bar (track + fill + knob) for a 0..100 progress value.
+  void drawInlineSlider(const GfxRenderer& renderer, const Rect& rect, int progress, bool inverted) const;
+  // Shared inline-slider geometry constants.
+  static constexpr int inlineSliderWidth = 120;
+  static constexpr int inlineSliderHeight = 14;
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
                           const char* subtitle = nullptr) const;
   virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
@@ -284,6 +293,12 @@ class BaseTheme {
   bool drawSelectionBackground(const GfxRenderer& renderer, Rect rect) const;
   virtual void drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
                                int selectedIndex) const;
+  // Returns the hit rectangles for each option row in the option popup, in the
+  // same coordinate system drawOptionPopup renders at. The base implementation
+  // returns an empty vector (OptionPopup falls back to its own BaseMetrics-based
+  // geometry); themes that fully override drawOptionPopup (e.g. InxTheme) must
+  // override this to return matching rects so touch hits line up with the rows.
+  virtual std::vector<Rect> getOptionPopupOptionRects(const GfxRenderer& renderer, int optionCount, int selectedIndex) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,
                      std::string title, const int paddingBottom = 0, const int textYOffset = 0,

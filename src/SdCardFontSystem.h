@@ -46,6 +46,12 @@ class SdCardFontSystem {
   /// Returns true when the saved selection changed.
   bool adoptCompleteChineseNotoSans();
 
+  /// Adopt the EEGO A4 eefont (HarmonyOS Sans SC) family as the default Chinese
+  /// reader font when it is present on the SD root and nothing has been
+  /// explicitly selected yet. Takes priority over the built-in/NotoSansSC
+  /// default. Returns true when the saved selection changed.
+  bool adoptEefontAsDefault();
+
   /// If the registry is dirty, re-scan the SD card now and clear the flag.
   /// Used by the web UI so uploaded/deleted fonts appear in the list
   /// without waiting for the reader activity to run ensureLoaded().
@@ -53,6 +59,7 @@ class SdCardFontSystem {
     if (registryDirty_.exchange(false, std::memory_order_acquire)) {
       registry_.discover();
       adoptCompleteChineseNotoSans();
+      adoptEefontAsDefault();
     }
   }
 

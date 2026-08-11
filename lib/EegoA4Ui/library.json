@@ -1,0 +1,22 @@
+{
+  "name": "EegoA4Ui",
+  "version": "1.0.0",
+  "description": "EEGO A4 portrait canvas, safe-area clipping, touch rotation, and CPFONT v4 renderer shared by diagnostics and examples.",
+  "keywords": "eego-a4, eink, ui, font, cpfont",
+  "authors": [
+    {
+      "name": "EEGO A4 template contributors"
+    }
+  ],
+  "dependencies": {
+    "Adafruit GFX Library": "*",
+    "EegoA4Support": "*",
+    "EInkDisplay": "*",
+    "InputManager": "*",
+    "SDCardManager": "*"
+  },
+  "platforms": "espressif32",
+  "frameworks": [
+    "arduino"
+  ]
+}

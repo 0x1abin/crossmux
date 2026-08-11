@@ -29,7 +29,8 @@ class LyraCarouselTheme final : public LyraTheme {
                 const std::function<UIIcon(int index)>& rowIcon = nullptr,
                 const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
                 const std::function<bool(int index)>& rowDimmed = nullptr, bool showSelection = true,
-                const std::function<bool(int index)>& rowHeading = nullptr) const override;
+                const std::function<bool(int index)>& rowHeading = nullptr,
+                const std::function<int(int index)>& rowProgress = nullptr) const override;
 
  private:
   mutable int lastCenterIndex_ = -1;

@@ -432,12 +432,12 @@ void ReadingStatsDetailActivity::openAdjustment() {
     return;
   }
 
-  startActivityForResultWith<BookReadingAdjustmentActivity>(
+  startActivityForResult(
+      std::make_unique<BookReadingAdjustmentActivity>(renderer, mappedInput, book->path, getDisplayTitle(*book)),
       [this](const ActivityResult&) {
         guardChildReturn();
         requestUpdate();
-      },
-      book->path, getDisplayTitle(*book));
+      });
 }
 
 void ReadingStatsDetailActivity::guardChildReturn() {

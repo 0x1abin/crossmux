@@ -80,9 +80,9 @@ void IntervalSelectionActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    ActivityResult result;
-    result.isCancelled = true;
-    setResult(std::move(result));
+    // A slider has no separate "cancel": leaving via Back preserves the adjusted
+    // value so the change isn't silently discarded (e.g. sleep timeout).
+    setResult(IntervalResult{static_cast<uint32_t>(value)});
     finish();
     return;
   }
@@ -102,9 +102,9 @@ void IntervalSelectionActivity::loop() {
     }
     if (ty >= renderer.getScreenHeight() - 80) {
       if (tx < renderer.getScreenWidth() / 3) {
-        ActivityResult result;
-        result.isCancelled = true;
-        setResult(std::move(result));
+        // Bottom-left is the "Back" zone: preserve the adjusted value (same as the
+        // physical Back button) rather than discarding it.
+        setResult(IntervalResult{static_cast<uint32_t>(value)});
         finish();
       } else if (tx > renderer.getScreenWidth() * 2 / 3) {
         setResult(IntervalResult{static_cast<uint32_t>(value)});

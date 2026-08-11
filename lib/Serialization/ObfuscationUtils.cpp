@@ -6,22 +6,22 @@
 #include <mbedtls/base64.h>
 
 #include <cstring>
-#include <limits>
 
 namespace obfuscation {
 
 namespace {
 constexpr size_t HW_KEY_LEN = 6;
 
+// Simple lazy init — no thread-safety concern on single-core ESP32-C3.
 const uint8_t* getHwKey() {
-  // Function-local static initialization is synchronized by C++.
-  static const HalSystem::DeviceId key = [] {
-    HalSystem::DeviceId value{};
-    if (!HalSystem::getDeviceId(value)) {
+  static HalSystem::DeviceId key{};
+  static bool initialized = false;
+  if (!initialized) {
+    if (!HalSystem::getDeviceId(key)) {
       LOG_ERR("OBF", "Using zero credential key because device ID is unavailable");
     }
-    return value;
-  }();
+    initialized = true;
+  }
   return key.data();
 }
 }  // namespace
@@ -48,11 +48,6 @@ String obfuscateToBase64(const std::string& plaintext) {
 }
 
 std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
-  return deobfuscateFromBase64(encoded, std::numeric_limits<size_t>::max(), ok, nullptr);
-}
-
-std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLength, bool* ok, bool* tooLong) {
-  if (tooLong) *tooLong = false;
   if (encoded == nullptr || encoded[0] == '\0') {
     if (ok) *ok = false;
     return "";
@@ -65,11 +60,6 @@ std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLe
   if (ret != 0 && ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
     LOG_ERR("OBF", "Base64 decode size query failed (ret=%d)", ret);
     if (ok) *ok = false;
-    return "";
-  }
-  if (decodedLen > maxDecodedLength) {
-    if (ok) *ok = false;
-    if (tooLong) *tooLong = true;
     return "";
   }
   std::string result(decodedLen, '\0');

@@ -297,8 +297,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // UI Theme
   uint8_t uiTheme = INX;
-  // Show front-button hints along the bottom edge on non-touch devices.
-  uint8_t showButtonHints = 1;
   uint8_t inxRecentLayout = static_cast<uint8_t>(InxRecentLayout::Flow);
   uint8_t inxLibraryLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   uint8_t inxAppsLayout = static_cast<uint8_t>(InxItemLayout::Icons);
@@ -306,6 +304,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t standbyShortcutEnabled = 0;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
+  // PWM frontlight, present only on capable board profiles.
+  uint8_t frontlightBrightness = 0;
+  uint8_t frontlightWarmth = 50;
   // Power button return from footnotes (1 = enabled, 0 = disabled)
   uint8_t pwrBtnFootnoteBack = 1;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)

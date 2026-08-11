@@ -157,17 +157,17 @@ void Game2048Activity::handleSlide(Game2048Board::Direction d) {
 }
 
 void Game2048Activity::promptNewGameConfirm() {
-  startActivityForResultWith<ConfirmationActivity>(
-      [this](const ActivityResult& result) {
-        if (result.isCancelled) {
-          requestUpdate();
-          return;
-        }
-        newGame();
-        persistNow();
-        requestUpdate();
-      },
-      tr(STR_2048_CONFIRM_NEW), tr(STR_2048_CONFIRM_BODY));
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_2048_CONFIRM_NEW),
+                                                                tr(STR_2048_CONFIRM_BODY)),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             requestUpdate();
+                             return;
+                           }
+                           newGame();
+                           persistNow();
+                           requestUpdate();
+                         });
 }
 
 void Game2048Activity::persistNow() {

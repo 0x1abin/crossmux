@@ -1,346 +1,224 @@
-# CrossMux
+# EEGO A4 硬件模板固件
 
-**English** | [简体中文](./README.zh-CN.md)
+[English](README.en.md) · [文档导航](docs/README.md) ·
+[贡献指南](CONTRIBUTING.md) · [安全政策](SECURITY.md)
 
-**CrossMux** is a community fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) that turns the device into more than a reader — it adds an Apps hub of mini-games and tools, richer standby faces, and a first-class Simplified Chinese build.
+这是一个独立的 EEGO A4 硬件支持、诊断与固件开发基线。它不是日常阅读器
+应用，而是一套已经在实体设备上验证的“能安全启动、能点屏、能逐项测试、能恢复”
+模板：保留官方固件的完整触控标定与按键定义，并采用 CrossLink 固件中效果更好的
+UC8279C 刷新策略。
 
-**Version:** CrossMux 1.5.5 (based on CrossPoint Reader 1.5.0 plus upstream `develop` through `ba1b849f`)
+当前版本为 `1.0.18`。项目与 EEGO、Xteink、CrossLink 及其权利人没有隶属或
+背书关系；来源和许可边界见 [NOTICE.md](NOTICE.md)。
 
-**Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
+## 快速开始
 
-![CrossMux running on Xteink device](./docs/images/cover.jpg)
-
-What CrossMux adds on top of upstream:
-
-- **Apps hub** (the `Apps` menu): 2048, Minesweeper, Sudoku, Gomoku (五子棋), Chinese Chess / Xiangqi (象棋), Electronic Woodfish (button or touchscreen knocks with a permanent, lazily checkpointed counter), a procedural "Ugly Avatar" generator, and **AirPage** — scan its QR upload page, then fetch and display BMP or JPEG cloud images manually or through foreground-only live MQTT push. AirPage always opens on the QR page and stays offline until Refresh or live mode needs Wi-Fi; connecting or reconnecting never fetches by itself. The mapped bottom actions open Settings, browse the latest 20 delivered images, or Refresh, with the side keys mirroring image/refresh navigation. Images use the EPUB aspect-fit, centered 4-level grayscale path and can be selected as the custom sleep screen, optionally after every new delivery. Failed refreshes keep the previous image, while repeated live connection failures pause after two minutes so normal auto-sleep can resume. The menu paginates with page dots once the apps overflow a single screen.
-- **WeRead** (微信读书): scan to sign in, browse your shelf, download books, read them offline as EPUBs, and sync reading progress. The reader keeps one **Sync Progress** action: recognized standard WeRead books use WeRead sync, while other EPUBs keep KOReader sync. New WeRead downloads also make a best-effort cloud-progress fetch before caching content so the first open can start at the remote position.
-- **Reading analytics**: reading stats, a monthly reading heatmap, a reading profile, and achievements — backed by an SD-stored JSON history.
-- **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), with optional 4-level grayscale enhancement and inverse display.
-- **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
-- **Desktop simulator** for developing and previewing the UI on the host.
-
-> **WeRead security notice:** WeRead uses an unofficial Web protocol that may
-> change without notice. Device builds encrypt traffic with wolfSSL but call
-> `setInsecure()`, so they do not verify the server CA or host identity and are
-> vulnerable to man-in-the-middle attacks. Use WeRead only on a trusted network.
-> The native simulator verifies certificates through libcurl's host trust store.
-
----
-
-[![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
-
-CrossPoint is open-source e-reader firmware - community-built, fully hackable, free forever. It's maintained by a growing community of developers and readers who believe your device should do what you want - not what a manufacturer decided for you.
-
-> If you're planning to buy an Xteink device, consider purchasing an **X3/X4 Developer Edition** through https://crosspointreader.com. CrossPoint receives a small share of each sale, helping fund development costs.
-
-## What can CrossPoint do?
-
-- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, dictionary lookups ([StarDict](docs/dictionary.md)), go-to-percent, auto page turn, orientation control, focus reading, KOReader progress sync and more.
-
-- **Various formats**: native handling for `.epub`, `.xtc/.xtch`, `.txt`, and `.bmp`.
-
-- **Screenshots.**
-
-- **Custom fonts**: install your favorite fonts on the SD card.
-
-- **Tilt page turn (X3 only)**.
-
-- **Library workflow**: folder browser, hidden-file toggle, long-press delete, recent books, SD-cache management.
-
-- **Wireless workflows**:
-
-  - File transfer web UI
-  - EPUB Optimizer
-  - Web settings UI/API (edit many device settings from browser)
-  - WebSocket fast uploads
-  - WebDAV handler
-  - AP mode (hotspot) and STA mode (join existing Wi-Fi), both with QR helpers
-  - Calibre wireless connect flow
-  - OPDS browser with saved servers (up to 8), search, pagination, and direct download
-  - OTA update checks and installs from GitHub releases
-
-- **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
-
-- **Localization**: 24 UI languages and counting. RTL support.
-
-### Coming soon:
-
-- More themes.
-
-- Much more! stay tuned.
-
----
-
-## USB-locked devices (Xteink Unlocker)
-
-Some Xteink units purchased from third-party stores (e.g. AliExpress) ship with USB flashing locked from the factory.
-If your device is locked, you will need to use the **Xteink Unlocker** tool available at
-https://crosspointreader.com/#unlock-tool before you can flash CrossPoint.
-
-**You do not need this tool if you bought your device directly from xteink.com.** Those units are not locked.
-
-**Not sure if your device is locked?** Power it on, connect the USB-C cable, and try flashing via the web flasher first (see
-[Install firmware](#install-firmware) below). If the browser's serial device picker does not show your device, try a different
-USB port or browser before assuming the device is locked. Only reach for the unlocker if the device still doesn't appear.
-
-> ### ⚠️ WARNING: READ THIS BEFORE USING THE UNLOCKER ⚠️
->
-> **The only officially supported firmwares in the unlock tool are CrossPoint and CrossInk.**
->
-> Flashing any other firmware on a USB-locked device may **permanently brick the device** or leave it **permanently
-> stuck on that firmware with no recovery path**. Once USB flashing is re-locked, your only way back is via OTA, and if
-> the firmware you flashed doesn't support OTA, **there is no way out**.
-
-## Install firmware
-
-### Web installer (recommended)
-
-1. Connect your device to your computer via USB-C and wake/unlock the device
-2. Go to https://crosspointreader.com/#flash-tools, select device (X3 or X4), and choose an official CrossPoint release.
-
-### Web installer (specific version)
-
-1. Connect your device to your computer via USB-C and wake/unlock the device
-2. Download a `firmware.bin` from [Releases](https://github.com/crosspoint-reader/crosspoint-reader/releases), local build, or continuous integration artifact.
-3. Go to https://crosspointreader.com/#flash-tools, select device (X3 or X4), click "Custom .bin" and upload a `firmware.bin`.
-
-### Revert to Official Firmware
-
-To revert to the official firmware, you can also flash the latest official firmware using https://crosspointreader.com/#flash-tools.
-
-### Command line
-
-1. Install [`esptool`](https://github.com/espressif/esptool):
-
-```bash
-pip install esptool
-```
-
-2. Download `firmware.bin` from the [releases page](https://github.com/crosspoint-reader/crosspoint-reader/releases).
-3. Connect your device via USB-C.
-4. Find the device port. On Linux, run `dmesg` after connecting. On macOS:
-
-```bash
-log stream --predicate 'subsystem == "com.apple.iokit"' --info
-```
-
-5. Flash:
-
-```bash
-esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 /path/to/firmware.bin
-```
-
-Adjust `/dev/ttyACM0` to match your system.
-
-### Manual
-
-See [Development quick start](#development-quick-start) below.
-
----
-
-## Custom SD-card fonts
-
-Convert your own TTF/OTF files into `.cpfont` files that load from the SD card. No firmware reflash is needed.
-
-1. Go to https://crosspointreader.com/fonts and open the "SD-card font builder" form.
-2. Upload up to four styles (regular, bold, italic, bold-italic), set the family name, point sizes, and Unicode range.
-3. Download the generated `.cpfont` files.
-4. Copy them to your SD card under `/fonts/YourFont/` (or `/.fonts/YourFont/` to hide the folder).
-5. Select the font on the device from the font settings.
-
-Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` script unmodified, so output matches a local host build.
-
----
-
-## Documentation
-
-- [User Guide](./USER_GUIDE.md)
-- [Web server usage](./docs/webserver.md)
-- [Web server endpoints](./docs/webserver-endpoints.md)
-- [Project scope](./SCOPE.md)
-- [Contributing docs](./docs/contributing/README.md)
-- [Touch and UI development](./docs/contributing/touch-and-ui.md) - FreeInkUI components for new screens, the touch bridge for existing ones, and build envs for the non-Xteink touch devices
-
----
-
-## Development quick start
-
-### Prerequisites
-
-- [pioarduino](https://github.com/pioarduino/pioarduino) or VS Code + pioarduino plugin
-- Python 3.8+
-- `clang-format` 21
-- USB-C cable supporting data transfer
-
-### Setup
-
-```bash
-git clone --recursive https://github.com/crosspoint-reader/crosspoint-reader
-cd crosspoint-reader
-
-# if cloned without --recursive:
-git submodule update --init --recursive
-```
-
-### Nix/NixOS
-
-Nix/NixOS users can enter the development shell with either `nix develop` (flakes) or `nix-shell`:
-
-```bash
-nix develop -f nix
-# or
-nix-shell nix
-```
-
-To flash a connected ESP32-C3 device, enable PlatformIO's udev rules in your NixOS configuration:
-
-```nix
-services.udev.packages = with pkgs; [ platformio-core.udev ];
-```
-
-After rebuilding the system configuration, reconnect the device or reload udev rules.
-
-### Build / flash / monitor
-
-```bash
-pio run --target upload
-```
-
-### Build the Simplified Chinese firmware
-
-CrossMux ships a dedicated Simplified-Chinese build environment, `gh_release_cn`. It produces a Chinese-only firmware: Simplified Chinese UI + i18n, embedded CJK bitmap fonts, CJK-aware EPUB layout, and the Chinese Chess / WeRead apps. A fresh device boots straight into the Chinese UI.
-
-The CJK font headers are committed to the repo, so a normal build needs no extra asset steps:
-
-```bash
-# Build the Chinese firmware
-pio run -e gh_release_cn
-
-# Build + flash to a connected device
-pio run -e gh_release_cn -t upload
-```
-
-The resulting `firmware.bin` is written to `.pio/build/gh_release_cn/firmware.bin`; it can also be flashed with the web installer (see [Install firmware](#install-firmware)).
-
-You only need to regenerate the CJK bitmap headers when changing the character set or updating the embedded fonts — see [docs/engineering/chinese-build.md](./docs/engineering/chinese-build.md) for the font toolchain and flash-budget details.
-
-### Run the desktop simulator
-
-Install SDL2 and `curl` (plus OpenSSL development headers on Linux), place EPUB
-files in `fs_/books/`, then run:
-
-```bash
-# X4
-pio run -e simulator -t run_simulator
-
-# X3
-pio run -e simulator_x3 -t run_simulator
-```
-
-The simulator is provided by the pinned
-[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1);
-its framebuffer, storage, input, network, and screenshot automation run as a
-native PlatformIO dependency.
-
-### Contributor pre-PR checks
-
-```bash
-./bin/clang-format-fix
-pio check -e default
-pio run -e default
-```
-
-### Debugging
-
-After flashing the new features, it’s recommended to capture detailed logs from the serial port.
-
-First, make sure all required Python packages are installed:
-
-```python
-python3 -m pip install pyserial colorama matplotlib
-```
-
-After that run the script:
+需要 Python 3.10+、Git 和一根支持数据的 USB 线：
 
 ```sh
-# For Linux
-# This was tested on Debian and should work on most Linux systems.
-python3 scripts/debugging_monitor.py
-
-# For macOS
-python3 scripts/debugging_monitor.py /dev/cu.usbmodem2101
+git clone <repository-url>
+cd eego-a4-template-firmware
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python scripts/validate_project.py --quick
+pio run -e eego_a4_quickstart
 ```
 
-Minor adjustments may be required for Windows.
+Windows PowerShell 激活虚拟环境：
 
----
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
-## Internals
+然后按顺序阅读：
 
-CrossPoint Reader is pretty aggressive about caching data down to the SD card to minimise RAM usage. The ESP32-C3 only has ~380KB of usable RAM, so we have to be careful. A lot of the decisions made in the design of the firmware were based on this constraint.
+1. [从零开发指南](docs/GETTING_STARTED.md)
+2. [五个可编译示例](examples/README.md)
+3. [驱动与 API](docs/DRIVER_GUIDE.md)
+4. [架构与总线所有权](docs/ARCHITECTURE.md)
+5. [刷写与救砖](docs/RECOVERY.md)
 
-### Data caching
+## 已覆盖硬件
 
-The first time chapters of a book are loaded, they are cached to the SD card. Subsequent loads are served from the
-cache. This cache directory exists at `.crosspoint` on the SD card. The structure is as follows:
+| 模块 | 已实现行为 |
+|---|---|
+| 屏幕 | UC8279C 初始化、Full、Fast、四灰阶、边界与残影测试 |
+| 字体 | 从 SD 读取 CPFONT v4，绘制 8/10/12/14/16/18 pt 中英文字 |
+| 触控 | 上传完整 GSLX680 固件，官方全范围标定，九宫格与边缘测试 |
+| 输入 | GPIO 5/7/8 Up、Down、Power；屏下键短按与 700 ms 长按 |
+| 存储 | microSD 挂载、临时文件写读校验和容量读取 |
+| 时钟 | PCF8563 探测、VL 状态和时间读写 |
+| 电源 | GPIO 4 电源保持、电池 ADC、GPIO 11 充电状态、安全深睡 |
+| 无线 | 2.4 GHz Wi-Fi 扫描/临时联网，BLE 被动扫描 |
+| 系统 | 16 MiB Flash、8 MiB PSRAM、原生 USB CDC、JSON 报告 |
+| 可选前光 | 仅在 I²C `0x36` 确认 LM3630A 后短时低亮度测试 |
+
+没有证据的模块不会被“猜测支持”。当前没有确认板载扬声器、麦克风、蜂鸣器、
+LED、IMU 或环境传感器。完整事实、来源和置信度见
+[硬件参考](docs/HARDWARE_REFERENCE.md)。
+
+## 安全合同
+
+- `GPIO4` 必须是第一项硬件操作并保持高电平。
+- 默认永不自动休眠，也不会自动关闭电源保持。
+- `sleep` 命令只允许 3–60 秒，并始终配置定时唤醒。
+- 自动诊断不擦除 Flash、不格式化 SD、不保存 Wi-Fi 密码、不写未知 I²C 器件。
+- SD 测试只创建、验证并删除 `/eego-a4-diagnostics.tmp`。
+- 完整镜像会改写分区表；任何写入前都必须保存新的 16 MiB 整片备份。
+- 构建、校验和打包命令不会自动刷写已连接设备。
+
+实体机标定的显示合同：
 
 ```text
-.crosspoint/
-├── epub_<hash>/         # one directory per book, named by content hash
-│   ├── progress.bin     # reading position (chapter, page, etc.)
-│   ├── cover.bmp        # generated cover image
-│   ├── book.bin         # metadata: title, author, spine, TOC
-│   ├── css_rules.cache  # parsed CSS rule cache
-│   ├── img_*            # rendered image cache files
-│   └── sections/        # per-chapter layout cache
-│       ├── 0.bin
-│       ├── 1.bin
-│       └── ...
-├── settings.json        # device settings
-├── state.json           # resume/runtime state
-└── recent.json          # recent books list
+物理外轮廓：x=0,  y=0,  552×768, R60
+圆角安全区：x=12, y=12, 528×744, R48
+普通 UI 区：x=28, y=28, 496×712, R0
+推荐标题起点：(32,32)
 ```
 
-Removing `/.crosspoint` clears all cached metadata and forces a full regeneration on next open. Book deletes, overwrites, and moves done through the firmware or web UI clear or re-key matching caches; manual SD-card edits may leave stale cache directories behind.
+正文和控件必须使用 `PortraitCanvas::useUiContentRect()`；只有背景、显示边缘或
+触控边缘测试可以临时越界。详细规范见 [SAFE_AREA.md](docs/SAFE_AREA.md)。
 
-For more details on the internal file structures, see the [file formats document](./docs/file-formats.md).
+## 项目结构
 
----
+```text
+src/
+  main.cpp                 诊断固件入口
+  app/                     诊断菜单、状态机与串口协议
+lib/
+  EegoA4Support/           板级合同、安全启动、坐标、电源策略
+  EegoA4Ui/                竖屏画布、安全裁剪、CPFONT renderer
+  BoardConfig/             FreeInk 板级 profile
+  FreeInkDisplay/          显示 facade、总线、UC8279C 与其他驱动
+  InputManager/            侧键、GSLX680 和触控标定
+  SDCardManager/           独立 HSPI SD
+  Rtc/ BatteryMonitor/ FrontlightManager/
+examples/                  五个独立可编译示例
+scripts/                   校验、打包、安全刷写、截图与提取工具
+docs/                      开发、硬件、调试、恢复和维护文档
+```
 
-## Contributing
+`.pio/`、`release/` 和 `captures/` 都是生成目录，已从源码控制排除。二进制发布包
+应作为 GitHub Release assets 发布，而不是长期提交到源码历史。
 
-Contributions are welcome. If you're new to the codebase, start with the [contributing docs](./docs/contributing/README.md). For things to work on, check the [ideas discussion board](https://github.com/crosspoint-reader/crosspoint-reader/discussions/categories/ideas) — leave a comment before starting so we don't duplicate effort.
+## 构建与校验
 
-Everyone here is a volunteer, so please be respectful and patient. For governance and community expectations, see [GOVERNANCE.md](./GOVERNANCE.md).
+快速静态检查：
 
----
+```sh
+python scripts/validate_project.py --quick
+```
 
-## Community forks
+完整回归会检查目录合同、版本、示例安全入口、UI 规则、Markdown 链接和开源
+元数据，并编译诊断固件与五个示例：
 
-One of the best things about open source is that anyone can take the code in a different direction. If you need something outside CrossPoint's [scope](./SCOPE.md), check out the community forks:
+```sh
+python scripts/validate_project.py
+```
 
-- [CrossInk](https://github.com/uxjulia/CrossInk) — Typography and reading tracking: Bionic Reading (bolds word stems to create fixation points), guide dots between words, improved paragraph indents, and replaces the default fonts with ChareInk/Lexend/Bitter.
+单独构建：
 
-- [papyrix-reader](https://github.com/bigbag/papyrix-reader) — Adds FB2 and MD format support. Actively maintained with Arabic script support. Custom themes via SD card.
+```sh
+pio run -e eego_a4_diagnostics
+pio run -e eego_a4_quickstart
+pio run -e eego_a4_storage_rtc_battery
+pio run -e eego_a4_wifi_ble
+pio run -e eego_a4_safe_sleep
+pio run -e eego_a4_cpfont
+```
 
-- ~~[crosspet](https://github.com/trilwu/crosspet) — A Vietnamese fork that adds a Tamagotchi-style virtual chicken that grows based on your reading milestones (pages read, streaks, care). Also: Flashcards, Weather, Pomodoro timer, and mini-games.~~ (Unmaintained)
+生成当前版本发布包：
 
-- [crosspoint-reader-cjk](https://github.com/aBER0724/crosspoint-reader-cjk) — Purpose-built for Chinese, Japanese, and Korean reading.
+```sh
+pio run -e eego_a4_diagnostics
+python scripts/package.py
+cd release/1.0.18
+shasum -a 256 -c SHA256SUMS
+```
 
-- [inx](https://github.com/obijuankenobiii/inx) — Completely reimagines the user interface with tabbed navigation.
+打包器从 `EegoA4Hardware.h` 读取版本，创建 app/full 镜像、manifest、校验表和
+安全刷写器；不会访问串口。
 
-- ~~[PlusPoint](https://github.com/ngxson/pluspoint-reader) — custom JS apps support.~~ (Unmaintained)
+## 安全刷写
 
-- [crosspoint-reader-papers3](https://github.com/juicecultus/crosspoint-reader-papers3) — Crosspoint port for M5Stack Paper S3.
+先在工程外准备备份目录。发布包的只读预检会检查 SHA-256、目标芯片、MAC、
+Flash 容量和当前分区表：
 
-- [t5s3-reader](https://github.com/ShallowGreen123/t5s3-reader) — Crosspoint port for LilyGo T5 ePaper S3 / T5S3 4.7-inch e-paper device.
+```sh
+python release/1.0.18/safe_flash_template.py \
+  --package release/1.0.18 --port <PORT> --preflight-only
+```
 
-**Note:** Many of these features will make their way into CrossPoint over time. We maintain a slower pace to ensure rock-solid stability and squash bugs before they reach your device.
+写入要求一个尚不存在的备份路径和预检显示的准确 MAC。分区表匹配时可 app-only：
 
-Want to build your own device? Be sure to check out the [de-link](https://github.com/iandchasse/de-link) project.
+```sh
+python release/1.0.18/safe_flash_template.py \
+  --package release/1.0.18 --port <PORT> --app-update \
+  --backup <backup>/eego-a4-before-update.bin \
+  --confirm-mac 00:00:00:00:00:00
+```
 
----
+OEM/未知分区或首次安装必须改用 `--first-install`。工具会先读取完整备份，再写入
+并执行 `verify-flash`。不要把 app 镜像写到 `0x0`，也不要在未知分区表上手工写
+`0x10000`。完整说明见 [RECOVERY.md](docs/RECOVERY.md)。
 
-CrossPoint Reader is **not affiliated with Xteink or any device manufacturer**.
+## 使用诊断固件
 
-Huge shoutout to [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader), which inspired this project.
+启动后显示 `EEGO A4 LAB`，默认不会自动休眠：
+
+- Up / Down：移动选择
+- Power：打开或重测
+- 触摸菜单行：直接打开
+- 屏下键短按：返回
+- 屏下键长按：运行全部自动测试
+
+单项测试会停留在详情页，不会自动跳到报告。触控、实体键、屏下键、屏幕残影和
+充电三阶段需要人工确认；`run all` 不会伪造这些结果。
+
+USB CDC 为 115200 baud：
+
+```sh
+pio device monitor -b 115200 -p <PORT>
+```
+
+常用命令：
+
+```text
+help
+status
+ui state
+run all
+run safe
+font page 3
+report json
+screenshot
+```
+
+`screenshot` 返回实体设备 RAM 中完整的 52,992 字节 framebuffer。主机工具：
+
+```sh
+python scripts/capture_framebuffer.py --port <PORT> \
+  --page-command 'font page 3' --name font-page-3
+```
+
+这能证明 renderer 的真实像素，但不能替代对实体面板刷新、残影和对比度的观察。
+见 [Framebuffer 调试指南](docs/FRAMEBUFFER_DEBUGGING.md)。
+
+## 文档与项目治理
+
+- [完整文档导航](docs/README.md)
+- [实体设备验证范围](docs/VALIDATION.md)
+- [维护者与发布流程](docs/MAINTAINER_GUIDE.md)
+- [贡献规范](CONTRIBUTING.md)
+- [行为准则](CODE_OF_CONDUCT.md)
+- [支持入口](SUPPORT.md)
+- [安全政策](SECURITY.md)
+- [变更记录](CHANGELOG.md)
+- [第三方依赖声明](THIRD_PARTY_NOTICES.md)
+
+## 许可证与来源
+
+源代码按 [MIT License](LICENSE) 发布。仓库不包含官方或第三方完整固件，也不
+包含字体包。GSLX680 固件表和 UC8279C LUT 属于从已记录哈希的二进制提取的
+互操作数据；发布者必须单独评估其分发依据。详见 [NOTICE.md](NOTICE.md)。

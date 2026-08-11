@@ -98,11 +98,12 @@ void SudokuMenuActivity::onSelect() {
   const Item& it = items[selected];
   switch (it.kind) {
     case ItemKind::Continue:
-      activityManager.replaceActivityWith<SudokuGameActivity>(it.difficulty, true);
+      activityManager.replaceActivity(std::make_unique<SudokuGameActivity>(renderer, mappedInput, it.difficulty, true));
       return;
     case ItemKind::NewGame:
       SudokuStore::clear();
-      activityManager.replaceActivityWith<SudokuGameActivity>(it.difficulty, false);
+      activityManager.replaceActivity(
+          std::make_unique<SudokuGameActivity>(renderer, mappedInput, it.difficulty, false));
       return;
     case ItemKind::Stats:
       showingStats = true;

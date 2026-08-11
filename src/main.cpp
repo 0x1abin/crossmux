@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalOtaSlot.h>
 #include <HalPowerManager.h>
@@ -341,6 +342,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   }
 
   halTiltSensor.deepSleep();
+  Frontlight.setOn(false);
   display.deepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
@@ -421,7 +423,7 @@ void setup() {
   halTiltSensor.begin();
   halClock.begin();
 
-  LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
+  LOG_INF("MAIN", "Hardware detect: %s", BoardConfig::ACTIVE.name);
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
@@ -443,6 +445,7 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
+  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightBrightness != 0);
   halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();

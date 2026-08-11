@@ -1,0 +1,10 @@
+{
+  "name": "FrontlightManager",
+  "version": "1.0.0",
+  "description": "FreeInk frontlight manager with PWM and LM3630A backends; EEGO A4 probes the optional controller before enabling warm/cool brightness channels.",
+  "keywords": "frontlight, backlight, lm3630a, pwm, ledc",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {},
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

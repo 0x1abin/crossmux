@@ -47,7 +47,7 @@ class UITheme {
   CrossPointSettings::UI_THEME currentType = CrossPointSettings::UI_THEME::CLASSIC;
   mutable ThemeMetrics adjustedMetrics;
   mutable bool metricsValid = false;
-  mutable bool metricsForButtonHints = false;
+  mutable bool metricsForTouch = false;
 };
 
 // Helper macro to access current theme

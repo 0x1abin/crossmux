@@ -40,9 +40,8 @@
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
 #ifdef ENABLE_CHINESE_VERSION
-#include <WeReadStore.h>
-
 #include "activities/apps/weread/WeReadProgressSyncActivity.h"
+#include "activities/apps/weread/WeReadStore.h"
 #include "activities/settings/FontDownloadActivity.h"
 #endif
 #include "components/UITheme.h"
@@ -50,7 +49,6 @@
 #include "util/AchievementPopupUtils.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
-#include "util/TimeUtils.h"
 
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
@@ -220,12 +218,6 @@ void EpubReaderActivity::onEnter() {
       strncmp(wereadBookId_, "MP_WXS_", 7) == 0) {
     wereadBookId_[0] = '\0';
   }
-  if (wereadBookId_[0]) {
-    const uint32_t timestamp = TimeUtils::getCurrentValidTimestamp();
-    if (timestamp != 0 && WeReadStore::promoteShelfBook(wereadBookId_, timestamp) != WeReadStore::ShelfSortResult::Ok) {
-      LOG_ERR("WR", "Failed to promote recently opened shelf book");
-    }
-  }
 #endif
 
 #ifdef ENABLE_CHINESE_VERSION
@@ -333,6 +325,11 @@ void EpubReaderActivity::onExit() {
   } else {
     epub.reset();
   }
+
+  // Leaving the reader: force the next activity's first frame to a full refresh
+  // so grayscale AA residue from the reading pages does not ghost into the home
+  // screen or file browser.
+  renderer.requestNextFullRefresh();
 }
 
 void EpubReaderActivity::openReaderMenu() {
@@ -354,6 +351,11 @@ void EpubReaderActivity::openReaderMenu() {
                            const auto& menu = std::get<MenuResult>(result.data);
                            applyOrientation(menu.orientation);
                            toggleAutoPageTurn(menu.pageTurnOption);
+                           // Always take a clean base when the menu closes (cancelled or
+                           // confirmed): the reader page re-renders over the menu and a FAST
+                           // refresh would leave its ghost residue on the e-ink panel.
+                           pagesUntilFullRefresh = 1;
+                           forcedRefreshPending = true;
                            if (!result.isCancelled) {
                              onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
                            }
@@ -1126,18 +1128,24 @@ bool EpubReaderActivity::launchWeReadSync() {
     return true;
   }
 
-  const auto context = WeReadProgressSyncActivity::makeContext(
-      *epub, wereadBookId_, localFraction, static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(currentPage),
-      static_cast<uint16_t>(totalPages));
+  WeReadClient::ProgressSyncInput input;
+  input.localFraction = localFraction;
+  input.localSpineIndex = static_cast<uint16_t>(currentSpineIndex);
+  input.localPageNumber = static_cast<uint16_t>(currentPage);
+  input.localPageCount = static_cast<uint16_t>(totalPages);
+  WeReadStore::BookOptions options;
+  input.hasLocalTocIndex =
+      WeReadStore::loadBookOptions(WeReadStore::bookDirectory(wereadBookId_), options) &&
+      WeReadStore::parseGeneratedChapterHref(epub->getSpineItem(currentSpineIndex).href, input.localTocIndex);
   LOG_INF("WRSync", "local chapter mapping: precise=%u spine=%u toc=%u page=%u/%u",
-          static_cast<unsigned>(context.hasLocalTocIndex), static_cast<unsigned>(context.localSpineIndex),
-          static_cast<unsigned>(context.localTocIndex), static_cast<unsigned>(context.localPageNumber),
-          static_cast<unsigned>(context.localPageCount));
+          static_cast<unsigned>(input.hasLocalTocIndex), static_cast<unsigned>(input.localSpineIndex),
+          static_cast<unsigned>(input.localTocIndex), static_cast<unsigned>(input.localPageNumber),
+          static_cast<unsigned>(input.localPageCount));
 
   // The activity owns the existing 4 KB WeRead workspace. Allocate it before
   // releasing the reader so OOM can leave the current page intact.
   auto sync = makeUniqueNoThrow<WeReadProgressSyncActivity>(renderer, mappedInput, std::move(savedEpubPath),
-                                                            wereadBookId_, context);
+                                                            wereadBookId_, input);
   if (!sync) {
     LOG_ERR("WRSync", "OOM: WeReadProgressSyncActivity (%u bytes)",
             static_cast<unsigned>(sizeof(WeReadProgressSyncActivity)));
@@ -1620,6 +1628,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   updateBookmarkFlag();
 
+  // Serialize SD access in this render path against the main task's SD writes
+  // (progress, bookmarks, background build) so they cannot interleave mid-FAT-op.
+  HalStorage::StorageLock storageLock;
+
   {
     // Unified page read: the in-progress build's in-RAM table if it has reached the page,
     // otherwise the on-disk file (finalized section, or a partial from a previous session).
@@ -1717,6 +1729,18 @@ bool EpubReaderActivity::applyDeferredReposition() {
     if (newPage < 0) newPage = 0;
     if (section->pageCount > 0 && newPage >= static_cast<int>(section->pageCount)) {
       newPage = section->pageCount - 1;
+    }
+    // Suppress the duplicate grayscale flash: if the deferred reposition remaps the
+    // saved offset to the page already displayed (same content offset), consume the
+    // cache without re-rendering so the ~1s-later background finish doesn't repaint
+    // the same anti-aliased page.
+    if (mappedOffset && currentPageVisibleOffset.has_value()) {
+      if (const auto newPageOffset = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(newPage));
+          newPageOffset == currentPageVisibleOffset) {
+        cachedChapterTotalPageCount = 0;  // consumed; don't read cached progress again
+        cachedVisibleTextOffset.reset();
+        return false;
+      }
     }
     if (newPage != section->currentPage) {
       section->currentPage = newPage;
@@ -1827,13 +1851,17 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // identical serial timing. Image pages take the blocking double-FAST path
   // below (no async refresh is ever started), so they'd spend the buffers with
   // nothing in flight to overlap.
-  const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
+  const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
   auto renderGrayscalePass = [&]() {
     if (needsTextGrayscale) {
       page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     } else {
       page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     }
+    // Include the status bar in the gray pass so the final anti-aliased frame
+    // keeps the bottom UI. Without this the gray pass only re-renders the body
+    // and wipes the status bar that the earlier BW frame drew.
+    renderStatusBar();
   };
 
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
@@ -1880,7 +1908,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   } else {
     // Async form: start the waveform and return so the grayscale plane rendering
     // below overlaps the panel's refresh time instead of following it.
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+    // With text AA on there is no BW frame to show first: skipping this BW
+    // refresh avoids the BW-then-gray double flash, and the single gray pass
+    // below (which now includes the status bar) is the only display.
+    if (!needsTextGrayscale) {
+      ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+    }
   }
   const auto tDisplay = millis();
 
@@ -1939,6 +1972,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.waitRefreshComplete();
       const auto tWait = millis();
 
+      // Abort before expensive grayscale display if a push/pop is pending
+      if (activityManager.isSwitchPending()) {
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.cleanupGrayscaleWithFrameBuffer();
+        return;
+      }
+
       renderer.writeGrayscalePlaneStrip(true, lsbPlaneBuf.get(), 0, gh);
       if (msbPlaneBuf) {
         renderer.writeGrayscalePlaneStrip(false, msbPlaneBuf.get(), 0, gh);
@@ -1982,6 +2022,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         // X3 via PTL.
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
+          if (activityManager.isSwitchPending()) {
+            renderer.setRenderMode(GfxRenderer::BW);
+            renderer.cleanupGrayscaleWithFrameBuffer();
+            return;
+          }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
           renderer.beginStripTarget(scratch.get(), y, rows);
           renderer.clearScreen(0x00);
@@ -1994,6 +2039,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         // MSB plane.
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
+          if (activityManager.isSwitchPending()) {
+            renderer.setRenderMode(GfxRenderer::BW);
+            renderer.cleanupGrayscaleWithFrameBuffer();
+            return;
+          }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
           renderer.beginStripTarget(scratch.get(), y, rows);
           renderer.clearScreen(0x00);
@@ -2041,12 +2091,26 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
+      // Abort early if a push/pop is pending (e.g. user opened menu)
+      if (activityManager.isSwitchPending()) {
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.restoreBwBuffer();
+        return;
+      }
+
       // Render and copy to MSB buffer
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
+
+      // Abort before the expensive grayscale display if a push/pop is pending
+      if (activityManager.isSwitchPending()) {
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.restoreBwBuffer();
+        return;
+      }
 
       // display grayscale part
       renderer.displayGrayBuffer();

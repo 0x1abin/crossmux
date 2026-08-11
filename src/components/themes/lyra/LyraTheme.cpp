@@ -302,9 +302,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed, const bool showSelection,
-                         const std::function<bool(int index)>&) const {
+                         const std::function<bool(int index)>&,
+                         const std::function<int(int index)>& rowProgress) const {
   drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
-                      highlightValue, rowDimmed, LyraMetrics::values, false, showSelection);
+                      highlightValue, rowDimmed, LyraMetrics::values, false, showSelection, rowProgress);
 }
 
 void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
@@ -313,7 +314,8 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
                                     const std::function<UIIcon(int index)>& rowIcon,
                                     const std::function<std::string(int index)>& rowValue, bool highlightValue,
                                     const std::function<bool(int index)>& rowDimmed, const ThemeMetrics& metrics,
-                                    bool invertSelectedRows, const bool showSelection) const {
+                                    bool invertSelectedRows, const bool showSelection,
+                                    const std::function<int(int index)>& rowProgress) const {
   if (itemCount <= 0) return;
 
   const int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
@@ -349,7 +351,8 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
 
     int valueWidth = 0;
     std::string valueText;
-    if (rowValue != nullptr) {
+    const int sliderProgress = (rowProgress != nullptr) ? rowProgress(i) : -1;
+    if (rowValue != nullptr && sliderProgress < 0) {
       valueText = rowValue(i);
       valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxListValueWidth);
       valueWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + hPaddingInSelection;
@@ -399,12 +402,35 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
                        renderer.getLineHeight(UI_10_FONT_ID));
       }
     }
+
+    if (sliderProgress >= 0 && sliderProgress <= 100) {
+      const Rect sliderRect = getListSliderRect(rect, itemCount, selectedIndex, i);
+      if (sliderRect.width > 0) drawInlineSlider(renderer, sliderRect, sliderProgress, selected && invertSelectedRows);
+    }
   }
+}
+
+Rect LyraTheme::getListSliderRect(const Rect& listRect, const int itemCount, const int selectedIndex,
+                                  const int rowIndex) const {
+  if (rowIndex < 0 || rowIndex >= itemCount || listRect.height <= 0) return Rect(0, 0, 0, 0);
+  const ThemeMetrics& metrics = LyraMetrics::values;
+  const int rowHeight = metrics.listRowHeight;
+  const int pageItems = rowHeight > 0 ? std::max(1, listRect.height / rowHeight) : 1;
+  const int pageStart = selectedIndex >= 0 ? selectedIndex / pageItems * pageItems : 0;
+  if (rowIndex < pageStart || rowIndex >= pageStart + pageItems) return Rect(0, 0, 0, 0);
+  const int slot = rowIndex - pageStart;
+  const int rowY = listRect.y + slot * rowHeight;
+  const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  const int contentWidth = listRect.width - (totalPages > 1 ? (metrics.scrollBarWidth + metrics.scrollBarRightOffset) : 1);
+  const int sliderX =
+      listRect.x + contentWidth - metrics.contentSidePadding - hPaddingInSelection - inlineSliderWidth;
+  const int sliderY = rowY + (rowHeight - inlineSliderHeight) / 2;
+  return Rect{sliderX, sliderY, inlineSliderWidth, inlineSliderHeight};
 }
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-  if (!buttonHintsVisible()) {
+  if (gpio.hasTouch()) {
     return;
   }
 

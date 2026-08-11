@@ -1,6 +1,7 @@
 #include "GfxRenderer.h"
 
 #include <BidiUtils.h>
+#include <BoardConfig.h>
 #include <BuildScratch.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
@@ -452,14 +453,16 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
           if (renderMode == GfxRenderer::BW && bmpVal < 3) {
             // Black (also paints over the grays in BW mode)
             renderer.drawPixel(screenX, screenY, pixelState);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
-            // Light gray (also mark the MSB if it's going to be a dark gray too)
-            // Dedicated X3 gray LUTs now provide proper 4-level gray on both devices
-            // We have to flag pixels in reverse for the gray buffers, as 0 leave alone, 1 update
-            renderer.drawPixel(screenX, screenY, false);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB && bmpVal == 1) {
-            // Dark gray
-            renderer.drawPixel(screenX, screenY, false);
+          } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 0 || bmpVal == 1)) {
+            // MSB plane: solid black text core (bmpVal==0) plus the dark-gray AA
+            // fringe (bmpVal==1). The A4 panel inverts plane polarity at the
+            // driver (set bit -> light), so a set MSB lands on the darker half.
+            renderer.drawPixel(screenX, screenY, true);
+          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB && (bmpVal == 0 || bmpVal == 2)) {
+            // LSB plane: solid black text core (bmpVal==0) plus the light-gray AA
+            // fringe (bmpVal==2). Combined with the MSB pass this yields 4 distinct
+            // levels: 00 black, 01 dark gray, 10 light gray, 11 white.
+            renderer.drawPixel(screenX, screenY, true);
           }
         }
       }
@@ -528,7 +531,8 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
 
-  if (state) {
+  const bool eff = (renderMode != BW) ? !state : state;
+  if (eff) {
     target[byteIndex] &= ~(1 << bitPosition);  // Clear bit
   } else {
     target[byteIndex] |= 1 << bitPosition;  // Set bit
@@ -855,7 +859,8 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
 }
 
 void GfxRenderer::fillRect(const int x, const int y, const int width, const int height, const bool state) const {
-  if (state) {
+  const bool eff = (renderMode != BW) ? !state : state;
+  if (eff) {
     fillRectImpl<Color::Black>(x, y, width, height);
   } else {
     fillRectImpl<Color::White>(x, y, width, height);
@@ -1459,9 +1464,9 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       if (renderMode == BW && val < 3) {
         drawPixel(screenX, screenY);
       } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        drawPixel(screenX, screenY, false);
+        drawPixel(screenX, screenY, true);
       } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, false);
+        drawPixel(screenX, screenY, true);
       }
     }
   }
@@ -2322,6 +2327,10 @@ void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
 }
 
 void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const {
+#if FREEINK_DEVICE_EEGO_A4
+  *outTop = *outRight = *outBottom = *outLeft = 28;
+  return;
+#endif
   switch (orientation) {
     case Portrait:
       *outTop = VIEWABLE_MARGIN_TOP;

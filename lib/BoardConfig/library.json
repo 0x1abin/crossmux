@@ -1,0 +1,10 @@
+{
+  "name": "BoardConfig",
+  "version": "2.0.0",
+  "description": "FreeInk board hardware profiles: compile-time-selected pinout and capability descriptors (display, SD, input, touch, frontlight, audio) consumed by every FreeInk driver.",
+  "keywords": "board, config, hal, pins",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {},
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

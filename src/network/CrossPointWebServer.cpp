@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <FsHelpers.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -469,7 +470,7 @@ void CrossPointWebServer::handleStatus() const {
   doc["rssi"] = apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
-  doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
+  doc["device"] = BoardConfig::ACTIVE.name;
 
   char snBuf[33] = {0};
   bool valid = false;
@@ -1447,6 +1448,8 @@ void CrossPointWebServer::handlePostSettings() {
   });
 
   SETTINGS.saveToFile();
+  Frontlight.setWarmth(SETTINGS.frontlightWarmth);
+  Frontlight.setBrightness(SETTINGS.frontlightBrightness);
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");
@@ -1573,7 +1576,8 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
 // ---- Wi-Fi Credentials API ----
 
 void CrossPointWebServer::handleGetWifiNetworks() const {
-  const auto credentials = WIFI_STORE.getCredentialSummaries();
+  const auto& credentials = WIFI_STORE.getCredentials();
+  const std::string& lastConnectedSsid = WIFI_STORE.getLastConnectedSsid();
 
   // Stream JSON array incrementally to avoid allocating the full response in memory
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -1589,8 +1593,8 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
     doc["index"] = i;
     doc["ssid"] = credentials[i].ssid;
     // Never expose Wi-Fi passwords over the API — only indicate whether one is set
-    doc["hasPassword"] = credentials[i].hasPassword;
-    doc["isLastConnected"] = credentials[i].isLastConnected;
+    doc["hasPassword"] = !credentials[i].password.empty();
+    doc["isLastConnected"] = credentials[i].ssid == lastConnectedSsid;
 
     const size_t written = serializeJson(doc, output, outputSize);
     if (written >= outputSize) continue;
@@ -1633,19 +1637,15 @@ void CrossPointWebServer::handlePostWifiNetwork() {
 
   if (doc["index"].is<int>()) {
     int idx = doc["index"].as<int>();
-    if (idx < 0) {
-      server->send(400, "text/plain", "Invalid network index");
-      return;
-    }
-    const auto credential = WIFI_STORE.getCredentialAt(static_cast<size_t>(idx));
-    if (!credential) {
+    const auto& credentials = WIFI_STORE.getCredentials();
+    if (idx < 0 || idx >= static_cast<int>(credentials.size())) {
       server->send(400, "text/plain", "Invalid network index");
       return;
     }
 
-    const std::string oldSsid = credential->ssid;
+    const std::string oldSsid = credentials[static_cast<size_t>(idx)].ssid;
     if (!hasPasswordField) {
-      password = credential->password;
+      password = credentials[static_cast<size_t>(idx)].password;
     }
 
     bool ok = true;
@@ -1693,22 +1693,19 @@ void CrossPointWebServer::handleDeleteWifiNetwork() {
   }
 
   int idx = doc["index"].as<int>();
-  if (idx < 0) {
-    server->send(400, "text/plain", "Invalid network index");
-    return;
-  }
-  const auto ssid = WIFI_STORE.getSsidAt(static_cast<size_t>(idx));
-  if (!ssid) {
+  const auto& credentials = WIFI_STORE.getCredentials();
+  if (idx < 0 || idx >= static_cast<int>(credentials.size())) {
     server->send(400, "text/plain", "Invalid network index");
     return;
   }
 
-  if (!WIFI_STORE.removeCredential(*ssid)) {
+  const std::string ssid = credentials[static_cast<size_t>(idx)].ssid;
+  if (!WIFI_STORE.removeCredential(ssid)) {
     server->send(400, "text/plain", "Failed to delete Wi-Fi network");
     return;
   }
 
-  LOG_DBG("WEB", "Deleted Wi-Fi network at index %d (SSID: %s)", idx, ssid->c_str());
+  LOG_DBG("WEB", "Deleted Wi-Fi network at index %d (SSID: %s)", idx, ssid.c_str());
   server->send(200, "text/plain", "OK");
 }
 

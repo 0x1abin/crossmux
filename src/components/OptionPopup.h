@@ -61,6 +61,7 @@ class OptionPopup {
         if (contains(hitLayout.options[i], tx, ty)) {
           if (selectedIndex != i) {
             selectedIndex = i;
+            layoutValid = false;  // theme rects depend on selectedIndex (Inx paging)
             requestUpdate();
           }
           break;
@@ -87,10 +88,12 @@ class OptionPopup {
     }
     if (input.wasPressed(MappedInputManager::Button::NavPrevious)) {
       selectedIndex = (selectedIndex - 1 + count) % count;
+      layoutValid = false;  // theme rects depend on selectedIndex (Inx paging)
       requestUpdate();
       return true;
     } else if (input.wasPressed(MappedInputManager::Button::NavNext)) {
       selectedIndex = (selectedIndex + 1) % count;
+      layoutValid = false;  // theme rects depend on selectedIndex (Inx paging)
       requestUpdate();
       return true;
     }
@@ -166,8 +169,22 @@ class OptionPopup {
 
   // Text measurement is expensive and wasScreenTouchDown() is level-triggered, so the
   // layout is computed once per show() and cached rather than rebuilt every loop().
+  // Themes that fully override drawOptionPopup (e.g. InxTheme) return hit rects
+  // matching their own geometry; otherwise the popup falls back to the
+  // BaseMetrics-based layout computed here.
   const Layout& getLayout(const GfxRenderer& renderer) const {
     if (layoutValid) return layout;
+
+    const int optionCount = static_cast<int>(ownedStrings.size());
+
+    // Theme-provided rects take precedence — they match the theme's drawOptionPopup.
+    const auto themeRects = UITheme::getInstance().getTheme().getOptionPopupOptionRects(renderer, optionCount, selectedIndex);
+    if (!themeRects.empty()) {
+      layout.dialog = Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
+      layout.options = themeRects;
+      layoutValid = true;
+      return layout;
+    }
 
     const auto& metrics = UITheme::getInstance().getMetrics();
     const auto pageWidth = renderer.getScreenWidth();
@@ -191,7 +208,6 @@ class OptionPopup {
       if (width > maxTextWidth) maxTextWidth = width;
     }
 
-    const int optionCount = static_cast<int>(ownedStrings.size());
     const int listHeight = rowHeight * optionCount + itemSpacing * (optionCount - 1);
     const int dialogW = std::min((maxTextWidth + innerPadding * 2 + selectionHPadding * 2) * 12 / 10,
                                  pageWidth - metrics.optionPopupDialogSideMargin * 2);

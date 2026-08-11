@@ -1,5 +1,7 @@
 #include "Activity.h"
 
+#include <Logging.h>
+
 #include "ActivityManager.h"
 #include "CrossPointSettings.h"
 #include "I18n.h"

@@ -100,21 +100,24 @@ void PixelSwitchActivity::onEnter() {
   snapshotReady_ = false;
   ignoreConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForWifiInputRelease_ = false;
-  wifiSelectionFailed_ = false;
-  wifiRetryActive_ = false;
-  wifiRetryPaused_ = false;
+  returnToAppsAfterWifi_ = false;
   showCooldown_ = false;
   subscribedAtMs_ = 0;
   cooldownStartedMs_ = 0;
   lastPlacementMs_ = 0;
-  wifiRetryStartedMs_ = 0;
   active_ = this;
 
   mqtt_.setServer(MQTT_HOST, MQTT_PORT);
   mqtt_.setCallback(&PixelSwitchActivity::mqttCallback);
   lastConnectAttemptMs_ = millis() - MQTT_RECONNECT_MS;
-  LOG_DBG("PXSW", "onEnter activity=%u free=%u largest=%u", static_cast<unsigned>(sizeof(*this)),
-          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+
+  if (WiFi.status() != WL_CONNECTED) {
+    launchWifiSelection();
+    requestUpdate();
+    return;
+  }
+
+  prepareMqttBuffer();
   requestUpdate();
 }
 
@@ -130,8 +133,6 @@ void PixelSwitchActivity::onExit() {
   if (mqtt_.connected()) mqtt_.disconnect();
   mqtt_.setCallback(nullptr);
   teardownOwnedWifi();
-  LOG_DBG("PXSW", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
-          static_cast<unsigned>(ESP.getMaxAllocHeap()));
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   Activity::onExit();
 }
@@ -170,51 +171,20 @@ bool PixelSwitchActivity::prepareMqttBuffer() {
   return mqttBufferReady_;
 }
 
-void PixelSwitchActivity::startCanvas() {
-  if (WiFi.status() != WL_CONNECTED) {
-    launchWifiSelection(true);
-    return;
-  }
-
-  broughtWifiUp_ = true;
-  wifiSelectionFailed_ = false;
-  wifiRetryActive_ = false;
-  wifiRetryPaused_ = false;
-  if (!prepareMqttBuffer()) {
-    wifiSelectionFailed_ = true;
-    requestUpdate();
-    return;
-  }
-  view_ = View::Canvas;
-  requestUpdate();
-}
-
-void PixelSwitchActivity::launchWifiSelection(const bool enterCanvasAfterConnect) {
+void PixelSwitchActivity::launchWifiSelection() {
   // ActivityManager owns the picker across frames; stack lifetime is insufficient.
   auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, true);
   if (!wifi) {
     LOG_ERR("PXSW", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
-    wifiSelectionFailed_ = true;
-    requestUpdate();
+    activityManager.goToApps();
     return;
   }
 
   broughtWifiUp_ = true;
-  startActivityForResult(std::move(wifi), [this, enterCanvasAfterConnect](const ActivityResult& result) {
-    waitForWifiInputRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back) ||
-                               mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
-                               mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
-                               mappedInput.isPressed(MappedInputManager::Button::NavNext);
-    const bool connected = !result.isCancelled && WiFi.status() == WL_CONNECTED;
-    wifiSelectionFailed_ = !connected;
-    wifiRetryActive_ = false;
-    wifiRetryPaused_ = !connected;
-    if (connected && !prepareMqttBuffer()) {
-      wifiSelectionFailed_ = true;
-      wifiRetryPaused_ = true;
-    } else if (connected && enterCanvasAfterConnect) {
-      view_ = View::Canvas;
-    }
+  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
+    waitForWifiInputRelease_ = true;
+    returnToAppsAfterWifi_ = result.isCancelled || WiFi.status() != WL_CONNECTED;
+    if (!returnToAppsAfterWifi_) prepareMqttBuffer();
     requestUpdate();
   });
 }
@@ -250,9 +220,6 @@ bool PixelSwitchActivity::connectBroker() {
 
   subscribedAtMs_ = millis();
   snapshotReady_ = false;
-  wifiSelectionFailed_ = false;
-  wifiRetryActive_ = false;
-  wifiRetryPaused_ = false;
   LOG_INF("PXSW", "MQTT online, subscribed %s", pixel_switch::MQTT_TOPIC);
   return true;
 }
@@ -264,14 +231,12 @@ bool PixelSwitchActivity::startSavedWifiAssociation() {
   std::string pass;
   {
     RenderLock lock(*this);
-    if (WIFI_STORE.getCredentialCount() == 0) WIFI_STORE.loadFromFile();
-    const std::string last = WIFI_STORE.getLastConnectedSsid();
-    if (!last.empty()) {
-      const auto credential = WIFI_STORE.findCredential(last);
-      if (credential) {
-        ssid = credential->ssid;
-        pass = credential->password;
-      }
+    if (WIFI_STORE.getCredentials().empty()) WIFI_STORE.loadFromFile();
+    const std::string& last = WIFI_STORE.getLastConnectedSsid();
+    const WifiCredential* credential = last.empty() ? nullptr : WIFI_STORE.findCredential(last);
+    if (credential) {
+      ssid = credential->ssid;
+      pass = credential->password;
     }
   }
 
@@ -303,7 +268,7 @@ void PixelSwitchActivity::teardownOwnedWifi() {
 }
 
 void PixelSwitchActivity::pumpNetwork() {
-  if (!mqttBufferReady_ || wifiRetryPaused_) return;
+  if (!mqttBufferReady_) return;
 
   if (mqtt_.connected()) {
     mqtt_.loop();
@@ -315,16 +280,6 @@ void PixelSwitchActivity::pumpNetwork() {
 
   snapshotReady_ = false;
   const uint32_t now = millis();
-  if (!wifiRetryActive_) {
-    wifiRetryActive_ = true;
-    wifiRetryStartedMs_ = now;
-  } else if (pixel_switch::reconnectWindowExpired(wifiRetryStartedMs_, now)) {
-    wifiRetryPaused_ = true;
-    wifiSelectionFailed_ = true;
-    teardownOwnedWifi();
-    requestUpdate();
-    return;
-  }
   if (static_cast<uint32_t>(now - lastConnectAttemptMs_) < MQTT_RECONNECT_MS) return;
   lastConnectAttemptMs_ = now;
 
@@ -338,6 +293,10 @@ void PixelSwitchActivity::pumpNetwork() {
 
 void PixelSwitchActivity::loop() {
   if (consumeWifiInputReleaseBarrier()) return;
+  if (returnToAppsAfterWifi_) {
+    activityManager.goToApps();
+    return;
+  }
 
   pumpNetwork();
   const uint32_t now = millis();
@@ -394,11 +353,13 @@ void PixelSwitchActivity::handleIntroInput() {
   int touchX = 0;
   int touchY = 0;
   if (mappedInput.wasScreenTapped(touchX, touchY)) {
-    startCanvas();
+    view_ = View::Canvas;
+    requestUpdate();
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    startCanvas();
+    view_ = View::Canvas;
+    requestUpdate();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     activityManager.goToApps();
   }
@@ -514,7 +475,6 @@ void PixelSwitchActivity::handlePaletteInput() {
 
 void PixelSwitchActivity::attemptPlacement(const pixel_switch::Shade shade) {
   if (!canPublish()) {
-    if (WiFi.status() != WL_CONNECTED && (wifiRetryPaused_ || wifiSelectionFailed_)) launchWifiSelection(false);
     LOG_ERR("PXSW", "Placement ignored while offline");
     return;
   }
@@ -688,14 +648,8 @@ void PixelSwitchActivity::render(RenderLock&&) {
         const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), "", "");
         GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       }
-      if (wifiSelectionFailed_) GUI.drawPopup(renderer, tr(STR_WIFI_CONN_FAILED));
       break;
     case View::Canvas:
-      if (wifiRetryPaused_ || wifiSelectionFailed_) {
-        const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
-        GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-        GUI.drawPopup(renderer, tr(STR_WIFI_CONN_FAILED));
-      }
       break;
     case View::Palette:
       drawPalette();

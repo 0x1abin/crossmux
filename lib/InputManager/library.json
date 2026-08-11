@@ -1,0 +1,10 @@
+{
+  "name": "InputManager",
+  "version": "2.0.0",
+  "description": "FreeInk input abstraction with digital buttons, queued events, and capacitive touch backends including the full EEGO A4 GSLX680 firmware/calibration and front key.",
+  "keywords": "input, buttons, touch, gslx680, adc",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {},
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

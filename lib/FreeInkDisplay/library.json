@@ -1,0 +1,13 @@
+{
+  "name": "EInkDisplay",
+  "version": "2.0.0",
+  "description": "FreeInk e-paper facade with controller drivers including EEGO A4 UC8279C; supports full/fast/four-level grayscale refresh and the EInkDisplay compatibility API.",
+  "keywords": "epaper, eink, uc8279c, ssd1677, uc8253, display",
+  "authors": [
+    {"name": "FreeInk SDK Contributors"},
+    {"name": "CidVonHighwind", "url": "https://github.com/CidVonHighwind", "maintainer": false}
+  ],
+  "dependencies": {},
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

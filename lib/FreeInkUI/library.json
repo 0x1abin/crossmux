@@ -1,0 +1,11 @@
+{
+  "name": "FreeInkUI",
+  "version": "0.1.0",
+  "description": "Memory-bounded e-paper UI layout, drawing, and interaction primitives for FreeInk applications.",
+  "keywords": "eink, epaper, ui, layout, touch, buttons",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {},
+  "platforms": "*",
+  "frameworks": "*",
+  "export": {"exclude": ["test"]}
+}

@@ -261,13 +261,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         char obfKey[OBF_KEY_BUF];
         snprintf(obfKey, sizeof(obfKey), "%s_obf", info.key);
         bool ok = false;
-        bool tooLong = false;
-        const std::string decoded =
-            obfuscation::deobfuscateFromBase64(doc[obfKey] | "", info.stringMaxLen - 1, &ok, &tooLong);
-        if (tooLong) {
-          LOG_ERR("CPS", "Oversized obfuscated value for key '%s'", info.key);
-          needsResave = true;
-        }
+        const std::string decoded = obfuscation::deobfuscateFromBase64(doc[obfKey] | "", &ok);
         if (ok && !decoded.empty()) {
           copyToField(destPtr, decoded.c_str(), info.stringMaxLen);
           loaded = true;

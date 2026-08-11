@@ -4,6 +4,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 // --- SdCardFontFamilyInfo helpers ---
@@ -192,6 +193,97 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
   }
 }
 
+// Scan the SD card root for the EEGO A4 eefont files. These live directly in
+// "/" (not under /fonts) and carry the ".eefont" extension. All matching files
+// are merged into a single family named EEFONT_FAMILY, each file contributing
+// one point size parsed from "<prefix>_<size>.eefont".
+bool SdCardFontRegistry::scanEefontRoot(std::vector<SdCardFontFamilyInfo>& out) {
+  HalFile root = Storage.open("/");
+  if (!root || !root.isDirectory()) return false;
+
+  // Merge into an existing eefont family (in case it was already registered),
+  // otherwise create it.
+  SdCardFontFamilyInfo* family = nullptr;
+  for (auto& fam : out) {
+    if (fam.name == EEFONT_FAMILY) {
+      family = &fam;
+      break;
+    }
+  }
+  if (!family) {
+    out.push_back(SdCardFontFamilyInfo{});
+    family = &out.back();
+    family->name = EEFONT_FAMILY;
+  }
+
+  constexpr size_t kPrefixLen = sizeof(EEFONT_FILE_PREFIX) - 1;
+  constexpr size_t kExtLen = sizeof(EEFONT_EXT) - 1;
+
+  char nameBuffer[128];
+  bool found = false;
+  while (true) {
+    HalFile entry = root.openNextFile();
+    if (!entry) break;
+    if (entry.isDirectory()) {
+      entry.close();
+      continue;
+    }
+
+    entry.getName(nameBuffer, sizeof(nameBuffer));
+    entry.close();
+    if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
+
+    const size_t nameLen = strlen(nameBuffer);
+    if (nameLen <= kPrefixLen + kExtLen) continue;
+    if (strncmp(nameBuffer, EEFONT_FILE_PREFIX, kPrefixLen) != 0) continue;
+    if (strcmp(nameBuffer + nameLen - kExtLen, EEFONT_EXT) != 0) continue;
+
+    // Parse the size between the prefix and the extension:
+    //   HarmonyOS_Sans_SC_14.eefont -> 14
+    const char* sizeStart = nameBuffer + kPrefixLen;
+    if (*sizeStart != '_') continue;  // requires "<prefix>_<size>.eefont"
+    ++sizeStart;
+    char* endPtr;
+    const long sizeVal = strtol(sizeStart, &endPtr, 10);
+    if (endPtr == sizeStart || *endPtr != '\0' || sizeVal < 1 || sizeVal > 255) continue;
+    const uint8_t size = static_cast<uint8_t>(sizeVal);
+
+    // Reject duplicate sizes in the family.
+    bool duplicate = false;
+    for (const auto& existing : family->files) {
+      if (existing.pointSize == size && existing.style == 0) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      LOG_ERR("SDREG", "Duplicate eefont %s at root — skipping", nameBuffer);
+      continue;
+    }
+
+    SdCardFontFileInfo info;
+    std::string path = "/";
+    path += nameBuffer;
+    info.path = std::move(path);
+    info.pointSize = size;
+    info.style = 0;
+    family->files.push_back(std::move(info));
+    found = true;
+    LOG_DBG("SDREG", "Found eefont: %s (%u pt)", nameBuffer, size);
+  }
+
+  if (!found) {
+    // Drop the empty family we may have created.
+    for (auto it = out.begin(); it != out.end(); ++it) {
+      if (it->name == EEFONT_FAMILY) {
+        out.erase(it);
+        break;
+      }
+    }
+  }
+  return found;
+}
+
 bool SdCardFontRegistry::discover() {
   families_.clear();
   families_.reserve(MAX_SD_FAMILIES);
@@ -200,6 +292,9 @@ bool SdCardFontRegistry::discover() {
   // sleep-folder pattern (/.sleep preferred over /sleep).
   scanRoot(FONTS_DIR_HIDDEN, families_);
   scanRoot(FONTS_DIR_VISIBLE, families_);
+  // EEGO A4 eefont files live in the SD root; scan them last so a full family
+  // installed under /fonts is not shadowed by the root scan.
+  scanEefontRoot(families_);
 
   // Sort families alphabetically
   std::sort(families_.begin(), families_.end(),

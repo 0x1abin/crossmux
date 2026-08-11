@@ -53,8 +53,8 @@ class AirPageActivity final : public Activity {
   void handleRefresh();
   void queueFetch();
   void doFetch();
-  void openWifiSelection(bool fetchAfterConnect);
-  void handleWifiResult(const ActivityResult& result, bool fetchAfterConnect);
+  void openWifiSelection();
+  void handleWifiResult(const ActivityResult& result);
   bool consumeInputReleaseBarrier();
 
   void renderQr(const Rect& viewport);

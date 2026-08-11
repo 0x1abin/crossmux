@@ -6,6 +6,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "activities/util/FrontlightAdjustmentActivity.h"
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                const std::string& title, const int currentPage, const int totalPages,
@@ -22,7 +23,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes,
                                                                                      bool hasBookmarks) {
   std::vector<MenuItem> items;
-  items.reserve(14);
+  items.reserve(15);
+  items.push_back({MenuAction::FRONTLIGHT, StrId::STR_FRONTLIGHT});
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
@@ -91,6 +93,13 @@ void EpubReaderMenuActivity::loop() {
 
   auto activateSelected = [this] {
     const auto selectedAction = menuItems[selectedIndex].action;
+    if (selectedAction == MenuAction::FRONTLIGHT) {
+      startActivityForResult(
+          std::make_unique<FrontlightAdjustmentActivity>(renderer, mappedInput, "FrontlightAdjustment",
+                                                          StrId::STR_FRONTLIGHT),
+          [this](const ActivityResult&) { requestUpdate(); });
+      return;
+    }
     if (selectedAction == MenuAction::ROTATE_SCREEN) {
       optionPopup.show(StrId::STR_ORIENTATION, orientationLabels.data(), static_cast<int>(orientationLabels.size()),
                        pendingOrientation, [this](int idx) {
@@ -207,5 +216,6 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  renderer.displayBuffer();
+  renderer.displayBuffer(firstRender ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  firstRender = false;
 }

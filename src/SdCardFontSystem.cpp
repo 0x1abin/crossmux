@@ -42,6 +42,7 @@ constexpr UiFontSize kUiFontSizes[] = {
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   registry_.discover();
   adoptCompleteChineseNotoSans();
+  adoptEefontAsDefault();
 
   // Register this system as the SD font ID resolver in settings.
   // Uses a static trampoline since CrossPointSettings stores a plain function pointer.
@@ -81,6 +82,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache)
     LOG_DBG("SDFS", "Registry dirty — re-discovering fonts");
     registry_.discover();
     adoptCompleteChineseNotoSans();
+    adoptEefontAsDefault();
   }
 
   const char* wantedFamily = SETTINGS.sdFontFamilyName;
@@ -158,6 +160,22 @@ bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
 #else
   return false;
 #endif
+}
+
+bool SdCardFontSystem::adoptEefontAsDefault() {
+  // Only adopt when the user has not explicitly picked a font. The eefont
+  // family is the default Chinese "换皮" face for EEGO A4.
+  if (SETTINGS.sdFontFamilyName[0] != '\0' || !registry_.findFamily(SdCardFontRegistry::EEFONT_FAMILY)) return false;
+
+  strncpy(SETTINGS.sdFontFamilyName, SdCardFontRegistry::EEFONT_FAMILY, sizeof(SETTINGS.sdFontFamilyName) - 1);
+  SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+  SETTINGS.fontFamily = CrossPointSettings::NOTOSANS;
+  SETTINGS.sdFontFlashPreload = 0;
+  if (!SETTINGS.saveToFile()) {
+    LOG_ERR("SDFS", "Failed to save automatic eefont selection");
+  }
+  LOG_INF("SDFS", "Using SD-root eefont (HarmonyOS Sans SC) as the default Chinese font");
+  return true;
 }
 
 void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {

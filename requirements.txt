@@ -1,2 +1,5 @@
--r lib/EpdFont/scripts/requirements.txt
--r scripts/requirements.txt
+# Host-side development and diagnostics. Firmware library versions are pinned
+# separately in platformio.ini.
+platformio==6.1.19
+pyserial==3.5
+Pillow==11.3.0

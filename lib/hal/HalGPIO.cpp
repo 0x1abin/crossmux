@@ -1,140 +1,16 @@
 #include <HalGPIO.h>
 #include <Logging.h>
-#include <PowerManager.h>
-#include <Preferences.h>
-#include <SPI.h>
-#include <Wire.h>
-#include <XteinkDetect.h>
 #include <esp_sleep.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
 
-namespace X3GPIO {
-
-bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  if (Wire.requestFrom(addr, static_cast<uint8_t>(2), static_cast<uint8_t>(true)) < 2) {
-    while (Wire.available()) {
-      Wire.read();
-    }
-    return false;
-  }
-  const uint8_t lo = Wire.read();
-  const uint8_t hi = Wire.read();
-  *outValue = (static_cast<uint16_t>(hi) << 8) | lo;
-  return true;
-}
-
-bool readBQ27220CurrentMA(int16_t* outCurrent) {
-  uint16_t raw = 0;
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_CUR_REG, &raw)) {
-    return false;
-  }
-  *outCurrent = static_cast<int16_t>(raw);
-  return true;
-}
-
-}  // namespace X3GPIO
-
-namespace {
-constexpr char HW_NAMESPACE[] = "cphw";
-constexpr char NVS_KEY_DEV_OVERRIDE[] = "dev_ovr";  // 0=auto, 1=x4, 2=x3
-constexpr char NVS_KEY_DEV_CACHED[] = "dev_det";    // 0=unknown, 1=x4, 2=x3
-
-enum class NvsDeviceValue : uint8_t { Unknown = 0, X4 = 1, X3 = 2 };
-
-NvsDeviceValue readNvsDeviceValue(const char* key, NvsDeviceValue defaultValue) {
-  Preferences prefs;
-  if (!prefs.begin(HW_NAMESPACE, true)) {
-    return defaultValue;
-  }
-  const uint8_t raw = prefs.getUChar(key, static_cast<uint8_t>(defaultValue));
-  prefs.end();
-  if (raw > static_cast<uint8_t>(NvsDeviceValue::X3)) {
-    return defaultValue;
-  }
-  return static_cast<NvsDeviceValue>(raw);
-}
-
-void writeNvsDeviceValue(const char* key, NvsDeviceValue value) {
-  Preferences prefs;
-  if (!prefs.begin(HW_NAMESPACE, false)) {
-    return;
-  }
-  prefs.putUChar(key, static_cast<uint8_t>(value));
-  prefs.end();
-}
-
-HalGPIO::DeviceType nvsToDeviceType(NvsDeviceValue value) {
-  return value == NvsDeviceValue::X3 ? HalGPIO::DeviceType::X3 : HalGPIO::DeviceType::X4;
-}
-
-HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
-  // Explicit override for recovery/support:
-  // 0 = auto, 1 = force X4, 2 = force X3
-  const NvsDeviceValue overrideValue = readNvsDeviceValue(NVS_KEY_DEV_OVERRIDE, NvsDeviceValue::Unknown);
-  if (overrideValue == NvsDeviceValue::X3 || overrideValue == NvsDeviceValue::X4) {
-    LOG_INF("HW", "Device override active: %s", overrideValue == NvsDeviceValue::X3 ? "X3" : "X4");
-    return nvsToDeviceType(overrideValue);
-  }
-
-  const NvsDeviceValue cachedValue = readNvsDeviceValue(NVS_KEY_DEV_CACHED, NvsDeviceValue::Unknown);
-  if (cachedValue == NvsDeviceValue::X3 || cachedValue == NvsDeviceValue::X4) {
-    LOG_INF("HW", "Using cached device type: %s", cachedValue == NvsDeviceValue::X3 ? "X3" : "X4");
-    return nvsToDeviceType(cachedValue);
-  }
-
-  // No cache yet: use FreeInk's canonical two-pass X3 fingerprint and persist
-  // only confirmed results. Inconclusive probes deliberately remain uncached.
-  uint8_t score1 = 0;
-  uint8_t score2 = 0;
-  const freeink::XteinkVerdict verdict = freeink::detectXteinkVerdict(&score1, &score2);
-  LOG_INF("HW", "Xteink probe scores: pass1=%u pass2=%u verdict=%u", score1, score2, static_cast<unsigned>(verdict));
-
-  if (verdict == freeink::XteinkVerdict::X3Confirmed) {
-    writeNvsDeviceValue(NVS_KEY_DEV_CACHED, NvsDeviceValue::X3);
-    return HalGPIO::DeviceType::X3;
-  }
-
-  if (verdict == freeink::XteinkVerdict::X4Confirmed) {
-    writeNvsDeviceValue(NVS_KEY_DEV_CACHED, NvsDeviceValue::X4);
-    return HalGPIO::DeviceType::X4;
-  }
-
-  // Conservative fallback for first boot with inconclusive probes.
-  return HalGPIO::DeviceType::X4;
-}
-
-}  // namespace
-
 void HalGPIO::begin() {
-#if FREEINK_MCU_C3
-  _deviceType = detectDeviceTypeWithFingerprint();
-  BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
-
-  // Resolve the per-batch controller before SPI owns the display pins. FreeInk
-  // checks the OEM hw_calib/screenType value first, then falls back to its
-  // two-pass display-bus probe. X3's facade keys panel selection off the sibling
-  // board profile, so preserve a detected UC8279 through setDisplayX3().
-  freeink::applyXteinkDisplayController();
-  if (deviceIsX3() && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
-    BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
-  }
-
-  SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
-
-  if (deviceIsX4()) {
-    pinMode(BAT_GPIO0, INPUT);
-    pinMode(UART0_RXD, INPUT);
-  }
-#else
+  // EEGO A4 is a single-device build (FREEINK_DEVICE_EEGO_A4): BoardConfig::ACTIVE
+  // is already the EEGO_A4 profile by default, so no runtime X3/X4 detection or
+  // panel selection is needed. The template InputManager reads buttons/touch
+  // from ACTIVE.
   _deviceType = DeviceType::X4;
-#endif
   inputMgr.begin();
 }
 
@@ -181,31 +57,36 @@ bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEn
 
 bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
 
+bool HalGPIO::wasHomeKeyShortPressed() const { return inputMgr.wasHomeKeyShortPressed(); }
+
+bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
+
+void HalGPIO::clearTouchTapEvent() { inputMgr.clearTouchTapEvent(); }
+
+void HalGPIO::prepareForDeepSleep() {
+  // Deep-sleep rail/latch handling is owned by HalPowerManager (EEGO A4 keeps
+  // its GPIO4 power latch driven HIGH and arms the power-button wake source
+  // there). No work is needed here.
+}
+
 void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
 }
 
 bool HalGPIO::isXteinkDevice() const {
   return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
-         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
          BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4;
 }
 
 bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed) {
-  // Boards without a power button (or M5Paper's latch circuit) cannot verify a
-  // hold; treat the wake as valid.
+  // Boards without a power button cannot verify a hold; treat the wake as valid.
   if (BoardConfig::ACTIVE.input.power < 0) {
     return true;
   }
-#if defined(FREEINK_DEVICE_M5PAPER) && FREEINK_DEVICE_M5PAPER
-  return true;
-#endif
   if (shortPressAllowed) {
     // Fast path - no duration check needed
     return true;
   }
-  // TODO: Intermittent edge case remains: a single tap followed by another single tap
-  // can still power on the device. Tighten wake debounce/state handling here.
 
   // Calibrate: subtract boot time already elapsed, assuming button held since boot.
   const unsigned long calibration = millis();
@@ -233,18 +114,6 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
 }
 
 bool HalGPIO::isUsbConnected() const {
-  if (deviceIsX3()) {
-    // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
-    // Positive current means charging.
-    for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-      int16_t currentMa = 0;
-      if (X3GPIO::readBQ27220CurrentMA(&currentMa)) {
-        return currentMa > 0;
-      }
-      delay(2);
-    }
-    return false;
-  }
   if (BoardConfig::ACTIVE.usbDetect < 0) {
     return false;
   }

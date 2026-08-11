@@ -1,0 +1,8 @@
+{
+  "name": "SecureNet",
+  "version": "0.0.1",
+  "description": "FreeInk network Security layer: SecureHttpClient (esp_http_client backed).",
+  "keywords": ["network", "http", "https", "tls"],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}

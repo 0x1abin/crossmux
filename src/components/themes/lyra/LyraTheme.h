@@ -86,12 +86,14 @@ class LyraTheme : public BaseTheme {
                          int& index) const override;
   int getListRowStep(bool hasSubtitle) const override;
   int getListPageItems(int contentHeight, bool hasSubtitle) const override;
+  Rect getListSliderRect(const Rect& listRect, int itemCount, int selectedIndex, int rowIndex) const override;
   void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                 const std::function<std::string(int index)>& rowTitle,
                 const std::function<std::string(int index)>& rowSubtitle,
                 const std::function<UIIcon(int index)>& rowIcon, const std::function<std::string(int index)>& rowValue,
                 bool highlightValue, const std::function<bool(int index)>& rowDimmed = nullptr,
-                bool showSelection = true, const std::function<bool(int index)>& rowHeading = nullptr) const override;
+                bool showSelection = true, const std::function<bool(int index)>& rowHeading = nullptr,
+                const std::function<int(int index)>& rowProgress = nullptr) const override;
   void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                        const char* btn4) const override;
   void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const override;
@@ -112,5 +114,6 @@ class LyraTheme : public BaseTheme {
                            const std::function<UIIcon(int index)>& rowIcon,
                            const std::function<std::string(int index)>& rowValue, bool highlightValue,
                            const std::function<bool(int index)>& rowDimmed, const ThemeMetrics& metrics,
-                           bool invertSelectedRows, bool showSelection) const;
+                           bool invertSelectedRows, bool showSelection,
+                           const std::function<int(int index)>& rowProgress = nullptr) const;
 };

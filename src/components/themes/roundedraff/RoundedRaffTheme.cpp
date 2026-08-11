@@ -282,7 +282,8 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
                                 const std::function<UIIcon(int index)>& rowIcon,
                                 const std::function<std::string(int index)>& rowValue, bool highlightValue,
                                 const std::function<bool(int index)>& rowDimmed, const bool showSelection,
-                                const std::function<bool(int index)>&) const {
+                                const std::function<bool(int index)>&,
+                                const std::function<int(int index)>& rowProgress) const {
   (void)rowIcon;
   (void)highlightValue;
   const bool hasSubtitle = static_cast<bool>(rowSubtitle);
@@ -366,14 +367,40 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
                        renderer.getLineHeight(kTitleFontId));
       }
     }
+
+    if (rowProgress) {
+      const int sliderProgress = rowProgress(i);
+      if (sliderProgress >= 0 && sliderProgress <= 100) {
+        const Rect sliderRect = getListSliderRect(rect, itemCount, selectedIndex, i);
+        if (sliderRect.width > 0) drawInlineSlider(renderer, sliderRect, sliderProgress, isSelected);
+      }
+    }
   }
 
   drawScrollBar(renderer, rect, itemCount, pageStartIndex, pageItems);
 }
 
+Rect RoundedRaffTheme::getListSliderRect(const Rect& listRect, const int itemCount, const int selectedIndex,
+                                         const int rowIndex) const {
+  if (rowIndex < 0 || rowIndex >= itemCount || listRect.height <= 0) return Rect(0, 0, 0, 0);
+  const int rowHeight = RoundedRaffMetrics::values.listRowHeight;
+  const int rowStep = rowHeight + kSelectableRowGap;
+  const int pageItems = std::max(1, listRect.height / rowStep);
+  const int pageStartIndex = std::max(0, selectedIndex / pageItems) * pageItems;
+  if (rowIndex < pageStartIndex || rowIndex >= pageStartIndex + pageItems) return Rect(0, 0, 0, 0);
+  const int slot = rowIndex - pageStartIndex;
+  const int rowY = listRect.y + slot * rowStep;
+  const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
+  const int rowX = listRect.x + sidePadding;
+  const int rowWidth = listRect.width - sidePadding * 2;
+  const int sliderX = rowX + rowWidth - kInteractiveInsetX - inlineSliderWidth;
+  const int sliderY = rowY + (rowHeight - inlineSliderHeight) / 2;
+  return Rect{sliderX, sliderY, inlineSliderWidth, inlineSliderHeight};
+}
+
 void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                        const char* btn4) const {
-  if (!buttonHintsVisible()) {
+  if (gpio.hasTouch()) {
     return;
   }
 

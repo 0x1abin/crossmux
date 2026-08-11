@@ -212,6 +212,10 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
                           {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                           StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_FRONTLIGHT_BRIGHTNESS, &CrossPointSettings::frontlightBrightness, {0, 100, 5},
+                           "frontlightBrightness", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Value(StrId::STR_FRONTLIGHT_WARMTH, &CrossPointSettings::frontlightWarmth, {0, 100, 5},
+                           "frontlightWarmth", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(
             StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
             {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
@@ -220,8 +224,6 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                            StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_INX},
                           "uiTheme", StrId::STR_CAT_DISPLAY),
-        SettingInfo::Toggle(StrId::STR_SHOW_BUTTON_HINTS, &CrossPointSettings::showButtonHints, "showButtonHints",
-                            StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_INX_RECENT_LAYOUT, &CrossPointSettings::inxRecentLayout,
                           {StrId::STR_LAYOUT_FLOW, StrId::STR_LAYOUT_GRID, StrId::STR_LAYOUT_LIST,
                            StrId::STR_LAYOUT_ICONS, StrId::STR_COVER},
@@ -432,9 +434,20 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
 }
 
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
-  if (!BoardConfig::hasTouch()) return setting.nameId != StrId::STR_TOUCH_READER_CONTROLS;
-  return setting.nameId != StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION &&
-         setting.nameId != StrId::STR_SUNLIGHT_FADING_FIX && setting.nameId != StrId::STR_SHOW_BUTTON_HINTS;
+  if (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS && !BoardConfig::hasTouch()) return false;
+#if defined(SIMULATOR)
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) {
+    return false;
+  }
+#else
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS && !BoardConfig::hasFrontlight()) return false;
+  if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !BoardConfig::hasColorTemperatureFrontlight()) return false;
+#endif
+  if (BoardConfig::hasTouch() &&
+      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX)) {
+    return false;
+  }
+  return true;
 }
 
 // Visits the shared list without copying it. Dynamic font entries are built

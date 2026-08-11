@@ -35,12 +35,12 @@ void ReadingDayDetailActivity::openSelectedBook() {
     return;
   }
 
-  startActivityForResultWith<ReadingStatsDetailActivity>(
+  startActivityForResult(
+      std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, entries[selectedIndex].book->path),
       [this](const ActivityResult&) {
         refreshEntries();
         requestUpdate();
-      },
-      entries[selectedIndex].book->path);
+      });
 }
 
 void ReadingDayDetailActivity::onEnter() {

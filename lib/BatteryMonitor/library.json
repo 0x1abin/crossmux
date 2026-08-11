@@ -1,0 +1,10 @@
+{
+  "name": "BatteryMonitor",
+  "version": "2.0.0",
+  "description": "FreeInk battery monitor: ADC voltage/estimated percentage and charge-status telemetry; EEGO A4 polarity is supplied at runtime by EegoA4Support.",
+  "keywords": "battery, adc, lipo",
+  "authors": [{"name": "FreeInk SDK Contributors"}],
+  "dependencies": {},
+  "platforms": "espressif32",
+  "frameworks": ["arduino"]
+}

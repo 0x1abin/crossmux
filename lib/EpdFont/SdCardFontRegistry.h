@@ -33,6 +33,15 @@ class SdCardFontRegistry {
   static constexpr const char* FONTS_DIR_HIDDEN = "/.fonts";
   static constexpr const char* FONTS_DIR_VISIBLE = "/fonts";
 
+  // EEGO A4 "换皮" (eefont) font: HarmonyOS Sans SC shipped as bare .eefont
+  // files in the SD card ROOT (not inside /fonts). They are CPFONT v4 fonts
+  // named "<prefix>_<size>.eefont" (e.g. HarmonyOS_Sans_SC_14.eefont). A
+  // family is synthesized so the normal SD-font loader/pipeline can consume
+  // them, and this family is adopted as the default Chinese face when present.
+  static constexpr const char* EEFONT_FAMILY = "HarmonyOS Sans SC";
+  static constexpr const char* EEFONT_FILE_PREFIX = "HarmonyOS_Sans_SC";
+  static constexpr const char* EEFONT_EXT = ".eefont";
+
   // Returns the existing root for `familyName` (the one that contains
   // /<root>/<familyName>/), or nullptr if the family is not installed in
   // either root. Used by writers to keep re-installs in their existing dir.
@@ -58,4 +67,8 @@ class SdCardFontRegistry {
   static void scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family);
   // Scan one root (e.g. "/.fonts"), append families to `out`, dedup by name.
   static void scanRoot(const char* rootPath, std::vector<SdCardFontFamilyInfo>& out);
+  // Scan the SD card root ("/") for EEGO A4 eefont files and append them as a
+  // single family (EEFONT_FAMILY). Returns true when at least one eefont file
+  // was registered.
+  static bool scanEefontRoot(std::vector<SdCardFontFamilyInfo>& out);
 };
