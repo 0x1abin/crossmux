@@ -169,7 +169,7 @@ bool InxTheme::tabIndexFromPoint(const GfxRenderer&, const Rect rect, const std:
 
 void InxTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const {
-  if (gpio.hasTouch()) return;
+  if (!buttonHintsVisible()) return;
 
   const GfxRenderer::Orientation original = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);

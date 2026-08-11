@@ -1,5 +1,6 @@
 #pragma once
 #include <Logging.h>
+#include <Memory.h>
 
 #include <cassert>
 #include <memory>
@@ -60,6 +61,19 @@ class Activity {
   // Start a new activity without destroying the current one
   // Note: requestUpdate() will be invoked automatically once resultHandler finishes
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler);
+
+  template <typename T, typename... Args>
+  bool startActivityForResultWith(ActivityResultHandler resultHandler, Args&&... args) {
+    // The child is owned by ActivityManager across frames, so stack storage is
+    // not possible; keep its one allocation fallible.
+    auto activity = makeUniqueNoThrow<T>(renderer, mappedInput, std::forward<Args>(args)...);
+    if (!activity) {
+      LOG_ERR("ACT", "OOM: child activity (%u bytes)", static_cast<unsigned>(sizeof(T)));
+      return false;
+    }
+    startActivityForResult(std::move(activity), std::move(resultHandler));
+    return true;
+  }
 
   // Set the result to be passed back to the previous activity when this activity finishes
   void setResult(ActivityResult&& result);

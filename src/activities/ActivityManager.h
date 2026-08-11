@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "GfxRenderer.h"
+#include "Logging.h"
 #include "MappedInputManager.h"
+#include "Memory.h"
 #include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
 
@@ -83,6 +85,19 @@ class ActivityManager {
 
   // Will replace currentActivity and drop all activities on stack
   void replaceActivity(std::unique_ptr<Activity>&& newActivity);
+
+  // Activities must outlive the caller, so they cannot use stack storage. This
+  // keeps the single required heap allocation fallible under -fno-exceptions.
+  template <typename T, typename... Args>
+  bool replaceActivityWith(Args&&... args) {
+    auto activity = makeUniqueNoThrow<T>(renderer, mappedInput, std::forward<Args>(args)...);
+    if (!activity) {
+      LOG_ERR("ACT", "OOM: activity (%u bytes)", static_cast<unsigned>(sizeof(T)));
+      return false;
+    }
+    replaceActivity(std::move(activity));
+    return true;
+  }
 
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer();

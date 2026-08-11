@@ -123,9 +123,8 @@ void GomokuMenuActivity::handleAiDifficultyInput() {
     requestUpdate();
     if (touch == MappedInputManager::RowTouch::Tap) {
       GomokuStore::clear();
-      activityManager.replaceActivity(
-          std::make_unique<GomokuGameActivity>(renderer, mappedInput, GomokuMode::VsAi, pendingAiBoardSize, false,
-                                               static_cast<GomokuAiLevel>(aiDifficultySel)));
+      activityManager.replaceActivityWith<GomokuGameActivity>(GomokuMode::VsAi, pendingAiBoardSize, false,
+                                                              static_cast<GomokuAiLevel>(aiDifficultySel));
     }
     return;
   }
@@ -140,8 +139,7 @@ void GomokuMenuActivity::handleAiDifficultyInput() {
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     GomokuStore::clear();
     const auto level = static_cast<GomokuAiLevel>(aiDifficultySel);
-    activityManager.replaceActivity(std::make_unique<GomokuGameActivity>(renderer, mappedInput, GomokuMode::VsAi,
-                                                                         pendingAiBoardSize, false, level));
+    activityManager.replaceActivityWith<GomokuGameActivity>(GomokuMode::VsAi, pendingAiBoardSize, false, level);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     showingAiDifficulty = false;
     requestUpdate();
@@ -154,8 +152,7 @@ void GomokuMenuActivity::onSelect() {
   if (it.disabled) return;  // legacy guard; no items currently use it
   switch (it.kind) {
     case ItemKind::Continue:
-      activityManager.replaceActivity(
-          std::make_unique<GomokuGameActivity>(renderer, mappedInput, it.mode, it.boardSize, true, resumeAiLevel));
+      activityManager.replaceActivityWith<GomokuGameActivity>(it.mode, it.boardSize, true, resumeAiLevel);
       return;
     case ItemKind::NewGame:
       if (it.mode == GomokuMode::VsAi) {
@@ -167,8 +164,7 @@ void GomokuMenuActivity::onSelect() {
         return;
       }
       GomokuStore::clear();
-      activityManager.replaceActivity(
-          std::make_unique<GomokuGameActivity>(renderer, mappedInput, it.mode, it.boardSize, false));
+      activityManager.replaceActivityWith<GomokuGameActivity>(it.mode, it.boardSize, false);
       return;
     case ItemKind::Stats:
       showingStats = true;

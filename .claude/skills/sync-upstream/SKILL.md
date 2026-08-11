@@ -21,6 +21,9 @@ python3 .claude/skills/sync-upstream/scripts/sync_upstream.py run --draft
 
 `run --draft` uses a two-stage gate:
 
+Private forks can append repeatable build environments, for example
+`--extra-build-env gh_weread_pro`.
+
 1. Compares `Free-Ink/freeink-sdk/main` with `0x1abin/freeink-sdk/main`.
 2. If the fork is behind, creates `agent/sync-freeink-sdk-main-<sha>`, runs both
    SDK host suites and CrossMux `default`, `sticky`, `eego_a4`, and `mofei_m4` builds, opens

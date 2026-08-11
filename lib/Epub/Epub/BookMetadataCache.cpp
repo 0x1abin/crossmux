@@ -2,6 +2,7 @@
 
 #include <BufferedFile.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 #include <Utf8.h>
 #include <ZipFile.h>
@@ -56,6 +57,17 @@ BookMetadataCache::SpineEntry readSpineEntryFrom(F& file) {
   serialization::readPod(file, entry.cumulativeSize);
   serialization::readPod(file, entry.tocIndex);
   return entry;
+}
+
+uint32_t readSpineCumulativeSize(HalFile& file) {
+  uint32_t hrefLength = 0;
+  serialization::readPod(file, hrefLength);
+  file.seek(file.position() + hrefLength);
+  uint32_t cumulativeSize = 0;
+  serialization::readPod(file, cumulativeSize);
+  int16_t tocIndex;
+  serialization::readPod(file, tocIndex);
+  return cumulativeSize;
 }
 
 template <typename F>
@@ -488,8 +500,35 @@ bool BookMetadataCache::load() {
   serialization::readString(bookFile, coreMetadata.coverItemHref);
   serialization::readString(bookFile, coreMetadata.textReferenceHref);
 
+  // Cache cumulative spine sizes in RAM. The progress bar (every render) and percent
+  // jumps otherwise pay 2 seeks + a heap-allocating SpineEntry read per access. Spine
+  // entries are stored contiguously in index order immediately after the LUTs, so read
+  // them in a single sequential pass.
+  cumulativeSizes.reset();
+  cumulativeSizeCount = 0;
+  if (spineCount > 0 && spineCount <= MAX_CUMULATIVE_SIZE_CACHE_ITEMS) {
+    auto sizes = makeUniqueNoThrow<uint32_t[]>(spineCount);
+    if (sizes) {
+      const uint32_t lutSize = (static_cast<uint32_t>(spineCount) + tocCount) * sizeof(uint32_t);
+      bookFile.seek(lutOffset + lutSize);
+      for (uint16_t i = 0; i < spineCount; i++) {
+        sizes[i] = readSpineCumulativeSize(bookFile);
+      }
+      cumulativeSizeCount = spineCount;
+      cumulativeSizes = std::move(sizes);
+    } else {
+      LOG_ERR("BMC", "OOM caching %u cumulative spine sizes", spineCount);
+    }
+  }
+
   loaded = true;
   LOG_DBG("BMC", "Loaded cache data: %d spine, %d TOC entries", spineCount, tocCount);
+  return true;
+}
+
+bool BookMetadataCache::getCumulativeSize(const int index, uint32_t& size) const {
+  if (!cumulativeSizes || index < 0 || index >= cumulativeSizeCount) return false;
+  size = cumulativeSizes[index];
   return true;
 }
 

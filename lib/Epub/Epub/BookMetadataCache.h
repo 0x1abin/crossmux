@@ -62,6 +62,11 @@ class BookMetadataCache {
   // wrapper serves whichever pass is active (spine, then toc).
   std::unique_ptr<serialization::BufferedFileWriter> passOut;
 
+  // Cumulative spine sizes, cached in RAM at load() so progress/percent lookups avoid
+  // two seeks and a heap-allocating SpineEntry read. The cache is bounded to 4KB.
+  std::unique_ptr<uint32_t[]> cumulativeSizes;
+  uint16_t cumulativeSizeCount = 0;
+
   // Index for fast href→spineIndex lookup (used only for large EPUBs)
   struct SpineHrefIndexEntry {
     uint64_t hrefHash;  // FNV-1a 64-bit hash
@@ -72,6 +77,8 @@ class BookMetadataCache {
   bool useSpineHrefIndex = false;
 
   static constexpr uint16_t LARGE_SPINE_THRESHOLD = 400;
+  // ponytail: cap the optimization; larger books fall back to SD reads.
+  static constexpr uint16_t MAX_CUMULATIVE_SIZE_CACHE_ITEMS = 1024;
 
   // FNV-1a 64-bit hash function
   static uint64_t fnvHash64(const std::string& s) {
@@ -113,6 +120,8 @@ class BookMetadataCache {
   bool load();
   SpineEntry getSpineEntry(int index);
   TocEntry getTocEntry(int index);
+  // Returns whether the in-RAM cache contains the requested cumulative byte size.
+  bool getCumulativeSize(int index, uint32_t& size) const;
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }
   bool isLoaded() const { return loaded; }

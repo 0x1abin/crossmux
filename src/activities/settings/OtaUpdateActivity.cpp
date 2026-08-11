@@ -229,9 +229,8 @@ void OtaUpdateActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FAILED) {
-    const int detailHeight = failedDetail != nullptr ? height : 0;
-    const int failedTop =
-        SubpageLayout::centeredTop(content, titleHeight + (detailHeight > 0 ? relatedGap : 0) + detailHeight);
+    const int failedHeight = titleHeight + (failedDetail != nullptr ? relatedGap + height : 0);
+    const int failedTop = SubpageLayout::centeredTop(content, failedHeight);
     UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, failedTop, tr(STR_UPDATE_FAILED), true,
                               EpdFontFamily::BOLD);
     if (failedDetail != nullptr) {

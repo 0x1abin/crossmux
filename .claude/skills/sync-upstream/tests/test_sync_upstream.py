@@ -78,6 +78,16 @@ class SdkSyncStateTest(unittest.TestCase):
             ("default", "sticky", "eego_a4"),
         )
 
+    def test_sdk_candidate_builds_include_unique_extra_environments(self):
+        self.assertEqual(
+            sync_upstream.candidate_build_envs(
+                "FREEINK_DEVICE_EEGO_A4",
+                "[env:eego_a4]\n",
+                ("gh_weread_pro", "eego_a4"),
+            ),
+            ("default", "sticky", "eego_a4", "gh_weread_pro"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

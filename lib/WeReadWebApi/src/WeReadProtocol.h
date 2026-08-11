@@ -25,6 +25,8 @@ ImageType normalizeImageUrl(const char* source, char* output, size_t outputSize)
 uint32_t parseUint32OrZero(const char* value, size_t len);
 uint32_t hashAppId(const char* value, size_t len);
 bool hasUsablePclts(const char* value);
+bool formatReadingTimeQuery(uint32_t seconds, char* out, size_t outSize);
+bool formatReadingTimeJson(uint32_t seconds, char* out, size_t outSize);
 
 struct RemoteProgress {
   char chapterUid[64] = {};

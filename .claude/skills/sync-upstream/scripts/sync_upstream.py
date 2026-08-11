@@ -448,6 +448,7 @@ def pr_body(
     skipped_builds: bool,
     sdk_status: SdkStatus,
     a4_conflict_note: str,
+    extra_build_envs: Sequence[str],
 ) -> str:
     lines = [
         "## Summary",
@@ -470,6 +471,7 @@ def pr_body(
         lines.append("- Builds skipped with `--skip-builds`")
     else:
         lines.extend(["- `pio run -e default -e sticky -e eego_a4 -e mofei_m4`"])
+        lines.extend(f"- `pio run -e {env}`" for env in extra_build_envs)
     return "\n".join(lines) + "\n"
 
 
@@ -498,13 +500,15 @@ def validate_index(root: Path) -> None:
     check_conflict_markers(root)
 
 
-def candidate_build_envs(board_config: str, platformio: str) -> tuple[str, ...]:
+def candidate_build_envs(
+    board_config: str, platformio: str, extra_build_envs: Sequence[str] = ()
+) -> tuple[str, ...]:
     hardware = tuple(
         environment
         for environment, flag in FORK_HARDWARE_TARGETS
         if flag in board_config and f"[env:{environment}]" in platformio
     )
-    return DEFAULT_CROSSMUX_ENVS + hardware
+    return tuple(dict.fromkeys(DEFAULT_CROSSMUX_ENVS + hardware + tuple(extra_build_envs)))
 
 
 def run_builds(root: Path, skip_builds: bool, environments: Sequence[str] = DEFAULT_CROSSMUX_ENVS) -> None:
@@ -628,6 +632,7 @@ def create_or_show_pr(
     skip_builds: bool,
     sdk_status: SdkStatus,
     a4_conflict_note: str,
+    extra_build_envs: Sequence[str],
 ) -> None:
     repo = repo_slug_from_remote(root, ctx.origin_remote)
     if not repo:
@@ -645,7 +650,7 @@ def create_or_show_pr(
     upstream_short = short_sha(root, ctx.upstream_ref)
     upstream_full = full_sha(root, ctx.upstream_ref)
     title = sync_title(ctx, upstream_short)
-    body = pr_body(ctx, upstream_full, skip_builds, sdk_status, a4_conflict_note)
+    body = pr_body(ctx, upstream_full, skip_builds, sdk_status, a4_conflict_note, extra_build_envs)
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
         handle.write(body)
         body_path = handle.name
@@ -780,14 +785,13 @@ def cmd_publish(args: argparse.Namespace) -> int:
         raise RuntimeError(f"FreeInk SDK gate is not ready: {sdk_status.action}")
     update_sdk_gitlink(ctx.root, sdk_status.fork_sha)
     validate_index(ctx.root)
-    run_builds(
-        ctx.root,
-        args.skip_builds,
-        candidate_build_envs(
-            (ctx.root / "freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h").read_text(),
-            (ctx.root / "platformio.ini").read_text(),
-        ),
+    extra_build_envs = tuple(args.extra_build_env)
+    environments = candidate_build_envs(
+        (ctx.root / "freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h").read_text(),
+        (ctx.root / "platformio.ini").read_text(),
+        extra_build_envs,
     )
+    run_builds(ctx.root, args.skip_builds, environments)
     commit_if_needed(ctx.root, ctx)
     push_branch(ctx.root, ctx.origin_remote)
     create_or_show_pr(
@@ -797,6 +801,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         args.skip_builds,
         sdk_status,
         args.a4_conflict_note,
+        extra_build_envs,
     )
     return 0
 
@@ -832,6 +837,9 @@ def add_publish_options(parser: argparse.ArgumentParser) -> None:
         "--a4-conflict-note",
         default="No eego-a4 or mofei-m4 conflicts were recorded by the automated merge.",
         help="fork hardware conflict decisions recorded in the CrossMux PR body",
+    )
+    parser.add_argument(
+        "--extra-build-env", action="append", default=[], metavar="ENV", help="also build ENV; repeatable"
     )
 
 

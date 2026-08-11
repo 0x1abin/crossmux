@@ -25,12 +25,7 @@
 
 namespace {
 
-constexpr char kAirPageBase[] =
-#ifdef ENABLE_CHINESE_VERSION
-    "airpage.yunhug.com";
-#else
-    "airpage.crossmux.com";
-#endif
+constexpr char kAirPageBase[] = "airpage." CROSSMUX_HOST;
 constexpr uint32_t kWallpaperNoticeDurationMs = 1000u;
 
 uint64_t currentArchiveDateKey() {
@@ -120,7 +115,8 @@ void AirPageActivity::onEnter() {
   legacyDownloadUrl_ += "/latest.bmp";
 
   applyConnectionEvent(connection_.begin(airpage::loadRealtimeMode()));
-  LOG_DBG("AIRP", "onEnter free=%u largest=%u id=%s cached=%d realtime=%d", static_cast<unsigned>(ESP.getFreeHeap()),
+  LOG_DBG("AIRP", "onEnter activity=%u free=%u largest=%u id=%s cached=%d realtime=%d",
+          static_cast<unsigned>(sizeof(*this)), static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), deviceId.c_str(), imageStore_.hasImage() ? 1 : 0,
           connection_.realtime() ? 1 : 0);
   requestUpdate();
@@ -364,6 +360,7 @@ void AirPageActivity::applySettingsSelection() {
       const auto event = connection_.setRealtime(enabled);
       if (enabled) {
         applyConnectionEvent(event);
+        if (!connection_.wifiConnected()) openWifiSelection(false);
       } else {
         clearConnectionNotice();
         requestUpdate();
@@ -448,7 +445,7 @@ void AirPageActivity::handleWallpaperResult(const ActivityResult& result) {
 void AirPageActivity::handleRefresh() {
   if (phase_ != Phase::Idle) return;
   if (!connection_.wifiConnected()) {
-    openWifiSelection();
+    openWifiSelection(true);
     return;
   }
 
@@ -462,7 +459,7 @@ void AirPageActivity::queueFetch() {
   requestUpdate();
 }
 
-void AirPageActivity::openWifiSelection() {
+void AirPageActivity::openWifiSelection(const bool fetchAfterConnect) {
   auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, true);
   if (!wifi) {
     LOG_ERR("AIRP", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
@@ -473,11 +470,16 @@ void AirPageActivity::openWifiSelection() {
   }
 
   imageNeedsDisplay_ = true;
-  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) { handleWifiResult(result); });
+  startActivityForResult(std::move(wifi), [this, fetchAfterConnect](const ActivityResult& result) {
+    handleWifiResult(result, fetchAfterConnect);
+  });
 }
 
-void AirPageActivity::handleWifiResult(const ActivityResult& result) {
-  waitForInputRelease_ = true;
+void AirPageActivity::handleWifiResult(const ActivityResult& result, const bool fetchAfterConnect) {
+  waitForInputRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back) ||
+                         mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                         mappedInput.isPressed(MappedInputManager::Button::NavPrevious) ||
+                         mappedInput.isPressed(MappedInputManager::Button::NavNext);
   imageNeedsDisplay_ = true;
 
   const bool connected = !result.isCancelled && connection_.wifiConnected();
@@ -490,7 +492,7 @@ void AirPageActivity::handleWifiResult(const ActivityResult& result) {
 
   notice_ = Notice::None;
   applyConnectionEvent(event);
-  queueFetch();
+  if (fetchAfterConnect) queueFetch();
 }
 
 bool AirPageActivity::consumeInputReleaseBarrier() {
