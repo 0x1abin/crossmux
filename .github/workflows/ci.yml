@@ -65,7 +65,12 @@ jobs:
           restore-keys: pio-cache-${{ runner.os }}-
 
       - name: Run cppcheck
-        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+        run: |
+          for attempt in 1 2 3; do
+            pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high && exit 0
+            echo "PlatformIO attempt ${attempt} failed" >&2
+          done
+          exit 1
 
   build-default:
     name: Build default and simulators
@@ -107,7 +112,13 @@ jobs:
         # before the artifact upload.
         run: |
           set -euo pipefail
-          pio run -e default -e eego_a4 -e mofei_m4 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_mofei_m4 | tee pio.log
+          for attempt in 1 2 3; do
+            if pio run -e default -e eego_a4 -e mofei_m4 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_mofei_m4 | tee pio.log; then
+              exit 0
+            fi
+            echo "PlatformIO attempt ${attempt} failed" >&2
+          done
+          exit 1
 
       - name: Package experimental eego A4 images
         run: python3 scripts/package_hardware_beta.py eego-a4
@@ -181,7 +192,13 @@ jobs:
       - name: Build Sticky and X4 Pro firmware
         run: |
           set -euo pipefail
-          pio run -e sticky -e x4pro | tee pio.log
+          for attempt in 1 2 3; do
+            if pio run -e sticky -e x4pro | tee pio.log; then
+              exit 0
+            fi
+            echo "PlatformIO attempt ${attempt} failed" >&2
+          done
+          exit 1
 
       - name: Extract firmware stats
         run: |
