@@ -65,7 +65,12 @@ jobs:
           restore-keys: pio-cache-${{ runner.os }}-
 
       - name: Run cppcheck
-        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+        run: |
+          for attempt in 1 2 3; do
+            pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high && exit 0
+            echo "PlatformIO attempt ${attempt} failed" >&2
+          done
+          exit 1
 
   build-default:
     name: Build default and simulators
@@ -107,7 +112,13 @@ jobs:
         # before the artifact upload.
         run: |
           set -euo pipefail
-          pio run -e default -e simulator -e simulator_x3 | tee pio.log
+          for attempt in 1 2 3; do
+            if pio run -e default -e simulator -e simulator_x3 | tee pio.log; then
+              exit 0
+            fi
+            echo "PlatformIO attempt ${attempt} failed" >&2
+          done
+          exit 1
 
       - name: Extract firmware stats
 
@@ -161,7 +172,13 @@ jobs:
       - name: Build sticky firmware
         run: |
           set -euo pipefail
-          pio run -e sticky | tee pio.log
+          for attempt in 1 2 3; do
+            if pio run -e sticky | tee pio.log; then
+              exit 0
+            fi
+            echo "PlatformIO attempt ${attempt} failed" >&2
+          done
+          exit 1
 
       - name: Extract firmware stats
         run: |
