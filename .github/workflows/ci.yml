@@ -66,8 +66,7 @@ jobs:
 
   build-default:
     name: Build default and simulators
-    # Only trusted same-repository PRs and main builds may use the persistent H2O runner.
-    runs-on: ${{ (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'h2o' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -78,7 +77,6 @@ jobs:
           python-version: '3.14'
 
       - name: Install simulator build tools
-        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libssl-dev
@@ -93,7 +91,6 @@ jobs:
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
       - name: Cache PlatformIO packages
-        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ~/.platformio
@@ -132,8 +129,7 @@ jobs:
 
   build-sticky:
     name: Build sticky
-    # Match the default job's trusted-runner policy without exposing H2O to fork PRs.
-    runs-on: ${{ (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'h2o' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -153,7 +149,6 @@ jobs:
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
       - name: Cache PlatformIO packages
-        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ~/.platformio

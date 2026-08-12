@@ -30,7 +30,7 @@ env:
 jobs:
   build:
     if: inputs.action == 'publish'
-    runs-on: h2o
+    runs-on: ubuntu-latest
     outputs:
       crossmux_sha: ${{ steps.source.outputs.crossmux_sha }}
     steps:
