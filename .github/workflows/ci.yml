@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_HTTP_RETRIES: 10
+
 jobs:
   clang-format:
     runs-on: ubuntu-latest
