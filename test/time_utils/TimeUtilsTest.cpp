@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -5,6 +6,7 @@
 
 #include "CrossPointSettings.h"
 #include "HalClock.h"
+#include "StandbyTime.h"
 #include "TimeUtils.h"
 
 namespace {
@@ -112,4 +114,28 @@ TEST(TimeUtils, InvalidCurrentClockDoesNotFormat) {
   EXPECT_TRUE(TimeUtils::isClockValid());
   ASSERT_TRUE(TimeUtils::formatCurrentTime(buffer, sizeof(buffer), false));
   EXPECT_STREQ(buffer, "08:49");
+}
+
+TEST(StandbyTime, UsesTickingFallbackUntilClockBecomesValid) {
+  unsigned hour = 0;
+  unsigned minute = 0;
+  halClock.now = 0;
+  arduinoTestMillis = 100000u;
+
+  standby_time::getNowHHMM(arduinoTestMillis, hour, minute);
+  EXPECT_EQ(hour, 16u);
+  EXPECT_EQ(minute, 38u);
+  EXPECT_EQ(standby_time::getMinuteTick(arduinoTestMillis), 0u);
+
+  arduinoTestMillis += 60000u;
+  standby_time::getNowHHMM(100000u, hour, minute);
+  EXPECT_EQ(hour, 16u);
+  EXPECT_EQ(minute, 39u);
+  EXPECT_EQ(standby_time::getMinuteTick(100000u), 1u);
+
+  halClock.now = utcEpoch(2025, 1, 2, 3, 4);
+  SETTINGS.clockUtcOffsetQ = 80;
+  standby_time::getNowHHMM(100000u, hour, minute);
+  EXPECT_EQ(hour, 11u);
+  EXPECT_EQ(minute, 4u);
 }
