@@ -74,8 +74,8 @@ class Page {
  public:
   // the list of block index and line numbers on this page
   std::vector<std::shared_ptr<PageElement>> elements;
-  std::vector<FootnoteEntry> footnotes;
-  static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
+  FootnoteList footnotes;
+  static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = FootnoteList::MAX_SIZE;
 
   // Zero-based visible-codepoint offset where this page starts. Not part of the serialized page
   // body (it lives in the section's visible-offset LUT); Section::loadPage* fills it in from the
@@ -83,15 +83,7 @@ class Page {
   // progress without a second section-file open per page turn.
   uint32_t visibleTextOffset = 0;
 
-  void addFootnote(const char* number, const char* href) {
-    if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return;  // Cap per-page footnotes
-    FootnoteEntry entry;
-    strncpy(entry.number, number, sizeof(entry.number) - 1);
-    entry.number[sizeof(entry.number) - 1] = '\0';
-    strncpy(entry.href, href, sizeof(entry.href) - 1);
-    entry.href[sizeof(entry.href) - 1] = '\0';
-    footnotes.push_back(entry);
-  }
+  void addFootnote(const char* number, const char* href);
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
   void renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;

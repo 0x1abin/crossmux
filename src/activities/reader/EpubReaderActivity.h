@@ -81,7 +81,7 @@ class EpubReaderActivity final : public Activity {
   EndOfBookOptions endOfBookOptions;
 
   // Footnote support
-  std::vector<FootnoteEntry> currentPageFootnotes;
+  FootnoteList currentPageFootnotes;
   struct SavedPosition {
     int spineIndex;
     int pageNumber;
