@@ -17,7 +17,9 @@
 #include <Logging.h>
 #include <SPI.h>
 #include <WiFi.h>
+#if FREEINK_DEVICE_X4PRO
 #include <XteinkDetect.h>
+#endif
 #include <builtinFonts/all.h>
 
 #include <cstring>
