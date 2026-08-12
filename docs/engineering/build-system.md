@@ -34,6 +34,8 @@
   * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
   * `slim`: Minimal build (no serial logging)
   * `gh_release_cn`: Simplified-Chinese-only release with embedded CJK fonts (see [chinese-build.md](chinese-build.md))
+  * `sticky`: Seeed Sticky ESP32-S3 development build
+  * `x4pro`: Xteink X4 Pro ESP32-S3 experimental Chinese development build
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
@@ -100,7 +102,8 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
   power sequencing needed to avoid the persistent ghosting seen with the
   weaker incremental `0x1C` path.
 - X3 is runtime-selected before display initialization and uses its UC81xx
-  driver and SPI configuration unchanged. Sticky likewise retains its
+  driver and SPI configuration unchanged. X4 Pro probes its SSD1677/UC81xx
+  controller once before display initialization. Sticky retains its
   board-specific SSD1677 waveform config.
 
 ---
