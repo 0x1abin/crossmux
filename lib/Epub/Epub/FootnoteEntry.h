@@ -26,20 +26,21 @@ struct FootnoteEntry {
 
 class FootnoteList {
   std::unique_ptr<FootnoteEntry[]> entries_;
+  uint8_t capacity_ = 0;
   uint8_t size_ = 0;
   bool allocationFailed_ = false;
 
-  bool ensureStorage() {
-    if (entries_) return true;
+  bool allocateStorage(const size_t capacity) {
     if (allocationFailed_) return false;
 
     // FootnoteEntry is 288 bytes: the bounded 4,608-byte maximum is too large
     // for the task stack, while inline storage would burden every footnote-free page.
-    entries_ = makeUniqueNoThrow<FootnoteEntry[]>(MAX_SIZE);
+    entries_ = makeUniqueNoThrow<FootnoteEntry[]>(capacity);
     if (!entries_) {
       allocationFailed_ = true;
       return false;
     }
+    capacity_ = static_cast<uint8_t>(capacity);
     return true;
   }
 
@@ -54,13 +55,14 @@ class FootnoteList {
   FootnoteList& operator=(FootnoteList&& other) noexcept {
     if (this == &other) return *this;
     entries_ = std::move(other.entries_);
+    capacity_ = std::exchange(other.capacity_, 0);
     size_ = std::exchange(other.size_, 0);
     allocationFailed_ = std::exchange(other.allocationFailed_, false);
     return *this;
   }
 
   FootnoteEntry* append() {
-    if (size_ >= MAX_SIZE || !ensureStorage()) return nullptr;
+    if (size_ >= MAX_SIZE || (!entries_ && !allocateStorage(MAX_SIZE)) || size_ >= capacity_) return nullptr;
     return &entries_[size_++];
   }
 
@@ -68,11 +70,12 @@ class FootnoteList {
     if (size > MAX_SIZE) return false;
     if (size == 0) {
       entries_.reset();
+      capacity_ = 0;
       size_ = 0;
       allocationFailed_ = false;
       return true;
     }
-    if (!ensureStorage()) return false;
+    if ((!entries_ && !allocateStorage(size)) || size > capacity_) return false;
     size_ = static_cast<uint8_t>(size);
     return true;
   }
