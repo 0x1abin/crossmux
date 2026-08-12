@@ -54,20 +54,16 @@ void ReadingStatsMenuActivity::openSelected() {
   // Leaves call finish() on Back, so pushing them returns control here.
   switch (kEntries[selected].screen) {
     case StatsScreen::Stats:
-      startActivityForResult(std::make_unique<ReadingStatsActivity>(renderer, mappedInput),
-                             [](const ActivityResult&) {});
+      startActivityForResultWith<ReadingStatsActivity>([](const ActivityResult&) {});
       break;
     case StatsScreen::Heatmap:
-      startActivityForResult(std::make_unique<ReadingHeatmapActivity>(renderer, mappedInput),
-                             [](const ActivityResult&) {});
+      startActivityForResultWith<ReadingHeatmapActivity>([](const ActivityResult&) {});
       break;
     case StatsScreen::Profile:
-      startActivityForResult(std::make_unique<ReadingProfileActivity>(renderer, mappedInput),
-                             [](const ActivityResult&) {});
+      startActivityForResultWith<ReadingProfileActivity>([](const ActivityResult&) {});
       break;
     case StatsScreen::Achievements:
-      startActivityForResult(std::make_unique<AchievementsActivity>(renderer, mappedInput),
-                             [](const ActivityResult&) {});
+      startActivityForResultWith<AchievementsActivity>([](const ActivityResult&) {});
       break;
   }
 }

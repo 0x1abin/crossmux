@@ -171,7 +171,7 @@ int BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const siz
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-  if (gpio.hasTouch()) {
+  if (!buttonHintsVisible()) {
     return;
   }
 
@@ -203,6 +203,8 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
   renderer.setOrientation(orig_orientation);
 }
+
+bool BaseTheme::buttonHintsVisible() const { return !gpio.hasTouch() && SETTINGS.showButtonHints; }
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
   if (gpio.hasTouch()) {

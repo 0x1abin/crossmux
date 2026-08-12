@@ -33,7 +33,6 @@ jobs:
     runs-on: h2o
     outputs:
       crossmux_sha: ${{ steps.source.outputs.crossmux_sha }}
-      can_publish: ${{ steps.source.outputs.can_publish }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -43,15 +42,8 @@ jobs:
 
       - name: Record and validate source
         id: source
-        env:
-          A4_REDISTRIBUTION_APPROVED: ${{ vars.A4_REDISTRIBUTION_APPROVED }}
         run: |
           set -euo pipefail
-          can_publish=true
-          if [ "${{ inputs.device }}" = "eego-a4" ] && [ "$A4_REDISTRIBUTION_APPROVED" != "true" ]; then
-            echo "::warning::A4 redistribution review is not approved; only the private artifact will be created"
-            can_publish=false
-          fi
           git -C freeink-sdk fetch origin main:refs/remotes/origin/main
           sdk_sha="$(git -C freeink-sdk rev-parse HEAD)"
           if ! git -C freeink-sdk merge-base --is-ancestor "$sdk_sha" origin/main; then
@@ -59,7 +51,6 @@ jobs:
             exit 1
           fi
           echo "crossmux_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "can_publish=$can_publish" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v6
         with:
@@ -95,7 +86,7 @@ jobs:
           retention-days: 14
 
   publish:
-    if: inputs.action == 'publish' && needs.build.outputs.can_publish == 'true'
+    if: inputs.action == 'publish'
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -120,7 +111,7 @@ jobs:
           - Partition profile: \`crossmux-sticky-v1\`
           - Flash: ESP32-S3, DIO, 80 MHz, 16 MB
 
-          Back up the complete 16 MB flash before first installation. The recovery image is download-only.
+          Back up the complete 16 MB flash before first installation.
           EOF
 
       - name: Publish rolling GitHub prerelease
@@ -149,9 +140,6 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          # Gitee community releases accept six custom attachments. Keep the
-          # flasher assets on the rolling tag and put the download-only
-          # recovery payload on a companion tag at the same commit.
           bash scripts/publish-gitee-release.sh \
             "$GITEE_REPO" \
             "$RELEASE_TAG" \
@@ -165,15 +153,6 @@ jobs:
             dist/firmware.bin \
             dist/manifest.json \
             dist/partitions.bin
-          bash scripts/publish-gitee-release.sh \
-            "$GITEE_REPO" \
-            "${RELEASE_TAG}-recovery" \
-            "CrossMux ${{ inputs.device }} Hardware Beta Recovery" \
-            "true" \
-            "${{ needs.build.outputs.crossmux_sha }}" \
-            release-body.md \
-            dist/RECOVERY.md \
-            dist/*-recovery-16mb.bin
 
       - name: Verify Gitee release assets
         env:
@@ -181,14 +160,27 @@ jobs:
         run: |
           set -euo pipefail
           mkdir gitee-assets
-          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
-            api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${tag}?access_token=${GITEE_TOKEN}"
-            curl -fsS "$api" | jq -r \
-              '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv'
-          done | while IFS=$'\t' read -r name url; do
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
+          curl -fsS "$api" | jq -r \
+            '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv' \
+          | while IFS=$'\t' read -r name url; do
             curl -fsSL "$url" -o "gitee-assets/$name"
           done
           (cd gitee-assets && sha256sum --check SHA256SUMS)
+
+      - name: Clean up partial rolling releases
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+          release_api="${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
+          release_id="$(curl -fsS "$release_api" | jq -r '.id // empty' || true)"
+          if [ -n "$release_id" ]; then
+            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}" || true
+          fi
 
   unpublish:
     if: inputs.action == 'unpublish'
@@ -205,9 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
-          for tag in "$RELEASE_TAG" "${RELEASE_TAG}-recovery"; do
-            release_id="$(curl -fsS "${api}/releases/tags/${tag}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
-            if [ -n "$release_id" ]; then
-              curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
-            fi
-          done
+          release_id="$(curl -fsS "${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
+          if [ -n "$release_id" ]; then
+            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
+          fi

@@ -20,6 +20,21 @@ void renderFilteredPageElements(const std::vector<std::shared_ptr<PageElement>>&
 
 }  // namespace
 
+void Page::addFootnote(const char* number, const char* href) {
+  if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE || footnotes.allocationFailed()) return;
+
+  auto* entry = footnotes.append();
+  if (!entry) {
+    LOG_ERR("PGE", "OOM: footnote storage (%u bytes)",
+            static_cast<unsigned>(FootnoteList::MAX_SIZE * sizeof(FootnoteEntry)));
+    return;
+  }
+  strncpy(entry->number, number, sizeof(entry->number) - 1);
+  entry->number[sizeof(entry->number) - 1] = '\0';
+  strncpy(entry->href, href, sizeof(entry->href) - 1);
+  entry->href[sizeof(entry->href) - 1] = '\0';
+}
+
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
 }
@@ -211,7 +226,17 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
     LOG_ERR("PGE", "Invalid footnote count %u", fnCount);
     return nullptr;
   }
-  page->footnotes.resize(fnCount);
+  if (!page->footnotes.resize(fnCount)) {
+    const size_t bytesToSkip = static_cast<size_t>(fnCount) * sizeof(FootnoteEntry);
+    const size_t position = file.position();
+    const size_t fileSize = file.size();
+    LOG_ERR("PGE", "OOM: dropping %u footnotes (%u bytes)", fnCount, static_cast<unsigned>(bytesToSkip));
+    if (position > fileSize || bytesToSkip > fileSize - position || !file.seek(position + bytesToSkip)) {
+      LOG_ERR("PGE", "Failed to skip footnotes after OOM");
+      return nullptr;
+    }
+    return page;
+  }
   for (uint16_t i = 0; i < fnCount; i++) {
     auto& entry = page->footnotes[i];
     if (file.read(entry.number, sizeof(entry.number)) != sizeof(entry.number) ||

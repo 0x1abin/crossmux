@@ -168,6 +168,8 @@ bool clearCache();
 
 bool openShelf(HalFile& file, uint32_t& count);
 ShelfSortResult sortShelfByRecent();
+uint32_t cachedShelfReadUpdateTime(const char* bookId);
+ShelfSortResult promoteShelfBook(const char* bookId, uint32_t timestamp);
 bool openToc(const std::string& path, HalFile& file, uint32_t& count);
 bool openImageIndex(const std::string& path, HalFile& file, uint32_t& count);
 bool openImageWorkIndex(const std::string& path, HalFile& file, uint32_t& count);

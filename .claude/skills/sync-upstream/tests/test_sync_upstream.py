@@ -78,6 +78,13 @@ class SdkSyncStateTest(unittest.TestCase):
             ("default", "sticky", "eego_a4"),
         )
 
+    def test_extra_build_environments_are_appended(self):
+        args = sync_upstream.parse_args(["publish", "--extra-build-env", "gh_weread_pro"])
+        self.assertEqual(
+            sync_upstream.candidate_build_envs("", "", args.extra_build_env),
+            ("default", "sticky", "gh_weread_pro"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

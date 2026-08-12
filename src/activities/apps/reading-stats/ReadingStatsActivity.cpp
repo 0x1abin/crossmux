@@ -409,11 +409,10 @@ void ReadingStatsActivity::loop() {
 void ReadingStatsActivity::openSelectedEntry() {
   const auto& books = READING_STATS.getBooks();
   if (selectedIndex == 0) {
-    startActivityForResult(std::make_unique<ReadingStatsExtendedActivity>(renderer, mappedInput),
-                           [this](const ActivityResult&) {
-                             guardBackReturn();
-                             requestUpdate();
-                           });
+    startActivityForResultWith<ReadingStatsExtendedActivity>([this](const ActivityResult&) {
+      guardBackReturn();
+      requestUpdate();
+    });
     return;
   }
   const int bookIndex = selectedIndex - 1;
@@ -421,11 +420,12 @@ void ReadingStatsActivity::openSelectedEntry() {
     return;
   }
 
-  startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, books[bookIndex].path),
-                         [this](const ActivityResult&) {
-                           guardBackReturn();
-                           requestUpdate();
-                         });
+  startActivityForResultWith<ReadingStatsDetailActivity>(
+      [this](const ActivityResult&) {
+        guardBackReturn();
+        requestUpdate();
+      },
+      books[bookIndex].path);
 }
 
 void ReadingStatsActivity::confirmRemoveSelectedBook() {
@@ -437,17 +437,17 @@ void ReadingStatsActivity::confirmRemoveSelectedBook() {
 
   const ReadingBookStats selectedBook = books[bookIndex];
   const int currentSelection = selectedIndex;
-  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_STATS_ENTRY),
-                                                                getBookTitle(selectedBook)),
-                         [this, selectedBook, currentSelection](const ActivityResult& result) {
-                           if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
-                             const int bookCount = static_cast<int>(READING_STATS.getBooks().size());
-                             selectedIndex = InxStatisticsGeometry::clampView(currentSelection, bookCount);
-                           }
+  startActivityForResultWith<ConfirmationActivity>(
+      [this, selectedBook, currentSelection](const ActivityResult& result) {
+        if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
+          const int bookCount = static_cast<int>(READING_STATS.getBooks().size());
+          selectedIndex = InxStatisticsGeometry::clampView(currentSelection, bookCount);
+        }
 
-                           guardBackReturn();
-                           requestUpdate(true);
-                         });
+        guardBackReturn();
+        requestUpdate(true);
+      },
+      tr(STR_DELETE_STATS_ENTRY), getBookTitle(selectedBook));
 }
 
 void ReadingStatsActivity::guardBackReturn() {

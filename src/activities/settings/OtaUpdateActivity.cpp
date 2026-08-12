@@ -5,6 +5,7 @@
 #include <Memory.h>
 #include <WiFi.h>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
@@ -82,7 +83,7 @@ void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
   state = READY;
-  selectedChannel = OtaUpdater::Channel::Stable;
+  selectedChannel = SETTINGS.otaNightlyEnabled ? OtaUpdater::Channel::Nightly : OtaUpdater::Channel::Stable;
   selectedReadyRow = CHECK_UPDATES_ROW;
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   requestUpdate();
@@ -96,6 +97,8 @@ void OtaUpdateActivity::activateReadyRow() {
     case NIGHTLY_ROW:
       selectedChannel =
           selectedChannel == OtaUpdater::Channel::Stable ? OtaUpdater::Channel::Nightly : OtaUpdater::Channel::Stable;
+      SETTINGS.otaNightlyEnabled = selectedChannel == OtaUpdater::Channel::Nightly;
+      SETTINGS.saveToFile();
       requestUpdate();
       break;
     case READY_ROW_COUNT:
@@ -229,9 +232,8 @@ void OtaUpdateActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FAILED) {
-    const int detailHeight = failedDetail != nullptr ? height : 0;
-    const int failedTop =
-        SubpageLayout::centeredTop(content, titleHeight + (detailHeight > 0 ? relatedGap : 0) + detailHeight);
+    const int failedHeight = titleHeight + (failedDetail != nullptr ? relatedGap + height : 0);
+    const int failedTop = SubpageLayout::centeredTop(content, failedHeight);
     UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, failedTop, tr(STR_UPDATE_FAILED), true,
                               EpdFontFamily::BOLD);
     if (failedDetail != nullptr) {

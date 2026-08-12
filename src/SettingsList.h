@@ -224,6 +224,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                            StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_INX},
                           "uiTheme", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Toggle(StrId::STR_SHOW_BUTTON_HINTS, &CrossPointSettings::showButtonHints, "showButtonHints",
+                            StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_INX_RECENT_LAYOUT, &CrossPointSettings::inxRecentLayout,
                           {StrId::STR_LAYOUT_FLOW, StrId::STR_LAYOUT_GRID, StrId::STR_LAYOUT_LIST,
                            StrId::STR_LAYOUT_ICONS, StrId::STR_COVER},
@@ -444,7 +446,8 @@ inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
   if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !BoardConfig::hasColorTemperatureFrontlight()) return false;
 #endif
   if (BoardConfig::hasTouch() &&
-      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX)) {
+      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION ||
+       setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX || setting.nameId == StrId::STR_SHOW_BUTTON_HINTS)) {
     return false;
   }
   return true;

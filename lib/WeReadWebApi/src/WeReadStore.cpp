@@ -10,8 +10,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../../src/util/StringUtils.h"
 #include "WeReadProtocol.h"
-#include "util/StringUtils.h"
 
 namespace WeReadStore {
 namespace {
@@ -423,6 +423,55 @@ ShelfSortResult sortShelfByRecent() {
     }
   }
   return sorted.finish() ? ShelfSortResult::Ok : ShelfSortResult::StorageError;
+}
+
+uint32_t cachedShelfReadUpdateTime(const char* bookId) {
+  if (!bookId || !bookId[0]) return 0;
+  HalFile shelf;
+  uint32_t count = 0;
+  if (!openShelf(shelf, count)) return 0;
+  uint32_t latest = 0;
+  ShelfRecord record;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (!readShelfRecord(shelf, i, record)) return 0;
+    if (strcmp(record.bookId, bookId) == 0) latest = std::max(latest, record.readUpdateTime);
+  }
+  return latest;
+}
+
+ShelfSortResult promoteShelfBook(const char* bookId, const uint32_t timestamp) {
+  if (!bookId || !bookId[0] || timestamp == 0) return ShelfSortResult::Ok;
+  IndexWriter promoted;
+  {
+    HalFile source;
+    uint32_t count = 0;
+    if (!openShelf(source, count)) return ShelfSortResult::StorageError;
+    ShelfRecord selected;
+    uint32_t selectedIndex = count;
+    for (uint32_t i = 0; i < count; ++i) {
+      ShelfRecord record;
+      if (!readShelfRecord(source, i, record)) return ShelfSortResult::StorageError;
+      if (selectedIndex == count && strcmp(record.bookId, bookId) == 0) {
+        selected = record;
+        selectedIndex = i;
+      }
+    }
+    if (selectedIndex == count) return ShelfSortResult::Ok;
+    selected.readUpdateTime = std::max(selected.readUpdateTime, timestamp);
+    if (!promoted.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord)) || !promoted.append(&selected)) {
+      promoted.abort();
+      return ShelfSortResult::StorageError;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+      if (i == selectedIndex) continue;
+      ShelfRecord record;
+      if (!readShelfRecord(source, i, record) || !promoted.append(&record)) {
+        promoted.abort();
+        return ShelfSortResult::StorageError;
+      }
+    }
+  }
+  return promoted.finish() ? ShelfSortResult::Ok : ShelfSortResult::StorageError;
 }
 
 bool openToc(const std::string& path, HalFile& file, uint32_t& count) {

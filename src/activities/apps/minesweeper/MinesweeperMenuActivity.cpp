@@ -107,13 +107,11 @@ void MinesweeperMenuActivity::onSelect() {
   const Item& it = items[selected];
   switch (it.kind) {
     case ItemKind::Continue:
-      activityManager.replaceActivity(
-          std::make_unique<MinesweeperGameActivity>(renderer, mappedInput, it.difficulty, true));
+      activityManager.replaceActivityWith<MinesweeperGameActivity>(it.difficulty, true);
       return;
     case ItemKind::NewGame:
       MinesweeperStore::clear();
-      activityManager.replaceActivity(
-          std::make_unique<MinesweeperGameActivity>(renderer, mappedInput, it.difficulty, false));
+      activityManager.replaceActivityWith<MinesweeperGameActivity>(it.difficulty, false);
       return;
     case ItemKind::Stats:
       showingStats = true;

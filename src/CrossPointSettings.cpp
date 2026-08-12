@@ -218,6 +218,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   if (dictionaryName[0] != '\0') {
     doc["dictionaryName"] = dictionaryName;
   }
+  doc["otaNightlyEnabled"] = otaNightlyEnabled;
 
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
@@ -261,7 +262,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         char obfKey[OBF_KEY_BUF];
         snprintf(obfKey, sizeof(obfKey), "%s_obf", info.key);
         bool ok = false;
-        const std::string decoded = obfuscation::deobfuscateFromBase64(doc[obfKey] | "", &ok);
+        bool tooLong = false;
+        const std::string decoded =
+            obfuscation::deobfuscateFromBase64(doc[obfKey] | "", info.stringMaxLen - 1, &ok, &tooLong);
+        if (tooLong) {
+          LOG_ERR("CPS", "Oversized obfuscated value for key '%s'", info.key);
+          needsResave = true;
+        }
         if (ok && !decoded.empty()) {
           copyToField(destPtr, decoded.c_str(), info.stringMaxLen);
           loaded = true;
@@ -356,6 +363,8 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
 #endif
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
   copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
+  otaNightlyEnabled =
+      clamp(static_cast<uint8_t>(doc["otaNightlyEnabled"] | 0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
 
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {

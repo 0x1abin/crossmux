@@ -19,6 +19,9 @@ python3 .claude/skills/sync-upstream/scripts/sync_upstream.py inspect
 python3 .claude/skills/sync-upstream/scripts/sync_upstream.py run --draft
 ```
 
+Private forks can append repeatable build environments, for example
+`--extra-build-env gh_weread_pro`.
+
 `run --draft` uses a two-stage gate:
 
 1. Compares `Free-Ink/freeink-sdk/main` with `0x1abin/freeink-sdk/main`.
