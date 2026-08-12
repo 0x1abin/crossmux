@@ -57,17 +57,16 @@ jobs:
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
-          path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          path: ~/.platformio/.cache
+          key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-cache-${{ runner.os }}-
 
       - name: Run cppcheck
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
   build-default:
     name: Build default and simulators
-    # Only trusted same-repository PRs and main builds may use the persistent H2O runner.
-    runs-on: ${{ (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'h2o' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -78,7 +77,6 @@ jobs:
           python-version: '3.14'
 
       - name: Install simulator build tools
-        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libssl-dev
@@ -93,12 +91,11 @@ jobs:
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
       - name: Cache PlatformIO packages
-        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
-          path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          path: ~/.platformio/.cache
+          key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-cache-${{ runner.os }}-
 
       - name: Build default, hardware beta, and simulators
         # Keep every env in ONE pio invocation: a second `pio run` can wipe the whole
@@ -151,9 +148,8 @@ jobs:
           if-no-files-found: error
 
   build-sticky:
-    name: Build Sticky and X4 Pro
-    # Match the default job's trusted-runner policy without exposing H2O to fork PRs.
-    runs-on: ${{ (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'h2o' || 'ubuntu-latest' }}
+    name: Build sticky
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -173,12 +169,11 @@ jobs:
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
       - name: Cache PlatformIO packages
-        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
-          path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          path: ~/.platformio/.cache
+          key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-cache-${{ runner.os }}-
 
       - name: Build Sticky and X4 Pro firmware
         run: |
