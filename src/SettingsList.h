@@ -446,8 +446,8 @@ inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
   if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !BoardConfig::hasColorTemperatureFrontlight()) return false;
 #endif
   if (BoardConfig::hasTouch() &&
-      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION ||
-       setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX || setting.nameId == StrId::STR_SHOW_BUTTON_HINTS)) {
+      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX ||
+       setting.nameId == StrId::STR_SHOW_BUTTON_HINTS)) {
     return false;
   }
   return true;
