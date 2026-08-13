@@ -52,7 +52,7 @@ One word on the page becomes highlighted:
 2. Press **Confirm** to look up the highlighted word.
 3. Press **Back** to return to the reader.
 
-On the very first lookup with a dictionary (and again if the dictionary file changes), the reader shows *"Indexing dictionary…"* while it builds a small `.qidx` sidecar file next to the `.idx`. This takes a few seconds for large dictionaries and makes all subsequent lookups fast. The sidecar can be deleted safely at any time — it will simply be rebuilt.
+On the very first lookup with a dictionary (and again if the dictionary file changes), the reader shows *"Indexing may take a while…"* while it builds a small `.qidx` sidecar file next to the `.idx`. Large dictionaries can take longer, and all subsequent lookups use the completed index. The sidecar can be deleted safely at any time — it will simply be rebuilt.
 
 ### How Lookup Works
 
