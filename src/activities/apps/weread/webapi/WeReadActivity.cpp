@@ -22,7 +22,6 @@
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "WeReadBrowseActivity.h"
-#include "activities/apps/weread/WeReadQrLayout.h"
 #include "activities/apps/weread/WeReadTouchGeometry.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
@@ -2342,14 +2341,16 @@ void WeReadActivity::render(RenderLock&&) {
         break;
       }
       const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-      const int textGap = SubpageLayout::relatedGap(metrics);
-      const auto layout = WeReadQrLayout::calculate(content.x, content.y, content.width, content.height,
-                                                    metrics.contentSidePadding, textGap, lineHeight);
-      QrUtils::drawQrCode(renderer, Rect{layout.x, layout.y, layout.side, layout.side}, qrUrl_);
-      renderer.drawCenteredText(UI_10_FONT_ID, layout.textY, tr(STR_WEREAD_SCAN_LOGIN));
+      const int textGap = metrics.verticalSpacing;
+      const int qrLimit = content.height - textGap - lineHeight * 2;
+      const int qrSide = std::max(1, std::min(content.width * 4 / 5, qrLimit));
+      const int groupHeight = qrSide + textGap + lineHeight * 2;
+      const int qrY = content.y + std::max(0, (content.height - groupHeight) / 2);
+      QrUtils::drawQrCode(renderer, Rect{content.x + (content.width - qrSide) / 2, qrY, qrSide, qrSide}, qrUrl_);
+      renderer.drawCenteredText(UI_10_FONT_ID, qrY + qrSide + textGap, tr(STR_WEREAD_SCAN_LOGIN));
       char target[64];
       snprintf(target, sizeof(target), "\"%s\"", tr(STR_WEREAD_TITLE));
-      renderer.drawCenteredText(UI_10_FONT_ID, layout.textY + lineHeight, target);
+      renderer.drawCenteredText(UI_10_FONT_ID, qrY + qrSide + textGap + lineHeight, target);
       break;
     }
     case State::Syncing: {
