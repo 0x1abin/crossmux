@@ -5,6 +5,7 @@
 #include <ObfuscationUtils.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -46,18 +47,25 @@ bool shelfSortKeyBefore(const ShelfSortKey& left, const ShelfSortKey& right) {
   return left.sourceIndex < right.sourceIndex;
 }
 
-ShelfSortResult rewriteShelf(HalFile& source, const uint32_t count, const ShelfSortKey* keys, const uint32_t keyCount,
-                             const bool appendRemaining, IndexWriter& writer) {
-  if (!writer.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return ShelfSortResult::StorageError;
+bool readShelfUpdateTime(HalFile& file, const uint32_t index, uint32_t& readUpdateTime) {
+  const uint64_t offset =
+      sizeof(IndexHeader) + static_cast<uint64_t>(index) * sizeof(ShelfRecord) + offsetof(ShelfRecord, readUpdateTime);
+  return file.seek64(offset) &&
+         file.read(&readUpdateTime, sizeof(readUpdateTime)) == static_cast<int>(sizeof(readUpdateTime));
+}
+
+bool rewriteShelf(HalFile& source, const uint32_t count, const ShelfSortKey* keys, const uint32_t keyCount,
+                  IndexWriter& writer) {
+  if (!writer.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return false;
 
   ShelfRecord record;
   for (uint32_t i = 0; i < keyCount; ++i) {
     if (!readShelfRecord(source, keys[i].sourceIndex, record) || !writer.append(&record)) {
       writer.abort();
-      return ShelfSortResult::StorageError;
+      return false;
     }
   }
-  if (!appendRemaining) return ShelfSortResult::Ok;
+  if (keyCount == count) return true;
 
   for (uint32_t sourceIndex = 0; sourceIndex < count; ++sourceIndex) {
     bool inRecentHead = false;
@@ -70,28 +78,23 @@ ShelfSortResult rewriteShelf(HalFile& source, const uint32_t count, const ShelfS
     if (inRecentHead) continue;
     if (!readShelfRecord(source, sourceIndex, record) || !writer.append(&record)) {
       writer.abort();
-      return ShelfSortResult::StorageError;
+      return false;
     }
   }
-  return ShelfSortResult::Ok;
+  return true;
 }
 
 ShelfSortResult sortRecentShelfHead(HalFile& source, const uint32_t count, IndexWriter& writer) {
   const uint32_t keyCount = std::min(count, kRecentShelfWindow);
-  // The degraded path needs only 160 bytes regardless of shelf size. It stays
-  // off the small task stack and is released before the function returns.
-  auto keys = makeUniqueNoThrow<ShelfSortKey[]>(keyCount);
-  if (!keys) {
-    LOG_ERR("WR", "OOM: recent shelf sort (%zu bytes); keeping server order",
-            static_cast<size_t>(keyCount) * sizeof(ShelfSortKey));
-    return ShelfSortResult::Degraded;
-  }
+  // Fixed 160-byte stack workspace; unlike the full sort it cannot fragment
+  // the heap or fail under memory pressure.
+  std::array<ShelfSortKey, kRecentShelfWindow> keys{};
 
   uint32_t used = 0;
-  ShelfRecord record;
   for (uint32_t sourceIndex = 0; sourceIndex < count; ++sourceIndex) {
-    if (!readShelfRecord(source, sourceIndex, record)) return ShelfSortResult::StorageError;
-    const ShelfSortKey candidate{record.readUpdateTime, sourceIndex};
+    uint32_t readUpdateTime = 0;
+    if (!readShelfUpdateTime(source, sourceIndex, readUpdateTime)) return ShelfSortResult::StorageError;
+    const ShelfSortKey candidate{readUpdateTime, sourceIndex};
     if (used == keyCount && !shelfSortKeyBefore(candidate, keys[used - 1])) continue;
 
     uint32_t position = used < keyCount ? used++ : used - 1;
@@ -106,8 +109,8 @@ ShelfSortResult sortRecentShelfHead(HalFile& source, const uint32_t count, Index
   for (uint32_t i = 0; i < keyCount; ++i) alreadyAtHead &= keys[i].sourceIndex == i;
   if (alreadyAtHead) return ShelfSortResult::Degraded;
 
-  const ShelfSortResult result = rewriteShelf(source, count, keys.get(), keyCount, true, writer);
-  return result == ShelfSortResult::Ok ? ShelfSortResult::Degraded : result;
+  return rewriteShelf(source, count, keys.data(), keyCount, writer) ? ShelfSortResult::Degraded
+                                                                    : ShelfSortResult::StorageError;
 }
 
 constexpr size_t kMaxSessionFileSize = 2048;
@@ -527,39 +530,33 @@ ShelfSortResult sortShelfByRecent() {
 
     if (count > kLargeShelfThreshold) {
       result = sortRecentShelfHead(source, count, sorted);
-      if (result == ShelfSortResult::StorageError || sorted.count() == 0) return result;
     } else {
       // Full sorting is capped at 4 KB by kLargeShelfThreshold. It stays off
       // the small task stack and is released before the function returns.
-      auto keys =
+      auto keys = makeUniqueNoThrow<ShelfSortKey[]>(count);
 #ifdef CROSSPOINT_EMULATED
-          failNextFullShelfSortAllocation ? decltype(makeUniqueNoThrow<ShelfSortKey[]>(count)){} :
-#endif
-                                          makeUniqueNoThrow<ShelfSortKey[]>(count);
-#ifdef CROSSPOINT_EMULATED
+      if (failNextFullShelfSortAllocation) keys.reset();
       failNextFullShelfSortAllocation = false;
 #endif
       if (!keys) {
         LOG_ERR("WR", "OOM: shelf sort (%zu bytes); sorting recent head only",
                 static_cast<size_t>(count) * sizeof(ShelfSortKey));
         result = sortRecentShelfHead(source, count, sorted);
-        if (result == ShelfSortResult::StorageError || sorted.count() == 0) return result;
       } else {
-        ShelfRecord record;
         bool alreadySorted = true;
         for (uint32_t i = 0; i < count; ++i) {
-          if (!readShelfRecord(source, i, record)) return ShelfSortResult::StorageError;
-          keys[i] = {record.readUpdateTime, i};
+          if (!readShelfUpdateTime(source, i, keys[i].readUpdateTime)) return ShelfSortResult::StorageError;
+          keys[i].sourceIndex = i;
           if (i > 0 && shelfSortKeyBefore(keys[i], keys[i - 1])) alreadySorted = false;
         }
         if (alreadySorted) return ShelfSortResult::Ok;
 
         ShelfSortKey* const begin = keys.get();
         std::sort(begin, begin + count, shelfSortKeyBefore);
-        result = rewriteShelf(source, count, keys.get(), count, false, sorted);
-        if (result != ShelfSortResult::Ok) return result;
+        if (!rewriteShelf(source, count, keys.get(), count, sorted)) return ShelfSortResult::StorageError;
       }
     }
+    if (sorted.count() == 0) return result;
   }
   return sorted.finish() ? result : ShelfSortResult::StorageError;
 }

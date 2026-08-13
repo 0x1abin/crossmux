@@ -498,7 +498,6 @@ struct ShelfJsonContext {
   bool inBook = false;
   bool rootClosed = false;
   bool writeFailed = false;
-  uint32_t recordCount = 0;
 };
 
 void shelfKey(void* raw, const char* key, size_t) {
@@ -561,11 +560,7 @@ void shelfObjectEnd(void* raw) {
   auto& ctx = *static_cast<ShelfJsonContext*>(raw);
   if (ctx.inBook && ctx.depth == ctx.bookDepth) {
     if (ctx.current.bookId[0]) {
-      if (!ctx.writer.append(&ctx.current)) {
-        ctx.writeFailed = true;
-      } else {
-        ++ctx.recordCount;
-      }
+      if (!ctx.writer.append(&ctx.current)) ctx.writeFailed = true;
     }
     ctx.inBook = false;
     ctx.bookDepth = -1;
@@ -617,7 +612,6 @@ bool resetShelf(void* raw) {
   ctx.inBook = false;
   ctx.rootClosed = false;
   ctx.writeFailed = false;
-  ctx.recordCount = 0;
   ctx.parser->reset();
   return true;
 }
@@ -2597,10 +2591,11 @@ Error Operation::syncShelfOnce() {
     context.writer.abort();
     return Error::Protocol;
   }
+  const uint32_t recordCount = context.writer.count();
   if (!context.writer.finish()) return Error::SdCard;
-  progressCompleted_ = context.recordCount;
+  progressCompleted_ = recordCount;
   progressTotal_ = 0;
-  LOG_INF("WR", "Shelf download complete: books=%u ms=%u", static_cast<unsigned>(context.recordCount),
+  LOG_INF("WR", "Shelf download complete: books=%u ms=%u", static_cast<unsigned>(recordCount),
           static_cast<unsigned>(millis() - startedAt));
   logMemory("shelf parsed");
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
