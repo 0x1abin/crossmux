@@ -7,9 +7,10 @@ namespace standby_time {
 
 bool isSynced();
 
-// Return false when no trustworthy wall clock is available.
-bool getNowHHMM(unsigned& hh, unsigned& mm);
+// Use the trustworthy wall clock when available. Before sync, tick forward
+// from a plausible fallback time anchored at fallbackStartMs.
+void getNowHHMM(uint32_t fallbackStartMs, unsigned& hh, unsigned& mm);
 
-uint32_t getMinuteTick();
+uint32_t getMinuteTick(uint32_t fallbackStartMs);
 
 }  // namespace standby_time

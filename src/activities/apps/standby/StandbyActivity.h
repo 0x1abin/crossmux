@@ -23,11 +23,14 @@ class StandbyActivity final : public Activity {
   // back to Apps restores the default sleep behaviour. Tight-loop polling is
   // still only used during WiFi/clock sync.
   bool preventAutoSleep() override { return true; }
-  bool skipLoopDelay() override { return syncState_ != SyncState::Idle; }
+  bool skipLoopDelay() override {
+    return syncState_ == SyncState::WifiConnecting || syncState_ == SyncState::ClockSyncing;
+  }
 
  private:
   enum class SyncState : uint8_t {
     Idle,
+    Delayed,
     WifiConnecting,
     ClockSyncing,
   };
@@ -62,5 +65,5 @@ class StandbyActivity final : public Activity {
   // gray LUT waveform. Used by passive faces in Immersive mode (gated on
   // wantsGrayscale, e.g. the 老黄历 calendar). The face's render() must be
   // idempotent across the three passes.
-  void applyGrayscalePass(int sw, int sh);
+  void applyGrayscalePass(const Rect& viewport);
 };
