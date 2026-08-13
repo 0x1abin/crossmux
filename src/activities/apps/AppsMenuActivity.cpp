@@ -181,6 +181,7 @@ int AppsMenuActivity::getVisibleAppCount() {
 
 void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
   selected = MainTabs::contentEdgeIndex(edge, getVisibleAppCount());
+  selectionMode = SelectionMode::Buttons;
 }
 
 int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
@@ -190,6 +191,7 @@ int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
 void AppsMenuActivity::onEnter() {
   Activity::onEnter();
   selected = 0;
+  selectionMode = mappedInput.hasTouch() ? SelectionMode::Hidden : SelectionMode::Buttons;
   requestUpdate();
 }
 
@@ -214,13 +216,23 @@ void AppsMenuActivity::openSelected() {
 
 void AppsMenuActivity::loop() {
   const int visibleCount = getVisibleAppCount();
+  if (selectionMode == SelectionMode::Touch) {
+    int x = 0;
+    int y = 0;
+    if (!mappedInput.isScreenTouchHeld(x, y)) {
+      selectionMode = SelectionMode::Hidden;
+      requestUpdate();
+    }
+  }
+
   if (usesIconLayout()) {
     int x = 0;
     int y = 0;
     if (mappedInput.wasScreenTouchDown(x, y)) {
       const int touched = iconIndexFromPoint(x, y);
-      if (touched >= 0 && touched != selected) {
+      if (touched >= 0 && (touched != selected || selectionMode != SelectionMode::Touch)) {
         selected = touched;
+        selectionMode = SelectionMode::Touch;
         requestUpdate();
       }
       return;
@@ -229,6 +241,7 @@ void AppsMenuActivity::loop() {
       const int touched = iconIndexFromPoint(x, y);
       if (touched >= 0) {
         selected = touched;
+        selectionMode = SelectionMode::Hidden;
         openSelected();
       }
       return;
@@ -236,11 +249,13 @@ void AppsMenuActivity::loop() {
     const auto swipe = mappedInput.wasSwipe();
     if (swipe == MappedInputManager::SwipeDir::Up) {
       selected = ButtonNavigator::nextPageIndex(selected, visibleCount, InxGridGeometry::itemsPerPage);
+      selectionMode = SelectionMode::Hidden;
       requestUpdate();
       return;
     }
     if (swipe == MappedInputManager::SwipeDir::Down) {
       selected = ButtonNavigator::previousPageIndex(selected, visibleCount, InxGridGeometry::itemsPerPage);
+      selectionMode = SelectionMode::Hidden;
       requestUpdate();
       return;
     }
@@ -260,11 +275,13 @@ void AppsMenuActivity::loop() {
     switch (touch) {
       case MappedInputManager::RowTouch::Tap:
         selected = touched;
+        selectionMode = SelectionMode::Hidden;
         openSelected();
         return;
       case MappedInputManager::RowTouch::Down:
-        if (selected != touched) {
+        if (selected != touched || selectionMode != SelectionMode::Touch) {
           selected = touched;
+          selectionMode = SelectionMode::Touch;
           requestUpdate();
         }
         return;
@@ -275,10 +292,12 @@ void AppsMenuActivity::loop() {
 
   buttonNavigator.onNext([this, visibleCount] {
     selected = ButtonNavigator::nextIndex(selected, visibleCount);
+    selectionMode = SelectionMode::Buttons;
     requestUpdate();
   });
   buttonNavigator.onPrevious([this, visibleCount] {
     selected = ButtonNavigator::previousIndex(selected, visibleCount);
+    selectionMode = SelectionMode::Buttons;
     requestUpdate();
   });
 
@@ -329,7 +348,7 @@ void AppsMenuActivity::render(RenderLock&&) {
 
   const int visibleCount = getVisibleAppCount();
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
-  const bool showSelection = showMainTabContentSelection();
+  const bool showSelection = showMainTabContentSelection() && selectionMode != SelectionMode::Hidden;
 
   if (visibleCount == 0) {
     UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
