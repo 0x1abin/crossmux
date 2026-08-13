@@ -189,11 +189,11 @@ jobs:
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
-      - name: Build sticky firmware
+      - name: Build Sticky and X4 Pro firmware
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e sticky | tee pio.log; then
+            if pio run -e sticky -e x4pro | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2

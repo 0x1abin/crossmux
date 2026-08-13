@@ -155,7 +155,7 @@ Because the back gesture arrives as `Button::Back`, most button-era activities g
 
 ## Building and testing on non-Xteink devices
 
-Each MCU family is its own binary: X3/X4 are ESP32-C3, Sticky and LilyGo T5 are ESP32-S3, M5Paper v1.1 is a classic ESP32. The Sticky env ships in `platformio.ini` (`pio run -e sticky`). Envs for other devices go in **`platformio.local.ini`**, a gitignored file that PlatformIO merges over `platformio.ini` (see `extra_configs`). Create it next to `platformio.ini`; personal envs, ports, and debug flags live there and never get committed.
+Each MCU family is its own binary: X3/X4 are ESP32-C3, X4 Pro, Sticky, and LilyGo T5 are ESP32-S3, M5Paper v1.1 is a classic ESP32. The X4 Pro and Sticky envs ship in `platformio.ini` (`pio run -e x4pro`, `pio run -e sticky`); the X4 Pro Beta build defaults to the Chinese firmware profile. Envs for other devices go in **`platformio.local.ini`**, a gitignored file that PlatformIO merges over `platformio.ini` (see `extra_configs`). Create it next to `platformio.ini`; personal envs, ports, and debug flags live there and never get committed.
 
 Both envs below extend the repo's `[base]`, so they build against the `freeink-sdk` submodule with all the normal deps and scripts.
 

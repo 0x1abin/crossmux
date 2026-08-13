@@ -17,6 +17,9 @@
 #include <Logging.h>
 #include <SPI.h>
 #include <WiFi.h>
+#if FREEINK_DEVICE_X4PRO
+#include <XteinkDetect.h>
+#endif
 #include <builtinFonts/all.h>
 
 #include <cstring>
@@ -350,6 +353,16 @@ void enterDeepSleep(bool fromTimeout = false) {
 }
 
 bool setupDisplayAndFonts(bool seamless = false) {
+#if FREEINK_DEVICE_X4PRO
+  // X4 Pro batches use SSD1677 or UC81xx. Resolve the controller before
+  // display.begin(); C3 X3/X4 already do this once in HalGPIO::begin().
+  static bool controllerResolved = false;
+  if (!controllerResolved) {
+    controllerResolved = true;
+    freeink::applyXteinkDisplayController();
+  }
+#endif
+
   display.begin(seamless);
   renderer.begin();
   activityManager.begin();
@@ -478,9 +491,8 @@ void setup() {
       break;
   }
 
-  // Recovery firmware mode: hold left side button (BTN_UP) together with the power button at
-  // boot to skip directly to the SD-card firmware update screen. Useful on devices where USB
-  // flashing has been locked down (e.g. recent X3 firmware).
+  // Recovery firmware mode: hold a side button together with power at boot. X4 Pro uses
+  // BTN_DOWN/GPIO7 because BTN_UP/GPIO0 is an ESP32-S3 boot strap; other boards keep BTN_UP.
   bool recoveryFirmwareMode = false;
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
     // Refresh the cached button state a few times — isPressed() needs ~half a second to settle
@@ -491,9 +503,10 @@ void setup() {
       gpio.update();
       delay(10);
     }
-    if (gpio.isPressed(HalGPIO::BTN_UP)) {
+    const uint8_t recoveryButton = BoardConfig::isX4Pro() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP;
+    if (gpio.isPressed(recoveryButton)) {
       recoveryFirmwareMode = true;
-      LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
+      LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", BoardConfig::isX4Pro() ? "DOWN" : "UP");
     }
   }
 

@@ -7,6 +7,10 @@
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 
+#if FREEINK_DEVICE_X4PRO
+#include <soc/usb_serial_jtag_reg.h>
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
@@ -236,6 +240,28 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
   return true;
 }
 
+#if FREEINK_DEVICE_X4PRO
+// X4 Pro has no confirmed VBUS GPIO. A USB data host is observable through the
+// USB Serial/JTAG SOF counter; keep the last positive result across nearby polls.
+static bool usbHostSofActive() {
+  static uint32_t lastFrame = 0;
+  static unsigned long lastAdvanceMs = 0;
+  static bool seeded = false;
+  if (!seeded) {
+    seeded = true;
+    lastFrame = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+    delay(3);  // A connected host advances the 1 kHz SOF counter within this window.
+  }
+  const uint32_t frame = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+  if (frame != lastFrame) {
+    lastFrame = frame;
+    lastAdvanceMs = millis();
+    return true;
+  }
+  return lastAdvanceMs != 0 && millis() - lastAdvanceMs < 1500;
+}
+#endif
+
 bool HalGPIO::isUsbConnected() const {
   if (deviceIsX3()) {
     // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
@@ -250,7 +276,11 @@ bool HalGPIO::isUsbConnected() const {
     return false;
   }
   if (BoardConfig::ACTIVE.usbDetect < 0) {
+#if FREEINK_DEVICE_X4PRO
+    return usbHostSofActive();
+#else
     return false;
+#endif
   }
   return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
 }
