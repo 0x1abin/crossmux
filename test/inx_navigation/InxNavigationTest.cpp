@@ -53,6 +53,22 @@ TEST(InxNavigation, KeepsRecentPagesInsideBounds) {
   }
 }
 
+TEST(InxNavigation, WrapsRecentPagesAndKeepsSinglePageSelection) {
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(0, 0, InxRecentLayout::Flow), 0);
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(0, 3, InxRecentLayout::Flow), 1);
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(2, 3, InxRecentLayout::Cover), 0);
+  EXPECT_EQ(InxRecentGeometry::previousPageStart(0, 3, InxRecentLayout::Flow), 2);
+
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(0, 10, InxRecentLayout::Grid), 4);
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(5, 10, InxRecentLayout::Grid), 8);
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(9, 10, InxRecentLayout::Grid), 0);
+  EXPECT_EQ(InxRecentGeometry::previousPageStart(0, 10, InxRecentLayout::Grid), 8);
+  EXPECT_EQ(InxRecentGeometry::previousPageStart(5, 10, InxRecentLayout::Grid), 0);
+
+  EXPECT_EQ(InxRecentGeometry::nextPageStart(3, 5, InxRecentLayout::List), 3);
+  EXPECT_EQ(InxRecentGeometry::previousPageStart(7, 9, InxRecentLayout::Icons), 7);
+}
+
 TEST(InxNavigation, FitsOriginalCoverRatioInsideBounds) {
   EXPECT_EQ(InxCoverGeometry::fit(0, 250).width, 0);
   EXPECT_EQ(InxCoverGeometry::fit(170, 250).width, 170);

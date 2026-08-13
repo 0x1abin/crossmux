@@ -147,7 +147,9 @@ action**.
 * INX top-level tabs are owned by `ActivityManager`; only Activities with a
   non-`None` `MainTab` participate. Left/Right and tab touches are consumed
   before the page sees them, while reader and feature subpages remain outside
-  the top-level loop.
+  the top-level loop. A top-edge down swipe focuses the tab bar. In Recent,
+  Flow/Cover use horizontal one-book swipes while Grid/List/Icons use vertical
+  page swipes; other axes are ignored.
 * `GUI.drawProgressBar()` returns the first free Y coordinate after the bar and
   optional percentage line. Callers place following text from that value rather
   than reproducing the theme's font or spacing calculations.

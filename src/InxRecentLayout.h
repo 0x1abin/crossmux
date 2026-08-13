@@ -29,4 +29,22 @@ constexpr int pageStart(const int selected, const int count, const InxRecentLayo
   const int pageItems = itemsPerPage(layout);
   return clamped / pageItems * pageItems;
 }
+
+constexpr int nextPageStart(const int selected, const int count, const InxRecentLayout layout) {
+  if (count <= 0) return 0;
+  const int clamped = std::clamp(selected, 0, count - 1);
+  const int pageItems = itemsPerPage(layout);
+  if (count <= pageItems) return clamped;
+  const int next = pageStart(clamped, count, layout) + pageItems;
+  return next < count ? next : 0;
+}
+
+constexpr int previousPageStart(const int selected, const int count, const InxRecentLayout layout) {
+  if (count <= 0) return 0;
+  const int clamped = std::clamp(selected, 0, count - 1);
+  const int pageItems = itemsPerPage(layout);
+  if (count <= pageItems) return clamped;
+  const int current = pageStart(clamped, count, layout);
+  return current >= pageItems ? current - pageItems : (count - 1) / pageItems * pageItems;
+}
 }  // namespace InxRecentGeometry

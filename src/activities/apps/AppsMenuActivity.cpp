@@ -244,6 +244,33 @@ void AppsMenuActivity::loop() {
       requestUpdate();
       return;
     }
+  } else if (UITheme::getInstance().hasMainTabs()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect content = contentRect(renderer);
+    const int spacing = metrics.menuSpacing / 2;
+    const int rowStep = metrics.menuRowHeight + spacing;
+    const int perPage = std::max(1, (content.height + spacing) / rowStep);
+    const int pageStart = selected / perPage * perPage;
+    const int pageCount = std::min(perPage, visibleCount - pageStart);
+    int row = -1;
+    const auto touch = mappedInput.rowTouch(
+        row, content.y + metrics.verticalSpacing, rowStep, pageCount, content.x + metrics.contentSidePadding,
+        content.x + content.width - metrics.contentSidePadding, metrics.menuRowHeight);
+    const int touched = pageStart + row;
+    switch (touch) {
+      case MappedInputManager::RowTouch::Tap:
+        selected = touched;
+        openSelected();
+        return;
+      case MappedInputManager::RowTouch::Down:
+        if (selected != touched) {
+          selected = touched;
+          requestUpdate();
+        }
+        return;
+      case MappedInputManager::RowTouch::None:
+        break;
+    }
   }
 
   buttonNavigator.onNext([this, visibleCount] {
