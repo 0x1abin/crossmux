@@ -1,0 +1,223 @@
+name: Bluetooth Beta
+run-name: Bluetooth Beta / ${{ inputs.action }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Publish or remove the rolling prerelease
+        required: true
+        type: choice
+        options:
+          - publish
+          - unpublish
+
+permissions:
+  contents: write
+
+env:
+  BETA_REF: beta/bluetooth
+  RELEASE_TAG: bluetooth-beta
+  GITEE_REPO: x1abin/crossmux
+
+jobs:
+  build:
+    if: inputs.action == 'publish'
+    runs-on: ubuntu-latest
+    outputs:
+      crossmux_sha: ${{ steps.source.outputs.crossmux_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BETA_REF }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Record and validate source
+        id: source
+        run: |
+          set -euo pipefail
+          git -C freeink-sdk fetch origin main:refs/remotes/origin/main
+          sdk_sha="$(git -C freeink-sdk rev-parse HEAD)"
+          if ! git -C freeink-sdk merge-base --is-ancestor "$sdk_sha" origin/main; then
+            echo "::error::SDK gitlink $sdk_sha is not contained in FreeInk/freeink-sdk main"
+            exit 1
+          fi
+          crossmux_sha="$(git rev-parse HEAD)"
+          echo "crossmux_sha=$crossmux_sha" >> "$GITHUB_OUTPUT"
+          echo "CROSSPOINT_BLE_BETA_HASH=${crossmux_sha:0:8}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: false
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U pioarduino==6.1.19
+
+      - name: Install clang-format 21
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
+          sudo apt-get update
+          sudo apt-get install -y clang-format-21
+
+      - name: Validate source
+        run: |
+          PATH="/usr/lib/llvm-21/bin:$PATH" ./bin/clang-format-fix --check
+          pio check -e ble_debug --fail-on-defect high
+
+      - name: Build normal release regression
+        run: pio run -e gh_release
+
+      - name: Build and package BLE firmware
+        run: |
+          set -euo pipefail
+          pio run -e ble_debug -e gh_release_ble_beta -e gh_release_cn_ble_beta
+          mkdir -p dist
+          install -m 0644 .pio/build/gh_release_ble_beta/firmware.bin dist/firmware-ble.bin
+          install -m 0644 .pio/build/gh_release_cn_ble_beta/firmware.bin dist/firmware-cn-ble.bin
+          for firmware in dist/firmware-ble.bin dist/firmware-cn-ble.bin; do
+            size="$(stat -c %s "$firmware")"
+            if [ "$size" -ge 6553600 ]; then
+              echo "::error::$firmware is $size bytes; OTA slot limit is 6553600"
+              exit 1
+            fi
+          done
+          (cd dist && sha256sum firmware-ble.bin firmware-cn-ble.bin > SHA256SUMS)
+          (cd dist && sha256sum --check SHA256SUMS)
+
+      - name: Upload private build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: bluetooth-beta
+          path: dist
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: inputs.action == 'publish'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: bluetooth-beta
+          path: dist
+
+      - name: Build release notes
+        run: |
+          cat > release-body.md <<EOF
+          # CrossMux Bluetooth Beta
+
+          Experimental BLE HID page-turner builds for Xteink X3 and X4 from \`${{ env.BETA_REF }}\`.
+
+          - CrossMux: \`${{ needs.build.outputs.crossmux_sha }}\`
+          - International: \`firmware-ble.bin\`
+          - Simplified Chinese: \`firmware-cn-ble.bin\`
+
+          Important limitations:
+
+          - BLE and Wi-Fi are mutually exclusive. BLE stops before Wi-Fi, Web transfer, font download, OTA checks, and WeRead network work, then reconnects after returning to a reader.
+          - BLE increases power consumption and reduces available heap.
+          - Some Free3 buttons emit two HID codes and may turn two pages. This beta does not filter individual key codes.
+          - These files support only the X3 and X4 runtime-detected hardware. Do not flash them to Sticky, X4 Pro, or ESP32-S3 devices.
+          - This beta is not offered through stable, Nightly, website, or OTA channels.
+
+          To roll back, flash the matching stable CrossMux firmware. Partitions and book caches do not need migration; stable firmware ignores the BLE settings fields and may remove them on a later settings save.
+          EOF
+
+      - name: Publish rolling GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create "$RELEASE_TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "${{ needs.build.outputs.crossmux_sha }}" \
+            --title "CrossMux Bluetooth Beta" \
+            --notes-file release-body.md \
+            --prerelease
+
+      - name: Verify GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir github-assets
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir github-assets
+          (cd github-assets && sha256sum --check SHA256SUMS)
+
+      - name: Mirror prerelease to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          bash scripts/publish-gitee-release.sh \
+            "$GITEE_REPO" \
+            "$RELEASE_TAG" \
+            "CrossMux Bluetooth Beta" \
+            "true" \
+            "${{ needs.build.outputs.crossmux_sha }}" \
+            release-body.md \
+            dist/SHA256SUMS \
+            dist/firmware-ble.bin \
+            dist/firmware-cn-ble.bin
+
+      - name: Verify Gitee release assets
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir gitee-assets
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
+          curl -fsS "$api" | jq -r \
+            '.assets[] | select(.browser_download_url | contains("/releases/download/")) | [.name, .browser_download_url] | @tsv' \
+          | while IFS=$'\t' read -r name url; do
+            curl -fsSL "$url" -o "gitee-assets/$name"
+          done
+          (cd gitee-assets && sha256sum --check SHA256SUMS)
+
+      - name: Clean up partial rolling releases
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+          release_api="${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}"
+          release_id="$(curl -fsS "$release_api" | jq -r '.id // empty' || true)"
+          if [ -n "$release_id" ]; then
+            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}" || true
+          fi
+
+  unpublish:
+    if: inputs.action == 'unpublish'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+
+      - name: Remove Gitee prerelease
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+          api="https://gitee.com/api/v5/repos/${GITEE_REPO}"
+          release_id="$(curl -fsS "${api}/releases/tags/${RELEASE_TAG}?access_token=${GITEE_TOKEN}" | jq -r '.id // empty' || true)"
+          if [ -n "$release_id" ]; then
+            curl -fsS -X DELETE "${api}/releases/${release_id}?access_token=${GITEE_TOKEN}"
+          fi
