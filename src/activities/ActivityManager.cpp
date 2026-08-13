@@ -195,6 +195,14 @@ bool ActivityManager::handleMainTabInput() {
   const int tabTop = metrics.topPadding;
   const int tabBottom = tabTop + metrics.headerHeight;
 
+  if (mappedInput.wasMenuGesture()) {
+    if (mainTabFocus != MainTabFocus::Tabs) {
+      mainTabFocus = MainTabFocus::Tabs;
+      requestUpdate();
+    }
+    return true;
+  }
+
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTapped(x, y)) {

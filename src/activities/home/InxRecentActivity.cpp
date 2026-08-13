@@ -12,6 +12,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "components/themes/inx/InxTheme.h"
@@ -29,9 +30,8 @@ constexpr int kHomeBatteryRightMargin = 12;
 
 Rect contentRect(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  return Rect{0, top, renderer.getScreenWidth(),
-              renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing};
+  return SubpageLayout::contentRect(Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()}, metrics, false,
+                                    metrics.buttonHintsHeight);
 }
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
@@ -251,16 +251,41 @@ void InxRecentActivity::loop() {
   }
 
   const int count = static_cast<int>(books->size());
-  const auto swipe = mappedInput.wasSwipe();
-  if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) || swipe == MappedInputManager::SwipeDir::Up ||
-      swipe == MappedInputManager::SwipeDir::Left) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
     selected = (selected + 1) % count;
     requestUpdate();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) || swipe == MappedInputManager::SwipeDir::Down ||
-      swipe == MappedInputManager::SwipeDir::Right) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
     selected = (selected + count - 1) % count;
+    requestUpdate();
+    return;
+  }
+
+  const InxRecentLayout currentLayout = layout();
+  const auto swipe = mappedInput.wasSwipe();
+  int swipeSelection = selected;
+  switch (currentLayout) {
+    case InxRecentLayout::Flow:
+    case InxRecentLayout::Cover:
+      if (swipe == MappedInputManager::SwipeDir::Left)
+        swipeSelection = InxRecentGeometry::nextPageStart(selected, count, currentLayout);
+      else if (swipe == MappedInputManager::SwipeDir::Right)
+        swipeSelection = InxRecentGeometry::previousPageStart(selected, count, currentLayout);
+      break;
+    case InxRecentLayout::Grid:
+    case InxRecentLayout::List:
+    case InxRecentLayout::Icons:
+      if (swipe == MappedInputManager::SwipeDir::Up)
+        swipeSelection = InxRecentGeometry::nextPageStart(selected, count, currentLayout);
+      else if (swipe == MappedInputManager::SwipeDir::Down)
+        swipeSelection = InxRecentGeometry::previousPageStart(selected, count, currentLayout);
+      break;
+    case InxRecentLayout::Count:
+      break;
+  }
+  if (swipeSelection != selected) {
+    selected = swipeSelection;
     requestUpdate();
     return;
   }

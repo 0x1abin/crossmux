@@ -789,6 +789,11 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // A second turn before the first render owns the mutex can corrupt the
+  // differential baseline; the short time gate covers that scheduling gap.
+  constexpr unsigned long MIN_MANUAL_TURN_GAP_MS = 200;
+  if (RenderLock::peek() || (lastPageTurnTime != 0 && millis() - lastPageTurnTime < MIN_MANUAL_TURN_GAP_MS)) return;
+
   if (prevTriggered) {
     pageTurn(false);
   } else {

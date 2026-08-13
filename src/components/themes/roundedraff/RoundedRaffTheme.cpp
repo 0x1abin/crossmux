@@ -213,15 +213,15 @@ void RoundedRaffTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int butt
                                       const std::function<std::string(int index)>& buttonLabel,
                                       const std::function<UIIcon(int index)>& rowIcon, int rowSpacing) const {
   (void)rowIcon;
-  const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
+  const int sidePadding = RoundedRaffMetrics::values.buttonMenuSidePadding;
   const int rowX = rect.x + sidePadding;
-  const int rowHeight = renderer.getLineHeight(kTitleFontId) + 20;  // 10px top + 10px bottom
+  const int rowHeight = RoundedRaffMetrics::values.menuRowHeight;
   const int rowGap = rowSpacing >= 0 ? rowSpacing : kSelectableRowGap;
   const int rowStep = rowHeight + rowGap;
   const int pageItems = std::max(1, rect.height / rowStep);
   const int safeSelectedIndex = std::max(0, selectedIndex);
   const int pageStartIndex = (safeSelectedIndex / pageItems) * pageItems;
-  const int menuTop = rect.y;
+  const int menuTop = rect.y + RoundedRaffMetrics::values.buttonMenuTopPadding;
   const int textLineHeight = renderer.getLineHeight(kTitleFontId);
   const int menuMaxWidth = std::max(0, rect.width - sidePadding * 2);
 

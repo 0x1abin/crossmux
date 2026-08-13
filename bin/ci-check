@@ -17,8 +17,8 @@ echo "Checking formatting..."
 echo "Running cppcheck..."
 pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
-echo "Building default, Sticky, and X4 Pro firmware..."
-pio run -e default -e sticky -e x4pro
+echo "Building default and all S3 beta firmware..."
+pio run -e default -e sticky -e x4pro -e eego_a4 -e mofei_m4
 
 echo "Running host unit tests..."
 cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release

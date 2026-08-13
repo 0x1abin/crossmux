@@ -288,15 +288,18 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
 void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int buttonCount, const int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon, const int) const {
+  const int menuX = rect.x + InxMetrics::values.buttonMenuSidePadding;
+  const int menuWidth = rect.width - InxMetrics::values.buttonMenuSidePadding * 2;
+  const int menuTop = rect.y + InxMetrics::values.buttonMenuTopPadding;
   const int pageItems = InxMenuGeometry::pageItems(rect.height);
   const int pageStart = InxMenuGeometry::pageStart(selectedIndex, buttonCount, rect.height);
   const int pageEnd = std::min(buttonCount, pageStart + pageItems);
   for (int index = pageStart; index < pageEnd; ++index) {
-    const int rowY = rect.y + (index - pageStart) * kRowHeight;
+    const int rowY = menuTop + (index - pageStart) * kRowHeight;
     const bool selected = index == selectedIndex;
-    if (selected) renderer.fillRect(rect.x, rowY, rect.width, kRowHeight, true);
+    if (selected) renderer.fillRect(menuX, rowY, menuWidth, kRowHeight, true);
 
-    int textX = rect.x + kRowPadding;
+    int textX = menuX + kRowPadding;
     if (rowIcon) {
       const UIIcon icon = rowIcon(index);
       if (InxAppIcons::get(icon)) {
@@ -314,10 +317,10 @@ void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int 
     }
 
     const std::string label = renderer.truncatedText(UI_12_FONT_ID, buttonLabel(index).c_str(),
-                                                     std::max(1, rect.x + rect.width - kRowPadding - textX));
+                                                     std::max(1, menuX + menuWidth - kRowPadding - textX));
     const int textY = rowY + (kRowHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
     renderer.drawText(UI_12_FONT_ID, textX, textY, label.c_str(), !selected);
-    drawDottedSeparator(renderer, rect.x, rowY + kRowHeight - 1, rect.width);
+    drawDottedSeparator(renderer, menuX, rowY + kRowHeight - 1, menuWidth);
   }
   drawSideScrollBar(renderer, rect, buttonCount, pageStart, pageItems);
 }

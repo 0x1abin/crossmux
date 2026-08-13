@@ -34,12 +34,20 @@
   * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
   * `slim`: Minimal build (no serial logging)
   * `gh_release_cn`: Simplified-Chinese-only release with embedded CJK fonts (see [chinese-build.md](chinese-build.md))
-  * `sticky`: Seeed Sticky ESP32-S3 development build
+  * `sticky`: Seeed Sticky ESP32-S3 Chinese development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 experimental Chinese development build
+  * `eego_a4`: EEGO A4 ESP32-S3 experimental Chinese development build
+  * `mofei_m4`: Mofei M4 ESP32-S3 experimental Chinese development build
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_mofei_m4`: Native 800x480 Mofei M4 product simulator
+
+The four S3 development environments inherit their Chinese locale, China host,
+debug logging, Chinese Chess, and WeRead source filters from the non-buildable
+`s3_cn_beta` section. Keep device-specific board and feature flags in each
+`env:*` section. `bin/ci-check` builds all four S3 targets together with the
+default C3 target.
 
 ## Desktop Simulator
 

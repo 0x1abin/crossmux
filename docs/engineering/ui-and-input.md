@@ -107,6 +107,16 @@ may run after the edge's frame. Do not simulate consumption with another
 Touch input remains independent; only arm a physical-button barrier when that
 button is actually held.
 
+## Touch Coordinate and Gesture Layers
+
+Touch controllers keep their sampling, power, and panel-mount transforms in
+the FreeInk SDK. `HalGPIO` exposes the normalized contact, and
+`MappedInputManager` maps it through the renderer's live orientation before
+classifying direction and edge geometry with FreeInkUI. Activities assign the
+meaning: left-edge right swipe is Back, top-edge down swipe is Menu, and
+bottom-edge up swipe is Home on every touch device. A hardware Home key remains
+an additional input path and does not change those screen gestures.
+
 ## Long-Press Pattern
 
 Start timing on `wasPressed()`. While `isPressed()` remains true, fire the
@@ -137,7 +147,9 @@ action**.
 * INX top-level tabs are owned by `ActivityManager`; only Activities with a
   non-`None` `MainTab` participate. Left/Right and tab touches are consumed
   before the page sees them, while reader and feature subpages remain outside
-  the top-level loop.
+  the top-level loop. A top-edge down swipe focuses the tab bar. In Recent,
+  Flow/Cover use horizontal one-book swipes while Grid/List/Icons use vertical
+  page swipes; other axes are ignored.
 * `GUI.drawProgressBar()` returns the first free Y coordinate after the bar and
   optional percentage line. Callers place following text from that value rather
   than reproducing the theme's font or spacing calculations.

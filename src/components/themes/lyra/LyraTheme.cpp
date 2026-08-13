@@ -607,10 +607,11 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
                                const std::function<UIIcon(int index)>& rowIcon, int rowSpacing) const {
   const int spacing = rowSpacing >= 0 ? rowSpacing : LyraMetrics::values.menuSpacing;
   for (int i = 0; i < buttonCount; ++i) {
-    int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
+    int tileWidth = rect.width - LyraMetrics::values.buttonMenuSidePadding * 2;
     Rect tileRect =
-        Rect{rect.x + LyraMetrics::values.contentSidePadding,
-             rect.y + i * (LyraMetrics::values.menuRowHeight + spacing), tileWidth, LyraMetrics::values.menuRowHeight};
+        Rect{rect.x + LyraMetrics::values.buttonMenuSidePadding,
+             rect.y + LyraMetrics::values.buttonMenuTopPadding + i * (LyraMetrics::values.menuRowHeight + spacing),
+             tileWidth, LyraMetrics::values.menuRowHeight};
 
     const bool selected = selectedIndex == i;
 

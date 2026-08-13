@@ -3,6 +3,11 @@
 #include <HalGPIO.h>
 
 class GfxRenderer;
+namespace freeink {
+namespace ui {
+enum class ScreenEdge : uint8_t;
+}
+}  // namespace freeink
 
 class MappedInputManager {
  public:
@@ -94,6 +99,7 @@ class MappedInputManager {
   Button mapScreenDirection(Button button) const;
   Labels mapFrontLabels(const char* back, const char* confirm, const char* left, const char* right) const;
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
+  bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;
   bool wasBackGesture() const;
   // Fetch the pending swipe (if any) and map both endpoints to logical screen coords
   bool decodeSwipe(int& sx, int& sy, int& ex, int& ey) const;

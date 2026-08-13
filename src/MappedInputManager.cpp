@@ -1,12 +1,14 @@
 #include "MappedInputManager.h"
 
+#include <FreeInkUICore.h>
 #include <GfxRenderer.h>
 
 #include <algorithm>
-#include <cstdlib>
 
 #include "CrossPointSettings.h"
 #include "components/UITheme.h"
+
+namespace fui = freeink::ui;
 
 bool MappedInputManager::isNavDirectionSwapped() const {
   // Key the swap on the orientation the screen is *actually* rendered at, not the persisted reader
@@ -116,9 +118,6 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
 }
 
 namespace {
-constexpr float LEFT_EDGE_BACK_GESTURE_FRAC_X = 0.25f;
-constexpr float BOTTOM_EDGE_BACK_GESTURE_FRAC_Y = 0.14f;
-constexpr float TOP_EDGE_MENU_GESTURE_FRAC_Y = 0.14f;
 constexpr unsigned long TOUCH_DOWN_SELECT_DELAY_MS = 90;
 constexpr unsigned long TOUCH_HELD_OVERRIDE_WINDOW_MS = 250;
 }  // namespace
@@ -257,57 +256,42 @@ MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
   int ex = 0;
   int ey = 0;
   if (!decodeSwipe(sx, sy, ex, ey)) return SwipeDir::None;
-  const int dx = ex - sx;
-  const int dy = ey - sy;
-  if (std::abs(dx) >= std::abs(dy)) {
-    return dx < 0 ? SwipeDir::Left : SwipeDir::Right;
+  switch (fui::swipeDirection(sx, sy, ex, ey)) {
+    case fui::SwipeDir::Left:
+      return SwipeDir::Left;
+    case fui::SwipeDir::Right:
+      return SwipeDir::Right;
+    case fui::SwipeDir::Up:
+      return SwipeDir::Up;
+    case fui::SwipeDir::Down:
+      return SwipeDir::Down;
+    case fui::SwipeDir::None:
+      return SwipeDir::None;
   }
-  return dy < 0 ? SwipeDir::Up : SwipeDir::Down;
+  return SwipeDir::None;
+}
+
+bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const {
+  int sx = 0;
+  int sy = 0;
+  int ex = 0;
+  int ey = 0;
+  if (!decodeSwipe(sx, sy, ex, ey)) return false;
+  const bool hit = fui::edgeSwipe(edge, sx, sy, ex, ey, renderer.getScreenWidth(), renderer.getScreenHeight());
+  if (hit) rememberTouchHeldTime();
+  return hit;
 }
 
 bool MappedInputManager::wasBackGesture() const {
-  // Back = left-to-right swipe starting near the left edge. Edge-anchored so that
-  // mid-screen horizontal swipes stay available to activities that consume
-  // SwipeDir::Left/Right (e.g. percent selection, image viewer).
-  int sx = 0;
-  int sy = 0;
-  int ex = 0;
-  int ey = 0;
-  if (!decodeSwipe(sx, sy, ex, ey)) return false;
-  const bool hit = sx <= renderer.getScreenWidth() * LEFT_EDGE_BACK_GESTURE_FRAC_X && ex > sx &&
-                   std::abs(ex - sx) > std::abs(ey - sy);
-  if (hit) rememberTouchHeldTime();
-  return hit;
+  // Keep mid-screen horizontal swipes available to the active Activity.
+  return wasEdgeSwipe(fui::ScreenEdge::Left);
 }
 
-bool MappedInputManager::wasMenuGesture() const {
-  // Downward swipe starting at the top edge (mirror of the bottom-edge home gesture).
-  int sx = 0;
-  int sy = 0;
-  int ex = 0;
-  int ey = 0;
-  if (!decodeSwipe(sx, sy, ex, ey)) return false;
-  const int topEdgeBottom = static_cast<int>(renderer.getScreenHeight() * TOP_EDGE_MENU_GESTURE_FRAC_Y);
-  const bool hit = sy <= topEdgeBottom && ey > sy && std::abs(ey - sy) > std::abs(ex - sx);
-  if (hit) rememberTouchHeldTime();
-  return hit;
-}
+bool MappedInputManager::wasMenuGesture() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
 bool MappedInputManager::wasHomeGesture() const {
   if (gpio.wasHomeKeyLongPressed()) return true;
-  int sx = 0;
-  int sy = 0;
-  int ex = 0;
-  int ey = 0;
-  if (decodeSwipe(sx, sy, ex, ey)) {
-    const int bottomEdgeTop =
-        renderer.getScreenHeight() - static_cast<int>(renderer.getScreenHeight() * BOTTOM_EDGE_BACK_GESTURE_FRAC_Y);
-    if (sy >= bottomEdgeTop && ey < sy && std::abs(ey - sy) > std::abs(ex - sx)) {
-      rememberTouchHeldTime();
-      return true;
-    }
-  }
-  return false;
+  return wasEdgeSwipe(fui::ScreenEdge::Bottom);
 }
 
 bool MappedInputManager::wasPressed(const Button button) const {

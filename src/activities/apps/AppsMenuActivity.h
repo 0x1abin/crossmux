@@ -28,6 +28,8 @@ class AppsMenuActivity final : public Activity {
   static bool setAppVisible(int appIndex, bool visible);
 
  private:
+  enum class SelectionMode { Hidden, Touch, Buttons };
+
   static int getVisibleAppCount();
   static int getAppIndexForVisibleIndex(int visibleIndex);
   bool usesIconLayout() const;
@@ -36,5 +38,6 @@ class AppsMenuActivity final : public Activity {
   void drawIconGrid(const Rect& rect, int visibleCount, bool showSelection) const;
 
   ButtonNavigator buttonNavigator;
+  SelectionMode selectionMode = SelectionMode::Buttons;
   int selected = 0;
 };
