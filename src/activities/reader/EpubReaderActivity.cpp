@@ -39,6 +39,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "util/ReadingBackground.h"
 #include "util/ReadingGuideLine.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include <WeReadStore.h>
@@ -1825,7 +1826,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto tPrewarm = millis();
   fcm->logStats("epub-page");
 
-  auto renderPageWithGuideLines = [&]() {
+  auto renderPageWithGuideLines = [&](const bool includeBackground = false) {
+    if (includeBackground && SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) {
+      renderer.clearScreen();
+    }
     page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     if (!SETTINGS.readingGuideLineEnabled) return;
 
@@ -1871,7 +1875,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     }
   };
 
-  renderPageWithGuideLines();
+  renderPageWithGuideLines(true);
 #ifdef ENABLE_CHINESE_VERSION
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
   if (missingCodepoint != 0 && !FontDownloadActivity::wasChineseFontPromptShownThisBoot()) {

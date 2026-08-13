@@ -1,0 +1,6 @@
+add_executable(reading_background_test ReadingBackgroundTest.cpp)
+target_link_libraries(reading_background_test PRIVATE GTest::gtest_main crosspoint_test_common)
+target_include_directories(reading_background_test PRIVATE
+  ${REPO_ROOT}/src
+)
+gtest_discover_tests(reading_background_test)

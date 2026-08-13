@@ -12,7 +12,7 @@
 class FileBrowserActivity final : public Activity {
  public:
   // Picker modes filter to one file type and return its path via ActivityResult.
-  enum class Mode { Books, PickFirmware };
+  enum class Mode { Books, PickFirmware, PickPng };
 
  private:
   // Deletion

@@ -210,6 +210,8 @@ class SettingsActivity final : public Activity {
   std::array<int, categoryCount> accordionSettingCounts() const;
   std::string settingValueText(const SettingInfo& setting) const;
   void openSleepTimeoutPicker();
+  void openReadingBackgroundMenu();
+  void openReadingBackgroundPicker();
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 

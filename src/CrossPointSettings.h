@@ -254,6 +254,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t extraParagraphSpacing = 1;
   uint8_t textAntiAliasing = 1;
   uint8_t fakeBold = SYNTHETIC_BOLD_OFF;
+  uint8_t readingBackgroundEnabled = 0;
   uint8_t readingGuideLineEnabled = 0;
   uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
   int8_t readingGuideLineOffset = READING_GUIDE_LINE_OFFSET_DEFAULT;

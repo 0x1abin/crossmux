@@ -27,6 +27,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/AchievementPopupUtils.h"
+#include "util/ReadingBackground.h"
 #include "util/ReadingGuideLine.h"
 
 namespace {
@@ -694,6 +695,7 @@ void TxtReaderActivity::renderPage() {
   fcm->logStats("txt-page");
 
   // BW rendering
+  if (SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) renderer.clearScreen();
   renderLines();
   renderStatusBar();
   const auto tBwRender = millis();

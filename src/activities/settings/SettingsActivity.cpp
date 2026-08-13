@@ -35,11 +35,13 @@
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
+#include "activities/home/FileBrowserActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/ReadingBackground.h"
 
 namespace {
 
@@ -57,6 +59,7 @@ enum class AboutRow : uint8_t {
 };
 
 constexpr uint64_t BYTES_PER_TENTH_GB = 100000000ULL;
+constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 
 class AboutActivity final : public Activity {
  public:
@@ -600,6 +603,9 @@ void SettingsActivity::loopAccordion() {
 }
 
 std::string SettingsActivity::settingValueText(const SettingInfo& setting) const {
+  if (setting.valuePtr == &CrossPointSettings::readingBackgroundEnabled) {
+    return SETTINGS.readingBackgroundEnabled ? tr(STR_CUSTOM_IMAGE) : tr(STR_STATE_OFF);
+  }
   if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
     return SETTINGS.*(setting.valuePtr) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
   }
@@ -680,6 +686,10 @@ void SettingsActivity::toggleCurrentSetting() {
 
   if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
     openSleepTimeoutPicker();
+    return;
+  }
+  if (setting.valuePtr == &CrossPointSettings::readingBackgroundEnabled) {
+    openReadingBackgroundMenu();
     return;
   }
 
@@ -887,6 +897,47 @@ void SettingsActivity::openSleepTimeoutPicker() {
         }
         requestUpdate();
       });
+}
+
+void SettingsActivity::openReadingBackgroundMenu() {
+  static constexpr StrId OPTIONS[] = {StrId::STR_STATE_OFF, StrId::STR_CUSTOM_IMAGE};
+  optionPopup.show(StrId::STR_READING_BACKGROUND, OPTIONS, static_cast<int>(std::size(OPTIONS)),
+                   SETTINGS.readingBackgroundEnabled ? 1 : 0, [this](const int selected) {
+                     if (selected == 0) {
+                       SETTINGS.readingBackgroundEnabled = 0;
+                       SETTINGS.saveToFile();
+                       requestUpdate();
+                       return;
+                     }
+                     openReadingBackgroundPicker();
+                   });
+  requestUpdate();
+}
+
+void SettingsActivity::openReadingBackgroundPicker() {
+  const bool started = startActivityForResultWith<FileBrowserActivity>(
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) return;
+        const auto* selected = std::get_if<FilePathResult>(&result.data);
+        if (!selected) {
+          LOG_ERR("SET", "PNG picker returned no path");
+          return;
+        }
+
+        GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+        if (readingBackground::createCacheFromPng(renderer, selected->path.c_str())) {
+          SETTINGS.readingBackgroundEnabled = 1;
+          SETTINGS.saveToFile();
+          requestUpdate();
+        } else {
+          optionPopup.show(StrId::STR_FAILED_LOWER, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+        }
+      },
+      "/", FileBrowserActivity::Mode::PickPng);
+  if (!started) {
+    optionPopup.show(StrId::STR_MEMORY_ERROR, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+    requestUpdate();
+  }
 }
 
 void SettingsActivity::render(RenderLock&&) {

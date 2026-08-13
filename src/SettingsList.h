@@ -267,6 +267,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Toggle(StrId::STR_FOCUS_READING, &CrossPointSettings::focusReadingEnabled, "focusReadingEnabled",
                             StrId::STR_CAT_READER)
             .withTextSettings(),
+        SettingInfo::Toggle(StrId::STR_READING_BACKGROUND, &CrossPointSettings::readingBackgroundEnabled,
+                            "readingBackgroundEnabled", StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_READING_GUIDE_LINE, &CrossPointSettings::readingGuideLineEnabled,
                             "readingGuideLineEnabled", StrId::STR_CAT_READER)
             .withTextSettings(),

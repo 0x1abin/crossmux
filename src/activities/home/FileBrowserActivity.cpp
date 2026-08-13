@@ -66,6 +66,9 @@ void FileBrowserActivity::loadFiles() {
         case Mode::PickFirmware:
           if (FsHelpers::checkFileExtension(filename, ".bin")) files.emplace_back(filename);
           break;
+        case Mode::PickPng:
+          if (FsHelpers::hasPngExtension(filename)) files.emplace_back(filename);
+          break;
       }
     }
   }
@@ -470,6 +473,9 @@ void FileBrowserActivity::render(RenderLock&&) {
       break;
     case Mode::PickFirmware:
       folderName = tr(STR_SELECT_FIRMWARE_FILE);
+      break;
+    case Mode::PickPng:
+      folderName = tr(STR_READING_BACKGROUND);
       break;
   }
   drawPageHeader(Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
