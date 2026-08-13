@@ -506,7 +506,8 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
 
 void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName) {
   auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                              TextSettingsActivity::Tab::Family);
+                                                              TextSettingsActivity::Tab::Family,
+                                                              TextSettingsActivity::InitialFontState::Changed);
 
   strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
   SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';

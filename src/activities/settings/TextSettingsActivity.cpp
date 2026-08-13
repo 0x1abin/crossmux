@@ -48,8 +48,12 @@ constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 }  // namespace
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const SdCardFontRegistry* registry, Tab initialTab)
-    : Activity("TextSettings", renderer, mappedInput), registry_(registry), tab_(initialTab) {}
+                                           const SdCardFontRegistry* registry, Tab initialTab,
+                                           const InitialFontState initialFontState)
+    : Activity("TextSettings", renderer, mappedInput),
+      registry_(registry),
+      tab_(initialTab),
+      initialFontState_(initialFontState) {}
 
 void TextSettingsActivity::onEnter() {
   Activity::onEnter();
@@ -60,7 +64,7 @@ void TextSettingsActivity::onEnter() {
   usableHeight = renderer.getScreenHeight() - afterHeader - bottomReserved;
   previewHeight = usableHeight * metrics_.previewHeightPercent / 100;
 
-  sdFontSystem.adoptCompleteChineseNotoSans();
+  if (sdFontSystem.adoptCompleteChineseNotoSans()) initialFontState_ = InitialFontState::Changed;
   {
     RenderLock lock(*this);
     sdFontSystem.ensureLoaded(renderer, false);
@@ -104,6 +108,9 @@ void TextSettingsActivity::onEnter() {
       break;
     }
   }
+  initialFamilyIndex_ = currentFamilyIndex_;
+  initialPointSize_ = SETTINGS.fontPointSize;
+  initialSdFontFlashPreload_ = SETTINGS.sdFontFlashPreload;
   std::fill(std::begin(selectedIndex_), std::end(selectedIndex_), 1);       // default to the first list row
   selectedIndex_[static_cast<int>(Tab::Family)] = currentFamilyIndex_ + 1;  // Family/Size open on current selection
   selectedIndex_[static_cast<int>(Tab::Size)] = currentSizeIndex_ + 1;
@@ -508,6 +515,15 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   if (exitInProgress_) return;
   exitInProgress_ = true;
   exitDestination_ = destination;
+
+  const bool fontChanged = initialFontState_ == InitialFontState::Changed ||
+                           currentFamilyIndex_ != initialFamilyIndex_ || SETTINGS.fontPointSize != initialPointSize_;
+  if (!fontChanged) {
+    SETTINGS.sdFontFlashPreload = initialSdFontFlashPreload_;
+    SETTINGS.saveToFile();
+    completeExit();
+    return;
+  }
 
   if (SETTINGS.sdFontFamilyName[0] == '\0') {
     SETTINGS.sdFontFlashPreload = 0;

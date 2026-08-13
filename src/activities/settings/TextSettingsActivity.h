@@ -21,8 +21,9 @@
 class TextSettingsActivity final : public Activity {
  public:
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
+  enum class InitialFontState : uint8_t { Unchanged, Changed };
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
-                       Tab initialTab = Tab::Family);
+                       Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged);
 
   void onEnter() override;
   void onExit() override;
@@ -118,6 +119,10 @@ class TextSettingsActivity final : public Activity {
       {};  // per-Tab nav position (0 = tab bar, 1..N = row); set in onEnter
   int currentFamilyIndex_ = 0;
   int currentSizeIndex_ = 0;
+  int initialFamilyIndex_ = 0;
+  uint8_t initialPointSize_ = 0;
+  uint8_t initialSdFontFlashPreload_ = 0;
+  InitialFontState initialFontState_ = InitialFontState::Unchanged;
   ThemeMetrics metrics_ = {};
   int afterHeader = 0;
   int bottomReserved = 0;
