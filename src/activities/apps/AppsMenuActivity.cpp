@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 
+#include "../../components/SubpageLayout.h"
 #include "../../components/UITheme.h"
 #include "../../components/icons/inx_apps.h"
 #include "../../util/PaginationDots.h"
@@ -15,6 +16,12 @@
 #include "fontIds.h"
 
 namespace {
+
+Rect contentRect(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return SubpageLayout::contentRect(Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()}, metrics, false,
+                                    metrics.buttonHintsHeight);
+}
 
 // Single source of truth for the Apps menu — add a new app here, then provide the
 // matching `goTo<App>()` in ActivityManager and assign a stable, never-reused AppId.
@@ -194,10 +201,8 @@ bool AppsMenuActivity::usesIconLayout() const {
 }
 
 int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int height = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  return InxGridGeometry::indexFromPoint(x, y - top, renderer.getScreenWidth(), height,
+  const Rect content = contentRect(renderer);
+  return InxGridGeometry::indexFromPoint(x - content.x, y - content.y, content.width, content.height,
                                          InxGridGeometry::pageStart(selected, getVisibleAppCount()),
                                          getVisibleAppCount());
 }
@@ -290,27 +295,25 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, co
 void AppsMenuActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
-  const int sh = renderer.getScreenHeight();
+  const Rect content = contentRect(renderer);
 
   renderer.clearScreen();
   drawPageHeader(Rect{0, metrics.topPadding, sw, metrics.headerHeight}, tr(STR_APPS_TITLE));
 
-  const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const int visibleCount = getVisibleAppCount();
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   const bool showSelection = showMainTabContentSelection();
 
   if (visibleCount == 0) {
-    UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
+    UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
   } else if (usesIconLayout()) {
-    drawIconGrid(Rect{0, listY, sw, listH}, visibleCount, showSelection);
+    drawIconGrid(content, visibleCount, showSelection);
   } else {
     // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
     const int spacing = metrics.menuSpacing / 2;
     const int rowStep = metrics.menuRowHeight + spacing;
-    // Number of rows that fit: n rows occupy n*rowHeight + (n-1)*spacing <= listH.
-    const int perPage = std::max(1, (listH + spacing) / rowStep);
+    // Number of rows that fit: n rows occupy n*rowHeight + (n-1)*spacing <= content height.
+    const int perPage = std::max(1, (content.height + spacing) / rowStep);
     const int totalPages = (visibleCount + perPage - 1) / perPage;
     const int page = selected / perPage;
     const int pageStart = page * perPage;
@@ -318,7 +321,7 @@ void AppsMenuActivity::render(RenderLock&&) {
 
     // ponytail: scan at most 32 entries instead of keeping a RAM-backed filtered list.
     GUI.drawButtonMenu(
-        renderer, Rect{0, listY, sw, listH}, pageCount, showSelection ? selected - pageStart : -1,
+        renderer, content, pageCount, showSelection ? selected - pageStart : -1,
         [pageStart](int i) {
           const int appIndex = getAppIndexForVisibleIndex(i + pageStart);
           return appIndex >= 0 ? std::string(I18N.get(kAppEntries[appIndex].titleId)) : std::string();
@@ -331,9 +334,9 @@ void AppsMenuActivity::render(RenderLock&&) {
 
     if (totalPages > 1) {
       if (usesSideScrollBar(theme)) {
-        GUI.drawSideScrollBar(renderer, Rect{0, listY, sw, listH}, visibleCount, pageStart, perPage);
+        GUI.drawSideScrollBar(renderer, content, visibleCount, pageStart, perPage);
       } else {
-        const int dotsY = listY + listH - 8;
+        const int dotsY = content.y + content.height - 8;
         drawPaginationDots(renderer, sw, dotsY, totalPages, page);
       }
     }

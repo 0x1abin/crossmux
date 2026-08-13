@@ -12,6 +12,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "components/themes/inx/InxTheme.h"
@@ -29,9 +30,8 @@ constexpr int kHomeBatteryRightMargin = 12;
 
 Rect contentRect(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  return Rect{0, top, renderer.getScreenWidth(),
-              renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing};
+  return SubpageLayout::contentRect(Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()}, metrics, false,
+                                    metrics.buttonHintsHeight);
 }
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
