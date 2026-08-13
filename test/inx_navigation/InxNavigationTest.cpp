@@ -6,6 +6,11 @@
 #include "components/SubpageLayout.h"
 #include "components/icons/inx_apps.h"
 #include "components/themes/BaseTheme.h"
+#include "components/themes/inx/InxTheme.h"
+#include "components/themes/lyra/Lyra3CoversTheme.h"
+#include "components/themes/lyra/LyraCarouselTheme.h"
+#include "components/themes/lyra/LyraTheme.h"
+#include "components/themes/roundedraff/RoundedRaffTheme.h"
 
 namespace {
 constexpr uint32_t iconHash(const InxAppIcons::Icon& icon) {
@@ -222,6 +227,28 @@ TEST(InxNavigation, KeepsSubpageContentInsideChrome) {
   const Rect spacedBody = SubpageLayout::contentRect(Rect{0, 0, 480, 760}, metrics, false);
   EXPECT_EQ(spacedBody.y, 82);
   EXPECT_EQ(spacedBody.height, 662);
+}
+
+TEST(InxNavigation, KeepsButtonMenuTouchGeometryAlignedWithThemes) {
+  EXPECT_EQ(BaseMetrics::values.buttonMenuTopPadding, 10);
+  EXPECT_EQ(BaseMetrics::values.buttonMenuSidePadding, 20);
+  EXPECT_EQ(LyraMetrics::values.buttonMenuTopPadding, 0);
+  EXPECT_EQ(LyraMetrics::values.buttonMenuSidePadding, 20);
+  EXPECT_EQ(Lyra3CoversMetrics::values.buttonMenuTopPadding, LyraMetrics::values.buttonMenuTopPadding);
+  EXPECT_EQ(LyraCarouselMetrics::values.buttonMenuSidePadding, LyraMetrics::values.buttonMenuSidePadding);
+  EXPECT_EQ(RoundedRaffMetrics::values.buttonMenuTopPadding, 0);
+  EXPECT_EQ(RoundedRaffMetrics::values.buttonMenuSidePadding, 20);
+  EXPECT_EQ(InxMetrics::values.buttonMenuTopPadding, 0);
+  EXPECT_EQ(InxMetrics::values.buttonMenuSidePadding, 0);
+
+  constexpr int contentTop = 100;
+  constexpr int rowCount = 3;
+  constexpr int spacing = BaseMetrics::values.menuSpacing / 2;
+  constexpr int firstRowTop = contentTop + BaseMetrics::values.buttonMenuTopPadding;
+  constexpr int lastRowBottom =
+      firstRowTop + (rowCount - 1) * (BaseMetrics::values.menuRowHeight + spacing) + BaseMetrics::values.menuRowHeight;
+  EXPECT_EQ(firstRowTop, 110);
+  EXPECT_EQ(lastRowBottom, 253);
 }
 
 TEST(InxNavigation, MeasuresCompleteProgressBlock) {

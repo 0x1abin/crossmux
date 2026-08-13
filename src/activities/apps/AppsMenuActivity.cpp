@@ -244,7 +244,7 @@ void AppsMenuActivity::loop() {
       requestUpdate();
       return;
     }
-  } else if (UITheme::getInstance().hasMainTabs()) {
+  } else {
     const auto& metrics = UITheme::getInstance().getMetrics();
     const Rect content = contentRect(renderer);
     const int spacing = metrics.menuSpacing / 2;
@@ -254,8 +254,8 @@ void AppsMenuActivity::loop() {
     const int pageCount = std::min(perPage, visibleCount - pageStart);
     int row = -1;
     const auto touch = mappedInput.rowTouch(
-        row, content.y + metrics.verticalSpacing, rowStep, pageCount, content.x + metrics.contentSidePadding,
-        content.x + content.width - metrics.contentSidePadding, metrics.menuRowHeight);
+        row, content.y + metrics.buttonMenuTopPadding, rowStep, pageCount, content.x + metrics.buttonMenuSidePadding,
+        content.x + content.width - metrics.buttonMenuSidePadding, metrics.menuRowHeight);
     const int touched = pageStart + row;
     switch (touch) {
       case MappedInputManager::RowTouch::Tap:

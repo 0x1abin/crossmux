@@ -735,17 +735,17 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
                                const std::function<UIIcon(int index)>& rowIcon, int rowSpacing) const {
   const int spacing = rowSpacing >= 0 ? rowSpacing : BaseMetrics::values.menuSpacing;
   for (int i = 0; i < buttonCount; ++i) {
-    const int tileY = BaseMetrics::values.verticalSpacing + rect.y +
+    const int tileY = BaseMetrics::values.buttonMenuTopPadding + rect.y +
                       static_cast<int>(i) * (BaseMetrics::values.menuRowHeight + spacing);
 
     const bool selected = selectedIndex == i;
 
     if (selected) {
-      renderer.fillRect(rect.x + BaseMetrics::values.contentSidePadding, tileY,
-                        rect.width - BaseMetrics::values.contentSidePadding * 2, BaseMetrics::values.menuRowHeight);
+      renderer.fillRect(rect.x + BaseMetrics::values.buttonMenuSidePadding, tileY,
+                        rect.width - BaseMetrics::values.buttonMenuSidePadding * 2, BaseMetrics::values.menuRowHeight);
     } else {
-      renderer.drawRect(rect.x + BaseMetrics::values.contentSidePadding, tileY,
-                        rect.width - BaseMetrics::values.contentSidePadding * 2, BaseMetrics::values.menuRowHeight);
+      renderer.drawRect(rect.x + BaseMetrics::values.buttonMenuSidePadding, tileY,
+                        rect.width - BaseMetrics::values.buttonMenuSidePadding * 2, BaseMetrics::values.menuRowHeight);
     }
 
     std::string labelStr = buttonLabel(i);

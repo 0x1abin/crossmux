@@ -13,6 +13,8 @@ constexpr ThemeMetrics makeValues() {
   metrics.listWithSubtitleRowHeight = 66;
   metrics.menuRowHeight = 66;
   metrics.menuSpacing = 0;
+  metrics.buttonMenuTopPadding = 0;
+  metrics.buttonMenuSidePadding = 0;
   metrics.scrollBarWidth = 6;
   metrics.scrollBarRightOffset = 2;
   return metrics;
