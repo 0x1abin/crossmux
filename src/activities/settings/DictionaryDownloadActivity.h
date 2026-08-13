@@ -11,11 +11,7 @@
 #include "util/DictionaryResource.h"
 
 #ifndef DICTIONARY_MANIFEST_URL
-#ifdef ENABLE_CHINESE_VERSION
-#define DICTIONARY_MANIFEST_URL "https://crossmux.yunhug.com/api/assets/dictionaries/manifest?version=1"
-#else
-#define DICTIONARY_MANIFEST_URL "https://crossmux.com/api/assets/dictionaries/manifest?version=1"
-#endif
+#define DICTIONARY_MANIFEST_URL "https://" CROSSMUX_HOST "/api/assets/dictionaries/manifest?version=1"
 #endif
 
 class DictionaryDownloadActivity final : public Activity {
