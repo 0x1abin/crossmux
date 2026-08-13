@@ -4,9 +4,12 @@
 > `gh_release_cn` Simplified-Chinese firmware: how the flag gates resources, the
 > flash budget, and how to regenerate the embedded CJK fonts.
 
-A dedicated build env, `gh_release_cn`, produces a Simplified-Chinese-only
-firmware. The `-DENABLE_CHINESE_VERSION` flag in [platformio.ini](../../platformio.ini)
-gates every CN-only resource:
+The `gh_release_cn` release and the `sticky`, `x4pro`, `eego_a4`, and
+`mofei_m4` S3 development environments produce Simplified-Chinese firmware.
+The S3 environments inherit `-DENABLE_CHINESE_VERSION`, the China service
+host, and CN-only application sources from the shared, non-buildable
+`s3_cn_beta` section in [platformio.ini](../../platformio.ini). The flag gates
+every CN-only resource:
 
 | Resource | Behavior under ENABLE_CHINESE_VERSION |
 |---|---|
