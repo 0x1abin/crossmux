@@ -287,11 +287,39 @@ TEST_F(WeReadStoreTest, FindsOnlyTheExactGeneratedBookPath) {
   EXPECT_FALSE(WeReadStore::findBookIdForPath("/WeRead/Renamed-book-1.epub", bookId, sizeof(bookId)));
 }
 
-TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLast) {
+TEST_F(WeReadStoreTest, SortsEmptySingleAndTwentyBookShelves) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  for (const uint32_t shelfSize : {0U, 1U, 20U}) {
+    WeReadStore::IndexWriter shelf;
+    ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+    for (uint32_t i = 0; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      snprintf(record.bookId, sizeof(record.bookId), "book-%02u", static_cast<unsigned>(i));
+      record.readUpdateTime = i;
+      ASSERT_TRUE(shelf.append(&record));
+    }
+    ASSERT_TRUE(shelf.finish());
+    ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Ok);
+
+    HalFile file;
+    uint32_t count = 0;
+    ASSERT_TRUE(WeReadStore::openShelf(file, count));
+    ASSERT_EQ(count, shelfSize);
+    for (uint32_t i = 0; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+      char expected[64];
+      snprintf(expected, sizeof(expected), "book-%02u", static_cast<unsigned>(shelfSize - 1 - i));
+      EXPECT_STREQ(record.bookId, expected);
+    }
+  }
+}
+
+TEST_F(WeReadStoreTest, FullySortsShelfAtThresholdWithStableTiesAndUnreadLast) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   WeReadStore::IndexWriter shelf;
   ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
-  for (unsigned i = 0; i < 600; ++i) {
+  for (uint32_t i = 0; i < WeReadStore::kLargeShelfThreshold; ++i) {
     WeReadStore::ShelfRecord record;
     snprintf(record.bookId, sizeof(record.bookId), "book-%03u", i);
     record.readUpdateTime = i == 1 ? 100 : i == 2 || i == 3 ? 300 : i == 4 ? 200 : 0;
@@ -303,7 +331,7 @@ TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLas
   HalFile file;
   uint32_t count = 0;
   ASSERT_TRUE(WeReadStore::openShelf(file, count));
-  ASSERT_EQ(count, 600U);
+  ASSERT_EQ(count, WeReadStore::kLargeShelfThreshold);
   uint32_t previousTime = UINT32_MAX;
   unsigned previousSourceIndex = 0;
   for (uint32_t i = 0; i < count; ++i) {
@@ -326,7 +354,69 @@ TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLas
   EXPECT_STREQ(record.bookId, "book-000");
 }
 
-TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically) {
+TEST_F(WeReadStoreTest, SortsOnlyRecentHeadForLargeShelvesAndPreservesTailOrder) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  for (const uint32_t shelfSize : {501U, 1000U, 2000U}) {
+    WeReadStore::IndexWriter shelf;
+    ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+    for (uint32_t i = 0; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      snprintf(record.bookId, sizeof(record.bookId), "book-%04u", static_cast<unsigned>(i));
+      record.readUpdateTime = i + 1;
+      ASSERT_TRUE(shelf.append(&record));
+    }
+    ASSERT_TRUE(shelf.finish());
+    ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Degraded);
+
+    HalFile file;
+    uint32_t count = 0;
+    ASSERT_TRUE(WeReadStore::openShelf(file, count));
+    ASSERT_EQ(count, shelfSize);
+    for (uint32_t i = 0; i < WeReadStore::kRecentShelfWindow; ++i) {
+      WeReadStore::ShelfRecord record;
+      ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+      char expected[64];
+      snprintf(expected, sizeof(expected), "book-%04u", static_cast<unsigned>(shelfSize - 1 - i));
+      EXPECT_STREQ(record.bookId, expected);
+    }
+    for (uint32_t i = WeReadStore::kRecentShelfWindow; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+      char expected[64];
+      snprintf(expected, sizeof(expected), "book-%04u", static_cast<unsigned>(i - WeReadStore::kRecentShelfWindow));
+      EXPECT_STREQ(record.bookId, expected);
+    }
+  }
+}
+
+TEST_F(WeReadStoreTest, FallsBackToRecentHeadWhenFullSortAllocationFails) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  for (uint32_t i = 0; i < 100; ++i) {
+    WeReadStore::ShelfRecord record;
+    snprintf(record.bookId, sizeof(record.bookId), "book-%03u", static_cast<unsigned>(i));
+    record.readUpdateTime = i;
+    ASSERT_TRUE(shelf.append(&record));
+  }
+  ASSERT_TRUE(shelf.finish());
+
+  WeReadStore::failNextFullShelfSortAllocationForTest();
+  ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Degraded);
+  HalFile file;
+  uint32_t count = 0;
+  ASSERT_TRUE(WeReadStore::openShelf(file, count));
+  ASSERT_EQ(count, 100U);
+  for (uint32_t i = 0; i < WeReadStore::kRecentShelfWindow; ++i) {
+    WeReadStore::ShelfRecord record;
+    ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+    char expected[64];
+    snprintf(expected, sizeof(expected), "book-%03u", static_cast<unsigned>(99 - i));
+    EXPECT_STREQ(record.bookId, expected);
+  }
+}
+
+TEST_F(WeReadStoreTest, PromotesSmallShelfBookAtomically) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   WeReadStore::IndexWriter shelf;
   ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
@@ -338,8 +428,6 @@ TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically
   }
   ASSERT_TRUE(shelf.finish());
 
-  EXPECT_EQ(WeReadStore::cachedShelfReadUpdateTime("book-1"), 200U);
-  EXPECT_EQ(WeReadStore::cachedShelfReadUpdateTime("missing"), 0U);
   ASSERT_EQ(WeReadStore::promoteShelfBook("book-2", 300), WeReadStore::ShelfSortResult::Ok);
 
   HalFile file;
@@ -356,6 +444,27 @@ TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically
 
   EXPECT_EQ(WeReadStore::promoteShelfBook("missing", 400), WeReadStore::ShelfSortResult::Ok);
   EXPECT_EQ(WeReadStore::promoteShelfBook("book-1", 0), WeReadStore::ShelfSortResult::Ok);
+}
+
+TEST_F(WeReadStoreTest, DefersPromotionForLargeShelfWithoutRewritingIt) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  for (uint32_t i = 0; i <= WeReadStore::kLargeShelfThreshold; ++i) {
+    WeReadStore::ShelfRecord record;
+    snprintf(record.bookId, sizeof(record.bookId), "book-%03u", static_cast<unsigned>(i));
+    ASSERT_TRUE(shelf.append(&record));
+  }
+  ASSERT_TRUE(shelf.finish());
+
+  EXPECT_EQ(WeReadStore::promoteShelfBook("book-500", 123), WeReadStore::ShelfSortResult::Degraded);
+  HalFile file;
+  uint32_t count = 0;
+  ASSERT_TRUE(WeReadStore::openShelf(file, count));
+  WeReadStore::ShelfRecord first;
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 0, first));
+  EXPECT_STREQ(first.bookId, "book-000");
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
 }
 
 TEST_F(WeReadStoreTest, RejectsCorruptShelfSortWithoutLeavingPartialReplacement) {

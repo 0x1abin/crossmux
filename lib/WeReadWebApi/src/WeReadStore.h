@@ -27,6 +27,8 @@ constexpr uint16_t kBookDetailVersion = 1;
 constexpr uint16_t kBookDetailHeaderSize = 1024;
 constexpr uint32_t kMaxBookIntroBytes = 64 * 1024;
 constexpr uint16_t kBookDetailIntroTruncated = 1U << 0;
+constexpr uint32_t kLargeShelfThreshold = 500;
+constexpr uint32_t kRecentShelfWindow = 20;
 constexpr int kCoverThumbWidth = 112;
 constexpr int kCoverThumbHeight = 164;
 
@@ -70,7 +72,7 @@ static_assert(sizeof(ShelfRecord) == 356);
 
 enum class ShelfSortResult : uint8_t {
   Ok,
-  OutOfMemory,
+  Degraded,
   StorageError,
 };
 
@@ -168,8 +170,10 @@ bool clearCache();
 
 bool openShelf(HalFile& file, uint32_t& count);
 ShelfSortResult sortShelfByRecent();
-uint32_t cachedShelfReadUpdateTime(const char* bookId);
 ShelfSortResult promoteShelfBook(const char* bookId, uint32_t timestamp);
+#ifdef CROSSPOINT_EMULATED
+void failNextFullShelfSortAllocationForTest();
+#endif
 bool openToc(const std::string& path, HalFile& file, uint32_t& count);
 bool openImageIndex(const std::string& path, HalFile& file, uint32_t& count);
 bool openImageWorkIndex(const std::string& path, HalFile& file, uint32_t& count);

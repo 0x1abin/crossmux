@@ -76,7 +76,7 @@ struct ProgressSyncResult {
 class Operation {
  public:
   enum class Kind : uint8_t { Sync, Detail, Download, ProgressSync, Browse };
-  enum class ShelfCoverScope : uint8_t { None, FirstTen, All };
+  enum class ShelfCoverScope : uint8_t { None, All };
   enum class Event : uint8_t {
     None,
     QrReady,
@@ -91,7 +91,7 @@ class Operation {
   enum class ProgressStage : uint8_t { Chapters, Preparing, Images, Packaging };
 
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {},
-             ShelfCoverScope shelfCoverScope = ShelfCoverScope::FirstTen);
+             ShelfCoverScope shelfCoverScope = ShelfCoverScope::None);
   bool beginProgressSync(const char* bookId, ProgressSyncInput input, ProgressSyncMode mode);
   bool beginBrowseCache(const WeReadStore::ShelfRecord& book);
   Event step(WeReadStore::WorkCallback callback = nullptr, void* callbackContext = nullptr);
@@ -159,6 +159,7 @@ class Operation {
     LoginPollWait,
     LoginPoll,
     SyncShelf,
+    OrganizeShelf,
     ShelfCovers,
     Renew,
     PrepareDetail,
@@ -203,7 +204,6 @@ class Operation {
   static constexpr size_t kUrlSize = 512;
   static constexpr uint8_t kMaxRequestAttempts = 3;
   static constexpr uint8_t kMaxImageRedirects = 5;
-  static constexpr uint32_t kInitialShelfCoverCount = 10;
   static constexpr Event chapterResponseRetryEvent(const uint8_t attempts) {
     return attempts >= kMaxRequestAttempts ? Event::Failed : Event::None;
   }
@@ -239,11 +239,10 @@ class Operation {
     return cursor < total ? total - cursor : 0;
   }
   static constexpr uint32_t shelfCoverWorkCount(const ShelfCoverScope scope, const uint32_t total) {
+    if (total > WeReadStore::kLargeShelfThreshold) return 0;
     switch (scope) {
       case ShelfCoverScope::None:
         return 0;
-      case ShelfCoverScope::FirstTen:
-        return total < kInitialShelfCoverCount ? total : kInitialShelfCoverCount;
       case ShelfCoverScope::All:
         return total;
     }
@@ -327,6 +326,7 @@ class Operation {
   Error pollLogin();
   Error renewSession();
   Error syncShelfOnce();
+  Error organizeShelfOnce();
   Event stepShelfCovers();
   bool loadShelfCoverBook(ShelfCoverAction& action);
   void beginShelfCoverPass(ProgressStage stage);
@@ -360,7 +360,7 @@ class Operation {
   Phase phase_ = Phase::Idle;
   Phase resumePhase_ = Phase::Idle;
   Kind kind_ = Kind::Sync;
-  ShelfCoverScope shelfCoverScope_ = ShelfCoverScope::FirstTen;
+  ShelfCoverScope shelfCoverScope_ = ShelfCoverScope::None;
   Error error_ = Error::Ok;
   ProgressStage progressStage_ = ProgressStage::Chapters;
   DownloadOptions options_;

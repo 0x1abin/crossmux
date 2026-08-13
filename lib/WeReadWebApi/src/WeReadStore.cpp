@@ -30,6 +30,79 @@ struct ShelfSortKey {
 };
 static_assert(sizeof(ShelfSortKey) == 8);
 
+#ifdef CROSSPOINT_EMULATED
+bool failNextFullShelfSortAllocation = false;
+#endif
+
+bool shelfSortKeyBefore(const ShelfSortKey& left, const ShelfSortKey& right) {
+  if (left.readUpdateTime != right.readUpdateTime) return left.readUpdateTime > right.readUpdateTime;
+  return left.sourceIndex < right.sourceIndex;
+}
+
+ShelfSortResult rewriteShelf(HalFile& source, const uint32_t count, const ShelfSortKey* keys, const uint32_t keyCount,
+                             const bool appendRemaining, IndexWriter& writer) {
+  if (!writer.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return ShelfSortResult::StorageError;
+
+  ShelfRecord record;
+  for (uint32_t i = 0; i < keyCount; ++i) {
+    if (!readShelfRecord(source, keys[i].sourceIndex, record) || !writer.append(&record)) {
+      writer.abort();
+      return ShelfSortResult::StorageError;
+    }
+  }
+  if (!appendRemaining) return ShelfSortResult::Ok;
+
+  for (uint32_t sourceIndex = 0; sourceIndex < count; ++sourceIndex) {
+    bool inRecentHead = false;
+    for (uint32_t i = 0; i < keyCount; ++i) {
+      if (keys[i].sourceIndex == sourceIndex) {
+        inRecentHead = true;
+        break;
+      }
+    }
+    if (inRecentHead) continue;
+    if (!readShelfRecord(source, sourceIndex, record) || !writer.append(&record)) {
+      writer.abort();
+      return ShelfSortResult::StorageError;
+    }
+  }
+  return ShelfSortResult::Ok;
+}
+
+ShelfSortResult sortRecentShelfHead(HalFile& source, const uint32_t count, IndexWriter& writer) {
+  const uint32_t keyCount = std::min(count, kRecentShelfWindow);
+  // The degraded path needs only 160 bytes regardless of shelf size. It stays
+  // off the small task stack and is released before the function returns.
+  auto keys = makeUniqueNoThrow<ShelfSortKey[]>(keyCount);
+  if (!keys) {
+    LOG_ERR("WR", "OOM: recent shelf sort (%zu bytes); keeping server order",
+            static_cast<size_t>(keyCount) * sizeof(ShelfSortKey));
+    return ShelfSortResult::Degraded;
+  }
+
+  uint32_t used = 0;
+  ShelfRecord record;
+  for (uint32_t sourceIndex = 0; sourceIndex < count; ++sourceIndex) {
+    if (!readShelfRecord(source, sourceIndex, record)) return ShelfSortResult::StorageError;
+    const ShelfSortKey candidate{record.readUpdateTime, sourceIndex};
+    if (used == keyCount && !shelfSortKeyBefore(candidate, keys[used - 1])) continue;
+
+    uint32_t position = used < keyCount ? used++ : used - 1;
+    while (position > 0 && shelfSortKeyBefore(candidate, keys[position - 1])) {
+      if (position < keyCount) keys[position] = keys[position - 1];
+      --position;
+    }
+    keys[position] = candidate;
+  }
+
+  bool alreadyAtHead = true;
+  for (uint32_t i = 0; i < keyCount; ++i) alreadyAtHead &= keys[i].sourceIndex == i;
+  if (alreadyAtHead) return ShelfSortResult::Degraded;
+
+  const ShelfSortResult result = rewriteShelf(source, count, keys.get(), keyCount, true, writer);
+  return result == ShelfSortResult::Ok ? ShelfSortResult::Degraded : result;
+}
+
 constexpr size_t kMaxSessionFileSize = 2048;
 constexpr char kDisclaimerAcceptanceMarker[] = "WRD1\n";
 constexpr char kSessionMagic[] = "WRA1\n";
@@ -384,60 +457,55 @@ bool openShelf(HalFile& file, uint32_t& count) {
 
 ShelfSortResult sortShelfByRecent() {
   IndexWriter sorted;
+  ShelfSortResult result = ShelfSortResult::Ok;
   {
     HalFile source;
     uint32_t count = 0;
     if (!openShelf(source, count)) return ShelfSortResult::StorageError;
     if (count < 2) return ShelfSortResult::Ok;
-    if (static_cast<size_t>(count) > SIZE_MAX / sizeof(ShelfSortKey)) return ShelfSortResult::OutOfMemory;
 
-    // Sorting needs one rank per book; keep it off the small task stack. This is
-    // the only allocation and is exactly 8 * count bytes, released before return.
-    auto keys = makeUniqueNoThrow<ShelfSortKey[]>(count);
-    if (!keys) {
-      LOG_ERR("WR", "OOM: shelf sort (%zu bytes)", static_cast<size_t>(count) * sizeof(ShelfSortKey));
-      return ShelfSortResult::OutOfMemory;
-    }
+    if (count > kLargeShelfThreshold) {
+      result = sortRecentShelfHead(source, count, sorted);
+      if (result == ShelfSortResult::StorageError || sorted.count() == 0) return result;
+    } else {
+      // Full sorting is capped at 4 KB by kLargeShelfThreshold. It stays off
+      // the small task stack and is released before the function returns.
+      auto keys =
+#ifdef CROSSPOINT_EMULATED
+          failNextFullShelfSortAllocation ? decltype(makeUniqueNoThrow<ShelfSortKey[]>(count)){} :
+#endif
+                                          makeUniqueNoThrow<ShelfSortKey[]>(count);
+#ifdef CROSSPOINT_EMULATED
+      failNextFullShelfSortAllocation = false;
+#endif
+      if (!keys) {
+        LOG_ERR("WR", "OOM: shelf sort (%zu bytes); sorting recent head only",
+                static_cast<size_t>(count) * sizeof(ShelfSortKey));
+        result = sortRecentShelfHead(source, count, sorted);
+        if (result == ShelfSortResult::StorageError || sorted.count() == 0) return result;
+      } else {
+        ShelfRecord record;
+        bool alreadySorted = true;
+        for (uint32_t i = 0; i < count; ++i) {
+          if (!readShelfRecord(source, i, record)) return ShelfSortResult::StorageError;
+          keys[i] = {record.readUpdateTime, i};
+          if (i > 0 && shelfSortKeyBefore(keys[i], keys[i - 1])) alreadySorted = false;
+        }
+        if (alreadySorted) return ShelfSortResult::Ok;
 
-    ShelfRecord record;
-    bool alreadySorted = true;
-    for (uint32_t i = 0; i < count; ++i) {
-      if (!readShelfRecord(source, i, record)) return ShelfSortResult::StorageError;
-      keys[i] = {record.readUpdateTime, i};
-      if (i > 0 && keys[i - 1].readUpdateTime < keys[i].readUpdateTime) alreadySorted = false;
-    }
-    if (alreadySorted) return ShelfSortResult::Ok;
-
-    ShelfSortKey* const begin = keys.get();
-    std::sort(begin, begin + count, [](const ShelfSortKey& left, const ShelfSortKey& right) {
-      if (left.readUpdateTime != right.readUpdateTime) return left.readUpdateTime > right.readUpdateTime;
-      return left.sourceIndex < right.sourceIndex;
-    });
-
-    if (!sorted.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return ShelfSortResult::StorageError;
-    for (uint32_t i = 0; i < count; ++i) {
-      if (!readShelfRecord(source, keys[i].sourceIndex, record) || !sorted.append(&record)) {
-        sorted.abort();
-        return ShelfSortResult::StorageError;
+        ShelfSortKey* const begin = keys.get();
+        std::sort(begin, begin + count, shelfSortKeyBefore);
+        result = rewriteShelf(source, count, keys.get(), count, false, sorted);
+        if (result != ShelfSortResult::Ok) return result;
       }
     }
   }
-  return sorted.finish() ? ShelfSortResult::Ok : ShelfSortResult::StorageError;
+  return sorted.finish() ? result : ShelfSortResult::StorageError;
 }
 
-uint32_t cachedShelfReadUpdateTime(const char* bookId) {
-  if (!bookId || !bookId[0]) return 0;
-  HalFile shelf;
-  uint32_t count = 0;
-  if (!openShelf(shelf, count)) return 0;
-  uint32_t latest = 0;
-  ShelfRecord record;
-  for (uint32_t i = 0; i < count; ++i) {
-    if (!readShelfRecord(shelf, i, record)) return 0;
-    if (strcmp(record.bookId, bookId) == 0) latest = std::max(latest, record.readUpdateTime);
-  }
-  return latest;
-}
+#ifdef CROSSPOINT_EMULATED
+void failNextFullShelfSortAllocationForTest() { failNextFullShelfSortAllocation = true; }
+#endif
 
 ShelfSortResult promoteShelfBook(const char* bookId, const uint32_t timestamp) {
   if (!bookId || !bookId[0] || timestamp == 0) return ShelfSortResult::Ok;
@@ -446,6 +514,10 @@ ShelfSortResult promoteShelfBook(const char* bookId, const uint32_t timestamp) {
     HalFile source;
     uint32_t count = 0;
     if (!openShelf(source, count)) return ShelfSortResult::StorageError;
+    if (count > kLargeShelfThreshold) {
+      LOG_INF("WR", "Large shelf: skipping local promotion (%u books)", static_cast<unsigned>(count));
+      return ShelfSortResult::Degraded;
+    }
     ShelfRecord selected;
     uint32_t selectedIndex = count;
     for (uint32_t i = 0; i < count; ++i) {
