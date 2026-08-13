@@ -24,6 +24,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include "activities/settings/FontDownloadActivity.h"
 #endif
+#include "activities/util/IntervalSelectionActivity.h"
 #include "components/FontPreloadView.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -38,6 +39,8 @@ constexpr StrId SYNTHETIC_BOLD_IDS[] = {StrId::STR_STATE_OFF, StrId::STR_FAKE_BO
 static_assert(std::size(SYNTHETIC_BOLD_IDS) == CrossPointSettings::SYNTHETIC_BOLD_COUNT);
 constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                    StrId::STR_BOOK_S_STYLE};
+constexpr StrId GUIDE_LINE_STYLE_IDS[] = {StrId::STR_SOLID_LINE, StrId::STR_SHORT_DASH,  StrId::STR_MEDIUM_DASH,
+                                          StrId::STR_LONG_DASH,  StrId::STR_DOTTED_LINE, StrId::STR_WAVY_LINE};
 constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
 constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;
@@ -311,14 +314,22 @@ void TextSettingsActivity::render(RenderLock&&) {
 
     case Tab::Style: {
       constexpr int STYLE_ROWS = static_cast<int>(StyleRow::Count);
-      static constexpr StrId ROW_NAME_IDS[STYLE_ROWS] = {StrId::STR_FOCUS_READING, StrId::STR_HYPHENATION,
-                                                         StrId::STR_EMBEDDED_STYLE, StrId::STR_FAKE_BOLD,
+      static constexpr StrId ROW_NAME_IDS[STYLE_ROWS] = {StrId::STR_FOCUS_READING,
+                                                         StrId::STR_READING_GUIDE_LINE,
+                                                         StrId::STR_READING_GUIDE_LINE_STYLE,
+                                                         StrId::STR_READING_GUIDE_LINE_OFFSET,
+                                                         StrId::STR_HYPHENATION,
+                                                         StrId::STR_EMBEDDED_STYLE,
+                                                         StrId::STR_FAKE_BOLD,
                                                          StrId::STR_TEXT_AA};
       GUI.drawList(
-          renderer, listRect, STYLE_ROWS, selectedItem,
-          [](int index) { return std::string(I18N.get(ROW_NAME_IDS[index])); }, nullptr, nullptr,
-          [this](int index) { return styleValueText(index); }, true);
-      confirmLabel = onTabBar ? tr(STR_FONT) : tr(STR_TOGGLE);
+          renderer, listRect, styleRowCount(), selectedItem,
+          [this](int index) { return std::string(I18N.get(ROW_NAME_IDS[static_cast<int>(styleRowAt(index))])); },
+          nullptr, nullptr, [this](int index) { return styleValueText(styleRowAt(index)); }, true);
+      const StyleRow selectedStyleRow = styleRowAt(selectedItem);
+      const bool opensPicker =
+          selectedStyleRow == StyleRow::ReadingGuideLineStyle || selectedStyleRow == StyleRow::ReadingGuideLineOffset;
+      confirmLabel = onTabBar ? tr(STR_FONT) : (opensPicker ? tr(STR_SELECT) : tr(STR_TOGGLE));
       break;
     }
 
@@ -400,7 +411,7 @@ void TextSettingsActivity::activateRow(int row) {
       confirmLayoutRow(row);
       break;
     case Tab::Style:
-      confirmStyleRow(row);
+      confirmStyleRow(styleRowAt(row));
       break;
     case Tab::Count:
       break;
@@ -622,11 +633,39 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
   return "";
 }
 
-void TextSettingsActivity::confirmStyleRow(int row) {
-  switch (static_cast<StyleRow>(row)) {
+void TextSettingsActivity::confirmStyleRow(const StyleRow row) {
+  switch (row) {
     case StyleRow::FocusReading:
       SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
       break;
+    case StyleRow::ReadingGuideLine:
+      SETTINGS.readingGuideLineEnabled = !SETTINGS.readingGuideLineEnabled;
+      break;
+    case StyleRow::ReadingGuideLineStyle:
+      optionPopup_.show(StrId::STR_READING_GUIDE_LINE_STYLE, GUIDE_LINE_STYLE_IDS,
+                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle, [](int idx) {
+                          SETTINGS.readingGuideLineStyle = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      return;
+    case StyleRow::ReadingGuideLineOffset:
+      // ActivityManager owns this picker across frames; the shared helper keeps its one allocation fallible.
+      startActivityForResultWith<IntervalSelectionActivity>(
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              const int value = std::get<IntervalResult>(result.data).value;
+              SETTINGS.readingGuideLineOffset = static_cast<int8_t>(
+                  std::clamp(value, static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN),
+                             static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX)));
+              SETTINGS.saveToFile();
+            }
+            requestUpdate();
+          },
+          "ReadingGuideLineOffset", StrId::STR_READING_GUIDE_LINE_OFFSET, SETTINGS.readingGuideLineOffset,
+          CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN, CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX, 1, 5,
+          StrId::STR_NONE_OPT, false, true);
+      return;
     case StyleRow::Hyphenation:
       SETTINGS.hyphenationEnabled = !SETTINGS.hyphenationEnabled;
       break;
@@ -652,10 +691,19 @@ void TextSettingsActivity::confirmStyleRow(int row) {
   requestUpdate();
 }
 
-std::string TextSettingsActivity::styleValueText(int row) const {
-  switch (static_cast<StyleRow>(row)) {
+std::string TextSettingsActivity::styleValueText(const StyleRow row) const {
+  switch (row) {
     case StyleRow::FocusReading:
       return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ReadingGuideLine:
+      return SETTINGS.readingGuideLineEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ReadingGuideLineStyle: {
+      const uint8_t style = SETTINGS.readingGuideLineStyle;
+      return style < std::size(GUIDE_LINE_STYLE_IDS) ? I18N.get(GUIDE_LINE_STYLE_IDS[style])
+                                                     : I18N.get(StrId::STR_SHORT_DASH);
+    }
+    case StyleRow::ReadingGuideLineOffset:
+      return std::to_string(SETTINGS.readingGuideLineOffset);
     case StyleRow::Hyphenation:
       return SETTINGS.hyphenationEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case StyleRow::EmbeddedStyle:
@@ -673,12 +721,24 @@ std::string TextSettingsActivity::styleValueText(int row) const {
   return "";
 }
 
-// Focus Reading and Synthetic Bold are visible in the preview; the other Style
-// rows have no distinct preview.
+// Focus Reading, Synthetic Bold, and guide-line controls are reflected in the preview.
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
   if (selectedIndex() == 0 || tab_ != Tab::Style) return false;
-  const StyleRow row = static_cast<StyleRow>(selectedIndex() - 1);
+  const StyleRow row = styleRowAt(selectedIndex() - 1);
   return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
+}
+
+TextSettingsActivity::StyleRow TextSettingsActivity::styleRowAt(int visibleIndex) const {
+  if (visibleIndex < 0 || visibleIndex >= styleRowCount()) return StyleRow::Count;
+  if (!SETTINGS.readingGuideLineEnabled && visibleIndex >= static_cast<int>(StyleRow::ReadingGuideLineStyle)) {
+    visibleIndex += HIDDEN_GUIDE_ROW_COUNT;
+  }
+  return static_cast<StyleRow>(visibleIndex);
+}
+
+int TextSettingsActivity::styleRowCount() const {
+  if (SETTINGS.readingGuideLineEnabled) return static_cast<int>(StyleRow::Count);
+  return static_cast<int>(StyleRow::Count) - HIDDEN_GUIDE_ROW_COUNT;
 }
 
 void TextSettingsActivity::switchTab(int direction) {
@@ -704,7 +764,7 @@ int TextSettingsActivity::currentListSize() const {
     case Tab::Layout:
       return static_cast<int>(LayoutRow::Count);
     case Tab::Style:
-      return static_cast<int>(StyleRow::Count);
+      return styleRowCount();
 
     case Tab::Count:
       return 0;

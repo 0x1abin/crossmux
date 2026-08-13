@@ -1,0 +1,4 @@
+add_executable(reading_guide_line_test ReadingGuideLineTest.cpp)
+target_include_directories(reading_guide_line_test PRIVATE ${REPO_ROOT}/src)
+target_link_libraries(reading_guide_line_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(reading_guide_line_test)

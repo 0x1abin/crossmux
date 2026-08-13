@@ -33,7 +33,7 @@ struct PercentResult {
 };
 
 struct IntervalResult {
-  uint32_t value = 0;
+  int32_t value = 0;
 };
 
 struct ChapterRangeResult {

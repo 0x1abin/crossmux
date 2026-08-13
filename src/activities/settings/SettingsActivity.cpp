@@ -624,6 +624,9 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) const
     }
     return std::to_string(SETTINGS.*(setting.valuePtr));
   }
+  if (setting.type == SettingType::VALUE && setting.signedValuePtr != nullptr) {
+    return std::to_string(SETTINGS.*(setting.signedValuePtr));
+  }
   return {};
 }
 
@@ -723,11 +726,18 @@ void SettingsActivity::toggleCurrentSetting() {
     }
     setting.valueSetter((cur + 1) % totalValues);
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-    const int8_t currentValue = SETTINGS.*(setting.valuePtr);
+    const int currentValue = SETTINGS.*(setting.valuePtr);
     if (currentValue + setting.valueRange.step > setting.valueRange.max) {
-      SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
+      SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>(setting.valueRange.min);
     } else {
-      SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
+      SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>(currentValue + setting.valueRange.step);
+    }
+  } else if (setting.type == SettingType::VALUE && setting.signedValuePtr != nullptr) {
+    const int currentValue = SETTINGS.*(setting.signedValuePtr);
+    if (currentValue + setting.valueRange.step > setting.valueRange.max) {
+      SETTINGS.*(setting.signedValuePtr) = static_cast<int8_t>(setting.valueRange.min);
+    } else {
+      SETTINGS.*(setting.signedValuePtr) = static_cast<int8_t>(currentValue + setting.valueRange.step);
     }
   } else if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };

@@ -21,7 +21,6 @@
 class TextSettingsActivity final : public Activity {
  public:
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
-
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
                        Tab initialTab = Tab::Family);
 
@@ -36,7 +35,19 @@ class TextSettingsActivity final : public Activity {
   // Row indices per tab. enum class (not plain enum) so a LayoutRow can't be
   // silently confused with a StyleRow of equal value.
   enum class LayoutRow { LineSpacing, ParaSpacing, Alignment, ScreenMargin, Count };
-  enum class StyleRow { FocusReading, Hyphenation, EmbeddedStyle, FakeBold, AntiAliasing, Count };
+  enum class StyleRow {
+    FocusReading,
+    ReadingGuideLine,
+    ReadingGuideLineStyle,
+    ReadingGuideLineOffset,
+    Hyphenation,
+    EmbeddedStyle,
+    FakeBold,
+    AntiAliasing,
+    Count
+  };
+  static constexpr int HIDDEN_GUIDE_ROW_COUNT =
+      static_cast<int>(StyleRow::Hyphenation) - static_cast<int>(StyleRow::ReadingGuideLineStyle);
 
   enum class FontLoadState : uint8_t { Idle, Preloading, Ready };
   enum class ExitDestination : uint8_t { Previous, Home };
@@ -54,7 +65,7 @@ class TextSettingsActivity final : public Activity {
   // installed point sizes. Call after any family change.
   void rebuildSizeList();
   void confirmLayoutRow(int row);
-  void confirmStyleRow(int row);
+  void confirmStyleRow(StyleRow row);
   // Applies the row at the given list index for the active tab (Confirm and tap share this).
   void activateRow(int row);
 
@@ -71,7 +82,9 @@ class TextSettingsActivity final : public Activity {
   };
   PaneGeometry paneGeometry() const;
   std::string layoutValueText(int row) const;
-  std::string styleValueText(int row) const;
+  std::string styleValueText(StyleRow row) const;
+  StyleRow styleRowAt(int visibleIndex) const;
+  int styleRowCount() const;
   // True when the focused list row is a setting the preview cannot reflect.
   bool focusedRowHasNoPreview() const;
   void updateTabs();
@@ -105,7 +118,6 @@ class TextSettingsActivity final : public Activity {
       {};  // per-Tab nav position (0 = tab bar, 1..N = row); set in onEnter
   int currentFamilyIndex_ = 0;
   int currentSizeIndex_ = 0;
-
   ThemeMetrics metrics_ = {};
   int afterHeader = 0;
   int bottomReserved = 0;
