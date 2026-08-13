@@ -40,11 +40,13 @@ class GfxRenderer {
 
  private:
   static constexpr size_t BW_BUFFER_CHUNK_SIZE = 8000;  // 8KB chunks to allow for non-contiguous memory
+  static constexpr uint8_t MAX_SYNTHETIC_BOLD_PIXELS = 2;
 
   HalDisplay& display;
   RenderMode renderMode;
   Orientation orientation;
   bool fadingFix;
+  mutable uint8_t syntheticBoldPixels = 0;
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
@@ -296,6 +298,23 @@ class GfxRenderer {
   void writeFramebufferRegion(int x, int y, int w, int h, const uint8_t* src);
 
   // Text
+  // Page-local guard for synthetic bold. Restores the previous renderer state
+  // so EPUB content cannot leak the effect into status bars or other UI.
+  class SyntheticBoldScope {
+   public:
+    SyntheticBoldScope(const GfxRenderer& renderer, const uint8_t pixels)
+        : renderer_(renderer), previous_(renderer.syntheticBoldPixels) {
+      renderer_.syntheticBoldPixels = pixels <= MAX_SYNTHETIC_BOLD_PIXELS ? pixels : MAX_SYNTHETIC_BOLD_PIXELS;
+    }
+    ~SyntheticBoldScope() { renderer_.syntheticBoldPixels = previous_; }
+    SyntheticBoldScope(const SyntheticBoldScope&) = delete;
+    SyntheticBoldScope& operator=(const SyntheticBoldScope&) = delete;
+
+   private:
+    const GfxRenderer& renderer_;
+    uint8_t previous_;
+  };
+
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                    BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,

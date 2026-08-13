@@ -31,6 +31,9 @@ class EpdFontFamily {
   /// Returns true if the resolved style's font can render `cp` directly
   /// (interval coverage only — see EpdFont::hasCodepoint).
   bool hasCodepoint(uint32_t cp, Style style = REGULAR) const;
+  // True when a bold request resolves to font data distinct from the same style
+  // with BOLD removed. This treats missing faces and Regular aliases as non-native.
+  bool hasNativeBold(Style style) const;
   int8_t getKerning(uint32_t leftCp, uint32_t rightCp, Style style = REGULAR) const;
   uint32_t applyLigatures(uint32_t cp, const char*& text, Style style = REGULAR) const;
   static constexpr bool hasTextDecoration(const Style style) {

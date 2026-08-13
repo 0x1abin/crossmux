@@ -129,6 +129,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static constexpr uint8_t LEGACY_FONT_SIZE_MAX = 3;
   static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 14;
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
+  enum SYNTHETIC_BOLD {
+    SYNTHETIC_BOLD_OFF = 0,
+    SYNTHETIC_BOLD_STANDARD = 1,
+    SYNTHETIC_BOLD_HEAVY = 2,
+    SYNTHETIC_BOLD_COUNT
+  };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
     LEFT_ALIGN = 1,
@@ -242,6 +248,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
   uint8_t textAntiAliasing = 1;
+  uint8_t fakeBold = SYNTHETIC_BOLD_OFF;
   // Short power button click behaviour
   uint8_t shortPwrBtn = IGNORE;
   // EPUB reading orientation settings
