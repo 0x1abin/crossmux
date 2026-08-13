@@ -222,8 +222,17 @@ void EpubReaderActivity::onEnter() {
   }
   if (wereadBookId_[0]) {
     const uint32_t timestamp = TimeUtils::getCurrentValidTimestamp();
-    if (timestamp != 0 && WeReadStore::promoteShelfBook(wereadBookId_, timestamp) != WeReadStore::ShelfSortResult::Ok) {
-      LOG_ERR("WR", "Failed to promote recently opened shelf book");
+    if (timestamp != 0) {
+      switch (WeReadStore::promoteShelfBook(wereadBookId_, timestamp)) {
+        case WeReadStore::ShelfSortResult::Ok:
+          break;
+        case WeReadStore::ShelfSortResult::Degraded:
+          LOG_DBG("WR", "Large shelf: recent book promotion deferred until sync");
+          break;
+        case WeReadStore::ShelfSortResult::StorageError:
+          LOG_ERR("WR", "Failed to promote recently opened shelf book");
+          break;
+      }
     }
   }
 #endif

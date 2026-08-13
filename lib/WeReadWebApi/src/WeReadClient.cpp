@@ -560,8 +560,6 @@ void shelfObjectEnd(void* raw) {
   auto& ctx = *static_cast<ShelfJsonContext*>(raw);
   if (ctx.inBook && ctx.depth == ctx.bookDepth) {
     if (ctx.current.bookId[0]) {
-      ctx.current.readUpdateTime =
-          std::max(ctx.current.readUpdateTime, WeReadStore::cachedShelfReadUpdateTime(ctx.current.bookId));
       if (!ctx.writer.append(&ctx.current)) ctx.writeFailed = true;
     }
     ctx.inBook = false;
@@ -2104,6 +2102,7 @@ bool Operation::active() const {
     case Phase::LoginPollWait:
     case Phase::LoginPoll:
     case Phase::SyncShelf:
+    case Phase::OrganizeShelf:
     case Phase::ShelfCovers:
     case Phase::Renew:
     case Phase::PrepareDetail:
@@ -2159,7 +2158,7 @@ void Operation::reset() {
   phase_ = Phase::Idle;
   resumePhase_ = Phase::Idle;
   kind_ = Kind::Sync;
-  shelfCoverScope_ = ShelfCoverScope::FirstTen;
+  shelfCoverScope_ = ShelfCoverScope::None;
   error_ = Error::Ok;
   progressStage_ = ProgressStage::Chapters;
   options_ = {};
@@ -2222,9 +2221,17 @@ void Operation::reset() {
   finalPartPath_.clear();
 }
 
+bool Operation::prepareCacheGeneration() {
+  if (WeReadStore::ensureCacheGeneration()) return true;
+  error_ = Error::SdCard;
+  phase_ = Phase::Failed;
+  return false;
+}
+
 bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options,
                       const ShelfCoverScope shelfCoverScope) {
   reset();
+  if (!prepareCacheGeneration()) return false;
   if (kind == Kind::ProgressSync || kind == Kind::Browse) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;
@@ -2279,6 +2286,7 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
 
 bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
   reset();
+  if (!prepareCacheGeneration()) return false;
   if (!isSafeProtocolToken(book.bookId)) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;
@@ -2300,6 +2308,7 @@ bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
 
 bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input, const ProgressSyncMode mode) {
   reset();
+  if (!prepareCacheGeneration()) return false;
   if (!isSafeProtocolToken(bookId) || !std::isfinite(input.localFraction)) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;
@@ -2561,6 +2570,7 @@ Error Operation::renewSession() {
 }
 
 Error Operation::syncShelfOnce() {
+  const uint32_t startedAt = millis();
   ShelfJsonContext context;
   StreamingJsonParser parser(shelfCallbacks(&context));
   context.parser = &parser;
@@ -2581,17 +2591,30 @@ Error Operation::syncShelfOnce() {
     context.writer.abort();
     return Error::Protocol;
   }
+  const uint32_t recordCount = context.writer.count();
   if (!context.writer.finish()) return Error::SdCard;
+  progressCompleted_ = recordCount;
+  progressTotal_ = 0;
+  LOG_INF("WR", "Shelf download complete: books=%u ms=%u", static_cast<unsigned>(recordCount),
+          static_cast<unsigned>(millis() - startedAt));
+  logMemory("shelf parsed");
+  return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+}
+
+Error Operation::organizeShelfOnce() {
+  const uint32_t startedAt = millis();
   switch (WeReadStore::sortShelfByRecent()) {
     case WeReadStore::ShelfSortResult::Ok:
       break;
-    case WeReadStore::ShelfSortResult::OutOfMemory:
-      return Error::OutOfMemory;
+    case WeReadStore::ShelfSortResult::Degraded:
+      LOG_INF("WR", "Shelf organized with large-shelf fallback");
+      break;
     case WeReadStore::ShelfSortResult::StorageError:
       return Error::SdCard;
   }
-  logMemory("shelf parsed");
-  return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
+  LOG_INF("WR", "Shelf organize complete: ms=%u", static_cast<unsigned>(millis() - startedAt));
+  logMemory("shelf organized");
+  return Error::Ok;
 }
 
 bool Operation::loadShelfCoverBook(ShelfCoverAction& action) {
@@ -3759,6 +3782,13 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       }
       if (error != Error::Ok) return handleRequestError(error, Phase::SyncShelf);
       requestSucceeded();
+      phase_ = Phase::OrganizeShelf;
+      return Event::None;
+    }
+
+    case Phase::OrganizeShelf: {
+      const Error error = organizeShelfOnce();
+      if (error != Error::Ok) return fail(error);
       if (indexFile_.isOpen()) indexFile_.close();
       if (!WeReadStore::openShelf(indexFile_, workCount_)) return fail(Error::SdCard);
       workCount_ = shelfCoverWorkCount(shelfCoverScope_, workCount_);

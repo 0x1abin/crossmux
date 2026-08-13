@@ -87,6 +87,13 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 2. Version mismatch → Cache auto-invalidated and regenerated
 3. Document format changes in [../file-formats.md](../file-formats.md)
 
+WeRead also has a global cache generation in
+`/.crosspoint/weread/cache.version`. Increment `kCacheGeneration` when derived
+WeRead cache meaning or paths become incompatible. A binary layout change must
+also increment that file's own magic or version. Do not increment the global
+generation for UI-only or network-only changes, and do not tie it to
+`CROSSPOINT_VERSION`.
+
 **Example** (incrementing section format version):
 ```cpp
 // lib/Epub/Epub/Section.cpp

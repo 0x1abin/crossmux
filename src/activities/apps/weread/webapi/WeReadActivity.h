@@ -92,7 +92,7 @@ class WeReadActivity final : public Activity {
   std::atomic<MainTab> mainTab_{MainTab::Shelf};
   std::atomic<MainFocus> mainFocus_{MainFocus::Content};
   Job retryJob_ = Job::Sync;
-  WeReadClient::Operation::ShelfCoverScope syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::FirstTen;
+  WeReadClient::Operation::ShelfCoverScope syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::None;
   WeReadStore::BookDetailHeader detail_;
   uint32_t introPageOffsets_[kMaxIntroPages + 1] = {};
   WeReadStore::ImagePolicy detailImagePolicy_ = WeReadStore::ImagePolicy::Embed;
@@ -156,7 +156,7 @@ class WeReadActivity final : public Activity {
   void advanceJob();
   void openBook(const char* path);
   void openShelf();
-  void syncShelf(WeReadClient::Operation::ShelfCoverScope scope = WeReadClient::Operation::ShelfCoverScope::FirstTen);
+  void syncShelf(WeReadClient::Operation::ShelfCoverScope scope = WeReadClient::Operation::ShelfCoverScope::None);
   void enterApp();
   void activateDisclaimerSelection();
   void promptClearCache();

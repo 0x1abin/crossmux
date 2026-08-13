@@ -455,6 +455,13 @@ location is not migrated or read.
   Its complete contents must be the five bytes `WRD1\n`; a missing, truncated,
   or unknown marker shows the disclaimer again. Logging out preserves this
   file.
+- `cache.version` is an atomic fixed 8-byte `WRV1` record: `uint32 magic`
+  (`0x31565257`), `uint16 generation` (currently `1`), and two zero reserved
+  bytes. A missing, damaged, newer, or older generation silently removes all
+  derived WeRead caches before writing the current generation. This preserves
+  `session.bin`, `disclaimer.accepted`, completed `/WeRead/*.epub` files, and
+  their normal reader progress caches. `CROSSPOINT_VERSION` is deliberately
+  not used for cache invalidation.
 - `shelf.bin`, `<bookId>/toc.bin`, per-chapter
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
@@ -544,13 +551,13 @@ location is not migrated or read.
   are transient. The pre-v2 `<bookId>/cover.bmp` is not read or migrated. A failed
   fetch or conversion does not replace an existing v2 BMP.
 - The WeRead menu's cache-clear action preserves `session.bin`,
-  `disclaimer.accepted`, `shelf.bin`, `/WeRead/*.epub`, and the reader caches for
-  those EPUB files. It recursively removes every other entry below
-  `/.crosspoint/weread/`, including per-book data, browse caches, and partial files.
-- A login shelf sync or explicit shelf refresh prepares missing covers in three
-  streaming passes: detail metadata, original images, then v2 BMP conversion.
-  Existing v2 BMPs are skipped; cancellation and per-book failures preserve every
-  atomically completed cache file. No shelf or detail record layout changes.
+  `disclaimer.accepted`, `cache.version`, `/WeRead/*.epub`, and the reader caches
+  for those EPUB files. It recursively removes every other entry below
+  `/.crosspoint/weread/`, including `shelf.bin`, per-book data, browse caches,
+  and partial files.
+- Shelf sync does not prefetch covers. Missing covers are fetched and converted
+  lazily for the visible shelf page. Existing v2 BMPs are skipped; cancellation
+  and per-book failures preserve every atomically completed cache file.
 Readers reject a wrong magic, version, record size, or total file length.
 Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.

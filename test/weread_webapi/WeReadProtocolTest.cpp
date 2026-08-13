@@ -503,14 +503,10 @@ TEST(WeReadClientState, BoundsShelfCoverWorkToTheSelectedScope) {
   EXPECT_EQ(count(Scope::None, 9), 0U);
   EXPECT_EQ(count(Scope::None, 10), 0U);
   EXPECT_EQ(count(Scope::None, 11), 0U);
-  EXPECT_EQ(count(Scope::FirstTen, 0), 0U);
-  EXPECT_EQ(count(Scope::FirstTen, 9), 9U);
-  EXPECT_EQ(count(Scope::FirstTen, 10), 10U);
-  EXPECT_EQ(count(Scope::FirstTen, 11), 10U);
   EXPECT_EQ(count(Scope::All, 0), 0U);
   EXPECT_EQ(count(Scope::All, 9), 9U);
-  EXPECT_EQ(count(Scope::All, 10), 10U);
-  EXPECT_EQ(count(Scope::All, 11), 11U);
+  EXPECT_EQ(count(Scope::All, WeReadStore::kLargeShelfThreshold), WeReadStore::kLargeShelfThreshold);
+  EXPECT_EQ(count(Scope::All, WeReadStore::kLargeShelfThreshold + 1), 0U);
 }
 
 TEST(WeReadClientState, ThrottlesImageProgressAndBoundsRetries) {
