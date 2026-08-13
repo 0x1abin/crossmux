@@ -16,7 +16,9 @@ There are three ways to install fonts:
    preview. **Download All** prefers `NotoSansSC` (or the first valid catalog
    family when it is absent); **Update All** keeps the current selection.
 5. Preview any family or size you want. Leaving **Text Settings** caches only
-   the final SD font and size in internal Flash.
+   the final SD font and size in internal Flash. The preprocessing page appears
+   because a download marks the selected font as changed; ordinary layout or
+   style edits do not trigger it.
 
 ### Option 2: Upload via web browser
 
@@ -135,7 +137,9 @@ not kept in this repository.
 
 The incomplete-font prompt opens the same font manager described above. A
 successful single or batch download selects a default and opens the font
-preview before the download-complete screen.
+preview before the download-complete screen. Outside the download flow, the
+preprocessing page appears only when the final font family or point size differs
+from the values present when Text Settings opened.
 
 ## Converting Custom Fonts
 

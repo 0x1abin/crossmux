@@ -251,7 +251,9 @@ flow, preserving install/update/delete and batch-download behavior. A single
 download selects that family and opens the text preview; **Download All**
 prefers the stable `NotoSansSC` family, while **Update All** preserves the
 current selection. Preview changes read from SD without rebuilding the Flash
-cache. Leaving Text Settings caches only the final family and point size.
+cache. Leaving Text Settings caches only the final family and point size. In
+ordinary Text Settings entry, layout/style-only changes and font changes later
+restored to their entry values skip the preprocessing page.
 
 When `NotoSansSC` is discovered through download, web upload, or an SD-card
 copy, it replaces the active built-in face and the built-in row is hidden. If

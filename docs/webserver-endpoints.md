@@ -229,11 +229,12 @@ Example item:
 }
 ```
 
-`value` is always an index into `options`, never the option's text. `fontSize`
-is one of the settings whose `options` are built at request time — they are the
-point sizes the selected font family actually ships, so a family installed at
-10/12/14 offers three options. (`fontFamily` and `dictionaryName` vary the same
-way, from the SD card contents.)
+For an enum, `value` is always an index into `options`, never the option's text.
+For a toggle it is `0` or `1`; for a numeric value it is an integer and may be
+negative. `fontSize` is one of the settings whose `options` are built at request
+time — they are the point sizes the selected font family actually ships, so a
+family installed at 10/12/14 offers three options. (`fontFamily` and
+`dictionaryName` vary the same way, from the SD card contents.)
 
 Types:
 
@@ -245,6 +246,19 @@ Types:
 | `string` | `value` |
 
 The font-family setting includes SD-card font families when they are installed.
+
+Reader display settings include:
+
+| Key | Type | Behavior |
+|-----|------|----------|
+| `readingGuideLineEnabled` | toggle | Enables line guides for EPUB and TXT |
+| `readingGuideLineStyle` | enum | Solid, three dash lengths, dotted, or wavy |
+| `readingGuideLineOffset` | value | Signed vertical offset from `-30` to `30` pixels |
+| `readingBackgroundEnabled` | toggle | Uses the existing custom background cache for EPUB and TXT |
+
+The API can enable or disable an existing reading background, but selecting and
+converting a PNG is a device workflow under **Settings > Reader > Reading
+Background > Custom Image**. Disabling the setting does not delete that cache.
 
 ### `POST /api/settings`
 
