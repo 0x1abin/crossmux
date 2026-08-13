@@ -28,6 +28,7 @@ enum class SettingAction {
   SdFirmwareUpdate,
   Language,
   DownloadFonts,
+  ManageDictionaries,
   TextSettings,
   About,
 };
