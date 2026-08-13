@@ -13,7 +13,10 @@ using WorkCallback = void (*)(void*);
 constexpr const char* kRoot = "/.crosspoint/weread";
 constexpr const char* kDisclaimerAcceptancePath = "/.crosspoint/weread/disclaimer.accepted";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
+constexpr const char* kCacheGenerationPath = "/.crosspoint/weread/cache.version";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
+constexpr uint32_t kCacheGenerationMagic = 0x31565257;  // WRV1
+constexpr uint16_t kCacheGeneration = 1;
 constexpr uint32_t kShelfMagic = 0x35535257;            // WRS5
 constexpr uint32_t kTocMagic = 0x32545257;              // WRT2
 constexpr uint32_t kImageMagic = 0x31495257;            // WRI1
@@ -167,6 +170,7 @@ bool saveSession(const Session& session);
 bool clearSession();
 bool clearShelf();
 bool clearCache();
+bool ensureCacheGeneration();
 
 bool openShelf(HalFile& file, uint32_t& count);
 ShelfSortResult sortShelfByRecent();
