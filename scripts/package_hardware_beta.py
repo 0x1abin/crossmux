@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package one A4/M4 beta build with the CrossMux/Sticky flash layout."""
+"""Package one S3 hardware beta build with the CrossMux/Sticky flash layout."""
 
 import argparse
 import configparser
@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 DEVICES = {
+    'sticky': 'sticky',
     'eego-a4': 'eego_a4',
     'mofei-m4': 'mofei_m4',
 }
