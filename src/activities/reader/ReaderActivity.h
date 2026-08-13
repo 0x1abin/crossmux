@@ -38,5 +38,6 @@ class ReaderActivity final : public Activity {
         allowFastInitialRefresh(allowFastInitialRefresh),
         openStartMs(millis()) {}
   void onEnter() override;
-  bool isReaderActivity() const override { return true; }
+  bool isReaderActivity() const override { return false; }
+  bool deferBluetoothStart() const override { return true; }
 };

@@ -369,6 +369,11 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
   }
   stats.pageBufferBytes += totalBytes;
   stats.pageGlyphsBytes += glyphCount * sizeof(PageGlyphEntry);
+  // MEMFIX-PORT: page-slot address landmark for the heap map; portable
+  // Landmark for the heap block map: page slots are the largest flash-font
+  // allocations and otherwise show up as anonymous ~4-20 KB used blocks.
+  LOG_DBG("FDC", "page slot buffer=%p bytes=%u glyphs=%u", static_cast<void*>(slot.buffer), (unsigned)totalBytes,
+          (unsigned)glyphCount);
 
   slot.fontData = fontData;
   slot.glyphCount = glyphCount;

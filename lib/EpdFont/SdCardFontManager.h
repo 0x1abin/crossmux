@@ -40,6 +40,10 @@ class SdCardFontManager {
   // Get name of currently loaded family (empty if none).
   const std::string& currentFamilyName() const { return loadedFamilyName_; };
 
+  // MEMFIX-PORT: font manager audit passthrough; portable
+  // Sum of loaded fonts' resident heap (see SdCardFont::reportMemory).
+  size_t reportMemory() const;
+
   // Point size that was actually loaded.
   // 0 if nothing loaded.
   uint8_t currentPointSize() const { return loadedPointSize_; };

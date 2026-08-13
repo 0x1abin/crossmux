@@ -61,6 +61,11 @@ class EpubReaderActivity final : public Activity {
   unsigned long dictionaryMessageTime = 0UL;
   bool ignoreNextConfirmRelease = false;
   bool currentPageBookmarked = false;
+  // BLE connection state the status bar last rendered with; loop() watches for
+  // a flip and redraws the bar so the "BT connecting" placeholder swaps back
+  // to the chapter/book title the moment the connection completes (and
+  // returns on disconnect) instead of waiting for the next page turn.
+  bool statusBarBleConnected = false;
   // Idle-time glyph prewarm: after a page settles, scan the LIKELY next page
   // (scan mode draws nothing) and load its missing glyphs from SD during idle,
   // so the next turn's in-render prewarm is a cache hit instead of ~100 ms of
@@ -89,6 +94,21 @@ class EpubReaderActivity final : public Activity {
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
   int footnoteDepth = 0;
+
+  // Heap floor for entering a section build. The layout code allocates freely (line-break DP
+  // arrays sized by word count, CSS rule lookups, glyph buffers) and under -fno-exceptions an
+  // OOM there abort()s the firmware instead of failing cleanly -- so a starved heap must be
+  // handled *before* the build, not after. Field data: builds succeed at ~46 KB free with BLE
+  // resident; abort() observed at ~11 KB free. CSS styling already degrades below 48 KB
+  // (MIN_FREE_HEAP_FOR_CSS), so 40 KB trades a few early BLE teardowns for not crashing.
+  static constexpr size_t BUILD_MIN_FREE_HEAP = 40 * 1024;
+
+  // Heap floor for rendering a page at all. Page deserialization (TextBlock word
+  // vectors/strings) and glyph caching allocate through throwing paths that abort()
+  // on OOM; below this floor render() sheds the BLE stack (~52 KB back, and it
+  // restores a large contiguous block) before touching the page. Field data: a
+  // session with no shed ground to <2.2 KB free and aborted on a page load.
+  static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
 
   // Viewport of the last render(), captured so loop()'s lazy partial-extension start
   // builds with IDENTICAL layout parameters to the pages already rendered (a mismatch
@@ -120,32 +140,34 @@ class EpubReaderActivity final : public Activity {
   static constexpr int BUILD_PAGES_PER_CHUNK = 8;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
 
-  // MEMFIX-PORT: background-build heap floor; portable
   // Skip background build ticks below this free-heap floor. The parse path grows
   // word vectors of heap strings — throwing allocations that abort() on OOM under
   // -fno-exceptions (field crash: bad_alloc in ParsedText::addWord during a
-  // background tick under heap pressure). The tick is deferrable work:
+  // background tick with the BLE stack resident). The tick is deferrable work:
   // page-turn transients free up between turns and the build resumes; the render
   // path still builds the page it actually needs regardless of this floor.
-  static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
-  // Fragmentation floor for the same gate: a tick passed the free-heap floor at
-  // 34.7 KB free but the largest block was ~11 KB, and a parse allocation inside the
-  // tick aborted anyway. Free heap says how much memory exists; maxAlloc says whether
-  // any single allocation can actually have it. Keep this parse-safety floor even
-  // though the advance-table scratch is now bounded to about 3 KB.
-  static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
+  // Calibrated BETWEEN the measured states: steady reading with BLE resident runs at
+  // ~29.4 KB free / ~16.4 KB largest block (ticks are safe there — a 2-page parse
+  // transient is a few KB), while the field crash happened at 34.7 KB free with an
+  // ~11 KB largest block. A first cut at 32 KB/16 KB sat just ABOVE the healthy
+  // steady state, guaranteeing a pointless BLE shed the moment any build work was
+  // pending (the maxAlloc floor fired on a 12-byte shortfall).
+  static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 26 * 1024;
+  // Fragmentation floor for the same gate: free heap says how much memory exists;
+  // maxAlloc says whether any single allocation can actually have it.
+  static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 13 * 1024;
   // Gate for a background build tick: true when the heap can take parse allocations.
-  // Updates buildHeapPaused as a side effect.
+  // When BLE is what's squeezing the heap, sheds it (build-pending deferral in the
+  // lifecycle then holds restarts off until the window is caught up) instead of
+  // stalling the build forever below the floors.
   bool buildTickHeapGate();
   // True while the background build is gated on the heap floors. Lets skipLoopDelay()
   // return the loop to normal delay/power-saving during the pause: isBuilding() stays
   // true the whole time, and without this the loop would spin at full CPU speed doing
   // no build work — indefinitely, if the build context itself keeps the heap low.
   bool buildHeapPaused = false;
-  // Heap floor for optional render-adjacent work (idle prewarm). Page
-  // deserialization (TextBlock word vectors/strings) and glyph caching allocate
-  // through throwing paths that abort() on OOM; skip deferrable work below it.
-  static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
+  // Fragmentation companion to RENDER_MIN_FREE_HEAP for optional
+  // render-adjacent work such as idle prewarm.
   static constexpr size_t RENDER_MIN_MAX_ALLOC = 24 * 1024;
   // How many pages to keep laid out ahead of the reader for a still-building section. A page
   // turn is ~1s on e-ink and a page builds in ~30ms, so the reader can't out-click the builder
@@ -229,6 +251,7 @@ class EpubReaderActivity final : public Activity {
   // speed would only burn battery; the paused gate still retries every loop pass).
   bool skipLoopDelay() override { return section && section->isBuilding() && !buildHeapPaused; }
   bool isReaderActivity() const override { return true; }
+  void requestGhostCleanup() override { pagesUntilFullRefresh = 1; }
   bool handleForcedRefresh() override {
     {
       RenderLock lock(*this);

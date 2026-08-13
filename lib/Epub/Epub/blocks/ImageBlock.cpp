@@ -330,6 +330,25 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
   FontCacheManager* fcm = renderer.getFontCacheManager();
   if (fcm && fcm->isScanning()) return true;
 
+  // Grayscale strip passes re-invoke render() once per horizontal band and once
+  // per plane. When the image's pixels are resident in the RAM slot, redrawing
+  // from RAM is cheap and preserves 4-level AA. When they are NOT resident -- the
+  // payload was too big to cache on this heap (a full-page image is ~80 KB vs
+  // ~48 KB free with BLE up), or another image on the page owns the single slot --
+  // each band would re-stream the entire .pxc from SD. For a full-page image
+  // that is ~13 full-file reads (BW pass + ~6 column bands x 2 planes in
+  // portrait), the dominant cost of an image page (measured bw_render ~7.8 s).
+  // The image already has its 1bpp rendering from the BW pass, so skip the
+  // grayscale redraw instead of re-streaming: cacheable images keep full AA,
+  // oversized ones stay BW (already dithered in the .pxc). Orientation-agnostic --
+  // gated on slot residency, not on Portrait vs Landscape.
+  const GfxRenderer::RenderMode renderMode = renderer.getRenderMode();
+  if (renderMode == GfxRenderer::GRAYSCALE_LSB || renderMode == GfxRenderer::GRAYSCALE_MSB) {
+    if (pxcSlotHash != imagePathHash(getCachePath(imagePath))) {
+      return true;  // not slot-resident; leave the successful BW-pass pixels untouched
+    }
+  }
+
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
   const int screenWidth = renderer.getScreenWidth();

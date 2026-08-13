@@ -17,6 +17,9 @@
 #endif
 
 #include "AppVisibilitySettingsActivity.h"
+#ifdef ENABLE_BLUETOOTH
+#include "BluetoothSettingsActivity.h"
+#endif
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
@@ -234,6 +237,9 @@ void SettingsActivity::rebuildSettingsLists() {
                             SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_APP_VISIBILITY, SettingAction::AppVisibility));
+#ifdef ENABLE_BLUETOOTH
+  controlsSettings.push_back(SettingInfo::Action(StrId::STR_BLUETOOTH, SettingAction::Bluetooth));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::DateTime));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
@@ -811,6 +817,11 @@ void SettingsActivity::toggleCurrentSetting() {
         } else {
           LOG_ERR("SET", "OOM: AboutActivity (%u bytes)", static_cast<unsigned>(sizeof(AboutActivity)));
         }
+        break;
+      case SettingAction::Bluetooth:
+#ifdef ENABLE_BLUETOOTH
+        startActivityForResultWith<BluetoothSettingsActivity>(resultHandler);
+#endif
         break;
       case SettingAction::None:
         // Do nothing

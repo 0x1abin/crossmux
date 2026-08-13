@@ -49,6 +49,7 @@ class XtcReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  void requestGhostCleanup() override { pagesUntilFullRefresh = 1; }
   bool handleForcedRefresh() override {
     {
       RenderLock lock(*this);

@@ -2,8 +2,12 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
 
+#include "BleInput.h"
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "SilentRestart.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -38,6 +42,9 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
   items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
+#ifdef ENABLE_BLUETOOTH
+  items.push_back({MenuAction::TOGGLE_BLUETOOTH, StrId::STR_TOGGLE_BLUETOOTH});
+#endif
   items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
   items.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
   items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
@@ -107,6 +114,24 @@ void EpubReaderMenuActivity::loop() {
                          selectedPageTurnOption = idx;
                          requestUpdate();
                        });
+      requestUpdate();
+      return;
+    }
+
+    if (selectedAction == MenuAction::TOGGLE_BLUETOOTH) {
+      // Just flip the preference and stay in the menu. The main-loop lifecycle check
+      // brings the BLE stack up/down to match, so start/stop has a single owner.
+      SETTINGS.bluetoothEnabled = SETTINGS.bluetoothEnabled ? 0 : 1;
+      SETTINGS.saveToFile();
+      // Turning BT on below the lifecycle's heap floor would otherwise wait
+      // until the heap happens to recover -- which a long session's fragmentation never
+      // gives back. The user asked for BT *now*: silent-restart into this book to
+      // defrag (fresh boot is ~118 KB free, comfortably above the floor), and BT
+      // auto-starts on the way back in.
+      if (SETTINGS.bluetoothEnabled && !BleHid.isRunning() && ESP.getFreeHeap() < bleinput::kStartMinFreeHeap) {
+        LOG_INF("ERM", "BT enabled below heap floor (%u); silent restart to defrag", ESP.getFreeHeap());
+        silentRestartToReader();
+      }
       requestUpdate();
       return;
     }
@@ -197,6 +222,12 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
         } else if (value == MenuAction::AUTO_PAGE_TURN) {
           // Render current page turn value on the right edge of the content area.
           return pageTurnLabels[selectedPageTurnOption];
+        } else if (value == MenuAction::TOGGLE_BLUETOOTH) {
+          if (SETTINGS.bluetoothEnabled) {
+            if (!BleHid.isRunning()) return tr(STR_CONNECTING);
+            return BleHid.isConnected() ? tr(STR_STATE_ON) : tr(STR_CONNECTING);
+          }
+          return tr(STR_STATE_OFF);
         } else {
           return "";
         }

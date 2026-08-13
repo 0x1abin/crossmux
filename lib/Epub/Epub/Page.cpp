@@ -180,6 +180,10 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
 
   uint16_t count;
   serialization::readPod(file, count);
+  // Reserve up front: growth-by-doubling needs old + new capacity live at once and
+  // reallocates repeatedly — a field crash (bad_alloc -> abort under -fno-exceptions)
+  // hit exactly this append path on a heavily fragmented heap.
+  page->elements.reserve(count);
 
   // Reserve up front so a page load costs one allocation for the element vector
   // instead of a grow-copy-free cycle every doubling. `count` is untrusted (it

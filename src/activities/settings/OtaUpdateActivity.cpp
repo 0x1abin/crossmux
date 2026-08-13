@@ -5,6 +5,7 @@
 #include <Memory.h>
 #include <WiFi.h>
 
+#include "BleInput.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
@@ -118,6 +119,12 @@ void OtaUpdateActivity::beginWifiSelection() {
 
   state = WIFI_SELECTION;
   LOG_DBG("OTA", "Turning on WiFi...");
+  // Free the BLE stack BEFORE bringing WiFi up (matches WifiSelectionActivity):
+  // the C3 shares one radio and heap between the stacks, and the WiFi driver
+  // sizes its RX/TX buffer pools at init — initializing it with NimBLE's ~50 KB
+  // still resident leaves WiFi permanently starved even after the lifecycle
+  // stops BLE a loop later. No-op when BLE is already off.
+  bleinput::stop();
   WiFi.mode(WIFI_STA);
 
   LOG_DBG("OTA", "Launching WifiSelectionActivity...");

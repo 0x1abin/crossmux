@@ -104,6 +104,14 @@ class SdCardFont {
   // Returns the bitmap for an on-demand-loaded (overflow) glyph.
   const uint8_t* getOverflowBitmap(const EpdGlyph* glyph) const;
 
+  // Resolve a prewarmed mini glyph's bitmap. The mini bitmap is chunked (see
+  // MINI_BM_* above), so glyph->dataOffset is a byte offset across the fixed-size
+  // chunk sequence; each glyph lives wholly within one chunk. ctx is the glyph's
+  // EpdFontData::glyphMissCtx (an OverflowContext carrying the style index). Called
+  // by GfxRenderer::getGlyphBitmap for SD-card mini glyphs. Returns nullptr if the
+  // chunk isn't resident.
+  const uint8_t* miniGlyphBitmap(const void* ctx, uint32_t dataOffset) const;
+
   // Extract SdCardFont* from an opaque glyphMissCtx pointer.
   // Used by GfxRenderer::getGlyphBitmap() to recover the SdCardFont from EpdFontData::glyphMissCtx.
   static SdCardFont* fromMissCtx(void* ctx);
@@ -119,6 +127,11 @@ class SdCardFont {
     uint32_t uniqueGlyphs = 0;
     uint32_t bitmapBytes = 0;
   };
+  // MEMFIX-PORT: SD font resident-bytes audit; portable
+  // Log per-style resident heap (full tables + kept-if-fits mini arenas +
+  // advance tables + overflow bitmaps) and return the total in bytes. Pure
+  // accounting — no allocation, no state change.
+  size_t reportMemory() const;
   void logStats(const char* label = "SDCF");
   void resetStats();
   const Stats& getStats() const { return stats_; }
@@ -144,6 +157,16 @@ class SdCardFont {
     uint8_t kernRightClassCount = 0;
     uint8_t ligaturePairCount = 0;
   };
+
+  // Per-page prewarm bitmap chunking. A page of a large 2-bpp font needs a
+  // 20-40 KB bitmap; as one contiguous block it fails to allocate on a fragmented,
+  // BLE-resident heap, dropping the whole style to the slow overflow path. Splitting
+  // it into fixed 4 KB chunks (each glyph kept whole within one chunk) lets it fit
+  // scattered free space, so prewarm succeeds and the render still gets a contiguous
+  // per-glyph pointer. Mirrors the image .pxc slot's chunking.
+  static constexpr uint32_t MINI_BM_CHUNK_SHIFT = 12;  // 4 KB chunks
+  static constexpr uint32_t MINI_BM_CHUNK_SIZE = 1u << MINI_BM_CHUNK_SHIFT;
+  static constexpr uint32_t MINI_BM_MAX_CHUNKS = 24;  // 96 KB max per-style page bitmap
 
   // All per-style data: file offsets, intervals, kern/lig, prewarm cache, EpdFont
   struct PerStyle {
@@ -204,12 +227,16 @@ class SdCardFont {
     EpdFontData miniData{};
     EpdUnicodeInterval* miniIntervals = nullptr;
     EpdGlyph* miniGlyphs = nullptr;
-    uint8_t* miniBitmap = nullptr;
+    // Chunked mini bitmap (see MINI_BM_* above): fixed-size chunks so a large page's
+    // bitmap fits a fragmented heap. Each glyph is placed wholly within one chunk;
+    // EpdGlyph::dataOffset is a byte offset across the logical chunk sequence.
+    uint8_t* miniBitmapChunks[MINI_BM_MAX_CHUNKS] = {};
+    uint32_t miniBitmapChunkCount = 0;  // chunks currently allocated (0..count-1), kept across pages
     uint32_t miniIntervalCount = 0;
     uint32_t miniGlyphCount = 0;
     uint32_t miniIntervalCapacity = 0;
     uint32_t miniGlyphCapacity = 0;
-    uint32_t miniBitmapCapacity = 0;
+    uint32_t miniBitmapCapacity = 0;  // miniBitmapChunkCount * MINI_BM_CHUNK_SIZE (hysteresis/report)
     // Bitmap bytes the current page actually used (set by prewarmStyle), the
     // underuse-hysteresis signal; 0 = no bitmap built this scope (metadata-only
     // prewarm), which leaves the hysteresis counter untouched.
@@ -261,7 +288,10 @@ class SdCardFont {
   };
   OverflowContext overflowCtx_[MAX_STYLES] = {};
 
-  // Shared on-demand overflow buffer (ring buffer of glyphs loaded via glyphMissHandler)
+  // Shared on-demand overflow ring (glyphs loaded via glyphMissHandler) -- the
+  // fallback for glyphs the per-page prewarm didn't cover. Kept small: the chunked
+  // mini-bitmap (below) lets prewarm succeed on a fragmented heap, so this ring
+  // only serves the rare uncovered glyph rather than a whole page.
   static constexpr uint32_t OVERFLOW_CAPACITY = 8;
   struct OverflowEntry {
     EpdGlyph glyph;
@@ -272,6 +302,20 @@ class SdCardFont {
   OverflowEntry overflow_[OVERFLOW_CAPACITY] = {};
   uint32_t overflowCount_ = 0;
   uint32_t overflowNext_ = 0;
+
+  // Single pre-reserved fallback buffer for the on-demand overflow path.
+  // onGlyphMiss() normally mallocs each glyph's bitmap; under heap pressure (BLE
+  // resident) that per-glyph malloc fails and the glyph -- and thus the whole
+  // last-loaded style, in practice bold-italic -- renders blank. This buffer is
+  // reserved once at load(), when the heap is healthy. When the per-glyph malloc
+  // fails, the current glyph is read into this buffer and rendered directly. It is
+  // NOT part of the cache ring above (it is overwritten on every use), which is
+  // fine: getGlyphBitmap() consumes the bitmap immediately after the miss handler
+  // returns, before the next glyph is fetched.
+  static constexpr uint32_t OVERFLOW_EMERGENCY_BYTES = 1024;
+  uint8_t* overflowEmergencyBuf_ = nullptr;
+  uint32_t overflowEmergencyCap_ = 0;
+  OverflowEntry overflowEmergency_ = {};
 
   // Compact advance-only table for layout measurement (per-style).
   // Built by buildAdvanceTable(), queried by getAdvance().

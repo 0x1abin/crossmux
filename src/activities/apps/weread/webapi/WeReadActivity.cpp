@@ -18,6 +18,7 @@
 #include <numeric>
 #include <string>
 
+#include "BleInput.h"
 #include "CrossPointState.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
@@ -401,6 +402,7 @@ static_assert(sizeof(WeReadChapterRangeActivity) <= 1024, "WeRead chapter select
 
 void WeReadActivity::onEnter() {
   Activity::onEnter();
+  bleinput::stop();
   if (!WeReadBrowse::clearLegacyWorkspace()) LOG_ERR("WR", "legacy browse workspace cleanup failed");
   {
     RenderLock lock(*this);

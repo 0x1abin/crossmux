@@ -44,6 +44,18 @@ class Epub {
   }
   ~Epub() = default;
   std::string& getBasePath() { return contentBasePath; }
+  // MEMFIX-PORT: epub resident-bytes audit accessor; portable
+  // Approximate resident heap of the open book (audit): path strings, the CSS
+  // file list, and the parsed stylesheet. BookMetadataCache is file-backed
+  // (counts + HalFile handles) and contributes little.
+  size_t residentBytes() const {
+    size_t total = sizeof(Epub) + tocNcxItem.capacity() + tocNavItem.capacity() + filepath.capacity() +
+                   contentBasePath.capacity() + cachePath.capacity();
+    for (const auto& f : cssFiles) total += sizeof(f) + (f.capacity() > 15 ? f.capacity() : 0);
+    if (cssParser) total += cssParser->residentBytes();
+    return total;
+  }
+  size_t cssRuleCount() const { return cssParser ? cssParser->ruleCount() : 0; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
   bool clearCache() const;
   void setupCacheDir() const;

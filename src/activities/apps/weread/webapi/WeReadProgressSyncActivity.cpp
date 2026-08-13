@@ -17,6 +17,7 @@
 #include <memory>
 #include <utility>
 
+#include "BleInput.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
@@ -66,6 +67,7 @@ WeReadProgressContext WeReadProgressSyncActivity::makeContext(const Epub& epub, 
 
 void WeReadProgressSyncActivity::onEnter() {
   Activity::onEnter();
+  bleinput::stop();
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 
   const auto& snapshot = READING_STATS.getLastSessionSnapshot();

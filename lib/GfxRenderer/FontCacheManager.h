@@ -2,9 +2,9 @@
 
 #include <EpdFontFamily.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
-#include <string>
 
 class FontDecompressor;
 class SdCardFont;
@@ -57,10 +57,25 @@ class FontCacheManager {
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
-  std::string scanText_;
-  uint32_t scanStyleCounts_[4] = {};
+  // Per-style scan buffers (index = base Style: 0=Regular, 1=Bold, 2=Italic,
+  // 3=Bold-Italic). Each page render prewarms every style ONLY against the text
+  // actually drawn in that style, not the whole page. Prewarming a secondary style
+  // over the entire page produced a full-page-sized FontDecompressor page-slot
+  // buffer per style; with the BLE stack resident the later styles' malloc failed,
+  // dropping bold/italic onto the hot-group fallback (which also OOM'd) so those
+  // glyphs rendered blank. Bucketing by style keeps each secondary buffer as small
+  // as the bold/italic text present, so every style reliably gets its slot.
+  static constexpr size_t SCAN_TEXT_CAPACITY = 2048;
+  static constexpr uint8_t STYLE_COUNT = 4;
+  char scanText_[STYLE_COUNT][SCAN_TEXT_CAPACITY] = {};
+  size_t scanTextLen_[STYLE_COUNT] = {};
+  // Font id recorded during the scan pass. SD-card font ids are negative
+  // (std::hash-derived), so "nothing recorded" CANNOT be sentinelled as < 0 --
+  // that would swallow every SD font and skip its prewarm entirely. Track
+  // whether anything was recorded with an explicit flag instead.
   int scanFontId_ = -1;
 #ifdef ENABLE_CHINESE_VERSION
   uint32_t missingChineseCodepoint_ = 0;
 #endif
+  bool scanRecorded_ = false;
 };

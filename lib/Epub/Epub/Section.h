@@ -72,6 +72,7 @@ class Section {
   // Builds write here and are swapped over filePath only on commit, so a prior
   // partial/finalized file stays readable while a rebuild is in progress.
   std::string binTmpPath() const { return filePath + ".part"; }
+
   std::unique_ptr<Page> loadPageAt(int page) const;
   // Read a page already laid out by the in-progress build (page < build LUT size), from
   // the partially-written tmp .bin without disturbing the build's write cursor.
@@ -123,6 +124,20 @@ class Section {
   // Resolve an anchor from the in-progress build first, then the on-disk anchor map
   // (covers finalized sections and partials from a previous session).
   std::optional<uint16_t> findAnchor(const std::string& anchor) const;
+
+  // MEMFIX-PORT: section resident-bytes audit accessor; portable
+  // Approximate resident heap for the audit log. Steady state (no build) a
+  // Section holds little beyond itself; during a build the page LUT and path
+  // strings dominate (the parser's internal footprint is not walked here).
+  size_t residentBytes() const {
+    size_t total = sizeof(Section) + filePath.capacity();
+    if (build_) {
+      total += sizeof(BuildContext) + build_->lut.capacity() * sizeof(PageLutEntry) + build_->parsePath.capacity() +
+               build_->contentBase.capacity() + build_->imageBasePath.capacity() + build_->htmlPath.capacity() +
+               build_->tmpHtmlPath.capacity();
+    }
+    return total;
+  }
 
   // True if this spine's unzipped HTML is already cached, so a build won't pay the (multi-second on a
   // giant spine) zip inflation. Lets the reader skip the indexing popup on a fast reopen/rebuild.

@@ -37,6 +37,8 @@
 #include "html/en/HomePageHtml.generated.h"
 #include "html/en/SettingsPageHtml.generated.h"
 #endif
+#include <Memory.h>
+
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"

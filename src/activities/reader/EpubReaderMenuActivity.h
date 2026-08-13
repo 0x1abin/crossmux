@@ -26,6 +26,7 @@ class EpubReaderMenuActivity final : public Activity {
     GO_HOME,
     SYNC,
     DELETE_CACHE,
+    TOGGLE_BLUETOOTH,
     DICTIONARY
   };
 
@@ -37,6 +38,9 @@ class EpubReaderMenuActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+#ifdef ENABLE_BLUETOOTH
+  bool keepsBluetoothAlive() const override { return true; }
+#endif
   bool handleHomeGesture() override;
 
  private:

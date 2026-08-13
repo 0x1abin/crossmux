@@ -13,6 +13,7 @@
 #include "I18n.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#include "components/icons/bluetooth.h"
 #include "components/icons/bookmark.h"
 #include "fontIds.h"
 #include "util/TimeUtils.h"
@@ -24,8 +25,10 @@ constexpr int homeMarginTop = 30;
 constexpr int subtitleY = 738;
 constexpr int bookmarkStatusIconWidth = 16;
 constexpr int bookmarkStatusIconHeight = 14;
-constexpr int bookmarkStatusIconGap = 4;
 constexpr int bookmarkStatusIconTopCrop = 2;
+constexpr int bluetoothStatusIconWidth = 16;
+constexpr int bluetoothStatusIconHeight = 16;
+constexpr int statusIconGap = 4;
 
 void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
   constexpr int bytesPerRow = bookmarkStatusIconWidth / 8;
@@ -34,6 +37,17 @@ void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int 
       const uint8_t byte = BookmarkStatusIcon[(row + bookmarkStatusIconTopCrop) * bytesPerRow + col / 8];
       const uint8_t mask = 1U << (7 - (col % 8));
       renderer.drawPixel(x + col, y + row, (byte & mask) != 0);
+    }
+  }
+}
+
+void drawBluetoothStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
+  constexpr int bytesPerRow = bluetoothStatusIconWidth / 8;
+  for (int row = 0; row < bluetoothStatusIconHeight; ++row) {
+    for (int col = 0; col < bluetoothStatusIconWidth; ++col) {
+      const uint8_t byte = BluetoothStatusIcon[row * bytesPerRow + col / 8];
+      const uint8_t mask = 1U << (7 - (col % 8));
+      renderer.drawPixel(x + col, y + row, (byte & mask) == 0);
     }
   }
 }
@@ -824,7 +838,8 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
-                              const bool fillMargin, const bool isPageBookmarked, const bool pageCountEstimated) const {
+                              const bool fillMargin, const bool isPageBookmarked, const bool pageCountEstimated,
+                              const bool bluetoothConnected) const {
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -919,9 +934,17 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     renderer.drawText(STATUS_NUMERIC_FONT_ID, clockX, textY, timeBuf);
   }
 
-  // Draw Bookmark
+  // Draw status icons
+  if (showStatusBarTextLane && bluetoothConnected) {
+    const int bluetoothGap = leftClusterWidth > 0 ? statusIconGap : 0;
+    const int bluetoothX = leftClusterX + leftClusterWidth + bluetoothGap;
+    const int bluetoothY = textY + 3;
+    drawBluetoothStatusIcon(renderer, bluetoothX, bluetoothY);
+    leftClusterWidth += bluetoothStatusIconWidth + bluetoothGap;
+  }
+
   if (showStatusBarTextLane && isPageBookmarked) {
-    const int bookmarkGap = leftClusterWidth > 0 ? bookmarkStatusIconGap : 0;
+    const int bookmarkGap = leftClusterWidth > 0 ? statusIconGap : 0;
     const int bookmarkX = leftClusterX + leftClusterWidth + bookmarkGap;
     const int bookmarkY = textY + 5;
     drawBookmarkStatusIcon(renderer, bookmarkX, bookmarkY);

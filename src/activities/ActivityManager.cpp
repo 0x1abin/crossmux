@@ -463,6 +463,25 @@ bool ActivityManager::isReaderActivity() const {
          (currentActivity && currentActivity->isReaderActivity());
 }
 
+bool ActivityManager::currentKeepsBluetoothAlive() const {
+  return currentActivity && currentActivity->keepsBluetoothAlive();
+}
+
+void ActivityManager::requestGhostCleanup() {
+  if (currentActivity) currentActivity->requestGhostCleanup();
+}
+
+bool ActivityManager::bluetoothShouldBeActive() const {
+  // Only the visible activity may own BLE. A reader often remains on the stack
+  // beneath Wi-Fi, Web, WeRead, or a menu; looking through the stack would restart
+  // NimBLE while that foreground activity is using the shared radio and heap.
+  return currentActivity && (currentActivity->isReaderActivity() || currentActivity->keepsBluetoothAlive());
+}
+
+bool ActivityManager::bluetoothStartDeferred() const {
+  return currentActivity && currentActivity->deferBluetoothStart();
+}
+
 bool ActivityManager::handleForcedRefresh() { return currentActivity && currentActivity->handleForcedRefresh(); }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
