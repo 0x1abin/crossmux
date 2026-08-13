@@ -301,6 +301,48 @@ static AlignedMemRect screenRectToAlignedMemRect(GfxRenderer::Orientation orient
 
 enum class TextRotation { None, Rotated90CW };
 
+static void drawGlyphPixel(const GfxRenderer& renderer, const int x, const int y, const bool pixelState,
+                           const uint8_t syntheticBoldPixels) {
+  renderer.drawPixel(x, y, pixelState);
+  if (syntheticBoldPixels == 0) return;
+  renderer.drawPixel(x + 1, y, pixelState);
+  if (syntheticBoldPixels == 2) renderer.drawPixel(x + 2, y, pixelState);
+}
+
+constexpr uint8_t dilate2BitCoverage(const uint8_t current, const uint8_t previous1, const uint8_t previous2,
+                                     const uint8_t pixels) {
+  uint8_t darkest = current;
+  if (pixels >= 1 && previous1 > darkest) darkest = previous1;
+  if (pixels >= 2 && previous2 > darkest) darkest = previous2;
+  return darkest;
+}
+
+static_assert(dilate2BitCoverage(0, 1, 0, 1) == 1);  // Light edge extends one pixel.
+static_assert(dilate2BitCoverage(3, 1, 0, 1) == 3);  // A gray neighbor cannot lighten black.
+static_assert(dilate2BitCoverage(0, 0, 3, 2) == 3);  // Heavy extends two pixels.
+static_assert(dilate2BitCoverage(0, 3, 3, 0) == 0);  // Off preserves the original coverage.
+
+static uint8_t get2BitCoverage(const uint8_t* bitmap, const int pixelPosition) {
+  const uint8_t byte = bitmap[pixelPosition >> 2];
+  return (byte >> ((3 - (pixelPosition & 3)) * 2)) & 0x3;
+}
+
+static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::RenderMode renderMode, const int x,
+                               const int y, const bool pixelState, const uint8_t coverage) {
+  // Font coverage is 0=white, 1=light gray, 2=dark gray, 3=black.
+  switch (renderMode) {
+    case GfxRenderer::BW:
+      if (coverage != 0) renderer.drawPixel(x, y, pixelState);
+      break;
+    case GfxRenderer::GRAYSCALE_LSB:
+      if (coverage == 2) renderer.drawPixel(x, y, false);
+      break;
+    case GfxRenderer::GRAYSCALE_MSB:
+      if (coverage == 1 || coverage == 2) renderer.drawPixel(x, y, false);
+      break;
+  }
+}
+
 // Shared glyph rendering logic for normal and rotated text.
 // Coordinate mapping and cursor advance direction are selected at compile time via the template parameter.
 // Render a glyph at 50% scale. Used for SUP/SUB style bits.
@@ -312,7 +354,8 @@ enum class TextRotation { None, Rotated90CW };
 // horizontal space for the scaled glyph.
 static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                             const bool pixelState, const EpdFontFamily::Style style) {
+                             const bool pixelState, const EpdFontFamily::Style style,
+                             const uint8_t syntheticBoldPixels) {
   const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
   if (!glyph) return;
 
@@ -348,7 +391,7 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
           }
         }
         if (maxRaw >= 2 || coverage >= 2) {
-          renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
+          drawGlyphPixel(renderer, baseX + dstX, baseY + dstY, pixelState, syntheticBoldPixels);
         }
       }
     }
@@ -370,7 +413,7 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
           }
         }
         if (hasInk) {
-          renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
+          drawGlyphPixel(renderer, baseX + dstX, baseY + dstY, pixelState, syntheticBoldPixels);
         }
       }
     }
@@ -380,7 +423,8 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
 template <TextRotation rotation = TextRotation::None>
 static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                            const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                           const bool pixelState, const EpdFontFamily::Style style) {
+                           const bool pixelState, const EpdFontFamily::Style style,
+                           const uint8_t syntheticBoldPixels = 0) {
   const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
   if (!glyph) {
     // Missing glyph is a known limitation (subset fonts, rare characters). The reader
@@ -409,7 +453,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   } else {
     const int gx0 = cursorX + left;
     const int gy0 = cursorY - top;
-    if (!renderer.glyphIntersectsStrip(gx0, gy0, gx0 + width - 1, gy0 + height - 1)) {
+    if (!renderer.glyphIntersectsStrip(gx0, gy0, gx0 + width - 1 + syntheticBoldPixels, gy0 + height - 1)) {
       return;
     }
   }
@@ -429,10 +473,28 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
     }
 
     if (is2Bit) {
-      int pixelPosition = 0;
       for (int glyphY = 0; glyphY < height; glyphY++) {
         const int outerCoord = outerBase + glyphY;
-        for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
+        if (syntheticBoldPixels == 0) {
+          for (int glyphX = 0; glyphX < width; glyphX++) {
+            int screenX, screenY;
+            if constexpr (rotation == TextRotation::Rotated90CW) {
+              screenX = outerCoord;
+              screenY = innerBase - glyphX;
+            } else {
+              screenX = innerBase + glyphX;
+              screenY = outerCoord;
+            }
+            draw2BitGlyphPixel(renderer, renderMode, screenX, screenY, pixelState,
+                               get2BitCoverage(bitmap, glyphY * width + glyphX));
+          }
+          continue;
+        }
+
+        uint8_t previous1 = 0;
+        uint8_t previous2 = 0;
+        const int outputWidth = width + syntheticBoldPixels;
+        for (int glyphX = 0; glyphX < outputWidth; glyphX++) {
           int screenX, screenY;
           if constexpr (rotation == TextRotation::Rotated90CW) {
             screenX = outerCoord;
@@ -442,25 +504,12 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             screenY = outerCoord;
           }
 
-          const uint8_t byte = bitmap[pixelPosition >> 2];
-          const uint8_t bit_index = (3 - (pixelPosition & 3)) * 2;
-          // the direct bit from the font is 0 -> white, 1 -> light gray, 2 -> dark gray, 3 -> black
-          // we swap this to better match the way images and screen think about colors:
-          // 0 -> black, 1 -> dark grey, 2 -> light grey, 3 -> white
-          const uint8_t bmpVal = 3 - ((byte >> bit_index) & 0x3);
-
-          if (renderMode == GfxRenderer::BW && bmpVal < 3) {
-            // Black (also paints over the grays in BW mode)
-            renderer.drawPixel(screenX, screenY, pixelState);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
-            // Light gray (also mark the MSB if it's going to be a dark gray too)
-            // Dedicated X3 gray LUTs now provide proper 4-level gray on both devices
-            // We have to flag pixels in reverse for the gray buffers, as 0 leave alone, 1 update
-            renderer.drawPixel(screenX, screenY, false);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB && bmpVal == 1) {
-            // Dark gray
-            renderer.drawPixel(screenX, screenY, false);
-          }
+          const uint8_t current =
+              glyphX < width ? get2BitCoverage(bitmap, glyphY * width + glyphX) : 0;  // White tail extends the edge.
+          const uint8_t coverage = dilate2BitCoverage(current, previous1, previous2, syntheticBoldPixels);
+          draw2BitGlyphPixel(renderer, renderMode, screenX, screenY, pixelState, coverage);
+          previous2 = previous1;
+          previous1 = current;
         }
       }
     } else {
@@ -481,7 +530,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
           const uint8_t bit_index = 7 - (pixelPosition & 7);
 
           if ((byte >> bit_index) & 1) {
-            renderer.drawPixel(screenX, screenY, pixelState);
+            drawGlyphPixel(renderer, screenX, screenY, pixelState, syntheticBoldPixels);
           }
         }
       }
@@ -596,6 +645,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
   const auto& font = fontIt->second;
+  const uint8_t activeSyntheticBoldPixels =
+      syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 && !font.hasNativeBold(style) ? syntheticBoldPixels
+                                                                                                   : 0;
+  const auto renderStyle =
+      activeSyntheticBoldPixels != 0
+          ? static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(style) & ~static_cast<uint8_t>(EpdFontFamily::BOLD))
+          : style;
 
   const char* textCursor = renderedText;
   uint32_t cp;
@@ -609,38 +665,39 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     // font-native position. Fonts without their glyphs — the built-ins — miss
     // the getGlyph lookup and skip them, as before.
     if (utf8IsCombiningMark(cp) || BidiUtils::isTransparentMark(cp)) {
-      const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
+      const EpdGlyph* combiningGlyph = font.getGlyph(cp, renderStyle);
       if (!combiningGlyph) continue;
       const auto anchor = combiningMark::anchorFor(cp);
       const int raiseBy =
           combiningMark::raiseAboveBase(anchor, combiningGlyph->top, combiningGlyph->height, lastBaseTop);
       const int combiningX = combiningMark::anchorOver(anchor, lastBaseX, lastBaseLeft, lastBaseWidth,
                                                        combiningGlyph->left, combiningGlyph->width);
-      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, combiningX, yPos - raiseBy, black, style);
+      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, combiningX, yPos - raiseBy, black, renderStyle,
+                                         activeSyntheticBoldPixels);
       continue;
     }
 
 #ifdef ENABLE_CHINESE_VERSION
     const uint32_t sourceCp = cp;
 #endif
-    cp = font.applyLigatures(cp, textCursor, style);
+    cp = font.applyLigatures(cp, textCursor, renderStyle);
 
     // Differential rounding: snap (previous advance + current kern) as one unit so
     // identical character pairs always produce the same pixel step regardless of
     // where they fall on the line.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
+      const auto kernFP = font.getKerning(prevCp, cp, renderStyle);  // 4.4 fixed-point kern
+      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);             // snap 12.4 fixed-point to nearest pixel
     }
 
 #ifdef ENABLE_CHINESE_VERSION
     bool usedReplacement = false;
-    const EpdGlyph* glyph = font.getGlyph(cp, style, &usedReplacement);
+    const EpdGlyph* glyph = font.getGlyph(cp, renderStyle, &usedReplacement);
     if (usedReplacement && fontCacheManager_) {
       fontCacheManager_->reportMissingChineseCodepoint(resolvedFontId, sourceCp);
     }
 #else
-    const EpdGlyph* glyph = font.getGlyph(cp, style);
+    const EpdGlyph* glyph = font.getGlyph(cp, renderStyle);
 #endif
 
     lastBaseLeft = glyph ? glyph->left : 0;
@@ -648,7 +705,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     lastBaseTop = glyph ? glyph->top : 0;
     prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
 
-    const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
+    const bool isSupSub = (renderStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
     if (isSupSub) {
       // Halve the advance so the cursor advances by the same amount the scaled glyph
       // actually occupies, keeping spacing correct without needing a separate smaller font.
@@ -657,9 +714,10 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 
     if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
-      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, style);
+      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle, activeSyntheticBoldPixels);
     } else {
-      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, lastBaseX, yPos, black, style);
+      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle,
+                                         activeSyntheticBoldPixels);
     }
     prevCp = cp;
   }

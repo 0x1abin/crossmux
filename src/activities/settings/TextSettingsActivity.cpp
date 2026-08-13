@@ -33,6 +33,9 @@ namespace {
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
 constexpr StrId LINE_SPACING_IDS[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
+constexpr StrId SYNTHETIC_BOLD_IDS[] = {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_STANDARD,
+                                        StrId::STR_FAKE_BOLD_HEAVY};
+static_assert(std::size(SYNTHETIC_BOLD_IDS) == CrossPointSettings::SYNTHETIC_BOLD_COUNT);
 constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                    StrId::STR_BOOK_S_STYLE};
 constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
@@ -309,7 +312,8 @@ void TextSettingsActivity::render(RenderLock&&) {
     case Tab::Style: {
       constexpr int STYLE_ROWS = static_cast<int>(StyleRow::Count);
       static constexpr StrId ROW_NAME_IDS[STYLE_ROWS] = {StrId::STR_FOCUS_READING, StrId::STR_HYPHENATION,
-                                                         StrId::STR_EMBEDDED_STYLE, StrId::STR_TEXT_AA};
+                                                         StrId::STR_EMBEDDED_STYLE, StrId::STR_FAKE_BOLD,
+                                                         StrId::STR_TEXT_AA};
       GUI.drawList(
           renderer, listRect, STYLE_ROWS, selectedItem,
           [](int index) { return std::string(I18N.get(ROW_NAME_IDS[index])); }, nullptr, nullptr,
@@ -629,6 +633,14 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     case StyleRow::EmbeddedStyle:
       SETTINGS.embeddedStyle = !SETTINGS.embeddedStyle;
       break;
+    case StyleRow::FakeBold:
+      optionPopup_.show(StrId::STR_FAKE_BOLD, SYNTHETIC_BOLD_IDS, static_cast<int>(std::size(SYNTHETIC_BOLD_IDS)),
+                        SETTINGS.fakeBold, [](int idx) {
+                          SETTINGS.fakeBold = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      return;
     case StyleRow::AntiAliasing:
       SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
       break;
@@ -648,6 +660,10 @@ std::string TextSettingsActivity::styleValueText(int row) const {
       return SETTINGS.hyphenationEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case StyleRow::EmbeddedStyle:
       return SETTINGS.embeddedStyle ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::FakeBold: {
+      const uint8_t v = SETTINGS.fakeBold;
+      return v < std::size(SYNTHETIC_BOLD_IDS) ? I18N.get(SYNTHETIC_BOLD_IDS[v]) : tr(STR_STATE_OFF);
+    }
     case StyleRow::AntiAliasing:
       return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
 
@@ -657,8 +673,8 @@ std::string TextSettingsActivity::styleValueText(int row) const {
   return "";
 }
 
-// Only Focus Reading shows in the preview (bold prefixes); the other Style rows
-// have no distinct preview.
+// Focus Reading and Synthetic Bold are visible in the preview; the other Style
+// rows have no distinct preview.
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
   if (selectedIndex() == 0 || tab_ != Tab::Style) return false;
   const StyleRow row = static_cast<StyleRow>(selectedIndex() - 1);

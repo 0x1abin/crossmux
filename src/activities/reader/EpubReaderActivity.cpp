@@ -1775,6 +1775,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
   const int fontId = SETTINGS.getReaderFontId();
+  const auto renderPage = [&] {
+    GfxRenderer::SyntheticBoldScope syntheticBold(renderer, SETTINGS.fakeBold);
+    page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+  };
 
   // The image pixel-cache RAM slot lives for exactly one page render (it feeds
   // the BW double-refresh and every grayscale band pass); release it on every
@@ -1809,7 +1813,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   std::optional<FontCacheManager::PrewarmScope> prewarmScope;
   if (fcm->needsPrewarmScan(fontId)) {
     prewarmScope.emplace(*fcm);
-    page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);  // scan pass
+    renderPage();  // scan pass
     prewarmScope->endScanAndPrewarm();
   } else {
     // Preserve PrewarmScope's cache lifecycle without allocating its scan string.
@@ -1839,13 +1843,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
   auto renderGrayscalePass = [&]() {
     if (needsTextGrayscale) {
-      page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+      renderPage();
     } else {
       page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     }
   };
 
-  page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+  renderPage();
 #ifdef ENABLE_CHINESE_VERSION
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
   if (missingCodepoint != 0 && !FontDownloadActivity::wasChineseFontPromptShownThisBoot()) {
@@ -1874,7 +1878,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+      renderPage();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
