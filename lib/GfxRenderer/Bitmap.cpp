@@ -168,9 +168,11 @@ BmpReaderError Bitmap::parseHeaders() {
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = new AtkinsonDitherer(width);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
+      if (!atkinsonDitherer || !atkinsonDitherer->valid()) return BmpReaderError::OomRowBuffer;
     } else {
-      fsDitherer = new FloydSteinbergDitherer(width);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
+      if (!fsDitherer || !fsDitherer->valid()) return BmpReaderError::OomRowBuffer;
     }
   }
 

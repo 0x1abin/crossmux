@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <InflateStream.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -11,6 +12,7 @@
 #include <cstring>
 
 #include "BitmapHelpers.h"
+#include "PngHelpers.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
@@ -88,6 +90,15 @@ bool readBE32(HalFile& file, uint32_t& value) {
           (static_cast<uint32_t>(buf[2]) << 8) | buf[3];
   return true;
 }
+
+bool readBE16(HalFile& file, uint16_t& value) {
+  uint8_t buf[2];
+  if (file.read(buf, 2) != 2) return false;
+  value = static_cast<uint16_t>(buf[0]) << 8 | buf[1];
+  return true;
+}
+
+bool skipChunkDataAndCrc(HalFile& file, const uint32_t length) { return file.seekCur(length) && file.seekCur(4); }
 
 void writeBmpHeader8bit(Print& bmpOut, const int width, const int height) {
   const int bytesPerRow = (width + 3) / 4 * 4;
@@ -207,7 +218,14 @@ struct PngDecodeContext {
 
   // Palette for indexed color (type 3)
   uint8_t palette[256 * 3];
+  uint8_t paletteAlpha[256];
   int paletteSize;
+  bool hasTransparentGray;
+  bool hasTransparentRgb;
+  uint16_t transparentGray;
+  uint16_t transparentRed;
+  uint16_t transparentGreen;
+  uint16_t transparentBlue;
 };
 
 // Read the next IDAT chunk header, skipping non-IDAT chunks
@@ -227,7 +245,7 @@ static bool findNextIdatChunk(PngDecodeContext& ctx) {
 
     // Skip this chunk's data + 4-byte CRC
     // Use seek to skip efficiently
-    if (!ctx.file->seekCur(chunkLen + 4)) return false;
+    if (!skipChunkDataAndCrc(*ctx.file, chunkLen)) return false;
 
     // If we hit IEND, there are no more chunks
     if (memcmp(chunkType, "IEND", 4) == 0) {
@@ -331,15 +349,23 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
   switch (ctx.colorType) {
     case PNG_COLOR_GRAYSCALE:
       if (ctx.bitDepth == 8) {
-        memcpy(grayRow, src, w);
+        if (!ctx.hasTransparentGray) {
+          memcpy(grayRow, src, w);
+        } else {
+          for (uint32_t x = 0; x < w; x++) grayRow[x] = src[x] == ctx.transparentGray ? 255 : src[x];
+        }
       } else if (ctx.bitDepth == 16) {
-        for (uint32_t x = 0; x < w; x++) grayRow[x] = src[x * 2];
+        for (uint32_t x = 0; x < w; x++) {
+          const uint16_t sample = static_cast<uint16_t>(src[x * 2]) << 8 | src[x * 2 + 1];
+          grayRow[x] = ctx.hasTransparentGray && sample == ctx.transparentGray ? 255 : src[x * 2];
+        }
       } else {
         const int ppb = 8 / ctx.bitDepth;
         const uint8_t mask = (1 << ctx.bitDepth) - 1;
         for (uint32_t x = 0; x < w; x++) {
           int shift = (ppb - 1 - (x % ppb)) * ctx.bitDepth;
-          grayRow[x] = (src[x / ppb] >> shift & mask) * 255 / mask;
+          const uint8_t sample = src[x / ppb] >> shift & mask;
+          grayRow[x] = ctx.hasTransparentGray && sample == ctx.transparentGray ? 255 : sample * 255 / mask;
         }
       }
       break;
@@ -349,11 +375,21 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
         // Fast path: most common EPUB cover format
         for (uint32_t x = 0; x < w; x++) {
           const uint8_t* p = src + x * 3;
-          grayRow[x] = (p[0] * 25 + p[1] * 50 + p[2] * 25) / 100;
+          grayRow[x] = ctx.hasTransparentRgb && p[0] == ctx.transparentRed && p[1] == ctx.transparentGreen &&
+                               p[2] == ctx.transparentBlue
+                           ? 255
+                           : (p[0] * 25 + p[1] * 50 + p[2] * 25) / 100;
         }
       } else {
         for (uint32_t x = 0; x < w; x++) {
-          grayRow[x] = (src[x * 6] * 25 + src[x * 6 + 2] * 50 + src[x * 6 + 4] * 25) / 100;
+          const uint8_t* p = src + x * 6;
+          const uint16_t red = static_cast<uint16_t>(p[0]) << 8 | p[1];
+          const uint16_t green = static_cast<uint16_t>(p[2]) << 8 | p[3];
+          const uint16_t blue = static_cast<uint16_t>(p[4]) << 8 | p[5];
+          grayRow[x] = ctx.hasTransparentRgb && red == ctx.transparentRed && green == ctx.transparentGreen &&
+                               blue == ctx.transparentBlue
+                           ? 255
+                           : (p[0] * 25 + p[2] * 50 + p[4] * 25) / 100;
         }
       }
       break;
@@ -367,16 +403,22 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
         int shift = (ppb - 1 - (x % ppb)) * ctx.bitDepth;
         uint8_t idx = (src[x / ppb] >> shift) & mask;
         if (idx >= palSize) idx = 0;
-        grayRow[x] = (pal[idx * 3] * 25 + pal[idx * 3 + 1] * 50 + pal[idx * 3 + 2] * 25) / 100;
+        const uint8_t gray = (pal[idx * 3] * 25 + pal[idx * 3 + 1] * 50 + pal[idx * 3 + 2] * 25) / 100;
+        grayRow[x] = pngHelpers::blendWithWhite(gray, ctx.paletteAlpha[idx]);
       }
       break;
     }
 
     case PNG_COLOR_GRAYSCALE_ALPHA:
       if (ctx.bitDepth == 8) {
-        for (uint32_t x = 0; x < w; x++) grayRow[x] = src[x * 2];
+        for (uint32_t x = 0; x < w; x++) {
+          grayRow[x] = pngHelpers::blendWithWhite(src[x * 2], src[x * 2 + 1]);
+        }
       } else {
-        for (uint32_t x = 0; x < w; x++) grayRow[x] = src[x * 4];
+        for (uint32_t x = 0; x < w; x++) {
+          const uint16_t alpha = static_cast<uint16_t>(src[x * 4 + 2]) << 8 | src[x * 4 + 3];
+          grayRow[x] = pngHelpers::blendWithWhite(src[x * 4], static_cast<uint8_t>((alpha + 128) / 257));
+        }
       }
       break;
 
@@ -384,11 +426,15 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
       if (ctx.bitDepth == 8) {
         for (uint32_t x = 0; x < w; x++) {
           const uint8_t* p = src + x * 4;
-          grayRow[x] = (p[0] * 25 + p[1] * 50 + p[2] * 25) / 100;
+          const uint8_t gray = (p[0] * 25 + p[1] * 50 + p[2] * 25) / 100;
+          grayRow[x] = pngHelpers::blendWithWhite(gray, p[3]);
         }
       } else {
         for (uint32_t x = 0; x < w; x++) {
-          grayRow[x] = (src[x * 8] * 25 + src[x * 8 + 2] * 50 + src[x * 8 + 4] * 25) / 100;
+          const uint8_t* p = src + x * 8;
+          const uint8_t gray = (p[0] * 25 + p[2] * 50 + p[4] * 25) / 100;
+          const uint16_t alpha = static_cast<uint16_t>(p[6]) << 8 | p[7];
+          grayRow[x] = pngHelpers::blendWithWhite(gray, static_cast<uint8_t>((alpha + 128) / 257));
         }
       }
       break;
@@ -413,6 +459,10 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   // Read IHDR chunk
   uint32_t ihdrLen;
   if (!readBE32(pngFile, ihdrLen)) return false;
+  if (ihdrLen != 13) {
+    LOG_ERR("PNG", "Invalid IHDR length: %u", ihdrLen);
+    return false;
+  }
 
   uint8_t ihdrType[4];
   if (pngFile.read(ihdrType, 4) != 4 || memcmp(ihdrType, "IHDR", 4) != 0) {
@@ -433,7 +483,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   uint8_t interlace = ihdrRest[4];
 
   // Skip IHDR CRC
-  pngFile.seekCur(4);
+  if (!pngFile.seekCur(4)) return false;
 
   LOG_DBG("PNG", "Image: %ux%u, depth=%u, color=%u, interlace=%u", width, height, bitDepth, colorType, interlace);
 
@@ -444,6 +494,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
   if (interlace != 0) {
     LOG_ERR("PNG", "Interlaced PNGs not supported");
+    return false;
+  }
+
+  if (!pngHelpers::isSupportedFormat(colorType, bitDepth)) {
+    LOG_ERR("PNG", "Unsupported color/depth combination: %u/%u", colorType, bitDepth);
     return false;
   }
 
@@ -511,20 +566,24 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   ctx.bytesPerPixel = bytesPerPixel;
   ctx.rawRowBytes = rawRowBytes;
   ctx.paletteSize = 0;
+  memset(ctx.paletteAlpha, 0xFF, sizeof(ctx.paletteAlpha));
 
   // Allocate scanline buffers
-  ctx.currentRow = static_cast<uint8_t*>(malloc(rawRowBytes));
-  ctx.previousRow = static_cast<uint8_t*>(calloc(rawRowBytes, 1));
-  if (!ctx.currentRow || !ctx.previousRow) {
+  auto currentRow = makeUniqueNoThrow<uint8_t[]>(rawRowBytes);
+  auto previousRow = makeUniqueNoThrow<uint8_t[]>(rawRowBytes);
+  if (!currentRow || !previousRow) {
     LOG_ERR("PNG", "Failed to allocate scanline buffers (%u bytes each)", rawRowBytes);
-    free(ctx.currentRow);
-    free(ctx.previousRow);
     return false;
   }
+  memset(previousRow.get(), 0, rawRowBytes);
+  ctx.currentRow = currentRow.get();
+  ctx.previousRow = previousRow.get();
 
   // Scan for PLTE chunk (palette) and first IDAT chunk
   // We need to read chunks until we find IDAT, collecting PLTE along the way
   bool foundIdat = false;
+  bool foundPalette = false;
+  bool foundTransparency = false;
   while (!foundIdat) {
     uint32_t chunkLen;
     if (!readBE32(pngFile, chunkLen)) break;
@@ -533,37 +592,71 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
     if (pngFile.read(chunkType, 4) != 4) break;
 
     if (memcmp(chunkType, "PLTE", 4) == 0) {
-      int entries = chunkLen / 3;
-      if (entries > 256) entries = 256;
+      if (foundPalette || colorType == PNG_COLOR_GRAYSCALE || colorType == PNG_COLOR_GRAYSCALE_ALPHA || chunkLen == 0 ||
+          chunkLen > sizeof(ctx.palette) || chunkLen % 3 != 0) {
+        LOG_ERR("PNG", "Invalid PLTE length: %u", chunkLen);
+        return false;
+      }
+      foundPalette = true;
+      const int entries = chunkLen / 3;
+      if (colorType == PNG_COLOR_PALETTE && entries > (1 << bitDepth)) {
+        LOG_ERR("PNG", "PLTE has too many entries: %d", entries);
+        return false;
+      }
       ctx.paletteSize = entries;
-      size_t palBytes = entries * 3;
-      pngFile.read(ctx.palette, palBytes);
-      // Skip any remaining palette data
-      if (chunkLen > palBytes) pngFile.seekCur(chunkLen - palBytes);
-      pngFile.seekCur(4);  // CRC
+      if (pngFile.read(ctx.palette, chunkLen) != static_cast<int>(chunkLen) || !pngFile.seekCur(4)) return false;
+    } else if (memcmp(chunkType, "tRNS", 4) == 0) {
+      if (foundTransparency) {
+        LOG_ERR("PNG", "Duplicate tRNS chunk");
+        return false;
+      }
+      foundTransparency = true;
+      if (colorType == PNG_COLOR_PALETTE) {
+        if (ctx.paletteSize == 0 || chunkLen == 0 || chunkLen > static_cast<uint32_t>(ctx.paletteSize) ||
+            pngFile.read(ctx.paletteAlpha, chunkLen) != static_cast<int>(chunkLen)) {
+          LOG_ERR("PNG", "Invalid palette tRNS length: %u", chunkLen);
+          return false;
+        }
+      } else if (colorType == PNG_COLOR_GRAYSCALE && chunkLen == 2) {
+        if (!readBE16(pngFile, ctx.transparentGray)) break;
+        if (bitDepth < 16 && ctx.transparentGray >= (1u << bitDepth)) return false;
+        ctx.hasTransparentGray = true;
+      } else if (colorType == PNG_COLOR_RGB && chunkLen == 6) {
+        if (!readBE16(pngFile, ctx.transparentRed) || !readBE16(pngFile, ctx.transparentGreen) ||
+            !readBE16(pngFile, ctx.transparentBlue))
+          break;
+        if (bitDepth == 8 && (ctx.transparentRed > 255 || ctx.transparentGreen > 255 || ctx.transparentBlue > 255)) {
+          return false;
+        }
+        ctx.hasTransparentRgb = true;
+      } else {
+        LOG_ERR("PNG", "Invalid tRNS length/type: %u/%u", colorType, chunkLen);
+        return false;
+      }
+      if (!pngFile.seekCur(4)) return false;  // CRC
     } else if (memcmp(chunkType, "IDAT", 4) == 0) {
+      if (colorType == PNG_COLOR_PALETTE && ctx.paletteSize == 0) {
+        LOG_ERR("PNG", "Palette PNG has no PLTE chunk");
+        return false;
+      }
       ctx.chunkBytesRemaining = chunkLen;
       foundIdat = true;
     } else if (memcmp(chunkType, "IEND", 4) == 0) {
       break;
     } else {
       // Skip unknown chunk
-      pngFile.seekCur(chunkLen + 4);
+      if (!skipChunkDataAndCrc(pngFile, chunkLen)) return false;
     }
   }
 
   if (!foundIdat) {
     LOG_ERR("PNG", "No IDAT chunk found");
-    free(ctx.currentRow);
-    free(ctx.previousRow);
     return false;
   }
 
   // Initialize streaming decompressor with 32KB window for back-reference history
   if (!ctx.reader.init(true)) {
     LOG_ERR("PNG", "Failed to init inflate stream");
-    free(ctx.currentRow);
-    free(ctx.previousRow);
     return false;
   }
   ctx.reader.setFill(pngIdatFillCallback, &ctx);
@@ -615,54 +708,48 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   }
 
   // Allocate BMP row buffer
-  auto* rowBuffer = static_cast<uint8_t*>(malloc(bytesPerRow));
+  auto rowBuffer = makeUniqueNoThrow<uint8_t[]>(bytesPerRow);
   if (!rowBuffer) {
     LOG_ERR("PNG", "Failed to allocate row buffer");
-    free(ctx.currentRow);
-    free(ctx.previousRow);
     return false;
   }
 
   // Create ditherers (same as JpegToBmpConverter)
-  AtkinsonDitherer* atkinsonDitherer = nullptr;
-  FloydSteinbergDitherer* fsDitherer = nullptr;
-  Atkinson1BitDitherer* atkinson1BitDitherer = nullptr;
+  std::unique_ptr<AtkinsonDitherer> atkinsonDitherer;
+  std::unique_ptr<FloydSteinbergDitherer> fsDitherer;
+  std::unique_ptr<Atkinson1BitDitherer> atkinson1BitDitherer;
 
   if (oneBit) {
-    atkinson1BitDitherer = new Atkinson1BitDitherer(outWidth);
+    atkinson1BitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
+    if (!atkinson1BitDitherer || !atkinson1BitDitherer->valid()) return false;
   } else if (!USE_8BIT_OUTPUT) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = new AtkinsonDitherer(outWidth);
+      atkinsonDitherer = makeUniqueNoThrow<AtkinsonDitherer>(outWidth);
+      if (!atkinsonDitherer || !atkinsonDitherer->valid()) return false;
     } else if (USE_FLOYD_STEINBERG) {
-      fsDitherer = new FloydSteinbergDitherer(outWidth);
+      fsDitherer = makeUniqueNoThrow<FloydSteinbergDitherer>(outWidth);
+      if (!fsDitherer || !fsDitherer->valid()) return false;
     }
   }
 
   // Scaling accumulators
-  uint32_t* rowAccum = nullptr;
-  uint16_t* rowCount = nullptr;
+  std::unique_ptr<uint32_t[]> rowAccum;
+  std::unique_ptr<uint16_t[]> rowCount;
   int currentOutY = 0;
   uint32_t nextOutY_srcStart = 0;
 
   if (needsScaling) {
-    rowAccum = new uint32_t[outWidth]();
-    rowCount = new uint16_t[outWidth]();
+    rowAccum = makeUniqueNoThrow<uint32_t[]>(outWidth);
+    rowCount = makeUniqueNoThrow<uint16_t[]>(outWidth);
+    if (!rowAccum || !rowCount) return false;
     nextOutY_srcStart = scaleY_fp;
   }
 
   // Allocate grayscale row buffer - batch-convert each scanline to avoid
   // per-pixel getPixelGray() switch overhead in the hot loops
-  auto* grayRow = static_cast<uint8_t*>(malloc(width));
+  auto grayRow = makeUniqueNoThrow<uint8_t[]>(width);
   if (!grayRow) {
     LOG_ERR("PNG", "Failed to allocate grayscale row buffer");
-    delete[] rowAccum;
-    delete[] rowCount;
-    delete atkinsonDitherer;
-    delete fsDitherer;
-    delete atkinson1BitDitherer;
-    free(rowBuffer);
-    free(ctx.currentRow);
-    free(ctx.previousRow);
     return false;
   }
 
@@ -679,11 +766,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
     }
 
     // Batch-convert entire scanline to grayscale (one branch, tight loop)
-    convertScanlineToGray(ctx, grayRow);
+    convertScanlineToGray(ctx, grayRow.get());
 
     if (!needsScaling) {
       // Direct output (no scaling)
-      memset(rowBuffer, 0, bytesPerRow);
+      memset(rowBuffer.get(), 0, bytesPerRow);
 
       if (USE_8BIT_OUTPUT && !oneBit) {
         for (int x = 0; x < outWidth; x++) {
@@ -718,7 +805,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
         else if (fsDitherer)
           fsDitherer->nextRow();
       }
-      bmpOut.write(rowBuffer, bytesPerRow);
+      bmpOut.write(rowBuffer.get(), bytesPerRow);
       yieldDuringDecode(rowsSinceYield);
     } else {
       // Area-averaging scaling (same as JpegToBmpConverter)
@@ -748,7 +835,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
       // Output all rows whose boundaries we've crossed (handles both up and downscaling)
       // For upscaling, one source row may produce multiple output rows
       while (srcY_fp >= nextOutY_srcStart && currentOutY < outHeight) {
-        memset(rowBuffer, 0, bytesPerRow);
+        memset(rowBuffer.get(), 0, bytesPerRow);
 
         if (USE_8BIT_OUTPUT && !oneBit) {
           for (int x = 0; x < outWidth; x++) {
@@ -786,7 +873,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
             fsDitherer->nextRow();
         }
 
-        bmpOut.write(rowBuffer, bytesPerRow);
+        bmpOut.write(rowBuffer.get(), bytesPerRow);
         currentOutY++;
         yieldDuringDecode(rowsSinceYield);
 
@@ -799,8 +886,8 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
           continue;
         }
         // Moving to next source row - reset accumulators
-        memset(rowAccum, 0, outWidth * sizeof(uint32_t));
-        memset(rowCount, 0, outWidth * sizeof(uint16_t));
+        memset(rowAccum.get(), 0, outWidth * sizeof(uint32_t));
+        memset(rowCount.get(), 0, outWidth * sizeof(uint16_t));
       }
     }
 
@@ -809,17 +896,6 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
     ctx.previousRow = ctx.currentRow;
     ctx.currentRow = temp;
   }
-
-  // Clean up
-  free(grayRow);
-  delete[] rowAccum;
-  delete[] rowCount;
-  delete atkinsonDitherer;
-  delete fsDitherer;
-  delete atkinson1BitDitherer;
-  free(rowBuffer);
-  free(ctx.currentRow);
-  free(ctx.previousRow);
 
   if (success) {
     LOG_DBG("PNG", "Successfully converted PNG to BMP");
@@ -832,6 +908,22 @@ bool PngToBmpConverter::pngFileToBmpStream(HalFile& pngFile, Print& bmpOut, bool
   const int targetWidth = display.getDisplayHeight();
   const int targetHeight = display.getDisplayWidth();
   return pngFileToBmpStreamInternal(pngFile, bmpOut, targetWidth, targetHeight, false, crop);
+}
+
+bool PngToBmpConverter::pngFileToBmpFile(const char* pngPath, const char* bmpPath, const bool crop) {
+  if (!pngPath || !bmpPath) return false;
+  if (Storage.exists(bmpPath)) Storage.remove(bmpPath);
+
+  bool converted = false;
+  {
+    HalFile input;
+    HalFile output;
+    converted = Storage.openFileForRead("PNG", pngPath, input) && Storage.openFileForWrite("PNG", bmpPath, output) &&
+                pngFileToBmpStream(input, output, crop);
+    if (converted) output.flush();
+  }
+  if (!converted && Storage.exists(bmpPath)) Storage.remove(bmpPath);
+  return converted;
 }
 
 bool PngToBmpConverter::pngFileToBmpStreamWithSize(HalFile& pngFile, Print& bmpOut, int targetMaxWidth,

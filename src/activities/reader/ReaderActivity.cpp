@@ -15,8 +15,8 @@
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
 #include "XtcReaderActivity.h"
-#include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
+#include "activities/util/ImageViewerActivity.h"
 #include "components/UITheme.h"
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
@@ -26,7 +26,9 @@ bool ReaderActivity::isTxtFile(const std::string& path) {
          FsHelpers::hasMarkdownExtension(path);  // Treat .md as txt files (until we have a markdown reader)
 }
 
-bool ReaderActivity::isBmpFile(const std::string& path) { return FsHelpers::hasBmpExtension(path); }
+bool ReaderActivity::isImageFile(const std::string& path) {
+  return FsHelpers::hasBmpExtension(path) || FsHelpers::hasPngExtension(path);
+}
 
 int ReaderActivity::initialRefreshCountdown() const {
   if (!allowFastInitialRefresh) return 0;
@@ -123,8 +125,14 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
                                                                        initialRefreshCountdown(), openStartMs));
 }
 
-void ReaderActivity::onGoToBmpViewer(const std::string& path) {
-  activityManager.replaceActivity(std::make_unique<BmpViewerActivity>(renderer, mappedInput, path));
+void ReaderActivity::onGoToImageViewer(const std::string& path) {
+  auto viewer = makeUniqueNoThrow<ImageViewerActivity>(renderer, mappedInput, path);
+  if (!viewer) {
+    LOG_ERR("READER", "Failed to allocate image viewer");
+    onGoBack();
+    return;
+  }
+  activityManager.replaceActivity(std::move(viewer));
 }
 
 void ReaderActivity::onGoToXtcReader(std::unique_ptr<Xtc> xtc) {
@@ -152,8 +160,8 @@ void ReaderActivity::onEnter() {
   sdFontSystem.ensureLoaded(renderer);
 
   currentBookPath = initialBookPath;
-  if (isBmpFile(initialBookPath)) {
-    onGoToBmpViewer(initialBookPath);
+  if (isImageFile(initialBookPath)) {
+    onGoToImageViewer(initialBookPath);
   } else if (isXtcFile(initialBookPath)) {
     auto xtc = loadXtc(initialBookPath);
     if (!xtc) {

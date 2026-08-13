@@ -1,0 +1,4 @@
+add_executable(png_conversion_test PngConversionTest.cpp)
+target_link_libraries(png_conversion_test PRIVATE GTest::gtest_main crosspoint_test_common)
+target_include_directories(png_conversion_test PRIVATE ${REPO_ROOT}/lib/PngToBmpConverter)
+gtest_discover_tests(png_conversion_test)

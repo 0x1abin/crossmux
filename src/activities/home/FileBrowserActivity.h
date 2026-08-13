@@ -11,7 +11,7 @@
 
 class FileBrowserActivity final : public Activity {
  public:
-  // Books = standard reader browser; PickFirmware = filter to .bin only and return path via ActivityResult.
+  // Picker modes filter to one file type and return its path via ActivityResult.
   enum class Mode { Books, PickFirmware };
 
  private:
@@ -36,6 +36,7 @@ class FileBrowserActivity final : public Activity {
 
   // Data loading
   void loadFiles();
+  bool isPickerMode() const { return mode != Mode::Books; }
   size_t findEntry(const std::string& name) const;
   bool usesIconLayout() const;
   int iconIndexFromPoint(int x, int y, int contentTop, int contentHeight) const;
