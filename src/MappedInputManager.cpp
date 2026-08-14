@@ -287,6 +287,21 @@ bool MappedInputManager::wasBackGesture() const {
   return wasEdgeSwipe(fui::ScreenEdge::Left);
 }
 
+bool MappedInputManager::wasHeaderTapBack() const {
+  // Tap on the header (title bar) acts as Return on touch-only devices that
+  // lack a dedicated front Back key (eego-a4). The header occupies
+  // [topPadding, topPadding + headerHeight); tapping it pops the activity.
+  if (!gpio.hasTouch()) return false;
+  int x = 0;
+  int y = 0;
+  if (!wasScreenTapped(x, y)) return false;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int headerBottom = metrics.topPadding + metrics.headerHeight;
+  const bool hit = y >= metrics.topPadding && y < headerBottom;
+  if (hit) rememberTouchHeldTime();
+  return hit;
+}
+
 bool MappedInputManager::wasMenuGesture() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
 bool MappedInputManager::wasHomeGesture() const {
@@ -295,12 +310,15 @@ bool MappedInputManager::wasHomeGesture() const {
 }
 
 bool MappedInputManager::wasPressed(const Button button) const {
-  if (button == Button::Back && wasBackGesture()) return true;
+  // Back also fires on the front touch key (home key) short press or a tap on
+  // the header (title bar) — so touch-only devices without a dedicated Back
+  // key (eego-a4) still have an obvious Return target.
+  if (button == Button::Back && (wasBackGesture() || gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
   return mapButton(button, &HalGPIO::wasPressed);
 }
 
 bool MappedInputManager::wasReleased(const Button button) const {
-  if (button == Button::Back && wasBackGesture()) return true;
+  if (button == Button::Back && (wasBackGesture() || gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
   return mapButton(button, &HalGPIO::wasReleased);
 }
 

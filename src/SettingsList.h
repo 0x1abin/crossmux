@@ -1,6 +1,7 @@
 #pragma once
 
 #include <BoardConfig.h>
+#include <HalFrontlight.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <SdCardFontRegistry.h>
@@ -442,7 +443,13 @@ inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
     return false;
   }
 #else
-  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS && !BoardConfig::hasPwmFrontlight()) return false;
+  // Frontlight settings are only shown when the hardware actually answers the
+  // probe: some retail A4 units ship WITHOUT a frontlight (LM3630A absent), and
+  // BoardConfig::hasI2cFrontlight() alone would show the entry anyway. Gate on
+  // the runtime probe result (Frontlight.present()).
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS && !BoardConfig::hasPwmFrontlight() &&
+      !(BoardConfig::hasI2cFrontlight() && Frontlight.present()))
+    return false;
   if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !BoardConfig::hasColorTemperatureFrontlight()) return false;
 #endif
   if (BoardConfig::hasTouch() &&
