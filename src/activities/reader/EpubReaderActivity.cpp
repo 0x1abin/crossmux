@@ -1858,17 +1858,28 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // identical serial timing. Image pages take the blocking double-FAST path
   // below (no async refresh is ever started), so they'd spend the buffers with
   // nothing in flight to overlap.
+#if FREEINK_DEVICE_EEGO_A4
+  // A4: text AA pages skip the BW frame entirely (single gray pass below), so
+  // there is nothing to overlap — keep the BW refresh synchronous there.
   const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
+#else
+  // Other devices keep the upstream behavior: BW frame shown first, then the
+  // gray pass overlaps the BW refresh.
+  const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
+#endif
   auto renderGrayscalePass = [&]() {
     if (needsTextGrayscale) {
       page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     } else {
       page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     }
-    // Include the status bar in the gray pass so the final anti-aliased frame
-    // keeps the bottom UI. Without this the gray pass only re-renders the body
-    // and wipes the status bar that the earlier BW frame drew.
+#if FREEINK_DEVICE_EEGO_A4
+    // A4: include the status bar in the gray pass so the final anti-aliased
+    // frame keeps the bottom UI. Without this the gray pass only re-renders
+    // the body and wipes the status bar that the earlier BW frame drew.
+    // (Other devices keep the upstream gray-pass contents.)
     renderStatusBar();
+#endif
   };
 
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
@@ -1915,12 +1926,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   } else {
     // Async form: start the waveform and return so the grayscale plane rendering
     // below overlaps the panel's refresh time instead of following it.
-    // With text AA on there is no BW frame to show first: skipping this BW
-    // refresh avoids the BW-then-gray double flash, and the single gray pass
-    // below (which now includes the status bar) is the only display.
+#if FREEINK_DEVICE_EEGO_A4
+    // A4: with text AA on there is no BW frame to show first — skipping this
+    // BW refresh avoids the BW-then-gray double flash, and the single gray
+    // pass below (which now includes the status bar) is the only display.
     if (!needsTextGrayscale) {
       ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
     }
+#else
+    // Other devices keep the upstream behavior: always show the BW frame
+    // first, then overlay the gray pass.
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+#endif
   }
   const auto tDisplay = millis();
 

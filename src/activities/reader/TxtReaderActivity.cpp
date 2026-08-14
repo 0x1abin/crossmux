@@ -699,8 +699,9 @@ void TxtReaderActivity::renderPage() {
   // (progress, index cache) so they cannot interleave mid-FAT-op.
   HalStorage::StorageLock storageLock;
 
+#if FREEINK_DEVICE_EEGO_A4
   if (SETTINGS.textAntiAliasing) {
-    // Single-refresh grayscale path: content + status bar are already in the
+    // A4 single-refresh grayscale path: content + status bar are already in the
     // framebuffer, so renderAntiAliased stores them, clears, re-renders the same
     // content AND status bar in gray and displays once. We skip the BW display
     // so there is no BW-then-AA double refresh (which flashed and left the bottom
@@ -713,6 +714,14 @@ void TxtReaderActivity::renderPage() {
   } else {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
+#else
+  // Other devices keep the upstream behavior: show the BW frame first, then
+  // the gray pass.
+  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  if (SETTINGS.textAntiAliasing) {
+    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+  }
+#endif
   const auto tDisplay = millis();
   const auto tEnd = millis();
   LOG_DBG("TRS", "Page render: prewarm=%lums bw_render=%lums display=%lums aa=%lums total=%lums", tPrewarm - t0,
