@@ -78,13 +78,13 @@ jobs:
           name: release-build
           path: .
 
-      - name: Read OTA summary from tag
+      - name: Read OTA release notes from tag
         run: |
           if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
             git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > ota-tag-message.txt
-            python3 scripts/generate_ota_summary.py --input ota-tag-message.txt --output ota-summary.md
+            python3 scripts/generate_ota_notes.py --input ota-tag-message.txt --output ota-notes.md
           else
-            echo "::notice::OTA summary omitted: release tag is not annotated"
+            echo "::notice::OTA release notes omitted: release tag is not annotated"
           fi
 
       # Prefer curated notes for a named release. When none are checked in,
@@ -112,9 +112,9 @@ jobs:
               fi
             } > release-body.md
           fi
-          if [ -s ota-summary.md ]; then
+          if [ -s ota-notes.md ]; then
             printf '\n' >> release-body.md
-            cat ota-summary.md >> release-body.md
+            cat ota-notes.md >> release-body.md
           fi
           echo "---- release-body.md ----"
           cat release-body.md
