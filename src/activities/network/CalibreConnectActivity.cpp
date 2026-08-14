@@ -6,6 +6,7 @@
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "components/SubpageLayout.h"
@@ -34,16 +35,19 @@ void CalibreConnectActivity::onEnter() {
   exitRequested = false;
 
   if (WiFi.status() != WL_CONNECTED) {
-    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               const auto& wifi = std::get<WifiResult>(result.data);
-                               connectedIP = wifi.ip;
-                               connectedSSID = wifi.ssid;
-                             }
-                             onWifiSelectionComplete(!result.isCancelled);
-                           });
+    if (!startActivityForResultWith<WifiSelectionActivity>([this](const ActivityResult& result) {
+          if (!result.isCancelled) {
+            const auto& wifi = std::get<WifiResult>(result.data);
+            connectedIP = wifi.ip;
+            connectedSSID = wifi.ssid;
+          }
+          onWifiSelectionComplete(!result.isCancelled);
+        })) {
+      state = CalibreConnectState::ERROR;
+      requestUpdate();
+    }
   } else {
+    NetworkStartup::prepare(renderer);
     connectedIP = WiFi.localIP().toString().c_str();
     connectedSSID = WiFi.SSID().c_str();
     startWebServer();

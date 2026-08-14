@@ -18,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -83,7 +84,6 @@ void FontDownloadActivity::onEnter() {
 }
 
 void FontDownloadActivity::startWifiSelection() {
-  WiFi.mode(WIFI_STA);
   // ActivityManager owns the Wi-Fi picker across frames, so it must live on the heap.
   auto wifiSelection = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
   if (!wifiSelection) {
@@ -113,7 +113,6 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
 
   {
     RenderLock lock(*this);
-    sdFontSystem.releaseLoadedFont(renderer);
     state_ = LOADING_MANIFEST;
   }
   requestUpdateAndWait();
@@ -371,6 +370,7 @@ bool FontDownloadActivity::computeFileCrc32(const char* path, uint32_t& outCrc) 
 }
 
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(ManifestFamily& family) {
+  NetworkStartup::prepare(renderer);
   const bool wasInstalled = family.installed;
   auto discardIncompleteFamily = [this, &family, wasInstalled] {
     if (!wasInstalled) fontInstaller_.deleteFamily(family.name.c_str());

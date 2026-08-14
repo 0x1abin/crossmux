@@ -119,7 +119,6 @@ void OtaUpdateActivity::beginWifiSelection() {
   {
     RenderLock lock(*this);
     state = WIFI_SELECTION;
-    sdFontSystem.releaseLoadedFont(renderer);
   }
 
   LOG_DBG("OTA", "Launching WifiSelectionActivity...");

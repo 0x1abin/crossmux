@@ -10,6 +10,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -474,6 +475,7 @@ void OpdsBookBrowserActivity::performSearch(const std::string& query) {
 
 void OpdsBookBrowserActivity::checkAndConnectWifi() {
   if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
+    NetworkStartup::prepare(renderer);
     state = BrowserState::LOADING;
     statusMessage = tr(STR_LOADING);
     requestUpdate();
@@ -487,8 +489,12 @@ void OpdsBookBrowserActivity::launchWifiSelection() {
   state = BrowserState::WIFI_SELECTION;
   requestUpdate();
 
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  if (!startActivityForResultWith<WifiSelectionActivity>(
+          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); })) {
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_MEMORY_ERROR);
+    requestUpdate();
+  }
 }
 
 void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {

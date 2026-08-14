@@ -17,6 +17,7 @@
 #include "../../ActivityResult.h"
 #include "../../network/WifiSelectionActivity.h"
 #include "CrossPointSettings.h"
+#include "NetworkStartup.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
@@ -178,6 +179,7 @@ void StandbyActivity::startTimeSync() {
   // Another activity (e.g. Settings → WiFi) may have already connected the
   // device. Skip our own WiFi.begin in that case and request a clock sync.
   if (WiFi.status() == WL_CONNECTED) {
+    NetworkStartup::prepare(renderer);
     LOG_DBG("STANDBY", "WiFi already connected, skipping silent attempt");
     beginClockSync();
     return;
@@ -218,7 +220,7 @@ bool StandbyActivity::trySilentWifiConnect() {
   }
 
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+  NetworkStartup::setMode(renderer, WIFI_STA);
   // Fresh-slate disconnect (radio off + erase cached AP) so the next begin()
   // latches the exact creds we just loaded, not whatever the radio retained
   // from a previous session. The disconnect(false) form used by the teardown

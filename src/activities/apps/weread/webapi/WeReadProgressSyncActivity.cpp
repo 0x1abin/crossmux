@@ -19,6 +19,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "ProgressMapper.h"
 #include "ReadingStatsStore.h"
 #include "SilentRestart.h"
@@ -89,6 +90,7 @@ void WeReadProgressSyncActivity::onEnter() {
     return;
   }
 
+  NetworkStartup::prepare(renderer);
   wifiActivated_ = true;
   if (WiFi.status() == WL_CONNECTED) {
     state_ = State::Starting;

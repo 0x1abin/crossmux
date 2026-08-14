@@ -11,6 +11,7 @@
 
 #include "MappedInputManager.h"
 #include "NetworkModeSelectionActivity.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
@@ -141,20 +142,18 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
 
   if (mode == NetworkMode::JOIN_NETWORK) {
     // STA mode - launch WiFi selection
-    LOG_DBG("WEBACT", "Turning on WiFi (STA mode)...");
-    WiFi.mode(WIFI_STA);
-
     state = WebServerActivityState::WIFI_SELECTION;
     LOG_DBG("WEBACT", "Launching WifiSelectionActivity...");
-    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               const auto& wifi = std::get<WifiResult>(result.data);
-                               connectedIP = wifi.ip;
-                               connectedSSID = wifi.ssid;
-                             }
-                             onWifiSelectionComplete(!result.isCancelled);
-                           });
+    if (!startActivityForResultWith<WifiSelectionActivity>([this](const ActivityResult& result) {
+          if (!result.isCancelled) {
+            const auto& wifi = std::get<WifiResult>(result.data);
+            connectedIP = wifi.ip;
+            connectedSSID = wifi.ssid;
+          }
+          onWifiSelectionComplete(!result.isCancelled);
+        })) {
+      onGoHome();
+    }
   } else {
     // AP mode - start access point
     state = WebServerActivityState::AP_STARTING;
@@ -195,7 +194,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
 
   // Configure and start the AP
-  WiFi.mode(WIFI_AP);
+  NetworkStartup::setMode(renderer, WIFI_AP);
   delay(100);
 
   // Start soft AP

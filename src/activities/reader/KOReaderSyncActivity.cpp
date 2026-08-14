@@ -17,6 +17,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "ReaderUtils.h"
 #include "SilentRestart.h"
 #include "activities/ActivityManager.h"
@@ -351,6 +352,7 @@ void KOReaderSyncActivity::onEnter() {
   }
 
   // Past this point every path uses WiFi.
+  NetworkStartup::prepare(renderer);
   wifiActivated = true;
 
   // Check if already connected (e.g. from settings page auth)
@@ -362,8 +364,12 @@ void KOReaderSyncActivity::onEnter() {
 
   // Launch WiFi selection subactivity
   LOG_DBG("KOSync", "Launching WifiSelectionActivity...");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  if (!startActivityForResultWith<WifiSelectionActivity>(
+          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); })) {
+    state = SYNC_FAILED;
+    statusMessage = tr(STR_MEMORY_ERROR);
+    requestUpdate();
+  }
 }
 
 void KOReaderSyncActivity::onExit() {
