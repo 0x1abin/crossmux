@@ -1,6 +1,7 @@
 #include "ActivityManager.h"
 
 #include <FontCacheManager.h>
+#include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
 
@@ -44,17 +45,34 @@
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
+extern HalGPIO gpio;  // defined in main.cpp
+
+// How long the main task waits for the render task to advance its heartbeat
+// before declaring it dead and restarting it. Generous to tolerate slow renders
+// (cover decode, gray refresh) without false positives.
+static constexpr unsigned long kRenderWatchdogTimeoutMs = 10000;
+
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
   constexpr BaseType_t renderTaskCore = 1;
 #else
   constexpr BaseType_t renderTaskCore = 0;
 #endif
+  // Render task stack: the S3 targets (eego A4 etc.) prewarm fonts, decode
+  // covers and run Bidi inside this task, and measured high-water marks there
+  // exceed a tight 8KB (an overflow aborts the task and leaves a black panel).
+  // C3 targets (X3/X4) keep the historical 8KB so no extra DRAM is resident on
+  // the RAM-constrained C3; the per-device size is picked at compile time.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  constexpr uint32_t kRenderTaskStackBytes = 16384;
+#else
+  constexpr uint32_t kRenderTaskStackBytes = 8192;
+#endif
   xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
-                          8192,               // Stack size
-                          this,               // Parameters
-                          1,                  // Priority
-                          &renderTaskHandle,  // Task handle
+                          kRenderTaskStackBytes,  // Stack size (see above)
+                          this,                   // Parameters
+                          1,                      // Priority
+                          &renderTaskHandle,      // Task handle
                           renderTaskCore  // Keep long renders/cover decodes off CPU 0's idle watchdog when available
   );
   assert(renderTaskHandle != nullptr && "Failed to create render task");
@@ -71,10 +89,18 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
-    if (currentActivity) {
+    // Skip rendering when a Push/Pop/Replace is pending: the main task is
+    // waiting to acquire this lock to swap currentActivity. Rendering the
+    // old activity here would re-hold the lock for the entire render duration,
+    // starving the main task and freezing the device.
+    if (currentActivity && pendingAction.load() == PendingAction::None) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
     }
+    // Advance the heartbeat so the main task's watchdog can tell this task is
+    // still alive (not crashed/aborted with a black, frozen panel).
+    renderHeartbeat.store(renderHeartbeat.load() + 1, std::memory_order_release);
+    renderRequestOutstanding.store(false, std::memory_order_release);
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
     taskENTER_CRITICAL(&activityManagerSpinlock);
@@ -87,8 +113,51 @@ void ActivityManager::renderTaskLoop() {
   }
 }
 
+void ActivityManager::restartRenderTask() {
+  LOG_ERR("ACT", "Render task heartbeat stalled; restarting render task");
+  renderRequestOutstanding.store(false, std::memory_order_release);
+
+  // The crashed task may have held the render semaphore when it died. Since a
+  // counting semaphore has no owner to release, recreate it so no task is stuck
+  // waiting forever.
+  if (renderingMutex) {
+    vSemaphoreDelete(renderingMutex);
+  }
+  renderingMutex = xSemaphoreCreateCounting(1, 1);
+  assert(renderingMutex && "Failed to recreate rendering semaphore");
+  renderLockHolder.store(nullptr);
+
+#if defined(configNUM_CORES) && configNUM_CORES > 1
+  constexpr BaseType_t renderTaskCore = 1;
+#else
+  constexpr BaseType_t renderTaskCore = 0;
+#endif
+
+  // Remove any leftover (dead) render task before creating a fresh one.
+  if (renderTaskHandle) {
+    vTaskDelete(renderTaskHandle);
+    renderTaskHandle = nullptr;
+  }
+  renderHeartbeat.store(0, std::memory_order_release);
+  lastRenderHeartbeatSeen = 0;
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  constexpr uint32_t kRenderTaskStackBytes = 16384;
+#else
+  constexpr uint32_t kRenderTaskStackBytes = 8192;
+#endif
+  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender", kRenderTaskStackBytes, this, 1,
+                          &renderTaskHandle, renderTaskCore);
+  assert(renderTaskHandle != nullptr && "Failed to recreate render task");
+
+  // Re-render the current activity so the panel recovers from the black screen.
+  renderRequestOutstanding.store(true, std::memory_order_release);
+  lastRenderRequestMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+  xTaskNotify(renderTaskHandle, 1, eIncrement);
+}
+
 void ActivityManager::loop() {
-  if (currentActivity) {
+  if (currentActivity && pendingAction.load() == PendingAction::None) {
     if (handleMainTabInput()) return;
 
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
@@ -103,14 +172,15 @@ void ActivityManager::loop() {
     currentActivity->loop();
   }
 
-  while (pendingAction != PendingAction::None) {
-    if (pendingAction == PendingAction::Pop) {
+  while (pendingAction.load() != PendingAction::None) {
+    if (pendingAction.load() == PendingAction::Pop) {
+      if (RenderLock::peek()) break;
       RenderLock lock;
 
       if (!currentActivity) {
         // Should never happen in practice
         LOG_ERR("ACT", "Pop set but currentActivity is null; ignoring pop request");
-        pendingAction = PendingAction::None;
+        pendingAction.store(PendingAction::None);
         continue;
       }
 
@@ -118,7 +188,7 @@ void ActivityManager::loop() {
 
       // Destroy the current activity
       exitActivity(lock);
-      pendingAction = PendingAction::None;
+      pendingAction.store(PendingAction::None);
 
       if (stackActivities.empty()) {
         LOG_DBG("ACT", "No more activities on stack, going home");
@@ -142,7 +212,7 @@ void ActivityManager::loop() {
         }
 
         // Request an update to ensure the popped activity gets re-rendered
-        if (pendingAction == PendingAction::None) {
+        if (pendingAction.load() == PendingAction::None) {
           requestUpdate();
         }
 
@@ -152,9 +222,10 @@ void ActivityManager::loop() {
 
     } else if (pendingActivity) {
       // Current activity has requested a new activity to be launched
+      if (RenderLock::peek()) break;
       RenderLock lock;
 
-      if (pendingAction == PendingAction::Replace) {
+      if (pendingAction.load() == PendingAction::Replace) {
         // Destroy the current activity
         exitActivity(lock);
         // Clear the stack
@@ -162,13 +233,21 @@ void ActivityManager::loop() {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
         }
-      } else if (pendingAction == PendingAction::Push) {
+      } else if (pendingAction.load() == PendingAction::Push) {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
       }
-      pendingAction = PendingAction::None;
+      pendingAction.store(PendingAction::None);
       currentActivity = std::move(pendingActivity);
+
+      // Drop any one-shot tap/release edge events the outgoing activity already
+      // consumed this frame. The SDK's InputManager clears these in update(),
+      // but a pushActivity runs mid-frame; without this, the incoming activity
+      // re-reads the same tap and double-activates (observed crash with WeRead:
+      // the second activation hit WiFi/render-lock interleaving and tripped
+      // FreeRTOS xTaskPriorityDisinherit on the rendering mutex).
+      gpio.clearTouchTapEvent();
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -178,12 +257,57 @@ void ActivityManager::loop() {
     }
   }
 
-  if (requestedUpdate.exchange(false)) {
+  if (pendingAction.load() == PendingAction::None && requestedUpdate.exchange(false)) {
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
+      // Record that a render is outstanding so the watchdog below can detect a
+      // render task that crashed mid-render and abandoned the panel.
+      lastRenderRequestMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+      renderRequestOutstanding.store(true, std::memory_order_release);
     }
+  }
+
+  // Render task watchdog: if a render was requested but the render task never
+  // advanced its heartbeat, the task may have crashed. Restart it ONLY when the
+  // task is genuinely gone (eTaskGetState says deleted/suspended). A task that
+  // is merely slow — a long AA grayscale render while the CPU is downclocked to
+  // 80 MHz, or a busy-wait on the panel — is still alive and must NOT be
+  // vTaskDelete()d: killing it mid-render leaves the display/SPI state
+  // incomplete and the recreated semaphore desynchronized from the old holder,
+  // which is what turned a slow render into a hard hang/reboot.
+  if (renderRequestOutstanding.load(std::memory_order_acquire)) {
+    const unsigned long nowMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    // The heartbeat only advances AFTER render() returns, so a render that is
+    // legitimately in progress (the render task is currently holding the render
+    // lock) can run longer than the watchdog timeout. Use a two-tier timeout:
+    //  - No lock held: short timeout (task died before acquiring lock)
+    //  - Lock held: long timeout (legitimate long render OR crashed task)
+    // The long timeout must exceed any legitimate render (AA grayscale: ~15s,
+    // plus one 30s waitBusy timeout = ~45s worst case).
+    constexpr unsigned long kRenderCrashTimeoutMs = 45000;  // must exceed the ~45s legal worst case above
+    const bool heartbeatStalled = (renderHeartbeat.load(std::memory_order_acquire) == lastRenderHeartbeatSeen);
+    if (heartbeatStalled) {
+      const unsigned long effectiveTimeout =
+          (renderLockHolder.load() != nullptr) ? kRenderCrashTimeoutMs : kRenderWatchdogTimeoutMs;
+      if ((nowMs - lastRenderRequestMs) > effectiveTimeout) {
+        const eTaskState taskState = eTaskGetState(renderTaskHandle);
+        if (taskState == eDeleted || taskState == eSuspended) {
+          // Task really is gone (deleted or suspended by something else) —
+          // restarting is safe.
+          restartRenderTask();
+        } else {
+          // Task is alive (running/ready/blocked on the panel busy-wait or a
+          // long render). Do NOT kill it; just warn and keep waiting. The
+          // heartbeat comparison above already guards against spurious logs.
+          LOG_INF("ACT", "Render task slow but alive (state=%d); waiting", static_cast<int>(taskState));
+        }
+      }
+    }
+    lastRenderHeartbeatSeen = renderHeartbeat.load(std::memory_order_acquire);
+  } else {
+    lastRenderHeartbeatSeen = renderHeartbeat.load(std::memory_order_acquire);
   }
 }
 
@@ -501,10 +625,12 @@ void ActivityManager::requestUpdateAndWait() {
   // Atomic section to perform checks
   taskENTER_CRITICAL(&activityManagerSpinlock);
   auto currTaskHandler = xTaskGetCurrentTaskHandle();
-  auto mutexHolder = xSemaphoreGetMutexHolder(renderingMutex);
+  // renderingMutex is now a counting semaphore (no priority inheritance), so
+  // xSemaphoreGetMutexHolder() can no longer report the owner. RenderLock
+  // records the holder in renderLockHolder instead.
+  bool holdingRenderLock = (renderLockHolder.load() == currTaskHandler);
   bool isRenderTask = (currTaskHandler == renderTaskHandle);
   bool alreadyWaiting = (waitingTaskHandle != nullptr);
-  bool holdingRenderLock = (mutexHolder == currTaskHandler);
   if (!alreadyWaiting && !isRenderTask && !holdingRenderLock) {
     waitingTaskHandle = currTaskHandler;
   }
@@ -527,17 +653,20 @@ void ActivityManager::requestUpdateAndWait() {
 
 RenderLock::RenderLock() {
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+  activityManager.renderLockHolder.store(xTaskGetCurrentTaskHandle());
   isLocked = true;
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+  activityManager.renderLockHolder.store(xTaskGetCurrentTaskHandle());
   isLocked = true;
 }
 
 RenderLock::~RenderLock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
+    activityManager.renderLockHolder.store(nullptr);
     isLocked = false;
   }
 }
@@ -545,6 +674,7 @@ RenderLock::~RenderLock() {
 void RenderLock::unlock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
+    activityManager.renderLockHolder.store(nullptr);
     isLocked = false;
   }
 }

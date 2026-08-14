@@ -11,13 +11,17 @@
 HalStorage HalStorage::instance;
 
 HalStorage::HalStorage() {
-  // Recursive so the same task can re-enter StorageLock without self-deadlock.
-  // openFileForRead/Write take the lock and then assign to a HalFile&
-  // out-param; if that out-param already held an Impl, its destructor takes
-  // the lock again to close the prior FsFile under serialization (see
-  // HalFile::Impl::~Impl below). Priority inheritance still applies to
-  // recursive mutexes.
-  storageMutex = xSemaphoreCreateRecursiveMutex();
+  // A counting semaphore (max=1, initial=1) provides mutual exclusion but has NO
+  // priority inheritance. The render task (core 1) and the main task (core 0)
+  // hand StorageLock across cores, and a priority-inheriting recursive mutex
+  // trips ESP-IDF SMP's xTaskPriorityDisinherit assert (black panels). Recursion
+  // is implemented manually in StorageLock via storageHolder/storageDepth, so we
+  // keep the same re-enter semantics (openFileForRead/Write take the lock and
+  // assign to a HalFile&; if that out-param already held an Impl, its destructor
+  // takes the lock again to close the prior FsFile under serialization — see
+  // HalFile::Impl::~Impl below) without the cross-core priority-inheritance give
+  // path.
+  storageMutex = xSemaphoreCreateCounting(1, 1);
   assert(storageMutex != nullptr);
 }
 
@@ -29,11 +33,29 @@ bool HalStorage::ready() const { return SDCard.ready(); }
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
-class HalStorage::StorageLock {
- public:
-  StorageLock() { xSemaphoreTakeRecursive(HalStorage::getInstance().storageMutex, portMAX_DELAY); }
-  ~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
-};
+HalStorage::StorageLock::StorageLock() {
+  HalStorage& self = HalStorage::getInstance();
+  const TaskHandle_t me = xTaskGetCurrentTaskHandle();
+  if (self.storageHolder.load() == me) {
+    // Re-entered by the same task: just bump the recursion depth.
+    self.storageDepth.fetch_add(1);
+    return;
+  }
+  xSemaphoreTake(self.storageMutex, portMAX_DELAY);
+  self.storageHolder.store(me);
+  self.storageDepth.store(1);
+}
+
+HalStorage::StorageLock::~StorageLock() {
+  HalStorage& self = HalStorage::getInstance();
+  if (self.storageDepth.load() > 1) {
+    self.storageDepth.fetch_sub(1);
+    return;
+  }
+  self.storageHolder.store(nullptr);
+  self.storageDepth.store(0);
+  xSemaphoreGive(self.storageMutex);
+}
 
 bool HalStorage::getSpace(uint64_t& totalBytes, uint64_t& freeBytes) {
   StorageLock lock;
