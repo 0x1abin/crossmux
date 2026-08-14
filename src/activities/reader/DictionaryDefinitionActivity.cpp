@@ -1,8 +1,10 @@
 #include "DictionaryDefinitionActivity.h"
 
+#include <Arduino.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -11,13 +13,13 @@
 #include "CrossPointSettings.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/HtmlToPlainText.h"
 
 namespace {
 
 // Longest measurable/drawable span. Wrapped lines stay under the screen width
 // (far below this); only pathological unbreakable tokens are split at this cap.
 constexpr size_t MAX_LINE_BYTES = 191;
+constexpr size_t LINE_HEAP_HEADROOM_BYTES = 8 * 1024;
 
 // Body text left/right inset, matching the reader's default feel.
 constexpr int SIDE_PADDING = 20;
@@ -29,8 +31,8 @@ void DictionaryDefinitionActivity::onEnter() {
   // Normalize StarDict multi-type separators so the wrap loop and the
   // C-string font APIs below both see the whole definition.
   std::replace(definition.begin(), definition.end(), '\0', '\n');
-  definition = htmlToPlainText(definition);
-  wrapText();
+  lowMemory = !wrapText();
+  if (lowMemory) std::vector<Line>().swap(lines);
   requestUpdate();
 }
 
@@ -46,9 +48,29 @@ int DictionaryDefinitionActivity::measureSpan(const int fontId, const char* text
 // lines survive as paragraph spacing; NULs from multi-type StarDict entries
 // were normalized to newlines in onEnter); '\r' is dropped by treating it as
 // a space at a token edge.
-void DictionaryDefinitionActivity::wrapText() {
+bool DictionaryDefinitionActivity::appendLine(const uint32_t start, const uint32_t end) {
+  if (lines.size() == lines.capacity()) {
+    const size_t capacity = std::max<size_t>(16, lines.capacity() * 2);
+    const size_t bytes = capacity * sizeof(Line);
+    if (ESP.getMaxAllocHeap() < bytes + LINE_HEAP_HEADROOM_BYTES) {
+      LOG_ERR("DICT", "Low heap for %u wrapped definition lines", static_cast<unsigned>(capacity));
+      return false;
+    }
+    lines.reserve(capacity);
+  }
+  lines.push_back({start, static_cast<uint16_t>(end - start)});
+  return true;
+}
+
+bool DictionaryDefinitionActivity::wrapText() {
   lines.clear();
-  lines.reserve(definition.size() / 32 + 8);
+  const size_t initialCapacity = definition.size() / 32 + 8;
+  const size_t initialBytes = initialCapacity * sizeof(Line);
+  if (ESP.getMaxAllocHeap() < initialBytes + LINE_HEAP_HEADROOM_BYTES) {
+    LOG_ERR("DICT", "Low heap for %u initial definition lines", static_cast<unsigned>(initialCapacity));
+    return false;
+  }
+  lines.reserve(initialCapacity);
 
   const int fontId = SETTINGS.getReaderFontId();
   // SD-card fonts: merge every definition codepoint into the persistent
@@ -77,17 +99,18 @@ void DictionaryDefinitionActivity::wrapText() {
   int lineWidth = 0;
 
   const auto flushLine = [&](uint32_t nextStart) {
-    lines.push_back({lineStart, static_cast<uint16_t>(lineEnd - lineStart)});
+    if (!appendLine(lineStart, lineEnd)) return false;
     lineStart = nextStart;
     lineEnd = nextStart;
     lineWidth = 0;
+    return true;
   };
 
   uint32_t i = 0;
   while (i < n) {
     const char c = text[i];
     if (c == '\n' || c == '\0') {
-      flushLine(i + 1);
+      if (!flushLine(i + 1)) return false;
       i++;
       continue;
     }
@@ -119,7 +142,7 @@ void DictionaryDefinitionActivity::wrapText() {
       lineEnd = tokenStart + tokenLen;
       lineWidth += spaceWidth + tokenWidth;
     } else {
-      flushLine(tokenStart);
+      if (!flushLine(tokenStart)) return false;
       lineEnd = tokenStart + tokenLen;
       lineWidth = tokenWidth;
     }
@@ -144,18 +167,19 @@ void DictionaryDefinitionActivity::wrapText() {
       }
       const uint32_t rest = lineStart + lastFit;
       lineEnd = rest;
-      flushLine(rest);
+      if (!flushLine(rest)) return false;
       lineEnd = rest + (len - lastFit);
       lineWidth = measureSpan(fontId, text + lineStart, lineEnd - lineStart);
     }
   }
-  if (lineEnd > lineStart) flushLine(n);
+  if (lineEnd > lineStart && !flushLine(n)) return false;
 
   // Trim trailing blank lines so the last page is not empty padding.
   while (!lines.empty() && lines.back().len == 0) lines.pop_back();
 
   totalPages = std::max(1, (static_cast<int>(lines.size()) + linesPerPage - 1) / linesPerPage);
   currentPage = 0;
+  return true;
 }
 
 void DictionaryDefinitionActivity::loop() {
@@ -215,6 +239,11 @@ void DictionaryDefinitionActivity::drawBody(const int fontId, const int x, const
 
 void DictionaryDefinitionActivity::render(RenderLock&&) {
   renderer.clearScreen();
+
+  if (lowMemory) {
+    GUI.drawPopup(renderer, tr(STR_DICT_LOW_MEMORY));
+    return;
+  }
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto orientation = renderer.getOrientation();

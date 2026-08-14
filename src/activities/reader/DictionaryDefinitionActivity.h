@@ -14,7 +14,7 @@ class DictionaryDefinitionActivity final : public Activity {
  public:
   explicit DictionaryDefinitionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string headword,
                                         std::string definition)
-      : Activity("DictionaryDefinition", renderer, mappedInput),
+      : Activity("DictDefinition", renderer, mappedInput),
         headword(std::move(headword)),
         definition(std::move(definition)) {}
 
@@ -30,7 +30,8 @@ class DictionaryDefinitionActivity final : public Activity {
     uint16_t len;
   };
 
-  void wrapText();
+  bool wrapText();
+  bool appendLine(uint32_t start, uint32_t end);
   int measureSpan(int fontId, const char* text, size_t len) const;
   void drawBody(int fontId, int x, int startY) const;
 
@@ -42,5 +43,6 @@ class DictionaryDefinitionActivity final : public Activity {
   int currentPage = 0;
   int totalPages = 1;
   int linesPerPage = 1;
+  bool lowMemory = false;
   ButtonNavigator buttonNavigator;
 };

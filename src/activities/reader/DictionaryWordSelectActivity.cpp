@@ -177,10 +177,12 @@ void DictionaryWordSelectActivity::performLookup() {
 
   if (found) {
     popup = Popup::None;
-    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
-                                                                          std::move(definition)),
-                           [this](const ActivityResult&) { requestUpdate(); });
-    return;
+    if (startActivityForResultWith<DictionaryDefinitionActivity>([this](const ActivityResult&) { requestUpdate(); },
+                                                                 std::move(headword), std::move(definition))) {
+      return;
+    }
+    popup = Popup::Error;
+    popupMsg = StrId::STR_DICT_LOW_MEMORY;
   }
   // Name the failure: a genuine miss is "Not found"; a word that WAS found but
   // couldn't be read is a real error — and we distinguish decompression from a
@@ -201,7 +203,7 @@ void DictionaryWordSelectActivity::performLookup() {
         popupMsg = StrId::STR_DICT_ERROR;  // dict.open() failed, not the index
         break;
     }
-  } else {
+  } else if (!found) {
     switch (result) {
       case Dictionary::LookupResult::Decompress:
         popup = Popup::Error;
