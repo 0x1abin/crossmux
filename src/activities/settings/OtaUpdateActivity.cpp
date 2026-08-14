@@ -116,9 +116,11 @@ void OtaUpdateActivity::beginWifiSelection() {
     return;
   }
 
-  state = WIFI_SELECTION;
-  LOG_DBG("OTA", "Turning on WiFi...");
-  WiFi.mode(WIFI_STA);
+  {
+    RenderLock lock(*this);
+    state = WIFI_SELECTION;
+    sdFontSystem.releaseLoadedFont(renderer);
+  }
 
   LOG_DBG("OTA", "Launching WifiSelectionActivity...");
   startActivityForResult(std::move(wifiSelection),
@@ -258,7 +260,6 @@ void OtaUpdateActivity::runUpdateInstall() {
   {
     RenderLock lock(*this);
     state = UPDATE_IN_PROGRESS;
-    sdFontSystem.releaseLoadedFont(renderer);
   }
   requestUpdateAndWait();
   const auto res = updater.installUpdate(
