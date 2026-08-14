@@ -147,6 +147,7 @@ class ReadingStatsStore {
   bool updateBookPath(const std::string& oldKey, const std::string& newPath, const std::string& title = "",
                       const std::string& author = "", const std::string& coverBmpPath = "",
                       const std::string& bookId = "");
+  bool updateBookPathPrefix(const std::string& oldPrefix, const std::string& newPrefix);
   bool removeBook(const std::string& path);
   const ReadingBookStats* findBook(const std::string& key) const;
   const ReadingBookStats* findMatchingBookForPath(const std::string& path, const std::string& title = "",
