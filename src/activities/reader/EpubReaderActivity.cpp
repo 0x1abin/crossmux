@@ -55,9 +55,7 @@
 #include "util/TimeUtils.h"
 
 namespace {
-// pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
-// pages per minute, first item is 1 to prevent division by zero if accessed
-constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
+constexpr uint8_t MAX_PAGE_TURN_RATE = 30;
 constexpr size_t initialBookmarkCacheCapacity = 16;
 constexpr float bookmarkProgressEpsilon = 0.0001f;
 
@@ -356,19 +354,20 @@ void EpubReaderActivity::openReaderMenu() {
     bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
   }
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
-  startActivityForResult(std::make_unique<EpubReaderMenuActivity>(
-                             renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
-                             SETTINGS.orientation, !currentPageFootnotes.empty(), !cachedBookmarks.empty()),
-                         [this](const ActivityResult& result) {
-                           READING_STATS.resumeSession();
-                           // Always apply orientation change even if the menu was cancelled
-                           const auto& menu = std::get<MenuResult>(result.data);
-                           applyOrientation(menu.orientation);
-                           toggleAutoPageTurn(menu.pageTurnOption);
-                           if (!result.isCancelled) {
-                             onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
-                           }
-                         });
+  startActivityForResult(
+      std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
+                                               bookProgressPercent, SETTINGS.orientation, pageTurnRate,
+                                               !currentPageFootnotes.empty(), !cachedBookmarks.empty()),
+      [this](const ActivityResult& result) {
+        READING_STATS.resumeSession();
+        // Always apply orientation change even if the menu was cancelled
+        const auto& menu = std::get<MenuResult>(result.data);
+        applyOrientation(menu.orientation);
+        toggleAutoPageTurn(menu.pageTurnRate);
+        if (!result.isCancelled) {
+          onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
+        }
+      });
 }
 
 bool EpubReaderActivity::buildTickHeapGate() {
@@ -1202,15 +1201,15 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
   }
 }
 
-void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption) {
-  if (selectedPageTurnOption == 0 || selectedPageTurnOption >= std::size(PAGE_TURN_RATES)) {
+void EpubReaderActivity::toggleAutoPageTurn(const uint8_t requestedPageTurnRate) {
+  if (requestedPageTurnRate == 0 || requestedPageTurnRate > MAX_PAGE_TURN_RATE) {
     automaticPageTurnActive = false;
     return;
   }
 
+  pageTurnRate = requestedPageTurnRate;
   lastPageTurnTime = millis();
-  // calculates page turn duration by dividing by number of pages
-  pageTurnDuration = (1UL * 60 * 1000) / PAGE_TURN_RATES[selectedPageTurnOption];
+  pageTurnDuration = (1UL * 60 * 1000) / pageTurnRate;
   automaticPageTurnActive = true;
 
   const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
@@ -2138,7 +2137,7 @@ void EpubReaderActivity::renderStatusBar() const {
   const auto sb = SETTINGS.statusBarSpec();
 
   if (automaticPageTurnActive) {
-    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(60 * 1000 / pageTurnDuration);
+    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnRate);
 
     // calculates textYOffset when rendering title in status bar
     const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();

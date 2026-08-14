@@ -3,18 +3,51 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <algorithm>
+#include <array>
+
 #include "MappedInputManager.h"
+#include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+namespace {
+constexpr std::array<uint8_t, 4> PAGE_TURN_RATES = {0, 3, 6, 12};
+constexpr int CUSTOM_PAGE_TURN_OPTION = static_cast<int>(PAGE_TURN_RATES.size());
+constexpr uint8_t DEFAULT_CUSTOM_PAGE_TURN_RATE = 15;
+constexpr uint8_t MIN_CUSTOM_PAGE_TURN_RATE = 1;
+constexpr uint8_t MAX_CUSTOM_PAGE_TURN_RATE = 30;
+
+constexpr uint8_t clampCustomPageTurnRate(const int rate) {
+  if (rate == 0) return DEFAULT_CUSTOM_PAGE_TURN_RATE;
+  return static_cast<uint8_t>(
+      std::clamp(rate, static_cast<int>(MIN_CUSTOM_PAGE_TURN_RATE), static_cast<int>(MAX_CUSTOM_PAGE_TURN_RATE)));
+}
+
+constexpr uint8_t pageTurnRateForOption(const int option, const uint8_t customRate) {
+  if (option == CUSTOM_PAGE_TURN_OPTION) return clampCustomPageTurnRate(customRate);
+  if (option < 0 || option >= static_cast<int>(PAGE_TURN_RATES.size())) return 0;
+  return PAGE_TURN_RATES[option];
+}
+
+static_assert(pageTurnRateForOption(0, 6) == 0);
+static_assert(pageTurnRateForOption(2, 6) == 6);
+static_assert(pageTurnRateForOption(CUSTOM_PAGE_TURN_OPTION, 7) == 7);
+static_assert(pageTurnRateForOption(CUSTOM_PAGE_TURN_OPTION, 0) == DEFAULT_CUSTOM_PAGE_TURN_RATE);
+static_assert(pageTurnRateForOption(CUSTOM_PAGE_TURN_OPTION, 31) == MAX_CUSTOM_PAGE_TURN_RATE);
+static_assert(pageTurnRateForOption(99, 6) == 0);
+}  // namespace
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                const std::string& title, const int currentPage, const int totalPages,
                                                const int bookProgressPercent, const uint8_t currentOrientation,
-                                               const bool hasFootnotes, const bool hasBookmarks)
+                                               const uint8_t initialPageTurnRate, const bool hasFootnotes,
+                                               const bool hasBookmarks)
     : Activity("EpubReaderMenu", renderer, mappedInput),
       menuItems(buildMenuItems(hasFootnotes, hasBookmarks)),
       title(title),
       pendingOrientation(currentOrientation),
+      customPageTurnRate(clampCustomPageTurnRate(initialPageTurnRate)),
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent) {}
@@ -54,7 +87,7 @@ void EpubReaderMenuActivity::onExit() { Activity::onExit(); }
 void EpubReaderMenuActivity::closeCancelled() {
   ActivityResult result;
   result.isCancelled = true;
-  result.data = MenuResult{-1, pendingOrientation, selectedPageTurnOption};
+  result.data = MenuResult{-1, pendingOrientation, pageTurnRateForOption(selectedPageTurnOption, customPageTurnRate)};
   setResult(std::move(result));
   finish();
 }
@@ -104,14 +137,33 @@ void EpubReaderMenuActivity::loop() {
     if (selectedAction == MenuAction::AUTO_PAGE_TURN) {
       optionPopup.show(I18N.get(StrId::STR_AUTO_TURN_PAGES_PER_MIN), pageTurnLabels.data(),
                        static_cast<int>(pageTurnLabels.size()), selectedPageTurnOption, [this](int idx) {
-                         selectedPageTurnOption = idx;
+                         if (idx != CUSTOM_PAGE_TURN_OPTION) {
+                           selectedPageTurnOption = idx;
+                           requestUpdate();
+                           return;
+                         }
+
+                         // ActivityManager owns the picker across frames; the shared helper keeps its allocation
+                         // fallible and logs OOM while leaving the previous option unchanged.
+                         startActivityForResultWith<IntervalSelectionActivity>(
+                             [this](const ActivityResult& result) {
+                               if (!result.isCancelled) {
+                                 customPageTurnRate =
+                                     clampCustomPageTurnRate(std::get<IntervalResult>(result.data).value);
+                                 selectedPageTurnOption = CUSTOM_PAGE_TURN_OPTION;
+                               }
+                               requestUpdate();
+                             },
+                             "AutoPageTurnRate", StrId::STR_AUTO_TURN_PAGES_PER_MIN, customPageTurnRate,
+                             MIN_CUSTOM_PAGE_TURN_RATE, MAX_CUSTOM_PAGE_TURN_RATE, 1, 5);
                          requestUpdate();
                        });
       requestUpdate();
       return;
     }
 
-    setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation, selectedPageTurnOption});
+    setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation,
+                         pageTurnRateForOption(selectedPageTurnOption, customPageTurnRate)});
     finish();
   };
 

@@ -39,6 +39,7 @@ class EpubReaderActivity final : public Activity {
   std::optional<uint32_t> pendingOffsetJump;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  uint8_t pageTurnRate = 15;
   unsigned long openStartMs;
   bool firstPageLogged = false;
   // Signals that the next render should reposition within the newly loaded section
@@ -202,7 +203,7 @@ class EpubReaderActivity final : public Activity {
   bool launchWeReadSync();
 #endif
   void applyOrientation(uint8_t orientation);
-  void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
+  void toggleAutoPageTurn(uint8_t requestedPageTurnRate);
   void pageTurn(bool isForwardTurn);
   void loadCachedBookmarks();
   void addBookmark();
