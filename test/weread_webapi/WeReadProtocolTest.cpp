@@ -55,25 +55,14 @@ struct OperationTestPeer {
     return Operation::wholeChapterRange(first, last, count);
   }
   using ProgressAction = Operation::ProgressAction;
-  static ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition,
-                                       const bool hasReadingTime) {
-    return Operation::progressAction(mode, samePosition, hasReadingTime);
+  static ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition) {
+    return Operation::progressAction(mode, samePosition);
   }
   static ProgressSyncOutcome progressVerification(const bool samePosition, const bool remoteHasAppId,
                                                   const bool sameAppId, const bool remoteHasUpdateTime,
                                                   const uint32_t remoteUpdateTime, const uint32_t uploadStartedAt) {
     return Operation::progressVerification(samePosition, remoteHasAppId, sameAppId, remoteHasUpdateTime,
                                            remoteUpdateTime, uploadStartedAt);
-  }
-  static ProgressSyncOutcome reportedProgressOutcome(const ProgressSyncOutcome verified,
-                                                     const ProgressSyncOutcome target) {
-    return Operation::reportedProgressOutcome(verified, target);
-  }
-  static bool ambiguousTimedReportFailure(const Error error, const uint32_t readingSeconds) {
-    return Operation::ambiguousTimedReportFailure(error, readingSeconds);
-  }
-  static uint32_t readingSecondsAfterReport(const Error error, const uint32_t readingSeconds) {
-    return Operation::readingSecondsAfterReport(error, readingSeconds);
   }
   static uint32_t browseReviewRequestCount(const uint32_t cached) {
     return Operation::browseReviewRequestCount(cached);
@@ -541,85 +530,12 @@ TEST(WeReadClientState, RequiresDirectionSelectionOnlyWhenComparedPositionsDiffe
   using Action = WeReadClient::OperationTestPeer::ProgressAction;
   const auto action = WeReadClient::OperationTestPeer::progressAction;
 
-  EXPECT_EQ(action(Mode::Compare, true, false), Action::AlreadySynced);
-  EXPECT_EQ(action(Mode::Compare, false, false), Action::SelectDirection);
-  EXPECT_EQ(action(Mode::ApplyRemote, true, false), Action::AlreadySynced);
-  EXPECT_EQ(action(Mode::ApplyRemote, false, false), Action::ApplyRemote);
-  EXPECT_EQ(action(Mode::UploadLocal, true, false), Action::AlreadySynced);
-  EXPECT_EQ(action(Mode::UploadLocal, false, false), Action::UploadLocal);
-}
-
-TEST(WeReadClientState, ReportsReadingTimeAtTheFinalProgressPosition) {
-  using Mode = WeReadClient::ProgressSyncMode;
-  using Action = WeReadClient::OperationTestPeer::ProgressAction;
-  const auto action = WeReadClient::OperationTestPeer::progressAction;
-
-  EXPECT_EQ(action(Mode::Compare, true, true), Action::ReportSynced);
-  EXPECT_EQ(action(Mode::Compare, false, true), Action::SelectDirection);
-  EXPECT_EQ(action(Mode::ApplyRemote, true, true), Action::ReportSynced);
-  EXPECT_EQ(action(Mode::ApplyRemote, false, true), Action::ReportRemote);
-  EXPECT_EQ(action(Mode::UploadLocal, true, true), Action::ReportSynced);
-  EXPECT_EQ(action(Mode::UploadLocal, false, true), Action::UploadLocal);
-}
-
-TEST(WeReadClientState, AcceptsOnlyTheJustEndedMatchingReadingSession) {
-  const auto seconds = WeReadClient::readingSecondsForSession;
-
-  EXPECT_EQ(seconds(true, true, true, 123999), 123U);
-  EXPECT_EQ(seconds(true, true, true, 999), 0U);
-  EXPECT_EQ(seconds(false, true, true, 123000), 0U);
-  EXPECT_EQ(seconds(true, false, true, 123000), 0U);
-  EXPECT_EQ(seconds(true, true, false, 123000), 0U);
-}
-
-TEST(WeReadClientState, PreservesTheChosenOutcomeAndDoesNotAutoRetryAmbiguousTimedReports) {
-  using Error = WeReadClient::Error;
-  using Outcome = WeReadClient::ProgressSyncOutcome;
-
-  EXPECT_EQ(WeReadClient::OperationTestPeer::reportedProgressOutcome(Outcome::LocalUploaded, Outcome::ApplyRemote),
-            Outcome::ApplyRemote);
-  EXPECT_EQ(WeReadClient::OperationTestPeer::reportedProgressOutcome(Outcome::AlreadySynced, Outcome::AlreadySynced),
-            Outcome::AlreadySynced);
-  EXPECT_EQ(WeReadClient::OperationTestPeer::reportedProgressOutcome(Outcome::LocalUploaded, Outcome::Pending),
-            Outcome::LocalUploaded);
-  EXPECT_TRUE(WeReadClient::OperationTestPeer::ambiguousTimedReportFailure(Error::Network, 123));
-  EXPECT_FALSE(WeReadClient::OperationTestPeer::ambiguousTimedReportFailure(Error::Network, 0));
-  EXPECT_FALSE(WeReadClient::OperationTestPeer::ambiguousTimedReportFailure(Error::Protocol, 123));
-}
-
-TEST(WeReadClientState, ConsumesReadingTimeOnlyAfterAnAcceptedReport) {
-  using Error = WeReadClient::Error;
-  const auto remaining = WeReadClient::OperationTestPeer::readingSecondsAfterReport;
-
-  EXPECT_EQ(remaining(Error::Ok, 123), 0U);
-  EXPECT_EQ(remaining(Error::Network, 123), 123U);
-  EXPECT_EQ(remaining(Error::Protocol, 123), 123U);
-  EXPECT_EQ(remaining(Error::Network, remaining(Error::Ok, 123)), 0U);
-}
-
-TEST(WeReadProtocol, IncludesReadingTimeInSignedQueryAndJsonBody) {
-  char field[32];
-  ASSERT_TRUE(WeReadProtocol::formatReadingTimeQuery(123, field, sizeof(field)));
-  EXPECT_STREQ(field, "&rt=123&sg=");
-
-  std::string query = "appId=wb123&b=book&c=chapter&rn=7";
-  query += field;
-  query += "abcdef&sm=title&ts=1700000000123";
-  char signature[24];
-  ASSERT_TRUE(WeReadProtocol::signQuery(query.c_str(), signature, sizeof(signature)));
-
-  ASSERT_TRUE(WeReadProtocol::formatReadingTimeQuery(124, field, sizeof(field)));
-  std::string changedQuery = "appId=wb123&b=book&c=chapter&rn=7";
-  changedQuery += field;
-  changedQuery += "abcdef&sm=title&ts=1700000000123";
-  char changedSignature[24];
-  ASSERT_TRUE(WeReadProtocol::signQuery(changedQuery.c_str(), changedSignature, sizeof(changedSignature)));
-  EXPECT_STRNE(signature, changedSignature);
-
-  ASSERT_TRUE(WeReadProtocol::formatReadingTimeJson(123, field, sizeof(field)));
-  EXPECT_STREQ(field, ",\"rt\":123,\"ts\":");
-  EXPECT_FALSE(WeReadProtocol::formatReadingTimeQuery(123, field, 4));
-  EXPECT_FALSE(WeReadProtocol::formatReadingTimeJson(123, field, 4));
+  EXPECT_EQ(action(Mode::Compare, true), Action::AlreadySynced);
+  EXPECT_EQ(action(Mode::Compare, false), Action::SelectDirection);
+  EXPECT_EQ(action(Mode::ApplyRemote, true), Action::AlreadySynced);
+  EXPECT_EQ(action(Mode::ApplyRemote, false), Action::ApplyRemote);
+  EXPECT_EQ(action(Mode::UploadLocal, true), Action::AlreadySynced);
+  EXPECT_EQ(action(Mode::UploadLocal, false), Action::UploadLocal);
 }
 
 TEST(WeReadClientState, RequiresAReadBackBeforeReportingProgressUpload) {
