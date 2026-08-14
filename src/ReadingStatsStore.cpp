@@ -11,6 +11,7 @@
 #include <ctime>
 
 #include "CrossPointState.h"
+#include "util/BookCacheUtils.h"
 #include "util/BookIdentity.h"
 #include "util/TimeUtils.h"
 
@@ -813,6 +814,8 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
     return false;
   }
 
+  const bool updateLastSessionPath =
+      !lastSessionSnapshot.path.empty() && findBookIndexByPath(lastSessionSnapshot.path) == index;
   auto& book = books[index];
   if (!bookId.empty() &&
       (book.bookId.empty() || (BookIdentity::isLegacyBookId(book.bookId) && !BookIdentity::isLegacyBookId(bookId)))) {
@@ -821,6 +824,9 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
 
   rememberBookPath(book, oldKey);
   rememberBookPath(book, normalizedNewPath);
+  if (updateLastSessionPath) {
+    lastSessionSnapshot.path = normalizedNewPath;
+  }
   if (!title.empty()) {
     book.title = title;
   }
@@ -832,8 +838,31 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
   }
 
   markDirty();
-  saveToFile();
-  return true;
+  return saveToFile();
+}
+
+bool ReadingStatsStore::updateBookPathPrefix(const std::string& oldPrefix, const std::string& newPrefix) {
+  bool changed = false;
+  for (auto& book : books) {
+    if (!FsHelpers::isSameOrDescendantPath(book.path, oldPrefix)) continue;
+    const std::string oldPath = book.path;
+    const std::string oldCachePath = bookCachePath(oldPath);
+    const std::string newPath = FsHelpers::rebasePath(oldPath, oldPrefix, newPrefix);
+    const std::string newCachePath = bookCachePath(newPath);
+    if (!oldCachePath.empty() && book.coverBmpPath.rfind(oldCachePath, 0) == 0) {
+      book.coverBmpPath = newCachePath + book.coverBmpPath.substr(oldCachePath.size());
+    }
+    rememberBookPath(book, newPath);
+    changed = true;
+  }
+
+  if (FsHelpers::isSameOrDescendantPath(lastSessionSnapshot.path, oldPrefix)) {
+    lastSessionSnapshot.path = FsHelpers::rebasePath(lastSessionSnapshot.path, oldPrefix, newPrefix);
+    changed = true;
+  }
+  if (!changed) return true;
+  markDirty();
+  return saveToFile();
 }
 
 bool ReadingStatsStore::removeBook(const std::string& path) {
