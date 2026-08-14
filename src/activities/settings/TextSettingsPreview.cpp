@@ -16,6 +16,7 @@
 
 #include "CrossPointSettings.h"
 #include "fontIds.h"
+#include "util/ReadingGuideLine.h"
 
 namespace textsettings {
 
@@ -129,6 +130,11 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
     for (const auto& line : layout.lines) {
       if (y + lineH > textBottomLimit) return;
       line->render(renderer, fontId, textLeft, y);
+      const int guideY = y + lineAdvance + SETTINGS.readingGuideLineOffset;
+      if (SETTINGS.readingGuideLineEnabled &&
+          readingGuideLine::fitsVertically(SETTINGS.readingGuideLineStyle, guideY, textTop, textBottomLimit)) {
+        readingGuideLine::draw(renderer, textLeft, guideY, textLeft + textWidth - 1, SETTINGS.readingGuideLineStyle);
+      }
       y += lineAdvance;
     }
     y += paragraphGap;

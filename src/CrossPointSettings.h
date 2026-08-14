@@ -7,6 +7,7 @@
 
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
+#include "util/ReadingGuideLine.h"
 
 // I18nKeys.h is intentionally NOT included here. It is auto-generated and
 // changes on every translation edit; pulling it into this widely-included
@@ -144,6 +145,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     PARAGRAPH_ALIGNMENT_COUNT
   };
 
+  static constexpr int8_t READING_GUIDE_LINE_OFFSET_MIN = -30;
+  static constexpr int8_t READING_GUIDE_LINE_OFFSET_MAX = 30;
+  static constexpr int8_t READING_GUIDE_LINE_OFFSET_DEFAULT = -2;
+
   // Auto-sleep timeout options (in minutes)
   enum SLEEP_TIMEOUT {
     SLEEP_1_MIN = 0,
@@ -249,6 +254,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t extraParagraphSpacing = 1;
   uint8_t textAntiAliasing = 1;
   uint8_t fakeBold = SYNTHETIC_BOLD_OFF;
+  uint8_t readingBackgroundEnabled = 0;
+  uint8_t readingGuideLineEnabled = 0;
+  uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
+  int8_t readingGuideLineOffset = READING_GUIDE_LINE_OFFSET_DEFAULT;
   // Short power button click behaviour
   uint8_t shortPwrBtn = IGNORE;
   // EPUB reading orientation settings

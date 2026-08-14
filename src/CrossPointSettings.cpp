@@ -180,7 +180,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     if (!isSettingAvailableOnBoard(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.stringOffset) continue;
+    if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) continue;
 
     if (info.stringOffset) {
       const char* strPtr = (const char*)&s + info.stringOffset;
@@ -191,6 +191,8 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
       } else {
         doc[info.key] = strPtr;
       }
+    } else if (info.signedValuePtr) {
+      doc[info.key] = s.*(info.signedValuePtr);
     } else {
       doc[info.key] = s.*(info.valuePtr);
     }
@@ -244,7 +246,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     if (!isSettingAvailableOnBoard(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.stringOffset) continue;
+    if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) continue;
 
     if (info.stringOffset) {
       // destPtr starts out holding the struct-initializer default; it stays that
@@ -285,6 +287,11 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
           copyToField(destPtr, raw, info.stringMaxLen);
         }
       }
+    } else if (info.signedValuePtr) {
+      const int8_t fieldDefault = s.*(info.signedValuePtr);
+      int value = doc[info.key] | static_cast<int>(fieldDefault);
+      if (value < info.valueRange.min || value > info.valueRange.max) value = fieldDefault;
+      s.*(info.signedValuePtr) = static_cast<int8_t>(value);
     } else {
       const uint8_t fieldDefault = s.*(info.valuePtr);  // struct-initializer default, read before we overwrite it
       uint8_t v = doc[info.key] | fieldDefault;

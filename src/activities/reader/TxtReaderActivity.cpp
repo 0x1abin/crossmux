@@ -27,6 +27,8 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/AchievementPopupUtils.h"
+#include "util/ReadingBackground.h"
+#include "util/ReadingGuideLine.h"
 
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
@@ -635,6 +637,8 @@ void TxtReaderActivity::renderPage() {
   const auto t0 = millis();
   const int lineHeight = renderer.getLineHeight(cachedFontId);
   const int contentWidth = viewportWidth;
+  const int contentBottom = renderer.getScreenHeight() - cachedOrientedMarginBottom;
+  auto* fcm = renderer.getFontCacheManager();
 
   // Render text lines with alignment
   auto renderLines = [&]() {
@@ -671,13 +675,19 @@ void TxtReaderActivity::renderPage() {
         }
 
         renderer.drawText(cachedFontId, x, y, line.c_str());
+        const int guideY = y + lineHeight + SETTINGS.readingGuideLineOffset;
+        if (SETTINGS.readingGuideLineEnabled && !fcm->isScanning() &&
+            readingGuideLine::fitsVertically(SETTINGS.readingGuideLineStyle, guideY, cachedOrientedMarginTop,
+                                             contentBottom)) {
+          readingGuideLine::draw(renderer, cachedOrientedMarginLeft, guideY,
+                                 cachedOrientedMarginLeft + contentWidth - 1, SETTINGS.readingGuideLineStyle);
+        }
       }
       y += lineHeight;
     }
   };
 
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
-  auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
   renderLines();  // scan pass — text accumulated, no drawing
   scope.endScanAndPrewarm();
@@ -685,6 +695,7 @@ void TxtReaderActivity::renderPage() {
   fcm->logStats("txt-page");
 
   // BW rendering
+  if (SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) renderer.clearScreen();
   renderLines();
   renderStatusBar();
   const auto tBwRender = millis();

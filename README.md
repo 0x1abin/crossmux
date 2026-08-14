@@ -35,9 +35,9 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 ## What can CrossPoint do?
 
-- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, dictionary lookups ([StarDict](docs/dictionary.md)), go-to-percent, auto page turn, orientation control, focus reading, KOReader progress sync and more.
+- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, dictionary lookups ([StarDict](docs/dictionary.md)), go-to-percent, auto page turn, orientation control, focus reading, configurable line guides, KOReader progress sync and more.
 
-- **Various formats**: native handling for `.epub`, `.xtc/.xtch`, `.txt`, and `.bmp`.
+- **Various formats**: native handling for `.epub`, `.xtc/.xtch`, `.txt`, `.bmp`, and `.png`.
 
 - **Screenshots.**
 
@@ -59,7 +59,7 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
   - OPDS browser with saved servers (up to 8), search, pagination, and direct download
   - OTA update checks and installs from GitHub releases
 
-- **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
+- **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, EPUB/TXT line guides, custom PNG reading backgrounds, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more. Set a background from **Settings > Reader > Reading Background > Custom Image**.
 
 - **Localization**: 24 UI languages and counting. RTL support.
 

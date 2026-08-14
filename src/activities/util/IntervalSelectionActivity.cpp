@@ -88,7 +88,7 @@ void IntervalSelectionActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    setResult(IntervalResult{static_cast<uint32_t>(value)});
+    setResult(IntervalResult{value});
     finish();
     return;
   }
@@ -107,7 +107,7 @@ void IntervalSelectionActivity::loop() {
         setResult(std::move(result));
         finish();
       } else if (tx > renderer.getScreenWidth() * 2 / 3) {
-        setResult(IntervalResult{static_cast<uint32_t>(value)});
+        setResult(IntervalResult{value});
         finish();
       }
       return;

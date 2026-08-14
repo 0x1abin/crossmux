@@ -35,11 +35,13 @@
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
+#include "activities/home/FileBrowserActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/ReadingBackground.h"
 
 namespace {
 
@@ -57,6 +59,7 @@ enum class AboutRow : uint8_t {
 };
 
 constexpr uint64_t BYTES_PER_TENTH_GB = 100000000ULL;
+constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 
 class AboutActivity final : public Activity {
  public:
@@ -600,6 +603,9 @@ void SettingsActivity::loopAccordion() {
 }
 
 std::string SettingsActivity::settingValueText(const SettingInfo& setting) const {
+  if (setting.valuePtr == &CrossPointSettings::readingBackgroundEnabled) {
+    return SETTINGS.readingBackgroundEnabled ? tr(STR_CUSTOM_IMAGE) : tr(STR_STATE_OFF);
+  }
   if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
     return SETTINGS.*(setting.valuePtr) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
   }
@@ -623,6 +629,9 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) const
       return valueBuffer;
     }
     return std::to_string(SETTINGS.*(setting.valuePtr));
+  }
+  if (setting.type == SettingType::VALUE && setting.signedValuePtr != nullptr) {
+    return std::to_string(SETTINGS.*(setting.signedValuePtr));
   }
   return {};
 }
@@ -679,6 +688,10 @@ void SettingsActivity::toggleCurrentSetting() {
     openSleepTimeoutPicker();
     return;
   }
+  if (setting.valuePtr == &CrossPointSettings::readingBackgroundEnabled) {
+    openReadingBackgroundMenu();
+    return;
+  }
 
   if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
     // Toggle the boolean value using the member pointer
@@ -723,11 +736,18 @@ void SettingsActivity::toggleCurrentSetting() {
     }
     setting.valueSetter((cur + 1) % totalValues);
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-    const int8_t currentValue = SETTINGS.*(setting.valuePtr);
+    const int currentValue = SETTINGS.*(setting.valuePtr);
     if (currentValue + setting.valueRange.step > setting.valueRange.max) {
-      SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
+      SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>(setting.valueRange.min);
     } else {
-      SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
+      SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>(currentValue + setting.valueRange.step);
+    }
+  } else if (setting.type == SettingType::VALUE && setting.signedValuePtr != nullptr) {
+    const int currentValue = SETTINGS.*(setting.signedValuePtr);
+    if (currentValue + setting.valueRange.step > setting.valueRange.max) {
+      SETTINGS.*(setting.signedValuePtr) = static_cast<int8_t>(setting.valueRange.min);
+    } else {
+      SETTINGS.*(setting.signedValuePtr) = static_cast<int8_t>(currentValue + setting.valueRange.step);
     }
   } else if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
@@ -877,6 +897,47 @@ void SettingsActivity::openSleepTimeoutPicker() {
         }
         requestUpdate();
       });
+}
+
+void SettingsActivity::openReadingBackgroundMenu() {
+  static constexpr StrId OPTIONS[] = {StrId::STR_STATE_OFF, StrId::STR_CUSTOM_IMAGE};
+  optionPopup.show(StrId::STR_READING_BACKGROUND, OPTIONS, static_cast<int>(std::size(OPTIONS)),
+                   SETTINGS.readingBackgroundEnabled ? 1 : 0, [this](const int selected) {
+                     if (selected == 0) {
+                       SETTINGS.readingBackgroundEnabled = 0;
+                       SETTINGS.saveToFile();
+                       requestUpdate();
+                       return;
+                     }
+                     openReadingBackgroundPicker();
+                   });
+  requestUpdate();
+}
+
+void SettingsActivity::openReadingBackgroundPicker() {
+  const bool started = startActivityForResultWith<FileBrowserActivity>(
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) return;
+        const auto* selected = std::get_if<FilePathResult>(&result.data);
+        if (!selected) {
+          LOG_ERR("SET", "PNG picker returned no path");
+          return;
+        }
+
+        GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+        if (readingBackground::createCacheFromPng(renderer, selected->path.c_str())) {
+          SETTINGS.readingBackgroundEnabled = 1;
+          SETTINGS.saveToFile();
+          requestUpdate();
+        } else {
+          optionPopup.show(StrId::STR_FAILED_LOWER, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+        }
+      },
+      "/", FileBrowserActivity::Mode::PickPng);
+  if (!started) {
+    optionPopup.show(StrId::STR_MEMORY_ERROR, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+    requestUpdate();
+  }
 }
 
 void SettingsActivity::render(RenderLock&&) {

@@ -39,6 +39,8 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "util/ReadingBackground.h"
+#include "util/ReadingGuideLine.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include <WeReadStore.h>
 
@@ -1824,6 +1826,30 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto tPrewarm = millis();
   fcm->logStats("epub-page");
 
+  auto renderPageWithGuideLines = [&](const bool includeBackground = false) {
+    if (includeBackground && SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) {
+      renderer.clearScreen();
+    }
+    page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+    if (!SETTINGS.readingGuideLineEnabled) return;
+
+    const int x1 = orientedMarginLeft;
+    const int x2 = renderer.getScreenWidth() - orientedMarginRight - 1;
+    const int contentBottom = renderer.getScreenHeight() - orientedMarginBottom;
+    const int baseLineHeight = renderer.getLineHeight(fontId, SETTINGS.getReaderLineCompression());
+    const int ascender = renderer.getFontAscenderSize(fontId);
+    for (const auto& element : page->elements) {
+      if (element->getTag() != TAG_PageLine) continue;
+      const auto& line = static_cast<const PageLine&>(*element);
+      if (line.getBlock()->isEmpty()) continue;
+      const int lineHeight = baseLineHeight + line.getBlock()->getRubyShift(ascender);
+      const int guideY = orientedMarginTop + line.yPos + lineHeight + SETTINGS.readingGuideLineOffset;
+      if (!readingGuideLine::fitsVertically(SETTINGS.readingGuideLineStyle, guideY, orientedMarginTop, contentBottom))
+        continue;
+      readingGuideLine::draw(renderer, x1, guideY, x2, SETTINGS.readingGuideLineStyle);
+    }
+  };
+
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;
   // The reader starts with zero here, which means the normal refresh cycle
@@ -1843,13 +1869,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
   auto renderGrayscalePass = [&]() {
     if (needsTextGrayscale) {
-      renderPage();
+      renderPageWithGuideLines();
     } else {
       page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     }
   };
 
-  renderPage();
+  renderPageWithGuideLines(true);
 #ifdef ENABLE_CHINESE_VERSION
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
   if (missingCodepoint != 0 && !FontDownloadActivity::wasChineseFontPromptShownThisBoot()) {
@@ -1878,7 +1904,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      renderPage();
+      renderPageWithGuideLines();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
