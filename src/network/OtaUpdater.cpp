@@ -76,7 +76,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
   // on top of the TLS session's heap during the fetch; with -fno-exceptions an
   // OOM there aborts. fetchUrl handles the configured secure GET transport,
   // redirects, and User-Agent (see HttpDownloader).
-  ReleaseJsonParser releaseParser(summaryLines);
+  ReleaseJsonParser releaseParser(releaseNotes);
   const bool ok = HttpDownloader::fetchUrl(releaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
     releaseParser.feed(reinterpret_cast<const char*>(data), len);
     return true;
@@ -104,9 +104,9 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
   otaSize = releaseParser.getFirmwareSize();
   totalSize = otaSize;
   updateAvailable = true;
+  releaseNoteCount = releaseParser.getReleaseNoteCount();
 
-  LOG_DBG("OTA", "Found update: tag=%s size=%zu summary=%s", latestVersion.c_str(), otaSize,
-          releaseParser.foundSummary() ? "yes" : "no");
+  LOG_DBG("OTA", "Found update: tag=%s size=%zu notes=%zu", latestVersion.c_str(), otaSize, releaseNoteCount);
   LOG_DBG("OTA", "Firmware URL: %s", otaUrl.c_str());
   return OK;
 }

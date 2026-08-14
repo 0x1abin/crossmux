@@ -8,20 +8,12 @@ on:
     - cron: '0 23 * * *' # daily 07:00 Asia/Shanghai
   workflow_dispatch:
     inputs:
-      summary_en_1:
-        description: 'English OTA summary line 1 (max 42 ASCII characters)'
+      notes_en:
+        description: 'English OTA release notes (2-8 lines, max 96 ASCII bytes each)'
         required: true
         type: string
-      summary_en_2:
-        description: 'English OTA summary line 2 (max 42 ASCII characters)'
-        required: true
-        type: string
-      summary_zh_1:
-        description: 'Chinese OTA summary line 1 (max 16 characters)'
-        required: true
-        type: string
-      summary_zh_2:
-        description: 'Chinese OTA summary line 2 (max 16 characters)'
+      notes_zh:
+        description: 'Chinese OTA release notes (2-8 lines, max 32 characters each)'
         required: true
         type: string
 
@@ -40,22 +32,18 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Validate manual OTA summary
+      - name: Validate manual OTA release notes
         if: github.event_name == 'workflow_dispatch'
         env:
-          SUMMARY_EN_1: ${{ inputs.summary_en_1 }}
-          SUMMARY_EN_2: ${{ inputs.summary_en_2 }}
-          SUMMARY_ZH_1: ${{ inputs.summary_zh_1 }}
-          SUMMARY_ZH_2: ${{ inputs.summary_zh_2 }}
+          NOTES_EN: ${{ inputs.notes_en }}
+          NOTES_ZH: ${{ inputs.notes_zh }}
         run: |
           mkdir -p dist
-          python3 scripts/generate_ota_summary.py \
-            --en-line="$SUMMARY_EN_1" \
-            --en-line="$SUMMARY_EN_2" \
-            --zh-line="$SUMMARY_ZH_1" \
-            --zh-line="$SUMMARY_ZH_2" \
-            --output dist/ota-summary.md
-          test -s dist/ota-summary.md
+          python3 scripts/generate_ota_notes.py \
+            --en-notes="$NOTES_EN" \
+            --zh-notes="$NOTES_ZH" \
+            --output dist/ota-notes.md
+          test -s dist/ota-notes.md
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -114,9 +102,9 @@ jobs:
             printf '%s\n' '- `firmware.bin` — international'
             printf '%s\n' '- `firmware-cn.bin` — Chinese (中文)'
           } > nightly-body.md
-          if [ -s dist/ota-summary.md ]; then
+          if [ -s dist/ota-notes.md ]; then
             printf '\n' >> nightly-body.md
-            cat dist/ota-summary.md >> nightly-body.md
+            cat dist/ota-notes.md >> nightly-body.md
           fi
 
       # Roll the single `nightly` release/tag forward to the current commit.
