@@ -41,10 +41,12 @@ upstream    https://github.com/crosspoint-reader/crosspoint-reader.git (fetch/pu
    # Good: git push origin $(git branch --show-current)
    ```
 
-2. **Never assume remote names or write permissions**:
-   - **Forked repos**: Push to `origin` (your fork), submit PR to `upstream`
-   - **Direct contributors**: May push feature branches to `upstream`
-   - **Always ask**: "Should I push to origin or create a PR?"
+2. **Use this project's default PR target**:
+   - For an unqualified PR request, push the feature branch to `origin` and open the PR against
+     `0x1abin/crossmux:main` without asking for the target again.
+   - An explicit user-supplied repository or base branch overrides this default.
+   - Still verify that `origin` resolves to `0x1abin/crossmux` and that the current credentials can push; ask only
+     when the configured repository differs or required access is unavailable.
 
 3. **Check for upstream changes before starting work**:
    ```bash
