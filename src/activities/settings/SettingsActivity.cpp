@@ -789,7 +789,7 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::Network:
-        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
+        startActivityForResultWith<WifiSelectionActivity>(resultHandler, false);
         break;
       case SettingAction::DateTime:
         // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.

@@ -66,13 +66,13 @@ void DictionaryDownloadActivity::onEnter() {
 }
 
 void DictionaryDownloadActivity::startWifiSelection() {
-  WiFi.mode(WIFI_STA);
   auto wifiSelection = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
   if (!wifiSelection) {
     LOG_ERR("DICTDL", "OOM allocating WifiSelectionActivity (%zu bytes)", sizeof(WifiSelectionActivity));
     finish();
     return;
   }
+
   startActivityForResult(std::move(wifiSelection),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }

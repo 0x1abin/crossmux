@@ -11,6 +11,7 @@
 #include <iterator>
 
 #include "AirPageDeviceId.h"
+#include "NetworkStartup.h"
 #include "WifiCredentialStore.h"
 
 namespace airpage {
@@ -48,6 +49,7 @@ AirPageConnection::Event AirPageConnection::begin(const bool realtime) {
 
   resetRetryWindow();
   if (wifiConnected()) {
+    NetworkStartup::prepare(renderer_);
     ownsWifi_ = realtime_;
     state_ = realtime_ ? State::BrokerConnecting : State::WifiOnline;
     return Event::StateChanged;
@@ -254,7 +256,7 @@ bool AirPageConnection::startWifiAssociation() {
   }
 
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+  NetworkStartup::setMode(renderer_, WIFI_STA);
   WiFi.disconnect(true, true);
   delay(100);
   if (credential->password.empty()) {

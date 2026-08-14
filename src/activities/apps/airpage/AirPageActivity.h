@@ -13,7 +13,7 @@ struct Rect;
 class AirPageActivity final : public Activity {
  public:
   explicit AirPageActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("AirPage", renderer, mappedInput) {}
+      : Activity("AirPage", renderer, mappedInput), connection_(renderer) {}
 
   void onEnter() override;
   void onExit() override;

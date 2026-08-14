@@ -19,7 +19,7 @@
 #include <string>
 
 #include "CrossPointState.h"
-#include "SdCardFontSystem.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "WeReadBrowseActivity.h"
 #include "activities/apps/weread/WeReadTouchGeometry.h"
@@ -401,11 +401,7 @@ static_assert(sizeof(WeReadChapterRangeActivity) <= 1024, "WeRead chapter select
 void WeReadActivity::onEnter() {
   Activity::onEnter();
   if (!WeReadBrowse::clearLegacyWorkspace()) LOG_ERR("WR", "legacy browse workspace cleanup failed");
-  {
-    RenderLock lock(*this);
-    sdFontSystem.releaseLoadedFont(renderer);
-    if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
-  }
+  NetworkStartup::prepare(renderer);
   disclaimerSelected_ = 0;
   disclaimerSaveFailed_ = false;
   manageSelected_ = 0;

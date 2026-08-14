@@ -7,6 +7,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncClient.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/SubpageLayout.h"
@@ -56,13 +57,18 @@ void KOReaderAuthActivity::onEnter() {
 
   // Check if already connected
   if (WiFi.status() == WL_CONNECTED) {
+    NetworkStartup::prepare(renderer);
     onWifiSelectionComplete(true);
     return;
   }
 
   // Launch WiFi selection
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  if (!startActivityForResultWith<WifiSelectionActivity>(
+          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); })) {
+    state = FAILED;
+    errorMessage = tr(STR_MEMORY_ERROR);
+    requestUpdate();
+  }
 }
 
 void KOReaderAuthActivity::onExit() {
