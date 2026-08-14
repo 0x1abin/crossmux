@@ -1,12 +1,13 @@
 #pragma once
 
-#include <esp_wifi_types.h>
+#include <WiFi.h>
 
 class GfxRenderer;
 
 namespace NetworkStartup {
 
-// Release rebuildable render memory before the Wi-Fi driver starts allocating.
+// Preserve render memory when PSRAM/internal SRAM headroom is healthy; otherwise
+// release it before the Wi-Fi driver starts allocating.
 void prepare(GfxRenderer& renderer);
 
 // The only entry point for enabling STA/AP mode in application code.
