@@ -171,11 +171,10 @@ To convert your own TrueType/OpenType fonts:
       --name MyFont \
       --output-dir ./MyFont/
 
-If a family omits a bold face, **Text Settings > Style > Synthetic Bold** can
-thicken EPUB bold text by one (Standard) or two (Heavy) horizontal pixels at
-render time. A real Bold or Bold Italic face always takes precedence. The
-fallback does not change font metrics, wrapping, or the `.cpfont` format, and
-it does not affect menus or status-bar text.
+**Text Settings > Style > Synthetic Bold** replaces EPUB bold faces with the
+regular or italic face thickened by one (Standard) or two (Heavy) horizontal
+pixels at render time. It does not change font metrics, wrapping, or the
+`.cpfont` format, and it does not affect menus or status-bar text.
 
 ### Available Unicode interval presets
 
