@@ -256,6 +256,11 @@ void SettingsActivity::rebuildSettingsLists() {
                         SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
   readerSettings.insert(readerSettings.begin() + 2,
                         SettingInfo::Action(StrId::STR_MANAGE_DICTIONARIES, SettingAction::ManageDictionaries));
+  const auto dictionarySetting =
+      std::find_if(readerSettings.begin() + 3, readerSettings.end(),
+                   [](const SettingInfo& setting) { return setting.nameId == StrId::STR_DICTIONARY; });
+  if (dictionarySetting != readerSettings.end())
+    std::rotate(readerSettings.begin() + 3, dictionarySetting, dictionarySetting + 1);
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStatsSettings));
 
