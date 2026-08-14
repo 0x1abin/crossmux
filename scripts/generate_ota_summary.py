@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an OTA summary supplied in an annotated release tag."""
+"""Validate and serialize OTA summary metadata."""
 
 from __future__ import annotations
 
@@ -101,6 +101,8 @@ def self_test() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input")
+    parser.add_argument("--en-line", action="append")
+    parser.add_argument("--zh-line", action="append")
     parser.add_argument("--output", default="ota-summary.md")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -113,9 +115,12 @@ def main() -> int:
     output = Path(args.output)
     output.unlink(missing_ok=True)
     try:
-        if not args.input:
-            raise ValueError("input file is required")
-        summary = extract_summary(Path(args.input).read_text(encoding="utf-8"))
+        if args.input and (args.en_line or args.zh_line):
+            raise ValueError("use either --input or direct summary lines")
+        if args.input:
+            summary = extract_summary(Path(args.input).read_text(encoding="utf-8"))
+        else:
+            summary = validate_summary({"en": args.en_line, "zh": args.zh_line})
         output.write_text(marker(summary), encoding="utf-8")
     except Exception as error:
         print(f"::warning::OTA summary omitted: {error}", file=sys.stderr)
