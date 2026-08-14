@@ -646,8 +646,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   }
   const auto& font = fontIt->second;
   const uint8_t activeSyntheticBoldPixels =
-      syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 && !font.hasNativeBold(style) ? syntheticBoldPixels
-                                                                                                   : 0;
+      syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 ? syntheticBoldPixels : 0;
   const auto renderStyle =
       activeSyntheticBoldPixels != 0
           ? static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(style) & ~static_cast<uint8_t>(EpdFontFamily::BOLD))

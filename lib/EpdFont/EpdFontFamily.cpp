@@ -36,12 +36,6 @@ bool EpdFontFamily::hasCodepoint(const uint32_t cp, const Style style) const {
   return getFont(style)->hasCodepoint(cp);
 }
 
-bool EpdFontFamily::hasNativeBold(const Style style) const {
-  if ((style & BOLD) == 0) return false;
-  const auto unbolded = static_cast<Style>(static_cast<uint8_t>(style) & ~static_cast<uint8_t>(BOLD));
-  return getFont(style)->data != getFont(unbolded)->data;
-}
-
 int8_t EpdFontFamily::getKerning(const uint32_t leftCp, const uint32_t rightCp, const Style style) const {
   return getFont(style)->getKerning(leftCp, rightCp);
 }
