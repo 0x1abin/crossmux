@@ -1298,7 +1298,7 @@ bool appendEncodedId(char* out, const size_t outSize, size_t& position, char* wo
 bool appendProgressQuery(char* out, const size_t outSize, char* work, const size_t workSize, const char* bookId,
                          const WeReadStore::TocRecord& chapter, const uint32_t chapterOffset, const uint32_t progress,
                          const uint32_t now, const char* psvts, const char* pclts, const char* token, const bool report,
-                         const uint32_t readingSeconds, const uint64_t timestampMs, const uint32_t randomNumber) {
+                         const uint64_t timestampMs, const uint32_t randomNumber) {
   size_t position = 0;
   out[0] = '\0';
   if (!makeWebAppId(work, workSize) || !appendText(out, outSize, position, "appId=") ||
@@ -1324,8 +1324,7 @@ bool appendProgressQuery(char* out, const size_t outSize, char* work, const size
   }
   if (report) {
     if (!appendText(out, outSize, position, "&rn=") || !appendUnsigned(out, outSize, position, randomNumber) ||
-        !WeReadProtocol::formatReadingTimeQuery(readingSeconds, work, workSize) ||
-        !appendText(out, outSize, position, work)) {
+        !appendText(out, outSize, position, "&sg=")) {
       return false;
     }
     const int sourceLength = snprintf(work, workSize, "%llu%u%s", static_cast<unsigned long long>(timestampMs),
@@ -1344,8 +1343,8 @@ bool appendProgressQuery(char* out, const size_t outSize, char* work, const size
 
 bool makeProgressBody(const char* bookId, const WeReadStore::TocRecord& chapter, const uint32_t chapterOffset,
                       const float localFraction, const char* psvts, const char* pclts, const char* readerToken,
-                      const bool report, const uint32_t readingSeconds, char* body, const size_t bodySize, char* work,
-                      const size_t workSize, size_t& written) {
+                      const bool report, char* body, const size_t bodySize, char* work, const size_t workSize,
+                      size_t& written) {
   static constexpr char kDefaultReaderToken[] = "3c5c8717f3daf09iop3423zafeqoi";
   const uint32_t now = TimeUtils::getCurrentValidTimestamp();
   if (now == 0 || !isSafeProtocolToken(bookId) || !isSafeProtocolToken(chapter.chapterUid) ||
@@ -1361,7 +1360,7 @@ bool makeProgressBody(const char* bookId, const WeReadStore::TocRecord& chapter,
       report ? static_cast<uint64_t>(now) * 1000ULL + static_cast<uint32_t>(random(0, 1000)) : 0;
 
   if (!appendProgressQuery(body, bodySize, work, workSize, bookId, chapter, chapterOffset, progress, now, psvts, pclts,
-                           token, report, readingSeconds, timestampMs, randomNumber)) {
+                           token, report, timestampMs, randomNumber)) {
     return false;
   }
   char signature[24];
@@ -1394,8 +1393,7 @@ bool makeProgressBody(const char* bookId, const WeReadStore::TocRecord& chapter,
   }
   if (!appendText(body, bodySize, position, "\"")) return false;
   if (report) {
-    if (!WeReadProtocol::formatReadingTimeJson(readingSeconds, work, workSize) ||
-        !appendText(body, bodySize, position, work) || !appendUnsigned(body, bodySize, position, timestampMs) ||
+    if (!appendText(body, bodySize, position, ",\"ts\":") || !appendUnsigned(body, bodySize, position, timestampMs) ||
         !appendText(body, bodySize, position, ",\"rn\":") || !appendUnsigned(body, bodySize, position, randomNumber)) {
       return false;
     }
@@ -2165,7 +2163,6 @@ void Operation::reset() {
   progressSyncInput_ = {};
   progressSyncMode_ = ProgressSyncMode::Compare;
   progressSyncResult_ = {};
-  progressReportOutcome_ = ProgressSyncOutcome::Pending;
   session_.clear();
   book_ = {};
   chapter_ = {};
@@ -3117,11 +3114,9 @@ Error Operation::decideProgress() {
           chapter_.chapterUid, static_cast<unsigned>(progressChapterOffset_),
           static_cast<unsigned long>(progressSyncInput_.localFraction * 1000000.0f + 0.5f));
   const bool samePosition = sameRemotePosition();
-  const bool hasReadingTime = progressSyncInput_.readingSeconds > 0;
-  const ProgressAction action = progressAction(progressSyncMode_, samePosition, hasReadingTime);
-  LOG_INF("WR", "progress decision: mode=%u same=%u action=%u readingSeconds=%u",
-          static_cast<unsigned>(progressSyncMode_), static_cast<unsigned>(samePosition), static_cast<unsigned>(action),
-          static_cast<unsigned>(progressSyncInput_.readingSeconds));
+  const ProgressAction action = progressAction(progressSyncMode_, samePosition);
+  LOG_INF("WR", "progress decision: mode=%u same=%u action=%u", static_cast<unsigned>(progressSyncMode_),
+          static_cast<unsigned>(samePosition), static_cast<unsigned>(action));
   switch (action) {
     case ProgressAction::AlreadySynced:
       progressSyncResult_.outcome = ProgressSyncOutcome::AlreadySynced;
@@ -3132,32 +3127,7 @@ Error Operation::decideProgress() {
     case ProgressAction::ApplyRemote:
       progressSyncResult_.outcome = ProgressSyncOutcome::ApplyRemote;
       return Error::Ok;
-    case ProgressAction::ReportSynced:
-      progressReportOutcome_ = ProgressSyncOutcome::AlreadySynced;
-      break;
-    case ProgressAction::ReportRemote: {
-      const auto& remote = progressSyncResult_.remote;
-      uint32_t tocIndex = 0;
-      float chapterFraction = 0.0f;
-      float bookFraction = 0.0f;
-      if (!remote.hasChapterOffset ||
-          !WeReadStore::mapChapterToPosition(tocPath_, remote.chapterUid, remote.chapterOffset, tocIndex,
-                                             chapterFraction, bookFraction)) {
-        return Error::Unavailable;
-      }
-      HalFile toc;
-      uint32_t count = 0;
-      if (!WeReadStore::openToc(tocPath_, toc, count) || tocIndex >= count ||
-          !WeReadStore::readTocRecord(toc, tocIndex, chapter_)) {
-        return Error::SdCard;
-      }
-      progressChapterOffset_ = remote.chapterOffset;
-      progressSyncInput_.localFraction = bookFraction;
-      progressReportOutcome_ = ProgressSyncOutcome::ApplyRemote;
-      break;
-    }
     case ProgressAction::UploadLocal:
-      progressReportOutcome_ = ProgressSyncOutcome::LocalUploaded;
       break;
   }
   if (!makeReaderReferer(book_.bookId, chapter_.chapterUid, referer_)) return Error::Unavailable;
@@ -3185,8 +3155,8 @@ Error Operation::fetchProgressReaderOnce() {
 Error Operation::sendProgressOnce(const bool report) {
   size_t bodySize = 0;
   if (!makeProgressBody(book_.bookId, chapter_, progressChapterOffset_, progressSyncInput_.localFraction, psvts_,
-                        imageHost_, previousVid_, report, progressSyncInput_.readingSeconds,
-                        reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_), url_, sizeof(url_), bodySize)) {
+                        imageHost_, previousVid_, report, reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_), url_,
+                        sizeof(url_), bodySize)) {
     return Error::Clock;
   }
   SimpleJsonContext context;
@@ -4004,17 +3974,11 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::SendProgressReport: {
       const Error error = sendProgressOnce(true);
-      progressSyncInput_.readingSeconds = readingSecondsAfterReport(error, progressSyncInput_.readingSeconds);
       if (error == Error::SessionExpired) {
         requestAuthentication(Phase::FetchProgressReader);
         return phase_ == Phase::Failed ? fail(error_) : Event::None;
       }
-      if (error != Error::Ok) {
-        // A timed report may have reached WeRead even if its response was lost.
-        // Surface Retry instead of automatically sending the same seconds again.
-        if (ambiguousTimedReportFailure(error, progressSyncInput_.readingSeconds)) return fail(error);
-        return handleRequestError(error, Phase::SendProgressReport);
-      }
+      if (error != Error::Ok) return handleRequestError(error, Phase::SendProgressReport);
       requestSucceeded();
       progressVerifyAttempts_ = 0;
       nextActionAt_ = millis() + kNetworkRetryBaseMs;
@@ -4044,7 +4008,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       switch (outcome) {
         case ProgressSyncOutcome::LocalUploaded:
         case ProgressSyncOutcome::AlreadySynced:
-          progressSyncResult_.outcome = reportedProgressOutcome(outcome, progressReportOutcome_);
+          progressSyncResult_.outcome = outcome;
           break;
         case ProgressSyncOutcome::SelectionRequired:
           progressSyncResult_.outcome = outcome;

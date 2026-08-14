@@ -184,6 +184,8 @@ class EpubReaderActivity final : public Activity {
   // settings change re-paginates a chapter). Returns true if currentPage moved.
   // No-op while the section is still building or when the pagination is unchanged (plain resume).
   bool applyDeferredReposition();
+  // Discard the session-start resume anchor after explicit navigation supersedes it.
+  void clearDeferredReposition();
   void rememberCurrentContentOffset();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   bool jumpToFraction(float fraction);

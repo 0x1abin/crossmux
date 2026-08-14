@@ -68,18 +68,6 @@ void WeReadProgressSyncActivity::onEnter() {
   Activity::onEnter();
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 
-  const auto& snapshot = READING_STATS.getLastSessionSnapshot();
-  char mappedBookId[sizeof(bookId_)] = {};
-  const bool pathMatches = snapshot.path == epubPath_;
-  const bool bookMatches = pathMatches &&
-                           WeReadStore::findBookIdForPath(snapshot.path, mappedBookId, sizeof(mappedBookId)) &&
-                           strcmp(mappedBookId, bookId_) == 0;
-  input_.readingSeconds =
-      WeReadClient::readingSecondsForSession(snapshot.valid, pathMatches, bookMatches, snapshot.sessionMs);
-  LOG_INF("WRSync", "session report: valid=%u path=%u book=%u readingSeconds=%u", static_cast<unsigned>(snapshot.valid),
-          static_cast<unsigned>(pathMatches), static_cast<unsigned>(bookMatches),
-          static_cast<unsigned>(input_.readingSeconds));
-
   WeReadStore::Session session;
   const bool loggedIn = WeReadStore::loadSession(session) && session.valid();
   session.clear();
@@ -158,7 +146,6 @@ void WeReadProgressSyncActivity::advanceSync() {
   RenderLock renderBarrier(*this);
   if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
   const auto event = operation_.step();
-  input_.readingSeconds = operation_.pendingReadingSeconds();
   switch (event) {
     case WeReadClient::Operation::Event::None:
     case WeReadClient::Operation::Event::Authenticated:
@@ -180,8 +167,7 @@ void WeReadProgressSyncActivity::advanceSync() {
 
   const auto result = operation_.progressSyncResult();
   outcome_ = result.outcome;
-  LOG_INF("WRSync", "sync complete: outcome=%u readingSeconds=%u", static_cast<unsigned>(outcome_),
-          static_cast<unsigned>(input_.readingSeconds));
+  LOG_INF("WRSync", "sync complete: outcome=%u", static_cast<unsigned>(outcome_));
   operation_.reset();
   if (outcome_ == WeReadClient::ProgressSyncOutcome::SelectionRequired) {
     remoteFraction_ = result.remote.percent / 100.0f;
