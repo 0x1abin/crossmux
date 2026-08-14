@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "FontInstaller.h"
 #include "MappedInputManager.h"
 #include "ReaderFontSizes.h"
 #include "SdCardFontSystem.h"
@@ -83,7 +84,11 @@ void TextSettingsActivity::onEnter() {
   if (registry_) {
     const auto& families = registry_->getFamilies();
     for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      fonts_.push_back({families[i].name, false, static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
+      fonts_.push_back({FontInstaller::readDisplayName(families[i].name), false,
+                        static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
+      if (!renderer.canRenderText(UI_12_FONT_ID, fonts_.back().name.c_str())) {
+        fonts_.back().name = families[i].name;
+      }
     }
   }
 
@@ -100,9 +105,15 @@ void TextSettingsActivity::onEnter() {
   currentFamilyIndex_ = 0;
   for (int i = 0; i < static_cast<int>(fonts_.size()); i++) {
     const auto& font = fonts_[i];
-    const bool selected = font.isBuiltin
-                              ? SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily
-                              : font.name == SETTINGS.sdFontFamilyName;
+    bool selected = false;
+    if (font.isBuiltin) {
+      selected = SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily;
+    } else if (registry_) {
+      const int sdIndex = font.settingIndex - CrossPointSettings::BUILTIN_FONT_COUNT;
+      const auto& families = registry_->getFamilies();
+      selected = sdIndex >= 0 && sdIndex < static_cast<int>(families.size()) &&
+                 families[sdIndex].name == SETTINGS.sdFontFamilyName;
+    }
     if (selected) {
       currentFamilyIndex_ = i;
       break;

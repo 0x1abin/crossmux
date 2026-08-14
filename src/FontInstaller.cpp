@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Utf8.h>
 
 #include <cctype>
 #include <cstring>
@@ -51,6 +52,52 @@ bool FontInstaller::isValidCpfontFilename(const char* name) {
     if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') {
       return false;
     }
+  }
+  return true;
+}
+
+bool FontInstaller::isValidDisplayName(const char* name) {
+  if (!name) return false;
+  const size_t len = strlen(name);
+  if (len == 0 || len > DISPLAY_NAME_MAX_BYTES) return false;
+
+  const auto* cursor = reinterpret_cast<const unsigned char*>(name);
+  while (*cursor) {
+    if (*cursor < 0x20 || *cursor == 0x7F) return false;
+    if (utf8NextCodepoint(&cursor) == REPLACEMENT_GLYPH) return false;
+  }
+  return true;
+}
+
+std::string FontInstaller::readDisplayName(const std::string& familyName) {
+  char path[160];
+  buildFontPath(familyName.c_str(), DISPLAY_NAME_FILENAME, path, sizeof(path));
+
+  HalFile file;
+  if (!Storage.openFileForRead("FONT", path, file)) return familyName;
+  const size_t size = file.fileSize();
+  if (size == 0 || size > DISPLAY_NAME_MAX_BYTES) return familyName;
+
+  char displayName[DISPLAY_NAME_MAX_BYTES + 1];
+  if (file.read(displayName, size) != static_cast<int>(size)) return familyName;
+  displayName[size] = '\0';
+  if (strlen(displayName) != size) return familyName;
+  return isValidDisplayName(displayName) ? std::string(displayName) : familyName;
+}
+
+bool FontInstaller::writeDisplayName(const char* familyName, const char* displayName) {
+  if (!isValidFamilyName(familyName) || !isValidDisplayName(displayName)) return false;
+  if (!ensureFamilyDir(familyName)) return false;
+
+  char path[160];
+  buildFontPath(familyName, DISPLAY_NAME_FILENAME, path, sizeof(path));
+  HalFile file;
+  if (!Storage.openFileForWrite("FONT", path, file)) return false;
+
+  const size_t size = strlen(displayName);
+  if (file.write(displayName, size) != size) {
+    LOG_ERR("FONT", "Failed to write display name for %s", familyName);
+    return false;
   }
   return true;
 }

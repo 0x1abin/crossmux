@@ -50,13 +50,27 @@ There are three ways to install fonts:
        │       ├── Literata_12.cpfont
        │       ├── Literata_14.cpfont
        │       ├── Literata_16.cpfont
-       │       └── Literata_18.cpfont
+       │       ├── Literata_18.cpfont
+       │       └── display-name.txt     ← Optional UTF-8 display name
        └── fonts/                      ← Visible root (equally valid)
            └── Merriweather/
                ├── Merriweather_12.cpfont
                └── ...
 
 3. Insert the SD card and power on your CrossPoint reader
+
+The optional `display-name.txt` sidecar contains one UTF-8 family label with
+no newline, control characters, or more than 63 bytes. The directory name and
+`.cpfont` filenames remain the ASCII family ID used by settings and loading.
+Missing or invalid sidecars fall back to that ID. If the built-in UI font does
+not contain every glyph in the label, the device also falls back to the ASCII
+ID instead of drawing replacement boxes.
+
+The browser font builder at `crosspoint-web` reads a Simplified-Chinese family
+name from the Regular OpenType face when available and includes the sidecar in
+its ZIP. Copy the extracted family directory as a unit to retain it. The
+device's per-file web upload accepts only `.cpfont`, so that upload path does
+not carry the sidecar.
 
 ## CJK in the User Interface
 
@@ -129,7 +143,10 @@ builds keep using the GitHub catalog. Both use the release tag
 `sd-fonts-m<manifest>-b<binary>`, matching the manifest and cpfont versions
 compiled into the firmware.
 
-The external Chinese catalog must publish manifest v1 with a valid `baseUrl`,
+The external Chinese catalog may add a validated `displayName` to each manifest
+v1 family; current catalogs use it for Chinese labels while older manifests and
+firmware remain compatible. Opening the font manager backfills the sidecar for
+an older installed family. The catalog must also publish a valid `baseUrl`,
 family/file names, non-zero file sizes, and CRC32 values. Every referenced
 asset must be cpfont v4 and provide the complete Chinese coverage promised by
 the catalog maintainer. Font sources and catalog-generation configuration are
