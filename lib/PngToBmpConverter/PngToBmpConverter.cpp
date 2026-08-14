@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "Bitmap.h"
 #include "BitmapHelpers.h"
 #include "PngHelpers.h"
 
@@ -189,6 +190,36 @@ void writeBmpHeader2bit(Print& bmpOut, const int width, const int height) {
   for (const uint8_t i : palette) {
     bmpOut.write(i);
   }
+}
+
+void writeTransparentBmpHeader4bit(Print& bmpOut, const int width, const int height) {
+  const int bytesPerRow = (width + 7) / 8 * 4;
+  const int imageSize = bytesPerRow * height;
+  constexpr uint32_t paletteSize = 5 * 4;
+  const uint32_t pixelOffset = 14 + 40 + paletteSize;
+
+  bmpOut.write('B');
+  bmpOut.write('M');
+  write32(bmpOut, pixelOffset + imageSize);
+  write16(bmpOut, Bitmap::TRANSPARENT_OVERLAY_MARKER);
+  write16(bmpOut, Bitmap::TRANSPARENT_OVERLAY_VERSION);
+  write32(bmpOut, pixelOffset);
+
+  write32(bmpOut, 40);
+  write32Signed(bmpOut, width);
+  write32Signed(bmpOut, -height);
+  write16(bmpOut, 1);
+  write16(bmpOut, 4);
+  write32(bmpOut, 0);
+  write32(bmpOut, imageSize);
+  write32(bmpOut, 2835);
+  write32(bmpOut, 2835);
+  write32(bmpOut, Bitmap::TRANSPARENT_PALETTE_INDEX + 1);
+  write32(bmpOut, Bitmap::TRANSPARENT_PALETTE_INDEX + 1);
+
+  constexpr uint8_t palette[] = {0x00, 0x00, 0x00, 0x00, 0x55, 0x55, 0x55, 0x00, 0xAA, 0xAA,
+                                 0xAA, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0x00};
+  bmpOut.write(palette, sizeof(palette));
 }
 }  // namespace
 
@@ -445,9 +476,94 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
   }
 }
 
+static void convertScanlineToOpacity(const PngDecodeContext& ctx, uint8_t* opacityRow) {
+  const uint8_t* src = ctx.currentRow;
+  const uint32_t w = ctx.width;
+
+  switch (ctx.colorType) {
+    case PNG_COLOR_GRAYSCALE:
+      if (!ctx.hasTransparentGray) {
+        memset(opacityRow, 1, w);
+      } else if (ctx.bitDepth == 8) {
+        for (uint32_t x = 0; x < w; x++) opacityRow[x] = src[x] != ctx.transparentGray;
+      } else if (ctx.bitDepth == 16) {
+        for (uint32_t x = 0; x < w; x++) {
+          const uint16_t sample = static_cast<uint16_t>(src[x * 2]) << 8 | src[x * 2 + 1];
+          opacityRow[x] = sample != ctx.transparentGray;
+        }
+      } else {
+        const int ppb = 8 / ctx.bitDepth;
+        const uint8_t mask = (1 << ctx.bitDepth) - 1;
+        for (uint32_t x = 0; x < w; x++) {
+          const int shift = (ppb - 1 - (x % ppb)) * ctx.bitDepth;
+          opacityRow[x] = ((src[x / ppb] >> shift) & mask) != ctx.transparentGray;
+        }
+      }
+      break;
+
+    case PNG_COLOR_RGB:
+      if (!ctx.hasTransparentRgb) {
+        memset(opacityRow, 1, w);
+      } else if (ctx.bitDepth == 8) {
+        for (uint32_t x = 0; x < w; x++) {
+          const uint8_t* p = src + x * 3;
+          opacityRow[x] = p[0] != ctx.transparentRed || p[1] != ctx.transparentGreen || p[2] != ctx.transparentBlue;
+        }
+      } else {
+        for (uint32_t x = 0; x < w; x++) {
+          const uint8_t* p = src + x * 6;
+          const uint16_t red = static_cast<uint16_t>(p[0]) << 8 | p[1];
+          const uint16_t green = static_cast<uint16_t>(p[2]) << 8 | p[3];
+          const uint16_t blue = static_cast<uint16_t>(p[4]) << 8 | p[5];
+          opacityRow[x] = red != ctx.transparentRed || green != ctx.transparentGreen || blue != ctx.transparentBlue;
+        }
+      }
+      break;
+
+    case PNG_COLOR_PALETTE: {
+      const int ppb = 8 / ctx.bitDepth;
+      const uint8_t mask = (1 << ctx.bitDepth) - 1;
+      for (uint32_t x = 0; x < w; x++) {
+        const int shift = (ppb - 1 - (x % ppb)) * ctx.bitDepth;
+        uint8_t idx = (src[x / ppb] >> shift) & mask;
+        if (idx >= ctx.paletteSize) idx = 0;
+        opacityRow[x] = ctx.paletteAlpha[idx] != 0;
+      }
+      break;
+    }
+
+    case PNG_COLOR_GRAYSCALE_ALPHA:
+      if (ctx.bitDepth == 8) {
+        for (uint32_t x = 0; x < w; x++) opacityRow[x] = pngHelpers::isOverlayPixelOpaque(src[x * 2 + 1]);
+      } else {
+        for (uint32_t x = 0; x < w; x++) {
+          const uint16_t alpha = static_cast<uint16_t>(src[x * 4 + 2]) << 8 | src[x * 4 + 3];
+          opacityRow[x] = pngHelpers::isOverlayPixelOpaque(alpha);
+        }
+      }
+      break;
+
+    case PNG_COLOR_RGBA:
+      if (ctx.bitDepth == 8) {
+        for (uint32_t x = 0; x < w; x++) opacityRow[x] = pngHelpers::isOverlayPixelOpaque(src[x * 4 + 3]);
+      } else {
+        for (uint32_t x = 0; x < w; x++) {
+          const uint16_t alpha = static_cast<uint16_t>(src[x * 8 + 6]) << 8 | src[x * 8 + 7];
+          opacityRow[x] = pngHelpers::isOverlayPixelOpaque(alpha);
+        }
+      }
+      break;
+
+    default:
+      memset(opacityRow, 1, w);
+      break;
+  }
+}
+
 bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpOut, int targetWidth, int targetHeight,
-                                                   bool oneBit, bool crop) {
-  LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
+                                                   bool oneBit, bool crop, bool preserveTransparency) {
+  LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)",
+          preserveTransparency ? "transparent 4-bit" : (oneBit ? "1-bit" : "2-bit"), targetWidth, targetHeight);
 
   // Verify PNG signature
   uint8_t sig[8];
@@ -696,7 +812,10 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
   // Write BMP header
   int bytesPerRow;
-  if (USE_8BIT_OUTPUT && !oneBit) {
+  if (preserveTransparency) {
+    writeTransparentBmpHeader4bit(bmpOut, outWidth, outHeight);
+    bytesPerRow = (outWidth + 7) / 8 * 4;
+  } else if (USE_8BIT_OUTPUT && !oneBit) {
     writeBmpHeader8bit(bmpOut, outWidth, outHeight);
     bytesPerRow = (outWidth + 3) / 4 * 4;
   } else if (oneBit) {
@@ -735,21 +854,25 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   // Scaling accumulators
   std::unique_ptr<uint32_t[]> rowAccum;
   std::unique_ptr<uint16_t[]> rowCount;
+  std::unique_ptr<uint32_t[]> rowOpaqueCount;
   int currentOutY = 0;
   uint32_t nextOutY_srcStart = 0;
 
   if (needsScaling) {
     rowAccum = makeUniqueNoThrow<uint32_t[]>(outWidth);
     rowCount = makeUniqueNoThrow<uint16_t[]>(outWidth);
-    if (!rowAccum || !rowCount) return false;
+    if (preserveTransparency) rowOpaqueCount = makeUniqueNoThrow<uint32_t[]>(outWidth);
+    if (!rowAccum || !rowCount || (preserveTransparency && !rowOpaqueCount)) return false;
     nextOutY_srcStart = scaleY_fp;
   }
 
   // Allocate grayscale row buffer - batch-convert each scanline to avoid
   // per-pixel getPixelGray() switch overhead in the hot loops
   auto grayRow = makeUniqueNoThrow<uint8_t[]>(width);
-  if (!grayRow) {
-    LOG_ERR("PNG", "Failed to allocate grayscale row buffer");
+  // Source rows can be 2048 pixels wide, so the optional opacity row cannot live on the task stack.
+  auto opacityRow = preserveTransparency ? makeUniqueNoThrow<uint8_t[]>(width) : nullptr;
+  if (!grayRow || (preserveTransparency && !opacityRow)) {
+    LOG_ERR("PNG", "Failed to allocate grayscale/opacity row buffers");
     return false;
   }
 
@@ -767,12 +890,13 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
     // Batch-convert entire scanline to grayscale (one branch, tight loop)
     convertScanlineToGray(ctx, grayRow.get());
+    if (preserveTransparency) convertScanlineToOpacity(ctx, opacityRow.get());
 
     if (!needsScaling) {
       // Direct output (no scaling)
       memset(rowBuffer.get(), 0, bytesPerRow);
 
-      if (USE_8BIT_OUTPUT && !oneBit) {
+      if (!preserveTransparency && USE_8BIT_OUTPUT && !oneBit) {
         for (int x = 0; x < outWidth; x++) {
           rowBuffer[x] = adjustPixel(grayRow[x]);
         }
@@ -787,18 +911,27 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
         if (atkinson1BitDitherer) atkinson1BitDitherer->nextRow();
       } else {
         for (int x = 0; x < outWidth; x++) {
+          const bool opaque = !preserveTransparency || opacityRow[x] != 0;
           const uint8_t gray = adjustPixel(grayRow[x]);
           uint8_t twoBit;
-          if (atkinsonDitherer) {
+          if (!opaque) {
+            twoBit = Bitmap::TRANSPARENT_PALETTE_INDEX;
+          } else if (atkinsonDitherer) {
             twoBit = atkinsonDitherer->processPixel(gray, x);
           } else if (fsDitherer) {
             twoBit = fsDitherer->processPixel(gray, x);
           } else {
             twoBit = quantize(gray, x, y);
           }
-          const int byteIndex = (x * 2) / 8;
-          const int bitOffset = 6 - ((x * 2) % 8);
-          rowBuffer[byteIndex] |= (twoBit << bitOffset);
+          if (preserveTransparency) {
+            const int byteIndex = x / 2;
+            const int bitOffset = (x & 1) ? 0 : 4;
+            rowBuffer[byteIndex] |= pngHelpers::overlayPaletteIndex(twoBit, opaque) << bitOffset;
+          } else {
+            const int byteIndex = (x * 2) / 8;
+            const int bitOffset = 6 - ((x * 2) % 8);
+            rowBuffer[byteIndex] |= twoBit << bitOffset;
+          }
         }
         if (atkinsonDitherer)
           atkinsonDitherer->nextRow();
@@ -815,18 +948,22 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
         int sum = 0;
         int count = 0;
+        uint32_t opaqueCount = 0;
         for (int srcX = srcXStart; srcX < srcXEnd && srcX < static_cast<int>(width); srcX++) {
           sum += grayRow[srcX];
           count++;
+          if (preserveTransparency) opaqueCount += opacityRow[srcX] != 0;
         }
 
         if (count == 0 && srcXStart < static_cast<int>(width)) {
           sum = grayRow[srcXStart];
           count = 1;
+          if (preserveTransparency) opaqueCount = opacityRow[srcXStart] != 0;
         }
 
         rowAccum[outX] += sum;
         rowCount[outX] += count;
+        if (preserveTransparency) rowOpaqueCount[outX] += opaqueCount;
       }
 
       // Check if we've crossed into the next output row(s)
@@ -837,7 +974,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
       while (srcY_fp >= nextOutY_srcStart && currentOutY < outHeight) {
         memset(rowBuffer.get(), 0, bytesPerRow);
 
-        if (USE_8BIT_OUTPUT && !oneBit) {
+        if (!preserveTransparency && USE_8BIT_OUTPUT && !oneBit) {
           for (int x = 0; x < outWidth; x++) {
             const uint8_t gray = (rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0;
             rowBuffer[x] = adjustPixel(gray);
@@ -854,18 +991,27 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
           if (atkinson1BitDitherer) atkinson1BitDitherer->nextRow();
         } else {
           for (int x = 0; x < outWidth; x++) {
+            const bool opaque = !preserveTransparency || rowOpaqueCount[x] != 0;
             const uint8_t gray = adjustPixel((rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0);
             uint8_t twoBit;
-            if (atkinsonDitherer) {
+            if (!opaque) {
+              twoBit = Bitmap::TRANSPARENT_PALETTE_INDEX;
+            } else if (atkinsonDitherer) {
               twoBit = atkinsonDitherer->processPixel(gray, x);
             } else if (fsDitherer) {
               twoBit = fsDitherer->processPixel(gray, x);
             } else {
               twoBit = quantize(gray, x, currentOutY);
             }
-            const int byteIndex = (x * 2) / 8;
-            const int bitOffset = 6 - ((x * 2) % 8);
-            rowBuffer[byteIndex] |= (twoBit << bitOffset);
+            if (preserveTransparency) {
+              const int byteIndex = x / 2;
+              const int bitOffset = (x & 1) ? 0 : 4;
+              rowBuffer[byteIndex] |= pngHelpers::overlayPaletteIndex(twoBit, opaque) << bitOffset;
+            } else {
+              const int byteIndex = (x * 2) / 8;
+              const int bitOffset = 6 - ((x * 2) % 8);
+              rowBuffer[byteIndex] |= twoBit << bitOffset;
+            }
           }
           if (atkinsonDitherer)
             atkinsonDitherer->nextRow();
@@ -888,6 +1034,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
         // Moving to next source row - reset accumulators
         memset(rowAccum.get(), 0, outWidth * sizeof(uint32_t));
         memset(rowCount.get(), 0, outWidth * sizeof(uint16_t));
+        if (preserveTransparency) memset(rowOpaqueCount.get(), 0, outWidth * sizeof(uint32_t));
       }
     }
 
@@ -910,7 +1057,8 @@ bool PngToBmpConverter::pngFileToBmpStream(HalFile& pngFile, Print& bmpOut, bool
   return pngFileToBmpStreamInternal(pngFile, bmpOut, targetWidth, targetHeight, false, crop);
 }
 
-bool PngToBmpConverter::pngFileToBmpFile(const char* pngPath, const char* bmpPath, const bool crop) {
+bool PngToBmpConverter::pngFileToBmpFileInternal(const char* pngPath, const char* bmpPath, const bool crop,
+                                                 const bool preserveTransparency) {
   if (!pngPath || !bmpPath) return false;
   if (Storage.exists(bmpPath)) Storage.remove(bmpPath);
 
@@ -919,11 +1067,20 @@ bool PngToBmpConverter::pngFileToBmpFile(const char* pngPath, const char* bmpPat
     HalFile input;
     HalFile output;
     converted = Storage.openFileForRead("PNG", pngPath, input) && Storage.openFileForWrite("PNG", bmpPath, output) &&
-                pngFileToBmpStream(input, output, crop);
+                pngFileToBmpStreamInternal(input, output, display.getDisplayHeight(), display.getDisplayWidth(), false,
+                                           crop, preserveTransparency);
     if (converted) output.flush();
   }
   if (!converted && Storage.exists(bmpPath)) Storage.remove(bmpPath);
   return converted;
+}
+
+bool PngToBmpConverter::pngFileToBmpFile(const char* pngPath, const char* bmpPath, const bool crop) {
+  return pngFileToBmpFileInternal(pngPath, bmpPath, crop, false);
+}
+
+bool PngToBmpConverter::pngFileToTransparentBmpFile(const char* pngPath, const char* bmpPath, const bool crop) {
+  return pngFileToBmpFileInternal(pngPath, bmpPath, crop, true);
 }
 
 bool PngToBmpConverter::pngFileToBmpStreamWithSize(HalFile& pngFile, Print& bmpOut, int targetMaxWidth,

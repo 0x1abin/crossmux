@@ -8,6 +8,10 @@ constexpr uint8_t blendWithWhite(const uint8_t gray, const uint8_t alpha) {
   return static_cast<uint8_t>((static_cast<uint16_t>(gray) * alpha + 255u * (255u - alpha) + 127u) / 255u);
 }
 
+constexpr uint8_t overlayPaletteIndex(const uint8_t grayLevel, const bool opaque) { return opaque ? grayLevel : 4; }
+
+constexpr bool isOverlayPixelOpaque(const uint16_t alpha) { return alpha != 0; }
+
 constexpr bool isSupportedFormat(const uint8_t colorType, const uint8_t bitDepth) {
   switch (colorType) {
     case 0:  // Grayscale

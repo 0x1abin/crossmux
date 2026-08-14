@@ -15,7 +15,11 @@
 
 namespace {
 constexpr const char* PNG_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
-}
+constexpr const char* TRANSPARENT_PREVIEW_PATH = "/.crosspoint/image_preview.transparent.bmp";
+constexpr const char* SLEEP_IMAGE_PATH = "/sleep.bmp";
+constexpr const char* SLEEP_IMAGE_PART_PATH = "/sleep.bmp.part";
+constexpr const char* SLEEP_IMAGE_BACKUP_PATH = "/sleep.bmp.bak";
+}  // namespace
 
 ImageViewerActivity::ImageViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path)
     : Activity("ImageViewer", renderer, mappedInput), filePath(std::move(path)) {}
@@ -153,6 +157,7 @@ void ImageViewerActivity::onEnter() {
 void ImageViewerActivity::onExit() {
   Activity::onExit();
   if (Storage.exists(PNG_PREVIEW_PATH)) Storage.remove(PNG_PREVIEW_PATH);
+  if (Storage.exists(TRANSPARENT_PREVIEW_PATH)) Storage.remove(TRANSPARENT_PREVIEW_PATH);
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
@@ -160,41 +165,80 @@ void ImageViewerActivity::onExit() {
 void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool transparent) {
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
-  bool success = false;
-  {
+  const char* preparedPath = sourcePath;
+  bool success = true;
+  if (transparent) {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    success = PngToBmpConverter::pngFileToTransparentBmpFile(sourcePath, TRANSPARENT_PREVIEW_PATH, true);
+    if (success) preparedPath = TRANSPARENT_PREVIEW_PATH;
+  }
+
+  Storage.remove(SLEEP_IMAGE_PART_PATH);
+  if (success) {
     HalFile inFile, outFile;
-    if (Storage.openFileForRead("IMAGE", sourcePath, inFile) &&
-        Storage.openFileForWrite("IMAGE", "/sleep.bmp", outFile)) {
-      char buffer[2048];
+    if (Storage.openFileForRead("IMAGE", preparedPath, inFile) &&
+        Storage.openFileForWrite("IMAGE", SLEEP_IMAGE_PART_PATH, outFile)) {
+      const uint64_t expected = inFile.fileSize64();
+      uint64_t copied = 0;
+      char buffer[128];
       int bytesRead;
-      success = true;
       while ((bytesRead = inFile.read(buffer, sizeof(buffer))) > 0) {
         if (outFile.write(buffer, bytesRead) != bytesRead) {
           success = false;
           break;
         }
+        copied += bytesRead;
       }
       outFile.flush();
+      success = success && copied == expected;
+    } else {
+      success = false;
     }
   }
 
   if (success) {
-    SETTINGS.sleepScreen = transparent ? CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT
-                                       : CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    SETTINGS.saveToFile();
-    GUI.drawPopup(renderer, tr(STR_DONE));
-  } else {
-    GUI.drawPopup(renderer, tr(STR_FAILED_LOWER));
+    Storage.remove(SLEEP_IMAGE_BACKUP_PATH);
+    const bool hadPrevious = Storage.exists(SLEEP_IMAGE_PATH);
+    if ((hadPrevious && !Storage.rename(SLEEP_IMAGE_PATH, SLEEP_IMAGE_BACKUP_PATH)) ||
+        !Storage.rename(SLEEP_IMAGE_PART_PATH, SLEEP_IMAGE_PATH)) {
+      if (hadPrevious && !Storage.exists(SLEEP_IMAGE_PATH)) {
+        Storage.rename(SLEEP_IMAGE_BACKUP_PATH, SLEEP_IMAGE_PATH);
+      }
+      success = false;
+    }
   }
 
+  if (success) {
+    const uint8_t previousMode = SETTINGS.sleepScreen;
+    SETTINGS.sleepScreen = transparent ? CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT
+                                       : CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
+    if (!SETTINGS.saveToFile()) {
+      SETTINGS.sleepScreen = previousMode;
+      (void)SETTINGS.saveToFile();
+      Storage.remove(SLEEP_IMAGE_PATH);
+      if (Storage.exists(SLEEP_IMAGE_BACKUP_PATH)) {
+        Storage.rename(SLEEP_IMAGE_BACKUP_PATH, SLEEP_IMAGE_PATH);
+      }
+      success = false;
+    }
+  }
+
+  Storage.remove(SLEEP_IMAGE_PART_PATH);
+  if (success) Storage.remove(SLEEP_IMAGE_BACKUP_PATH);
+  GUI.drawPopup(renderer, success ? tr(STR_DONE) : tr(STR_FAILED_LOWER));
   delay(1000);
 }
 
 void ImageViewerActivity::showSleepCoverOptions() {
+  if (!isPng()) {
+    doSetSleepCover(filePath.c_str(), false);
+    return;
+  }
+
   static constexpr StrId options[] = {StrId::STR_NORMAL, StrId::STR_TRANSPARENT};
   static constexpr int optionCount = sizeof(options) / sizeof(options[0]);
   sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER, options, optionCount, 0, [this](const int index) {
-    doSetSleepCover(isPng() ? PNG_PREVIEW_PATH : filePath.c_str(), index == 1);
+    doSetSleepCover(index == 1 ? filePath.c_str() : PNG_PREVIEW_PATH, index == 1);
   });
   requestUpdate();
 }

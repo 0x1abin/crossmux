@@ -10,6 +10,22 @@ TEST(PngConversion, CompositesAlphaAgainstWhite) {
   EXPECT_EQ(pngHelpers::blendWithWhite(100, 128), 177);
 }
 
+TEST(PngConversion, KeepsOpaqueWhiteDistinctFromTransparency) {
+  EXPECT_FALSE(pngHelpers::isOverlayPixelOpaque(0));
+  EXPECT_TRUE(pngHelpers::isOverlayPixelOpaque(1));
+  EXPECT_TRUE(pngHelpers::isOverlayPixelOpaque(128));
+  EXPECT_TRUE(pngHelpers::isOverlayPixelOpaque(255));
+  EXPECT_TRUE(pngHelpers::isOverlayPixelOpaque(65535));
+
+  EXPECT_EQ(pngHelpers::overlayPaletteIndex(0, true), 0);
+  EXPECT_EQ(pngHelpers::overlayPaletteIndex(3, true), 3);
+  EXPECT_EQ(pngHelpers::overlayPaletteIndex(0, false), 4);
+  EXPECT_EQ(pngHelpers::overlayPaletteIndex(3, false), 4);
+
+  const uint8_t semiTransparentWhite = pngHelpers::blendWithWhite(255, 128);
+  EXPECT_EQ(pngHelpers::overlayPaletteIndex(semiTransparentWhite >> 6, true), 3);
+}
+
 TEST(PngConversion, AcceptsOnlyLegalColorTypeAndDepthCombinations) {
   for (const uint8_t depth : {1, 2, 4, 8, 16}) EXPECT_TRUE(pngHelpers::isSupportedFormat(0, depth));
   for (const uint8_t depth : {8, 16}) {

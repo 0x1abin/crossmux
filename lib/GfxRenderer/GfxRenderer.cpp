@@ -1421,7 +1421,7 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
 }
 
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
-                             const float cropX, const float cropY) const {
+                             const float cropX, const float cropY, const bool preserveTransparency) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
@@ -1463,8 +1463,11 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
+  const bool useTransparency = preserveTransparency && bitmap.hasTransparency();
+  // Up to 2048 bytes, too large for the task stack; allocate once for this draw pass.
+  auto opacityRow = useTransparency ? makeUniqueNoThrow<uint8_t[]>(bitmap.getWidth()) : nullptr;
 
-  if (!outputRow || !rowBytes) {
+  if (!outputRow || !rowBytes || (useTransparency && !opacityRow)) {
     LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
     free(outputRow);
     free(rowBytes);
@@ -1483,7 +1486,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       break;
     }
 
-    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+    if (bitmap.readNextRow(outputRow, rowBytes, opacityRow.get()) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
       free(outputRow);
       free(rowBytes);
@@ -1514,8 +1517,11 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
       const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
-      if (renderMode == BW && val < 3) {
-        drawPixel(screenX, screenY);
+      if (useTransparency && !opacityRow[bmpX]) {
+        continue;
+      }
+      if (renderMode == BW && (useTransparency || val < 3)) {
+        drawPixel(screenX, screenY, val < 3);
       } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
         drawPixel(screenX, screenY, false);
       } else if (renderMode == GRAYSCALE_LSB && val == 1) {

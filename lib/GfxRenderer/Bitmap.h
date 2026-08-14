@@ -62,12 +62,16 @@ enum class BmpReaderError : uint8_t {
 
 class Bitmap {
  public:
+  static constexpr uint16_t TRANSPARENT_OVERLAY_MARKER = 0x5843;
+  static constexpr uint16_t TRANSPARENT_OVERLAY_VERSION = 1;
+  static constexpr uint8_t TRANSPARENT_PALETTE_INDEX = 4;
+
   static const char* errorToString(BmpReaderError err);
 
   explicit Bitmap(HalFile& file, bool dithering = false) : file(file), dithering(dithering) {}
   ~Bitmap();
   BmpReaderError parseHeaders();
-  BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer) const;
+  BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr) const;
   BmpReaderError rewindToData() const;
   int getWidth() const { return width; }
   int getHeight() const { return height; }
@@ -76,6 +80,7 @@ class Bitmap {
   int getRowBytes() const { return rowBytes; }
   bool is1Bit() const { return bpp == 1; }
   uint16_t getBpp() const { return bpp; }
+  bool hasTransparency() const { return transparentOverlay; }
 
  private:
   static uint16_t readLE16(HalFile& f);
@@ -89,6 +94,7 @@ class Bitmap {
   uint32_t bfOffBits = 0;
   uint16_t bpp = 0;
   uint32_t colorsUsed = 0;
+  bool transparentOverlay = false;
   bool nativePalette = false;  // true if all palette entries map to native gray levels
   int rowBytes = 0;
   uint8_t paletteLum[256] = {};
