@@ -157,7 +157,7 @@ void ImageViewerActivity::onExit() {
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
-void ImageViewerActivity::doSetSleepCover(const char* sourcePath) {
+void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool transparent) {
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
   bool success = false;
@@ -179,7 +179,8 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath) {
   }
 
   if (success) {
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
+    SETTINGS.sleepScreen = transparent ? CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT
+                                       : CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
     SETTINGS.saveToFile();
     GUI.drawPopup(renderer, tr(STR_DONE));
   } else {
@@ -189,9 +190,25 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath) {
   delay(1000);
 }
 
+void ImageViewerActivity::showSleepCoverOptions() {
+  static constexpr StrId options[] = {StrId::STR_NORMAL, StrId::STR_TRANSPARENT};
+  static constexpr int optionCount = sizeof(options) / sizeof(options[0]);
+  sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER, options, optionCount, 0, [this](const int index) {
+    doSetSleepCover(isPng() ? PNG_PREVIEW_PATH : filePath.c_str(), index == 1);
+  });
+  requestUpdate();
+}
+
+void ImageViewerActivity::render(RenderLock&&) { sleepCoverPopup.processRender(renderer, mappedInput); }
+
 void ImageViewerActivity::loop() {
   // Keep CPU awake/polling so 1st click works
   Activity::loop();
+
+  if (sleepCoverPopup.handleInput(mappedInput, [this] { requestUpdate(); })) {
+    if (!sleepCoverPopup.isActive()) onEnter();
+    return;
+  }
 
   auto openSibling = [this](const int delta) {
     if (currentImageIndex < 0) {
@@ -225,8 +242,7 @@ void ImageViewerActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    doSetSleepCover(isPng() ? PNG_PREVIEW_PATH : filePath.c_str());
-    onEnter();
+    showSleepCoverOptions();
     return;
   }
 

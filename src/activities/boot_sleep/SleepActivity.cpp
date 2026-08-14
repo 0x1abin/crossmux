@@ -29,6 +29,12 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
+  // The retained screen is the transparent image's background; even the sleep popup would damage it.
+  if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT) {
+    if (APP_STATE.lastSleepFromReader) ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+    return renderTransparentSleepScreen();
+  }
+
   // Show popup with reader orientation only when going to sleep from reader
   if (APP_STATE.lastSleepFromReader) {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
@@ -171,7 +177,7 @@ void SleepActivity::renderDefaultSleepScreen() const {
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
-void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
+void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool preserveBackground) const {
   int x, y;
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -212,14 +218,16 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
   }
 
   LOG_DBG("SLP", "drawing to %d x %d", x, y);
-  renderer.clearScreen();
+  if (!preserveBackground) renderer.clearScreen();
 
-  const bool hasGreyscale = bitmap.hasGreyscale() &&
-                            SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+  const bool hasGreyscale =
+      bitmap.hasGreyscale() && (preserveBackground || SETTINGS.sleepScreenCoverFilter ==
+                                                          CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
 
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
-  if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
+  if (!preserveBackground &&
+      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
     renderer.invertScreen();
   }
 
@@ -249,6 +257,33 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
     renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
   }
+}
+
+void SleepActivity::renderTransparentSleepScreen() const {
+  HalFile file;
+  if (!Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
+    LOG_ERR("SLP", "Transparent sleep image /sleep.bmp is unavailable");
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return;
+  }
+
+  Bitmap bitmap(file);
+  const auto error = bitmap.parseHeaders();
+  if (error != BmpReaderError::Ok) {
+    LOG_ERR("SLP", "Invalid transparent sleep image: %s", Bitmap::errorToString(error));
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return;
+  }
+
+  const uint64_t pixelBytes = static_cast<uint64_t>(bitmap.getRowBytes()) * bitmap.getHeight();
+  if (file.position() > file.fileSize64() || pixelBytes > file.fileSize64() - file.position()) {
+    LOG_ERR("SLP", "Transparent sleep image pixel data is truncated");
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    return;
+  }
+
+  LOG_DBG("SLP", "Rendering transparent sleep image");
+  renderBitmapSleepScreen(bitmap, true);
 }
 
 void SleepActivity::renderCoverSleepScreen() const {
