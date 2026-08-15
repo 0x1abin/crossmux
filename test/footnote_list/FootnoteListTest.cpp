@@ -35,6 +35,7 @@ void ImageBlock::render(GfxRenderer&, int, int) {}
 bool ImageBlock::serialize(HalFile&) { return false; }
 std::unique_ptr<ImageBlock> ImageBlock::deserialize(HalFile&) { return nullptr; }
 bool ImageBlock::needsDecode() const { return false; }
+bool ImageBlock::ensureExtracted() { return false; }
 void GfxRenderer::drawLine(int, int, int, int, int, bool) const {}
 
 TEST(FootnoteList, AllocatesOnceAndMovesItsBoundedStorage) {
@@ -160,6 +161,6 @@ TEST_F(PageFootnoteOomTest, KeepsBodyAndSkipsFootnotesWhenAllocationFails) {
   EXPECT_TRUE(page->footnotes.empty());
   EXPECT_EQ(input.position(), markerPosition);
   uint32_t restoredMarker = 0;
-  serialization::readPod(input, restoredMarker);
+  ASSERT_TRUE(serialization::readPod(input, restoredMarker));
   EXPECT_EQ(restoredMarker, marker);
 }
