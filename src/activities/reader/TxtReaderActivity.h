@@ -4,6 +4,7 @@
 #include <TxtEncoding.h>
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include "CrossPointSettings.h"
@@ -11,6 +12,12 @@
 
 class TxtReaderActivity final : public Activity {
   enum class PageMode : uint8_t { Indexed, Direct };
+
+  struct TxtLine {
+    std::string text;
+    bool indented = false;
+  };
+  static_assert(sizeof(TxtLine) <= sizeof(std::string) + alignof(std::string));
 
   static constexpr size_t DIRECT_PAGE_HISTORY_SIZE = 32;
 
@@ -31,7 +38,7 @@ class TxtReaderActivity final : public Activity {
   size_t directPageCount = 0;
   int directReturnPage = 0;
   PageMode pageMode = PageMode::Indexed;
-  std::vector<std::string> currentPageLines;
+  std::vector<TxtLine> currentPageLines;
   int linesPerPage = 0;
   int viewportWidth = 0;
   bool initialized = false;
@@ -51,6 +58,7 @@ class TxtReaderActivity final : public Activity {
   int cachedFontId = 0;
   uint8_t cachedScreenMargin = 0;
   uint8_t cachedParagraphAlignment = CrossPointSettings::LEFT_ALIGN;
+  int paragraphIndentWidth = 0;
   int cachedOrientedMarginTop = 0;
   int cachedOrientedMarginRight = 0;
   int cachedOrientedMarginBottom = 0;
@@ -61,7 +69,7 @@ class TxtReaderActivity final : public Activity {
 
   void initializeReader();
   void probeTextEncoding();
-  bool loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset);
+  bool loadPageAtOffset(size_t offset, std::vector<TxtLine>& outLines, size_t& nextOffset);
   bool advancePageIndex(size_t nextOffset);
   bool extendIndexToPage(size_t targetPage);
   void goToSourceOffset(size_t sourceOffset, int returnPage);
