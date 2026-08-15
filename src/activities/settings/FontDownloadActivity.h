@@ -70,16 +70,16 @@ class FontDownloadActivity : public Activity {
   enum class DownloadResult : uint8_t { Success, Cancelled, Failed };
 
   struct ManifestFile {
-    std::string name;
     size_t size = 0;
     uint32_t crc32 = 0;
+    uint8_t pointSize = 0;
   };
 
   struct ManifestFamily {
     std::string name;
     std::string description;
-    std::vector<std::string> styles;
-    std::vector<ManifestFile> files;
+    size_t fileOffset = 0;
+    size_t fileCount = 0;
     size_t totalSize = 0;
     bool installed = false;
     bool hasUpdate = false;
@@ -93,6 +93,7 @@ class FontDownloadActivity : public Activity {
   // Manifest data
   std::string baseUrl_;
   std::vector<ManifestFamily> families_;
+  std::vector<ManifestFile> files_;
   int selectedIndex_ = 0;
 
   // Download progress
