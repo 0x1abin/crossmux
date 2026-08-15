@@ -45,6 +45,7 @@ FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
 static unsigned long allowSleepAt = 0;
+constexpr unsigned long READING_STATS_CHECKPOINT_IDLE_MS = 15UL * 1000UL;
 
 // Fonts
 #ifdef ENABLE_CHINESE_VERSION
@@ -328,6 +329,13 @@ void enterDeepSleep(bool fromTimeout = false) {
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
   activityManager.goToSleep(fromTimeout);
+
+  if (!READING_STATS.saveToFile()) {
+    LOG_ERR("RST", "Failed to save reading stats before deep sleep");
+  }
+  if (!ACHIEVEMENTS.saveToFile()) {
+    LOG_ERR("ACH", "Failed to save achievements before deep sleep");
+  }
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
@@ -710,8 +718,26 @@ void loop() {
   }
 
   const unsigned long activityStartTime = millis();
+  const bool readerWasActive = activityManager.isReaderActivity();
   activityManager.loop();
+  const bool readerIsActive = activityManager.isReaderActivity();
   const unsigned long activityDuration = millis() - activityStartTime;
+
+  if (readerWasActive && !readerIsActive) {
+    if (!READING_STATS.saveToFile()) {
+      LOG_ERR("RST", "Failed to save reading stats after reader exit");
+    }
+    if (!ACHIEVEMENTS.saveToFile()) {
+      LOG_ERR("ACH", "Failed to save achievements after reader exit");
+    }
+  } else if (readerIsActive && (millis() - lastActivityTime) >= READING_STATS_CHECKPOINT_IDLE_MS &&
+             !activityManager.skipLoopDelay() && !activityManager.preventAutoSleep() &&
+             READING_STATS.shouldSaveCheckpoint()) {
+    RenderLock lock;
+    if (!READING_STATS.saveToFile()) {
+      LOG_ERR("RST", "Failed to save idle reading checkpoint");
+    }
+  }
 
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {
