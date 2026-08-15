@@ -4,6 +4,27 @@
 
 namespace avatar {
 
+namespace {
+
+PointF blendedCurvePoint(const PointF& p0, const PointF& p1, const PointF& p2, const PointF& p3,
+                         const PointF& leftControl, const PointF& rightControl, const int index) {
+  PointF point = cubicBezier(p0, p1, p2, p3, index / 100.0f);
+  if (index >= 25) {
+    const int i = index - 25;
+    const float w = ((75.0f - i) / 75.0f) * ((75.0f - i) / 75.0f);
+    const PointF right = cubicBezier(p1, p2, p3, rightControl, i / 100.0f);
+    point = PointF{point.x * w + right.x * (1 - w), point.y * w + right.y * (1 - w)};
+  }
+  if (index < 75) {
+    const float w = ((75.0f - index) / 75.0f) * ((75.0f - index) / 75.0f);
+    const PointF left = cubicBezier(leftControl, p0, p1, p2, (index + 25) / 100.0f);
+    point = PointF{point.x * (1 - w) + left.x * w, point.y * (1 - w) + left.y * w};
+  }
+  return point;
+}
+
+}  // namespace
+
 EyeParams generateEyeParameters(Rng& rng, float width) {
   EyeParams p{};
   p.height_upper = rng.uniform01() * width / 1.2f;
@@ -65,61 +86,24 @@ PointF generateOneEye(Rng& rng, const EyeParams& p, float width, Polyline& outUp
   PointF upperCtlR{P3_upper.x * (1 - p.right_converge0) + P2_lower.x * p.right_converge0,
                    P3_upper.y * (1 - p.right_converge0) + P2_lower.y * p.right_converge0};
 
-  PointF upperCurve[100];
-  PointF upperCtlLCurve[100];
-  PointF upperCtlRCurve[100];
-  for (int t = 0; t < 100; ++t) {
-    const float u = t / 100.0f;
-    upperCurve[t] = cubicBezier(P0_upper, P1_upper, P2_upper, P3_upper, u);
-    upperCtlLCurve[t] = cubicBezier(upperCtlL, P0_upper, P1_upper, P2_upper, u);
-    upperCtlRCurve[t] = cubicBezier(P1_upper, P2_upper, P3_upper, upperCtlR, u);
-  }
-  for (int i = 0; i < 75; ++i) {
-    const float w = ((75.0f - i) / 75.0f) * ((75.0f - i) / 75.0f);
-    upperCurve[i] = PointF{upperCurve[i].x * (1 - w) + upperCtlLCurve[i + 25].x * w,
-                           upperCurve[i].y * (1 - w) + upperCtlLCurve[i + 25].y * w};
-    upperCurve[i + 25] = PointF{upperCurve[i + 25].x * w + upperCtlRCurve[i].x * (1 - w),
-                                upperCurve[i + 25].y * w + upperCtlRCurve[i].y * (1 - w)};
-  }
-
-  PointF lowerCurve[100];
-  PointF lowerCtlLCurve[100];
-  PointF lowerCtlRCurve[100];
   PointF lowerCtlL{P0_lower.x * (1 - p.left_converge0) + P1_upper.x * p.left_converge0,
                    P0_lower.y * (1 - p.left_converge0) + P1_upper.y * p.left_converge0};
   PointF lowerCtlR{P3_lower.x * (1 - p.right_converge1) + P2_upper.x * p.right_converge1,
                    P3_lower.y * (1 - p.right_converge1) + P2_upper.y * p.right_converge1};
-  for (int t = 0; t < 100; ++t) {
-    const float u = t / 100.0f;
-    lowerCurve[t] = cubicBezier(P0_lower, P1_lower, P2_lower, P3_lower, u);
-    lowerCtlLCurve[t] = cubicBezier(lowerCtlL, P0_lower, P1_lower, P2_lower, u);
-    lowerCtlRCurve[t] = cubicBezier(P1_lower, P2_lower, P3_lower, lowerCtlR, u);
-  }
-  for (int i = 0; i < 75; ++i) {
-    const float w = ((75.0f - i) / 75.0f) * ((75.0f - i) / 75.0f);
-    lowerCurve[i] = PointF{lowerCurve[i].x * (1 - w) + lowerCtlLCurve[i + 25].x * w,
-                           lowerCurve[i].y * (1 - w) + lowerCtlLCurve[i + 25].y * w};
-    lowerCurve[i + 25] = PointF{lowerCurve[i + 25].x * w + lowerCtlRCurve[i].x * (1 - w),
-                                lowerCurve[i + 25].y * w + lowerCtlRCurve[i].y * (1 - w)};
+  for (int i = 0; i < 100; ++i) {
+    outUpper.points[i] = blendedCurvePoint(P0_upper, P1_upper, P2_upper, P3_upper, upperCtlL, upperCtlR, i);
+    outLower.points[i] = blendedCurvePoint(P0_lower, P1_lower, P2_lower, P3_lower, lowerCtlL, lowerCtlR, i);
+    outUpper.points[i].y = -outUpper.points[i].y;
+    outLower.points[i].y = -outLower.points[i].y;
   }
 
+  PointF eyeCenter{outUpper.points[50].x / 2.0f + outLower.points[50].x / 2.0f,
+                   outUpper.points[50].y / 2.0f + outLower.points[50].y / 2.0f};
   for (int i = 0; i < 100; ++i) {
-    upperCurve[i].y = -upperCurve[i].y;
-    lowerCurve[i].y = -lowerCurve[i].y;
-  }
-
-  PointF eyeCenter{upperCurve[50].x / 2.0f + lowerCurve[50].x / 2.0f,
-                   upperCurve[50].y / 2.0f + lowerCurve[50].y / 2.0f};
-  for (int i = 0; i < 100; ++i) {
-    upperCurve[i].x -= eyeCenter.x;
-    upperCurve[i].y -= eyeCenter.y;
-    lowerCurve[i].x -= eyeCenter.x;
-    lowerCurve[i].y -= eyeCenter.y;
-  }
-
-  for (int i = 0; i < 100; ++i) {
-    outUpper.points[i] = upperCurve[i];
-    outLower.points[i] = lowerCurve[i];
+    outUpper.points[i].x -= eyeCenter.x;
+    outUpper.points[i].y -= eyeCenter.y;
+    outLower.points[i].x -= eyeCenter.x;
+    outLower.points[i].y -= eyeCenter.y;
   }
   outUpper.count = 100;
   outLower.count = 100;

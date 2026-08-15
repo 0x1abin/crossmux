@@ -1,7 +1,11 @@
 #include "Bitmap.h"
 
+#include <Logging.h>
+
 #include <cstdlib>
 #include <cstring>
+
+#include "../Memory/Memory.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS
@@ -19,6 +23,19 @@ Bitmap::~Bitmap() {
 
   delete atkinsonDitherer;
   delete fsDitherer;
+}
+
+bool Bitmap::ensureDrawScratch(const size_t bytes) const {
+  if (drawScratchCapacity >= bytes) return true;
+
+  auto scratch = makeUniqueNoThrow<uint8_t[]>(bytes);
+  if (!scratch) {
+    LOG_ERR("BMP", "OOM: draw scratch (%u bytes)", static_cast<unsigned>(bytes));
+    return false;
+  }
+  drawScratch = std::move(scratch);
+  drawScratchCapacity = bytes;
+  return true;
 }
 
 uint16_t Bitmap::readLE16(HalFile& f) {

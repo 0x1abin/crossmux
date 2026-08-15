@@ -672,17 +672,21 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
     return false;
   }
 
-  // Initialize decode context
-  PngDecodeContext ctx = {};
-  ctx.file = &pngFile;
-  ctx.width = width;
-  ctx.height = height;
-  ctx.bitDepth = bitDepth;
-  ctx.colorType = colorType;
-  ctx.bytesPerPixel = bytesPerPixel;
-  ctx.rawRowBytes = rawRowBytes;
-  ctx.paletteSize = 0;
-  memset(ctx.paletteAlpha, 0xFF, sizeof(ctx.paletteAlpha));
+  // This context is over 3KB; keep it off the 8KB render-task stack.
+  auto ctx = makeUniqueNoThrow<PngDecodeContext>();
+  if (!ctx) {
+    LOG_ERR("PNG", "OOM: decode context (%u bytes)", static_cast<unsigned>(sizeof(PngDecodeContext)));
+    return false;
+  }
+  ctx->file = &pngFile;
+  ctx->width = width;
+  ctx->height = height;
+  ctx->bitDepth = bitDepth;
+  ctx->colorType = colorType;
+  ctx->bytesPerPixel = bytesPerPixel;
+  ctx->rawRowBytes = rawRowBytes;
+  ctx->paletteSize = 0;
+  memset(ctx->paletteAlpha, 0xFF, sizeof(ctx->paletteAlpha));
 
   // Allocate scanline buffers
   auto currentRow = makeUniqueNoThrow<uint8_t[]>(rawRowBytes);
@@ -692,8 +696,8 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
     return false;
   }
   memset(previousRow.get(), 0, rawRowBytes);
-  ctx.currentRow = currentRow.get();
-  ctx.previousRow = previousRow.get();
+  ctx->currentRow = currentRow.get();
+  ctx->previousRow = previousRow.get();
 
   // Scan for PLTE chunk (palette) and first IDAT chunk
   // We need to read chunks until we find IDAT, collecting PLTE along the way
@@ -709,7 +713,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
     if (memcmp(chunkType, "PLTE", 4) == 0) {
       if (foundPalette || colorType == PNG_COLOR_GRAYSCALE || colorType == PNG_COLOR_GRAYSCALE_ALPHA || chunkLen == 0 ||
-          chunkLen > sizeof(ctx.palette) || chunkLen % 3 != 0) {
+          chunkLen > sizeof(ctx->palette) || chunkLen % 3 != 0) {
         LOG_ERR("PNG", "Invalid PLTE length: %u", chunkLen);
         return false;
       }
@@ -719,8 +723,8 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
         LOG_ERR("PNG", "PLTE has too many entries: %d", entries);
         return false;
       }
-      ctx.paletteSize = entries;
-      if (pngFile.read(ctx.palette, chunkLen) != static_cast<int>(chunkLen) || !pngFile.seekCur(4)) return false;
+      ctx->paletteSize = entries;
+      if (pngFile.read(ctx->palette, chunkLen) != static_cast<int>(chunkLen) || !pngFile.seekCur(4)) return false;
     } else if (memcmp(chunkType, "tRNS", 4) == 0) {
       if (foundTransparency) {
         LOG_ERR("PNG", "Duplicate tRNS chunk");
@@ -728,34 +732,34 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
       }
       foundTransparency = true;
       if (colorType == PNG_COLOR_PALETTE) {
-        if (ctx.paletteSize == 0 || chunkLen == 0 || chunkLen > static_cast<uint32_t>(ctx.paletteSize) ||
-            pngFile.read(ctx.paletteAlpha, chunkLen) != static_cast<int>(chunkLen)) {
+        if (ctx->paletteSize == 0 || chunkLen == 0 || chunkLen > static_cast<uint32_t>(ctx->paletteSize) ||
+            pngFile.read(ctx->paletteAlpha, chunkLen) != static_cast<int>(chunkLen)) {
           LOG_ERR("PNG", "Invalid palette tRNS length: %u", chunkLen);
           return false;
         }
       } else if (colorType == PNG_COLOR_GRAYSCALE && chunkLen == 2) {
-        if (!readBE16(pngFile, ctx.transparentGray)) break;
-        if (bitDepth < 16 && ctx.transparentGray >= (1u << bitDepth)) return false;
-        ctx.hasTransparentGray = true;
+        if (!readBE16(pngFile, ctx->transparentGray)) break;
+        if (bitDepth < 16 && ctx->transparentGray >= (1u << bitDepth)) return false;
+        ctx->hasTransparentGray = true;
       } else if (colorType == PNG_COLOR_RGB && chunkLen == 6) {
-        if (!readBE16(pngFile, ctx.transparentRed) || !readBE16(pngFile, ctx.transparentGreen) ||
-            !readBE16(pngFile, ctx.transparentBlue))
+        if (!readBE16(pngFile, ctx->transparentRed) || !readBE16(pngFile, ctx->transparentGreen) ||
+            !readBE16(pngFile, ctx->transparentBlue))
           break;
-        if (bitDepth == 8 && (ctx.transparentRed > 255 || ctx.transparentGreen > 255 || ctx.transparentBlue > 255)) {
+        if (bitDepth == 8 && (ctx->transparentRed > 255 || ctx->transparentGreen > 255 || ctx->transparentBlue > 255)) {
           return false;
         }
-        ctx.hasTransparentRgb = true;
+        ctx->hasTransparentRgb = true;
       } else {
         LOG_ERR("PNG", "Invalid tRNS length/type: %u/%u", colorType, chunkLen);
         return false;
       }
       if (!pngFile.seekCur(4)) return false;  // CRC
     } else if (memcmp(chunkType, "IDAT", 4) == 0) {
-      if (colorType == PNG_COLOR_PALETTE && ctx.paletteSize == 0) {
+      if (colorType == PNG_COLOR_PALETTE && ctx->paletteSize == 0) {
         LOG_ERR("PNG", "Palette PNG has no PLTE chunk");
         return false;
       }
-      ctx.chunkBytesRemaining = chunkLen;
+      ctx->chunkBytesRemaining = chunkLen;
       foundIdat = true;
     } else if (memcmp(chunkType, "IEND", 4) == 0) {
       break;
@@ -771,13 +775,13 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   }
 
   // Initialize streaming decompressor with 32KB window for back-reference history
-  if (!ctx.reader.init(true)) {
+  if (!ctx->reader.init(true)) {
     LOG_ERR("PNG", "Failed to init inflate stream");
     return false;
   }
-  ctx.reader.setFill(pngIdatFillCallback, &ctx);
+  ctx->reader.setFill(pngIdatFillCallback, ctx.get());
   // PNG IDAT data is zlib-wrapped (2-byte header + trailing adler32)
-  ctx.reader.setZlibWrapped();
+  ctx->reader.setZlibWrapped();
 
   // Calculate output dimensions (same logic as JpegToBmpConverter)
   int outWidth = width;
@@ -882,15 +886,15 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   // Process each scanline
   for (uint32_t y = 0; y < height; y++) {
     // Decode one scanline
-    if (!decodeScanline(ctx)) {
+    if (!decodeScanline(*ctx)) {
       LOG_ERR("PNG", "Failed to decode scanline %u", y);
       success = false;
       break;
     }
 
     // Batch-convert entire scanline to grayscale (one branch, tight loop)
-    convertScanlineToGray(ctx, grayRow.get());
-    if (preserveTransparency) convertScanlineToOpacity(ctx, opacityRow.get());
+    convertScanlineToGray(*ctx, grayRow.get());
+    if (preserveTransparency) convertScanlineToOpacity(*ctx, opacityRow.get());
 
     if (!needsScaling) {
       // Direct output (no scaling)
@@ -1039,9 +1043,9 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
     }
 
     // Swap current/previous row buffers
-    uint8_t* temp = ctx.previousRow;
-    ctx.previousRow = ctx.currentRow;
-    ctx.currentRow = temp;
+    uint8_t* temp = ctx->previousRow;
+    ctx->previousRow = ctx->currentRow;
+    ctx->currentRow = temp;
   }
 
   if (success) {

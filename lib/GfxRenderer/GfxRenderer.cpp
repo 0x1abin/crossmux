@@ -9,6 +9,7 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <string_view>
 
 #include "FontCacheManager.h"
 #include "Memory.h"
@@ -1373,18 +1374,18 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
 
   // Same bounded two-row working set as drawBitmap(); a scaled image buffer would exceed the RAM budget.
   const int outputRowSize = (sourceWidth + 3) / 4;
-  auto outputRow = makeUniqueNoThrow<uint8_t[]>(outputRowSize);
-  auto rowBytes = makeUniqueNoThrow<uint8_t[]>(bitmap.getRowBytes());
-  if (!outputRow || !rowBytes) {
-    LOG_ERR("GFX", "Failed to allocate crop-fill row buffers (%d + %u bytes)", outputRowSize,
-            static_cast<unsigned>(bitmap.getRowBytes()));
+  const size_t scratchSize = static_cast<size_t>(outputRowSize) + bitmap.getRowBytes();
+  if (!bitmap.ensureDrawScratch(scratchSize)) {
+    LOG_ERR("GFX", "Failed to allocate crop-fill row buffers (%u bytes)", static_cast<unsigned>(scratchSize));
     return false;
   }
+  uint8_t* const outputRow = bitmap.drawScratch.get();
+  uint8_t* const rowBytes = outputRow + outputRowSize;
 
   const GfxRenderer::RenderMode mode = getRenderMode();
   const bool pixelState = mode == GfxRenderer::BW;
   for (int sourceRow = 0; sourceRow < sourceHeight; ++sourceRow) {
-    if (bitmap.readNextRow(outputRow.get(), rowBytes.get()) != BmpReaderError::Ok) {
+    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read crop-fill row %d", sourceRow);
       return false;
     }
@@ -1461,18 +1462,16 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   // Calculate output row size (2 bits per pixel, packed into bytes)
   // IMPORTANT: Use int, not uint8_t, to avoid overflow for images > 1020 pixels wide
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
-  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
-  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
   const bool useTransparency = preserveTransparency && bitmap.hasTransparency();
-  // Up to 2048 bytes, too large for the task stack; allocate once for this draw pass.
-  auto opacityRow = useTransparency ? makeUniqueNoThrow<uint8_t[]>(bitmap.getWidth()) : nullptr;
-
-  if (!outputRow || !rowBytes || (useTransparency && !opacityRow)) {
+  const size_t scratchSize = static_cast<size_t>(outputRowSize) + bitmap.getRowBytes() +
+                             (useTransparency ? static_cast<size_t>(bitmap.getWidth()) : 0);
+  if (!bitmap.ensureDrawScratch(scratchSize)) {
     LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
-    free(outputRow);
-    free(rowBytes);
     return;
   }
+  uint8_t* const outputRow = bitmap.drawScratch.get();
+  uint8_t* const rowBytes = outputRow + outputRowSize;
+  uint8_t* const opacityRow = useTransparency ? rowBytes + bitmap.getRowBytes() : nullptr;
 
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
     // The BMP's (0, 0) is the bottom-left corner (if the height is positive, top-left if negative).
@@ -1486,10 +1485,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       break;
     }
 
-    if (bitmap.readNextRow(outputRow, rowBytes, opacityRow.get()) != BmpReaderError::Ok) {
+    if (bitmap.readNextRow(outputRow, rowBytes, opacityRow) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
       return;
     }
 
@@ -1529,9 +1526,6 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       }
     }
   }
-
-  free(outputRow);
-  free(rowBytes);
 }
 
 void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
@@ -1549,22 +1543,18 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
 
   // For 1-bit BMP, output is still 2-bit packed (for consistency with readNextRow)
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
-  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
-  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
-
-  if (!outputRow || !rowBytes) {
+  const size_t scratchSize = static_cast<size_t>(outputRowSize) + bitmap.getRowBytes();
+  if (!bitmap.ensureDrawScratch(scratchSize)) {
     LOG_ERR("GFX", "!! Failed to allocate 1-bit BMP row buffers");
-    free(outputRow);
-    free(rowBytes);
     return;
   }
+  uint8_t* const outputRow = bitmap.drawScratch.get();
+  uint8_t* const rowBytes = outputRow + outputRowSize;
 
   for (int bmpY = 0; bmpY < bitmap.getHeight(); bmpY++) {
     // Read rows sequentially using readNextRow
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from 1-bit bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
       return;
     }
 
@@ -1598,9 +1588,6 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
       // White pixels (val == 3) are not drawn (leave background)
     }
   }
-
-  free(outputRow);
-  free(rowBytes);
 }
 
 void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state) const {
@@ -1791,11 +1778,15 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
     return item;
   }
 
-  while (!item.empty() && getTextWidth(fontId, (item + ellipsis).c_str(), style) >= maxWidth) {
+  item.reserve(item.size() + 3);
+  item += ellipsis;
+  while (item.size() > 3 && getTextWidth(fontId, item.c_str(), style) >= maxWidth) {
+    item.resize(item.size() - 3);
     utf8RemoveLastChar(item);
+    item += ellipsis;
   }
 
-  return item.empty() ? ellipsis : item + ellipsis;
+  return item;
 }
 
 std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* text, const int maxWidth,
@@ -1804,52 +1795,63 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
 
   if (!text || maxWidth <= 0 || maxLines <= 0) return lines;
 
-  std::string remaining = text;
+  lines.reserve(static_cast<size_t>(maxLines));
+  const size_t textLength = strlen(text);
+  std::string_view remaining{text, textLength};
   std::string currentLine;
+  std::string candidate;
+  currentLine.reserve(textLength);
+  candidate.reserve(textLength);
 
   while (!remaining.empty()) {
     if (static_cast<int>(lines.size()) == maxLines - 1) {
       // Last available line: combine any word already started on this line with
       // the rest of the text, then let truncatedText fit it with an ellipsis.
-      std::string lastContent = currentLine.empty() ? remaining : currentLine + " " + remaining;
-      lines.push_back(truncatedText(fontId, lastContent.c_str(), maxWidth, style));
+      candidate = currentLine;
+      if (!candidate.empty() && !remaining.empty()) candidate.push_back(' ');
+      candidate.append(remaining.data(), remaining.size());
+      lines.push_back(truncatedText(fontId, candidate.c_str(), maxWidth, style));
       return lines;
     }
 
     // Find next word
-    size_t spacePos = remaining.find(' ');
-    std::string word;
+    const size_t spacePos = remaining.find(' ');
+    std::string_view word;
 
     if (spacePos == std::string::npos) {
       word = remaining;
-      remaining.clear();
+      remaining = {};
     } else {
       word = remaining.substr(0, spacePos);
-      remaining.erase(0, spacePos + 1);
+      remaining.remove_prefix(spacePos + 1);
     }
 
-    std::string testLine = currentLine.empty() ? word : currentLine + " " + word;
+    candidate = currentLine;
+    if (!candidate.empty()) candidate.push_back(' ');
+    candidate.append(word.data(), word.size());
 
-    if (getTextWidth(fontId, testLine.c_str(), style) <= maxWidth) {
-      currentLine = testLine;
+    if (getTextWidth(fontId, candidate.c_str(), style) <= maxWidth) {
+      currentLine = candidate;
     } else {
       if (!currentLine.empty()) {
         lines.push_back(currentLine);
         // If the carried-over word itself exceeds maxWidth, truncate it and
         // push it as a complete line immediately — storing it in currentLine
         // would allow a subsequent short word to be appended after the ellipsis.
-        if (getTextWidth(fontId, word.c_str(), style) > maxWidth) {
-          lines.push_back(truncatedText(fontId, word.c_str(), maxWidth, style));
+        candidate.assign(word.data(), word.size());
+        if (getTextWidth(fontId, candidate.c_str(), style) > maxWidth) {
+          lines.push_back(truncatedText(fontId, candidate.c_str(), maxWidth, style));
           currentLine.clear();
           if (static_cast<int>(lines.size()) >= maxLines) return lines;
         } else {
-          currentLine = word;
+          currentLine.assign(word.data(), word.size());
         }
       } else {
         // Single word wider than maxWidth: truncate and stop to avoid complicated
         // splitting rules (different between languages). Results in an aesthetically
         // pleasing end.
-        lines.push_back(truncatedText(fontId, word.c_str(), maxWidth, style));
+        candidate.assign(word.data(), word.size());
+        lines.push_back(truncatedText(fontId, candidate.c_str(), maxWidth, style));
         return lines;
       }
     }
