@@ -252,9 +252,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Opportunistically synchronize the system UTC clock while Wi-Fi is already connected.
   uint8_t clockAutoSync = 1;
   // Text rendering settings
-  uint8_t extraParagraphSpacing = 1;
+  uint8_t extraParagraphSpacing = 0;
   uint8_t textAntiAliasing = 1;
-  uint8_t fakeBold = SYNTHETIC_BOLD_OFF;
+  uint8_t fakeBold = SYNTHETIC_BOLD_STANDARD;
   uint8_t readingBackgroundEnabled = 0;
   uint8_t readingGuideLineEnabled = 0;
   uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
