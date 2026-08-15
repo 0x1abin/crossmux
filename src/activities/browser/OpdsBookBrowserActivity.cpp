@@ -424,15 +424,16 @@ void OpdsBookBrowserActivity::launchSearch() {
   state = BrowserState::SEARCH_INPUT;
   requestUpdate();
 
-  auto keyboard = std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH));
-  startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
-    state = BrowserState::BROWSING;
-    if (!result.isCancelled) {
-      performSearch(std::get<KeyboardResult>(result.data).text);
-    } else {
-      requestUpdate();
-    }
-  });
+  startActivityForResultWith<KeyboardEntryActivity>(
+      [this](const ActivityResult& result) {
+        state = BrowserState::BROWSING;
+        if (!result.isCancelled) {
+          performSearch(std::get<KeyboardResult>(result.data).text);
+        } else {
+          requestUpdate();
+        }
+      },
+      tr(STR_SEARCH));
 }
 
 void OpdsBookBrowserActivity::performSearch(const std::string& query) {

@@ -3,6 +3,7 @@
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
@@ -85,7 +86,13 @@ void CalibreConnectActivity::startWebServer() {
     LOG_DBG("CAL", "mDNS started: http://%s.local/", HOSTNAME);
   }
 
-  webServer.reset(new CrossPointWebServer());
+  webServer = makeUniqueNoThrow<CrossPointWebServer>();
+  if (!webServer) {
+    LOG_ERR("CAL", "OOM: CrossPointWebServer (%u bytes)", static_cast<unsigned>(sizeof(CrossPointWebServer)));
+    state = CalibreConnectState::ERROR;
+    requestUpdate();
+    return;
+  }
   webServer->begin();
 
   if (webServer->isRunning()) {

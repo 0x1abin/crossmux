@@ -128,7 +128,11 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
 
   LOG_DBG("WEB", "Creating web server on port %d...", port);
-  server.reset(new WebServer(port));
+  server = makeUniqueNoThrow<WebServer>(port);
+  if (!server) {
+    LOG_ERR("WEB", "OOM: WebServer (%u bytes)", static_cast<unsigned>(sizeof(WebServer)));
+    return;
+  }
 
   // Disable WiFi sleep to improve responsiveness and prevent 'unreachable' errors.
   // This is critical for reliable web server operation on ESP32.
@@ -142,9 +146,10 @@ void CrossPointWebServer::begin() {
 
   LOG_DBG("WEB", "[MEM] Free heap after WebServer allocation: %d bytes", ESP.getFreeHeap());
 
-  if (!server) {
-    LOG_ERR("WEB", "Failed to create WebServer!");
-    return;
+  upload.buffer = makeUniqueNoThrow<uint8_t[]>(UploadState::UPLOAD_BUFFER_SIZE);
+  fontUpload.buffer = makeUniqueNoThrow<uint8_t[]>(FontUploadState::BUFFER_SIZE);
+  if (!upload.buffer || !fontUpload.buffer) {
+    LOG_ERR("WEB", "OOM: upload buffers (%u bytes each)", static_cast<unsigned>(UploadState::UPLOAD_BUFFER_SIZE));
   }
 
   // Add Access-Control-Allow-* headers to every response so web-based clients
@@ -211,11 +216,15 @@ void CrossPointWebServer::begin() {
 
   // Start WebSocket server for fast binary uploads
   LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
-  wsServer.reset(new WebSocketsServer(wsPort));
-  wsInstance = const_cast<CrossPointWebServer*>(this);
-  wsServer->begin();
-  wsServer->onEvent(wsEventCallback);
-  LOG_DBG("WEB", "WebSocket server started");
+  wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
+  if (wsServer) {
+    wsInstance = const_cast<CrossPointWebServer*>(this);
+    wsServer->begin();
+    wsServer->onEvent(wsEventCallback);
+    LOG_DBG("WEB", "WebSocket server started");
+  } else {
+    LOG_ERR("WEB", "OOM: WebSocketsServer (%u bytes)", static_cast<unsigned>(sizeof(WebSocketsServer)));
+  }
 
   udpActive = udp.begin(LOCAL_UDP_PORT);
   LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
@@ -731,7 +740,7 @@ void CrossPointWebServer::handleDownload() const {
   server->send(200, contentType.c_str(), "");
 
   NetworkClient client = server->client();
-  const size_t chunkSize = 4096;
+  constexpr size_t chunkSize = 512;
   uint8_t buffer[chunkSize];
 
   bool downloadOk = true;
@@ -763,7 +772,7 @@ static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
   if (state.bufferPos > 0 && state.file) {
     resetTaskWatchdogIfSubscribed();  // Reset watchdog before potentially slow SD write
     const unsigned long writeStart = millis();
-    const size_t written = state.file.write(state.buffer.data(), state.bufferPos);
+    const size_t written = state.file.write(state.buffer.get(), state.bufferPos);
     totalWriteTime += millis() - writeStart;
     writeCount++;
     resetTaskWatchdogIfSubscribed();  // Reset watchdog after SD write
@@ -805,6 +814,10 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     state.bufferPos = 0;
     totalWriteTime = 0;
     writeCount = 0;
+    if (!state.buffer) {
+      state.error = "Not enough memory for upload buffer";
+      return;
+    }
 
     // Get upload path from query parameter (defaults to root if not specified)
     // Note: We use query parameter instead of form data because multipart form
@@ -859,7 +872,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         const size_t space = UploadState::UPLOAD_BUFFER_SIZE - state.bufferPos;
         const size_t toCopy = (remaining < space) ? remaining : space;
 
-        memcpy(state.buffer.data() + state.bufferPos, data, toCopy);
+        memcpy(state.buffer.get() + state.bufferPos, data, toCopy);
         state.bufferPos += toCopy;
         data += toCopy;
         remaining -= toCopy;
@@ -1967,6 +1980,11 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
 
+      if (!fontUpload.buffer) {
+        LOG_ERR("WEB", "Font upload unavailable: no buffer");
+        break;
+      }
+
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());
         break;
@@ -2026,13 +2044,13 @@ void CrossPointWebServer::handleFontUploadData() {
       while (remaining > 0) {
         size_t space = FontUploadState::BUFFER_SIZE - fontUpload.bufferPos;
         size_t chunk = (remaining < space) ? remaining : space;
-        memcpy(fontUpload.buffer.data() + fontUpload.bufferPos, src, chunk);
+        memcpy(fontUpload.buffer.get() + fontUpload.bufferPos, src, chunk);
         fontUpload.bufferPos += chunk;
         src += chunk;
         remaining -= chunk;
 
         if (fontUpload.bufferPos >= FontUploadState::BUFFER_SIZE) {
-          fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
+          fontUpload.file.write(fontUpload.buffer.get(), fontUpload.bufferPos);
           fontUpload.bytesWritten += fontUpload.bufferPos;
           fontUpload.bufferPos = 0;
           resetTaskWatchdogIfSubscribed();
@@ -2044,7 +2062,7 @@ void CrossPointWebServer::handleFontUploadData() {
     case UPLOAD_FILE_END: {
       // Flush remaining buffer
       if (fontUpload.valid && fontUpload.bufferPos > 0) {
-        fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
+        fontUpload.file.write(fontUpload.buffer.get(), fontUpload.bufferPos);
         fontUpload.bytesWritten += fontUpload.bufferPos;
         fontUpload.bufferPos = 0;
       }

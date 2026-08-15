@@ -759,97 +759,59 @@ void SettingsActivity::toggleCurrentSetting() {
 
     switch (setting.action) {
       case SettingAction::RemapFrontButtons:
-        startActivityForResult(std::make_unique<ButtonRemapActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<ButtonRemapActivity>(resultHandler);
         break;
       case SettingAction::CustomiseStatusBar:
-        startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<StatusBarSettingsActivity>(resultHandler);
         break;
       case SettingAction::ReadingStatsSettings:
-        // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
-        if (auto readingStatsSettings = makeUniqueNoThrow<ReadingStatsSettingsActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(readingStatsSettings), resultHandler);
-        } else {
-          LOG_ERR("SET", "OOM: ReadingStatsSettingsActivity (%u bytes)",
-                  static_cast<unsigned>(sizeof(ReadingStatsSettingsActivity)));
-        }
+        startActivityForResultWith<ReadingStatsSettingsActivity>(resultHandler);
         break;
       case SettingAction::AppVisibility:
-        // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
-        if (auto appVisibility = makeUniqueNoThrow<AppVisibilitySettingsActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(appVisibility), [](const ActivityResult&) {});
-        } else {
-          LOG_ERR("SET", "OOM: AppVisibilitySettingsActivity (%u bytes)",
-                  static_cast<unsigned>(sizeof(AppVisibilitySettingsActivity)));
-        }
+        startActivityForResultWith<AppVisibilitySettingsActivity>([](const ActivityResult&) {});
         break;
       case SettingAction::KOReaderSync:
-        startActivityForResult(std::make_unique<KOReaderSettingsActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<KOReaderSettingsActivity>(resultHandler);
         break;
       case SettingAction::OPDSBrowser:
-        startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<OpdsServerListActivity>(resultHandler);
         break;
       case SettingAction::Network:
         startActivityForResultWith<WifiSelectionActivity>(resultHandler, false);
         break;
       case SettingAction::DateTime:
-        // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
-        if (auto dateTime = makeUniqueNoThrow<DateTimeSettingsActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(dateTime), resultHandler);
-        } else {
-          LOG_ERR("SET", "OOM: DateTimeSettingsActivity (%u bytes)",
-                  static_cast<unsigned>(sizeof(DateTimeSettingsActivity)));
-        }
+        startActivityForResultWith<DateTimeSettingsActivity>(resultHandler);
         break;
       case SettingAction::ClearCache:
-        startActivityForResult(std::make_unique<ClearCacheActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<ClearCacheActivity>(resultHandler);
         break;
       case SettingAction::CheckForUpdates:
-        startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<OtaUpdateActivity>(resultHandler);
         break;
       case SettingAction::SdFirmwareUpdate:
-        startActivityForResult(std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<SdFirmwareUpdateActivity>(resultHandler);
         break;
       case SettingAction::DownloadFonts:
-        startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
-                               [this](const ActivityResult&) {
-                                 SETTINGS.saveToFile();
-                                 rebuildSettingsLists();
-                               });
+        startActivityForResultWith<FontDownloadActivity>([this](const ActivityResult&) {
+          SETTINGS.saveToFile();
+          rebuildSettingsLists();
+        });
         break;
       case SettingAction::ManageDictionaries:
-        if (auto dictionaries = makeUniqueNoThrow<DictionaryDownloadActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(dictionaries), [this](const ActivityResult&) {
-            SETTINGS.saveToFile();
-            rebuildSettingsLists();
-          });
-        } else {
-          LOG_ERR("SET", "OOM: DictionaryDownloadActivity (%u bytes)",
-                  static_cast<unsigned>(sizeof(DictionaryDownloadActivity)));
-        }
+        startActivityForResultWith<DictionaryDownloadActivity>([this](const ActivityResult&) {
+          SETTINGS.saveToFile();
+          rebuildSettingsLists();
+        });
         break;
       case SettingAction::TextSettings:
-        // ActivityManager owns this across render-loop frames, so it cannot be a
-        // stack object. Use the nothrow factory because ESP32 builds disable exceptions.
-        if (auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                                        TextSettingsActivity::Tab::Family)) {
-          startActivityForResult(std::move(textSettings), [this](const ActivityResult&) {
-            // TextSettingsActivity persists every change before returning.
-            rebuildSettingsLists();
-          });
-        } else {
-          LOG_ERR("SET", "OOM: TextSettingsActivity (%u bytes)", static_cast<unsigned>(sizeof(TextSettingsActivity)));
-        }
+        startActivityForResultWith<TextSettingsActivity>([this](const ActivityResult&) { rebuildSettingsLists(); },
+                                                         &sdFontSystem.registry(), TextSettingsActivity::Tab::Family);
         break;
       case SettingAction::Language:
-        startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResultWith<LanguageSelectActivity>(resultHandler);
         break;
       case SettingAction::About:
-        // ActivityManager owns this across frames; stack/static lifetime is invalid.
-        if (auto about = makeUniqueNoThrow<AboutActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(about), [](const ActivityResult&) {});
-        } else {
-          LOG_ERR("SET", "OOM: AboutActivity (%u bytes)", static_cast<unsigned>(sizeof(AboutActivity)));
-        }
+        startActivityForResultWith<AboutActivity>([](const ActivityResult&) {});
         break;
       case SettingAction::None:
         // Do nothing
@@ -890,18 +852,17 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
 }
 
 void SettingsActivity::openSleepTimeoutPicker() {
-  startActivityForResult(
-      std::make_unique<IntervalSelectionActivity>(
-          renderer, mappedInput, "SleepTimeoutInterval", StrId::STR_TIME_TO_SLEEP, SETTINGS.sleepTimeoutMinutes,
-          CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, 1, 5,
-          StrId::STR_SLEEP_TIMER_VALUE_FORMAT, false, true, StrId::STR_SLEEP_NEVER),
+  startActivityForResultWith<IntervalSelectionActivity>(
       [this](const ActivityResult& result) {
         if (!result.isCancelled) {
           SETTINGS.sleepTimeoutMinutes = static_cast<uint8_t>(std::get<IntervalResult>(result.data).value);
           SETTINGS.saveToFile();
         }
         requestUpdate();
-      });
+      },
+      "SleepTimeoutInterval", StrId::STR_TIME_TO_SLEEP, SETTINGS.sleepTimeoutMinutes,
+      CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, 1, 5,
+      StrId::STR_SLEEP_TIMER_VALUE_FORMAT, false, true, StrId::STR_SLEEP_NEVER);
 }
 
 void SettingsActivity::openReadingBackgroundMenu() {

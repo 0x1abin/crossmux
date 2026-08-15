@@ -129,7 +129,7 @@ void OpdsServerListActivity::handleSelection() {
     if (selectedIndex < serverCount) {
       const auto* server = OPDS_STORE.getServer(static_cast<size_t>(selectedIndex));
       if (server) {
-        activityManager.replaceActivity(std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput, *server));
+        activityManager.replaceActivityWith<OpdsBookBrowserActivity>(*server);
       }
     }
     return;
@@ -147,10 +147,8 @@ void OpdsServerListActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(
-        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_OPDS_DOWNLOAD_FOLDER),
-                                                std::string(SETTINGS.opdsDownloadFolder), 63, InputType::Text),
-        folderHandler);
+    startActivityForResultWith<KeyboardEntryActivity>(folderHandler, tr(STR_OPDS_DOWNLOAD_FOLDER),
+                                                      std::string(SETTINGS.opdsDownloadFolder), 63, InputType::Text);
     return;
   }
 
@@ -171,9 +169,9 @@ void OpdsServerListActivity::handleSelection() {
   };
 
   if (selectedIndex < serverCount) {
-    startActivityForResult(std::make_unique<OpdsSettingsActivity>(renderer, mappedInput, selectedIndex), resultHandler);
+    startActivityForResultWith<OpdsSettingsActivity>(resultHandler, selectedIndex);
   } else {
-    startActivityForResult(std::make_unique<OpdsSettingsActivity>(renderer, mappedInput, -1), resultHandler);
+    startActivityForResultWith<OpdsSettingsActivity>(resultHandler, -1);
   }
 }
 
