@@ -1832,7 +1832,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     if (includeBackground && SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) {
       renderer.clearScreen();
     }
-    page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+    renderPage();
     if (!SETTINGS.readingGuideLineEnabled) return;
 
     const int x1 = orientedMarginLeft;
