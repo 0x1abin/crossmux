@@ -15,14 +15,13 @@
 #define FONTS_MANIFEST_VERSION 1
 
 #ifndef FONT_MANIFEST_URL
-// Global assets are published by .github/workflows/release-fonts.yml; Chinese
-// assets use the separately managed Gitee service. Both use the
-// "sd-fonts-m<META>-b<BIN>" tag derived from cpfont_version.py.
+// Global assets are published by .github/workflows/release-fonts.yml. Chinese
+// assets use the CrossMux API so the device avoids Gitee's redirect chain.
 #define FONT_MANIFEST_URL_STRINGIFY_INNER(x) #x
 #define FONT_MANIFEST_URL_STRINGIFY(x) FONT_MANIFEST_URL_STRINGIFY_INNER(x)
 #ifdef ENABLE_CHINESE_VERSION
-#define FONT_MANIFEST_URL                                                                             \
-  "https://gitee.com/x1abin/crossmux-fonts/releases/download/sd-fonts-m" FONT_MANIFEST_URL_STRINGIFY( \
+#define FONT_MANIFEST_URL                                                     \
+  "https://" CROSSMUX_HOST "/api/assets/fonts/m" FONT_MANIFEST_URL_STRINGIFY( \
       FONTS_MANIFEST_VERSION) "-b" FONT_MANIFEST_URL_STRINGIFY(CPFONT_VERSION) "/fonts.json"
 #else
 #define FONT_MANIFEST_URL                                                                                           \
@@ -70,16 +69,16 @@ class FontDownloadActivity : public Activity {
   enum class DownloadResult : uint8_t { Success, Cancelled, Failed };
 
   struct ManifestFile {
-    std::string name;
     size_t size = 0;
     uint32_t crc32 = 0;
+    uint8_t pointSize = 0;
   };
 
   struct ManifestFamily {
     std::string name;
     std::string description;
-    std::vector<std::string> styles;
-    std::vector<ManifestFile> files;
+    size_t fileOffset = 0;
+    size_t fileCount = 0;
     size_t totalSize = 0;
     bool installed = false;
     bool hasUpdate = false;
@@ -93,13 +92,12 @@ class FontDownloadActivity : public Activity {
   // Manifest data
   std::string baseUrl_;
   std::vector<ManifestFamily> families_;
+  std::vector<ManifestFile> files_;
   int selectedIndex_ = 0;
 
   // Download progress
   size_t currentFileIndex_ = 0;
   size_t currentFileTotal_ = 0;
-  size_t fileProgress_ = 0;
-  size_t fileTotal_ = 0;
   int downloadingFamilyIndex_ = -1;
   std::string errorMessage_;
   bool cancelRequested_ = false;
@@ -111,6 +109,7 @@ class FontDownloadActivity : public Activity {
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();
+  DownloadResult downloadFile(const ManifestFamily& family, const ManifestFile& file);
   DownloadResult downloadFamily(ManifestFamily& family);
   void downloadSingle(int familyIndex);
   void downloadAll();
@@ -118,6 +117,7 @@ class FontDownloadActivity : public Activity {
   void retryDownloadOperation();
   void selectDownloadedFontAndPreview(const char* familyName);
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);
+  bool isVerifiedFontFile(const char* path, const ManifestFile& file);
   bool showDownloadAllRow() const;
   bool showUpdateAllRow() const;
   int specialRowCount() const;
