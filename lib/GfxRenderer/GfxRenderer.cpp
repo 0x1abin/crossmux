@@ -620,9 +620,16 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
 
+  const uint8_t activeSyntheticBoldPixels =
+      syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 ? syntheticBoldPixels : 0;
+  const auto renderStyle =
+      activeSyntheticBoldPixels != 0
+          ? static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(style) & ~static_cast<uint8_t>(EpdFontFamily::BOLD))
+          : style;
+
   // Route CJK-bearing strings to the fallback font when the requested font
   // lacks the glyphs (e.g. Chinese book titles drawn with a Latin UI font).
-  const int resolvedFontId = resolveTextFontId(fontId, text, style);
+  const int resolvedFontId = resolveTextFontId(fontId, text, renderStyle);
 
   std::string visual;
   const char* renderedText = resolveVisualText(text, visual, baseDir);
@@ -635,7 +642,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
 
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
-    fontCacheManager_->recordText(renderedText, resolvedFontId, style);
+    fontCacheManager_->recordText(renderedText, resolvedFontId, renderStyle);
     return;
   }
 
@@ -645,12 +652,6 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
   const auto& font = fontIt->second;
-  const uint8_t activeSyntheticBoldPixels =
-      syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 ? syntheticBoldPixels : 0;
-  const auto renderStyle =
-      activeSyntheticBoldPixels != 0
-          ? static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(style) & ~static_cast<uint8_t>(EpdFontFamily::BOLD))
-          : style;
 
   const char* textCursor = renderedText;
   uint32_t cp;
