@@ -32,7 +32,6 @@
 
 namespace {
 
-constexpr uint32_t kProgressRefreshIntervalMs = 2000;
 constexpr size_t kMaxManifestBytes = 64 * 1024;
 constexpr size_t kMaxManifestFamilies = 32;
 constexpr size_t kMaxManifestFiles = 128;
@@ -146,6 +145,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
     state_ = LOADING_MANIFEST;
   }
   requestUpdateAndWait();
+  NetworkStartup::prepare(renderer);
 
   if (!fetchAndParseManifest()) {
     {
@@ -418,11 +418,6 @@ bool FontDownloadActivity::computeFileCrc32(const char* path, uint32_t& outCrc) 
 
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const ManifestFamily& family,
                                                                         const ManifestFile& file) {
-  {
-    RenderLock lock(*this);
-    fileProgress_ = 0;
-    fileTotal_ = file.size;
-  }
   requestUpdateAndWait();
 
   char fileName[128];
@@ -437,24 +432,18 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
   char downloadPath[136];
   snprintf(downloadPath, sizeof(downloadPath), "%s.part", destPath);
 
-  uint32_t lastProgressRefreshAt = millis();
-  const auto result = HttpDownloader::downloadToFile(
-      baseUrl_ + fileName, downloadPath,
-      [this, &lastProgressRefreshAt](size_t downloaded, size_t total) {
-        fileProgress_ = downloaded;
-        fileTotal_ = total;
-        mappedInput.update();
-        if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
-            mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-          cancelRequested_ = true;
-        }
-        const uint32_t now = millis();
-        if (now - lastProgressRefreshAt >= kProgressRefreshIntervalMs) {
-          lastProgressRefreshAt = now;
-          requestUpdate(true);
-        }
-      },
-      &cancelRequested_);
+  std::string url = baseUrl_ + fileName;
+  std::string destination = downloadPath;
+  HttpDownloader::ProgressCallback progress = [this](size_t, size_t) {
+    mappedInput.update();
+    if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
+        mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      cancelRequested_ = true;
+    }
+  };
+
+  NetworkStartup::prepare(renderer);
+  const auto result = HttpDownloader::downloadToFile(url, destination, std::move(progress), &cancelRequested_);
   if (result == HttpDownloader::ABORTED) return DownloadResult::Cancelled;
   if (result != HttpDownloader::OK) {
     LOG_ERR("FONT", "Download failed: %s (%d)", fileName, result);
@@ -500,7 +489,6 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
 }
 
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(ManifestFamily& family) {
-  NetworkStartup::prepare(renderer);
   const bool wasInstalled = family.installed;
   auto discardIncompleteFamily = [this, &family, wasInstalled] {
     if (!wasInstalled) fontInstaller_.deleteFamily(family.name.c_str());
@@ -511,11 +499,8 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
     RenderLock lock(*this);
     state_ = DOWNLOADING;
     downloadingFamilyIndex_ = static_cast<int>(&family - families_.data());
-    fileProgress_ = 0;
-    fileTotal_ = 0;
     cancelRequested_ = false;
   }
-  requestUpdateAndWait();
 
   if (!fontInstaller_.ensureFamilyDir(family.name.c_str())) {
     RenderLock lock(*this);
@@ -881,10 +866,8 @@ void FontDownloadActivity::render(RenderLock&&) {
 
     std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + family.name + " (" +
                              std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
-    float progress = 0;
-    if (fileTotal_ > 0) {
-      progress = static_cast<float>(fileProgress_) / static_cast<float>(fileTotal_);
-    }
+    const float progress =
+        currentFileTotal_ == 0 ? 0 : static_cast<float>(currentFileIndex_) / static_cast<float>(currentFileTotal_);
 
     const int statusLines = renderer.getTextWidth(UI_10_FONT_ID, statusText.c_str()) <= textBounds.width ? 1 : 2;
     const int statusHeight = lineHeight * statusLines;
