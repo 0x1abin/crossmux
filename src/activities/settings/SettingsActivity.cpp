@@ -196,10 +196,8 @@ void SettingsActivity::rebuildSettingsLists() {
   // reader activity ran — otherwise the font-family picker shows stale list.
   sdFontSystem.refreshIfDirty();
 
-  // Rescan /dictionaries on every rebuild: cheap (one directory listing) and
-  // picks up dictionaries copied to the SD card since the last visit.
   std::vector<DictionaryEntry> dictionaries;
-  DictionaryRegistry::discover(dictionaries);
+  if (dictionariesLoaded) DictionaryRegistry::discover(dictionaries);
 
   for (auto& setting : getSettingsList(&sdFontSystem.registry(), &dictionaries)) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
@@ -294,6 +292,7 @@ void SettingsActivity::onEnter() {
       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
   quickResumeTimeoutAutoEnabled = false;
   syncQuickResumeTimeoutForSleepScreen(/*sleepScreenChanged=*/true, /*quickResumeTimeoutChanged=*/false);
+  dictionariesLoaded = !usesAccordion();
 
   rebuildSettingsLists();
 
@@ -507,7 +506,13 @@ std::array<int, SettingsActivity::categoryCount> SettingsActivity::accordionSett
 
 void SettingsActivity::toggleAccordionCategory(const int categoryIndex) {
   if (categoryIndex < 0 || categoryIndex >= categoryCount) return;
-  expandedCategories ^= uint8_t{1} << categoryIndex;
+  constexpr int readerCategoryIndex = 1;
+  const uint8_t categoryMask = uint8_t{1} << categoryIndex;
+  if (categoryIndex == readerCategoryIndex && !dictionariesLoaded && (expandedCategories & categoryMask) == 0) {
+    dictionariesLoaded = true;
+    rebuildSettingsLists();
+  }
+  expandedCategories ^= categoryMask;
   accordionSelectedIndex =
       InxAccordionGeometry::categoryRow(accordionSettingCounts(), expandedCategories, categoryIndex);
   requestUpdate();

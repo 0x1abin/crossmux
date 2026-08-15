@@ -193,6 +193,7 @@ class SettingsActivity final : public Activity {
 
   bool preserveQuickResumeTimeoutOn = false;
   bool quickResumeTimeoutAutoEnabled = false;
+  bool dictionariesLoaded = false;
 
   OptionPopup optionPopup;
 
