@@ -91,7 +91,8 @@ class ReadingStatsStore {
   uint32_t sessionSerialCounter = 0;
   mutable SummaryCache summaryCache;
   mutable bool dirty = false;
-  mutable unsigned long lastSaveMs = 0;
+  mutable unsigned long dirtySinceMs = 0;
+  mutable unsigned long lastSaveAttemptMs = 0;
 
   friend bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore&, const char*);
   friend bool JsonSettingsIO::loadReadingStats(ReadingStatsStore&, const char*);
@@ -122,7 +123,6 @@ class ReadingStatsStore {
   bool removeIgnoredBooks();
   void invalidateSummaryCache();
   void rebuildSummaryCache() const;
-  bool shouldSaveDeferred() const;
   void markDirty();
   bool persistToFile(const char* path) const;
   static bool isClockValid(uint32_t epochSeconds);
@@ -172,6 +172,7 @@ class ReadingStatsStore {
   void reset();
   bool exportToFile(const std::string& path) const;
   bool importFromFile(const std::string& path);
+  bool shouldSaveCheckpoint() const;
   bool saveToFile() const;
   bool loadFromFile();
   bool releaseMemoryForNetwork();
