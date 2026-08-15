@@ -24,13 +24,24 @@ TEST(TxtPageIndex, BoundsRecoveryAndAcceptsTheCompleteV4Cache) {
 
   EXPECT_TRUE(isSupportedCacheVersion(LEGACY_CACHE_VERSION));
   EXPECT_TRUE(isSupportedCacheVersion(LAZY_CACHE_VERSION));
+  EXPECT_TRUE(isSupportedCacheVersion(ENCODING_CACHE_VERSION));
   EXPECT_TRUE(isSupportedCacheVersion(CACHE_VERSION));
   EXPECT_FALSE(isSupportedCacheVersion(CACHE_VERSION + 1));
   EXPECT_FALSE(canReuseCacheVersion(LEGACY_CACHE_VERSION, false));
   EXPECT_FALSE(canReuseCacheVersion(LAZY_CACHE_VERSION, false));
   EXPECT_TRUE(canReuseCacheVersion(LEGACY_CACHE_VERSION, true));
   EXPECT_TRUE(canReuseCacheVersion(LAZY_CACHE_VERSION, true));
+  EXPECT_TRUE(canReuseCacheVersion(ENCODING_CACHE_VERSION, false));
   EXPECT_TRUE(canReuseCacheVersion(CACHE_VERSION, false));
+  EXPECT_FALSE(canReuseCacheVersion(CACHE_VERSION + 1, true));
+  EXPECT_TRUE(canReuseParagraphLayout(LEGACY_CACHE_VERSION, true, false));
+  EXPECT_TRUE(canReuseParagraphLayout(LAZY_CACHE_VERSION, true, false));
+  EXPECT_TRUE(canReuseParagraphLayout(ENCODING_CACHE_VERSION, true, false));
+  EXPECT_FALSE(canReuseParagraphLayout(ENCODING_CACHE_VERSION, false, true));
+  EXPECT_TRUE(canReuseParagraphLayout(PARAGRAPH_LAYOUT_CACHE_VERSION, false, false));
+  EXPECT_TRUE(canReuseParagraphLayout(PARAGRAPH_LAYOUT_CACHE_VERSION, true, true));
+  EXPECT_FALSE(canReuseParagraphLayout(PARAGRAPH_LAYOUT_CACHE_VERSION, false, true));
+  EXPECT_FALSE(canReuseParagraphLayout(PARAGRAPH_LAYOUT_CACHE_VERSION, true, false));
   EXPECT_EQ(recoveryTargetPage(1000, 32), 62);
   EXPECT_TRUE(shouldCheckpoint(32, false));
   EXPECT_FALSE(shouldCheckpoint(33, false));
