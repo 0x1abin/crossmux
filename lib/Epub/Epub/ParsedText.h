@@ -38,6 +38,7 @@ class ParsedText {
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
+  bool firstLinePending;
   bool isNaturalAlign;
   bool hasRtlWord;
   std::vector<std::string> reorderedWordsScratch;
@@ -79,6 +80,7 @@ class ParsedText {
         extraParagraphSpacing(extraParagraphSpacing),
         hyphenationEnabled(hyphenationEnabled),
         focusReadingEnabled(focusReadingEnabled),
+        firstLinePending(true),
         isNaturalAlign(false),
         hasRtlWord(false) {}
   ~ParsedText() = default;

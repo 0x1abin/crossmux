@@ -1742,7 +1742,7 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY += blockStyle.paddingBottom;
   }
 
-  // Extra paragraph spacing if enabled (default behavior)
+  // Extra paragraph spacing if enabled.
   if (extraParagraphSpacing) {
     currentPageNextY += lineHeight / 2;
   }

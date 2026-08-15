@@ -589,7 +589,7 @@ void ParsedText::ensureRubyCapacity() {
 }
 
 int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer& renderer, const int fontId) const {
-  if (!isFirstLine || !isNaturalAlign) {
+  if (!isFirstLine || !firstLinePending || !isNaturalAlign) {
     return 0;
   }
   if (blockStyle.textIndentDefined) {
@@ -599,7 +599,15 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
     return 0;
   }
   if (!extraParagraphSpacing) {
-    return renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
+    const int spaceIndent = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
+    const bool hasCjkText =
+        std::any_of(words.begin(), words.end(), [](const auto& word) { return containsCjkBreakableCodepoint(word); });
+    if (!hasCjkText) {
+      return spaceIndent;
+    }
+
+    const int cjkAdvance = renderer.getTextAdvanceX(fontId, "我", EpdFontFamily::REGULAR);
+    return cjkAdvance > 0 ? cjkAdvance * 2 : spaceIndent;
   }
   return 0;
 }
@@ -661,6 +669,10 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   for (size_t i = 0; i < lineCount; ++i) {
     extractLine(i, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore, lineBreakIndices, processLine, renderer,
                 fontId);
+  }
+
+  if (lineCount > 0) {
+    firstLinePending = false;
   }
 
   // Remove consumed words so size() reflects only remaining words
