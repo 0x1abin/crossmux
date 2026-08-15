@@ -117,6 +117,7 @@ class FontDownloadActivity : public Activity {
   void retryDownloadOperation();
   void selectDownloadedFontAndPreview(const char* familyName);
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);
+  bool isVerifiedFontFile(const char* path, const ManifestFile& file);
   bool showDownloadAllRow() const;
   bool showUpdateAllRow() const;
   int specialRowCount() const;

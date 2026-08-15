@@ -416,10 +416,18 @@ bool FontDownloadActivity::computeFileCrc32(const char* path, uint32_t& outCrc) 
   return true;
 }
 
+bool FontDownloadActivity::isVerifiedFontFile(const char* path, const ManifestFile& file) {
+  {
+    HalFile existing;
+    if (!Storage.openFileForRead("FONT", path, existing) || existing.size() != file.size) return false;
+  }
+
+  uint32_t actualCrc = 0;
+  return fontInstaller_.validateCpfontFile(path) && computeFileCrc32(path, actualCrc) && actualCrc == file.crc32;
+}
+
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const ManifestFamily& family,
                                                                         const ManifestFile& file) {
-  requestUpdateAndWait();
-
   char fileName[128];
   const int fileNameLength =
       snprintf(fileName, sizeof(fileName), "%s_%u.cpfont", family.name.c_str(), static_cast<unsigned>(file.pointSize));
@@ -431,6 +439,15 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
   FontInstaller::buildFontPath(family.name.c_str(), fileName, destPath, sizeof(destPath));
   char downloadPath[136];
   snprintf(downloadPath, sizeof(downloadPath), "%s.part", destPath);
+
+  if (isVerifiedFontFile(destPath, file)) {
+    Storage.remove(downloadPath);
+    LOG_INF("FONT", "Skipping verified file: %s", fileName);
+    currentFileIndex_++;
+    return DownloadResult::Success;
+  }
+
+  requestUpdateAndWait();
 
   std::string url = baseUrl_ + fileName;
   std::string destination = downloadPath;
@@ -490,10 +507,10 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
 
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(ManifestFamily& family) {
   const bool wasInstalled = family.installed;
-  auto discardIncompleteFamily = [this, &family, wasInstalled] {
-    if (!wasInstalled) fontInstaller_.deleteFamily(family.name.c_str());
+  const bool hadUpdate = family.hasUpdate;
+  auto restoreFamilyState = [&family, wasInstalled, hadUpdate] {
     family.installed = wasInstalled;
-    family.hasUpdate = wasInstalled;
+    family.hasUpdate = hadUpdate;
   };
   {
     RenderLock lock(*this);
@@ -513,7 +530,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
     const auto result = downloadFile(family, files_[family.fileOffset + i]);
     if (result == DownloadResult::Success) continue;
 
-    discardIncompleteFamily();
+    restoreFamilyState();
     if (result == DownloadResult::Cancelled) operation_ = DownloadOperation::None;
     RenderLock lock(*this);
     state_ = result == DownloadResult::Cancelled ? FAMILY_LIST : ERROR;
