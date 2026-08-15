@@ -27,10 +27,11 @@ namespace {
 //   48 / 49 - source-space-aware CJK gaps, ruby continuation, and <br> margins
 //   50 / 51 - per-page visible-text offset LUT
 //   52 / 53 - ruby/CJK justification layout and 256-byte footnote hrefs
+//   54 / 55 - one-shot soft-flush indentation and two-CJK-character defaults
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 53;
+constexpr uint8_t SECTION_FILE_VERSION = 55;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 52;
+constexpr uint8_t SECTION_FILE_VERSION = 54;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
