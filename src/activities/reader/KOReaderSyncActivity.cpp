@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
 
@@ -44,7 +45,11 @@ const char* matchMethodName(const DocumentMatchMethod method) {
 void KOReaderSyncActivity::ensureEpubLoaded() {
   if (!epub) {
     LOG_DBG("KOSync", "Loading epub for progress mapping (heap: %u)", (unsigned)ESP.getFreeHeap());
-    epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    epub = makeUniqueNoThrow<Epub>(epubPath, "/.crosspoint");
+    if (!epub) {
+      LOG_ERR("KOSync", "OOM: Epub (%u bytes)", static_cast<unsigned>(sizeof(Epub)));
+      return;
+    }
     epub->setupCacheDir();
     // Load metadata only (no CSS needed for progress mapping, don't rebuild if cache is missing).
     if (!epub->load(false, true)) {
@@ -214,13 +219,15 @@ void KOReaderSyncActivity::performSync() {
 
   // The standard KOReader progress XPath is the authoritative content anchor.
   // The CrossPoint server's existing rich page hints remain a legacy fallback.
+  const std::shared_ptr<Epub> epubView(std::shared_ptr<Epub>(), epub.get());
   SavedProgressPosition koPos = {remoteProgress.progress, remoteProgress.percentage};
-  remotePosition = ProgressMapper::toCrossPoint(epub, koPos, renderer, currentSpineIndex, totalPagesInSpine);
+  remotePosition = ProgressMapper::toCrossPoint(epubView, koPos, renderer, currentSpineIndex, totalPagesInSpine);
   if (!remotePosition.hasVisibleTextOffset && remoteProgress.position.has_value()) {
     // toCrossPoint above already tried koPos.xpath; if the rich position carries the same XPath,
     // tell fromRichPosition to skip re-resolving it and use its page hints directly.
     const bool sameXPath = remoteProgress.position->xpath == remoteProgress.progress;
-    if (const auto richMapped = ProgressMapper::fromRichPosition(epub, *remoteProgress.position, renderer, sameXPath)) {
+    if (const auto richMapped =
+            ProgressMapper::fromRichPosition(epubView, *remoteProgress.position, renderer, sameXPath)) {
       remotePosition = *richMapped;
     }
   }

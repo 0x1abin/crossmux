@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
+#include <string>
 #include <vector>
 
 #include "InxRecentLayout.h"
@@ -10,21 +12,24 @@
 struct ReadingBookStats;
 
 class InxRecentActivity final : public Activity {
-  static constexpr size_t kMaxRecentBooks = 10;
+  enum class CoverCacheState : uint8_t { Unchecked, Ready, Missing };
 
   const std::vector<RecentBook>* books = nullptr;
-  std::array<const ReadingBookStats*, kMaxRecentBooks> bookStats{};
+  std::array<const ReadingBookStats*, RecentBooksStore::MAX_RECENT_BOOKS> bookStats{};
+  std::array<CoverCacheState, RecentBooksStore::MAX_RECENT_BOOKS> targetCoverStates{};
+  std::array<CoverCacheState, RecentBooksStore::MAX_RECENT_BOOKS> fallbackCoverStates{};
   int selected = 0;
-  bool firstRenderDone = false;
-  bool waitingForCoverRender = false;
-  size_t nextCoverIndex = 0;
   int thumbnailHeight = 0;
+  int preparedThumbnailHeight = 0;
 
   InxRecentLayout layout() const;
   const ReadingBookStats* statsAt(int index) const;
   int indexFromPoint(int x, int y) const;
   void openSelected();
-  void prepareNextCover();
+  void setThumbnailHeight(int height);
+  bool tryDrawBookCover(const std::string& path, const Rect& bounds, CoverCacheState& state);
+  bool drawBookCover(int bookIndex, const Rect& bounds);
+  bool prepareMissingCovers();
 
   void drawFlow(const Rect& content);
   void drawGrid(const Rect& content);

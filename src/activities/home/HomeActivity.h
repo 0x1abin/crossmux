@@ -20,6 +20,7 @@ class HomeActivity final : public Activity {
   int lastCarouselBookIndex = 0;
   bool coverRendered = false;              // Track if cover has been rendered once
   bool coverBufferStored = false;          // Track if cover buffer is stored
+  bool coverBufferUnavailable = false;     // Stop retrying an optional snapshot after OOM
   std::unique_ptr<uint8_t[]> coverBuffer;  // HomeActivity's own buffer for cover image
   size_t coverBufferSize = 0;              // Bytes allocated to coverBuffer
   // Logical rect last passed to drawRecentBookCover. The cover snapshot only

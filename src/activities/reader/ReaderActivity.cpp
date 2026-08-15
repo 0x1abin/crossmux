@@ -121,32 +121,26 @@ void ReaderActivity::goToLibrary(const std::string& fromBookPath) {
 void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
   const auto epubPath = epub->getPath();
   currentBookPath = epubPath;
-  activityManager.replaceActivity(std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub),
-                                                                       initialRefreshCountdown(), openStartMs));
+  activityManager.replaceActivityWith<EpubReaderActivity>(std::move(epub), initialRefreshCountdown(), openStartMs);
 }
 
 void ReaderActivity::onGoToImageViewer(const std::string& path) {
-  auto viewer = makeUniqueNoThrow<ImageViewerActivity>(renderer, mappedInput, path);
-  if (!viewer) {
+  if (!activityManager.replaceActivityWith<ImageViewerActivity>(path)) {
     LOG_ERR("READER", "Failed to allocate image viewer");
     onGoBack();
-    return;
   }
-  activityManager.replaceActivity(std::move(viewer));
 }
 
 void ReaderActivity::onGoToXtcReader(std::unique_ptr<Xtc> xtc) {
   const auto xtcPath = xtc->getPath();
   currentBookPath = xtcPath;
-  activityManager.replaceActivity(
-      std::make_unique<XtcReaderActivity>(renderer, mappedInput, std::move(xtc), initialRefreshCountdown()));
+  activityManager.replaceActivityWith<XtcReaderActivity>(std::move(xtc), initialRefreshCountdown());
 }
 
 void ReaderActivity::onGoToTxtReader(std::unique_ptr<Txt> txt) {
   const auto txtPath = txt->getPath();
   currentBookPath = txtPath;
-  activityManager.replaceActivity(std::make_unique<TxtReaderActivity>(renderer, mappedInput, std::move(txt),
-                                                                      initialRefreshCountdown(), openStartMs));
+  activityManager.replaceActivityWith<TxtReaderActivity>(std::move(txt), initialRefreshCountdown(), openStartMs);
 }
 
 void ReaderActivity::onEnter() {

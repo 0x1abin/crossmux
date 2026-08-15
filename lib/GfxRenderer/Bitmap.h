@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <cstdint>
+#include <memory>
 
 #include "BitmapHelpers.h"
 
@@ -61,6 +62,8 @@ enum class BmpReaderError : uint8_t {
 };
 
 class Bitmap {
+  friend class GfxRenderer;
+
  public:
   static constexpr uint16_t TRANSPARENT_OVERLAY_MARKER = 0x5843;
   static constexpr uint16_t TRANSPARENT_OVERLAY_VERSION = 1;
@@ -70,6 +73,10 @@ class Bitmap {
 
   explicit Bitmap(HalFile& file, bool dithering = false) : file(file), dithering(dithering) {}
   ~Bitmap();
+  Bitmap(const Bitmap&) = delete;
+  Bitmap& operator=(const Bitmap&) = delete;
+  Bitmap(Bitmap&&) = delete;
+  Bitmap& operator=(Bitmap&&) = delete;
   BmpReaderError parseHeaders();
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr) const;
   BmpReaderError rewindToData() const;
@@ -106,4 +113,9 @@ class Bitmap {
 
   mutable AtkinsonDitherer* atkinsonDitherer = nullptr;
   mutable FloydSteinbergDitherer* fsDitherer = nullptr;
+  // One bounded row workspace, reused across repeated grayscale draw passes.
+  mutable std::unique_ptr<uint8_t[]> drawScratch;
+  mutable size_t drawScratchCapacity = 0;
+
+  bool ensureDrawScratch(size_t bytes) const;
 };

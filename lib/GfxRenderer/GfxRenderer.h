@@ -129,6 +129,10 @@ class GfxRenderer {
   explicit GfxRenderer(HalDisplay& halDisplay)
       : display(halDisplay), renderMode(BW), orientation(Portrait), fadingFix(false) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
+  GfxRenderer(const GfxRenderer&) = delete;
+  GfxRenderer& operator=(const GfxRenderer&) = delete;
+  GfxRenderer(GfxRenderer&&) = delete;
+  GfxRenderer& operator=(GfxRenderer&&) = delete;
 
   static constexpr int VIEWABLE_MARGIN_TOP = 9;
   static constexpr int VIEWABLE_MARGIN_RIGHT = 3;

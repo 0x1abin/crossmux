@@ -5,6 +5,10 @@ files under `/.crosspoint/epub_<hash>/`. All POD fields are written in the
 ESP32 little-endian representation used by `Serialization.h`; strings are
 length-prefixed UTF-8.
 
+Runtime readers additionally cap resource paths at 4096 bytes and human-readable
+text at 16384 bytes. A length that exceeds its field's cap or the remaining file
+bytes invalidates the cache; the output value is left unchanged.
+
 ## `book.bin`
 
 ### Version 11
@@ -172,7 +176,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 52
+#define LATIN_VERSION 54
+#define CHINESE_VERSION 55
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -254,6 +259,7 @@ struct TextBlock {
 
 struct ImageBlock {
     String imagePath;
+    String srcPath [[comment("Book-internal source path used for lazy extraction")]];
     s16 width;
     s16 height;
 };
@@ -320,8 +326,8 @@ struct ParagraphLut {
 
 struct SectionBin {
     u8 version;
-    if (version != EXPECTED_VERSION) {
-        std::error(std::format("Unsupported version: {} (expected {})", version, EXPECTED_VERSION));
+    if (version != LATIN_VERSION && version != CHINESE_VERSION) {
+        std::error(std::format("Unsupported section version: {}", version));
     }
 
     s32 fontId;

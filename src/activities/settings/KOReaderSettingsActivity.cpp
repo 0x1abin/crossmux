@@ -68,42 +68,40 @@ void KOReaderSettingsActivity::loop() {
 void KOReaderSettingsActivity::handleSelection() {
   if (selectedIndex == 0) {
     // Username
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
-                                                                   KOREADER_STORE.getUsername(), 64, InputType::Text),
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               const auto& kb = std::get<KeyboardResult>(result.data);
-                               KOREADER_STORE.setCredentials(kb.text, KOREADER_STORE.getPassword());
-                               KOREADER_STORE.saveToFile();
-                             }
-                           });
+    startActivityForResultWith<KeyboardEntryActivity>(
+        [this](const ActivityResult& result) {
+          if (!result.isCancelled) {
+            const auto& kb = std::get<KeyboardResult>(result.data);
+            KOREADER_STORE.setCredentials(kb.text, KOREADER_STORE.getPassword());
+            KOREADER_STORE.saveToFile();
+          }
+        },
+        tr(STR_KOREADER_USERNAME), KOREADER_STORE.getUsername(), 64, InputType::Text);
   } else if (selectedIndex == 1) {
     // Password
-    startActivityForResult(
-        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_PASSWORD),
-                                                KOREADER_STORE.getPassword(), 64, InputType::Password),
+    startActivityForResultWith<KeyboardEntryActivity>(
         [this](const ActivityResult& result) {
           if (!result.isCancelled) {
             const auto& kb = std::get<KeyboardResult>(result.data);
             KOREADER_STORE.setCredentials(KOREADER_STORE.getUsername(), kb.text);
             KOREADER_STORE.saveToFile();
           }
-        });
+        },
+        tr(STR_KOREADER_PASSWORD), KOREADER_STORE.getPassword(), 64, InputType::Password);
   } else if (selectedIndex == 2) {
     // Sync Server URL - prefill with https:// if empty to save typing
     const std::string currentUrl = KOREADER_STORE.getServerUrl();
     const std::string prefillUrl = currentUrl.empty() ? "https://" : currentUrl;
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SYNC_SERVER_URL),
-                                                                   prefillUrl, 128, InputType::Url),
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               const auto& kb = std::get<KeyboardResult>(result.data);
-                               const std::string urlToSave =
-                                   (kb.text == "https://" || kb.text == "http://") ? "" : kb.text;
-                               KOREADER_STORE.setServerUrl(urlToSave);
-                               KOREADER_STORE.saveToFile();
-                             }
-                           });
+    startActivityForResultWith<KeyboardEntryActivity>(
+        [this](const ActivityResult& result) {
+          if (!result.isCancelled) {
+            const auto& kb = std::get<KeyboardResult>(result.data);
+            const std::string urlToSave = (kb.text == "https://" || kb.text == "http://") ? "" : kb.text;
+            KOREADER_STORE.setServerUrl(urlToSave);
+            KOREADER_STORE.saveToFile();
+          }
+        },
+        tr(STR_SYNC_SERVER_URL), prefillUrl, 128, InputType::Url);
   } else if (selectedIndex == 3) {
     // Document Matching - toggle between Filename and Binary
     const auto current = KOREADER_STORE.getMatchMethod();
@@ -130,16 +128,14 @@ void KOReaderSettingsActivity::handleSelection() {
     if (!KOREADER_STORE.hasCredentials()) {
       return;
     }
-    startActivityForResult(
-        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::SIGN_UP),
-        [](const ActivityResult&) {});
+    startActivityForResultWith<KOReaderAuthActivity>([](const ActivityResult&) {}, KOReaderAuthActivity::Mode::SIGN_UP);
   } else if (selectedIndex == 7) {
     // Authenticate
     if (!KOREADER_STORE.hasCredentials()) {
       // Can't authenticate without credentials - just show message briefly
       return;
     }
-    startActivityForResult(std::make_unique<KOReaderAuthActivity>(renderer, mappedInput), [](const ActivityResult&) {});
+    startActivityForResultWith<KOReaderAuthActivity>([](const ActivityResult&) {});
   }
 }
 

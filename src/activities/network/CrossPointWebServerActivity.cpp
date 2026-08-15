@@ -4,6 +4,7 @@
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -78,14 +79,13 @@ void CrossPointWebServerActivity::onEnter() {
   requestUpdate();
 
   LOG_DBG("WEBACT", "Launching NetworkModeSelectionActivity...");
-  startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) {
-                           if (result.isCancelled) {
-                             onGoHome();
-                           } else {
-                             onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
-                           }
-                         });
+  startActivityForResultWith<NetworkModeSelectionActivity>([this](const ActivityResult& result) {
+    if (result.isCancelled) {
+      onGoHome();
+    } else {
+      onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+    }
+  });
 }
 
 void CrossPointWebServerActivity::onExit() {
@@ -124,19 +124,17 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
   isApMode = (mode == NetworkMode::CREATE_HOTSPOT);
 
   if (mode == NetworkMode::CONNECT_CALIBRE) {
-    startActivityForResult(
-        std::make_unique<CalibreConnectActivity>(renderer, mappedInput), [this](const ActivityResult& result) {
-          state = WebServerActivityState::MODE_SELECTION;
+    startActivityForResultWith<CalibreConnectActivity>([this](const ActivityResult& result) {
+      state = WebServerActivityState::MODE_SELECTION;
 
-          startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult& result) {
-                                   if (result.isCancelled) {
-                                     onGoHome();
-                                   } else {
-                                     onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
-                                   }
-                                 });
-        });
+      startActivityForResultWith<NetworkModeSelectionActivity>([this](const ActivityResult& result) {
+        if (result.isCancelled) {
+          onGoHome();
+        } else {
+          onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+        }
+      });
+    });
     return;
   }
 
@@ -178,14 +176,13 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
     // User cancelled - go back to mode selection
     state = WebServerActivityState::MODE_SELECTION;
 
-    startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
-                           [this](const ActivityResult& result) {
-                             if (result.isCancelled) {
-                               onGoHome();
-                             } else {
-                               onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
-                             }
-                           });
+    startActivityForResultWith<NetworkModeSelectionActivity>([this](const ActivityResult& result) {
+      if (result.isCancelled) {
+        onGoHome();
+      } else {
+        onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+      }
+    });
   }
 }
 
@@ -231,7 +228,12 @@ void CrossPointWebServerActivity::startAccessPoint() {
   // Start DNS server for captive portal behavior
   // This redirects all DNS queries to our IP, making any domain typed resolve to us
   stopDnsServer();
-  dnsServer = new DNSServer();
+  dnsServer = new (std::nothrow) DNSServer();
+  if (!dnsServer) {
+    LOG_ERR("WEBACT", "OOM: DNSServer (%u bytes)", static_cast<unsigned>(sizeof(DNSServer)));
+    onGoHome();
+    return;
+  }
   dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
   dnsServer->start(DNS_PORT, "*", apIP);
   LOG_DBG("WEBACT", "DNS server started for captive portal");
@@ -246,7 +248,12 @@ void CrossPointWebServerActivity::startWebServer() {
   LOG_DBG("WEBACT", "Starting web server...");
 
   // Create the web server instance
-  webServer.reset(new CrossPointWebServer());
+  webServer = makeUniqueNoThrow<CrossPointWebServer>();
+  if (!webServer) {
+    LOG_ERR("WEBACT", "OOM: CrossPointWebServer (%u bytes)", static_cast<unsigned>(sizeof(CrossPointWebServer)));
+    onGoHome();
+    return;
+  }
   webServer->begin();
 
   if (webServer->isRunning()) {

@@ -49,8 +49,9 @@ sdkApiThatTakesOwnership(buffer, bufferSize);  // SDK calls free() / delete[]
 
 **Examples in codebase**:
 - Memory utilities: [Memory.h](../../lib/Memory/Memory.h) (`makeUniqueNoThrow`)
-- Cover image buffers: [HomeActivity.cpp:166](../../src/activities/home/HomeActivity.cpp)
-- Bitmap rendering: [GfxRenderer.cpp:439-440](../../lib/GfxRenderer/GfxRenderer.cpp)
+- Activity transitions: [Activity.h](../../src/activities/Activity.h) and
+  [ActivityManager.h](../../src/activities/ActivityManager.h)
+- Bitmap rendering scratch: [Bitmap.h](../../lib/GfxRenderer/Bitmap.h)
 
 ## Heap Allocation with `new`: Always Use `makeUniqueNoThrow`
 
@@ -86,3 +87,22 @@ sdkApiThatTakesOwnership(obj);  // SDK calls delete
 
 **Examples in codebase**:
 - Memory utilities: [Memory.h](../../lib/Memory/Memory.h) (`makeUniqueNoThrow`)
+
+## Shared Allocation Paths
+
+- Create Activities through `startActivityForResultWith<T>()` or
+  `replaceActivityWith<T>()`. Both use the project nothrow allocation path and
+  report failure without publishing a partially constructed transition.
+- A `Bitmap` owns one draw scratch block. Rendering operations grow that block
+  only when necessary and reuse it for source rows, output rows, and alpha
+  data; do not add per-draw row allocations in `GfxRenderer`.
+- `FrameBufferLoan` temporarily makes the single 48KB framebuffer unavailable
+  for drawing and publishes it through `BuildScratch`. Only cold, full-redraw
+  paths may hold a loan. `BuildScratch` is exclusive: consumers must tolerate a
+  failed `claim()` and release a successful claim before the loan ends.
+
+These mechanisms make large and high-frequency allocations recoverable. They
+do not make the firmware globally OOM-safe: ordinary `std::string` and
+`std::vector` growth still uses throwing allocation, and exceptions are
+disabled. Bound external lengths, reserve before append loops, and avoid
+unbounded container growth on device-controlled input.

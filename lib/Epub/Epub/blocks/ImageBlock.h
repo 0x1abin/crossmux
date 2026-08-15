@@ -24,6 +24,7 @@ class ImageBlock final : public Block {
   bool imageExists() const;
   bool hasValidCache() const;
   bool needsDecode() const;
+  bool ensureExtracted();
   void renderPlaceholder(GfxRenderer& renderer, int x, int y) const;
   static void clearSessionRenderFailures();
 

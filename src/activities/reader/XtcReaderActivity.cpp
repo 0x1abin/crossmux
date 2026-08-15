@@ -68,13 +68,14 @@ void XtcReaderActivity::onExit() {
 
 void XtcReaderActivity::openChapterSelection() {
   if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
-    startActivityForResult(std::make_unique<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage),
-                           [this](const ActivityResult& result) {
-                             READING_STATS.resumeSession();
-                             if (!result.isCancelled) {
-                               currentPage = std::get<PageResult>(result.data).page;
-                             }
-                           });
+    startActivityForResultWith<XtcReaderChapterSelectionActivity>(
+        [this](const ActivityResult& result) {
+          READING_STATS.resumeSession();
+          if (!result.isCancelled) {
+            currentPage = std::get<PageResult>(result.data).page;
+          }
+        },
+        xtc, currentPage);
   }
 }
 

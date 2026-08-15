@@ -90,25 +90,27 @@ bool CrossPointState::loadFromBinaryFile() {
   std::lock_guard<std::mutex> lock(storeMutex);
 
   uint8_t version = 0;
-  serialization::readPod(inputFile, version);
-  if (version > STATE_FILE_VERSION) {
+  if (!serialization::readPod(inputFile, version) || version > STATE_FILE_VERSION) {
     LOG_ERR("CPS", "Deserialization failed: Unknown version %u", version);
     return false;
   }
 
-  serialization::readString(inputFile, openEpubPath);
+  if (!serialization::readString(inputFile, openEpubPath, serialization::MAX_PATH_BYTES)) {
+    LOG_ERR("CPS", "State path is truncated or oversized");
+    return false;
+  }
   if (version >= 2) {
     uint8_t legacyLastSleep = UINT8_MAX;
-    serialization::readPod(inputFile, legacyLastSleep);
+    if (!serialization::readPod(inputFile, legacyLastSleep)) return false;
     if (legacyLastSleep != UINT8_MAX) {
       pushRecentSleep(static_cast<uint16_t>(legacyLastSleep));
     }
   }
   if (version >= 3) {
-    serialization::readPod(inputFile, readerActivityLoadCount);
+    if (!serialization::readPod(inputFile, readerActivityLoadCount)) return false;
   }
   if (version >= 4) {
-    serialization::readPod(inputFile, lastSleepFromReader);
+    if (!serialization::readPod(inputFile, lastSleepFromReader)) return false;
   } else {
     lastSleepFromReader = false;
   }

@@ -20,6 +20,13 @@ thumbnail height. Lyra Carousel redirects only its in-memory `RecentBook` copy
 to `cover.bmp`, generating that full cover when missing; switching themes must
 not replace the persisted template.
 
+When an EPUB has no `book.bin`, thumbnail generation first builds metadata but
+continues to skip CSS. Inx resolves each target and compatibility thumbnail at
+most once per Activity, displays the existing localized loading popup while it
+generates the missing covers under one framebuffer loan, then performs one
+final screen refresh. `Missing` is Activity-local, so leaving and reopening the
+theme allows a failed cover to be retried.
+
 TXT `index.bin` version 7 stores a partial or complete lazy page index, the
 detected source encoding, and the paragraph-spacing mode. It is invalidated by
 file-size, viewport, font, margin, alignment, or paragraph-spacing changes; see
@@ -52,6 +59,12 @@ four-byte page-number records remain readable.
    - Display resolution change
 4. **Book file modified**:
    - Moved, renamed, or content changed (new hash)
+
+Malformed caches are treated as misses. Readers validate every POD/string read,
+length and lookup-table boundary before publishing parsed state. A truncated or
+oversized `book.bin` is closed and removed; the current call returns no entry,
+and the next normal EPUB load rebuilds it. This is a validation change only and
+does not alter the version-11 binary layout.
 
 **Manual Cache Clear** (safe operations):
 ```bash

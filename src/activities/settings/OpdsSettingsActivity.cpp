@@ -126,9 +126,8 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SERVER_NAME),
-                                                                   editServer.name, 63, InputType::Text),
-                           handler);
+    startActivityForResultWith<KeyboardEntryActivity>(handler, tr(STR_SERVER_NAME), editServer.name, 63,
+                                                      InputType::Text);
   } else if (selectedIndex == 1) {
     // Server URL
     const std::string prefillUrl = editServer.url.empty() ? "https://" : editServer.url;
@@ -140,9 +139,8 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_OPDS_SERVER_URL),
-                                                                   prefillUrl, 127, InputType::Url),
-                           handler);
+    startActivityForResultWith<KeyboardEntryActivity>(handler, tr(STR_OPDS_SERVER_URL), prefillUrl, 127,
+                                                      InputType::Url);
   } else if (selectedIndex == 2) {
     // Username
     auto handler = [this](const ActivityResult& result) {
@@ -153,9 +151,8 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_USERNAME),
-                                                                   editServer.username, 63, InputType::Text),
-                           handler);
+    startActivityForResultWith<KeyboardEntryActivity>(handler, tr(STR_USERNAME), editServer.username, 63,
+                                                      InputType::Text);
   } else if (selectedIndex == 3) {
     // Password
     auto handler = [this](const ActivityResult& result) {
@@ -166,9 +163,8 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_PASSWORD),
-                                                                   editServer.password, 63, InputType::Password),
-                           handler);
+    startActivityForResultWith<KeyboardEntryActivity>(handler, tr(STR_PASSWORD), editServer.password, 63,
+                                                      InputType::Password);
   } else if (selectedIndex == 4 && !isNewServer) {
     // Delete flow is only available for existing servers.
     if (!OPDS_STORE.removeServer(static_cast<size_t>(serverIndex))) {
