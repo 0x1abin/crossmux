@@ -111,6 +111,7 @@ class FontDownloadActivity : public Activity {
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();
+  DownloadResult downloadFile(const ManifestFamily& family, const ManifestFile& file);
   DownloadResult downloadFamily(ManifestFamily& family);
   void downloadSingle(int familyIndex);
   void downloadAll();

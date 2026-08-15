@@ -369,6 +369,82 @@ bool FontDownloadActivity::computeFileCrc32(const char* path, uint32_t& outCrc) 
   return true;
 }
 
+FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const ManifestFamily& family,
+                                                                        const ManifestFile& file) {
+  {
+    RenderLock lock(*this);
+    fileProgress_ = 0;
+    fileTotal_ = file.size;
+  }
+  requestUpdateAndWait();
+
+  char destPath[128];
+  FontInstaller::buildFontPath(family.name.c_str(), file.name.c_str(), destPath, sizeof(destPath));
+  char downloadPath[136];
+  snprintf(downloadPath, sizeof(downloadPath), "%s.part", destPath);
+
+  uint32_t lastProgressRefreshAt = millis();
+  const auto result = HttpDownloader::downloadToFile(
+      baseUrl_ + file.name, downloadPath,
+      [this, &lastProgressRefreshAt](size_t downloaded, size_t total) {
+        fileProgress_ = downloaded;
+        fileTotal_ = total;
+        mappedInput.update();
+        if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
+            mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+          cancelRequested_ = true;
+        }
+        const uint32_t now = millis();
+        if (now - lastProgressRefreshAt >= kProgressRefreshIntervalMs) {
+          lastProgressRefreshAt = now;
+          requestUpdate(true);
+        }
+      },
+      &cancelRequested_);
+  if (result == HttpDownloader::ABORTED) return DownloadResult::Cancelled;
+  if (result != HttpDownloader::OK) {
+    LOG_ERR("FONT", "Download failed: %s (%d)", file.name.c_str(), result);
+    errorMessage_ = "Download failed: " + file.name;
+    return DownloadResult::Failed;
+  }
+
+  uint32_t actualCrc = 0;
+  if (!computeFileCrc32(downloadPath, actualCrc)) {
+    LOG_ERR("FONT", "Failed to open file for CRC check: %s", downloadPath);
+    Storage.remove(downloadPath);
+    errorMessage_ = "Failed to compute checksum: " + file.name;
+    return DownloadResult::Failed;
+  }
+  if (actualCrc != file.crc32) {
+    LOG_ERR("FONT", "CRC32 mismatch for %s: got %08x expected %08x", file.name.c_str(), actualCrc, file.crc32);
+    Storage.remove(downloadPath);
+    errorMessage_ = "Checksum mismatch: " + file.name;
+    return DownloadResult::Failed;
+  }
+  LOG_DBG("FONT", "Downloaded %s (size=%zu crc32=%08x)", file.name.c_str(), file.size, actualCrc);
+
+  if (!fontInstaller_.validateCpfontFile(downloadPath)) {
+    LOG_ERR("FONT", "Invalid .cpfont: %s", downloadPath);
+    Storage.remove(downloadPath);
+    errorMessage_ = "Invalid font file: " + file.name;
+    return DownloadResult::Failed;
+  }
+
+  char backupPath[136];
+  snprintf(backupPath, sizeof(backupPath), "%s.bak", destPath);
+  Storage.remove(backupPath);
+  const bool hadPrevious = Storage.exists(destPath);
+  if ((hadPrevious && !Storage.rename(destPath, backupPath)) || !Storage.rename(downloadPath, destPath)) {
+    if (hadPrevious && !Storage.exists(destPath)) Storage.rename(backupPath, destPath);
+    Storage.remove(downloadPath);
+    errorMessage_ = "Failed to install font file: " + file.name;
+    return DownloadResult::Failed;
+  }
+  if (hadPrevious) Storage.remove(backupPath);
+  currentFileIndex_++;
+  return DownloadResult::Success;
+}
+
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(ManifestFamily& family) {
   NetworkStartup::prepare(renderer);
   const bool wasInstalled = family.installed;
@@ -394,107 +470,15 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
     return DownloadResult::Failed;
   }
 
-  for (size_t i = 0; i < family.files.size(); i++) {
-    const auto& file = family.files[i];
+  for (const auto& file : family.files) {
+    const auto result = downloadFile(family, file);
+    if (result == DownloadResult::Success) continue;
 
-    {
-      RenderLock lock(*this);
-      fileProgress_ = 0;
-      fileTotal_ = file.size;
-    }
-    requestUpdateAndWait();
-
-    char destPath[128];
-    FontInstaller::buildFontPath(family.name.c_str(), file.name.c_str(), destPath, sizeof(destPath));
-    char downloadPath[136];
-    snprintf(downloadPath, sizeof(downloadPath), "%s.part", destPath);
-
-    std::string url = baseUrl_ + file.name;
-    uint32_t lastProgressRefreshAt = millis();
-
-    auto result = HttpDownloader::downloadToFile(
-        url, downloadPath,
-        [this, &lastProgressRefreshAt](size_t downloaded, size_t total) {
-          fileProgress_ = downloaded;
-          fileTotal_ = total;
-          mappedInput.update();
-          if (mappedInput.isPressed(MappedInputManager::Button::Back) ||
-              mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-            cancelRequested_ = true;
-          }
-          const uint32_t now = millis();
-          if (now - lastProgressRefreshAt >= kProgressRefreshIntervalMs) {
-            lastProgressRefreshAt = now;
-            requestUpdate(true);
-          }
-        },
-        &cancelRequested_);
-
-    if (result == HttpDownloader::ABORTED) {
-      discardIncompleteFamily();
-      {
-        RenderLock lock(*this);
-        state_ = FAMILY_LIST;
-      }
-      operation_ = DownloadOperation::None;
-      return DownloadResult::Cancelled;
-    }
-
-    if (result != HttpDownloader::OK) {
-      LOG_ERR("FONT", "Download failed: %s (%d)", file.name.c_str(), result);
-      discardIncompleteFamily();
-      RenderLock lock(*this);
-      state_ = ERROR;
-      errorMessage_ = "Download failed: " + file.name;
-      return DownloadResult::Failed;
-    }
-
-    uint32_t actualCrc = 0;
-    if (!computeFileCrc32(downloadPath, actualCrc)) {
-      LOG_ERR("FONT", "Failed to open file for CRC check: %s", downloadPath);
-      Storage.remove(downloadPath);
-      discardIncompleteFamily();
-      RenderLock lock(*this);
-      state_ = ERROR;
-      errorMessage_ = "Failed to compute checksum: " + file.name;
-      return DownloadResult::Failed;
-    }
-    if (actualCrc != file.crc32) {
-      LOG_ERR("FONT", "CRC32 mismatch for %s: got %08x expected %08x", file.name.c_str(), actualCrc, file.crc32);
-      Storage.remove(downloadPath);
-      discardIncompleteFamily();
-      RenderLock lock(*this);
-      state_ = ERROR;
-      errorMessage_ = "Checksum mismatch: " + file.name;
-      return DownloadResult::Failed;
-    }
-    LOG_DBG("FONT", "Downloaded %s (size=%zu crc32=%08x)", file.name.c_str(), file.size, actualCrc);
-
-    if (!fontInstaller_.validateCpfontFile(downloadPath)) {
-      LOG_ERR("FONT", "Invalid .cpfont: %s", downloadPath);
-      Storage.remove(downloadPath);
-      discardIncompleteFamily();
-      RenderLock lock(*this);
-      state_ = ERROR;
-      errorMessage_ = "Invalid font file: " + file.name;
-      return DownloadResult::Failed;
-    }
-
-    char backupPath[136];
-    snprintf(backupPath, sizeof(backupPath), "%s.bak", destPath);
-    Storage.remove(backupPath);
-    const bool hadPrevious = Storage.exists(destPath);
-    if ((hadPrevious && !Storage.rename(destPath, backupPath)) || !Storage.rename(downloadPath, destPath)) {
-      if (hadPrevious && !Storage.exists(destPath)) Storage.rename(backupPath, destPath);
-      Storage.remove(downloadPath);
-      discardIncompleteFamily();
-      RenderLock lock(*this);
-      state_ = ERROR;
-      errorMessage_ = "Failed to install font file: " + file.name;
-      return DownloadResult::Failed;
-    }
-    if (hadPrevious) Storage.remove(backupPath);
-    currentFileIndex_++;
+    discardIncompleteFamily();
+    if (result == DownloadResult::Cancelled) operation_ = DownloadOperation::None;
+    RenderLock lock(*this);
+    state_ = result == DownloadResult::Cancelled ? FAMILY_LIST : ERROR;
+    return result;
   }
 
   fontInstaller_.refreshRegistry();
