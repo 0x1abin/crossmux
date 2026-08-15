@@ -96,10 +96,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 52 / 53
+### Versions 54 / 55
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **53**; Latin builds use **52**. The byte layout is identical between
+> currently **55**; Latin builds use **54**. The byte layout is identical between
 > flavors, but the same built-in font IDs resolve to different font data and
 > metrics, so pagination caches are not reusable across firmware flavors.
 >
@@ -118,9 +118,13 @@ if (parsedSize != fileSize) {
 > continuation, and `<br>` no longer re-applies container margins. Versions 50/51
 > add a per-page visible-text offset LUT so progress and bookmarks survive
 > re-pagination. Versions 52/53 reserve layout space for ruby/CJK justification
-> and expand serialized footnote hrefs from 96 to 256 bytes. The counters
-> remain distinct and above every previously shipped value so a firmware-flavor
-> swap cannot read the other flavor's stale cache.
+> and expand serialized footnote hrefs from 96 to 256 bytes.
+> Versions 54/55 keep the byte layout unchanged but invalidate word positions so
+> soft-flushed continuations of long paragraphs do not receive another first-line
+> indent and default CJK paragraph indents use two ideograph advances instead of
+> three space advances. The counters remain distinct and above every
+> previously shipped value so a firmware-flavor swap cannot read the other flavor's
+> stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
@@ -377,12 +381,12 @@ if (parsedSize != fileSize) {
 
 TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
 
-`index.bin` version 6 is a little-endian page-offset checkpoint. Its fixed
+`index.bin` version 7 is a little-endian page-offset checkpoint. Its fixed
 header contains, in order: `uint32 magic` (`TXTI`, `0x54585449`), `uint8
-version` (`6`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
+version` (`7`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
 `int32 fontId`, `int32 screenMargin`, `uint8 paragraphAlignment`, `uint8
-complete`, `uint8 encoding` (`0` unknown/ASCII, `1` UTF-8, `2` GBK), and `uint32
-knownPageCount`. It is followed by `knownPageCount`
+extraParagraphSpacing`, `uint8 complete`, `uint8 encoding` (`0` unknown/ASCII,
+`1` UTF-8, `2` GBK), and `uint32 knownPageCount`. It is followed by `knownPageCount`
 strictly increasing `uint32` byte offsets; the first offset is zero and every
 offset is smaller than `fileSize`. An empty file has no offsets and must be
 marked complete.
@@ -390,9 +394,11 @@ marked complete.
 An incomplete index contains only pages discovered while reading. It is
 checkpointed every 32 known page starts and when the reader exits; the final
 page marks it complete and makes `knownPageCount` exact. Version 4 indexes omit
-`complete`; version 5 indexes omit `encoding`. These legacy indexes are reused
+`complete`; versions 4 and 5 omit `encoding`. These legacy indexes are reused
 only when the file prefix is confirmed UTF-8, because offsets produced before
-GBK decoding are not valid GBK page boundaries. A wrong magic, unsupported
+GBK decoding are not valid GBK page boundaries. Versions 4 through 6 omit
+`extraParagraphSpacing`; they remain reusable only while paragraph spacing is
+enabled, which preserves their pagination behavior. A wrong magic, unsupported
 version, truncated payload, changed file size, changed layout setting,
 non-monotonic offset, or out-of-range offset invalidates the index. Writers
 flush `index.bin.tmp` before replacing the prior checkpoint.
