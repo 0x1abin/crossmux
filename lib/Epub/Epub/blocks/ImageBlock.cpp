@@ -306,6 +306,21 @@ bool ImageBlock::hasValidCache() const {
 
 bool ImageBlock::needsDecode() const { return !imageFailedThisSession(imagePath) && !hasValidCache(); }
 
+bool ImageBlock::ensureExtracted() {
+  if (Storage.exists(imagePath.c_str())) return true;
+  if (srcPath.empty() || !extractFn) {
+    rememberImageFailure(imagePath);
+    return false;
+  }
+
+  LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
+  if (extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) return true;
+
+  LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
+  rememberImageFailure(imagePath);
+  return false;
+}
+
 void ImageBlock::clearSessionRenderFailures() { failedImageCount = 0; }
 
 void ImageBlock::releaseRenderCache() { releasePxcSlot(); }
@@ -365,11 +380,9 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
 
   // The build only header-probed the image for dimensions; pull the actual
   // file out of the book now, on first visit to the page.
-  if (!srcPath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
-    LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
-    if (!extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) {
-      LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
-    }
+  if (!srcPath.empty() && !ensureExtracted()) {
+    renderPlaceholder(renderer, x, y);
+    return false;
   }
 
   // No cache - need to decode the image
@@ -439,10 +452,18 @@ bool ImageBlock::serialize(HalFile& file) {
 std::unique_ptr<ImageBlock> ImageBlock::deserialize(HalFile& file) {
   std::string path;
   std::string src;
-  serialization::readString(file, path);
-  serialization::readString(file, src);
-  int16_t w, h;
-  serialization::readPod(file, w);
-  serialization::readPod(file, h);
-  return std::unique_ptr<ImageBlock>(new (std::nothrow) ImageBlock(path, src, w, h));
+  if (!serialization::readString(file, path, serialization::MAX_PATH_BYTES) ||
+      !serialization::readString(file, src, serialization::MAX_PATH_BYTES)) {
+    LOG_ERR("IMG", "Deserialization failed: truncated or oversized image path");
+    return nullptr;
+  }
+  int16_t w = 0;
+  int16_t h = 0;
+  if (!serialization::readPod(file, w) || !serialization::readPod(file, h) || w <= 0 || h <= 0) {
+    LOG_ERR("IMG", "Deserialization failed: invalid image dimensions");
+    return nullptr;
+  }
+  auto block = makeUniqueNoThrow<ImageBlock>(path, src, w, h);
+  if (!block) LOG_ERR("IMG", "OOM: ImageBlock (%u bytes)", static_cast<unsigned>(sizeof(ImageBlock)));
+  return block;
 }

@@ -56,7 +56,7 @@ std::string ensureThumbnail(const std::string& bookPath, const int height, bool*
     Epub epub(bookPath, "/.crosspoint");
     const std::string path = epub.getThumbBmpPath(height);
     return ensureCachedCover(path, true, generated, [&]() {
-      if (!epub.load(false, true)) return false;
+      if (!epub.load(true, true)) return false;
       epub.setupCacheDir();
       return epub.generateThumbBmp(height);
     });

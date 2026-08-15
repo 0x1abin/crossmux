@@ -347,7 +347,12 @@ void SleepActivity::renderCoverSleepScreen() const {
       return (this->*renderNoCoverSleepScreen)();
     }
 
-    if (!lastEpub.generateCoverBmp(cropped)) {
+    bool generated;
+    {
+      GfxRenderer::FrameBufferLoan loan(renderer);
+      generated = lastEpub.generateCoverBmp(cropped);
+    }
+    if (!generated) {
       LOG_ERR("SLP", "Failed to generate cover bmp");
       return (this->*renderNoCoverSleepScreen)();
     }

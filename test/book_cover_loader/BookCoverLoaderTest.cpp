@@ -55,6 +55,26 @@ TEST_F(BookCoverLoaderTest, GeneratesAndReusesMissingThumbnail) {
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
 }
 
+TEST_F(BookCoverLoaderTest, GeneratesEachThumbnailHeightOnlyOnce) {
+  writeBook("/book.epub");
+  constexpr int firstHeight = 220;
+  constexpr int batchSize = 10;
+
+  for (int offset = 0; offset < batchSize; ++offset) {
+    bool generated = false;
+    EXPECT_FALSE(BookCoverLoader::ensureThumbnail("/book.epub", firstHeight + offset, &generated).empty());
+    EXPECT_TRUE(generated);
+  }
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, batchSize);
+
+  for (int offset = 0; offset < batchSize; ++offset) {
+    bool generated = true;
+    EXPECT_FALSE(BookCoverLoader::ensureThumbnail("/book.epub", firstHeight + offset, &generated).empty());
+    EXPECT_FALSE(generated);
+  }
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, batchSize);
+}
+
 TEST_F(BookCoverLoaderTest, ReplacesCorruptThumbnail) {
   writeBook("/book.epub");
   Storage.mkdir("/.crosspoint/epub");
