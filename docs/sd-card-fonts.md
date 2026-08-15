@@ -124,16 +124,20 @@ What this means in practice:
 The current list of pre-built fonts is maintained in the
 [crosspoint-fonts repository](https://github.com/crosspoint-reader/crosspoint-fonts).
 
-Chinese firmware builds use an externally maintained Gitee catalog; global
-builds keep using the GitHub catalog. Both use the release tag
-`sd-fonts-m<manifest>-b<binary>`, matching the manifest and cpfont versions
-compiled into the firmware.
+Current Chinese firmware loads its manifest through the CrossMux API, and the
+manifest points immutable font files at `assets.crossmux.cn`. Older Chinese
+firmware still loads the Gitee release manifest; that manifest points to the
+same assets domain, so those devices do not follow Gitee redirects for each
+font file. Global builds continue to use the GitHub manifest and assets.
 
-The external Chinese catalog must publish manifest v1 with a valid `baseUrl`,
-family/file names, non-zero file sizes, and CRC32 values. Every referenced
-asset must be cpfont v4 and provide the complete Chinese coverage promised by
-the catalog maintainer. Font sources and catalog-generation configuration are
-not kept in this repository.
+The CrossMux `/api/assets/fonts/m1-b4/<file>.cpfont` Gitee proxy remains a
+compatibility and rollback path. It is not the canonical file source.
+
+The Chinese and global catalogs both publish manifest v1 with a valid
+`baseUrl`, family/file names, non-zero file sizes, and CRC32 values. Every
+referenced asset must be cpfont v4 and provide the coverage promised by its
+catalog maintainer. Font sources and catalog-generation configuration are not
+kept in this repository.
 
 The incomplete-font prompt opens the same font manager described above. A
 successful single or batch download selects a default and opens the font
