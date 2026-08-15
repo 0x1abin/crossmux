@@ -278,7 +278,7 @@ void ReadingStatsActivity::selectMainTabContentEdge(const MainTabContentEdge edg
 
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
-  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+  if (!usesInxLayout()) renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
   selectedIndex = usesInxLayout() ? 0 : (READING_STATS.getBooks().empty() ? 0 : 1);
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForBackRelease = false;
@@ -364,7 +364,7 @@ void ReadingStatsActivity::loop() {
     buttonNavigator.onPreviousRelease([moveSelection] { moveSelection(-1); });
     buttonNavigator.onNextContinuous([moveSelection] { moveSelection(1); });
     buttonNavigator.onPreviousContinuous([moveSelection] { moveSelection(-1); });
-    prepareVisibleCover();
+    if (showMainTabContentSelection()) prepareVisibleCover();
     return;
   }
 
