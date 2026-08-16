@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <string>
 
 #include "CrossPointState.h"
@@ -682,6 +683,9 @@ WeReadClient::Operation::Event WeReadActivity::stepOperation() {
   // with each synchronous protocol step so TLS never competes with a refresh.
   RenderLock renderBarrier(*this);
   if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
+  // Cover conversion claims JPEGDEC from the lent 48KB framebuffer.
+  std::optional<GfxRenderer::FrameBufferLoan> coverScratch;
+  if (operation_.needsCoverConversionScratch()) coverScratch.emplace(renderer);
   struct WorkContext {
     WeReadActivity* activity;
     RenderLock* renderBarrier;
