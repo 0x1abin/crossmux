@@ -37,6 +37,10 @@ struct OperationTestPeer {
   static bool shelfCoverAuthenticationResumesBatch() {
     return Operation::shelfCoverResumePhase() == Operation::Phase::ShelfCovers;
   }
+  using Phase = Operation::Phase;
+  static bool coverConversionNeedsScratch(const Phase phase, const Operation::ProgressStage stage) {
+    return Operation::coverConversionNeedsScratch(phase, stage);
+  }
   static bool chapterResponseRetryRestartsReader() {
     return Operation::chapterResponseRetryPhase() == Operation::Phase::FetchReader;
   }
@@ -482,6 +486,18 @@ TEST(WeReadClientState, AdvancesShelfCoverPassesAndBoundsRemainingWork) {
   EXPECT_EQ(remaining(4, 4), 0U);
   EXPECT_EQ(remaining(5, 4), 0U);
   EXPECT_TRUE(WeReadClient::OperationTestPeer::shelfCoverAuthenticationResumesBatch());
+}
+
+TEST(WeReadClientState, RequestsScratchOnlyForCoverConversion) {
+  using Peer = WeReadClient::OperationTestPeer;
+  using Phase = Peer::Phase;
+  using Stage = WeReadClient::Operation::ProgressStage;
+  const auto needsScratch = Peer::coverConversionNeedsScratch;
+
+  EXPECT_TRUE(needsScratch(Phase::ConvertCover, Stage::Chapters));
+  EXPECT_TRUE(needsScratch(Phase::ShelfCovers, Stage::Packaging));
+  EXPECT_FALSE(needsScratch(Phase::ShelfCovers, Stage::Images));
+  EXPECT_FALSE(needsScratch(Phase::PackageBook, Stage::Packaging));
 }
 
 TEST(WeReadClientState, BoundsShelfCoverWorkToTheSelectedScope) {

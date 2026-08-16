@@ -107,6 +107,7 @@ class Operation {
   const char* finalPath() const { return outputPath_.c_str(); }
   const ProgressSyncResult& progressSyncResult() const { return progressSyncResult_; }
   bool active() const;
+  bool needsCoverConversionScratch() const { return coverConversionNeedsScratch(phase_, progressStage_); }
 
  private:
   friend struct OperationTestPeer;
@@ -188,6 +189,10 @@ class Operation {
     Cancelled,
     Failed,
   };
+
+  static constexpr bool coverConversionNeedsScratch(const Phase phase, const ProgressStage stage) {
+    return phase == Phase::ConvertCover || (phase == Phase::ShelfCovers && stage == ProgressStage::Packaging);
+  }
 
   static constexpr size_t kCookieSize = 896;
   // Reader pages currently include response headers larger than 2 KB.
