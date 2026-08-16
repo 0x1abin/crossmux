@@ -12,7 +12,7 @@
 struct ReadingBookStats;
 
 class InxRecentActivity final : public Activity {
-  enum class CoverCacheState : uint8_t { Unchecked, Ready, Missing };
+  enum class CoverCacheState : uint8_t { Unchecked, Ready, Missing, Unavailable };
 
   const std::vector<RecentBook>* books = nullptr;
   std::array<const ReadingBookStats*, RecentBooksStore::MAX_RECENT_BOOKS> bookStats{};
@@ -20,7 +20,6 @@ class InxRecentActivity final : public Activity {
   std::array<CoverCacheState, RecentBooksStore::MAX_RECENT_BOOKS> fallbackCoverStates{};
   int selected = 0;
   int thumbnailHeight = 0;
-  int preparedThumbnailHeight = 0;
 
   InxRecentLayout layout() const;
   const ReadingBookStats* statsAt(int index) const;
@@ -29,7 +28,7 @@ class InxRecentActivity final : public Activity {
   void setThumbnailHeight(int height);
   bool tryDrawBookCover(const std::string& path, const Rect& bounds, CoverCacheState& state);
   bool drawBookCover(int bookIndex, const Rect& bounds);
-  bool prepareMissingCovers();
+  bool prepareNextMissingCover();
 
   void drawFlow(const Rect& content);
   void drawGrid(const Rect& content);

@@ -124,7 +124,6 @@ void InxRecentActivity::onEnter() {
   }
   selected = 0;
   thumbnailHeight = 0;
-  preparedThumbnailHeight = 0;
   targetCoverStates.fill(CoverCacheState::Unchecked);
   fallbackCoverStates.fill(CoverCacheState::Unchecked);
   requestUpdate();
@@ -136,7 +135,6 @@ void InxRecentActivity::onExit() {
   targetCoverStates.fill(CoverCacheState::Unchecked);
   fallbackCoverStates.fill(CoverCacheState::Unchecked);
   thumbnailHeight = 0;
-  preparedThumbnailHeight = 0;
   Activity::onExit();
 }
 
@@ -148,7 +146,6 @@ void InxRecentActivity::openSelected() {
 void InxRecentActivity::setThumbnailHeight(const int height) {
   if (thumbnailHeight == height) return;
   thumbnailHeight = height;
-  preparedThumbnailHeight = 0;
   targetCoverStates.fill(CoverCacheState::Unchecked);
   fallbackCoverStates.fill(CoverCacheState::Unchecked);
 }
@@ -165,19 +162,18 @@ bool InxRecentActivity::tryDrawBookCover(const std::string& path, const Rect& bo
     case CoverCacheState::Ready:
       break;
     case CoverCacheState::Missing:
+    case CoverCacheState::Unavailable:
       return false;
   }
 
   HalFile file;
   if (!Storage.openFileForRead("INX", path, file)) {
     state = CoverCacheState::Missing;
-    preparedThumbnailHeight = 0;
     return false;
   }
   Bitmap bitmap(file);
   if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
     state = CoverCacheState::Missing;
-    preparedThumbnailHeight = 0;
     return false;
   }
   return renderer.drawBitmapCropToFill(bitmap, bounds.x, bounds.y, bounds.width, bounds.height);
@@ -209,46 +205,42 @@ bool InxRecentActivity::drawBookCover(const int bookIndex, const Rect& bounds) {
   return false;
 }
 
-bool InxRecentActivity::prepareMissingCovers() {
-  if (!books || thumbnailHeight <= 0 || preparedThumbnailHeight == thumbnailHeight) return false;
-  preparedThumbnailHeight = thumbnailHeight;
-
-  bool hasMissing = false;
+bool InxRecentActivity::prepareNextMissingCover() {
+  if (!books || thumbnailHeight <= 0) return false;
   const size_t count = std::min(books->size(), RecentBooksStore::MAX_RECENT_BOOKS);
   for (size_t index = 0; index < count; ++index) {
     CoverCacheState& state = targetCoverStates[index];
     switch (state) {
       case CoverCacheState::Unchecked: {
         const std::string& templatePath = (*books)[index].coverBmpPath;
-        state =
-            !templatePath.empty() && Storage.exists(UITheme::getCoverThumbPath(templatePath, thumbnailHeight).c_str())
-                ? CoverCacheState::Ready
-                : CoverCacheState::Missing;
-        if (state == CoverCacheState::Missing) hasMissing = true;
+        if (templatePath.empty()) {
+          state = CoverCacheState::Unavailable;
+          continue;
+        }
+        state = Storage.exists(UITheme::getCoverThumbPath(templatePath, thumbnailHeight).c_str())
+                    ? CoverCacheState::Ready
+                    : CoverCacheState::Missing;
+        if (state == CoverCacheState::Ready) continue;
         break;
       }
       case CoverCacheState::Ready:
-        break;
+      case CoverCacheState::Unavailable:
+        continue;
       case CoverCacheState::Missing:
-        hasMissing = true;
         break;
     }
-  }
-  if (!hasMissing) return false;
 
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  renderer.displayBuffer();
-  {
-    GfxRenderer::FrameBufferLoan loan(renderer);
-    for (size_t index = 0; index < count; ++index) {
-      if (targetCoverStates[index] != CoverCacheState::Missing) continue;
-      targetCoverStates[index] = BookCoverLoader::ensureThumbnail((*books)[index].path, thumbnailHeight).empty()
-                                     ? CoverCacheState::Missing
-                                     : CoverCacheState::Ready;
+    renderer.displayBuffer();
+    {
+      GfxRenderer::FrameBufferLoan loan(renderer);
+      state = BookCoverLoader::ensureThumbnail((*books)[index].path, thumbnailHeight).empty()
+                  ? CoverCacheState::Unavailable
+                  : CoverCacheState::Ready;
     }
+    requestUpdate();
+    return true;
   }
-  requestUpdate();
-  return true;
+  return false;
 }
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
@@ -507,6 +499,6 @@ void InxRecentActivity::render(RenderLock&&) {
                        Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth,
                             renderer.getScreenHeight() - 30, kHomeBatteryWidth, kHomeBatteryHeight},
                        SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
-  if (prepareMissingCovers()) return;
+  if (prepareNextMissingCover()) return;
   renderer.displayBuffer();
 }
