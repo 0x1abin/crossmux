@@ -523,8 +523,9 @@ void EpubReaderActivity::loop() {
     if (section->isBuilding() && buildTickHeapGate()) {
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
         LOG_ERR("ERS", "Background section build failed");
-        section.reset();
-        requestUpdate();
+        automaticPageTurnActive = false;
+        renderer.clearScreen();
+        GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
       } else if (section->isBuildComplete() && applyDeferredReposition()) {
         // The chapter re-paginated since the saved progress (settings changed): we now know the
         // real page count, so re-render at the remapped page. No-op for an unchanged resume.
@@ -1323,6 +1324,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   const ReaderRenderSpec renderSpec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight);
   const auto buildSomeMoreWithScratch = [this](const int maxPages) {
+    if (!buildTickHeapGate()) {
+      LOG_ERR("ERS", "Insufficient heap for synchronous section build (free=%u, maxAlloc=%u)",
+              static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+      section->abandonBuild();
+      return false;
+    }
     GfxRenderer::FrameBufferLoan loan(renderer);
     return section->buildSomeMore(maxPages);
   };

@@ -1315,12 +1315,14 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     const uint16_t effectiveWidth = (horizontalInset < self->viewportWidth)
                                         ? static_cast<uint16_t>(self->viewportWidth - horizontalInset)
                                         : self->viewportWidth;
-    self->currentTextBlock->layoutAndExtractLines(
-        self->renderer, self->fontId, effectiveWidth,
-        [self](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
-          self->addLineToPage(std::move(textBlock), offset);
-        },
-        false);
+    if (!self->currentTextBlock->layoutAndExtractLines(
+            self->renderer, self->fontId, effectiveWidth,
+            [self](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+              self->addLineToPage(std::move(textBlock), offset);
+            },
+            false)) {
+      self->allocationFailed_ = true;
+    }
   }
 }
 
@@ -1716,10 +1718,13 @@ void ChapterHtmlSlimParser::makePages() {
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
 
-  currentTextBlock->layoutAndExtractLines(renderer, fontId, effectiveWidth,
-                                          [this](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
-                                            addLineToPage(std::move(textBlock), offset);
-                                          });
+  if (!currentTextBlock->layoutAndExtractLines(renderer, fontId, effectiveWidth,
+                                               [this](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+                                                 addLineToPage(std::move(textBlock), offset);
+                                               })) {
+    allocationFailed_ = true;
+    return;
+  }
   if (allocationFailed_) return;
 
   // Fallback: transfer any remaining pending footnotes to current page.

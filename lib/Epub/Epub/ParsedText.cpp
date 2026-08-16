@@ -613,11 +613,11 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   return 0;
 }
 // Consumes data to minimize memory usage
-void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
                                        const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                                        const bool includeLastLine) {
   if (words.empty()) {
-    return;
+    return true;
   }
 
   // Per-paragraph RTL auto-detection: only when CSS/HTML didn't explicitly set direction.
@@ -657,19 +657,29 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   const int pageWidth = viewportWidth;
   auto wordWidths = calculateWordWidths(renderer, fontId);
 
-  std::vector<size_t> lineBreakIndices;
+  std::vector<size_t> hyphenatedLineBreaks;
+  std::unique_ptr<LineBreakState[]> lineBreakWorkspace;
+  size_t lineBreakCount = 0;
   if (hyphenationEnabled) {
     // Use greedy layout that can split words mid-loop when a hyphenated prefix fits.
-    lineBreakIndices =
+    hyphenatedLineBreaks =
         computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore);
+    lineBreakCount = hyphenatedLineBreaks.size();
   } else {
-    lineBreakIndices = computeLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore);
+    if (!computeLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore,
+                           lineBreakWorkspace, lineBreakCount)) {
+      return false;
+    }
   }
-  const size_t lineCount = includeLastLine ? lineBreakIndices.size() : lineBreakIndices.size() - 1;
+  const size_t lineCount = includeLastLine ? lineBreakCount : (lineBreakCount > 0 ? lineBreakCount - 1 : 0);
+
+  const auto breakAt = [&](const size_t index) {
+    return hyphenationEnabled ? hyphenatedLineBreaks[index] : lineBreakWorkspace[index].breakIndex;
+  };
 
   for (size_t i = 0; i < lineCount; ++i) {
-    extractLine(i, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore, lineBreakIndices, processLine, renderer,
-                fontId);
+    extractLine(i, breakAt(i), i > 0 ? breakAt(i - 1) : 0, lineBreakCount, pageWidth, wordWidths, wordContinues,
+                wordNoSpaceBefore, processLine, renderer, fontId);
   }
 
   if (lineCount > 0) {
@@ -678,7 +688,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
 
   // Remove consumed words so size() reflects only remaining words
   if (lineCount > 0) {
-    const size_t consumed = lineBreakIndices[lineCount - 1];
+    const size_t consumed = breakAt(lineCount - 1);
     words.erase(words.begin(), words.begin() + consumed);
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
@@ -690,6 +700,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
       rubyTexts.erase(rubyTexts.begin(), rubyTexts.begin() + rtConsumed);
     }
   }
+  return true;
 }
 
 static inline bool isCjkIdeograph(uint32_t cp) {
@@ -872,11 +883,13 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
   return wordWidths;
 }
 
-std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
-                                                  std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                                  std::vector<bool>& noSpaceBeforeVec) {
+bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
+                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                   std::vector<bool>& noSpaceBeforeVec, std::unique_ptr<LineBreakState[]>& workspace,
+                                   size_t& lineBreakCount) {
   if (words.empty()) {
-    return {};
+    lineBreakCount = 0;
+    return true;
   }
 
   const int firstLineIndent = resolveFirstLineIndent(true, renderer, fontId);
@@ -894,18 +907,25 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
   const size_t totalWordCount = words.size();
 
-  // DP table to store the minimum badness (cost) of lines starting at index i
-  std::vector<int> dp(totalWordCount);
-  // 'ans[i]' stores the index 'j' of the *last word* in the optimal line starting at 'i'
-  std::vector<size_t> ans(totalWordCount);
+  // One fallible allocation holds both the DP cost and chosen break for every
+  // word. At the parser's 750-word soft limit this is 6 KB on ESP32, too large
+  // for the render-task stack and short-lived enough to release after layout.
+  workspace = makeUniqueNoThrow<LineBreakState[]>(totalWordCount);
+  if (!workspace) {
+    LOG_ERR("PTX", "OOM: line-break workspace (%u words, %u bytes, free=%u, maxAlloc=%u)",
+            static_cast<unsigned>(totalWordCount), static_cast<unsigned>(totalWordCount * sizeof(LineBreakState)),
+            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    lineBreakCount = 0;
+    return false;
+  }
 
   // Base Case
-  dp[totalWordCount - 1] = 0;
-  ans[totalWordCount - 1] = totalWordCount - 1;
+  workspace[totalWordCount - 1].cost = 0;
+  workspace[totalWordCount - 1].breakIndex = totalWordCount - 1;
 
   for (int i = totalWordCount - 2; i >= 0; --i) {
     int currlen = 0;
-    dp[i] = MAX_COST;
+    workspace[i].cost = MAX_COST;
 
     // First line has reduced width due to text-indent
     const int effectivePageWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
@@ -949,7 +969,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
       } else {
         const int remainingSpace = effectivePageWidth - currlen;
         // Use long long for the square to prevent overflow
-        const long long cost_ll = static_cast<long long>(remainingSpace) * remainingSpace + dp[j + 1];
+        const long long cost_ll = static_cast<long long>(remainingSpace) * remainingSpace + workspace[j + 1].cost;
 
         if (cost_ll > MAX_COST) {
           cost = MAX_COST;
@@ -960,31 +980,32 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
       // Favor longer lines when line-breaking costs are equal, to avoid unnecessary short lines in Chinese and Japanese
       // text.
-      if (cost <= dp[i]) {
-        dp[i] = cost;
-        ans[i] = j;  // j is the index of the last word in this optimal line
+      if (cost <= workspace[i].cost) {
+        workspace[i].cost = cost;
+        workspace[i].breakIndex = j;  // j is the index of the last word in this optimal line
       }
     }
 
     // Handle oversized word: if no valid configuration found, force single-word line
     // This prevents cascade failure where one oversized word breaks all preceding words
-    if (dp[i] == MAX_COST) {
-      ans[i] = i;  // Just this word on its own line
+    if (workspace[i].cost == MAX_COST) {
+      workspace[i].breakIndex = i;  // Just this word on its own line
       // Inherit cost from next word to allow subsequent words to find valid configurations
       if (i + 1 < static_cast<int>(totalWordCount)) {
-        dp[i] = dp[i + 1];
+        workspace[i].cost = workspace[i + 1].cost;
       } else {
-        dp[i] = 0;
+        workspace[i].cost = 0;
       }
     }
   }
 
-  // Stores the index of the word that starts the next line (last_word_index + 1)
-  std::vector<size_t> lineBreakIndices;
+  // Compact the chosen breaks into the front of the same workspace. The write
+  // index never overtakes currentWordIndex, so no unread DP entry is replaced.
+  lineBreakCount = 0;
   size_t currentWordIndex = 0;
 
   while (currentWordIndex < totalWordCount) {
-    size_t nextBreakIndex = ans[currentWordIndex] + 1;
+    size_t nextBreakIndex = workspace[currentWordIndex].breakIndex + 1;
 
     // Safety check: prevent infinite loop if nextBreakIndex doesn't advance
     if (nextBreakIndex <= currentWordIndex) {
@@ -992,11 +1013,11 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
       nextBreakIndex = currentWordIndex + 1;
     }
 
-    lineBreakIndices.push_back(nextBreakIndex);
+    workspace[lineBreakCount++].breakIndex = nextBreakIndex;
     currentWordIndex = nextBreakIndex;
   }
 
-  return lineBreakIndices;
+  return true;
 }
 
 // Builds break indices while opportunistically splitting the word that would overflow the current line.
@@ -1177,17 +1198,15 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   return true;
 }
 
-void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
+void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, const size_t lastBreakAt,
+                             const size_t lineCount, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
-                             const std::vector<size_t>& lineBreakIndices,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              const GfxRenderer& renderer, const int fontId) {
-  const size_t lineBreak = lineBreakIndices[breakIndex];
-  const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
   const uint32_t lineVisibleOffset = visibleOffsetAt(lastBreakAt);
 
-  const int firstLineIndent = resolveFirstLineIndent(breakIndex == 0, renderer, fontId);
+  const int firstLineIndent = resolveFirstLineIndent(lineIndex == 0, renderer, fontId);
 
   std::vector<std::string> lineRubyTexts(lineWordCount);
   if (!rubyTexts.empty() && lastBreakAt < rubyTexts.size()) {
@@ -1243,7 +1262,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
   // Calculate spacing (account for indent reducing effective page width on first line)
   const int effectivePageWidth = pageWidth - firstLineIndent;
-  const bool isLastLine = breakIndex == lineBreakIndices.size() - 1;
+  const bool isLastLine = lineIndex == lineCount - 1;
 
   // For RTL, implicit/default Left alignment becomes Right alignment.
   // Explicit text-align:left must remain left for CSS correctness.
