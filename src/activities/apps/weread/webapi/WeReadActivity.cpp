@@ -736,7 +736,7 @@ void WeReadActivity::advanceShelfCovers() {
         ++shelfCoverCursor_;
         shelfFrameInvalidated_.store(true);
         requestUpdate();
-        return;
+        break;
       case WeReadClient::Operation::Event::QrReady:
       case WeReadClient::Operation::Event::Authenticated:
       case WeReadClient::Operation::Event::ChapterRangeReady:
@@ -864,6 +864,7 @@ void WeReadActivity::advanceJob() {
           mainTab_.store(MainTab::Shelf);
           mainFocus_.store(MainFocus::Content);
           state_.store(State::Home);
+          advanceShelfCovers();
           requestJobUpdate();
           return;
         case Job::Detail: {
