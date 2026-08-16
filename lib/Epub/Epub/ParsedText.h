@@ -14,6 +14,11 @@
 class GfxRenderer;
 
 class ParsedText {
+  struct LineBreakState {
+    int cost;
+    size_t breakIndex;
+  };
+
   // Long CJK paragraphs can exceed 512 short tokens. A vector<string> growth
   // from 512 to 1024 needs one 24 KB contiguous block while retaining the old
   // 12 KB block; deque keeps the same indexed interface without that peak.
@@ -58,17 +63,17 @@ class ParsedText {
   int calculateRubyExtraEndOffset(size_t lineStartIdx, size_t lineBreakIdx, const GfxRenderer& renderer,
                                   int fontId) const;
   int resolveFirstLineIndent(bool isFirstLine, const GfxRenderer& renderer, int fontId) const;
-  std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                        std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                        std::vector<bool>& noSpaceBeforeVec);
+  bool computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth, std::vector<uint16_t>& wordWidths,
+                         std::vector<bool>& continuesVec, std::vector<bool>& noSpaceBeforeVec,
+                         std::unique_ptr<LineBreakState[]>& workspace, size_t& lineBreakCount);
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
                                                   std::vector<bool>& noSpaceBeforeVec);
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
-  void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
-                   const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
-                   const std::vector<size_t>& lineBreakIndices,
+  void extractLine(size_t lineIndex, size_t lineBreak, size_t lastBreakAt, size_t lineCount, int pageWidth,
+                   const std::vector<uint16_t>& wordWidths, const std::vector<bool>& continuesVec,
+                   const std::vector<bool>& noSpaceBeforeVec,
                    const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                    const GfxRenderer& renderer, int fontId);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
@@ -98,7 +103,7 @@ class ParsedText {
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
-  void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
+  bool layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              bool includeLastLine = true);
 };
