@@ -697,7 +697,9 @@ void TxtReaderActivity::renderPage() {
 
   // Serialize SD access in this render path against the main task's SD writes
   // (progress, index cache) so they cannot interleave mid-FAT-op.
+#if !defined(SIMULATOR)
   HalStorage::StorageLock storageLock;
+#endif
 
 #if FREEINK_DEVICE_EEGO_A4
   if (SETTINGS.textAntiAliasing) {

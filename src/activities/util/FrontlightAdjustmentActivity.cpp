@@ -8,9 +8,9 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "CrossPointSettings.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "CrossPointSettings.h"
 
 namespace {
 constexpr int kBarHeight = 16;
@@ -55,9 +55,7 @@ void FrontlightAdjustmentActivity::loop() {
 
   // Live drag on either bar: the value follows the finger until release. Runs
   // before the Back/Confirm handlers so a drag release can't cancel the page.
-  auto inBar = [](int ty, int barY) {
-    return ty >= barY + kBarTopLeft && ty < barY + kBarHeight + kBarBottom;
-  };
+  auto inBar = [](int ty, int barY) { return ty >= barY + kBarTopLeft && ty < barY + kBarHeight + kBarBottom; };
   if (held) {
     if (draggingBrightness || (inBar(ty, brightnessBarY) && !inBar(ty, warmthBarY))) {
       draggingBrightness = true;

@@ -98,7 +98,15 @@ class ActivityManager {
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateCounting(1, 1)) {
+      : renderer(renderer), mappedInput(mappedInput),
+#if defined(SIMULATOR)
+        // The host simulator's FreeRTOS shim only provides xSemaphoreCreateMutex.
+        renderingMutex(xSemaphoreCreateMutex()) {
+#else
+        // Counting semaphore (max=1): no priority inheritance, so cross-core
+        // take/give on the S3 cannot trip xTaskPriorityDisinherit.
+        renderingMutex(xSemaphoreCreateCounting(1, 1)) {
+#endif
     assert(renderingMutex != nullptr && "Failed to create rendering semaphore");
     stackActivities.reserve(10);
   }

@@ -119,13 +119,17 @@ void ActivityManager::restartRenderTask() {
 
   // The crashed task may have held the render semaphore when it died. Since a
   // counting semaphore has no owner to release, recreate it so no task is stuck
-  // waiting forever.
+  // waiting forever. (The host simulator's FreeRTOS shim has no
+  // xSemaphoreCreateCounting/vSemaphoreDelete; the render task never really
+  // crashes there, so keep the original semaphore.)
+#if !defined(SIMULATOR)
   if (renderingMutex) {
     vSemaphoreDelete(renderingMutex);
   }
   renderingMutex = xSemaphoreCreateCounting(1, 1);
   assert(renderingMutex && "Failed to recreate rendering semaphore");
   renderLockHolder.store(nullptr);
+#endif
 
 #if defined(configNUM_CORES) && configNUM_CORES > 1
   constexpr BaseType_t renderTaskCore = 1;
@@ -247,7 +251,9 @@ void ActivityManager::loop() {
       // re-reads the same tap and double-activates (observed crash with WeRead:
       // the second activation hit WiFi/render-lock interleaving and tripped
       // FreeRTOS xTaskPriorityDisinherit on the rendering mutex).
+#if !defined(SIMULATOR)
       gpio.clearTouchTapEvent();
+#endif
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();

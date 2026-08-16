@@ -1637,7 +1637,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   // Serialize SD access in this render path against the main task's SD writes
   // (progress, bookmarks, background build) so they cannot interleave mid-FAT-op.
+#if !defined(SIMULATOR)
   HalStorage::StorageLock storageLock;
+#endif
 
   {
     // Unified page read: the in-progress build's in-RAM table if it has reached the page,
@@ -1861,7 +1863,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 #if FREEINK_DEVICE_EEGO_A4
   // A4: text AA pages skip the BW frame entirely (single gray pass below), so
   // there is nothing to overlap — keep the BW refresh synchronous there.
-  const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
+  const bool overlapRefresh =
+      tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
 #else
   // Other devices keep the upstream behavior: BW frame shown first, then the
   // gray pass overlaps the BW refresh.
