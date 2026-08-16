@@ -114,12 +114,14 @@ void AirPageActivity::onEnter() {
   legacyDownloadUrl_ += deviceId;
   legacyDownloadUrl_ += "/latest.bmp";
 
-  applyConnectionEvent(connection_.begin(airpage::loadRealtimeMode()));
+  const auto connectionEvent = connection_.begin(airpage::loadRealtimeMode());
+  applyConnectionEvent(connectionEvent);
   LOG_DBG("AIRP", "onEnter activity=%u free=%u largest=%u id=%s cached=%d realtime=%d",
           static_cast<unsigned>(sizeof(*this)), static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), deviceId.c_str(), imageStore_.hasImage() ? 1 : 0,
           connection_.realtime() ? 1 : 0);
   requestUpdate();
+  if (connectionEvent == airpage::AirPageConnection::Event::WifiRequired) openWifiSelection(false);
 }
 
 void AirPageActivity::onExit() {
