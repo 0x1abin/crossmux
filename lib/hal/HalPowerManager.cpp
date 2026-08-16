@@ -10,7 +10,12 @@
 
 #include <cassert>
 
+#include "HalFrontlight.h"
 #include "HalGPIO.h"
+
+#if FREEINK_DEVICE_PAPERMONO
+#include <M5Pm1.h>
+#endif
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -101,6 +106,15 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // guarantees that ordering).
   freeink::PowerManager::powerDownRailsForSleep();
 
+#if FREEINK_DEVICE_PAPERMONO
+  // Its power button is behind the M5PM1 PMIC rather than an ESP GPIO, so
+  // normal GPIO deep sleep would have no wake source. Ask the PMIC to shut the
+  // device down; a button click then restarts it through a cold boot.
+  if (freeink::m5pm1::requestShutdown()) {
+    delay(1000);  // allow the PMIC firmware time to drop power
+  }
+#endif
+
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();
@@ -118,7 +132,15 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) const {
     return false;
   }
   // Light sleep drops a WiFi association and kills an enumerated USB-CDC link.
+#ifdef FREEINK_FRONTLIGHT_LS
+  // The frontlight PWM runs from RC_FAST with KEEP_ALIVE and survives light
+  // sleep (SDK FREEINK_FRONTLIGHT_LS), so a lit light no longer blocks it.
   if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached()) {
+#else
+  // It also stops the default LEDC PWM output, visibly flashing ESP-driven
+  // frontlights as the idle loop enters repeated sleep slices.
+  if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached() || (Frontlight.present() && Frontlight.isOn())) {
+#endif
     return false;
   }
 
@@ -181,9 +203,12 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) const {
 }
 
 bool HalPowerManager::onEinkBusyWaitSlice(const int8_t busyPin, const uint8_t busyLevel) {
-  // Same exclusions as lightSleep(): light sleep drops a WiFi association and
-  // kills an enumerated USB-CDC link. No LOG here — this runs ~50x/s mid-refresh.
+  // Same exclusions as lightSleep(). No LOG here — this runs ~50x/s mid-refresh.
+#ifdef FREEINK_FRONTLIGHT_LS
   if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached()) {
+#else
+  if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached() || (Frontlight.present() && Frontlight.isOn())) {
+#endif
     return false;
   }
 

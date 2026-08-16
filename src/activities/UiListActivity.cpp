@@ -110,6 +110,8 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
     // as many rows per screen as they did before the FreeInkUI migration.
     // props.rowHeight must be set explicitly: screen.list() otherwise falls
     // back to the (touch-friendly) theme token, not this local value.
+    // A label that must wrap (labelText.maxLines > 1) grows only its own row:
+    // list() sizes wrapped items per-row, so the dense height stays.
     const auto& metrics = UITheme::getInstance().getMetrics();
     rowHeight = static_cast<int16_t>(hasSubtitle ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight);
     props.rowHeight = rowHeight;

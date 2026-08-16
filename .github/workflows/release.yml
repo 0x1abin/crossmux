@@ -1,23 +1,32 @@
-name: Compile Release Candidate
+name: Compile Release
+
+# Builds every board's release firmware on tag push, with the .bin named
+# exactly as OtaUpdater requests it from the GitHub release: plain
+# firmware.bin for the C3 X4/X3 binary, firmware-<board>.bin for every other
+# board. Attach the artifacts' .bin files to the release as-is.
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: read
 
 jobs:
-  build-release-candidate:
-    if: startsWith(github.ref_name, 'release/')
+  build-release:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - pio_env: gh_release_rc
+          - pio_env: gh_release
             asset: firmware.bin
-          - pio_env: sticky-gh_release_rc
+          - pio_env: sticky-gh_release
             asset: firmware-sticky.bin
-          - pio_env: x4pro-gh_release_rc
+          - pio_env: x4pro-gh_release
             asset: firmware-x4pro.bin
-          - pio_env: papermono-gh_release_rc
+          - pio_env: papermono-gh_release
             asset: firmware-papermono.bin
     steps:
       - uses: actions/checkout@v6
@@ -52,14 +61,7 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
-      - name: Extract env
-        run: |
-          echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
-          echo "BRANCH_SUFFIX=${GITHUB_REF_NAME#release/}" >> $GITHUB_ENV
-
-      - name: Build CrossPoint Release Candidate
-        env:
-          CROSSPOINT_RC_HASH: ${{ env.SHORT_SHA }}
+      - name: Build CrossPoint
         run: pio run -e ${{ matrix.pio_env }} -j1
 
       - name: Name release asset
@@ -72,7 +74,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CrossPoint-RC-${{ env.BRANCH_SUFFIX }}-${{ matrix.pio_env }}
+          name: ${{ matrix.asset }}
           path: |
             .pio/build/${{ matrix.pio_env }}/bootloader.bin
             .pio/build/${{ matrix.pio_env }}/${{ matrix.asset }}

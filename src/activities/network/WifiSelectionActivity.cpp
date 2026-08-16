@@ -183,6 +183,9 @@ void WifiSelectionActivity::startWifiScan(const bool autoScan) {
   listNav.reset();
   state = WifiSelectionState::SCANNING;
   networks.clear();
+  // The cached rows point into the cleared networks' strings; drop them too.
+  networkStatuses.clear();
+  networkRowItems.clear();
   requestUpdate();
 
   // Set WiFi mode to station
@@ -940,7 +943,8 @@ void WifiSelectionActivity::buildListScreen(UiScreen& screen) {
     // Non-touch hardware (X3/X4) keeps the original, denser row height
     // instead of FreeInkUI's touch-target-sized default (see
     // UiListActivity::syncListViewport; this screen predates that base and
-    // syncs its own viewport directly).
+    // syncs its own viewport directly). A long SSID that wraps grows only
+    // its own row: list() sizes wrapped items per-row.
     rowHeight = static_cast<int16_t>(metrics.listRowHeight);
     props.rowHeight = rowHeight;
   }

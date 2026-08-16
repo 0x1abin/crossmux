@@ -58,10 +58,15 @@ void RecentBooksActivity::onEnter() {
 
 void RecentBooksActivity::onExit() {
   Activity::onExit();
+  // rowItems' label/subtitle pointers alias recentBooks' strings; drop both.
+  rowItems.clear();
   recentBooks.clear();
 }
 
 void RecentBooksActivity::activateIndex(const int index) {
+  // The interaction table can deliver a row index captured before a removal
+  // shrank the list; the next render re-registers the rows.
+  if (index < 0 || index >= listCount()) return;
   // Opening the book leaves this screen; a lingering flash would gray an
   // unrelated row when the list next appears.
   app.clearTapFlash();
@@ -70,6 +75,7 @@ void RecentBooksActivity::activateIndex(const int index) {
 }
 
 void RecentBooksActivity::onRowLongPress(const int index) {
+  if (index < 0 || index >= listCount()) return;
   // Long-press prompts removal from the list (mirrors the Confirm-button hold).
   app.clearTapFlash();
   promptRemoveBook(recentBooks[index].path, recentBooks[index].title);
@@ -103,6 +109,9 @@ void RecentBooksActivity::promptRemoveBook(const std::string& path, const std::s
     }
     if (RECENT_BOOKS.removeByPath(path)) {
       LOG_DBG("RBA", "Removed from recents: %s", path.c_str());
+      // The interaction table still indexes the pre-removal rows; stop routing
+      // touches against it until the next render republishes.
+      closeRouting();
       loadRecentBooks();
       if (recentBooks.empty()) {
         nav.selected = 0;
