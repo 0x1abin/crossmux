@@ -578,6 +578,12 @@ void AirPageActivity::render(RenderLock&&) {
     return;
   }
 
+  if (screen_ == Screen::Image && (phase_ == Phase::FetchRequested || phase_ == Phase::Fetching)) {
+    renderer.setRenderMode(GfxRenderer::BW);
+    GUI.drawPopup(renderer, tr(STR_UPDATING));
+    return;
+  }
+
   if (screen_ == Screen::Image && phase_ == Phase::Idle) {
     const bool screenSizeChanged =
         displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
