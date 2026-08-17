@@ -98,7 +98,8 @@ class ActivityManager {
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : renderer(renderer), mappedInput(mappedInput),
+      : renderer(renderer),
+        mappedInput(mappedInput),
 #if defined(SIMULATOR)
         // The host simulator's FreeRTOS shim only provides xSemaphoreCreateMutex.
         renderingMutex(xSemaphoreCreateMutex()) {
