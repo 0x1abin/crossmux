@@ -52,6 +52,17 @@ extern HalGPIO gpio;  // defined in main.cpp
 // (cover decode, gray refresh) without false positives.
 static constexpr unsigned long kRenderWatchdogTimeoutMs = 10000;
 
+// Monotonic millisecond clock for the render watchdog. On device this is the
+// FreeRTOS tick; the host simulator's FreeRTOS shim has no xTaskGetTickCount,
+// so fall back to millis() (which the shim implements with steady_clock).
+static unsigned long renderWatchdogNowMs() {
+#if defined(SIMULATOR)
+  return millis();
+#else
+  return (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+#endif
+}
+
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
   constexpr BaseType_t renderTaskCore = 1;
@@ -156,7 +167,7 @@ void ActivityManager::restartRenderTask() {
 
   // Re-render the current activity so the panel recovers from the black screen.
   renderRequestOutstanding.store(true, std::memory_order_release);
-  lastRenderRequestMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+  lastRenderRequestMs = renderWatchdogNowMs();
   xTaskNotify(renderTaskHandle, 1, eIncrement);
 }
 
@@ -270,7 +281,7 @@ void ActivityManager::loop() {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
       // Record that a render is outstanding so the watchdog below can detect a
       // render task that crashed mid-render and abandoned the panel.
-      lastRenderRequestMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+      lastRenderRequestMs = renderWatchdogNowMs();
       renderRequestOutstanding.store(true, std::memory_order_release);
     }
   }
@@ -284,7 +295,7 @@ void ActivityManager::loop() {
   // incomplete and the recreated semaphore desynchronized from the old holder,
   // which is what turned a slow render into a hard hang/reboot.
   if (renderRequestOutstanding.load(std::memory_order_acquire)) {
-    const unsigned long nowMs = (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    const unsigned long nowMs = renderWatchdogNowMs();
     // The heartbeat only advances AFTER render() returns, so a render that is
     // legitimately in progress (the render task is currently holding the render
     // lock) can run longer than the watchdog timeout. Use a two-tier timeout:
@@ -298,6 +309,7 @@ void ActivityManager::loop() {
       const unsigned long effectiveTimeout =
           (renderLockHolder.load() != nullptr) ? kRenderCrashTimeoutMs : kRenderWatchdogTimeoutMs;
       if ((nowMs - lastRenderRequestMs) > effectiveTimeout) {
+#if !defined(SIMULATOR)
         const eTaskState taskState = eTaskGetState(renderTaskHandle);
         if (taskState == eDeleted || taskState == eSuspended) {
           // Task really is gone (deleted or suspended by something else) —
@@ -309,6 +321,13 @@ void ActivityManager::loop() {
           // heartbeat comparison above already guards against spurious logs.
           LOG_INF("ACT", "Render task slow but alive (state=%d); waiting", static_cast<int>(taskState));
         }
+#else
+        // The host simulator's FreeRTOS shim has no eTaskGetState(), and its
+        // render task is a host thread that can never be deleted or suspended
+        // (a crash there aborts the whole process). Treat it as alive and keep
+        // waiting instead of restarting a possibly-live render.
+        LOG_INF("ACT", "Render task slow but alive (simulator); waiting");
+#endif
       }
     }
     lastRenderHeartbeatSeen = renderHeartbeat.load(std::memory_order_acquire);
