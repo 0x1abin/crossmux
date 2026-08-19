@@ -446,7 +446,7 @@ inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
   const bool frontlightSetting =
       setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || setting.nameId == StrId::STR_FRONTLIGHT_WARMTH;
   if (frontlightSetting && !Frontlight.present()) return false;
-  if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !BoardConfig::hasColorTemperatureFrontlight()) return false;
+  if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH && !Frontlight.hasColorTemperature()) return false;
 #endif
   if (BoardConfig::hasTouch() &&
       (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX ||

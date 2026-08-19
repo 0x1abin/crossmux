@@ -1,4 +1,4 @@
 [submodule "freeink-sdk"]
 	path = freeink-sdk
-	url = https://github.com/MokuMMk/freeink-sdk.git
-	branch = eego-a4
+	url = https://github.com/0x1abin/freeink-sdk.git
+	branch = main

@@ -17,6 +17,7 @@ class HalFrontlight {
   // True when a frontlight is actually present on this unit. Some retail A4
   // units ship without a frontlight; probe the hardware instead of assuming.
   bool present() const { return manager.present(); }
+  bool hasColorTemperature() const { return manager.hasColorTemperature(); }
 
  private:
   FrontlightManager manager;

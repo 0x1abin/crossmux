@@ -69,5 +69,7 @@ class EpubReaderMenuActivity final : public Activity {
   int currentPage = 0;
   int totalPages = 0;
   int bookProgressPercent = 0;
+#if FREEINK_DEVICE_EEGO_A4
   bool firstRender = true;
+#endif
 };
