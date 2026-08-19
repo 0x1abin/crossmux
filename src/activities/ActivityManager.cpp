@@ -1,6 +1,7 @@
 #include "ActivityManager.h"
 
 #include <FontCacheManager.h>
+#include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
 
@@ -44,17 +45,26 @@
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
+extern HalGPIO gpio;  // defined in main.cpp
+
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
   constexpr BaseType_t renderTaskCore = 1;
 #else
   constexpr BaseType_t renderTaskCore = 0;
 #endif
+  // A4 prewarms fonts, decodes covers and runs Bidi in this task; keep its
+  // measured stack allowance local to that experimental target.
+#if FREEINK_DEVICE_EEGO_A4
+  constexpr uint32_t kRenderTaskStackBytes = 16384;
+#else
+  constexpr uint32_t kRenderTaskStackBytes = 8192;
+#endif
   xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
-                          8192,               // Stack size
-                          this,               // Parameters
-                          1,                  // Priority
-                          &renderTaskHandle,  // Task handle
+                          kRenderTaskStackBytes,  // Stack size (see above)
+                          this,                   // Parameters
+                          1,                      // Priority
+                          &renderTaskHandle,      // Task handle
                           renderTaskCore  // Keep long renders/cover decodes off CPU 0's idle watchdog when available
   );
   assert(renderTaskHandle != nullptr && "Failed to create render task");
@@ -71,7 +81,11 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
-    if (currentActivity) {
+    // Skip rendering when a Push/Pop/Replace is pending: the main task is
+    // waiting to acquire this lock to swap currentActivity. Rendering the
+    // old activity here would re-hold the lock for the entire render duration,
+    // starving the main task and freezing the device.
+    if (currentActivity && pendingAction.load() == PendingAction::None) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
     }
@@ -88,7 +102,7 @@ void ActivityManager::renderTaskLoop() {
 }
 
 void ActivityManager::loop() {
-  if (currentActivity) {
+  if (currentActivity && pendingAction.load() == PendingAction::None) {
     if (handleMainTabInput()) return;
 
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
@@ -103,14 +117,15 @@ void ActivityManager::loop() {
     currentActivity->loop();
   }
 
-  while (pendingAction != PendingAction::None) {
-    if (pendingAction == PendingAction::Pop) {
+  while (pendingAction.load() != PendingAction::None) {
+    if (pendingAction.load() == PendingAction::Pop) {
+      if (RenderLock::peek()) break;
       RenderLock lock;
 
       if (!currentActivity) {
         // Should never happen in practice
         LOG_ERR("ACT", "Pop set but currentActivity is null; ignoring pop request");
-        pendingAction = PendingAction::None;
+        pendingAction.store(PendingAction::None);
         continue;
       }
 
@@ -118,7 +133,7 @@ void ActivityManager::loop() {
 
       // Destroy the current activity
       exitActivity(lock);
-      pendingAction = PendingAction::None;
+      pendingAction.store(PendingAction::None);
 
       if (stackActivities.empty()) {
         LOG_DBG("ACT", "No more activities on stack, going home");
@@ -142,7 +157,7 @@ void ActivityManager::loop() {
         }
 
         // Request an update to ensure the popped activity gets re-rendered
-        if (pendingAction == PendingAction::None) {
+        if (pendingAction.load() == PendingAction::None) {
           requestUpdate();
         }
 
@@ -152,9 +167,10 @@ void ActivityManager::loop() {
 
     } else if (pendingActivity) {
       // Current activity has requested a new activity to be launched
+      if (RenderLock::peek()) break;
       RenderLock lock;
 
-      if (pendingAction == PendingAction::Replace) {
+      if (pendingAction.load() == PendingAction::Replace) {
         // Destroy the current activity
         exitActivity(lock);
         // Clear the stack
@@ -162,13 +178,23 @@ void ActivityManager::loop() {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
         }
-      } else if (pendingAction == PendingAction::Push) {
+      } else if (pendingAction.load() == PendingAction::Push) {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
       }
-      pendingAction = PendingAction::None;
+      pendingAction.store(PendingAction::None);
       currentActivity = std::move(pendingActivity);
+
+      // Drop any one-shot tap/release edge events the outgoing activity already
+      // consumed this frame. The SDK's InputManager clears these in update(),
+      // but a pushActivity runs mid-frame; without this, the incoming activity
+      // re-reads the same tap and double-activates (observed crash with WeRead:
+      // the second activation hit WiFi/render-lock interleaving and tripped
+      // FreeRTOS xTaskPriorityDisinherit on the rendering mutex).
+#if !defined(SIMULATOR)
+      gpio.clearTouchTapEvent();
+#endif
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -178,7 +204,7 @@ void ActivityManager::loop() {
     }
   }
 
-  if (requestedUpdate.exchange(false)) {
+  if (pendingAction.load() == PendingAction::None && requestedUpdate.exchange(false)) {
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost
     if (renderTaskHandle) {
@@ -501,10 +527,9 @@ void ActivityManager::requestUpdateAndWait() {
   // Atomic section to perform checks
   taskENTER_CRITICAL(&activityManagerSpinlock);
   auto currTaskHandler = xTaskGetCurrentTaskHandle();
-  auto mutexHolder = xSemaphoreGetMutexHolder(renderingMutex);
+  bool holdingRenderLock = (xSemaphoreGetMutexHolder(renderingMutex) == currTaskHandler);
   bool isRenderTask = (currTaskHandler == renderTaskHandle);
   bool alreadyWaiting = (waitingTaskHandle != nullptr);
-  bool holdingRenderLock = (mutexHolder == currTaskHandler);
   if (!alreadyWaiting && !isRenderTask && !holdingRenderLock) {
     waitingTaskHandle = currTaskHandler;
   }

@@ -1,9 +1,11 @@
 #include "EpubReaderMenuActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <I18n.h>
 
 #include "MappedInputManager.h"
+#include "activities/util/FrontlightAdjustmentActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -22,7 +24,16 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes,
                                                                                      bool hasBookmarks) {
   std::vector<MenuItem> items;
+#if FREEINK_DEVICE_EEGO_A4
+  items.reserve(15);
+  // Only show the frontlight entry when the hardware actually has one: some
+  // retail A4 units ship without a frontlight (probed via HalFrontlight).
+  if (Frontlight.present()) {
+    items.push_back({MenuAction::FRONTLIGHT, StrId::STR_FRONTLIGHT});
+  }
+#else
   items.reserve(14);
+#endif
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
@@ -91,6 +102,11 @@ void EpubReaderMenuActivity::loop() {
 
   auto activateSelected = [this] {
     const auto selectedAction = menuItems[selectedIndex].action;
+    if (selectedAction == MenuAction::FRONTLIGHT) {
+      startActivityForResultWith<FrontlightAdjustmentActivity>([this](const ActivityResult&) { requestUpdate(); },
+                                                               "FrontlightAdjustment", StrId::STR_FRONTLIGHT);
+      return;
+    }
     if (selectedAction == MenuAction::ROTATE_SCREEN) {
       optionPopup.show(StrId::STR_ORIENTATION, orientationLabels.data(), static_cast<int>(orientationLabels.size()),
                        pendingOrientation, [this](int idx) {
@@ -207,5 +223,10 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+#if FREEINK_DEVICE_EEGO_A4
+  renderer.displayBuffer(firstRender ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  firstRender = false;
+#else
   renderer.displayBuffer();
+#endif
 }

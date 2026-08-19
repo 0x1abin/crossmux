@@ -49,12 +49,24 @@ class HalStorage {
 
   static HalStorage& getInstance() { return instance; }
 
-  class StorageLock;  // private class, used internally
+  // Public RAII guard that keeps the SD/SPI transaction serialization lock held
+  // for the duration of a scope. Downstream code can hold it across a whole
+  // multi-step read (exists + open + read + draw) so the main task cannot
+  // interleave SD access mid-transaction and corrupt SdFat's m_spiActive.
+  class StorageLock {
+   public:
+    StorageLock();
+    ~StorageLock();
+    StorageLock(const StorageLock&) = delete;
+    StorageLock& operator=(const StorageLock&) = delete;
+  };
 
  private:
   static HalStorage instance;
 
   bool initialized = false;
+  // Recursive because HalFile operations can re-enter storage wrappers while
+  // a long transaction guard is held by the same task.
   SemaphoreHandle_t storageMutex = nullptr;
 };
 

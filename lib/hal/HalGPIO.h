@@ -80,7 +80,14 @@ class HalGPIO {
   unsigned long lastTouchHeldMs() const;
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
   bool wasTouchActivity() const;
+  // One-shot short-press (tap) of the touch home key, cleared each update().
+  bool wasHomeKeyTapped() const;
   bool wasHomeKeyLongPressed() const;
+  // Drop the one-shot touch tap/release edge events. Call on activity
+  // transitions so the incoming activity does not re-read a tap the outgoing
+  // one consumed (InputManager clears these in update(), but a pushActivity
+  // runs mid-frame; without this the incoming activity double-activates).
+  void clearTouchTapEvent();
   void prepareForDeepSleep();
   void setSharedConfirmPowerShortPressEmitsPower(bool enabled);
 
