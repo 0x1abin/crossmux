@@ -47,34 +47,15 @@ static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
 extern HalGPIO gpio;  // defined in main.cpp
 
-// How long the main task waits for the render task to advance its heartbeat
-// before declaring it dead and restarting it. Generous to tolerate slow renders
-// (cover decode, gray refresh) without false positives.
-static constexpr unsigned long kRenderWatchdogTimeoutMs = 10000;
-
-// Monotonic millisecond clock for the render watchdog. On device this is the
-// FreeRTOS tick; the host simulator's FreeRTOS shim has no xTaskGetTickCount,
-// so fall back to millis() (which the shim implements with steady_clock).
-static unsigned long renderWatchdogNowMs() {
-#if defined(SIMULATOR)
-  return millis();
-#else
-  return (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-#endif
-}
-
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
   constexpr BaseType_t renderTaskCore = 1;
 #else
   constexpr BaseType_t renderTaskCore = 0;
 #endif
-  // Render task stack: the S3 targets (eego A4 etc.) prewarm fonts, decode
-  // covers and run Bidi inside this task, and measured high-water marks there
-  // exceed a tight 8KB (an overflow aborts the task and leaves a black panel).
-  // C3 targets (X3/X4) keep the historical 8KB so no extra DRAM is resident on
-  // the RAM-constrained C3; the per-device size is picked at compile time.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  // A4 prewarms fonts, decodes covers and runs Bidi in this task; keep its
+  // measured stack allowance local to that experimental target.
+#if FREEINK_DEVICE_EEGO_A4
   constexpr uint32_t kRenderTaskStackBytes = 16384;
 #else
   constexpr uint32_t kRenderTaskStackBytes = 8192;
@@ -108,10 +89,6 @@ void ActivityManager::renderTaskLoop() {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
     }
-    // Advance the heartbeat so the main task's watchdog can tell this task is
-    // still alive (not crashed/aborted with a black, frozen panel).
-    renderHeartbeat.store(renderHeartbeat.load() + 1, std::memory_order_release);
-    renderRequestOutstanding.store(false, std::memory_order_release);
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
     taskENTER_CRITICAL(&activityManagerSpinlock);
@@ -122,53 +99,6 @@ void ActivityManager::renderTaskLoop() {
       xTaskNotify(waiter, 1, eIncrement);
     }
   }
-}
-
-void ActivityManager::restartRenderTask() {
-  LOG_ERR("ACT", "Render task heartbeat stalled; restarting render task");
-  renderRequestOutstanding.store(false, std::memory_order_release);
-
-  // The crashed task may have held the render semaphore when it died. Since a
-  // counting semaphore has no owner to release, recreate it so no task is stuck
-  // waiting forever. (The host simulator's FreeRTOS shim has no
-  // xSemaphoreCreateCounting/vSemaphoreDelete; the render task never really
-  // crashes there, so keep the original semaphore.)
-#if !defined(SIMULATOR)
-  if (renderingMutex) {
-    vSemaphoreDelete(renderingMutex);
-  }
-  renderingMutex = xSemaphoreCreateCounting(1, 1);
-  assert(renderingMutex && "Failed to recreate rendering semaphore");
-  renderLockHolder.store(nullptr);
-#endif
-
-#if defined(configNUM_CORES) && configNUM_CORES > 1
-  constexpr BaseType_t renderTaskCore = 1;
-#else
-  constexpr BaseType_t renderTaskCore = 0;
-#endif
-
-  // Remove any leftover (dead) render task before creating a fresh one.
-  if (renderTaskHandle) {
-    vTaskDelete(renderTaskHandle);
-    renderTaskHandle = nullptr;
-  }
-  renderHeartbeat.store(0, std::memory_order_release);
-  lastRenderHeartbeatSeen = 0;
-
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-  constexpr uint32_t kRenderTaskStackBytes = 16384;
-#else
-  constexpr uint32_t kRenderTaskStackBytes = 8192;
-#endif
-  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender", kRenderTaskStackBytes, this, 1,
-                          &renderTaskHandle, renderTaskCore);
-  assert(renderTaskHandle != nullptr && "Failed to recreate render task");
-
-  // Re-render the current activity so the panel recovers from the black screen.
-  renderRequestOutstanding.store(true, std::memory_order_release);
-  lastRenderRequestMs = renderWatchdogNowMs();
-  xTaskNotify(renderTaskHandle, 1, eIncrement);
 }
 
 void ActivityManager::loop() {
@@ -279,60 +209,7 @@ void ActivityManager::loop() {
     // Increment counter so multiple rapid calls won't be lost
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
-      // Record that a render is outstanding so the watchdog below can detect a
-      // render task that crashed mid-render and abandoned the panel.
-      lastRenderRequestMs = renderWatchdogNowMs();
-      renderRequestOutstanding.store(true, std::memory_order_release);
     }
-  }
-
-  // Render task watchdog: if a render was requested but the render task never
-  // advanced its heartbeat, the task may have crashed. Restart it ONLY when the
-  // task is genuinely gone (eTaskGetState says deleted/suspended). A task that
-  // is merely slow — a long AA grayscale render while the CPU is downclocked to
-  // 80 MHz, or a busy-wait on the panel — is still alive and must NOT be
-  // vTaskDelete()d: killing it mid-render leaves the display/SPI state
-  // incomplete and the recreated semaphore desynchronized from the old holder,
-  // which is what turned a slow render into a hard hang/reboot.
-  if (renderRequestOutstanding.load(std::memory_order_acquire)) {
-    const unsigned long nowMs = renderWatchdogNowMs();
-    // The heartbeat only advances AFTER render() returns, so a render that is
-    // legitimately in progress (the render task is currently holding the render
-    // lock) can run longer than the watchdog timeout. Use a two-tier timeout:
-    //  - No lock held: short timeout (task died before acquiring lock)
-    //  - Lock held: long timeout (legitimate long render OR crashed task)
-    // The long timeout must exceed any legitimate render (AA grayscale: ~15s,
-    // plus one 30s waitBusy timeout = ~45s worst case).
-    constexpr unsigned long kRenderCrashTimeoutMs = 45000;  // must exceed the ~45s legal worst case above
-    const bool heartbeatStalled = (renderHeartbeat.load(std::memory_order_acquire) == lastRenderHeartbeatSeen);
-    if (heartbeatStalled) {
-      const unsigned long effectiveTimeout =
-          (renderLockHolder.load() != nullptr) ? kRenderCrashTimeoutMs : kRenderWatchdogTimeoutMs;
-      if ((nowMs - lastRenderRequestMs) > effectiveTimeout) {
-#if !defined(SIMULATOR)
-        const eTaskState taskState = eTaskGetState(renderTaskHandle);
-        if (taskState == eDeleted || taskState == eSuspended) {
-          // Task really is gone (deleted or suspended by something else) —
-          // restarting is safe.
-          restartRenderTask();
-        } else {
-          // Task is alive (running/ready/blocked on the panel busy-wait or a
-          // long render). Do NOT kill it; just warn and keep waiting. The
-          // heartbeat comparison above already guards against spurious logs.
-          LOG_INF("ACT", "Render task slow but alive (state=%d); waiting", static_cast<int>(taskState));
-        }
-#else
-        // The host simulator's FreeRTOS shim has no eTaskGetState(), and its
-        // render task is a host thread that can never be deleted or suspended
-        // (a crash there aborts the whole process). Treat it as alive and keep
-        // waiting instead of restarting a possibly-live render.
-        LOG_INF("ACT", "Render task slow but alive (simulator); waiting");
-#endif
-      }
-    }
-    lastRenderHeartbeatSeen = renderHeartbeat.load(std::memory_order_acquire);
-  } else {
-    lastRenderHeartbeatSeen = renderHeartbeat.load(std::memory_order_acquire);
   }
 }
 
@@ -650,10 +527,7 @@ void ActivityManager::requestUpdateAndWait() {
   // Atomic section to perform checks
   taskENTER_CRITICAL(&activityManagerSpinlock);
   auto currTaskHandler = xTaskGetCurrentTaskHandle();
-  // renderingMutex is now a counting semaphore (no priority inheritance), so
-  // xSemaphoreGetMutexHolder() can no longer report the owner. RenderLock
-  // records the holder in renderLockHolder instead.
-  bool holdingRenderLock = (renderLockHolder.load() == currTaskHandler);
+  bool holdingRenderLock = (xSemaphoreGetMutexHolder(renderingMutex) == currTaskHandler);
   bool isRenderTask = (currTaskHandler == renderTaskHandle);
   bool alreadyWaiting = (waitingTaskHandle != nullptr);
   if (!alreadyWaiting && !isRenderTask && !holdingRenderLock) {
@@ -678,20 +552,17 @@ void ActivityManager::requestUpdateAndWait() {
 
 RenderLock::RenderLock() {
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  activityManager.renderLockHolder.store(xTaskGetCurrentTaskHandle());
   isLocked = true;
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  activityManager.renderLockHolder.store(xTaskGetCurrentTaskHandle());
   isLocked = true;
 }
 
 RenderLock::~RenderLock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
-    activityManager.renderLockHolder.store(nullptr);
     isLocked = false;
   }
 }
@@ -699,7 +570,6 @@ RenderLock::~RenderLock() {
 void RenderLock::unlock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
-    activityManager.renderLockHolder.store(nullptr);
     isLocked = false;
   }
 }
