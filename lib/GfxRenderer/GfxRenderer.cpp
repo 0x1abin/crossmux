@@ -450,32 +450,9 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
           // 0 -> black, 1 -> dark grey, 2 -> light grey, 3 -> white
           const uint8_t bmpVal = 3 - ((byte >> bit_index) & 0x3);
 
-          if (renderMode == GfxRenderer::BW && bmpVal < 3) {
-            // Black (also paints over the grays in BW mode)
-            renderer.drawPixel(screenX, screenY, pixelState);
-#if FREEINK_DEVICE_EEGO_A4
-          } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 0 || bmpVal == 1)) {
-            // MSB plane: solid black text core (bmpVal==0) plus the dark-gray AA
-            // fringe (bmpVal==1). The A4 panel inverts plane polarity at the
-            // driver (set bit -> light), so a set MSB lands on the darker half.
-            renderer.drawPixel(screenX, screenY, true);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB && (bmpVal == 0 || bmpVal == 2)) {
-            // LSB plane: solid black text core (bmpVal==0) plus the light-gray AA
-            // fringe (bmpVal==2). Combined with the MSB pass this yields 4 distinct
-            // levels: 00 black, 01 dark gray, 10 light gray, 11 white.
-            renderer.drawPixel(screenX, screenY, true);
-          }
-#else
-          } else if (renderMode == GfxRenderer::GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
-            // Light gray (also mark the MSB if it's going to be a dark gray too)
-            // Dedicated X3 gray LUTs now provide proper 4-level gray on both devices
-            // We have to flag pixels in reverse for the gray buffers, as 0 leave alone, 1 update
-            renderer.drawPixel(screenX, screenY, false);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB && bmpVal == 1) {
-            // Dark gray
-            renderer.drawPixel(screenX, screenY, false);
-          }
-#endif
+          const auto pixel = GfxRenderer::mapTwoBitPixel(renderMode, bmpVal);
+          if (pixel.draw)
+            renderer.drawPixel(screenX, screenY, renderMode == GfxRenderer::BW ? pixelState : pixel.state);
         }
       }
     } else {
@@ -543,15 +520,7 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
 
-#if FREEINK_DEVICE_EEGO_A4
-  // A4 (UC8279C): the driver complements the grayscale planes when storing them
-  // (copyGrayscaleXxx does ~buf — set bit stores as cleared, which the gray LUT
-  // drives darker), so the grayscale passes write the complement of the BW
-  // convention. This mirrors the validated EEGO A4 template pipeline.
-  const bool eff = (renderMode != BW) ? !state : state;
-#else
-  const bool eff = state;
-#endif
+  const bool eff = framebufferState(renderMode, state);
   if (eff) {
     target[byteIndex] &= ~(1 << bitPosition);  // Clear bit
   } else {
@@ -879,12 +848,7 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
 }
 
 void GfxRenderer::fillRect(const int x, const int y, const int width, const int height, const bool state) const {
-#if FREEINK_DEVICE_EEGO_A4
-  // A4: same complement as drawPixel — the driver inverts the grayscale planes.
-  const bool eff = (renderMode != BW) ? !state : state;
-#else
-  const bool eff = state;
-#endif
+  const bool eff = framebufferState(renderMode, state);
   if (eff) {
     fillRectImpl<Color::Black>(x, y, width, height);
   } else {
@@ -1311,20 +1275,6 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
   }
 }
 
-namespace {
-bool shouldDrawBitmapValue(const GfxRenderer::RenderMode mode, const uint8_t value) {
-  switch (mode) {
-    case GfxRenderer::BW:
-      return value < 3;
-    case GfxRenderer::GRAYSCALE_LSB:
-      return value == 1;
-    case GfxRenderer::GRAYSCALE_MSB:
-      return value == 1 || value == 2;
-  }
-  return false;
-}
-}  // namespace
-
 bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const int y, const int targetWidth,
                                        const int targetHeight) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
@@ -1354,7 +1304,7 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
   }
 
   const GfxRenderer::RenderMode mode = getRenderMode();
-  const bool pixelState = mode == GfxRenderer::BW;
+  const auto runPixel = mapTwoBitPixel(mode, 0);
   for (int sourceRow = 0; sourceRow < sourceHeight; ++sourceRow) {
     if (bitmap.readNextRow(outputRow.get(), rowBytes.get()) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read crop-fill row %d", sourceRow);
@@ -1373,7 +1323,7 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
       bool draw = false;
       if (sourceX < sourceWidth) {
         const uint8_t value = outputRow[sourceX / 4] >> (6 - ((sourceX * 2) % 8)) & 0x3;
-        draw = shouldDrawBitmapValue(mode, value);
+        draw = mapTwoBitPixel(mode, value).draw;
       }
       if (draw && runStart < 0) {
         runStart = sourceX;
@@ -1383,7 +1333,8 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
         const int clippedLeft = std::max(0, runLeft);
         const int clippedRight = std::min(targetWidth, runRight);
         if (clippedLeft < clippedRight) {
-          fillRect(x + clippedLeft, y + clippedTop, clippedRight - clippedLeft, clippedBottom - clippedTop, pixelState);
+          fillRect(x + clippedLeft, y + clippedTop, clippedRight - clippedLeft, clippedBottom - clippedTop,
+                   runPixel.state);
         }
         runStart = -1;
       }
@@ -1486,24 +1437,8 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
       const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
-      if (renderMode == BW && val < 3) {
-        drawPixel(screenX, screenY);
-#if FREEINK_DEVICE_EEGO_A4
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        // A4: the driver inverts grayscale plane polarity; draw the set state so
-        // the driver inversion lands on the intended gray level (mirrors
-        // renderCharImpl's A4 branches and drawPixel's A4 eff flip).
-        drawPixel(screenX, screenY, true);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, true);
-      }
-#else
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        drawPixel(screenX, screenY, false);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, false);
-      }
-#endif
+      const auto pixel = mapTwoBitPixel(renderMode, val);
+      if (pixel.draw) drawPixel(screenX, screenY, pixel.state);
     }
   }
 

@@ -334,10 +334,10 @@ void EpubReaderActivity::onExit() {
     epub.reset();
   }
 
-  // Leaving the reader: force the next activity's first frame to a full refresh
-  // so grayscale AA residue from the reading pages does not ghost into the home
-  // screen or file browser.
+#if FREEINK_DEVICE_EEGO_A4
+  // A4's single-pass grayscale path needs a clean first frame after exit.
   renderer.requestNextFullRefresh();
+#endif
 }
 
 void EpubReaderActivity::openReaderMenu() {
@@ -359,11 +359,11 @@ void EpubReaderActivity::openReaderMenu() {
                            const auto& menu = std::get<MenuResult>(result.data);
                            applyOrientation(menu.orientation);
                            toggleAutoPageTurn(menu.pageTurnOption);
-                           // Always take a clean base when the menu closes (cancelled or
-                           // confirmed): the reader page re-renders over the menu and a FAST
-                           // refresh would leave its ghost residue on the e-ink panel.
+#if FREEINK_DEVICE_EEGO_A4
+                           // A4's single-pass grayscale page must clear the menu first.
                            pagesUntilFullRefresh = 1;
                            forcedRefreshPending = true;
+#endif
                            if (!result.isCancelled) {
                              onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
                            }
@@ -1637,7 +1637,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   // Serialize SD access in this render path against the main task's SD writes
   // (progress, bookmarks, background build) so they cannot interleave mid-FAT-op.
-#if !defined(SIMULATOR)
+#if FREEINK_DEVICE_EEGO_A4 && !defined(SIMULATOR)
   HalStorage::StorageLock storageLock;
 #endif
 
@@ -1933,7 +1933,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // A4: with text AA on there is no BW frame to show first — skipping this
     // BW refresh avoids the BW-then-gray double flash, and the single gray
     // pass below (which now includes the status bar) is the only display.
-    if (!needsTextGrayscale) {
+    if (needsTextGrayscale) {
+      const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
+      if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
+    } else {
       ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
     }
 #else

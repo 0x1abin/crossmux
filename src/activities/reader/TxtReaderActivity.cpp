@@ -107,11 +107,10 @@ void TxtReaderActivity::onExit() {
   showPendingAchievementPopups(renderer);
   txt.reset();
 
-  // Leaving the reader: force the next activity's first frame to a full refresh
-  // so grayscale AA residue from the reading pages does not ghost into the file
-  // browser / home screen. Placed after the achievement popups so they don't
-  // consume the one-shot override.
+#if FREEINK_DEVICE_EEGO_A4
+  // A4's single-pass grayscale path needs a clean first frame after exit.
   renderer.requestNextFullRefresh();
+#endif
 }
 
 void TxtReaderActivity::loop() {
@@ -697,7 +696,7 @@ void TxtReaderActivity::renderPage() {
 
   // Serialize SD access in this render path against the main task's SD writes
   // (progress, index cache) so they cannot interleave mid-FAT-op.
-#if !defined(SIMULATOR)
+#if FREEINK_DEVICE_EEGO_A4 && !defined(SIMULATOR)
   HalStorage::StorageLock storageLock;
 #endif
 
@@ -709,6 +708,8 @@ void TxtReaderActivity::renderPage() {
     // so there is no BW-then-AA double refresh (which flashed and left the bottom
     // status bar wiped), and the gray pass includes the status bar so it stays
     // visible on the final frame.
+    const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
+    if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
     ReaderUtils::renderAntiAliased(renderer, [this, &renderLines]() {
       renderLines();
       renderStatusBar();
