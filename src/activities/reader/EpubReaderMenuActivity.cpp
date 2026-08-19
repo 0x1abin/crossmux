@@ -99,9 +99,8 @@ void EpubReaderMenuActivity::loop() {
   auto activateSelected = [this] {
     const auto selectedAction = menuItems[selectedIndex].action;
     if (selectedAction == MenuAction::FRONTLIGHT) {
-      startActivityForResult(std::make_unique<FrontlightAdjustmentActivity>(
-                                 renderer, mappedInput, "FrontlightAdjustment", StrId::STR_FRONTLIGHT),
-                             [this](const ActivityResult&) { requestUpdate(); });
+      startActivityForResultWith<FrontlightAdjustmentActivity>([this](const ActivityResult&) { requestUpdate(); },
+                                                               "FrontlightAdjustment", StrId::STR_FRONTLIGHT);
       return;
     }
     if (selectedAction == MenuAction::ROTATE_SCREEN) {

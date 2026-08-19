@@ -288,6 +288,9 @@ bool MappedInputManager::wasBackGesture() const {
 }
 
 bool MappedInputManager::wasHeaderTapBack() const {
+#if !FREEINK_DEVICE_EEGO_A4
+  return false;
+#else
   // Tap on the header (title bar) acts as Return on touch-only devices that
   // lack a dedicated front Back key (eego-a4). The header occupies
   // [topPadding, topPadding + headerHeight); tapping it pops the activity.
@@ -300,6 +303,7 @@ bool MappedInputManager::wasHeaderTapBack() const {
   const bool hit = y >= metrics.topPadding && y < headerBottom;
   if (hit) rememberTouchHeldTime();
   return hit;
+#endif
 }
 
 bool MappedInputManager::wasMenuGesture() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
