@@ -126,6 +126,13 @@ bool TextBlock::hasRuby() const {
   return false;
 }
 
+bool TextBlock::hasFocusLead() const {
+  for (uint16_t i = 0; i < numWords; ++i) {
+    if ((wordStyle(i) & EpdFontFamily::FOCUS_LEAD) != 0) return true;
+  }
+  return false;
+}
+
 void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int x, const int y) const {
   if (!isValid) {
     LOG_ERR("TXB", "Render skipped: invalid block");

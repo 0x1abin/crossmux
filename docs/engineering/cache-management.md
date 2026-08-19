@@ -100,9 +100,9 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
 - `book.bin`: **Version 11** (metadata structure) — includes NFC-composed titles and ignores ambiguous EPUB guide text references while remaining above every version shipped by either lineage.
-- `section.bin`: unified firmware uses **Version 57**. Version 56 was the former
-  Latin flavor; selecting 57 invalidates pagination made with its different
-  built-in font metrics.
+- `section.bin`: unified firmware uses **Version 58**. Version 58 invalidates
+  cached word styles and positions for two-line CJK Focus Reading paragraph
+  leads; versions 56/57 remain the former per-flavor cache generations.
 
 **Version Increment Rules**:
 1. **ALWAYS increment version** BEFORE changing binary structure

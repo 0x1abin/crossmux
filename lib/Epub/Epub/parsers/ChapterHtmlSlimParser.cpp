@@ -1667,14 +1667,16 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
 }
 
 void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const uint32_t visibleOffset) {
-  const int lineHeight =
-      renderer.getLineHeight(fontId, lineCompression) + line->getRubyShift(renderer.getFontAscenderSize(fontId));
+  const int ascender = renderer.getFontAscenderSize(fontId);
+  const int baseLineHeight = renderer.getLineHeight(fontId, lineCompression);
+  const int lineHeight = baseLineHeight + line->getRubyShift(ascender);
+  const int requiredHeight = line->hasFocusLead() ? lineHeight + baseLineHeight + ascender / 2 : lineHeight;
 
   if (!currentPage) {
     if (!allocatePage()) return;
   }
 
-  if (currentPageNextY + lineHeight > viewportHeight) {
+  if (currentPageNextY + requiredHeight > viewportHeight) {
     setCurrentPageVisibleOffset(visibleOffset);
     completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
     completedPageCount++;
@@ -1729,14 +1731,22 @@ void ChapterHtmlSlimParser::makePages() {
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
 
+  size_t paragraphLineCount = 0;
+  bool paragraphHasFocusLead = false;
   if (!currentTextBlock->layoutAndExtractLines(renderer, fontId, effectiveWidth,
-                                               [this](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+                                               [this, &paragraphLineCount, &paragraphHasFocusLead](
+                                                   std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+                                                 ++paragraphLineCount;
+                                                 paragraphHasFocusLead |= textBlock->hasFocusLead();
                                                  addLineToPage(std::move(textBlock), offset);
                                                })) {
     allocationFailed_ = true;
     return;
   }
   if (allocationFailed_) return;
+
+  // A one-line drop-cap paragraph still owns the second line of vertical space.
+  if (paragraphHasFocusLead && paragraphLineCount == 1) currentPageNextY += lineHeight;
 
   // Fallback: transfer any remaining pending footnotes to current page.
   // Normally addLineToPage handles this via word-index tracking, but this catches

@@ -12,6 +12,7 @@
 #include <limits>
 #include <vector>
 
+#include "FocusReadingRules.h"
 #include "TokenBoundary.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
@@ -532,10 +533,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         charCount++;
       }
 
-      // Target 45% for 1-bold at 4 chars and 3-bold at 7 chars with floor truncation
-      constexpr size_t FOCUS_READING_PERCENT = 45;
-      size_t targetBoldChars = (charCount * FOCUS_READING_PERCENT) / 100;
-      targetBoldChars = std::clamp<size_t>(targetBoldChars, 1, 9);
+      // 45% gives 1-bold at 4 chars and 3-bold at 7 chars with floor truncation.
+      const size_t targetBoldChars = focusReading::boldPrefixLength(charCount);
 
       if (targetBoldChars >= charCount) {
         // Whole segment is bold - no suffix split needed
@@ -689,6 +688,17 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
       blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
 
+  // Chinese Focus Reading is deliberately separate from the Latin word-prefix path in addWord().
+  // CJK tokenization makes the leading ideograph its own word, so the new style can never reach Latin text.
+  if (focusReadingEnabled && firstLinePending && !words.empty()) {
+    const uint32_t lead = firstCodepoint(words.front());
+    const int firstLineIndent = focusReading::isHanIdeograph(lead) ? resolveFirstLineIndent(true, renderer, fontId) : 0;
+    if (focusReading::shouldEmphasizeCjkLead(focusReadingEnabled, firstLinePending, firstLineIndent, lead)) {
+      wordStyles.front() =
+          static_cast<EpdFontFamily::Style>(wordStyles.front() | EpdFontFamily::BOLD | EpdFontFamily::FOCUS_LEAD);
+    }
+  }
+
   // Ensure SD card font glyph metrics are loaded before measuring word widths.
   // For flash-based fonts isSdCardFont() returns false and this block is skipped
   // entirely — no heap allocation. For SD card fonts this reads glyph metadata
@@ -708,6 +718,8 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
 
   const int pageWidth = viewportWidth;
   auto wordWidths = calculateWordWidths(renderer, fontId);
+  const int focusLeadAdvance =
+      !wordStyles.empty() && (wordStyles.front() & EpdFontFamily::FOCUS_LEAD) != 0 ? wordWidths.front() : 0;
 
   std::vector<size_t> hyphenatedLineBreaks;
   std::unique_ptr<LineBreakState[]> lineBreakWorkspace;
@@ -731,7 +743,7 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
 
   for (size_t i = 0; i < lineCount; ++i) {
     extractLine(i, breakAt(i), i > 0 ? breakAt(i - 1) : 0, lineBreakCount, pageWidth, wordWidths, wordContinues,
-                wordNoSpaceBefore, processLine, renderer, fontId);
+                wordNoSpaceBefore, focusLeadAdvance, processLine, renderer, fontId);
   }
 
   if (lineCount > 0) {
@@ -753,11 +765,6 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     }
   }
   return true;
-}
-
-static inline bool isCjkIdeograph(uint32_t cp) {
-  return (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0xF900 && cp <= 0xFAFF) ||
-         (cp >= 0x20000 && cp <= 0x3FFFF);
 }
 
 // The first word of a line may have its ruby characters wider than the word (the base text). In that case, we need to
@@ -875,7 +882,7 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
       // 1. Preceding character (left overhang)
       if (g.start > 0) {
         const uint32_t cpPrev = lastCodepoint(words[g.start - 1]);
-        if (isCjkIdeograph(cpPrev)) {
+        if (focusReading::isHanIdeograph(cpPrev)) {
           wordWidths[g.start - 1] += g.leftOverlap;
         } else {
           const int maxLeftOverhang = wordWidths[g.start - 1] / 2;
@@ -896,7 +903,7 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
         } else {
           // Regular character following: check if it's Kanji
           const uint32_t cpNext = firstCodepoint(words[nextIdx]);
-          if (isCjkIdeograph(cpNext)) {
+          if (focusReading::isHanIdeograph(cpNext)) {
             wordWidths[g.start + g.count - 1] += g.rightOverlap;
           } else {
             const int maxRightOverhang = wordWidths[nextIdx] / 2;
@@ -910,7 +917,7 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
             int gapWidth = 0;
             for (size_t k = nextIdx; k < nextG.start; ++k) {
               const uint32_t cp = firstCodepoint(words[k]);
-              if (isCjkIdeograph(cp)) {
+              if (focusReading::isHanIdeograph(cp)) {
                 onlyNonIdeographsInBetween = false;
                 break;
               }
@@ -944,7 +951,52 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
     return true;
   }
 
-  const int firstLineIndent = resolveFirstLineIndent(true, renderer, fontId);
+  const bool hasFocusLead = (wordStyles.front() & EpdFontFamily::FOCUS_LEAD) != 0;
+  const int firstLineIndent = hasFocusLead ? 0 : resolveFirstLineIndent(true, renderer, fontId);
+
+  size_t focusLeadBreaks[focusReading::LEAD_WRAP_LINES] = {};
+  size_t focusLeadBreakCount = 0;
+  if (hasFocusLead) {
+    size_t lineStart = 0;
+    const int focusLeadAdvance = wordWidths.front();
+
+    // ponytail: only the two drop-cap lines need greedy widths; retain the existing DP from line three onward.
+    // Upgrade to a line-state DP only if these two bounded lines produce a measurable layout defect.
+    while (lineStart < wordWidths.size() && focusLeadBreakCount < focusReading::LEAD_WRAP_LINES) {
+      const int effectivePageWidth =
+          std::max(1, pageWidth - focusReading::leadInsetForLine(true, focusLeadBreakCount, focusLeadAdvance));
+      while (wordWidths[lineStart] > effectivePageWidth &&
+             hyphenateWordAtIndex(lineStart, effectivePageWidth, renderer, fontId, wordWidths,
+                                  /*allowFallbackBreaks=*/true)) {
+      }
+
+      int lineWidth = 0;
+      size_t bestBreak = lineStart;
+      for (size_t j = lineStart; j < wordWidths.size(); ++j) {
+        int gap = 0;
+        if (j > lineStart && continuesVec[j]) {
+          gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
+        } else if (j > lineStart && !noSpaceBeforeVec[j]) {
+          gap = renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]),
+                                         wordStyles[j - 1]);
+        }
+
+        lineWidth += wordWidths[j] + gap;
+        if (j == lineStart) lineWidth += calculateRubyExtraStartOffset(lineStart, words.size(), renderer, fontId);
+        if (lineWidth > effectivePageWidth) break;
+        if (j + 1 < wordWidths.size() && !TokenBoundary::allowsBreak(continuesVec[j + 1], noSpaceBeforeVec[j + 1])) {
+          continue;
+        }
+        if (lineWidth + calculateRubyExtraEndOffset(lineStart, j + 1, renderer, fontId) <= effectivePageWidth) {
+          bestBreak = j + 1;
+        }
+      }
+
+      if (bestBreak == lineStart) bestBreak = lineStart + 1;
+      focusLeadBreaks[focusLeadBreakCount++] = bestBreak;
+      lineStart = bestBreak;
+    }
+  }
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
@@ -1055,6 +1107,12 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
   lineBreakCount = 0;
   size_t currentWordIndex = 0;
 
+  while (lineBreakCount < focusLeadBreakCount) {
+    currentWordIndex = focusLeadBreaks[lineBreakCount];
+    workspace[lineBreakCount].breakIndex = currentWordIndex;
+    ++lineBreakCount;
+  }
+
   while (currentWordIndex < totalWordCount) {
     size_t nextBreakIndex = workspace[currentWordIndex].breakIndex + 1;
 
@@ -1076,18 +1134,20 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
                                                             const int pageWidth, std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec,
                                                             std::vector<bool>& noSpaceBeforeVec) {
-  const int firstLineIndent = resolveFirstLineIndent(true, renderer, fontId);
+  const bool hasFocusLead = !wordStyles.empty() && (wordStyles.front() & EpdFontFamily::FOCUS_LEAD) != 0;
+  const int firstLineIndent = hasFocusLead ? 0 : resolveFirstLineIndent(true, renderer, fontId);
+  const int focusLeadAdvance = hasFocusLead ? wordWidths.front() : 0;
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
-  bool isFirstLine = true;
+  size_t lineIndex = 0;
 
   while (currentIndex < wordWidths.size()) {
     const size_t lineStart = currentIndex;
     int lineWidth = 0;
 
-    // First line has reduced width due to text-indent
-    const int effectivePageWidth = isFirstLine ? pageWidth - firstLineIndent : pageWidth;
+    const int lineInset = focusReading::leadInsetForLine(hasFocusLead, lineIndex, focusLeadAdvance);
+    const int effectivePageWidth = std::max(1, pageWidth - (lineIndex == 0 ? firstLineIndent : lineInset));
 
     // Consume as many words as possible for current line, splitting when prefixes fit
     while (currentIndex < wordWidths.size()) {
@@ -1140,7 +1200,7 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
     }
 
     lineBreakIndices.push_back(currentIndex);
-    isFirstLine = false;
+    ++lineIndex;
   }
 
   return lineBreakIndices;
@@ -1258,12 +1318,14 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, const size_t lastBreakAt,
                              const size_t lineCount, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
+                             const int focusLeadAdvance,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              const GfxRenderer& renderer, const int fontId) {
   const size_t lineWordCount = lineBreak - lastBreakAt;
   const uint32_t lineVisibleOffset = visibleOffsetAt(lastBreakAt);
 
-  const int firstLineIndent = resolveFirstLineIndent(lineIndex == 0, renderer, fontId);
+  const int firstLineIndent = focusLeadAdvance > 0 ? focusReading::leadInsetForLine(true, lineIndex, focusLeadAdvance)
+                                                   : resolveFirstLineIndent(lineIndex == 0, renderer, fontId);
 
   std::vector<std::string> lineRubyTexts(lineWordCount);
   if (!rubyTexts.empty() && lastBreakAt < rubyTexts.size()) {
