@@ -3,7 +3,9 @@
 #include <Print.h>
 #include <common/FsApiConstants.h>  // for oflag_t
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -65,9 +67,15 @@ class HalStorage {
   static HalStorage instance;
 
   bool initialized = false;
-  // Recursive because HalFile operations can re-enter storage wrappers while
-  // a long transaction guard is held by the same task.
+  // Counting semaphore (max=1, initial=1) providing mutual exclusion with NO
+  // priority inheritance. Used to be a recursive mutex, but the render task
+  // (core 1) and main task (core 0) hand StorageLock across cores, and a
+  // priority-inheriting recursive mutex trips ESP-IDF SMP's
+  // xTaskPriorityDisinherit assert. Recursion is implemented manually in
+  // StorageLock via storageHolder/storageDepth.
   SemaphoreHandle_t storageMutex = nullptr;
+  std::atomic<TaskHandle_t> storageHolder{nullptr};
+  std::atomic<uint32_t> storageDepth{0};
 };
 
 #define Storage HalStorage::getInstance()
