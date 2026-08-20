@@ -98,10 +98,12 @@ void FontDownloadActivity::startWifiSelection() {
 void FontDownloadActivity::onExit() {
   Activity::onExit();
 
+  // Tear down WiFi without rebooting: a silent restart on exit throws the user
+  // back to Home (not the settings page they came from) and looks like a lost
+  // frame. The heap-fragmentation reboot only matters for the heavy reader
+  // flows that keep WiFi on for sync; the font manager can simply disconnect.
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
-    delay(30);
-    silentRestart();
   }
 }
 

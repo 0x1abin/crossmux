@@ -177,7 +177,12 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   const CrossPointSettings& s = *this;
 
   for (const auto& info : getBaseSettingsList()) {
-    if (!isSettingAvailableOnBoard(info)) continue;
+    // Frontlight entries persist by static board capability, NOT by the runtime
+    // probe: loadFromFile() runs before Frontlight.begin(), so present() is
+    // false at load time and the saved brightness would be skipped on boot.
+    const bool frontlightSetting =
+        info.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || info.nameId == StrId::STR_FRONTLIGHT_WARMTH;
+    if (!frontlightSetting && !isSettingAvailableOnBoard(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.stringOffset) continue;
@@ -241,7 +246,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
 
   for (const auto& info : getBaseSettingsList()) {
-    if (!isSettingAvailableOnBoard(info)) continue;
+    // Same rule as toJson: frontlight settings persist by static board
+    // capability so they survive reboots even though Frontlight.begin() (and
+    // thus the runtime probe behind present()) has not run yet at load time.
+    const bool frontlightSetting =
+        info.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || info.nameId == StrId::STR_FRONTLIGHT_WARMTH;
+    if (!frontlightSetting && !isSettingAvailableOnBoard(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.stringOffset) continue;

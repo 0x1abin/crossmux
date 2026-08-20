@@ -80,10 +80,18 @@ void IntervalSelectionActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+#if FREEINK_DEVICE_EEGO_A4
+    // Touch-only A4: no on-screen button hints and no dedicated front Back
+    // key, so users expect leaving the slider to persist the value — matching
+    // the reader's frontlight adjustment page. Other devices keep Back=cancel.
+    setResult(IntervalResult{static_cast<uint32_t>(value)});
+    finish();
+#else
     ActivityResult result;
     result.isCancelled = true;
     setResult(std::move(result));
     finish();
+#endif
     return;
   }
 
@@ -101,6 +109,12 @@ void IntervalSelectionActivity::loop() {
       return;
     }
     if (ty >= renderer.getScreenHeight() - 80) {
+#if FREEINK_DEVICE_EEGO_A4
+      // The whole bottom band confirms on the touch-only A4 (no hint labels to
+      // split it into cancel/confirm zones).
+      setResult(IntervalResult{static_cast<uint32_t>(value)});
+      finish();
+#else
       if (tx < renderer.getScreenWidth() / 3) {
         ActivityResult result;
         result.isCancelled = true;
@@ -110,6 +124,7 @@ void IntervalSelectionActivity::loop() {
         setResult(IntervalResult{static_cast<uint32_t>(value)});
         finish();
       }
+#endif
       return;
     }
   }
