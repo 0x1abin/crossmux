@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <BoardConfig.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -139,6 +140,17 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
   }
 }
 
+bool isSettingAvailableForPersistence(const SettingInfo& setting) {
+  // Settings load before Frontlight.begin(), so persistence must use the board profile, not the runtime probe.
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS) {
+    return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight();
+  }
+  if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) {
+    return BoardConfig::hasColorTemperatureFrontlight();
+  }
+  return isSettingAvailableOnBoard(setting);
+}
+
 }  // namespace
 
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
@@ -177,12 +189,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   const CrossPointSettings& s = *this;
 
   for (const auto& info : getBaseSettingsList()) {
-    // Frontlight entries persist by static board capability, NOT by the runtime
-    // probe: loadFromFile() runs before Frontlight.begin(), so present() is
-    // false at load time and the saved brightness would be skipped on boot.
-    const bool frontlightSetting =
-        info.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || info.nameId == StrId::STR_FRONTLIGHT_WARMTH;
-    if (!frontlightSetting && !isSettingAvailableOnBoard(info)) continue;
+    if (!isSettingAvailableForPersistence(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.stringOffset) continue;
@@ -246,12 +253,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
 
   for (const auto& info : getBaseSettingsList()) {
-    // Same rule as toJson: frontlight settings persist by static board
-    // capability so they survive reboots even though Frontlight.begin() (and
-    // thus the runtime probe behind present()) has not run yet at load time.
-    const bool frontlightSetting =
-        info.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || info.nameId == StrId::STR_FRONTLIGHT_WARMTH;
-    if (!frontlightSetting && !isSettingAvailableOnBoard(info)) continue;
+    if (!isSettingAvailableForPersistence(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.stringOffset) continue;
