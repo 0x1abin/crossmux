@@ -11,7 +11,7 @@
   * lib/hal/: Hardware Abstraction Layer (HalDisplay, HalGPIO, HalStorage)
   * lib/I18n/: Internationalization (translations in `translations/*.yaml`, generated string tables)
 * src/activities/: UI logic using the Activity Lifecycle (onEnter, loop, onExit)
-* open-x4-sdk/: Low-level SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager)
+* freeink-sdk/: Low-level SDK (FreeInkDisplay, InputManager, BatteryMonitor, SDCardManager)
 * .crosspoint/: SD-based binary cache for EPUB metadata and pre-rendered layout sections
 
 ## Hardware Abstraction Layer (HAL)

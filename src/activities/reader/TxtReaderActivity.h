@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
-#include "activities/Activity.h"
+#include "ReaderActivity.h"
 
-class TxtReaderActivity final : public Activity {
+class TxtReaderActivity final : public ReaderActivity {
   enum class PageMode : uint8_t { Indexed, Direct };
 
   struct TxtLine {
@@ -25,9 +25,9 @@ class TxtReaderActivity final : public Activity {
 
   int currentPage = 0;
   int totalPages = 1;
-  int pagesUntilFullRefresh = 0;
-  unsigned long openStartMs;
+  unsigned long openStartMs = 0;
   bool firstPageLogged = false;
+  bool endOfBook = false;
 
   // Streaming text reader - stores file offsets for each page
   std::vector<size_t> pageOffsets;  // File offset for start of each page
@@ -83,25 +83,19 @@ class TxtReaderActivity final : public Activity {
   void saveProgress() const;
   void loadProgress();
 
+  bool loadBook() override;
+  std::string getBookTitle() const override { return txt ? txt->getTitle() : ""; }
+  bool handleFormatInput() override;
+  void renderBook() override;
+
  public:
-  explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt,
-                             int initialRefreshCountdown, unsigned long openStartMs)
-      : Activity("TxtReader", renderer, mappedInput),
-        txt(std::move(txt)),
-        pagesUntilFullRefresh(initialRefreshCountdown),
-        openStartMs(openStartMs) {}
-  void onEnter() override;
+  explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string bookPath,
+                             bool allowFastInitialRefresh)
+      : ReaderActivity("TxtReader", renderer, mappedInput, std::move(bookPath), allowFastInitialRefresh) {}
   void onExit() override;
-  void loop() override;
-  void render(RenderLock&&) override;
-  bool isReaderActivity() const override { return true; }
-  bool handleForcedRefresh() override {
-    {
-      RenderLock lock(*this);
-      pagesUntilFullRefresh = 1;
-    }
-    requestUpdate();
-    return true;
-  }
+  bool pageTurn(bool isForward) override;
+  bool skipPages(int amount) override;
+  bool isAtEndOfBook() const override { return endOfBook; }
+  void onReturnFromEndOfBook() override { endOfBook = false; }
   ScreenshotInfo getScreenshotInfo() const override;
 };

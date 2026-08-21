@@ -7,9 +7,8 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
-#include "activities/Activity.h"
+#include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
-#include "util/ButtonNavigator.h"
 
 enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 
@@ -175,13 +174,9 @@ struct SettingInfo {
   }
 };
 
-class SettingsActivity final : public Activity {
-  ButtonNavigator buttonNavigator;
-
+class SettingsActivity final : public UiTabListActivity {
   int selectedCategoryIndex = 0;  // Currently selected category
-  int selectedSettingIndex = 0;
   int settingsCount = 0;
-  int accordionSelectedIndex = 0;
   uint8_t expandedCategories = 0;
 
   // Per-category settings derived from shared list + device-only actions
@@ -197,19 +192,46 @@ class SettingsActivity final : public Activity {
 
   OptionPopup optionPopup;
 
+  // Row structure (label/actionValue) for *currentSettings, rebuilt only when
+  // the active category or a category's setting list changes
+  // (rebuildRowItems(), called from selectCategory()/rebuildSettingsLists())
+  // — not on every repaint. rowValues_ holds the live per-row value text,
+  // refreshed every buildScreen() call by assigning into the existing
+  // strings (no vector growth).
+  std::vector<std::string> rowValues_;
+  std::vector<std::string> rowLabels_;
+  std::vector<freeink::ui::ListItem> rowItems_;
+  void rebuildRowItems();
+  void rebuildAccordionRows();
+
   static constexpr int categoryCount = 4;
   static const StrId categoryNames[categoryCount];
 
-  void enterCategory(int categoryIndex);
+  // --- UiTabListActivity contract ---
+  int listCount() const override;
+  int tabCount() const override { return categoryCount; }
+  int activeTab() const override { return selectedCategoryIndex; }
+  const char* tabLabel(int index) const override { return I18N.get(categoryNames[index]); }
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  freeink::ui::ListNav& activeNav() override;
+  void onRowAction(const freeink::ui::ActionEvent& event) override;
+  void navigateButtons() override;
+  void onTabAction(int index) override;
+  void stepTab(int direction) override;
+  bool handleButtons() override;
+  bool handleCustomInput() override;
+
+  static std::string settingValueText(const SettingInfo& setting);
+  void selectCategory(int categoryIndex);
+  void applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr);
+
   void toggleCurrentSetting();
   void toggleAccordionSetting(int categoryIndex, int settingIndex);
   void toggleAccordionCategory(int categoryIndex);
-  void loopAccordion();
-  void renderAccordion();
   bool usesAccordion() const;
   const std::vector<SettingInfo>& settingsForCategory(int categoryIndex) const;
   std::array<int, categoryCount> accordionSettingCounts() const;
-  std::string settingValueText(const SettingInfo& setting) const;
   void openSleepTimeoutPicker();
   void openReadingBackgroundMenu();
   void openReadingBackgroundPicker();
@@ -217,12 +239,11 @@ class SettingsActivity final : public Activity {
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 
  public:
-  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("Settings", renderer, mappedInput) {}
+  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
   void onEnter() override;
   void onExit() override;
-  void loop() override;
   void render(RenderLock&&) override;
   MainTab mainTab() const override { return MainTab::Settings; }
+  bool mainTabBackReturnsToTabs() const override { return !usesAccordion() || expandedCategories == 0; }
   void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };

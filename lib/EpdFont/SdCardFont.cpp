@@ -230,6 +230,17 @@ void SdCardFont::freeStyleAll(PerStyle& s) {
 
 // --- Global free/cleanup ---
 
+void SdCardFont::releaseResidentCaches() {
+  clearOverflow();
+  clearPersistentCache();
+  for (uint8_t i = 0; i < MAX_STYLES; i++) {
+    if (!styles_[i].present) continue;
+    freeStyleMiniData(styles_[i]);
+    freeStyleKernLigatureData(styles_[i]);
+    applyGlyphMissCallback(i);
+  }
+}
+
 void SdCardFont::freeAll() {
   clearOverflow();
   clearPersistentCache();
@@ -786,8 +797,17 @@ int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) 
 
 // --- Prewarm ---
 
-int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly) {
-  if (!loaded_) return -1;
+namespace {
+const char* singleTextGetter(const void* ctx, uint32_t) { return static_cast<const char*>(ctx); }
+}  // namespace
+
+int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, bool loadKernLig) {
+  return prewarm(&singleTextGetter, utf8Text, 1, styleMask, metadataOnly, loadKernLig);
+}
+
+int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask, bool metadataOnly,
+                        bool loadKernLig) {
+  if (!loaded_ || getter == nullptr) return -1;
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
 
@@ -804,7 +824,10 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
     return -1;
   }
   uint32_t cpCount = 0;
-  collectUniqueCodepoints(utf8Text, codepoints.get(), cpCount, MAX_PAGE_GLYPHS);
+  for (uint32_t i = 0; i < textCount && cpCount < MAX_PAGE_GLYPHS; i++) {
+    const char* text = getter(ctx, i);
+    if (text) collectUniqueCodepoints(text, codepoints.get(), cpCount, MAX_PAGE_GLYPHS);
+  }
 
   // Always include the replacement character
   sd_card_font_algorithms::insertSortedUnique(REPLACEMENT_GLYPH, codepoints.get(), cpCount, MAX_PAGE_GLYPHS);
@@ -813,7 +836,7 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   // Skip during metadata-only prewarm (layout measurement) to avoid loading
   // kern/lig data for all styles upfront (~22KB per style). Kern/lig is
   // loaded per-style in prewarmStyle() during the full render prewarm instead.
-  if (!metadataOnly) {
+  if (!metadataOnly && loadKernLig) {
     for (uint8_t si = 0; si < MAX_STYLES; si++) {
       if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
       auto& s = styles_[si];
@@ -840,14 +863,15 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   int totalMissed = 0;
   for (uint8_t si = 0; si < MAX_STYLES; si++) {
     if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
-    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly);
+    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly, loadKernLig);
   }
 
   stats_.prewarmTotalMs = millis() - startMs;
   return totalMissed;
 }
 
-int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly) {
+int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
+                             bool loadKernLig) {
   auto& s = styles_[styleIdx];
 
   // Idle-prewarm hit: mini data persists across PrewarmScopes (resetStyleMiniData
@@ -876,7 +900,38 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
       }
     }
     if (covered) {
+      if (!metadataOnly && loadKernLig && s.miniKernLeftClassCount == 0 && s.header.kernLeftEntryCount > 0) {
+        if (loadStyleKernLigatureData(s) && buildMiniKernMatrix(s, codepoints, cpCount)) {
+          applyKernLigaturePointers(s, s.miniData);
+        }
+      }
       return missedInMini;
+    }
+  }
+
+  // Keep glyphs already resident when a UI screen prewarms several distinct
+  // labels. The fixed MAX_PAGE_GLYPHS bound prevents this cache from growing.
+  std::unique_ptr<uint32_t[]> unionCps;
+  if (s.miniGlyphCount > 0 && s.miniIntervalCount > 0) {
+    const uint32_t unionMax = s.miniGlyphCount + cpCount;
+    unionCps = makeUniqueNoThrow<uint32_t[]>(unionMax);
+    if (unionCps) {
+      uint32_t count = 0;
+      for (uint32_t iv = 0; iv < s.miniIntervalCount && count <= MAX_PAGE_GLYPHS; iv++) {
+        for (uint32_t cp = s.miniIntervals[iv].first; cp <= s.miniIntervals[iv].last; cp++) {
+          if (!sd_card_font_algorithms::insertSortedUnique(cp, unionCps.get(), count, unionMax)) break;
+        }
+      }
+      for (uint32_t i = 0; i < cpCount && count <= MAX_PAGE_GLYPHS; i++) {
+        if (!sd_card_font_algorithms::insertSortedUnique(codepoints[i], unionCps.get(), count, unionMax)) break;
+      }
+      if (count <= MAX_PAGE_GLYPHS) {
+        metadataOnly = metadataOnly && s.miniMetadataOnly;
+        codepoints = unionCps.get();
+        cpCount = count;
+      } else {
+        unionCps.reset();
+      }
     }
   }
 
@@ -994,7 +1049,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
 
   uint32_t totalBitmapSize = 0;
 
-  if (!metadataOnly) {
+  if (!metadataOnly && loadKernLig) {
     const uint32_t bitmapStartUs = micros();
     // Compute total bitmap size
     for (uint32_t i = 0; i < validCount; i++) {

@@ -12,6 +12,8 @@
 #include <limits>
 #include <vector>
 
+#include "TokenBoundary.h"
+#include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
 constexpr int MAX_COST = std::numeric_limits<int>::max();
@@ -230,6 +232,61 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
 }
 
+// True when a token ends with a hyphen or dash that allows a line break after it. U+00AD is
+// excluded because it renders as nothing, so only a hyphenation break -- which substitutes a
+// visible '-' -- may use it; U+2011 because forbidding that break is its purpose.
+bool endsWithBreakableHyphen(const std::string& token) {
+  if (token.empty()) return false;
+  return TokenBoundary::allowsBreakAfterExplicitHyphen(lastCodepoint(token));
+}
+
+// Focus Reading renders the first `focusBoundary` bytes of a token bold and the rest at the
+// token's own style; 0 means no emphasis. The bold run is at most 9 codepoints (see addWord),
+// so it is copied to a stack buffer rather than a substring: this runs once per word during
+// pagination and must not allocate.
+constexpr size_t FOCUS_PREFIX_BUF_SIZE = 40;
+
+// Advance from the token origin to the start of its regular-weight suffix: the bold prefix plus
+// the kerning across the weight change. Doubles as the suffix's x offset inside the word.
+uint16_t measureFocusPrefixAdvance(const GfxRenderer& renderer, const int fontId, const std::string& word,
+                                   const EpdFontFamily::Style style, const uint8_t focusBoundary) {
+  char prefixBuf[FOCUS_PREFIX_BUF_SIZE];
+  const size_t prefixLen = std::min<size_t>(focusBoundary, FOCUS_PREFIX_BUF_SIZE - 1);
+  memcpy(prefixBuf, word.data(), prefixLen);
+  prefixBuf[prefixLen] = '\0';
+
+  const auto boldStyle = static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD);
+  const auto* suffixPtr = reinterpret_cast<const unsigned char*>(word.c_str() + focusBoundary);
+  const int kerning = renderer.getKerning(fontId, lastCodepoint(prefixBuf), utf8NextCodepoint(&suffixPtr), boldStyle);
+  return static_cast<uint16_t>(renderer.getTextAdvanceX(fontId, prefixBuf, boldStyle) + kerning);
+}
+
+// Advance width of a whole token, accounting for a bold focus prefix when it has one.
+uint16_t measureFocusWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
+                               const EpdFontFamily::Style style, const uint8_t focusBoundary,
+                               const bool appendHyphen = false) {
+  if (focusBoundary == 0) {
+    return measureWordWidth(renderer, fontId, word, style, appendHyphen);
+  }
+  if (focusBoundary >= word.size()) {
+    // The bold run covers the whole token, as for a split candidate ending on the boundary.
+    return measureWordWidth(renderer, fontId, word, static_cast<EpdFontFamily::Style>(style | EpdFontFamily::BOLD),
+                            appendHyphen);
+  }
+  const uint16_t suffixWidth =
+      appendHyphen ? measureWordWidth(renderer, fontId, word.substr(focusBoundary), style, true)
+                   : static_cast<uint16_t>(renderer.getTextAdvanceX(fontId, word.c_str() + focusBoundary, style));
+  return measureFocusPrefixAdvance(renderer, fontId, word, style, focusBoundary) + suffixWidth;
+}
+
+// Focus boundaries for the two halves of a token split at `splitOffset`.
+uint8_t focusBoundaryBefore(const uint8_t focusBoundary, const size_t splitOffset) {
+  return static_cast<uint8_t>(std::min<size_t>(focusBoundary, splitOffset));
+}
+uint8_t focusBoundaryAfter(const uint8_t focusBoundary, const size_t splitOffset) {
+  return focusBoundary > splitOffset ? static_cast<uint8_t>(focusBoundary - splitOffset) : 0;
+}
+
 // Checks if a UTF-8 codepoint should be counted as part of a word for Focus Reading
 bool isWordCharacter(uint32_t cp) {
   // ASCII range (Catches 95%+ of characters immediately)
@@ -350,12 +407,12 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
                              BidiUtils::startsWithRtl(word.c_str(), RTL_PER_WORD_PROBE_DEPTH);
 
   const auto pushToken = [&](std::string token, const bool continues, const bool noSpaceBefore,
-                             const bool isFocusSuffix, const uint32_t tokenOffset) {
+                             const uint8_t focusBoundary, const uint32_t tokenOffset) {
     words.push_back(std::move(token));
     wordStyles.push_back(baseStyle);
     wordContinues.push_back(continues);
     wordNoSpaceBefore.push_back(noSpaceBefore);
-    wordIsFocusSuffix.push_back(isFocusSuffix);
+    wordFocusBoundary.push_back(focusBoundary);
     pushVisibleOffset(tokenOffset);
     if (!rubyTexts.empty()) {
       rubyTexts.push_back("");
@@ -384,10 +441,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     const size_t requiredSize = words.size() + additionalTokens;
     if (wordStyles.capacity() >= requiredSize) return;
 
-    size_t newCapacity = wordStyles.capacity();
-    if (newCapacity < 16) {
-      newCapacity = 16;
-    }
+    size_t newCapacity = wordStyles.capacity() < 16 ? 16 : wordStyles.capacity();
     while (newCapacity < requiredSize) {
       newCapacity *= 2;
     }
@@ -395,7 +449,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     wordStyles.reserve(newCapacity);
     wordContinues.reserve(newCapacity);
     wordNoSpaceBefore.reserve(newCapacity);
-    wordIsFocusSuffix.reserve(newCapacity);
+    wordFocusBoundary.reserve(newCapacity);
     wordVisibleOffsetDeltas.reserve(newCapacity);
   };
 
@@ -410,14 +464,14 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       if (breakOffset <= tokenStart || breakOffset > word.size()) continue;
       const std::string_view token(word.data() + tokenStart, breakOffset - tokenStart);
       pushToken(std::string(token), firstToken ? effectiveAttachToPrevious : false,
-                firstToken ? effectiveNoSpaceBefore : true, false, tokenVisibleOffset);
+                firstToken ? effectiveNoSpaceBefore : true, /*focusBoundary=*/0, tokenVisibleOffset);
       tokenVisibleOffset += countCodepoints(token);
       firstToken = false;
       tokenStart = breakOffset;
     }
     if (tokenStart < word.size()) {
       pushToken(word.substr(tokenStart), firstToken ? effectiveAttachToPrevious : false,
-                firstToken ? effectiveNoSpaceBefore : true, false, tokenVisibleOffset);
+                firstToken ? effectiveNoSpaceBefore : true, /*focusBoundary=*/0, tokenVisibleOffset);
     }
     if (wordStartsRtl) {
       hasRtlWord = true;
@@ -426,7 +480,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   }
 
   if (containsCjkBreakableCodepoint(word)) {
-    pushToken(std::move(word), effectiveAttachToPrevious, effectiveNoSpaceBefore, false, visibleTextOffset);
+    pushToken(std::move(word), effectiveAttachToPrevious, effectiveNoSpaceBefore, /*focusBoundary=*/0,
+              visibleTextOffset);
     if (wordStartsRtl) {
       hasRtlWord = true;
     }
@@ -435,7 +490,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
 
   // Already-bold text should stay fully bold; focus splitting would make its suffix regular later.
   if (!this->focusReadingEnabled || (baseStyle & EpdFontFamily::BOLD) != 0) {
-    pushToken(std::move(word), effectiveAttachToPrevious, effectiveNoSpaceBefore, false, visibleTextOffset);
+    pushToken(std::move(word), effectiveAttachToPrevious, effectiveNoSpaceBefore, /*focusBoundary=*/0,
+              visibleTextOffset);
     if (wordStartsRtl) {
       hasRtlWord = true;
     }
@@ -464,7 +520,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       wordStyles.push_back(baseStyle);
       wordContinues.push_back(attach);
       wordNoSpaceBefore.push_back(noSpaceBefore);
-      wordIsFocusSuffix.push_back(false);
+      wordFocusBoundary.push_back(0);
       pushVisibleOffset(segmentOffset);
     } else {
       size_t charCount = 0;
@@ -487,7 +543,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         wordStyles.push_back(static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD));
         wordContinues.push_back(attach);
         wordNoSpaceBefore.push_back(noSpaceBefore);
-        wordIsFocusSuffix.push_back(false);
+        wordFocusBoundary.push_back(0);
         pushVisibleOffset(segmentOffset);
       } else {
         countPtr = reinterpret_cast<const unsigned char*>(segment.data());
@@ -496,21 +552,14 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         }
         size_t splitByteOffset = countPtr - reinterpret_cast<const unsigned char*>(segment.data());
 
-        // Bold prefix
-        words.emplace_back(segment.substr(0, splitByteOffset));
-        wordStyles.push_back(static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD));
+        // One token carrying the emphasis as a byte boundary, so the word stays whole for the
+        // hyphenator and the line breaker. The renderer applies BOLD to bytes [0, splitByteOffset).
+        words.emplace_back(segment);
+        wordStyles.push_back(baseStyle);
         wordContinues.push_back(attach);
         wordNoSpaceBefore.push_back(noSpaceBefore);
-        wordIsFocusSuffix.push_back(false);
+        wordFocusBoundary.push_back(static_cast<uint8_t>(std::min<size_t>(splitByteOffset, 255)));
         pushVisibleOffset(segmentOffset);
-
-        // Regular suffix - marked so extractLine can merge it back into single TextBlock entry
-        words.emplace_back(segment.substr(splitByteOffset));
-        wordStyles.push_back(baseStyle);
-        wordContinues.push_back(true);
-        wordNoSpaceBefore.push_back(false);
-        wordIsFocusSuffix.push_back(true);
-        pushVisibleOffset(segmentOffset + static_cast<uint32_t>(targetBoldChars));
       }
     }
   };
@@ -536,9 +585,12 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
 
       // Only the very first segment inherits the original attachToPrevious flag.
-      // Every subsequent segment MUST attach=true so it glues seamlessly to the prefix.
+      // Every subsequent segment glues seamlessly to the prefix. After a visible explicit-hyphen
+      // character, continues=true + noSpaceBefore=true records a breakable attachment: it may wrap,
+      // but when it stays on the line it receives kerning only, never a space or justification.
+      const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
       processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : true,
-                     isFirstSegment ? effectiveNoSpaceBefore : false);
+                     isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
 
       // Setup for the next segment
       segmentStart = currentCpStart;
@@ -550,8 +602,9 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // Process the final remaining segment
   size_t segmentLen = end - segmentStart;
   std::string_view segment(reinterpret_cast<const char*>(segmentStart), segmentLen);
+  const bool breakAfterPrev = !isFirstSegment && !words.empty() && endsWithBreakableHyphen(words.back());
   processSegment(segment, inWordSegment, isFirstSegment ? effectiveAttachToPrevious : true,
-                 isFirstSegment ? effectiveNoSpaceBefore : false);
+                 isFirstSegment ? effectiveNoSpaceBefore : breakAfterPrev);
   if (wordStartsRtl) {
     hasRtlWord = true;
   }
@@ -580,7 +633,8 @@ void ParsedText::setRubyGroupAt(size_t startIndex, size_t count, const std::stri
     rubyTexts[idx] = "";
     wordStyles[idx] =
         static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(wordStyles[idx]) | EpdFontFamily::RUBY_CONTINUE);
-    wordContinues[idx] = true;  // Prevent page breaker from splitting the Group Ruby!
+    wordContinues[idx] = true;       // Prevent page breaker from splitting the Group Ruby!
+    wordNoSpaceBefore[idx] = false;  // Ensure allowsBreak returns false!
   }
 }
 
@@ -603,9 +657,7 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
     const int spaceIndent = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
     const bool hasCjkText =
         std::any_of(words.begin(), words.end(), [](const auto& word) { return containsCjkBreakableCodepoint(word); });
-    if (!hasCjkText) {
-      return spaceIndent;
-    }
+    if (!hasCjkText) return spaceIndent;
 
     const int cjkAdvance = renderer.getTextAdvanceX(fontId, "我", EpdFontFamily::REGULAR);
     return cjkAdvance > 0 ? cjkAdvance * 2 : spaceIndent;
@@ -693,7 +745,7 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
     wordNoSpaceBefore.erase(wordNoSpaceBefore.begin(), wordNoSpaceBefore.begin() + consumed);
-    wordIsFocusSuffix.erase(wordIsFocusSuffix.begin(), wordIsFocusSuffix.begin() + consumed);
+    wordFocusBoundary.erase(wordFocusBoundary.begin(), wordFocusBoundary.begin() + consumed);
     eraseVisibleOffsetPrefix(consumed);
     if (!rubyTexts.empty()) {
       const size_t rtConsumed = std::min(consumed, rubyTexts.size());
@@ -783,7 +835,7 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
   wordWidths.reserve(words.size());
 
   for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
+    wordWidths.push_back(measureFocusWordWidth(renderer, fontId, words[i], wordStyles[i], wordFocusBoundary[i]));
   }
 
   // Adjust widths for ruby groups to comply with JLReq standards
@@ -908,8 +960,7 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
   const size_t totalWordCount = words.size();
 
   // One fallible allocation holds both the DP cost and chosen break for every
-  // word. At the parser's 750-word soft limit this is 6 KB on ESP32, too large
-  // for the render-task stack and short-lived enough to release after layout.
+  // word. At the parser's 750-word soft limit this is 6 KB on ESP32.
   workspace = makeUniqueNoThrow<LineBreakState[]>(totalWordCount);
   if (!workspace) {
     LOG_ERR("PTX", "OOM: line-break workspace (%u words, %u bytes, free=%u, maxAlloc=%u)",
@@ -933,14 +984,14 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
     for (size_t j = i; j < totalWordCount; ++j) {
       // Add space before word j, unless it's the first word on the line or a continuation
       int gap = 0;
-      if (j > static_cast<size_t>(i) && noSpaceBeforeVec[j]) {
+      if (j > static_cast<size_t>(i) && continuesVec[j]) {
+        // Attached and breakable-attached boundaries both use kerning when kept on one line.
+        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
+      } else if (j > static_cast<size_t>(i) && noSpaceBeforeVec[j]) {
         gap = 0;
-      } else if (j > static_cast<size_t>(i) && !continuesVec[j]) {
+      } else if (j > static_cast<size_t>(i)) {
         gap =
             renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      } else if (j > static_cast<size_t>(i) && continuesVec[j]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
       }
 
       // Calculate extraStartOffset for the first word on the line (i) (protect left margin)
@@ -952,8 +1003,9 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
         break;
       }
 
-      // Cannot break after word j if the next word attaches to it (continuation group)
-      if (j + 1 < totalWordCount && continuesVec[j + 1]) {
+      // A normal continuation is unbreakable. continues=true + noSpaceBefore=true is the compact
+      // breakable-attachment state used after explicit hyphen characters.
+      if (j + 1 < totalWordCount && !TokenBoundary::allowsBreak(continuesVec[j + 1], noSpaceBeforeVec[j + 1])) {
         continue;
       }
 
@@ -982,14 +1034,14 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
       // text.
       if (cost <= workspace[i].cost) {
         workspace[i].cost = cost;
-        workspace[i].breakIndex = j;  // j is the index of the last word in this optimal line
+        workspace[i].breakIndex = j;
       }
     }
 
     // Handle oversized word: if no valid configuration found, force single-word line
     // This prevents cascade failure where one oversized word breaks all preceding words
     if (workspace[i].cost == MAX_COST) {
-      workspace[i].breakIndex = i;  // Just this word on its own line
+      workspace[i].breakIndex = i;
       // Inherit cost from next word to allow subsequent words to find valid configurations
       if (i + 1 < static_cast<int>(totalWordCount)) {
         workspace[i].cost = workspace[i + 1].cost;
@@ -999,8 +1051,7 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
     }
   }
 
-  // Compact the chosen breaks into the front of the same workspace. The write
-  // index never overtakes currentWordIndex, so no unread DP entry is replaced.
+  // Compact chosen breaks into the front of the same workspace.
   lineBreakCount = 0;
   size_t currentWordIndex = 0;
 
@@ -1042,15 +1093,15 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
     while (currentIndex < wordWidths.size()) {
       const bool isFirstWord = currentIndex == lineStart;
       int spacing = 0;
-      if (!isFirstWord && noSpaceBeforeVec[currentIndex]) {
-        spacing = 0;
-      } else if (!isFirstWord && !continuesVec[currentIndex]) {
-        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
-                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
-      } else if (!isFirstWord && continuesVec[currentIndex]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
+      if (!isFirstWord && continuesVec[currentIndex]) {
+        // Attached and breakable-attached boundaries both use kerning when kept on one line.
         spacing = renderer.getKerning(fontId, lastCodepoint(words[currentIndex - 1]),
                                       firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
+      } else if (!isFirstWord && noSpaceBeforeVec[currentIndex]) {
+        spacing = 0;
+      } else if (!isFirstWord) {
+        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
+                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
       }
       const int candidateWidth = spacing + wordWidths[currentIndex];
 
@@ -1083,7 +1134,8 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
 
     // Don't break before a continuation word (e.g., orphaned "?" after "question").
     // Backtrack to the start of the continuation group so the whole group moves to the next line.
-    while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() && continuesVec[currentIndex]) {
+    while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() &&
+           !TokenBoundary::allowsBreak(continuesVec[currentIndex], noSpaceBeforeVec[currentIndex])) {
       --currentIndex;
     }
 
@@ -1107,23 +1159,21 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   const std::string& word = words[wordIndex];
   const auto style = wordStyles[wordIndex];
 
+  const uint8_t focusBoundary = wordFocusBoundary[wordIndex];
+
   size_t chosenOffset = 0;
   int chosenWidth = -1;
   bool chosenNeedsHyphen = true;
 
   const auto chooseWidestFittingBreak = [&](const bool includeFallback) {
-    const auto breakInfos = Hyphenator::breakOffsets(word, includeFallback);
-    for (const auto& info : breakInfos) {
+    for (const auto& info : Hyphenator::breakOffsets(word, includeFallback)) {
       const size_t offset = info.byteOffset;
-      if (offset == 0 || offset >= word.size()) {
-        continue;
-      }
+      if (offset == 0 || offset >= word.size()) continue;
 
       const bool needsHyphen = info.requiresInsertedHyphen;
-      const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, offset), style, needsHyphen);
-      if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
-        continue;
-      }
+      const int prefixWidth = measureFocusWordWidth(renderer, fontId, word.substr(0, offset), style,
+                                                    focusBoundaryBefore(focusBoundary, offset), needsHyphen);
+      if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) continue;
 
       chosenWidth = prefixWidth;
       chosenOffset = offset;
@@ -1131,8 +1181,6 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
     }
   };
 
-  // Prefer language and explicit breakpoints. Only allocate the full UTF-8 fallback list
-  // when an oversized token has no legal breakpoint that fits the available width.
   chooseWidestFittingBreak(/*includeFallback=*/false);
   if (chosenWidth < 0 && allowFallbackBreaks) {
     chooseWidestFittingBreak(/*includeFallback=*/true);
@@ -1162,8 +1210,16 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   words.insert(words.begin() + wordIndex + 1, remainder);
   wordStyles.insert(wordStyles.begin() + wordIndex + 1, style);
   insertVisibleOffset(wordIndex + 1, remainderOffset);
-  // The hyphen remainder is not a focus suffix - it starts fresh on the next line.
-  wordIsFocusSuffix.insert(wordIsFocusSuffix.begin() + wordIndex + 1, false);
+  // Emphasis follows the text across the split, so a break at or after the boundary leaves the
+  // remainder fully regular.
+  wordFocusBoundary.insert(wordFocusBoundary.begin() + wordIndex + 1, focusBoundaryAfter(focusBoundary, chosenOffset));
+  wordFocusBoundary[wordIndex] = focusBoundaryBefore(focusBoundary, chosenOffset);
+  // Invariant: a boundary is always strictly inside its token, so an all-bold part carries BOLD in
+  // its style with boundary 0 and nothing downstream special-cases boundary == size.
+  if (wordFocusBoundary[wordIndex] >= words[wordIndex].size()) {
+    wordStyles[wordIndex] = static_cast<EpdFontFamily::Style>(wordStyles[wordIndex] | EpdFontFamily::BOLD);
+    wordFocusBoundary[wordIndex] = 0;
+  }
   if (wordIndex + 1 <= rubyTexts.size()) {
     rubyTexts.insert(rubyTexts.begin() + wordIndex + 1, "");
   }
@@ -1193,7 +1249,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
-  const uint16_t remainderWidth = measureWordWidth(renderer, fontId, remainder, style);
+  const uint16_t remainderWidth =
+      measureFocusWordWidth(renderer, fontId, remainder, style, wordFocusBoundary[wordIndex + 1]);
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
   return true;
 }
@@ -1239,24 +1296,18 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
     lineWordWidthSum += wordWidths[lastBreakAt + wordIdx];
-    // Count gaps: each word after the first creates a gap, unless it's a continuation
-    if (wordIdx > 0 && noSpaceBeforeVec[lastBreakAt + wordIdx]) {
-      // Unicode break opportunity with no inserted Latin-style space. It is still
-      // a stretchable gap for justified CJK/Korean text.
+    if (wordIdx == 0) continue;
+    const size_t boundaryIdx = lastBreakAt + wordIdx;
+    const bool isSpaceToken = lineWords[wordIdx] == " ";
+    if (TokenBoundary::isJustifiableGap(continuesVec[boundaryIdx], noSpaceBeforeVec[boundaryIdx], isSpaceToken)) {
       actualGapCount++;
-    } else if (wordIdx > 0 && !continuesVec[lastBreakAt + wordIdx]) {
-      actualGapCount++;
-      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(lineWords[wordIdx - 1]),
-                                                   firstCodepoint(lineWords[wordIdx]), lineWordStyles[wordIdx - 1]);
-    } else if (wordIdx > 0 && continuesVec[lastBreakAt + wordIdx]) {
-      // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
-      // count them as justifiable gaps so justifyExtra is distributed to them too.
-      if (lineWords[wordIdx] == " ") {
-        actualGapCount++;
-      }
-      // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
+    }
+    if (continuesVec[boundaryIdx]) {
       totalNaturalGaps += renderer.getKerning(fontId, lastCodepoint(lineWords[wordIdx - 1]),
                                               firstCodepoint(lineWords[wordIdx]), lineWordStyles[wordIdx - 1]);
+    } else if (!noSpaceBeforeVec[boundaryIdx]) {
+      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(lineWords[wordIdx - 1]),
+                                                   firstCodepoint(lineWords[wordIdx]), lineWordStyles[wordIdx - 1]);
     }
   }
 
@@ -1295,20 +1346,20 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
     reorderedWidthsScratch.clear();
     reorderedContinuesScratch.clear();
     reorderedNoSpaceBeforeScratch.clear();
-    reorderedFocusSuffixScratch.clear();
+    reorderedFocusBoundaryScratch.clear();
     reorderedWordsScratch.reserve(visualOrderScratch.size());
     reorderedStylesScratch.reserve(visualOrderScratch.size());
     reorderedWidthsScratch.reserve(visualOrderScratch.size());
     reorderedContinuesScratch.reserve(visualOrderScratch.size());
     reorderedNoSpaceBeforeScratch.reserve(visualOrderScratch.size());
-    reorderedFocusSuffixScratch.reserve(visualOrderScratch.size());
+    reorderedFocusBoundaryScratch.reserve(visualOrderScratch.size());
 
     for (size_t i = 0; i < visualOrderScratch.size(); ++i) {
       const uint16_t src = visualOrderScratch[i];
       reorderedWordsScratch.push_back(std::move(lineWords[src]));
       reorderedStylesScratch.push_back(lineWordStyles[src]);
       reorderedWidthsScratch.push_back(wordWidths[lastBreakAt + src]);
-      reorderedFocusSuffixScratch.push_back(wordIsFocusSuffix[lastBreakAt + src]);
+      reorderedFocusBoundaryScratch.push_back(wordFocusBoundary[lastBreakAt + src]);
 
       // Continuation means "no break/gap between two adjacent logical tokens".
       // After visual reordering (common in RTL), an adjacent logical pair can appear
@@ -1502,16 +1553,15 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
     }
   }
 
-  const auto isFocusSuffixAt = [&](const size_t idx) {
-    return willReorder ? reorderedFocusSuffixScratch[idx] : wordIsFocusSuffix[lastBreakAt + idx];
+  const auto focusBoundaryAt = [&](const size_t idx) {
+    return willReorder ? reorderedFocusBoundaryScratch[idx] : wordFocusBoundary[lastBreakAt + idx];
   };
 
-  // Fast path: when no word on this line was split for focus reading, skip the merge work
-  // entirely and pass empty boundary/suffixX vectors. TextBlock pays zero per-word RAM cost
-  // for these annotations when the vectors are empty.
+  // Fast path: no word on this line carries focus emphasis, so pass empty boundary/suffixX
+  // vectors. TextBlock pays zero per-word RAM cost for these annotations when they are empty.
   bool lineHasFocusSplit = false;
   for (size_t i = 0; i < lineWordCount; i++) {
-    if (isFocusSuffixAt(i)) {
+    if (focusBoundaryAt(i) != 0) {
       lineHasFocusSplit = true;
       break;
     }
@@ -1529,52 +1579,21 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
     return;
   }
 
-  // Slow path: merge focus suffix tokens back into their preceding word entry so each
-  // original word occupies one TextBlock slot. Splits are recorded as per-word annotations
-  // applied at render time, cutting the token count significantly when the feature is active.
-  std::vector<std::string> outWords;
-  std::vector<int16_t> outXPos;
-  std::vector<EpdFontFamily::Style> outStyles;
+  // Each word is one TextBlock entry carrying its own boundary; all that remains is the suffix x
+  // offset the renderer needs to resume in regular weight, i.e. the bold prefix's advance.
   std::vector<uint8_t> outBoundaries;
   std::vector<uint16_t> outSuffixX;
-  std::vector<std::string> outRubyTexts;
-  outWords.reserve(lineWordCount);
-  outXPos.reserve(lineWordCount);
-  outStyles.reserve(lineWordCount);
   outBoundaries.reserve(lineWordCount);
   outSuffixX.reserve(lineWordCount);
-  outRubyTexts.reserve(lineWordCount);
-
   for (size_t i = 0; i < lineWordCount; i++) {
-    if (isFocusSuffixAt(i) && !outWords.empty()) {
-      // Focus suffix: merge string into the preceding bold-prefix entry.
-      outWords.back() += lineWords[i];
-    } else {
-      // Normal word: check for a following focus suffix to record the byte boundary.
-      uint8_t boundary = 0;
-      uint16_t suffixX = 0;
-      if (i + 1 < lineWordCount && isFocusSuffixAt(i + 1)) {
-        boundary = static_cast<uint8_t>(std::min(lineWords[i].size(), size_t{255}));
-        // Suffix x offset = layout-time advance of the bold prefix, already known from xpos table.
-        const int suffixDelta = static_cast<int>(lineXPos[i + 1]) - static_cast<int>(lineXPos[i]);
-        suffixX = static_cast<uint16_t>(suffixDelta > 0 ? suffixDelta : 0);
-      }
-      outWords.push_back(std::move(lineWords[i]));
-      outXPos.push_back(lineXPos[i]);
-      // For focus entries with a suffix, strip BOLD from the stored style.
-      // Render re-applies it to the prefix portion only, via the boundary field.
-      const EpdFontFamily::Style storedStyle =
-          boundary > 0 ? static_cast<EpdFontFamily::Style>(lineWordStyles[i] & ~EpdFontFamily::BOLD)
-                       : lineWordStyles[i];
-      outStyles.push_back(storedStyle);
-      outBoundaries.push_back(boundary);
-      outSuffixX.push_back(suffixX);
-      outRubyTexts.push_back(i < lineRubyTexts.size() ? std::move(lineRubyTexts[i]) : std::string());
-    }
+    const uint8_t boundary = focusBoundaryAt(i);
+    outBoundaries.push_back(boundary);
+    outSuffixX.push_back(
+        boundary == 0 ? 0 : measureFocusPrefixAdvance(renderer, fontId, lineWords[i], lineWordStyles[i], boundary));
   }
 
-  auto block = makeUniqueNoThrow<TextBlock>(outWords, outXPos, outStyles, outBoundaries, outSuffixX, blockStyle,
-                                            std::move(outRubyTexts));
+  auto block = makeUniqueNoThrow<TextBlock>(lineWords, lineXPos, lineWordStyles, outBoundaries, outSuffixX, blockStyle,
+                                            std::move(lineRubyTexts));
   if (!block || !block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     return;

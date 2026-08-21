@@ -72,6 +72,10 @@ void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffse
   imageBlock->render(renderer, xPos + xOffset, yPos + yOffset);
 }
 
+void PageImage::renderPlaceholder(GfxRenderer& renderer, const int xOffset, const int yOffset) const {
+  imageBlock->renderPlaceholder(renderer, xPos + xOffset, yPos + yOffset);
+}
+
 bool PageImage::serialize(HalFile& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
@@ -142,6 +146,17 @@ void Page::renderImages(GfxRenderer& renderer, const int fontId, const int xOffs
                              [](const PageElement& element) { return element.getTag() == TAG_PageImage; });
 }
 
+void Page::renderWithImagePlaceholders(GfxRenderer& renderer, const int fontId, const int xOffset,
+                                       const int yOffset) const {
+  for (const auto& element : elements) {
+    if (element->getTag() == TAG_PageImage) {
+      static_cast<const PageImage&>(*element).renderPlaceholder(renderer, xOffset, yOffset);
+    } else {
+      element->render(renderer, fontId, xOffset, yOffset);
+    }
+  }
+}
+
 void Page::extractImagesNeedingDecode() {
   for (auto& element : elements) {
     if (element->getTag() != TAG_PageImage) continue;
@@ -150,11 +165,14 @@ void Page::extractImagesNeedingDecode() {
   }
 }
 
-void Page::renderImagesNeedingDecode(GfxRenderer& renderer, const int fontId, const int xOffset,
-                                     const int yOffset) const {
-  renderFilteredPageElements(elements, renderer, fontId, xOffset, yOffset, [](const PageElement& element) {
-    return element.getTag() == TAG_PageImage && static_cast<const PageImage&>(element).getImageBlock().needsDecode();
-  });
+void Page::cacheImagesNeedingDecode(GfxRenderer& renderer, const int xOffset, const int yOffset) {
+  for (auto& element : elements) {
+    if (element->getTag() != TAG_PageImage) continue;
+    auto& image = static_cast<PageImage&>(*element);
+    if (image.getImageBlock().needsDecode()) {
+      image.getImageBlock().cacheDecodedImage(renderer, image.xPos + xOffset, image.yPos + yOffset);
+    }
+  }
 }
 
 bool Page::serialize(HalFile& file) const {
