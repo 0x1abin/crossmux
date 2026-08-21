@@ -61,40 +61,33 @@ bool writePodChecked(HalFile& file, const T& value) {
 }
 }  // namespace
 
-void TxtReaderActivity::onEnter() {
-  Activity::onEnter();
-
+bool TxtReaderActivity::loadBook() {
+  openStartMs = millis();
+  txt = makeUniqueNoThrow<Txt>(bookPath, "/.crosspoint");
   if (!txt) {
-    return;
+    LOG_ERR("TRS", "OOM: TXT object (%u bytes)", static_cast<unsigned>(sizeof(Txt)));
+    return false;
   }
-
-  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-
+  if (!txt->load()) {
+    LOG_ERR("TRS", "Failed to load TXT: %s", bookPath.c_str());
+    return false;
+  }
   txt->setupCacheDir();
 
   // Allocated once and reused; putting 8193 bytes on the render task's 8KB stack would overflow it.
   pageBuffer = makeUniqueNoThrow<uint8_t[]>(CHUNK_SIZE + 1);
   if (!pageBuffer) {
     LOG_ERR("TRS", "OOM: TXT page buffer (%u bytes)", static_cast<unsigned>(CHUNK_SIZE + 1));
+    return false;
   }
 
-  // Save current txt as last opened file and add to recent books
-  auto filePath = txt->getPath();
-  auto fileName = filePath.substr(filePath.rfind('/') + 1);
-  APP_STATE.openEpubPath = filePath;
-  APP_STATE.saveToFile();
-  RECENT_BOOKS.addBook(filePath, fileName, "", "");
-  READING_STATS.beginSession(filePath, fileName, "", "", 0, "", 0);
-
-  // Trigger first update
-  requestUpdate();
+  const auto fileName = bookPath.substr(bookPath.rfind('/') + 1);
+  READING_STATS.beginSession(bookPath, fileName, "", "", 0, "", 0);
+  return true;
 }
 
 void TxtReaderActivity::onExit() {
-  Activity::onExit();
-
-  // Reset orientation back to portrait for the rest of the UI
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  ReaderActivity::onExit();
 
   if (indexCacheDirty) {
     savePageIndexCache();
@@ -103,91 +96,96 @@ void TxtReaderActivity::onExit() {
   directPageCount = 0;
   currentPageLines.clear();
   pageBuffer.reset();
-  APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
   READING_STATS.endSession();
   ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
   showPendingAchievementPopups(renderer);
   txt.reset();
 }
 
-void TxtReaderActivity::loop() {
+bool TxtReaderActivity::handleFormatInput() {
   READING_STATS.tickActiveSession();
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || ReaderUtils::isTouchMenuGesture(mappedInput)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+      ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
     READING_STATS.noteActivity();
     openChapterSelection();
-    return;
+    return true;
   }
+  return false;
+}
 
-  if (ReaderUtils::handleBackNavigation(mappedInput, activityManager, txt ? txt->getPath().c_str() : "",
-                                        {this, [](void* ctx) { static_cast<TxtReaderActivity*>(ctx)->onGoHome(); }})) {
-    return;
-  }
-
-  const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
-  auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
-  prevTriggered = prevTriggered || touch.prev;
-  nextTriggered = nextTriggered || touch.next;
-  if (!prevTriggered && !nextTriggered) {
-    return;
-  }
-
+bool TxtReaderActivity::pageTurn(const bool isForward) {
+  if (!initialized || pageOffsets.empty()) return false;
   READING_STATS.noteActivity();
-
-  bool pageChanged = false;
-  bool reachedEnd = false;
-  {
-    RenderLock lock(*this);
-    switch (pageMode) {
-      case PageMode::Indexed:
-        if (prevTriggered && currentPage > 0) {
-          currentPage--;
-          pageChanged = true;
-        } else if (nextTriggered) {
-          if (static_cast<size_t>(currentPage + 1) < pageOffsets.size()) {
-            currentPage++;
-            pageChanged = true;
-          } else if (indexComplete) {
-            reachedEnd = true;
-          }
-        }
-        break;
-      case PageMode::Direct:
-        if (prevTriggered) {
-          if (directPageIndex > 0) {
-            directPageIndex--;
-          } else {
-            pageMode = PageMode::Indexed;
-            currentPage = directReturnPage;
-          }
-          pageChanged = true;
-        } else if (nextTriggered) {
-          if (directPageIndex + 1 < directPageCount) {
-            directPageIndex++;
-            pageChanged = true;
-          } else if (currentPageEndOffset >= txt->getFileSize()) {
-            reachedEnd = true;
-          } else {
-            if (directPageCount < directPageOffsets.size()) {
-              directPageOffsets[directPageCount++] = currentPageEndOffset;
-              directPageIndex++;
-            } else {
-              std::move(directPageOffsets.begin() + 1, directPageOffsets.end(), directPageOffsets.begin());
-              directPageOffsets.back() = currentPageEndOffset;
-            }
-            pageChanged = true;
-          }
-        }
-        break;
+  RenderLock lock(*this);
+  endOfBook = false;
+  if (pageMode == PageMode::Indexed) {
+    if (!isForward && currentPage > 0) {
+      currentPage--;
+      return true;
     }
+    if (isForward && static_cast<size_t>(currentPage + 1) < pageOffsets.size()) {
+      currentPage++;
+      return true;
+    }
+    if (isForward && indexComplete) endOfBook = true;
+    return endOfBook;
   }
 
-  if (pageChanged) {
-    requestUpdate();
-  } else if (reachedEnd) {
-    onGoHome();
+  if (!isForward) {
+    if (directPageIndex > 0) {
+      directPageIndex--;
+    } else {
+      pageMode = PageMode::Indexed;
+      currentPage = directReturnPage;
+    }
+    return true;
   }
+  if (directPageIndex + 1 < directPageCount) {
+    directPageIndex++;
+    return true;
+  }
+  if (currentPageEndOffset >= txt->getFileSize()) {
+    endOfBook = true;
+    return true;
+  }
+  if (directPageCount < directPageOffsets.size()) {
+    directPageOffsets[directPageCount++] = currentPageEndOffset;
+    directPageIndex++;
+  } else {
+    std::move(directPageOffsets.begin() + 1, directPageOffsets.end(), directPageOffsets.begin());
+    directPageOffsets.back() = currentPageEndOffset;
+  }
+  return true;
+}
+
+bool TxtReaderActivity::skipPages(const int amount) {
+  if (!initialized || pageOffsets.empty() || amount == 0) return false;
+  RenderLock lock(*this);
+  endOfBook = false;
+  if (pageMode == PageMode::Direct) {
+    pageMode = PageMode::Indexed;
+    currentPage = directReturnPage;
+  }
+  if (amount < 0) {
+    const int target = std::max(0, currentPage + amount);
+    if (target == currentPage) return false;
+    currentPage = target;
+    return true;
+  }
+
+  const size_t target = static_cast<size_t>(currentPage) + static_cast<size_t>(amount);
+  extendIndexToPage(target);
+  if (target < pageOffsets.size()) {
+    currentPage = static_cast<int>(target);
+    return true;
+  }
+  if (indexComplete) {
+    currentPage = static_cast<int>(pageOffsets.size() - 1);
+    endOfBook = true;
+    return true;
+  }
+  return false;
 }
 
 void TxtReaderActivity::openChapterSelection() {
@@ -608,7 +606,7 @@ int TxtReaderActivity::getProgressPercent() const {
   return txt_page_index::progressPercent(currentPageEndOffset, txt ? txt->getFileSize() : 0);
 }
 
-void TxtReaderActivity::render(RenderLock&&) {
+void TxtReaderActivity::renderBook() {
   if (!txt) {
     return;
   }

@@ -141,8 +141,8 @@ jobs:
           path: .pio/build/default/firmware.bin
           if-no-files-found: error
 
-  build-sticky:
-    name: Build sticky
+  build-hardware:
+    name: Build S3 hardware
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -169,11 +169,11 @@ jobs:
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
-      - name: Build sticky firmware
+      - name: Build S3 hardware firmware
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e sticky | tee pio.log; then
+            if pio run -e sticky -e x4pro -e papermono | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2
@@ -188,7 +188,7 @@ jobs:
           echo "ram_line=${ram_line}" >> "$GITHUB_OUTPUT"
           echo "flash_line=${flash_line}" >> "$GITHUB_OUTPUT"
           {
-            echo "## Sticky firmware build stats"
+            echo "## S3 hardware firmware build stats"
             if [ -n "$ram_line" ]; then echo "- ${ram_line}"; else echo "- RAM: not found"; fi
             if [ -n "$flash_line" ]; then echo "- ${flash_line}"; else echo "- Flash: not found"; fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -226,7 +226,7 @@ jobs:
     name: Test Status
     needs:
       - build-default
-      - build-sticky
+      - build-hardware
       - clang-format
       - cppcheck
       - unit-tests

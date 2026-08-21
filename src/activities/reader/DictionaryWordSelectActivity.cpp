@@ -178,7 +178,8 @@ void DictionaryWordSelectActivity::performLookup() {
   if (found) {
     popup = Popup::None;
     startActivityForResultWith<DictionaryDefinitionActivity>([this](const ActivityResult&) { requestUpdate(); },
-                                                             std::move(headword), std::move(definition));
+                                                             std::move(headword), std::move(definition),
+                                                             dict.definitionsAreHtml());
     return;
   }
   // Name the failure: a genuine miss is "Not found"; a word that WAS found but
@@ -234,13 +235,11 @@ void DictionaryWordSelectActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) confirmPressSeen = true;
-
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && confirmPressSeen && !words.empty()) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !words.empty()) {
     performLookup();
     return;
   }

@@ -104,7 +104,7 @@ bool SdFirmwareUpdateActivity::validateFirmware() {
       errorMessage = tr(STR_FIRMWARE_TOO_LARGE);
     } else if (vr == firmware_flash::Result::TOO_SMALL) {
       errorMessage = tr(STR_FIRMWARE_TOO_SMALL);
-    } else if (vr == firmware_flash::Result::BAD_CHIP) {
+    } else if (vr == firmware_flash::Result::BAD_CHIP || vr == firmware_flash::Result::WRONG_BOARD) {
       errorMessage = tr(STR_FIRMWARE_WRONG_DEVICE);
     } else {
       errorMessage = tr(STR_INVALID_FIRMWARE);
@@ -171,10 +171,12 @@ void SdFirmwareUpdateActivity::performUpdate() {
   const auto result = firmware_flash::flashFromSdPath(firmwarePath.c_str(), progressCb, this);
   if (result != firmware_flash::Result::OK) {
     LOG_ERR("FW", "flash failed: %s", firmware_flash::resultName(result));
-    // BAD_CHIP here is the TOCTOU re-validation catching a wrong-MCU image the
-    // pre-confirmation pass missed (e.g. the SD card was swapped).
-    errorMessage =
-        result == firmware_flash::Result::BAD_CHIP ? tr(STR_FIRMWARE_WRONG_DEVICE) : tr(STR_FIRMWARE_WRITE_FAILED);
+    // BAD_CHIP / WRONG_BOARD here is the TOCTOU re-validation catching a
+    // wrong-device image the pre-confirmation pass missed (e.g. the SD card
+    // was swapped).
+    errorMessage = result == firmware_flash::Result::BAD_CHIP || result == firmware_flash::Result::WRONG_BOARD
+                       ? tr(STR_FIRMWARE_WRONG_DEVICE)
+                       : tr(STR_FIRMWARE_WRITE_FAILED);
     RenderLock lock(*this);
     sdFontSystem.ensureLoaded(renderer, false);
     state = State::FAILED;

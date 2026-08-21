@@ -1,4 +1,4 @@
-# Device Variants — Xteink X3 vs X4
+# Device Variants — X3/X4 and Build-Only S3 Targets
 
 > Deep reference for [CLAUDE.md](../../CLAUDE.md). How one firmware binary runs
 > on both the Xteink X3 and X4, how the device is detected at boot, what differs
@@ -17,6 +17,20 @@ pio run -e gh_release        # international
 pio run -e gh_release_cn     # Simplified-Chinese (see chinese-build.md)
 pio run -t upload            # build + flash to whatever is plugged in
 ```
+
+X4 Pro and Paper Mono use separate ESP32-S3 builds because their board,
+display, touch, storage, and frontlight profiles differ from the combined
+ESP32-C3 image:
+
+```bash
+pio run -e x4pro
+pio run -e papermono
+```
+
+These two environments are compile/CI targets only in CrossMux. Stable,
+nightly, Gitee, and OTA artifacts are not published for them yet. Manual
+flashing must use the matching build; the embedded board tag rejects a tagged
+image for a different board.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.
@@ -92,7 +106,7 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 |---|---|---|
 | Panel | 800 × 480, **SSD1677** | 792 × 528, **UC81xx** |
 | Framebuffer | 48000 B | 52272 B |
-| Buffer allocation | `MAX_BUFFER_SIZE = 52272` (static, covers both) — [EInkDisplay.h:35](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
+| Buffer allocation | `MAX_BUFFER_SIZE = 52272` (static, covers both) — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
 | Geometry switch | default 800×480 | `setDisplayX3()` before `begin()` — [HalDisplay.cpp:39](../../lib/hal/HalDisplay.cpp) |
 | Display SPI clock | **20 MHz** (SSD1677 in-spec maximum) | UC81xx profile default, unchanged |
 | Battery | ADC on GPIO0 | BQ27220 fuel gauge (I²C) — [HalPowerManager.cpp](../../lib/hal/HalPowerManager.cpp) |
@@ -101,7 +115,7 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 | Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp:55](../../lib/hal/HalTiltSensor.cpp) |
 | Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp:194](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp:399](../../src/components/themes/lyra/LyraTheme.cpp) |
 | INX front-button hints | four bottom segments aligned to the X4 keys | four bottom segments using the wider X3 spacing; labels remain orientation-aware — [InxTheme.cpp](../../src/components/themes/inx/InxTheme.cpp) |
-| Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [EInkDisplay.h:56-94](../../open-x4-sdk/libs/display/EInkDisplay/include/EInkDisplay.h) |
+| Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
 
 The application HAL does not override the display bus or refresh waveform.
 `HalDisplay::begin()` only selects the X3 panel before the SDK driver starts.
@@ -152,7 +166,8 @@ esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 \
 ```
 
 **Web flasher device target.** The in-firmware file/flash page
-([src/network/html/FilesPage.html](../../src/network/html/FilesPage.html),
+([English Files page](../../src/network/html/en/FilesPage.html) and
+[Chinese Files page](../../src/network/html/zh-CN/FilesPage.html),
 profile `X3: { width: 528, height: 792 }`) exposes an X3/X4 target selector.
 That selector drives per-silicon image **patching**
 ([FirmwareFlasher.h](../../src/network/FirmwareFlasher.h) /

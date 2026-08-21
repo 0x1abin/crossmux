@@ -24,9 +24,6 @@ constexpr int kListIconSize = 24;
 constexpr int kMenuIconSize = 32;
 constexpr int kIconGap = 10;
 constexpr int kMaxValueWidth = 200;
-constexpr int kOptionVisibleRows = 5;
-constexpr int kOptionRowHeight = 62;
-constexpr int kOptionHeaderHeight = 62;
 constexpr int kSideHintY = 345;
 constexpr int kX3SideHintY = 155;
 constexpr int kHintWidth = 80;
@@ -328,38 +325,40 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
 
   const int optionCount = static_cast<int>(options.size());
   const int selected = std::clamp(selectedIndex, 0, optionCount - 1);
-  const int visibleRows = std::min(kOptionVisibleRows, optionCount);
+  const int visibleRows = InxOptionGeometry::visibleRows(optionCount);
   const int maxStart = optionCount - visibleRows;
-  const int start = std::clamp(selected - visibleRows / 2, 0, maxStart);
+  const int start = InxOptionGeometry::start(selected, optionCount);
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
   const int panelWidth = std::max(1, std::min(screenWidth - 24, 360));
-  const int panelHeight = kOptionHeaderHeight + visibleRows * kOptionRowHeight;
+  const int panelHeight = InxOptionGeometry::headerHeight + visibleRows * InxOptionGeometry::rowHeight;
   const int panelX = (screenWidth - panelWidth) / 2;
   const int panelY = std::max(0, (screenHeight - panelHeight) / 2);
 
   renderer.fillRect(panelX, panelY, panelWidth, panelHeight, false);
   const std::string shownTitle = renderer.truncatedText(UI_10_FONT_ID, title, panelWidth - 32, EpdFontFamily::BOLD);
-  const int titleY = panelY + (kOptionHeaderHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+  const int titleY = panelY + (InxOptionGeometry::headerHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
   renderer.drawText(UI_10_FONT_ID, panelX + 16, titleY, shownTitle.c_str(), true, EpdFontFamily::BOLD);
-  renderer.drawLine(panelX, panelY + kOptionHeaderHeight, panelX + panelWidth - 1, panelY + kOptionHeaderHeight, true);
+  renderer.drawLine(panelX, panelY + InxOptionGeometry::headerHeight, panelX + panelWidth - 1,
+                    panelY + InxOptionGeometry::headerHeight, true);
 
   for (int slot = 0; slot < visibleRows; ++slot) {
     const int optionIndex = start + slot;
-    const int rowY = panelY + kOptionHeaderHeight + slot * kOptionRowHeight;
+    const int rowY = panelY + InxOptionGeometry::headerHeight + slot * InxOptionGeometry::rowHeight;
     const bool isSelected = optionIndex == selected;
-    if (isSelected) renderer.fillRect(panelX + 2, rowY, panelWidth - 4, kOptionRowHeight, true);
+    if (isSelected) renderer.fillRect(panelX + 2, rowY, panelWidth - 4, InxOptionGeometry::rowHeight, true);
     const std::string option = renderer.truncatedText(UI_10_FONT_ID, options[optionIndex].c_str(), panelWidth - 44);
-    const int textY = rowY + (kOptionRowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+    const int textY = rowY + (InxOptionGeometry::rowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
     renderer.drawText(UI_10_FONT_ID, panelX + 18, textY, option.c_str(), !isSelected,
                       isSelected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-    if (slot + 1 < visibleRows) drawDottedSeparator(renderer, panelX + 2, rowY + kOptionRowHeight - 1, panelWidth - 4);
+    if (slot + 1 < visibleRows)
+      drawDottedSeparator(renderer, panelX + 2, rowY + InxOptionGeometry::rowHeight - 1, panelWidth - 4);
   }
 
   if (optionCount > visibleRows) {
     const int trackX = panelX + panelWidth - 10;
-    const int trackY = panelY + kOptionHeaderHeight;
-    const int trackHeight = visibleRows * kOptionRowHeight;
+    const int trackY = panelY + InxOptionGeometry::headerHeight;
+    const int trackHeight = visibleRows * InxOptionGeometry::rowHeight;
     const int thumbHeight = std::max(8, trackHeight * visibleRows / optionCount);
     const int thumbY = trackY + start * (trackHeight - thumbHeight) / maxStart;
     renderer.fillRect(trackX, trackY, 2, trackHeight, true);

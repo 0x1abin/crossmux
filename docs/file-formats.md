@@ -100,10 +100,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 54 / 55
+### Versions 56 / 57
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **55**; Latin builds use **54**. The byte layout is identical between
+> currently **57**; Latin builds use **56**. The byte layout is identical between
 > flavors, but the same built-in font IDs resolve to different font data and
 > metrics, so pagination caches are not reusable across firmware flavors.
 >
@@ -126,7 +126,9 @@ if (parsedSize != fileSize) {
 > Versions 54/55 keep the byte layout unchanged but invalidate word positions so
 > soft-flushed continuations of long paragraphs do not receive another first-line
 > indent and default CJK paragraph indents use two ideograph advances instead of
-> three space advances. The counters remain distinct and above every
+> three space advances. Versions 56/57 invalidate pagination for focus-word
+> break opportunities, image viewport clamping, and the extra-wide line-spacing
+> option. The counters remain distinct and above every
 > previously shipped value so a firmware-flavor swap cannot read the other flavor's
 > stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
