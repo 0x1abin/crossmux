@@ -18,12 +18,7 @@ void HalPowerManager::begin() {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
   normalFreq = getCpuFrequencyMhz();
-  // Counting semaphore (max=1) instead of a priority-inheriting mutex: the
-  // render task (core 1) and main task (core 0) both take HalPowerManager::Lock
-  // and hand it across cores. ESP-IDF SMP's priority-inheritance give path trips
-  // the xTaskPriorityDisinherit assert; a counting semaphore has no such path,
-  // so cross-core take/give is safe.
-  modeMutex = xSemaphoreCreateCounting(1, 1);
+  modeMutex = xSemaphoreCreateMutex();
   assert(modeMutex != nullptr);
 }
 
