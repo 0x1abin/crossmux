@@ -625,7 +625,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
       bitmap.hasGreyscale() && (preserveBackground || SETTINGS.sleepScreenCoverFilter ==
                                                           CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
 
-  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, preserveBackground);
 
   if (!preserveBackground &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
@@ -646,13 +646,13 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
     bitmap.rewindToData();
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, preserveBackground);
     renderer.copyGrayscaleLsbBuffers();
 
     bitmap.rewindToData();
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, preserveBackground);
     renderer.copyGrayscaleMsbBuffers();
 
     renderer.displayGrayBuffer();
@@ -673,8 +673,6 @@ bool SleepActivity::renderSleepOverlayFile(HalFile& file, const char* pathForLog
   }
 
   LOG_DBG("SLP", "Rendering regular BMP sleep overlay: %s (%dx%d)", pathForLog, bitmap.getWidth(), bitmap.getHeight());
-  // drawBitmap leaves white pixels untouched; skipping the initial clear makes
-  // them transparent while retaining the existing grayscale pipeline.
   renderBitmapSleepScreen(bitmap, true);
   return true;
 }
@@ -732,6 +730,17 @@ bool SleepActivity::renderSleepOverlayPath(const std::string& path) const {
 }
 
 void SleepActivity::renderTransparentCustomSleepScreen() const {
+  {
+    HalFile legacyFile;
+    if (Storage.openFileForRead("SLP", "/sleep.bmp", legacyFile)) {
+      Bitmap legacyBitmap(legacyFile);
+      if (legacyBitmap.parseHeaders() == BmpReaderError::Ok && legacyBitmap.hasTransparency()) {
+        renderBitmapSleepScreen(legacyBitmap, true);
+        return;
+      }
+    }
+  }
+
   if (renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_BMP)) return;
   if (renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_PNG)) return;
 

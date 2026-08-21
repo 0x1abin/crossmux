@@ -30,7 +30,6 @@ enum ReadyRow {
 };
 
 constexpr uint8_t RELEASE_NOTE_MAX_LINES = 4;
-constexpr uint8_t RELEASE_NOTES_PER_PAGE_MAX = 3;
 
 fui::TextStyle releaseNoteStyle() {
   fui::TextStyle style;
@@ -229,7 +228,6 @@ void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea) {
     int usedHeight = 0;
     const uint8_t pageStart = noteIndex;
     while (noteIndex < notes.size()) {
-      if (noteIndex - pageStart >= RELEASE_NOTES_PER_PAGE_MAX) break;
       const int noteHeight = fui::measureWrappedText(target, notes[noteIndex].data(), style, textWidth).height;
       const int itemHeight = noteHeight + (noteIndex == pageStart ? 0 : relatedGap);
       if (noteIndex != pageStart && usedHeight + itemHeight > availableHeight) break;
