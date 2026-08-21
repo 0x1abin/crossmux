@@ -646,7 +646,7 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResultWith<ClearCacheActivity>(resultHandler);
         break;
       case SettingAction::CheckForUpdates:
-        startActivityForResultWith<OtaUpdateActivity>(resultHandler);
+        openOtaUpdate();
         break;
       case SettingAction::SdFirmwareUpdate:
         startActivityForResultWith<SdFirmwareUpdateActivity>(resultHandler);
@@ -723,6 +723,32 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
     SETTINGS.quickResumeSleepScreen = CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_NEVER;
     quickResumeTimeoutAutoEnabled = false;
   }
+}
+
+void SettingsActivity::openOtaUpdate() {
+  {
+    RenderLock lock(*this);
+    closeRouting();
+    // clear() keeps vector capacity; swap it out so the stacked Settings activity leaves that heap to TLS.
+    std::vector<freeink::ui::ListItem>().swap(rowItems_);
+    std::vector<std::string>().swap(rowValues_);
+    std::vector<std::string>().swap(rowLabels_);
+    std::vector<SettingInfo>().swap(displaySettings);
+    std::vector<SettingInfo>().swap(readerSettings);
+    std::vector<SettingInfo>().swap(controlsSettings);
+    std::vector<SettingInfo>().swap(systemSettings);
+    settingsCount = 0;
+  }
+
+  if (startActivityForResultWith<OtaUpdateActivity>([this](const ActivityResult&) {
+        SETTINGS.saveToFile();
+        rebuildSettingsLists();
+      })) {
+    return;
+  }
+
+  rebuildSettingsLists();
+  requestUpdate();
 }
 
 void SettingsActivity::openSleepTimeoutPicker() {

@@ -232,6 +232,7 @@ class SettingsActivity final : public UiTabListActivity {
   bool usesAccordion() const;
   const std::vector<SettingInfo>& settingsForCategory(int categoryIndex) const;
   std::array<int, categoryCount> accordionSettingCounts() const;
+  void openOtaUpdate();
   void openSleepTimeoutPicker();
   void openReadingBackgroundMenu();
   void openReadingBackgroundPicker();
