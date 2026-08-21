@@ -2,6 +2,7 @@
 
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
 #include <Memory.h>
 #include <WiFi.h>
@@ -11,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -85,6 +87,10 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 #ifdef SIMULATOR
   updater.loadSimulatorReleaseNotes();
 #else
+  // The checking screen can reload fonts after WiFi startup cleanup, so release them again immediately before TLS.
+  NetworkStartup::prepare(renderer);
+  LOG_INF("OTA", "TLS preflight (manifest): free=%u, maxAlloc=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMaxAllocHeap()));
   const auto res = updater.checkForUpdate(selectedChannel);
   if (res != OtaUpdater::OK) {
     LOG_DBG("OTA", "Update check failed: %d", res);
@@ -155,6 +161,9 @@ void OtaUpdateActivity::beginWifiSelection() {
     requestUpdate();
     return;
   }
+
+  // halClock.update() runs before ActivityManager::loop(); disable auto-sync before WiFi can start and race TLS.
+  halClock.setAutoSyncEnabled(false);
 
   {
     RenderLock lock(*this);
@@ -436,6 +445,12 @@ void OtaUpdateActivity::runUpdateInstall() {
     state = State::UpdateInProgress;
   }
   requestUpdateAndWait();
+  // The progress screen is another font-loading boundary before a separate TLS connection.
+  NetworkStartup::prepare(renderer);
+#ifndef SIMULATOR
+  LOG_INF("OTA", "TLS preflight (firmware): free=%u, maxAlloc=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMaxAllocHeap()));
+#endif
   const auto res = updater.installUpdate(
       [](void* ctx) {
         // immediate=true notifies the render task directly. The default deferred path only
