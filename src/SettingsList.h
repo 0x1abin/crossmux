@@ -1,6 +1,7 @@
 #pragma once
 
 #include <BoardConfig.h>
+#include <HalFrontlight.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <SdCardFontRegistry.h>
@@ -487,6 +488,21 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
   if (!BoardConfig::hasTouch() && setting.nameId == StrId::STR_TOUCH_READER_CONTROLS) return false;
   if (!BoardConfig::hasHomeKey() && setting.nameId == StrId::STR_TAP_FOR_READER_MENU) return false;
+  const bool frontlightSetting = setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
+                                 setting.valuePtr == &CrossPointSettings::frontlightOn ||
+                                 setting.valuePtr == &CrossPointSettings::frontlightRestoreOnWake
+#if FREEINK_CAP_WARMLIGHT
+                                 || setting.valuePtr == &CrossPointSettings::frontlightWarmth
+#endif
+      ;
+#if defined(SIMULATOR)
+  if (frontlightSetting) return false;
+#else
+  if (frontlightSetting && !Frontlight.present()) return false;
+#if FREEINK_CAP_WARMLIGHT
+  if (setting.valuePtr == &CrossPointSettings::frontlightWarmth && !Frontlight.hasColorTemperature()) return false;
+#endif
+#endif
   if (!BoardConfig::hasTouch()) return true;
   return setting.nameId != StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION &&
          setting.nameId != StrId::STR_SUNLIGHT_FADING_FIX && setting.nameId != StrId::STR_SHOW_BUTTON_HINTS &&

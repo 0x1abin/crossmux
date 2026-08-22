@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <BoardConfig.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -132,6 +133,23 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
   }
 }
 
+bool isSettingAvailableForPersistence(const SettingInfo& setting) {
+#if !defined(SIMULATOR)
+  // Settings load before Frontlight.begin(), so persistence must use the board profile, not the runtime probe.
+  if (setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
+      setting.valuePtr == &CrossPointSettings::frontlightOn ||
+      setting.valuePtr == &CrossPointSettings::frontlightRestoreOnWake) {
+    return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight();
+  }
+#if FREEINK_CAP_WARMLIGHT
+  if (setting.valuePtr == &CrossPointSettings::frontlightWarmth) {
+    return BoardConfig::hasColorTemperatureFrontlight();
+  }
+#endif
+#endif
+  return isSettingAvailableOnBoard(setting);
+}
+
 }  // namespace
 
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
@@ -170,7 +188,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   const CrossPointSettings& s = *this;
 
   for (const auto& info : getBaseSettingsList()) {
-    if (!isSettingAvailableOnBoard(info)) continue;
+    if (!isSettingAvailableForPersistence(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) continue;
@@ -236,7 +254,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
 
   for (const auto& info : getBaseSettingsList()) {
-    if (!isSettingAvailableOnBoard(info)) continue;
+    if (!isSettingAvailableForPersistence(info)) continue;
     if (!info.key) continue;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) continue;

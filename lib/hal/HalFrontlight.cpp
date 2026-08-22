@@ -2,12 +2,15 @@
 
 #include <Logging.h>
 
-HalFrontlight HalFrontlight::instance;
+HalFrontlight& HalFrontlight::getInstance() {
+  static HalFrontlight instance;
+  return instance;
+}
 
 void HalFrontlight::begin(const uint8_t brightness, const uint8_t warmth, const bool on) {
+  manager.begin();
   if (!manager.present()) return;
 
-  manager.begin();
   lastBrightness = brightness > 100 ? 100 : brightness;
   manager.setColorTemperature(warmth > 100 ? 100 : warmth);
   lit = on;

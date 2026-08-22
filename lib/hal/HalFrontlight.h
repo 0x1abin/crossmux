@@ -2,20 +2,20 @@
 
 #include <FrontlightManager.h>
 
-// Thin firmware HAL over the SDK frontlight manager. It is inert on boards
-// without a frontlight, so callers do not need board-specific conditionals.
+#include <cstdint>
+
 class HalFrontlight {
  public:
-  static HalFrontlight& getInstance() { return instance; }
+  static HalFrontlight& getInstance();
 
   void begin(uint8_t brightness, uint8_t warmth, bool on);
-
-  bool present() const { return manager.present(); }
-  bool hasColorTemperature() const { return manager.hasColorTemperature(); }
 
   void setBrightness(uint8_t percent);
   void setWarmth(uint8_t warmPercent);
   void setOn(bool on);
+
+  bool present() const { return manager.present(); }
+  bool hasColorTemperature() const { return manager.hasColorTemperature(); }
 
   uint8_t brightness() const { return lastBrightness; }
   uint8_t warmth() const { return manager.colorTemperature(); }
@@ -29,8 +29,6 @@ class HalFrontlight {
   // toggling back on restores it.
   uint8_t lastBrightness = 60;
   bool lit = false;
-
-  static HalFrontlight instance;
 };
 
 #define Frontlight HalFrontlight::getInstance()
