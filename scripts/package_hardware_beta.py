@@ -15,6 +15,7 @@ DEVICES = {
     'sticky': 'sticky',
     'eego-a4': 'eego_a4',
     'mofei-m4': 'mofei_m4',
+    'waveshare-epaper-397': 'waveshare_epaper_397',
 }
 SEGMENTS = (
     ('bootloader', 'bootloader.bin', 0x0000),

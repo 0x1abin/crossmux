@@ -7,7 +7,9 @@
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 
-#if FREEINK_DEVICE_X4PRO
+#include "Waveshare397Power.h"
+
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
 #include <soc/usb_serial_jtag_reg.h>
 #endif
 
@@ -49,6 +51,12 @@ namespace {
 constexpr char HW_NAMESPACE[] = "cphw";
 constexpr char NVS_KEY_DEV_OVERRIDE[] = "dev_ovr";  // 0=auto, 1=x4, 2=x3
 constexpr char NVS_KEY_DEV_CACHED[] = "dev_det";    // 0=unknown, 1=x4, 2=x3
+
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+uint8_t wavesharePowerButtonHook() {
+  return Waveshare397Power::powerButtonPressed() ? static_cast<uint8_t>(1u << HalGPIO::BTN_POWER) : 0;
+}
+#endif
 
 enum class NvsDeviceValue : uint8_t { Unknown = 0, X4 = 1, X3 = 2 };
 
@@ -138,6 +146,9 @@ void HalGPIO::begin() {
   }
 #else
   _deviceType = DeviceType::X4;
+#endif
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  InputManager::setButtonHook(wavesharePowerButtonHook);
 #endif
   inputMgr.begin();
 }
@@ -244,7 +255,7 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
   return true;
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
 // X4 Pro has no confirmed VBUS GPIO. A USB data host is observable through the
 // USB Serial/JTAG SOF counter; keep the last positive result across nearby polls.
 static bool usbHostSofActive() {
@@ -279,6 +290,11 @@ bool HalGPIO::isUsbConnected() const {
     }
     return false;
   }
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  bool connected = false;
+  if (Waveshare397Power::externalPowerConnected(connected)) return connected;
+  return usbHostSofActive();
+#endif
   if (BoardConfig::ACTIVE.usbDetect < 0) {
 #if FREEINK_DEVICE_X4PRO
     return usbHostSofActive();

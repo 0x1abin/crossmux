@@ -10,10 +10,14 @@
 #include <cassert>
 
 #include "HalGPIO.h"
+#include "Waveshare397Power.h"
 
 HalPowerManager powerManager;  // Singleton instance
 
 void HalPowerManager::begin() {
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  if (!Waveshare397Power::begin()) LOG_ERR("PWR", "AXP2101 initialization failed");
+#endif
   if (BoardConfig::ACTIVE.batteryAdc >= 0) {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
@@ -58,6 +62,9 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  Waveshare397Power::waitForPowerButtonRelease();
+#endif
 #ifdef ENABLE_SERIAL_LOG
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
   // doesn't hold power domains that interfere with USB-powered GPIO wake.
@@ -87,12 +94,36 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   gpio.prepareForDeepSleep();
   freeink::PowerManager::powerDownRailsForSleep();
 
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  if (Waveshare397Power::shutdown()) {
+    delay(500);  // Battery power normally disappears before this returns.
+  } else {
+    LOG_ERR("PWR", "AXP2101 shutdown failed; falling back to ESP deep sleep");
+  }
+  // A failed PMIC shutdown still needs a usable wake source. GPIO5 is the
+  // confirm key at runtime; it is also the fallback when USB keeps the MCU on.
+  constexpr int8_t FALLBACK_WAKE_PIN = 5;
+  pinMode(FALLBACK_WAKE_PIN, INPUT_PULLUP);
+  while (digitalRead(FALLBACK_WAKE_PIN) == LOW) delay(50);
+  freeink::PowerManager::armWakeOnPins(1ULL << FALLBACK_WAKE_PIN, true);
+  freeink::PowerManager::deepSleep();
+#else
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();
+#endif
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  const unsigned long now = millis();
+  if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) return _batteryCachedPercent;
+  _batteryLastPollMs = now;
+  uint16_t percent = 0;
+  if (Waveshare397Power::readBatteryPercentage(percent)) _batteryCachedPercent = percent;
+  return _batteryCachedPercent;
+#endif
+
   static const BatteryMonitor battery;
   if (BoardConfig::ACTIVE.batteryGauge.gaugeAddr != 0) {
     const unsigned long now = millis();

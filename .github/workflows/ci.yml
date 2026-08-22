@@ -113,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e default -e eego_a4 -e mofei_m4 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_mofei_m4 | tee pio.log; then
+            if pio run -e default -e eego_a4 -e mofei_m4 -e waveshare_epaper_397 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_mofei_m4 | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2
@@ -125,6 +125,9 @@ jobs:
 
       - name: Package experimental Mofei M4 images
         run: python3 scripts/package_hardware_beta.py mofei-m4
+
+      - name: Package experimental Waveshare 3.97 images
+        run: python3 scripts/package_hardware_beta.py waveshare-epaper-397
 
       - name: Extract firmware stats
 
@@ -159,6 +162,13 @@ jobs:
         with:
           name: mofei-m4-experimental
           path: dist/mofei-m4
+          if-no-files-found: error
+
+      - name: Upload experimental Waveshare 3.97 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: waveshare-epaper-397-experimental
+          path: dist/waveshare-epaper-397
           if-no-files-found: error
 
   build-sticky:

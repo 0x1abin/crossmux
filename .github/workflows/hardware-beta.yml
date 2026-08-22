@@ -12,6 +12,7 @@ on:
           - sticky
           - eego-a4
           - mofei-m4
+          - waveshare-epaper-397
       action:
         description: Publish or remove the rolling prerelease
         required: true
@@ -73,6 +74,7 @@ jobs:
             sticky) environment=sticky ;;
             eego-a4) environment=eego_a4 ;;
             mofei-m4) environment=mofei_m4 ;;
+            waveshare-epaper-397) environment=waveshare_epaper_397 ;;
             *) exit 2 ;;
           esac
           pio run -e "$environment"
