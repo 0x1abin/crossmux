@@ -53,7 +53,9 @@ class ActivityManager {
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
   enum class PendingAction { None, Push, Pop, Replace };
-  PendingAction pendingAction = PendingAction::None;
+  // Shared between the main task (core 0) and the render task (core 1), so it
+  // must be atomic rather than a plain/volatile enum (FreeRTOS SMP data race).
+  std::atomic<PendingAction> pendingAction{PendingAction::None};
 
   // Task to render and display the activity
   TaskHandle_t renderTaskHandle = nullptr;
@@ -64,8 +66,7 @@ class ActivityManager {
   // Note: only one waiting task is supported at a time
   TaskHandle_t waitingTaskHandle = nullptr;
 
-  // Mutex to protect rendering operations from race conditions
-  // Must only be used via RenderLock
+  // Lock to serialize rendering operations. Must only be used via RenderLock.
   SemaphoreHandle_t renderingMutex = nullptr;
 
   // Cross-task render request flag. requestUpdate() may set it from any task;
@@ -149,6 +150,11 @@ class ActivityManager {
   bool handleForcedRefresh();
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
+
+  // Returns true when a Push/Pop/Replace is waiting for the render lock.
+  // The render task can call this to abort a long render early and let the
+  // main task proceed with the activity switch.
+  bool isSwitchPending() const { return pendingAction.load() != PendingAction::None; }
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
