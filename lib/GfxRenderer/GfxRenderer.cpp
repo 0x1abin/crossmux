@@ -376,18 +376,9 @@ static uint8_t get2BitCoverage(const uint8_t* bitmap, const int pixelPosition) {
 
 static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::RenderMode renderMode, const int x,
                                const int y, const bool pixelState, const uint8_t coverage) {
-  // Font coverage is 0=white, 1=light gray, 2=dark gray, 3=black.
-  switch (renderMode) {
-    case GfxRenderer::BW:
-      if (coverage != 0) renderer.drawPixel(x, y, pixelState);
-      break;
-    case GfxRenderer::GRAYSCALE_LSB:
-      if (coverage == 2) renderer.drawPixel(x, y, false);
-      break;
-    case GfxRenderer::GRAYSCALE_MSB:
-      if (coverage == 1 || coverage == 2) renderer.drawPixel(x, y, false);
-      break;
-  }
+  const auto pixel = GfxRenderer::mapTwoBitGlyphCoverage(renderMode, coverage);
+  if (!pixel.draw) return;
+  renderer.drawPixel(x, y, renderMode == GfxRenderer::BW ? pixelState : pixel.state);
 }
 
 // Shared glyph rendering logic for normal and rotated text.
@@ -624,7 +615,8 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
   const uint8_t bitPosition = 7 - (phyX % 8);  // MSB first
 
-  if (state) {
+  const bool eff = framebufferState(renderMode, state);
+  if (eff) {
     target[byteIndex] &= ~(1 << bitPosition);  // Clear bit
   } else {
     target[byteIndex] |= 1 << bitPosition;  // Set bit
@@ -965,7 +957,8 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
 }
 
 void GfxRenderer::fillRect(const int x, const int y, const int width, const int height, const bool state) const {
-  if (state) {
+  const bool eff = framebufferState(renderMode, state);
+  if (eff) {
     fillRectImpl<Color::Black>(x, y, width, height);
   } else {
     fillRectImpl<Color::White>(x, y, width, height);
@@ -1391,20 +1384,6 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
   }
 }
 
-namespace {
-bool shouldDrawBitmapValue(const GfxRenderer::RenderMode mode, const uint8_t value) {
-  switch (mode) {
-    case GfxRenderer::BW:
-      return value < 3;
-    case GfxRenderer::GRAYSCALE_LSB:
-      return value == 1;
-    case GfxRenderer::GRAYSCALE_MSB:
-      return value == 1 || value == 2;
-  }
-  return false;
-}
-}  // namespace
-
 bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const int y, const int targetWidth,
                                        const int targetHeight) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
@@ -1434,7 +1413,7 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
   uint8_t* const rowBytes = outputRow + outputRowSize;
 
   const GfxRenderer::RenderMode mode = getRenderMode();
-  const bool pixelState = mode == GfxRenderer::BW;
+  const auto runPixel = mapTwoBitPixel(mode, 0);
   for (int sourceRow = 0; sourceRow < sourceHeight; ++sourceRow) {
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read crop-fill row %d", sourceRow);
@@ -1453,7 +1432,7 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
       bool draw = false;
       if (sourceX < sourceWidth) {
         const uint8_t value = outputRow[sourceX / 4] >> (6 - ((sourceX * 2) % 8)) & 0x3;
-        draw = shouldDrawBitmapValue(mode, value);
+        draw = mapTwoBitPixel(mode, value).draw;
       }
       if (draw && runStart < 0) {
         runStart = sourceX;
@@ -1463,7 +1442,8 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
         const int clippedLeft = std::max(0, runLeft);
         const int clippedRight = std::min(targetWidth, runRight);
         if (clippedLeft < clippedRight) {
-          fillRect(x + clippedLeft, y + clippedTop, clippedRight - clippedLeft, clippedBottom - clippedTop, pixelState);
+          fillRect(x + clippedLeft, y + clippedTop, clippedRight - clippedLeft, clippedBottom - clippedTop,
+                   runPixel.state);
         }
         runStart = -1;
       }
@@ -1568,13 +1548,9 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       if (useTransparency && !opacityRow[bmpX]) {
         continue;
       }
-      if (renderMode == BW && (useTransparency || val < 3)) {
-        drawPixel(screenX, screenY, val < 3);
-      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
-        drawPixel(screenX, screenY, false);
-      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
-        drawPixel(screenX, screenY, false);
-      }
+      auto pixel = mapTwoBitPixel(renderMode, val);
+      if (renderMode == BW && useTransparency && val >= 3) pixel = {true, false};
+      if (pixel.draw) drawPixel(screenX, screenY, pixel.state);
     }
   }
 

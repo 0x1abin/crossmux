@@ -191,6 +191,10 @@ void EpubReaderActivity::onExit() {
   ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
   showPendingAchievementPopups(renderer);
   ReaderActivity::onExit();
+#if FREEINK_DEVICE_EEGO_A4
+  // EEGO uses a single-pass grayscale page; force a clean first frame after exit.
+  renderer.requestNextFullRefresh();
+#endif
 }
 
 bool EpubReaderActivity::loadBook() {
@@ -326,6 +330,11 @@ void EpubReaderActivity::openReaderMenu() {
           applyOrientation(menu.orientation);
         }
         toggleAutoPageTurn(menu.pageTurnRate);
+#if FREEINK_DEVICE_EEGO_A4
+        // EEGO's single-pass grayscale page must clear the menu first.
+        pagesUntilFullRefresh = 1;
+        forcedRefreshPending = true;
+#endif
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }
@@ -1442,6 +1451,12 @@ void EpubReaderActivity::renderBook() {
 
   updateBookmarkFlag();
 
+  // Serialize SD access in this render path against the main task's SD writes
+  // (progress, bookmarks, background build) so they cannot interleave mid-FAT-op.
+#if FREEINK_DEVICE_EEGO_A4 && !defined(SIMULATOR)
+  HalStorage::StorageLock storageLock;
+#endif
+
   {
     auto p = section->loadPage(section->currentPage);
     if (!p) {
@@ -1533,6 +1548,18 @@ bool EpubReaderActivity::applyDeferredReposition() {
     if (section->pageCount > 0 && newPage >= static_cast<int>(section->pageCount)) {
       newPage = section->pageCount - 1;
     }
+#if FREEINK_DEVICE_EEGO_A4
+    // Suppress A4's duplicate grayscale flash when the deferred reposition
+    // resolves to the page already on screen.
+    if (mappedOffset && currentPageVisibleOffset.has_value()) {
+      if (const auto newPageOffset = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(newPage));
+          newPageOffset == currentPageVisibleOffset) {
+        cachedChapterTotalPageCount = 0;  // consumed; don't read cached progress again
+        cachedVisibleTextOffset.reset();
+        return false;
+      }
+    }
+#endif
     if (newPage != section->currentPage) {
       section->currentPage = newPage;
       changed = true;
@@ -1644,7 +1671,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
   const bool combinedGrayscaleBase = tiledGrayscale && !pageHasImages && renderer.combinesGrayscaleBase();
+#if FREEINK_DEVICE_EEGO_A4
+  const bool overlapRefresh =
+      tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
+#else
   const bool overlapRefresh = tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages;
+#endif
   const auto drawGuideLines = [&] {
     if (!SETTINGS.readingGuideLineEnabled) return;
     const int x1 = orientedMarginLeft;
@@ -1673,6 +1705,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     } else {
       page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     }
+#if FREEINK_DEVICE_EEGO_A4
+    // A4: include the status bar in the gray pass so the final anti-aliased
+    // frame keeps the bottom UI. Without this the gray pass only re-renders
+    // the body and wipes the status bar that the earlier BW frame drew.
+    // (Other devices keep the upstream gray-pass contents.)
+    renderStatusBar();
+#endif
   };
 
   if (SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) renderer.clearScreen();
@@ -1698,7 +1737,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // base + grays as one waveform.
     ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
   } else {
+#if FREEINK_DEVICE_EEGO_A4
+    if (needsTextGrayscale) {
+      const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
+      if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
+    } else {
+      ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+    }
+#else
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+#endif
   }
   const auto tDisplay = millis();
 
@@ -1735,6 +1783,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       renderer.waitRefreshComplete();
       const auto tWait = millis();
+
+      // Abort before expensive grayscale display if a push/pop is pending
+      if (activityManager.isSwitchPending()) {
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.cleanupGrayscaleWithFrameBuffer();
+        return;
+      }
 
       renderer.writeGrayscalePlaneStrip(true, lsbPlaneBuf.get(), 0, gh);
       if (msbPlaneBuf) {
@@ -1774,6 +1829,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       } else {
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
+          if (activityManager.isSwitchPending()) {
+            renderer.setRenderMode(GfxRenderer::BW);
+            renderer.cleanupGrayscaleWithFrameBuffer();
+            return;
+          }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
           renderer.beginStripTarget(scratch.get(), y, rows);
           renderer.clearScreen(0x00);
@@ -1785,6 +1845,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
+          if (activityManager.isSwitchPending()) {
+            renderer.setRenderMode(GfxRenderer::BW);
+            renderer.cleanupGrayscaleWithFrameBuffer();
+            return;
+          }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
           renderer.beginStripTarget(scratch.get(), y, rows);
           renderer.clearScreen(0x00);
@@ -1823,12 +1888,25 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
+      // Abort early if a push/pop is pending (e.g. user opened menu)
+      if (activityManager.isSwitchPending()) {
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.restoreBwBuffer();
+        return;
+      }
+
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
 
+      // Abort before the expensive grayscale display if a push/pop is pending
+      if (activityManager.isSwitchPending()) {
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.restoreBwBuffer();
+        return;
+      }
       renderer.displayGrayBuffer();
       const auto tGrayDisplay = millis();
       renderer.setRenderMode(GfxRenderer::BW);

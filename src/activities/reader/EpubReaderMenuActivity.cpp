@@ -260,5 +260,10 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   renderUi();
 
   drawFooter();
+#if FREEINK_DEVICE_EEGO_A4
+  renderer.displayBuffer(firstRender ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  firstRender = false;
+#else
   renderer.displayBuffer();
+#endif
 }

@@ -122,7 +122,15 @@ void IntervalSelectionActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+#if FREEINK_DEVICE_EEGO_A4
+    // Touch-only A4: no on-screen button hints and no dedicated front Back
+    // key, so users expect leaving the slider to persist the value — matching
+    // the reader's frontlight adjustment page. Other devices keep Back=cancel.
+    setResult(IntervalResult{static_cast<uint32_t>(value)});
+    finish();
+#else
     cancel();
+#endif
     return;
   }
 
