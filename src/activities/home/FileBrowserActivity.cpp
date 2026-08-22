@@ -780,13 +780,9 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   // Tap opens/navigates; long-press prompts delete (physical buttons stay in loop()).
   props.inputMask = fui::InputTouch | fui::InputLongPress;
   props.valueInset = 8;  // air between the extension and the row edge
-  // File names in the small font, wrapping onto a second line inside the same
-  // row height (rowHeight is derived from the small font itself: two of its
-  // lines plus 8, so two small lines always fit), so long names show more
-  // text. maxLines=2 doubles as the caller-owned marker: an all-default
-  // smallText fails textStyleUnset and Screen::list() would substitute
-  // bodyText back (FONT_SLOT_SMALL is 0).
-  fui::TextStyle label = screen.theme().smallText;
+  // Match the pre-FreeInkUI file-list size while keeping two-line wrapping for
+  // long names.
+  fui::TextStyle label = screen.theme().bodyText;
   label.maxLines = 2;
   props.labelText = label;
   // The trailing value here is just the short extension: skip the balanced
