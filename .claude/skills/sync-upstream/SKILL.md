@@ -26,7 +26,7 @@ Private forks can append repeatable build environments, for example
 
 1. Compares `Free-Ink/freeink-sdk/main` with `0x1abin/freeink-sdk/main`.
 2. If the fork is behind, creates `agent/sync-freeink-sdk-main-<sha>`, runs both
-   SDK host suites and CrossMux `default`, `sticky`, `eego_a4`, and `mofei_m4` builds, opens
+   SDK host suites and CrossMux `default`, `sticky`, `eego_a4`, and `murphy_m4` builds, opens
    an SDK draft PR, then stops without changing CrossMux.
 3. After that PR is merged, reads the super.engineering target branch with `sc worktree status --json`
    when available.
@@ -81,7 +81,7 @@ used:
 ```bash
 git diff --check
 git diff --cached --check
-pio run -e default -e sticky -e eego_a4 -e mofei_m4
+pio run -e default -e sticky -e eego_a4 -e murphy_m4
 ```
 
 It also checks for unresolved index entries and conflict markers in tracked

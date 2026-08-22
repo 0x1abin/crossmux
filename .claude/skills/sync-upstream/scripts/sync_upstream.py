@@ -26,7 +26,7 @@ SDK_BRANCH_PREFIX = "agent/sync-freeink-sdk-main"
 DEFAULT_CROSSMUX_ENVS = ("default", "sticky")
 FORK_HARDWARE_TARGETS = (
     ("eego_a4", "FREEINK_DEVICE_EEGO_A4"),
-    ("mofei_m4", "FREEINK_DEVICE_MOFEI_M4"),
+    ("murphy_m4", "FREEINK_DEVICE_MURPHY_M4"),
 )
 
 
@@ -570,7 +570,7 @@ def publish_sdk_sync(ctx: Context, status: SdkStatus, skip_builds: bool) -> None
             "- SDK FreeInkBook host tests\n"
             "- SDK FreeInkUI host tests\n"
             + ("- CrossMux builds skipped with `--skip-builds`\n" if skip_builds else
-               "- CrossMux `default`, `sticky`, `eego_a4`, and `mofei_m4` builds\n")
+               "- CrossMux `default`, `sticky`, `eego_a4`, and `murphy_m4` builds\n")
         )
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
             handle.write(body)
@@ -838,7 +838,7 @@ def add_publish_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--skip-builds", action="store_true", help="skip build validation")
     parser.add_argument(
         "--a4-conflict-note",
-        default="No eego-a4 or mofei-m4 conflicts were recorded by the automated merge.",
+        default="No eego-a4 or murphy-m4 conflicts were recorded by the automated merge.",
         help="fork hardware conflict decisions recorded in the CrossMux PR body",
     )
     parser.add_argument(
