@@ -23,9 +23,13 @@
 #include "../../../src/util/BookCacheUtils.h"
 #include "../../../src/util/TimeUtils.h"
 #include "WeReadProtocol.h"
+#include "WeReadXhtmlCodec.h"
 
 namespace WeReadClient {
 namespace {
+
+using WeReadXhtmlCodec::writeLiteral;
+using WeReadXhtmlCodec::writeXmlText;
 
 constexpr const char* kHost = "https://weread.qq.com";
 constexpr const char* kOrigin = "https://weread.qq.com";
@@ -1570,307 +1574,6 @@ bool combineAndDecode(const std::string* shards, const size_t shardCount, const 
   return true;
 }
 
-bool writeXmlText(HalFile& output, const char* text) {
-  if (!text) return true;
-  for (const auto* p = reinterpret_cast<const uint8_t*>(text); *p; ++p) {
-    const char* escaped = nullptr;
-    switch (*p) {
-      case '&':
-        escaped = "&amp;";
-        break;
-      case '<':
-        escaped = "&lt;";
-        break;
-      case '>':
-        escaped = "&gt;";
-        break;
-      case '"':
-        escaped = "&quot;";
-        break;
-      case '\'':
-        escaped = "&apos;";
-        break;
-      default:
-        if (output.write(*p) != 1) return false;
-        continue;
-    }
-    if (output.write(reinterpret_cast<const uint8_t*>(escaped), strlen(escaped)) != strlen(escaped)) return false;
-  }
-  return true;
-}
-
-bool writeLiteral(HalFile& output, const char* text) {
-  return output.write(reinterpret_cast<const uint8_t*>(text), strlen(text)) == strlen(text);
-}
-
-void decodeBasicHtmlEntities(char* text) {
-  if (!text) return;
-  char* read = text;
-  char* write = text;
-  while (*read) {
-    struct Entity {
-      const char* encoded;
-      char decoded;
-    };
-    static constexpr Entity kEntities[] = {
-        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''}};
-    bool replaced = false;
-    for (const auto& entity : kEntities) {
-      const size_t length = strlen(entity.encoded);
-      if (strncmp(read, entity.encoded, length) != 0) continue;
-      *write++ = entity.decoded;
-      read += length;
-      replaced = true;
-      break;
-    }
-    if (!replaced) *write++ = *read++;
-  }
-  *write = '\0';
-}
-
-struct XhtmlSanitizer {
-  HalFile* output = nullptr;
-  WeReadStore::IndexWriter* imageWriter = nullptr;
-  char* tag = nullptr;
-  size_t tagCapacity = 0;
-  uint32_t chapterIndex = 0;
-  bool plainText = false;
-  bool inTag = false;
-  bool inEntity = false;
-  bool skip = false;
-  bool skipHead = false;
-  bool tagOverflow = false;
-  size_t tagLen = 0;
-  char entity[24] = {};
-  size_t entityLen = 0;
-};
-
-bool emitEntity(XhtmlSanitizer& sanitizer) {
-  sanitizer.entity[sanitizer.entityLen] = '\0';
-  const char* replacement = nullptr;
-  if (strcmp(sanitizer.entity, "amp") == 0) replacement = "&amp;";
-  if (strcmp(sanitizer.entity, "lt") == 0) replacement = "&lt;";
-  if (strcmp(sanitizer.entity, "gt") == 0) replacement = "&gt;";
-  if (strcmp(sanitizer.entity, "quot") == 0) replacement = "&quot;";
-  if (strcmp(sanitizer.entity, "apos") == 0) replacement = "&apos;";
-  if (strcmp(sanitizer.entity, "nbsp") == 0) replacement = "&#160;";
-  bool numericEntity = sanitizer.entity[0] == '#' && sanitizer.entity[1] != '\0';
-  const bool hexEntity = sanitizer.entity[1] == 'x' || sanitizer.entity[1] == 'X';
-  if (hexEntity && sanitizer.entity[2] == '\0') numericEntity = false;
-  for (size_t i = hexEntity ? 2 : 1; numericEntity && sanitizer.entity[i]; ++i) {
-    numericEntity = hexEntity ? std::isxdigit(static_cast<unsigned char>(sanitizer.entity[i]))
-                              : std::isdigit(static_cast<unsigned char>(sanitizer.entity[i]));
-  }
-  if (numericEntity) {
-    char numeric[32];
-    const int written = snprintf(numeric, sizeof(numeric), "&%s;", sanitizer.entity);
-    if (written <= 0 || static_cast<size_t>(written) >= sizeof(numeric)) return false;
-    replacement = numeric;
-    const bool ok = writeLiteral(*sanitizer.output, replacement);
-    sanitizer.entityLen = 0;
-    sanitizer.inEntity = false;
-    return ok;
-  }
-  bool ok = true;
-  if (replacement) {
-    ok = writeLiteral(*sanitizer.output, replacement);
-  } else {
-    ok = writeLiteral(*sanitizer.output, "&amp;") && writeLiteral(*sanitizer.output, sanitizer.entity) &&
-         writeLiteral(*sanitizer.output, ";");
-  }
-  sanitizer.entityLen = 0;
-  sanitizer.inEntity = false;
-  return ok;
-}
-
-bool emitSanitizedTextByte(XhtmlSanitizer& sanitizer, const uint8_t value) {
-  if (sanitizer.skip || sanitizer.skipHead) return true;
-  if (sanitizer.plainText) {
-    if (value == '\r') return true;
-    if (value == '\n') return writeLiteral(*sanitizer.output, "<br/>");
-  }
-  if (sanitizer.inEntity) {
-    if (value == ';') return emitEntity(sanitizer);
-    if (sanitizer.entityLen + 1 >= sizeof(sanitizer.entity) || value == '<' || value == '&' || std::isspace(value)) {
-      if (!writeLiteral(*sanitizer.output, "&amp;") ||
-          sanitizer.output->write(reinterpret_cast<const uint8_t*>(sanitizer.entity), sanitizer.entityLen) !=
-              sanitizer.entityLen) {
-        return false;
-      }
-      sanitizer.entityLen = 0;
-      sanitizer.inEntity = false;
-    } else {
-      sanitizer.entity[sanitizer.entityLen++] = static_cast<char>(value);
-      return true;
-    }
-  }
-  if (value == '&') {
-    sanitizer.inEntity = true;
-    sanitizer.entityLen = 0;
-    return true;
-  }
-  if (value < 0x20 && value != '\t' && value != '\n') return true;
-  if (value == '<') return writeLiteral(*sanitizer.output, "&lt;");
-  if (value == '>') return writeLiteral(*sanitizer.output, "&gt;");
-  return sanitizer.output->write(value) == 1;
-}
-
-bool processTag(XhtmlSanitizer& sanitizer) {
-  if (sanitizer.tagOverflow || !sanitizer.tag || sanitizer.tagCapacity == 0) {
-    sanitizer.tagLen = 0;
-    sanitizer.inTag = false;
-    sanitizer.tagOverflow = false;
-    return true;
-  }
-  sanitizer.tag[sanitizer.tagLen] = '\0';
-  const char* tagEnd = sanitizer.tag + sanitizer.tagLen;
-  while (tagEnd > sanitizer.tag && std::isspace(static_cast<unsigned char>(tagEnd[-1]))) --tagEnd;
-  const bool selfClosing = tagEnd > sanitizer.tag && tagEnd[-1] == '/';
-  const char* cursor = sanitizer.tag;
-  while (*cursor && std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
-  bool closing = false;
-  if (*cursor == '/') {
-    closing = true;
-    ++cursor;
-  }
-  char name[24] = {};
-  size_t len = 0;
-  while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != '/' && *cursor != '>' &&
-         len + 1 < sizeof(name)) {
-    name[len++] = static_cast<char>(std::tolower(static_cast<unsigned char>(*cursor++)));
-  }
-  name[len] = '\0';
-  sanitizer.tagLen = 0;
-  sanitizer.inTag = false;
-  if (!name[0] || name[0] == '!' || name[0] == '?') return true;
-
-  if (strcmp(name, "head") == 0) {
-    sanitizer.skipHead = !closing && !selfClosing;
-    return true;
-  }
-  if (strcmp(name, "script") == 0 || strcmp(name, "style") == 0) {
-    sanitizer.skip = !closing && !selfClosing;
-    return true;
-  }
-  if (!closing && strcmp(name, "img") == 0 && !sanitizer.skip && !sanitizer.skipHead) {
-    WeReadStore::ImageRecord record;
-    char alt[256] = {};
-    const bool extracted =
-        WeReadProtocol::extractImageAttributes(sanitizer.tag, record.url, sizeof(record.url), alt, sizeof(alt));
-    const WeReadProtocol::ImageType type =
-        extracted ? WeReadProtocol::normalizeImageUrl(record.url, sanitizer.tag, sizeof(record.url))
-                  : WeReadProtocol::ImageType::None;
-    decodeBasicHtmlEntities(alt);
-    if (type != WeReadProtocol::ImageType::None) {
-      memcpy(record.url, sanitizer.tag, strlen(sanitizer.tag) + 1);
-      const char* extension = type == WeReadProtocol::ImageType::Jpeg ? "jpg" : "png";
-      const int hrefLen = snprintf(record.href, sizeof(record.href), "images/ch%06u-%u.%s",
-                                   static_cast<unsigned>(sanitizer.chapterIndex),
-                                   static_cast<unsigned>(sanitizer.imageWriter->count()), extension);
-      if (hrefLen <= 0 || static_cast<size_t>(hrefLen) >= sizeof(record.href) ||
-          !sanitizer.imageWriter->append(&record) || !writeLiteral(*sanitizer.output, "<img src=\"") ||
-          !writeLiteral(*sanitizer.output, record.href)) {
-        return false;
-      }
-      if (alt[0] && (!writeLiteral(*sanitizer.output, "\" alt=\"") || !writeXmlText(*sanitizer.output, alt))) {
-        return false;
-      }
-      return writeLiteral(*sanitizer.output, "\"/>");
-    }
-    return !alt[0] || writeXmlText(*sanitizer.output, alt);
-  }
-  if (sanitizer.skip || sanitizer.skipHead || strcmp(name, "html") == 0 || strcmp(name, "body") == 0 ||
-      !WeReadProtocol::isAllowedXhtmlTag(name)) {
-    return true;
-  }
-  if (!writeLiteral(*sanitizer.output, "<")) return false;
-  if (closing && !writeLiteral(*sanitizer.output, "/")) return false;
-  if (!writeLiteral(*sanitizer.output, name)) return false;
-  if (!closing && (selfClosing || strcmp(name, "br") == 0 || strcmp(name, "hr") == 0) &&
-      !writeLiteral(*sanitizer.output, "/")) {
-    return false;
-  }
-  return writeLiteral(*sanitizer.output, ">");
-}
-
-bool sanitizeToXhtml(const std::string& inputPath, const std::string& outputPath, const std::string& imageIndexPath,
-                     const uint32_t chapterIndex, const char* title, const bool plainText, uint8_t* readBuffer,
-                     const size_t readBufferSize, char* tagBuffer, const size_t tagBufferSize) {
-  HalFile input;
-  if (!readBuffer || readBufferSize == 0 || !tagBuffer || tagBufferSize < sizeof(WeReadStore::ImageRecord::url) ||
-      !Storage.openFileForRead("WR", inputPath, input)) {
-    return false;
-  }
-  const std::string partPath = outputPath + ".part";
-  if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
-  if (Storage.exists(imageIndexPath.c_str()) && !Storage.remove(imageIndexPath.c_str())) return false;
-  HalFile output;
-  if (!Storage.openFileForWrite("WR", partPath, output)) return false;
-  WeReadStore::IndexWriter imageWriter;
-  if (!imageWriter.begin(imageIndexPath, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord))) return false;
-
-  const bool written = [&]() {
-    if (!writeLiteral(output,
-                      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                      "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>") ||
-        !writeXmlText(output, title) || !writeLiteral(output, "</title></head><body>") ||
-        (plainText && !writeLiteral(output, "<p>"))) {
-      return false;
-    }
-
-    XhtmlSanitizer sanitizer{&output, &imageWriter, tagBuffer, tagBufferSize, chapterIndex, plainText};
-    while (input.available()) {
-      const int got = input.read(readBuffer, readBufferSize);
-      if (got <= 0) return false;
-      for (int i = 0; i < got;) {
-        if (!sanitizer.inTag && !sanitizer.inEntity && !sanitizer.skip && !sanitizer.skipHead) {
-          const size_t run =
-              WeReadProtocol::safeXhtmlTextRunLength(readBuffer + i, static_cast<size_t>(got - i), plainText);
-          if (run > 0) {
-            if (output.write(readBuffer + i, run) != run) return false;
-            i += static_cast<int>(run);
-            continue;
-          }
-        }
-        const uint8_t value = readBuffer[i++];
-        if (!plainText && sanitizer.inTag) {
-          if (value == '>') {
-            if (!processTag(sanitizer)) return false;
-          } else if (sanitizer.tagLen + 1 < sanitizer.tagCapacity) {
-            sanitizer.tag[sanitizer.tagLen++] = static_cast<char>(value);
-          } else {
-            sanitizer.tagOverflow = true;
-          }
-          continue;
-        }
-        if (!plainText && value == '<') {
-          if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
-          sanitizer.inTag = true;
-          sanitizer.tagOverflow = false;
-          sanitizer.tagLen = 0;
-          continue;
-        }
-        if (!emitSanitizedTextByte(sanitizer, value)) return false;
-      }
-    }
-    if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
-    return (!plainText || writeLiteral(output, "</p>")) && writeLiteral(output, "</body></html>");
-  }();
-  if (!written) {
-    imageWriter.abort();
-    output.close();
-    Storage.remove(partPath.c_str());
-    return false;
-  }
-  output.flush();
-  output.close();
-  if (!WeReadStore::atomicReplace(partPath, outputPath) || !imageWriter.finish()) {
-    Storage.remove(partPath.c_str());
-    return false;
-  }
-  return true;
-}
-
 Error writePackageFiles(const std::string& bookDir, const WeReadStore::ShelfRecord& book, const std::string& tocPath,
                         const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
                         const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath,
@@ -2322,13 +2025,7 @@ bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input, c
     phase_ = Phase::Failed;
     return false;
   }
-  if (session_.rt[0]) {
-    renewalAttempted_ = true;
-    resumePhase_ = Phase::PrepareProgressSync;
-    phase_ = Phase::Renew;
-  } else {
-    phase_ = Phase::PrepareProgressSync;
-  }
+  phase_ = Phase::PrepareProgressSync;
   logMemory("progress sync start");
   return true;
 }
@@ -3100,17 +2797,29 @@ void Operation::persistInitialProgress() {
 Error Operation::decideProgress() {
   const float remoteFraction = normalizedRemoteProgress();
   progressSyncResult_.remote.percent = remoteFraction * 100.0f;
-  const bool preciseLocal =
-      progressSyncInput_.hasLocalTocIndex &&
-      WeReadStore::mapPageToChapter(tocPath_, progressSyncInput_.localTocIndex, progressSyncInput_.localPageNumber,
-                                    progressSyncInput_.localPageCount, chapter_, progressChapterOffset_,
-                                    progressSyncInput_.localFraction);
+  bool preciseLocal = false;
+  const char* basis = "fraction";
+  switch (progressSyncInput_.localOffsetBasis) {
+    case LocalOffsetBasis::None:
+      break;
+    case LocalOffsetBasis::VisibleText:
+      preciseLocal = WeReadStore::mapVisibleOffsetToChapter(tocPath_, progressSyncInput_.localTocIndex,
+                                                            progressSyncInput_.localOffset, chapter_,
+                                                            progressChapterOffset_, progressSyncInput_.localFraction);
+      if (preciseLocal) basis = "visible_text";
+      break;
+    case LocalOffsetBasis::RawXhtmlUtf16:
+      preciseLocal = WeReadStore::mapNativeOffsetToChapter(
+          tocPath_, progressSyncInput_.localTocIndex, progressSyncInput_.localOffset, chapter_, progressChapterOffset_);
+      if (preciseLocal) basis = "raw_xhtml_utf16";
+      break;
+  }
   if (!preciseLocal && !WeReadStore::mapFractionToChapter(tocPath_, progressSyncInput_.localFraction, chapter_,
                                                           progressChapterOffset_)) {
     return Error::Unavailable;
   }
-  LOG_INF("WR", "local progress mapping: precise=%u toc=%u chapter=%s offset=%u fraction=%lu",
-          static_cast<unsigned>(preciseLocal), static_cast<unsigned>(progressSyncInput_.localTocIndex),
+  LOG_INF("WR", "local progress mapping: precise=%u basis=%s toc=%u chapter=%s offset=%u fraction=%lu",
+          static_cast<unsigned>(preciseLocal), basis, static_cast<unsigned>(progressSyncInput_.localTocIndex),
           chapter_.chapterUid, static_cast<unsigned>(progressChapterOffset_),
           static_cast<unsigned long>(progressSyncInput_.localFraction * 1000000.0f + 0.5f));
   const bool samePosition = sameRemotePosition();
@@ -3666,10 +3375,10 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
     cleanup();
     return retryChapterResponse();
   }
-  const bool ok = sanitizeToXhtml(decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_),
-                                  WeReadStore::imageIndexPath(bookDir_, chapterIndex_), chapterIndex_, chapter_.title,
-                                  plainText, reinterpret_cast<uint8_t*>(url_), sizeof(url_),
-                                  reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_));
+  const bool ok = WeReadXhtmlCodec::sanitizeChapter(
+      decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_), WeReadStore::imageIndexPath(bookDir_, chapterIndex_),
+      chapterIndex_, chapter_.title, plainText, reinterpret_cast<uint8_t*>(url_), sizeof(url_),
+      reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_));
   cleanup();
   if (!ok) return fail(Error::SdCard);
   phase_ = Phase::AdvanceChapter;
@@ -3883,6 +3592,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::PrepareDownload: {
       if (!preparePaths()) return fail(Error::SdCard);
+      LOG_INF("WR", "download cache mode: refresh=%u", static_cast<unsigned>(Storage.exists(outputPath_.c_str())));
       phase_ = Phase::FetchToc;
       return Event::None;
     }
@@ -4065,7 +3775,8 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       chapterResponseAttempts_ = 0;
       HalFile imageIndex;
       uint32_t imageCount = 0;
-      if (Storage.exists(WeReadStore::chapterPath(bookDir_, chapterIndex_).c_str()) &&
+      if (reuseChapterFile(Storage.exists(outputPath_.c_str()),
+                           Storage.exists(WeReadStore::chapterPath(bookDir_, chapterIndex_).c_str())) &&
           WeReadStore::openImageIndex(WeReadStore::imageIndexPath(bookDir_, chapterIndex_), imageIndex, imageCount)) {
         phase_ = Phase::AdvanceChapter;
         return Event::None;

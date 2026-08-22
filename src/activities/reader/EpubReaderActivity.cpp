@@ -1039,6 +1039,7 @@ bool EpubReaderActivity::launchWeReadSync() {
   const float chapterFraction =
       totalPages > 1 ? static_cast<float>(currentPage) / static_cast<float>(totalPages - 1) : 0.0f;
   const float localFraction = epub->calculateProgress(currentSpineIndex, chapterFraction);
+  const CrossPointPosition localPosition = getCurrentPosition();
   std::string savedEpubPath = epub->getPath();
 
   if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
@@ -1048,9 +1049,7 @@ bool EpubReaderActivity::launchWeReadSync() {
     return true;
   }
 
-  const auto context = WeReadProgressSyncActivity::makeContext(
-      *epub, wereadBookId_, localFraction, static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(currentPage),
-      static_cast<uint16_t>(totalPages));
+  const auto context = WeReadProgressSyncActivity::makeContext(*epub, wereadBookId_, localFraction, localPosition);
   auto sync = makeUniqueNoThrow<WeReadProgressSyncActivity>(renderer, mappedInput, std::move(savedEpubPath),
                                                             wereadBookId_, context);
   if (!sync) {
@@ -1262,7 +1261,6 @@ void EpubReaderActivity::renderBook() {
     const bool cacheLoaded = section->loadSectionFile(renderSpec);
     if (cacheLoaded) {
       cachedChapterTotalPageCount = 0;
-      cachedVisibleTextOffset.reset();
     }
     const bool cacheComplete = cacheLoaded && !section->isPartial();
     const bool explicitOffsetJump = pendingOffsetJump.has_value();

@@ -201,8 +201,10 @@ std::string finalBookPath(const ShelfRecord& book);
 bool findBookIdForPath(const std::string& path, char* bookId, size_t bookIdSize);
 bool parseGeneratedChapterHref(const std::string& href, uint32_t& tocIndex);
 bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& chapter, uint32_t& chapterOffset);
-bool mapPageToChapter(const std::string& path, uint32_t tocIndex, uint16_t pageNumber, uint16_t pageCount,
-                      TocRecord& chapter, uint32_t& chapterOffset, float& fraction);
+bool mapVisibleOffsetToChapter(const std::string& path, uint32_t tocIndex, uint32_t visibleTextOffset,
+                               TocRecord& chapter, uint32_t& chapterOffset, float& fraction);
+bool mapNativeOffsetToChapter(const std::string& path, uint32_t tocIndex, uint32_t nativeOffset, TocRecord& chapter,
+                              uint32_t& chapterOffset);
 bool mapChapterToFraction(const std::string& path, const char* chapterUid, uint32_t chapterOffset, float& fraction);
 bool mapChapterToPosition(const std::string& path, const char* chapterUid, uint32_t chapterOffset, uint32_t& tocIndex,
                           float& chapterFraction, float& bookFraction);

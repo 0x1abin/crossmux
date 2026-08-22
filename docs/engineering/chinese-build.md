@@ -108,19 +108,24 @@ EPUBs continue to use KOReader. WeRead public-account books (`MP_WXS_`), moved
 files, and renamed files are intentionally treated as ordinary EPUBs. The
 existing long-press KOReader shortcut is unchanged.
 
-Manual WeRead sync renews the saved Cookie, fetches the remote position, and
-maps it through the `WRT2` chapter word counts. Positions within two percentage
-points are left unchanged. Otherwise the farther position wins automatically:
-a remote position is applied locally, or the local position is sent with an
-enter/report pair. For an exact WeRead EPUB, the report also includes the whole
-seconds recorded by the local reading session that ended when manual sync was
-opened. Equal positions report against the local position; when the remote
-position is selected, its exact chapter and offset are reported before being
-applied locally, so reporting time cannot move cloud progress backwards. A
-timed report is not automatically repeated after an ambiguous network failure;
-the current sync screen retains it for an explicit Retry, but no pending time is
-persisted after leaving the screen. An expired session directs the user back to
-**Apps → WeRead** to sign in; it does not open a QR flow from the reader.
+Manual WeRead sync starts with the saved Cookie and renews it only after an
+authentication failure. Newly generated WeRead chapters retain invisible
+raw-XHTML UTF-16 source anchors. These map the local page's visible-text offset
+to WeRead's native `chapterUid + chapterOffset` coordinate without clamping the
+offset to the `WRT2` word count; the inverse mapping restores a remote offset
+through the reader's existing pagination LUT. Older generated books without
+anchors retain the visible-offset approximation, and other EPUBs fall back to
+the whole-book percentage derived from `WRT2` word counts. Different canonical
+positions show the direction selector. A local upload uses an enter/report pair
+and includes the whole seconds recorded by the local reading session that ended
+when manual sync was opened. When the remote position is selected, its exact
+chapter and offset are reported before being applied locally, so reporting time
+cannot move cloud progress backwards. Upload is accepted only after a read-back
+verifies the chapter and offset. A timed report is not automatically repeated
+after an ambiguous network failure; the current sync screen retains it for an
+explicit Retry, but no pending time is persisted after leaving the screen. An
+expired session directs the user back to **Apps → WeRead** to sign in; it does
+not open a QR flow from the reader.
 
 For a new standard-book cache, the downloader fetches cloud progress after the
 `WRT2` catalog and before any chapter or image. This request is best effort:

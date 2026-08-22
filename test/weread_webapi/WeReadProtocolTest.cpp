@@ -47,6 +47,9 @@ struct OperationTestPeer {
   static bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
     return Operation::shouldRetryPaidPreview(paid, plainText, hasXhtmlTag);
   }
+  static bool reuseChapterFile(const bool refreshingBook, const bool chapterExists) {
+    return Operation::reuseChapterFile(refreshingBook, chapterExists);
+  }
   static bool imageAttemptPending(const uint8_t attempts) { return Operation::imageAttemptPending(attempts); }
   static bool imageRedirectAllowed(const uint8_t redirects) { return Operation::imageRedirectAllowed(redirects); }
   static bool validChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
@@ -435,6 +438,14 @@ TEST(WeReadClientState, RetryableChapterResponsesNeverSignalCompletion) {
   EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(false, false, false));
   EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, true, false));
   EXPECT_FALSE(WeReadClient::OperationTestPeer::shouldRetryPaidPreview(true, false, true));
+}
+
+TEST(WeReadClientState, ReusesChaptersOnlyWhenResumingAnInitialDownload) {
+  const auto reuse = WeReadClient::OperationTestPeer::reuseChapterFile;
+  EXPECT_TRUE(reuse(false, true));
+  EXPECT_FALSE(reuse(false, false));
+  EXPECT_FALSE(reuse(true, true));
+  EXPECT_FALSE(reuse(true, false));
 }
 
 TEST(WeReadClientState, ExposesDetailBeforePendingCover) {
