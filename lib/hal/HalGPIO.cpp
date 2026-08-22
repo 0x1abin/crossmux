@@ -7,6 +7,12 @@
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 
+#include "Waveshare397Power.h"
+
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
+#include <soc/usb_serial_jtag_reg.h>
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
@@ -45,6 +51,12 @@ namespace {
 constexpr char HW_NAMESPACE[] = "cphw";
 constexpr char NVS_KEY_DEV_OVERRIDE[] = "dev_ovr";  // 0=auto, 1=x4, 2=x3
 constexpr char NVS_KEY_DEV_CACHED[] = "dev_det";    // 0=unknown, 1=x4, 2=x3
+
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+uint8_t wavesharePowerButtonHook() {
+  return Waveshare397Power::powerButtonPressed() ? static_cast<uint8_t>(1u << HalGPIO::BTN_POWER) : 0;
+}
+#endif
 
 enum class NvsDeviceValue : uint8_t { Unknown = 0, X4 = 1, X3 = 2 };
 
@@ -135,6 +147,9 @@ void HalGPIO::begin() {
 #else
   _deviceType = DeviceType::X4;
 #endif
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  InputManager::setButtonHook(wavesharePowerButtonHook);
+#endif
   inputMgr.begin();
 }
 
@@ -193,6 +208,10 @@ bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEn
 
 bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
 
+void HalGPIO::clearTouchTapEvent() { inputMgr.clearTouchTapEvent(); }
+
+void HalGPIO::prepareForDeepSleep() { inputMgr.prepareForDeepSleep(); }
+
 void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
 }
@@ -250,6 +269,28 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
   return true;
 }
 
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
+// X4 Pro has no confirmed VBUS GPIO. A USB data host is observable through the
+// USB Serial/JTAG SOF counter; keep the last positive result across nearby polls.
+static bool usbHostSofActive() {
+  static uint32_t lastFrame = 0;
+  static unsigned long lastAdvanceMs = 0;
+  static bool seeded = false;
+  if (!seeded) {
+    seeded = true;
+    lastFrame = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+    delay(3);  // A connected host advances the 1 kHz SOF counter within this window.
+  }
+  const uint32_t frame = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+  if (frame != lastFrame) {
+    lastFrame = frame;
+    lastAdvanceMs = millis();
+    return true;
+  }
+  return lastAdvanceMs != 0 && millis() - lastAdvanceMs < 1500;
+}
+#endif
+
 bool HalGPIO::isUsbConnected() const {
   if (deviceIsX3()) {
     // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
@@ -263,8 +304,17 @@ bool HalGPIO::isUsbConnected() const {
     }
     return false;
   }
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+  bool connected = false;
+  if (Waveshare397Power::externalPowerConnected(connected)) return connected;
+  return usbHostSofActive();
+#endif
   if (BoardConfig::ACTIVE.usbDetect < 0) {
+#if FREEINK_DEVICE_X4PRO
+    return usbHostSofActive();
+#else
     return false;
+#endif
   }
   return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
 }
