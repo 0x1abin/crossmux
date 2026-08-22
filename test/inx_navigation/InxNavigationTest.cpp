@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <type_traits>
+
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
 #include "activities/MainTab.h"
@@ -13,6 +15,20 @@
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
 
 namespace {
+using DrawListMethod = void (BaseTheme::*)(const GfxRenderer&, Rect, int, int, const std::function<std::string(int)>&,
+                                           const std::function<std::string(int)>&, const std::function<UIIcon(int)>&,
+                                           const std::function<std::string(int)>&, bool,
+                                           const std::function<bool(int)>&, bool,
+                                           const std::function<bool(int)>&) const;
+using DrawButtonMenuMethod = void (BaseTheme::*)(GfxRenderer&, Rect, int, int, const std::function<std::string(int)>&,
+                                                 const std::function<UIIcon(int)>&, int) const;
+
+static_assert(std::is_same_v<decltype(&BaseTheme::drawList), DrawListMethod>);
+static_assert(std::is_same_v<decltype(&BaseTheme::drawButtonMenu), DrawButtonMenuMethod>);
+static_assert(!BaseMetrics::values.homeShowRecentBookTitle);
+static_assert(RoundedRaffMetrics::values.homeShowRecentBookTitle);
+static_assert(RoundedRaffMetrics::values.topPadding == 0);
+
 constexpr uint32_t iconHash(const InxAppIcons::Icon& icon) {
   uint32_t hash = 2166136261u;
   for (const uint8_t byte : icon) hash = (hash ^ byte) * 16777619u;
@@ -43,6 +59,20 @@ TEST(InxNavigation, WrapsAcrossFiveTabs) {
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::First, 10), 0);
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 1), 0);
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 10), 9);
+}
+
+TEST(InxNavigation, KeepsLegacyListMetricsIndependentFromLyra) {
+  EXPECT_EQ(InxMetrics::values.listRowHeight, 66);
+  EXPECT_EQ(InxMetrics::values.listWithSubtitleRowHeight, 66);
+  EXPECT_EQ(InxMetrics::values.listRowGap, 0);
+  EXPECT_EQ(InxMetrics::values.listRowRadius, 0);
+  EXPECT_EQ(InxMetrics::values.listInset, 0);
+  EXPECT_EQ(InxMetrics::values.listSidePadding, 20);
+  EXPECT_EQ(InxMetrics::values.listSelectionStyle, 0);
+  EXPECT_EQ(InxMetrics::values.listScrollWidth, 6);
+  EXPECT_EQ(InxMetrics::values.listSeparatorStyle, 2);
+  EXPECT_EQ(InxMetrics::values.listValueMaxWidth, 200);
+  EXPECT_TRUE(InxMetrics::values.listSelectionCoversScrollReservation);
 }
 
 TEST(InxNavigation, KeepsRecentPagesInsideBounds) {
@@ -130,6 +160,17 @@ TEST(InxNavigation, MapsAccordionRowsWithoutFlatteningSettings) {
   EXPECT_EQ(InxAccordionGeometry::rowAt(counts, displayAndSystem, 7).category, 3);
   EXPECT_EQ(InxAccordionGeometry::rowAt(counts, displayAndSystem, 7).setting, 1);
   EXPECT_EQ(InxAccordionGeometry::categoryRow(counts, displayAndSystem, 3), 5);
+}
+
+TEST(InxNavigation, KeepsOptionPopupOnFiveCenteredRows) {
+  EXPECT_EQ(InxOptionGeometry::visibleRows(0), 0);
+  EXPECT_EQ(InxOptionGeometry::visibleRows(3), 3);
+  EXPECT_EQ(InxOptionGeometry::visibleRows(8), 5);
+  EXPECT_EQ(InxOptionGeometry::start(0, 8), 0);
+  EXPECT_EQ(InxOptionGeometry::start(3, 8), 1);
+  EXPECT_EQ(InxOptionGeometry::start(7, 8), 3);
+  EXPECT_EQ(InxOptionGeometry::headerHeight, 62);
+  EXPECT_EQ(InxOptionGeometry::rowHeight, 62);
 }
 
 TEST(InxNavigation, KeepsStatisticsViewsInsideBounds) {
@@ -249,10 +290,4 @@ TEST(InxNavigation, KeepsButtonMenuTouchGeometryAlignedWithThemes) {
       firstRowTop + (rowCount - 1) * (BaseMetrics::values.menuRowHeight + spacing) + BaseMetrics::values.menuRowHeight;
   EXPECT_EQ(firstRowTop, 110);
   EXPECT_EQ(lastRowBottom, 253);
-}
-
-TEST(InxNavigation, MeasuresCompleteProgressBlock) {
-  EXPECT_EQ(ProgressBarGeometry::contentHeight(16, 24), 55);
-  EXPECT_EQ(ProgressBarGeometry::contentHeight(16, 24, false), 16);
-  EXPECT_EQ(ProgressBarGeometry::contentHeight(0, 24), 0);
 }

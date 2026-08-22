@@ -5,6 +5,7 @@
 #include <ObfuscationUtils.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -24,16 +25,99 @@ struct IndexHeader {
 };
 static_assert(sizeof(IndexHeader) == 12);
 
+struct CacheGenerationRecord {
+  uint32_t magic = kCacheGenerationMagic;
+  uint16_t generation = kCacheGeneration;
+  uint16_t reserved = 0;
+};
+static_assert(sizeof(CacheGenerationRecord) == 8);
+
 struct ShelfSortKey {
   uint32_t readUpdateTime;
   uint32_t sourceIndex;
 };
 static_assert(sizeof(ShelfSortKey) == 8);
 
+#ifdef CROSSPOINT_EMULATED
+bool failNextFullShelfSortAllocation = false;
+#endif
+
+bool shelfSortKeyBefore(const ShelfSortKey& left, const ShelfSortKey& right) {
+  if (left.readUpdateTime != right.readUpdateTime) return left.readUpdateTime > right.readUpdateTime;
+  return left.sourceIndex < right.sourceIndex;
+}
+
+bool readShelfUpdateTime(HalFile& file, const uint32_t index, uint32_t& readUpdateTime) {
+  const uint64_t offset =
+      sizeof(IndexHeader) + static_cast<uint64_t>(index) * sizeof(ShelfRecord) + offsetof(ShelfRecord, readUpdateTime);
+  return file.seek64(offset) &&
+         file.read(&readUpdateTime, sizeof(readUpdateTime)) == static_cast<int>(sizeof(readUpdateTime));
+}
+
+bool rewriteShelf(HalFile& source, const uint32_t count, const ShelfSortKey* keys, const uint32_t keyCount,
+                  IndexWriter& writer) {
+  if (!writer.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return false;
+
+  ShelfRecord record;
+  for (uint32_t i = 0; i < keyCount; ++i) {
+    if (!readShelfRecord(source, keys[i].sourceIndex, record) || !writer.append(&record)) {
+      writer.abort();
+      return false;
+    }
+  }
+  if (keyCount == count) return true;
+
+  for (uint32_t sourceIndex = 0; sourceIndex < count; ++sourceIndex) {
+    bool inRecentHead = false;
+    for (uint32_t i = 0; i < keyCount; ++i) {
+      if (keys[i].sourceIndex == sourceIndex) {
+        inRecentHead = true;
+        break;
+      }
+    }
+    if (inRecentHead) continue;
+    if (!readShelfRecord(source, sourceIndex, record) || !writer.append(&record)) {
+      writer.abort();
+      return false;
+    }
+  }
+  return true;
+}
+
+ShelfSortResult sortRecentShelfHead(HalFile& source, const uint32_t count, IndexWriter& writer) {
+  const uint32_t keyCount = std::min(count, kRecentShelfWindow);
+  // Fixed 160-byte stack workspace; unlike the full sort it cannot fragment
+  // the heap or fail under memory pressure.
+  std::array<ShelfSortKey, kRecentShelfWindow> keys{};
+
+  uint32_t used = 0;
+  for (uint32_t sourceIndex = 0; sourceIndex < count; ++sourceIndex) {
+    uint32_t readUpdateTime = 0;
+    if (!readShelfUpdateTime(source, sourceIndex, readUpdateTime)) return ShelfSortResult::StorageError;
+    const ShelfSortKey candidate{readUpdateTime, sourceIndex};
+    if (used == keyCount && !shelfSortKeyBefore(candidate, keys[used - 1])) continue;
+
+    uint32_t position = used < keyCount ? used++ : used - 1;
+    while (position > 0 && shelfSortKeyBefore(candidate, keys[position - 1])) {
+      if (position < keyCount) keys[position] = keys[position - 1];
+      --position;
+    }
+    keys[position] = candidate;
+  }
+
+  bool alreadyAtHead = true;
+  for (uint32_t i = 0; i < keyCount; ++i) alreadyAtHead &= keys[i].sourceIndex == i;
+  if (alreadyAtHead) return ShelfSortResult::Degraded;
+
+  return rewriteShelf(source, count, keys.data(), keyCount, writer) ? ShelfSortResult::Degraded
+                                                                    : ShelfSortResult::StorageError;
+}
+
 constexpr size_t kMaxSessionFileSize = 2048;
 constexpr char kDisclaimerAcceptanceMarker[] = "WRD1\n";
 constexpr char kSessionMagic[] = "WRA1\n";
 constexpr char kShelfPartPath[] = "/.crosspoint/weread/shelf.bin.part";
+constexpr char kCacheGenerationPartPath[] = "/.crosspoint/weread/cache.version.part";
 
 template <size_t N>
 bool setBounded(char (&dest)[N], const char* value, const size_t len) {
@@ -258,7 +342,8 @@ bool clearCache() {
         ok = false;
         continue;
       }
-      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0) {
+      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0 ||
+          strcmp(name, "cache.version") == 0) {
         continue;
       }
       isDirectory = entry.isDirectory();
@@ -278,6 +363,58 @@ bool clearCache() {
     }
   }
   return ok;
+}
+
+bool ensureCacheGeneration() {
+  if (!ensureRoot()) {
+    LOG_ERR("WR", "Cache generation: failed to prepare root");
+    return false;
+  }
+
+  CacheGenerationRecord stored;
+  bool valid = false;
+  {
+    HalFile file;
+    valid = Storage.openFileForRead("WR", kCacheGenerationPath, file) &&
+            file.fileSize() == sizeof(CacheGenerationRecord) &&
+            file.read(&stored, sizeof(stored)) == static_cast<int>(sizeof(stored)) &&
+            stored.magic == kCacheGenerationMagic && stored.reserved == 0;
+  }
+  if (valid && stored.generation == kCacheGeneration) {
+    if (Storage.exists(kCacheGenerationPartPath) && !Storage.remove(kCacheGenerationPartPath)) {
+      LOG_ERR("WR", "Cache generation: failed to remove stale part");
+      return false;
+    }
+    return true;
+  }
+
+  if (valid) {
+    LOG_INF("WR", "Cache generation changed: old=%u new=%u", static_cast<unsigned>(stored.generation),
+            static_cast<unsigned>(kCacheGeneration));
+  } else {
+    LOG_INF("WR", "Cache generation missing or invalid; rebuilding for version %u",
+            static_cast<unsigned>(kCacheGeneration));
+  }
+  if (!clearCache()) {
+    LOG_ERR("WR", "Cache generation: failed to clear stale cache");
+    return false;
+  }
+
+  const CacheGenerationRecord current;
+  bool written = false;
+  {
+    HalFile file;
+    written = Storage.openFileForWrite("WR", kCacheGenerationPartPath, file) &&
+              file.write(&current, sizeof(current)) == sizeof(current);
+    if (written) file.flush();
+  }
+  if (!written || !atomicReplace(kCacheGenerationPartPath, kCacheGenerationPath)) {
+    if (Storage.exists(kCacheGenerationPartPath)) Storage.remove(kCacheGenerationPartPath);
+    LOG_ERR("WR", "Cache generation: failed to persist version %u", static_cast<unsigned>(kCacheGeneration));
+    return false;
+  }
+  LOG_INF("WR", "Cache generation ready: version=%u", static_cast<unsigned>(kCacheGeneration));
+  return true;
 }
 
 bool IndexWriter::begin(const std::string& finalPath, const uint32_t magic, const uint16_t recordSize) {
@@ -384,60 +521,49 @@ bool openShelf(HalFile& file, uint32_t& count) {
 
 ShelfSortResult sortShelfByRecent() {
   IndexWriter sorted;
+  ShelfSortResult result = ShelfSortResult::Ok;
   {
     HalFile source;
     uint32_t count = 0;
     if (!openShelf(source, count)) return ShelfSortResult::StorageError;
     if (count < 2) return ShelfSortResult::Ok;
-    if (static_cast<size_t>(count) > SIZE_MAX / sizeof(ShelfSortKey)) return ShelfSortResult::OutOfMemory;
 
-    // Sorting needs one rank per book; keep it off the small task stack. This is
-    // the only allocation and is exactly 8 * count bytes, released before return.
-    auto keys = makeUniqueNoThrow<ShelfSortKey[]>(count);
-    if (!keys) {
-      LOG_ERR("WR", "OOM: shelf sort (%zu bytes)", static_cast<size_t>(count) * sizeof(ShelfSortKey));
-      return ShelfSortResult::OutOfMemory;
-    }
+    if (count > kLargeShelfThreshold) {
+      result = sortRecentShelfHead(source, count, sorted);
+    } else {
+      // Full sorting is capped at 4 KB by kLargeShelfThreshold. It stays off
+      // the small task stack and is released before the function returns.
+      auto keys = makeUniqueNoThrow<ShelfSortKey[]>(count);
+#ifdef CROSSPOINT_EMULATED
+      if (failNextFullShelfSortAllocation) keys.reset();
+      failNextFullShelfSortAllocation = false;
+#endif
+      if (!keys) {
+        LOG_ERR("WR", "OOM: shelf sort (%zu bytes); sorting recent head only",
+                static_cast<size_t>(count) * sizeof(ShelfSortKey));
+        result = sortRecentShelfHead(source, count, sorted);
+      } else {
+        bool alreadySorted = true;
+        for (uint32_t i = 0; i < count; ++i) {
+          if (!readShelfUpdateTime(source, i, keys[i].readUpdateTime)) return ShelfSortResult::StorageError;
+          keys[i].sourceIndex = i;
+          if (i > 0 && shelfSortKeyBefore(keys[i], keys[i - 1])) alreadySorted = false;
+        }
+        if (alreadySorted) return ShelfSortResult::Ok;
 
-    ShelfRecord record;
-    bool alreadySorted = true;
-    for (uint32_t i = 0; i < count; ++i) {
-      if (!readShelfRecord(source, i, record)) return ShelfSortResult::StorageError;
-      keys[i] = {record.readUpdateTime, i};
-      if (i > 0 && keys[i - 1].readUpdateTime < keys[i].readUpdateTime) alreadySorted = false;
-    }
-    if (alreadySorted) return ShelfSortResult::Ok;
-
-    ShelfSortKey* const begin = keys.get();
-    std::sort(begin, begin + count, [](const ShelfSortKey& left, const ShelfSortKey& right) {
-      if (left.readUpdateTime != right.readUpdateTime) return left.readUpdateTime > right.readUpdateTime;
-      return left.sourceIndex < right.sourceIndex;
-    });
-
-    if (!sorted.begin(kShelfPath, kShelfMagic, sizeof(ShelfRecord))) return ShelfSortResult::StorageError;
-    for (uint32_t i = 0; i < count; ++i) {
-      if (!readShelfRecord(source, keys[i].sourceIndex, record) || !sorted.append(&record)) {
-        sorted.abort();
-        return ShelfSortResult::StorageError;
+        ShelfSortKey* const begin = keys.get();
+        std::sort(begin, begin + count, shelfSortKeyBefore);
+        if (!rewriteShelf(source, count, keys.get(), count, sorted)) return ShelfSortResult::StorageError;
       }
     }
+    if (sorted.count() == 0) return result;
   }
-  return sorted.finish() ? ShelfSortResult::Ok : ShelfSortResult::StorageError;
+  return sorted.finish() ? result : ShelfSortResult::StorageError;
 }
 
-uint32_t cachedShelfReadUpdateTime(const char* bookId) {
-  if (!bookId || !bookId[0]) return 0;
-  HalFile shelf;
-  uint32_t count = 0;
-  if (!openShelf(shelf, count)) return 0;
-  uint32_t latest = 0;
-  ShelfRecord record;
-  for (uint32_t i = 0; i < count; ++i) {
-    if (!readShelfRecord(shelf, i, record)) return 0;
-    if (strcmp(record.bookId, bookId) == 0) latest = std::max(latest, record.readUpdateTime);
-  }
-  return latest;
-}
+#ifdef CROSSPOINT_EMULATED
+void failNextFullShelfSortAllocationForTest() { failNextFullShelfSortAllocation = true; }
+#endif
 
 ShelfSortResult promoteShelfBook(const char* bookId, const uint32_t timestamp) {
   if (!bookId || !bookId[0] || timestamp == 0) return ShelfSortResult::Ok;
@@ -446,6 +572,10 @@ ShelfSortResult promoteShelfBook(const char* bookId, const uint32_t timestamp) {
     HalFile source;
     uint32_t count = 0;
     if (!openShelf(source, count)) return ShelfSortResult::StorageError;
+    if (count > kLargeShelfThreshold) {
+      LOG_INF("WR", "Large shelf: skipping local promotion (%u books)", static_cast<unsigned>(count));
+      return ShelfSortResult::Degraded;
+    }
     ShelfRecord selected;
     uint32_t selectedIndex = count;
     for (uint32_t i = 0; i < count; ++i) {

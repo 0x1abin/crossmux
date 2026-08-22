@@ -12,7 +12,16 @@
 #include "HalGPIO.h"
 #include "Waveshare397Power.h"
 
+#if FREEINK_DEVICE_PAPERMONO
+#include <M5Pm1.h>
+#endif
+
 HalPowerManager powerManager;  // Singleton instance
+
+// GPIO13 controls the X4 battery latch and the X3 SD power rail on the C3
+// Xteink boards. Other boards use it for unrelated signals, including the
+// X4 Pro display chip select.
+static constexpr gpio_num_t XTEINK_C3_GPIO13 = GPIO_NUM_13;
 
 void HalPowerManager::begin() {
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
@@ -74,13 +83,16 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 #endif
 
 #if !SOC_PM_SUPPORT_EXT1_WAKEUP
-  if (gpio.isXteinkDevice() && !gpio.deviceIsX3()) {
-    // X4 GPIO13 is connected to the battery latch MOSFET. Keeping it low powers
-    // the MCU off on battery, while the SDK wake source still handles USB power.
-    constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
-    gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_SPIWP, 0);
-    gpio_hold_en(GPIO_SPIWP);
+  if (gpio.isXteinkDevice()) {
+    // GPIO13 gates the battery MOSFET on both Xteink C3 boards; driving it low
+    // is the battery power-off (the SDK wake source still handles USB power).
+    // Release any surviving pad hold first: hold_en survives deep sleep via
+    // the SDK's deepSleep() (esp_sleep_config_gpio_isolate +
+    // gpio_deep_sleep_hold_en), and a held pad silently ignores the drive.
+    gpio_hold_dis(XTEINK_C3_GPIO13);
+    gpio_set_direction(XTEINK_C3_GPIO13, GPIO_MODE_OUTPUT);
+    gpio_set_level(XTEINK_C3_GPIO13, 0);
+    gpio_hold_en(XTEINK_C3_GPIO13);
   }
 #endif
 
@@ -107,7 +119,16 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   while (digitalRead(FALLBACK_WAKE_PIN) == LOW) delay(50);
   freeink::PowerManager::armWakeOnPins(1ULL << FALLBACK_WAKE_PIN, true);
   freeink::PowerManager::deepSleep();
-#else
+#elif FREEINK_DEVICE_PAPERMONO
+  // Its power button is behind the M5PM1 PMIC rather than an ESP GPIO, so
+  // normal GPIO deep sleep would have no wake source. Ask the PMIC to shut the
+  // device down; a button click then restarts it through a cold boot.
+  if (freeink::m5pm1::requestShutdown()) {
+    delay(1000);  // allow the PMIC firmware time to drop power
+  }
+#endif
+
+#if !FREEINK_DEVICE_WAVESHARE_EPAPER_397
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();

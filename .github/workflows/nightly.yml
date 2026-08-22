@@ -7,6 +7,15 @@ on:
   schedule:
     - cron: '0 23 * * *' # daily 07:00 Asia/Shanghai
   workflow_dispatch:
+    inputs:
+      notes_en:
+        description: 'English OTA release notes (2-8 lines, max 96 ASCII bytes each)'
+        required: true
+        type: string
+      notes_zh:
+        description: 'Chinese OTA release notes (2-8 lines, max 32 characters each)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -22,6 +31,19 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
+
+      - name: Validate manual OTA release notes
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          NOTES_EN: ${{ inputs.notes_en }}
+          NOTES_ZH: ${{ inputs.notes_zh }}
+        run: |
+          mkdir -p dist
+          python3 scripts/generate_ota_notes.py \
+            --en-notes="$NOTES_EN" \
+            --zh-notes="$NOTES_ZH" \
+            --output dist/ota-notes.md
+          test -s dist/ota-notes.md
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -80,6 +102,10 @@ jobs:
             printf '%s\n' '- `firmware.bin` — international'
             printf '%s\n' '- `firmware-cn.bin` — Chinese (中文)'
           } > nightly-body.md
+          if [ -s dist/ota-notes.md ]; then
+            printf '\n' >> nightly-body.md
+            cat dist/ota-notes.md >> nightly-body.md
+          fi
 
       # Roll the single `nightly` release/tag forward to the current commit.
       - name: Remove previous nightly release
@@ -94,7 +120,9 @@ jobs:
           name: CrossMux Nightly (${{ env.SHORT_SHA }})
           prerelease: true
           target_commitish: ${{ github.sha }}
-          files: dist/*
+          files: |
+            dist/firmware.bin
+            dist/firmware-cn.bin
           fail_on_unmatched_files: true
           body_path: nightly-body.md
 

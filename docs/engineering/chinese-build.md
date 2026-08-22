@@ -5,7 +5,7 @@
 > flash budget, and how to regenerate the embedded CJK fonts.
 
 The `gh_release_cn` release and the `sticky`, `x4pro`, `eego_a4`, and
-`mofei_m4` S3 development environments produce Simplified-Chinese firmware.
+`murphy_m4` S3 development environments produce Simplified-Chinese firmware.
 The S3 environments inherit `-DENABLE_CHINESE_VERSION`, the China service
 host, and CN-only application sources from the shared, non-buildable
 `s3_cn_beta` section in [platformio.ini](../../platformio.ini). The flag gates
@@ -15,7 +15,7 @@ every CN-only resource:
 |---|---|
 | i18n string table (`gen_i18n.py`) | Pre-script auto-detects the flag via `env.subst("$BUILD_FLAGS")` and emits **only EN + ZH_CN** into `I18nStrings.cpp` (saves ~144 KB vs the full 23-language table). Detection logs `[gen_i18n] ENABLE_CHINESE_VERSION detected …` during the build. |
 | Built-in fonts ([lib/EpdFont/builtinFonts/all.h](../../lib/EpdFont/builtinFonts/all.h)) | Latin headers are skipped. The reader UI exposes one built-in **Noto Sans** because the legacy Serif/Sans IDs both reference the same six per-size CJK headers (`notosans_cjk_{8,10,12,14,16,18}.h`). The old IDs remain valid for settings compatibility. The headers use raw 2-bit bitmaps. **Character coverage is tiered by point size**: 8/10/12pt carry all 3500 chars from `chars_3500_common.txt` plus every CJK glyph found in `chinese.yaml` and feature-specific require-from files (3517 CJK glyphs total); 14/16/18pt carry only the require-from set (747 CJK glyphs). Every size also includes the standard ASCII, Latin-1, and CJK punctuation ranges. The 14/16/18pt sizes rely on a complete SD-card font for broad Chinese EPUB coverage while still rendering every built-in Chinese UI string. |
-| Downloadable fonts | The Chinese build uses the same manifest-v1 font manager as global builds; only its catalog URL points to an externally maintained Gitee release. Its embedded 8/10/12pt fonts already cover the Simplified-Chinese UI, so it keeps only the selected reader-size SD font resident and does not load the global build's three size-matched UI fallbacks. This preserves contiguous heap for EPUB image decoding and glyph prewarm. |
+| Downloadable fonts | The Chinese build uses the same manifest-v1 font manager as global builds. Current firmware reads the catalog through the CrossMux API and downloads immutable files from `assets.crossmux.cn`; old firmware reads the Gitee manifest, which points to the same asset domain. Its embedded 8/10/12pt fonts already cover the Simplified-Chinese UI, so it keeps only the selected reader-size SD font resident and does not load the global build's three size-matched UI fallbacks. This preserves contiguous heap for EPUB image decoding and glyph prewarm. |
 | `src/main.cpp` font globals | Each Latin `EpdFont`/`EpdFontFamily` global is aliased to the matching-size CJK header. Bold/italic variants all point at the Regular OTF (no style data in the subset). SD-card fonts still provide style variants when the user loads them. |
 | EPUB layout ([lib/Epub/Epub/ParsedText.cpp](../../lib/Epub/Epub/ParsedText.cpp)) | All firmware flavors use the same Unicode-aware CJK splitting, punctuation, line-breaking, and source-space rules. The CN build changes the bundled font data and metrics, not tokenization or inter-word spacing behavior. |
 | Activities (`src/activities/apps/chinese-chess/`) | Compiled in (also gated by `build_src_filter +<activities/apps/chinese-chess/>`). |
@@ -232,18 +232,25 @@ measured rather than inferred from the source character count.
 
 ## Complete Chinese SD fonts
 
-The Chinese build downloads its catalog from:
+Current Chinese firmware downloads its catalog from:
 
 ```text
-https://gitee.com/x1abin/crossmux-fonts/releases/download/sd-fonts-m<manifest>-b<binary>/fonts.json
+https://crossmux.cn/api/assets/fonts/m<manifest>-b<binary>/fonts.json
 ```
 
+The API returns the canonical COS manifest, whose `baseUrl` uses an immutable
+Git SHA under `https://assets.crossmux.cn/fonts/m1-b4/releases/`. Older Chinese
+firmware continues to read the Gitee release manifest; releases are kept in
+sync with the canonical manifest, so those devices also download font files
+from `assets.crossmux.cn`. The CrossMux per-file API keeps its fixed Gitee
+proxy behavior only as a compatibility and rollback path. Global firmware
+continues to use the corresponding GitHub manifest and files.
+
 The version numbers come from the firmware's manifest and cpfont constants.
-The external Gitee service must keep manifest v1 and all referenced cpfont v4
-assets under that tag. `baseUrl`, family/file names, non-zero file sizes, and
-CRC32 values must be valid; the external catalog maintainer is responsible for
-complete Chinese coverage. Global firmware continues to use the corresponding
-GitHub service.
+All catalogs must keep manifest v1 and referenced cpfont v4 assets consistent.
+`baseUrl`, family/file names, non-zero file sizes, and CRC32 values must be
+valid; the external catalog maintainer is responsible for complete Chinese
+coverage.
 
 The firmware offers the guided downloader when a built-in font is changed to
 14/16/18pt, or when an EPUB scan sees a missing U+4E00–U+9FFF or
@@ -254,7 +261,9 @@ flow, preserving install/update/delete and batch-download behavior. A single
 download selects that family and opens the text preview; **Download All**
 prefers the stable `NotoSansSC` family, while **Update All** preserves the
 current selection. Preview changes read from SD without rebuilding the Flash
-cache. Leaving Text Settings caches only the final family and point size.
+cache. Leaving Text Settings caches only the final family and point size. In
+ordinary Text Settings entry, layout/style-only changes and font changes later
+restored to their entry values skip the preprocessing page.
 
 When `NotoSansSC` is discovered through download, web upload, or an SD-card
 copy, it replaces the active built-in face and the built-in row is hidden. If

@@ -140,16 +140,20 @@ The hidden `sdFontFlashPreload` setting stores the user's preference:
 
 - Font and point-size changes in Text Settings load only the data needed for
   preview from SD; they do not rebuild the cache.
-- Leaving Text Settings normally by Back or Home enables acceleration for an
-  SD font and caches only the final family and nearest installed point size.
-  A matching cache is reused without rewriting Flash. Selecting a built-in
-  font disables the preference and exits without a cache write.
+- Leaving Text Settings by Back or Home enables acceleration only when the
+  final font family or point size differs from the values on entry. Layout- or
+  style-only edits, and font changes restored before exit, keep the previous
+  acceleration preference and skip the preprocessing page. The font downloader
+  marks its newly selected family as changed before opening Text Settings.
+  A matching cache is reused without rewriting Flash. Selecting a built-in font
+  disables the preference and exits without a cache write.
 - A newly installed OTA image automatically rebuilds once, after successful
   firmware confirmation, when the selected SD font exists and the cache is
   invalid.
-- An ordinary boot does not retry a failed post-OTA rebuild. Reconfirming the
-  final font by normally leaving Text Settings provides the next explicit
-  retry. Sleep, power loss, and forced activity destruction do not start a
+- An ordinary boot does not retry a failed post-OTA rebuild. A later final font
+  or point-size change in Text Settings provides the next explicit retry.
+  Entering and leaving Text Settings without such a change is not a retry
+  trigger. Sleep, power loss, and forced activity destruction do not start a
   write.
 
 Manual preloads and post-OTA rebuilds share the same storage-neutral

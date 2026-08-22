@@ -16,9 +16,26 @@ Not supported: `.syn` synonym files (ignored), dictionaries with 64-bit index of
 
 ## Setting Up a Dictionary
 
-1. Copy your dictionary folder(s) to `/dictionaries/` on the SD card — one dictionary per folder, e.g. `/dictionaries/webster/webster.idx` + `webster.dict.dz`. A hidden `/.dictionaries/` folder (dot-prefixed) works the same way, for keeping it out of the file browser.
-2. Open **Settings → Reader → Dictionary** on the device.
-3. Select a dictionary from the list, or **None** to disable lookups.
+### Download over Wi-Fi
+
+1. Open **Settings → Reader → Manage Dictionaries** and connect to Wi-Fi.
+2. Download or update a dictionary. A single download is enabled automatically; **Update All** preserves the current selection.
+3. Use **Settings → Reader → Dictionary** to switch between installed dictionaries, or choose **None** to disable lookups.
+
+Online dictionaries are installed under `/.dictionaries/`. Downloads are verified before the old version is replaced, and interrupted installations are recovered the next time the manager opens. Only folders carrying the manager's `.crossmux-resource` marker can be updated or deleted online.
+
+The build environment supplies `CROSSMUX_HOST` to select the resource route at compile time.
+International builds configure `crossmux.com` and normally download from GitHub
+`0x1abin/crossmux-assets`; Chinese builds configure `crossmux.cn` and download from Gitee
+`x1abin/crossmux-assets`. The current UI language is included as the `lang` query parameter but does
+not select the mirror. The existing
+Cloudflare mainland-China redirect for `crossmux.com` remains in effect, so an international build
+used in China may be redirected to the China API. Once an API deployment is selected, an upstream
+failure is reported without falling back to the other repository.
+
+### Copy manually
+
+Copy each dictionary folder to `/dictionaries/` on the SD card, e.g. `/dictionaries/webster/webster.idx` + `webster.dict.dz`. A hidden `/.dictionaries/` folder works too. A manual folder whose name conflicts with an online dictionary is never overwritten by the manager.
 
 The Dictionary setting only appears when at least one usable dictionary folder exists. Folders containing more than one dictionary (multiple `.idx` stems) are skipped as ambiguous.
 
@@ -35,7 +52,7 @@ One word on the page becomes highlighted:
 2. Press **Confirm** to look up the highlighted word.
 3. Press **Back** to return to the reader.
 
-On the very first lookup with a dictionary (and again if the dictionary file changes), the reader shows *"Indexing dictionary…"* while it builds a small `.qidx` sidecar file next to the `.idx`. This takes a few seconds for large dictionaries and makes all subsequent lookups fast. The sidecar can be deleted safely at any time — it will simply be rebuilt.
+On the very first lookup with a dictionary (and again if the dictionary file changes), the reader shows *"Indexing may take a while…"* while it builds a small `.qidx` sidecar file next to the `.idx`. Large dictionaries can take longer, and all subsequent lookups use the completed index. The sidecar can be deleted safely at any time — it will simply be rebuilt.
 
 ### How Lookup Works
 

@@ -1,12 +1,15 @@
 #include "ActivityManager.h"
 
 #include <FontCacheManager.h>
+#include <FsHelpers.h>
+#include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
 
 #include <algorithm>
 
+#include "CrossPointSettings.h"
 #include "OpdsServerStore.h"
 #include "apps/2048/Game2048Activity.h"
 #include "apps/AppsMenuActivity.h"
@@ -41,7 +44,9 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
+#include "util/ImageViewerActivity.h"
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -87,6 +92,7 @@ void ActivityManager::renderTaskLoop() {
     // starving the main task and freezing the device.
     if (currentActivity && pendingAction.load() == PendingAction::None) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
+      display.setInverted(SETTINGS.screenInverted && currentActivity->appliesNightMode());
       currentActivity->render(std::move(lock));
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
@@ -110,6 +116,16 @@ void ActivityManager::loop() {
         return;
       }
       goHome();
+      return;
+    }
+
+    if (currentActivity->name != "FrontlightPanel" && mappedInput.wasLightPanelGesture()) {
+      auto panel = makeUniqueNoThrow<FrontlightPanelActivity>(renderer, mappedInput);
+      if (!panel) {
+        LOG_ERR("ACT", "OOM: frontlight panel (%u bytes)", static_cast<unsigned>(sizeof(FrontlightPanelActivity)));
+        return;
+      }
+      pushActivity(std::move(panel));
       return;
     }
 
@@ -390,7 +406,16 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  replaceActivityWith<ReaderActivity>(std::move(path), allowFastInitialRefresh);
+  if (path.empty()) {
+    goToFileBrowser("/");
+    return;
+  }
+  if (FsHelpers::hasBmpExtension(path) || FsHelpers::hasPngExtension(path)) {
+    replaceActivityWith<ImageViewerActivity>(std::move(path));
+    return;
+  }
+  auto activity = ReaderActivity::create(renderer, mappedInput, std::move(path), allowFastInitialRefresh);
+  if (activity) replaceActivity(std::move(activity));
 }
 
 void ActivityManager::goToSleep(bool fromTimeout) {

@@ -1,0 +1,4 @@
+add_executable(txt_paragraph_test TxtParagraphTest.cpp)
+target_include_directories(txt_paragraph_test PRIVATE ${REPO_ROOT}/lib/Txt)
+target_link_libraries(txt_paragraph_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(txt_paragraph_test)

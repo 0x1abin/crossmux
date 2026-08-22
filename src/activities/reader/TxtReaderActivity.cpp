@@ -8,6 +8,7 @@
 #include <Memory.h>
 #include <TxtEncoding.h>
 #include <TxtPageIndex.h>
+#include <TxtParagraph.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -27,6 +28,8 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/AchievementPopupUtils.h"
+#include "util/ReadingBackground.h"
+#include "util/ReadingGuideLine.h"
 
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
@@ -58,40 +61,33 @@ bool writePodChecked(HalFile& file, const T& value) {
 }
 }  // namespace
 
-void TxtReaderActivity::onEnter() {
-  Activity::onEnter();
-
+bool TxtReaderActivity::loadBook() {
+  openStartMs = millis();
+  txt = makeUniqueNoThrow<Txt>(bookPath, "/.crosspoint");
   if (!txt) {
-    return;
+    LOG_ERR("TRS", "OOM: TXT object (%u bytes)", static_cast<unsigned>(sizeof(Txt)));
+    return false;
   }
-
-  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-
+  if (!txt->load()) {
+    LOG_ERR("TRS", "Failed to load TXT: %s", bookPath.c_str());
+    return false;
+  }
   txt->setupCacheDir();
 
   // Allocated once and reused; putting 8193 bytes on the render task's 8KB stack would overflow it.
   pageBuffer = makeUniqueNoThrow<uint8_t[]>(CHUNK_SIZE + 1);
   if (!pageBuffer) {
     LOG_ERR("TRS", "OOM: TXT page buffer (%u bytes)", static_cast<unsigned>(CHUNK_SIZE + 1));
+    return false;
   }
 
-  // Save current txt as last opened file and add to recent books
-  auto filePath = txt->getPath();
-  auto fileName = filePath.substr(filePath.rfind('/') + 1);
-  APP_STATE.openEpubPath = filePath;
-  APP_STATE.saveToFile();
-  RECENT_BOOKS.addBook(filePath, fileName, "", "");
-  READING_STATS.beginSession(filePath, fileName, "", "", 0, "", 0);
-
-  // Trigger first update
-  requestUpdate();
+  const auto fileName = bookPath.substr(bookPath.rfind('/') + 1);
+  READING_STATS.beginSession(bookPath, fileName, "", "", 0, "", 0);
+  return true;
 }
 
 void TxtReaderActivity::onExit() {
-  Activity::onExit();
-
-  // Reset orientation back to portrait for the rest of the UI
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  ReaderActivity::onExit();
 
   if (indexCacheDirty) {
     savePageIndexCache();
@@ -100,8 +96,6 @@ void TxtReaderActivity::onExit() {
   directPageCount = 0;
   currentPageLines.clear();
   pageBuffer.reset();
-  APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
   READING_STATS.endSession();
   ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
   showPendingAchievementPopups(renderer);
@@ -113,83 +107,90 @@ void TxtReaderActivity::onExit() {
 #endif
 }
 
-void TxtReaderActivity::loop() {
+bool TxtReaderActivity::handleFormatInput() {
   READING_STATS.tickActiveSession();
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || ReaderUtils::isTouchMenuGesture(mappedInput)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+      ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
     READING_STATS.noteActivity();
     openChapterSelection();
-    return;
+    return true;
   }
+  return false;
+}
 
-  if (ReaderUtils::handleBackNavigation(mappedInput, activityManager, txt ? txt->getPath().c_str() : "",
-                                        {this, [](void* ctx) { static_cast<TxtReaderActivity*>(ctx)->onGoHome(); }})) {
-    return;
-  }
-
-  const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
-  auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
-  prevTriggered = prevTriggered || touch.prev;
-  nextTriggered = nextTriggered || touch.next;
-  if (!prevTriggered && !nextTriggered) {
-    return;
-  }
-
+bool TxtReaderActivity::pageTurn(const bool isForward) {
+  if (!initialized || pageOffsets.empty()) return false;
   READING_STATS.noteActivity();
-
-  bool pageChanged = false;
-  bool reachedEnd = false;
-  {
-    RenderLock lock(*this);
-    switch (pageMode) {
-      case PageMode::Indexed:
-        if (prevTriggered && currentPage > 0) {
-          currentPage--;
-          pageChanged = true;
-        } else if (nextTriggered) {
-          if (static_cast<size_t>(currentPage + 1) < pageOffsets.size()) {
-            currentPage++;
-            pageChanged = true;
-          } else if (indexComplete) {
-            reachedEnd = true;
-          }
-        }
-        break;
-      case PageMode::Direct:
-        if (prevTriggered) {
-          if (directPageIndex > 0) {
-            directPageIndex--;
-          } else {
-            pageMode = PageMode::Indexed;
-            currentPage = directReturnPage;
-          }
-          pageChanged = true;
-        } else if (nextTriggered) {
-          if (directPageIndex + 1 < directPageCount) {
-            directPageIndex++;
-            pageChanged = true;
-          } else if (currentPageEndOffset >= txt->getFileSize()) {
-            reachedEnd = true;
-          } else {
-            if (directPageCount < directPageOffsets.size()) {
-              directPageOffsets[directPageCount++] = currentPageEndOffset;
-              directPageIndex++;
-            } else {
-              std::move(directPageOffsets.begin() + 1, directPageOffsets.end(), directPageOffsets.begin());
-              directPageOffsets.back() = currentPageEndOffset;
-            }
-            pageChanged = true;
-          }
-        }
-        break;
+  RenderLock lock(*this);
+  endOfBook = false;
+  if (pageMode == PageMode::Indexed) {
+    if (!isForward && currentPage > 0) {
+      currentPage--;
+      return true;
     }
+    if (isForward && static_cast<size_t>(currentPage + 1) < pageOffsets.size()) {
+      currentPage++;
+      return true;
+    }
+    if (isForward && indexComplete) endOfBook = true;
+    return endOfBook;
   }
 
-  if (pageChanged) {
-    requestUpdate();
-  } else if (reachedEnd) {
-    onGoHome();
+  if (!isForward) {
+    if (directPageIndex > 0) {
+      directPageIndex--;
+    } else {
+      pageMode = PageMode::Indexed;
+      currentPage = directReturnPage;
+    }
+    return true;
   }
+  if (directPageIndex + 1 < directPageCount) {
+    directPageIndex++;
+    return true;
+  }
+  if (currentPageEndOffset >= txt->getFileSize()) {
+    endOfBook = true;
+    return true;
+  }
+  if (directPageCount < directPageOffsets.size()) {
+    directPageOffsets[directPageCount++] = currentPageEndOffset;
+    directPageIndex++;
+  } else {
+    std::move(directPageOffsets.begin() + 1, directPageOffsets.end(), directPageOffsets.begin());
+    directPageOffsets.back() = currentPageEndOffset;
+  }
+  return true;
+}
+
+bool TxtReaderActivity::skipPages(const int amount) {
+  if (!initialized || pageOffsets.empty() || amount == 0) return false;
+  RenderLock lock(*this);
+  endOfBook = false;
+  if (pageMode == PageMode::Direct) {
+    pageMode = PageMode::Indexed;
+    currentPage = directReturnPage;
+  }
+  if (amount < 0) {
+    const int target = std::max(0, currentPage + amount);
+    if (target == currentPage) return false;
+    currentPage = target;
+    return true;
+  }
+
+  const size_t target = static_cast<size_t>(currentPage) + static_cast<size_t>(amount);
+  extendIndexToPage(target);
+  if (target < pageOffsets.size()) {
+    currentPage = static_cast<int>(target);
+    return true;
+  }
+  if (indexComplete) {
+    currentPage = static_cast<int>(pageOffsets.size() - 1);
+    endOfBook = true;
+    return true;
+  }
+  return false;
 }
 
 void TxtReaderActivity::openChapterSelection() {
@@ -260,6 +261,11 @@ void TxtReaderActivity::initializeReader() {
   viewportWidth = renderer.getScreenWidth() - cachedOrientedMarginLeft - cachedOrientedMarginRight;
   const int viewportHeight = renderer.getScreenHeight() - cachedOrientedMarginTop - cachedOrientedMarginBottom;
   const int lineHeight = renderer.getLineHeight(cachedFontId);
+  if (SETTINGS.extraParagraphSpacing == 0) {
+    const int cjkAdvance = renderer.getTextAdvanceX(cachedFontId, "我", EpdFontFamily::REGULAR);
+    paragraphIndentWidth =
+        cjkAdvance > 0 ? cjkAdvance * 2 : renderer.getSpaceWidth(cachedFontId, EpdFontFamily::REGULAR) * 3;
+  }
 
   linesPerPage = viewportHeight / lineHeight;
   if (linesPerPage < 1) linesPerPage = 1;
@@ -294,7 +300,7 @@ void TxtReaderActivity::probeTextEncoding() {
 #endif
 }
 
-bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset) {
+bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<TxtLine>& outLines, size_t& nextOffset) {
   outLines.clear();
   const size_t fileSize = txt->getFileSize();
 
@@ -354,6 +360,10 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
 
   // Parse lines from buffer
   size_t pos = 0;
+  const bool compactParagraphs = SETTINGS.extraParagraphSpacing == 0;
+  const bool naturalAlignment = cachedParagraphAlignment == CrossPointSettings::LEFT_ALIGN ||
+                                cachedParagraphAlignment == CrossPointSettings::JUSTIFIED;
+  txt_paragraph::State paragraphState(offset == 0);
 
   while (pos < chunkSize && static_cast<int>(outLines.size()) < linesPerPage) {
     // Find end of line
@@ -378,16 +388,33 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
     bool hasCR = (lineContentLen > 0 && buffer[pos + lineContentLen - 1] == '\r');
     size_t displayLen = hasCR ? lineContentLen - 1 : lineContentLen;
 
-    // Track position within this source line (in bytes from pos)
     size_t lineBytePos = 0;
+    bool indentFirstVisualLine = false;
+
+    if (compactParagraphs) {
+      const auto info = txt_paragraph::analyzeLine(buffer + pos, displayLen);
+      if (info.kind == txt_paragraph::LineKind::Blank) {
+        paragraphState.noteBlankLine();
+        pos = lineEnd + (hasNewline ? 1 : 0);
+        continue;
+      }
+      indentFirstVisualLine = paragraphState.consume(info.kind) && naturalAlignment;
+      lineBytePos = info.contentOffset;
+    }
 
     if (displayLen == 0) {
-      // Emit one visual line for an empty source line.
       outLines.emplace_back();
     } else {
       char* const line = reinterpret_cast<char*>(buffer + pos);
       const char lineTerminator = line[displayLen];
       line[displayLen] = '\0';
+
+      if (indentFirstVisualLine && BidiUtils::startsWithRtl(line + lineBytePos, BidiUtils::RTL_PARAGRAPH_PROBE_DEPTH)) {
+        indentFirstVisualLine = false;
+      }
+      if (!indentFirstVisualLine && compactParagraphs) {
+        lineBytePos = 0;
+      }
 
       while (lineBytePos < displayLen && static_cast<int>(outLines.size()) < linesPerPage) {
         size_t scanPos = lineBytePos;
@@ -434,7 +461,8 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
             }
           }
 
-          if (candidateWidth > viewportWidth) {
+          const int effectiveWidth = std::max(1, viewportWidth - (indentFirstVisualLine ? paragraphIndentWidth : 0));
+          if (candidateWidth > effectiveWidth) {
             if (codepoint == ' ' && codepointStart > lineBytePos) {
               lastFittingSpace = codepointStart;
             }
@@ -458,7 +486,10 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
         assert(breakPos > lineBytePos && breakPos <= displayLen);
         assert(breakPos == displayLen || (static_cast<uint8_t>(line[breakPos]) & 0xC0) != 0x80);
 
-        outLines.emplace_back(line + lineBytePos, breakPos - lineBytePos);
+        outLines.emplace_back();
+        outLines.back().text.assign(line + lineBytePos, breakPos - lineBytePos);
+        outLines.back().indented = indentFirstVisualLine;
+        indentFirstVisualLine = false;
         lineBytePos = breakPos;
         if (lineBytePos < displayLen && line[lineBytePos] == ' ') {
           lineBytePos++;
@@ -493,6 +524,10 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
   const size_t sourceBytes =
       textEncoding == txt_encoding::Encoding::Gbk ? txt_encoding::gbkSourceLength(buffer, pos) : pos;
   nextOffset = offset + sourceBytes;
+
+  if (outLines.empty() && pos > 0) {
+    outLines.emplace_back();
+  }
 
   // Make sure we don't go past the file
   if (nextOffset > fileSize) {
@@ -576,7 +611,7 @@ int TxtReaderActivity::getProgressPercent() const {
   return txt_page_index::progressPercent(currentPageEndOffset, txt ? txt->getFileSize() : 0);
 }
 
-void TxtReaderActivity::render(RenderLock&&) {
+void TxtReaderActivity::renderBook() {
   if (!txt) {
     return;
   }
@@ -640,20 +675,22 @@ void TxtReaderActivity::renderPage() {
   const auto t0 = millis();
   const int lineHeight = renderer.getLineHeight(cachedFontId);
   const int contentWidth = viewportWidth;
+  const int contentBottom = renderer.getScreenHeight() - cachedOrientedMarginBottom;
+  auto* fcm = renderer.getFontCacheManager();
 
   // Render text lines with alignment
   auto renderLines = [&]() {
     int y = cachedOrientedMarginTop;
     for (const auto& line : currentPageLines) {
-      if (!line.empty()) {
-        int x = cachedOrientedMarginLeft;
-        const bool lineIsRtl = BidiUtils::startsWithRtl(line.c_str(), BidiUtils::RTL_PARAGRAPH_PROBE_DEPTH);
+      if (!line.text.empty()) {
+        int x = cachedOrientedMarginLeft + (line.indented ? paragraphIndentWidth : 0);
+        const bool lineIsRtl = BidiUtils::startsWithRtl(line.text.c_str(), BidiUtils::RTL_PARAGRAPH_PROBE_DEPTH);
         uint8_t effectiveAlignment = cachedParagraphAlignment;
         if (lineIsRtl && (effectiveAlignment == CrossPointSettings::LEFT_ALIGN ||
                           effectiveAlignment == CrossPointSettings::JUSTIFIED)) {
           effectiveAlignment = CrossPointSettings::RIGHT_ALIGN;
         }
-        const int textWidth = renderer.getTextAdvanceX(cachedFontId, line.c_str(), EpdFontFamily::REGULAR);
+        const int textWidth = renderer.getTextAdvanceX(cachedFontId, line.text.c_str(), EpdFontFamily::REGULAR);
 
         // Apply text alignment
         switch (effectiveAlignment) {
@@ -675,14 +712,20 @@ void TxtReaderActivity::renderPage() {
             break;
         }
 
-        renderer.drawText(cachedFontId, x, y, line.c_str());
+        renderer.drawText(cachedFontId, x, y, line.text.c_str());
+        const int guideY = y + lineHeight + SETTINGS.readingGuideLineOffset;
+        if (SETTINGS.readingGuideLineEnabled && !fcm->isScanning() &&
+            readingGuideLine::fitsVertically(SETTINGS.readingGuideLineStyle, guideY, cachedOrientedMarginTop,
+                                             contentBottom)) {
+          readingGuideLine::draw(renderer, cachedOrientedMarginLeft, guideY,
+                                 cachedOrientedMarginLeft + contentWidth - 1, SETTINGS.readingGuideLineStyle);
+        }
       }
       y += lineHeight;
     }
   };
 
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
-  auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
   renderLines();  // scan pass — text accumulated, no drawing
   scope.endScanAndPrewarm();
@@ -690,6 +733,7 @@ void TxtReaderActivity::renderPage() {
   fcm->logStats("txt-page");
 
   // BW rendering
+  if (SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) renderer.clearScreen();
   renderLines();
   renderStatusBar();
   const auto tBwRender = millis();
@@ -804,6 +848,7 @@ bool TxtReaderActivity::loadPageIndexCache() {
   // - int32_t: font ID (to invalidate cache on font change)
   // - int32_t: screen margin (to invalidate cache on margin change)
   // - uint8_t: paragraph alignment (to invalidate cache on alignment change)
+  // - uint8_t: extra paragraph spacing (v7+)
   // - uint8_t: index complete (v5+; v4 indexes are always complete)
   // - uint8_t: text encoding (v6+)
   // - uint32_t: known pages count
@@ -872,6 +917,16 @@ bool TxtReaderActivity::loadPageIndexCache() {
     return false;
   }
 
+  uint8_t cachedExtraParagraphSpacing = 1;
+  if (version >= txt_page_index::PARAGRAPH_LAYOUT_CACHE_VERSION) {
+    if (!readPodChecked(f, cachedExtraParagraphSpacing) || cachedExtraParagraphSpacing > 1) return false;
+  }
+  if (!txt_page_index::canReuseParagraphLayout(version, SETTINGS.extraParagraphSpacing != 0,
+                                               cachedExtraParagraphSpacing != 0)) {
+    LOG_DBG("TRS", "Cache paragraph spacing mismatch, rebuilding");
+    return false;
+  }
+
   probeTextEncoding();
   if (!txt_page_index::canReuseCacheVersion(version, textEncoding == txt_encoding::Encoding::Utf8)) {
     LOG_DBG("TRS", "Cache encoding is incompatible with version %d, rebuilding", version);
@@ -883,7 +938,7 @@ bool TxtReaderActivity::loadPageIndexCache() {
   if (complete > 1) return false;
 
   txt_encoding::Encoding cachedEncoding = txt_encoding::Encoding::Utf8;
-  if (version >= txt_page_index::CACHE_VERSION) {
+  if (version >= txt_page_index::ENCODING_CACHE_VERSION) {
     uint8_t serializedEncoding = 0;
     if (!readPodChecked(f, serializedEncoding) || !txt_encoding::isSerializedValueValid(serializedEncoding))
       return false;
@@ -953,7 +1008,8 @@ bool TxtReaderActivity::savePageIndexCache() {
     if (!writePodChecked(f, CACHE_MAGIC) || !writePodChecked(f, txt_page_index::CACHE_VERSION) ||
         !writePodChecked(f, fileSize) || !writePodChecked(f, width) || !writePodChecked(f, pageLines) ||
         !writePodChecked(f, fontId) || !writePodChecked(f, margin) || !writePodChecked(f, cachedParagraphAlignment) ||
-        !writePodChecked(f, complete) || !writePodChecked(f, encoding) || !writePodChecked(f, pageCount)) {
+        !writePodChecked(f, SETTINGS.extraParagraphSpacing) || !writePodChecked(f, complete) ||
+        !writePodChecked(f, encoding) || !writePodChecked(f, pageCount)) {
       LOG_ERR("TRS", "Short write saving page index header");
       return false;
     }

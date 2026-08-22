@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <string>
 
+#include "../../../NetworkStartup.h"
 #include "../../../WifiCredentialStore.h"
 #include "../../../components/UITheme.h"
 #include "../../../fontIds.h"
@@ -176,6 +177,7 @@ void PixelSwitchActivity::startCanvas() {
     return;
   }
 
+  NetworkStartup::prepare(renderer);
   broughtWifiUp_ = true;
   wifiSelectionFailed_ = false;
   wifiRetryActive_ = false;
@@ -281,7 +283,7 @@ bool PixelSwitchActivity::startSavedWifiAssociation() {
   }
 
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+  NetworkStartup::setMode(renderer, WIFI_STA);
   WiFi.disconnect(true, true);
   delay(100);
   if (pass.empty()) {

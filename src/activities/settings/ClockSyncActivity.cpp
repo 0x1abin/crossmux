@@ -11,6 +11,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/SubpageLayout.h"
@@ -24,6 +25,7 @@ void ClockSyncActivity::onEnter() {
   syncedTime[0] = '\0';
 
   if (WiFi.status() == WL_CONNECTED) {
+    NetworkStartup::prepare(renderer);
     requestUpdate();
     return;
   }

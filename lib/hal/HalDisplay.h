@@ -52,6 +52,12 @@ class HalDisplay {
   bool supportsAsyncRefresh() const;
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
 
+  // Output polarity. The framebuffer remains in normal polarity; inversion is
+  // applied by the display driver while sending it to the panel.
+  void setInverted(bool inverted);
+  bool toggleInverted();
+  bool isInverted() const;
+
   // Power management
   void deepSleep();
 
@@ -91,6 +97,13 @@ class HalDisplay {
   // EInkDisplay::writeGrayscalePlaneStrip.
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows);
   bool supportsStripGrayscale() const;
+
+  // True when displayGrayscaleBase() defers the base activation so the gray
+  // planes join it in a single waveform (Paper Mono). Callers should then route
+  // the base of a grayscale page through displayGrayscaleBase() instead of
+  // displayBuffer(): a separate B/W refresh first makes the gray pass re-drive
+  // the whole text body (a visible flash).
+  bool combinesGrayscaleBase() const;
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

@@ -451,7 +451,6 @@ void AchievementsStore::recordSessionEnded(const ReadingSessionSnapshot& snapsho
 
   markDirty();
   evaluateProgress(true);
-  saveToFile();
 }
 
 void AchievementsStore::recordBookmarkAdded() {

@@ -1,10 +1,11 @@
-#include "BmpViewerActivity.h"
+#include "ImageViewerActivity.h"
 
 #include <Bitmap.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <PngToBmpConverter.h>
 
 #include <algorithm>
 
@@ -12,10 +13,18 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-BmpViewerActivity::BmpViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path)
-    : Activity("BmpViewer", renderer, mappedInput), filePath(std::move(path)) {}
+namespace {
+constexpr const char* PNG_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
+constexpr const char* TRANSPARENT_PREVIEW_PATH = "/.crosspoint/image_preview.transparent.bmp";
+constexpr const char* SLEEP_IMAGE_PATH = "/sleep.bmp";
+constexpr const char* SLEEP_IMAGE_PART_PATH = "/sleep.bmp.part";
+constexpr const char* SLEEP_IMAGE_BACKUP_PATH = "/sleep.bmp.bak";
+}  // namespace
 
-void BmpViewerActivity::loadSiblingImages() {
+ImageViewerActivity::ImageViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path)
+    : Activity("ImageViewer", renderer, mappedInput), filePath(std::move(path)) {}
+
+void ImageViewerActivity::loadSiblingImages() {
   siblingImages.clear();
   currentImageIndex = -1;
 
@@ -26,10 +35,7 @@ void BmpViewerActivity::loadSiblingImages() {
   std::string fileName = (lastSlash != std::string::npos) ? filePath.substr(lastSlash + 1) : filePath;
 
   auto dir = Storage.open(dirPath.c_str());
-  if (!dir || !dir.isDirectory()) {
-    if (dir) dir.close();
-    return;
-  }
+  if (!dir || !dir.isDirectory()) return;
 
   char name[500];
   for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
@@ -37,14 +43,12 @@ void BmpViewerActivity::loadSiblingImages() {
       file.getName(name, sizeof(name));
       if (name[0] != '.') {
         std::string fname(name);
-        if (fname.length() >= 4 && fname.substr(fname.length() - 4) == ".bmp") {
+        if (FsHelpers::hasBmpExtension(fname) || FsHelpers::hasPngExtension(fname)) {
           siblingImages.push_back(fname);
         }
       }
     }
-    file.close();
   }
-  dir.close();
 
   FsHelpers::sortFileList(siblingImages);
 
@@ -56,21 +60,35 @@ void BmpViewerActivity::loadSiblingImages() {
   }
 }
 
-void BmpViewerActivity::onEnter() {
+bool ImageViewerActivity::isPng() const { return FsHelpers::hasPngExtension(filePath); }
+
+void ImageViewerActivity::onEnter() {
   Activity::onEnter();
 
   if (siblingImages.empty() && !filePath.empty()) {
     loadSiblingImages();
   }
 
-  HalFile file;
-
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
   Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
+  const bool png = isPng();
+  bool prepared = !png;
+  if (png && Storage.ensureDirectoryExists("/.crosspoint")) {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), PNG_PREVIEW_PATH, true);
+  }
+  const char* bitmapPath = png ? PNG_PREVIEW_PATH : filePath.c_str();
+  HalFile file;
   // 1. Open the file
-  if (Storage.openFileForRead("BMP", filePath, file)) {
+  if (!prepared) {
+    renderer.clearScreen();
+    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_INVALID_IMAGE_FILE));
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  } else if (Storage.openFileForRead("IMAGE", bitmapPath, file)) {
     Bitmap bitmap(file, true);
 
     // 2. Parse headers to get dimensions
@@ -120,13 +138,12 @@ void BmpViewerActivity::onEnter() {
     } else {
       // Handle file parsing error
       renderer.clearScreen();
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_INVALID_BMP_FILE));
+      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_INVALID_IMAGE_FILE));
       const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     }
 
-    file.close();
   } else {
     // Handle file open error
     renderer.clearScreen();
@@ -137,48 +154,105 @@ void BmpViewerActivity::onEnter() {
   }
 }
 
-void BmpViewerActivity::onExit() {
+void ImageViewerActivity::onExit() {
   Activity::onExit();
+  if (Storage.exists(PNG_PREVIEW_PATH)) Storage.remove(PNG_PREVIEW_PATH);
+  if (Storage.exists(TRANSPARENT_PREVIEW_PATH)) Storage.remove(TRANSPARENT_PREVIEW_PATH);
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
-void BmpViewerActivity::doSetSleepCover() {
+void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool transparent) {
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
-  bool success = false;
-  HalFile inFile, outFile;
-  if (Storage.openFileForRead("BMP", filePath, inFile)) {
-    if (Storage.openFileForWrite("BMP", "/sleep.bmp", outFile)) {
-      char buffer[2048];
+  const char* preparedPath = sourcePath;
+  bool success = true;
+  if (transparent) {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    success = PngToBmpConverter::pngFileToTransparentBmpFile(sourcePath, TRANSPARENT_PREVIEW_PATH, true);
+    if (success) preparedPath = TRANSPARENT_PREVIEW_PATH;
+  }
+
+  Storage.remove(SLEEP_IMAGE_PART_PATH);
+  if (success) {
+    HalFile inFile, outFile;
+    if (Storage.openFileForRead("IMAGE", preparedPath, inFile) &&
+        Storage.openFileForWrite("IMAGE", SLEEP_IMAGE_PART_PATH, outFile)) {
+      const uint64_t expected = inFile.fileSize64();
+      uint64_t copied = 0;
+      char buffer[128];
       int bytesRead;
-      success = true;
       while ((bytesRead = inFile.read(buffer, sizeof(buffer))) > 0) {
         if (outFile.write(buffer, bytesRead) != bytesRead) {
           success = false;
           break;
         }
+        copied += bytesRead;
       }
-      outFile.close();
+      outFile.flush();
+      success = success && copied == expected;
+    } else {
+      success = false;
     }
-    inFile.close();
   }
 
   if (success) {
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    SETTINGS.saveToFile();
-    GUI.drawPopup(renderer, tr(STR_DONE));
-  } else {
-    GUI.drawPopup(renderer, tr(STR_FAILED_LOWER));
+    Storage.remove(SLEEP_IMAGE_BACKUP_PATH);
+    const bool hadPrevious = Storage.exists(SLEEP_IMAGE_PATH);
+    if ((hadPrevious && !Storage.rename(SLEEP_IMAGE_PATH, SLEEP_IMAGE_BACKUP_PATH)) ||
+        !Storage.rename(SLEEP_IMAGE_PART_PATH, SLEEP_IMAGE_PATH)) {
+      if (hadPrevious && !Storage.exists(SLEEP_IMAGE_PATH)) {
+        Storage.rename(SLEEP_IMAGE_BACKUP_PATH, SLEEP_IMAGE_PATH);
+      }
+      success = false;
+    }
   }
 
+  if (success) {
+    const uint8_t previousMode = SETTINGS.sleepScreen;
+    SETTINGS.sleepScreen = transparent ? CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT
+                                       : CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
+    if (!SETTINGS.saveToFile()) {
+      SETTINGS.sleepScreen = previousMode;
+      (void)SETTINGS.saveToFile();
+      Storage.remove(SLEEP_IMAGE_PATH);
+      if (Storage.exists(SLEEP_IMAGE_BACKUP_PATH)) {
+        Storage.rename(SLEEP_IMAGE_BACKUP_PATH, SLEEP_IMAGE_PATH);
+      }
+      success = false;
+    }
+  }
+
+  Storage.remove(SLEEP_IMAGE_PART_PATH);
+  if (success) Storage.remove(SLEEP_IMAGE_BACKUP_PATH);
+  GUI.drawPopup(renderer, success ? tr(STR_DONE) : tr(STR_FAILED_LOWER));
   delay(1000);
-  onEnter();
 }
 
-void BmpViewerActivity::loop() {
+void ImageViewerActivity::showSleepCoverOptions() {
+  if (!isPng()) {
+    doSetSleepCover(filePath.c_str(), false);
+    return;
+  }
+
+  static constexpr StrId options[] = {StrId::STR_NORMAL, StrId::STR_TRANSPARENT};
+  static constexpr int optionCount = sizeof(options) / sizeof(options[0]);
+  sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER, options, optionCount, 0, [this](const int index) {
+    doSetSleepCover(index == 1 ? filePath.c_str() : PNG_PREVIEW_PATH, index == 1);
+  });
+  requestUpdate();
+}
+
+void ImageViewerActivity::render(RenderLock&&) { sleepCoverPopup.processRender(renderer, mappedInput); }
+
+void ImageViewerActivity::loop() {
   // Keep CPU awake/polling so 1st click works
   Activity::loop();
+
+  if (sleepCoverPopup.handleInput(mappedInput, [this] { requestUpdate(); })) {
+    if (!sleepCoverPopup.isActive()) onEnter();
+    return;
+  }
 
   auto openSibling = [this](const int delta) {
     if (currentImageIndex < 0) {
@@ -212,7 +286,7 @@ void BmpViewerActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    doSetSleepCover();
+    showSleepCoverOptions();
     return;
   }
 

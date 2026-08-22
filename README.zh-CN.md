@@ -4,7 +4,7 @@
 
 **CrossMux** 是 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 的社区 fork：在原有电子书阅读体验之上，新增了一个 Apps 应用中心（小游戏 / 小工具）、更丰富的待机表盘，以及一套完整的简体中文固件。
 
-**版本：** CrossMux 1.5.5（基于 CrossPoint Reader 1.5.0，并同步上游 `develop` 至 `ba1b849f`）
+**版本：** CrossMux 1.5.6（基于 CrossPoint Reader 1.5.0，并同步上游 `develop` 至 `596f0d3f`）
 
 **运行设备：** 基于 ESP32-C3 的 Xteink [X4](https://www.xteink.com/products/xteink-x4) 与 [X3](https://www.xteink.com/products/xteink-x3)。
 
@@ -164,8 +164,8 @@ pio run -e simulator_x3 -t run_simulator
 # eego A4
 pio run -e simulator_eego_a4 -t run_simulator
 
-# Mofei M4
-pio run -e simulator_mofei_m4 -t run_simulator
+# Murphy M4
+pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 模拟器由固定版本的

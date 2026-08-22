@@ -8,7 +8,7 @@ class Epub {
  public:
   Epub(std::string path, const std::string&) : path(std::move(path)) {}
 
-  bool load(bool, bool) const { return path.find("load-fail") == std::string::npos; }
+  bool load(bool buildIfMissing, bool) const { return buildIfMissing && path.find("load-fail") == std::string::npos; }
   void setupCacheDir() const { Storage.mkdir("/.crosspoint/epub"); }
   std::string getThumbBmpPath(int height) const { return "/.crosspoint/epub/thumb_" + std::to_string(height) + ".bmp"; }
   std::string getCoverBmpPath(bool = false) const { return "/.crosspoint/epub/cover.bmp"; }

@@ -11,6 +11,7 @@
 #include <ctime>
 
 #include "CrossPointState.h"
+#include "util/BookCacheUtils.h"
 #include "util/BookIdentity.h"
 #include "util/TimeUtils.h"
 
@@ -18,7 +19,8 @@ namespace {
 constexpr char READING_STATS_FILE_JSON[] = "/.crosspoint/reading_stats.json";
 constexpr unsigned long MAX_READING_GAP_MS = 30UL * 60UL * 1000UL;
 constexpr unsigned long SESSION_HEARTBEAT_MS = 60UL * 1000UL;
-constexpr unsigned long DEFERRED_SAVE_INTERVAL_MS = 30UL * 1000UL;
+constexpr unsigned long CHECKPOINT_INTERVAL_MS = 10UL * 60UL * 1000UL;
+constexpr unsigned long CHECKPOINT_RETRY_INTERVAL_MS = 30UL * 1000UL;
 constexpr uint64_t MIN_SESSION_READING_MS = 3ULL * 60ULL * 1000ULL;
 constexpr size_t MAX_SESSION_LOG_ENTRIES = 256;
 
@@ -550,26 +552,29 @@ bool ReadingStatsStore::removeIgnoredBooks() {
 void ReadingStatsStore::invalidateSummaryCache() { summaryCache.valid = false; }
 
 void ReadingStatsStore::markDirty() {
+  if (!dirty) {
+    dirtySinceMs = millis();
+  }
   dirty = true;
   invalidateSummaryCache();
 }
 
-bool ReadingStatsStore::shouldSaveDeferred() const {
-  if (!dirty) {
+bool ReadingStatsStore::shouldSaveCheckpoint() const {
+  if (!dirty || !activeSession.active) {
     return false;
   }
-  if (!activeSession.active) {
-    return true;
-  }
-  return lastSaveMs == 0 || (millis() - lastSaveMs) >= DEFERRED_SAVE_INTERVAL_MS;
+  const unsigned long nowMs = millis();
+  return (nowMs - dirtySinceMs) >= CHECKPOINT_INTERVAL_MS &&
+         (lastSaveAttemptMs == 0 || (nowMs - lastSaveAttemptMs) >= CHECKPOINT_RETRY_INTERVAL_MS);
 }
 
 bool ReadingStatsStore::persistToFile(const char* path) const {
   Storage.mkdir("/.crosspoint");
+  lastSaveAttemptMs = millis();
   const bool saved = JsonSettingsIO::saveReadingStats(*this, path);
   if (saved) {
     dirty = false;
-    lastSaveMs = millis();
+    dirtySinceMs = 0;
   }
   return saved;
 }
@@ -701,9 +706,6 @@ void ReadingStatsStore::noteActivity() {
   }
 
   activeSession.lastInteractionMs = nowMs;
-  if (shouldSaveDeferred()) {
-    saveToFile();
-  }
 }
 
 void ReadingStatsStore::tickActiveSession() {
@@ -757,9 +759,6 @@ void ReadingStatsStore::updateProgress(const uint8_t progressPercent, const bool
   }
 
   markDirty();
-  if (shouldSaveDeferred()) {
-    saveToFile();
-  }
 }
 
 bool ReadingStatsStore::updateBookMetadata(const std::string& path, const std::string& title, const std::string& author,
@@ -790,7 +789,7 @@ bool ReadingStatsStore::updateBookMetadata(const std::string& path, const std::s
 
   if (changed) {
     markDirty();
-    if (shouldSaveDeferred()) {
+    if (!activeSession.active) {
       saveToFile();
     }
   }
@@ -813,6 +812,8 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
     return false;
   }
 
+  const bool updateLastSessionPath =
+      !lastSessionSnapshot.path.empty() && findBookIndexByPath(lastSessionSnapshot.path) == index;
   auto& book = books[index];
   if (!bookId.empty() &&
       (book.bookId.empty() || (BookIdentity::isLegacyBookId(book.bookId) && !BookIdentity::isLegacyBookId(bookId)))) {
@@ -821,6 +822,9 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
 
   rememberBookPath(book, oldKey);
   rememberBookPath(book, normalizedNewPath);
+  if (updateLastSessionPath) {
+    lastSessionSnapshot.path = normalizedNewPath;
+  }
   if (!title.empty()) {
     book.title = title;
   }
@@ -832,8 +836,31 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
   }
 
   markDirty();
-  saveToFile();
-  return true;
+  return saveToFile();
+}
+
+bool ReadingStatsStore::updateBookPathPrefix(const std::string& oldPrefix, const std::string& newPrefix) {
+  bool changed = false;
+  for (auto& book : books) {
+    if (!FsHelpers::isSameOrDescendantPath(book.path, oldPrefix)) continue;
+    const std::string oldPath = book.path;
+    const std::string oldCachePath = bookCachePath(oldPath);
+    const std::string newPath = FsHelpers::rebasePath(oldPath, oldPrefix, newPrefix);
+    const std::string newCachePath = bookCachePath(newPath);
+    if (!oldCachePath.empty() && book.coverBmpPath.rfind(oldCachePath, 0) == 0) {
+      book.coverBmpPath = newCachePath + book.coverBmpPath.substr(oldCachePath.size());
+    }
+    rememberBookPath(book, newPath);
+    changed = true;
+  }
+
+  if (FsHelpers::isSameOrDescendantPath(lastSessionSnapshot.path, oldPrefix)) {
+    lastSessionSnapshot.path = FsHelpers::rebasePath(lastSessionSnapshot.path, oldPrefix, newPrefix);
+    changed = true;
+  }
+  if (!changed) return true;
+  markDirty();
+  return saveToFile();
 }
 
 bool ReadingStatsStore::removeBook(const std::string& path) {
@@ -898,7 +925,6 @@ void ReadingStatsStore::endSession() {
   lastSessionSnapshot.endProgressPercent = book.lastProgressPercent;
 
   activeSession = {};
-  saveToFile();
 }
 
 bool ReadingStatsStore::adjustBookReadingTime(const std::string& path, const uint32_t dayOrdinal,
@@ -1074,9 +1100,6 @@ bool ReadingStatsStore::saveToFile() const {
   if (!dirty && Storage.exists(READING_STATS_FILE_JSON)) {
     return true;
   }
-  if (activeSession.active && !shouldSaveDeferred()) {
-    return true;
-  }
   return persistToFile(READING_STATS_FILE_JSON);
 }
 
@@ -1116,7 +1139,8 @@ bool ReadingStatsStore::loadFromFile() {
       saveToFile();
     } else {
       dirty = false;
-      lastSaveMs = millis();
+      dirtySinceMs = 0;
+      lastSaveAttemptMs = millis();
     }
   }
   return loaded;
@@ -1149,7 +1173,8 @@ bool ReadingStatsStore::releaseMemoryForNetwork() {
   sessionSerialCounter = 0;
   invalidateSummaryCache();
   dirty = false;
-  lastSaveMs = millis();
+  dirtySinceMs = 0;
+  lastSaveAttemptMs = millis();
 
   LOG_DBG("RST", "After network release: free=%u largest=%u", ESP.getFreeHeap(),
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));

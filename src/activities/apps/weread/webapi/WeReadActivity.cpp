@@ -16,13 +16,13 @@
 #include <cstdio>
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <string>
 
 #include "CrossPointState.h"
-#include "SdCardFontSystem.h"
+#include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "WeReadBrowseActivity.h"
-#include "activities/apps/weread/WeReadQrLayout.h"
 #include "activities/apps/weread/WeReadTouchGeometry.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
@@ -402,11 +402,7 @@ static_assert(sizeof(WeReadChapterRangeActivity) <= 1024, "WeRead chapter select
 void WeReadActivity::onEnter() {
   Activity::onEnter();
   if (!WeReadBrowse::clearLegacyWorkspace()) LOG_ERR("WR", "legacy browse workspace cleanup failed");
-  {
-    RenderLock lock(*this);
-    sdFontSystem.releaseLoadedFont(renderer);
-    if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
-  }
+  NetworkStartup::prepare(renderer);
   disclaimerSelected_ = 0;
   disclaimerSaveFailed_ = false;
   manageSelected_ = 0;
@@ -434,7 +430,7 @@ void WeReadActivity::onEnter() {
   optionPopupClosing_ = false;
   wifiSessionActive_ = false;
   wifiReleasePending_ = false;
-  syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::FirstTen;
+  syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::None;
   LOG_DBG("WR", "onEnter activity=%u free=%u largest=%u", static_cast<unsigned>(sizeof(*this)),
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
   if (!WeReadStore::hasAcceptedDisclaimer()) {
@@ -447,6 +443,13 @@ void WeReadActivity::onEnter() {
 
 void WeReadActivity::enterApp() {
   disclaimerSaveFailed_ = false;
+  if (!WeReadStore::ensureCacheGeneration()) {
+    retryJob_ = Job::Sync;
+    error_ = WeReadClient::Error::SdCard;
+    state_.store(State::Error);
+    requestUpdate();
+    return;
+  }
   // This bounded 832-byte probe is gone before TLS and avoids a transient heap
   // allocation that could fragment the ESP32-C3 heap.
   WeReadStore::Session session;
@@ -680,6 +683,9 @@ WeReadClient::Operation::Event WeReadActivity::stepOperation() {
   // with each synchronous protocol step so TLS never competes with a refresh.
   RenderLock renderBarrier(*this);
   if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
+  // Cover conversion claims JPEGDEC from the lent 48KB framebuffer.
+  std::optional<GfxRenderer::FrameBufferLoan> coverScratch;
+  if (operation_.needsCoverConversionScratch()) coverScratch.emplace(renderer);
   struct WorkContext {
     WeReadActivity* activity;
     RenderLock* renderBarrier;
@@ -734,7 +740,7 @@ void WeReadActivity::advanceShelfCovers() {
         ++shelfCoverCursor_;
         shelfFrameInvalidated_.store(true);
         requestUpdate();
-        return;
+        break;
       case WeReadClient::Operation::Event::QrReady:
       case WeReadClient::Operation::Event::Authenticated:
       case WeReadClient::Operation::Event::ChapterRangeReady:
@@ -788,7 +794,7 @@ void WeReadActivity::updateJobProgress() {
   const bool decileChanged = WeReadClient::Operation::progressDecile(previousCompleted, total) !=
                              WeReadClient::Operation::progressDecile(completed, total);
 
-  if (retryJob_ == Job::Sync && stage != WeReadClient::Operation::ProgressStage::Chapters) {
+  if (retryJob_ == Job::Sync && (stage != WeReadClient::Operation::ProgressStage::Chapters || completed > 0)) {
     state_.store(State::Syncing);
   }
   if (stageChanged && retryJob_ == Job::Download) {
@@ -800,7 +806,7 @@ void WeReadActivity::updateJobProgress() {
   if (!requestRender && completedChanged) {
     switch (retryJob_) {
       case Job::Sync:
-        requestRender = decileChanged || completed == total;
+        requestRender = total == 0 ? completed > 0 : decileChanged || completed == total;
         break;
       case Job::Download:
         switch (stage) {
@@ -858,10 +864,11 @@ void WeReadActivity::advanceJob() {
       switch (retryJob_) {
         case Job::Sync:
           refreshShelf();
-          shelfCoverStopped_ = syncShelfCoverScope_ != WeReadClient::Operation::ShelfCoverScope::None;
+          shelfCoverStopped_ = false;
           mainTab_.store(MainTab::Shelf);
           mainFocus_.store(MainFocus::Content);
           state_.store(State::Home);
+          advanceShelfCovers();
           requestJobUpdate();
           return;
         case Job::Detail: {
@@ -880,8 +887,7 @@ void WeReadActivity::advanceJob() {
       return;
     case WeReadClient::Operation::Event::Cancelled:
       refreshShelf();
-      shelfCoverStopped_ =
-          retryJob_ == Job::Sync && syncShelfCoverScope_ != WeReadClient::Operation::ShelfCoverScope::None;
+      shelfCoverStopped_ = false;
       state_.store(State::Home);
       requestJobUpdate();
       return;
@@ -2336,21 +2342,33 @@ void WeReadActivity::render(RenderLock&&) {
         break;
       }
       const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-      const int textGap = SubpageLayout::relatedGap(metrics);
-      const auto layout = WeReadQrLayout::calculate(content.x, content.y, content.width, content.height,
-                                                    metrics.contentSidePadding, textGap, lineHeight);
-      QrUtils::drawQrCode(renderer, Rect{layout.x, layout.y, layout.side, layout.side}, qrUrl_);
-      renderer.drawCenteredText(UI_10_FONT_ID, layout.textY, tr(STR_WEREAD_SCAN_LOGIN));
+      const int textGap = metrics.verticalSpacing;
+      const int qrLimit = content.height - textGap - lineHeight * 2;
+      const int qrSide = std::max(1, std::min(content.width * 4 / 5, qrLimit));
+      const int groupHeight = qrSide + textGap + lineHeight * 2;
+      const int qrY = content.y + std::max(0, (content.height - groupHeight) / 2);
+      QrUtils::drawQrCode(renderer, Rect{content.x + (content.width - qrSide) / 2, qrY, qrSide, qrSide}, qrUrl_);
+      renderer.drawCenteredText(UI_10_FONT_ID, qrY + qrSide + textGap, tr(STR_WEREAD_SCAN_LOGIN));
       char target[64];
       snprintf(target, sizeof(target), "\"%s\"", tr(STR_WEREAD_TITLE));
-      renderer.drawCenteredText(UI_10_FONT_ID, layout.textY + lineHeight, target);
+      renderer.drawCenteredText(UI_10_FONT_ID, qrY + qrSide + textGap + lineHeight, target);
       break;
     }
     case State::Syncing: {
       const auto stage = progressStage_.load();
       const uint32_t completed = progressCompleted_.load();
       const uint32_t total = progressTotal_.load();
-      if (stage == WeReadClient::Operation::ProgressStage::Chapters || total == 0) {
+      if (stage == WeReadClient::Operation::ProgressStage::Chapters) {
+        if (completed > 0) {
+          char status[96];
+          snprintf(status, sizeof(status), tr(STR_WEREAD_SHELF_RECEIVED), static_cast<unsigned>(completed));
+          GUI.drawPopup(renderer, status);
+        } else {
+          GUI.drawPopup(renderer, tr(STR_WEREAD_SYNCING_SHELF));
+        }
+        break;
+      }
+      if (total == 0) {
         GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));
         break;
       }
@@ -2441,6 +2459,12 @@ void WeReadActivity::render(RenderLock&&) {
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGIN_CONFIRMED));
       break;
     case State::Connecting:
+      if (retryJob_ == Job::Sync) {
+        GUI.drawPopup(renderer, tr(STR_WEREAD_SYNCING_SHELF));
+      } else {
+        GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));
+      }
+      break;
     case State::Cancelling:
     case State::OpenBook:
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));

@@ -27,8 +27,11 @@ struct PreviewKey {
 // Cached engine preview lines + the key that produced them. The vector is
 // bounded to the visible line capacity of the preview pane.
 struct PreviewLayout {
-  std::vector<std::shared_ptr<TextBlock>> lines;
+  std::vector<std::unique_ptr<TextBlock>> lines;
   PreviewKey key;
+
+  PreviewLayout();
+  ~PreviewLayout();
 };
 
 // Draws the sample-text pane via the reader engine, reusing layout across redraws

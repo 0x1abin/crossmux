@@ -16,7 +16,9 @@ There are three ways to install fonts:
    preview. **Download All** prefers `NotoSansSC` (or the first valid catalog
    family when it is absent); **Update All** keeps the current selection.
 5. Preview any family or size you want. Leaving **Text Settings** caches only
-   the final SD font and size in internal Flash.
+   the final SD font and size in internal Flash. The preprocessing page appears
+   because a download marks the selected font as changed; ordinary layout or
+   style edits do not trigger it.
 
 ### Option 2: Upload via web browser
 
@@ -122,20 +124,26 @@ What this means in practice:
 The current list of pre-built fonts is maintained in the
 [crosspoint-fonts repository](https://github.com/crosspoint-reader/crosspoint-fonts).
 
-Chinese firmware builds use an externally maintained Gitee catalog; global
-builds keep using the GitHub catalog. Both use the release tag
-`sd-fonts-m<manifest>-b<binary>`, matching the manifest and cpfont versions
-compiled into the firmware.
+Current Chinese firmware loads its manifest through the CrossMux API, and the
+manifest points immutable font files at `assets.crossmux.cn`. Older Chinese
+firmware still loads the Gitee release manifest; that manifest points to the
+same assets domain, so those devices do not follow Gitee redirects for each
+font file. Global builds continue to use the GitHub manifest and assets.
 
-The external Chinese catalog must publish manifest v1 with a valid `baseUrl`,
-family/file names, non-zero file sizes, and CRC32 values. Every referenced
-asset must be cpfont v4 and provide the complete Chinese coverage promised by
-the catalog maintainer. Font sources and catalog-generation configuration are
-not kept in this repository.
+The CrossMux `/api/assets/fonts/m1-b4/<file>.cpfont` Gitee proxy remains a
+compatibility and rollback path. It is not the canonical file source.
+
+The Chinese and global catalogs both publish manifest v1 with a valid
+`baseUrl`, family/file names, non-zero file sizes, and CRC32 values. Every
+referenced asset must be cpfont v4 and provide the coverage promised by its
+catalog maintainer. Font sources and catalog-generation configuration are not
+kept in this repository.
 
 The incomplete-font prompt opens the same font manager described above. A
 successful single or batch download selects a default and opens the font
-preview before the download-complete screen.
+preview before the download-complete screen. Outside the download flow, the
+preprocessing page appears only when the final font family or point size differs
+from the values present when Text Settings opened.
 
 ## Converting Custom Fonts
 
@@ -166,6 +174,12 @@ To convert your own TrueType/OpenType fonts:
       --sizes 12,14,16,18 \
       --name MyFont \
       --output-dir ./MyFont/
+
+**Text Settings > Style > Synthetic Bold** replaces EPUB bold faces with the
+regular or italic face thickened by one (Standard) or two (Heavy) horizontal
+pixels at render time. It does not change font metrics, wrapping, or the
+`.cpfont` format, and it does not affect menus or status-bar text. Standard is
+the default for newly initialized settings; an existing saved choice is kept.
 
 ### Available Unicode interval presets
 

@@ -11,6 +11,10 @@ class FontDecompressor {
 
   FontDecompressor() = default;
   ~FontDecompressor();
+  FontDecompressor(const FontDecompressor&) = delete;
+  FontDecompressor& operator=(const FontDecompressor&) = delete;
+  FontDecompressor(FontDecompressor&&) = delete;
+  FontDecompressor& operator=(FontDecompressor&&) = delete;
 
   bool init();
   void deinit();

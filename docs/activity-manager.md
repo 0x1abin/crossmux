@@ -79,6 +79,12 @@ A single `ActivityManager` owns the render task and manages an activity stack:
 └──────────────────────────────────────────────────────────┘
 ```
 
+## Manager-owned display and input policy
+
+`ActivityManager` resolves display polarity immediately before every render. Night mode inverts only Activities whose `appliesNightMode()` returns true; menus, the frontlight panel, and sleep screens automatically render with normal polarity.
+
+Global input is dispatched before the current Activity in this order: main-tab navigation, Home, then the top-edge frontlight gesture. On devices without a frontlight the last check is a no-op, leaving the same edge gesture available to reader menus. Opening the panel uses the fallible Activity allocation path; an allocation failure is logged and the gesture is consumed.
+
 ## Migration Checklist
 
 ### 1. Change Base Class
@@ -113,10 +119,10 @@ enterNewActivity(new SettingsActivity(renderer, mappedInput, onGoHome));
 // AFTER (from any Activity method)
 activityManager.goToSettings();
 // or for arbitrary navigation:
-activityManager.replaceActivity(std::make_unique<MyActivity>(renderer, mappedInput));
+activityManager.replaceActivityWith<MyActivity>();
 ```
 
-`replaceActivity()` destroys the current activity and clears the stack. Use it for top-level navigation (home, reader, settings, etc.).
+`replaceActivityWith<T>()` allocates through the project's nothrow path, then delegates to `replaceActivity()`, which destroys the current activity and clears the stack. Use it for top-level navigation (home, reader, settings, etc.).
 
 ### 3. Replace Subactivity Pattern
 
@@ -132,13 +138,11 @@ void MyActivity::launchWifi() {
 
 // AFTER
 void MyActivity::launchWifi() {
-  startActivityForResult(
-      std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-      [this](const ActivityResult& result) {
-        if (result.isCancelled) return;
-        auto& wifi = std::get<WifiResult>(result.data);
-        onWifiDone(wifi.connected);
-      });
+  startActivityForResultWith<WifiSelectionActivity>([this](const ActivityResult& result) {
+    if (result.isCancelled) return;
+    auto& wifi = std::get<WifiResult>(result.data);
+    onWifiDone(wifi.connected);
+  });
 }
 // Child calls:
 //   setResult(WifiResult{.connected = true, .ssid = ssid});
@@ -375,7 +379,7 @@ requestUpdateAndWait()
 ### Activity Lifecycle Under ActivityManager
 
 ```text
-activityManager.replaceActivity(make_unique<MyActivity>(...))
+activityManager.replaceActivityWith<MyActivity>(...)
   │
   ▼
 ╔═══════════════════════════════════════════════════╗
@@ -404,7 +408,7 @@ activityManager.replaceActivity(make_unique<MyActivity>(...))
 For push/pop (subactivity) navigation:
 
 ```text
-Parent calls: startActivityForResult(make_unique<Child>(...), handler)
+Parent calls: startActivityForResultWith<Child>(handler, ...)
   │
   ▼
 ╔══════════════════════════════════════╗

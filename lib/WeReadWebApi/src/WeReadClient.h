@@ -13,11 +13,6 @@ namespace WeReadClient {
 
 struct OperationTestPeer;
 
-constexpr uint32_t readingSecondsForSession(const bool valid, const bool pathMatches, const bool bookMatches,
-                                            const uint32_t sessionMs) {
-  return valid && pathMatches && bookMatches ? sessionMs / 1000 : 0;
-}
-
 enum class Error {
   Ok,
   Cancelled,
@@ -46,13 +41,12 @@ struct DownloadOptions {
 struct ProgressSyncInput {
   float localFraction = 0.0f;
   uint32_t localTocIndex = 0;
-  uint32_t readingSeconds = 0;
   uint16_t localSpineIndex = 0;
   uint16_t localPageNumber = 0;
   uint16_t localPageCount = 0;
   bool hasLocalTocIndex = false;
 };
-static_assert(sizeof(ProgressSyncInput) == 20);
+static_assert(sizeof(ProgressSyncInput) == 16);
 
 enum class ProgressSyncMode : uint8_t {
   Compare,
@@ -76,7 +70,7 @@ struct ProgressSyncResult {
 class Operation {
  public:
   enum class Kind : uint8_t { Sync, Detail, Download, ProgressSync, Browse };
-  enum class ShelfCoverScope : uint8_t { None, FirstTen, All };
+  enum class ShelfCoverScope : uint8_t { None, All };
   enum class Event : uint8_t {
     None,
     QrReady,
@@ -91,7 +85,7 @@ class Operation {
   enum class ProgressStage : uint8_t { Chapters, Preparing, Images, Packaging };
 
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {},
-             ShelfCoverScope shelfCoverScope = ShelfCoverScope::FirstTen);
+             ShelfCoverScope shelfCoverScope = ShelfCoverScope::None);
   bool beginProgressSync(const char* bookId, ProgressSyncInput input, ProgressSyncMode mode);
   bool beginBrowseCache(const WeReadStore::ShelfRecord& book);
   Event step(WeReadStore::WorkCallback callback = nullptr, void* callbackContext = nullptr);
@@ -112,8 +106,8 @@ class Operation {
   const char* qrUrl() const { return url_; }
   const char* finalPath() const { return outputPath_.c_str(); }
   const ProgressSyncResult& progressSyncResult() const { return progressSyncResult_; }
-  uint32_t pendingReadingSeconds() const { return progressSyncInput_.readingSeconds; }
   bool active() const;
+  bool needsCoverConversionScratch() const { return coverConversionNeedsScratch(phase_, progressStage_); }
 
  private:
   friend struct OperationTestPeer;
@@ -123,8 +117,6 @@ class Operation {
     SelectDirection,
     ApplyRemote,
     UploadLocal,
-    ReportSynced,
-    ReportRemote,
   };
 
   enum class CoverCacheAction : uint8_t {
@@ -159,6 +151,7 @@ class Operation {
     LoginPollWait,
     LoginPoll,
     SyncShelf,
+    OrganizeShelf,
     ShelfCovers,
     Renew,
     PrepareDetail,
@@ -197,13 +190,16 @@ class Operation {
     Failed,
   };
 
+  static constexpr bool coverConversionNeedsScratch(const Phase phase, const ProgressStage stage) {
+    return phase == Phase::ConvertCover || (phase == Phase::ShelfCovers && stage == ProgressStage::Packaging);
+  }
+
   static constexpr size_t kCookieSize = 896;
   // Reader pages currently include response headers larger than 2 KB.
   static constexpr size_t kIoBufferSize = 4096;
   static constexpr size_t kUrlSize = 512;
   static constexpr uint8_t kMaxRequestAttempts = 3;
   static constexpr uint8_t kMaxImageRedirects = 5;
-  static constexpr uint32_t kInitialShelfCoverCount = 10;
   static constexpr Event chapterResponseRetryEvent(const uint8_t attempts) {
     return attempts >= kMaxRequestAttempts ? Event::Failed : Event::None;
   }
@@ -239,11 +235,10 @@ class Operation {
     return cursor < total ? total - cursor : 0;
   }
   static constexpr uint32_t shelfCoverWorkCount(const ShelfCoverScope scope, const uint32_t total) {
+    if (total > WeReadStore::kLargeShelfThreshold) return 0;
     switch (scope) {
       case ShelfCoverScope::None:
         return 0;
-      case ShelfCoverScope::FirstTen:
-        return total < kInitialShelfCoverCount ? total : kInitialShelfCoverCount;
       case ShelfCoverScope::All:
         return total;
     }
@@ -265,14 +260,13 @@ class Operation {
   static constexpr bool wholeChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
     return validChapterRange(first, last, count) && first == 0 && last == count - 1;
   }
-  static constexpr ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition,
-                                                 const bool hasReadingTime) {
-    if (samePosition) return hasReadingTime ? ProgressAction::ReportSynced : ProgressAction::AlreadySynced;
+  static constexpr ProgressAction progressAction(const ProgressSyncMode mode, const bool samePosition) {
+    if (samePosition) return ProgressAction::AlreadySynced;
     switch (mode) {
       case ProgressSyncMode::Compare:
         return ProgressAction::SelectDirection;
       case ProgressSyncMode::ApplyRemote:
-        return hasReadingTime ? ProgressAction::ReportRemote : ProgressAction::ApplyRemote;
+        return ProgressAction::ApplyRemote;
       case ProgressSyncMode::UploadLocal:
         return ProgressAction::UploadLocal;
     }
@@ -291,16 +285,6 @@ class Operation {
     }
     return ProgressSyncOutcome::Pending;
   }
-  static constexpr ProgressSyncOutcome reportedProgressOutcome(const ProgressSyncOutcome verified,
-                                                               const ProgressSyncOutcome target) {
-    return target == ProgressSyncOutcome::Pending ? verified : target;
-  }
-  static constexpr bool ambiguousTimedReportFailure(const Error error, const uint32_t readingSeconds) {
-    return error == Error::Network && readingSeconds > 0;
-  }
-  static constexpr uint32_t readingSecondsAfterReport(const Error error, const uint32_t readingSeconds) {
-    return error == Error::Ok ? 0 : readingSeconds;
-  }
   static constexpr uint32_t browseReviewRequestCount(const uint32_t cached) {
     const uint32_t remaining = cached < WeReadBrowse::kMaxCachedReviews ? WeReadBrowse::kMaxCachedReviews - cached : 0;
     return remaining < 20 ? remaining : 20;
@@ -313,6 +297,7 @@ class Operation {
     return responseCount > 0 && !stalled && !looped;
   }
 
+  bool prepareCacheGeneration();
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
   void abortBrowseCache();
@@ -327,6 +312,7 @@ class Operation {
   Error pollLogin();
   Error renewSession();
   Error syncShelfOnce();
+  Error organizeShelfOnce();
   Event stepShelfCovers();
   bool loadShelfCoverBook(ShelfCoverAction& action);
   void beginShelfCoverPass(ProgressStage stage);
@@ -360,14 +346,13 @@ class Operation {
   Phase phase_ = Phase::Idle;
   Phase resumePhase_ = Phase::Idle;
   Kind kind_ = Kind::Sync;
-  ShelfCoverScope shelfCoverScope_ = ShelfCoverScope::FirstTen;
+  ShelfCoverScope shelfCoverScope_ = ShelfCoverScope::None;
   Error error_ = Error::Ok;
   ProgressStage progressStage_ = ProgressStage::Chapters;
   DownloadOptions options_;
   ProgressSyncInput progressSyncInput_;
   ProgressSyncMode progressSyncMode_ = ProgressSyncMode::Compare;
   ProgressSyncResult progressSyncResult_;
-  ProgressSyncOutcome progressReportOutcome_ = ProgressSyncOutcome::Pending;
   WeReadStore::Session session_;
   WeReadStore::ShelfRecord book_;
   WeReadStore::TocRecord chapter_;

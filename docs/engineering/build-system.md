@@ -37,11 +37,11 @@
   * `sticky`: Seeed Sticky ESP32-S3 Chinese development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 experimental Chinese development build
   * `eego_a4`: EEGO A4 ESP32-S3 experimental Chinese development build
-  * `mofei_m4`: Mofei M4 ESP32-S3 experimental Chinese development build
+  * `murphy_m4`: Murphy M4 ESP32-S3 experimental Chinese development build
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
-  * `simulator_mofei_m4`: Native 800x480 Mofei M4 product simulator
+  * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
 
 The four S3 development environments inherit their Chinese locale, China host,
 debug logging, Chinese Chess, and WeRead source filters from the non-buildable
@@ -58,7 +58,7 @@ files under `fs_/books/`, and run:
 pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
 pio run -e simulator_eego_a4 -t run_simulator
-pio run -e simulator_mofei_m4 -t run_simulator
+pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 The simulator implementation and launcher come from the pinned

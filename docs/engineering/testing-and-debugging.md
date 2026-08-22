@@ -23,7 +23,7 @@ pio run -e gh_release
 pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
 pio run -e simulator_eego_a4 -t run_simulator
-pio run -e simulator_mofei_m4 -t run_simulator
+pio run -e simulator_murphy_m4 -t run_simulator
 
 # Clean build artifacts
 pio run -t clean
@@ -54,14 +54,14 @@ pio run -t upload && pio device monitor
 ## Code Quality
 
 ```bash
-# Static analysis (cppcheck)
-pio check
+# Complete local CI suite: format, static analysis, firmware builds, host tests
+./bin/ci-check
 
-# Format code (clang-format) - Windows Git Bash
-find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
+# Check formatting without modifying files
+./bin/clang-format-fix --check
 
-# Format code (clang-format) - Linux
-clang-format -i src/**/*.cpp src/**/*.h
+# Apply formatting
+./bin/clang-format-fix
 ```
 
 ## Debugging Crashes
@@ -82,7 +82,8 @@ clang-format -i src/**/*.cpp src/**/*.h
    ```
    - Occurs during deep recursion or large local variables
    - Increase task stack size in `xTaskCreate()` (2048 → 4096)
-   - Move large buffers to heap with malloc
+   - Reduce the frame or reuse an existing bounded scratch buffer; use a
+     checked nothrow heap allocation only when no scoped scratch is available
 
 3. **Use-After-Free**:
    - Activity deleted but task still running
@@ -132,7 +133,7 @@ clang-format -i src/**/*.cpp src/**/*.h
 
 **AI agent scope** (what you CAN verify):
 1. ✅ **Build**: `pio run -t clean && pio run` (0 errors/warnings)
-2. ✅ **Quality**: `pio check` + `find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i`
+2. ✅ **Quality**: `./bin/ci-check` and `./bin/clang-format-fix --check`
 3. ✅ **Format**: Commit messages (`feat:`/`fix:`), no `.gitignore`-excluded files staged (e.g., `*.generated.h`, `.pio/`, `platformio.local.ini`)
 4. ✅ **CI**: Fix GitHub Actions failures before review
 5. ✅ **Code review**: Ensure orientation-aware logic is correct in all 4 modes by inspecting switch/case coverage
@@ -140,7 +141,10 @@ clang-format -i src/**/*.cpp src/**/*.h
 **Human tester scope** (flag these for the user):
 6. 🔲 **Device**: Test on hardware
 7. 🔲 **Orientations**: Verify all 4 modes (Portrait/Inverted/Landscape CW/CCW)
-8. 🔲 **Heap**: `ESP.getFreeHeap()` > 50KB, no leaks
+8. 🔲 **Memory**: record `ESP.getFreeHeap()`, `ESP.getMinFreeHeap()`,
+   `ESP.getMaxAllocHeap()`, and task stack high-water marks. Memory-sensitive
+   EPUB paths must still work when the largest contiguous block is about 16–19KB;
+   no task may fall below 512 bytes of remaining stack.
 9. 🔲 **Cache**: If EPUB modified, delete `.crosspoint/` and verify re-parse
 
 ### CI/CD Pipeline Awareness

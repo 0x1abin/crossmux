@@ -1,7 +1,9 @@
 #include "MappedInputManager.h"
 
+#include <BoardConfig.h>
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 
 #include <algorithm>
 
@@ -149,6 +151,21 @@ bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
   return true;
 }
 
+bool MappedInputManager::wasScreenLongPress(int& x, int& y) const {
+#if CROSSPOINT_EMULATED
+  (void)x;
+  (void)y;
+  return false;
+#else
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!gpio.wasTouchLongPress(nx, ny)) return false;
+  gpio.suppressTouchContact();
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+#endif
+}
+
 bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
   // Live contact position while the finger is down (no tap-slop gate) — drag tracking.
   float nx = 0.0f;
@@ -157,6 +174,8 @@ bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
   renderer.tapToLogical(nx, ny, x, y);
   return true;
 }
+
+bool MappedInputManager::wasScreenTouchReleased() const { return gpio.wasTouchReleased(); }
 
 bool MappedInputManager::wasTapInRect(const int x, const int y, const int width, const int height) const {
   int tx = 0;
@@ -168,37 +187,33 @@ bool MappedInputManager::listItemFromPoint(const int x, const int y, int& index,
                                            const int selectedIndex, const int listTop, const int listHeight,
                                            const bool hasSubtitle) const {
   (void)x;
-  if (itemCount <= 0) return false;
-  if (y < listTop || y >= listTop + listHeight) return false;
-
+  if (itemCount <= 0 || y < listTop || y >= listTop + listHeight) return false;
   const auto& theme = UITheme::getInstance().getTheme();
   const int rowStep = theme.getListRowStep(hasSubtitle);
-  if (rowStep <= 0) return false;
-
   const int pageItems = theme.getListPageItems(listHeight, hasSubtitle);
-  if (pageItems <= 0) return false;
+  if (rowStep <= 0 || pageItems <= 0) return false;
   const int pageStart = std::max(0, selectedIndex / pageItems) * pageItems;
   const int row = (y - listTop) / rowStep;
-  const int tapped = pageStart + row;
-  if (row < 0 || row >= pageItems || tapped >= itemCount) return false;
-  index = tapped;
+  const int touched = pageStart + row;
+  if (row < 0 || row >= pageItems || touched >= itemCount) return false;
+  index = touched;
   return true;
 }
 
 bool MappedInputManager::wasListItemTapped(int& index, const int itemCount, const int selectedIndex, const int listTop,
                                            const int listHeight, const bool hasSubtitle) const {
-  int tx = 0;
-  int ty = 0;
-  return wasScreenTapped(tx, ty) &&
-         listItemFromPoint(tx, ty, index, itemCount, selectedIndex, listTop, listHeight, hasSubtitle);
+  int x = 0;
+  int y = 0;
+  return wasScreenTapped(x, y) &&
+         listItemFromPoint(x, y, index, itemCount, selectedIndex, listTop, listHeight, hasSubtitle);
 }
 
 bool MappedInputManager::wasListItemTouchedDown(int& index, const int itemCount, const int selectedIndex,
                                                 const int listTop, const int listHeight, const bool hasSubtitle) const {
-  int tx = 0;
-  int ty = 0;
-  return wasScreenTouchDown(tx, ty) &&
-         listItemFromPoint(tx, ty, index, itemCount, selectedIndex, listTop, listHeight, hasSubtitle);
+  int x = 0;
+  int y = 0;
+  return wasScreenTouchDown(x, y) &&
+         listItemFromPoint(x, y, index, itemCount, selectedIndex, listTop, listHeight, hasSubtitle);
 }
 
 MappedInputManager::RowTouch MappedInputManager::rowTouch(int& row, const int top, const int rowStep,
@@ -271,6 +286,9 @@ MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
   return SwipeDir::None;
 }
 
+// Edge classification (which swipe counts as an edge gesture) lives in the
+// SDK; only the MEANING of each edge — back, menu, home, light panel, and the
+// home-key remap — is decided here.
 bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const {
   int sx = 0;
   int sy = 0;
@@ -305,24 +323,57 @@ bool MappedInputManager::wasHeaderTapBack() const {
   return hit;
 #endif
 }
+bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
-bool MappedInputManager::wasMenuGesture() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
+bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
+
+bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
+#if FREEINK_DEVICE_EEGO_A4
   if (gpio.wasHomeKeyLongPressed()) return true;
-  return wasEdgeSwipe(fui::ScreenEdge::Bottom);
+  return wasBottomEdgeUpSwipe();
+#else
+  return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();
+#endif
 }
 
+bool MappedInputManager::wasHomeKeyHold() const { return gpio.hasHomeKey() && gpio.wasHomeKeyLongPressed(); }
+
+bool MappedInputManager::wasLightPanelGesture() const {
+  // On lightless boards the same edge remains available to the reader menu.
+  return Frontlight.present() && wasTopEdgeDownSwipe();
+}
+
+#if FREEINK_CAP_TOUCH
+bool MappedInputManager::wasPowerConfirmClick() const {
+  if (!gpio.hasTouch() || SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::PWR_CONFIRM) return false;
+  // Wait out the X4 Pro's frontlight double-click window before treating its
+  // first release as Confirm. Other touch boards can use the release directly.
+  if (BoardConfig::isX4Pro()) return powerConfirmClickFrame;
+  return gpio.wasReleased(HalGPIO::BTN_POWER) && gpio.getPowerButtonHeldTime() <= SETTINGS.getPowerButtonDuration();
+}
+#endif
+
 bool MappedInputManager::wasPressed(const Button button) const {
-  // Back also fires on the front touch key (home key) short press or a tap on
-  // the header (title bar) — so touch-only devices without a dedicated Back
-  // key (eego-a4) still have an obvious Return target.
-  if (button == Button::Back && (wasBackGesture() || gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
+  if (button == Button::Back && wasBackGesture()) return true;
+#if FREEINK_DEVICE_EEGO_A4
+  if (button == Button::Back && (gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
+#endif
+#if FREEINK_CAP_TOUCH
+  if (button == Button::Confirm && wasPowerConfirmClick()) return true;
+#endif
   return mapButton(button, &HalGPIO::wasPressed);
 }
 
 bool MappedInputManager::wasReleased(const Button button) const {
-  if (button == Button::Back && (wasBackGesture() || gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
+  if (button == Button::Back && wasBackGesture()) return true;
+#if FREEINK_DEVICE_EEGO_A4
+  if (button == Button::Back && (gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
+#endif
+#if FREEINK_CAP_TOUCH
+  if (button == Button::Confirm && wasPowerConfirmClick()) return true;
+#endif
   return mapButton(button, &HalGPIO::wasReleased);
 }
 

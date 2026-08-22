@@ -2,6 +2,7 @@ add_executable(AirPageImageStoreTest
   AirPageImageStoreTest.cpp
   ${REPO_ROOT}/src/activities/apps/airpage/AirPageImageStore.cpp
   ${REPO_ROOT}/lib/Epub/Epub/converters/ImageDimsProbe.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp
   ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${crosspoint_simulator_SOURCE_DIR}/src/HalStorage.cpp
