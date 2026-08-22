@@ -1,8 +1,9 @@
 # Device Variants — Xteink X3 vs X4
 
-> The ESP32-S3 [eego A4](eego-a4.md) and [Mofei M4](mofei-m4.md) are separate
-> compile-time targets. The one-binary rule in this document applies only to
-> the ESP32-C3 X3/X4 pair.
+> The ESP32-S3 [eego A4](eego-a4.md), [Mofei M4](mofei-m4.md), and
+> [Waveshare ePaper 3.97](waveshare-epaper-397.md) are separate compile-time
+> targets. The one-binary rule in this document applies only to the ESP32-C3
+> X3/X4 pair.
 
 > Deep reference for [CLAUDE.md](../../CLAUDE.md). How one firmware binary runs
 > on both the Xteink X3 and X4, how the device is detected at boot, what differs

@@ -80,7 +80,7 @@ def inject_version(env):
     pioenv = env['PIOENV']
     # Only applies to development environments; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if pioenv not in ('default', 'sticky', 'eego_a4', 'mofei_m4'):
+    if pioenv not in ('default', 'sticky', 'eego_a4', 'mofei_m4', 'waveshare_epaper_397'):
         return
 
     project_dir = env['PROJECT_DIR']
