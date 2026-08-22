@@ -77,16 +77,20 @@ def get_base_version(project_dir):
 
 
 def inject_version(env):
+    pioenv = env['PIOENV']
     # Only applies to development environments; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if env['PIOENV'] not in ('default', 'sticky'):
+    if pioenv not in ('default', 'sticky', 'eego_a4', 'murphy_m4', 'waveshare_epaper_397'):
         return
 
     project_dir = env['PROJECT_DIR']
     base_version = get_base_version(project_dir)
-    branch = get_git_branch(project_dir)
     short_sha = get_git_short_sha(project_dir)
-    version_string = f'{base_version}-dev-{branch}-{short_sha}'
+    if pioenv in ('default', 'sticky'):
+        version_string = f'{base_version}-dev-{get_git_branch(project_dir)}-{short_sha}'
+    else:
+        device = pioenv.replace('_', '-')
+        version_string = f'{base_version}-{device}-beta+{short_sha}'
 
     env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
     print(f'CrossPoint build version: {version_string}')
