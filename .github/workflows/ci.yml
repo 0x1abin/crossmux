@@ -113,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e default -e simulator -e simulator_x3 | tee pio.log; then
+            if pio run -e default -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_murphy_m4 | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2
@@ -173,7 +173,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e sticky -e x4pro -e papermono | tee pio.log; then
+            if pio run -e sticky -e x4pro -e papermono -e eego_a4 -e murphy_m4 -e waveshare_epaper_397 | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2
@@ -183,15 +183,42 @@ jobs:
       - name: Extract firmware stats
         run: |
           set -euo pipefail
-          ram_line="$(grep -E "RAM:\\s" -m1 pio.log || true)"
-          flash_line="$(grep -E "Flash:\\s" -m1 pio.log || true)"
-          echo "ram_line=${ram_line}" >> "$GITHUB_OUTPUT"
-          echo "flash_line=${flash_line}" >> "$GITHUB_OUTPUT"
           {
             echo "## S3 hardware firmware build stats"
-            if [ -n "$ram_line" ]; then echo "- ${ram_line}"; else echo "- RAM: not found"; fi
-            if [ -n "$flash_line" ]; then echo "- ${flash_line}"; else echo "- Flash: not found"; fi
+            echo '```text'
+            grep -E '^Processing |RAM:\\s|Flash:\\s' pio.log || true
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package experimental eego A4 images
+        run: python3 scripts/package_hardware_beta.py eego-a4
+
+      - name: Package experimental Murphy M4 images
+        run: python3 scripts/package_hardware_beta.py murphy-m4
+
+      - name: Package experimental Waveshare 3.97 images
+        run: python3 scripts/package_hardware_beta.py waveshare-epaper-397
+
+      - name: Upload experimental eego A4 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eego-a4-experimental
+          path: dist/eego-a4
+          if-no-files-found: error
+
+      - name: Upload experimental Murphy M4 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: murphy-m4-experimental
+          path: dist/murphy-m4
+          if-no-files-found: error
+
+      - name: Upload experimental Waveshare 3.97 artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: waveshare-epaper-397-experimental
+          path: dist/waveshare-epaper-397
+          if-no-files-found: error
 
   unit-tests:
     runs-on: ubuntu-latest
@@ -219,6 +246,14 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build/test --output-on-failure -j
+
+      - name: Run FreeInk SDK host tests
+        run: |
+          bash freeink-sdk/libs/book/FreeInkBook/test/host/run.sh
+          bash freeink-sdk/libs/ui/FreeInkUI/test/host/run.sh
+
+      - name: Run hardware packaging tests
+        run: python3 -m unittest discover -v -s scripts/tests
 
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.

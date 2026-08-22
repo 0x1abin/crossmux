@@ -18,7 +18,7 @@ echo "Running cppcheck..."
 pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
 echo "Building default and supported hardware firmware..."
-pio run -e default -e sticky -e x4pro -e papermono
+pio run -e default -e sticky -e x4pro -e papermono -e eego_a4 -e murphy_m4 -e waveshare_epaper_397
 
 echo "Running host unit tests..."
 cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
