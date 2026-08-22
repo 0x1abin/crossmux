@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "CrossPointSettings.h"
@@ -23,6 +24,7 @@
 #include "ProgressMapper.h"
 #include "ReadingStatsStore.h"
 #include "SilentRestart.h"
+#include "WeReadXhtmlCodec.h"
 #include "activities/ActivityManager.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/EpubReaderUtils.h"
@@ -43,25 +45,39 @@ WeReadProgressSyncActivity::WeReadProgressSyncActivity(GfxRenderer& renderer, Ma
   if (bookId) strncpy(bookId_, bookId, sizeof(bookId_) - 1);
   input_.localFraction = context.localFraction;
   input_.localTocIndex = context.localTocIndex;
-  input_.localSpineIndex = context.localSpineIndex;
-  input_.localPageNumber = context.localPageNumber;
-  input_.localPageCount = context.localPageCount;
-  input_.hasLocalTocIndex = context.hasLocalTocIndex;
+  input_.localOffset = context.localOffset;
+  input_.localOffsetBasis = context.localOffsetBasis;
+  localSpineIndex_ = context.localSpineIndex;
+  localPageNumber_ = context.localPageNumber;
+  localPageCount_ = context.localPageCount;
 }
 
 WeReadProgressContext WeReadProgressSyncActivity::makeContext(const Epub& epub, const char* bookId,
-                                                              const float localFraction, const uint16_t localSpineIndex,
-                                                              const uint16_t localPageNumber,
-                                                              const uint16_t localPageCount) {
+                                                              const float localFraction,
+                                                              const CrossPointPosition& localPosition) {
   WeReadProgressContext context;
   context.localFraction = localFraction;
-  context.localSpineIndex = localSpineIndex;
-  context.localPageNumber = localPageNumber;
-  context.localPageCount = localPageCount;
+  context.localSpineIndex = static_cast<uint16_t>(localPosition.spineIndex);
+  context.localPageNumber = static_cast<uint16_t>(localPosition.pageNumber);
+  context.localPageCount = static_cast<uint16_t>(localPosition.totalPages);
+  if (!localPosition.hasVisibleTextOffset) return context;
+
+  const std::string bookDir = WeReadStore::bookDirectory(bookId);
   WeReadStore::BookOptions options;
-  context.hasLocalTocIndex =
-      WeReadStore::loadBookOptions(WeReadStore::bookDirectory(bookId), options) &&
-      WeReadStore::parseGeneratedChapterHref(epub.getSpineItem(localSpineIndex).href, context.localTocIndex);
+  if (!WeReadStore::loadBookOptions(bookDir, options) ||
+      !WeReadStore::parseGeneratedChapterHref(epub.getSpineItem(localPosition.spineIndex).href,
+                                              context.localTocIndex)) {
+    return context;
+  }
+
+  context.localOffset = localPosition.visibleTextOffset;
+  context.localOffsetBasis = WeReadClient::LocalOffsetBasis::VisibleText;
+  uint32_t nativeOffset = 0;
+  if (WeReadXhtmlCodec::visibleToNativeOffset(WeReadStore::chapterPath(bookDir, context.localTocIndex),
+                                              context.localOffset, nativeOffset)) {
+    context.localOffset = nativeOffset;
+    context.localOffsetBasis = WeReadClient::LocalOffsetBasis::RawXhtmlUtf16;
+  }
   return context;
 }
 
@@ -263,17 +279,24 @@ void WeReadProgressSyncActivity::applyRemoteProgress(const WeReadProtocol::Remot
                   1000000.0f +
               0.5f));
   const CrossPointPosition target =
-      preciseRemote
-          ? ProgressMapper::fromSpineProgress(epubView, exactSpineIndex, chapterFraction, renderer,
-                                              input_.localSpineIndex, input_.localPageCount)
-          : ProgressMapper::toCrossPoint(epubView, fallback, renderer, input_.localSpineIndex, input_.localPageCount);
+      preciseRemote ? ProgressMapper::fromSpineProgress(epubView, exactSpineIndex, chapterFraction, renderer,
+                                                        localSpineIndex_, localPageCount_)
+                    : ProgressMapper::toCrossPoint(epubView, fallback, renderer, localSpineIndex_, localPageCount_);
   if (target.totalPages <= 0) {
     error_ = WeReadClient::Error::Unavailable;
     state_ = State::Failed;
     requestUpdate();
     return;
   }
-  if (!EpubReaderUtils::saveProgress(*uniqueEpub, target.spineIndex, target.pageNumber, target.totalPages)) {
+  std::optional<uint32_t> visibleTextOffset;
+  uint32_t resolvedVisibleOffset = 0;
+  if (preciseRemote && WeReadXhtmlCodec::nativeToVisibleOffset(
+                           WeReadStore::chapterPath(WeReadStore::bookDirectory(bookId_), remoteTocIndex),
+                           remoteProgress.chapterOffset, resolvedVisibleOffset)) {
+    visibleTextOffset = resolvedVisibleOffset;
+  }
+  if (!EpubReaderUtils::saveProgress(*uniqueEpub, target.spineIndex, target.pageNumber, target.totalPages,
+                                     visibleTextOffset)) {
     error_ = WeReadClient::Error::SdCard;
     state_ = State::Failed;
     requestUpdate();
@@ -427,8 +450,8 @@ void WeReadProgressSyncActivity::render(RenderLock&&) {
       char remoteValue[24];
       snprintf(remoteValue, sizeof(remoteValue), "%.2f%%", remoteFraction_ * 100.0f);
       char localValue[64];
-      snprintf(localValue, sizeof(localValue), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), input_.localPageNumber + 1,
-               input_.localPageCount, input_.localFraction * 100.0f);
+      snprintf(localValue, sizeof(localValue), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), localPageNumber_ + 1, localPageCount_,
+               input_.localFraction * 100.0f);
       const int remoteLabelY = contentTop + lineHeight * 2;
       UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, remoteLabelY, tr(STR_REMOTE_LABEL), true,
                                 EpdFontFamily::BOLD);

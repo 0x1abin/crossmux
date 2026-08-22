@@ -38,13 +38,17 @@ struct DownloadOptions {
   ChapterScope chapterScope = ChapterScope::WholeBook;
 };
 
+enum class LocalOffsetBasis : uint8_t {
+  None,
+  VisibleText,
+  RawXhtmlUtf16,
+};
+
 struct ProgressSyncInput {
   float localFraction = 0.0f;
   uint32_t localTocIndex = 0;
-  uint16_t localSpineIndex = 0;
-  uint16_t localPageNumber = 0;
-  uint16_t localPageCount = 0;
-  bool hasLocalTocIndex = false;
+  uint32_t localOffset = 0;
+  LocalOffsetBasis localOffsetBasis = LocalOffsetBasis::None;
 };
 static_assert(sizeof(ProgressSyncInput) == 16);
 
@@ -248,6 +252,9 @@ class Operation {
   static constexpr Phase chapterResponseRetryPhase() { return Phase::FetchReader; }
   static constexpr bool shouldRetryPaidPreview(const bool paid, const bool plainText, const bool hasXhtmlTag) {
     return paid && !plainText && !hasXhtmlTag;
+  }
+  static constexpr bool reuseChapterFile(const bool refreshingBook, const bool chapterExists) {
+    return !refreshingBook && chapterExists;
   }
   static constexpr bool imageAttemptPending(const uint8_t attempts) { return attempts < 2; }
   static constexpr bool imageRedirectAllowed(const uint8_t redirects) { return redirects < kMaxImageRedirects; }

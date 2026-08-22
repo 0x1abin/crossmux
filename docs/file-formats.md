@@ -590,7 +590,15 @@ automatically; cache a book again to embed its available cover and selected
 chapter images.
 
 `WRT2` rejects `WRT1` TOC indexes because TOC records now include
-`wordCount`, used to map local whole-book progress to WeRead chapter offsets.
+`wordCount`, used for fallback whole-book progress mapping. It is not the unit
+of WeRead's native `chapterOffset`.
+
+Newly generated chapter XHTML embeds `<!--wr-co:N-->` comments at source-text,
+entity, image, and final boundaries. `N` is the zero-based UTF-16 code-unit
+offset in the decoded raw chapter source after removing a UTF-8 BOM. The reader
+ignores these comments; manual sync streams the loose generated chapter to map
+between its visible-text offsets and WeRead's native offsets. Old chapters have
+no marker and remain compatible through the approximate fallback.
 Manual progress sync refreshes only an old or invalid TOC; an existing
 `/WeRead/*.epub` is retained.
 

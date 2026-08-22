@@ -1,4 +1,5 @@
 #include <ObfuscationUtils.h>
+#include <expat.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -15,6 +16,7 @@
 
 #include "WeReadBrowse.h"
 #include "WeReadStore.h"
+#include "WeReadXhtmlCodec.h"
 
 namespace obfuscation {
 
@@ -237,7 +239,7 @@ TEST_F(WeReadStoreTest, RejectsWrt1AndMapsProgressWithoutLoadingTheCatalog) {
   EXPECT_FALSE(WeReadStore::mapChapterToFraction(tocPath, "missing", 0, fraction));
 }
 
-TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) {
+TEST_F(WeReadStoreTest, MapsGeneratedChapterVisibleOffsetsWithoutWholeBookApproximation) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   const std::string tocPath = WeReadStore::tocPath("precise-book");
   WeReadStore::IndexWriter writer;
@@ -255,26 +257,33 @@ TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) 
   WeReadStore::TocRecord chapter;
   uint32_t offset = 0;
   float fraction = 0.0f;
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 0, 1, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 0, 50, chapter, offset, fraction));
   EXPECT_STREQ(chapter.chapterUid, "chapter-0");
   EXPECT_EQ(offset, 50U);
   EXPECT_FLOAT_EQ(fraction, 0.125f);
 
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 1, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 2, 150, chapter, offset, fraction));
   EXPECT_STREQ(chapter.chapterUid, "chapter-2");
   EXPECT_EQ(offset, 150U);
   EXPECT_FLOAT_EQ(fraction, 0.625f);
 
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 0, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 2, 0, chapter, offset, fraction));
   EXPECT_EQ(offset, 0U);
   EXPECT_FLOAT_EQ(fraction, 0.25f);
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 2, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 2, 400, chapter, offset, fraction));
   EXPECT_EQ(offset, 300U);
   EXPECT_FLOAT_EQ(fraction, 1.0f);
 
-  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 1, 0, 1, chapter, offset, fraction));
-  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 3, 0, 1, chapter, offset, fraction));
-  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 0, 3, 3, chapter, offset, fraction));
+  EXPECT_FALSE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 1, 0, chapter, offset, fraction));
+  EXPECT_FALSE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 3, 0, chapter, offset, fraction));
+
+  ASSERT_TRUE(WeReadStore::mapNativeOffsetToChapter(tocPath, 0, 1234, chapter, offset));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-0");
+  EXPECT_EQ(offset, 1234U);
+  ASSERT_TRUE(WeReadStore::mapNativeOffsetToChapter(tocPath, 1, 456, chapter, offset));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-1");
+  EXPECT_EQ(offset, 456U);
+  EXPECT_FALSE(WeReadStore::mapNativeOffsetToChapter(tocPath, 3, 0, chapter, offset));
 
   uint32_t tocIndex = 0;
   float chapterFraction = 0.0f;
@@ -282,6 +291,114 @@ TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) 
   EXPECT_EQ(tocIndex, 2U);
   EXPECT_NEAR(chapterFraction, 1.0f / 3.0f, 0.000001f);
   EXPECT_FLOAT_EQ(fraction, 0.5f);
+}
+
+TEST_F(WeReadStoreTest, MapsGeneratedVisibleOffsetsToRawXhtmlUtf16Coordinates) {
+  const std::string bookDir = WeReadStore::bookDirectory("source-offset-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string path = WeReadStore::chapterPath(bookDir, 0);
+  std::ofstream chapter(hostPath(path.c_str()), std::ios::binary);
+  ASSERT_TRUE(chapter.good());
+  // The first 15-byte marker starts at byte 123, crossing the resolver's
+  // 128-byte read boundary.
+  chapter << "\xEF\xBB\xBF<?xml version=\"1.0\"?><html><head><title>" << std::string(59, 'x')
+          << "</title></head><body>"
+             "<!--wr-co:10-->A中"
+             "<!--wr-co:20-->&amp;"
+             "<!--wr-co:25-->😀"
+             "<!--wr-co:30-->\r\nZ"
+             "<!--wr-co:33-->"
+             "<!--wr-co:40--><img src=\"image.png\"/>"
+             "<!--wr-co:50--></body></html>";
+  chapter.close();
+
+  struct Mapping {
+    uint32_t visible;
+    uint32_t native;
+  };
+  static constexpr Mapping kMappings[] = {{0, 10}, {1, 11}, {2, 20}, {3, 25}, {4, 30}, {5, 32}, {6, 50}};
+  for (const auto& mapping : kMappings) {
+    uint32_t native = 0;
+    ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(path, mapping.visible, native));
+    EXPECT_EQ(native, mapping.native) << "visible=" << mapping.visible;
+  }
+
+  static constexpr Mapping kReverseMappings[] = {
+      {0, 0},  {0, 10}, {1, 11}, {2, 12}, {2, 20}, {3, 25}, {3, 26},
+      {4, 30}, {5, 31}, {5, 32}, {6, 33}, {6, 40}, {6, 50},
+  };
+  for (const auto& mapping : kReverseMappings) {
+    uint32_t visible = UINT32_MAX;
+    ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(path, mapping.native, visible));
+    EXPECT_EQ(visible, mapping.visible) << "native=" << mapping.native;
+  }
+  uint32_t rejected = 0;
+  EXPECT_FALSE(WeReadXhtmlCodec::visibleToNativeOffset(path, 7, rejected));
+  EXPECT_FALSE(WeReadXhtmlCodec::nativeToVisibleOffset(path, 51, rejected));
+}
+
+TEST_F(WeReadStoreTest, KeepsUtf8CodepointsIntactAcrossSanitizerReadBoundaries) {
+  const std::string bookDir = WeReadStore::bookDirectory("utf8-boundary-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imageIndexPath = WeReadStore::imageIndexPath(bookDir, 0);
+
+  std::string input = "<p>";
+  input.append(508, 'a');
+  input += "中";  // Lead byte is the last byte of the first 512-byte read.
+  input.append(1022 - input.size(), 'b');
+  input += "😀";  // Two bytes land on each side of the next read boundary.
+  input += "c</p>";
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    ASSERT_TRUE(source.good());
+    source.write(input.data(), static_cast<std::streamsize>(input.size()));
+  }
+
+  std::array<uint8_t, 512> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imageIndexPath, 0, "Boundary", false,
+                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                tagBuffer.size()));
+
+  std::ifstream generated(hostPath(outputPath.c_str()), std::ios::binary);
+  ASSERT_TRUE(generated.good());
+  const std::string xhtml((std::istreambuf_iterator<char>(generated)), std::istreambuf_iterator<char>());
+  XML_Parser parser = XML_ParserCreate(nullptr);
+  ASSERT_NE(parser, nullptr);
+  const XML_Status status = XML_Parse(parser, xhtml.data(), static_cast<int>(xhtml.size()), XML_TRUE);
+  EXPECT_EQ(status, XML_STATUS_OK) << XML_ErrorString(XML_GetErrorCode(parser));
+  XML_ParserFree(parser);
+
+  uint32_t nativeOffset = 0;
+  EXPECT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 508, nativeOffset));
+  EXPECT_EQ(nativeOffset, 511U);
+  EXPECT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 1017, nativeOffset));
+  EXPECT_EQ(nativeOffset, 1020U);
+  EXPECT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 1018, nativeOffset));
+  EXPECT_EQ(nativeOffset, 1022U);
+
+  uint32_t visibleOffset = 0;
+  EXPECT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, 1021, visibleOffset));
+  EXPECT_EQ(visibleOffset, 1017U);
+}
+
+TEST_F(WeReadStoreTest, RejectsMissingAndMalformedSourceOffsetMarkers) {
+  const std::string bookDir = WeReadStore::bookDirectory("bad-source-offset-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string path = WeReadStore::chapterPath(bookDir, 0);
+  uint32_t output = 0;
+  const auto reject = [&](const char* xhtml, const uint32_t visibleOffset) {
+    {
+      std::ofstream chapter(hostPath(path.c_str()), std::ios::binary | std::ios::trunc);
+      chapter << xhtml;
+    }
+    EXPECT_FALSE(WeReadXhtmlCodec::visibleToNativeOffset(path, visibleOffset, output));
+  };
+  reject("<html><body>text</body></html>", 0);
+  reject("<html><body><!--wr-co:bad-->text</body></html>", 0);
+  reject("<html><body><!--wr-co:20-->a<!--wr-co:10-->b</body></html>", 0);
 }
 
 TEST(WeReadStore, ParsesOnlyGeneratedChapterHrefs) {
