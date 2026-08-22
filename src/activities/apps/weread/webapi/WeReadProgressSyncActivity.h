@@ -8,6 +8,7 @@
 #include "activities/Activity.h"
 
 class Epub;
+struct CrossPointPosition;
 
 class WeReadProgressSyncActivity final : public Activity {
  public:
@@ -15,7 +16,7 @@ class WeReadProgressSyncActivity final : public Activity {
                              const char* bookId, WeReadProgressContext context);
 
   static WeReadProgressContext makeContext(const Epub& epub, const char* bookId, float localFraction,
-                                           uint16_t localSpineIndex, uint16_t localPageNumber, uint16_t localPageCount);
+                                           const CrossPointPosition& localPosition);
 
   void onEnter() override;
   void onExit() override;
@@ -48,6 +49,9 @@ class WeReadProgressSyncActivity final : public Activity {
   std::string epubPath_;
   char bookId_[64] = {};
   WeReadClient::ProgressSyncInput input_;
+  uint16_t localSpineIndex_ = 0;
+  uint16_t localPageNumber_ = 0;
+  uint16_t localPageCount_ = 0;
   float remoteFraction_ = 0.0f;
   bool uploadConflict_ = false;
   bool wifiActivated_ = false;

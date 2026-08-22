@@ -761,9 +761,8 @@ bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& ch
   return true;
 }
 
-bool mapPageToChapter(const std::string& path, const uint32_t tocIndex, const uint16_t pageNumber,
-                      const uint16_t pageCount, TocRecord& chapter, uint32_t& chapterOffset, float& fraction) {
-  if (pageCount == 0 || pageNumber >= pageCount) return false;
+bool mapVisibleOffsetToChapter(const std::string& path, const uint32_t tocIndex, const uint32_t visibleTextOffset,
+                               TocRecord& chapter, uint32_t& chapterOffset, float& fraction) {
   HalFile toc;
   uint32_t count = 0;
   if (!openToc(path, toc, count) || tocIndex >= count) return false;
@@ -779,16 +778,18 @@ bool mapPageToChapter(const std::string& path, const uint32_t tocIndex, const ui
   }
   if (chapter.wordCount == 0 || totalWords == 0) return false;
 
-  if (pageCount <= 1) {
-    chapterOffset = 0;
-  } else {
-    const uint64_t denominator = static_cast<uint64_t>(pageCount - 1);
-    const uint64_t numerator = static_cast<uint64_t>(pageNumber) * chapter.wordCount;
-    chapterOffset =
-        static_cast<uint32_t>(std::min<uint64_t>(chapter.wordCount, (numerator + denominator / 2) / denominator));
-  }
+  chapterOffset = std::min(visibleTextOffset, chapter.wordCount);
   fraction = static_cast<float>(static_cast<double>(wordsBefore + chapterOffset) / static_cast<double>(totalWords));
   return true;
+}
+
+bool mapNativeOffsetToChapter(const std::string& path, const uint32_t tocIndex, const uint32_t nativeOffset,
+                              TocRecord& chapter, uint32_t& chapterOffset) {
+  HalFile toc;
+  uint32_t count = 0;
+  if (!openToc(path, toc, count) || tocIndex >= count || !readTocRecord(toc, tocIndex, chapter)) return false;
+  chapterOffset = nativeOffset;
+  return chapter.chapterUid[0] != '\0';
 }
 
 bool mapChapterToPosition(const std::string& path, const char* chapterUid, const uint32_t chapterOffset,

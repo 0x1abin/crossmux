@@ -41,6 +41,10 @@ add_executable(WeReadStoreTest
   ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadBrowse.cpp
   ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadProtocol.cpp
   ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadStore.cpp
+  ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadXhtmlCodec.cpp
+  ${REPO_ROOT}/lib/expat/xmlparse.c
+  ${REPO_ROOT}/lib/expat/xmlrole.c
+  ${REPO_ROOT}/lib/expat/xmltok.c
   ${REPO_ROOT}/src/util/StringUtils.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${crosspoint_simulator_SOURCE_DIR}/src/HalStorage.cpp
@@ -56,11 +60,14 @@ target_include_directories(WeReadStoreTest BEFORE PRIVATE
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/Utf8
+  ${REPO_ROOT}/lib/expat
 )
 
 target_compile_definitions(WeReadStoreTest PRIVATE
   CROSSPOINT_EMULATED=1
   DESTRUCTOR_CLOSES_FILE=1
+  XML_CONTEXT_BYTES=1024
+  XML_GE=0
 )
 
 target_link_libraries(WeReadStoreTest PRIVATE
