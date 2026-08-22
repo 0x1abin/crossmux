@@ -68,8 +68,8 @@ struct XhtmlSanitizer {
 
 bool writeSourceOffsetMarker(XhtmlSanitizer& sanitizer, const uint32_t offset) {
   char marker[32];
-  const int length = snprintf(marker, sizeof(marker), "<!--%s%u-->", kSourceOffsetMarkerName,
-                              static_cast<unsigned>(offset));
+  const int length =
+      snprintf(marker, sizeof(marker), "<!--%s%u-->", kSourceOffsetMarkerName, static_cast<unsigned>(offset));
   return length > 0 && static_cast<size_t>(length) < sizeof(marker) && writeLiteral(*sanitizer.output, marker);
 }
 
@@ -496,10 +496,9 @@ bool writeXmlText(HalFile& output, const char* text) {
   return true;
 }
 
-bool sanitizeChapter(const std::string& inputPath, const std::string& outputPath,
-                     const std::string& imageIndexPath, const uint32_t chapterIndex, const char* title,
-                     const bool plainText, uint8_t* readBuffer, const size_t readBufferSize, char* tagBuffer,
-                     const size_t tagBufferSize) {
+bool sanitizeChapter(const std::string& inputPath, const std::string& outputPath, const std::string& imageIndexPath,
+                     const uint32_t chapterIndex, const char* title, const bool plainText, uint8_t* readBuffer,
+                     const size_t readBufferSize, char* tagBuffer, const size_t tagBufferSize) {
   HalFile input;
   if (!readBuffer || readBufferSize == 0 || !tagBuffer || tagBufferSize < sizeof(WeReadStore::ImageRecord::url) ||
       !Storage.openFileForRead("WR", inputPath, input)) {
