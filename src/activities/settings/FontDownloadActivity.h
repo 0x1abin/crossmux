@@ -5,8 +5,7 @@
 
 #include "FontInstaller.h"
 #include "SdCardFont.h"
-#include "activities/Activity.h"
-#include "util/ButtonNavigator.h"
+#include "activities/UiListActivity.h"
 
 // JSON schema version of the fonts.json manifest. The canonical version for
 // the build tooling lives in lib/EpdFont/scripts/cpfont_version.py. This
@@ -15,14 +14,15 @@
 #define FONTS_MANIFEST_VERSION 1
 
 #ifndef FONT_MANIFEST_URL
-// Global assets are published by .github/workflows/release-fonts.yml; Chinese
-// assets use the separately managed Gitee service. Both use the
-// "sd-fonts-m<META>-b<BIN>" tag derived from cpfont_version.py.
+// Manifest + .cpfont assets are published by .github/workflows/release-fonts.yml
+// to the crosspoint-fonts repo under the "sd-fonts-m<META>-b<BIN>" tag. The tag
+// pattern must stay in sync with the workflow; it derives its version numbers
+// from lib/EpdFont/scripts/cpfont_version.py.
 #define FONT_MANIFEST_URL_STRINGIFY_INNER(x) #x
 #define FONT_MANIFEST_URL_STRINGIFY(x) FONT_MANIFEST_URL_STRINGIFY_INNER(x)
 #ifdef ENABLE_CHINESE_VERSION
-#define FONT_MANIFEST_URL                                                                             \
-  "https://gitee.com/x1abin/crossmux-fonts/releases/download/sd-fonts-m" FONT_MANIFEST_URL_STRINGIFY( \
+#define FONT_MANIFEST_URL                                                     \
+  "https://" CROSSMUX_HOST "/api/assets/fonts/m" FONT_MANIFEST_URL_STRINGIFY( \
       FONTS_MANIFEST_VERSION) "-b" FONT_MANIFEST_URL_STRINGIFY(CPFONT_VERSION) "/fonts.json"
 #else
 #define FONT_MANIFEST_URL                                                                                           \
@@ -31,7 +31,7 @@
 #endif
 #endif
 
-class FontDownloadActivity : public Activity {
+class FontDownloadActivity final : public UiListActivity {
  public:
   enum class Purpose : uint8_t { Manage, PromptThenManage };
 
@@ -44,7 +44,6 @@ class FontDownloadActivity : public Activity {
 
   void onEnter() override;
   void onExit() override;
-  void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override {
     return state_ == LOADING_MANIFEST || state_ == DOWNLOADING ||
@@ -70,16 +69,16 @@ class FontDownloadActivity : public Activity {
   enum class DownloadResult : uint8_t { Success, Cancelled, Failed };
 
   struct ManifestFile {
-    std::string name;
     size_t size = 0;
     uint32_t crc32 = 0;
+    uint8_t pointSize = 0;
   };
 
   struct ManifestFamily {
     std::string name;
     std::string description;
-    std::vector<std::string> styles;
-    std::vector<ManifestFile> files;
+    size_t fileOffset = 0;
+    size_t fileCount = 0;
     size_t totalSize = 0;
     bool installed = false;
     bool hasUpdate = false;
@@ -88,12 +87,11 @@ class FontDownloadActivity : public Activity {
   State state_ = WIFI_SELECTION;
   Purpose purpose_;
   FontInstaller fontInstaller_;
-  ButtonNavigator buttonNavigator_;
 
   // Manifest data
   std::string baseUrl_;
   std::vector<ManifestFamily> families_;
-  int selectedIndex_ = 0;
+  std::vector<ManifestFile> files_;
 
   // Download progress
   size_t currentFileIndex_ = 0;
@@ -103,21 +101,45 @@ class FontDownloadActivity : public Activity {
   int downloadingFamilyIndex_ = -1;
   std::string errorMessage_;
   bool cancelRequested_ = false;
-  bool waitForConfirmRelease_ = false;
   DownloadOperation operation_ = DownloadOperation::None;
   bool selectionUpdated_ = false;
   bool accelerationCompleted_ = false;
+  // Set when the cancel came from the home gesture (consumed by the download
+  // callback's own input pump); exit to home after the abort unwinds.
+  bool goHomeRequested_ = false;
+
+  // Row cache: buildScreen() only runs while state_ == FAMILY_LIST, and
+  // families_ only changes at the handful of state_-transition points back to
+  // FAMILY_LIST (manifest load, download/update/delete completing) — never
+  // mid-stay (cursor move, tap flash). rowsDirty_ marks those transitions so
+  // buildScreen() rebuilds rowItems_ only when it actually needs to, instead
+  // of on every repaint.
+  std::vector<std::string> rowLabels_;
+  std::vector<freeink::ui::ListItem> rowItems_;
+  bool rowsDirty_ = true;
+  void rebuildRowItems();
+
+  int listCount() const override { return listItemCount(); }
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  // Non-list states (loading, downloading, complete, error) consume the loop
+  // pass here; only FAMILY_LIST falls through to the base list protocol.
+  bool handleCustomInput() override;
+
+  void activateSelected();
 
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);
   bool fetchAndParseManifest();
+  DownloadResult downloadFile(const ManifestFamily& family, const ManifestFile& file);
   DownloadResult downloadFamily(ManifestFamily& family);
   void downloadSingle(int familyIndex);
-  void downloadAll();
-  void updateAll();
   void retryDownloadOperation();
   void selectDownloadedFontAndPreview(const char* familyName);
+  void downloadAll();
+  void updateAll();
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);
+  bool isVerifiedFontFile(const char* path, const ManifestFile& file);
   bool showDownloadAllRow() const;
   bool showUpdateAllRow() const;
   int specialRowCount() const;

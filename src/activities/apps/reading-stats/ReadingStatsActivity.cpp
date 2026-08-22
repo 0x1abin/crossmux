@@ -1,6 +1,7 @@
 #include "ReadingStatsActivity.h"
 
 #include <Bitmap.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -277,7 +278,7 @@ void ReadingStatsActivity::selectMainTabContentEdge(const MainTabContentEdge edg
 
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
-  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+  if (!usesInxLayout()) renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
   selectedIndex = usesInxLayout() ? 0 : (READING_STATS.getBooks().empty() ? 0 : 1);
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForBackRelease = false;
@@ -363,7 +364,7 @@ void ReadingStatsActivity::loop() {
     buttonNavigator.onPreviousRelease([moveSelection] { moveSelection(-1); });
     buttonNavigator.onNextContinuous([moveSelection] { moveSelection(1); });
     buttonNavigator.onPreviousContinuous([moveSelection] { moveSelection(-1); });
-    prepareVisibleCover();
+    if (showMainTabContentSelection()) prepareVisibleCover();
     return;
   }
 
@@ -466,24 +467,31 @@ void ReadingStatsActivity::prepareVisibleCover() {
   if (bookIndex < 0 || bookIndex >= static_cast<int>(books.size())) return;
 
   attemptedCoverView = selectedIndex;
-  const ReadingBookStats& book = books[bookIndex];
-  std::string title;
-  std::string author;
-  bool generated = false;
-  const std::string coverPath = BookCoverLoader::ensureFullCover(book.path, &title, &author, &generated);
-  if (coverPath.empty()) return;
-
-  const bool pathChanged = coverPath != book.coverBmpPath;
-  READING_STATS.updateBookMetadata(book.path, title, author, coverPath);
-  if (generated || pathChanged) {
-    waitingForCoverRender = true;
-    requestUpdate();
-  }
+  waitingForCoverRender = true;
+  requestUpdate();
 }
 
 bool ReadingStatsActivity::usesInxLayout() const { return UITheme::getInstance().hasMainTabs(); }
 
 void ReadingStatsActivity::render(RenderLock&&) {
+  if (waitingForCoverRender) {
+    const auto& books = READING_STATS.getBooks();
+    const int bookIndex = selectedIndex == 0 ? 0 : selectedIndex - 1;
+    if (bookIndex >= 0 && bookIndex < static_cast<int>(books.size())) {
+      const std::string bookPath = books[bookIndex].path;
+      std::string title;
+      std::string author;
+      std::string coverPath;
+      if (FsHelpers::hasEpubExtension(bookPath)) {
+        GfxRenderer::FrameBufferLoan loan(renderer);
+        coverPath = BookCoverLoader::ensureFullCover(bookPath, &title, &author);
+      } else {
+        coverPath = BookCoverLoader::ensureFullCover(bookPath, &title, &author);
+      }
+      if (!coverPath.empty()) READING_STATS.updateBookMetadata(bookPath, title, author, coverPath);
+    }
+  }
+
   if (usesInxLayout()) {
     renderInx();
     renderedCoverView = selectedIndex;

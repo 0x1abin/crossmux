@@ -183,6 +183,38 @@ std::string extractFolderPath(const std::string& filePath) {
   return filePath.substr(0, lastSlash);
 }
 
+bool isValidPathComponent(const std::string_view component) {
+  if (component.empty() || component.size() > 255 || component == "." || component == ".." || component.back() == '.' ||
+      component.back() == ' ') {
+    return false;
+  }
+  for (const unsigned char c : component) {
+    if (c <= 0x1f || c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' ||
+        c == '|') {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool isProtectedPathComponent(const std::string_view component) {
+  return component.empty() || component.front() == '.' || component == "System Volume Information" ||
+         component == "XTCache";
+}
+
+bool isSameOrDescendantPath(const std::string_view path, const std::string_view root) {
+  if (path == root) return true;
+  if (root == "/") return !path.empty() && path.front() == '/';
+  return path.size() > root.size() && path.compare(0, root.size(), root) == 0 && path[root.size()] == '/';
+}
+
+std::string rebasePath(const std::string_view path, const std::string_view oldRoot, const std::string_view newRoot) {
+  if (!isSameOrDescendantPath(path, oldRoot)) return std::string(path);
+  std::string result(newRoot);
+  result.append(path.substr(oldRoot.size()));
+  return result;
+}
+
 void sanitizePathComponentForFat32(const char* input, char* output, size_t maxLen) {
   if (maxLen == 0) {
     return;

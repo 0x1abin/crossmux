@@ -306,6 +306,21 @@ bool ImageBlock::hasValidCache() const {
 
 bool ImageBlock::needsDecode() const { return !imageFailedThisSession(imagePath) && !hasValidCache(); }
 
+bool ImageBlock::ensureExtracted() {
+  if (Storage.exists(imagePath.c_str())) return true;
+  if (srcPath.empty() || !extractFn) {
+    rememberImageFailure(imagePath);
+    return false;
+  }
+
+  LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
+  if (extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) return true;
+
+  LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
+  rememberImageFailure(imagePath);
+  return false;
+}
+
 void ImageBlock::clearSessionRenderFailures() { failedImageCount = 0; }
 
 void ImageBlock::releaseRenderCache() { releasePxcSlot(); }
@@ -322,13 +337,24 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 }
 
 bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const PixelCachePolicy cachePolicy) {
+  return renderInternal(renderer, x, y, cachePolicy, DecodeOutput::FrameBufferAndCache);
+}
+
+bool ImageBlock::cacheDecodedImage(GfxRenderer& renderer, const int x, const int y) {
+  return renderInternal(renderer, x, y, PixelCachePolicy::Stream, DecodeOutput::CacheOnly);
+}
+
+bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y, const PixelCachePolicy cachePolicy,
+                                const DecodeOutput output) {
+  const bool renderToFramebuffer = output == DecodeOutput::FrameBufferAndCache;
+
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
   // suppression, so it would otherwise do a full (discarded) cache render every
   // page view. Skip it here. The image still draws in the real BW/grayscale
   // passes; on first view this just moves the one-time decode to the BW pass.
   FontCacheManager* fcm = renderer.getFontCacheManager();
-  if (fcm && fcm->isScanning()) return true;
+  if (renderToFramebuffer && fcm && fcm->isScanning()) return true;
 
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
@@ -348,28 +374,29 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
   // and discarded the result — the dominant cost of AA on image pages. The check
   // is orientation-aware and returns true when no strip is active, so the BW
   // pass and non-tiled controllers render the image exactly as before.
-  if (!renderer.glyphIntersectsStrip(x, y, x + width - 1, y + height - 1)) {
+  if (renderToFramebuffer && !renderer.glyphIntersectsStrip(x, y, x + width - 1, y + height - 1)) {
     return true;
   }
 
   if (imageFailedThisSession(imagePath)) {
-    renderPlaceholder(renderer, x, y);
+    if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
     return false;
   }
 
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
-  if (renderFromCache(renderer, cachePath, x, y, width, height, cachePolicy)) {
+  if (renderToFramebuffer && renderFromCache(renderer, cachePath, x, y, width, height, cachePolicy)) {
+    return true;
+  }
+  if (!renderToFramebuffer && hasValidCache()) {
     return true;
   }
 
   // The build only header-probed the image for dimensions; pull the actual
   // file out of the book now, on first visit to the page.
-  if (!srcPath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
-    LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
-    if (!extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) {
-      LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
-    }
+  if (!srcPath.empty() && !ensureExtracted()) {
+    if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
+    return false;
   }
 
   // No cache - need to decode the image
@@ -380,7 +407,7 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
     if (!Storage.openFileForRead("IMG", imagePath, file)) {
       LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
       rememberImageFailure(imagePath);
-      renderPlaceholder(renderer, x, y);
+      if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
       return false;
     }
     fileSize = file.size();
@@ -389,7 +416,7 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
   if (fileSize == 0) {
     LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
-    renderPlaceholder(renderer, x, y);
+    if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
     return false;
   }
 
@@ -405,12 +432,13 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
   config.performanceMode = false;
   config.useExactDimensions = true;  // Use pre-calculated dimensions to avoid rounding mismatches
   config.cachePath = cachePath;      // Enable caching during decode
+  config.output = output;
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {
     LOG_ERR("IMG", "No decoder found for image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
-    renderPlaceholder(renderer, x, y);
+    if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
     return false;
   }
 
@@ -420,7 +448,7 @@ bool ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const P
   if (!success) {
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
-    renderPlaceholder(renderer, x, y);
+    if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
     return false;
   }
 
@@ -439,10 +467,18 @@ bool ImageBlock::serialize(HalFile& file) {
 std::unique_ptr<ImageBlock> ImageBlock::deserialize(HalFile& file) {
   std::string path;
   std::string src;
-  serialization::readString(file, path);
-  serialization::readString(file, src);
-  int16_t w, h;
-  serialization::readPod(file, w);
-  serialization::readPod(file, h);
-  return std::unique_ptr<ImageBlock>(new (std::nothrow) ImageBlock(path, src, w, h));
+  if (!serialization::readString(file, path, serialization::MAX_PATH_BYTES) ||
+      !serialization::readString(file, src, serialization::MAX_PATH_BYTES)) {
+    LOG_ERR("IMG", "Deserialization failed: truncated or oversized image path");
+    return nullptr;
+  }
+  int16_t w = 0;
+  int16_t h = 0;
+  if (!serialization::readPod(file, w) || !serialization::readPod(file, h) || w <= 0 || h <= 0) {
+    LOG_ERR("IMG", "Deserialization failed: invalid image dimensions");
+    return nullptr;
+  }
+  auto block = makeUniqueNoThrow<ImageBlock>(path, src, w, h);
+  if (!block) LOG_ERR("IMG", "OOM: ImageBlock (%u bytes)", static_cast<unsigned>(sizeof(ImageBlock)));
+  return block;
 }

@@ -520,19 +520,6 @@ void ReadingStatsDetailActivity::loop() {
     requestUpdate();
   });
 
-  if (coverLoadPending) {
-    coverLoadPending = false;
-    if (const auto* book = findBook(bookPath)) {
-      const std::string resolvedCoverPath = ensureCoverPath(*book);
-      if (!resolvedCoverPath.empty() && resolvedCoverPath != resolvedCoverBmpPath) {
-        resolvedCoverBmpPath = resolvedCoverPath;
-        invalidateBaseScreenBuffer();
-        requestUpdate();
-      }
-    }
-    return;
-  }
-
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const auto coverSize = UITheme::getInstance().hasMainTabs() ? InxCoverGeometry::fit(COVER_WIDTH, COVER_HEIGHT)
@@ -576,6 +563,23 @@ void ReadingStatsDetailActivity::loop() {
 }
 
 void ReadingStatsDetailActivity::render(RenderLock&&) {
+  if (coverLoadPending) {
+    coverLoadPending = false;
+    if (const auto* pendingBook = findBook(bookPath)) {
+      std::string resolvedCoverPath;
+      if (FsHelpers::hasEpubExtension(pendingBook->path)) {
+        GfxRenderer::FrameBufferLoan loan(renderer);
+        resolvedCoverPath = ensureCoverPath(*pendingBook);
+      } else {
+        resolvedCoverPath = ensureCoverPath(*pendingBook);
+      }
+      if (!resolvedCoverPath.empty() && resolvedCoverPath != resolvedCoverBmpPath) {
+        resolvedCoverBmpPath = std::move(resolvedCoverPath);
+        invalidateBaseScreenBuffer();
+      }
+    }
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   const auto* book = findBook(bookPath);

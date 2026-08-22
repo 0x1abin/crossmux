@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace serialization {
 
@@ -139,8 +140,11 @@ void writePod(BufferedFileWriter& out, const T& value) {
 }
 
 template <typename T>
-void readPod(BufferedFileReader& in, T& value) {
-  in.read(&value, sizeof(T));
+[[nodiscard]] bool readPod(BufferedFileReader& in, T& value) {
+  T next{};
+  if (in.read(&next, sizeof(T)) != sizeof(T)) return false;
+  value = next;
+  return true;
 }
 
 inline void writeString(BufferedFileWriter& out, const std::string& s) {
@@ -149,13 +153,14 @@ inline void writeString(BufferedFileWriter& out, const std::string& s) {
   out.write(s.data(), len);
 }
 
-inline void readString(BufferedFileReader& in, std::string& s) {
-  uint32_t len;
-  readPod(in, len);
-  s.resize(len);
-  if (len > 0) {
-    in.read(&s[0], len);
-  }
+[[nodiscard]] inline bool readString(BufferedFileReader& in, std::string& s, const uint32_t maxLength) {
+  uint32_t len = 0;
+  if (!readPod(in, len) || len > maxLength) return false;
+  std::string next;
+  next.resize(len);
+  if (len > 0 && in.read(next.data(), len) != len) return false;
+  s = std::move(next);
+  return true;
 }
 
 }  // namespace serialization

@@ -20,7 +20,7 @@ struct KeyboardResult {
 struct MenuResult {
   int action = -1;
   uint8_t orientation = 0;
-  uint8_t pageTurnOption = 0;
+  uint8_t pageTurnRate = 0;
 };
 
 struct ChapterResult {
@@ -33,7 +33,7 @@ struct PercentResult {
 };
 
 struct IntervalResult {
-  uint32_t value = 0;
+  int32_t value = 0;
 };
 
 struct ChapterRangeResult {

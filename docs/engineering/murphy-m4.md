@@ -1,13 +1,13 @@
-# Mofei M4 experimental target
+# Murphy M4 experimental target
 
-`mofei_m4` is a separate ESP32-S3 N16R8 build. It inherits the normal DIO
+`murphy_m4` is a separate ESP32-S3 N16R8 build. It inherits the normal DIO
 flash mode, 16 MB partition table, one 48,000-byte framebuffer, OPI PSRAM and
 USB CDC settings, and uses native 4-bit SDMMC storage.
 
 ```bash
-pio run -e mofei_m4
-pio run -e mofei_m4 -t upload
-pio run -e simulator_mofei_m4 -t run_simulator
+pio run -e murphy_m4
+pio run -e murphy_m4 -t upload
+pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 Hardware profiles and drivers live in the pinned `0x1abin/freeink-sdk`
@@ -15,7 +15,7 @@ submodule. CrossMux adds only the build, frontlight settings, and experimental
 product gates: AirPage and remote OTA are hidden, while reading, library,
 settings, Web file transfer, and same-target SD firmware update remain.
 
-The desktop target models the 800x480 panel, `mofei_m4` identity, touch and
+The desktop target models the 800x480 panel, `murphy_m4` identity, touch and
 rotation, RTC, buttons, dual-channel frontlight state, and Power-only wake. Use
 the mouse for touch, arrows for Up/Down, `P` for Power, and `S` for sleep; M4
 has no Home key, so `H` is ignored. It does not replace hardware tests for
@@ -24,7 +24,7 @@ or standby current.
 
 The default SSD1677 configuration targets the second production batch with
 R13 fitted and uses the verified `0x50` pseudo-temperature. To build for the
-first no-R13 batch, add `-DFREEINK_MOFEI_M4_BATCH1=1` in
+first no-R13 batch, add `-DFREEINK_MURPHY_M4_BATCH1=1` in
 `platformio.local.ini`; this selects `0x3C`. Keep this compile-time until both
 batches pass the display gate.
 
@@ -33,8 +33,8 @@ batches pass the display gate.
 Back up the complete flash before the first write:
 
 ```bash
-esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 0x1000000 mofei-m4-backup.bin
-shasum -a 256 mofei-m4-backup.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 0x1000000 murphy-m4-backup.bin
+shasum -a 256 murphy-m4-backup.bin
 ```
 
 Keep that backup outside the device. It is the only full-flash recovery image;
@@ -42,7 +42,7 @@ the Beta release contains only the four segments required by the Web installer.
 Restore the original backup with:
 
 ```bash
-esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 mofei-m4-backup.bin
+esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0 murphy-m4-backup.bin
 ```
 
 Do not flash an ESP32-C3 or eego A4 artifact. The first-install flow writes the

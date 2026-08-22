@@ -71,11 +71,11 @@ class SdkSyncStateTest(unittest.TestCase):
         )
 
     def test_sdk_candidate_builds_only_available_hardware(self):
-        board_config = "FREEINK_DEVICE_EEGO_A4"
-        platformio = "[env:eego_a4]\n[env:mofei_m4]\n"
+        board_config = "FREEINK_DEVICE_EEGO_A4\nFREEINK_DEVICE_MURPHY_M4"
+        platformio = "[env:eego_a4]\n[env:murphy_m4]\n"
         self.assertEqual(
             sync_upstream.candidate_build_envs(board_config, platformio),
-            ("default", "sticky", "eego_a4"),
+            ("default", "sticky", "eego_a4", "murphy_m4"),
         )
 
     def test_extra_build_environments_are_appended(self):

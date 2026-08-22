@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstring>
 #include <string>
 
@@ -159,56 +160,69 @@ TEST(ReleaseJsonParser, NightlyBuildTag) {
   EXPECT_EQ(p.getFirmwareSize(), 5839088u);
 }
 
-TEST(ReleaseJsonParser, OtaSummary) {
+TEST(ReleaseJsonParser, OtaReleaseNotes) {
   const char* json =
-      R"({"tag_name":"v2.4.1","summary":"Faster book opening\nMore reliable OTA","assets":[{"name":"firmware.bin","size":1,"browser_download_url":"https://example.com/fw"}]})";
-  ReleaseJsonParser::SummaryLine summaryLines[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
-  ReleaseJsonParser p(summaryLines);
+      R"({"tag_name":"v2.4.1","release_notes":["Faster book opening","More reliable OTA","New font sizes 20 and 22"],"assets":[{"name":"firmware.bin","size":1,"browser_download_url":"https://example.com/fw"}]})";
+  std::array<ReleaseJsonParser::ReleaseNote, ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX> notes{};
+  ReleaseJsonParser p(notes);
   p.feed(json, strlen(json));
 
-  EXPECT_TRUE(p.foundSummary());
-  EXPECT_STREQ(p.getSummaryLine(0), "Faster book opening");
-  EXPECT_STREQ(p.getSummaryLine(1), "More reliable OTA");
-  EXPECT_STREQ(p.getSummaryLine(2), "");
+  ASSERT_TRUE(p.foundReleaseNotes());
+  ASSERT_EQ(p.getReleaseNoteCount(), 3u);
+  EXPECT_STREQ(notes[0].data(), "Faster book opening");
+  EXPECT_STREQ(notes[1].data(), "More reliable OTA");
+  EXPECT_STREQ(notes[2].data(), "New font sizes 20 and 22");
 }
 
-TEST(ReleaseJsonParser, OtaSummaryChunkedByteByByte) {
-  const char* json = R"({"summary":"加快图书打开速度\n提升OTA更新可靠性"})";
-  ReleaseJsonParser::SummaryLine summaryLines[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
-  ReleaseJsonParser p(summaryLines);
+TEST(ReleaseJsonParser, OtaReleaseNotesChunkedByteByByte) {
+  const char* json = R"({"release_notes":["加快图书打开速度","提升OTA更新可靠性","新增20和22号字体"]})";
+  std::array<ReleaseJsonParser::ReleaseNote, ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX> notes{};
+  ReleaseJsonParser p(notes);
   feedChunked(p, json, 1);
 
-  EXPECT_TRUE(p.foundSummary());
-  EXPECT_STREQ(p.getSummaryLine(0), "加快图书打开速度");
-  EXPECT_STREQ(p.getSummaryLine(1), "提升OTA更新可靠性");
+  ASSERT_TRUE(p.foundReleaseNotes());
+  ASSERT_EQ(p.getReleaseNoteCount(), 3u);
+  EXPECT_STREQ(notes[0].data(), "加快图书打开速度");
+  EXPECT_STREQ(notes[1].data(), "提升OTA更新可靠性");
+  EXPECT_STREQ(notes[2].data(), "新增20和22号字体");
 }
 
-TEST(ReleaseJsonParser, MissingOrInvalidOtaSummary) {
-  ReleaseJsonParser missing;
-  const char* oldJson = R"({"tag_name":"v1.0.0","assets":[]})";
-  missing.feed(oldJson, strlen(oldJson));
-  EXPECT_FALSE(missing.foundSummary());
+TEST(ReleaseJsonParser, OtaReleaseNotesAtCapacity) {
+  const char* json = R"({"release_notes":["One","Two","Three","Four","Five","Six","Seven","Eight"]})";
+  std::array<ReleaseJsonParser::ReleaseNote, ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX> notes{};
+  ReleaseJsonParser p(notes);
+  p.feed(json, strlen(json));
 
-  ReleaseJsonParser::SummaryLine singleLineSummary[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
-  ReleaseJsonParser singleLine(singleLineSummary);
-  const char* oneLine = R"({"summary":"Only one line"})";
-  singleLine.feed(oneLine, strlen(oneLine));
-  EXPECT_FALSE(singleLine.foundSummary());
-
-  ReleaseJsonParser::SummaryLine threeLineSummary[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
-  ReleaseJsonParser threeLines(threeLineSummary);
-  const char* tooMany = R"({"summary":"One\nTwo\nThree"})";
-  threeLines.feed(tooMany, strlen(tooMany));
-  EXPECT_FALSE(threeLines.foundSummary());
+  ASSERT_TRUE(p.foundReleaseNotes());
+  EXPECT_EQ(p.getReleaseNoteCount(), ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX);
+  EXPECT_STREQ(notes.back().data(), "Eight");
 }
 
-TEST(ReleaseJsonParser, RejectsOversizedOtaSummaryLine) {
-  const std::string json = R"({"summary":")" + std::string(64, 'x') + R"(\nValid"})";
-  ReleaseJsonParser::SummaryLine summaryLines[ReleaseJsonParser::SUMMARY_LINE_COUNT] = {};
-  ReleaseJsonParser p(summaryLines);
-  p.feed(json.c_str(), json.size());
+TEST(ReleaseJsonParser, RejectsInvalidOtaReleaseNotes) {
+  const std::string oversized = R"({"release_notes":[")" + std::string(97, 'x') + R"(","Valid"]})";
+  const char* invalid[] = {
+      R"({"tag_name":"v1.0.0","assets":[]})",
+      R"({"summary":"Legacy\nSummary"})",
+      R"({"release_notes":["Only one"]})",
+      R"({"release_notes":["Duplicate","Duplicate"]})",
+      R"({"release_notes":["Bad * markdown","Valid"]})",
+      R"({"release_notes":["Valid",null]})",
+      R"({"release_notes":["Valid",{"nested":"value"}]})",
+      R"({"release_notes":["One","Two","Three","Four","Five","Six","Seven","Eight","Nine"]})",
+  };
+  for (const char* json : invalid) {
+    std::array<ReleaseJsonParser::ReleaseNote, ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX> notes{};
+    ReleaseJsonParser p(notes);
+    p.feed(json, strlen(json));
+    EXPECT_FALSE(p.foundReleaseNotes()) << json;
+    EXPECT_EQ(p.getReleaseNoteCount(), 0u) << json;
+  }
 
-  EXPECT_FALSE(p.foundSummary());
+  std::array<ReleaseJsonParser::ReleaseNote, ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX> notes{};
+  ReleaseJsonParser p(notes);
+  p.feed(oversized.c_str(), oversized.size());
+  EXPECT_FALSE(p.foundReleaseNotes());
+  EXPECT_EQ(p.getReleaseNoteCount(), 0u);
 }
 
 TEST(ReleaseJsonParser, PrettyAndMinifiedAgree) {

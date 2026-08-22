@@ -79,6 +79,25 @@ constexpr int pageStart(const int selected, const int itemCount, const int conte
 }
 }  // namespace InxMenuGeometry
 
+namespace InxOptionGeometry {
+inline constexpr int visibleRowLimit = 5;
+inline constexpr int rowHeight = 62;
+inline constexpr int headerHeight = 62;
+
+constexpr int visibleRows(const int optionCount) {
+  return optionCount < visibleRowLimit ? (optionCount > 0 ? optionCount : 0) : visibleRowLimit;
+}
+
+constexpr int start(const int selected, const int optionCount) {
+  const int visible = visibleRows(optionCount);
+  if (visible == 0) return 0;
+  const int clamped = selected < 0 ? 0 : (selected < optionCount ? selected : optionCount - 1);
+  const int wanted = clamped - visible / 2;
+  const int maxStart = optionCount - visible;
+  return wanted < 0 ? 0 : (wanted > maxStart ? maxStart : wanted);
+}
+}  // namespace InxOptionGeometry
+
 namespace InxAccordionGeometry {
 struct Row {
   int category = -1;

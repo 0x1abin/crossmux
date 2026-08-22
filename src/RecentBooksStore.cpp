@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <iterator>
 
+#include "util/BookCacheUtils.h"
+
 void RecentBooksStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["books"].to<JsonArray>();
   for (const auto& book : recentBooks) {
@@ -89,18 +91,34 @@ bool RecentBooksStore::removeByPath(const std::string& path) {
   return true;
 }
 
-void RecentBooksStore::updatePath(const std::string& oldPath, const std::string& newPath,
+bool RecentBooksStore::updatePath(const std::string& oldPath, const std::string& newPath,
                                   const std::string& oldCachePath, const std::string& newCachePath) {
   auto it = std::find_if(recentBooks.begin(), recentBooks.end(),
                          [&](const RecentBook& book) { return book.path == oldPath; });
   if (it == recentBooks.end()) {
-    return;
+    return true;
   }
   it->path = newPath;
   if (!oldCachePath.empty() && !it->coverBmpPath.empty() && it->coverBmpPath.rfind(oldCachePath, 0) == 0) {
     it->coverBmpPath = newCachePath + it->coverBmpPath.substr(oldCachePath.size());
   }
-  saveToFile();
+  return saveToFile();
+}
+
+bool RecentBooksStore::updatePathPrefix(const std::string& oldPrefix, const std::string& newPrefix) {
+  bool changed = false;
+  for (auto& book : recentBooks) {
+    if (!FsHelpers::isSameOrDescendantPath(book.path, oldPrefix)) continue;
+    const std::string oldPath = book.path;
+    const std::string oldCachePath = bookCachePath(oldPath);
+    book.path = FsHelpers::rebasePath(oldPath, oldPrefix, newPrefix);
+    const std::string newCachePath = bookCachePath(book.path);
+    if (!oldCachePath.empty() && book.coverBmpPath.rfind(oldCachePath, 0) == 0) {
+      book.coverBmpPath = newCachePath + book.coverBmpPath.substr(oldCachePath.size());
+    }
+    changed = true;
+  }
+  return !changed || saveToFile();
 }
 
 bool RecentBooksStore::isMissing(const RecentBook& book) { return !Storage.exists(book.path.c_str()); }

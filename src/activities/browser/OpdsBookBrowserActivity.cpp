@@ -1,6 +1,7 @@
 #include "OpdsBookBrowserActivity.h"
 
 #include <Arduino.h>
+#include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -13,9 +14,9 @@
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
-#include "components/SubpageLayout.h"
+#include "components/UIScale.h"
 #include "components/UITheme.h"
-#include "components/icons/search24.h"
+#include "components/icons/search32.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/BookCacheUtils.h"
@@ -23,29 +24,23 @@
 #include "util/StringUtils.h"
 #include "util/UrlUtils.h"
 
+namespace fui = freeink::ui;
+
 namespace {
-constexpr int SEARCH_ICON_SIZE = 24;
+constexpr fui::ActionId ACTION_ROW = 1;
+constexpr fui::ActionId ACTION_SEARCH = 2;
+constexpr fui::ActionId ACTION_CANCEL = 3;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
 
-Rect searchIconRect(const GfxRenderer& renderer) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  constexpr int touchSize = SEARCH_ICON_SIZE + 8;
-  const int titleBandHeight = std::max(0, metrics.headerHeight - metrics.batteryBarHeight);
-  const int y = safe.y + metrics.topPadding + metrics.batteryBarHeight + std::max(0, (titleBandHeight - touchSize) / 2);
-  return Rect{safe.x + safe.width - metrics.contentSidePadding - touchSize, y, touchSize, touchSize};
-}
-
-Rect browserContentRect(const GfxRenderer& renderer) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  return SubpageLayout::contentRect(UITheme::getInstance().getScreenSafeArea(renderer, true, false), metrics);
-}
-
-bool contains(const Rect& rect, const int x, const int y) {
-  return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
-}
 }  // namespace
+
+OpdsBookBrowserActivity::OpdsBookBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                                 OpdsServer server)
+    : Activity("OpdsBookBrowser", renderer, mappedInput),
+      UiAppHost(renderer),
+      buttonNavigator(),
+      server(std::move(server)) {}
 
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
@@ -56,10 +51,15 @@ void OpdsBookBrowserActivity::onEnter() {
   searchTemplate = "";
   currentPath = "";
   selectorIndex = 0;
-  consumeConfirm = false;
-  consumeBack = false;
   errorMessage.clear();
   statusMessage = tr(STR_CHECKING_WIFI);
+
+  listNav.reset();
+  resetUi();
+  app.on(ACTION_ROW, &OpdsBookBrowserActivity::onRowEvent, this);
+  app.on(ACTION_SEARCH, &OpdsBookBrowserActivity::onSearchEvent, this);
+  app.on(ACTION_CANCEL, &OpdsBookBrowserActivity::onCancelEvent, this);
+  app.setScreen(&OpdsBookBrowserActivity::rootScreen, this);
   requestUpdate();
 
   checkAndConnectWifi();
@@ -77,17 +77,39 @@ void OpdsBookBrowserActivity::onExit() {
   }
 }
 
+void OpdsBookBrowserActivity::activateSelected() {
+  if (entries.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(entries.size())) return;
+  const auto& entry = entries[selectorIndex];
+  entry.type == OpdsEntryType::BOOK ? downloadBook(entry) : navigateToEntry(entry);
+}
+
+void OpdsBookBrowserActivity::onRowEvent(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<OpdsBookBrowserActivity*>(user);
+  if (self->state != BrowserState::BROWSING) return;
+  if (event.value < 0 || event.value >= static_cast<int16_t>(self->entries.size())) return;
+  self->selectorIndex = event.value;
+  // The tapped row leaves the screen either way (new feed or download view);
+  // a lingering tap flash would gray an unrelated row on the next list.
+  self->app.clearTapFlash();
+  self->activateSelected();
+}
+
+void OpdsBookBrowserActivity::onSearchEvent(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<OpdsBookBrowserActivity*>(user);
+  if (self->state != BrowserState::BROWSING) return;
+  self->app.clearTapFlash();
+  self->launchSearch();
+}
+
+void OpdsBookBrowserActivity::onCancelEvent(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<OpdsBookBrowserActivity*>(user);
+  if (self->state != BrowserState::DOWNLOADING) return;
+  self->app.clearTapFlash();
+  self->cancelDownload = true;
+}
+
 void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::WIFI_SELECTION || state == BrowserState::SEARCH_INPUT) {
-    return;
-  }
-
-  if (consumeConfirm && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    consumeConfirm = false;
-    return;
-  }
-  if (consumeBack && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    consumeBack = false;
     return;
   }
 
@@ -119,13 +141,6 @@ void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::DOWNLOADING) return;
 
   if (state == BrowserState::BROWSING) {
-    auto activateSelected = [this] {
-      if (!entries.empty()) {
-        const auto& entry = entries[selectorIndex];
-        entry.type == OpdsEntryType::BOOK ? downloadBook(entry) : navigateToEntry(entry);
-      }
-    };
-
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       activateSelected();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -134,144 +149,218 @@ void OpdsBookBrowserActivity::loop() {
       if (!searchTemplate.empty() && selectorIndex == 0) launchSearch();
     }
 
-    int tx = 0;
-    int ty = 0;
-    if (!searchTemplate.empty() && mappedInput.wasScreenTapped(tx, ty) && contains(searchIconRect(renderer), tx, ty)) {
-      launchSearch();
-      return;
+    // Touch goes through the FreeInkApp: render() registered every tap target
+    // (rows, header search button); route the snapshot and let the registered
+    // handlers dispatch.
+    const auto route = routeTouch(mappedInput);
+    if (route.routed) {
+      // No pressed-state repaint: the render it triggers would drop a slow
+      // tap's release inside the uiReady window (tap-to-activate needed two
+      // taps), and it costs a second e-ink refresh per tap.
+      if (app.invalidated()) requestUpdate();
+      if (route) return;  // dispatched to onRowEvent/onSearchEvent
+      if (state != BrowserState::BROWSING) return;
     }
 
     if (!entries.empty()) {
-      const Rect content = browserContentRect(renderer);
-      int touched = selectorIndex;
-      const auto touch = handleListTouch(touched, static_cast<int>(entries.size()), content.y, content.height, false);
-      if (touch != ListTouchResult::None) {
-        selectorIndex = touched;
-        if (touch == ListTouchResult::Activated) activateSelected();
-        return;
-      }
-
-      const int pageItems = GUI.getListPageItems(content.height, false);
+      // Swipes scroll the viewport; the selection stays put (it may scroll
+      // off-screen) and button navigation pulls the view back to it.
       const auto swipe = mappedInput.wasSwipe();
-      if (swipe == MappedInputManager::SwipeDir::Up) {
-        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), pageItems);
-        requestUpdate();
-        return;
-      }
-      if (swipe == MappedInputManager::SwipeDir::Down) {
-        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), pageItems);
-        requestUpdate();
+      if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+        const int delta = swipe == MappedInputManager::SwipeDir::Up ? listNav.visibleRows : -listNav.visibleRows;
+        if (listNav.scrollBy(delta, static_cast<int>(entries.size()))) requestUpdate();
         return;
       }
 
-      buttonNavigator.onNextRelease([this] {
-        selectorIndex = ButtonNavigator::nextIndex(selectorIndex, entries.size());
+      const auto moveSelection = [this](const int index) {
+        selectorIndex = index;
+        listNav.selected = index;
+        listNav.follow(static_cast<int>(entries.size()));
         requestUpdate();
+      };
+      buttonNavigator.onNextRelease(
+          [this, &moveSelection] { moveSelection(ButtonNavigator::nextIndex(selectorIndex, entries.size())); });
+      buttonNavigator.onPreviousRelease(
+          [this, &moveSelection] { moveSelection(ButtonNavigator::previousIndex(selectorIndex, entries.size())); });
+      buttonNavigator.onNextContinuous([this, &moveSelection] {
+        moveSelection(ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), listNav.visibleRows));
       });
-      buttonNavigator.onPreviousRelease([this] {
-        selectorIndex = ButtonNavigator::previousIndex(selectorIndex, entries.size());
-        requestUpdate();
-      });
-      buttonNavigator.onNextContinuous([this] {
-        const int pageItems = GUI.getListPageItems(browserContentRect(renderer).height, false);
-        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), pageItems);
-        requestUpdate();
-      });
-      buttonNavigator.onPreviousContinuous([this] {
-        const int pageItems = GUI.getListPageItems(browserContentRect(renderer).height, false);
-        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), pageItems);
-        requestUpdate();
+      buttonNavigator.onPreviousContinuous([this, &moveSelection] {
+        moveSelection(ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), listNav.visibleRows));
       });
     }
   }
 }
 
-void OpdsBookBrowserActivity::render(RenderLock&&) {
-  renderer.clearScreen();
+void OpdsBookBrowserActivity::rootScreen(UiScreen& screen, void* user) {
+  auto* self = static_cast<OpdsBookBrowserActivity*>(user);
+  switch (self->state) {
+    case BrowserState::BROWSING:
+      self->buildBrowsingScreen(screen);
+      break;
+    case BrowserState::DOWNLOADING:
+      self->buildDownloadScreen(screen);
+      break;
+    default:
+      self->buildStatusScreen(screen);
+      break;
+  }
+}
+
+// Shared chrome for every state: reserve the firmware's button-hint band and
+// draw the themed header (padding, centering, and rule come from the theme).
+void OpdsBookBrowserActivity::screenHeader(UiScreen& screen, const bool withSearch) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  const Rect content = SubpageLayout::contentRect(safeArea, metrics);
-  const Rect textBounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
-  const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int smallHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int relatedGap = SubpageLayout::relatedGap(metrics);
-  const int sectionGap = SubpageLayout::sectionGap(metrics);
-
-  // Show server name in header if available, otherwise generic title
-  const char* headerTitle = server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str();
-  const Rect searchRect = searchIconRect(renderer);
-  const int headerTextWidth = searchTemplate.empty() ? safeArea.width - metrics.contentSidePadding * 2
-                                                     : searchRect.x - safeArea.x - metrics.contentSidePadding * 2;
-  const std::string clippedHeader =
-      renderer.truncatedText(UI_12_FONT_ID, headerTitle, std::max(1, headerTextWidth), EpdFontFamily::BOLD);
-  GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
-                 clippedHeader.c_str());
-  if (!searchTemplate.empty()) {
-    renderer.drawIcon(Search24Icon.bits, searchRect.x + 4, searchRect.y + 4, Search24Icon.w);
-  }
-
-  if (state == BrowserState::CHECK_WIFI || state == BrowserState::LOADING) {
-    UITheme::drawCenteredWrappedText(renderer, textBounds, UI_12_FONT_ID, statusMessage.c_str(), 2, true,
-                                     EpdFontFamily::BOLD);
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
-    return;
-  }
-
-  if (state == BrowserState::ERROR) {
-    const int retryHeight = mappedInput.hasTouch() ? relatedGap + smallHeight : 0;
-    const int blockHeight = titleHeight + relatedGap + lineHeight * 2 + retryHeight;
-    const int top = SubpageLayout::centeredTop(content, blockHeight);
-    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top, tr(STR_ERROR_MSG), true, EpdFontFamily::BOLD);
-    UITheme::drawCenteredWrappedText(
-        renderer, Rect{textBounds.x, top + titleHeight + relatedGap, textBounds.width, lineHeight * 2}, UI_10_FONT_ID,
-        errorMessage.c_str(), 2, true, EpdFontFamily::REGULAR, UITheme::TextVerticalAlignment::TOP);
-    if (mappedInput.hasTouch()) {
-      UITheme::drawCenteredText(renderer, textBounds, SMALL_FONT_ID,
-                                top + titleHeight + relatedGap + lineHeight * 2 + relatedGap, tr(STR_TAP_TO_RETRY));
+  screen.takeBottom(static_cast<int16_t>(metrics.buttonHintsHeight));
+  // Same top offset as every GUI.drawHeader caller, so the band lines up with
+  // the rest of the firmware's screens.
+  screen.spacer(static_cast<int16_t>(metrics.topPadding));
+  if (UITheme::getInstance().hasMainTabs()) {
+    const fui::Rect headerRect = screen.takeTop(static_cast<int16_t>(metrics.headerHeight));
+    GUI.drawHeader(renderer, Rect{headerRect.x, headerRect.y, headerRect.width, headerRect.height},
+                   server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str());
+    if (withSearch && !searchTemplate.empty()) {
+      constexpr int16_t iconSize = 32;
+      const fui::Rect iconRect{static_cast<int16_t>(headerRect.right() - metrics.contentSidePadding - iconSize),
+                               static_cast<int16_t>(headerRect.bottom() - iconSize - 5), iconSize, iconSize};
+      screen.target().fill(iconRect, fui::Paint::solid(fui::Color::White));
+      screen.target().bitmap(iconRect, fui::bitmapFromIcon(icon_search_32), fui::BitmapMode::Center);
+      screen.frame().hit(iconRect, ACTION_SEARCH, 0, fui::InputTouch);
     }
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
+    screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
     return;
   }
-
-  if (state == BrowserState::DOWNLOADING) {
-    const int progressHeight =
-        downloadTotal > 0 ? sectionGap + GUI.measureProgressBarHeight(renderer, metrics.progressBarHeight) : 0;
-    const int blockHeight = titleHeight + relatedGap + lineHeight + progressHeight;
-    int y = SubpageLayout::centeredTop(content, blockHeight);
-    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, y, tr(STR_DOWNLOADING), true, EpdFontFamily::BOLD);
-    y += titleHeight + relatedGap;
-    const std::string title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), textBounds.width);
-    UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, y, title.c_str());
-    if (downloadTotal > 0) {
-      GUI.drawProgressBar(renderer,
-                          Rect{textBounds.x, y + lineHeight + sectionGap, textBounds.width, metrics.progressBarHeight},
-                          downloadProgress, downloadTotal);
-    }
-    renderer.displayBuffer();
-    return;
+  fui::HeaderProps header;
+  header.title = server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str();
+  header.borderEdges = fui::EdgeBottom;
+  if (withSearch && !searchTemplate.empty()) {
+    header.trailingIcon = fui::bitmapFromIcon(icon_search_32);
+    header.trailingAction = ACTION_SEARCH;
+    // Optically align the icon with the title glyphs: text hangs low in its
+    // line cell by the font's internal leading; drop the button to match.
+    const int titleFontId = uiScaleSpec().titleFontId;
+    header.actionOffsetY =
+        static_cast<int16_t>((renderer.getLineHeight(titleFontId) - renderer.getTextHeight(titleFontId)) / 2);
   }
+  screen.header(header);
+  // Same breathing room between header and content as the legacy screens.
+  screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
+}
 
-  const char* confirmLabel =
-      (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
-  const char* searchLabel = (!searchTemplate.empty() && selectorIndex == 0) ? tr(STR_SEARCH) : tr(STR_DIR_UP);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, searchLabel, tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+void OpdsBookBrowserActivity::buildBrowsingScreen(UiScreen& screen) {
+  screenHeader(screen, true);
 
   if (entries.empty()) {
-    UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
-                              tr(STR_NO_ENTRIES));
-  } else {
-    GUI.drawList(
-        renderer, content, static_cast<int>(entries.size()), selectorIndex,
-        [this](const int index) { return entries[index].title; },
-        [this](const int index) { return entries[index].type == OpdsEntryType::BOOK ? entries[index].author : ""; },
-        [this](const int index) { return entries[index].type == OpdsEntryType::BOOK ? UIIcon::Book : UIIcon::Folder; });
+    screen.centeredText(tr(STR_NO_ENTRIES), screen.theme().bodyText);
+    return;
   }
+
+  // Transient per-render: sized once via reserve, points into `entries`
+  // strings, freed on scope exit.
+  // rowItems is built whenever entries changes (see rebuildRowItems(), called
+  // from fetchFeed()/releaseEntries()) and reused here on every repaint.
+  fui::ListProps props;
+  props.items = rowItems.data();
+  props.count = static_cast<uint16_t>(rowItems.size());
+  props.action = ACTION_ROW;
+  props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
+  props.valueInset = 8;               // air between the nav chevron and the row edge
+  listNav.selected = selectorIndex;
+  int16_t rowHeight = screen.theme().rowHeight;
+  if (!mappedInput.hasTouch()) {
+    // Non-touch hardware (X3/X4) keeps the original, denser row height
+    // instead of FreeInkUI's touch-target-sized default (see
+    // UiListActivity::syncListViewport; this screen predates that base and
+    // syncs its own viewport directly). Book rows carry an author subtitle.
+    rowHeight = static_cast<int16_t>(UITheme::getInstance().getMetrics().listWithSubtitleRowHeight);
+    props.rowHeight = rowHeight;
+  }
+  listNav.syncToProps(screen.body(), rowHeight, screen.theme().listRowGap, static_cast<int>(entries.size()), props);
+  screen.list(props);
+}
+
+void OpdsBookBrowserActivity::buildDownloadScreen(UiScreen& screen) {
+  screenHeader(screen, false);
+
+  // Centered block: status line, book title, progress bar, cancel button.
+  const auto& theme = screen.theme();
+  fui::TextStyle centered = theme.bodyText;
+  centered.align = fui::TextAlign::Center;
+  const int16_t lh = screen.target().lineHeight(centered.font);
+  const int16_t gap = theme.spaceMd;
+  const int16_t barH = 16;
+  const int16_t btnH = theme.rowHeight;
+  const int16_t blockH = static_cast<int16_t>(lh * 2 + barH + btnH + gap * 3);
+  const fui::Rect body = screen.body();
+  if (body.height > blockH) screen.spacer(static_cast<int16_t>((body.height - blockH) / 2));
+
+  screen.target().text(screen.takeTop(lh, gap), tr(STR_DOWNLOADING), centered);
+  screen.target().text(screen.takeTop(lh, gap), statusMessage.c_str(), centered);
+
+  const fui::Rect bar = screen.takeTop(barH, gap).inset(fui::Insets{0, 50, 0, 50});
+  if (downloadTotal > 0) {
+    fui::ProgressBarProps progress;
+    progress.value = static_cast<int32_t>(downloadProgress);
+    progress.max = static_cast<int32_t>(downloadTotal);
+    progress.border = fui::Paint::solid(fui::Color::Black);
+    progress.borderWidth = 1;
+    fui::progressBar(screen.frame(), bar, progress);
+  }
+
+  const fui::Rect btnArea = screen.takeTop(btnH);
+  const int16_t btnW = static_cast<int16_t>(btnArea.width / 3);
+  fui::ButtonProps cancel;
+  cancel.label = tr(STR_CANCEL);
+  cancel.action = ACTION_CANCEL;
+  screen.button(cancel, fui::Rect{static_cast<int16_t>(btnArea.x + (btnArea.width - btnW) / 2), btnArea.y, btnW, btnH});
+}
+
+void OpdsBookBrowserActivity::buildStatusScreen(UiScreen& screen) {
+  screenHeader(screen, false);
+
+  fui::TextStyle centered = screen.theme().bodyText;
+  centered.align = fui::TextAlign::Center;
+  if (state == BrowserState::ERROR) {
+    const int16_t lh = screen.target().lineHeight(centered.font);
+    const int16_t gap = screen.theme().spaceMd;
+    const bool showTapHint = mappedInput.hasTouch();
+    const int16_t blockH = static_cast<int16_t>(lh * (showTapHint ? 3 : 2) + gap * (showTapHint ? 2 : 1));
+    const fui::Rect body = screen.body();
+    if (body.height > blockH) screen.spacer(static_cast<int16_t>((body.height - blockH) / 2));
+    screen.target().text(screen.takeTop(lh, gap), tr(STR_ERROR_MSG), centered);
+    screen.target().text(screen.takeTop(lh, gap), errorMessage.c_str(), centered);
+    if (showTapHint) screen.target().text(screen.takeTop(lh), tr(STR_TAP_TO_RETRY), centered);
+    return;
+  }
+  // CHECK_WIFI / LOADING (and the brief child-activity handoff states).
+  screen.centeredText(statusMessage.c_str(), centered);
+}
+
+void OpdsBookBrowserActivity::render(RenderLock&&) {
+  renderer.clearScreen();
+
+  MappedInputManager::Labels labels;
+  switch (state) {
+    case BrowserState::BROWSING: {
+      const char* confirmLabel =
+          (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
+      const char* searchLabel = (!searchTemplate.empty() && selectorIndex == 0) ? tr(STR_SEARCH) : tr(STR_DIR_UP);
+      labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, searchLabel, tr(STR_DIR_DOWN));
+      break;
+    }
+    case BrowserState::DOWNLOADING:
+      labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
+      break;
+    case BrowserState::ERROR:
+      labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
+      break;
+    default:
+      labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      break;
+  }
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
+  renderUi();
   renderer.displayBuffer();
 }
 
@@ -307,6 +396,11 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   const auto& nextUrl = parser.getNextPageUrl();
   const auto& prevUrl = parser.getPrevPageUrl();
   const bool feedTruncated = parser.truncated();
+  // Reset the selection before the swap: the render task reads
+  // entries[selectorIndex] under only an empty() guard, and the new feed can
+  // be shorter than the old selection.
+  selectorIndex = 0;
+  listNav.reset();
   entries = std::move(parser).getEntries();
 
   entries.reserve(entries.size() + (prevUrl.empty() ? 0 : 1) + (nextUrl.empty() ? 0 : 1));
@@ -320,13 +414,35 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     LOG_INF("OPDS", "Feed truncated to fit memory");
   }
 
-  selectorIndex = 0;
   state = entries.empty() ? BrowserState::ERROR : BrowserState::BROWSING;
   if (entries.empty()) errorMessage = tr(STR_NO_ENTRIES);
+  rebuildRowItems();
   requestUpdate();
 }
 
-void OpdsBookBrowserActivity::releaseEntries() { std::vector<OpdsEntry>().swap(entries); }
+// Derives rowItems from entries. Called whenever entries changes
+// (fetchFeed()/releaseEntries()) so buildBrowsingScreen() reuses the cached
+// rows on every repaint instead of rebuilding them per render.
+void OpdsBookBrowserActivity::rebuildRowItems() {
+  rowItems.clear();
+  rowItems.reserve(entries.size());
+  for (const auto& entry : entries) {
+    fui::ListItem item;
+    item.label = entry.title.c_str();
+    if (entry.type == OpdsEntryType::BOOK && !entry.author.empty()) item.subtitle = entry.author.c_str();
+    if (entry.type == OpdsEntryType::NAVIGATION) item.value = ">";
+    item.actionValue = static_cast<int16_t>(rowItems.size());
+    rowItems.push_back(item);
+  }
+}
+
+void OpdsBookBrowserActivity::releaseEntries() {
+  // The app's interaction table holds row indices (and hit rects) for the old
+  // entries; stop routing touches against it until the next render.
+  closeRouting();
+  std::vector<OpdsEntry>().swap(entries);
+  rebuildRowItems();
+}
 
 void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
   navigationHistory.push_back(currentPath);
@@ -361,6 +477,8 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   state = BrowserState::DOWNLOADING;
   statusMessage = book.title;
   downloadProgress = downloadTotal = 0;
+  cancelDownload = false;
+  goHomeAfterCancel = false;
   requestUpdate(true);
 
   // Build full download URL relative to the current feed, not the root server URL
@@ -395,6 +513,18 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
       [this, &lastRenderedPercent, &lastProgressUpdateMs](const size_t downloaded, const size_t total) {
         downloadProgress = downloaded;
         downloadTotal = total;
+        // The activity loop is blocked for the whole download; pump input here
+        // so the Cancel button or a Back press can abort mid-transfer.
+        mappedInput.update();
+        if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
+        // This update() consumes the one-shot home event before the central
+        // ActivityManager dispatch can see it, so honor it here: abort the
+        // download, then exit to home once the abort unwinds.
+        if (mappedInput.wasHomeGesture()) {
+          cancelDownload = true;
+          goHomeAfterCancel = true;
+        }
+        routeTouch(mappedInput);
         const int percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
         const unsigned long now = millis();
         if (percent >= 100 || lastRenderedPercent < 0 ||
@@ -405,10 +535,19 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
           requestUpdate(true);
         }
       },
-      nullptr, server.username, server.password);
+      &cancelDownload, server.username, server.password);
 
   if (result == HttpDownloader::OK) {
     clearBookCache(filename);
+    state = BrowserState::BROWSING;
+  } else if (result == HttpDownloader::ABORTED) {
+    // User cancelled; the partial file is already removed. Back to the list,
+    // or straight home when the abort came from the home gesture.
+    LOG_INF("OPDS", "Download cancelled");
+    if (goHomeAfterCancel) {
+      onGoHome();
+      return;
+    }
     state = BrowserState::BROWSING;
   } else {
     LOG_ERR("OPDS", "Download failed: %d", static_cast<int>(result));
@@ -419,19 +558,19 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 }
 
 void OpdsBookBrowserActivity::launchSearch() {
-  consumeConfirm = true;
   state = BrowserState::SEARCH_INPUT;
   requestUpdate();
 
-  auto keyboard = std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH));
-  startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
-    state = BrowserState::BROWSING;
-    if (!result.isCancelled) {
-      performSearch(std::get<KeyboardResult>(result.data).text);
-    } else {
-      requestUpdate();
-    }
-  });
+  startActivityForResultWith<KeyboardEntryActivity>(
+      [this](const ActivityResult& result) {
+        state = BrowserState::BROWSING;
+        if (!result.isCancelled) {
+          performSearch(std::get<KeyboardResult>(result.data).text);
+        } else {
+          requestUpdate();
+        }
+      },
+      tr(STR_SEARCH));
 }
 
 void OpdsBookBrowserActivity::performSearch(const std::string& query) {
@@ -461,8 +600,8 @@ void OpdsBookBrowserActivity::performSearch(const std::string& query) {
   const size_t pos = url.find(placeholder);
   if (pos != std::string::npos) url.replace(pos, placeholder.length(), urlEncode(query));
 
-  navigationHistory.push_back(currentPath);  // <-- add this
-  currentPath = url;                         // <-- add this
+  navigationHistory.push_back(currentPath);
+  currentPath = url;
 
   state = BrowserState::LOADING;
   statusMessage = tr(STR_LOADING);
@@ -487,8 +626,8 @@ void OpdsBookBrowserActivity::launchWifiSelection() {
   state = BrowserState::WIFI_SELECTION;
   requestUpdate();
 
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  startActivityForResultWith<WifiSelectionActivity>(
+      [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
 void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {

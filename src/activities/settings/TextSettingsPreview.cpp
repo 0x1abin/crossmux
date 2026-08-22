@@ -16,8 +16,12 @@
 
 #include "CrossPointSettings.h"
 #include "fontIds.h"
+#include "util/ReadingGuideLine.h"
 
 namespace textsettings {
+
+PreviewLayout::PreviewLayout() = default;
+PreviewLayout::~PreviewLayout() = default;
 
 namespace {
 
@@ -43,10 +47,12 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   const char* text = I18N.get(StrId::STR_FONT_PREVIEW_TEXT);
   std::string word;
   word.reserve(strlen(text));
+  bool firstWord = true;
   for (const char* p = text;; p++) {
     if (*p == ' ' || *p == '\0') {
       if (!word.empty()) {
-        parsed.addWord(word, EpdFontFamily::REGULAR);
+        parsed.addWord(word, firstWord ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+        firstWord = false;
         word.clear();
       }
       if (*p == '\0') break;
@@ -55,10 +61,12 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
     }
   }
 
-  parsed.layoutAndExtractLines(renderer, fontId, static_cast<uint16_t>(textWidth),
-                               [&layout, maxLines](std::shared_ptr<TextBlock> line, uint32_t) {
-                                 if (layout.lines.size() < maxLines) layout.lines.push_back(std::move(line));
-                               });
+  if (!parsed.layoutAndExtractLines(renderer, fontId, static_cast<uint16_t>(textWidth),
+                                    [&layout, maxLines](std::unique_ptr<TextBlock> line, uint32_t) {
+                                      if (layout.lines.size() < maxLines) layout.lines.push_back(std::move(line));
+                                    })) {
+    layout.lines.clear();
+  }
 }
 
 }  // namespace
@@ -114,18 +122,24 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .hyphenation = SETTINGS.hyphenationEnabled != 0};
   if (key != layout.key) {
     if (auto* fcm = renderer.getFontCacheManager()) {
-      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT), SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
+      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT), 0x03);
     }
     relayout(layout, renderer, fontId, textWidth, static_cast<size_t>(maxLines));
     layout.key = key;
   }
 
   // Draw the sample twice so the paragraph gap is visible
+  GfxRenderer::SyntheticBoldScope syntheticBold(renderer, SETTINGS.fakeBold);
   int y = textTop;
   for (int paragraph = 0; paragraph < 2; paragraph++) {
     for (const auto& line : layout.lines) {
       if (y + lineH > textBottomLimit) return;
       line->render(renderer, fontId, textLeft, y);
+      const int guideY = y + lineAdvance + SETTINGS.readingGuideLineOffset;
+      if (SETTINGS.readingGuideLineEnabled &&
+          readingGuideLine::fitsVertically(SETTINGS.readingGuideLineStyle, guideY, textTop, textBottomLimit)) {
+        readingGuideLine::draw(renderer, textLeft, guideY, textLeft + textWidth - 1, SETTINGS.readingGuideLineStyle);
+      }
       y += lineAdvance;
     }
     y += paragraphGap;

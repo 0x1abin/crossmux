@@ -9,6 +9,7 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 
+#include <algorithm>
 #include <string>
 
 #include "../../../util/PaginationDots.h"
@@ -16,6 +17,7 @@
 #include "../../ActivityResult.h"
 #include "../../network/WifiSelectionActivity.h"
 #include "CrossPointSettings.h"
+#include "NetworkStartup.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
@@ -29,6 +31,7 @@ namespace {
 
 constexpr uint32_t kWifiTimeoutMs = 15000u;  // Same as WifiSelectionActivity
 constexpr uint32_t kNtpTimeoutMs = 12000u;
+constexpr uint32_t kSyncDelayMs = 1500u;
 
 // Face factory table. Add new faces by appending a row here and including the
 // corresponding header above. Each entry also declares an isAvailable()
@@ -118,17 +121,26 @@ void StandbyActivity::onEnter() {
   currentFace_->onEnter();
   mode_ = DisplayMode::Normal;
   lastInputMs_ = millis();
-  startTimeSync();
+  if (!TimeUtils::isClockValid() && SETTINGS.clockAutoSync) {
+    syncState_ = SyncState::Delayed;
+    syncStartMs_ = millis();
+  }
   requestUpdate();
 }
 
 void StandbyActivity::onExit() {
-  if (syncState_ != SyncState::Idle) {
-    WiFi.disconnect(false);
-    delay(100);
-    WiFi.mode(WIFI_OFF);
-    syncState_ = SyncState::Idle;
+  switch (syncState_) {
+    case SyncState::Idle:
+    case SyncState::Delayed:
+      break;
+    case SyncState::WifiConnecting:
+    case SyncState::ClockSyncing:
+      WiFi.disconnect(false);
+      delay(100);
+      WiFi.mode(WIFI_OFF);
+      break;
   }
+  syncState_ = SyncState::Idle;
   if (currentFace_) {
     currentFace_->onExit();
     currentFace_.reset();
@@ -167,6 +179,7 @@ void StandbyActivity::startTimeSync() {
   // Another activity (e.g. Settings → WiFi) may have already connected the
   // device. Skip our own WiFi.begin in that case and request a clock sync.
   if (WiFi.status() == WL_CONNECTED) {
+    NetworkStartup::prepare(renderer);
     LOG_DBG("STANDBY", "WiFi already connected, skipping silent attempt");
     beginClockSync();
     return;
@@ -207,7 +220,7 @@ bool StandbyActivity::trySilentWifiConnect() {
   }
 
   WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+  NetworkStartup::setMode(renderer, WIFI_STA);
   // Fresh-slate disconnect (radio off + erase cached AP) so the next begin()
   // latches the exact creds we just loaded, not whatever the radio retained
   // from a previous session. The disconnect(false) form used by the teardown
@@ -274,6 +287,11 @@ void StandbyActivity::pumpTimeSync() {
 
   switch (syncState_) {
     case SyncState::Idle:
+      return;
+    case SyncState::Delayed:
+      if (elapsed < kSyncDelayMs) return;
+      syncState_ = SyncState::Idle;
+      startTimeSync();
       return;
     case SyncState::WifiConnecting: {
       const wl_status_t status = WiFi.status();
@@ -459,13 +477,28 @@ void StandbyActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
+  int viewTop = 0;
+  int viewRight = 0;
+  int viewBottom = 0;
+  int viewLeft = 0;
+  renderer.getOrientedViewableTRBL(&viewTop, &viewRight, &viewBottom, &viewLeft);
+  const Rect faceViewport{viewLeft, viewTop, sw - viewLeft - viewRight, sh - viewTop - viewBottom};
+  const int overlayTop = std::max(metrics.topPadding, viewTop);
 
   renderer.clearScreen();
 
-  // Face renders into the full screen regardless of mode. Chrome (title, battery,
-  // dot indicator) is drawn as overlay on top in Normal mode only, so the face
-  // content doesn't re-flow when transitioning to Immersive.
-  currentFace_->render(renderer, Rect{0, 0, sw, sh});
+  // Face renders inside the physically viewable screen regardless of mode. Normal
+  // chrome is overlaid without reflow; the unsynced warning remains in Immersive.
+  {
+    const GfxRenderer::ClipScope clip(renderer, faceViewport.x, faceViewport.y, faceViewport.width,
+                                      faceViewport.height);
+    currentFace_->render(renderer, faceViewport);
+  }
+
+  const bool clockValid = TimeUtils::isClockValid();
+  if (!clockValid) {
+    UITheme::drawCenteredText(renderer, faceViewport, SMALL_FONT_ID, overlayTop, tr(STR_STANDBY_SYNCING));
+  }
 
   if (mode_ != DisplayMode::Normal) {
     if (inverseMode_) renderer.invertScreen();
@@ -474,20 +507,21 @@ void StandbyActivity::render(RenderLock&&) {
     // image. Only fires in Immersive — Normal-mode navigation needs the
     // ~300-500ms FAST_REFRESH and can't afford the ~2s gray LUT. inverseMode_
     // short-circuits because invertScreen is BW-only and mixes poorly with gray.
-    if (currentFace_->wantsGrayscale() && !inverseMode_) applyGrayscalePass(sw, sh);
+    if (currentFace_->wantsGrayscale() && !inverseMode_) applyGrayscalePass(faceViewport);
     return;
   }
 
   // Top-center face title (or sync state). Small font, no chrome container,
   // no separator line — Apple Standby-style minimal overlay.
-  const char* title =
-      (syncState_ != SyncState::Idle) ? tr(STR_STANDBY_SYNCING) : I18n::getInstance().get(currentFace_->titleId());
-  renderer.drawCenteredText(SMALL_FONT_ID, metrics.topPadding, title, /*black=*/true);
+  if (clockValid) {
+    UITheme::drawCenteredText(renderer, faceViewport, SMALL_FONT_ID, overlayTop,
+                              I18n::getInstance().get(currentFace_->titleId()));
+  }
 
   // Top-right battery icon (no percentage text). Reuses BaseTheme::drawBatteryRight.
   constexpr int kBatW = 16;
   constexpr int kBatH = 12;
-  GUI.drawBatteryRight(renderer, Rect{sw - kBatW - metrics.contentSidePadding, metrics.topPadding, kBatW, kBatH},
+  GUI.drawBatteryRight(renderer, Rect{sw - viewRight - kBatW - metrics.contentSidePadding, overlayTop, kBatW, kBatH},
                        /*showPercentage=*/false);
 
   const uint8_t availFaces = countAvailableFaces(sw, sh);
@@ -504,7 +538,7 @@ void StandbyActivity::render(RenderLock&&) {
 // backup by the gray LUT waveform. Mirrors EpubReaderActivity.cpp:813-837. The
 // caller gates invocation (passive Immersive vs interactive on-demand); this
 // just runs the pass unconditionally.
-void StandbyActivity::applyGrayscalePass(int sw, int sh) {
+void StandbyActivity::applyGrayscalePass(const Rect& viewport) {
   if (!renderer.storeBwBuffer()) {
     LOG_ERR("STANDBY", "Grayscale pass skipped: storeBwBuffer failed");
     return;
@@ -512,12 +546,18 @@ void StandbyActivity::applyGrayscalePass(int sw, int sh) {
 
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-  currentFace_->render(renderer, Rect{0, 0, sw, sh});
+  {
+    const GfxRenderer::ClipScope clip(renderer, viewport.x, viewport.y, viewport.width, viewport.height);
+    currentFace_->render(renderer, viewport);
+  }
   renderer.copyGrayscaleLsbBuffers();
 
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-  currentFace_->render(renderer, Rect{0, 0, sw, sh});
+  {
+    const GfxRenderer::ClipScope clip(renderer, viewport.x, viewport.y, viewport.width, viewport.height);
+    currentFace_->render(renderer, viewport);
+  }
   renderer.copyGrayscaleMsbBuffers();
 
   renderer.displayGrayBuffer();

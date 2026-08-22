@@ -49,6 +49,7 @@ FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
 static unsigned long allowSleepAt = 0;
+constexpr unsigned long READING_STATS_CHECKPOINT_IDLE_MS = 15UL * 1000UL;
 
 // Fonts
 #ifdef ENABLE_CHINESE_VERSION
@@ -333,6 +334,13 @@ void enterDeepSleep(bool fromTimeout = false) {
   deepSleepInProgress = true;
   activityManager.goToSleep(fromTimeout);
 
+  if (!READING_STATS.saveToFile()) {
+    LOG_ERR("RST", "Failed to save reading stats before deep sleep");
+  }
+  if (!ACHIEVEMENTS.saveToFile()) {
+    LOG_ERR("ACH", "Failed to save achievements before deep sleep");
+  }
+
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
   }
@@ -458,7 +466,7 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
-  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightBrightness != 0);
+  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightOn != 0);
   halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
@@ -565,8 +573,7 @@ void setup() {
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
-    activityManager.replaceActivity(
-        std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInputManager, /*recoveryMode=*/true));
+    activityManager.replaceActivityWith<SdFirmwareUpdateActivity>(/*recoveryMode=*/true);
   } else if (HalSystem::isRebootFromPanic()) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
@@ -726,8 +733,26 @@ void loop() {
   }
 
   const unsigned long activityStartTime = millis();
+  const bool readerWasActive = activityManager.isReaderActivity();
   activityManager.loop();
+  const bool readerIsActive = activityManager.isReaderActivity();
   const unsigned long activityDuration = millis() - activityStartTime;
+
+  if (readerWasActive && !readerIsActive) {
+    if (!READING_STATS.saveToFile()) {
+      LOG_ERR("RST", "Failed to save reading stats after reader exit");
+    }
+    if (!ACHIEVEMENTS.saveToFile()) {
+      LOG_ERR("ACH", "Failed to save achievements after reader exit");
+    }
+  } else if (readerIsActive && (millis() - lastActivityTime) >= READING_STATS_CHECKPOINT_IDLE_MS &&
+             !activityManager.skipLoopDelay() && !activityManager.preventAutoSleep() &&
+             READING_STATS.shouldSaveCheckpoint()) {
+    RenderLock lock;
+    if (!READING_STATS.saveToFile()) {
+      LOG_ERR("RST", "Failed to save idle reading checkpoint");
+    }
+  }
 
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {

@@ -44,7 +44,10 @@ class SdCardFont {
   // Default 0x0F = all present styles.
   // When metadataOnly=true, only glyph metrics are loaded (no bitmap data).
   // Returns number of glyphs that couldn't be loaded (0 on full success).
-  int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false);
+  int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false, bool loadKernLig = true);
+  using TextGetter = const char* (*)(const void* ctx, uint32_t index);
+  int prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask = 0x0F,
+              bool metadataOnly = false, bool loadKernLig = true);
 
   // Build a compact advance-only table for layout measurement.
   // Extracts unique codepoints up to the persistent cache capacity, batch-reads
@@ -80,6 +83,10 @@ class SdCardFont {
   // Drop the persistent advance cache. Call when unloading the SD font or
   // when font/size/family/glyph-table state changes.
   void clearPersistentCache();
+
+  // Release rebuildable font data before heap-critical transitions while
+  // keeping coverage metadata and the on-demand glyph path available.
+  void releaseResidentCaches();
 
   // Returns pointer to the managed EpdFont for a given style.
   // Returns nullptr if the style is not present.
@@ -313,7 +320,7 @@ class SdCardFont {
   template <typename Iter>
   int buildAdvanceTableRange(Iter begin, Iter end, bool includeSpace, bool includeHyphen, uint8_t styleMask,
                              const char* extraText = nullptr);
-  int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly);
+  int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly, bool loadKernLig);
 
   // Global helpers
   void freeAll();

@@ -144,8 +144,9 @@ struct DirectPixelWriter {
   // Write a single 2-bit dithered pixel value to the framebuffer.
   // Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
-  inline void writePixel(int logicalX, uint8_t pixelValue) const {
-    const auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue);
+  inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
+    auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue);
+    if (mode == GfxRenderer::BW && writeWhiteInBw && pixelValue >= 3) pixel = {true, false};
     if (!pixel.draw) return;
 
     const int phyX = rowPhyXBase + logicalX * phyXStepX;

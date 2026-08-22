@@ -4,7 +4,7 @@
 
 **CrossMux** is a community fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) that turns the device into more than a reader — it adds an Apps hub of mini-games and tools, richer standby faces, and a first-class Simplified Chinese build.
 
-**Version:** CrossMux 1.5.5 (based on CrossPoint Reader 1.5.0 plus upstream `develop` through `ba1b849f`)
+**Version:** CrossMux 1.5.7 (based on CrossPoint Reader 1.5.0 plus upstream `develop` through `eef20504`)
 
 **Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
 
@@ -35,9 +35,9 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 ## What can CrossPoint do?
 
-- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, dictionary lookups ([StarDict](docs/dictionary.md)), go-to-percent, auto page turn, orientation control, focus reading, KOReader progress sync and more.
+- **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, dictionary lookups ([StarDict](docs/dictionary.md)), go-to-percent, auto page turn, orientation control, focus reading, configurable line guides, KOReader progress sync and more.
 
-- **Various formats**: native handling for `.epub`, `.xtc/.xtch`, `.txt`, and `.bmp`.
+- **Various formats**: native handling for `.epub`, `.xtc/.xtch`, `.txt`, `.bmp`, and `.png`.
 
 - **Screenshots.**
 
@@ -59,7 +59,7 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
   - OPDS browser with saved servers (up to 8), search, pagination, and direct download
   - OTA update checks and installs from GitHub releases
 
-- **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
+- **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, EPUB/TXT line guides, custom PNG reading backgrounds, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more. Set a background from **Settings > Reader > Reading Background > Custom Image**.
 
 - **Localization**: 24 UI languages and counting. RTL support.
 
@@ -239,8 +239,8 @@ pio run -e simulator_x3 -t run_simulator
 # eego A4
 pio run -e simulator_eego_a4 -t run_simulator
 
-# Mofei M4
-pio run -e simulator_mofei_m4 -t run_simulator
+# Murphy M4
+pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 The simulator is provided by the pinned

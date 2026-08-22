@@ -5,6 +5,8 @@
 
 #include <cstdint>
 
+class GfxRenderer;
+
 namespace airpage {
 
 class AirPageConnection final {
@@ -29,7 +31,7 @@ class AirPageConnection final {
     PushRequested,
   };
 
-  AirPageConnection() : mqtt_(mqttNet_) {}
+  explicit AirPageConnection(GfxRenderer& renderer) : renderer_(renderer), mqtt_(mqttNet_) {}
 
   Event begin(bool realtime);
   void stop();
@@ -60,6 +62,7 @@ class AirPageConnection final {
   uint32_t retryWindowStartedMs_ = 0;
   uint32_t nextRetryAtMs_ = 0;
 
+  GfxRenderer& renderer_;
   WiFiClient mqttNet_;
   PubSubClient mqtt_;
 };

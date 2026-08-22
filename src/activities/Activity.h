@@ -48,6 +48,8 @@ class Activity {
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // Reading surfaces opt into output-polarity inversion; menus and overlays stay normal.
+  virtual bool appliesNightMode() const { return false; }
   // Returns true when the activity schedules its own forced refresh.
   virtual bool handleForcedRefresh() { return false; }
   virtual bool isHomeActivity() const { return false; }

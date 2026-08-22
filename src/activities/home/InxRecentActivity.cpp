@@ -89,36 +89,6 @@ void drawMetric(const GfxRenderer& renderer, const int x, const int y, const cha
   renderer.drawText(SMALL_FONT_ID, x, y + renderer.getLineHeight(UI_12_FONT_ID) + 4, shownLabel.c_str());
 }
 
-bool tryDrawBookCover(const GfxRenderer& renderer, const std::string& path, const Rect bounds) {
-  HalFile file;
-  if (!Storage.openFileForRead("INX", path, file)) return false;
-  Bitmap bitmap(file);
-  return bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0 &&
-         renderer.drawBitmapCropToFill(bitmap, bounds.x, bounds.y, bounds.width, bounds.height);
-}
-
-bool drawBookCover(const GfxRenderer& renderer, const RecentBook& book, const Rect bounds, const int thumbnailHeight) {
-  renderer.fillRect(bounds.x, bounds.y, bounds.width, bounds.height, false);
-  if (!book.coverBmpPath.empty() && thumbnailHeight > 0) {
-    std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, thumbnailHeight);
-    if (tryDrawBookCover(renderer, path, bounds)) return true;
-    if (book.coverBmpPath.find("[HEIGHT]") != std::string::npos &&
-        thumbnailHeight != InxMetrics::values.homeCoverHeight) {
-      path = UITheme::getCoverThumbPath(book.coverBmpPath, InxMetrics::values.homeCoverHeight);
-      if (tryDrawBookCover(renderer, path, bounds)) return true;
-    }
-  }
-
-  const auto size = InxCoverGeometry::fit(bounds.width, bounds.height);
-  const int x = bounds.x + (bounds.width - size.width) / 2;
-  const int y = bounds.y + (bounds.height - size.height) / 2;
-  renderer.drawRect(x, y, size.width, size.height, 2, true);
-  renderer.fillRect(x, y + size.height / 3, size.width, size.height * 2 / 3);
-  constexpr int iconSize = 32;
-  renderer.drawIcon(CoverIcon, x + (size.width - iconSize) / 2, y + size.height / 6 - iconSize / 2, iconSize);
-  return false;
-}
-
 void drawBookText(const GfxRenderer& renderer, const RecentBook& book, const int x, const int y, const int width,
                   const bool author) {
   const std::string title = renderer.truncatedText(UI_10_FONT_ID, titleOf(book), width, EpdFontFamily::BOLD);
@@ -153,19 +123,17 @@ void InxRecentActivity::onEnter() {
     bookStats[i] = READING_STATS.findMatchingBookForPath(book.path, book.title, book.author);
   }
   selected = 0;
-  firstRenderDone = false;
-  waitingForCoverRender = false;
-  nextCoverIndex = 0;
   thumbnailHeight = 0;
+  targetCoverStates.fill(CoverCacheState::Unchecked);
+  fallbackCoverStates.fill(CoverCacheState::Unchecked);
   requestUpdate();
 }
 
 void InxRecentActivity::onExit() {
   books = nullptr;
   bookStats.fill(nullptr);
-  firstRenderDone = false;
-  waitingForCoverRender = false;
-  nextCoverIndex = 0;
+  targetCoverStates.fill(CoverCacheState::Unchecked);
+  fallbackCoverStates.fill(CoverCacheState::Unchecked);
   thumbnailHeight = 0;
   Activity::onExit();
 }
@@ -175,18 +143,104 @@ void InxRecentActivity::openSelected() {
   onSelectBook((*books)[selected].path);
 }
 
-void InxRecentActivity::prepareNextCover() {
-  if (!firstRenderDone || waitingForCoverRender || !books || thumbnailHeight <= 0) return;
-  const size_t count = std::min(books->size(), kMaxRecentBooks);
-  if (nextCoverIndex >= count) return;
+void InxRecentActivity::setThumbnailHeight(const int height) {
+  if (thumbnailHeight == height) return;
+  thumbnailHeight = height;
+  targetCoverStates.fill(CoverCacheState::Unchecked);
+  fallbackCoverStates.fill(CoverCacheState::Unchecked);
+}
 
-  const RecentBook& book = (*books)[nextCoverIndex++];
-  bool generated = false;
-  BookCoverLoader::ensureThumbnail(book.path, thumbnailHeight, &generated);
-  if (generated) {
-    waitingForCoverRender = true;
-    requestUpdate();
+bool InxRecentActivity::tryDrawBookCover(const std::string& path, const Rect& bounds, CoverCacheState& state) {
+  switch (state) {
+    case CoverCacheState::Unchecked:
+      if (!Storage.exists(path.c_str())) {
+        state = CoverCacheState::Missing;
+        return false;
+      }
+      state = CoverCacheState::Ready;
+      break;
+    case CoverCacheState::Ready:
+      break;
+    case CoverCacheState::Missing:
+    case CoverCacheState::Unavailable:
+      return false;
   }
+
+  HalFile file;
+  if (!Storage.openFileForRead("INX", path, file)) {
+    state = CoverCacheState::Missing;
+    return false;
+  }
+  Bitmap bitmap(file);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+    state = CoverCacheState::Missing;
+    return false;
+  }
+  return renderer.drawBitmapCropToFill(bitmap, bounds.x, bounds.y, bounds.width, bounds.height);
+}
+
+bool InxRecentActivity::drawBookCover(const int bookIndex, const Rect& bounds) {
+  renderer.fillRect(bounds.x, bounds.y, bounds.width, bounds.height, false);
+  if (books && bookIndex >= 0 && bookIndex < static_cast<int>(books->size()) &&
+      bookIndex < static_cast<int>(RecentBooksStore::MAX_RECENT_BOOKS) && thumbnailHeight > 0) {
+    const RecentBook& book = (*books)[bookIndex];
+    if (!book.coverBmpPath.empty()) {
+      std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, thumbnailHeight);
+      if (tryDrawBookCover(path, bounds, targetCoverStates[bookIndex])) return true;
+      if (book.coverBmpPath.find("[HEIGHT]") != std::string::npos &&
+          thumbnailHeight != InxMetrics::values.homeCoverHeight) {
+        path = UITheme::getCoverThumbPath(book.coverBmpPath, InxMetrics::values.homeCoverHeight);
+        if (tryDrawBookCover(path, bounds, fallbackCoverStates[bookIndex])) return true;
+      }
+    }
+  }
+
+  const auto size = InxCoverGeometry::fit(bounds.width, bounds.height);
+  const int x = bounds.x + (bounds.width - size.width) / 2;
+  const int y = bounds.y + (bounds.height - size.height) / 2;
+  renderer.drawRect(x, y, size.width, size.height, 2, true);
+  renderer.fillRect(x, y + size.height / 3, size.width, size.height * 2 / 3);
+  constexpr int iconSize = 32;
+  renderer.drawIcon(CoverIcon, x + (size.width - iconSize) / 2, y + size.height / 6 - iconSize / 2, iconSize);
+  return false;
+}
+
+bool InxRecentActivity::prepareNextMissingCover() {
+  if (!books || thumbnailHeight <= 0) return false;
+  const size_t count = std::min(books->size(), RecentBooksStore::MAX_RECENT_BOOKS);
+  for (size_t index = 0; index < count; ++index) {
+    CoverCacheState& state = targetCoverStates[index];
+    switch (state) {
+      case CoverCacheState::Unchecked: {
+        const std::string& templatePath = (*books)[index].coverBmpPath;
+        if (templatePath.empty()) {
+          state = CoverCacheState::Unavailable;
+          continue;
+        }
+        state = Storage.exists(UITheme::getCoverThumbPath(templatePath, thumbnailHeight).c_str())
+                    ? CoverCacheState::Ready
+                    : CoverCacheState::Missing;
+        if (state == CoverCacheState::Ready) continue;
+        break;
+      }
+      case CoverCacheState::Ready:
+      case CoverCacheState::Unavailable:
+        continue;
+      case CoverCacheState::Missing:
+        break;
+    }
+
+    renderer.displayBuffer();
+    {
+      GfxRenderer::FrameBufferLoan loan(renderer);
+      state = BookCoverLoader::ensureThumbnail((*books)[index].path, thumbnailHeight).empty()
+                  ? CoverCacheState::Unavailable
+                  : CoverCacheState::Ready;
+    }
+    requestUpdate();
+    return true;
+  }
+  return false;
 }
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
@@ -261,7 +315,6 @@ void InxRecentActivity::loop() {
     requestUpdate();
     return;
   }
-
   const InxRecentLayout currentLayout = layout();
   const auto swipe = mappedInput.wasSwipe();
   int swipeSelection = selected;
@@ -289,8 +342,6 @@ void InxRecentActivity::loop() {
     requestUpdate();
     return;
   }
-
-  prepareNextCover();
 }
 
 void InxRecentActivity::drawFlow(const Rect& content) {
@@ -304,22 +355,19 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   const auto centerSize = InxCoverGeometry::fit(carousel.width, std::max(1, carousel.height * 94 / 100));
   const Rect center{carousel.x + (carousel.width - centerSize.width) / 2,
                     carousel.y + (carousel.height - centerSize.height) / 2, centerSize.width, centerSize.height};
-  thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(center.height);
+  setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(center.height));
   const auto sideSize = InxCoverGeometry::fit(carousel.width, std::max(1, center.height * 90 / 100));
   const int sideTop = center.y + (center.height - sideSize.height) / 2;
   const int sideGap = std::max(kGap, content.width * 4 / 100);
   {
     const GfxRenderer::ClipScope clip(renderer, carousel.x, carousel.y, carousel.width, carousel.height);
     if (selected > 0) {
-      drawBookCover(renderer, (*books)[selected - 1],
-                    Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height},
-                    thumbnailHeight);
+      drawBookCover(selected - 1, Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height});
     }
     if (selected + 1 < count) {
-      drawBookCover(renderer, (*books)[selected + 1],
-                    Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height}, thumbnailHeight);
+      drawBookCover(selected + 1, Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height});
     }
-    drawBookCover(renderer, book, center, thumbnailHeight);
+    drawBookCover(selected, center);
     if (showSelection) drawThickFrame(renderer, center);
   }
 
@@ -367,8 +415,8 @@ void InxRecentActivity::drawGrid(const Rect& content) {
                     cellWidth - kGap, cellHeight - kGap};
     if (showSelection && index == selected) drawSparseInk(renderer, cell);
     const Rect cover = fitCoverRect(Rect{cell.x + kGap, cell.y + kGap, cell.width - kGap * 2, cell.height - kGap * 2});
-    if (slot == 0) thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
-    drawBookCover(renderer, (*books)[index], cover, thumbnailHeight);
+    if (slot == 0) setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+    drawBookCover(index, cover);
     if (showSelection && index == selected) drawThickFrame(renderer, cover);
     const int barWidth = std::max(24, cover.width - 30);
     const int barX = cover.x + (cover.width - barWidth) / 2;
@@ -387,8 +435,8 @@ void InxRecentActivity::drawList(const Rect& content) {
     const Rect row{content.x, content.y + slot * rowHeight, content.width, rowHeight};
     if (showSelection && index == selected) drawSparseInk(renderer, row);
     const Rect cover = fitCoverRect(Rect{row.x + kPagePadding, row.y + 5, 88, row.height - 10});
-    if (slot == 0) thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
-    drawBookCover(renderer, (*books)[index], cover, thumbnailHeight);
+    if (slot == 0) setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+    drawBookCover(index, cover);
     const int textX = cover.x + cover.width + 14;
     const int textWidth = row.x + row.width - kPagePadding - textX;
     drawBookText(renderer, (*books)[index], textX, row.y + 14, textWidth, true);
@@ -413,8 +461,8 @@ void InxRecentActivity::drawIcons(const Rect& content) {
     const Rect cell{content.x + column * cellWidth + 5, content.y + row * cellHeight + 5, cellWidth - 10,
                     cellHeight - 10};
     const Rect cover = fitCoverRect(Rect{cell.x + 4, cell.y + 4, cell.width - 8, cell.height - 8});
-    if (slot == 0) thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
-    drawBookCover(renderer, (*books)[index], cover, thumbnailHeight);
+    if (slot == 0) setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+    drawBookCover(index, cover);
     drawProgressBadge(renderer, cover, progressOf(statsAt(index)));
     if (showSelection && index == selected)
       drawThickFrame(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, cover.height + 4});
@@ -423,14 +471,13 @@ void InxRecentActivity::drawIcons(const Rect& content) {
 
 void InxRecentActivity::drawCover(const Rect& content) {
   const bool showSelection = showMainTabContentSelection();
-  const RecentBook& book = (*books)[selected];
   constexpr int progressGap = 10;
   const int progressBlockHeight = progressGap + 8;
   const int targetWidth = std::max(1, content.width * 78 / 100);
   const Rect cover = fitCoverRect(Rect{content.x + (content.width - targetWidth) / 2, content.y + 6, targetWidth,
                                        std::max(1, content.height - progressBlockHeight - 12)});
-  thumbnailHeight = InxCoverGeometry::thumbnailHeightForCropFill(cover.height);
-  drawBookCover(renderer, book, cover, thumbnailHeight);
+  setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+  drawBookCover(selected, cover);
   if (showSelection) drawThickFrame(renderer, cover);
   const int barWidth = std::max(24, cover.width * 80 / 100);
   drawMiniProgress(renderer,
@@ -444,7 +491,6 @@ void InxRecentActivity::render(RenderLock&&) {
   const int width = renderer.getScreenWidth();
   drawPageHeader(Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
   const Rect content = contentRect(renderer);
-  thumbnailHeight = 0;
 
   if (!books || books->empty()) {
     UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_RECENT_BOOKS), 2);
@@ -477,7 +523,6 @@ void InxRecentActivity::render(RenderLock&&) {
                        Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth,
                             renderer.getScreenHeight() - 30, kHomeBatteryWidth, kHomeBatteryHeight},
                        SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
+  if (prepareNextMissingCover()) return;
   renderer.displayBuffer();
-  firstRenderDone = true;
-  waitingForCoverRender = false;
 }

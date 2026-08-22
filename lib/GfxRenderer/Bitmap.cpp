@@ -1,7 +1,11 @@
 #include "Bitmap.h"
 
+#include <Logging.h>
+
 #include <cstdlib>
 #include <cstring>
+
+#include "../Memory/Memory.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS
@@ -19,6 +23,19 @@ Bitmap::~Bitmap() {
 
   delete atkinsonDitherer;
   delete fsDitherer;
+}
+
+bool Bitmap::ensureDrawScratch(const size_t bytes) const {
+  if (drawScratchCapacity >= bytes) return true;
+
+  auto scratch = makeUniqueNoThrow<uint8_t[]>(bytes);
+  if (!scratch) {
+    LOG_ERR("BMP", "OOM: draw scratch (%u bytes)", static_cast<unsigned>(bytes));
+    return false;
+  }
+  drawScratch = std::move(scratch);
+  drawScratchCapacity = bytes;
+  return true;
 }
 
 uint16_t Bitmap::readLE16(HalFile& f) {
@@ -90,7 +107,9 @@ BmpReaderError Bitmap::parseHeaders() {
   const uint16_t bfType = readLE16(file);
   if (bfType != 0x4D42) return BmpReaderError::NotBMP;
 
-  file.seekCur(8);
+  file.seekCur(4);  // bfSize
+  const uint16_t reserved1 = readLE16(file);
+  const uint16_t reserved2 = readLE16(file);
   bfOffBits = readLE32(file);
 
   // --- DIB HEADER ---
@@ -118,6 +137,9 @@ BmpReaderError Bitmap::parseHeaders() {
   if (colorsUsed == 0 && bpp <= 8) colorsUsed = 1u << bpp;
   if (colorsUsed > 256u) return BmpReaderError::PaletteTooLarge;
   file.seekCur(4);  // biClrImportant
+
+  transparentOverlay = reserved1 == TRANSPARENT_OVERLAY_MARKER && reserved2 == TRANSPARENT_OVERLAY_VERSION &&
+                       bpp == 4 && colorsUsed == TRANSPARENT_PALETTE_INDEX + 1;
 
   if (width <= 0 || height <= 0) return BmpReaderError::BadDimensions;
 
@@ -168,9 +190,11 @@ BmpReaderError Bitmap::parseHeaders() {
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = new AtkinsonDitherer(width);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
+      if (!atkinsonDitherer || !atkinsonDitherer->valid()) return BmpReaderError::OomRowBuffer;
     } else {
-      fsDitherer = new FloydSteinbergDitherer(width);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
+      if (!fsDitherer || !fsDitherer->valid()) return BmpReaderError::OomRowBuffer;
     }
   }
 
@@ -178,7 +202,7 @@ BmpReaderError Bitmap::parseHeaders() {
 }
 
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
-BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
+BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow) const {
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
   if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
 
@@ -190,7 +214,7 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   int currentX = 0;
 
   // Helper lambda to pack 2bpp color into the output stream
-  auto packPixel = [&](const uint8_t lum) {
+  auto packPixel = [&](const uint8_t lum, const bool opaque = true) {
     uint8_t color;
     if (atkinsonDitherer) {
       color = atkinsonDitherer->processPixel(adjustPixel(lum), currentX);
@@ -205,6 +229,7 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
         color = quantize(adjustPixel(lum), currentX, prevRowY);
       }
     }
+    if (opacityRow) opacityRow[currentX] = opaque;
     currentOutByte |= (color << bitShift);
     if (bitShift == 0) {
       *outPtr++ = currentOutByte;
@@ -246,7 +271,8 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
     case 4: {
       for (int x = 0; x < width; x++) {
         const uint8_t nibble = (x & 1) ? (rowBuffer[x >> 1] & 0x0F) : (rowBuffer[x >> 1] >> 4);
-        packPixel(paletteLum[nibble]);
+        const bool opaque = !transparentOverlay || nibble != TRANSPARENT_PALETTE_INDEX;
+        packPixel(opaque ? paletteLum[nibble] : 255, opaque);
       }
       break;
     }

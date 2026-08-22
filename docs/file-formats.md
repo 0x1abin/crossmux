@@ -1,8 +1,13 @@
 # File Formats
 
-These formats describe the SD-card cache files under `/.crosspoint/epub_<hash>/`.
-All POD fields are written in the ESP32 little-endian representation used by
-`Serialization.h`; strings are length-prefixed UTF-8.
+Unless a section states otherwise, these formats describe the SD-card cache
+files under `/.crosspoint/epub_<hash>/`. All POD fields are written in the
+ESP32 little-endian representation used by `Serialization.h`; strings are
+length-prefixed UTF-8.
+
+Runtime readers additionally cap resource paths at 4096 bytes and human-readable
+text at 16384 bytes. A length that exceeds its field's cap or the remaining file
+bytes invalidates the cache; the output value is left unchanged.
 
 ## `book.bin`
 
@@ -95,10 +100,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 52 / 53
+### Versions 56 / 57
 
 > Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **53**; Latin builds use **52**. The byte layout is identical between
+> currently **57**; Latin builds use **56**. The byte layout is identical between
 > flavors, but the same built-in font IDs resolve to different font data and
 > metrics, so pagination caches are not reusable across firmware flavors.
 >
@@ -117,9 +122,15 @@ if (parsedSize != fileSize) {
 > continuation, and `<br>` no longer re-applies container margins. Versions 50/51
 > add a per-page visible-text offset LUT so progress and bookmarks survive
 > re-pagination. Versions 52/53 reserve layout space for ruby/CJK justification
-> and expand serialized footnote hrefs from 96 to 256 bytes. The counters
-> remain distinct and above every previously shipped value so a firmware-flavor
-> swap cannot read the other flavor's stale cache.
+> and expand serialized footnote hrefs from 96 to 256 bytes.
+> Versions 54/55 keep the byte layout unchanged but invalidate word positions so
+> soft-flushed continuations of long paragraphs do not receive another first-line
+> indent and default CJK paragraph indents use two ideograph advances instead of
+> three space advances. Versions 56/57 invalidate pagination for focus-word
+> break opportunities, image viewport clamping, and the extra-wide line-spacing
+> option. The counters remain distinct and above every
+> previously shipped value so a firmware-flavor swap cannot read the other flavor's
+> stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
@@ -167,7 +178,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 52
+#define LATIN_VERSION 54
+#define CHINESE_VERSION 55
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -249,6 +261,7 @@ struct TextBlock {
 
 struct ImageBlock {
     String imagePath;
+    String srcPath [[comment("Book-internal source path used for lazy extraction")]];
     s16 width;
     s16 height;
 };
@@ -315,8 +328,8 @@ struct ParagraphLut {
 
 struct SectionBin {
     u8 version;
-    if (version != EXPECTED_VERSION) {
-        std::error(std::format("Unsupported version: {} (expected {})", version, EXPECTED_VERSION));
+    if (version != LATIN_VERSION && version != CHINESE_VERSION) {
+        std::error(std::format("Unsupported section version: {}", version));
     }
 
     s32 fontId;
@@ -376,12 +389,12 @@ if (parsedSize != fileSize) {
 
 TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
 
-`index.bin` version 6 is a little-endian page-offset checkpoint. Its fixed
+`index.bin` version 7 is a little-endian page-offset checkpoint. Its fixed
 header contains, in order: `uint32 magic` (`TXTI`, `0x54585449`), `uint8
-version` (`6`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
+version` (`7`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
 `int32 fontId`, `int32 screenMargin`, `uint8 paragraphAlignment`, `uint8
-complete`, `uint8 encoding` (`0` unknown/ASCII, `1` UTF-8, `2` GBK), and `uint32
-knownPageCount`. It is followed by `knownPageCount`
+extraParagraphSpacing`, `uint8 complete`, `uint8 encoding` (`0` unknown/ASCII,
+`1` UTF-8, `2` GBK), and `uint32 knownPageCount`. It is followed by `knownPageCount`
 strictly increasing `uint32` byte offsets; the first offset is zero and every
 offset is smaller than `fileSize`. An empty file has no offsets and must be
 marked complete.
@@ -389,9 +402,11 @@ marked complete.
 An incomplete index contains only pages discovered while reading. It is
 checkpointed every 32 known page starts and when the reader exits; the final
 page marks it complete and makes `knownPageCount` exact. Version 4 indexes omit
-`complete`; version 5 indexes omit `encoding`. These legacy indexes are reused
+`complete`; versions 4 and 5 omit `encoding`. These legacy indexes are reused
 only when the file prefix is confirmed UTF-8, because offsets produced before
-GBK decoding are not valid GBK page boundaries. A wrong magic, unsupported
+GBK decoding are not valid GBK page boundaries. Versions 4 through 6 omit
+`extraParagraphSpacing`; they remain reusable only while paragraph spacing is
+enabled, which preserves their pagination behavior. A wrong magic, unsupported
 version, truncated payload, changed file size, changed layout setting,
 non-monotonic offset, or out-of-range offset invalidates the index. Writers
 flush `index.bin.tmp` before replacing the prior checkpoint.
@@ -455,6 +470,13 @@ location is not migrated or read.
   Its complete contents must be the five bytes `WRD1\n`; a missing, truncated,
   or unknown marker shows the disclaimer again. Logging out preserves this
   file.
+- `cache.version` is an atomic fixed 8-byte `WRV1` record: `uint32 magic`
+  (`0x31565257`), `uint16 generation` (currently `1`), and two zero reserved
+  bytes. A missing, damaged, newer, or older generation silently removes all
+  derived WeRead caches before writing the current generation. This preserves
+  `session.bin`, `disclaimer.accepted`, completed `/WeRead/*.epub` files, and
+  their normal reader progress caches. `CROSSPOINT_VERSION` is deliberately
+  not used for cache invalidation.
 - `shelf.bin`, `<bookId>/toc.bin`, per-chapter
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
@@ -544,13 +566,13 @@ location is not migrated or read.
   are transient. The pre-v2 `<bookId>/cover.bmp` is not read or migrated. A failed
   fetch or conversion does not replace an existing v2 BMP.
 - The WeRead menu's cache-clear action preserves `session.bin`,
-  `disclaimer.accepted`, `shelf.bin`, `/WeRead/*.epub`, and the reader caches for
-  those EPUB files. It recursively removes every other entry below
-  `/.crosspoint/weread/`, including per-book data, browse caches, and partial files.
-- A login shelf sync or explicit shelf refresh prepares missing covers in three
-  streaming passes: detail metadata, original images, then v2 BMP conversion.
-  Existing v2 BMPs are skipped; cancellation and per-book failures preserve every
-  atomically completed cache file. No shelf or detail record layout changes.
+  `disclaimer.accepted`, `cache.version`, `/WeRead/*.epub`, and the reader caches
+  for those EPUB files. It recursively removes every other entry below
+  `/.crosspoint/weread/`, including `shelf.bin`, per-book data, browse caches,
+  and partial files.
+- Shelf sync does not prefetch covers. Missing covers are fetched and converted
+  lazily for the visible shelf page. Existing v2 BMPs are skipped; cancellation
+  and per-book failures preserve every atomically completed cache file.
 Readers reject a wrong magic, version, record size, or total file length.
 Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.
@@ -568,9 +590,44 @@ automatically; cache a book again to embed its available cover and selected
 chapter images.
 
 `WRT2` rejects `WRT1` TOC indexes because TOC records now include
-`wordCount`, used to map local whole-book progress to WeRead chapter offsets.
+`wordCount`, used for fallback whole-book progress mapping. It is not the unit
+of WeRead's native `chapterOffset`.
+
+Newly generated chapter XHTML embeds `<!--wr-co:N-->` comments at source-text,
+entity, image, and final boundaries. `N` is the zero-based UTF-16 code-unit
+offset in the decoded raw chapter source after removing a UTF-8 BOM. The reader
+ignores these comments; manual sync streams the loose generated chapter to map
+between its visible-text offsets and WeRead's native offsets. Old chapters have
+no marker and remain compatible through the approximate fallback.
 Manual progress sync refreshes only an old or invalid TOC; an existing
 `/WeRead/*.epub` is retained.
+
+## Reading background cache
+
+`/.crosspoint/background/reading_bg.bin` stores a versioned 1-bit framebuffer
+for each reader orientation. Its packed 18-byte header is:
+
+| Offset | Field |
+|--------|-------|
+| 0 | `uint32 magic` (`0x47425243`, bytes `CRBG`) |
+| 4 | `uint16 version` (`1`) |
+| 6 | `uint16 orientationCount` (`4`) |
+| 8 | `uint16 displayWidth` |
+| 10 | `uint16 displayHeight` |
+| 12 | `uint32 frameSize` |
+| 16 | `uint16 reserved` (`0`) |
+
+Four `frameSize`-byte frames follow in `GfxRenderer::Orientation` order:
+Portrait, Landscape Clockwise, Portrait Inverted, then Landscape Counter
+Clockwise. A cache is accepted only when its magic, version, orientation count,
+display dimensions, frame size, reserved field, and exact file length
+(`18 + 4 * frameSize`) all match the running device.
+
+Generation writes `reading_bg.tmp`, renames the existing cache to
+`reading_bg.bak`, and only then promotes the temporary file. A failed promotion
+restores the backup; a later read also recovers a backup when the main file is
+absent. The source PNG is converted through a short-lived BMP and is not needed
+after cache creation.
 
 ## SD-card font cache
 

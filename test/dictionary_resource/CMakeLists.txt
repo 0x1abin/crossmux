@@ -1,0 +1,6 @@
+add_executable(DictionaryResourceTest DictionaryResourceTest.cpp)
+
+target_include_directories(DictionaryResourceTest PRIVATE ${REPO_ROOT}/src/util)
+target_link_libraries(DictionaryResourceTest PRIVATE crosspoint_test_common GTest::gtest_main)
+
+gtest_discover_tests(DictionaryResourceTest)

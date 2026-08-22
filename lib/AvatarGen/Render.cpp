@@ -26,30 +26,37 @@ void drawPolylineXf(const GfxRenderer& renderer, const Polyline& line, const Tra
   }
 }
 
-bool pointInPolygonF(float px, float py, const PointF* poly, uint16_t n) {
+PointF eyeContourPoint(const Polyline& upper, const Polyline& lower, const uint16_t index) {
+  const uint16_t startU = upper.count > 20 ? 10 : 0;
+  const uint16_t endU = upper.count > 20 ? upper.count - 10 : upper.count;
+  const uint16_t upperCount = endU - startU;
+  if (index < upperCount) return upper.points[startU + index];
+
+  const uint16_t startL = lower.count > 20 ? 10 : 0;
+  const uint16_t endL = lower.count > 20 ? lower.count - 10 : lower.count;
+  return lower.points[endL - 1 - (index - upperCount)];
+}
+
+bool pointInEye(float px, float py, const Polyline& upper, const Polyline& lower) {
+  const uint16_t upperCount = upper.count > 20 ? upper.count - 20 : upper.count;
+  const uint16_t lowerCount = lower.count > 20 ? lower.count - 20 : lower.count;
+  const uint16_t count = upperCount + lowerCount;
+  if (count < 3) return false;
+
   bool inside = false;
-  for (uint16_t i = 0, j = n - 1; i < n; j = i++) {
-    const float yi = poly[i].y;
-    const float yj = poly[j].y;
-    if (((yi > py) != (yj > py)) && (px < (poly[j].x - poly[i].x) * (py - yi) / (yj - yi) + poly[i].x)) {
+  for (uint16_t i = 0, j = count - 1; i < count; j = i++) {
+    const PointF current = eyeContourPoint(upper, lower, i);
+    const PointF previous = eyeContourPoint(upper, lower, j);
+    if (((current.y > py) != (previous.y > py)) &&
+        (px < (previous.x - current.x) * (py - current.y) / (previous.y - current.y) + current.x)) {
       inside = !inside;
     }
   }
   return inside;
 }
 
-void buildEyeContour(const Polyline& upper, const Polyline& lower, PointF* outBuf, uint16_t& outCount) {
-  outCount = 0;
-  const uint16_t startU = upper.count > 20 ? 10 : 0;
-  const uint16_t endU = upper.count > 20 ? upper.count - 10 : upper.count;
-  for (uint16_t i = startU; i < endU; ++i) outBuf[outCount++] = upper.points[i];
-  const uint16_t startL = lower.count > 20 ? 10 : 0;
-  const uint16_t endL = lower.count > 20 ? lower.count - 10 : lower.count;
-  for (uint16_t i = endL; i > startL; --i) outBuf[outCount++] = lower.points[i - 1];
-}
-
-void drawPupil(const GfxRenderer& renderer, const PointF& center, float radius, const PointF* contour,
-               uint16_t contourCount, const Transform& t) {
+void drawPupil(const GfxRenderer& renderer, const PointF& center, float radius, const Polyline& upper,
+               const Polyline& lower, const Transform& t) {
   const int sx = toScreenX(center.x, t);
   const int sy = toScreenY(center.y, t);
   const int sr = static_cast<int>(radius * t.scale + 0.5f);
@@ -59,7 +66,7 @@ void drawPupil(const GfxRenderer& renderer, const PointF& center, float radius, 
       if (dx * dx + dy * dy > sr * sr) continue;
       const float worldX = (sx + dx - t.offsetX) / t.scale;
       const float worldY = (sy + dy - t.offsetY) / t.scale;
-      if (!pointInPolygonF(worldX, worldY, contour, contourCount)) continue;
+      if (!pointInEye(worldX, worldY, upper, lower)) continue;
       renderer.drawPixel(sx + dx, sy + dy, true);
     }
   }
@@ -104,20 +111,13 @@ void drawAvatar(const GfxRenderer& renderer, const AvatarData& data, const Scree
   }
   drawPolylineXf(renderer, data.face, t);
 
-  PointF leftContour[MAX_EYELID_POINTS * 2];
-  PointF rightContour[MAX_EYELID_POINTS * 2];
-  uint16_t leftContourN = 0;
-  uint16_t rightContourN = 0;
-  buildEyeContour(data.eyeLeftUpper, data.eyeLeftLower, leftContour, leftContourN);
-  buildEyeContour(data.eyeRightUpper, data.eyeRightLower, rightContour, rightContourN);
-
   drawPolylineXf(renderer, data.eyeLeftUpper, t);
   drawPolylineXf(renderer, data.eyeLeftLower, t);
   drawPolylineXf(renderer, data.eyeRightUpper, t);
   drawPolylineXf(renderer, data.eyeRightLower, t);
 
-  drawPupil(renderer, data.eyeLeftCenter, data.pupilRadius, leftContour, leftContourN, t);
-  drawPupil(renderer, data.eyeRightCenter, data.pupilRadius, rightContour, rightContourN, t);
+  drawPupil(renderer, data.eyeLeftCenter, data.pupilRadius, data.eyeLeftUpper, data.eyeLeftLower, t);
+  drawPupil(renderer, data.eyeRightCenter, data.pupilRadius, data.eyeRightUpper, data.eyeRightLower, t);
 
   if (data.noseStyle == 0) {
     drawNoseDots(renderer, data.nose, data.noseDotRadius, t);

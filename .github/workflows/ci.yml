@@ -113,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e default -e eego_a4 -e mofei_m4 -e waveshare_epaper_397 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_mofei_m4 | tee pio.log; then
+            if pio run -e default -e eego_a4 -e murphy_m4 -e waveshare_epaper_397 -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_murphy_m4 | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2
@@ -123,8 +123,8 @@ jobs:
       - name: Package experimental eego A4 images
         run: python3 scripts/package_hardware_beta.py eego-a4
 
-      - name: Package experimental Mofei M4 images
-        run: python3 scripts/package_hardware_beta.py mofei-m4
+      - name: Package experimental Murphy M4 images
+        run: python3 scripts/package_hardware_beta.py murphy-m4
 
       - name: Package experimental Waveshare 3.97 images
         run: python3 scripts/package_hardware_beta.py waveshare-epaper-397
@@ -157,11 +157,11 @@ jobs:
           path: dist/eego-a4
           if-no-files-found: error
 
-      - name: Upload experimental Mofei M4 artifact
+      - name: Upload experimental Murphy M4 artifact
         uses: actions/upload-artifact@v6
         with:
-          name: mofei-m4-experimental
-          path: dist/mofei-m4
+          name: murphy-m4-experimental
+          path: dist/murphy-m4
           if-no-files-found: error
 
       - name: Upload experimental Waveshare 3.97 artifact
@@ -171,8 +171,8 @@ jobs:
           path: dist/waveshare-epaper-397
           if-no-files-found: error
 
-  build-sticky:
-    name: Build sticky
+  build-hardware:
+    name: Build S3 hardware
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -199,11 +199,11 @@ jobs:
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
-      - name: Build Sticky and X4 Pro firmware
+      - name: Build S3 hardware firmware
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if pio run -e sticky -e x4pro | tee pio.log; then
+            if pio run -e sticky -e x4pro -e papermono | tee pio.log; then
               exit 0
             fi
             echo "PlatformIO attempt ${attempt} failed" >&2
@@ -218,7 +218,7 @@ jobs:
           echo "ram_line=${ram_line}" >> "$GITHUB_OUTPUT"
           echo "flash_line=${flash_line}" >> "$GITHUB_OUTPUT"
           {
-            echo "## Sticky firmware build stats"
+            echo "## S3 hardware firmware build stats"
             if [ -n "$ram_line" ]; then echo "- ${ram_line}"; else echo "- RAM: not found"; fi
             if [ -n "$flash_line" ]; then echo "- ${flash_line}"; else echo "- Flash: not found"; fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -264,7 +264,7 @@ jobs:
     name: Test Status
     needs:
       - build-default
-      - build-sticky
+      - build-hardware
       - clang-format
       - cppcheck
       - unit-tests

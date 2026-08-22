@@ -1,4 +1,5 @@
 #include <ObfuscationUtils.h>
+#include <expat.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -15,6 +16,7 @@
 
 #include "WeReadBrowse.h"
 #include "WeReadStore.h"
+#include "WeReadXhtmlCodec.h"
 
 namespace obfuscation {
 
@@ -47,6 +49,13 @@ uint32_t readLe32(const std::vector<uint8_t>& data, const size_t offset) {
          (static_cast<uint32_t>(data[offset + 2]) << 16) | (static_cast<uint32_t>(data[offset + 3]) << 24);
 }
 
+struct TestCacheGenerationRecord {
+  uint32_t magic = WeReadStore::kCacheGenerationMagic;
+  uint16_t generation = WeReadStore::kCacheGeneration;
+  uint16_t reserved = 0;
+};
+static_assert(sizeof(TestCacheGenerationRecord) == 8);
+
 class WeReadStoreTest : public ::testing::Test {
  protected:
   static constexpr const char* kBrowseBook = "browse-book";
@@ -76,6 +85,25 @@ class WeReadStoreTest : public ::testing::Test {
 
   void beginBrowseCache(WeReadBrowse::CacheManifest& manifest) {
     ASSERT_TRUE(WeReadBrowse::beginCache(kBrowseBook, kBrowseOwner, manifest));
+  }
+
+  void writeCacheGeneration(const uint16_t generation, const uint32_t magic = WeReadStore::kCacheGenerationMagic,
+                            const uint16_t reserved = 0) {
+    ASSERT_TRUE(WeReadStore::ensureRoot());
+    HalFile file;
+    ASSERT_TRUE(Storage.openFileForWrite("WR", WeReadStore::kCacheGenerationPath, file));
+    const TestCacheGenerationRecord record{magic, generation, reserved};
+    ASSERT_EQ(file.write(&record, sizeof(record)), sizeof(record));
+    file.flush();
+  }
+
+  TestCacheGenerationRecord readCacheGeneration() {
+    TestCacheGenerationRecord record{};
+    HalFile file;
+    EXPECT_TRUE(Storage.openFileForRead("WR", WeReadStore::kCacheGenerationPath, file));
+    EXPECT_EQ(file.fileSize(), sizeof(record));
+    EXPECT_EQ(file.read(&record, sizeof(record)), static_cast<int>(sizeof(record)));
+    return record;
   }
 
   void writeBrowsePage(WeReadBrowse::CacheManifest& manifest, const WeReadBrowse::Kind kind, const uint32_t page,
@@ -211,7 +239,7 @@ TEST_F(WeReadStoreTest, RejectsWrt1AndMapsProgressWithoutLoadingTheCatalog) {
   EXPECT_FALSE(WeReadStore::mapChapterToFraction(tocPath, "missing", 0, fraction));
 }
 
-TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) {
+TEST_F(WeReadStoreTest, MapsGeneratedChapterVisibleOffsetsWithoutWholeBookApproximation) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   const std::string tocPath = WeReadStore::tocPath("precise-book");
   WeReadStore::IndexWriter writer;
@@ -229,26 +257,33 @@ TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) 
   WeReadStore::TocRecord chapter;
   uint32_t offset = 0;
   float fraction = 0.0f;
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 0, 1, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 0, 50, chapter, offset, fraction));
   EXPECT_STREQ(chapter.chapterUid, "chapter-0");
   EXPECT_EQ(offset, 50U);
   EXPECT_FLOAT_EQ(fraction, 0.125f);
 
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 1, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 2, 150, chapter, offset, fraction));
   EXPECT_STREQ(chapter.chapterUid, "chapter-2");
   EXPECT_EQ(offset, 150U);
   EXPECT_FLOAT_EQ(fraction, 0.625f);
 
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 0, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 2, 0, chapter, offset, fraction));
   EXPECT_EQ(offset, 0U);
   EXPECT_FLOAT_EQ(fraction, 0.25f);
-  ASSERT_TRUE(WeReadStore::mapPageToChapter(tocPath, 2, 2, 3, chapter, offset, fraction));
+  ASSERT_TRUE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 2, 400, chapter, offset, fraction));
   EXPECT_EQ(offset, 300U);
   EXPECT_FLOAT_EQ(fraction, 1.0f);
 
-  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 1, 0, 1, chapter, offset, fraction));
-  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 3, 0, 1, chapter, offset, fraction));
-  EXPECT_FALSE(WeReadStore::mapPageToChapter(tocPath, 0, 3, 3, chapter, offset, fraction));
+  EXPECT_FALSE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 1, 0, chapter, offset, fraction));
+  EXPECT_FALSE(WeReadStore::mapVisibleOffsetToChapter(tocPath, 3, 0, chapter, offset, fraction));
+
+  ASSERT_TRUE(WeReadStore::mapNativeOffsetToChapter(tocPath, 0, 1234, chapter, offset));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-0");
+  EXPECT_EQ(offset, 1234U);
+  ASSERT_TRUE(WeReadStore::mapNativeOffsetToChapter(tocPath, 1, 456, chapter, offset));
+  EXPECT_STREQ(chapter.chapterUid, "chapter-1");
+  EXPECT_EQ(offset, 456U);
+  EXPECT_FALSE(WeReadStore::mapNativeOffsetToChapter(tocPath, 3, 0, chapter, offset));
 
   uint32_t tocIndex = 0;
   float chapterFraction = 0.0f;
@@ -256,6 +291,114 @@ TEST_F(WeReadStoreTest, MapsGeneratedChapterPagesWithoutWholeBookApproximation) 
   EXPECT_EQ(tocIndex, 2U);
   EXPECT_NEAR(chapterFraction, 1.0f / 3.0f, 0.000001f);
   EXPECT_FLOAT_EQ(fraction, 0.5f);
+}
+
+TEST_F(WeReadStoreTest, MapsGeneratedVisibleOffsetsToRawXhtmlUtf16Coordinates) {
+  const std::string bookDir = WeReadStore::bookDirectory("source-offset-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string path = WeReadStore::chapterPath(bookDir, 0);
+  std::ofstream chapter(hostPath(path.c_str()), std::ios::binary);
+  ASSERT_TRUE(chapter.good());
+  // The first 15-byte marker starts at byte 123, crossing the resolver's
+  // 128-byte read boundary.
+  chapter << "\xEF\xBB\xBF<?xml version=\"1.0\"?><html><head><title>" << std::string(59, 'x')
+          << "</title></head><body>"
+             "<!--wr-co:10-->A中"
+             "<!--wr-co:20-->&amp;"
+             "<!--wr-co:25-->😀"
+             "<!--wr-co:30-->\r\nZ"
+             "<!--wr-co:33-->"
+             "<!--wr-co:40--><img src=\"image.png\"/>"
+             "<!--wr-co:50--></body></html>";
+  chapter.close();
+
+  struct Mapping {
+    uint32_t visible;
+    uint32_t native;
+  };
+  static constexpr Mapping kMappings[] = {{0, 10}, {1, 11}, {2, 20}, {3, 25}, {4, 30}, {5, 32}, {6, 50}};
+  for (const auto& mapping : kMappings) {
+    uint32_t native = 0;
+    ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(path, mapping.visible, native));
+    EXPECT_EQ(native, mapping.native) << "visible=" << mapping.visible;
+  }
+
+  static constexpr Mapping kReverseMappings[] = {
+      {0, 0},  {0, 10}, {1, 11}, {2, 12}, {2, 20}, {3, 25}, {3, 26},
+      {4, 30}, {5, 31}, {5, 32}, {6, 33}, {6, 40}, {6, 50},
+  };
+  for (const auto& mapping : kReverseMappings) {
+    uint32_t visible = UINT32_MAX;
+    ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(path, mapping.native, visible));
+    EXPECT_EQ(visible, mapping.visible) << "native=" << mapping.native;
+  }
+  uint32_t rejected = 0;
+  EXPECT_FALSE(WeReadXhtmlCodec::visibleToNativeOffset(path, 7, rejected));
+  EXPECT_FALSE(WeReadXhtmlCodec::nativeToVisibleOffset(path, 51, rejected));
+}
+
+TEST_F(WeReadStoreTest, KeepsUtf8CodepointsIntactAcrossSanitizerReadBoundaries) {
+  const std::string bookDir = WeReadStore::bookDirectory("utf8-boundary-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imageIndexPath = WeReadStore::imageIndexPath(bookDir, 0);
+
+  std::string input = "<p>";
+  input.append(508, 'a');
+  input += "中";  // Lead byte is the last byte of the first 512-byte read.
+  input.append(1022 - input.size(), 'b');
+  input += "😀";  // Two bytes land on each side of the next read boundary.
+  input += "c</p>";
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    ASSERT_TRUE(source.good());
+    source.write(input.data(), static_cast<std::streamsize>(input.size()));
+  }
+
+  std::array<uint8_t, 512> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imageIndexPath, 0, "Boundary", false,
+                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                tagBuffer.size()));
+
+  std::ifstream generated(hostPath(outputPath.c_str()), std::ios::binary);
+  ASSERT_TRUE(generated.good());
+  const std::string xhtml((std::istreambuf_iterator<char>(generated)), std::istreambuf_iterator<char>());
+  XML_Parser parser = XML_ParserCreate(nullptr);
+  ASSERT_NE(parser, nullptr);
+  const XML_Status status = XML_Parse(parser, xhtml.data(), static_cast<int>(xhtml.size()), XML_TRUE);
+  EXPECT_EQ(status, XML_STATUS_OK) << XML_ErrorString(XML_GetErrorCode(parser));
+  XML_ParserFree(parser);
+
+  uint32_t nativeOffset = 0;
+  EXPECT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 508, nativeOffset));
+  EXPECT_EQ(nativeOffset, 511U);
+  EXPECT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 1017, nativeOffset));
+  EXPECT_EQ(nativeOffset, 1020U);
+  EXPECT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 1018, nativeOffset));
+  EXPECT_EQ(nativeOffset, 1022U);
+
+  uint32_t visibleOffset = 0;
+  EXPECT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, 1021, visibleOffset));
+  EXPECT_EQ(visibleOffset, 1017U);
+}
+
+TEST_F(WeReadStoreTest, RejectsMissingAndMalformedSourceOffsetMarkers) {
+  const std::string bookDir = WeReadStore::bookDirectory("bad-source-offset-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string path = WeReadStore::chapterPath(bookDir, 0);
+  uint32_t output = 0;
+  const auto reject = [&](const char* xhtml, const uint32_t visibleOffset) {
+    {
+      std::ofstream chapter(hostPath(path.c_str()), std::ios::binary | std::ios::trunc);
+      chapter << xhtml;
+    }
+    EXPECT_FALSE(WeReadXhtmlCodec::visibleToNativeOffset(path, visibleOffset, output));
+  };
+  reject("<html><body>text</body></html>", 0);
+  reject("<html><body><!--wr-co:bad-->text</body></html>", 0);
+  reject("<html><body><!--wr-co:20-->a<!--wr-co:10-->b</body></html>", 0);
 }
 
 TEST(WeReadStore, ParsesOnlyGeneratedChapterHrefs) {
@@ -287,11 +430,39 @@ TEST_F(WeReadStoreTest, FindsOnlyTheExactGeneratedBookPath) {
   EXPECT_FALSE(WeReadStore::findBookIdForPath("/WeRead/Renamed-book-1.epub", bookId, sizeof(bookId)));
 }
 
-TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLast) {
+TEST_F(WeReadStoreTest, SortsEmptySingleAndTwentyBookShelves) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  for (const uint32_t shelfSize : {0U, 1U, 20U}) {
+    WeReadStore::IndexWriter shelf;
+    ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+    for (uint32_t i = 0; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      snprintf(record.bookId, sizeof(record.bookId), "book-%02u", static_cast<unsigned>(i));
+      record.readUpdateTime = i;
+      ASSERT_TRUE(shelf.append(&record));
+    }
+    ASSERT_TRUE(shelf.finish());
+    ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Ok);
+
+    HalFile file;
+    uint32_t count = 0;
+    ASSERT_TRUE(WeReadStore::openShelf(file, count));
+    ASSERT_EQ(count, shelfSize);
+    for (uint32_t i = 0; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+      char expected[64];
+      snprintf(expected, sizeof(expected), "book-%02u", static_cast<unsigned>(shelfSize - 1 - i));
+      EXPECT_STREQ(record.bookId, expected);
+    }
+  }
+}
+
+TEST_F(WeReadStoreTest, FullySortsShelfAtThresholdWithStableTiesAndUnreadLast) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   WeReadStore::IndexWriter shelf;
   ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
-  for (unsigned i = 0; i < 600; ++i) {
+  for (uint32_t i = 0; i < WeReadStore::kLargeShelfThreshold; ++i) {
     WeReadStore::ShelfRecord record;
     snprintf(record.bookId, sizeof(record.bookId), "book-%03u", i);
     record.readUpdateTime = i == 1 ? 100 : i == 2 || i == 3 ? 300 : i == 4 ? 200 : 0;
@@ -303,7 +474,7 @@ TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLas
   HalFile file;
   uint32_t count = 0;
   ASSERT_TRUE(WeReadStore::openShelf(file, count));
-  ASSERT_EQ(count, 600U);
+  ASSERT_EQ(count, WeReadStore::kLargeShelfThreshold);
   uint32_t previousTime = UINT32_MAX;
   unsigned previousSourceIndex = 0;
   for (uint32_t i = 0; i < count; ++i) {
@@ -326,7 +497,69 @@ TEST_F(WeReadStoreTest, SortsLargeShelfByRecentReadingWithStableTiesAndUnreadLas
   EXPECT_STREQ(record.bookId, "book-000");
 }
 
-TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically) {
+TEST_F(WeReadStoreTest, SortsOnlyRecentHeadForLargeShelvesAndPreservesTailOrder) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  for (const uint32_t shelfSize : {501U, 1000U, 2000U}) {
+    WeReadStore::IndexWriter shelf;
+    ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+    for (uint32_t i = 0; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      snprintf(record.bookId, sizeof(record.bookId), "book-%04u", static_cast<unsigned>(i));
+      record.readUpdateTime = i + 1;
+      ASSERT_TRUE(shelf.append(&record));
+    }
+    ASSERT_TRUE(shelf.finish());
+    ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Degraded);
+
+    HalFile file;
+    uint32_t count = 0;
+    ASSERT_TRUE(WeReadStore::openShelf(file, count));
+    ASSERT_EQ(count, shelfSize);
+    for (uint32_t i = 0; i < WeReadStore::kRecentShelfWindow; ++i) {
+      WeReadStore::ShelfRecord record;
+      ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+      char expected[64];
+      snprintf(expected, sizeof(expected), "book-%04u", static_cast<unsigned>(shelfSize - 1 - i));
+      EXPECT_STREQ(record.bookId, expected);
+    }
+    for (uint32_t i = WeReadStore::kRecentShelfWindow; i < shelfSize; ++i) {
+      WeReadStore::ShelfRecord record;
+      ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+      char expected[64];
+      snprintf(expected, sizeof(expected), "book-%04u", static_cast<unsigned>(i - WeReadStore::kRecentShelfWindow));
+      EXPECT_STREQ(record.bookId, expected);
+    }
+  }
+}
+
+TEST_F(WeReadStoreTest, FallsBackToRecentHeadWhenFullSortAllocationFails) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  for (uint32_t i = 0; i < 100; ++i) {
+    WeReadStore::ShelfRecord record;
+    snprintf(record.bookId, sizeof(record.bookId), "book-%03u", static_cast<unsigned>(i));
+    record.readUpdateTime = i;
+    ASSERT_TRUE(shelf.append(&record));
+  }
+  ASSERT_TRUE(shelf.finish());
+
+  WeReadStore::failNextFullShelfSortAllocationForTest();
+  ASSERT_EQ(WeReadStore::sortShelfByRecent(), WeReadStore::ShelfSortResult::Degraded);
+  HalFile file;
+  uint32_t count = 0;
+  ASSERT_TRUE(WeReadStore::openShelf(file, count));
+  ASSERT_EQ(count, 100U);
+  for (uint32_t i = 0; i < WeReadStore::kRecentShelfWindow; ++i) {
+    WeReadStore::ShelfRecord record;
+    ASSERT_TRUE(WeReadStore::readShelfRecord(file, i, record));
+    char expected[64];
+    snprintf(expected, sizeof(expected), "book-%03u", static_cast<unsigned>(99 - i));
+    EXPECT_STREQ(record.bookId, expected);
+  }
+}
+
+TEST_F(WeReadStoreTest, PromotesSmallShelfBookAtomically) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   WeReadStore::IndexWriter shelf;
   ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
@@ -338,8 +571,6 @@ TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically
   }
   ASSERT_TRUE(shelf.finish());
 
-  EXPECT_EQ(WeReadStore::cachedShelfReadUpdateTime("book-1"), 200U);
-  EXPECT_EQ(WeReadStore::cachedShelfReadUpdateTime("missing"), 0U);
   ASSERT_EQ(WeReadStore::promoteShelfBook("book-2", 300), WeReadStore::ShelfSortResult::Ok);
 
   HalFile file;
@@ -356,6 +587,27 @@ TEST_F(WeReadStoreTest, PreservesCachedReadingTimeAndPromotesLocalOpenAtomically
 
   EXPECT_EQ(WeReadStore::promoteShelfBook("missing", 400), WeReadStore::ShelfSortResult::Ok);
   EXPECT_EQ(WeReadStore::promoteShelfBook("book-1", 0), WeReadStore::ShelfSortResult::Ok);
+}
+
+TEST_F(WeReadStoreTest, DefersPromotionForLargeShelfWithoutRewritingIt) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  WeReadStore::IndexWriter shelf;
+  ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
+  for (uint32_t i = 0; i <= WeReadStore::kLargeShelfThreshold; ++i) {
+    WeReadStore::ShelfRecord record;
+    snprintf(record.bookId, sizeof(record.bookId), "book-%03u", static_cast<unsigned>(i));
+    ASSERT_TRUE(shelf.append(&record));
+  }
+  ASSERT_TRUE(shelf.finish());
+
+  EXPECT_EQ(WeReadStore::promoteShelfBook("book-500", 123), WeReadStore::ShelfSortResult::Degraded);
+  HalFile file;
+  uint32_t count = 0;
+  ASSERT_TRUE(WeReadStore::openShelf(file, count));
+  WeReadStore::ShelfRecord first;
+  ASSERT_TRUE(WeReadStore::readShelfRecord(file, 0, first));
+  EXPECT_STREQ(first.bookId, "book-000");
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
 }
 
 TEST_F(WeReadStoreTest, RejectsCorruptShelfSortWithoutLeavingPartialReplacement) {
@@ -734,6 +986,7 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) 
   ASSERT_TRUE(session.setCookie("wr_vid", "12345", 5));
   ASSERT_TRUE(session.setCookie("wr_skey", "secret", 6));
   ASSERT_TRUE(WeReadStore::saveSession(session));
+  ASSERT_TRUE(WeReadStore::ensureCacheGeneration());
 
   WeReadStore::IndexWriter shelf;
   ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
@@ -754,6 +1007,7 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) 
   ASSERT_TRUE(WeReadStore::clearCache());
   EXPECT_TRUE(Storage.exists(WeReadStore::kSessionPath));
   EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
+  EXPECT_TRUE(Storage.exists(WeReadStore::kCacheGenerationPath));
   EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/book-1"));
@@ -762,6 +1016,115 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) 
   EXPECT_TRUE(Storage.exists("/WeRead/Cached Book.epub"));
   EXPECT_TRUE(Storage.exists("/.crosspoint/epub_123/progress.bin"));
   EXPECT_TRUE(WeReadStore::clearCache());
+}
+
+TEST_F(WeReadStoreTest, InitializesMissingCacheGenerationAndPreservesUserData) {
+  ASSERT_TRUE(WeReadStore::ensureRoot());
+  ASSERT_TRUE(WeReadStore::acceptDisclaimer());
+  WeReadStore::Session session;
+  ASSERT_TRUE(session.setCookie("wr_vid", "12345", 5));
+  ASSERT_TRUE(session.setCookie("wr_skey", "secret", 6));
+  ASSERT_TRUE(WeReadStore::saveSession(session));
+  ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "stale shelf"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/book-1"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/detail.bin", "stale detail"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/browse-cache"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/browse-cache/page.bin", "stale browse"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/WeRead"));
+  ASSERT_TRUE(Storage.writeFile("/WeRead/Cached Book.epub", "epub"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub_123"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/epub_123/progress.bin", "progress"));
+
+  ASSERT_TRUE(WeReadStore::ensureCacheGeneration());
+  const TestCacheGenerationRecord generation = readCacheGeneration();
+  EXPECT_EQ(generation.magic, WeReadStore::kCacheGenerationMagic);
+  EXPECT_EQ(generation.generation, WeReadStore::kCacheGeneration);
+  EXPECT_EQ(generation.reserved, 0U);
+  EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/book-1"));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/browse-cache"));
+  EXPECT_TRUE(Storage.exists(WeReadStore::kSessionPath));
+  EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
+  EXPECT_TRUE(Storage.exists("/WeRead/Cached Book.epub"));
+  EXPECT_TRUE(Storage.exists("/.crosspoint/epub_123/progress.bin"));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
+}
+
+TEST_F(WeReadStoreTest, CurrentCacheGenerationSkipsInvalidationAndManualClearPreservesIt) {
+  writeCacheGeneration(WeReadStore::kCacheGeneration);
+  ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "current shelf"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/book-1"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/detail.bin", "current detail"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/browse-cache"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/browse-cache/page.bin", "current browse"));
+  const std::string longName(63, 'x');
+  const std::string longPath = std::string(WeReadStore::kRoot) + "/" + longName;
+  ASSERT_TRUE(Storage.writeFile(longPath.c_str(), "must not be scanned"));
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/cache.version.part", "interrupted"));
+
+  EXPECT_TRUE(WeReadStore::ensureCacheGeneration());
+  EXPECT_TRUE(Storage.exists(WeReadStore::kShelfPath));
+  EXPECT_TRUE(Storage.exists("/.crosspoint/weread/book-1/detail.bin"));
+  EXPECT_TRUE(Storage.exists("/.crosspoint/weread/browse-cache/page.bin"));
+  EXPECT_TRUE(Storage.exists(longPath.c_str()));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
+
+  ASSERT_TRUE(Storage.remove(longPath.c_str()));
+  ASSERT_TRUE(WeReadStore::clearCache());
+  EXPECT_TRUE(Storage.exists(WeReadStore::kCacheGenerationPath));
+  EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
+  EXPECT_TRUE(WeReadStore::ensureCacheGeneration());
+}
+
+TEST_F(WeReadStoreTest, InvalidatesLowerHigherAndCorruptCacheGenerations) {
+  const TestCacheGenerationRecord stale[] = {
+      {WeReadStore::kCacheGenerationMagic, 0, 0},
+      {WeReadStore::kCacheGenerationMagic, static_cast<uint16_t>(WeReadStore::kCacheGeneration + 1), 0},
+      {0, WeReadStore::kCacheGeneration, 0},
+      {WeReadStore::kCacheGenerationMagic, WeReadStore::kCacheGeneration, 1},
+  };
+  for (const auto& record : stale) {
+    if (Storage.exists(WeReadStore::kRoot)) ASSERT_TRUE(Storage.removeDir(WeReadStore::kRoot));
+    writeCacheGeneration(record.generation, record.magic, record.reserved);
+    ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "stale"));
+
+    ASSERT_TRUE(WeReadStore::ensureCacheGeneration());
+    const TestCacheGenerationRecord current = readCacheGeneration();
+    EXPECT_EQ(current.magic, WeReadStore::kCacheGenerationMagic);
+    EXPECT_EQ(current.generation, WeReadStore::kCacheGeneration);
+    EXPECT_EQ(current.reserved, 0U);
+    EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
+    EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
+  }
+}
+
+TEST_F(WeReadStoreTest, FailedInvalidationDoesNotAdvanceCacheGeneration) {
+  writeCacheGeneration(0);
+  const std::string longName(63, 'x');
+  const std::string longPath = std::string(WeReadStore::kRoot) + "/" + longName;
+  ASSERT_TRUE(Storage.writeFile(longPath.c_str(), "cannot be cleared by bounded scanner"));
+
+  EXPECT_FALSE(WeReadStore::ensureCacheGeneration());
+  EXPECT_EQ(readCacheGeneration().generation, 0U);
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
+}
+
+TEST_F(WeReadStoreTest, FailedGenerationWriteKeepsPreviousVersionAndNoPart) {
+  writeCacheGeneration(0);
+  const std::filesystem::path cacheRoot = hostPath(WeReadStore::kRoot);
+  std::error_code error;
+  std::filesystem::permissions(cacheRoot, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec,
+                               std::filesystem::perm_options::replace, error);
+  ASSERT_FALSE(error);
+
+  const bool ensured = WeReadStore::ensureCacheGeneration();
+  std::filesystem::permissions(cacheRoot, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
+                               error);
+  ASSERT_FALSE(error);
+
+  EXPECT_FALSE(ensured);
+  EXPECT_EQ(readCacheGeneration().generation, 0U);
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
 }
 
 TEST_F(WeReadStoreTest, ClearingMissingWeReadCacheIsIdempotent) {

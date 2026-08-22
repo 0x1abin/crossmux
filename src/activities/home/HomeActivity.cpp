@@ -184,8 +184,22 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
     }
     GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
-    const std::string generatedPath = useFullCover ? BookCoverLoader::ensureFullCover(book.path)
-                                                   : BookCoverLoader::ensureThumbnail(book.path, coverHeight);
+    std::string generatedPath;
+    if (isEpub) {
+      {
+        GfxRenderer::FrameBufferLoan loan(renderer);
+        generatedPath = useFullCover ? BookCoverLoader::ensureFullCover(book.path)
+                                     : BookCoverLoader::ensureThumbnail(book.path, coverHeight);
+      }
+      // Inflate used the old framebuffer bytes. Rebuild a complete, known
+      // loading frame before the next progress refresh can reach the panel.
+      renderer.clearScreen();
+      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+      GUI.fillPopupProgress(renderer, popupRect, 10 + currentProgress * (90 / recentBooks.size()));
+    } else {
+      generatedPath = useFullCover ? BookCoverLoader::ensureFullCover(book.path)
+                                   : BookCoverLoader::ensureThumbnail(book.path, coverHeight);
+    }
     if (generatedPath.empty() && isXtc) LOG_ERR("HOME", "Failed to generate XTC cover: %s", book.path.c_str());
   }
 
@@ -223,6 +237,8 @@ void HomeActivity::onExit() {
 }
 
 bool HomeActivity::storeCoverBuffer() {
+  if (coverBufferUnavailable) return false;
+
   // Keep the carousel's ~40-44 KB snapshot out of the heap while missing
   // thumbnails are decoded; the final cover render will cache it instead.
   if (!recentsLoaded) return false;
@@ -239,6 +255,9 @@ bool HomeActivity::storeCoverBuffer() {
     auto replacement = makeUniqueNoThrow<uint8_t[]>(needed);
     if (!replacement) {
       LOG_ERR("HOME", "OOM: cover buffer (%u bytes)", (unsigned)needed);
+      // ponytail: the theme/region is fixed for this Activity lifetime; retry
+      // only after re-entering Home, when heap fragmentation may have changed.
+      coverBufferUnavailable = true;
       return false;
     }
     coverBuffer = std::move(replacement);
@@ -262,6 +281,7 @@ void HomeActivity::freeCoverBuffer() {
   coverBuffer.reset();
   coverBufferSize = 0;
   coverBufferStored = false;
+  coverBufferUnavailable = false;
 }
 
 void HomeActivity::loop() {

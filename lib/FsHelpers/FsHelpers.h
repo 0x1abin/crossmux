@@ -71,6 +71,18 @@ inline bool hasCssExtension(const String& fileName) {
 }
 std::string extractFolderPath(const std::string& filePath);
 
+// Path-component validation used before destructive SD-card rename/move operations.
+bool isValidPathComponent(std::string_view component);
+
+// Names owned by the firmware or operating system and not editable in the library.
+bool isProtectedPathComponent(std::string_view component);
+
+// Both arguments are normalized absolute paths. Equality counts as containment.
+bool isSameOrDescendantPath(std::string_view path, std::string_view root);
+
+// Replace oldRoot with newRoot when path is oldRoot or one of its descendants.
+std::string rebasePath(std::string_view path, std::string_view oldRoot, std::string_view newRoot);
+
 /**
  * Sanitize a filename/path component for FAT32 in a caller-provided buffer.
  * Replaces invalid path characters, spaces, and control characters with '-'.

@@ -91,7 +91,8 @@ class ReadingStatsStore {
   uint32_t sessionSerialCounter = 0;
   mutable SummaryCache summaryCache;
   mutable bool dirty = false;
-  mutable unsigned long lastSaveMs = 0;
+  mutable unsigned long dirtySinceMs = 0;
+  mutable unsigned long lastSaveAttemptMs = 0;
 
   friend bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore&, const char*);
   friend bool JsonSettingsIO::loadReadingStats(ReadingStatsStore&, const char*);
@@ -122,7 +123,6 @@ class ReadingStatsStore {
   bool removeIgnoredBooks();
   void invalidateSummaryCache();
   void rebuildSummaryCache() const;
-  bool shouldSaveDeferred() const;
   void markDirty();
   bool persistToFile(const char* path) const;
   static bool isClockValid(uint32_t epochSeconds);
@@ -147,6 +147,7 @@ class ReadingStatsStore {
   bool updateBookPath(const std::string& oldKey, const std::string& newPath, const std::string& title = "",
                       const std::string& author = "", const std::string& coverBmpPath = "",
                       const std::string& bookId = "");
+  bool updateBookPathPrefix(const std::string& oldPrefix, const std::string& newPrefix);
   bool removeBook(const std::string& path);
   const ReadingBookStats* findBook(const std::string& key) const;
   const ReadingBookStats* findMatchingBookForPath(const std::string& path, const std::string& title = "",
@@ -171,6 +172,7 @@ class ReadingStatsStore {
   void reset();
   bool exportToFile(const std::string& path) const;
   bool importFromFile(const std::string& path);
+  bool shouldSaveCheckpoint() const;
   bool saveToFile() const;
   bool loadFromFile();
   bool releaseMemoryForNetwork();
