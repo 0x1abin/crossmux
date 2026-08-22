@@ -379,8 +379,8 @@ static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::R
   // Font coverage is 0=white..3=black; the shared mapping expects 0=black..3=white.
   const auto pixel = GfxRenderer::mapTwoBitPixel(renderMode, 3 - coverage);
   if (!pixel.draw) return;
-  renderer.drawPixel(x, y,
-                     renderMode == GfxRenderer::BW ? pixelState : GfxRenderer::framebufferState(renderMode, pixel.state));
+  renderer.drawPixel(
+      x, y, renderMode == GfxRenderer::BW ? pixelState : GfxRenderer::framebufferState(renderMode, pixel.state));
 }
 
 // Shared glyph rendering logic for normal and rotated text.

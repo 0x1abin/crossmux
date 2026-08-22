@@ -342,7 +342,6 @@ void InxRecentActivity::loop() {
     requestUpdate();
     return;
   }
-
 }
 
 void InxRecentActivity::drawFlow(const Rect& content) {
