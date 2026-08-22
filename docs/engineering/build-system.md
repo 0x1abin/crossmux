@@ -34,8 +34,20 @@
   * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
   * `slim`: Minimal build (no serial logging)
   * `gh_release_cn`: Simplified-Chinese-only release with embedded CJK fonts (see [chinese-build.md](chinese-build.md))
+  * `sticky`: Seeed Sticky ESP32-S3 development build
+  * `x4pro`: Xteink X4 Pro ESP32-S3 development build
+  * `papermono`: M5Stack PaperMono ESP32-S3 development build
+  * `eego_a4`: eego A4 ESP32-S3 experimental development build
+  * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
+  * `waveshare_epaper_397`: Waveshare ePaper 3.97 ESP32-S3 experimental development build
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
+  * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
+  * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
+
+The six S3 environments are separate device binaries. They keep the global
+development profile unless an environment explicitly opts into another locale
+or host. `bin/ci-check` builds all six together with the default C3 target.
 
 ## Desktop Simulator
 
@@ -45,12 +57,22 @@ files under `fs_/books/`, and run:
 ```bash
 pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
+pio run -e simulator_eego_a4 -t run_simulator
+pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 The simulator implementation and launcher come from the pinned
-[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/6f743c4d6a956bbb69ae3544e98168537b12ea1f)
+[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12)
 fork.
-The firmware repository does not carry a second host implementation.
+The firmware repository does not carry a second host implementation. Arrow
+keys are Up/Down, `P` is Power,
+mouse input provides touch, and `S` sleeps. A4 additionally maps `H` to a short
+Back or one-shot Home after 700 ms; M4 ignores `H`. Once A4/M4 is asleep, only
+Power wakes it.
+
+This product-level simulator covers UI, input, RTC state, M4 frontlight state,
+and sleep/wake flows. It does not emulate EPD waveforms or ghosting, bus timing,
+SDMMC contention, PSRAM, or power consumption.
 
 ## Critical Build Flags
 These flags in `platformio.ini` fundamentally affect firmware behavior:
@@ -88,7 +110,8 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
   power sequencing needed to avoid the persistent ghosting seen with the
   weaker incremental `0x1C` path.
 - X3 is runtime-selected before display initialization and uses its UC81xx
-  driver and SPI configuration unchanged. Sticky likewise retains its
+  driver and SPI configuration unchanged. X4 Pro probes its SSD1677/UC81xx
+  controller once before display initialization. Sticky retains its
   board-specific SSD1677 waveform config.
 
 ---

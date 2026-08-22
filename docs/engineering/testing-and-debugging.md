@@ -19,9 +19,11 @@ pio run -t upload
 # Build specific environment
 pio run -e gh_release
 
-# Build and run the native X4 or X3 simulator
+# Build and run a native device simulator
 pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
+pio run -e simulator_eego_a4 -t run_simulator
+pio run -e simulator_murphy_m4 -t run_simulator
 
 # Clean build artifacts
 pio run -t clean

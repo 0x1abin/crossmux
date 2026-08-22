@@ -107,6 +107,16 @@ may run after the edge's frame. Do not simulate consumption with another
 Touch input remains independent; only arm a physical-button barrier when that
 button is actually held.
 
+## Touch Coordinate and Gesture Layers
+
+Touch controllers keep their sampling, power, and panel-mount transforms in
+the FreeInk SDK. `HalGPIO` exposes the normalized contact, and
+`MappedInputManager` maps it through the renderer's live orientation before
+classifying direction and edge geometry with FreeInkUI. Activities assign the
+meaning: left-edge right swipe is Back, top-edge down swipe is Menu, and
+bottom-edge up swipe is Home on every touch device. A hardware Home key remains
+an additional input path and does not change those screen gestures.
+
 ## Long-Press Pattern
 
 Start timing on `wasPressed()`. While `isPressed()` remains true, fire the

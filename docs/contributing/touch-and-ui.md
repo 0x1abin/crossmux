@@ -135,9 +135,15 @@ As with all input: never call the SDK `InputManager` or read GPIO directly. The 
 
 ## Building and testing on non-Xteink devices
 
-Each MCU family is its own binary: X3/X4 are ESP32-C3, Sticky and LilyGo T5 are ESP32-S3, M5Paper v1.1 is a classic ESP32. The Sticky env ships in `platformio.ini` (`pio run -e sticky`). Envs for other devices go in **`platformio.local.ini`**, a gitignored file that PlatformIO merges over `platformio.ini` (see `extra_configs`). Create it next to `platformio.ini`; personal envs, ports, and debug flags live there and never get committed.
+Each MCU family is its own binary: X3/X4 are ESP32-C3, while Sticky, X4 Pro,
+PaperMono, eego A4, Murphy M4, and Waveshare ePaper 3.97 are separate ESP32-S3
+builds. Their environments ship in `platformio.ini`; personal device ports and
+debug flags belong in **`platformio.local.ini`**, which is gitignored and merged
+over the committed configuration.
 
-Both envs below extend the repo's `[base]`, so they build against the `freeink-sdk` submodule with all the normal deps and scripts.
+All committed device environments extend the repository's `[base]`, so they
+build against the pinned `freeink-sdk` submodule with the normal dependencies
+and scripts.
 
 ### M5Paper v1.1 (classic ESP32, IT8951 panel)
 
