@@ -23,6 +23,16 @@ void FrontlightAdjustmentActivity::onEnter() {
   requestUpdate();
 }
 
+void FrontlightAdjustmentActivity::onExit() {
+  // The sliders write to SETTINGS in memory as they are dragged, but the file
+  // save only happened on Back/Confirm/bottom-tap. On the touch-only A4 the
+  // user can also leave via the home key / home gesture (goHome() replaces this
+  // activity without going through loop()), so persist on every exit path to
+  // keep the last adjustment across power cycles.
+  SETTINGS.saveToFile();
+  Activity::onExit();
+}
+
 void FrontlightAdjustmentActivity::adjustBrightness(const int delta) {
   const int v = static_cast<int>(SETTINGS.frontlightBrightness) + delta;
   SETTINGS.frontlightBrightness = static_cast<uint8_t>(std::clamp(v, 0, 100));
@@ -38,7 +48,7 @@ void FrontlightAdjustmentActivity::adjustWarmth(const int delta) {
 }
 
 void FrontlightAdjustmentActivity::saveAndFinish() {
-  SETTINGS.saveToFile();
+  // Persistence happens in onExit(), which runs on every exit path.
   finish();
 }
 
