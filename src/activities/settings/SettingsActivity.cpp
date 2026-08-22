@@ -36,6 +36,7 @@
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/FrontlightAdjustmentActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
@@ -680,6 +681,14 @@ void SettingsActivity::toggleCurrentSetting() {
     return;
   }
 
+  // Frontlight brightness/warmth open the same two-slider page the reader menu
+  // uses (live drag, save on exit), instead of stepping +5 per press here.
+  if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS || setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) {
+    startActivityForResultWith<FrontlightAdjustmentActivity>([this](const ActivityResult&) { requestUpdate(); },
+                                                             "FrontlightAdjustment", StrId::STR_FRONTLIGHT);
+    return;
+  }
+
   if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
     // Toggle the boolean value using the member pointer
     const bool currentValue = SETTINGS.*(setting.valuePtr);
@@ -735,7 +744,13 @@ void SettingsActivity::toggleCurrentSetting() {
       SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
     }
   } else if (setting.type == SettingType::ACTION) {
-    auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
+    // Every child page returns here through ActivityManager's Pop; make sure the
+    // settings list is both rebuilt (values may have changed) and repainted.
+    auto resultHandler = [this](const ActivityResult&) {
+      SETTINGS.saveToFile();
+      rebuildSettingsLists();
+      requestUpdate();
+    };
 
     switch (setting.action) {
       case SettingAction::RemapFrontButtons:
@@ -756,7 +771,10 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::AppVisibility:
         // ActivityManager owns child activities across frames, so stack/static lifetime is invalid.
         if (auto appVisibility = makeUniqueNoThrow<AppVisibilitySettingsActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(appVisibility), [](const ActivityResult&) {});
+          startActivityForResult(std::move(appVisibility), [this](const ActivityResult&) {
+            rebuildSettingsLists();
+            requestUpdate();
+          });
         } else {
           LOG_ERR("SET", "OOM: AppVisibilitySettingsActivity (%u bytes)",
                   static_cast<unsigned>(sizeof(AppVisibilitySettingsActivity)));
@@ -794,6 +812,7 @@ void SettingsActivity::toggleCurrentSetting() {
                                [this](const ActivityResult&) {
                                  SETTINGS.saveToFile();
                                  rebuildSettingsLists();
+                                 requestUpdate();
                                });
         break;
       case SettingAction::TextSettings:
@@ -804,6 +823,7 @@ void SettingsActivity::toggleCurrentSetting() {
           startActivityForResult(std::move(textSettings), [this](const ActivityResult&) {
             // TextSettingsActivity persists every change before returning.
             rebuildSettingsLists();
+            requestUpdate();
           });
         } else {
           LOG_ERR("SET", "OOM: TextSettingsActivity (%u bytes)", static_cast<unsigned>(sizeof(TextSettingsActivity)));
@@ -815,7 +835,10 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::About:
         // ActivityManager owns this across frames; stack/static lifetime is invalid.
         if (auto about = makeUniqueNoThrow<AboutActivity>(renderer, mappedInput)) {
-          startActivityForResult(std::move(about), [](const ActivityResult&) {});
+          startActivityForResult(std::move(about), [this](const ActivityResult&) {
+            rebuildSettingsLists();
+            requestUpdate();
+          });
         } else {
           LOG_ERR("SET", "OOM: AboutActivity (%u bytes)", static_cast<unsigned>(sizeof(AboutActivity)));
         }

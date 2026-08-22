@@ -19,6 +19,7 @@ class FrontlightAdjustmentActivity final : public Activity {
       : Activity(activityName, renderer, mappedInput), titleId(titleId) {}
 
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 
