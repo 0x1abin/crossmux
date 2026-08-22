@@ -141,6 +141,7 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
 }
 
 bool isSettingAvailableForPersistence(const SettingInfo& setting) {
+#if !defined(SIMULATOR)
   // Settings load before Frontlight.begin(), so persistence must use the board profile, not the runtime probe.
   if (setting.nameId == StrId::STR_FRONTLIGHT_BRIGHTNESS) {
     return BoardConfig::hasPwmFrontlight() || BoardConfig::hasI2cFrontlight();
@@ -148,6 +149,7 @@ bool isSettingAvailableForPersistence(const SettingInfo& setting) {
   if (setting.nameId == StrId::STR_FRONTLIGHT_WARMTH) {
     return BoardConfig::hasColorTemperatureFrontlight();
   }
+#endif
   return isSettingAvailableOnBoard(setting);
 }
 
