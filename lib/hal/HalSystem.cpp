@@ -1,5 +1,7 @@
 #include "HalSystem.h"
 
+#include <BoardConfig.h>
+
 #include <string>
 
 #include "Arduino.h"
@@ -130,6 +132,8 @@ void clearPanic() {
   }
   clearLastLogs();
 }
+
+const char* getDeviceModel() { return BoardConfig::ACTIVE.name; }
 
 bool getDeviceId(DeviceId& out) {
   out.fill(0);

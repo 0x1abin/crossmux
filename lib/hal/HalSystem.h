@@ -23,6 +23,7 @@ void checkPanic();
 void clearPanic();
 
 using DeviceId = std::array<uint8_t, 6>;
+const char* getDeviceModel();
 bool getDeviceId(DeviceId& out);
 bool getWifiStationMac(DeviceId& out);
 bool getChipTemperatureCelsius(float& out);
