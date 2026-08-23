@@ -5,9 +5,10 @@
 
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
+#include "components/UiAppHost.h"
 #include "network/OtaUpdater.h"
 
-class OtaUpdateActivity : public Activity {
+class OtaUpdateActivity : public Activity, private UiAppHost {
   enum class State : uint8_t {
     Ready,
     WifiSelection,
@@ -44,12 +45,19 @@ class OtaUpdateActivity : public Activity {
   void onWifiSelectionComplete(bool success);
   void showUpdateConfirmation();
   void renderUpdateAvailable(const Rect& safeArea);
-  void rebuildReleaseNotePages(const Rect& safeArea);
+  void rebuildReleaseNotePages(const Rect& safeArea, int bottomInset);
   void runUpdateInstall();
+
+  static constexpr freeink::ui::ActionId ACTION_RELEASE_PAGE = 1;
+  static constexpr freeink::ui::ActionId ACTION_INSTALL_UPDATE = 2;
+  static void updateScreen(UiScreen& screen, void* user);
+  static void onReleasePage(const freeink::ui::ActionEvent& event, void* user);
+  static void onInstallUpdate(const freeink::ui::ActionEvent& event, void* user);
+  void buildUpdateScreen(UiScreen& screen);
 
  public:
   explicit OtaUpdateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("OtaUpdate", renderer, mappedInput), updater() {}
+      : Activity("OtaUpdate", renderer, mappedInput), UiAppHost(renderer), updater() {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

@@ -7,13 +7,15 @@
 #include "../../Activity.h"
 #include "AirPageConnection.h"
 #include "AirPageImageStore.h"
+#include "components/OptionPopup.h"
+#include "components/UiAppHost.h"
 
 struct Rect;
 
-class AirPageActivity final : public Activity {
+class AirPageActivity final : public Activity, private UiAppHost {
  public:
   explicit AirPageActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("AirPage", renderer, mappedInput), connection_(renderer) {}
+      : Activity("AirPage", renderer, mappedInput), UiAppHost(renderer), connection_(renderer) {}
 
   void onEnter() override;
   void onExit() override;
@@ -39,6 +41,15 @@ class AirPageActivity final : public Activity {
   enum class SettingRow : uint8_t { Mode, AutoWallpaper, Count };
   enum class WallpaperResult : uint8_t { None, Saved, Failed };
   enum class ImageDisplayResult : uint8_t { None, Success, Failure };
+  enum class TouchAction : int16_t {
+    BackToApps,
+    ShowQr,
+    Settings,
+    Images,
+    Refresh,
+    SetWallpaper,
+    OpenImageMenu,
+  };
 
   bool processImageDisplayResult();
   void applyConnectionEvent(airpage::AirPageConnection::Event event);
@@ -56,6 +67,14 @@ class AirPageActivity final : public Activity {
   void openWifiSelection(bool fetchAfterConnect);
   void handleWifiResult(const ActivityResult& result, bool fetchAfterConnect);
   bool consumeInputReleaseBarrier();
+  void setAirPageScreen(Screen screen);
+  void openImageMenu();
+  void applyTouchAction(TouchAction action);
+
+  static constexpr freeink::ui::ActionId ACTION_TOUCH = 1;
+  static void touchScreen(UiScreen& screen, void* user);
+  static void onTouchAction(const freeink::ui::ActionEvent& event, void* user);
+  void buildTouchScreen(UiScreen& screen);
 
   void renderQr(const Rect& viewport);
   void renderStatus(const Rect& viewport, const char* msg);
@@ -78,6 +97,7 @@ class AirPageActivity final : public Activity {
   airpage::AirPageImageStore imageStore_;
   airpage::AirPageConnection connection_;
   airpage::SelectedImage selectedImage_;
+  OptionPopup imageMenu_;
 
   bool imageNeedsDisplay_ = true;
   bool waitForInputRelease_ = false;

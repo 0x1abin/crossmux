@@ -184,6 +184,8 @@ mode needs Wi-Fi. Network-dependent apps use the shared Wi-Fi picker on demand;
 cancelling it leaves the app on its current screen so the user can retry.
 Its mapped bottom actions are Back, Settings, Images, and Refresh; logical
 previous/next also map the side buttons to Images/Refresh in every orientation.
+Touch devices render those QR-page actions as a tappable footer, and tapping a
+full-screen image opens the same actions plus Set Cover in a modal menu.
 Connecting or reconnecting never downloads an image by itself; only Refresh or
 a live MQTT push starts a download.
 Settings uses the standard themed list for manual/live mode and the optional

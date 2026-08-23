@@ -15,8 +15,11 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/TimeUtils.h"
+
+namespace fui = freeink::ui;
 
 namespace {
 
@@ -41,6 +44,11 @@ std::string twoDigits(const unsigned value) {
 
 void DateTimeSettingsActivity::onEnter() {
   Activity::onEnter();
+  resetUi();
+  app.on(ACTION_STEP, &DateTimeSettingsActivity::onStep, this);
+  app.on(ACTION_CANCEL, &DateTimeSettingsActivity::onCancel, this);
+  app.on(ACTION_OK, &DateTimeSettingsActivity::onOk, this);
+  app.setScreen(&DateTimeSettingsActivity::manualScreen, this);
   if (SETTINGS.clockUtcOffsetQ > 104) SETTINGS.clockUtcOffsetQ = 48;
   if (SETTINGS.clockFormat > 1) SETTINGS.clockFormat = 0;
   if (SETTINGS.clockAutoSync > 1) SETTINGS.clockAutoSync = 1;
@@ -159,21 +167,22 @@ void DateTimeSettingsActivity::beginManualEdit() {
     minute = 0;
   }
   selectedEditField = 0;
+  closeRouting();
   mode = Mode::ManualEdit;
   requestUpdate();
 }
 
 void DateTimeSettingsActivity::loopManualEdit() {
+  const auto touch = routeTouch(mappedInput);
+  if (touch.routed && app.invalidated()) requestUpdate();
+  if (touch) return;
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    mode = Mode::Menu;
-    requestUpdate();
+    cancelManualEdit();
     return;
   }
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    if (applyManualTime()) {
-      mode = Mode::Menu;
-      requestUpdate();
-    }
+    confirmManualEdit();
     return;
   }
 
@@ -223,6 +232,77 @@ bool DateTimeSettingsActivity::applyManualTime() {
     return false;
   }
   return true;
+}
+
+void DateTimeSettingsActivity::cancelManualEdit() {
+  closeRouting();
+  mode = Mode::Menu;
+  requestUpdate();
+}
+
+void DateTimeSettingsActivity::confirmManualEdit() {
+  if (!applyManualTime()) return;
+  closeRouting();
+  mode = Mode::Menu;
+  requestUpdate();
+}
+
+void DateTimeSettingsActivity::manualScreen(UiScreen& screen, void* user) {
+  static_cast<DateTimeSettingsActivity*>(user)->buildManualScreen(screen);
+}
+
+void DateTimeSettingsActivity::buildManualScreen(UiScreen& screen) {
+  if (mode != Mode::ManualEdit || !mappedInput.hasTouch()) return;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  screen.setContentMargin(fui::Insets{
+      static_cast<int16_t>(metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing),
+      static_cast<int16_t>(metrics.contentSidePadding), 0, static_cast<int16_t>(metrics.contentSidePadding)});
+  addDialogCancelOk(screen, ACTION_CANCEL, ACTION_OK);
+
+  static constexpr StrId names[] = {StrId::STR_YEAR, StrId::STR_MONTH, StrId::STR_DAY, StrId::STR_HOUR,
+                                    StrId::STR_MINUTE};
+  char values[EDIT_FIELD_COUNT][5];
+  snprintf(values[0], sizeof(values[0]), "%d", year);
+  snprintf(values[1], sizeof(values[1]), "%02u", month);
+  snprintf(values[2], sizeof(values[2]), "%02u", day);
+  snprintf(values[3], sizeof(values[3]), "%02u", hour);
+  snprintf(values[4], sizeof(values[4]), "%02u", minute);
+  for (int index = 0; index < EDIT_FIELD_COUNT; ++index) {
+    fui::StepperRowProps props;
+    props.row.label = I18N.get(names[index]);
+    props.row.labelText = screen.theme().bodyText;
+    props.row.valueText = screen.theme().bodyText;
+    props.row.minTouchSize = screen.theme().minTouchSize;
+    props.row.state = index == selectedEditField ? fui::StateFocused : fui::StateNormal;
+    props.value = values[index];
+    props.widestValue = index == 0 ? "2099" : "00";
+    props.decrement = ACTION_STEP;
+    props.increment = ACTION_STEP;
+    props.decrementValue = static_cast<int16_t>(-(index + 1));
+    props.incrementValue = static_cast<int16_t>(index + 1);
+    screen.stepperRow(props);
+  }
+}
+
+void DateTimeSettingsActivity::onStep(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<DateTimeSettingsActivity*>(user);
+  if (self->mode != Mode::ManualEdit || event.value == 0) return;
+  self->selectedEditField = event.value > 0 ? event.value - 1 : -event.value - 1;
+  self->adjustEditField(event.value > 0 ? 1 : -1);
+}
+
+void DateTimeSettingsActivity::onCancel(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<DateTimeSettingsActivity*>(user);
+  if (self->mode != Mode::ManualEdit) return;
+  self->app.clearTapFlash();
+  self->cancelManualEdit();
+}
+
+void DateTimeSettingsActivity::onOk(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<DateTimeSettingsActivity*>(user);
+  if (self->mode != Mode::ManualEdit) return;
+  self->app.clearTapFlash();
+  self->confirmManualEdit();
 }
 
 void DateTimeSettingsActivity::render(RenderLock&&) {
@@ -303,32 +383,36 @@ void DateTimeSettingsActivity::renderManualEdit() {
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SET_DATE_AND_TIME));
-  GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, EDIT_FIELD_COUNT, selectedEditField,
-      [](int index) {
-        static constexpr StrId NAMES[] = {StrId::STR_YEAR, StrId::STR_MONTH, StrId::STR_DAY, StrId::STR_HOUR,
-                                          StrId::STR_MINUTE};
-        return std::string(I18N.get(NAMES[index]));
-      },
-      nullptr, nullptr,
-      [this](int index) {
-        switch (static_cast<EditField>(index)) {
-          case EditField::Year:
-            return std::to_string(year);
-          case EditField::Month:
-            return twoDigits(month);
-          case EditField::Day:
-            return twoDigits(day);
-          case EditField::Hour:
-            return twoDigits(hour);
-          case EditField::Minute:
-            return twoDigits(minute);
-          case EditField::Count:
-            return std::string();
-        }
-        return std::string();
-      },
-      true);
+  if (mappedInput.hasTouch()) {
+    renderUi();
+  } else {
+    GUI.drawList(
+        renderer, Rect{0, contentTop, pageWidth, contentHeight}, EDIT_FIELD_COUNT, selectedEditField,
+        [](int index) {
+          static constexpr StrId NAMES[] = {StrId::STR_YEAR, StrId::STR_MONTH, StrId::STR_DAY, StrId::STR_HOUR,
+                                            StrId::STR_MINUTE};
+          return std::string(I18N.get(NAMES[index]));
+        },
+        nullptr, nullptr,
+        [this](int index) {
+          switch (static_cast<EditField>(index)) {
+            case EditField::Year:
+              return std::to_string(year);
+            case EditField::Month:
+              return twoDigits(month);
+            case EditField::Day:
+              return twoDigits(day);
+            case EditField::Hour:
+              return twoDigits(hour);
+            case EditField::Minute:
+              return twoDigits(minute);
+            case EditField::Count:
+              return std::string();
+          }
+          return std::string();
+        },
+        true);
+  }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

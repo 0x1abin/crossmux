@@ -18,12 +18,15 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
+#include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/QrUtils.h"
 #include "util/TimeUtils.h"
 
 namespace {
+
+namespace fui = freeink::ui;
 
 constexpr char kAirPageBase[] = "airpage." CROSSMUX_HOST;
 constexpr uint32_t kWallpaperNoticeDurationMs = 1000u;
@@ -63,6 +66,10 @@ bool formatArchiveDate(const uint64_t archiveId, char* buffer, const size_t buff
 
 void AirPageActivity::onEnter() {
   Activity::onEnter();
+
+  resetUi();
+  app.on(ACTION_TOUCH, &AirPageActivity::onTouchAction, this);
+  app.setScreen(&AirPageActivity::touchScreen, this);
 
   phase_ = Phase::Idle;
   screen_ = Screen::Qr;
@@ -159,13 +166,13 @@ bool AirPageActivity::processImageDisplayResult() {
       switch (imageStore_.rejectDisplayedImage(selectedImage_)) {
         case airpage::AirPageImageStore::RejectResult::CurrentRestored:
         case airpage::AirPageImageStore::RejectResult::CurrentInvalid:
-          screen_ = Screen::Qr;
+          setAirPageScreen(Screen::Qr);
           break;
         case airpage::AirPageImageStore::RejectResult::HistoryInvalid:
           if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
             historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
           }
-          screen_ = Screen::History;
+          setAirPageScreen(Screen::History);
           break;
       }
       notice_ = Notice::InvalidImage;
@@ -185,19 +192,19 @@ void AirPageActivity::applyConnectionEvent(const airpage::AirPageConnection::Eve
       break;
     case airpage::AirPageConnection::Event::WifiRequired:
       notice_ = Notice::WifiRequired;
-      screen_ = Screen::Qr;
+      setAirPageScreen(Screen::Qr);
       break;
     case airpage::AirPageConnection::Event::WifiFailed:
       notice_ = Notice::WifiFailed;
-      screen_ = Screen::Qr;
+      setAirPageScreen(Screen::Qr);
       break;
     case airpage::AirPageConnection::Event::RealtimeRetrying:
       notice_ = Notice::RealtimeRetrying;
-      screen_ = Screen::Qr;
+      setAirPageScreen(Screen::Qr);
       break;
     case airpage::AirPageConnection::Event::RealtimePaused:
       notice_ = Notice::RealtimePaused;
-      screen_ = Screen::Qr;
+      setAirPageScreen(Screen::Qr);
       break;
     case airpage::AirPageConnection::Event::PushRequested:
       queueFetch();
@@ -228,6 +235,21 @@ void AirPageActivity::loop() {
   if (processImageDisplayResult()) return;
   if (consumeInputReleaseBarrier()) return;
 
+  if (imageMenu_.handleInput(mappedInput, [this] { requestUpdate(); })) {
+    if (!imageMenu_.isActive()) {
+      closeRouting();
+      imageNeedsDisplay_ = true;
+      requestUpdate();
+    }
+    return;
+  }
+
+  if (phase_ == Phase::Idle && (screen_ == Screen::Qr || screen_ == Screen::Image)) {
+    const auto touch = routeTouch(mappedInput);
+    if (touch.routed && app.invalidated()) requestUpdate();
+    if (touch) return;
+  }
+
   switch (screen_) {
     case Screen::Qr:
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -251,7 +273,7 @@ void AirPageActivity::loop() {
     case Screen::Settings: {
       if (mappedInput.wasAnyReleased() && notice_ == Notice::SettingsSaveFailed) notice_ = Notice::None;
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-        screen_ = Screen::Qr;
+        setAirPageScreen(Screen::Qr);
         requestUpdate();
         return;
       }
@@ -286,7 +308,7 @@ void AirPageActivity::loop() {
     case Screen::History: {
       if (mappedInput.wasAnyReleased() && notice_ == Notice::InvalidImage) notice_ = Notice::None;
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-        screen_ = Screen::Qr;
+        setAirPageScreen(Screen::Qr);
         requestUpdate();
         return;
       }
@@ -322,7 +344,7 @@ void AirPageActivity::loop() {
     case Screen::Image:
       if (mappedInput.wasAnyReleased()) wallpaperResult_ = WallpaperResult::None;
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-        screen_ = Screen::Qr;
+        setAirPageScreen(Screen::Qr);
         requestUpdate();
         return;
       }
@@ -343,9 +365,95 @@ void AirPageActivity::loop() {
   applyConnectionEvent(connection_.pump(phase_ == Phase::Idle && screen_ != Screen::Settings));
 }
 
+void AirPageActivity::setAirPageScreen(const Screen screen) {
+  if (screen_ == screen) return;
+  closeRouting();
+  screen_ = screen;
+}
+
+void AirPageActivity::touchScreen(UiScreen& screen, void* user) {
+  static_cast<AirPageActivity*>(user)->buildTouchScreen(screen);
+}
+
+void AirPageActivity::buildTouchScreen(UiScreen& screen) {
+  if (!mappedInput.hasTouch() || phase_ != Phase::Idle || wallpaperResult_ != WallpaperResult::None) return;
+
+  switch (screen_) {
+    case Screen::Qr: {
+      const fui::FooterAction actions[] = {
+          {tr(STR_BACK), ACTION_TOUCH, static_cast<int16_t>(TouchAction::BackToApps)},
+          {tr(STR_AIRPAGE_SETTINGS_ACTION), ACTION_TOUCH, static_cast<int16_t>(TouchAction::Settings)},
+          {tr(STR_AIRPAGE_IMAGES_ACTION), ACTION_TOUCH, static_cast<int16_t>(TouchAction::Images)},
+          {refreshActionText(), ACTION_TOUCH, static_cast<int16_t>(TouchAction::Refresh)},
+      };
+      screen.footer(actions, 4);
+      return;
+    }
+    case Screen::Image: {
+      const fui::TapZone zone{screen.frame().screen(), ACTION_TOUCH, static_cast<int16_t>(TouchAction::OpenImageMenu)};
+      fui::TapZonesProps props;
+      props.zones = &zone;
+      props.count = 1;
+      fui::tapZones(screen.frame(), screen.frame().screen(), props);
+      return;
+    }
+    case Screen::Settings:
+    case Screen::History:
+      return;
+  }
+}
+
+void AirPageActivity::onTouchAction(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<AirPageActivity*>(user);
+  self->app.clearTapFlash();
+  self->applyTouchAction(static_cast<TouchAction>(event.value));
+}
+
+void AirPageActivity::applyTouchAction(const TouchAction action) {
+  switch (action) {
+    case TouchAction::BackToApps:
+      activityManager.goToApps();
+      return;
+    case TouchAction::ShowQr:
+      setAirPageScreen(Screen::Qr);
+      requestUpdate();
+      return;
+    case TouchAction::Settings:
+      openSettings();
+      return;
+    case TouchAction::Images:
+      openHistory();
+      return;
+    case TouchAction::Refresh:
+      handleRefresh();
+      return;
+    case TouchAction::SetWallpaper:
+      openWallpaperConfirmation();
+      return;
+    case TouchAction::OpenImageMenu:
+      openImageMenu();
+      return;
+  }
+}
+
+void AirPageActivity::openImageMenu() {
+  if (phase_ != Phase::Idle || screen_ != Screen::Image || selectedImage_.path[0] == '\0') return;
+  static constexpr int OPTION_COUNT = 5;
+  static constexpr TouchAction ACTIONS[OPTION_COUNT] = {TouchAction::ShowQr, TouchAction::Settings, TouchAction::Images,
+                                                        TouchAction::Refresh, TouchAction::SetWallpaper};
+  const char* options[OPTION_COUNT] = {tr(STR_DISPLAY_QR), tr(STR_AIRPAGE_SETTINGS_ACTION),
+                                       tr(STR_AIRPAGE_IMAGES_ACTION), refreshActionText(), tr(STR_SET_SLEEP_COVER)};
+  imageMenu_.show(tr(STR_AIRPAGE_TITLE), options, OPTION_COUNT, 0, [this](const int index) {
+    if (index < 0 || index >= OPTION_COUNT) return;
+    applyTouchAction(ACTIONS[index]);
+  });
+  closeRouting();
+  requestUpdate();
+}
+
 void AirPageActivity::openSettings() {
   if (phase_ != Phase::Idle) return;
-  screen_ = Screen::Settings;
+  setAirPageScreen(Screen::Settings);
   settingsSelection_ = 0;
   requestUpdate();
 }
@@ -388,7 +496,7 @@ void AirPageActivity::applySettingsSelection() {
 void AirPageActivity::openHistory() {
   if (phase_ != Phase::Idle) return;
   historySelection_ = 0;
-  screen_ = Screen::History;
+  setAirPageScreen(Screen::History);
   requestUpdate();
 }
 
@@ -402,7 +510,7 @@ void AirPageActivity::openSelectedHistoryImage() {
     return;
   }
   wallpaperResult_ = WallpaperResult::None;
-  screen_ = Screen::Image;
+  setAirPageScreen(Screen::Image);
   imageNeedsDisplay_ = true;
   requestUpdate();
 }
@@ -457,6 +565,7 @@ void AirPageActivity::handleRefresh() {
 
 void AirPageActivity::queueFetch() {
   if (phase_ != Phase::Idle || screen_ == Screen::Settings) return;
+  closeRouting();
   phase_ = Phase::FetchRequested;
   requestUpdate();
 }
@@ -466,7 +575,7 @@ void AirPageActivity::openWifiSelection(const bool fetchAfterConnect) {
   if (!wifi) {
     LOG_ERR("AIRP", "OOM: WifiSelectionActivity (%u bytes)", static_cast<unsigned>(sizeof(WifiSelectionActivity)));
     notice_ = Notice::WifiFailed;
-    screen_ = Screen::Qr;
+    setAirPageScreen(Screen::Qr);
     requestUpdate();
     return;
   }
@@ -515,7 +624,7 @@ void AirPageActivity::doFetch() {
 
   if (!imageStore_.ensureDirectories()) {
     notice_ = Notice::DownloadFailed;
-    screen_ = Screen::Qr;
+    setAirPageScreen(Screen::Qr);
     return;
   }
 
@@ -527,20 +636,20 @@ void AirPageActivity::doFetch() {
   if (error != HttpDownloader::OK) {
     LOG_ERR("AIRP", "Download failed: %d", static_cast<int>(error));
     notice_ = Notice::DownloadFailed;
-    screen_ = Screen::Qr;
+    setAirPageScreen(Screen::Qr);
     return;
   }
 
   switch (imageStore_.stageDownloadedImage(currentArchiveDateKey())) {
     case airpage::AirPageImageStore::StageResult::Failed:
       notice_ = Notice::DownloadFailed;
-      screen_ = Screen::Qr;
+      setAirPageScreen(Screen::Qr);
       return;
 
     case airpage::AirPageImageStore::StageResult::Unchanged:
       airpage::AirPageImageRenderer::resetSessionFailures();
       imageStore_.selectCurrent(selectedImage_);
-      screen_ = Screen::Image;
+      setAirPageScreen(Screen::Image);
       imageNeedsDisplay_ = true;
       notice_ = Notice::None;
       LOG_INF("AIRP", "Fetched image is unchanged");
@@ -551,7 +660,7 @@ void AirPageActivity::doFetch() {
       imageStore_.selectCurrent(selectedImage_);
       imageNeedsDisplay_ = true;
       notice_ = Notice::None;
-      screen_ = Screen::Image;
+      setAirPageScreen(Screen::Image);
       LOG_INF("AIRP", "Fetched latest image; awaiting display validation");
       return;
   }
@@ -561,7 +670,10 @@ Rect AirPageActivity::contentViewport() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, true);
   const int contentTop = safeArea.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.verticalSpacing * 2;
+  int contentHeight = safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.verticalSpacing * 2;
+  if (mappedInput.hasTouch() && screen_ == Screen::Qr) {
+    contentHeight = std::max(0, contentHeight - app.theme().footerHeight - metrics.verticalSpacing);
+  }
   return Rect{safeArea.x, contentTop, safeArea.width, contentHeight};
 }
 
@@ -584,6 +696,8 @@ void AirPageActivity::render(RenderLock&&) {
     return;
   }
 
+  if (imageMenu_.processRender(renderer, mappedInput)) return;
+
   if (screen_ == Screen::Image && phase_ == Phase::Idle) {
     const bool screenSizeChanged =
         displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
@@ -600,6 +714,7 @@ void AirPageActivity::render(RenderLock&&) {
           renderer.displayBuffer(HalDisplay::FAST_REFRESH);
         }
         imageDisplayResult_.store(ImageDisplayResult::Success, std::memory_order_release);
+        if (mappedInput.hasTouch()) renderUi();
       } else {
         imageDisplayResult_.store(ImageDisplayResult::Failure, std::memory_order_release);
       }
@@ -612,6 +727,7 @@ void AirPageActivity::render(RenderLock&&) {
       GUI.drawPopup(renderer, message);
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     }
+    if (mappedInput.hasTouch()) renderUi();
     return;
   }
 
@@ -666,6 +782,8 @@ void AirPageActivity::render(RenderLock&&) {
     case Screen::Image:
       break;
   }
+
+  if (mappedInput.hasTouch()) renderUi();
 
   renderer.displayBuffer();
   imageNeedsDisplay_ = true;

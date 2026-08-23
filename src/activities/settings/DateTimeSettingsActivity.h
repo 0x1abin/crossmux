@@ -3,12 +3,13 @@
 #include <cstdint>
 
 #include "activities/Activity.h"
+#include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
 
-class DateTimeSettingsActivity final : public Activity {
+class DateTimeSettingsActivity final : public Activity, private UiAppHost {
  public:
   explicit DateTimeSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("DateTimeSettings", renderer, mappedInput) {}
+      : Activity("DateTimeSettings", renderer, mappedInput), UiAppHost(renderer) {}
 
   void onEnter() override;
   void onExit() override;
@@ -60,4 +61,15 @@ class DateTimeSettingsActivity final : public Activity {
   void beginManualEdit();
   void adjustEditField(int delta);
   bool applyManualTime();
+  void cancelManualEdit();
+  void confirmManualEdit();
+
+  static constexpr freeink::ui::ActionId ACTION_STEP = 1;
+  static constexpr freeink::ui::ActionId ACTION_CANCEL = 2;
+  static constexpr freeink::ui::ActionId ACTION_OK = 3;
+  static void manualScreen(UiScreen& screen, void* user);
+  static void onStep(const freeink::ui::ActionEvent& event, void* user);
+  static void onCancel(const freeink::ui::ActionEvent& event, void* user);
+  static void onOk(const freeink::ui::ActionEvent& event, void* user);
+  void buildManualScreen(UiScreen& screen);
 };

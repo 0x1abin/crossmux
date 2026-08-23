@@ -60,6 +60,16 @@ class OptionPopup {
     const int total = static_cast<int>(ownedStrings.size());
     const int count = UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
     const freeink::ui::InputSnapshot snap = touchSnapshotFrom(input);
+    if (ignoreInitialTouchContact) {
+      if (snap.touchPressed || snap.touchHeld || snap.touchReleased) {
+        // A popup can be opened while the activating finger is still down.
+        // Own that contact through release so it cannot select or dismiss the
+        // new popup; a normal entry clears the barrier on the first idle pass.
+        if (snap.touchReleased) ignoreInitialTouchContact = false;
+        return true;
+      }
+      ignoreInitialTouchContact = false;
+    }
     if (snap.touchPressed || snap.touchReleased || snap.touchHeld) {
       // Interactions are registered on the render task; only route once the
       // first render after show() has populated the table (uiReady handshake).
@@ -263,6 +273,7 @@ class OptionPopup {
     selectedIndex = std::clamp(currentIndex, 0, count - 1);
     onSelectCallback = std::move(onSelect);
     ignoreInitialConfirmRelease = true;
+    ignoreInitialTouchContact = true;
     uiReady = false;
     active = true;
   }
@@ -281,6 +292,7 @@ class OptionPopup {
   int selectedIndex = 0;
   std::function<void(int)> onSelectCallback;
   bool ignoreInitialConfirmRelease = false;
+  bool ignoreInitialTouchContact = false;
   // Written by the render task (frame registration), routed by the loop task;
   // uiReady closes the rebuild window exactly like UiListActivity::uiReady.
   mutable freeink::ui::InteractionBuffer<INTERACTION_CAPACITY> interactions;

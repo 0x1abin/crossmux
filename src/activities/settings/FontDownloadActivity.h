@@ -119,6 +119,14 @@ class FontDownloadActivity final : public UiListActivity {
   bool rowsDirty_ = true;
   void rebuildRowItems();
 
+  static constexpr freeink::ui::ActionId ACTION_CANCEL_DOWNLOAD = ACTION_USER;
+  static constexpr freeink::ui::ActionId ACTION_RETURN_TO_LIST = ACTION_USER + 1;
+  static constexpr freeink::ui::ActionId ACTION_RETRY_DOWNLOAD = ACTION_USER + 2;
+  static void onCancelDownload(const freeink::ui::ActionEvent& event, void* user);
+  static void onReturnToList(const freeink::ui::ActionEvent& event, void* user);
+  static void onRetryDownload(const freeink::ui::ActionEvent& event, void* user);
+  void returnToFamilyList();
+
   int listCount() const override { return listItemCount(); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
