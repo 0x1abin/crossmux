@@ -36,9 +36,11 @@ pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 ```
 
-All six S3 targets publish separate rolling hardware-beta artifacts. Manual
-flashing must use the matching build; the embedded board tag rejects a tagged
-image for a different board.
+All six S3 targets publish separate rolling hardware-beta artifacts. Each
+publish builds both flavors: GitHub carries the international package and
+Gitee carries the Simplified-Chinese package under the same rolling tag.
+Manual flashing must use the matching build; the embedded board tag rejects a
+tagged image for a different board.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.

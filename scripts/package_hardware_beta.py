@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package one S3 hardware beta build with the CrossMux/Sticky flash layout."""
+"""Package one S3 hardware beta flavor with the CrossMux/Sticky flash layout."""
 
 import argparse
 import configparser
@@ -19,6 +19,10 @@ DEVICES = {
     'murphy-m4': 'murphy_m4',
     'waveshare-epaper-397': 'waveshare_epaper_397',
 }
+FLAVOR_SUFFIXES = {
+    'global': '',
+    'zh-CN': '_cn',
+}
 SEGMENTS = (
     ('bootloader', 'bootloader.bin', 0x0000),
     ('partitions', 'partitions.bin', 0x8000),
@@ -31,6 +35,15 @@ EXPECTED_PARTITIONS = {
     'app1': (0x650000, 0x640000),
 }
 ESP32S3_CHIP_ID = 0x0009
+
+
+def environment_for(device, flavor):
+    return DEVICES[device] + FLAVOR_SUFFIXES[flavor]
+
+
+def version_for(base_version, device, flavor, short_sha):
+    flavor_suffix = '-cn' if FLAVOR_SUFFIXES[flavor] else ''
+    return f'{base_version}-{device}{flavor_suffix}-beta+{short_sha}'
 
 
 def sha256(path):
@@ -93,13 +106,16 @@ def verify_firmware(path, board):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('device', choices=DEVICES)
+    parser.add_argument('--flavor', choices=FLAVOR_SUFFIXES, default='global')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent.parent
-    environment = DEVICES[args.device]
+    board = DEVICES[args.device]
+    environment = environment_for(args.device, args.flavor)
     build = root / '.pio/build' / environment
-    output = (args.output or root / 'dist' / args.device).resolve()
+    output_name = args.device if args.flavor == 'global' else f'{args.device}-cn'
+    output = (args.output or root / 'dist' / output_name).resolve()
     output.mkdir(parents=True, exist_ok=True)
 
     verify_partition_csv(root)
@@ -111,12 +127,12 @@ def main():
     firmware_size = (output / 'firmware.bin').stat().st_size
     if firmware_size > EXPECTED_PARTITIONS['app0'][1]:
         raise SystemExit(f'firmware.bin is {firmware_size} bytes; app slot is 0x640000 bytes')
-    verify_firmware(output / 'firmware.bin', environment)
+    verify_firmware(output / 'firmware.bin', board)
 
     config = configparser.ConfigParser()
     config.read(root / 'platformio.ini')
     short_sha = git_value(root, 'rev-parse', '--short', 'HEAD')
-    version = f"{config['crosspoint']['version']}-{args.device}-beta+{short_sha}"
+    version = version_for(config['crosspoint']['version'], args.device, args.flavor, short_sha)
     assets = []
     for role, name, offset in SEGMENTS:
         path = output / name
@@ -132,7 +148,7 @@ def main():
         'device': args.device,
         'environment': environment,
         'chip': 'ESP32-S3',
-        'flavor': 'global',
+        'flavor': args.flavor,
         'version': version,
         'crossmuxSha': git_value(root, 'rev-parse', 'HEAD'),
         'sdkSha': git_value(root / 'freeink-sdk', 'rev-parse', 'HEAD'),

@@ -79,15 +79,19 @@ jobs:
             waveshare-epaper-397) environment=waveshare_epaper_397 ;;
             *) exit 2 ;;
           esac
-          pio run -e "$environment"
-          python3 scripts/package_hardware_beta.py "${{ inputs.device }}"
-          (cd "dist/${{ inputs.device }}" && sha256sum --check SHA256SUMS)
+          pio run -e "$environment" -e "${environment}_cn"
+          python3 scripts/package_hardware_beta.py "${{ inputs.device }}" \
+            --flavor global --output dist/global
+          python3 scripts/package_hardware_beta.py "${{ inputs.device }}" \
+            --flavor zh-CN --output dist/cn
+          (cd dist/global && sha256sum --check SHA256SUMS)
+          (cd dist/cn && sha256sum --check SHA256SUMS)
 
       - name: Upload private build artifact
         uses: actions/upload-artifact@v6
         with:
           name: hardware-beta-${{ inputs.device }}
-          path: dist/${{ inputs.device }}
+          path: dist
           if-no-files-found: error
           retention-days: 14
 
@@ -108,16 +112,27 @@ jobs:
 
       - name: Build release notes
         run: |
-          cat > release-body.md <<EOF
+          cat > release-body-global.md <<EOF
           # CrossMux ${{ inputs.device }} hardware beta
 
-          Experimental build from \`main\`.
+          International experimental build from \`main\`.
 
           - CrossMux: \`${{ needs.build.outputs.crossmux_sha }}\`
           - Partition profile: \`crossmux-sticky-v1\`
           - Flash: ESP32-S3, DIO, 80 MHz, 16 MB
 
           Back up the complete 16 MB flash before first installation.
+          EOF
+          cat > release-body-cn.md <<EOF
+          # CrossMux ${{ inputs.device }} 中文硬件 Beta
+
+          从 \`main\` 构建的简体中文实验固件。
+
+          - CrossMux: \`${{ needs.build.outputs.crossmux_sha }}\`
+          - 分区布局: \`crossmux-sticky-v1\`
+          - Flash: ESP32-S3, DIO, 80 MHz, 16 MB
+
+          首次安装前请备份完整的 16 MB Flash。
           EOF
 
       - name: Publish rolling GitHub prerelease
@@ -126,11 +141,11 @@ jobs:
         run: |
           set -euo pipefail
           gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create "$RELEASE_TAG" dist/* \
+          gh release create "$RELEASE_TAG" dist/global/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "${{ needs.build.outputs.crossmux_sha }}" \
             --title "CrossMux ${{ inputs.device }} Hardware Beta" \
-            --notes-file release-body.md \
+            --notes-file release-body-global.md \
             --prerelease
 
       - name: Verify GitHub release assets
@@ -152,13 +167,13 @@ jobs:
             "CrossMux ${{ inputs.device }} Hardware Beta" \
             "true" \
             "${{ needs.build.outputs.crossmux_sha }}" \
-            release-body.md \
-            dist/SHA256SUMS \
-            dist/boot_app0.bin \
-            dist/bootloader.bin \
-            dist/firmware.bin \
-            dist/manifest.json \
-            dist/partitions.bin
+            release-body-cn.md \
+            dist/cn/SHA256SUMS \
+            dist/cn/boot_app0.bin \
+            dist/cn/bootloader.bin \
+            dist/cn/firmware.bin \
+            dist/cn/manifest.json \
+            dist/cn/partitions.bin
 
       - name: Verify Gitee release assets
         env:
