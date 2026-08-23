@@ -1,5 +1,10 @@
 # Device Variants — X3/X4 and Build-Only S3 Targets
 
+> Sticky, X4 Pro, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
+> and [Waveshare ePaper 3.97](waveshare-epaper-397.md) are separate ESP32-S3
+> compile-time targets. The one-binary rule in this document applies only to
+> the ESP32-C3 X3/X4 pair.
+
 > Deep reference for [CLAUDE.md](../../CLAUDE.md). How one firmware binary runs
 > on both the Xteink X3 and X4, how the device is detected at boot, what differs
 > between the two panels, and how to build / flash / verify for X3.
@@ -18,19 +23,23 @@ pio run -e gh_release_cn     # Simplified-Chinese (see chinese-build.md)
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
-X4 Pro and Paper Mono use separate ESP32-S3 builds because their board,
-display, touch, storage, and frontlight profiles differ from the combined
-ESP32-C3 image:
+All six supported ESP32-S3 devices use separate builds because their boards,
+displays, input, storage, and power profiles differ from the combined ESP32-C3
+image:
 
 ```bash
 pio run -e x4pro
 pio run -e papermono
+pio run -e sticky
+pio run -e eego_a4
+pio run -e murphy_m4
+pio run -e waveshare_epaper_397
 ```
 
-These two environments are compile/CI targets only in CrossMux. Stable,
-nightly, Gitee, and OTA artifacts are not published for them yet. Manual
-flashing must use the matching build; the embedded board tag rejects a tagged
-image for a different board.
+X4 Pro and PaperMono remain compile/CI targets only. Sticky retains its existing
+beta channel; eego A4, Murphy M4, and Waveshare use experimental hardware-beta
+artifacts. Manual flashing must use the matching build; the embedded board tag
+rejects a tagged image for a different board.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.
@@ -192,7 +201,8 @@ verification.
 - **Serial** — boot log line `Hardware detect: X3`
   ([src/main.cpp:453](../../src/main.cpp)). The line above it prints the probe
   scores.
-- **Web API** — `device` field is `"X3"` / `"X4"`
+- **Web API** — `device` field uses `BoardConfig::ACTIVE.name`
+  (`"xteink_x3"` / `"xteink_x4"`)
   ([CrossPointWebServer.cpp:382](../../src/network/CrossPointWebServer.cpp)).
 - **UI** — the X3-only Tilt Page Turn item appears only when the QMI8658 is
   detected. Clock and Date & Time settings are available on every device.

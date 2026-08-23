@@ -5,6 +5,24 @@
 
 #include "EpdFont/SdCardFontAlgorithms.h"
 
+TEST(SdCardFontAlgorithms, SeparatesBitmapAndKernLigaturePrewarmPolicy) {
+  const auto metadataWithKern = sd_card_font_algorithms::prewarmLoadPolicy(true, true);
+  EXPECT_FALSE(metadataWithKern.bitmap);
+  EXPECT_FALSE(metadataWithKern.kernLigature);
+
+  const auto metadataWithoutKern = sd_card_font_algorithms::prewarmLoadPolicy(true, false);
+  EXPECT_FALSE(metadataWithoutKern.bitmap);
+  EXPECT_FALSE(metadataWithoutKern.kernLigature);
+
+  const auto fullWithKern = sd_card_font_algorithms::prewarmLoadPolicy(false, true);
+  EXPECT_TRUE(fullWithKern.bitmap);
+  EXPECT_TRUE(fullWithKern.kernLigature);
+
+  const auto fullWithoutKern = sd_card_font_algorithms::prewarmLoadPolicy(false, false);
+  EXPECT_TRUE(fullWithoutKern.bitmap);
+  EXPECT_FALSE(fullWithoutKern.kernLigature);
+}
+
 TEST(SdCardFontAlgorithms, InsertsSortedUniqueWithinCapacity) {
   uint32_t codepoints[4] = {};
   uint32_t count = 0;

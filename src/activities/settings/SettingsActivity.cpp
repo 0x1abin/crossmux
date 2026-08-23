@@ -615,7 +615,13 @@ void SettingsActivity::toggleCurrentSetting() {
       SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
     }
   } else if (setting.type == SettingType::ACTION) {
-    auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
+    // Every child page returns here through ActivityManager's Pop; make sure the
+    // settings list is both rebuilt (values may have changed) and repainted.
+    auto resultHandler = [this](const ActivityResult&) {
+      SETTINGS.saveToFile();
+      rebuildSettingsLists();
+      requestUpdate();
+    };
 
     switch (setting.action) {
       case SettingAction::RemapFrontButtons:
@@ -628,7 +634,7 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResultWith<ReadingStatsSettingsActivity>(resultHandler);
         break;
       case SettingAction::AppVisibility:
-        startActivityForResultWith<AppVisibilitySettingsActivity>([](const ActivityResult&) {});
+        startActivityForResultWith<AppVisibilitySettingsActivity>(resultHandler);
         break;
       case SettingAction::KOReaderSync:
         startActivityForResultWith<KOReaderSettingsActivity>(resultHandler);
@@ -655,12 +661,14 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResultWith<FontDownloadActivity>([this](const ActivityResult&) {
           SETTINGS.saveToFile();
           rebuildSettingsLists();
+          requestUpdate();
         });
         break;
       case SettingAction::ManageDictionaries:
         startActivityForResultWith<DictionaryDownloadActivity>([this](const ActivityResult&) {
           SETTINGS.saveToFile();
           rebuildSettingsLists();
+          requestUpdate();
         });
         break;
       case SettingAction::TextSettings:
@@ -668,6 +676,7 @@ void SettingsActivity::toggleCurrentSetting() {
             [this](const ActivityResult&) {
               // TextSettingsActivity saves on each change; no save needed here.
               rebuildSettingsLists();
+              requestUpdate();
             },
             &sdFontSystem.registry(), TextSettingsActivity::Tab::Family);
         break;
@@ -681,7 +690,7 @@ void SettingsActivity::toggleCurrentSetting() {
         });
         break;
       case SettingAction::About:
-        startActivityForResultWith<AboutActivity>([](const ActivityResult&) {});
+        startActivityForResultWith<AboutActivity>(resultHandler);
         break;
       case SettingAction::None:
         // Do nothing

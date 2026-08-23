@@ -12,12 +12,6 @@
 HalStorage HalStorage::instance;
 
 HalStorage::HalStorage() {
-  // Recursive so the same task can re-enter StorageLock without self-deadlock.
-  // openFileForRead/Write take the lock and then assign to a HalFile&
-  // out-param; if that out-param already held an Impl, its destructor takes
-  // the lock again to close the prior FsFile under serialization (see
-  // HalFile::Impl::~Impl below). Priority inheritance still applies to
-  // recursive mutexes.
   storageMutex = xSemaphoreCreateRecursiveMutex();
   assert(storageMutex != nullptr);
 }
@@ -30,11 +24,11 @@ bool HalStorage::ready() const { return SDCard.ready(); }
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
-class HalStorage::StorageLock {
- public:
-  StorageLock() { xSemaphoreTakeRecursive(HalStorage::getInstance().storageMutex, portMAX_DELAY); }
-  ~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
-};
+HalStorage::StorageLock::StorageLock() {
+  xSemaphoreTakeRecursive(HalStorage::getInstance().storageMutex, portMAX_DELAY);
+}
+
+HalStorage::StorageLock::~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
 
 bool HalStorage::getSpace(uint64_t& totalBytes, uint64_t& freeBytes) {
   StorageLock lock;

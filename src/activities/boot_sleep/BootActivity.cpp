@@ -34,6 +34,12 @@ void BootActivity::renderSplash() {
   renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
+#if FREEINK_DEVICE_EEGO_A4
+  // A4: the panel is being powered on for the first time here, and a FAST
+  // refresh on a freshly powered panel doesn't establish the frame (observed:
+  // splash never appears). Force the first paint to a full waveform.
+  renderer.requestNextFullRefresh();
+#endif
   renderer.displayBuffer();
 }
 

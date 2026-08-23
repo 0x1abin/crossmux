@@ -1048,8 +1048,9 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   stats_.glyphPrepareTimeUs += micros() - glyphPrepareStartUs;
 
   uint32_t totalBitmapSize = 0;
+  const auto loadPolicy = sd_card_font_algorithms::prewarmLoadPolicy(metadataOnly, loadKernLig);
 
-  if (!metadataOnly && loadKernLig) {
+  if (loadPolicy.bitmap) {
     const uint32_t bitmapStartUs = micros();
     // Compute total bitmap size
     for (uint32_t i = 0; i < validCount; i++) {
@@ -1108,7 +1109,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   // page's codepoints. Skip during metadata-only prewarm — layout only needs
   // advanceX and the mini kern would be thrown away before rendering.
   bool kernLigOk = false;
-  if (!metadataOnly) {
+  if (loadPolicy.kernLigature) {
     const uint32_t kernStartUs = micros();
     if (loadStyleKernLigatureData(s)) {
       kernLigOk = buildMiniKernMatrix(s, codepoints, cpCount);

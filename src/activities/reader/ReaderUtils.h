@@ -149,22 +149,27 @@ inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputMan
   return (input.hasTouch() && input.wasMenuGesture()) || isTouchMenuTap(renderer, input);
 }
 
+inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh) {
+  const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+  if (pagesUntilFullRefresh <= 1) {
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else {
+    pagesUntilFullRefresh--;
+  }
+  return mode;
+}
+
 // One helper, blocking or deferred: the async form starts the refresh and
 // returns so the caller can overlap CPU work with the panel's refresh time.
 // Async callers must not touch the framebuffer until
 // renderer.waitRefreshComplete() and must rebuild the differential baseline
 // before the next page turn (the tiled grayscale cleanup does).
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh, bool async = false) {
-  const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+  const auto mode = consumeRefreshMode(pagesUntilFullRefresh);
   if (async) {
     renderer.displayBufferAsync(mode);
   } else {
     renderer.displayBuffer(mode);
-  }
-  if (pagesUntilFullRefresh <= 1) {
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else {
-    pagesUntilFullRefresh--;
   }
 }
 

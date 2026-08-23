@@ -3288,7 +3288,10 @@ const WS_CHUNK_SIZE = 4096; // 4KB chunks - smaller for ESP32 stability
 const DEVICE_PROFILES = {
   X4: { width: 480, height: 800, label: 'X4' },
   X3: { width: 528, height: 792, label: 'X3' },
+  A4: { width: 552, height: 768, label: 'eego A4' },
+  M4: { width: 480, height: 800, label: 'Murphy M4' },
 };
+const STATUS_DEVICE_MAP = { xteink_x4: 'X4', xteink_x3: 'X3', xteink_x3_uc8279: 'X3', eego_a4: 'A4', murphy_m4: 'M4' };
 
 // Default conversion settings
 const DEFAULT_DEVICE = 'X4';
@@ -3418,8 +3421,9 @@ async function fetchVersion() {
     if (response.ok) {
       const data = await response.json();
       crosspointVersion = data.version || 'Unknown';
-      if (data.device === 'X3' || data.device === 'X4') {
-        DETECTED_DEVICE = data.device;
+      const detected = STATUS_DEVICE_MAP[data.device] || data.device;
+      if (DEVICE_PROFILES[detected]) {
+        DETECTED_DEVICE = detected;
         applyDeviceTarget();
       }
     }

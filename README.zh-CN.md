@@ -160,10 +160,16 @@ pio run -e simulator -t run_simulator
 
 # X3
 pio run -e simulator_x3 -t run_simulator
+
+# eego A4
+pio run -e simulator_eego_a4 -t run_simulator
+
+# Murphy M4
+pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 模拟器由固定版本的
-[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1)
+[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12)
 作为原生 PlatformIO 依赖提供。
 
 调试日志（先 `python3 -m pip install pyserial colorama matplotlib`）：

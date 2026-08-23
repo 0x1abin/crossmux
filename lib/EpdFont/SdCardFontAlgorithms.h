@@ -7,6 +7,15 @@
 
 namespace sd_card_font_algorithms {
 
+struct PrewarmLoadPolicy {
+  bool bitmap;
+  bool kernLigature;
+};
+
+constexpr PrewarmLoadPolicy prewarmLoadPolicy(const bool metadataOnly, const bool loadKernLigature) {
+  return {!metadataOnly, !metadataOnly && loadKernLigature};
+}
+
 inline bool insertSortedUnique(uint32_t codepoint, uint32_t* codepoints, uint32_t& count, uint32_t capacity) {
   auto* const end = codepoints + count;
   auto* const pos = std::lower_bound(codepoints, end, codepoint);

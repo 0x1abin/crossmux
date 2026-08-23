@@ -100,6 +100,11 @@ void TxtReaderActivity::onExit() {
   ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
   showPendingAchievementPopups(renderer);
   txt.reset();
+
+#if FREEINK_DEVICE_EEGO_A4
+  // A4's single-pass grayscale path needs a clean first frame after exit.
+  renderer.requestNextFullRefresh();
+#endif
 }
 
 bool TxtReaderActivity::handleFormatInput() {
@@ -733,12 +738,38 @@ void TxtReaderActivity::renderPage() {
   renderStatusBar();
   const auto tBwRender = millis();
 
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
-  const auto tDisplay = millis();
+  // Serialize SD access in this render path against the main task's SD writes
+  // (progress, index cache) so they cannot interleave mid-FAT-op.
+#if FREEINK_DEVICE_EEGO_A4 && !defined(SIMULATOR)
+  HalStorage::StorageLock storageLock;
+#endif
 
+#if FREEINK_DEVICE_EEGO_A4
+  if (SETTINGS.textAntiAliasing) {
+    // A4 single-refresh grayscale path: content + status bar are already in the
+    // framebuffer, so renderAntiAliased stores them, clears, re-renders the same
+    // content AND status bar in gray and displays once. We skip the BW display
+    // so there is no BW-then-AA double refresh (which flashed and left the bottom
+    // status bar wiped), and the gray pass includes the status bar so it stays
+    // visible on the final frame.
+    const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
+    if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
+    ReaderUtils::renderAntiAliased(renderer, [this, &renderLines]() {
+      renderLines();
+      renderStatusBar();
+    });
+  } else {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  }
+#else
+  // Other devices keep the upstream behavior: show the BW frame first, then
+  // the gray pass.
+  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   if (SETTINGS.textAntiAliasing) {
     ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
   }
+#endif
+  const auto tDisplay = millis();
   const auto tEnd = millis();
   LOG_DBG("TRS", "Page render: prewarm=%lums bw_render=%lums display=%lums aa=%lums total=%lums", tPrewarm - t0,
           tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - tDisplay, tEnd - t0);

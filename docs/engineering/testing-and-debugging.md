@@ -19,9 +19,11 @@ pio run -t upload
 # Build specific environment
 pio run -e gh_release
 
-# Build and run the native X4 or X3 simulator
+# Build and run a native device simulator
 pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
+pio run -e simulator_eego_a4 -t run_simulator
+pio run -e simulator_murphy_m4 -t run_simulator
 
 # Clean build artifacts
 pio run -t clean
@@ -151,7 +153,8 @@ pio run -t upload && pio device monitor
 
 | Workflow | File | Purpose |
 |----------|------|---------|
-| Build Check | `.github/workflows/ci.yml` | Verifies code compiles |
+| Core Build Check | `.github/workflows/ci.yml` | Builds `default` (shared X3/X4) and `x4pro` |
+| Hardware CI | `.github/workflows/hardware-ci.yml` | Builds all simulators and global S3 targets for hardware-sensitive changes or manual runs |
 | Format Check | `.github/workflows/pr-formatting-check.yml` | Validates clang-format |
 | Release Build | `.github/workflows/release.yml` | Production releases |
 | RC Build | `.github/workflows/release_candidate.yml` | Release candidates |
@@ -159,6 +162,7 @@ pio run -t upload && pio device monitor
 **Rules**:
 - **Fix CI failures BEFORE** requesting review
 - CI runs on: Push to PR, PR updates
+- Hardware CI runs only for its configured paths, or from **Run workflow**
 - Format check fails → Run clang-format locally
 - Build check fails → Fix compile errors
 

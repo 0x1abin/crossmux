@@ -6,7 +6,6 @@
 #include <HalFrontlight.h>
 
 #include <algorithm>
-#include <cstdlib>
 
 #include "CrossPointSettings.h"
 #include "components/UITheme.h"
@@ -281,9 +280,10 @@ MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
       return SwipeDir::Up;
     case fui::SwipeDir::Down:
       return SwipeDir::Down;
-    default:
+    case fui::SwipeDir::None:
       return SwipeDir::None;
   }
+  return SwipeDir::None;
 }
 
 // Edge classification (which swipe counts as an edge gesture) lives in the
@@ -301,12 +301,28 @@ bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const 
 }
 
 bool MappedInputManager::wasBackGesture() const {
-  // Back = left-to-right swipe starting near the left edge. Edge-anchored so that
-  // mid-screen horizontal swipes stay available to activities that consume
-  // SwipeDir::Left/Right (e.g. percent selection, image viewer).
+  // Keep mid-screen horizontal swipes available to the active Activity.
   return wasEdgeSwipe(fui::ScreenEdge::Left);
 }
 
+bool MappedInputManager::wasHeaderTapBack() const {
+#if !FREEINK_DEVICE_EEGO_A4
+  return false;
+#else
+  // Tap on the header (title bar) acts as Return on touch-only devices that
+  // lack a dedicated front Back key (eego-a4). The header occupies
+  // [topPadding, topPadding + headerHeight); tapping it pops the activity.
+  if (!gpio.hasTouch()) return false;
+  int x = 0;
+  int y = 0;
+  if (!wasScreenTapped(x, y)) return false;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int headerBottom = metrics.topPadding + metrics.headerHeight;
+  const bool hit = y >= metrics.topPadding && y < headerBottom;
+  if (hit) rememberTouchHeldTime();
+  return hit;
+#endif
+}
 bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
@@ -314,7 +330,12 @@ bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui:
 bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
+#if FREEINK_DEVICE_EEGO_A4
+  if (gpio.wasHomeKeyLongPressed()) return true;
+  return wasBottomEdgeUpSwipe();
+#else
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();
+#endif
 }
 
 bool MappedInputManager::wasHomeKeyHold() const { return gpio.hasHomeKey() && gpio.wasHomeKeyLongPressed(); }
@@ -336,6 +357,9 @@ bool MappedInputManager::wasPowerConfirmClick() const {
 
 bool MappedInputManager::wasPressed(const Button button) const {
   if (button == Button::Back && wasBackGesture()) return true;
+#if FREEINK_DEVICE_EEGO_A4
+  if (button == Button::Back && (gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
+#endif
 #if FREEINK_CAP_TOUCH
   if (button == Button::Confirm && wasPowerConfirmClick()) return true;
 #endif
@@ -344,6 +368,9 @@ bool MappedInputManager::wasPressed(const Button button) const {
 
 bool MappedInputManager::wasReleased(const Button button) const {
   if (button == Button::Back && wasBackGesture()) return true;
+#if FREEINK_DEVICE_EEGO_A4
+  if (button == Button::Back && (gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
+#endif
 #if FREEINK_CAP_TOUCH
   if (button == Button::Confirm && wasPowerConfirmClick()) return true;
 #endif
