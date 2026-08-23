@@ -90,6 +90,9 @@ void FontDownloadActivity::activateIndex(const int index) {
 
 void FontDownloadActivity::onEnter() {
   UiListActivity::onEnter();
+  app.on(ACTION_CANCEL_DOWNLOAD, &FontDownloadActivity::onCancelDownload, this);
+  app.on(ACTION_RETURN_TO_LIST, &FontDownloadActivity::onReturnToList, this);
+  app.on(ACTION_RETRY_DOWNLOAD, &FontDownloadActivity::onRetryDownload, this);
   if (purpose_ == Purpose::PromptThenManage) {
     auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_CHINESE_FONT_INCOMPLETE),
                                                                 tr(STR_DOWNLOAD_FULL_CHINESE_FONT),
@@ -469,6 +472,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
           cancelRequested_ = true;
           goHomeRequested_ = true;
         }
+        UiAppHost::routeTouch(mappedInput);
         requestUpdate(true);
       },
       &cancelRequested_);
@@ -736,6 +740,28 @@ void FontDownloadActivity::buildScreen(UiScreen& screen) {
                                       static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
+  if (state_ != FAMILY_LIST) {
+    if (!mappedInput.hasTouch()) return;
+    fui::FooterAction actions[2];
+    uint8_t count = 0;
+    switch (state_) {
+      case DOWNLOADING:
+        actions[count++] = {tr(STR_CANCEL), ACTION_CANCEL_DOWNLOAD};
+        break;
+      case COMPLETE:
+        actions[count++] = {tr(STR_BACK), ACTION_RETURN_TO_LIST};
+        break;
+      case ERROR:
+        actions[count++] = {tr(STR_BACK), ACTION_RETURN_TO_LIST};
+        actions[count++] = {tr(STR_RETRY), ACTION_RETRY_DOWNLOAD};
+        break;
+      default:
+        break;
+    }
+    if (count > 0) screen.footer(actions, count);
+    return;
+  }
+
   if (families_.empty()) {
     screen.centeredText(tr(STR_NO_FONTS_AVAILABLE), screen.theme().bodyText);
     return;
@@ -754,6 +780,38 @@ void FontDownloadActivity::buildScreen(UiScreen& screen) {
   props.valueInset = 8;               // air between the status and the row edge
   syncListViewport(screen, props, /*hasSubtitle=*/true);
   screen.list(props);
+}
+
+void FontDownloadActivity::onCancelDownload(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<FontDownloadActivity*>(user);
+  if (self->state_ == DOWNLOADING) self->cancelRequested_ = true;
+}
+
+void FontDownloadActivity::returnToFamilyList() {
+  closeRouting();
+  {
+    RenderLock lock(*this);
+    state_ = FAMILY_LIST;
+    operation_ = DownloadOperation::None;
+    rowsDirty_ = true;
+  }
+  requestUpdate();
+}
+
+void FontDownloadActivity::onReturnToList(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<FontDownloadActivity*>(user);
+  if (self->state_ != COMPLETE && self->state_ != ERROR) return;
+  self->app.clearTapFlash();
+  self->returnToFamilyList();
+}
+
+void FontDownloadActivity::onRetryDownload(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<FontDownloadActivity*>(user);
+  if (self->state_ != ERROR) return;
+  self->app.clearTapFlash();
+  self->closeRouting();
+  self->retryDownloadOperation();
+  self->requestUpdateAndWait();
 }
 
 // Rebuilds rowLabels_/rowItems_ from families_. Only called when rowsDirty_ is
@@ -798,40 +856,23 @@ bool FontDownloadActivity::handleCustomInput() {
     return false;
   }
 
+  const auto touch = UiAppHost::routeTouch(mappedInput);
+  if (touch.routed && app.invalidated()) requestUpdate();
+  if (touch) return true;
+
   if (state_ == COMPLETE) {
-    int x = 0;
-    int y = 0;
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) {
-      {
-        RenderLock lock(*this);
-        state_ = FAMILY_LIST;
-        operation_ = DownloadOperation::None;
-        rowsDirty_ = true;  // the completed download changed installed/hasUpdate
-      }
-      requestUpdate();
+        mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      returnToFamilyList();
     }
   } else if (state_ == ERROR) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      {
-        RenderLock lock(*this);
-        state_ = FAMILY_LIST;
-        operation_ = DownloadOperation::None;
-        rowsDirty_ = true;  // the failed download reset installed/hasUpdate
-      }
-      requestUpdate();
+      returnToFamilyList();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      closeRouting();
       retryDownloadOperation();
       requestUpdateAndWait();
       return true;
-    } else {
-      int x = 0;
-      int y = 0;
-      if (mappedInput.wasScreenTapped(x, y)) {
-        retryDownloadOperation();
-        requestUpdateAndWait();
-        return true;
-      }
     }
   }
 
@@ -921,6 +962,8 @@ void FontDownloadActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
+
+  if (state_ == DOWNLOADING || state_ == COMPLETE || state_ == ERROR) renderUi();
 
   renderer.displayBuffer();
 }

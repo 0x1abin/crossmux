@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
 #include "util/DictionaryResource.h"
 
@@ -14,7 +15,7 @@
 #define DICTIONARY_MANIFEST_URL "https://" CROSSMUX_HOST "/api/assets/dictionaries/manifest?version=1"
 #endif
 
-class DictionaryDownloadActivity final : public Activity {
+class DictionaryDownloadActivity final : public Activity, private UiAppHost {
  public:
   DictionaryDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
@@ -66,6 +67,17 @@ class DictionaryDownloadActivity final : public Activity {
   bool cancelRequested_ = false;
   bool waitForConfirmRelease_ = false;
   bool waitForBackRelease_ = false;
+  bool goHomeRequested_ = false;
+
+  static constexpr freeink::ui::ActionId ACTION_CANCEL_DOWNLOAD = 1;
+  static constexpr freeink::ui::ActionId ACTION_RETURN_TO_LIST = 2;
+  static constexpr freeink::ui::ActionId ACTION_RETRY_DOWNLOAD = 3;
+  static void stateScreen(UiScreen& screen, void* user);
+  static void onCancelDownload(const freeink::ui::ActionEvent& event, void* user);
+  static void onReturnToList(const freeink::ui::ActionEvent& event, void* user);
+  static void onRetryDownload(const freeink::ui::ActionEvent& event, void* user);
+  void buildStateScreen(UiScreen& screen);
+  void returnToList();
 
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);

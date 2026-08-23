@@ -23,6 +23,8 @@
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 
+namespace fui = freeink::ui;
+
 namespace {
 
 constexpr const char* MANIFEST_TMP = "/dictionary_manifest.tmp";
@@ -58,10 +60,15 @@ void logHeap(const char* phase) {
 }  // namespace
 
 DictionaryDownloadActivity::DictionaryDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("DictionaryDownload", renderer, mappedInput) {}
+    : Activity("DictionaryDownload", renderer, mappedInput), UiAppHost(renderer) {}
 
 void DictionaryDownloadActivity::onEnter() {
   Activity::onEnter();
+  resetUi();
+  app.on(ACTION_CANCEL_DOWNLOAD, &DictionaryDownloadActivity::onCancelDownload, this);
+  app.on(ACTION_RETURN_TO_LIST, &DictionaryDownloadActivity::onReturnToList, this);
+  app.on(ACTION_RETRY_DOWNLOAD, &DictionaryDownloadActivity::onRetryDownload, this);
+  app.setScreen(&DictionaryDownloadActivity::stateScreen, this);
   startWifiSelection();
 }
 
@@ -362,6 +369,7 @@ DictionaryDownloadActivity::DownloadResult DictionaryDownloadActivity::downloadI
     state_ = State::Downloading;
     downloadingIndex_ = static_cast<int>(&item - items_.data());
     cancelRequested_ = false;
+    goHomeRequested_ = false;
   }
   requestUpdateAndWait();
   logHeap("download start");
@@ -386,6 +394,11 @@ DictionaryDownloadActivity::DownloadResult DictionaryDownloadActivity::downloadI
               mappedInput.wasPressed(MappedInputManager::Button::Back)) {
             cancelRequested_ = true;
           }
+          if (mappedInput.wasHomeGesture()) {
+            cancelRequested_ = true;
+            goHomeRequested_ = true;
+          }
+          routeTouch(mappedInput);
           const uint32_t now = millis();
           if (now - lastRefresh >= PROGRESS_REFRESH_MS) {
             lastRefresh = now;
@@ -396,6 +409,10 @@ DictionaryDownloadActivity::DownloadResult DictionaryDownloadActivity::downloadI
     if (download == HttpDownloader::ABORTED) {
       Storage.removeDir(staging);
       operation_ = Operation::None;
+      if (goHomeRequested_) {
+        onGoHome();
+        return DownloadResult::Cancelled;
+      }
       waitForBackRelease_ = true;
       RenderLock lock(*this);
       state_ = State::List;
@@ -534,6 +551,12 @@ void DictionaryDownloadActivity::loop() {
     return;
   }
 
+  if (state_ == State::Downloading || state_ == State::Complete || state_ == State::Error) {
+    const auto touch = routeTouch(mappedInput);
+    if (touch.routed && app.invalidated()) requestUpdate();
+    if (touch) return;
+  }
+
   if (state_ == State::List) {
     auto activate = [this] {
       if (isUpdateAllRow(selectedIndex_)) {
@@ -608,12 +631,9 @@ void DictionaryDownloadActivity::loop() {
     });
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) activate();
   } else if (state_ == State::Complete) {
-    int x = 0;
-    int y = 0;
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(x, y)) {
-      state_ = State::List;
-      requestUpdate();
+        mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      returnToList();
     }
   } else if (state_ == State::Error) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
@@ -622,13 +642,71 @@ void DictionaryDownloadActivity::loop() {
         finish();
         return;
       }
-      state_ = State::List;
-      requestUpdate();
+      returnToList();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      closeRouting();
       retryOperation();
       requestUpdateAndWait();
     }
   }
+}
+
+void DictionaryDownloadActivity::stateScreen(UiScreen& screen, void* user) {
+  static_cast<DictionaryDownloadActivity*>(user)->buildStateScreen(screen);
+}
+
+void DictionaryDownloadActivity::buildStateScreen(UiScreen& screen) {
+  if (!mappedInput.hasTouch()) return;
+  fui::FooterAction actions[2];
+  uint8_t count = 0;
+  switch (state_) {
+    case State::Downloading:
+      actions[count++] = {tr(STR_CANCEL), ACTION_CANCEL_DOWNLOAD};
+      break;
+    case State::Complete:
+      actions[count++] = {tr(STR_BACK), ACTION_RETURN_TO_LIST};
+      break;
+    case State::Error:
+      actions[count++] = {tr(STR_BACK), ACTION_RETURN_TO_LIST};
+      actions[count++] = {tr(STR_RETRY), ACTION_RETRY_DOWNLOAD};
+      break;
+    default:
+      break;
+  }
+  if (count > 0) screen.footer(actions, count);
+}
+
+void DictionaryDownloadActivity::onCancelDownload(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<DictionaryDownloadActivity*>(user);
+  if (self->state_ == State::Downloading) self->cancelRequested_ = true;
+}
+
+void DictionaryDownloadActivity::returnToList() {
+  closeRouting();
+  operation_ = Operation::None;
+  state_ = State::List;
+  requestUpdate();
+}
+
+void DictionaryDownloadActivity::onReturnToList(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<DictionaryDownloadActivity*>(user);
+  if (self->state_ != State::Complete && self->state_ != State::Error) return;
+  if (self->state_ == State::Error && self->items_.empty()) {
+    self->app.clearTapFlash();
+    self->finish();
+    return;
+  }
+  self->app.clearTapFlash();
+  self->returnToList();
+}
+
+void DictionaryDownloadActivity::onRetryDownload(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<DictionaryDownloadActivity*>(user);
+  if (self->state_ != State::Error) return;
+  self->app.clearTapFlash();
+  self->closeRouting();
+  self->retryOperation();
+  self->requestUpdateAndWait();
 }
 
 std::string DictionaryDownloadActivity::formatSize(const size_t bytes) {
@@ -740,5 +818,6 @@ void DictionaryDownloadActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
+  if (state_ == State::Downloading || state_ == State::Complete || state_ == State::Error) renderUi();
   renderer.displayBuffer();
 }

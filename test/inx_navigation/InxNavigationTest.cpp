@@ -1,3 +1,4 @@
+#include <FreeInkUICore.h>
 #include <gtest/gtest.h>
 
 #include <type_traits>
@@ -152,6 +153,109 @@ TEST(InxNavigation, KeepsOptionPopupOnFiveCenteredRows) {
   EXPECT_EQ(InxOptionGeometry::start(7, 8), 3);
   EXPECT_EQ(InxOptionGeometry::headerHeight, 62);
   EXPECT_EQ(InxOptionGeometry::rowHeight, 62);
+}
+
+TEST(InxNavigation, RoutesPopupReleaseAgainstPublishedRotatedHitRects) {
+  namespace fui = freeink::ui;
+  constexpr fui::ActionId cancel = 1;
+  constexpr fui::ActionId confirm = 2;
+  fui::DeviceContext paperMono;
+  paperMono.width = 800;
+  paperMono.height = 480;
+  paperMono.touchOrientation = fui::touchOrientationFor(fui::Orientation::LandscapeClockwise);
+
+  const fui::Point cancelPoint = fui::touchToLogical(paperMono, 0.75f, 0.75f);
+  const fui::Point confirmPoint = fui::touchToLogical(paperMono, 0.25f, 0.75f);
+  fui::InteractionBuffer<2> interactions;
+  interactions.beginPublishCycle();
+  interactions.clear();
+  EXPECT_TRUE(interactions.addInteraction({fui::Rect{100, 100, 300, 100}, cancel, 0, fui::InputTouch}));
+  EXPECT_TRUE(interactions.addInteraction({fui::Rect{400, 100, 300, 100}, confirm, 1, fui::InputTouch}));
+  interactions.publish();
+
+  fui::InputSnapshot press;
+  press.touchPressed = true;
+  press.touchX = cancelPoint.x;
+  press.touchY = cancelPoint.y;
+  EXPECT_FALSE(interactions.routePublished(press));
+
+  // A repaint may publish the next complete generation while the finger is
+  // down; its release must still resolve exactly once against the new table.
+  interactions.beginPublishCycle();
+  interactions.clear();
+  EXPECT_TRUE(interactions.addInteraction({fui::Rect{100, 100, 300, 100}, cancel, 0, fui::InputTouch}));
+  EXPECT_TRUE(interactions.addInteraction({fui::Rect{400, 100, 300, 100}, confirm, 1, fui::InputTouch}));
+  interactions.publish();
+
+  fui::InputSnapshot release = press;
+  release.touchPressed = false;
+  release.touchReleased = true;
+  EXPECT_EQ(interactions.routePublished(release).action, cancel);
+  release.touchX = confirmPoint.x;
+  release.touchY = confirmPoint.y;
+  EXPECT_EQ(interactions.routePublished(release).action, confirm);
+  release.touchX = 20;
+  release.touchY = 20;
+  EXPECT_FALSE(interactions.routePublished(release));
+}
+
+TEST(InxNavigation, RoutesAirPageFooterAndImageTapOnRotatedTouch) {
+  namespace fui = freeink::ui;
+  constexpr fui::ActionId footerActions[] = {10, 11, 12, 13};
+  constexpr fui::ActionId imageMenu = 14;
+  fui::DeviceContext paperMono;
+  paperMono.width = 800;
+  paperMono.height = 480;
+  paperMono.touchOrientation = fui::touchOrientationFor(fui::Orientation::LandscapeClockwise);
+
+  fui::InteractionBuffer<4> interactions;
+  auto publishFooter = [&] {
+    interactions.beginPublishCycle();
+    interactions.clear();
+    for (int index = 0; index < 4; ++index) {
+      EXPECT_TRUE(interactions.addInteraction(
+          {fui::Rect{static_cast<int16_t>(index * 200), 420, 200, 60}, footerActions[index], 0, fui::InputTouch}));
+    }
+    interactions.publish();
+  };
+  publishFooter();
+
+  for (int index = 0; index < 4; ++index) {
+    const float logicalX = static_cast<float>(index * 200 + 100) / paperMono.width;
+    const float logicalY = 450.0f / paperMono.height;
+    const fui::Point point = fui::touchToLogical(paperMono, 1.0f - logicalX, 1.0f - logicalY);
+    fui::InputSnapshot release;
+    release.touchReleased = true;
+    release.touchX = point.x;
+    release.touchY = point.y;
+    EXPECT_EQ(interactions.routePublished(release).action, footerActions[index]);
+  }
+
+  const fui::Point center = fui::touchToLogical(paperMono, 0.5f, 0.5f);
+  auto publishImageTap = [&] {
+    interactions.beginPublishCycle();
+    interactions.clear();
+    EXPECT_TRUE(interactions.addInteraction({paperMono.screen(), imageMenu, 0, fui::InputTouch}));
+    interactions.publish();
+  };
+  publishImageTap();
+
+  fui::InputSnapshot press;
+  press.touchPressed = true;
+  press.touchX = center.x;
+  press.touchY = center.y;
+  EXPECT_FALSE(interactions.routePublished(press));
+
+  publishImageTap();
+
+  fui::InputSnapshot release = press;
+  release.touchPressed = false;
+  release.touchReleased = true;
+  EXPECT_EQ(interactions.routePublished(release).action, imageMenu);
+  release.touchX = -1;
+  release.touchY = -1;
+  release.swipeRight = true;
+  EXPECT_FALSE(interactions.routePublished(release));
 }
 
 TEST(InxNavigation, KeepsStatisticsViewsInsideBounds) {

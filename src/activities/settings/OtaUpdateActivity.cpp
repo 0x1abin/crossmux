@@ -40,8 +40,9 @@ fui::TextStyle releaseNoteStyle() {
   return style;
 }
 
-Rect releaseNotesBody(const Rect& safeArea, const ThemeMetrics& metrics, const bool firstPage) {
+Rect releaseNotesBody(const Rect& safeArea, const ThemeMetrics& metrics, const bool firstPage, const int bottomInset) {
   Rect body = SubpageLayout::contentRect(safeArea, metrics);
+  body.height = std::max(0, body.height - bottomInset);
   if (firstPage) {
     const int versionTop = safeArea.y + metrics.topPadding + metrics.headerHeight;
     const int notesTop = versionTop + metrics.tabBarHeight * 2 + SubpageLayout::sectionGap(metrics);
@@ -124,6 +125,10 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
+  resetUi();
+  app.on(ACTION_RELEASE_PAGE, &OtaUpdateActivity::onReleasePage, this);
+  app.on(ACTION_INSTALL_UPDATE, &OtaUpdateActivity::onInstallUpdate, this);
+  app.setScreen(&OtaUpdateActivity::updateScreen, this);
   state = State::Ready;
   selectedChannel = SETTINGS.otaNightlyEnabled ? OtaUpdater::Channel::Nightly : OtaUpdater::Channel::Stable;
   selectedReadyRow = CHECK_UPDATES_ROW;
@@ -209,7 +214,7 @@ void OtaUpdateActivity::showUpdateConfirmation() {
   requestUpdate();
 }
 
-void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea) {
+void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea, const int bottomInset) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto notes = updater.getReleaseNotes();
   releaseNotePageCount = 1;
@@ -231,7 +236,7 @@ void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea) {
   uint8_t noteIndex = 0;
   while (noteIndex < notes.size() && pageCount < ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX) {
     releaseNotePageStarts[pageCount] = noteIndex;
-    const Rect body = releaseNotesBody(safeArea, metrics, pageCount == 0);
+    const Rect body = releaseNotesBody(safeArea, metrics, pageCount == 0, bottomInset);
     const int availableHeight = std::max(0, body.height - titleHeight - sectionGap);
     const int textWidth = std::max(1, body.width - bulletIndent);
     int usedHeight = 0;
@@ -253,7 +258,8 @@ void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea) {
 
 void OtaUpdateActivity::renderUpdateAvailable(const Rect& safeArea) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  rebuildReleaseNotePages(safeArea);
+  const int bottomInset = mappedInput.hasTouch() ? app.theme().footerHeight : 0;
+  rebuildReleaseNotePages(safeArea, bottomInset);
 
   GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
                  tr(STR_UPDATE));
@@ -267,7 +273,7 @@ void OtaUpdateActivity::renderUpdateAvailable(const Rect& safeArea) {
                       tr(STR_NEW_VERSION), latestVersionLabel(updater));
   }
 
-  const Rect body = releaseNotesBody(safeArea, metrics, releaseNotePage == 0);
+  const Rect body = releaseNotesBody(safeArea, metrics, releaseNotePage == 0, bottomInset);
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int relatedGap = SubpageLayout::relatedGap(metrics);
   const int sectionGap = SubpageLayout::sectionGap(metrics);
@@ -311,6 +317,37 @@ void OtaUpdateActivity::renderUpdateAvailable(const Rect& safeArea) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_UPDATE), releaseNotePage > 0 ? tr(STR_DIR_UP) : "",
                                             releaseNotePage + 1 < releaseNotePageCount ? tr(STR_DIR_DOWN) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderUi();
+}
+
+void OtaUpdateActivity::updateScreen(UiScreen& screen, void* user) {
+  static_cast<OtaUpdateActivity*>(user)->buildUpdateScreen(screen);
+}
+
+void OtaUpdateActivity::buildUpdateScreen(UiScreen& screen) {
+  if (!mappedInput.hasTouch() || (state != State::UpdateAvailable && state != State::ConfirmingUpdate)) return;
+  const fui::FooterAction actions[] = {
+      {tr(STR_PREV_PAGE), ACTION_RELEASE_PAGE, -1, fui::StateNormal, releaseNotePage > 0},
+      {tr(STR_UPDATE), ACTION_INSTALL_UPDATE},
+      {tr(STR_NEXT_PAGE), ACTION_RELEASE_PAGE, 1, fui::StateNormal, releaseNotePage + 1 < releaseNotePageCount},
+  };
+  screen.footer(actions, 3);
+}
+
+void OtaUpdateActivity::onReleasePage(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<OtaUpdateActivity*>(user);
+  if (self->state != State::UpdateAvailable) return;
+  const int next = static_cast<int>(self->releaseNotePage) + event.value;
+  if (next < 0 || next >= self->releaseNotePageCount) return;
+  self->releaseNotePage = static_cast<uint8_t>(next);
+  self->requestUpdate();
+}
+
+void OtaUpdateActivity::onInstallUpdate(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<OtaUpdateActivity*>(user);
+  if (self->state != State::UpdateAvailable) return;
+  self->app.clearTapFlash();
+  self->showUpdateConfirmation();
 }
 
 void OtaUpdateActivity::render(RenderLock&&) {
@@ -521,7 +558,10 @@ void OtaUpdateActivity::loop() {
       }
       return;
     }
-    case State::UpdateAvailable:
+    case State::UpdateAvailable: {
+      const auto touch = routeTouch(mappedInput);
+      if (touch.routed && app.invalidated()) requestUpdate();
+      if (touch) return;
       if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
         finish();
         return;
@@ -540,6 +580,7 @@ void OtaUpdateActivity::loop() {
         requestUpdate();
       }
       return;
+    }
     case State::ConfirmingUpdate:
       if (updateConfirmation.handleInput(mappedInput, [this] { requestUpdate(); })) {
         if (state == State::ConfirmingUpdate && !updateConfirmation.isActive()) {
