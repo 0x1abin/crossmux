@@ -21,6 +21,23 @@ class FirmwareValidationTest(unittest.TestCase):
             'waveshare-epaper-397': 'waveshare_epaper_397',
         })
 
+    def test_global_and_chinese_beta_variants(self):
+        for device, environment in package_hardware_beta.DEVICES.items():
+            self.assertEqual(package_hardware_beta.environment_for(device, 'global'), environment)
+            self.assertEqual(package_hardware_beta.environment_for(device, 'zh-CN'), f'{environment}_cn')
+        self.assertEqual(
+            package_hardware_beta.version_for('1.5.7', 'sticky', 'global', '12345678'),
+            '1.5.7-sticky-beta+12345678',
+        )
+        self.assertEqual(
+            package_hardware_beta.version_for('1.5.7', 'sticky', 'zh-CN', '12345678'),
+            '1.5.7-sticky-cn-beta+12345678',
+        )
+        with self.assertRaises(KeyError):
+            package_hardware_beta.environment_for('sticky', 'invalid')
+        with self.assertRaises(KeyError):
+            package_hardware_beta.version_for('1.5.7', 'sticky', 'invalid', '12345678')
+
     def write_image(self, chip_id=package_hardware_beta.ESP32S3_CHIP_ID, board='eego_a4'):
         image = bytearray(24)
         image[0] = 0xE9

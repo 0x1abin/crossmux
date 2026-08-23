@@ -6,8 +6,8 @@
 # (China) deployment reads release metadata + binaries from this Gitee repo when
 # FIRMWARE_MIRROR=gitee (see crosspoint-web server/handlers.ts).
 #
-# This publishes the SAME binaries GitHub Actions just built — it does NOT
-# rebuild on Gitee — so the firmware is byte-identical across both hosts.
+# This uploads binaries built by GitHub Actions; workflows may select regional
+# variants (for example, Simplified-Chinese hardware betas) for Gitee.
 #
 # The stable-release workflow treats mirror failures as errors; nightly remains
 # best-effort at the workflow level.
