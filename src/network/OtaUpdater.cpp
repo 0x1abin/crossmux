@@ -5,6 +5,7 @@
 // ip4_addr.h unless seen first. Pin this order; clang-format would otherwise sort
 // the local header last and break the build.
 #include "HttpDownloader.h"
+#include <HalSystem.h>
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
 #include <esp_ota_ops.h>
@@ -12,6 +13,7 @@
 // clang-format on
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -63,11 +65,21 @@ constexpr char nightlyReleaseUrl[] =
 #else
     "https://" CROSSMUX_HOST "/api/ota/manifest?variant=global&channel=nightly";
 #endif
+constexpr size_t deviceModelLengthMax = 32;
+constexpr size_t releaseUrlCapacity = sizeof(nightlyReleaseUrl) + sizeof("&model=") + deviceModelLengthMax;
+static_assert(releaseUrlCapacity < 256);
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedChannel) {
   channel = requestedChannel;
-  const char* releaseUrl = channel == Channel::Nightly ? nightlyReleaseUrl : latestReleaseUrl;
+  const char* releaseUrlBase = channel == Channel::Nightly ? nightlyReleaseUrl : latestReleaseUrl;
+  char releaseUrl[releaseUrlCapacity];
+  const int releaseUrlLength =
+      snprintf(releaseUrl, sizeof(releaseUrl), "%s&model=%s", releaseUrlBase, HalSystem::getDeviceModel());
+  if (releaseUrlLength < 0 || static_cast<size_t>(releaseUrlLength) >= sizeof(releaseUrl)) {
+    LOG_ERR("OTA", "Release URL exceeds %zu bytes", sizeof(releaseUrl));
+    return INTERNAL_UPDATE_ERROR;
+  }
   LOG_DBG("OTA", "Checking %s channel (current: %s)", channel == Channel::Nightly ? "nightly" : "stable",
           CROSSPOINT_VERSION);
 
