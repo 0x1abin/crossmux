@@ -40,6 +40,7 @@
   * `eego_a4`: eego A4 ESP32-S3 experimental development build
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
   * `waveshare_epaper_397`: Waveshare ePaper 3.97 ESP32-S3 experimental development build
+  * `<s3_environment>_cn`: Simplified-Chinese counterpart of each S3 environment
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
@@ -47,7 +48,9 @@
 
 The six S3 environments are separate device binaries. They keep the global
 development profile unless an environment explicitly opts into another locale
-or host. `bin/ci-check` builds all six together with the default C3 target.
+or host. Their `_cn` counterparts keep the same hardware profile while enabling
+the Chinese-only resources and `crossmux.cn`. `bin/ci-check` builds the six
+global environments together with the default C3 target.
 
 ## Desktop Simulator
 

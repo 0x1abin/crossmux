@@ -160,7 +160,14 @@ PYTHON=/tmp/cn_font_venv/bin/python3 \
 
 # 5. Build
 pio run -e gh_release_cn
+
+# Build all six ESP32-S3 Chinese device binaries
+pio run -e sticky_cn -e x4pro_cn -e papermono_cn -e eego_a4_cn \
+  -e murphy_m4_cn -e waveshare_epaper_397_cn
 ```
+
+Each S3 `_cn` environment inherits its device's hardware flags and uses the
+same Chinese-only resources and `crossmux.cn` host as `gh_release_cn`.
 
 The committed headers were regenerated with source SHA-256
 `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`.
