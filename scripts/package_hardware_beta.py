@@ -13,6 +13,8 @@ from pathlib import Path
 
 DEVICES = {
     'sticky': 'sticky',
+    'x4pro': 'x4pro',
+    'papermono': 'papermono',
     'eego-a4': 'eego_a4',
     'murphy-m4': 'murphy_m4',
     'waveshare-epaper-397': 'waveshare_epaper_397',

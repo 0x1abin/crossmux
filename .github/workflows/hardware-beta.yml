@@ -10,6 +10,8 @@ on:
         type: choice
         options:
           - sticky
+          - x4pro
+          - papermono
           - eego-a4
           - murphy-m4
           - waveshare-epaper-397
@@ -25,7 +27,6 @@ permissions:
   contents: write
 
 env:
-  BETA_REF: beta/s3-hardware
   RELEASE_TAG: hardware-beta-${{ inputs.device }}
   GITEE_REPO: x1abin/crossmux
 
@@ -38,7 +39,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ env.BETA_REF }}
           fetch-depth: 0
           submodules: recursive
 
@@ -72,6 +72,8 @@ jobs:
           set -euo pipefail
           case "${{ inputs.device }}" in
             sticky) environment=sticky ;;
+            x4pro) environment=x4pro ;;
+            papermono) environment=papermono ;;
             eego-a4) environment=eego_a4 ;;
             murphy-m4) environment=murphy_m4 ;;
             waveshare-epaper-397) environment=waveshare_epaper_397 ;;
@@ -109,7 +111,7 @@ jobs:
           cat > release-body.md <<EOF
           # CrossMux ${{ inputs.device }} hardware beta
 
-          Experimental build from \`${{ env.BETA_REF }}\`.
+          Experimental build from \`main\`.
 
           - CrossMux: \`${{ needs.build.outputs.crossmux_sha }}\`
           - Partition profile: \`crossmux-sticky-v1\`

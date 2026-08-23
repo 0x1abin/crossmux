@@ -11,6 +11,16 @@ SPEC.loader.exec_module(package_hardware_beta)
 
 
 class FirmwareValidationTest(unittest.TestCase):
+    def test_all_s3_beta_device_mappings(self):
+        self.assertEqual(package_hardware_beta.DEVICES, {
+            'sticky': 'sticky',
+            'x4pro': 'x4pro',
+            'papermono': 'papermono',
+            'eego-a4': 'eego_a4',
+            'murphy-m4': 'murphy_m4',
+            'waveshare-epaper-397': 'waveshare_epaper_397',
+        })
+
     def write_image(self, chip_id=package_hardware_beta.ESP32S3_CHIP_ID, board='eego_a4'):
         image = bytearray(24)
         image[0] = 0xE9
