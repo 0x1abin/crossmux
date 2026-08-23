@@ -52,6 +52,12 @@ or host. Their `_cn` counterparts keep the same hardware profile while enabling
 the Chinese-only resources and `crossmux.cn`. `bin/ci-check` builds the six
 global environments together with the default C3 target.
 
+Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
+shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
+CI workflow builds all four simulators and all six global S3 environments when
+hardware-sensitive files change, and can also be started manually. Chinese S3
+environments remain local or manually invoked builds.
+
 ## Desktop Simulator
 
 Install SDL2 and `curl` (plus OpenSSL development headers on Linux), place EPUB

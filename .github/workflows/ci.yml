@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   UV_HTTP_RETRIES: 10
 
@@ -65,15 +69,10 @@ jobs:
           restore-keys: pio-cache-${{ runner.os }}-
 
       - name: Run cppcheck
-        run: |
-          for attempt in 1 2 3; do
-            pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high && exit 0
-            echo "PlatformIO attempt ${attempt} failed" >&2
-          done
-          exit 1
+        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
   build-default:
-    name: Build default and simulators
+    name: Build X4 and X4 Pro
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -83,11 +82,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
-
-      - name: Install simulator build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsdl2-dev libssl-dev
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -105,33 +99,21 @@ jobs:
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
-      - name: Build default firmware and simulators
-        # Keep every env in ONE pio invocation: a second `pio run` can wipe the whole
-        # .pio/build tree (project-checksum mismatch after the S3 toolchain
-        # installs into the restored cache), deleting the default firmware.bin
-        # before the artifact upload.
+      - name: Build X4 and X4 Pro firmware
+        # Keep both envs in one invocation so the S3 toolchain install cannot
+        # invalidate and remove the default firmware before artifact upload.
         run: |
           set -euo pipefail
-          for attempt in 1 2 3; do
-            if pio run -e default -e simulator -e simulator_x3 -e simulator_eego_a4 -e simulator_murphy_m4 | tee pio.log; then
-              exit 0
-            fi
-            echo "PlatformIO attempt ${attempt} failed" >&2
-          done
-          exit 1
+          pio run -e default -e x4pro | tee pio.log
 
       - name: Extract firmware stats
-
         run: |
           set -euo pipefail
-          ram_line="$(grep -E "RAM:\\s" -m1 pio.log || true)"
-          flash_line="$(grep -E "Flash:\\s" -m1 pio.log || true)"
-          echo "ram_line=${ram_line}" >> "$GITHUB_OUTPUT"
-          echo "flash_line=${flash_line}" >> "$GITHUB_OUTPUT"
           {
-            echo "## Firmware build stats"
-            if [ -n "$ram_line" ]; then echo "- ${ram_line}"; else echo "- RAM: not found"; fi
-            if [ -n "$flash_line" ]; then echo "- ${flash_line}"; else echo "- Flash: not found"; fi
+            echo "## X4 and X4 Pro firmware build stats"
+            echo '```text'
+            grep -E '^Processing |RAM:\\s|Flash:\\s' pio.log || true
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload firmware.bin artifact
@@ -139,85 +121,6 @@ jobs:
         with:
           name: firmware.bin
           path: .pio/build/default/firmware.bin
-          if-no-files-found: error
-
-  build-hardware:
-    name: Build S3 hardware
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.14'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-          enable-cache: false
-
-      - name: Install PlatformIO Core
-        run: uv pip install --system -U pioarduino==6.1.19
-
-      - name: Cache PlatformIO packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.platformio/.cache
-          key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-cache-${{ runner.os }}-
-
-      - name: Build S3 hardware firmware
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if pio run -e sticky -e x4pro -e papermono -e eego_a4 -e murphy_m4 -e waveshare_epaper_397 | tee pio.log; then
-              exit 0
-            fi
-            echo "PlatformIO attempt ${attempt} failed" >&2
-          done
-          exit 1
-
-      - name: Extract firmware stats
-        run: |
-          set -euo pipefail
-          {
-            echo "## S3 hardware firmware build stats"
-            echo '```text'
-            grep -E '^Processing |RAM:\\s|Flash:\\s' pio.log || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Package experimental eego A4 images
-        run: python3 scripts/package_hardware_beta.py eego-a4
-
-      - name: Package experimental Murphy M4 images
-        run: python3 scripts/package_hardware_beta.py murphy-m4
-
-      - name: Package experimental Waveshare 3.97 images
-        run: python3 scripts/package_hardware_beta.py waveshare-epaper-397
-
-      - name: Upload experimental eego A4 artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: eego-a4-experimental
-          path: dist/eego-a4
-          if-no-files-found: error
-
-      - name: Upload experimental Murphy M4 artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: murphy-m4-experimental
-          path: dist/murphy-m4
-          if-no-files-found: error
-
-      - name: Upload experimental Waveshare 3.97 artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: waveshare-epaper-397-experimental
-          path: dist/waveshare-epaper-397
           if-no-files-found: error
 
   unit-tests:
@@ -261,7 +164,6 @@ jobs:
     name: Test Status
     needs:
       - build-default
-      - build-hardware
       - clang-format
       - cppcheck
       - unit-tests

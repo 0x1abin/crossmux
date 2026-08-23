@@ -1,0 +1,133 @@
+name: Hardware CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ci.yml
+      - .github/workflows/hardware-ci.yml
+      - .github/workflows/hardware-beta.yml
+      - bin/ci-check
+      - platformio.ini
+      - partitions.csv
+      - freeink-sdk
+      - lib/hal/**
+      - lib/EpdFont/**
+      - lib/GfxRenderer/**
+      - src/MappedInputManager.*
+      - src/NetworkStartup.cpp
+      - src/CrossPointSettings.*
+      - src/SettingsList.h
+      - src/main.cpp
+      - src/activities/ActivityManager.*
+      - src/activities/apps/AppsMenuActivity.cpp
+      - src/activities/boot_sleep/**
+      - src/activities/reader/**
+      - src/activities/settings/**
+      - src/activities/util/IntervalSelectionActivity.*
+      - src/network/**
+      - scripts/package_hardware_beta.py
+      - scripts/tests/test_package_hardware_beta.py
+  pull_request:
+    paths:
+      - .github/workflows/ci.yml
+      - .github/workflows/hardware-ci.yml
+      - .github/workflows/hardware-beta.yml
+      - bin/ci-check
+      - platformio.ini
+      - partitions.csv
+      - freeink-sdk
+      - lib/hal/**
+      - lib/EpdFont/**
+      - lib/GfxRenderer/**
+      - src/MappedInputManager.*
+      - src/NetworkStartup.cpp
+      - src/CrossPointSettings.*
+      - src/SettingsList.h
+      - src/main.cpp
+      - src/activities/ActivityManager.*
+      - src/activities/apps/AppsMenuActivity.cpp
+      - src/activities/boot_sleep/**
+      - src/activities/reader/**
+      - src/activities/settings/**
+      - src/activities/util/IntervalSelectionActivity.*
+      - src/network/**
+      - scripts/package_hardware_beta.py
+      - scripts/tests/test_package_hardware_beta.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_HTTP_RETRIES: 10
+
+jobs:
+  build:
+    name: Build simulators and S3 hardware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install simulator build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libssl-dev
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          enable-cache: false
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U pioarduino==6.1.19
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio/.cache
+          key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-cache-${{ runner.os }}-
+
+      - name: Build simulators and S3 hardware
+        run: |
+          set -euo pipefail
+          pio run \
+            -e simulator \
+            -e simulator_x3 \
+            -e simulator_eego_a4 \
+            -e simulator_murphy_m4 \
+            -e sticky \
+            -e x4pro \
+            -e papermono \
+            -e eego_a4 \
+            -e murphy_m4 \
+            -e waveshare_epaper_397 | tee pio.log
+
+      - name: Record firmware stats
+        run: |
+          {
+            echo "## Simulator and S3 hardware build stats"
+            echo '```text'
+            grep -E '^Processing |RAM:\s|Flash:\s' pio.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify hardware packages
+        run: |
+          set -euo pipefail
+          for device in eego-a4 murphy-m4 waveshare-epaper-397; do
+            python3 scripts/package_hardware_beta.py "$device"
+            (cd "dist/$device" && sha256sum --check SHA256SUMS)
+          done
