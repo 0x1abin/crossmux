@@ -258,9 +258,9 @@ void TxtReaderActivity::initializeReader() {
   cachedOrientedMarginBottom +=
       std::max(cachedScreenMargin, static_cast<uint8_t>(UITheme::getInstance().getStatusBarHeight()));
 #if FREEINK_DEVICE_EEGO_A4
-  // The A4's status bar is lifted 2 px so the bezel does not cover it (see
+  // The A4's status bar is lifted 4 px so the bezel does not cover it (see
   // BaseTheme::drawStatusBar); reserve the same space for the content.
-  cachedOrientedMarginBottom += 2;
+  cachedOrientedMarginBottom += 4;
 #endif
 
   viewportWidth = renderer.getScreenWidth() - cachedOrientedMarginLeft - cachedOrientedMarginRight;

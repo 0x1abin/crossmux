@@ -885,13 +885,18 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   const auto screenHeight = renderer.getScreenHeight();
   auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4;
 
-  const int leftClusterX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
-  const int rightClusterX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight;
+  int leftClusterX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
+  int rightClusterX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight;
 #if FREEINK_DEVICE_EEGO_A4
-  // On the physical panel only the bottom ~2 px of the status bar is covered by
-  // the bezel, so lift the cluster by that amount (measured on device). The
-  // horizontal positions are untouched.
-  textY -= 2;
+  // The EEGO A4 panel has physically rounded corners; the status bar text must
+  // stay inside the 28 px UI content inset (eego-a4-template-firmware
+  // SAFE_AREA spec), so clamp the left/right text clusters out of the corner
+  // cutouts. The bottom ~4 px of the bar is covered by the bezel, so the whole
+  // cluster is also lifted by that amount (measured on device).
+  constexpr int kEegoStatusBarSafeInset = 28;
+  leftClusterX = std::max(leftClusterX, kEegoStatusBarSafeInset);
+  rightClusterX = std::min(rightClusterX, renderer.getScreenWidth() - kEegoStatusBarSafeInset);
+  textY -= 4;
 #endif
   int leftClusterWidth = 0;
   int rightClusterWidth = 0;
@@ -921,12 +926,12 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   // Draw Progress Bar
   if (sb.showsProgressBar()) {
 #if FREEINK_DEVICE_EEGO_A4
-    // The bar's bottom edge is lifted 2 px so the bezel does not cover it
+    // The bar's bottom edge is lifted 4 px so the bezel does not cover it
     // (measured on device); horizontal span is untouched.
     const int barMarginLeft = fillMargin ? 0 : orientedMarginLeft;
     const int barMarginRight = fillMargin ? 0 : orientedMarginRight;
     const int progressBarMaxWidth = renderer.getScreenWidth() - barMarginLeft - barMarginRight;
-    const int progressBarY = renderer.getScreenHeight() - 2 - orientedMarginBottom - sb.progressBarHeightPx -
+    const int progressBarY = renderer.getScreenHeight() - 4 - orientedMarginBottom - sb.progressBarHeightPx -
                              paddingBottom + (fillMargin ? 1 : 0);
 #else
     const int barMarginLeft = fillMargin ? 0 : orientedMarginLeft;
