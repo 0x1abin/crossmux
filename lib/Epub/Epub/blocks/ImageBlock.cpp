@@ -98,8 +98,8 @@ void rememberImageFailure(const std::string& path) {
 // smaller than an SD sector, so every sector is touched regardless of the band
 // window. Instead the first pass loads the payload into RAM and later passes
 // render from it. Chunked allocation because a single full-image block (up to
-// 96 KB) rarely fits the fragmented mid-render heap; each chunk is heap-gated
-// and any failure falls back to the streaming path unchanged. The reader
+// 96 KB) rarely fits the fragmented mid-render heap; all chunks are allocated
+// before the file is read, and any failure falls back to streaming. The reader
 // releases the slot when the page render completes, so nothing stays resident
 // across page turns.
 constexpr size_t PXC_CHUNK_SHIFT = 14;  // 16 KB chunks
@@ -111,7 +111,7 @@ constexpr size_t PXC_MAX_ALLOC_RESERVE = 8 * 1024;
 // buffer. (screenWidth + 3) / 4 caps at 200 B for an 800px panel.
 constexpr int PXC_MAX_BYTES_PER_ROW = 208;
 
-std::unique_ptr<uint8_t[]> pxcChunks[PXC_MAX_CHUNKS];
+memory::ByteBuffer pxcChunks[PXC_MAX_CHUNKS];
 uint64_t pxcSlotHash = 0;
 uint16_t pxcSlotWidth = 0;
 uint16_t pxcSlotHeight = 0;
@@ -142,19 +142,39 @@ bool loadPxcSlot(uint64_t cacheHash, HalFile& cacheFile, uint16_t cachedWidth, u
   if (bytesPerRow > PXC_MAX_BYTES_PER_ROW) {
     return false;
   }
-  size_t remaining = (size_t)bytesPerRow * cachedHeight;
-  const size_t chunkCount = (remaining + PXC_CHUNK_SIZE - 1) >> PXC_CHUNK_SHIFT;
+  const size_t payloadBytes = static_cast<size_t>(bytesPerRow) * cachedHeight;
+  const size_t chunkCount = (payloadBytes + PXC_CHUNK_SIZE - 1) >> PXC_CHUNK_SHIFT;
   if (chunkCount == 0 || chunkCount > PXC_MAX_CHUNKS) {
     return false;
   }
-  for (size_t i = 0; i < chunkCount; i++) {
-    const size_t want = remaining < PXC_CHUNK_SIZE ? remaining : PXC_CHUNK_SIZE;
-    if (ESP.getFreeHeap() < remaining + PXC_HEAP_RESERVE || ESP.getMaxAllocHeap() < want + PXC_MAX_ALLOC_RESERVE) {
-      releasePxcSlot();
+
+  const size_t largestChunk = payloadBytes < PXC_CHUNK_SIZE ? payloadBytes : PXC_CHUNK_SIZE;
+  const auto allocateChunks = [&](const bool usePsram) {
+    size_t remaining = payloadBytes;
+    for (size_t i = 0; i < chunkCount; i++) {
+      const size_t want = remaining < PXC_CHUNK_SIZE ? remaining : PXC_CHUNK_SIZE;
+      pxcChunks[i] = usePsram ? memory::makePsramByteBufferNoThrow(want) : memory::makeInternalByteBufferNoThrow(want);
+      if (!pxcChunks[i]) {
+        releasePxcSlot();
+        return false;
+      }
+      remaining -= want;
+    }
+    return true;
+  };
+
+  const bool internalFits = memory::hasAllocationHeadroom(ESP.getFreeHeap(), ESP.getMaxAllocHeap(), payloadBytes,
+                                                          largestChunk, PXC_HEAP_RESERVE, PXC_MAX_ALLOC_RESERVE);
+  if (!internalFits || !allocateChunks(false)) {
+    if (!memory::psramHasHeadroom(payloadBytes, largestChunk, PXC_MAX_ALLOC_RESERVE) || !allocateChunks(true)) {
       return false;
     }
-    pxcChunks[i] = makeUniqueNoThrow<uint8_t[]>(want);
-    if (!pxcChunks[i] || cacheFile.read(pxcChunks[i].get(), want) != static_cast<int>(want)) {
+  }
+
+  size_t remaining = payloadBytes;
+  for (size_t i = 0; i < chunkCount; i++) {
+    const size_t want = remaining < PXC_CHUNK_SIZE ? remaining : PXC_CHUNK_SIZE;
+    if (cacheFile.read(pxcChunks[i].get(), want) != static_cast<int>(want)) {
       releasePxcSlot();
       return false;
     }

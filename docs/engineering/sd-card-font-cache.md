@@ -10,6 +10,14 @@ cache the 8/10/12pt UI fallback fonts, add an LRU, or make an SD font part of
 the firmware image. `SdCardFont` still provides the renderer-facing font
 interface; only its random-access storage backend changes.
 
+On `BOARD_HAS_PSRAM` targets, the selected reader font also gets a volatile,
+1 MiB on-demand glyph cache. The first metadata or bitmap read still comes from
+the selected Flash/SD backend; later pages copy the same immutable glyph bytes
+from PSRAM into the ordinary internal-DRAM page mini-cache. The PSRAM cache is
+released with the font, is never used by UI fallback sizes, and does not change
+the persistent cache format. Allocation failure leaves the existing Flash/SD
+path unchanged.
+
 The canonical byte layout is documented in
 [file-formats.md](../file-formats.md#sd-card-font-cache).
 
@@ -203,7 +211,7 @@ Existing debug logs expose the storage source and timing needed to repeat the
 comparison:
 
 - `Initial load source=flash|sd load_ms=...`
-- `[epub-page]` or `[txt-page] source=flash|sd total=... read_ms=...`
+- `[txt-page] source=psram+flash|psram+sd|flash|sd total=... read_ms=...`
 - `First page displayed: open_total=...`
 - Page rendering logs report display time separately from font prewarm.
 

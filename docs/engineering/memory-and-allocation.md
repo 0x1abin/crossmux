@@ -106,3 +106,31 @@ do not make the firmware globally OOM-safe: ordinary `std::string` and
 `std::vector` growth still uses throwing allocation, and exceptions are
 disabled. Bound external lengths, reserve before append loops, and avoid
 unbounded container growth on device-controlled input.
+
+## Optional PSRAM
+
+ESP32-C3 remains the no-PSRAM baseline. On targets declaring
+`BOARD_HAS_PSRAM`, use `memory::makePsramByteBufferNoThrow()` only for large,
+sequential buffers whose main benefit is avoiding storage I/O or preserving an
+asynchronous render path. Keep the framebuffer, decoder state, current-page
+font mini-cache, small scratch buffers, and other frequently accessed data in
+internal DRAM. A bounded cache of immutable font source bytes may use PSRAM as
+long as glyphs are copied back into the internal mini-cache before rendering.
+
+Prefer internal DRAM when its free-size and largest-block reserves are healthy,
+then try PSRAM, and finally retain the existing low-memory business fallback.
+`memory::psramHasHeadroom()` reserves 256 KB of PSRAM and returns false on the
+simulator, devices without the capability macro, failed PSRAM initialization,
+or insufficient contiguous space. `memory::ByteBuffer` owns both internal and
+PSRAM heap-cap allocations through RAII, so every early return releases them.
+
+The Inx recent-books screen applies this policy to complete, validated 1-bit
+thumbnail BMP files: it reads each file sequentially into PSRAM once, then the
+normal `Bitmap` row scratch copies rows back into internal DRAM for hot pixel
+processing. The cache is bounded to 64 KB per file and 512 KB per Activity;
+there is no internal-DRAM cache on no-PSRAM devices.
+
+The selected SD reader font may allocate one 1 MiB uninitialized PSRAM block.
+It clears only its fixed glyph index and appends verified glyph bitmaps into the
+remaining arena. The cache is optional, shared across styles of that one font,
+and released on font unload; UI fallback fonts never allocate another block.

@@ -1776,11 +1776,22 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     constexpr size_t PLANE_BUF_HEADROOM = 60000;
     constexpr size_t PLANE_BUF_MAX_ALLOC_RESERVE = 16 * 1024;
     const auto planeBufFits = [planeBytes] {
-      return ESP.getFreeHeap() >= planeBytes + PLANE_BUF_HEADROOM &&
-             ESP.getMaxAllocHeap() >= planeBytes + PLANE_BUF_MAX_ALLOC_RESERVE;
+      return memory::hasAllocationHeadroom(ESP.getFreeHeap(), ESP.getMaxAllocHeap(), planeBytes, planeBytes,
+                                           PLANE_BUF_HEADROOM, PLANE_BUF_MAX_ALLOC_RESERVE);
     };
-    auto lsbPlaneBuf = (overlapRefresh && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
-    auto msbPlaneBuf = (lsbPlaneBuf && planeBufFits()) ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
+    const auto allocatePlane = [&] {
+      if (planeBufFits()) {
+        auto buffer = memory::makeInternalByteBufferNoThrow(planeBytes);
+        if (buffer) return buffer;
+      }
+      if (memory::psramHasHeadroom(planeBytes, planeBytes, PLANE_BUF_MAX_ALLOC_RESERVE)) {
+        auto buffer = memory::makePsramByteBufferNoThrow(planeBytes);
+        if (buffer) return buffer;
+      }
+      return memory::ByteBuffer{};
+    };
+    auto lsbPlaneBuf = overlapRefresh ? allocatePlane() : memory::ByteBuffer{};
+    auto msbPlaneBuf = lsbPlaneBuf ? allocatePlane() : memory::ByteBuffer{};
 
     if (lsbPlaneBuf) {
       renderPlaneToBuffer(true, lsbPlaneBuf.get());

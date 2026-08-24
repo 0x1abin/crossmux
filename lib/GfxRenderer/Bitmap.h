@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -71,7 +72,14 @@ class Bitmap {
 
   static const char* errorToString(BmpReaderError err);
 
-  explicit Bitmap(HalFile& file, bool dithering = false) : file(file), dithering(dithering) {}
+  explicit Bitmap(HalFile& file, bool dithering = false) : file(&file), dithering(dithering) {}
+#if defined(BOARD_HAS_PSRAM) || defined(CROSSPOINT_EMULATED)
+  // Non-owning memory source. The caller must keep `data` alive for the
+  // Bitmap's lifetime; sequential rows are copied into the existing internal
+  // draw scratch before pixel processing.
+  Bitmap(const uint8_t* data, size_t size, bool dithering = false)
+      : memoryData(data), memorySize(size), dithering(dithering) {}
+#endif
   ~Bitmap();
   Bitmap(const Bitmap&) = delete;
   Bitmap& operator=(const Bitmap&) = delete;
@@ -90,10 +98,20 @@ class Bitmap {
   bool hasTransparency() const { return transparentOverlay; }
 
  private:
-  static uint16_t readLE16(HalFile& f);
-  static uint32_t readLE32(HalFile& f);
+  uint16_t readLE16() const;
+  uint32_t readLE32() const;
+  bool sourceValid() const;
+  int sourceRead(void* data, size_t size) const;
+  int sourceReadByte() const;
+  bool sourceSeek(size_t position) const;
+  bool sourceSeekCur(int64_t offset) const;
 
-  HalFile& file;
+  HalFile* file = nullptr;
+#if defined(BOARD_HAS_PSRAM) || defined(CROSSPOINT_EMULATED)
+  const uint8_t* memoryData = nullptr;
+  size_t memorySize = 0;
+  mutable size_t memoryPosition = 0;
+#endif
   bool dithering = false;
   int width = 0;
   int height = 0;
