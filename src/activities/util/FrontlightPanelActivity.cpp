@@ -44,7 +44,12 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
-  firstRender = true;
+#if FREEINK_DEVICE_EEGO_A4
+  // The first frame draws over the reader's gray AA page; a HALF refresh keeps
+  // the overlay clean instead of ghosting. Other boards keep the standard
+  // FAST_REFRESH first frame (X4 Pro reference behavior).
+  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+#endif
 
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
@@ -278,6 +283,5 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   renderUi();
 
   renderer.fillRect(0, panelBottom - 2, pageWidth, 2, true);
-  renderer.displayBuffer(firstRender ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-  firstRender = false;
+  renderer.displayBuffer();
 }
