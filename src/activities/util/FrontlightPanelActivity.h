@@ -24,6 +24,9 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   bool lightOnChanged = false;
   bool draggingSlider = false;
   int panelBottom = 0;
+  // First frame after summoning draws over the reader's content (gray AA text
+  // on the A4); a full refresh keeps the overlay clean instead of ghosting.
+  bool firstRender = true;
 
   static void panelScreen(UiScreen& screen, void* user);
   static void onBrightnessEvent(const freeink::ui::ActionEvent& event, void* user);

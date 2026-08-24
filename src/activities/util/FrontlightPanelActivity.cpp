@@ -2,6 +2,7 @@
 
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <HalFrontlight.h>
 #include <I18n.h>
 
@@ -43,6 +44,7 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
+  firstRender = true;
 
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
@@ -69,6 +71,11 @@ void FrontlightPanelActivity::onExit() {
     SETTINGS.saveToFile();
   }
   Activity::onExit();
+#if FREEINK_DEVICE_EEGO_A4
+  // The overlay pops back to the reader's gray AA page; force a clean first
+  // frame so the panel's white region does not ghost over the text.
+  renderer.requestNextFullRefresh();
+#endif
 }
 
 void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, void* user) {
@@ -271,5 +278,6 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   renderUi();
 
   renderer.fillRect(0, panelBottom - 2, pageWidth, 2, true);
-  renderer.displayBuffer();
+  renderer.displayBuffer(firstRender ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  firstRender = false;
 }
