@@ -11,6 +11,7 @@
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "components/SelectionCursorPolicy.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
@@ -98,6 +99,11 @@ const ThemeMetrics& UITheme::getMetrics() const {
     metricsValid = true;
   }
   return adjustedMetrics;
+}
+
+bool UITheme::showSelectionCursor() const {
+  return SelectionCursorPolicy::visible(currentType == CrossPointSettings::UI_THEME::INX, gpio.hasTouch(),
+                                        gpio.lastInputModality());
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,

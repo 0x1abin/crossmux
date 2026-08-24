@@ -14,6 +14,7 @@ void UiAppHost::resetUi() {
 
 void UiAppHost::renderUi() {
   app.setDevice(uiTarget.deviceContext());
+  refreshSharedUiThemeTokens(uiTarget);
   app.render();
   uiReady = true;
 }

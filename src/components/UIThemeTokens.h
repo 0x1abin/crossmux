@@ -2,6 +2,7 @@
 #include <BoardConfig.h>
 #include <FreeInkUIGfxRenderer.h>
 
+#include "SelectionCursorPolicy.h"
 #include "UITheme.h"
 
 namespace ui_theme_detail {
@@ -51,5 +52,6 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   tokens.listEmphasizedText = tokens.titleText;
   tokens.listEmphasizedText.bold = true;
   tokens.listValueText = tokens.bodyText;
+  if (!UITheme::getInstance().showSelectionCursor()) SelectionCursorPolicy::hideFreeInkListFocus(tokens);
   return tokens;
 }

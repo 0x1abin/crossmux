@@ -28,7 +28,8 @@ MappedInputManager::Labels Activity::mainTabButtonLabels(const char* back, const
 }
 
 bool Activity::showMainTabContentSelection() const {
-  return !usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content;
+  return UITheme::getInstance().showSelectionCursor() &&
+         (!usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content);
 }
 
 void Activity::drawPageHeader(const Rect& rect, const char* title, const char* subtitle) const {

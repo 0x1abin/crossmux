@@ -736,6 +736,10 @@ void loop() {
   if (gpio.wasUsbStateChanged()) {
     activityManager.requestUpdate();
   }
+  if (gpio.wasInputModalityChanged() && gpio.hasTouch() && UITheme::getInstance().hasMainTabs() &&
+      !activityManager.isReaderActivity()) {
+    activityManager.requestUpdate();
+  }
 
   const unsigned long activityStartTime = millis();
   const bool readerWasActive = activityManager.isReaderActivity();

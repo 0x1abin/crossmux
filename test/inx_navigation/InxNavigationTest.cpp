@@ -3,9 +3,11 @@
 
 #include <type_traits>
 
+#include "InputModality.h"
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
 #include "activities/MainTab.h"
+#include "components/SelectionCursorPolicy.h"
 #include "components/SubpageLayout.h"
 #include "components/icons/inx_apps.h"
 #include "components/themes/BaseTheme.h"
@@ -57,6 +59,42 @@ TEST(InxNavigation, WrapsAcrossFiveTabs) {
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::First, 10), 0);
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 1), 0);
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 10), 9);
+}
+
+TEST(InxNavigation, TracksLastInputWithTouchPriority) {
+  InputModality modality = InputModality::Touch;
+  modality = inputModalityAfter(modality, false, false);
+  EXPECT_EQ(modality, InputModality::Touch);
+  modality = inputModalityAfter(modality, true, false);
+  EXPECT_EQ(modality, InputModality::Buttons);
+  modality = inputModalityAfter(modality, false, false);
+  EXPECT_EQ(modality, InputModality::Buttons);
+  modality = inputModalityAfter(modality, true, true);
+  EXPECT_EQ(modality, InputModality::Touch);
+}
+
+TEST(InxNavigation, HidesOnlyInxTouchFocusAndKeepsActiveFeedback) {
+  EXPECT_FALSE(SelectionCursorPolicy::visible(true, true, InputModality::Touch));
+  EXPECT_TRUE(SelectionCursorPolicy::visible(true, true, InputModality::Buttons));
+  EXPECT_TRUE(SelectionCursorPolicy::visible(true, false, InputModality::Touch));
+  EXPECT_TRUE(SelectionCursorPolicy::visible(false, true, InputModality::Touch));
+
+  freeink::ui::ThemeTokens tokens;
+  tokens.listRow.normal.background = freeink::ui::Paint::solid(freeink::ui::Color::White);
+  tokens.listRow.normal.foreground = freeink::ui::Paint::solid(freeink::ui::Color::Black);
+  tokens.listRow.selected.background = freeink::ui::Paint::solid(freeink::ui::Color::Black);
+  tokens.listRow.selected.foreground = freeink::ui::Paint::solid(freeink::ui::Color::White);
+  tokens.listRow.focused.background = freeink::ui::Paint::dither(freeink::ui::Color::LightGray);
+  tokens.listRow.active.background = freeink::ui::Paint::solid(freeink::ui::Color::Black);
+  tokens.listRow.active.foreground = freeink::ui::Paint::solid(freeink::ui::Color::White);
+  const auto active = tokens.listRow.active;
+  SelectionCursorPolicy::hideFreeInkListFocus(tokens);
+  EXPECT_EQ(tokens.listRow.selected.background.kind, tokens.listRow.normal.background.kind);
+  EXPECT_EQ(tokens.listRow.selected.foreground.color, tokens.listRow.normal.foreground.color);
+  EXPECT_EQ(tokens.listRow.focused.background.kind, tokens.listRow.normal.background.kind);
+  EXPECT_EQ(tokens.listRow.focused.foreground.color, tokens.listRow.normal.foreground.color);
+  EXPECT_EQ(tokens.listRow.active.background.kind, active.background.kind);
+  EXPECT_EQ(tokens.listRow.active.foreground.color, active.foreground.color);
 }
 
 TEST(InxNavigation, KeepsLegacyListMetricsIndependentFromLyra) {

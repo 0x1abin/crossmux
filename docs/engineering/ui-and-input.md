@@ -164,6 +164,10 @@ action**.
   so the caller can draw its fallback cover.
 * INX front-button hints use black text above a 50% gray bottom line. Empty
   actions draw neither label nor line; directional actions use `<` and `>`.
+* On touch hardware, INX list and app-grid navigation focus follows the last
+  input modality: touch hides it, while a physical button restores it. The
+  logical selection and viewport remain intact, and FreeInkUI's active touch
+  feedback plus semantic values such as checks and switches remain visible.
 
 ## Retained Framebuffer Updates
 

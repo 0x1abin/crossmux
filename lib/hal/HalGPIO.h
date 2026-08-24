@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include <InputManager.h>
 
+#include <atomic>
+
+#include "InputModality.h"
+
 // Display SPI pins (custom pins for XteinkX4, not hardware SPI defaults)
 #define EPD_SCLK 8   // SPI Clock
 #define EPD_MOSI 10  // SPI MOSI (Master Out Slave In)
@@ -45,6 +49,8 @@ class HalGPIO {
 
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
+  std::atomic<InputModality> inputModality{InputModality::Touch};
+  bool inputModalityChanged = false;
 
  public:
   enum class DeviceType : uint8_t { X4, X3 };
@@ -103,6 +109,8 @@ class HalGPIO {
   unsigned long lastTouchHeldMs() const;
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
   bool wasTouchActivity() const;
+  InputModality lastInputModality() const { return inputModality.load(std::memory_order_relaxed); }
+  bool wasInputModalityChanged() const { return inputModalityChanged; }
   // Drop the one-shot touch tap/release edge events. Call on activity
   // transitions so the incoming activity does not re-read a tap the outgoing
   // one consumed (InputManager clears these in update(), but a pushActivity

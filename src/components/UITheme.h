@@ -22,6 +22,7 @@ class UITheme {
   const BaseTheme& getTheme() const { return *currentTheme; }
   bool usesClassicTabs() const { return currentType == CrossPointSettings::UI_THEME::CLASSIC; }
   bool hasMainTabs() const { return currentType == CrossPointSettings::UI_THEME::INX; }
+  bool showSelectionCursor() const;
   Rect getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints = false,
                          bool hasSideButtonHints = false);
   static void drawCenteredText(const GfxRenderer& renderer, Rect screen, int fontId, int y, const char* text,
