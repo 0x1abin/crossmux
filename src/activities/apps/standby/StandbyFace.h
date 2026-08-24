@@ -17,6 +17,8 @@ class GfxRenderer;
 // StandbyActivity.
 class StandbyFace {
  public:
+  enum class TickResult : uint8_t { None, Redraw, RedrawWithGhostCleanup };
+
   virtual ~StandbyFace() = default;
 
   // Allocate per-face state. Called once when this face becomes active.
@@ -38,10 +40,9 @@ class StandbyFace {
   virtual void onPagePrev() {}
   virtual void onPageNext() {}
 
-  // Called once per StandbyActivity::loop() tick. Returns true if the screen
-  // needs to be redrawn (e.g. the minute boundary moved). Face owns the
-  // "did anything change since last render" decision.
-  virtual bool tick() = 0;
+  // Called once per StandbyActivity::loop() tick. Face owns both the redraw
+  // decision and whether that frame needs the stronger ghost-cleanup waveform.
+  virtual TickResult tick() = 0;
 
   // Render the face content within the provided viewport. The activity has
   // already drawn the header / button hints (or cleared the screen in Immersive

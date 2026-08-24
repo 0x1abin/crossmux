@@ -42,6 +42,20 @@ Gitee carries the Simplified-Chinese package under the same rolling tag.
 Manual flashing must use the matching build; the embedded board tag rejects a
 tagged image for a different board.
 
+## Standby-display light sleep
+
+Standby-display light sleep is currently enabled only for the runtime-selected
+X3/X3 UC8279 profiles. The HAL arms GPIO3 plus a timer and consumes the released
+power button before returning to the Activity. ESP32-C3 isolates ordinary GPIOs
+in light sleep, so the HAL exempts GPIO13 from that isolation and keeps the X3 SD
+rail powered. Display state and all other power rails remain unchanged.
+
+X4 light sleep is disabled because hardware testing entered a cold-boot state
+instead of resuming. X4 and all S3 targets remain in the normal downclocked
+standby loop. Add a target only after its wake polarity, repeated wake,
+peripheral recovery, USB behavior, and sleep current have passed hardware
+validation; a successful build is not that acceptance test.
+
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.
 

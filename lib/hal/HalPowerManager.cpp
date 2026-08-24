@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_sleep.h>
 #include <soc/soc_caps.h>
 
@@ -18,10 +19,29 @@
 
 HalPowerManager powerManager;  // Singleton instance
 
-// GPIO13 controls the X4 battery latch and the X3 SD power rail on the C3
-// Xteink boards. Other boards use it for unrelated signals, including the
-// X4 Pro display chip select.
+// GPIO13 is the existing Xteink C3 deep-sleep shutdown signal; the X3 profile
+// also identifies it as the SD power rail. Its X4 hardware role is unverified.
+// Other boards use it for unrelated signals, including X4 Pro display CS.
 static constexpr gpio_num_t XTEINK_C3_GPIO13 = GPIO_NUM_13;
+
+namespace {
+struct StandbyRetention {
+  int8_t pin;
+  int activeLevel;
+};
+
+StandbyRetention x3StandbyRetention() {
+  const auto& board = BoardConfig::ACTIVE;
+  switch (board.board) {
+    case BoardConfig::Board::XteinkX3:
+    case BoardConfig::Board::XteinkX3Uc8279:
+      return {board.sd.powerEnable, board.sd.powerActiveHigh ? HIGH : LOW};
+    default:
+      // X4 failed hardware validation; all other profiles remain unvalidated.
+      return {BoardConfig::PIN_UNASSIGNED, LOW};
+  }
+}
+}  // namespace
 
 void HalPowerManager::begin() {
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
@@ -91,8 +111,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 
 #if !SOC_PM_SUPPORT_EXT1_WAKEUP
   if (gpio.isXteinkDevice()) {
-    // GPIO13 gates the battery MOSFET on both Xteink C3 boards; driving it low
-    // is the battery power-off (the SDK wake source still handles USB power).
+    // Keep the existing GPIO13 deep-sleep shutdown behavior unchanged while
+    // its exact X4 hardware role remains unverified (the SDK still handles wake).
     // Release any surviving pad hold first: hold_en survives deep sleep via
     // the SDK's deepSleep() (esp_sleep_config_gpio_isolate +
     // gpio_deep_sleep_hold_en), and a held pad silently ignores the drive.
@@ -140,6 +160,79 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();
 #endif
+}
+
+bool HalPowerManager::canStandbyLightSleep(const HalGPIO& gpio) const {
+  return gpio.isXteinkDevice() && BoardConfig::ACTIVE.input.power >= 0 && x3StandbyRetention().pin >= 0;
+}
+
+HalPowerManager::LightSleepWakeReason HalPowerManager::lightSleepFor(const uint32_t seconds) const {
+  const int8_t powerPin = BoardConfig::ACTIVE.input.power;
+  const StandbyRetention retention = x3StandbyRetention();
+  if (seconds == 0 || powerPin < 0 || retention.pin < 0) {
+    LOG_ERR("PWR", "Invalid light-sleep request: seconds=%u powerPin=%d retentionPin=%d",
+            static_cast<unsigned>(seconds), powerPin, retention.pin);
+    return LightSleepWakeReason::Failed;
+  }
+
+  const bool activeHigh = BoardConfig::ACTIVE.input.powerActiveHigh;
+  pinMode(powerPin, activeHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+  if (digitalRead(powerPin) == (activeHigh ? HIGH : LOW)) {
+    freeink::PowerManager::waitForPowerButtonRelease();
+    return LightSleepWakeReason::PowerButton;
+  }
+
+  const gpio_num_t retentionPin = static_cast<gpio_num_t>(retention.pin);
+  const auto cleanupLightSleep = [&] {
+    esp_err_t cleanupError = gpio_wakeup_disable(static_cast<gpio_num_t>(powerPin));
+    const auto keepFirstError = [&](const esp_err_t current) {
+      if (cleanupError == ESP_OK && current != ESP_OK) cleanupError = current;
+    };
+    keepFirstError(esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO));
+    keepFirstError(esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER));
+    keepFirstError(gpio_sleep_sel_en(retentionPin));
+    return cleanupError;
+  };
+
+  // ESP32-C3 isolates ordinary GPIOs in light sleep. Keep the X3 SD rail
+  // actively driven instead of allowing GPIO13 to float.
+  esp_err_t error = gpio_set_level(retentionPin, retention.activeLevel);
+  if (error == ESP_OK) error = gpio_set_direction(retentionPin, GPIO_MODE_OUTPUT);
+  if (error == ESP_OK) error = gpio_sleep_sel_dis(retentionPin);
+  if (error == ESP_OK)
+    error =
+        gpio_wakeup_enable(static_cast<gpio_num_t>(powerPin), activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
+  if (error == ESP_OK) error = esp_sleep_enable_gpio_wakeup();
+  if (error == ESP_OK) error = esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(seconds) * 1000000ULL);
+  if (error != ESP_OK) {
+    const esp_err_t cleanupError = cleanupLightSleep();
+    LOG_ERR("PWR", "Failed to configure light sleep: %d", static_cast<int>(error));
+    if (cleanupError != ESP_OK) LOG_ERR("PWR", "Failed to clean up light sleep: %d", static_cast<int>(cleanupError));
+    return LightSleepWakeReason::Failed;
+  }
+
+  error = esp_light_sleep_start();
+  const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  const esp_err_t cleanupError = cleanupLightSleep();
+  if (cause == ESP_SLEEP_WAKEUP_GPIO) freeink::PowerManager::waitForPowerButtonRelease();
+  if (error != ESP_OK) {
+    LOG_ERR("PWR", "Light sleep failed: %d", static_cast<int>(error));
+    return LightSleepWakeReason::Failed;
+  }
+  if (cleanupError != ESP_OK) {
+    LOG_ERR("PWR", "Failed to clean up light sleep: %d", static_cast<int>(cleanupError));
+    return LightSleepWakeReason::Failed;
+  }
+
+  switch (cause) {
+    case ESP_SLEEP_WAKEUP_TIMER:
+      return LightSleepWakeReason::Timer;
+    case ESP_SLEEP_WAKEUP_GPIO:
+      return LightSleepWakeReason::PowerButton;
+    default:
+      LOG_ERR("PWR", "Unexpected light-sleep wake cause: %d", static_cast<int>(cause));
+      return LightSleepWakeReason::Failed;
+  }
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {

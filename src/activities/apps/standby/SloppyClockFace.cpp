@@ -43,12 +43,16 @@ void SloppyClockFace::regenerate(uint32_t seed) {
   lastMin_ = -1;
 }
 
-bool SloppyClockFace::tick() {
-  if (!style_ || !seeds_) return false;
+StandbyFace::TickResult SloppyClockFace::tick() {
+  if (!style_ || !seeds_) return TickResult::None;
   const uint32_t nowMin = standby_time::getMinuteTick(startMs_);
-  if (static_cast<int32_t>(nowMin) == lastMin_) return false;
+  if (static_cast<int32_t>(nowMin) == lastMin_) return TickResult::None;
   lastMin_ = static_cast<int32_t>(nowMin);
-  return true;
+
+  const uint8_t currentBucket = standby_time::getTenMinuteBucket(startMs_);
+  const bool cleanGhosting = standby_time::didTenMinuteBucketChange(lastTenMinuteBucket_, currentBucket);
+  lastTenMinuteBucket_ = currentBucket;
+  return cleanGhosting ? TickResult::RedrawWithGhostCleanup : TickResult::Redraw;
 }
 
 void SloppyClockFace::render(GfxRenderer& renderer, const Rect& viewport) {

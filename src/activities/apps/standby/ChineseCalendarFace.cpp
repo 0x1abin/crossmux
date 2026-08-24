@@ -378,23 +378,23 @@ void ChineseCalendarFace::onPageNext() {
   }
 }
 
-bool ChineseCalendarFace::tick() {
+StandbyFace::TickResult ChineseCalendarFace::tick() {
   // If user is parked on today (offset 0) and the wall clock has crossed
   // midnight, recompute. Otherwise stay put.
-  if (dayOffset_ != 0) return false;
+  if (dayOffset_ != 0) return TickResult::None;
   struct tm today;
-  if (!getTodayLocal(today)) return false;
+  if (!getTodayLocal(today)) return TickResult::None;
   const int32_t key = today.tm_year * 512 + today.tm_yday;
-  if (key == cachedBaseDayKey_) return false;
+  if (key == cachedBaseDayKey_) return TickResult::None;
   refreshCachedDay();
-  return true;
+  return TickResult::Redraw;
 }
 
 StrId ChineseCalendarFace::titleId() const { return StrId::STR_FACE_CHINESE_CALENDAR; }
 
 uint32_t ChineseCalendarFace::secondsUntilNextWake() const {
   // No time-dependent UI inside the page (we only repaint at day crossover).
-  // Return a large value; StandbyActivity's loop is event-driven anyway.
+  // StandbyActivity bounds this interval so USB state is still polled regularly.
   return 3600u;
 }
 

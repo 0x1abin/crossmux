@@ -18,7 +18,7 @@ class SloppyClockFace final : public StandbyFace {
   // existing shake-reroll behaviour so the gesture keeps doing something.
   void onPagePrev() override;
   void onPageNext() override;
-  bool tick() override;
+  TickResult tick() override;
   void render(GfxRenderer& renderer, const Rect& viewport) override;
   StrId titleId() const override { return StrId::STR_FACE_SLOPPY_CLOCK; }
   uint32_t secondsUntilNextWake() const override;
@@ -28,6 +28,7 @@ class SloppyClockFace final : public StandbyFace {
   std::unique_ptr<sloppy::Seeds> seeds_;
   uint32_t startMs_ = 0;  // millis() anchor for the pre-sync fallback display
   int32_t lastMin_ = -1;  // last rendered minute tick, for "did the minute change?" gating
+  int16_t lastTenMinuteBucket_ = -1;
 
   void regenerate(uint32_t seed);
 };
