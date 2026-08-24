@@ -1650,8 +1650,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   std::optional<FontCacheManager::PrewarmScope> prewarmScope;
   if (fcm->needsPrewarmScan(fontId)) {
     prewarmScope.emplace(*fcm);
+    // Scan pass records the page text only (status bar glyphs are flash-resident
+    // UI fonts and would otherwise shadow the reader font in the prewarm).
     renderPage();
-    renderStatusBar();
     prewarmScope->endScanAndPrewarm();
   } else {
     fcm->clearCache();
