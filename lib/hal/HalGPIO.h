@@ -109,6 +109,7 @@ class HalGPIO {
   // runs mid-frame; without this the incoming activity double-activates).
   void clearTouchTapEvent();
   void prepareForDeepSleep();
+  bool restoreTouchAfterDisplayReset();
   void setSharedConfirmPowerShortPressEmitsPower(bool enabled);
 
   // Verify power button was held long enough after wakeup.

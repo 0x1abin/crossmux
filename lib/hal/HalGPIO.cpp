@@ -212,6 +212,8 @@ void HalGPIO::clearTouchTapEvent() { inputMgr.clearTouchTapEvent(); }
 
 void HalGPIO::prepareForDeepSleep() { inputMgr.prepareForDeepSleep(); }
 
+bool HalGPIO::restoreTouchAfterDisplayReset() { return inputMgr.reinitializeTouchAfterSharedReset(); }
+
 void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
 }

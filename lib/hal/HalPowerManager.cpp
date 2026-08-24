@@ -36,6 +36,12 @@ void HalPowerManager::begin() {
 }
 
 void HalPowerManager::setPowerSaving(bool enabled) {
+#if FREEINK_DEVICE_MURPHY_M4
+  // Hardware validation found FT6336U touch unreliable after runtime CPU clock
+  // changes. The main loop still uses its 50 ms idle delay on this target.
+  (void)enabled;
+  return;
+#else
   if (normalFreq <= 0) {
     return;  // invalid state
   }
@@ -68,6 +74,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   }
 
   // Otherwise, no change needed
+#endif
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
