@@ -10,7 +10,7 @@ class StatusBarSettingsActivity final : public UiListActivity {
   explicit StatusBarSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
   // Must equal ITEM_COUNT in the .cpp (static_assert'd there).
-  static constexpr int MAX_STATUS_BAR_ITEMS = 11;
+  static constexpr int MAX_STATUS_BAR_ITEMS = 8;
 
   void onEnter() override;
   void render(RenderLock&&) override;
