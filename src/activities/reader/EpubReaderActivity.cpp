@@ -1239,6 +1239,11 @@ void EpubReaderActivity::renderBook() {
   } else {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
+#if FREEINK_DEVICE_EEGO_A4
+  // The A4's status bar is lifted 2 px so the bezel does not cover it (see
+  // BaseTheme::drawStatusBar); reserve the same space for the content.
+  orientedMarginBottom += 2;
+#endif
 
   const uint16_t viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
   const uint16_t viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
