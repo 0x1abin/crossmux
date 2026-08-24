@@ -11,16 +11,18 @@ pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 Hardware profiles and drivers live in the pinned `0x1abin/freeink-sdk`
-submodule. CrossMux adds only the build, frontlight settings, and experimental
-product gates: AirPage and remote OTA are hidden, while reading, library,
-settings, Web file transfer, and same-target SD firmware update remain.
+submodule on its long-lived `crossmux` branch. The M4 button, FT6336U touch and
+GPIO/LEDC frontlight paths track upstream FreeInk commit `e4d3cc33`; CrossMux
+retains the two display batches, RX8010, GPIO43 charge input, SDMMC and product
+gates. AirPage and remote OTA are hidden, while reading, library, settings, Web
+file transfer, and same-target SD firmware update remain.
 
 The desktop target models the 800x480 panel, `murphy_m4` identity, touch and
 rotation, RTC, buttons, dual-channel frontlight state, and Power-only wake. Use
 the mouse for touch, arrows for Up/Down, `P` for Power, and `S` for sleep; M4
 has no Home key, so `H` is ignored. It does not replace hardware tests for
-display batches/ghosting, FT6336 polling, SDMMC contention, PWM curves, PSRAM,
-or standby current.
+display batches/ghosting, FT6336U IRQ/reset behavior, SDMMC contention, PWM
+curves, PSRAM, or standby current.
 
 The default SSD1677 configuration targets the second production batch with
 R13 fitted and uses the verified `0x50` pseudo-temperature. To build for the
@@ -54,14 +56,23 @@ and app at `0x10000` without overwriting NVS.
 - Verify direction, edge pattern, Full/Fast/grayscale and ghosting on both
   display batches.
 - Verify four-corner touch, swipes and rotations, including a short touch while
-  an e-paper refresh blocks the main loop; record the FT6336 task stack high-water mark.
-- Verify GPIO0/1/2 buttons, concurrent 4-bit SDMMC/display use, ADC9 battery,
-  active-low GPIO43 charging, and RX8010 power-loss retention/VLF handling.
-- Verify warm/cool PWM curves and restoration after wake.
+  an e-paper refresh blocks the main loop; confirm GPIO44 active-low IRQ and
+  that GPIO7 display reset is followed by successful FT6336U reinitialization.
+- Verify GPIO1/2 navigation and GPIO0 shared input: short press emits only
+  Confirm (or only Power when the existing short-power option is enabled), and
+  long press emits only Power.
+- Exercise touch while repeatedly reading/writing RX8010; confirm both devices
+  share I²C1 without conflicts or bus/device recreation. Also verify concurrent
+  4-bit SDMMC/display use, ADC9 battery, active-low GPIO43 charging, and RX8010
+  power-loss retention/VLF handling.
+- Measure GPIO47/48 at about 25 kHz / 10-bit and verify the gamma curve at
+  0/1/5/50/100%, both color-temperature endpoints, off, and wake restoration.
 - Cycle deep sleep and confirm GPIO10/45 rails turn off, frontlight is off,
   GPIO0 wakes the device, and standby current is stable.
-- Record internal heap, largest block and PSRAM through repeated reading,
-  grayscale and Wi-Fi cycles; none may show a continuing decline.
+- Record free heap, minimum free heap, largest block and PSRAM before/after
+  initialization and through repeated touch/RTC/sleep, reading, grayscale and
+  Wi-Fi cycles. The removed M4-only touch task must be absent, I²C handles must
+  be allocated only at startup, and no metric may show a continuing decline.
 
 AHT20, SC7A20, runtime panel-batch settings, AirPage, remote OTA and complex SD
 fallback remain outside this experimental target.
