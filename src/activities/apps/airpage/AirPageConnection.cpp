@@ -21,7 +21,9 @@ namespace {
 constexpr char kMqttHost[] = "mqtt-cn.uipcat.com";
 constexpr uint16_t kMqttPort = 1883;
 constexpr uint16_t kMqttSocketTimeoutSeconds = 5;
-constexpr uint16_t kMqttKeepAliveSeconds = 30;
+constexpr uint16_t kMqttKeepAliveSeconds = 57;
+constexpr char kMqttOnline[] = "online";
+constexpr char kMqttOffline[] = "offline";
 constexpr uint32_t kWifiConnectTimeoutMs = 15000u;
 constexpr uint32_t kLiveRetryWindowMs = 120000u;
 constexpr uint32_t kRetryDelaysMs[] = {5000u, 10000u, 20000u, 30000u};
@@ -59,7 +61,7 @@ AirPageConnection::Event AirPageConnection::begin(const bool realtime) {
 }
 
 void AirPageConnection::stop() {
-  if (mqtt_.connected()) mqtt_.disconnect();
+  disconnectBroker();
   state_ = State::Off;
   sPushPending = false;
   teardownWifi();
@@ -87,7 +89,7 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
   retryCount_ = 0;
 
   if (!realtime_) {
-    if (mqtt_.connected()) mqtt_.disconnect();
+    disconnectBroker();
     if (wifiConnected()) {
       state_ = State::WifiOnline;
     } else {
@@ -147,7 +149,7 @@ AirPageConnection::Event AirPageConnection::scheduleRetry() {
 }
 
 AirPageConnection::Event AirPageConnection::pause(const Event event) {
-  if (mqtt_.connected()) mqtt_.disconnect();
+  disconnectBroker();
   state_ = State::Paused;
   teardownWifi();
   return event;
@@ -156,20 +158,37 @@ AirPageConnection::Event AirPageConnection::pause(const Event event) {
 bool AirPageConnection::connectBroker() {
   char clientId[24];
   snprintf(clientId, sizeof(clientId), "%s-%s", gpio.deviceIsX3() ? "x3" : "x4", deviceId().c_str());
-  if (!mqtt_.connect(clientId)) {
+  char statusTopic[64];
+  snprintf(statusTopic, sizeof(statusTopic), "airpage/device/%s/status", deviceId().c_str());
+  if (!mqtt_.connect(clientId, statusTopic, 0, true, kMqttOffline)) {
     LOG_ERR("AIRP", "MQTT connect failed (state=%d)", mqtt_.state());
     return false;
   }
 
-  char topic[64];
-  snprintf(topic, sizeof(topic), "airpage/device/%s/refresh", deviceId().c_str());
-  if (!mqtt_.subscribe(topic)) {
-    LOG_ERR("AIRP", "MQTT subscribe failed: %s", topic);
-    mqtt_.disconnect();
+  char refreshTopic[64];
+  snprintf(refreshTopic, sizeof(refreshTopic), "airpage/device/%s/refresh", deviceId().c_str());
+  if (!mqtt_.subscribe(refreshTopic)) {
+    LOG_ERR("AIRP", "MQTT subscribe failed: %s", refreshTopic);
+    disconnectBroker();
     return false;
   }
-  LOG_INF("AIRP", "MQTT online, subscribed %s", topic);
+  if (!mqtt_.publish(statusTopic, kMqttOnline, true)) {
+    LOG_ERR("AIRP", "MQTT online status failed: %s", statusTopic);
+    disconnectBroker();
+    return false;
+  }
+  LOG_INF("AIRP", "MQTT online, subscribed %s", refreshTopic);
   return true;
+}
+
+void AirPageConnection::disconnectBroker() {
+  if (!mqtt_.connected()) return;
+  char statusTopic[64];
+  snprintf(statusTopic, sizeof(statusTopic), "airpage/device/%s/status", deviceId().c_str());
+  if (!mqtt_.publish(statusTopic, kMqttOffline, true)) {
+    LOG_ERR("AIRP", "MQTT offline status failed: %s", statusTopic);
+  }
+  mqtt_.disconnect();
 }
 
 AirPageConnection::Event AirPageConnection::pump(const bool allowPush) {

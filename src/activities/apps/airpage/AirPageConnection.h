@@ -50,6 +50,7 @@ class AirPageConnection final {
   bool startWifiAssociation();
   void teardownWifi();
   bool connectBroker();
+  void disconnectBroker();
   void resetRetryWindow();
   Event scheduleRetry();
   Event pause(Event event);
