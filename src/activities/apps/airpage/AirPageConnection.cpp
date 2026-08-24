@@ -21,7 +21,7 @@ namespace {
 constexpr char kMqttHost[] = "mqtt-cn.uipcat.com";
 constexpr uint16_t kMqttPort = 1883;
 constexpr uint16_t kMqttSocketTimeoutSeconds = 5;
-constexpr uint16_t kMqttKeepAliveSeconds = 30;
+constexpr uint16_t kMqttKeepAliveSeconds = 57;
 constexpr uint32_t kWifiConnectTimeoutMs = 15000u;
 constexpr uint32_t kLiveRetryWindowMs = 120000u;
 constexpr uint32_t kRetryDelaysMs[] = {5000u, 10000u, 20000u, 30000u};

@@ -105,7 +105,10 @@ void AirPageActivity::onEnter() {
   uploadUrl_ += kAirPageBase;
   uploadUrl_ += "/?id=";
   uploadUrl_ += deviceId;
-  uploadUrl_ += gpio.deviceIsX3() ? "&type=xteink-x3" : "&type=xteink-x4";
+  char displayParams[48];
+  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray4",
+           static_cast<unsigned>(renderer.getDisplayHeight()), static_cast<unsigned>(renderer.getDisplayWidth()));
+  uploadUrl_ += displayParams;
 
   downloadUrl_.reserve(64 + deviceId.size());
   downloadUrl_ = "https://";
