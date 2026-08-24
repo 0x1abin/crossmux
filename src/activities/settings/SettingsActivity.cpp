@@ -223,6 +223,13 @@ void SettingsActivity::rebuildSettingsLists() {
       }
       controlsSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_SYSTEM) {
+      // These stay in the shared list for persistence and the web API, but the
+      // device UI owns them in the Date & Time submenu.
+      if (setting.valuePtr == &CrossPointSettings::clockAutoSync ||
+          setting.valuePtr == &CrossPointSettings::clockUtcOffsetQ ||
+          setting.valuePtr == &CrossPointSettings::clockFormat) {
+        continue;
+      }
       systemSettings.push_back(setting);
     }
   }
