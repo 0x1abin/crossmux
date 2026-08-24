@@ -102,8 +102,12 @@ const ThemeMetrics& UITheme::getMetrics() const {
 }
 
 bool UITheme::showSelectionCursor() const {
+#ifdef CROSSPOINT_EMULATED
+  return true;
+#else
   return SelectionCursorPolicy::visible(currentType == CrossPointSettings::UI_THEME::INX, gpio.hasTouch(),
                                         gpio.lastInputModality());
+#endif
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
