@@ -533,7 +533,14 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   SETTINGS.sdFontFlashPreload = 0;
   SETTINGS.saveToFile();
   exitInProgress_ = false;
-  optionPopup_.show(StrId::STR_FONT_PRELOAD_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+  // Preload failure is informational (the font still loads from SD at runtime);
+  // acknowledging the popup exits exactly like the success path, with a
+  // cancelled result so the caller does not treat it as a font change.
+  ActivityResult result;
+  result.isCancelled = true;
+  setResult(std::move(result));
+  optionPopup_.show(StrId::STR_FONT_PRELOAD_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0,
+                    [this](int) { completeExit(); });
   requestUpdate();
 }
 

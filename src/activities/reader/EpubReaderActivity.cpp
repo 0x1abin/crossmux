@@ -1239,6 +1239,11 @@ void EpubReaderActivity::renderBook() {
   } else {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
+#if FREEINK_DEVICE_EEGO_A4
+  // The A4's status bar is lifted 4 px so the bezel does not cover it (see
+  // BaseTheme::drawStatusBar); reserve the same space for the content.
+  orientedMarginBottom += 4;
+#endif
 
   const uint16_t viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
   const uint16_t viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
@@ -1650,8 +1655,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   std::optional<FontCacheManager::PrewarmScope> prewarmScope;
   if (fcm->needsPrewarmScan(fontId)) {
     prewarmScope.emplace(*fcm);
+    // Scan pass records the page text only (status bar glyphs are flash-resident
+    // UI fonts and would otherwise shadow the reader font in the prewarm).
     renderPage();
-    renderStatusBar();
     prewarmScope->endScanAndPrewarm();
   } else {
     fcm->clearCache();

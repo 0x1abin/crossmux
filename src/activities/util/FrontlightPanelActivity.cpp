@@ -2,6 +2,7 @@
 
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <HalFrontlight.h>
 #include <I18n.h>
 
@@ -43,6 +44,12 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
+#if FREEINK_DEVICE_EEGO_A4
+  // The first frame draws over the reader's gray AA page; a HALF refresh keeps
+  // the overlay clean instead of ghosting. Other boards keep the standard
+  // FAST_REFRESH first frame (X4 Pro reference behavior).
+  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+#endif
 
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
@@ -69,6 +76,11 @@ void FrontlightPanelActivity::onExit() {
     SETTINGS.saveToFile();
   }
   Activity::onExit();
+#if FREEINK_DEVICE_EEGO_A4
+  // The overlay pops back to the reader's gray AA page; force a clean first
+  // frame so the panel's white region does not ghost over the text.
+  renderer.requestNextFullRefresh();
+#endif
 }
 
 void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, void* user) {

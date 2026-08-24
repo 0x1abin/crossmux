@@ -5,6 +5,7 @@
 #include <SdCardFont.h>
 
 #include <cstring>
+#include <iterator>
 
 #ifdef ENABLE_CHINESE_VERSION
 namespace {
@@ -100,6 +101,16 @@ bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanni
 void FontCacheManager::recordText(const char* text, const int fontId, EpdFontFamily::Style style) {
   scanText_ += text;
   if (scanFontId_ < 0) scanFontId_ = fontId;
+  if (scanFontIdCount_ < static_cast<int>(std::size(scanFontIds_))) {
+    bool known = false;
+    for (int i = 0; i < scanFontIdCount_; i++) {
+      if (scanFontIds_[i] == fontId) {
+        known = true;
+        break;
+      }
+    }
+    if (!known) scanFontIds_[scanFontIdCount_++] = fontId;
+  }
   const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
   const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
   uint32_t cpCount = 0;
@@ -135,6 +146,10 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
   manager_->scanText_.reserve(2048);  // Pre-allocate to avoid heap fragmentation from repeated concat
   memset(manager_->scanStyleCounts_, 0, sizeof(manager_->scanStyleCounts_));
   manager_->scanFontId_ = -1;
+  manager_->scanFontIdCount_ = 0;
+  for (int i = 0; i < static_cast<int>(std::size(manager_->scanFontIds_)); i++) {
+    manager_->scanFontIds_[i] = -1;
+  }
 #ifdef ENABLE_CHINESE_VERSION
   manager_->missingChineseCodepoint_ = 0;
 #endif
@@ -151,7 +166,18 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   }
   if (styleMask == 0) styleMask = 1;  // default to regular
 
-  manager_->prewarmCache(manager_->scanFontId_, manager_->scanText_.c_str(), styleMask);
+  // Prewarm every distinct font seen during the scan: a UI font that drew
+  // before the body text (status bar, placeholders) must not steal the whole
+  // prewarm; the reader font carrying the page text is among the recorded ids.
+  if (manager_->scanFontIdCount_ == 0 && manager_->scanFontId_ >= 0) {
+    manager_->scanFontIds_[0] = manager_->scanFontId_;
+    manager_->scanFontIdCount_ = 1;
+  }
+  for (int i = 0; i < manager_->scanFontIdCount_; i++) {
+    const int fontId = manager_->scanFontIds_[i];
+    if (fontId == -1) continue;  // unused slot; SD font ids are signed FNV hashes and may be negative
+    manager_->prewarmCache(fontId, manager_->scanText_.c_str(), styleMask);
+  }
 
   // Free scan string memory
   manager_->scanText_.clear();

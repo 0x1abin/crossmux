@@ -61,6 +61,11 @@ class FontCacheManager {
   std::string scanText_;
   uint32_t scanStyleCounts_[4] = {};
   int scanFontId_ = -1;
+  // All distinct font ids seen during the scan; the prewarm runs for each so a
+  // UI font drawn before the body text (e.g. the status bar) can never hijack
+  // the whole scan into the wrong font.
+  int scanFontIds_[4] = {-1, -1, -1, -1};
+  int scanFontIdCount_ = 0;
 #ifdef ENABLE_CHINESE_VERSION
   uint32_t missingChineseCodepoint_ = 0;
 #endif
