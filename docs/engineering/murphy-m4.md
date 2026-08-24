@@ -17,6 +17,12 @@ retains the two display batches, RX8010, GPIO43 charge input, SDMMC and product
 gates. AirPage and remote OTA are hidden, while reading, library, settings, Web
 file transfer, and same-target SD firmware update remain.
 
+The M4 keeps its boot CPU frequency fixed because hardware validation found
+FT6336U input unreliable after runtime clock changes. Idle power saving still
+uses the normal 50 ms main-loop delay. Touch initialization reads back the
+volatile mode, threshold, and report-rate registers before accepting input;
+invalid status/event/coordinate frames are discarded without latching contact.
+
 The desktop target models the 800x480 panel, `murphy_m4` identity, touch and
 rotation, RTC, buttons, dual-channel frontlight state, and Power-only wake. Use
 the mouse for touch, arrows for Up/Down, `P` for Power, and `S` for sleep; M4
@@ -57,7 +63,9 @@ and app at `0x10000` without overwriting NVS.
   display batches.
 - Verify four-corner touch, swipes and rotations, including a short touch while
   an e-paper refresh blocks the main loop; confirm GPIO44 active-low IRQ and
-  that GPIO7 display reset is followed by successful FT6336U reinitialization.
+  that GPIO7 display reset is followed by successful FT6336U reinitialization
+  with `0x00=0x00`, `0x80=0x16`, and `0x88=0x04` read back correctly. Confirm
+  invalid frames neither create phantom touches nor leave an active touch stuck.
 - Verify GPIO1/2 navigation and GPIO0 shared input: short press emits only
   Confirm (or only Power when the existing short-power option is enabled), and
   long press emits only Power.
@@ -69,6 +77,8 @@ and app at `0x10000` without overwriting NVS.
   0/1/5/50/100%, both color-temperature endpoints, off, and wake restoration.
 - Cycle deep sleep and confirm GPIO10/45 rails turn off, frontlight is off,
   GPIO0 wakes the device, and standby current is stable.
+- Repeatedly alternate more than three seconds of idle time with touch input;
+  confirm the CPU clock remains at its boot frequency and touch stays responsive.
 - Record free heap, minimum free heap, largest block and PSRAM before/after
   initialization and through repeated touch/RTC/sleep, reading, grayscale and
   Wi-Fi cycles. The removed M4-only touch task must be absent, I²C handles must
