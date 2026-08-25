@@ -46,10 +46,10 @@ jobs:
         id: source
         run: |
           set -euo pipefail
-          git -C freeink-sdk fetch origin crossmux/inx-compat:refs/remotes/origin/crossmux/inx-compat
+          git -C freeink-sdk fetch origin crossmux:refs/remotes/origin/crossmux
           sdk_sha="$(git -C freeink-sdk rev-parse HEAD)"
-          if ! git -C freeink-sdk merge-base --is-ancestor "$sdk_sha" origin/crossmux/inx-compat; then
-            echo "::error::SDK gitlink $sdk_sha is not contained in 0x1abin/freeink-sdk crossmux/inx-compat"
+          if ! git -C freeink-sdk merge-base --is-ancestor "$sdk_sha" origin/crossmux; then
+            echo "::error::SDK gitlink $sdk_sha is not contained in 0x1abin/freeink-sdk crossmux"
             exit 1
           fi
           echo "crossmux_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
