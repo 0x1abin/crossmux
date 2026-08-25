@@ -14,8 +14,9 @@ Hardware profiles and drivers live in the pinned `0x1abin/freeink-sdk`
 submodule on its long-lived `crossmux` branch. The M4 button, FT6336U touch and
 GPIO/LEDC frontlight paths track upstream FreeInk commit `e4d3cc33`; CrossMux
 retains the two display batches, RX8010, GPIO43 charge input, SDMMC and product
-gates. AirPage and remote OTA are hidden, while reading, library, settings, Web
-file transfer, and same-target SD firmware update remain.
+gates. AirPage, reading, library, settings, Web file transfer, and same-target
+SD firmware update remain available; remote OTA/catalog publication remains
+withheld.
 
 The M4 keeps its boot CPU frequency fixed because hardware validation found
 FT6336U input unreliable after runtime clock changes. Idle power saving still
@@ -84,5 +85,5 @@ and app at `0x10000` without overwriting NVS.
   Wi-Fi cycles. The removed M4-only touch task must be absent, I²C handles must
   be allocated only at startup, and no metric may show a continuing decline.
 
-AHT20, SC7A20, runtime panel-batch settings, AirPage, remote OTA and complex SD
-fallback remain outside this experimental target.
+AHT20, SC7A20, runtime panel-batch settings, remote OTA/catalog publication and
+complex SD fallback remain outside this experimental target.

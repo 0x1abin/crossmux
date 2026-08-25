@@ -15,9 +15,9 @@ The target inherits the normal DIO flash mode, 16 MB partition table, single
 framebuffer, and USB CDC settings. Hardware descriptions and drivers live in
 the pinned `0x1abin/freeink-sdk` submodule; CrossMux only adds product behavior:
 the board name comes from `BoardConfig::ACTIVE.name`, normal view content has a
-symmetric 28 px safe margin, and the experimental build hides AirPage and
-remote OTA. Reading, library, settings, Web file transfer, and same-target SD
-firmware update remain available.
+symmetric 28 px safe margin, and AirPage is available. Reading, library,
+settings, Web file transfer, and same-target SD firmware update remain
+available; remote OTA/catalog publication remains withheld.
 
 The desktop target models the 768x552 panel, `eego_a4` identity, symmetric
 28 px content margin, touch/rotation, RTC, buttons, the screen Home/Back key,
@@ -61,5 +61,5 @@ overwriting NVS. Do not use the C3 release artifacts.
   high-level wake, and record standby current.
 - Record internal heap, largest block, and PSRAM at boot, book open, grayscale,
   and Wi-Fi; repeated cycles must not show a continuing decline.
-AirPage, remote OTA/catalog publication, GPIO44 hard power-off, and additional
-hardware language environments remain outside this experimental target.
+Remote OTA/catalog publication, GPIO44 hard power-off, and additional hardware
+language environments remain outside this experimental target.
