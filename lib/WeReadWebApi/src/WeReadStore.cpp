@@ -25,13 +25,6 @@ struct IndexHeader {
 };
 static_assert(sizeof(IndexHeader) == 12);
 
-struct CacheGenerationRecord {
-  uint32_t magic = kCacheGenerationMagic;
-  uint16_t generation = kCacheGeneration;
-  uint16_t reserved = 0;
-};
-static_assert(sizeof(CacheGenerationRecord) == 8);
-
 struct ShelfSortKey {
   uint32_t readUpdateTime;
   uint32_t sourceIndex;
@@ -117,7 +110,6 @@ constexpr size_t kMaxSessionFileSize = 2048;
 constexpr char kDisclaimerAcceptanceMarker[] = "WRD1\n";
 constexpr char kSessionMagic[] = "WRA1\n";
 constexpr char kShelfPartPath[] = "/.crosspoint/weread/shelf.bin.part";
-constexpr char kCacheGenerationPartPath[] = "/.crosspoint/weread/cache.version.part";
 
 template <size_t N>
 bool setBounded(char (&dest)[N], const char* value, const size_t len) {
@@ -342,8 +334,7 @@ bool clearCache() {
         ok = false;
         continue;
       }
-      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0 ||
-          strcmp(name, "cache.version") == 0) {
+      if (strcmp(name, "session.bin") == 0 || strcmp(name, "disclaimer.accepted") == 0) {
         continue;
       }
       isDirectory = entry.isDirectory();
@@ -363,58 +354,6 @@ bool clearCache() {
     }
   }
   return ok;
-}
-
-bool ensureCacheGeneration() {
-  if (!ensureRoot()) {
-    LOG_ERR("WR", "Cache generation: failed to prepare root");
-    return false;
-  }
-
-  CacheGenerationRecord stored;
-  bool valid = false;
-  {
-    HalFile file;
-    valid = Storage.openFileForRead("WR", kCacheGenerationPath, file) &&
-            file.fileSize() == sizeof(CacheGenerationRecord) &&
-            file.read(&stored, sizeof(stored)) == static_cast<int>(sizeof(stored)) &&
-            stored.magic == kCacheGenerationMagic && stored.reserved == 0;
-  }
-  if (valid && stored.generation == kCacheGeneration) {
-    if (Storage.exists(kCacheGenerationPartPath) && !Storage.remove(kCacheGenerationPartPath)) {
-      LOG_ERR("WR", "Cache generation: failed to remove stale part");
-      return false;
-    }
-    return true;
-  }
-
-  if (valid) {
-    LOG_INF("WR", "Cache generation changed: old=%u new=%u", static_cast<unsigned>(stored.generation),
-            static_cast<unsigned>(kCacheGeneration));
-  } else {
-    LOG_INF("WR", "Cache generation missing or invalid; rebuilding for version %u",
-            static_cast<unsigned>(kCacheGeneration));
-  }
-  if (!clearCache()) {
-    LOG_ERR("WR", "Cache generation: failed to clear stale cache");
-    return false;
-  }
-
-  const CacheGenerationRecord current;
-  bool written = false;
-  {
-    HalFile file;
-    written = Storage.openFileForWrite("WR", kCacheGenerationPartPath, file) &&
-              file.write(&current, sizeof(current)) == sizeof(current);
-    if (written) file.flush();
-  }
-  if (!written || !atomicReplace(kCacheGenerationPartPath, kCacheGenerationPath)) {
-    if (Storage.exists(kCacheGenerationPartPath)) Storage.remove(kCacheGenerationPartPath);
-    LOG_ERR("WR", "Cache generation: failed to persist version %u", static_cast<unsigned>(kCacheGeneration));
-    return false;
-  }
-  LOG_INF("WR", "Cache generation ready: version=%u", static_cast<unsigned>(kCacheGeneration));
-  return true;
 }
 
 bool IndexWriter::begin(const std::string& finalPath, const uint32_t magic, const uint16_t recordSize) {

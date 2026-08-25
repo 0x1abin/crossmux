@@ -106,12 +106,12 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 2. Version mismatch → Cache auto-invalidated and regenerated
 3. Document format changes in [../file-formats.md](../file-formats.md)
 
-WeRead also has a global cache generation in
-`/.crosspoint/weread/cache.version`. Increment `kCacheGeneration` when derived
-WeRead cache meaning or paths become incompatible. A binary layout change must
-also increment that file's own magic or version. Do not increment the global
-generation for UI-only or network-only changes, and do not tie it to
-`CROSSPOINT_VERSION`.
+WeRead caches invalidate independently through their own magic/version or a
+versioned filename. Do not add a global generation that recursively clears the
+cache during application startup. Chapter XHTML compatibility is paired with
+its image-index magic, so a mismatch causes that chapter to be rebuilt when the
+user caches the book. Manual cache clearing remains the fallback for disposable
+legacy files.
 
 **Example** (incrementing section format version):
 ```cpp

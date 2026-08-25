@@ -304,7 +304,6 @@ class Operation {
     return responseCount > 0 && !stalled && !looped;
   }
 
-  bool prepareCacheGeneration();
   void startLogin(Phase resume);
   void requestAuthentication(Phase resume);
   void abortBrowseCache();

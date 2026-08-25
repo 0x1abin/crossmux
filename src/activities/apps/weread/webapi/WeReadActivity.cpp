@@ -443,13 +443,6 @@ void WeReadActivity::onEnter() {
 
 void WeReadActivity::enterApp() {
   disclaimerSaveFailed_ = false;
-  if (!WeReadStore::ensureCacheGeneration()) {
-    retryJob_ = Job::Sync;
-    error_ = WeReadClient::Error::SdCard;
-    state_.store(State::Error);
-    requestUpdate();
-    return;
-  }
   // This bounded 832-byte probe is gone before TLS and avoids a transient heap
   // allocation that could fragment the ESP32-C3 heap.
   WeReadStore::Session session;
