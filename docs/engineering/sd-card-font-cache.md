@@ -158,9 +158,12 @@ The hidden `sdFontFlashPreload` setting stores the user's preference:
 - The Chinese EPUB missing-glyph flow uses the same Text Settings preload path
   in an automatic exit mode. It first requires the `NotoSansSC` manifest to
   contain the reader's exact point size, so `ensureLoaded()` cannot snap the
-  setting. It downloads the whole family but caches only that size, then silently
-  restarts to the same book. A cache failure persists `sdFontFlashPreload=0` and
-  continues from SD after one acknowledgement.
+  setting. It downloads the whole family, saves the selection with preload off,
+  and silently restarts before loading it. This avoids asking the Wi-Fi/TLS-
+  fragmented heap for the complete CJK font's 48,000-byte contiguous interval
+  table. The clean boot loads and caches only the selected size, then returns to
+  the same book. A cache failure persists `sdFontFlashPreload=0` and continues
+  from SD after one acknowledgement.
 - A newly installed OTA image automatically rebuilds once, after successful
   firmware confirmation, when the selected SD font exists and the cache is
   invalid.
@@ -189,6 +192,8 @@ verification failure; all continue with the SD font.
 
 During the automatic reader flow, power loss before a font file's verified
 rename leaves the previous selection active; `.part` files are never selected.
+Power loss after the selection is saved but before the software restart safely
+loads the font from SD on the next cold boot and skips automatic preprocessing.
 Power loss during preprocessing leaves an invalid cache header, so the selected
 font safely loads from SD on the next boot. Failed or cancelled network flows
 use a one-shot RTC resume target to avoid reopening the missing-glyph prompt

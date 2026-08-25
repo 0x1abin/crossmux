@@ -141,12 +141,14 @@ kept in this repository.
 
 In a Chinese EPUB, confirming the incomplete-font prompt starts an automatic
 reader-only flow: connect Wi-Fi, download and verify the complete `NotoSansSC`
-family, select the exact current point size, and preprocess that size. Success
-silently restarts into the same book and visible text position; page numbers can
-change because the new font repaginates the book. Back or Wi-Fi cancellation
-returns to the book without changing the selection, while Home always returns
-to Home. Download errors offer Retry and Back. A preprocessing failure keeps
-the verified SD font, disables Flash acceleration, and returns after one notice.
+family, and save the exact current point size. It then silently restarts before
+loading the font, avoiding the fragmented heap left by Wi-Fi/TLS, and preprocesses
+that size on the clean boot before returning to the same book and visible text
+position. Page numbers can change because the new font repaginates the book. Back
+or Wi-Fi cancellation returns to the book without changing the selection, while
+Home always returns to Home. Download or clean-boot font-load errors offer Retry
+and Back. A preprocessing failure keeps the verified SD font, disables Flash
+acceleration, and returns after one notice.
 
 The manual font manager and the prompt opened from Text Settings keep the
 interactive preview flow described above.

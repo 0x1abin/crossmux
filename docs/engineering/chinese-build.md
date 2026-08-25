@@ -272,12 +272,13 @@ loop opens the activity. A reader session prompts once, and an active SD font
 is never rechecked. The Text Settings prompt retains the ordinary **Manage
 Fonts** flow. The EPUB prompt instead downloads and verifies the complete
 `NotoSansSC` family, rejects a catalog without the exact current point size,
-selects it without changing the point size, and automatically runs the existing
-Flash preprocessing path. Success silently restarts into the same book and
-visible-text offset. Back and cancellation return there without changing the
-selection; Home still routes to Home. Download errors remain on a Retry/Back
-page. A preprocessing failure keeps the verified family, disables Flash
-preload, shows one notice, and continues from SD.
+selects it without changing the point size, and silently restarts before loading
+it. The clean boot supplies the contiguous heap required by the complete CJK
+interval table, then runs the existing Flash preprocessing path and returns to
+the same book and visible-text offset. Back and cancellation return there without
+changing the selection; Home still routes to Home. Download and clean-boot load
+errors remain on a Retry/Back page. A preprocessing failure keeps the verified
+family, disables Flash preload, shows one notice, and continues from SD.
 
 The manual manager still allows install/update/delete and batch downloads. A
 single download selects that family and opens the text preview; **Download
