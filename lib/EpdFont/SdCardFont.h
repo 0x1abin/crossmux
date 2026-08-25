@@ -7,6 +7,12 @@
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+#include "Memory.h"
+#include "SdCardFontGlyphCache.h"
+#endif
+
+class FontFile;
 
 // On-disk binary format version for .cpfont files. Defined as a preprocessor
 // macro (rather than a constexpr) so it can be stringified into the SD-fonts
@@ -36,7 +42,7 @@ class SdCardFont {
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
   // Supports v4 (multi-style) format.
   // Returns true on success.
-  bool load(const char* path, bool preferFlash = false);
+  bool load(const char* path, bool preferFlash = false, bool enablePsramGlyphCache = false);
   bool usingFlash() const { return useFlash_; }
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
@@ -260,6 +266,12 @@ class SdCardFont {
   char filePath_[128] = {};
   mutable bool useFlash_ = false;
   size_t flashPayloadSize_ = 0;
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  mutable bool glyphCacheAllowed_ = false;
+  mutable bool glyphCacheAttempted_ = false;
+  mutable memory::ByteBuffer glyphCacheBuffer_;
+  mutable SdCardFontGlyphCache glyphCache_;
+#endif
 
   // Overflow context: glyphMissHandler needs to know which style it's serving
   struct OverflowContext {
@@ -316,6 +328,15 @@ class SdCardFont {
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
+  enum class GlyphReadResult : uint8_t { CacheHit, SourceRead, Failed };
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  bool ensureGlyphCache() const;
+#endif
+  GlyphReadResult readGlyphMetadata(FontFile& file, uint8_t styleIdx, uint32_t glyphIndex, EpdGlyph& glyph,
+                                    bool seekFirst) const;
+  GlyphReadResult readGlyphBitmap(FontFile& file, uint8_t styleIdx, uint32_t glyphIndex, const EpdGlyph& glyph,
+                                  uint8_t* bitmap, bool seekFirst) const;
+  const char* sourceName() const;
   int fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCount, uint8_t styleMask);
   template <typename Iter>
   int buildAdvanceTableRange(Iter begin, Iter end, bool includeSpace, bool includeHyphen, uint8_t styleMask,

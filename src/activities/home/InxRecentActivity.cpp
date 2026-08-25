@@ -126,6 +126,9 @@ void InxRecentActivity::onEnter() {
   thumbnailHeight = 0;
   targetCoverStates.fill(CoverCacheState::Unchecked);
   fallbackCoverStates.fill(CoverCacheState::Unchecked);
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  clearCoverCaches();
+#endif
   requestUpdate();
 }
 
@@ -134,6 +137,9 @@ void InxRecentActivity::onExit() {
   bookStats.fill(nullptr);
   targetCoverStates.fill(CoverCacheState::Unchecked);
   fallbackCoverStates.fill(CoverCacheState::Unchecked);
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  clearCoverCaches();
+#endif
   thumbnailHeight = 0;
   Activity::onExit();
 }
@@ -148,9 +154,59 @@ void InxRecentActivity::setThumbnailHeight(const int height) {
   thumbnailHeight = height;
   targetCoverStates.fill(CoverCacheState::Unchecked);
   fallbackCoverStates.fill(CoverCacheState::Unchecked);
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  clearCoverCaches();
+#endif
 }
 
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+void InxRecentActivity::clearCoverCaches() {
+  std::for_each(targetCoverCaches.begin(), targetCoverCaches.end(), [](auto& cache) { cache = {}; });
+  std::for_each(fallbackCoverCaches.begin(), fallbackCoverCaches.end(), [](auto& cache) { cache = {}; });
+  cachedCoverBytes = 0;
+}
+
+InxRecentActivity::CoverCacheLoadResult InxRecentActivity::tryLoadCoverCache(HalFile& file, CoverRamCache& cache) {
+  if (cache.attempted) return CoverCacheLoadResult::Stream;
+  cache.attempted = true;
+
+  const size_t fileSize = file.fileSize();
+  if (fileSize == 0 || fileSize > MAX_CACHED_COVER_FILE_BYTES || cachedCoverBytes > MAX_COVER_CACHE_BYTES ||
+      fileSize > MAX_COVER_CACHE_BYTES - cachedCoverBytes) {
+    return CoverCacheLoadResult::Stream;
+  }
+  if (!memory::psramHasHeadroom(fileSize, fileSize, COVER_CACHE_MAX_ALLOC_RESERVE)) {
+    return CoverCacheLoadResult::Stream;
+  }
+
+  // A cover is up to 64 KB, so it cannot live on the task stack. Allocate once
+  // on first use and retain it for this Activity.
+  auto bytes = memory::makePsramByteBufferNoThrow(fileSize);
+  if (!bytes) return CoverCacheLoadResult::Stream;
+  if (!file.seek(0) || file.read(bytes.get(), fileSize) != static_cast<int>(fileSize)) {
+    LOG_ERR("INX", "Short read loading cover into PSRAM (%u bytes)", static_cast<unsigned>(fileSize));
+    file.seek(0);
+    return CoverCacheLoadResult::Stream;
+  }
+
+  Bitmap bitmap(bytes.get(), fileSize);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+    return CoverCacheLoadResult::Invalid;
+  }
+
+  cache.bytes = std::move(bytes);
+  cache.size = fileSize;
+  cachedCoverBytes += fileSize;
+  return CoverCacheLoadResult::Loaded;
+}
+#endif
+
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+bool InxRecentActivity::tryDrawBookCover(const std::string& path, const Rect& bounds, CoverCacheState& state,
+                                         CoverRamCache& cache) {
+#else
 bool InxRecentActivity::tryDrawBookCover(const std::string& path, const Rect& bounds, CoverCacheState& state) {
+#endif
   switch (state) {
     case CoverCacheState::Unchecked:
       if (!Storage.exists(path.c_str())) {
@@ -166,11 +222,39 @@ bool InxRecentActivity::tryDrawBookCover(const std::string& path, const Rect& bo
       return false;
   }
 
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  const auto drawCached = [this, &bounds, &state, &cache] {
+    Bitmap bitmap(cache.bytes.get(), cache.size);
+    if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+      cachedCoverBytes -= cache.size;
+      cache = {};
+      state = CoverCacheState::Missing;
+      return false;
+    }
+    return renderer.drawBitmapCropToFill(bitmap, bounds.x, bounds.y, bounds.width, bounds.height);
+  };
+
+  if (cache.bytes) return drawCached();
+#endif
+
   HalFile file;
   if (!Storage.openFileForRead("INX", path, file)) {
     state = CoverCacheState::Missing;
     return false;
   }
+
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  switch (tryLoadCoverCache(file, cache)) {
+    case CoverCacheLoadResult::Loaded:
+      return drawCached();
+    case CoverCacheLoadResult::Invalid:
+      state = CoverCacheState::Missing;
+      return false;
+    case CoverCacheLoadResult::Stream:
+      break;
+  }
+#endif
+
   Bitmap bitmap(file);
   if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
     state = CoverCacheState::Missing;
@@ -186,11 +270,19 @@ bool InxRecentActivity::drawBookCover(const int bookIndex, const Rect& bounds) {
     const RecentBook& book = (*books)[bookIndex];
     if (!book.coverBmpPath.empty()) {
       std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, thumbnailHeight);
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+      if (tryDrawBookCover(path, bounds, targetCoverStates[bookIndex], targetCoverCaches[bookIndex])) return true;
+#else
       if (tryDrawBookCover(path, bounds, targetCoverStates[bookIndex])) return true;
+#endif
       if (book.coverBmpPath.find("[HEIGHT]") != std::string::npos &&
           thumbnailHeight != InxMetrics::values.homeCoverHeight) {
         path = UITheme::getCoverThumbPath(book.coverBmpPath, InxMetrics::values.homeCoverHeight);
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+        if (tryDrawBookCover(path, bounds, fallbackCoverStates[bookIndex], fallbackCoverCaches[bookIndex])) return true;
+#else
         if (tryDrawBookCover(path, bounds, fallbackCoverStates[bookIndex])) return true;
+#endif
       }
     }
   }

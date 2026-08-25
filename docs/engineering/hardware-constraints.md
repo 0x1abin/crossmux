@@ -32,7 +32,9 @@ find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
 ### Hardware Specs
 * MCU: ESP32-C3 (Single-core RISC-V @ 160MHz)
 * RAM: ~380KB usable (VERY LIMITED - primary project constraint)
-  * **NO PSRAM**: ESP32-C3 has no PSRAM capability (unlike ESP32-S3)
+  * **ESP32-C3 has no PSRAM** and remains the compatibility baseline
+  * Supported ESP32-S3 N16R8 targets provide 8 MB OPI PSRAM, but every use must
+    retain the normal internal-heap fallback for builds or hardware without it
   * **Single Buffer Mode**: Only ONE 48KB framebuffer (not double-buffered)
 * Flash: 16MB (Instruction storage and static data)
 * Display: 800x480 E-Ink (Slow refresh, monochrome, 1-2s full update)

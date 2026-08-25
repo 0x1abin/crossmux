@@ -27,6 +27,13 @@ generates the missing covers under one framebuffer loan, then performs one
 final screen refresh. `Missing` is Activity-local, so leaving and reopening the
 theme allows a failed cover to be retried.
 
+On `BOARD_HAS_PSRAM` targets, Inx also keeps successfully validated thumbnail
+BMP files in an Activity-local PSRAM cache. Entries are capped at 64 KB and the
+cache at 512 KB; oversized files, allocation/read failures, and devices without
+usable PSRAM continue through the same SD streaming path. The cache owns no new
+on-disk format and is released when the Activity exits or its thumbnail height
+changes.
+
 TXT `index.bin` version 7 stores a partial or complete lazy page index, the
 detected source encoding, and the paragraph-spacing mode. It is invalidated by
 file-size, viewport, font, margin, alignment, or paragraph-spacing changes; see
