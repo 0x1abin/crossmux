@@ -140,6 +140,12 @@ void AirPageActivity::onExit() {
   LOG_DBG("AIRP", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()));
   Activity::onExit();
+#if FREEINK_DEVICE_EEGO_A4
+  // EEGO can render the AirPage image as a grayscale full-screen frame; force
+  // a clean first frame after exit so its pixels do not ghost into the next
+  // activity (same A4-only treatment as the EPUB reader).
+  renderer.requestNextFullRefresh();
+#endif
 }
 
 bool AirPageActivity::preventAutoSleep() { return phase_ != Phase::Idle || connection_.preventsAutoSleep(); }
@@ -371,6 +377,12 @@ void AirPageActivity::loop() {
 void AirPageActivity::setAirPageScreen(const Screen screen) {
   if (screen_ == screen) return;
   closeRouting();
+#if FREEINK_DEVICE_EEGO_A4
+  // Leaving the full-screen image for a normal UI page (QR/settings/history):
+  // the image may have been driven as a grayscale frame whose residue a plain
+  // FAST diff won't scrub. Force a clean first frame on the A4.
+  if (screen_ == Screen::Image && screen != Screen::Image) renderer.requestNextFullRefresh();
+#endif
   screen_ = screen;
 }
 
