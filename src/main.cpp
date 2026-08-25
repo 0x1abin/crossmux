@@ -35,6 +35,9 @@
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#ifdef ENABLE_CHINESE_VERSION
+#include "activities/settings/FontDownloadActivity.h"
+#endif
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -243,6 +246,7 @@ RTC_NOINIT_ATTR uint32_t silentRebootTarget;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
+constexpr uint32_t SILENT_REBOOT_TARGET_READER_SUPPRESS_FONT_PROMPT = 2;
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -275,11 +279,12 @@ void silentRestart() {
   ESP.restart();
 }
 
-void silentRestartToReader() {
+void silentRestartToReader(const bool suppressChineseFontPrompt) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  silentRebootTarget = SILENT_REBOOT_TARGET_READER;
+  silentRebootTarget =
+      suppressChineseFontPrompt ? SILENT_REBOOT_TARGET_READER_SUPPRESS_FONT_PROMPT : SILENT_REBOOT_TARGET_READER;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
-  LOG_DBG("MAIN", "Silent restart (target=reader)");
+  LOG_DBG("MAIN", "Silent restart (target=reader%s)", suppressChineseFontPrompt ? ", suppress-font-prompt" : "");
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   ESP.restart();
@@ -440,9 +445,15 @@ void setup() {
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
   const uint32_t snapshotTarget =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
+      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER_SUPPRESS_FONT_PROMPT) ? silentRebootTarget
+                                                                                                 : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
+#ifdef ENABLE_CHINESE_VERSION
+  if (snapshotTarget == SILENT_REBOOT_TARGET_READER_SUPPRESS_FONT_PROMPT) {
+    FontDownloadActivity::suppressChineseFontPromptThisBoot();
+  }
+#endif
 
   gpio.begin();
   powerManager.begin();
@@ -584,7 +595,9 @@ void setup() {
     activityManager.goToCrashReport();
   } else if (postOtaBoot) {
     activityManager.goHome();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
+  } else if (resume == BootResume::Silent &&
+             (snapshotTarget == SILENT_REBOOT_TARGET_READER ||
+              snapshotTarget == SILENT_REBOOT_TARGET_READER_SUPPRESS_FONT_PROMPT) &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent) {

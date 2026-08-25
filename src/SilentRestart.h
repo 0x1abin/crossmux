@@ -4,5 +4,5 @@
 // skips the boot splash and routes straight to a destination. Used to clear
 // heap fragmentation accumulated during a wifi session.
 
-void silentRestart();          // home screen
-void silentRestartToReader();  // currently-open EPUB (APP_STATE.openEpubPath)
+void silentRestart();                                                // home screen
+void silentRestartToReader(bool suppressChineseFontPrompt = false);  // currently-open EPUB (APP_STATE.openEpubPath)
