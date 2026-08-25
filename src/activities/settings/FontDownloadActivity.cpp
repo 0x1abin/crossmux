@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstring>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
 #include "SdCardFontSystem.h"
@@ -66,14 +67,19 @@ bool parseManifestPointSize(const char* familyName, const char* fileName, uint8_
 }  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const Purpose purpose)
+                                           const Purpose purpose, const StartMode startMode)
     : UiListActivity("FontDownload", renderer, mappedInput),
       purpose_(purpose),
+      startMode_(startMode),
       fontInstaller_(sdFontSystem.registry()) {}
 
 #ifdef ENABLE_CHINESE_VERSION
 bool FontDownloadActivity::wasChineseFontPromptShownThisBoot() {
   return chineseFontPromptShownThisBoot.load(std::memory_order_relaxed);
+}
+
+void FontDownloadActivity::suppressChineseFontPromptThisBoot() {
+  chineseFontPromptShownThisBoot.store(true, std::memory_order_relaxed);
 }
 #endif
 
@@ -93,13 +99,31 @@ void FontDownloadActivity::onEnter() {
   app.on(ACTION_CANCEL_DOWNLOAD, &FontDownloadActivity::onCancelDownload, this);
   app.on(ACTION_RETURN_TO_LIST, &FontDownloadActivity::onReturnToList, this);
   app.on(ACTION_RETRY_DOWNLOAD, &FontDownloadActivity::onRetryDownload, this);
-  if (purpose_ == Purpose::PromptThenManage) {
+  if (purpose_ == Purpose::ReaderAutoInstall) targetPointSize_ = SETTINGS.fontPointSize;
+  if (startMode_ == StartMode::ResumeFontLoadError) {
+#ifdef ENABLE_CHINESE_VERSION
+    suppressChineseFontPromptThisBoot();
+#endif
+    state_ = ERROR;
+    operation_ = DownloadOperation::None;
+    automaticError_ = AutomaticError::FontLoad;
+    requestUpdate();
+    return;
+  }
+  if (purpose_ != Purpose::Manage) {
     auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_CHINESE_FONT_INCOMPLETE),
                                                                 tr(STR_DOWNLOAD_FULL_CHINESE_FONT),
                                                                 ConfirmationActivity::BodyPlacement::PopupTitle);
     if (!confirmation) {
       LOG_ERR("FONT", "OOM allocating ConfirmationActivity (%zu bytes)", sizeof(ConfirmationActivity));
-      finish();
+#ifdef ENABLE_CHINESE_VERSION
+      chineseFontPromptShownThisBoot.store(true, std::memory_order_relaxed);
+#endif
+      if (purpose_ == Purpose::ReaderAutoInstall) {
+        finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+      } else {
+        finish();
+      }
       return;
     }
 #ifdef ENABLE_CHINESE_VERSION
@@ -107,7 +131,11 @@ void FontDownloadActivity::onEnter() {
 #endif
     startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
       if (result.isCancelled) {
-        finish();
+        if (purpose_ == Purpose::ReaderAutoInstall) {
+          finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+        } else {
+          finish();
+        }
       } else {
         startWifiSelection();
       }
@@ -120,23 +148,51 @@ void FontDownloadActivity::onEnter() {
 void FontDownloadActivity::startWifiSelection() {
   if (!startActivityForResultWith<WifiSelectionActivity>(
           [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); })) {
-    finish();
+    if (purpose_ == Purpose::ReaderAutoInstall) {
+      finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+    } else {
+      finish();
+    }
   }
 }
 
 void FontDownloadActivity::onExit() {
   Activity::onExit();
 
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
+  const bool wifiWasEnabled = WiFi.getMode() != WIFI_MODE_NULL;
+  if (wifiWasEnabled) {
     WiFi.disconnect(false);
     delay(30);
-    silentRestart();
+  }
+  if (exitRoute_ == ExitRoute::ReaderPreloadChineseFont) {
+    LOG_INF("FONT", "Network phase complete: free=%u, maxAlloc=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  }
+  if (!wifiWasEnabled && exitRoute_ != ExitRoute::ReaderPreloadChineseFont) return;
+
+  switch (exitRoute_) {
+    case ExitRoute::Home:
+      silentRestart();
+      return;
+    case ExitRoute::Reader:
+      silentRestartToReader();
+      return;
+    case ExitRoute::ReaderSuppressPrompt:
+      silentRestartToReader(true);
+      return;
+    case ExitRoute::ReaderPreloadChineseFont:
+      silentRestartToReaderAndPreloadChineseFont(targetPointSize_);
+      return;
   }
 }
 
 void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
-    finish();
+    if (purpose_ == Purpose::ReaderAutoInstall) {
+      finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+    } else {
+      finish();
+    }
     return;
   }
 
@@ -146,6 +202,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdateAndWait();
   NetworkStartup::prepare(renderer);
+  automaticError_ = AutomaticError::Download;
 
   if (!fetchAndParseManifest()) {
     {
@@ -155,12 +212,60 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
     return;
   }
 
+  if (purpose_ == Purpose::ReaderAutoInstall) {
+    startAutomaticDownload();
+    return;
+  }
+
   {
     RenderLock lock(*this);
     state_ = FAMILY_LIST;
     rowsDirty_ = true;  // families_ just loaded
     nav.selected = 0;
   }
+}
+
+bool FontDownloadActivity::startAutomaticDownload() {
+  const auto familyIt = std::find_if(families_.begin(), families_.end(), [](const auto& family) {
+    return family.name == SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY;
+  });
+  if (familyIt == families_.end()) {
+    LOG_ERR("FONT", "Manifest does not contain required family %s",
+            SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY);
+    RenderLock lock(*this);
+    state_ = ERROR;
+    operation_ = DownloadOperation::None;
+    automaticError_ = AutomaticError::FamilyMissing;
+    return false;
+  }
+
+  const bool hasExactPointSize =
+      std::any_of(files_.begin() + static_cast<ptrdiff_t>(familyIt->fileOffset),
+                  files_.begin() + static_cast<ptrdiff_t>(familyIt->fileOffset + familyIt->fileCount),
+                  [this](const auto& file) { return file.pointSize == targetPointSize_; });
+  if (!hasExactPointSize) {
+    LOG_ERR("FONT", "Required family %s does not contain point size %u",
+            SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY, static_cast<unsigned>(targetPointSize_));
+    RenderLock lock(*this);
+    state_ = ERROR;
+    operation_ = DownloadOperation::None;
+    automaticError_ = AutomaticError::PointSizeMissing;
+    return false;
+  }
+
+  downloadingFamilyIndex_ = static_cast<int>(familyIt - families_.begin());
+  operation_ = DownloadOperation::Single;
+  selectionUpdated_ = false;
+  accelerationCompleted_ = false;
+  currentFileIndex_ = 0;
+  currentFileTotal_ = familyIt->fileCount;
+  downloadSingle(downloadingFamilyIndex_);
+  return true;
+}
+
+void FontDownloadActivity::finishAutomaticFlow(const ExitRoute route) {
+  exitRoute_ = route;
+  finish();
 }
 
 // --- Manifest fetching ---
@@ -360,7 +465,12 @@ void FontDownloadActivity::updateAll() {
 void FontDownloadActivity::downloadSingle(const int familyIndex) {
   if (familyIndex < 0 || familyIndex >= static_cast<int>(families_.size())) return;
   auto& family = families_[familyIndex];
-  if (downloadFamily(family) == DownloadResult::Success) selectDownloadedFontAndPreview(family.name.c_str());
+  const DownloadResult result = downloadFamily(family);
+  if (result == DownloadResult::Success) {
+    selectDownloadedFontAndPreview(family.name.c_str());
+  } else if (result == DownloadResult::Cancelled && purpose_ == Purpose::ReaderAutoInstall && !goHomeRequested_) {
+    finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+  }
 }
 
 bool FontDownloadActivity::showDownloadAllRow() const {
@@ -584,6 +694,31 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
 }
 
 void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName) {
+  if (purpose_ == Purpose::ReaderAutoInstall) {
+    char previousFamily[sizeof(SETTINGS.sdFontFamilyName)];
+    strncpy(previousFamily, SETTINGS.sdFontFamilyName, sizeof(previousFamily));
+    previousFamily[sizeof(previousFamily) - 1] = '\0';
+    const uint8_t previousFlashPreload = SETTINGS.sdFontFlashPreload;
+
+    strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
+    SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+    SETTINGS.sdFontFlashPreload = 0;
+    if (!SETTINGS.saveToFile()) {
+      LOG_ERR("FONT", "Failed to save selected family %s", familyName);
+      strncpy(SETTINGS.sdFontFamilyName, previousFamily, sizeof(SETTINGS.sdFontFamilyName));
+      SETTINGS.sdFontFlashPreload = previousFlashPreload;
+      RenderLock lock(*this);
+      state_ = ERROR;
+      automaticError_ = AutomaticError::SettingsSave;
+      return;
+    }
+
+    selectionUpdated_ = true;
+    accelerationCompleted_ = false;
+    finishAutomaticFlow(ExitRoute::ReaderPreloadChineseFont);
+    return;
+  }
+
   auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
                                                               TextSettingsActivity::Tab::Family,
                                                               TextSettingsActivity::InitialFontState::Changed);
@@ -639,7 +774,11 @@ void FontDownloadActivity::retryDownloadOperation() {
       updateAll();
       return;
     case DownloadOperation::None:
-      onWifiSelectionComplete(true);
+      if (WiFi.getMode() == WIFI_MODE_NULL) {
+        startWifiSelection();
+      } else {
+        onWifiSelectionComplete(true);
+      }
       return;
   }
 }
@@ -802,7 +941,11 @@ void FontDownloadActivity::onReturnToList(const fui::ActionEvent&, void* user) {
   auto* self = static_cast<FontDownloadActivity*>(user);
   if (self->state_ != COMPLETE && self->state_ != ERROR) return;
   self->app.clearTapFlash();
-  self->returnToFamilyList();
+  if (self->purpose_ == Purpose::ReaderAutoInstall) {
+    self->finishAutomaticFlow(self->state_ == ERROR ? ExitRoute::ReaderSuppressPrompt : ExitRoute::Reader);
+  } else {
+    self->returnToFamilyList();
+  }
 }
 
 void FontDownloadActivity::onRetryDownload(const fui::ActionEvent&, void* user) {
@@ -863,11 +1006,19 @@ bool FontDownloadActivity::handleCustomInput() {
   if (state_ == COMPLETE) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
         mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      returnToFamilyList();
+      if (purpose_ == Purpose::ReaderAutoInstall) {
+        finishAutomaticFlow(ExitRoute::Reader);
+      } else {
+        returnToFamilyList();
+      }
     }
   } else if (state_ == ERROR) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      returnToFamilyList();
+      if (purpose_ == Purpose::ReaderAutoInstall) {
+        finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+      } else {
+        returnToFamilyList();
+      }
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       closeRouting();
       retryDownloadOperation();
@@ -891,6 +1042,22 @@ std::string FontDownloadActivity::formatSize(size_t bytes) {
     snprintf(buf, sizeof(buf), "%zu B", bytes);
   }
   return buf;
+}
+
+const char* FontDownloadActivity::automaticErrorText() const {
+  switch (automaticError_) {
+    case AutomaticError::Download:
+      return tr(STR_AUTO_FONT_DOWNLOAD_FAILED);
+    case AutomaticError::FamilyMissing:
+      return tr(STR_AUTO_FONT_FAMILY_MISSING);
+    case AutomaticError::PointSizeMissing:
+      return tr(STR_AUTO_FONT_SIZE_MISSING);
+    case AutomaticError::SettingsSave:
+      return tr(STR_AUTO_FONT_SETTINGS_SAVE_FAILED);
+    case AutomaticError::FontLoad:
+      return tr(STR_AUTO_FONT_LOAD_FAILED);
+  }
+  return tr(STR_AUTO_FONT_DOWNLOAD_FAILED);
 }
 
 void FontDownloadActivity::render(RenderLock&&) {
@@ -956,8 +1123,9 @@ void FontDownloadActivity::render(RenderLock&&) {
   } else if (state_ == ERROR) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
                               EpdFontFamily::BOLD);
-    if (!errorMessage_.empty()) {
-      renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, errorMessage_.c_str());
+    const char* detail = purpose_ == Purpose::ReaderAutoInstall ? automaticErrorText() : errorMessage_.c_str();
+    if (detail[0] != '\0') {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, detail);
     }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

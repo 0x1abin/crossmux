@@ -139,11 +139,19 @@ referenced asset must be cpfont v4 and provide the coverage promised by its
 catalog maintainer. Font sources and catalog-generation configuration are not
 kept in this repository.
 
-The incomplete-font prompt opens the same font manager described above. A
-successful single or batch download selects a default and opens the font
-preview before the download-complete screen. Outside the download flow, the
-preprocessing page appears only when the final font family or point size differs
-from the values present when Text Settings opened.
+In a Chinese EPUB, confirming the incomplete-font prompt starts an automatic
+reader-only flow: connect Wi-Fi, download and verify the complete `NotoSansSC`
+family, and save the exact current point size. It then silently restarts before
+loading the font, avoiding the fragmented heap left by Wi-Fi/TLS, and preprocesses
+that size on the clean boot before returning to the same book and visible text
+position. Page numbers can change because the new font repaginates the book. Back
+or Wi-Fi cancellation returns to the book without changing the selection, while
+Home always returns to Home. Download or clean-boot font-load errors offer Retry
+and Back. A preprocessing failure keeps the verified SD font, disables Flash
+acceleration, and returns after one notice.
+
+The manual font manager and the prompt opened from Text Settings keep the
+interactive preview flow described above.
 
 ## Converting Custom Fonts
 

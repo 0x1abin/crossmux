@@ -21,9 +21,11 @@ class TextSettingsActivity final : public UiTabListActivity {
  public:
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
   enum class InitialFontState : uint8_t { Unchanged, Changed };
+  enum class StartMode : uint8_t { Interactive, PreloadThenExit };
 
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
-                       Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged);
+                       Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged,
+                       StartMode startMode = StartMode::Interactive);
 
   void onEnter() override;
   void onExit() override;
@@ -124,6 +126,7 @@ class TextSettingsActivity final : public UiTabListActivity {
   uint8_t initialPointSize_ = 0;
   uint8_t initialSdFontFlashPreload_ = 0;
   InitialFontState initialFontState_ = InitialFontState::Unchanged;
+  StartMode startMode_ = StartMode::Interactive;
 
   ThemeMetrics metrics_ = {};
   int afterHeader = 0;

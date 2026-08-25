@@ -33,13 +33,15 @@
 
 class FontDownloadActivity final : public UiListActivity {
  public:
-  enum class Purpose : uint8_t { Manage, PromptThenManage };
+  enum class Purpose : uint8_t { Manage, PromptThenManage, ReaderAutoInstall };
+  enum class StartMode : uint8_t { Normal, ResumeFontLoadError };
 
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                Purpose purpose = Purpose::Manage);
+                                Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal);
 
 #ifdef ENABLE_CHINESE_VERSION
   static bool wasChineseFontPromptShownThisBoot();
+  static void suppressChineseFontPromptThisBoot();
 #endif
 
   void onEnter() override;
@@ -67,6 +69,8 @@ class FontDownloadActivity final : public UiListActivity {
 
   enum class DownloadOperation : uint8_t { None, Single, DownloadAll, UpdateAll };
   enum class DownloadResult : uint8_t { Success, Cancelled, Failed };
+  enum class AutomaticError : uint8_t { Download, FamilyMissing, PointSizeMissing, SettingsSave, FontLoad };
+  enum class ExitRoute : uint8_t { Home, Reader, ReaderSuppressPrompt, ReaderPreloadChineseFont };
 
   struct ManifestFile {
     size_t size = 0;
@@ -86,6 +90,7 @@ class FontDownloadActivity final : public UiListActivity {
 
   State state_ = WIFI_SELECTION;
   Purpose purpose_;
+  StartMode startMode_;
   FontInstaller fontInstaller_;
 
   // Manifest data
@@ -104,6 +109,9 @@ class FontDownloadActivity final : public UiListActivity {
   DownloadOperation operation_ = DownloadOperation::None;
   bool selectionUpdated_ = false;
   bool accelerationCompleted_ = false;
+  uint8_t targetPointSize_ = 0;
+  AutomaticError automaticError_ = AutomaticError::Download;
+  ExitRoute exitRoute_ = ExitRoute::Home;
   // Set when the cancel came from the home gesture (consumed by the download
   // callback's own input pump); exit to home after the abort unwinds.
   bool goHomeRequested_ = false;
@@ -138,6 +146,9 @@ class FontDownloadActivity final : public UiListActivity {
 
   void startWifiSelection();
   void onWifiSelectionComplete(bool success);
+  bool startAutomaticDownload();
+  void finishAutomaticFlow(ExitRoute route);
+  const char* automaticErrorText() const;
   bool fetchAndParseManifest();
   DownloadResult downloadFile(const ManifestFamily& family, const ManifestFile& file);
   DownloadResult downloadFamily(ManifestFamily& family);

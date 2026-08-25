@@ -269,14 +269,22 @@ The firmware offers the guided downloader when a built-in font is changed to
 14/16/18pt, or when an EPUB scan sees a missing U+4E00–U+9FFF or
 U+F900–U+FAFF glyph. The render task only records the first codepoint; the main
 loop opens the activity. A reader session prompts once, and an active SD font
-is never rechecked. After confirmation it opens the ordinary **Manage Fonts**
-flow, preserving install/update/delete and batch-download behavior. A single
-download selects that family and opens the text preview; **Download All**
-prefers the stable `NotoSansSC` family, while **Update All** preserves the
-current selection. Preview changes read from SD without rebuilding the Flash
-cache. Leaving Text Settings caches only the final family and point size. In
-ordinary Text Settings entry, layout/style-only changes and font changes later
-restored to their entry values skip the preprocessing page.
+is never rechecked. The Text Settings prompt retains the ordinary **Manage
+Fonts** flow. The EPUB prompt instead downloads and verifies the complete
+`NotoSansSC` family, rejects a catalog without the exact current point size,
+selects it without changing the point size, and silently restarts before loading
+it. The clean boot supplies the contiguous heap required by the complete CJK
+interval table, then runs the existing Flash preprocessing path and returns to
+the same book and visible-text offset. Back and cancellation return there without
+changing the selection; Home still routes to Home. Download and clean-boot load
+errors remain on a Retry/Back page. A preprocessing failure keeps the verified
+family, disables Flash preload, shows one notice, and continues from SD.
+
+The manual manager still allows install/update/delete and batch downloads. A
+single download selects that family and opens the text preview; **Download
+All** prefers stable `NotoSansSC`, while **Update All** preserves the current
+selection. In ordinary Text Settings entry, layout/style-only changes and font
+changes later restored to their entry values skip preprocessing.
 
 When `NotoSansSC` is discovered through download, web upload, or an SD-card
 copy, it replaces the active built-in face and the built-in row is hidden. If

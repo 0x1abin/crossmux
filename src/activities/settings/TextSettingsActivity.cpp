@@ -62,11 +62,12 @@ constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const SdCardFontRegistry* registry, Tab initialTab,
-                                           const InitialFontState initialFontState)
+                                           const InitialFontState initialFontState, const StartMode startMode)
     : UiTabListActivity("TextSettings", renderer, mappedInput),
       registry_(registry),
       tab_(initialTab),
-      initialFontState_(initialFontState) {}
+      initialFontState_(initialFontState),
+      startMode_(startMode) {}
 
 const char* TextSettingsActivity::tabLabel(const int index) const { return I18N.get(TAB_NAME_IDS[index]); }
 
@@ -127,6 +128,7 @@ void TextSettingsActivity::onEnter() {
   tabNavs[static_cast<int>(tab_)].selected = 0;  // screen opens with the tab bar focused, not a list row
 
   rebuildRowItems();
+  if (startMode_ == StartMode::PreloadThenExit) exitAfterFinalFont(ExitDestination::Previous);
 }
 
 void TextSettingsActivity::onExit() { Activity::onExit(); }

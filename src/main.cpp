@@ -15,6 +15,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SPI.h>
 #include <WiFi.h>
 #if FREEINK_DEVICE_X4PRO
@@ -35,6 +36,11 @@
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#ifdef ENABLE_CHINESE_VERSION
+#include "activities/settings/FontDownloadActivity.h"
+#include "activities/settings/TextSettingsActivity.h"
+#include "activities/util/ConfirmationActivity.h"
+#endif
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -240,9 +246,15 @@ unsigned long t2 = 0;
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
+RTC_NOINIT_ATTR uint32_t silentRebootFontPointSize;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
-constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
-constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
+enum class SilentRebootTarget : uint32_t {
+  Home,
+  Reader,
+  ReaderSuppressFontPrompt,
+  ReaderPreloadChineseFont,
+  Count,
+};
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -263,7 +275,8 @@ static bool deepSleepInProgress = false;
 
 void silentRestart() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
+  silentRebootTarget = static_cast<uint32_t>(SilentRebootTarget::Home);
+  silentRebootFontPointSize = 0;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=home)");
   // E-ink retains the previous frame until Home's first paint lands (~2-3s).
@@ -275,11 +288,24 @@ void silentRestart() {
   ESP.restart();
 }
 
-void silentRestartToReader() {
+void silentRestartToReader(const bool suppressChineseFontPrompt) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  silentRebootTarget = SILENT_REBOOT_TARGET_READER;
+  silentRebootTarget = static_cast<uint32_t>(suppressChineseFontPrompt ? SilentRebootTarget::ReaderSuppressFontPrompt
+                                                                       : SilentRebootTarget::Reader);
+  silentRebootFontPointSize = 0;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
-  LOG_DBG("MAIN", "Silent restart (target=reader)");
+  LOG_DBG("MAIN", "Silent restart (target=reader%s)", suppressChineseFontPrompt ? ", suppress-font-prompt" : "");
+  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  delay(50);
+  ESP.restart();
+}
+
+void silentRestartToReaderAndPreloadChineseFont(const uint8_t pointSize) {
+  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+  silentRebootTarget = static_cast<uint32_t>(SilentRebootTarget::ReaderPreloadChineseFont);
+  silentRebootFontPointSize = pointSize;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Silent restart (target=reader-preload-font, size=%u)", static_cast<unsigned>(pointSize));
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   ESP.restart();
@@ -360,7 +386,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   powerManager.startDeepSleep(gpio);
 }
 
-bool setupDisplayAndFonts(bool seamless = false) {
+bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false) {
 #if FREEINK_DEVICE_X4PRO
   // X4 Pro batches use SSD1677 or UC81xx. Resolve the controller before
   // display.begin(); C3 X3/X4 already do this once in HalGPIO::begin().
@@ -409,11 +435,80 @@ bool setupDisplayAndFonts(bool seamless = false) {
 #endif
 
   // Discover and load SD card fonts
+  if (logSdFontLoadHeap) {
+    LOG_INF("FONT", "Clean restart before font load: free=%u, maxAlloc=%u", static_cast<unsigned>(ESP.getFreeHeap()),
+            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  }
   sdFontSystem.begin(renderer);
 
   LOG_DBG("MAIN", "Fonts setup");
   return fontDecompressorReady;
 }
+
+#ifdef ENABLE_CHINESE_VERSION
+void continueChineseFontInstall(const uint8_t expectedPointSize) {
+  if (APP_STATE.openEpubPath.empty() || !Storage.exists(APP_STATE.openEpubPath.c_str())) {
+    LOG_ERR("FONT", "Cannot resume automatic font install: original EPUB is unavailable");
+    activityManager.goHome();
+    return;
+  }
+
+  const bool fontReady =
+      strcmp(SETTINGS.sdFontFamilyName, SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY) == 0 &&
+      SETTINGS.fontPointSize == expectedPointSize &&
+      sdFontSystem.resolveFontId(SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY, expectedPointSize) != 0;
+  if (!fontReady) {
+    LOG_ERR("FONT", "Failed to load selected family %s at point size %u after clean restart",
+            SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY, static_cast<unsigned>(expectedPointSize));
+    SETTINGS.clearSdFontFamily();
+    SETTINGS.fontPointSize = expectedPointSize;
+    if (!SETTINGS.saveToFile()) LOG_ERR("FONT", "Failed to restore reader point size after font load failure");
+  }
+
+  activityManager.goToReader(APP_STATE.openEpubPath);
+  activityManager.loop();
+  if (!activityManager.isReaderActivity()) {
+    LOG_ERR("FONT", "Cannot resume automatic font install: reader allocation failed");
+    activityManager.goHome();
+    return;
+  }
+
+  if (!fontReady) {
+    auto error = makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInputManager,
+                                                         FontDownloadActivity::Purpose::ReaderAutoInstall,
+                                                         FontDownloadActivity::StartMode::ResumeFontLoadError);
+    if (!error) {
+      LOG_ERR("FONT", "OOM allocating resumed FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
+      return;
+    }
+    activityManager.pushActivity(std::move(error));
+    activityManager.loop();
+    return;
+  }
+
+  auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(
+      renderer, mappedInputManager, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
+      TextSettingsActivity::InitialFontState::Changed, TextSettingsActivity::StartMode::PreloadThenExit);
+  if (textSettings) {
+    activityManager.pushActivity(std::move(textSettings));
+    activityManager.loop();
+    return;
+  }
+
+  LOG_ERR("FONT", "OOM allocating automatic TextSettingsActivity (%zu bytes)", sizeof(TextSettingsActivity));
+  SETTINGS.sdFontFlashPreload = 0;
+  if (!SETTINGS.saveToFile()) LOG_ERR("FONT", "Failed to persist disabled font preload after OOM");
+
+  auto notice = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInputManager, "", tr(STR_FONT_PRELOAD_FAILED),
+                                                        ConfirmationActivity::BodyPlacement::PopupTitle);
+  if (!notice) {
+    LOG_ERR("FONT", "OOM allocating font preload failure notice (%zu bytes)", sizeof(ConfirmationActivity));
+    return;
+  }
+  activityManager.pushActivity(std::move(notice));
+  activityManager.loop();
+}
+#endif
 
 void setup() {
   BoardConfig::holdPowerRails();
@@ -439,10 +534,27 @@ void setup() {
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
-  const uint32_t snapshotTarget =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
+  const bool targetIsValid = isSilentReboot && silentRebootTarget < static_cast<uint32_t>(SilentRebootTarget::Count);
+  SilentRebootTarget snapshotTarget =
+      targetIsValid ? static_cast<SilentRebootTarget>(silentRebootTarget) : SilentRebootTarget::Home;
+  const bool fontPointSizeIsValid = snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont &&
+                                    silentRebootFontPointSize > 0 && silentRebootFontPointSize <= UINT8_MAX;
+  const uint8_t snapshotFontPointSize =
+      snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont && fontPointSizeIsValid
+          ? static_cast<uint8_t>(silentRebootFontPointSize)
+          : 0;
+  if (snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont && snapshotFontPointSize == 0) {
+    snapshotTarget = SilentRebootTarget::Home;
+  }
   silentRebootMagic = 0;
   silentRebootTarget = 0;
+  silentRebootFontPointSize = 0;
+#ifdef ENABLE_CHINESE_VERSION
+  if (snapshotTarget == SilentRebootTarget::ReaderSuppressFontPrompt ||
+      snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont) {
+    FontDownloadActivity::suppressChineseFontPromptThisBoot();
+  }
+#endif
 
   gpio.begin();
   powerManager.begin();
@@ -535,7 +647,8 @@ void setup() {
                                                         : BootResume::Splash;
   bool allowFastInitialReaderRefresh = false;
 
-  const bool fontsReady = setupDisplayAndFonts(resume != BootResume::Splash);
+  const bool fontsReady = setupDisplayAndFonts(resume != BootResume::Splash,
+                                               snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont);
   const bool postOtaBoot = otaPendingAtBoot && fontsReady && activityManager.goToPostOtaBoot(!recoveryFirmwareMode);
 
   if (!postOtaBoot) {
@@ -584,7 +697,15 @@ void setup() {
     activityManager.goToCrashReport();
   } else if (postOtaBoot) {
     activityManager.goHome();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
+  } else if (resume == BootResume::Silent && snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont) {
+#ifdef ENABLE_CHINESE_VERSION
+    continueChineseFontInstall(snapshotFontPointSize);
+#else
+    activityManager.goHome();
+#endif
+  } else if (resume == BootResume::Silent &&
+             (snapshotTarget == SilentRebootTarget::Reader ||
+              snapshotTarget == SilentRebootTarget::ReaderSuppressFontPrompt) &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent) {
