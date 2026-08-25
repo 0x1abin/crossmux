@@ -358,6 +358,74 @@ TEST_F(WeReadStoreTest, KeepsUtf8CodepointsIntactAcrossSanitizerReadBoundaries) 
   EXPECT_EQ(visibleOffset, 1017U);
 }
 
+TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) {
+  const std::string bookDir = WeReadStore::bookDirectory("annotation-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imageIndexPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string input =
+      "<p>A<a class='marker DUOKAN-footnote extra' href='#d1'><img src='https://res.weread.qq.com/note.png'/></a>"
+      "<img class='duokan-footnote' src='https://res.weread.qq.com/direct.png'/>B</p>"
+      "<aside class='note'>Sidebar</aside>"
+      "<ol class='duokan-footnote-content'><li class='duokan-footnote-item' id='d1'><p>Duokan note "
+      "<a href='#back'>back</a></p></li></ol>"
+      "<p>C<a epub:type='noteref' href='#n1'>2</a>D</p>"
+      "<aside epub:type='footnote' id='n1'><p>Semantic footnote</p></aside>"
+      "<aside epub:type='endnote'>Semantic endnote</aside><aside epub:type='rearnote'>Semantic rearnote</aside>"
+      "<a type='noteref'>Type ref</a><aside type='footnote'>Type footnote</aside>"
+      "<aside type='endnote'>Type endnote</aside><aside type='rearnote'>Type rearnote</aside>"
+      "<a role='doc-noteref'>Role ref</a><aside role='doc-footnote'>Role footnote</aside>"
+      "<aside role='doc-endnote'>Role endnote</aside><aside role='doc-rearnote'>Role rearnote</aside><p>E</p>";
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    ASSERT_TRUE(source.good());
+    source.write(input.data(), static_cast<std::streamsize>(input.size()));
+  }
+
+  std::array<uint8_t, 7> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imageIndexPath, 0, "Annotations", false,
+                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                tagBuffer.size()));
+
+  std::ifstream generated(hostPath(outputPath.c_str()), std::ios::binary);
+  ASSERT_TRUE(generated.good());
+  const std::string xhtml((std::istreambuf_iterator<char>(generated)), std::istreambuf_iterator<char>());
+  XML_Parser parser = XML_ParserCreate(nullptr);
+  ASSERT_NE(parser, nullptr);
+  const XML_Status status = XML_Parse(parser, xhtml.data(), static_cast<int>(xhtml.size()), XML_TRUE);
+  EXPECT_EQ(status, XML_STATUS_OK) << XML_ErrorString(XML_GetErrorCode(parser));
+  XML_ParserFree(parser);
+
+  EXPECT_NE(xhtml.find("Sidebar"), std::string::npos);
+  static constexpr const char* kRemovedText[] = {
+      "Duokan note",  "Semantic footnote", "Semantic endnote", "Semantic rearnote", "Type ref",     "Type footnote",
+      "Type endnote", "Type rearnote",     "Role ref",         "Role footnote",     "Role endnote", "Role rearnote"};
+  for (const char* removed : kRemovedText) EXPECT_EQ(xhtml.find(removed), std::string::npos) << removed;
+  EXPECT_EQ(xhtml.find("note.png"), std::string::npos);
+  EXPECT_EQ(xhtml.find("direct.png"), std::string::npos);
+  EXPECT_EQ(xhtml.find(">2<"), std::string::npos);
+
+  HalFile imageIndex;
+  uint32_t imageCount = UINT32_MAX;
+  ASSERT_TRUE(WeReadStore::openImageIndex(imageIndexPath, imageIndex, imageCount));
+  EXPECT_EQ(imageCount, 0U);
+
+  const struct {
+    uint32_t visible;
+    const char* sourceRun;
+  } mappings[] = {{0, ">A<"}, {1, ">B<"}, {2, ">Sidebar<"}, {9, ">C<"}, {10, ">D<"}, {11, ">E<"}};
+  for (const auto& mapping : mappings) {
+    uint32_t nativeOffset = 0;
+    ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, mapping.visible, nativeOffset));
+    EXPECT_EQ(nativeOffset, input.find(mapping.sourceRun) + 1) << "visible=" << mapping.visible;
+  }
+  uint32_t visibleOffset = UINT32_MAX;
+  ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, input.find("Duokan note"), visibleOffset));
+  EXPECT_EQ(visibleOffset, 9U);
+}
+
 TEST_F(WeReadStoreTest, RejectsMissingAndMalformedSourceOffsetMarkers) {
   const std::string bookDir = WeReadStore::bookDirectory("bad-source-offset-book");
   ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
@@ -611,7 +679,7 @@ TEST(WeReadStorePaths, UsesVersionedCoverThumbnailPath) {
   EXPECT_EQ(WeReadStore::kCoverThumbHeight, 164);
 }
 
-TEST_F(WeReadStoreTest, WritesEmptyAndPopulatedImageIndexesAndRejectsCorruption) {
+TEST_F(WeReadStoreTest, WritesCurrentImageIndexesAndRejectsLegacyOrCorruptIndexes) {
   ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
   const std::string path = WeReadStore::imageIndexPath("/work", 7);
   WeReadStore::IndexWriter images;
@@ -645,6 +713,17 @@ TEST_F(WeReadStoreTest, WritesEmptyAndPopulatedImageIndexesAndRejectsCorruption)
     EXPECT_STREQ(loaded.href, second.href);
     EXPECT_STREQ(loaded.url, second.url);
   }
+
+  static constexpr uint32_t kLegacyImageMagic = 0x31495257;  // WRI1
+  ASSERT_TRUE(images.begin(path, kLegacyImageMagic, sizeof(WeReadStore::ImageRecord)));
+  ASSERT_TRUE(images.finish());
+  {
+    HalFile rejected;
+    EXPECT_FALSE(WeReadStore::openImageIndex(path, rejected, count));
+  }
+
+  ASSERT_TRUE(images.begin(path, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord)));
+  ASSERT_TRUE(images.finish());
 
   std::ofstream corrupt(hostPath(path.c_str()), std::ios::binary | std::ios::app);
   ASSERT_TRUE(corrupt.good());
