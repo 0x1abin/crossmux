@@ -1921,17 +1921,9 @@ void Operation::reset() {
   finalPartPath_.clear();
 }
 
-bool Operation::prepareCacheGeneration() {
-  if (WeReadStore::ensureCacheGeneration()) return true;
-  error_ = Error::SdCard;
-  phase_ = Phase::Failed;
-  return false;
-}
-
 bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, const DownloadOptions options,
                       const ShelfCoverScope shelfCoverScope) {
   reset();
-  if (!prepareCacheGeneration()) return false;
   if (kind == Kind::ProgressSync || kind == Kind::Browse) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;
@@ -1986,7 +1978,6 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
 
 bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
   reset();
-  if (!prepareCacheGeneration()) return false;
   if (!isSafeProtocolToken(book.bookId)) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;
@@ -2008,7 +1999,6 @@ bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
 
 bool Operation::beginProgressSync(const char* bookId, ProgressSyncInput input, const ProgressSyncMode mode) {
   reset();
-  if (!prepareCacheGeneration()) return false;
   if (!isSafeProtocolToken(bookId) || !std::isfinite(input.localFraction)) {
     error_ = Error::Protocol;
     phase_ = Phase::Failed;

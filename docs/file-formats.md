@@ -470,39 +470,32 @@ location is not migrated or read.
   Its complete contents must be the five bytes `WRD1\n`; a missing, truncated,
   or unknown marker shows the disclaimer again. Logging out preserves this
   file.
-- `cache.version` is an atomic fixed 8-byte `WRV1` record: `uint32 magic`
-  (`0x31565257`), `uint16 generation` (currently `1`), and two zero reserved
-  bytes. A missing, damaged, newer, or older generation silently removes all
-  derived WeRead caches before writing the current generation. This preserves
-  `session.bin`, `disclaimer.accepted`, completed `/WeRead/*.epub` files, and
-  their normal reader progress caches. `CROSSPOINT_VERSION` is deliberately
-  not used for cache invalidation.
 - `shelf.bin`, `<bookId>/toc.bin`, per-chapter
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
   `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
   Their magic values are `WRS5` (`0x35535257`) and `WRT2` (`0x32545257`);
-  image indexes use `WRI1` (`0x31495257`) and image work indexes use `WIP1`
+  image indexes use `WRI2` (`0x32495257`) and image work indexes use `WIP1`
   (`0x31504957`). Version is currently `1`.
 - Shelf records contain fixed `bookId[64]`, `title[192]`, and `author[96]`
   fields followed by `uint32 readUpdateTime`. TOC records contain fixed
   `chapterUid[64]`, `title[192]`, `uint32 wordCount`,
   `uint32 chapterIdx`, and a paid flag.
-- `WRI1` records contain a generated EPUB-relative `href[64]` and the original
+- `WRI2` records contain a generated EPUB-relative `href[64]` and the original
   HTTPS image URL in `url[512]`; both are NUL-terminated. TXT chapters have a
   valid zero-record index. Images that pass download and JPEG/PNG validation
   are stored below `<bookId>/images/` and embedded into the generated EPUB.
-- `WIP1` records contain one `WRI1` record followed by `uint8 state`,
+- `WIP1` records contain one `WRI2` record followed by `uint8 state`,
   `uint8 attempts`, `uint8 redirects`, and one reserved byte. They schedule
   pending images by HTTPS host so one TLS connection can serve a host batch.
   During an `Embed` download, completed records are also the authoritative
   image list for the OPF manifest and ZIP packaging pass.
-  `images.work` is always rebuilt from `WRI1`, may be deleted after interruption,
+  `images.work` is always rebuilt from `WRI2`, may be deleted after interruption,
   and is removed when the job finishes; it is not a durable cache format.
 - Per-book `options.bin` is an atomic fixed 8-byte `WRO1` record:
   `uint32 magic` (`0x314F5257`), `uint16 version` (`1`), `uint8 imagePolicy`,
   and one zero reserved byte. Policy `0` embeds validated images and policy `1`
-  excludes image requests and EPUB image entries while retaining `WRI1` and
+  excludes image requests and EPUB image entries while retaining `WRI2` and
   existing image files. Missing, truncated, unknown-policy, or otherwise
   damaged records fall back to policy `0`. The record is replaced only after a
   generated EPUB succeeds; a directly returned complete EPUB remains unchanged.
@@ -566,7 +559,7 @@ location is not migrated or read.
   are transient. The pre-v2 `<bookId>/cover.bmp` is not read or migrated. A failed
   fetch or conversion does not replace an existing v2 BMP.
 - The WeRead menu's cache-clear action preserves `session.bin`,
-  `disclaimer.accepted`, `cache.version`, `/WeRead/*.epub`, and the reader caches
+  `disclaimer.accepted`, `/WeRead/*.epub`, and the reader caches
   for those EPUB files. It recursively removes every other entry below
   `/.crosspoint/weread/`, including `shelf.bin`, per-book data, browse caches,
   and partial files.
@@ -583,11 +576,12 @@ rename. `WRS5` rejects `WRS4` shelves because shelf records now include
 order while preserving server order for ties. Existing per-book detail,
 cover, and EPUB files are retained. `WRS4` rejected `WRS3` shelves whose book
 titles could be overwritten by nested category titles. A cached chapter
-without a valid `WRI1` index is
-downloaded again so pre-image-support chapter caches cannot silently lose
-figures. Existing `/WeRead/*.epub` files remain readable and are not upgraded
-automatically; cache a book again to embed its available cover and selected
-chapter images.
+without a valid `WRI2` index is downloaded again so pre-image-support chapter
+caches cannot silently lose figures. `WRI2` also rejects chapters generated
+before unsupported footnote references and bodies were filtered. Existing
+`/WeRead/*.epub` files remain readable and are not upgraded automatically;
+cache a book again to rebuild affected chapters and embed its available cover
+and selected chapter images.
 
 `WRT2` rejects `WRT1` TOC indexes because TOC records now include
 `wordCount`, used for fallback whole-book progress mapping. It is not the unit

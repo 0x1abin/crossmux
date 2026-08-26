@@ -49,13 +49,6 @@ uint32_t readLe32(const std::vector<uint8_t>& data, const size_t offset) {
          (static_cast<uint32_t>(data[offset + 2]) << 16) | (static_cast<uint32_t>(data[offset + 3]) << 24);
 }
 
-struct TestCacheGenerationRecord {
-  uint32_t magic = WeReadStore::kCacheGenerationMagic;
-  uint16_t generation = WeReadStore::kCacheGeneration;
-  uint16_t reserved = 0;
-};
-static_assert(sizeof(TestCacheGenerationRecord) == 8);
-
 class WeReadStoreTest : public ::testing::Test {
  protected:
   static constexpr const char* kBrowseBook = "browse-book";
@@ -85,25 +78,6 @@ class WeReadStoreTest : public ::testing::Test {
 
   void beginBrowseCache(WeReadBrowse::CacheManifest& manifest) {
     ASSERT_TRUE(WeReadBrowse::beginCache(kBrowseBook, kBrowseOwner, manifest));
-  }
-
-  void writeCacheGeneration(const uint16_t generation, const uint32_t magic = WeReadStore::kCacheGenerationMagic,
-                            const uint16_t reserved = 0) {
-    ASSERT_TRUE(WeReadStore::ensureRoot());
-    HalFile file;
-    ASSERT_TRUE(Storage.openFileForWrite("WR", WeReadStore::kCacheGenerationPath, file));
-    const TestCacheGenerationRecord record{magic, generation, reserved};
-    ASSERT_EQ(file.write(&record, sizeof(record)), sizeof(record));
-    file.flush();
-  }
-
-  TestCacheGenerationRecord readCacheGeneration() {
-    TestCacheGenerationRecord record{};
-    HalFile file;
-    EXPECT_TRUE(Storage.openFileForRead("WR", WeReadStore::kCacheGenerationPath, file));
-    EXPECT_EQ(file.fileSize(), sizeof(record));
-    EXPECT_EQ(file.read(&record, sizeof(record)), static_cast<int>(sizeof(record)));
-    return record;
   }
 
   void writeBrowsePage(WeReadBrowse::CacheManifest& manifest, const WeReadBrowse::Kind kind, const uint32_t page,
@@ -384,6 +358,74 @@ TEST_F(WeReadStoreTest, KeepsUtf8CodepointsIntactAcrossSanitizerReadBoundaries) 
   EXPECT_EQ(visibleOffset, 1017U);
 }
 
+TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) {
+  const std::string bookDir = WeReadStore::bookDirectory("annotation-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imageIndexPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string input =
+      "<p>A<a class='marker DUOKAN-footnote extra' href='#d1'><img src='https://res.weread.qq.com/note.png'/></a>"
+      "<img class='duokan-footnote' src='https://res.weread.qq.com/direct.png'/>B</p>"
+      "<aside class='note'>Sidebar</aside>"
+      "<ol class='duokan-footnote-content'><li class='duokan-footnote-item' id='d1'><p>Duokan note "
+      "<a href='#back'>back</a></p></li></ol>"
+      "<p>C<a epub:type='noteref' href='#n1'>2</a>D</p>"
+      "<aside epub:type='footnote' id='n1'><p>Semantic footnote</p></aside>"
+      "<aside epub:type='endnote'>Semantic endnote</aside><aside epub:type='rearnote'>Semantic rearnote</aside>"
+      "<a type='noteref'>Type ref</a><aside type='footnote'>Type footnote</aside>"
+      "<aside type='endnote'>Type endnote</aside><aside type='rearnote'>Type rearnote</aside>"
+      "<a role='doc-noteref'>Role ref</a><aside role='doc-footnote'>Role footnote</aside>"
+      "<aside role='doc-endnote'>Role endnote</aside><aside role='doc-rearnote'>Role rearnote</aside><p>E</p>";
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    ASSERT_TRUE(source.good());
+    source.write(input.data(), static_cast<std::streamsize>(input.size()));
+  }
+
+  std::array<uint8_t, 7> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imageIndexPath, 0, "Annotations", false,
+                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                tagBuffer.size()));
+
+  std::ifstream generated(hostPath(outputPath.c_str()), std::ios::binary);
+  ASSERT_TRUE(generated.good());
+  const std::string xhtml((std::istreambuf_iterator<char>(generated)), std::istreambuf_iterator<char>());
+  XML_Parser parser = XML_ParserCreate(nullptr);
+  ASSERT_NE(parser, nullptr);
+  const XML_Status status = XML_Parse(parser, xhtml.data(), static_cast<int>(xhtml.size()), XML_TRUE);
+  EXPECT_EQ(status, XML_STATUS_OK) << XML_ErrorString(XML_GetErrorCode(parser));
+  XML_ParserFree(parser);
+
+  EXPECT_NE(xhtml.find("Sidebar"), std::string::npos);
+  static constexpr const char* kRemovedText[] = {
+      "Duokan note",  "Semantic footnote", "Semantic endnote", "Semantic rearnote", "Type ref",     "Type footnote",
+      "Type endnote", "Type rearnote",     "Role ref",         "Role footnote",     "Role endnote", "Role rearnote"};
+  for (const char* removed : kRemovedText) EXPECT_EQ(xhtml.find(removed), std::string::npos) << removed;
+  EXPECT_EQ(xhtml.find("note.png"), std::string::npos);
+  EXPECT_EQ(xhtml.find("direct.png"), std::string::npos);
+  EXPECT_EQ(xhtml.find(">2<"), std::string::npos);
+
+  HalFile imageIndex;
+  uint32_t imageCount = UINT32_MAX;
+  ASSERT_TRUE(WeReadStore::openImageIndex(imageIndexPath, imageIndex, imageCount));
+  EXPECT_EQ(imageCount, 0U);
+
+  const struct {
+    uint32_t visible;
+    const char* sourceRun;
+  } mappings[] = {{0, ">A<"}, {1, ">B<"}, {2, ">Sidebar<"}, {9, ">C<"}, {10, ">D<"}, {11, ">E<"}};
+  for (const auto& mapping : mappings) {
+    uint32_t nativeOffset = 0;
+    ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, mapping.visible, nativeOffset));
+    EXPECT_EQ(nativeOffset, input.find(mapping.sourceRun) + 1) << "visible=" << mapping.visible;
+  }
+  uint32_t visibleOffset = UINT32_MAX;
+  ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, input.find("Duokan note"), visibleOffset));
+  EXPECT_EQ(visibleOffset, 9U);
+}
+
 TEST_F(WeReadStoreTest, RejectsMissingAndMalformedSourceOffsetMarkers) {
   const std::string bookDir = WeReadStore::bookDirectory("bad-source-offset-book");
   ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
@@ -637,7 +679,7 @@ TEST(WeReadStorePaths, UsesVersionedCoverThumbnailPath) {
   EXPECT_EQ(WeReadStore::kCoverThumbHeight, 164);
 }
 
-TEST_F(WeReadStoreTest, WritesEmptyAndPopulatedImageIndexesAndRejectsCorruption) {
+TEST_F(WeReadStoreTest, WritesCurrentImageIndexesAndRejectsLegacyOrCorruptIndexes) {
   ASSERT_TRUE(Storage.ensureDirectoryExists("/work"));
   const std::string path = WeReadStore::imageIndexPath("/work", 7);
   WeReadStore::IndexWriter images;
@@ -671,6 +713,17 @@ TEST_F(WeReadStoreTest, WritesEmptyAndPopulatedImageIndexesAndRejectsCorruption)
     EXPECT_STREQ(loaded.href, second.href);
     EXPECT_STREQ(loaded.url, second.url);
   }
+
+  static constexpr uint32_t kLegacyImageMagic = 0x31495257;  // WRI1
+  ASSERT_TRUE(images.begin(path, kLegacyImageMagic, sizeof(WeReadStore::ImageRecord)));
+  ASSERT_TRUE(images.finish());
+  {
+    HalFile rejected;
+    EXPECT_FALSE(WeReadStore::openImageIndex(path, rejected, count));
+  }
+
+  ASSERT_TRUE(images.begin(path, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord)));
+  ASSERT_TRUE(images.finish());
 
   std::ofstream corrupt(hostPath(path.c_str()), std::ios::binary | std::ios::app);
   ASSERT_TRUE(corrupt.good());
@@ -986,7 +1039,7 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) 
   ASSERT_TRUE(session.setCookie("wr_vid", "12345", 5));
   ASSERT_TRUE(session.setCookie("wr_skey", "secret", 6));
   ASSERT_TRUE(WeReadStore::saveSession(session));
-  ASSERT_TRUE(WeReadStore::ensureCacheGeneration());
+  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/cache.version", "legacy"));
 
   WeReadStore::IndexWriter shelf;
   ASSERT_TRUE(shelf.begin(WeReadStore::kShelfPath, WeReadStore::kShelfMagic, sizeof(WeReadStore::ShelfRecord)));
@@ -1007,7 +1060,7 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) 
   ASSERT_TRUE(WeReadStore::clearCache());
   EXPECT_TRUE(Storage.exists(WeReadStore::kSessionPath));
   EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
-  EXPECT_TRUE(Storage.exists(WeReadStore::kCacheGenerationPath));
+  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version"));
   EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/shelf.bin.part"));
   EXPECT_FALSE(Storage.exists("/.crosspoint/weread/book-1"));
@@ -1016,115 +1069,6 @@ TEST_F(WeReadStoreTest, ClearsWeReadCacheButPreservesAccountAndDownloadedBooks) 
   EXPECT_TRUE(Storage.exists("/WeRead/Cached Book.epub"));
   EXPECT_TRUE(Storage.exists("/.crosspoint/epub_123/progress.bin"));
   EXPECT_TRUE(WeReadStore::clearCache());
-}
-
-TEST_F(WeReadStoreTest, InitializesMissingCacheGenerationAndPreservesUserData) {
-  ASSERT_TRUE(WeReadStore::ensureRoot());
-  ASSERT_TRUE(WeReadStore::acceptDisclaimer());
-  WeReadStore::Session session;
-  ASSERT_TRUE(session.setCookie("wr_vid", "12345", 5));
-  ASSERT_TRUE(session.setCookie("wr_skey", "secret", 6));
-  ASSERT_TRUE(WeReadStore::saveSession(session));
-  ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "stale shelf"));
-  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/book-1"));
-  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/detail.bin", "stale detail"));
-  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/browse-cache"));
-  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/browse-cache/page.bin", "stale browse"));
-  ASSERT_TRUE(Storage.ensureDirectoryExists("/WeRead"));
-  ASSERT_TRUE(Storage.writeFile("/WeRead/Cached Book.epub", "epub"));
-  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub_123"));
-  ASSERT_TRUE(Storage.writeFile("/.crosspoint/epub_123/progress.bin", "progress"));
-
-  ASSERT_TRUE(WeReadStore::ensureCacheGeneration());
-  const TestCacheGenerationRecord generation = readCacheGeneration();
-  EXPECT_EQ(generation.magic, WeReadStore::kCacheGenerationMagic);
-  EXPECT_EQ(generation.generation, WeReadStore::kCacheGeneration);
-  EXPECT_EQ(generation.reserved, 0U);
-  EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
-  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/book-1"));
-  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/browse-cache"));
-  EXPECT_TRUE(Storage.exists(WeReadStore::kSessionPath));
-  EXPECT_TRUE(WeReadStore::hasAcceptedDisclaimer());
-  EXPECT_TRUE(Storage.exists("/WeRead/Cached Book.epub"));
-  EXPECT_TRUE(Storage.exists("/.crosspoint/epub_123/progress.bin"));
-  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
-}
-
-TEST_F(WeReadStoreTest, CurrentCacheGenerationSkipsInvalidationAndManualClearPreservesIt) {
-  writeCacheGeneration(WeReadStore::kCacheGeneration);
-  ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "current shelf"));
-  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/book-1"));
-  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/book-1/detail.bin", "current detail"));
-  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/weread/browse-cache"));
-  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/browse-cache/page.bin", "current browse"));
-  const std::string longName(63, 'x');
-  const std::string longPath = std::string(WeReadStore::kRoot) + "/" + longName;
-  ASSERT_TRUE(Storage.writeFile(longPath.c_str(), "must not be scanned"));
-  ASSERT_TRUE(Storage.writeFile("/.crosspoint/weread/cache.version.part", "interrupted"));
-
-  EXPECT_TRUE(WeReadStore::ensureCacheGeneration());
-  EXPECT_TRUE(Storage.exists(WeReadStore::kShelfPath));
-  EXPECT_TRUE(Storage.exists("/.crosspoint/weread/book-1/detail.bin"));
-  EXPECT_TRUE(Storage.exists("/.crosspoint/weread/browse-cache/page.bin"));
-  EXPECT_TRUE(Storage.exists(longPath.c_str()));
-  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
-
-  ASSERT_TRUE(Storage.remove(longPath.c_str()));
-  ASSERT_TRUE(WeReadStore::clearCache());
-  EXPECT_TRUE(Storage.exists(WeReadStore::kCacheGenerationPath));
-  EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
-  EXPECT_TRUE(WeReadStore::ensureCacheGeneration());
-}
-
-TEST_F(WeReadStoreTest, InvalidatesLowerHigherAndCorruptCacheGenerations) {
-  const TestCacheGenerationRecord stale[] = {
-      {WeReadStore::kCacheGenerationMagic, 0, 0},
-      {WeReadStore::kCacheGenerationMagic, static_cast<uint16_t>(WeReadStore::kCacheGeneration + 1), 0},
-      {0, WeReadStore::kCacheGeneration, 0},
-      {WeReadStore::kCacheGenerationMagic, WeReadStore::kCacheGeneration, 1},
-  };
-  for (const auto& record : stale) {
-    if (Storage.exists(WeReadStore::kRoot)) ASSERT_TRUE(Storage.removeDir(WeReadStore::kRoot));
-    writeCacheGeneration(record.generation, record.magic, record.reserved);
-    ASSERT_TRUE(Storage.writeFile(WeReadStore::kShelfPath, "stale"));
-
-    ASSERT_TRUE(WeReadStore::ensureCacheGeneration());
-    const TestCacheGenerationRecord current = readCacheGeneration();
-    EXPECT_EQ(current.magic, WeReadStore::kCacheGenerationMagic);
-    EXPECT_EQ(current.generation, WeReadStore::kCacheGeneration);
-    EXPECT_EQ(current.reserved, 0U);
-    EXPECT_FALSE(Storage.exists(WeReadStore::kShelfPath));
-    EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
-  }
-}
-
-TEST_F(WeReadStoreTest, FailedInvalidationDoesNotAdvanceCacheGeneration) {
-  writeCacheGeneration(0);
-  const std::string longName(63, 'x');
-  const std::string longPath = std::string(WeReadStore::kRoot) + "/" + longName;
-  ASSERT_TRUE(Storage.writeFile(longPath.c_str(), "cannot be cleared by bounded scanner"));
-
-  EXPECT_FALSE(WeReadStore::ensureCacheGeneration());
-  EXPECT_EQ(readCacheGeneration().generation, 0U);
-  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
-}
-
-TEST_F(WeReadStoreTest, FailedGenerationWriteKeepsPreviousVersionAndNoPart) {
-  writeCacheGeneration(0);
-  const std::filesystem::path cacheRoot = hostPath(WeReadStore::kRoot);
-  std::error_code error;
-  std::filesystem::permissions(cacheRoot, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec,
-                               std::filesystem::perm_options::replace, error);
-  ASSERT_FALSE(error);
-
-  const bool ensured = WeReadStore::ensureCacheGeneration();
-  std::filesystem::permissions(cacheRoot, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
-                               error);
-  ASSERT_FALSE(error);
-
-  EXPECT_FALSE(ensured);
-  EXPECT_EQ(readCacheGeneration().generation, 0U);
-  EXPECT_FALSE(Storage.exists("/.crosspoint/weread/cache.version.part"));
 }
 
 TEST_F(WeReadStoreTest, ClearingMissingWeReadCacheIsIdempotent) {

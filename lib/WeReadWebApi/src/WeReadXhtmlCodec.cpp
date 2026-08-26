@@ -20,6 +20,67 @@ bool isUtf8Continuation(const uint8_t value) { return (value & 0xC0) == 0x80; }
 
 uint32_t utf16Width(const uint8_t utf8Lead) { return utf8Lead >= 0xF0 && utf8Lead <= 0xF4 ? 2U : 1U; }
 
+bool equalsIgnoreCase(const char* value, const size_t length, const char* expected) {
+  if (!value || !expected || strlen(expected) != length) return false;
+  for (size_t i = 0; i < length; ++i) {
+    if (std::tolower(static_cast<unsigned char>(value[i])) != std::tolower(static_cast<unsigned char>(expected[i]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool hasAttributeToken(const char* tag, const char* expectedName, const char* expectedToken) {
+  if (!tag || !expectedName || !expectedToken) return false;
+  const char* cursor = tag;
+  while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+  while (*cursor) {
+    while (std::isspace(static_cast<unsigned char>(*cursor)) || *cursor == '/') ++cursor;
+    if (!*cursor) break;
+    const char* name = cursor;
+    while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != '=' && *cursor != '/') {
+      ++cursor;
+    }
+    const size_t nameLength = static_cast<size_t>(cursor - name);
+    while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+    if (*cursor != '=') {
+      while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != '/') ++cursor;
+      continue;
+    }
+    ++cursor;
+    while (std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+    if (*cursor != '"' && *cursor != '\'') {
+      while (*cursor && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != '/') ++cursor;
+      continue;
+    }
+    const char quote = *cursor++;
+    const char* value = cursor;
+    while (*cursor && *cursor != quote) ++cursor;
+    if (*cursor != quote) return false;
+    const char* valueEnd = cursor++;
+    if (!equalsIgnoreCase(name, nameLength, expectedName)) continue;
+    while (value < valueEnd) {
+      while (value < valueEnd && std::isspace(static_cast<unsigned char>(*value))) ++value;
+      const char* token = value;
+      while (value < valueEnd && !std::isspace(static_cast<unsigned char>(*value))) ++value;
+      if (equalsIgnoreCase(token, static_cast<size_t>(value - token), expectedToken)) return true;
+    }
+  }
+  return false;
+}
+
+bool isAnnotationTag(const char* tag) {
+  return hasAttributeToken(tag, "class", "duokan-footnote") ||
+         hasAttributeToken(tag, "class", "duokan-footnote-content") ||
+         hasAttributeToken(tag, "class", "duokan-footnote-item") || hasAttributeToken(tag, "epub:type", "noteref") ||
+         hasAttributeToken(tag, "epub:type", "footnote") || hasAttributeToken(tag, "epub:type", "endnote") ||
+         hasAttributeToken(tag, "epub:type", "rearnote") || hasAttributeToken(tag, "type", "noteref") ||
+         hasAttributeToken(tag, "type", "footnote") || hasAttributeToken(tag, "type", "endnote") ||
+         hasAttributeToken(tag, "type", "rearnote") || hasAttributeToken(tag, "role", "doc-noteref") ||
+         hasAttributeToken(tag, "role", "doc-footnote") || hasAttributeToken(tag, "role", "doc-endnote") ||
+         hasAttributeToken(tag, "role", "doc-rearnote");
+}
+
 void decodeBasicHtmlEntities(char* text) {
   if (!text) return;
   char* read = text;
@@ -54,10 +115,11 @@ struct XhtmlSanitizer {
   bool plainText = false;
   bool inTag = false;
   bool inEntity = false;
-  bool skip = false;
   bool skipHead = false;
   bool tagOverflow = false;
   bool textRunOpen = false;
+  char skippedElement[24] = {};
+  size_t skipDepth = 0;
   size_t tagLen = 0;
   char entity[24] = {};
   size_t entityLen = 0;
@@ -85,7 +147,8 @@ bool advanceSourceUtf16Offset(XhtmlSanitizer& sanitizer, const uint8_t* data, co
 
 bool emitEntity(XhtmlSanitizer& sanitizer) {
   sanitizer.entity[sanitizer.entityLen] = '\0';
-  if (!sanitizer.skip && !sanitizer.skipHead && !writeSourceOffsetMarker(sanitizer, sanitizer.entitySourceOffset)) {
+  if (sanitizer.skipDepth == 0 && !sanitizer.skipHead &&
+      !writeSourceOffsetMarker(sanitizer, sanitizer.entitySourceOffset)) {
     return false;
   }
   const char* replacement = nullptr;
@@ -125,7 +188,7 @@ bool emitEntity(XhtmlSanitizer& sanitizer) {
 }
 
 bool emitSanitizedTextByte(XhtmlSanitizer& sanitizer, const uint8_t value, const uint32_t sourceOffset) {
-  if (sanitizer.skip || sanitizer.skipHead) return true;
+  if (sanitizer.skipDepth != 0 || sanitizer.skipHead) return true;
   if (sanitizer.plainText) {
     if (value == '\r') return true;
     if (value == '\n') {
@@ -190,15 +253,34 @@ bool processTag(XhtmlSanitizer& sanitizer) {
   sanitizer.inTag = false;
   if (!name[0] || name[0] == '!' || name[0] == '?') return true;
 
+  if (sanitizer.skipDepth != 0) {
+    if (strcmp(name, sanitizer.skippedElement) == 0) {
+      if (closing) {
+        --sanitizer.skipDepth;
+        if (sanitizer.skipDepth == 0) sanitizer.skippedElement[0] = '\0';
+      } else if (!selfClosing) {
+        ++sanitizer.skipDepth;
+      }
+    }
+    return true;
+  }
+
   if (strcmp(name, "head") == 0) {
     sanitizer.skipHead = !closing && !selfClosing;
     return true;
   }
-  if (strcmp(name, "script") == 0 || strcmp(name, "style") == 0) {
-    sanitizer.skip = !closing && !selfClosing;
+  if (!closing && isAnnotationTag(sanitizer.tag)) {
+    if (selfClosing) return true;
+    memcpy(sanitizer.skippedElement, name, len + 1);
+    sanitizer.skipDepth = 1;
     return true;
   }
-  if (!closing && strcmp(name, "img") == 0 && !sanitizer.skip && !sanitizer.skipHead) {
+  if (!closing && !selfClosing && (strcmp(name, "script") == 0 || strcmp(name, "style") == 0)) {
+    memcpy(sanitizer.skippedElement, name, len + 1);
+    sanitizer.skipDepth = 1;
+    return true;
+  }
+  if (!closing && strcmp(name, "img") == 0 && !sanitizer.skipHead) {
     WeReadStore::ImageRecord record;
     char alt[256] = {};
     const bool extracted =
@@ -226,7 +308,7 @@ bool processTag(XhtmlSanitizer& sanitizer) {
     }
     return !alt[0] || writeXmlText(*sanitizer.output, alt);
   }
-  if (sanitizer.skip || sanitizer.skipHead || strcmp(name, "html") == 0 || strcmp(name, "body") == 0 ||
+  if (sanitizer.skipHead || strcmp(name, "html") == 0 || strcmp(name, "body") == 0 ||
       !WeReadProtocol::isAllowedXhtmlTag(name)) {
     return true;
   }
@@ -530,7 +612,7 @@ bool sanitizeChapter(const std::string& inputPath, const std::string& outputPath
       if (firstChunk && got >= 3 && readBuffer[0] == 0xEF && readBuffer[1] == 0xBB && readBuffer[2] == 0xBF) i = 3;
       firstChunk = false;
       for (; i < got;) {
-        if (!sanitizer.inTag && !sanitizer.inEntity && !sanitizer.skip && !sanitizer.skipHead) {
+        if (!sanitizer.inTag && !sanitizer.inEntity && sanitizer.skipDepth == 0 && !sanitizer.skipHead) {
           const size_t run =
               WeReadProtocol::safeXhtmlTextRunLength(readBuffer + i, static_cast<size_t>(got - i), plainText);
           if (run > 0) {
