@@ -662,6 +662,7 @@ void setup() {
                             : isSleepWake && !APP_STATE.showBootScreen ? BootResume::SplashlessWake
                                                                        : BootResume::Splash;
   bool allowFastInitialReaderRefresh = false;
+  bool needsWakeRefresh = false;
 
   const bool fontsReady = setupDisplayAndFonts(resume != BootResume::Splash,
                                                snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont);
@@ -695,6 +696,10 @@ void setup() {
           } else {
             renderer.displayBuffer(HalDisplay::HALF_REFRESH);
           }
+        } else {
+          // The panel still physically shows the sleep image, so clean the
+          // first Home paint without adding a separate refresh cycle.
+          needsWakeRefresh = true;
         }
         break;
       case BootResume::Splash:
@@ -731,6 +736,7 @@ void setup() {
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
     // crashed (indicated by readerActivityLoadCount > 0)
+    if (needsWakeRefresh) renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
     activityManager.goHome();
   } else {
     // Clear app state to avoid getting into a boot loop if the epub doesn't load
