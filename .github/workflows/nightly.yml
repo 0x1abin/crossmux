@@ -1,8 +1,5 @@
 name: Nightly
 
-# Daily rolling nightly build of main, published as a prerelease tagged
-# `nightly` with both international (firmware.bin) and Chinese (firmware-cn.bin)
-# assets. The website's Insider/Nightly reads the newest prerelease.
 on:
   schedule:
     - cron: '0 23 * * *' # daily 07:00 Asia/Shanghai
@@ -21,7 +18,21 @@ permissions:
   contents: read
 
 jobs:
-  build-nightly:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: targets
+        run: echo "matrix=$(python3 scripts/package_nightly_target.py --matrix)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    name: ${{ matrix.targetId }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -32,113 +43,175 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Validate manual OTA release notes
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          NOTES_EN: ${{ inputs.notes_en }}
-          NOTES_ZH: ${{ inputs.notes_zh }}
-        run: |
-          mkdir -p dist
-          python3 scripts/generate_ota_notes.py \
-            --en-notes="$NOTES_EN" \
-            --zh-notes="$NOTES_ZH" \
-            --output dist/ota-notes.md
-          test -s dist/ota-notes.md
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v7
         with:
-          version: "latest"
+          version: latest
           enable-cache: false
 
       - name: Install PlatformIO Core
         run: uv pip install --system -U pioarduino==6.1.19
 
-      - name: Extract short SHA
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+      - name: Set seven-character build revision
+        run: echo "CROSSPOINT_RC_HASH=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-      - name: Build CrossMux Nightly (international + Chinese)
-        env:
-          CROSSPOINT_RC_HASH: ${{ env.SHORT_SHA }}
-        run: pio run -e gh_release_rc -e gh_release_cn_rc
+      - name: Build target pair
+        run: pio run -e "${{ matrix.globalEnv }}" -e "${{ matrix.cnEnv }}"
 
-      - name: Stage nightly assets
+      - name: Package and verify target pair
         run: |
-          mkdir -p dist
-          cp .pio/build/gh_release_rc/firmware.bin     dist/firmware.bin
-          cp .pio/build/gh_release_cn_rc/firmware.bin  dist/firmware-cn.bin
+          set -euo pipefail
+          python3 scripts/package_nightly_target.py "${{ matrix.targetId }}" --flavor global \
+            --output "dist/${{ matrix.targetId }}/global"
+          python3 scripts/package_nightly_target.py "${{ matrix.targetId }}" --flavor zh-CN \
+            --output "dist/${{ matrix.targetId }}/cn"
+          (cd "dist/${{ matrix.targetId }}/global" && sha256sum --check *-SHA256SUMS)
+          (cd "dist/${{ matrix.targetId }}/cn" && sha256sum --check *-SHA256SUMS)
 
-      - name: Upload nightly build
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: nightly-build
-          path: dist/*
+          name: nightly-${{ matrix.targetId }}
+          path: dist/${{ matrix.targetId }}
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
 
-  publish-nightly:
-    needs: build-nightly
+  publish:
+    if: always() && needs.prepare.result == 'success'
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      BUILD_ID: ${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
+      BUILD_TAG: nightly-build-${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
+      COS_ALIAS: crossmux-firmware
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Download nightly build
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: nightly-build
-          path: dist
+          pattern: nightly-*
+          path: artifacts
 
-      - name: Extract short SHA
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+      - name: Require at least one complete target pair
+        run: test -n "$(find artifacts -name '*-global-manifest.json' -print -quit)"
 
-      - name: Build nightly release notes
-        run: |
-          {
-            printf '%s\n' 'Rolling nightly build from `main` (${{ env.SHORT_SHA }}).'
-            printf '%s\n' '- `firmware.bin` — international'
-            printf '%s\n' '- `firmware-cn.bin` — Chinese (中文)'
-          } > nightly-body.md
-          if [ -s dist/ota-notes.md ]; then
-            printf '\n' >> nightly-body.md
-            cat dist/ota-notes.md >> nightly-body.md
-          fi
-
-      # Roll the single `nightly` release/tag forward to the current commit.
-      - name: Remove previous nightly release
+      - name: Load previous indexes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-
-      - name: Publish nightly prerelease
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: CrossMux Nightly (${{ env.SHORT_SHA }})
-          prerelease: true
-          target_commitish: ${{ github.sha }}
-          files: |
-            dist/firmware.bin
-            dist/firmware-cn.bin
-          fail_on_unmatched_files: true
-          body_path: nightly-body.md
-
-      # Roll the same nightly binaries onto Gitee for the China mirror. The
-      # script deletes the previous Gitee `nightly` release and recreates it.
-      # Best-effort: never blocks the GitHub nightly. Needs the GITEE_TOKEN secret.
-      - name: Mirror nightly to Gitee (China)
-        continue-on-error: true
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          bash scripts/publish-gitee-release.sh \
-            "x1abin/crossmux" \
-            "nightly" \
-            "CrossMux Nightly (${{ env.SHORT_SHA }})" \
-            "true" \
-            "${{ github.sha }}" \
-            "nightly-body.md" \
-            dist/firmware.bin dist/firmware-cn.bin
+          mkdir -p previous/global
+          gh release download nightly --repo "$GITHUB_REPOSITORY" \
+            --pattern release-index.json --dir previous/global || true
+          curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
+            -o previous/cn.json || true
+
+      - name: Build regional indexes
+        run: |
+          updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 scripts/build_nightly_index.py \
+            --manifests artifacts \
+            --previous previous/global/release-index.json \
+            --region global \
+            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${BUILD_TAG}/" \
+            --updated-at "$updated_at" \
+            --build-id "$BUILD_ID" \
+            --output release-index.json
+          python3 scripts/build_nightly_index.py \
+            --manifests artifacts \
+            --previous previous/cn.json \
+            --region cn \
+            --base-url "https://assets.crossmux.cn/firmware/builds/${BUILD_ID}/" \
+            --updated-at "$updated_at" \
+            --build-id "$BUILD_ID" \
+            --output release-index-cn.json
+
+      - name: Build release notes
+        env:
+          NOTES_EN: ${{ inputs.notes_en }}
+          NOTES_ZH: ${{ inputs.notes_zh }}
+        run: |
+          printf 'Nightly build `%s` from `main`.\n' "${GITHUB_SHA::7}" > nightly-body.md
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            python3 scripts/generate_ota_notes.py \
+              --en-notes="$NOTES_EN" \
+              --zh-notes="$NOTES_ZH" \
+              --output ota-notes.md
+            printf '\n' >> nightly-body.md
+            cat ota-notes.md >> nightly-body.md
+          fi
+
+      - name: Publish immutable GitHub build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t assets < <(find artifacts -type f -print)
+          gh release create "$BUILD_TAG" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "CrossMux Nightly ${GITHUB_SHA::7} #${GITHUB_RUN_NUMBER}" \
+            --notes-file nightly-body.md \
+            --prerelease
+
+      - name: Install COS CLI
+        run: |
+          curl -fsSL \
+            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-linux-amd64 \
+            -o "$RUNNER_TEMP/coscli"
+          sudo install -m 0755 "$RUNNER_TEMP/coscli" /usr/local/bin/coscli
+          coscli --version
+
+      - name: Configure COS
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+          COS_BUCKET: ${{ secrets.COS_BUCKET }}
+          COS_REGION: ${{ secrets.COS_REGION }}
+        run: |
+          token_args=()
+          if [ -n "$COS_SESSION_TOKEN" ]; then
+            token_args=(--session-token "$COS_SESSION_TOKEN")
+          fi
+          coscli config add --init-skip --disable-log \
+            -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" "${token_args[@]}" \
+            -a "$COS_ALIAS" -b "$COS_BUCKET" -r "$COS_REGION"
+
+      - name: Publish immutable COS objects
+        run: |
+          set -euo pipefail
+          for artifact in artifacts/nightly-*; do
+            target="${artifact##*/nightly-}"
+            for flavor in global cn; do
+              [ -d "$artifact/$flavor" ] || continue
+              coscli cp "$artifact/$flavor/" \
+                "cos://${COS_ALIAS}/firmware/builds/${BUILD_ID}/${target}/${flavor}/" \
+                --recursive --forbid-overwrite \
+                --meta 'Cache-Control:public,max-age=31536000,immutable'
+            done
+          done
+
+      - name: Publish rolling indexes last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          coscli cp release-index-cn.json \
+            "cos://${COS_ALIAS}/firmware/releases/nightly/index.json" \
+            --meta 'Cache-Control:no-cache'
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit nightly --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "CrossMux Nightly (${GITHUB_SHA::7})" \
+              --notes-file nightly-body.md --prerelease
+          else
+            gh release create nightly --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "CrossMux Nightly (${GITHUB_SHA::7})" --notes-file nightly-body.md --prerelease
+          fi
+          gh release upload nightly release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+
+          c3_artifact=artifacts/nightly-xteink_x4
+          if [ -d "$c3_artifact" ]; then
+            cp "$c3_artifact/global/xteink-global-firmware.bin" firmware.bin
+            cp "$c3_artifact/cn/xteink-cn-firmware.bin" firmware-cn.bin
+            gh release upload nightly firmware.bin firmware-cn.bin --repo "$GITHUB_REPOSITORY" --clobber
+          fi

@@ -127,23 +127,6 @@ jobs:
           fail_on_unmatched_files: true
           body_path: release-body.md
 
-      # Mirror the SAME binaries to Gitee so mainland-China users / device OTA
-      # download from Gitee's CN CDN (see scripts/publish-gitee-release.sh).
-      # GitHub is published first, but an incomplete China mirror fails this
-      # workflow. Needs the GITEE_TOKEN secret (`projects` scope).
-      - name: Mirror release to Gitee (China)
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          bash scripts/publish-gitee-release.sh \
-            "x1abin/crossmux" \
-            "${{ github.ref_name }}" \
-            "CrossMux ${{ github.ref_name }}" \
-            "false" \
-            "${{ github.sha }}" \
-            "release-body.md" \
-            dist/firmware.bin dist/firmware-cn.bin dist/bootloader.bin dist/partitions.bin
-
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
