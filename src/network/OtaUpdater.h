@@ -31,6 +31,7 @@ class OtaUpdater {
   enum OtaUpdaterError {
     OK = 0,
     NO_UPDATE,
+    UNSUPPORTED_CHANNEL,
     HTTP_ERROR,
     JSON_PARSE_ERROR,
     UPDATE_OLDER_ERROR,

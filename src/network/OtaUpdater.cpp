@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 
+#include "FirmwareBoardTag.h"
 #include "FirmwareFlasher.h"
 
 namespace {
@@ -100,6 +101,11 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
 
   LOG_DBG("OTA", "Parser results: tag=%s firmware=%s", releaseParser.foundTag() ? "yes" : "no",
           releaseParser.foundFirmware() ? "yes" : "no");
+
+  if (releaseParser.foundUnsupportedChannel()) {
+    LOG_INF("OTA", "Selected update channel is not supported by this device");
+    return UNSUPPORTED_CHANNEL;
+  }
 
   if (!releaseParser.foundTag()) {
     LOG_ERR("OTA", "No tag_name in release JSON");
@@ -210,6 +216,8 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   uint8_t hdr[14];
   size_t hdrLen = 0;
   bool wrongChip = false;
+  board_tag::Scanner boardScanner;
+  bool wrongBoard = false;
   const bool fetchOk = HttpDownloader::fetchUrl(otaUrl, [&](const uint8_t* data, size_t len) {
     if (hdrLen < sizeof(hdr)) {
       const size_t take = std::min(len, sizeof(hdr) - hdrLen);
@@ -225,6 +233,13 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
           return false;  // abort the transfer
         }
       }
+    }
+    boardScanner.feed(data, len);
+    if (boardScanner.mismatch()) {
+      LOG_ERR("OTA", "wrong board: image=%s device=%.*s", boardScanner.foundName(),
+              static_cast<int>(board_tag::boardNameLen()), board_tag::boardName());
+      wrongBoard = true;
+      return false;  // abort before selecting the incomplete image as bootable
     }
     if (esp_ota_write(otaHandle, data, len) != ESP_OK) {
       flashOk = false;
@@ -247,7 +262,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   /* Return back to default power saving for WiFi in case of failing */
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
-  if (wrongChip) {
+  if (wrongChip || wrongBoard) {
     LOG_ERR("OTA", "Firmware install aborted: wrong device");
     esp_ota_abort(otaHandle);
     return WRONG_DEVICE_ERROR;

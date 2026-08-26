@@ -6,7 +6,7 @@ on:
     paths:
       - .github/workflows/ci.yml
       - .github/workflows/hardware-ci.yml
-      - .github/workflows/hardware-beta.yml
+      - .github/workflows/nightly.yml
       - bin/ci-check
       - platformio.ini
       - partitions.csv
@@ -26,13 +26,15 @@ on:
       - src/activities/settings/**
       - src/activities/util/IntervalSelectionActivity.*
       - src/network/**
-      - scripts/package_hardware_beta.py
-      - scripts/tests/test_package_hardware_beta.py
+      - scripts/package_nightly_target.py
+      - scripts/build_nightly_index.py
+      - scripts/nightly_targets.py
+      - scripts/tests/test_nightly_release.py
   pull_request:
     paths:
       - .github/workflows/ci.yml
       - .github/workflows/hardware-ci.yml
-      - .github/workflows/hardware-beta.yml
+      - .github/workflows/nightly.yml
       - bin/ci-check
       - platformio.ini
       - partitions.csv
@@ -52,8 +54,10 @@ on:
       - src/activities/settings/**
       - src/activities/util/IntervalSelectionActivity.*
       - src/network/**
-      - scripts/package_hardware_beta.py
-      - scripts/tests/test_package_hardware_beta.py
+      - scripts/package_nightly_target.py
+      - scripts/build_nightly_index.py
+      - scripts/nightly_targets.py
+      - scripts/tests/test_nightly_release.py
   workflow_dispatch:
 
 permissions:
@@ -103,17 +107,24 @@ jobs:
       - name: Build simulators and S3 hardware
         run: |
           set -euo pipefail
+          export CROSSPOINT_RC_HASH="${GITHUB_SHA::7}"
           pio run \
             -e simulator \
             -e simulator_x3 \
             -e simulator_eego_a4 \
             -e simulator_murphy_m4 \
-            -e sticky \
-            -e x4pro \
-            -e papermono \
-            -e eego_a4 \
-            -e murphy_m4 \
-            -e waveshare_epaper_397 | tee pio.log
+            -e sticky_nightly \
+            -e sticky_cn_nightly \
+            -e x4pro_nightly \
+            -e x4pro_cn_nightly \
+            -e papermono_nightly \
+            -e papermono_cn_nightly \
+            -e eego_a4_nightly \
+            -e eego_a4_cn_nightly \
+            -e murphy_m4_nightly \
+            -e murphy_m4_cn_nightly \
+            -e waveshare_epaper_397_nightly \
+            -e waveshare_epaper_397_cn_nightly | tee pio.log
 
       - name: Record firmware stats
         run: |
@@ -127,7 +138,9 @@ jobs:
       - name: Verify hardware packages
         run: |
           set -euo pipefail
-          for device in eego-a4 murphy-m4 waveshare-epaper-397; do
-            python3 scripts/package_hardware_beta.py "$device"
-            (cd "dist/$device" && sha256sum --check SHA256SUMS)
+          for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397; do
+            python3 scripts/package_nightly_target.py "$target" --flavor global
+            python3 scripts/package_nightly_target.py "$target" --flavor zh-CN
+            (cd "dist/$target/global" && sha256sum --check *-SHA256SUMS)
+            (cd "dist/$target/cn" && sha256sum --check *-SHA256SUMS)
           done

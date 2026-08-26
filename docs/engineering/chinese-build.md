@@ -168,10 +168,11 @@ pio run -e sticky_cn -e x4pro_cn -e papermono_cn -e eego_a4_cn \
 
 Each S3 `_cn` environment inherits its device's hardware flags and uses the
 same Chinese-only resources and `crossmux.cn` host as `gh_release_cn`.
-Hardware-beta publishes build the international and `_cn` environments
-together. The same rolling tag contains the international package on GitHub
-and the Simplified-Chinese package on Gitee; each package keeps the standard
-six asset names and its own manifest and checksums.
+The Nightly matrix builds each target's international and `_cn_nightly`
+environments together. The global deployment serves both variants from
+immutable GitHub Releases; the China deployment serves both variants from COS
+through `assets.crossmux.cn`. Each flavor keeps its own manifest and checksums.
+See [firmware-release.md](firmware-release.md) for the release and index contract.
 
 The committed headers were regenerated with source SHA-256
 `2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`.

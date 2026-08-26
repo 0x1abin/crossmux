@@ -90,7 +90,7 @@ def inject_version(env):
         version_string = f'{base_version}-dev-{get_git_branch(project_dir)}-{short_sha}'
     else:
         device = pioenv.replace('_', '-')
-        version_string = f'{base_version}-{device}-beta+{short_sha}'
+        version_string = f'{base_version}-{device}-rc+{short_sha}'
 
     env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
     print(f'CrossPoint build version: {version_string}')

@@ -160,6 +160,16 @@ TEST(ReleaseJsonParser, NightlyBuildTag) {
   EXPECT_EQ(p.getFirmwareSize(), 5839088u);
 }
 
+TEST(ReleaseJsonParser, UnsupportedChannelStatus) {
+  const char* json = R"({"ota_status":"unsupported_channel","assets":[]})";
+  ReleaseJsonParser p;
+  p.feed(json, strlen(json));
+
+  EXPECT_TRUE(p.foundUnsupportedChannel());
+  EXPECT_FALSE(p.foundTag());
+  EXPECT_FALSE(p.foundFirmware());
+}
+
 TEST(ReleaseJsonParser, OtaReleaseNotes) {
   const char* json =
       R"({"tag_name":"v2.4.1","release_notes":["Faster book opening","More reliable OTA","New font sizes 20 and 22"],"assets":[{"name":"firmware.bin","size":1,"browser_download_url":"https://example.com/fw"}]})";

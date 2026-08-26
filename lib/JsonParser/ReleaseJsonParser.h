@@ -23,6 +23,7 @@ class ReleaseJsonParser {
 
   bool foundTag() const;
   bool foundFirmware() const;
+  bool foundUnsupportedChannel() const;
   bool foundReleaseNotes() const;
   const char* getTagName() const;
   const char* getFirmwareUrl() const;
@@ -40,6 +41,7 @@ class ReleaseJsonParser {
   enum class LastKey : uint8_t {
     NONE,
     TAG_NAME,
+    OTA_STATUS,
     RELEASE_NOTES,
     ASSETS,
     ASSET_NAME,
@@ -74,6 +76,7 @@ class ReleaseJsonParser {
   size_t firmwareSize;
   bool tagFound;
   bool firmwareFound;
+  bool unsupportedChannelFound;
   bool releaseNotesFound;
   bool releaseNotesInvalid;
   size_t releaseNoteCount;
