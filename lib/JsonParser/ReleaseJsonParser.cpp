@@ -45,6 +45,7 @@ void ReleaseJsonParser::reset() {
   firmwareSize = 0;
   tagFound = false;
   firmwareFound = false;
+  unsupportedChannelFound = false;
   releaseNotesInvalid = false;
   clearReleaseNotes();
   currentAssetName[0] = '\0';
@@ -56,6 +57,7 @@ void ReleaseJsonParser::feed(const char* data, size_t len) { parser.feed(data, l
 
 bool ReleaseJsonParser::foundTag() const { return tagFound; }
 bool ReleaseJsonParser::foundFirmware() const { return firmwareFound; }
+bool ReleaseJsonParser::foundUnsupportedChannel() const { return unsupportedChannelFound; }
 bool ReleaseJsonParser::foundReleaseNotes() const { return releaseNotesFound; }
 const char* ReleaseJsonParser::getTagName() const { return tagName; }
 const char* ReleaseJsonParser::getFirmwareUrl() const { return firmwareUrl; }
@@ -107,6 +109,8 @@ void ReleaseJsonParser::sOnKey(void* ctx, const char* key, size_t len) {
       if (self->depth == 1) {
         if (len == 8 && memcmp(key, "tag_name", 8) == 0)
           self->lastKey = LastKey::TAG_NAME;
+        else if (len == 10 && memcmp(key, "ota_status", 10) == 0)
+          self->lastKey = LastKey::OTA_STATUS;
         else if (len == 13 && memcmp(key, "release_notes", 13) == 0)
           self->lastKey = LastKey::RELEASE_NOTES;
         else if (len == 6 && memcmp(key, "assets", 6) == 0)
@@ -131,7 +135,7 @@ void ReleaseJsonParser::sOnKey(void* ctx, const char* key, size_t len) {
           self->lastKey = LastKey::NONE;
       }
       break;
-    default:
+    case Position::IN_ASSETS_ARRAY:
       break;
   }
 }
@@ -155,6 +159,12 @@ void ReleaseJsonParser::sOnString(void* ctx, const char* value, size_t len) {
         self->tagFound = true;
       }
       break;
+    case LastKey::OTA_STATUS:
+      if (self->position == Position::TOP_LEVEL && self->depth == 1 && len == 19 &&
+          memcmp(value, "unsupported_channel", 19) == 0) {
+        self->unsupportedChannelFound = true;
+      }
+      break;
     case LastKey::RELEASE_NOTES:
       self->clearReleaseNotes();
       break;
@@ -166,7 +176,9 @@ void ReleaseJsonParser::sOnString(void* ctx, const char* value, size_t len) {
       if (self->position == Position::IN_ASSET_OBJECT && self->assetDepth == 1)
         safeCopy(self->currentAssetUrl, sizeof(self->currentAssetUrl), value, len);
       break;
-    default:
+    case LastKey::NONE:
+    case LastKey::ASSETS:
+    case LastKey::ASSET_SIZE:
       break;
   }
   self->lastKey = LastKey::NONE;

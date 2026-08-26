@@ -97,6 +97,7 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
     LOG_DBG("OTA", "Update check failed: %d", res);
     {
       RenderLock lock(*this);
+      failedDetail = res == OtaUpdater::UNSUPPORTED_CHANNEL ? tr(STR_OTA_CHANNEL_UNSUPPORTED) : nullptr;
       state = State::Failed;
     }
     requestUpdate();
@@ -126,6 +127,7 @@ void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
   resetUi();
+  failedDetail = nullptr;
   app.on(ACTION_RELEASE_PAGE, &OtaUpdateActivity::onReleasePage, this);
   app.on(ACTION_INSTALL_UPDATE, &OtaUpdateActivity::onInstallUpdate, this);
   app.setScreen(&OtaUpdateActivity::updateScreen, this);
