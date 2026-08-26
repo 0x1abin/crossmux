@@ -1,4 +1,5 @@
 #include <FreeInkUICore.h>
+#include <components/lists/list.h>
 #include <gtest/gtest.h>
 
 #include <type_traits>
@@ -59,6 +60,26 @@ TEST(InxNavigation, WrapsAcrossFiveTabs) {
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::First, 10), 0);
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 1), 0);
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 10), 9);
+}
+
+TEST(InxNavigation, ScrollsListPagesWithoutMovingSelection) {
+  freeink::ui::ListNav nav;
+  nav.selected = 2;
+  nav.visibleRows = 4;
+
+  EXPECT_TRUE(nav.scrollBy(nav.pageRows(), 10));
+  EXPECT_EQ(nav.top, 4);
+  EXPECT_EQ(nav.selected, 2);
+  EXPECT_TRUE(nav.scrollBy(nav.pageRows(), 10));
+  EXPECT_EQ(nav.top, 6);
+  EXPECT_FALSE(nav.scrollBy(nav.pageRows(), 10));
+
+  EXPECT_TRUE(nav.scrollBy(-nav.pageRows(), 10));
+  EXPECT_EQ(nav.top, 2);
+  EXPECT_TRUE(nav.scrollBy(-nav.pageRows(), 10));
+  EXPECT_EQ(nav.top, 0);
+  EXPECT_FALSE(nav.scrollBy(-nav.pageRows(), 10));
+  EXPECT_EQ(nav.selected, 2);
 }
 
 TEST(InxNavigation, TracksLastInputWithTouchPriority) {

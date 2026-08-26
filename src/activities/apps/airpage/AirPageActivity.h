@@ -9,6 +9,7 @@
 #include "AirPageImageStore.h"
 #include "components/OptionPopup.h"
 #include "components/UiAppHost.h"
+#include "util/ButtonNavigator.h"
 
 struct Rect;
 
@@ -70,16 +71,21 @@ class AirPageActivity final : public Activity, private UiAppHost {
   void setAirPageScreen(Screen screen);
   void openImageMenu();
   void applyTouchAction(TouchAction action);
+  void rebuildHistoryRows();
+  void moveSettingsSelection(int index);
+  void moveHistorySelection(int index);
 
   static constexpr freeink::ui::ActionId ACTION_TOUCH = 1;
+  static constexpr freeink::ui::ActionId ACTION_SETTINGS_ROW = 2;
+  static constexpr freeink::ui::ActionId ACTION_HISTORY_ROW = 3;
   static void touchScreen(UiScreen& screen, void* user);
   static void onTouchAction(const freeink::ui::ActionEvent& event, void* user);
+  static void onSettingsRow(const freeink::ui::ActionEvent& event, void* user);
+  static void onHistoryRow(const freeink::ui::ActionEvent& event, void* user);
   void buildTouchScreen(UiScreen& screen);
 
   void renderQr(const Rect& viewport);
   void renderStatus(const Rect& viewport, const char* msg);
-  void renderSettings(const Rect& viewport);
-  void renderHistory(const Rect& viewport);
   Rect contentViewport() const;
   const char* noticeText() const;
   const char* connectionText() const;
@@ -98,6 +104,14 @@ class AirPageActivity final : public Activity, private UiAppHost {
   airpage::AirPageConnection connection_;
   airpage::SelectedImage selectedImage_;
   OptionPopup imageMenu_;
+  ButtonNavigator buttonNavigator_;
+
+  freeink::ui::ListNav settingsNav_;
+  freeink::ui::ListNav historyNav_;
+  freeink::ui::ListItem settingsRows_[kSettingsRows]{};
+  freeink::ui::ListItem historyRows_[airpage::AirPageImageStore::kMaxHistoryEntries]{};
+  char historyLabels_[airpage::AirPageImageStore::kMaxHistoryEntries][48]{};
+  char historySubtitles_[airpage::AirPageImageStore::kMaxHistoryEntries][40]{};
 
   bool imageNeedsDisplay_ = true;
   bool waitForInputRelease_ = false;

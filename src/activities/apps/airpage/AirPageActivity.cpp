@@ -69,6 +69,8 @@ void AirPageActivity::onEnter() {
 
   resetUi();
   app.on(ACTION_TOUCH, &AirPageActivity::onTouchAction, this);
+  app.on(ACTION_SETTINGS_ROW, &AirPageActivity::onSettingsRow, this);
+  app.on(ACTION_HISTORY_ROW, &AirPageActivity::onHistoryRow, this);
   app.setScreen(&AirPageActivity::touchScreen, this);
 
   phase_ = Phase::Idle;
@@ -83,6 +85,12 @@ void AirPageActivity::onEnter() {
   displayedScreenHeight_ = 0;
   settingsSelection_ = 0;
   historySelection_ = 0;
+  settingsNav_.reset();
+  historyNav_.reset();
+  settingsRows_[0].label = tr(STR_AIRPAGE_MODE_SETTING);
+  settingsRows_[0].actionValue = 0;
+  settingsRows_[1].label = tr(STR_AIRPAGE_AUTO_WALLPAPER);
+  settingsRows_[1].actionValue = 1;
   airpage::AirPageImageRenderer::resetSessionFailures();
 
   switch (imageStore_.initialize(currentArchiveDateKey())) {
@@ -96,6 +104,7 @@ void AirPageActivity::onEnter() {
       notice_ = Notice::InvalidImage;
       break;
   }
+  rebuildHistoryRows();
   autoSleepWallpaper_ = airpage::loadAutoSleepWallpaper();
   airpage::AirPageWallpaper::recoverInterruptedTransaction();
 
@@ -161,6 +170,7 @@ bool AirPageActivity::processImageDisplayResult() {
       if (newlyDownloaded) {
         imageStore_.commitDisplayedDownload(currentArchiveDateKey());
         imageStore_.selectCurrent(selectedImage_);
+        rebuildHistoryRows();
         if (autoSleepWallpaper_ && !airpage::AirPageWallpaper::install(selectedImage_)) {
           notice_ = Notice::WallpaperFailed;
           wallpaperResult_ = WallpaperResult::Failed;
@@ -184,6 +194,7 @@ bool AirPageActivity::processImageDisplayResult() {
           setAirPageScreen(Screen::History);
           break;
       }
+      rebuildHistoryRows();
       notice_ = Notice::InvalidImage;
       imageNeedsDisplay_ = true;
       requestUpdate();
@@ -253,10 +264,26 @@ void AirPageActivity::loop() {
     return;
   }
 
-  if (phase_ == Phase::Idle && (screen_ == Screen::Qr || screen_ == Screen::Image)) {
+  if (phase_ == Phase::Idle) {
     const auto touch = routeTouch(mappedInput);
     if (touch.routed && app.invalidated()) requestUpdate();
     if (touch) return;
+
+    if (screen_ == Screen::Settings || screen_ == Screen::History) {
+      const auto swipe = mappedInput.wasSwipe();
+      if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+        const int count = screen_ == Screen::Settings ? kSettingsRows : static_cast<int>(imageStore_.historyCount());
+        bool moved = false;
+        {
+          RenderLock lock(*this);
+          fui::ListNav& nav = screen_ == Screen::Settings ? settingsNav_ : historyNav_;
+          const int delta = swipe == MappedInputManager::SwipeDir::Up ? nav.pageRows() : -nav.pageRows();
+          moved = nav.scrollBy(delta, count);
+        }
+        if (moved) requestUpdate();
+        return;
+      }
+    }
   }
 
   switch (screen_) {
@@ -286,31 +313,28 @@ void AirPageActivity::loop() {
         requestUpdate();
         return;
       }
-      if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
-        settingsSelection_ = (settingsSelection_ + kSettingsRows - 1) % kSettingsRows;
-        requestUpdate();
-        return;
-      }
-      if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
-        settingsSelection_ = (settingsSelection_ + 1) % kSettingsRows;
-        requestUpdate();
-        return;
-      }
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
         applySettingsSelection();
         return;
       }
 
-      const Rect content = contentViewport();
-      switch (handleListTouch(settingsSelection_, kSettingsRows, content.y, content.height, false)) {
-        case ListTouchResult::Activated:
-          applySettingsSelection();
-          return;
-        case ListTouchResult::Consumed:
-          return;
-        case ListTouchResult::None:
-          break;
-      }
+      bool navigated = false;
+      const auto moveSelection = [this, &navigated](const int index) {
+        navigated = true;
+        moveSettingsSelection(index);
+      };
+      buttonNavigator_.onNextRelease(
+          [this, &moveSelection] { moveSelection(ButtonNavigator::nextIndex(settingsSelection_, kSettingsRows)); });
+      buttonNavigator_.onPreviousRelease(
+          [this, &moveSelection] { moveSelection(ButtonNavigator::previousIndex(settingsSelection_, kSettingsRows)); });
+      buttonNavigator_.onNextContinuous([this, &moveSelection] {
+        moveSelection(ButtonNavigator::nextPageIndex(settingsSelection_, kSettingsRows, settingsNav_.pageRows()));
+      });
+      buttonNavigator_.onPreviousContinuous([this, &moveSelection] {
+        moveSelection(ButtonNavigator::previousPageIndex(settingsSelection_, kSettingsRows, settingsNav_.pageRows()));
+      });
+      if (navigated) return;
+
       break;
     }
 
@@ -322,31 +346,32 @@ void AirPageActivity::loop() {
         return;
       }
       const size_t historyCount = imageStore_.historyCount();
-      if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
-        historySelection_ = (historySelection_ + static_cast<int>(historyCount) - 1) % static_cast<int>(historyCount);
-        requestUpdate();
-        return;
-      }
-      if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
-        historySelection_ = (historySelection_ + 1) % static_cast<int>(historyCount);
-        requestUpdate();
-        return;
-      }
       if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
         openSelectedHistoryImage();
         return;
       }
+      if (historyCount == 0) break;
 
-      const Rect content = contentViewport();
-      switch (handleListTouch(historySelection_, static_cast<int>(historyCount), content.y, content.height, true)) {
-        case ListTouchResult::Activated:
-          openSelectedHistoryImage();
-          return;
-        case ListTouchResult::Consumed:
-          return;
-        case ListTouchResult::None:
-          break;
-      }
+      bool navigated = false;
+      const auto moveSelection = [this, &navigated](const int index) {
+        navigated = true;
+        moveHistorySelection(index);
+      };
+      buttonNavigator_.onNextRelease([this, historyCount, &moveSelection] {
+        moveSelection(ButtonNavigator::nextIndex(historySelection_, static_cast<int>(historyCount)));
+      });
+      buttonNavigator_.onPreviousRelease([this, historyCount, &moveSelection] {
+        moveSelection(ButtonNavigator::previousIndex(historySelection_, static_cast<int>(historyCount)));
+      });
+      buttonNavigator_.onNextContinuous([this, historyCount, &moveSelection] {
+        moveSelection(
+            ButtonNavigator::nextPageIndex(historySelection_, static_cast<int>(historyCount), historyNav_.pageRows()));
+      });
+      buttonNavigator_.onPreviousContinuous([this, historyCount, &moveSelection] {
+        moveSelection(ButtonNavigator::previousPageIndex(historySelection_, static_cast<int>(historyCount),
+                                                         historyNav_.pageRows()));
+      });
+      if (navigated) return;
       break;
     }
 
@@ -391,10 +416,11 @@ void AirPageActivity::touchScreen(UiScreen& screen, void* user) {
 }
 
 void AirPageActivity::buildTouchScreen(UiScreen& screen) {
-  if (!mappedInput.hasTouch() || phase_ != Phase::Idle || wallpaperResult_ != WallpaperResult::None) return;
+  if (phase_ != Phase::Idle || wallpaperResult_ != WallpaperResult::None) return;
 
   switch (screen_) {
     case Screen::Qr: {
+      if (!mappedInput.hasTouch()) return;
       const fui::FooterAction actions[] = {
           {tr(STR_BACK), ACTION_TOUCH, static_cast<int16_t>(TouchAction::BackToApps)},
           {tr(STR_AIRPAGE_SETTINGS_ACTION), ACTION_TOUCH, static_cast<int16_t>(TouchAction::Settings)},
@@ -405,6 +431,7 @@ void AirPageActivity::buildTouchScreen(UiScreen& screen) {
       return;
     }
     case Screen::Image: {
+      if (!mappedInput.hasTouch()) return;
       const fui::TapZone zone{screen.frame().screen(), ACTION_TOUCH, static_cast<int16_t>(TouchAction::OpenImageMenu)};
       fui::TapZonesProps props;
       props.zones = &zone;
@@ -412,9 +439,56 @@ void AirPageActivity::buildTouchScreen(UiScreen& screen) {
       fui::tapZones(screen.frame(), screen.frame().screen(), props);
       return;
     }
-    case Screen::Settings:
-    case Screen::History:
+    case Screen::Settings: {
+      const Rect content = contentViewport();
+      screen.setContentMargin(fui::Insets{static_cast<int16_t>(content.y),
+                                          static_cast<int16_t>(renderer.getScreenWidth() - content.x - content.width),
+                                          static_cast<int16_t>(renderer.getScreenHeight() - content.y - content.height),
+                                          static_cast<int16_t>(content.x)});
+      settingsRows_[0].value = connection_.realtime() ? tr(STR_AIRPAGE_MODE_REALTIME) : tr(STR_AIRPAGE_MODE_MANUAL);
+      settingsRows_[1].value = autoSleepWallpaper_ ? tr(STR_AIRPAGE_SETTING_ON) : tr(STR_AIRPAGE_SETTING_OFF);
+      fui::ListProps props;
+      props.items = settingsRows_;
+      props.count = kSettingsRows;
+      props.action = ACTION_SETTINGS_ROW;
+      props.inputMask = fui::InputTouch;
+      props.valueInset = 8;
+      int16_t rowHeight = screen.theme().rowHeight;
+      if (!mappedInput.hasTouch()) {
+        rowHeight = static_cast<int16_t>(UITheme::getInstance().getMetrics().listRowHeight);
+        props.rowHeight = rowHeight;
+      }
+      settingsNav_.selected = settingsSelection_;
+      settingsNav_.syncToProps(screen.body(), rowHeight, screen.theme().listRowGap, kSettingsRows, props);
+      screen.list(props);
       return;
+    }
+    case Screen::History: {
+      const Rect content = contentViewport();
+      screen.setContentMargin(fui::Insets{static_cast<int16_t>(content.y),
+                                          static_cast<int16_t>(renderer.getScreenWidth() - content.x - content.width),
+                                          static_cast<int16_t>(renderer.getScreenHeight() - content.y - content.height),
+                                          static_cast<int16_t>(content.x)});
+      const int count = static_cast<int>(imageStore_.historyCount());
+      if (count == 0) {
+        screen.centeredText(tr(STR_AIRPAGE_NO_IMAGE), screen.theme().bodyText);
+        return;
+      }
+      fui::ListProps props;
+      props.items = historyRows_;
+      props.count = static_cast<uint16_t>(count);
+      props.action = ACTION_HISTORY_ROW;
+      props.inputMask = fui::InputTouch;
+      int16_t rowHeight = screen.theme().rowHeight;
+      if (!mappedInput.hasTouch()) {
+        rowHeight = static_cast<int16_t>(UITheme::getInstance().getMetrics().listWithSubtitleRowHeight);
+        props.rowHeight = rowHeight;
+      }
+      historyNav_.selected = historySelection_;
+      historyNav_.syncToProps(screen.body(), rowHeight, screen.theme().listRowGap, count, props);
+      screen.list(props);
+      return;
+    }
   }
 }
 
@@ -422,6 +496,25 @@ void AirPageActivity::onTouchAction(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<AirPageActivity*>(user);
   self->app.clearTapFlash();
   self->applyTouchAction(static_cast<TouchAction>(event.value));
+}
+
+void AirPageActivity::onSettingsRow(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<AirPageActivity*>(user);
+  if (self->screen_ != Screen::Settings || event.value < 0 || event.value >= kSettingsRows) return;
+  self->app.clearTapFlash();
+  self->moveSettingsSelection(event.value);
+  self->applySettingsSelection();
+}
+
+void AirPageActivity::onHistoryRow(const fui::ActionEvent& event, void* user) {
+  auto* self = static_cast<AirPageActivity*>(user);
+  if (self->screen_ != Screen::History || event.value < 0 ||
+      event.value >= static_cast<int>(self->imageStore_.historyCount())) {
+    return;
+  }
+  self->app.clearTapFlash();
+  self->moveHistorySelection(event.value);
+  self->openSelectedHistoryImage();
 }
 
 void AirPageActivity::applyTouchAction(const TouchAction action) {
@@ -469,7 +562,18 @@ void AirPageActivity::openImageMenu() {
 void AirPageActivity::openSettings() {
   if (phase_ != Phase::Idle) return;
   setAirPageScreen(Screen::Settings);
-  settingsSelection_ = 0;
+  settingsNav_.reset();
+  moveSettingsSelection(0);
+  requestUpdate();
+}
+
+void AirPageActivity::moveSettingsSelection(const int index) {
+  {
+    RenderLock lock(*this);
+    settingsSelection_ = index;
+    settingsNav_.selected = index;
+    settingsNav_.follow(kSettingsRows);
+  }
   requestUpdate();
 }
 
@@ -510,9 +614,44 @@ void AirPageActivity::applySettingsSelection() {
 
 void AirPageActivity::openHistory() {
   if (phase_ != Phase::Idle) return;
+  historyNav_.reset();
   historySelection_ = 0;
+  rebuildHistoryRows();
   setAirPageScreen(Screen::History);
   requestUpdate();
+}
+
+void AirPageActivity::moveHistorySelection(const int index) {
+  {
+    RenderLock lock(*this);
+    historySelection_ = index;
+    historyNav_.selected = index;
+    historyNav_.follow(static_cast<int>(imageStore_.historyCount()));
+  }
+  requestUpdate();
+}
+
+void AirPageActivity::rebuildHistoryRows() {
+  RenderLock lock(*this);
+  const int count = static_cast<int>(imageStore_.historyCount());
+  historySelection_ = std::min(historySelection_, std::max(0, count - 1));
+  for (int i = 0; i < count; ++i) {
+    const auto& entry = imageStore_.historyEntry(static_cast<size_t>(i));
+    if (entry.isCurrent()) {
+      snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s", tr(STR_AIRPAGE_CURRENT_IMAGE));
+    } else if (!formatArchiveDate(entry.archiveId, historyLabels_[i], sizeof(historyLabels_[i]))) {
+      snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s %d", tr(STR_AIRPAGE_IMAGE_LABEL), i + 1);
+    }
+    const char* format = entry.image.format == airpage::ImageFormat::Jpeg ? "JPEG" : "BMP";
+    snprintf(historySubtitles_[i], sizeof(historySubtitles_[i]), "%s · %d×%d", format, entry.image.width,
+             entry.image.height);
+    historyRows_[i].label = historyLabels_[i];
+    historyRows_[i].subtitle = historySubtitles_[i];
+    historyRows_[i].actionValue = static_cast<int16_t>(i);
+  }
+  historyNav_.selected = historySelection_;
+  historyNav_.scrollBy(0, count);
+  historyNav_.follow(count);
 }
 
 void AirPageActivity::openSelectedHistoryImage() {
@@ -520,6 +659,7 @@ void AirPageActivity::openSelectedHistoryImage() {
     if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
       historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
     }
+    rebuildHistoryRows();
     notice_ = Notice::InvalidImage;
     requestUpdate();
     return;
@@ -762,10 +902,8 @@ void AirPageActivity::render(RenderLock&&) {
         renderQr(content);
         break;
       case Screen::Settings:
-        renderSettings(content);
         break;
       case Screen::History:
-        renderHistory(content);
         break;
       case Screen::Image:
         renderStatus(content, tr(STR_AIRPAGE_INVALID_IMAGE));
@@ -798,7 +936,7 @@ void AirPageActivity::render(RenderLock&&) {
       break;
   }
 
-  if (mappedInput.hasTouch()) renderUi();
+  if (mappedInput.hasTouch() || screen_ == Screen::Settings || screen_ == Screen::History) renderUi();
 
   renderer.displayBuffer();
   imageNeedsDisplay_ = true;
@@ -889,50 +1027,6 @@ void AirPageActivity::renderQr(const Rect& viewport) {
 
 void AirPageActivity::renderStatus(const Rect& viewport, const char* msg) {
   UITheme::drawCenteredWrappedText(renderer, viewport, UI_12_FONT_ID, msg, 2);
-}
-
-void AirPageActivity::renderSettings(const Rect& viewport) {
-  GUI.drawList(
-      renderer, viewport, kSettingsRows, settingsSelection_,
-      [](int index) {
-        const StrId id = index == 0 ? StrId::STR_AIRPAGE_MODE_SETTING : StrId::STR_AIRPAGE_AUTO_WALLPAPER;
-        return std::string(I18N.get(id));
-      },
-      nullptr, nullptr,
-      [this](int index) {
-        if (index == 0) {
-          const StrId id = connection_.realtime() ? StrId::STR_AIRPAGE_MODE_REALTIME : StrId::STR_AIRPAGE_MODE_MANUAL;
-          return std::string(I18N.get(id));
-        }
-        const StrId id = autoSleepWallpaper_ ? StrId::STR_AIRPAGE_SETTING_ON : StrId::STR_AIRPAGE_SETTING_OFF;
-        return std::string(I18N.get(id));
-      });
-}
-
-void AirPageActivity::renderHistory(const Rect& viewport) {
-  const size_t historyCount = imageStore_.historyCount();
-  if (historyCount == 0) {
-    renderStatus(viewport, tr(STR_AIRPAGE_NO_IMAGE));
-    return;
-  }
-
-  GUI.drawList(
-      renderer, viewport, static_cast<int>(historyCount), historySelection_,
-      [this](int index) {
-        const auto& entry = imageStore_.historyEntry(static_cast<size_t>(index));
-        if (entry.isCurrent()) return std::string(tr(STR_AIRPAGE_CURRENT_IMAGE));
-        char label[32];
-        if (formatArchiveDate(entry.archiveId, label, sizeof(label))) return std::string(label);
-        snprintf(label, sizeof(label), "%s %d", tr(STR_AIRPAGE_IMAGE_LABEL), index + 1);
-        return std::string(label);
-      },
-      [this](int index) {
-        const airpage::ImageInfo& image = imageStore_.historyEntry(static_cast<size_t>(index)).image;
-        const char* format = image.format == airpage::ImageFormat::Jpeg ? "JPEG" : "BMP";
-        char subtitle[40];
-        snprintf(subtitle, sizeof(subtitle), "%s · %d×%d", format, image.width, image.height);
-        return std::string(subtitle);
-      });
 }
 
 const char* AirPageActivity::screenTitle() const {
