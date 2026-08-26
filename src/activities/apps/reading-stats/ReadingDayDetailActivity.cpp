@@ -3,6 +3,8 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <algorithm>
+#include <iterator>
 #include <string>
 
 #include "AppMetricCard.h"
@@ -37,7 +39,8 @@ void ReadingDayDetailActivity::refreshEntries() {
 
   rowValues.clear();
   rowValues.reserve(entries.size());
-  for (const auto& entry : entries) rowValues.push_back(ReadingStatsAnalytics::formatDurationHm(entry.readingMs));
+  std::transform(entries.begin(), entries.end(), std::back_inserter(rowValues),
+                 [](const auto& entry) { return ReadingStatsAnalytics::formatDurationHm(entry.readingMs); });
 
   rowItems.clear();
   rowItems.reserve(entries.size());
