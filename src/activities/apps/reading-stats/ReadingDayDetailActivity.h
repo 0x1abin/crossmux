@@ -1,26 +1,33 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
-#include "../../Activity.h"
-#include "util/ButtonNavigator.h"
+#include "activities/UiListActivity.h"
 #include "util/ReadingStatsAnalytics.h"
 
-class ReadingDayDetailActivity final : public Activity {
-  ButtonNavigator buttonNavigator;
-  uint32_t dayOrdinal = 0;
-  int selectedIndex = 0;
-  std::vector<ReadingStatsAnalytics::DayBookEntry> entries;
-  bool waitForConfirmRelease = false;
+class ReadingDayDetailActivity final : public UiListActivity {
+ public:
+  explicit ReadingDayDetailActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t dayOrdinal);
+
+  void onEnter() override;
+
+ private:
+  int listCount() const override { return static_cast<int>(entries.size()); }
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  void drawChrome() override;
+  void drawFooter() override;
 
   void refreshEntries();
   void openSelectedBook();
 
- public:
-  explicit ReadingDayDetailActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t dayOrdinal)
-      : Activity("ReadingDayDetail", renderer, mappedInput), dayOrdinal(dayOrdinal) {}
-
-  void onEnter() override;
-  void loop() override;
-  void render(RenderLock&&) override;
+  uint32_t dayOrdinal = 0;
+  std::vector<ReadingStatsAnalytics::DayBookEntry> entries;
+  std::vector<std::string> rowValues;
+  std::vector<freeink::ui::ListItem> rowItems;
+  std::string dateLabel;
+  std::string totalReadingText;
+  std::string bookCountText;
+  std::string topBookTitle;
 };

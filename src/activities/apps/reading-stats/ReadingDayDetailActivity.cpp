@@ -8,8 +8,11 @@
 #include "AppMetricCard.h"
 #include "ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
+#include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
+
+namespace fui = freeink::ui;
 
 namespace {
 constexpr int SUMMARY_CARD_HEIGHT = 70;
@@ -22,128 +25,111 @@ void drawMetricCard(const GfxRenderer& renderer, const Rect& rect, const char* l
 }
 }  // namespace
 
+ReadingDayDetailActivity::ReadingDayDetailActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                                   const uint32_t dayOrdinal)
+    : UiListActivity("ReadingDayDetail", renderer, mappedInput), dayOrdinal(dayOrdinal) {}
+
 void ReadingDayDetailActivity::refreshEntries() {
   entries = ReadingStatsAnalytics::getBooksReadOnDay(dayOrdinal);
-  if (selectedIndex >= static_cast<int>(entries.size())) {
-    selectedIndex = std::max(0, static_cast<int>(entries.size()) - 1);
+  nav.selected = std::min(nav.selected, std::max(0, listCount() - 1));
+  nav.scrollBy(0, listCount());
+  nav.follow(listCount());
+
+  rowValues.clear();
+  rowValues.reserve(entries.size());
+  for (const auto& entry : entries) rowValues.push_back(ReadingStatsAnalytics::formatDurationHm(entry.readingMs));
+
+  rowItems.clear();
+  rowItems.reserve(entries.size());
+  for (size_t i = 0; i < entries.size(); ++i) {
+    const ReadingBookStats* book = entries[i].book;
+    fui::ListItem item;
+    item.label = book ? (book->title.empty() ? book->path.c_str() : book->title.c_str()) : tr(STR_NOT_SET);
+    item.subtitle = book ? (book->author.empty() ? tr(STR_IN_PROGRESS) : book->author.c_str()) : tr(STR_NOT_SET);
+    item.icon = listIconFor(UIIcon::Book, 32);
+    item.value = rowValues[i].c_str();
+    item.actionValue = static_cast<int16_t>(i);
+    rowItems.push_back(item);
   }
+
+  dateLabel = ReadingStatsAnalytics::formatDayOrdinalLabel(dayOrdinal);
+  const auto timeline = ReadingStatsAnalytics::buildTimelineDayEntry(dayOrdinal);
+  totalReadingText = ReadingStatsAnalytics::formatDurationHm(entries.empty() ? 0 : timeline.totalReadingMs);
+  bookCountText = std::to_string(entries.size());
+  topBookTitle = !entries.empty() && entries.front().book != nullptr ? getBookTitle(*entries.front().book)
+                                                                     : std::string(tr(STR_NOT_SET));
 }
 
 void ReadingDayDetailActivity::openSelectedBook() {
-  if (selectedIndex < 0 || selectedIndex >= static_cast<int>(entries.size()) ||
-      entries[selectedIndex].book == nullptr) {
+  if (nav.selected < 0 || nav.selected >= listCount() || entries[nav.selected].book == nullptr) {
     return;
   }
 
+  app.clearTapFlash();
   startActivityForResultWith<ReadingStatsDetailActivity>(
       [this](const ActivityResult&) {
         refreshEntries();
         requestUpdate();
       },
-      entries[selectedIndex].book->path);
+      entries[nav.selected].book->path);
 }
 
 void ReadingDayDetailActivity::onEnter() {
-  Activity::onEnter();
+  UiListActivity::onEnter();
   refreshEntries();
-  waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
-  requestUpdate();
 }
 
-void ReadingDayDetailActivity::loop() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
-    return;
-  }
-
-  if (waitForConfirmRelease) {
-    if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
-      waitForConfirmRelease = false;
-    }
-    return;
-  }
-
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + SUMMARY_CARD_HEIGHT +
-                      metrics.verticalSpacing + 34 + 10;
-  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  if (handleListTouch(selectedIndex, static_cast<int>(entries.size()), listTop, listHeight, false) ==
-      ListTouchResult::Activated) {
-    openSelectedBook();
-    return;
-  }
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    openSelectedBook();
-    return;
-  }
-
-  buttonNavigator.onNextRelease([this] {
-    if (entries.empty()) {
-      return;
-    }
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, static_cast<int>(entries.size()));
-    requestUpdate();
-  });
-
-  buttonNavigator.onPreviousRelease([this] {
-    if (entries.empty()) {
-      return;
-    }
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, static_cast<int>(entries.size()));
-    requestUpdate();
-  });
+void ReadingDayDetailActivity::activateIndex(const int index) {
+  if (index < 0 || index >= listCount()) return;
+  nav.selected = index;
+  openSelectedBook();
 }
 
-void ReadingDayDetailActivity::render(RenderLock&&) {
-  renderer.clearScreen();
-
+void ReadingDayDetailActivity::drawChrome() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
   const int sidePadding = metrics.contentSidePadding;
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int cardWidth = (pageWidth - sidePadding * 2 - SUMMARY_GAP) / 2;
-  const std::string dateLabel = ReadingStatsAnalytics::formatDayOrdinalLabel(dayOrdinal);
-  const uint64_t totalReadingMs =
-      !entries.empty() ? ReadingStatsAnalytics::buildTimelineDayEntry(dayOrdinal).totalReadingMs : 0;
 
   HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_READING_DAY), dateLabel.c_str());
 
   drawMetricCard(renderer, Rect{sidePadding, contentTop, cardWidth, SUMMARY_CARD_HEIGHT}, tr(STR_TOTAL_TIME),
-                 ReadingStatsAnalytics::formatDurationHm(totalReadingMs));
+                 totalReadingText);
   drawMetricCard(renderer, Rect{sidePadding + cardWidth + SUMMARY_GAP, contentTop, cardWidth, SUMMARY_CARD_HEIGHT},
-                 tr(STR_BOOKS_READ), std::to_string(entries.size()));
+                 tr(STR_BOOKS_READ), bookCountText);
 
-  const char* topBookLabel = tr(STR_TOP_BOOK);
-  const std::string topBookTitle = !entries.empty() && entries.front().book != nullptr
-                                       ? getBookTitle(*entries.front().book)
-                                       : std::string(tr(STR_NOT_SET));
   const int listTop = contentTop + SUMMARY_CARD_HEIGHT + metrics.verticalSpacing;
-  GUI.drawSubHeader(renderer, Rect{0, listTop, pageWidth, 34}, topBookLabel, topBookTitle.c_str());
+  GUI.drawSubHeader(renderer, Rect{0, listTop, pageWidth, 34}, tr(STR_TOP_BOOK), topBookTitle.c_str());
+}
 
+void ReadingDayDetailActivity::buildScreen(UiScreen& screen) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listTop = contentTop + SUMMARY_CARD_HEIGHT + metrics.verticalSpacing;
   const int listContentTop = listTop + 34 + 10;
-  const int listHeight = pageHeight - listContentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  screen.setContentMargin(fui::Insets{
+      static_cast<int16_t>(listContentTop), static_cast<int16_t>(renderer.getScreenWidth() - (safe.x + safe.width)),
+      static_cast<int16_t>(metrics.buttonHintsHeight + metrics.verticalSpacing), static_cast<int16_t>(safe.x)});
+
   if (entries.empty()) {
-    renderer.drawText(UI_10_FONT_ID, sidePadding, listContentTop + 20, tr(STR_NO_READING_DAY));
-  } else {
-    GUI.drawList(
-        renderer, Rect{0, listContentTop, pageWidth, listHeight}, static_cast<int>(entries.size()), selectedIndex,
-        [this](const int index) {
-          return entries[index].book ? getBookTitle(*entries[index].book) : std::string(tr(STR_NOT_SET));
-        },
-        [this](const int index) {
-          if (!entries[index].book) {
-            return std::string(tr(STR_NOT_SET));
-          }
-          return entries[index].book->author.empty() ? std::string(tr(STR_IN_PROGRESS)) : entries[index].book->author;
-        },
-        [](const int) { return UIIcon::Book; },
-        [this](const int index) { return ReadingStatsAnalytics::formatDurationHm(entries[index].readingMs); });
+    screen.centeredText(tr(STR_NO_READING_DAY), screen.theme().bodyText);
+    return;
   }
 
+  fui::ListProps props;
+  props.items = rowItems.data();
+  props.count = static_cast<uint16_t>(rowItems.size());
+  props.action = ACTION_ROW;
+  props.inputMask = fui::InputTouch;
+  props.valueInset = 8;
+  syncListViewport(screen, props, /*hasSubtitle=*/true);
+  screen.list(props);
+}
+
+void ReadingDayDetailActivity::drawFooter() {
   const auto labels =
       mappedInput.mapLabels(tr(STR_BACK), entries.empty() ? "" : tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  renderer.displayBuffer();
 }

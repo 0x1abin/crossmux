@@ -1,23 +1,25 @@
 #pragma once
 
-#include "activities/Activity.h"
-#include "util/ButtonNavigator.h"
+#include <vector>
 
-class AppVisibilitySettingsActivity final : public Activity {
+#include "activities/UiListActivity.h"
+
+class AppVisibilitySettingsActivity final : public UiListActivity {
  public:
-  explicit AppVisibilitySettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("AppVisibilitySettings", renderer, mappedInput) {}
+  explicit AppVisibilitySettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
   void onEnter() override;
   void onExit() override;
-  void loop() override;
-  void render(RenderLock&&) override;
 
  private:
-  void toggleSelected();
+  int listCount() const override;
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  bool handleCustomInput() override;
+  const char* headerTitle() const override;
+  void drawFooter() override;
 
-  ButtonNavigator buttonNavigator;
-  int selectedIndex = 0;
+  std::vector<freeink::ui::ListItem> rowItems;
   bool waitForConfirmRelease = false;
   bool dirty = false;
 };
