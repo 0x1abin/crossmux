@@ -36,11 +36,12 @@ pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 ```
 
-All six S3 targets publish separate rolling hardware-beta artifacts. Each
-publish builds both flavors: GitHub carries the international package and
-Gitee carries the Simplified-Chinese package under the same rolling tag.
-Manual flashing must use the matching build; the embedded board tag rejects a
-tagged image for a different board.
+All six S3 targets are part of the shared Nightly matrix. Each target builds
+international and Simplified-Chinese flavors as one pair. The active deployment
+region selects GitHub or COS for both flavors; language does not select the
+storage provider. Manual flashing must use the matching build; the embedded
+board tag rejects a tagged image for a different board. See
+[firmware-release.md](firmware-release.md) for publishing and rollback details.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.
