@@ -186,10 +186,15 @@ jobs:
             target="${artifact##*/nightly-}"
             for flavor in global cn; do
               [ -d "$artifact/$flavor" ] || continue
-              coscli cp "${cos_args[@]}" "$artifact/$flavor/" \
+              if ! coscli cp "${cos_args[@]}" "$artifact/$flavor/" \
                 "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/${flavor}/" \
                 --recursive --forbid-overwrite \
-                --meta 'Cache-Control:public,max-age=31536000,immutable'
+                --meta 'Cache-Control:public,max-age=31536000,immutable' \
+                --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
+                find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
+                  2>/dev/null || true
+                exit 1
+              fi
             done
           done
 
@@ -207,9 +212,14 @@ jobs:
           if [ -n "$COS_SESSION_TOKEN" ]; then
             cos_args+=(--token "$COS_SESSION_TOKEN")
           fi
-          coscli cp "${cos_args[@]}" release-index-cn.json \
+          if ! coscli cp "${cos_args[@]}" release-index-cn.json \
             "cos://${COS_BUCKET}/firmware/releases/nightly/index.json" \
-            --meta 'Cache-Control:no-cache'
+            --meta 'Cache-Control:no-cache' \
+            --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
+            find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
+              2>/dev/null || true
+            exit 1
+          fi
           if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit nightly --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --title "CrossMux Nightly (${GITHUB_SHA::7})" \

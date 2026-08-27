@@ -64,6 +64,8 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertNotIn('coscli config add', workflow)
         self.assertIn('cos://${COS_BUCKET}/firmware/builds/', workflow)
         self.assertIn('cos_args+=(--token "$COS_SESSION_TOKEN")', workflow)
+        self.assertIn('--fail-output-path "$RUNNER_TEMP/coscli-errors"', workflow)
+        self.assertIn('-name error.report -exec cat {} +', workflow)
 
     def write_image(self, chip_id=0x0009, board='eego_a4'):
         image = bytearray(24)
