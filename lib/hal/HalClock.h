@@ -22,6 +22,7 @@ class HalClock {
   bool _autoSyncEnabled = true;
   bool _wifiWasConnected = false;
   bool _sntpInitialized = false;
+  bool _useChinaServers = false;
   ClockSyncState _syncState = ClockSyncState::Idle;
   unsigned long _lastSyncMs = 0;
 
@@ -42,6 +43,7 @@ class HalClock {
   bool setUtcTime(time_t epoch);
 
   void setAutoSyncEnabled(bool enabled);
+  void setUseChinaServers(bool enabled) { _useChinaServers = enabled; }
   bool requestSync();
   bool syncNow(uint32_t timeoutMs = 10000);
   ClockSyncState syncState() const { return _syncState; }

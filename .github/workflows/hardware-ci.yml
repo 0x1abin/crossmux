@@ -122,17 +122,11 @@ jobs:
             -e simulator_eego_a4 \
             -e simulator_murphy_m4 \
             -e sticky_nightly \
-            -e sticky_cn_nightly \
             -e x4pro_nightly \
-            -e x4pro_cn_nightly \
             -e papermono_nightly \
-            -e papermono_cn_nightly \
             -e eego_a4_nightly \
-            -e eego_a4_cn_nightly \
             -e murphy_m4_nightly \
-            -e murphy_m4_cn_nightly \
-            -e waveshare_epaper_397_nightly \
-            -e waveshare_epaper_397_cn_nightly | tee pio.log
+            -e waveshare_epaper_397_nightly | tee pio.log
 
       - name: Record firmware stats
         run: |

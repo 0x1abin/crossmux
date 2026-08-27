@@ -22,19 +22,15 @@ class NightlyTargetTest(unittest.TestCase):
             {entry['targetId'] for entry in matrix},
             set(nightly_targets.TARGETS),
         )
-        environments = {
-            environment
-            for target in nightly_targets.TARGETS.values()
-            for environment in target['environments'].values()
-        }
-        self.assertEqual(len(environments), 14)
+        environments = {entry['environment'] for entry in matrix}
+        self.assertEqual(len(environments), 7)
 
     def test_runtime_models_and_board_tags_are_explicit(self):
         targets = nightly_targets.TARGETS
         self.assertEqual(targets['xteink_x4']['models'], ['xteink_x3', 'xteink_x4'])
         self.assertEqual(targets['xteink_x4_pro']['boardTag'], 'x4pro')
         self.assertEqual(targets['m5stack_paper_mono']['boardTag'], 'papermono')
-        self.assertEqual(targets['eego_a4']['environments']['zh-CN'], 'eego_a4_cn_nightly')
+        self.assertEqual(targets['eego_a4']['environment'], 'eego_a4_nightly')
 
     def test_versions_are_nightly_release_candidates(self):
         self.assertEqual(
@@ -43,7 +39,7 @@ class NightlyTargetTest(unittest.TestCase):
         )
         self.assertEqual(
             nightly_targets.version_for('1.5.7', 'sticky', 'zh-CN', '12345678'),
-            '1.5.7-sticky-cn-rc+1234567',
+            '1.5.7-sticky-rc+1234567',
         )
         self.assertNotIn('beta', nightly_targets.version_for('1.5.7', 'sticky', 'global', '1234567'))
 
@@ -121,13 +117,13 @@ class NightlyIndexTest(unittest.TestCase):
                 'deviceSlug': target['deviceSlug'],
                 'boardTag': target['boardTag'],
                 'supportedChannels': target['supportedChannels'],
-                'environment': target['environments'][flavor],
+                'environment': nightly_targets.environment_for(target_id, flavor),
                 'chip': target['chip'],
                 'flavor': flavor,
                 'version': f'1.5.7-rc+{revision[:7]}',
                 'crossmuxSha': revision,
                 'sdkSha': sdk_revision,
-                'assets': [{'role': 'firmware', 'name': 'firmware.bin'}],
+                'assets': [{'role': 'firmware', 'name': 'firmware.bin', 'sha256': 'd' * 64}],
             }
             (self.root / nightly_targets.manifest_name(target_id, flavor)).write_text(json.dumps(manifest))
 
@@ -170,6 +166,17 @@ class NightlyIndexTest(unittest.TestCase):
         manifest['sdkSha'] = 'c' * 40
         chinese.write_text(json.dumps(manifest))
         with self.assertRaisesRegex(ValueError, 'SDK revisions do not match'):
+            build_nightly_index.build_index(
+                self.root, None, 'global', 'https://example.com/', 'now', 'test'
+            )
+
+    def test_rejects_mismatched_firmware_pair(self):
+        self.write_pair('sticky')
+        chinese = self.root / nightly_targets.manifest_name('sticky', 'zh-CN')
+        manifest = json.loads(chinese.read_text())
+        manifest['assets'][0]['sha256'] = 'e' * 64
+        chinese.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, 'firmware hashes do not match'):
             build_nightly_index.build_index(
                 self.root, None, 'global', 'https://example.com/', 'now', 'test'
             )

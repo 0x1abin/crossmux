@@ -41,6 +41,7 @@
 #include "activities/settings/TextSettingsActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #endif
+#include "activities/settings/LanguageSelectActivity.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -58,169 +59,13 @@ static unsigned long allowSleepAt = 0;
 constexpr unsigned long READING_STATS_CHECKPOINT_IDLE_MS = 15UL * 1000UL;
 
 // Fonts
-#ifdef ENABLE_CHINESE_VERSION
-// Chinese build: each Latin EpdFont global aliases the matching-size CJK
-// header (notosans_cjk_{8,10,12,14,16,18}, raw 2-bit bitmaps). Bold /
-// italic / bolditalic variants share the single Regular OTF — bold and
-// italic styling are not available for built-in CJK glyphs in this build.
-// SD-card fonts continue to provide style variants when loaded.
-//
-// CJK character coverage is non-uniform across sizes (see
-// build-cn-builtin-fonts.sh):
-//   - 8/10/12pt: full subset (top-3500 现代汉语常用字表 by Zipf, ∪
-//     i18n require-from chars). Sized for reader SMALL and all UI.
-//   - 14/16/18pt: i18n-only subset (747 chars from chinese.yaml + feature
-//     requirements). UI strings still render, while Chinese EPUB text relies
-//     on an SD-card font for characters outside the subset.
-EpdFont notoserif14RegularFont(&notosans_cjk_14);
-EpdFont notoserif14BoldFont(&notosans_cjk_14);
-EpdFont notoserif14ItalicFont(&notosans_cjk_14);
-EpdFont notoserif14BoldItalicFont(&notosans_cjk_14);
-EpdFontFamily notoserif14FontFamily(&notoserif14RegularFont, &notoserif14BoldFont, &notoserif14ItalicFont,
-                                    &notoserif14BoldItalicFont);
-#ifndef OMIT_FONTS
-EpdFont notoserif12RegularFont(&notosans_cjk_12);
-EpdFont notoserif12BoldFont(&notosans_cjk_12);
-EpdFont notoserif12ItalicFont(&notosans_cjk_12);
-EpdFont notoserif12BoldItalicFont(&notosans_cjk_12);
-EpdFontFamily notoserif12FontFamily(&notoserif12RegularFont, &notoserif12BoldFont, &notoserif12ItalicFont,
-                                    &notoserif12BoldItalicFont);
-EpdFont notoserif16RegularFont(&notosans_cjk_16);
-EpdFont notoserif16BoldFont(&notosans_cjk_16);
-EpdFont notoserif16ItalicFont(&notosans_cjk_16);
-EpdFont notoserif16BoldItalicFont(&notosans_cjk_16);
-EpdFontFamily notoserif16FontFamily(&notoserif16RegularFont, &notoserif16BoldFont, &notoserif16ItalicFont,
-                                    &notoserif16BoldItalicFont);
-EpdFont notoserif18RegularFont(&notosans_cjk_18);
-EpdFont notoserif18BoldFont(&notosans_cjk_18);
-EpdFont notoserif18ItalicFont(&notosans_cjk_18);
-EpdFont notoserif18BoldItalicFont(&notosans_cjk_18);
-EpdFontFamily notoserif18FontFamily(&notoserif18RegularFont, &notoserif18BoldFont, &notoserif18ItalicFont,
-                                    &notoserif18BoldItalicFont);
+// All legacy built-in reader IDs share one 12pt offline fallback. Complete
+// families, other sizes, and style variants come from SD .cpfont files.
+EpdFont offlineReaderFont(&notosans_cjk_12);
+EpdFontFamily offlineReaderFontFamily(&offlineReaderFont);
 
-EpdFont notosans12RegularFont(&notosans_cjk_12);
-EpdFont notosans12BoldFont(&notosans_cjk_12);
-EpdFont notosans12ItalicFont(&notosans_cjk_12);
-EpdFont notosans12BoldItalicFont(&notosans_cjk_12);
-EpdFontFamily notosans12FontFamily(&notosans12RegularFont, &notosans12BoldFont, &notosans12ItalicFont,
-                                   &notosans12BoldItalicFont);
-EpdFont notosans14RegularFont(&notosans_cjk_14);
-EpdFont notosans14BoldFont(&notosans_cjk_14);
-EpdFont notosans14ItalicFont(&notosans_cjk_14);
-EpdFont notosans14BoldItalicFont(&notosans_cjk_14);
-EpdFontFamily notosans14FontFamily(&notosans14RegularFont, &notosans14BoldFont, &notosans14ItalicFont,
-                                   &notosans14BoldItalicFont);
-EpdFont notosans16RegularFont(&notosans_cjk_16);
-EpdFont notosans16BoldFont(&notosans_cjk_16);
-EpdFont notosans16ItalicFont(&notosans_cjk_16);
-EpdFont notosans16BoldItalicFont(&notosans_cjk_16);
-EpdFontFamily notosans16FontFamily(&notosans16RegularFont, &notosans16BoldFont, &notosans16ItalicFont,
-                                   &notosans16BoldItalicFont);
-EpdFont notosans18RegularFont(&notosans_cjk_18);
-EpdFont notosans18BoldFont(&notosans_cjk_18);
-EpdFont notosans18ItalicFont(&notosans_cjk_18);
-EpdFont notosans18BoldItalicFont(&notosans_cjk_18);
-EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, &notosans18ItalicFont,
-                                   &notosans18BoldItalicFont);
-
-// OpenDyslexic 8/10/12/14pt → matching CJK headers.
-EpdFont opendyslexic8RegularFont(&notosans_cjk_8);
-EpdFont opendyslexic8BoldFont(&notosans_cjk_8);
-EpdFont opendyslexic8ItalicFont(&notosans_cjk_8);
-EpdFont opendyslexic8BoldItalicFont(&notosans_cjk_8);
-EpdFontFamily opendyslexic8FontFamily(&opendyslexic8RegularFont, &opendyslexic8BoldFont, &opendyslexic8ItalicFont,
-                                      &opendyslexic8BoldItalicFont);
-EpdFont opendyslexic10RegularFont(&notosans_cjk_10);
-EpdFont opendyslexic10BoldFont(&notosans_cjk_10);
-EpdFont opendyslexic10ItalicFont(&notosans_cjk_10);
-EpdFont opendyslexic10BoldItalicFont(&notosans_cjk_10);
-EpdFontFamily opendyslexic10FontFamily(&opendyslexic10RegularFont, &opendyslexic10BoldFont, &opendyslexic10ItalicFont,
-                                       &opendyslexic10BoldItalicFont);
-EpdFont opendyslexic12RegularFont(&notosans_cjk_12);
-EpdFont opendyslexic12BoldFont(&notosans_cjk_12);
-EpdFont opendyslexic12ItalicFont(&notosans_cjk_12);
-EpdFont opendyslexic12BoldItalicFont(&notosans_cjk_12);
-EpdFontFamily opendyslexic12FontFamily(&opendyslexic12RegularFont, &opendyslexic12BoldFont, &opendyslexic12ItalicFont,
-                                       &opendyslexic12BoldItalicFont);
-EpdFont opendyslexic14RegularFont(&notosans_cjk_14);
-EpdFont opendyslexic14BoldFont(&notosans_cjk_14);
-EpdFont opendyslexic14ItalicFont(&notosans_cjk_14);
-EpdFont opendyslexic14BoldItalicFont(&notosans_cjk_14);
-EpdFontFamily opendyslexic14FontFamily(&opendyslexic14RegularFont, &opendyslexic14BoldFont, &opendyslexic14ItalicFont,
-                                       &opendyslexic14BoldItalicFont);
-#endif  // OMIT_FONTS
-
-// smallFont (8pt status text) → 8pt CJK header.
-EpdFont smallFont(&notosans_cjk_8);
-EpdFontFamily smallFontFamily(&smallFont);
-
-// Keep status digits and symbols pixel-identical to the international build.
-EpdFont statusNumericFont(&notosans_8_regular);
-EpdFontFamily statusNumericFontFamily(&statusNumericFont);
-
-// UI fonts: 10pt status bar uses the 10pt CJK header so glyphs match the
-// surrounding chrome size; 12pt menu uses the 12pt CJK header.
-EpdFont ui10RegularFont(&notosans_cjk_10);
-EpdFont ui10BoldFont(&notosans_cjk_10);
-EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
-
-EpdFont ui12RegularFont(&notosans_cjk_12);
-EpdFont ui12BoldFont(&notosans_cjk_12);
-EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
-#else  // ENABLE_CHINESE_VERSION
-EpdFont notoserif14RegularFont(&notoserif_14_regular);
-EpdFont notoserif14BoldFont(&notoserif_14_bold);
-EpdFont notoserif14ItalicFont(&notoserif_14_italic);
-EpdFont notoserif14BoldItalicFont(&notoserif_14_bolditalic);
-EpdFontFamily notoserif14FontFamily(&notoserif14RegularFont, &notoserif14BoldFont, &notoserif14ItalicFont,
-                                    &notoserif14BoldItalicFont);
-#ifndef OMIT_FONTS
-EpdFont notoserif12RegularFont(&notoserif_12_regular);
-EpdFont notoserif12BoldFont(&notoserif_12_bold);
-EpdFont notoserif12ItalicFont(&notoserif_12_italic);
-EpdFont notoserif12BoldItalicFont(&notoserif_12_bolditalic);
-EpdFontFamily notoserif12FontFamily(&notoserif12RegularFont, &notoserif12BoldFont, &notoserif12ItalicFont,
-                                    &notoserif12BoldItalicFont);
-EpdFont notoserif16RegularFont(&notoserif_16_regular);
-EpdFont notoserif16BoldFont(&notoserif_16_bold);
-EpdFont notoserif16ItalicFont(&notoserif_16_italic);
-EpdFont notoserif16BoldItalicFont(&notoserif_16_bolditalic);
-EpdFontFamily notoserif16FontFamily(&notoserif16RegularFont, &notoserif16BoldFont, &notoserif16ItalicFont,
-                                    &notoserif16BoldItalicFont);
-EpdFont notoserif18RegularFont(&notoserif_18_regular);
-EpdFont notoserif18BoldFont(&notoserif_18_bold);
-EpdFont notoserif18ItalicFont(&notoserif_18_italic);
-EpdFont notoserif18BoldItalicFont(&notoserif_18_bolditalic);
-EpdFontFamily notoserif18FontFamily(&notoserif18RegularFont, &notoserif18BoldFont, &notoserif18ItalicFont,
-                                    &notoserif18BoldItalicFont);
-
-EpdFont notosans12RegularFont(&notosans_12_regular);
-EpdFont notosans12BoldFont(&notosans_12_bold);
-EpdFont notosans12ItalicFont(&notosans_12_italic);
-EpdFont notosans12BoldItalicFont(&notosans_12_bolditalic);
-EpdFontFamily notosans12FontFamily(&notosans12RegularFont, &notosans12BoldFont, &notosans12ItalicFont,
-                                   &notosans12BoldItalicFont);
-EpdFont notosans14RegularFont(&notosans_14_regular);
-EpdFont notosans14BoldFont(&notosans_14_bold);
-EpdFont notosans14ItalicFont(&notosans_14_italic);
-EpdFont notosans14BoldItalicFont(&notosans_14_bolditalic);
-EpdFontFamily notosans14FontFamily(&notosans14RegularFont, &notosans14BoldFont, &notosans14ItalicFont,
-                                   &notosans14BoldItalicFont);
-EpdFont notosans16RegularFont(&notosans_16_regular);
-EpdFont notosans16BoldFont(&notosans_16_bold);
-EpdFont notosans16ItalicFont(&notosans_16_italic);
-EpdFont notosans16BoldItalicFont(&notosans_16_bolditalic);
-EpdFontFamily notosans16FontFamily(&notosans16RegularFont, &notosans16BoldFont, &notosans16ItalicFont,
-                                   &notosans16BoldItalicFont);
-EpdFont notosans18RegularFont(&notosans_18_regular);
-EpdFont notosans18BoldFont(&notosans_18_bold);
-EpdFont notosans18ItalicFont(&notosans_18_italic);
-EpdFont notosans18BoldItalicFont(&notosans_18_bolditalic);
-EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, &notosans18ItalicFont,
-                                   &notosans18BoldItalicFont);
-
-#endif  // OMIT_FONTS
-
+// International UI fonts remain primary; CJK subsets are selected only when
+// the primary is missing a Han glyph.
 EpdFont smallFont(&notosans_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
 
@@ -231,13 +76,20 @@ EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
 EpdFont ui12RegularFont(&ubuntu_12_regular);
 EpdFont ui12BoldFont(&ubuntu_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
-#endif  // ENABLE_CHINESE_VERSION
 
-#ifdef ENABLE_CHINESE_VERSION
+EpdFont cjk8Font(&notosans_cjk_8);
+EpdFontFamily cjk8FontFamily(&cjk8Font);
+EpdFont cjk10Font(&notosans_cjk_10);
+EpdFontFamily cjk10FontFamily(&cjk10Font);
+EpdFont cjk12Font(&notosans_cjk_12);
+EpdFontFamily cjk12FontFamily(&cjk12Font);
+constexpr int CJK_UI_8_FONT_ID = 0x434A4B08;
+constexpr int CJK_UI_10_FONT_ID = 0x434A4B0A;
+constexpr int CJK_UI_12_FONT_ID = 0x434A4B0C;
+
 // Chinese chess piece glyphs (subset CJK font, 14 characters at 16pt).
 EpdFont chineseChessPieceFont(&chinese_chess_16);
 EpdFontFamily chineseChessPieceFontFamily(&chineseChessPieceFont);
-#endif
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
@@ -419,25 +271,28 @@ bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false)
   }
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
-  renderer.insertFont(NOTOSERIF_14_FONT_ID, notoserif14FontFamily);
+  renderer.insertFont(NOTOSERIF_14_FONT_ID, offlineReaderFontFamily);
 #ifndef OMIT_FONTS
-  renderer.insertFont(NOTOSERIF_12_FONT_ID, notoserif12FontFamily);
-  renderer.insertFont(NOTOSERIF_16_FONT_ID, notoserif16FontFamily);
-  renderer.insertFont(NOTOSERIF_18_FONT_ID, notoserif18FontFamily);
+  renderer.insertFont(NOTOSERIF_12_FONT_ID, offlineReaderFontFamily);
+  renderer.insertFont(NOTOSERIF_16_FONT_ID, offlineReaderFontFamily);
+  renderer.insertFont(NOTOSERIF_18_FONT_ID, offlineReaderFontFamily);
 
-  renderer.insertFont(NOTOSANS_12_FONT_ID, notosans12FontFamily);
-  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
-  renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
-  renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
+  renderer.insertFont(NOTOSANS_12_FONT_ID, offlineReaderFontFamily);
+  renderer.insertFont(NOTOSANS_14_FONT_ID, offlineReaderFontFamily);
+  renderer.insertFont(NOTOSANS_16_FONT_ID, offlineReaderFontFamily);
+  renderer.insertFont(NOTOSANS_18_FONT_ID, offlineReaderFontFamily);
 #endif  // OMIT_FONTS
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
-#ifdef ENABLE_CHINESE_VERSION
-  // One boot-time map node (<100 bytes including font objects); glyph data stays in flash.
-  renderer.insertFont(BaseTheme::STATUS_NUMERIC_FONT_ID, statusNumericFontFamily);
+  renderer.insertFont(CJK_UI_8_FONT_ID, cjk8FontFamily);
+  renderer.insertFont(CJK_UI_10_FONT_ID, cjk10FontFamily);
+  renderer.insertFont(CJK_UI_12_FONT_ID, cjk12FontFamily);
+  renderer.setFallbackFont(SMALL_FONT_ID, CJK_UI_8_FONT_ID);
+  renderer.setFallbackFont(UI_10_FONT_ID, CJK_UI_10_FONT_ID);
+  renderer.setFallbackFont(UI_12_FONT_ID, CJK_UI_12_FONT_ID);
+  renderer.insertFont(BaseTheme::STATUS_NUMERIC_FONT_ID, smallFontFamily);
   renderer.insertFont(CHINESE_CHESS_FONT_ID, chineseChessPieceFontFamily);
-#endif
 
   // Discover and load SD card fonts
   if (logSdFontLoadHeap) {
@@ -587,8 +442,14 @@ void setup() {
 
   HalSystem::checkPanic();
 
-  SETTINGS.loadFromFile();
+  const bool settingsLoaded = SETTINGS.loadFromFile();
+  const auto onboardingMode =
+      settingsLoaded ? LanguageSelectActivity::Mode::Upgrade : LanguageSelectActivity::Mode::Initial;
+  const bool requiresOnboarding = CrossPointSettings::requiresOnboarding(SETTINGS.onboardingVersion);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightOn != 0);
+#ifndef SIMULATOR
+  halClock.setUseChinaServers(SETTINGS.contentProfile == CrossPointSettings::ContentProfile::China);
+#endif
   halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
@@ -715,7 +576,13 @@ void setup() {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
   } else if (postOtaBoot) {
-    activityManager.goHome();
+    if (requiresOnboarding) {
+      activityManager.replaceActivityWith<LanguageSelectActivity>(onboardingMode);
+    } else {
+      activityManager.goHome();
+    }
+  } else if (requiresOnboarding) {
+    activityManager.replaceActivityWith<LanguageSelectActivity>(onboardingMode);
   } else if (resume == BootResume::Silent && snapshotTarget == SilentRebootTarget::ReaderPreloadChineseFont) {
 #ifdef ENABLE_CHINESE_VERSION
     continueChineseFontInstall(snapshotFontPointSize);

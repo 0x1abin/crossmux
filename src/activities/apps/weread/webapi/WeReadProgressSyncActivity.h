@@ -13,7 +13,7 @@ struct CrossPointPosition;
 class WeReadProgressSyncActivity final : public Activity {
  public:
   WeReadProgressSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string epubPath,
-                             const char* bookId, WeReadProgressContext context);
+                             const char* bookId, const WeReadProgressContext& context);
 
   static WeReadProgressContext makeContext(const Epub& epub, const char* bookId, float localFraction,
                                            const CrossPointPosition& localPosition);

@@ -1,7 +1,9 @@
 #include "LanguageSelectActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <iterator>
@@ -13,18 +15,30 @@
 
 namespace fui = freeink::ui;
 
-LanguageSelectActivity::LanguageSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : UiListActivity("LanguageSelect", renderer, mappedInput) {}
+namespace {
+constexpr CrossPointSettings::ContentProfile initialProfileFor(const Language language) {
+  return language == Language::ZH_CN ? CrossPointSettings::ContentProfile::China
+                                     : CrossPointSettings::ContentProfile::Global;
+}
+
+static_assert(initialProfileFor(Language::ZH_CN) == CrossPointSettings::ContentProfile::China);
+static_assert(initialProfileFor(Language::EN) == CrossPointSettings::ContentProfile::Global);
+}  // namespace
+
+LanguageSelectActivity::LanguageSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Mode mode)
+    : UiListActivity("LanguageSelect", renderer, mappedInput), mode_(mode) {}
 
 void LanguageSelectActivity::onEnter() {
   UiListActivity::onEnter();
 
-  // Open on the current language, which may sit past the first page; the first
-  // screen build pulls the viewport to it (ListNav follow-on-build).
-  const auto currentLang = static_cast<uint8_t>(I18N.getLanguage());
+  // Initial onboarding offers Simplified Chinese first without changing the
+  // active language until the user confirms. Other entry modes keep the
+  // current language selected.
+  const auto selectedLang =
+      mode_ == Mode::Initial ? static_cast<uint8_t>(Language::ZH_CN) : static_cast<uint8_t>(I18N.getLanguage());
   const auto* begin = std::begin(SORTED_LANGUAGE_INDICES);
   const auto* end = std::end(SORTED_LANGUAGE_INDICES);
-  const auto* it = std::find(begin, end, currentLang);
+  const auto* it = std::find(begin, end, selectedLang);
   nav.selected = (it != end) ? static_cast<int>(std::distance(begin, it)) : 0;
 
   // Built once here rather than every buildScreen() call: labels are static,
@@ -33,7 +47,7 @@ void LanguageSelectActivity::onEnter() {
   for (int i = 0; i < totalItems; ++i) {
     fui::ListItem item;
     item.label = I18N.getLanguageName(static_cast<Language>(SORTED_LANGUAGE_INDICES[i]));
-    if (SORTED_LANGUAGE_INDICES[i] == currentLang) {
+    if (SORTED_LANGUAGE_INDICES[i] == selectedLang) {
       item.value = tr(STR_SELECTED);
     }
     item.actionValue = static_cast<int16_t>(i);
@@ -50,16 +64,75 @@ void LanguageSelectActivity::activateIndex(const int index) {
   nav.selected = index;
   const uint8_t langIndex = SORTED_LANGUAGE_INDICES[index];
 
-  {
-    RenderLock lock(*this);
-    I18N.setLanguage(static_cast<Language>(langIndex));
+  const uint8_t previousLanguage = SETTINGS.language;
+  const auto previousContentProfile = SETTINGS.contentProfile;
+  const uint8_t previousClockUtcOffsetQ = SETTINGS.clockUtcOffsetQ;
+  const uint8_t previousFontFamily = SETTINGS.fontFamily;
+  const uint8_t previousFontPointSize = SETTINGS.fontPointSize;
+  const uint32_t previousHiddenAppsMask = SETTINGS.hiddenAppsMask;
+  const uint8_t previousOnboardingVersion = SETTINGS.onboardingVersion;
+  SETTINGS.language = langIndex;
+  const Language language = static_cast<Language>(langIndex);
+  const bool simplifiedChinese = language == Language::ZH_CN;
+  switch (mode_) {
+    case Mode::Settings:
+      break;
+    case Mode::Initial:
+      SETTINGS.contentProfile = initialProfileFor(language);
+      SETTINGS.clockUtcOffsetQ = simplifiedChinese ? 80 : 48;
+      SETTINGS.fontFamily = CrossPointSettings::NOTOSANS;
+      SETTINGS.fontPointSize = 12;
+      if (simplifiedChinese) {
+        SETTINGS.hiddenAppsMask &= ~CrossPointSettings::CHINA_ONLY_APPS_MASK;
+      } else {
+        SETTINGS.hiddenAppsMask |= CrossPointSettings::CHINA_ONLY_APPS_MASK;
+      }
+      SETTINGS.onboardingVersion = CrossPointSettings::CURRENT_ONBOARDING_VERSION;
+      break;
+    case Mode::Upgrade:
+      SETTINGS.contentProfile = initialProfileFor(language);
+      SETTINGS.onboardingVersion = CrossPointSettings::CURRENT_ONBOARDING_VERSION;
+      break;
+  }
+  if (!SETTINGS.saveToFile()) {
+    SETTINGS.language = previousLanguage;
+    SETTINGS.contentProfile = previousContentProfile;
+    SETTINGS.clockUtcOffsetQ = previousClockUtcOffsetQ;
+    SETTINGS.fontFamily = previousFontFamily;
+    SETTINGS.fontPointSize = previousFontPointSize;
+    SETTINGS.hiddenAppsMask = previousHiddenAppsMask;
+    SETTINGS.onboardingVersion = previousOnboardingVersion;
+    LOG_ERR("LANG", "Failed to save language selection");
+    for (int i = 0; i < totalItems; ++i) {
+      rowItems[i].value = SORTED_LANGUAGE_INDICES[i] == langIndex ? tr(STR_SELECTED) : nullptr;
+    }
+    requestUpdate();
+    return;
   }
 
-  SETTINGS.language = langIndex;
-  SETTINGS.saveToFile();
+  {
+    RenderLock lock(*this);
+    I18N.setLanguage(language);
+  }
 
-  // Return to previous page
-  finish();
+  if (isOnboarding()) {
+#ifndef SIMULATOR
+    halClock.setUseChinaServers(SETTINGS.contentProfile == CrossPointSettings::ContentProfile::China);
+#endif
+    onGoHome();
+  } else {
+    finish();
+  }
+}
+
+void LanguageSelectActivity::onBackButton() {
+  if (!isOnboarding()) finish();
+}
+
+void LanguageSelectActivity::drawFooter() {
+  const auto labels =
+      mappedInput.mapLabels(isOnboarding() ? "" : tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void LanguageSelectActivity::buildScreen(UiScreen& screen) {

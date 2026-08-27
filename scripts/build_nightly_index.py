@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import urljoin
 
-from nightly_targets import FLAVOR_TOKENS, TARGETS, manifest_name
+from nightly_targets import FLAVOR_TOKENS, TARGETS, environment_for, manifest_name
 
 
 def read_json(path):
@@ -23,14 +23,19 @@ def valid_manifest(manifest, target_id, flavor):
         and manifest.get('deviceSlug') == target['deviceSlug']
         and manifest.get('boardTag') == target['boardTag']
         and manifest.get('supportedChannels') == target['supportedChannels']
-        and manifest.get('environment') == target['environments'][flavor]
+        and manifest.get('environment') == environment_for(target_id, flavor)
         and manifest.get('flavor') == flavor
         and isinstance(manifest.get('crossmuxSha'), str)
         and len(manifest['crossmuxSha']) == 40
         and isinstance(manifest.get('sdkSha'), str)
         and len(manifest['sdkSha']) == 40
         and isinstance(manifest.get('assets'), list)
-        and any(asset.get('role') == 'firmware' for asset in manifest['assets'])
+        and any(
+            asset.get('role') == 'firmware'
+            and isinstance(asset.get('sha256'), str)
+            and len(asset['sha256']) == 64
+            for asset in manifest['assets']
+        )
     )
 
 
@@ -39,6 +44,10 @@ def manifest_url(base_url, region, target_id, flavor):
     if region == 'global':
         return urljoin(base_url, name)
     return urljoin(base_url, f'{target_id}/{FLAVOR_TOKENS[flavor]}/{name}')
+
+
+def firmware_sha(manifest):
+    return next(asset.get('sha256') for asset in manifest['assets'] if asset.get('role') == 'firmware')
 
 
 def build_index(manifest_root, previous, region, base_url, updated_at, build_id):
@@ -67,6 +76,10 @@ def build_index(manifest_root, previous, region, base_url, updated_at, build_id)
         sdk_revisions = {manifest['sdkSha'] for manifest in manifests.values()}
         if len(sdk_revisions) != 1:
             raise ValueError(f'{target_id} flavor SDK revisions do not match')
+        if len({manifest['version'] for manifest in manifests.values()}) != 1:
+            raise ValueError(f'{target_id} flavor versions do not match')
+        if len({firmware_sha(manifest) for manifest in manifests.values()}) != 1:
+            raise ValueError(f'{target_id} flavor firmware hashes do not match')
         targets[target_id] = {
             'targetId': target_id,
             'models': target['models'],

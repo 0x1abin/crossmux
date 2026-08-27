@@ -626,7 +626,6 @@ bool computeAlmanac(const struct tm& t, AlmanacDay& out) {
   if (bestTerm < 0) {
     bestTerm = 23;
     bestYear = gy - 1;
-    bestAbs = absDay;
   }
   out.termCurrentIdx = static_cast<uint8_t>(bestTerm);
 
