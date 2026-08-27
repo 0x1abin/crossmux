@@ -23,6 +23,7 @@ enum class SettingAction {
   Network,
   DateTime,
   ClearCache,
+  RestoreSystemSettings,
   CheckForUpdates,
   SdFirmwareUpdate,
   Language,
@@ -236,6 +237,7 @@ class SettingsActivity final : public UiTabListActivity {
   void openSleepTimeoutPicker();
   void openReadingBackgroundMenu();
   void openReadingBackgroundPicker();
+  void confirmRestoreSystemSettings();
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 

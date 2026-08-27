@@ -29,16 +29,19 @@
 #include "SdCardFontSystem.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
+#include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/ReadingBackground.h"
+#include "util/SystemSettingsReset.h"
 
 namespace fui = freeink::ui;
 
@@ -245,6 +248,8 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+  systemSettings.push_back(
+      SettingInfo::Action(StrId::STR_RESTORE_SYSTEM_SETTINGS, SettingAction::RestoreSystemSettings));
   // Keep the existing CrossMux OTA proxy flow. Build-only boards compile this
   // UI but are intentionally absent from release assets in this sync.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
@@ -658,6 +663,9 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ClearCache:
         startActivityForResultWith<ClearCacheActivity>(resultHandler);
         break;
+      case SettingAction::RestoreSystemSettings:
+        confirmRestoreSystemSettings();
+        break;
       case SettingAction::CheckForUpdates:
         openOtaUpdate();
         break;
@@ -716,6 +724,33 @@ void SettingsActivity::toggleCurrentSetting() {
     rebuildSettingsLists();
     activeNav().selected = std::min(ringPos(), settingsCount);
   }
+}
+
+void SettingsActivity::confirmRestoreSystemSettings() {
+  const bool started = startActivityForResultWith<ConfirmationActivity>(
+      [this](const ActivityResult& firstResult) {
+        if (firstResult.isCancelled) return;
+
+        const bool finalStarted = startActivityForResultWith<ConfirmationActivity>(
+            [this](const ActivityResult& finalResult) {
+              if (finalResult.isCancelled) return;
+              if (systemSettingsReset::clearPersistedSettings()) {
+                silentRestart();
+                return;
+              }
+              optionPopup.show(StrId::STR_RESTORE_SYSTEM_SETTINGS_FAILED, OK_OPTION,
+                               static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+              requestUpdate();
+            },
+            tr(STR_RESTORE_SYSTEM_SETTINGS), tr(STR_RESTORE_SYSTEM_SETTINGS_FINAL_WARNING));
+        if (finalStarted) return;
+        optionPopup.show(StrId::STR_MEMORY_ERROR, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+        requestUpdate();
+      },
+      tr(STR_RESTORE_SYSTEM_SETTINGS), tr(STR_RESTORE_SYSTEM_SETTINGS_WARNING));
+  if (started) return;
+  optionPopup.show(StrId::STR_MEMORY_ERROR, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+  requestUpdate();
 }
 
 void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged) {

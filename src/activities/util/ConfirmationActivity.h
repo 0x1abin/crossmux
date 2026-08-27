@@ -17,15 +17,17 @@ class ConfirmationActivity : public Activity {
   std::string body;
   BodyPlacement bodyPlacement;
 
-  const int margin = 20;
-  const int spacing = 30;
-  const int fontId = UI_10_FONT_ID;
+  static constexpr int MARGIN = 20;
+  static constexpr int SPACING = 30;
+  static constexpr int HEADING_FONT_ID = UI_12_FONT_ID;
+  static constexpr int BODY_FONT_ID = UI_10_FONT_ID;
+  static constexpr int MAX_BODY_LINES = 2;
 
   std::string safeHeading;
   std::string safeBody;
+  // At most body.size() bytes; cached once so button-driven re-renders never wrap/allocate again.
+  std::string safeBodySecondLine;
   OptionPopup confirmPopup;
-  int startY = 0;
-  int lineHeight = 0;
 
  public:
   ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& heading,

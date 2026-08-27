@@ -2,6 +2,8 @@
 
 #include <I18n.h>
 
+#include <algorithm>
+
 #include "HalDisplay.h"
 #include "components/UITheme.h"
 
@@ -13,19 +15,20 @@ ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputMan
 void ConfirmationActivity::onEnter() {
   Activity::onEnter();
 
-  lineHeight = renderer.getLineHeight(fontId);
-  const int maxWidth = renderer.getScreenWidth() - (margin * 2);
+  const int maxWidth = renderer.getScreenWidth() - (MARGIN * 2);
 
   if (!heading.empty()) {
-    safeHeading = renderer.truncatedText(fontId, heading.c_str(), maxWidth, EpdFontFamily::BOLD);
+    safeHeading = renderer.truncatedText(HEADING_FONT_ID, heading.c_str(), maxWidth, EpdFontFamily::BOLD);
   }
   if (!body.empty()) {
-    safeBody = renderer.truncatedText(fontId, body.c_str(), maxWidth, EpdFontFamily::REGULAR);
+    if (bodyPlacement == BodyPlacement::Page) {
+      auto lines = renderer.wrappedText(BODY_FONT_ID, body.c_str(), maxWidth, MAX_BODY_LINES, EpdFontFamily::REGULAR);
+      if (!lines.empty()) safeBody = std::move(lines[0]);
+      if (lines.size() > 1) safeBodySecondLine = std::move(lines[1]);
+    } else {
+      safeBody = renderer.truncatedText(BODY_FONT_ID, body.c_str(), maxWidth, EpdFontFamily::REGULAR);
+    }
   }
-
-  // Text sits in the upper part of the screen so the confirmation popup
-  // (centered) doesn't cover it.
-  startY = renderer.getScreenHeight() / 6;
 
   const char* options[] = {I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM)};
   const char* popupTitle = nullptr;
@@ -50,19 +53,25 @@ void ConfirmationActivity::onEnter() {
 void ConfirmationActivity::render(RenderLock&& lock) {
   renderer.clearScreen();
 
-  int currentY = startY;
-  LOG_DBG("CONF", "currentY: %d", currentY);
-  // Draw Heading
+  const int headingHeight = safeHeading.empty() ? 0 : renderer.getLineHeight(HEADING_FONT_ID);
+  const int bodyLineHeight = renderer.getLineHeight(BODY_FONT_ID);
+  const int bodyLines = safeBody.empty() ? 0 : (safeBodySecondLine.empty() ? 1 : 2);
+  const int textBlockHeight =
+      headingHeight + (headingHeight > 0 && bodyLines > 0 ? SPACING : 0) + bodyLines * bodyLineHeight;
+  int currentY = std::max(MARGIN, renderer.getScreenHeight() / 6 - textBlockHeight / 2);
   if (!safeHeading.empty()) {
-    renderer.drawCenteredText(fontId, currentY, safeHeading.c_str(), true, EpdFontFamily::BOLD);
-    currentY += lineHeight + spacing;
+    renderer.drawCenteredText(HEADING_FONT_ID, currentY, safeHeading.c_str(), true, EpdFontFamily::BOLD);
+    currentY += headingHeight + SPACING;
   }
 
-  // Draw Body
   switch (bodyPlacement) {
     case BodyPlacement::Page:
       if (!safeBody.empty()) {
-        renderer.drawCenteredText(fontId, currentY, safeBody.c_str(), true, EpdFontFamily::REGULAR);
+        renderer.drawCenteredText(BODY_FONT_ID, currentY, safeBody.c_str(), true, EpdFontFamily::REGULAR);
+      }
+      if (!safeBodySecondLine.empty()) {
+        renderer.drawCenteredText(BODY_FONT_ID, currentY + bodyLineHeight, safeBodySecondLine.c_str(), true,
+                                  EpdFontFamily::REGULAR);
       }
       break;
     case BodyPlacement::PopupTitle:

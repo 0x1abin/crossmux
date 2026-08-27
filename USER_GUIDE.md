@@ -315,6 +315,10 @@ The Settings screen allows you to configure the device's behavior. There are a f
 
 - **Clear Reading Cache**: Clear the internal SD card cache.
 
+- **Restore System Settings**: After two confirmations, reset device preferences and clear saved Wi-Fi networks, OPDS
+  servers, and KOReader Sync configuration. The device restarts into the initial language and content-region guide.
+  Books, reading progress, bookmarks, reading statistics, and reading caches are not deleted.
+
 - **Check for updates**: Check for Crosspoint firmware updates over Wi-Fi. Firmware can also be updated without a USB connection by placing a `firmware.bin` file on the SD card.
 
 - **Language**: Set the UI language. CrossPoint supports 24 languages: English, Spanish, French, German, Czech, Brazilian Portuguese, Russian, Swedish, Romanian, Catalan, Ukrainian, Belarusian, Italian, Polish, Finnish, Danish, Dutch, Turkish, Kazakh, Hungarian, Lithuanian, Slovenian, Valencian, and Hebrew.
