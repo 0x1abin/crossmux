@@ -38,10 +38,11 @@ GitHub Release. Both variants and their manifests live in an immutable
 does not.
 
 COS publishing uses a version-pinned, SHA-256-verified COSCLI binary. The
-workflow verifies release tooling before writing any immutable release. Required
-repository secrets are `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, and
-`COS_REGION`; `COS_SESSION_TOKEN` is optional. Gitee is not a firmware release
-destination.
+workflow verifies release tooling before writing any immutable release and
+passes credentials directly to each COS command instead of persisting a CLI
+config file. Required repository secrets are `COS_SECRET_ID`, `COS_SECRET_KEY`,
+`COS_BUCKET`, and `COS_REGION`; `COS_SESSION_TOKEN` is optional. Gitee is not a
+firmware release destination.
 
 ## Index contract and failure behavior
 

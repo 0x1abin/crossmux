@@ -61,6 +61,9 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertLess(
             workflow.index('Install COS CLI'), workflow.index('Publish immutable GitHub build')
         )
+        self.assertNotIn('coscli config add', workflow)
+        self.assertIn('cos://${COS_BUCKET}/firmware/builds/', workflow)
+        self.assertIn('cos_args+=(--token "$COS_SESSION_TOKEN")', workflow)
 
     def write_image(self, chip_id=0x0009, board='eego_a4'):
         image = bytearray(24)
