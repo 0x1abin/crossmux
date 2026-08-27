@@ -33,30 +33,24 @@
   * `gh_release`: Production (LOG_LEVEL=0)
   * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
   * `slim`: Minimal build (no serial logging)
-  * `gh_release_cn`: Simplified-Chinese-only release with embedded CJK fonts (see [chinese-build.md](chinese-build.md))
   * `sticky`: Seeed Sticky ESP32-S3 development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 development build
   * `papermono`: M5Stack PaperMono ESP32-S3 development build
   * `eego_a4`: eego A4 ESP32-S3 experimental development build
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
   * `waveshare_epaper_397`: Waveshare ePaper 3.97 ESP32-S3 experimental development build
-  * `<s3_environment>_cn`: Simplified-Chinese counterpart of each S3 environment
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
 
-The six S3 environments are separate device binaries. They keep the global
-development profile unless an environment explicitly opts into another locale
-or host. Their `_cn` counterparts keep the same hardware profile while enabling
-the Chinese-only resources and `crossmux.cn`. `bin/ci-check` builds the six
-global environments together with the default C3 target.
+The six S3 environments are separate hardware binaries, but each is a unified
+language firmware. `bin/ci-check` builds them together with the default C3 target.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
-CI workflow builds all four simulators and all six global S3 environments when
-hardware-sensitive files change, and can also be started manually. Chinese S3
-environments remain local or manually invoked builds.
+CI workflow builds all four simulators and all six S3 environments when
+hardware-sensitive files change, and can also be started manually.
 
 ## Desktop Simulator
 

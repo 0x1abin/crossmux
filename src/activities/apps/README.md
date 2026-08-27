@@ -131,7 +131,8 @@ concerns.
 
 ### 6. (Optional) Conditional / compile-flag-gated apps
 
-Some apps ship only in a subset of releases — e.g. Chinese Chess (`chinese-chess/`) ships only in the Chinese-only release (`env:gh_release_cn`) and the host simulator. The branch lives behind `#ifdef ENABLE_CHINESE_VERSION`.
+Regional apps such as Chinese Chess and WeRead are compiled into the unified
+firmware and hidden unless the locked content profile is China.
 
 A conditional app uses a **two-layer guard**: ifdef at every reference site, plus a `build_src_filter` exclusion in `platformio.ini` so the app's `.cpp` files aren't compiled at all when the flag is off. The ifdef alone is not enough — without the filter, the app's translation units still compile (and fail, since they freely reference each other without inner ifdefs).
 

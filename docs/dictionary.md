@@ -24,14 +24,10 @@ Not supported: `.syn` synonym files (ignored), dictionaries with 64-bit index of
 
 Online dictionaries are installed under `/.dictionaries/`. Downloads are verified before the old version is replaced, and interrupted installations are recovered the next time the manager opens. Only folders carrying the manager's `.crossmux-resource` marker can be updated or deleted online.
 
-The build environment supplies `CROSSMUX_HOST` to select the resource route at compile time.
-International builds configure `crossmux.com` and normally download from GitHub
-`0x1abin/crossmux-assets`; Chinese builds configure `crossmux.cn` and download from Gitee
-`x1abin/crossmux-assets`. The current UI language is included as the `lang` query parameter but does
-not select the mirror. The existing
-Cloudflare mainland-China redirect for `crossmux.com` remains in effect, so an international build
-used in China may be redirected to the China API. Once an API deployment is selected, an upstream
-failure is reported without falling back to the other repository.
+The locked content profile selects the CrossMux API at runtime: China uses
+`crossmux.cn`, Global uses `crossmux.com`. The current UI language remains the
+`lang` query parameter but does not change the host. Both regions use
+`/api/assets/dictionaries/manifest`; third-party configured URLs are unchanged.
 
 ### Copy manually
 

@@ -16,7 +16,7 @@ What CrossMux adds on top of upstream:
 - **WeRead** (微信读书): scan to sign in, browse your shelf, download books, read them offline as EPUBs, and sync reading progress. The reader keeps one **Sync Progress** action: recognized standard WeRead books use WeRead sync, while other EPUBs keep KOReader sync. New WeRead downloads also make a best-effort cloud-progress fetch before caching content so the first open can start at the remote position.
 - **Reading analytics**: reading stats, a monthly reading heatmap, a reading profile, and achievements — backed by an SD-stored JSON history.
 - **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), with optional 4-level grayscale enhancement and inverse display.
-- **Simplified Chinese firmware** (`gh_release_cn`): Chinese UI + i18n, embedded CJK fonts, and CJK-aware EPUB layout (word breaking and line-break rules). See [Build the Simplified Chinese firmware](#build-the-simplified-chinese-firmware).
+- **Unified language firmware**: 33 UI languages, embedded Simplified-Chinese UI fallback fonts, and runtime `.cn`/`.com` content profiles selected on first start.
 - **Desktop simulator** for developing and previewing the UI on the host.
 
 > **WeRead security notice:** WeRead uses an unofficial Web protocol that may
@@ -61,7 +61,7 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 - **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, EPUB/TXT line guides, custom PNG reading backgrounds, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more. Set a background from **Settings > Reader > Reading Background > Custom Image**.
 
-- **Localization**: 24 UI languages and counting. RTL support.
+- **Localization**: 33 UI languages. RTL support.
 
 ### Coming soon:
 
@@ -206,21 +206,23 @@ After rebuilding the system configuration, reconnect the device or reload udev r
 pio run --target upload
 ```
 
-### Build the Simplified Chinese firmware
+### Build the unified language firmware
 
-CrossMux ships a dedicated Simplified-Chinese build environment, `gh_release_cn`. It produces a Chinese-only firmware: Simplified Chinese UI + i18n, embedded CJK bitmap fonts, CJK-aware EPUB layout, and the Chinese Chess / WeRead apps. A fresh device boots straight into the Chinese UI.
+Every hardware target has one firmware. On first start, choosing Simplified
+Chinese locks the China content profile (`crossmux.cn`); every other language
+locks Global (`crossmux.com`). Later language changes do not change that profile.
 
 The CJK font headers are committed to the repo, so a normal build needs no extra asset steps:
 
 ```bash
-# Build the Chinese firmware
-pio run -e gh_release_cn
+# Build the unified X3/X4 firmware
+pio run -e gh_release
 
 # Build + flash to a connected device
-pio run -e gh_release_cn -t upload
+pio run -e gh_release -t upload
 ```
 
-The resulting `firmware.bin` is written to `.pio/build/gh_release_cn/firmware.bin`; it can also be flashed with the web installer (see [Install firmware](#install-firmware)).
+The resulting `firmware.bin` is written to `.pio/build/gh_release/firmware.bin`; it can also be flashed with the web installer.
 
 You only need to regenerate the CJK bitmap headers when changing the character set or updating the embedded fonts — see [docs/engineering/chinese-build.md](./docs/engineering/chinese-build.md) for the font toolchain and flash-budget details.
 

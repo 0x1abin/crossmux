@@ -14,12 +14,12 @@ rather than copy it.
 
 The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
 image. Sticky, X4 Pro, Paper Mono, EEGO A4, Murphy M4, and Waveshare ePaper 3.97
-each produce their own ESP32-S3 image. Every target has global and `zh-CN`
-variants, for 14 Nightly environments in total.
+each produce their own ESP32-S3 image. There are seven Nightly environments in
+total. Each image is later aliased by the legacy `global` and `zh-CN` pointers.
 
 ## Publishing
 
-Each target job builds and verifies both variants. Packaging checks the ESP
+Each target job builds once and packages two compatibility variants. Packaging checks the ESP
 image chip ID, required board tag, partition layout, app-slot size, and SHA-256
 before emitting an immutable target manifest.
 
@@ -34,8 +34,8 @@ GitHub Release. Both variants and their manifests live in an immutable
 `nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index is
 `/firmware/releases/nightly/index.json`; both variants live under
 `/firmware/builds/<build-id>/<target>/<variant>/` in COS and are served through
-`assets.crossmux.cn`. Region chooses the storage provider; firmware language
-does not.
+`assets.crossmux.cn`. Region chooses the storage provider; both variant pointers
+reference identical firmware bytes and differing hashes fail publication.
 
 COS publishing runs only on the H2O self-hosted runner and does not fall back to
 a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary
@@ -53,7 +53,7 @@ global and `zh-CN` pointers with version, CrossMux SHA, SDK SHA, publish time,
 and immutable manifest URL.
 
 A target advances only when both variants are valid and have the same CrossMux
-and SDK revisions. A missing variant retains that target's previous pointer;
+revision, SDK revision, version, and firmware SHA-256. A missing variant retains that target's previous pointer;
 other targets may still advance. A malformed complete pair fails publishing.
 Unknown targets from an older index are discarded. Historical objects are
 never overwritten, so rollback changes only the rolling index pointer.
@@ -73,4 +73,4 @@ official packaging path are mandatory.
 
 CI, indexes, and checksum checks do not replace real-device acceptance. Before
 making a Nightly pipeline production-critical, test OTA and reboot on every S3
-target, one X3/X4, both language variants, and one wrong-board negative case.
+target, one X3/X4, both content profiles, and one wrong-board negative case.

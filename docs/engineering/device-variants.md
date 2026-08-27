@@ -18,8 +18,7 @@ is on at boot and adapts at runtime. To "build for X3", build any normal env and
 flash it — the device identifies itself:
 
 ```bash
-pio run -e gh_release        # international
-pio run -e gh_release_cn     # Simplified-Chinese (see chinese-build.md)
+pio run -e gh_release        # all 33 UI languages and both content profiles
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
@@ -37,9 +36,8 @@ pio run -e waveshare_epaper_397
 ```
 
 All six S3 targets are part of the shared Nightly matrix. Each target builds
-international and Simplified-Chinese flavors as one pair. The active deployment
-region selects GitHub or COS for both flavors; language does not select the
-storage provider. Manual flashing must use the matching build; the embedded
+one unified image, which is published under both legacy flavor pointers.
+Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
 
@@ -58,9 +56,8 @@ runtime. A compile-time split would:
 - add `#ifdef` branches where today there is one tested code path.
 
 So the codebase uses **100% runtime dispatch** (`if (gpio.deviceIsX3())`,
-~268 call sites), never `#ifdef`. The only compile-time SKU axis is *language*
-(`ENABLE_CHINESE_VERSION`), which is orthogonal to hardware — see
-[chinese-build.md](chinese-build.md).
+~268 call sites), never `#ifdef`. Language and content region are runtime
+settings; there is no compile-time language SKU — see [chinese-build.md](chinese-build.md).
 
 ## How detection works
 
@@ -152,8 +149,8 @@ the device is running.
 `clockUtcOffsetQ` remains a fixed display offset used by the status bar and
 Standby faces; it does not change the process-wide timezone. Every device exposes
 automatic sync, manual date/time, fixed offset, 12/24-hour format, and one-shot
-sync under **Settings → System → Date & Time**. Chinese builds default a missing
-`clockUtcOffsetQ` to UTC+8; an existing saved value is preserved.
+sync under **Settings → System → Date & Time**. First-start Simplified Chinese
+defaults to UTC+8 and other languages to UTC+0; upgrades preserve saved values.
 
 The SPI display pins (`EPD_SCLK=8`, `EPD_MOSI=10`, `EPD_CS=21`, `EPD_DC=4`,
 `EPD_RST=5`, `EPD_BUSY=6`) and the ADC button layout are **identical** on both
@@ -167,7 +164,7 @@ this is why X3 "just works" without per-screen code (see
 ## Build & flash for X3
 
 Same envs as X4 (`platformio.ini`): `default`, `gh_release`, `gh_release_rc`,
-`slim`, `gh_release_cn`, `gh_release_cn_rc`. Flash any of them to an X3:
+and `slim`. Flash any of them to an X3:
 
 ```bash
 pio run -e gh_release -t upload
