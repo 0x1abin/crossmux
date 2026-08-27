@@ -37,9 +37,11 @@ GitHub Release. Both variants and their manifests live in an immutable
 `assets.crossmux.cn`. Region chooses the storage provider; firmware language
 does not.
 
-COS publishing uses the version-pinned COSCLI binary. Required repository
-secrets are `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, and `COS_REGION`;
-`COS_SESSION_TOKEN` is optional. Gitee is not a firmware release destination.
+COS publishing uses a version-pinned, SHA-256-verified COSCLI binary. The
+workflow verifies release tooling before writing any immutable release. Required
+repository secrets are `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, and
+`COS_REGION`; `COS_SESSION_TOKEN` is optional. Gitee is not a firmware release
+destination.
 
 ## Index contract and failure behavior
 

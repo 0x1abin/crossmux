@@ -142,6 +142,16 @@ jobs:
             cat ota-notes.md >> nightly-body.md
           fi
 
+      - name: Install COS CLI
+        run: |
+          curl -fsSL \
+            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
+            -o "$RUNNER_TEMP/coscli"
+          echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" \
+            | sha256sum --check -
+          sudo install -m 0755 "$RUNNER_TEMP/coscli" /usr/local/bin/coscli
+          coscli --version
+
       - name: Publish immutable GitHub build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -153,14 +163,6 @@ jobs:
             --title "CrossMux Nightly ${GITHUB_SHA::7} #${GITHUB_RUN_NUMBER}" \
             --notes-file nightly-body.md \
             --prerelease
-
-      - name: Install COS CLI
-        run: |
-          curl -fsSL \
-            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-linux-amd64 \
-            -o "$RUNNER_TEMP/coscli"
-          sudo install -m 0755 "$RUNNER_TEMP/coscli" /usr/local/bin/coscli
-          coscli --version
 
       - name: Configure COS
         env:
