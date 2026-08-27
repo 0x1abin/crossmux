@@ -863,6 +863,7 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
 
 void SettingsActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const bool boldChineseCategories = I18N.getLanguage() == Language::ZH_CN;
   // Content below the GUI.drawHeader band, above the button hints.
   screen.setContentMargin(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
                                       static_cast<int16_t>(metrics.buttonHintsHeight), 0});
@@ -884,11 +885,23 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
     props.valueText = screen.theme().bodyText;
     syncListViewport(screen, props);
     if (!showMainTabContentSelection()) props.selectedIndex = -1;
+    if (boldChineseCategories) {
+      props.labelText.bold = false;
+      props.valueText.bold = false;
+    }
+    GfxRenderer::SyntheticBoldScope syntheticBold(renderer, boldChineseCategories
+                                                                ? CrossPointSettings::SYNTHETIC_BOLD_STANDARD
+                                                                : CrossPointSettings::SYNTHETIC_BOLD_OFF);
     screen.list(props);
     return;
   }
 
-  buildTabBar(screen);
+  {
+    GfxRenderer::SyntheticBoldScope syntheticBold(renderer, boldChineseCategories
+                                                                ? CrossPointSettings::SYNTHETIC_BOLD_STANDARD
+                                                                : CrossPointSettings::SYNTHETIC_BOLD_OFF);
+    buildTabBar(screen, boldChineseCategories);
+  }
 
   // rowItems_ (label/actionValue) was built by rebuildRowItems() when the
   // category was last selected/rebuilt; only the live value text needs

@@ -103,7 +103,7 @@ void UiTabListActivity::syncTabListViewport(UiScreen& screen, fui::ListProps& pr
   props.selectedIndex = static_cast<int16_t>(n.selected - 1);  // -1 = tab band focused
 }
 
-void UiTabListActivity::buildTabBar(UiScreen& screen) {
+void UiTabListActivity::buildTabBar(UiScreen& screen, const bool boldLabels) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   // Tabs. The selected pill dims to a dither when the selection is down in
@@ -162,6 +162,7 @@ void UiTabListActivity::buildTabBar(UiScreen& screen) {
     tabProps.tabInset = tabsFocused ? fui::Insets{2, 0, 4, 0} : fui::Insets{2, 0, 0, 0};
     tabProps.contentInset = fui::Insets{2, 8, 2, 8};
   }
+  if (boldLabels) tabProps.text.bold = true;
   const int16_t tabLineHeight = screen.target().lineHeight(tabProps.text.font);
   const int16_t tabBand =
       static_cast<int16_t>(metrics.tabBarHeight > tabLineHeight + 10 ? metrics.tabBarHeight : tabLineHeight + 10);
