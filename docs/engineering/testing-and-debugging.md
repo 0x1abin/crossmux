@@ -166,6 +166,16 @@ pio run -t upload && pio device monitor
 - Format check fails → Run clang-format locally
 - Build check fails → Fix compile errors
 
+Firmware build jobs call `select-build-runner.yml` before they start. Trusted
+same-repository PRs, pushes, tags, schedules, and manual runs use the H2O
+self-hosted runner only when it is online and idle; fork PRs, Dependabot, a
+missing `H2O_RUNNER_TOKEN`, API errors, and an unavailable H2O fall back to
+`ubuntu-latest`. The token must be repository-scoped with read-only
+Administration permission. Selection is best effort: a runner that disconnects
+after selection can still leave the selected job queued. Formatting, static
+analysis, unit tests, and all publishing jobs remain GitHub-hosted so persistent
+runner jobs never receive release credentials.
+
 ---
 
 ## Serial Monitoring and Live Debugging
