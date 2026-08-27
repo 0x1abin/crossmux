@@ -21,6 +21,7 @@
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/CrossMuxEndpoints.h"
 #include "network/HttpDownloader.h"
 
 namespace fui = freeink::ui;
@@ -122,11 +123,15 @@ void DictionaryDownloadActivity::onWifiSelectionComplete(const bool success) {
 bool DictionaryDownloadActivity::fetchAndParseManifest() {
   items_.clear();
   downloadingIndex_ = -1;
-  std::string manifestUrl = DICTIONARY_MANIFEST_URL;
-  manifestUrl.reserve(manifestUrl.size() + 16);
-  manifestUrl += manifestUrl.find('?') == std::string::npos ? "?lang=" : "&lang=";
-  manifestUrl += LANGUAGE_CODES[static_cast<uint8_t>(I18N.getLanguage())];
-  LOG_DBG("DICTDL", "Fetching manifest: %s", manifestUrl.c_str());
+  char manifestUrl[192];
+  const int manifestUrlLength =
+      snprintf(manifestUrl, sizeof(manifestUrl), CrossMuxEndpoints::DICTIONARY_MANIFEST_FORMAT,
+               CrossMuxEndpoints::host(), LANGUAGE_CODES[static_cast<uint8_t>(I18N.getLanguage())]);
+  if (manifestUrlLength < 0 || static_cast<size_t>(manifestUrlLength) >= sizeof(manifestUrl)) {
+    LOG_ERR("DICTDL", "Manifest URL exceeds %zu bytes", sizeof(manifestUrl));
+    return false;
+  }
+  LOG_DBG("DICTDL", "Fetching manifest: %s", manifestUrl);
   if (HttpDownloader::downloadToFile(manifestUrl, MANIFEST_TMP, nullptr) != HttpDownloader::OK) {
     LOG_ERR("DICTDL", "Failed to fetch dictionary manifest");
     Storage.remove(MANIFEST_TMP);

@@ -82,7 +82,7 @@ Canonical key for step 3 — keep this in sync with [`index.md`](index.md).
 | Build/monitor commands, crash playbook, verification checklist, CI | [testing-and-debugging.md](testing-and-debugging.md) |
 | Repo detection, git rules, branch naming, commit format, when to commit | [git-workflow.md](git-workflow.md) |
 | Cache structure, invalidation, format versioning | [cache-management.md](cache-management.md) |
-| `ENABLE_CHINESE_VERSION` build, embedded CJK fonts | [chinese-build.md](chinese-build.md) |
+| Unified content profiles, embedded CJK fonts | [chinese-build.md](chinese-build.md) |
 
 ## Hard rules
 

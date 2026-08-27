@@ -13,9 +13,8 @@
    - `src/network/html/**/*.generated.h`
    - **Source**: HTML templates below `src/network/html/`; device pages are split
      into `en/` and `zh-CN/`, while shared JavaScript remains in `js/`
-   - **Selection**: `ENABLE_CHINESE_VERSION` builds reference the `zh-CN/`
-     headers; other firmware builds reference `en/`, so only one language is
-     linked into each firmware image
+   - **Selection**: unified firmware links both locales and serves `zh-CN` only
+     when the current device UI language is Simplified Chinese
    - **Triggered**: During PlatformIO `pre:` build step
    - **To modify**: Edit source HTML below `src/network/html/`, not generated headers
 

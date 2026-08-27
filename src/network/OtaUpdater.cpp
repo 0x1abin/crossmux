@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 
+#include "CrossMuxEndpoints.h"
 #include "FirmwareBoardTag.h"
 #include "FirmwareFlasher.h"
 
@@ -46,37 +47,25 @@ static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly-1234567"));
 static_assert(!isSameNightlyBuild("1.5.2", "nightly-5064d90"));
 static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly"));
 
-// The build environment supplies the OTA host; ENABLE_CHINESE_VERSION selects
-// the matching release asset variant. The web proxy re-exposes it as a minimal
+// The locked content profile supplies the OTA host and release asset variant.
+// The web proxy re-exposes it as a minimal
 // GitHub-release-shaped JSON whose single asset is always named "firmware.bin"
 // — that's the literal ReleaseJsonParser matches on.
 //
 // Going through the web instead of api.github.com directly avoids the
 // unauthenticated 60 req/hr/IP rate limit and the unstable mainland-China
 // path to api.github.com.
-constexpr char latestReleaseUrl[] =
-#ifdef ENABLE_CHINESE_VERSION
-    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=cn";
-#else
-    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=global";
-#endif
-constexpr char nightlyReleaseUrl[] =
-#ifdef ENABLE_CHINESE_VERSION
-    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=cn&channel=nightly";
-#else
-    "https://" CROSSMUX_HOST "/api/ota/manifest?variant=global&channel=nightly";
-#endif
-constexpr size_t deviceModelLengthMax = 32;
-constexpr size_t releaseUrlCapacity = sizeof(nightlyReleaseUrl) + sizeof("&model=") + deviceModelLengthMax;
+constexpr size_t releaseUrlCapacity = 192;
 static_assert(releaseUrlCapacity < 256);
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedChannel) {
   channel = requestedChannel;
-  const char* releaseUrlBase = channel == Channel::Nightly ? nightlyReleaseUrl : latestReleaseUrl;
   char releaseUrl[releaseUrlCapacity];
+  const char* channelQuery = channel == Channel::Nightly ? "&channel=nightly" : "";
   const int releaseUrlLength =
-      snprintf(releaseUrl, sizeof(releaseUrl), "%s&model=%s", releaseUrlBase, HalSystem::getDeviceModel());
+      snprintf(releaseUrl, sizeof(releaseUrl), CrossMuxEndpoints::OTA_MANIFEST_FORMAT, CrossMuxEndpoints::host(),
+               CrossMuxEndpoints::otaVariant(), channelQuery, HalSystem::getDeviceModel());
   if (releaseUrlLength < 0 || static_cast<size_t>(releaseUrlLength) >= sizeof(releaseUrl)) {
     LOG_ERR("OTA", "Release URL exceeds %zu bytes", sizeof(releaseUrl));
     return INTERNAL_UPDATE_ERROR;

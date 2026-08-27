@@ -571,10 +571,8 @@ def generate_keys_header(
 
     # V1 language.bin migration table -- frozen enum order from commit 2f969a9.
     # Maps the old uint8_t index stored on disk to the current Language enum.
-    # When a build excludes some languages (e.g. ENABLE_CHINESE_VERSION strips
-    # everything except EN/ZH_CN), absent codes fall back to Language::EN so the
-    # table still compiles. On-device, a user whose stored language is no longer
-    # available simply lands back on English.
+    # Explicit command-line subset generation may omit old codes; firmware
+    # builds emit the complete language table.
     v1_codes = [
         "EN", "ES", "FR", "DE", "CS", "PT", "RU", "SV", "RO", "CA", "UK",
         "BE", "IT", "PL", "FI", "DA", "NL", "TR", "KK", "HU", "LT", "SI",
@@ -1038,57 +1036,7 @@ if __name__ == "__main__":
 else:
     try:
         Import("env")
-
-        # Detect ENABLE_CHINESE_VERSION via multiple sources because the flag
-        # may not yet be normalized into CPPDEFINES at extra_script-pre time.
-        # PlatformIO populates CPPDEFINES later in the build graph, but the
-        # raw "-D…" tokens live in BUILD_FLAGS (after $-substitution).
-        #
-        # Match by token, not substring: a flag like
-        # -DSOMETHING_ENABLE_CHINESE_VERSION_PROBE=1 must NOT trigger the
-        # Chinese-only path.
-        flag = "ENABLE_CHINESE_VERSION"
-
-        def _build_flags_has(flag_name: str, expanded_str: str) -> bool:
-            """True iff -D<flag_name> (optionally with =value) appears as a
-            whole token in `expanded_str`. -U flips it off (last wins)."""
-            enabled = False
-            for tok in expanded_str.split():
-                if tok == f"-D{flag_name}" or tok.startswith(f"-D{flag_name}="):
-                    enabled = True
-                elif tok == f"-U{flag_name}":
-                    enabled = False
-            return enabled
-
-        only = None
-        try:
-            sc_env = env  # type: ignore[name-defined]
-            env_name = sc_env.get("PIOENV", "?")
-
-            # 1) Expanded BUILD_FLAGS string (resolves ${base.build_flags}).
-            expanded = sc_env.subst("$BUILD_FLAGS") or ""
-
-            # 2) Raw CPPDEFINES list (catches Append() additions from other
-            #    pre-scripts; tuples or bare names). Compare against the bare
-            #    define name, not a substring.
-            defines = sc_env.get("CPPDEFINES", []) or []
-            define_names = {
-                d if isinstance(d, str) else (d[0] if d else "")
-                for d in defines
-            }
-
-            if _build_flags_has(flag, expanded) or flag in define_names:
-                only = {"ZH_CN"}
-                print(
-                    f"[gen_i18n] {flag} detected (env={env_name}); "
-                    f"restricting i18n tables to EN + ZH_CN"
-                )
-            else:
-                print(f"[gen_i18n] {flag} not set (env={env_name}); building full i18n")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[gen_i18n] flag detection failed ({exc}); building full i18n")
-            only = None
-
-        main(strip_unused=True, only_languages=only)
+        print("[gen_i18n] unified firmware; building full i18n")
+        main(strip_unused=True)
     except NameError:
         pass

@@ -27,17 +27,18 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
-#ifdef ENABLE_CHINESE_VERSION
+namespace web_zh_cn {
 #include "html/zh-CN/FilesPageHtml.generated.h"
 #include "html/zh-CN/FontsPageHtml.generated.h"
 #include "html/zh-CN/HomePageHtml.generated.h"
 #include "html/zh-CN/SettingsPageHtml.generated.h"
-#else
+}  // namespace web_zh_cn
+namespace web_en {
 #include "html/en/FilesPageHtml.generated.h"
 #include "html/en/FontsPageHtml.generated.h"
 #include "html/en/HomePageHtml.generated.h"
 #include "html/en/SettingsPageHtml.generated.h"
-#endif
+}  // namespace web_en
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
@@ -49,6 +50,18 @@ constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
 constexpr uint16_t UDP_PORTS[] = {54982, 48123, 39001, 44044, 59678};
 constexpr uint16_t LOCAL_UDP_PORT = 8134;
 constexpr size_t FILE_LIST_BATCH_CAPACITY = 1400;
+
+bool useChineseWebUi() { return I18N.getLanguage() == Language::ZH_CN; }
+
+struct LocalizedPage {
+  const char* data;
+  size_t size;
+};
+
+LocalizedPage localizedPage(const char* chinese, const size_t chineseSize, const char* english,
+                            const size_t englishSize) {
+  return useChineseWebUi() ? LocalizedPage{chinese, chineseSize} : LocalizedPage{english, englishSize};
+}
 
 // Static pointer for WebSocket callback (WebSocketsServer requires C-style callback)
 CrossPointWebServer* wsInstance = nullptr;
@@ -435,7 +448,9 @@ static bool sendCompressedContent(WebServer* server, const char* contentType, co
 }
 
 void CrossPointWebServer::handleRoot() const {
-  if (sendCompressedContent(server.get(), "text/html", HomePageHtml, sizeof(HomePageHtml))) {
+  const auto page = localizedPage(web_zh_cn::HomePageHtml, sizeof(web_zh_cn::HomePageHtml), web_en::HomePageHtml,
+                                  sizeof(web_en::HomePageHtml));
+  if (sendCompressedContent(server.get(), "text/html", page.data, page.size)) {
     LOG_DBG("WEB", "Served root page");
   }
 }
@@ -570,7 +585,9 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<bool(c
 bool CrossPointWebServer::isEpubFile(const String& filename) const { return FsHelpers::hasEpubExtension(filename); }
 
 void CrossPointWebServer::handleFileList() const {
-  sendCompressedContent(server.get(), "text/html", FilesPageHtml, sizeof(FilesPageHtml));
+  const auto page = localizedPage(web_zh_cn::FilesPageHtml, sizeof(web_zh_cn::FilesPageHtml), web_en::FilesPageHtml,
+                                  sizeof(web_en::FilesPageHtml));
+  sendCompressedContent(server.get(), "text/html", page.data, page.size);
 }
 
 void CrossPointWebServer::handleFileListData() const {
@@ -1296,7 +1313,9 @@ void CrossPointWebServer::handleDelete() const {
 }
 
 void CrossPointWebServer::handleSettingsPage() const {
-  if (sendCompressedContent(server.get(), "text/html", SettingsPageHtml, sizeof(SettingsPageHtml))) {
+  const auto page = localizedPage(web_zh_cn::SettingsPageHtml, sizeof(web_zh_cn::SettingsPageHtml),
+                                  web_en::SettingsPageHtml, sizeof(web_en::SettingsPageHtml));
+  if (sendCompressedContent(server.get(), "text/html", page.data, page.size)) {
     LOG_DBG("WEB", "Served settings page");
   }
 }
@@ -1922,7 +1941,9 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 // --- Font management handlers ---
 
 void CrossPointWebServer::handleFontsPage() const {
-  if (sendCompressedContent(server.get(), "text/html", FontsPageHtml, sizeof(FontsPageHtml))) {
+  const auto page = localizedPage(web_zh_cn::FontsPageHtml, sizeof(web_zh_cn::FontsPageHtml), web_en::FontsPageHtml,
+                                  sizeof(web_en::FontsPageHtml));
+  if (sendCompressedContent(server.get(), "text/html", page.data, page.size)) {
     LOG_DBG("WEB", "Served fonts page");
   }
 }

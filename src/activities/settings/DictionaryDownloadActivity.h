@@ -11,10 +11,6 @@
 #include "util/ButtonNavigator.h"
 #include "util/DictionaryResource.h"
 
-#ifndef DICTIONARY_MANIFEST_URL
-#define DICTIONARY_MANIFEST_URL "https://" CROSSMUX_HOST "/api/assets/dictionaries/manifest?version=1"
-#endif
-
 class DictionaryDownloadActivity final : public Activity, private UiAppHost {
  public:
   DictionaryDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);

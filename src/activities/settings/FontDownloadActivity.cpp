@@ -24,6 +24,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/CrossMuxEndpoints.h"
 #include "network/HttpDownloader.h"
 
 namespace fui = freeink::ui;
@@ -279,9 +280,18 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   baseUrl_.clear();
   downloadingFamilyIndex_ = -1;
 
-  auto result = HttpDownloader::downloadToFile(FONT_MANIFEST_URL, MANIFEST_TMP, nullptr);
+  char manifestUrl[160];
+  const int manifestUrlLength =
+      snprintf(manifestUrl, sizeof(manifestUrl), CrossMuxEndpoints::FONT_MANIFEST_FORMAT, CrossMuxEndpoints::host(),
+               FONT_MANIFEST_URL_STRINGIFY(FONTS_MANIFEST_VERSION), FONT_MANIFEST_URL_STRINGIFY(CPFONT_VERSION));
+  if (manifestUrlLength < 0 || static_cast<size_t>(manifestUrlLength) >= sizeof(manifestUrl)) {
+    LOG_ERR("FONT", "Manifest URL exceeds %zu bytes", sizeof(manifestUrl));
+    errorMessage_ = "Failed to fetch font list";
+    return false;
+  }
+  auto result = HttpDownloader::downloadToFile(manifestUrl, MANIFEST_TMP, nullptr);
   if (result != HttpDownloader::OK) {
-    LOG_ERR("FONT", "Failed to fetch manifest from %s", FONT_MANIFEST_URL);
+    LOG_ERR("FONT", "Failed to fetch manifest from %s", manifestUrl);
     errorMessage_ = "Failed to fetch font list";
     Storage.remove(MANIFEST_TMP);
     return false;

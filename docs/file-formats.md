@@ -102,10 +102,9 @@ if (parsedSize != fileSize) {
 
 ### Versions 56 / 57
 
-> Chinese builds (`ENABLE_CHINESE_VERSION`) carry an independent version counter,
-> currently **57**; Latin builds use **56**. The byte layout is identical between
-> flavors, but the same built-in font IDs resolve to different font data and
-> metrics, so pagination caches are not reusable across firmware flavors.
+> Unified firmware uses the CJK-capable cache version **57**. Version 56 was the
+> former Latin-build counter; its layout is identical, but font metrics differ,
+> so old pagination caches are deliberately invalidated.
 >
 > Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37
 > invalidated cached word positions after Arabic contextual shaping began measuring

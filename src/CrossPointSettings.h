@@ -23,10 +23,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   friend class PersistableStore<CrossPointSettings>;
 
  public:
-  // Returns the SKU-appropriate first-boot/fallback Language enum index. Defined
-  // in CrossPointSettings.cpp so I18nKeys.h stays out of this header. Public so
-  // the settings loader can reset to this build's default on a cross-SKU reflash.
+  // Returns the first-boot/fallback Language enum index. Defined out of line so
+  // I18nKeys.h stays out of this widely included header.
   static uint8_t defaultLanguageIndex();
+
+  static constexpr uint8_t CURRENT_ONBOARDING_VERSION = 1;
+  static constexpr bool requiresOnboarding(const uint8_t completedVersion) {
+    return completedVersion != CURRENT_ONBOARDING_VERSION;
+  }
 
   // Access the settings mutex for protecting multi-field reads/writes from other cores.
   // Callers must not re-enter SETTINGS methods that lock storeMutex while holding it.
@@ -108,6 +112,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     FRONT_BUTTON_LAYOUT_COUNT
   };
 
+  enum class ContentProfile : uint8_t { Global = 0, China = 1 };
+
   // Front button hardware identifiers (for remapping)
   enum FRONT_BUTTON_HARDWARE {
     FRONT_HW_BACK = 0,
@@ -129,7 +135,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Legacy 1.4-and-earlier files stored a 0..3 SMALL/MEDIUM/LARGE/EXTRA_LARGE
   // slot; fromJson() folds that range up (see LEGACY_FONT_SIZE_MAX).
   static constexpr uint8_t LEGACY_FONT_SIZE_MAX = 3;
-  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 14;
+  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 12;
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, EXTRA_WIDE = 3, LINE_COMPRESSION_COUNT };
   enum SYNTHETIC_BOLD {
     SYNTHETIC_BOLD_OFF = 0,
@@ -259,11 +265,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Clock UTC offset in quarter-hour steps, biased by 48 so it fits in uint8_t.
   // Value 48 = UTC+0, 0 = UTC-12:00, 104 = UTC+14:00.
   // Quarter-hour granularity supports oddball zones like Nepal (+5:45) and Chatham (+12:45).
-#ifdef ENABLE_CHINESE_VERSION
-  uint8_t clockUtcOffsetQ = 80;  // UTC+8
-#else
   uint8_t clockUtcOffsetQ = 48;
-#endif
   // Clock display format: 0 = 24-hour, 1 = 12-hour
   uint8_t clockFormat = 0;
   // Opportunistically synchronize the system UTC clock while Wi-Fi is already connected.
@@ -292,11 +294,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontButtonLeft = FRONT_HW_LEFT;
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
   // Reader font settings
-#ifdef ENABLE_CHINESE_VERSION
   uint8_t fontFamily = NOTOSANS;
-#else
-  uint8_t fontFamily = NOTOSERIF;
-#endif
   // Point size of the reader font. Only sizes the active family actually ships
   // are selectable; SdCardFontSystem::ensureLoaded() snaps this to the nearest
   // available size (and persists the snap) whenever the family changes.
@@ -364,6 +362,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static constexpr uint8_t APPS_CATALOG_VERSION = 1;
   static constexpr uint8_t BUDDY_APP_ID = 10;
   static constexpr uint8_t PIXEL_SWITCH_APP_ID = 12;
+  static constexpr uint32_t CHINA_ONLY_APPS_MASK = (uint32_t{1} << 1) | (uint32_t{1} << 4);
   static constexpr uint32_t DEFAULT_HIDDEN_APPS_MASK = (uint32_t{1} << 4) | (uint32_t{1} << 5) | (uint32_t{1} << 6) |
                                                        (uint32_t{1} << 8) | (uint32_t{1} << BUDDY_APP_ID) |
                                                        (uint32_t{1} << PIXEL_SWITCH_APP_ID);
@@ -385,14 +384,15 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontlightWarmth = 50;
   uint8_t frontlightOn = 0;
   uint8_t frontlightRestoreOnWake = 1;
-  // Language setting (Language enum index). First-boot default is ZH_CN under
-  // ENABLE_CHINESE_VERSION (where the table only has EN + ZH_CN), otherwise EN.
+  // Language setting (Language enum index). Fresh devices start in English and
+  // choose their UI language and locked content profile in the startup guide.
   // Resolved out-of-line in CrossPointSettings.cpp so the generated
   // I18nKeys.h header doesn't leak into every consumer of this header.
-  // Note: this default also applies on factory reset (re-construction sets
-  // the field back to ZH_CN for CN builds, EN otherwise) — by design, so a
-  // fresh device always lands on the SKU's intended UI language.
+  // Factory reset reconstructs the settings and the startup guide asks again.
   uint8_t language = defaultLanguageIndex();
+  ContentProfile contentProfile = ContentProfile::Global;
+  // Exact version of the startup guide last completed. Zero/missing means never completed.
+  uint8_t onboardingVersion = 0;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
   // OTA update channel preference (0 = stable, 1 = nightly).
@@ -481,6 +481,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Daily reading goal in milliseconds, derived from dailyGoalTarget.
   uint64_t getDailyGoalMs() const;
 };
+
+static_assert(CrossPointSettings::CURRENT_ONBOARDING_VERSION > 0);
+static_assert(CrossPointSettings::CURRENT_ONBOARDING_VERSION < UINT8_MAX);
+static_assert(!CrossPointSettings::requiresOnboarding(CrossPointSettings::CURRENT_ONBOARDING_VERSION));
+static_assert(CrossPointSettings::requiresOnboarding(0));
+static_assert(CrossPointSettings::requiresOnboarding(CrossPointSettings::CURRENT_ONBOARDING_VERSION + 1));
 
 // Helper macro to access settings
 #define SETTINGS CrossPointSettings::getInstance()

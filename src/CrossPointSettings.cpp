@@ -21,13 +21,7 @@
 // Resolved here (not in the header) so I18nKeys.h — auto-generated and
 // changed on every translation edit — doesn't pull a recompile of every
 // file that includes CrossPointSettings.h.
-uint8_t CrossPointSettings::defaultLanguageIndex() {
-#ifdef ENABLE_CHINESE_VERSION
-  return static_cast<uint8_t>(Language::ZH_CN);
-#else
-  return static_cast<uint8_t>(Language::EN);
-#endif
-}
+uint8_t CrossPointSettings::defaultLanguageIndex() { return static_cast<uint8_t>(Language::EN); }
 
 namespace {
 
@@ -36,12 +30,6 @@ constexpr char SETTINGS_FILE_BIN[] = "/.crosspoint/settings.bin";
 constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 constexpr char LANG_FILE_BIN[] = "/.crosspoint/language.bin";
 constexpr char LANG_FILE_BAK[] = "/.crosspoint/language.bin.bak";
-
-#ifdef ENABLE_CHINESE_VERSION
-constexpr char BUILD_LANG_SKU[] = "cn";
-#else
-constexpr char BUILD_LANG_SKU[] = "global";
-#endif
 
 // Stack buffer for "<key>_obf" key construction — avoids a std::string
 // allocation per obfuscated setting on every save and load.
@@ -236,8 +224,11 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
   doc["language"] = (language < getLanguageCount()) ? LANGUAGE_CODES[language] : "EN";
-  // Detect CN/global reflashes while settings.json survives firmware replacement.
-  doc["langSku"] = BUILD_LANG_SKU;
+  doc["contentProfile"] = static_cast<uint8_t>(contentProfile);
+  doc["onboardingVersion"] = onboardingVersion;
+  // Keep the legacy marker current so rollback to a split-SKU firmware retains
+  // the selected service region.
+  doc["langSku"] = contentProfile == ContentProfile::China ? "cn" : "global";
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc) {
@@ -373,12 +364,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   } else if (storedFontFamily >= BUILTIN_FONT_COUNT) {
     needsResave = true;
   }
-#ifdef ENABLE_CHINESE_VERSION
   if (sdFontFamilyName[0] == '\0' && fontFamily != NOTOSANS) {
     fontFamily = NOTOSANS;
     needsResave = true;
   }
-#endif
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
   copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
   otaNightlyEnabled =
@@ -389,15 +378,28 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
   }
 
-  // A settings file can outlive the firmware flavor that wrote it. Reset the
-  // language after a CN/global switch, and reject any language unavailable in
-  // this build so a global image cannot boot into unrenderable CJK text.
+  // Migrate the split-build region marker. Language and service region are
+  // deliberately independent after onboarding.
   const char* langSku = doc["langSku"] | "";
-  const bool skuMatches = langSku[0] != '\0' && strcmp(langSku, BUILD_LANG_SKU) == 0;
-  if ((langSku[0] != '\0' && !skuMatches) || !I18n::isLanguageAvailable(static_cast<Language>(language))) {
-    language = defaultLanguageIndex();
+  const uint8_t storedProfile = doc["contentProfile"].is<uint8_t>() ? doc["contentProfile"].as<uint8_t>() : UINT8_MAX;
+  if (storedProfile <= static_cast<uint8_t>(ContentProfile::China)) {
+    contentProfile = static_cast<ContentProfile>(storedProfile);
+  } else {
+    if (strcmp(langSku, "cn") == 0) {
+      contentProfile = ContentProfile::China;
+    } else if (strcmp(langSku, "global") == 0) {
+      contentProfile = ContentProfile::Global;
+    } else {
+      contentProfile =
+          static_cast<Language>(language) == Language::ZH_CN ? ContentProfile::China : ContentProfile::Global;
+    }
+    needsResave = true;
   }
-  if (!skuMatches) needsResave = true;
+  if (!I18n::isLanguageAvailable(static_cast<Language>(language))) {
+    language = defaultLanguageIndex();
+    needsResave = true;
+  }
+  onboardingVersion = doc["onboardingVersion"].is<uint8_t>() ? doc["onboardingVersion"].as<uint8_t>() : 0;
 
   if (needsResave) {
     LOG_DBG("CPS", "Resaving settings to update format");
@@ -447,6 +449,7 @@ bool CrossPointSettings::migrateLanguageBinaryFile() {
   }
 
   language = static_cast<uint8_t>(V1_LANGUAGES[oldIndex]);
+  contentProfile = static_cast<Language>(language) == Language::ZH_CN ? ContentProfile::China : ContentProfile::Global;
   Storage.rename(LANG_FILE_BIN, LANG_FILE_BAK);
   saveToFile();
   LOG_DBG("CPS", "Migrated language.bin into settings.json");
@@ -659,9 +662,7 @@ int CrossPointSettings::getRefreshFrequency() const {
 void CrossPointSettings::clearSdFontFamily() {
   sdFontFamilyName[0] = '\0';
   sdFontFlashPreload = 0;
-#ifdef ENABLE_CHINESE_VERSION
   fontFamily = NOTOSANS;
-#endif
   fontPointSize =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
   saveToFile();

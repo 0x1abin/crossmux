@@ -21,9 +21,9 @@ the IP address shown on the device screen.
 | `GET` | `/fonts` | SD-card font manager page |
 | `GET` | `/js/jszip.min.js` | JavaScript asset used by the file manager |
 
-The routes are identical in every firmware. Builds with
-`ENABLE_CHINESE_VERSION` embed the `zh-CN` pages; other builds embed the English
-pages. Only the selected locale is linked into the firmware image.
+The routes are identical in every firmware. Both page locales are embedded;
+Simplified-Chinese device UI selects `zh-CN`, and every other UI language uses
+the English pages. This follows UI language, not the locked content profile.
 
 ## Device Status
 

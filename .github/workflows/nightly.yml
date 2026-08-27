@@ -59,8 +59,8 @@ jobs:
       - name: Set seven-character build revision
         run: echo "CROSSPOINT_RC_HASH=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-      - name: Build target pair
-        run: pio run -e "${{ matrix.globalEnv }}" -e "${{ matrix.cnEnv }}"
+      - name: Build unified target
+        run: pio run -e "${{ matrix.environment }}"
 
       - name: Package and verify target pair
         run: |

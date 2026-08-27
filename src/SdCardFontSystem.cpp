@@ -144,7 +144,9 @@ void SdCardFontSystem::releaseLoadedFont(GfxRenderer& renderer) { manager_.unloa
 
 bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
 #ifdef ENABLE_CHINESE_VERSION
-  if (SETTINGS.sdFontFamilyName[0] != '\0' || !registry_.findFamily(COMPLETE_CHINESE_NOTO_SANS_FAMILY)) return false;
+  if (SETTINGS.contentProfile != CrossPointSettings::ContentProfile::China || SETTINGS.sdFontFamilyName[0] != '\0' ||
+      !registry_.findFamily(COMPLETE_CHINESE_NOTO_SANS_FAMILY))
+    return false;
 
   strncpy(SETTINGS.sdFontFamilyName, COMPLETE_CHINESE_NOTO_SANS_FAMILY, sizeof(SETTINGS.sdFontFamilyName) - 1);
   SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
@@ -162,8 +164,8 @@ bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
 
 void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
 #ifdef ENABLE_CHINESE_VERSION
-  // The CN firmware's built-in 8/10/12pt UI fonts cover its Simplified-Chinese
-  // interface. Keep only the selected reader-size SD font resident: loading
+  // Unified firmware has built-in 8/10/12pt Simplified-Chinese UI fallbacks.
+  // Keep only the selected reader-size SD font resident: loading
   // three more broad-CJK sizes leaves too little contiguous heap for EPUB image
   // decoding and glyph prewarm.
   (void)renderer;

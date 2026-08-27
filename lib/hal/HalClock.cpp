@@ -162,13 +162,12 @@ bool HalClock::startSntp() {
   }
 
   if (!_sntpInitialized) {
-#ifdef ENABLE_CHINESE_VERSION
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
-        3, ESP_SNTP_SERVER_LIST("ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org"));
-#else
     esp_sntp_config_t config =
         ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(2, ESP_SNTP_SERVER_LIST("pool.ntp.org", "time.nist.gov"));
-#endif
+    if (_useChinaServers) {
+      config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
+          3, ESP_SNTP_SERVER_LIST("ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org"));
+    }
     config.start = false;
     config.smooth_sync = false;
     if (esp_netif_sntp_init(&config) != ESP_OK) {

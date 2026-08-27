@@ -122,16 +122,13 @@ The main loop updates mapped input once per frame before
 
 **Source**: [src/main.cpp:40-115](../../src/main.cpp)
 
-**All fonts are loaded as global static objects** at firmware startup:
-- Noto Serif: 12, 14, 16, 18pt (4 styles each: regular, bold, italic, bold-italic)
-- Noto Sans: 12, 14, 16, 18pt (4 styles each)
-- Ubuntu UI fonts: 10, 12pt (2 styles)
+**Built-in fonts are global static objects** at firmware startup:
+- International UI fonts: 8, 10, 12pt
+- Simplified-Chinese UI fallbacks: 8, 10, 12pt
+- Offline reader fallback: 12pt; other sizes and styles use SD `.cpfont`
 
-OpenDyslexic is no longer a flash builtin — it moved to an SD-card font
-(`lib/EpdFont/scripts/sd-fonts.yaml`). The Chinese build reuses the legacy
-`opendyslexic*` font slots in `src/main.cpp` as aliases to the embedded CJK faces.
-
-**Total**: ~80+ global `EpdFont` and `EpdFontFamily` objects
+OpenDyslexic and the broad Noto reader families live in the SD font catalog
+(`lib/EpdFont/scripts/sd-fonts.yaml`). Legacy IDs resolve to the 12pt fallback.
 
 **Compilation Flag**:
 ```cpp

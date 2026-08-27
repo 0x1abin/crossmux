@@ -8,7 +8,7 @@ TARGETS = {
         'boardTag': 'x4',
         'chip': 'ESP32-C3',
         'chipId': 0x0005,
-        'environments': {'global': 'gh_release_rc', 'zh-CN': 'gh_release_cn_rc'},
+        'environment': 'gh_release_rc',
         'supportedChannels': ['stable', 'nightly'],
         'fullInstall': False,
     },
@@ -18,7 +18,7 @@ TARGETS = {
         'boardTag': 'sticky',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {'global': 'sticky_nightly', 'zh-CN': 'sticky_cn_nightly'},
+        'environment': 'sticky_nightly',
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
@@ -28,7 +28,7 @@ TARGETS = {
         'boardTag': 'x4pro',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {'global': 'x4pro_nightly', 'zh-CN': 'x4pro_cn_nightly'},
+        'environment': 'x4pro_nightly',
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
@@ -38,7 +38,7 @@ TARGETS = {
         'boardTag': 'papermono',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {'global': 'papermono_nightly', 'zh-CN': 'papermono_cn_nightly'},
+        'environment': 'papermono_nightly',
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
@@ -48,7 +48,7 @@ TARGETS = {
         'boardTag': 'eego_a4',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {'global': 'eego_a4_nightly', 'zh-CN': 'eego_a4_cn_nightly'},
+        'environment': 'eego_a4_nightly',
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
@@ -58,7 +58,7 @@ TARGETS = {
         'boardTag': 'murphy_m4',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {'global': 'murphy_m4_nightly', 'zh-CN': 'murphy_m4_cn_nightly'},
+        'environment': 'murphy_m4_nightly',
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
@@ -68,10 +68,7 @@ TARGETS = {
         'boardTag': 'waveshare_epaper_397',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {
-            'global': 'waveshare_epaper_397_nightly',
-            'zh-CN': 'waveshare_epaper_397_cn_nightly',
-        },
+        'environment': 'waveshare_epaper_397_nightly',
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
@@ -81,7 +78,9 @@ FLAVOR_TOKENS = {'global': 'global', 'zh-CN': 'cn'}
 
 
 def environment_for(target_id, flavor):
-    return TARGETS[target_id]['environments'][flavor]
+    if flavor not in FLAVOR_TOKENS:
+        raise KeyError(flavor)
+    return TARGETS[target_id]['environment']
 
 
 def version_for(base_version, target_id, flavor, short_sha):
@@ -89,9 +88,7 @@ def version_for(base_version, target_id, flavor, short_sha):
     parts = [base_version]
     if target_id != 'xteink_x4':
         parts.append(target['deviceSlug'])
-    if flavor == 'zh-CN':
-        parts.append('cn')
-    elif flavor != 'global':
+    if flavor not in FLAVOR_TOKENS:
         raise KeyError(flavor)
     return f"{'-'.join(parts)}-rc+{short_sha[:7]}"
 
@@ -112,8 +109,7 @@ def matrix():
             {
                 'targetId': target_id,
                 'deviceSlug': target['deviceSlug'],
-                'globalEnv': target['environments']['global'],
-                'cnEnv': target['environments']['zh-CN'],
+                'environment': target['environment'],
             }
             for target_id, target in TARGETS.items()
         ]

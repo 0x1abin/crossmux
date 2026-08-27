@@ -40,7 +40,7 @@ static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead progress work
 
 WeReadProgressSyncActivity::WeReadProgressSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                        std::string epubPath, const char* bookId,
-                                                       const WeReadProgressContext context)
+                                                       const WeReadProgressContext& context)
     : Activity("WeReadProgressSync", renderer, mappedInput), epubPath_(std::move(epubPath)) {
   if (bookId) strncpy(bookId_, bookId, sizeof(bookId_) - 1);
   input_.localFraction = context.localFraction;
@@ -262,14 +262,14 @@ void WeReadProgressSyncActivity::applyRemoteProgress(const WeReadProtocol::Remot
       preciseRemote = true;
       break;
     }
-  }
-  if (canonicalRemote && exactSpineIndex < 0) {
-    LOG_ERR("WRSync", "Remote chapter %u is not present in the downloaded range",
-            static_cast<unsigned>(remoteTocIndex));
-    error_ = WeReadClient::Error::Unavailable;
-    state_ = State::Failed;
-    requestUpdate();
-    return;
+    if (exactSpineIndex < 0) {
+      LOG_ERR("WRSync", "Remote chapter %u is not present in the downloaded range",
+              static_cast<unsigned>(remoteTocIndex));
+      error_ = WeReadClient::Error::Unavailable;
+      state_ = State::Failed;
+      requestUpdate();
+      return;
+    }
   }
   LOG_INF("WRSync", "remote progress mapping: precise=%u toc=%u chapter=%s offset=%u fraction=%lu",
           static_cast<unsigned>(preciseRemote), static_cast<unsigned>(remoteTocIndex), remoteProgress.chapterUid,

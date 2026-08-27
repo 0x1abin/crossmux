@@ -1,36 +1,30 @@
-# Chinese Build (ENABLE_CHINESE_VERSION)
+# Unified Firmware Chinese Support
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). Self-contained guide to the
-> `gh_release_cn` Simplified-Chinese firmware: how the flag gates resources, the
-> flash budget, and how to regenerate the embedded CJK fonts.
+> Deep reference for [CLAUDE.md](../../CLAUDE.md): runtime content profiles,
+> the compact embedded CJK fallback, and CJK font regeneration.
 
-A dedicated build env, `gh_release_cn`, produces a Simplified-Chinese-only
-firmware. The `-DENABLE_CHINESE_VERSION` flag in [platformio.ini](../../platformio.ini)
-gates every CN-only resource:
+Every hardware target now builds one firmware. The base environment always
+enables the existing CJK code paths while the first-start language guide saves
+`ContentProfile::China` only for `Language::ZH_CN`; all other choices save
+`ContentProfile::Global`. Later UI-language changes do not alter that profile.
 
-| Resource | Behavior under ENABLE_CHINESE_VERSION |
+| Resource | Unified behavior |
 |---|---|
-| i18n string table (`gen_i18n.py`) | Pre-script auto-detects the flag via `env.subst("$BUILD_FLAGS")` and emits **only EN + ZH_CN** into `I18nStrings.cpp` (saves ~144 KB vs the full 23-language table). Detection logs `[gen_i18n] ENABLE_CHINESE_VERSION detected …` during the build. |
-| Built-in fonts ([lib/EpdFont/builtinFonts/all.h](../../lib/EpdFont/builtinFonts/all.h)) | Latin headers are skipped. The reader UI exposes one built-in **Noto Sans** because the legacy Serif/Sans IDs both reference the same six per-size CJK headers (`notosans_cjk_{8,10,12,14,16,18}.h`). The old IDs remain valid for settings compatibility. The headers use raw 2-bit bitmaps. **Character coverage is tiered by point size**: 8/10/12pt carry all 3500 chars from `chars_3500_common.txt` plus every CJK glyph found in `chinese.yaml` and feature-specific require-from files (3517 CJK glyphs total); 14/16/18pt carry only the require-from set (747 CJK glyphs). Every size also includes the standard ASCII, Latin-1, and CJK punctuation ranges. The 14/16/18pt sizes rely on a complete SD-card font for broad Chinese EPUB coverage while still rendering every built-in Chinese UI string. |
-| Downloadable fonts | The Chinese build uses the same manifest-v1 font manager as global builds. Current firmware reads the catalog through the CrossMux API and downloads immutable files from `assets.crossmux.cn`; old firmware reads the Gitee manifest, which points to the same asset domain. Its embedded 8/10/12pt fonts already cover the Simplified-Chinese UI, so it keeps only the selected reader-size SD font resident and does not load the global build's three size-matched UI fallbacks. This preserves contiguous heap for EPUB image decoding and glyph prewarm. |
-| `src/main.cpp` font globals | Each Latin `EpdFont`/`EpdFontFamily` global is aliased to the matching-size CJK header. Bold/italic variants all point at the Regular OTF (no style data in the subset). SD-card fonts still provide style variants when the user loads them. |
-| EPUB layout ([lib/Epub/Epub/ParsedText.cpp](../../lib/Epub/Epub/ParsedText.cpp)) | All firmware flavors use the same Unicode-aware CJK splitting, punctuation, line-breaking, and source-space rules. The CN build changes the bundled font data and metrics, not tokenization or inter-word spacing behavior. |
-| Activities (`src/activities/apps/chinese-chess/`) | Compiled in (also gated by `build_src_filter +<activities/apps/chinese-chess/>`). |
-| WeRead (`src/activities/apps/weread/`) | Compiled into native CN builds through `build_src_filter`. Device requests use the app-local `WeReadHttpClient` over wolfSSL; the native simulator uses the pinned simulator fork's `esp_http_client` shim over the host `curl`. |
-| First-boot locale defaults (`src/CrossPointSettings.h`) | A fresh CN build starts with `Language::ZH_CN` and UTC+8 (`clockUtcOffsetQ = 80`); non-CN builds default to `Language::EN` and UTC+0. Saved UTC offsets are preserved across reflashes. When switching CN → global, the existing SKU/renderability guard resets Chinese to English, including legacy settings without a `langSku` marker. |
+| i18n | `gen_i18n.py` always emits all 33 languages. |
+| UI fonts | International 8/10/12pt faces are primary; Simplified-Chinese 8/10/12pt subsets are registered through `setFallbackFont()`. |
+| Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time. |
+| EPUB/TXT | Unicode CJK parsing, line breaking and missing-glyph detection are always compiled and trigger from text content. |
+| Regional apps | WeRead and Chinese Chess are compiled once and exposed only for the China content profile. |
+| Services | China uses `crossmux.cn`, OTA variant `cn`, UTC+8 NTP defaults; Global uses `crossmux.com`, variant `global`, UTC+0 defaults. |
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
 
-| Section | Bytes |
-|---|---|
-| Code + non-font data | 3,364,023 |
-| 3 CJK font headers 8/10/12pt (3517 CJK + 497 ASCII/Latin/punctuation glyphs) | 1,427,822 |
-| 3 CJK font headers 14/16/18pt (747 CJK + 497 ASCII/Latin/punctuation glyphs) | 786,336 |
-| **Total (`gh_release_cn`, 2026-08-06)** | **5,578,181 / 6,553,600 bytes**, 975,419 bytes headroom; 51,860 bytes static RAM |
-| **Total (`gh_release_cn_rc`, projected from release delta)** | **5,578,195 / 6,553,600 bytes**, 975,405 bytes headroom; 51,860 bytes static RAM |
+| Build (2026-08-27) | Flash | Slot headroom | Static RAM |
+|---|---:|---:|---:|
+| `gh_release` unified C3 | 5,828,005 B | 725,595 B | 55,604 B |
 
-A/B OTA rollback works exactly like the Latin build — the firmware fits in
-both app slots, and a failed update can auto-revert.
+A/B OTA remains unchanged: both app slots are 6,553,600 bytes. Release builds
+must stay at or below 6,029,312 bytes to retain at least 512 KiB headroom.
 
 > **Historical note (2026-05-19)**: the committed `notosans_cjk_*.h` headers
 > had drifted from `cn_common_chars.txt` in earlier PRs — the headers held
@@ -61,18 +55,15 @@ both app slots, and a failed update can auto-revert.
 > 587,322 bytes of raw bitmap and glyph metadata from the firmware. Regeneration
 > also picked up 14 UI glyphs that had been added since the previous font build.
 
-The CN build keeps LTO disabled. Combining LTO with the custom ESP-IDF core
+The unified build keeps LTO disabled. Combining LTO with the custom ESP-IDF core
 rebuild previously allowed cache-critical SPI flash helpers to be linked into
 Flash; calling them while cache was disabled caused an early-boot Cache Error.
 Do not re-enable LTO without checking the final ELF and map for the affected
 IRAM mappings.
 
-The remaining size strategy is **per-size CJK character coverage** in
-`build-cn-builtin-fonts.sh` (see "Regenerating the CJK fonts" below).
-8/10/12pt carry the complete 3500-char pool plus required glyphs; 14/16/18pt
-carry only required glyphs. The smaller tiers shrink raw Flash-resident bitmap
-and glyph metadata without adding a decompression buffer, heap allocation, or
-DRAM use.
+The active size strategy is to embed only 8/10/12pt CJK subsets and externalize
+large reading faces to `.cpfont`. This removes flash data without introducing a
+decompression buffer or a new long-lived heap allocation.
 
 ## WeRead transport
 
@@ -158,20 +149,17 @@ PYTHON=/tmp/cn_font_venv/bin/python3 \
 PYTHON=/tmp/cn_font_venv/bin/python3 \
   bash lib/EpdFont/scripts/build-cn-builtin-fonts.sh
 
-# 5. Build
-pio run -e gh_release_cn
+# 5. Build the unified C3 firmware
+pio run -e gh_release
 
-# Build all six ESP32-S3 Chinese device binaries
-pio run -e sticky_cn -e x4pro_cn -e papermono_cn -e eego_a4_cn \
-  -e murphy_m4_cn -e waveshare_epaper_397_cn
+# Build all six unified ESP32-S3 device binaries
+pio run -e sticky -e x4pro -e papermono -e eego_a4 \
+  -e murphy_m4 -e waveshare_epaper_397
 ```
 
-Each S3 `_cn` environment inherits its device's hardware flags and uses the
-same Chinese-only resources and `crossmux.cn` host as `gh_release_cn`.
-The Nightly matrix builds each target's international and `_cn_nightly`
-environments together. The global deployment serves both variants from
-immutable GitHub Releases; the China deployment serves both variants from COS
-through `assets.crossmux.cn`. Each flavor keeps its own manifest and checksums.
+Nightly builds each hardware target once, then publishes the identical firmware
+under the legacy `global` and `zh-CN` schema-v1 manifests. Publishing rejects a
+pair whose firmware SHA-256 differs.
 See [firmware-release.md](firmware-release.md) for the release and index contract.
 
 The committed headers were regenerated with source SHA-256
@@ -240,25 +228,20 @@ To enlarge the renderable character set:
    This is a deliberate Flash-budget decision — every 1000 extra chars adds
    roughly **380 KB** to the 8/10/12pt headers combined.
 
-The hard ceiling is the 6.25 MiB A/B-OTA slot. The 2026-08-06 measured
-headroom is 975,419 bytes, so broad pool expansion must be budgeted and
-measured rather than inferred from the source character count.
+The hard ceiling is the 6.25 MiB A/B-OTA slot; the release gate reserves at
+least 512 KiB, so broad pool expansion must be measured in the built image.
 
 ## Complete Chinese SD fonts
 
-Current Chinese firmware downloads its catalog from:
+The unified firmware chooses the catalog host from the locked content profile:
 
 ```text
 https://crossmux.cn/api/assets/fonts/m<manifest>-b<binary>/fonts.json
+https://crossmux.com/api/assets/fonts/m<manifest>-b<binary>/fonts.json
 ```
 
-The API returns the canonical COS manifest, whose `baseUrl` uses an immutable
-Git SHA under `https://assets.crossmux.cn/fonts/m1-b4/releases/`. Older Chinese
-firmware continues to read the Gitee release manifest; releases are kept in
-sync with the canonical manifest, so those devices also download font files
-from `assets.crossmux.cn`. The CrossMux per-file API keeps its fixed Gitee
-proxy behavior only as a compatibility and rollback path. Global firmware
-continues to use the corresponding GitHub manifest and files.
+Both catalogs are reached through CrossMux; firmware no longer selects GitHub
+or Gitee directly. The returned manifest still supplies immutable asset URLs.
 
 The version numbers come from the firmware's manifest and cpfont constants.
 All catalogs must keep manifest v1 and referenced cpfont v4 assets consistent.
@@ -298,11 +281,9 @@ repository.
 ## Known limitations
 
 - **No bold/italic CJK glyphs**: the bitmaps come from a single NotoSansSC-Regular subset. UI elements that pass `EpdFontFamily::Style::Bold` render the regular weight under CN.
-- **Font-size dropdown affects rendered size**: each reader size (12/14/16/18pt) and UI size (10/12pt) and small font (8pt) has its own bitmap header. Switching size really does swap glyph bitmaps.
+- **Offline reader fallback is 12pt only**: install an SD `.cpfont` family for other reading sizes and styles.
 - **Rare characters render as □ in reader at SMALL until an SD font is installed**: the 12pt bitmap uses the complete 3500-char pool plus required glyphs. It omits classical/scientific rarities, Traditional Chinese variants, and uncommon names outside that set; for example, `璟` is intentionally absent. The reader offers the complete-font downloader on the first detected missing glyph.
-- **CJK in reader at MEDIUM/LARGE/EXTRA_LARGE needs an SD font for full coverage**: the built-in 14/16/18pt subsets contain only required UI glyphs. Selecting any of these sizes offers the same downloader before a Chinese EPUB encounters missing text.
-- **`FontDecompressor` is bypassed for CJK** by design — bitmaps are stored raw because compressing 6 fonts × ~50 KB groups fragments the heap on boot.
-- **No Traditional Chinese support**: the build is explicitly SC-only (`_language_code: ZH_CN`, no `zh-TW`/`zh-HK` yaml). TC glyphs are not in any pool; TC strings would render as missing-glyph placeholders.
+- **No Traditional Chinese UI locale**: only `ZH_CN` is present; broader CJK book coverage depends on the selected SD font.
 
 ## Files
 

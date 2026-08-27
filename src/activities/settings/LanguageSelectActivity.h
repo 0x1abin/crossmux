@@ -12,7 +12,13 @@ class MappedInputManager;
  */
 class LanguageSelectActivity final : public UiListActivity {
  public:
-  explicit LanguageSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  enum class Mode : uint8_t {
+    Settings,
+    Initial,
+    Upgrade,
+  };
+
+  explicit LanguageSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Mode mode = Mode::Settings);
 
   void onEnter() override;
 
@@ -21,6 +27,9 @@ class LanguageSelectActivity final : public UiListActivity {
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   const char* headerTitle() const override;
+  void onBackButton() override;
+  void drawFooter() override;
+  bool isOnboarding() const { return mode_ != Mode::Settings; }
 
   constexpr static uint8_t totalItems = getLanguageCount();
 
@@ -30,4 +39,5 @@ class LanguageSelectActivity final : public UiListActivity {
   // selection, so buildScreen() never needs to see a different "Selected"
   // row within one visit.
   freeink::ui::ListItem rowItems[totalItems]{};
+  const Mode mode_;
 };
