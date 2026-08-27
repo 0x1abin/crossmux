@@ -12,18 +12,15 @@
 namespace {
 
 constexpr const char* RESET_PATHS[] = {
-    "/.crosspoint/settings.json",     "/.crosspoint/settings.json.tmp",
-    "/.crosspoint/settings.bin",      "/.crosspoint/settings.bin.bak",
-    "/.crosspoint/language.bin",      "/.crosspoint/language.bin.bak",
-    "/.crosspoint/wifi.json",         "/.crosspoint/wifi.json.tmp",
-    "/.crosspoint/opds.json",         "/.crosspoint/opds.json.tmp",
-    "/.crosspoint/koreader.json",     "/.crosspoint/koreader.json.tmp",
+    "/.crosspoint/settings.json",    "/.crosspoint/settings.json.tmp", "/.crosspoint/settings.bin",
+    "/.crosspoint/settings.bin.bak", "/.crosspoint/language.bin",      "/.crosspoint/language.bin.bak",
+    "/.crosspoint/wifi.json",        "/.crosspoint/wifi.json.tmp",     "/.crosspoint/opds.json",
+    "/.crosspoint/opds.json.tmp",    "/.crosspoint/koreader.json",     "/.crosspoint/koreader.json.tmp",
 };
 
 constexpr const char* PRESERVED_PATHS[] = {
-    "/.crosspoint/state.json",         "/.crosspoint/recent.json",
-    "/.crosspoint/reading_stats.json", "/.crosspoint/bookmarks/book.json",
-    "/Books/book.epub",
+    "/.crosspoint/state.json",          "/.crosspoint/recent.json", "/.crosspoint/reading_stats.json",
+    "/.crosspoint/bookmarks/book.json", "/Books/book.epub",
 };
 
 class SystemSettingsResetTest : public ::testing::Test {
