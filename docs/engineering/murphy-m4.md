@@ -11,18 +11,22 @@ pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 Hardware profiles and drivers live in the pinned `0x1abin/freeink-sdk`
-submodule on its long-lived `crossmux` branch. The M4 button, FT6336U touch and
-GPIO/LEDC frontlight paths track upstream FreeInk commit `e4d3cc33`; CrossMux
-retains the two display batches, RX8010, GPIO43 charge input, SDMMC and product
-gates. AirPage, reading, library, settings, Web file transfer, and same-target
-SD firmware update remain available; remote OTA/catalog publication remains
-withheld.
+submodule on its long-lived `crossmux` branch. GPIO0 is the independent power
+key, GPIO1/2 are Up/Down, and the FT6336U uses fixed-cadence background polling;
+CrossMux retains the two display batches, RX8010, GPIO43 charge input, SDMMC and
+product gates. AirPage, reading, library, settings, Web file transfer, and
+same-target SD firmware update remain available; remote OTA/catalog publication
+remains withheld.
 
 The M4 keeps its boot CPU frequency fixed because hardware validation found
-FT6336U input unreliable after runtime clock changes. Idle power saving still
-uses the normal 50 ms main-loop delay. Touch initialization reads back the
-volatile mode, threshold, and report-rate registers before accepting input;
-invalid status/event/coordinate frames are discarded without latching contact.
+FT6336U input unreliable after runtime clock changes. Touch initialization reads
+back the volatile mode, threshold, and report-rate registers before accepting
+input. GPIO46 TOUCH_INT is unusable on this board, so a core-0 task samples every
+10 ms and latches the first complete gesture while the main loop is blocked by
+an e-paper refresh. The task has a static 3072-byte stack and TCB, creates no
+queue or heap allocation, and leaves all gesture classification in the normal
+HAL input path. Invalid frames are discarded; repeated failed reads release a
+stale contact after 100 ms.
 
 The desktop target models the 800x480 panel, `murphy_m4` identity, touch and
 rotation, RTC, buttons, dual-channel frontlight state, and Power-only wake. Use
@@ -31,11 +35,36 @@ has no Home key, so `H` is ignored. It does not replace hardware tests for
 display batches/ghosting, FT6336U IRQ/reset behavior, SDMMC contention, PWM
 curves, PSRAM, or standby current.
 
-The default SSD1677 configuration targets the second production batch with
-R13 fitted and uses the verified `0x50` pseudo-temperature. To build for the
-first no-R13 batch, add `-DFREEINK_MURPHY_M4_BATCH1=1` in
-`platformio.local.ini`; this selects `0x3C`. Keep this compile-time until both
-batches pass the display gate.
+M4 batch detection runs before the normal GPIO input setup. R13 is a second
+100 kΩ pull-up in parallel on GPIO1/KEY1; together with the key's 100 nF
+capacitor it halves the charge time on batch 2. The firmware measures seven
+50%-charge times in a fixed 28-byte stack array, caches only a result outside
+the guard band in NVS key `cphw/m4_batch_v1`, and otherwise falls back to batch
+2 without caching. A pressed Up key therefore cannot permanently select the
+wrong batch. `HalGPIO::begin()` applies the result to touch before input starts;
+`HalDisplay::begin()` reads the same HAL state before constructing the immutable
+SSD1677 batch configuration. No batch state allocates from the heap.
+[ESP32-S3 Datasheet v2.2](https://documentation.espressif.com/esp32_s3_datasheet_en.pdf)
+Table 2-8 maps GPIO1 to ADC1_CH0; its documented 60 µs power-up low glitch is
+also shorter than the 50 ms settle delay before the charged reference sample.
+
+Batch 1 (no R13) uses the `0x3C` pseudo-temperature and touch short-axis range
+`[-52,553]`; batch 2 (R13 fitted) uses `0x50` and `[-47,514]`. The selected
+temperature is applied to HALF and window refreshes. For recovery or hardware
+diagnostics, `-DFREEINK_MURPHY_M4_BATCH1=1` forces batch 1 and bypasses the
+probe. The product UI deliberately has no manual batch setting.
+
+First-batch hardware validation measured 101 charge-time samples on GPIO1:
+median 6008 µs, range 6004–6059 µs, and coefficient of variation 0.379%.
+This passes the batch-1 interval and 10% stability gate. Second-batch hardware
+validation remains required before removing the experimental release gate.
+
+The first-batch input build was also sampled for 70 seconds after startup. The
+touch task retained at least 1120 bytes of its 3072-byte static stack while
+free heap/minimum heap/largest block stayed at 255028/254972/212980 bytes and
+free/minimum/largest PSRAM stayed at 8091424/8091424/7995380 bytes. The polling
+task and RX8010 reads reported no I²C failures. Physical touch gestures and
+Power sleep/wake remain part of the hands-on acceptance checklist below.
 
 ## First flash and backup
 
@@ -60,16 +89,19 @@ and app at `0x10000` without overwriting NVS.
 
 ## Hardware release gate
 
-- Verify direction, edge pattern, Full/Fast/grayscale and ghosting on both
-  display batches.
+- Verify direction, edge pattern, Full/Fast/Half/window/grayscale and ghosting
+  on the second display batch; the first-batch RC probe stability gate is
+  complete. Confirm first boot probes and caches the right batch, later boots
+  use the cache, and holding Up during an uncached probe cannot persist a
+  result.
 - Verify four-corner touch, swipes and rotations, including a short touch while
-  an e-paper refresh blocks the main loop; confirm GPIO44 active-low IRQ and
+  an e-paper refresh blocks the main loop; confirm GPIO46 remains unusable and
   that GPIO7 display reset is followed by successful FT6336U reinitialization
   with `0x00=0x00`, `0x80=0x16`, and `0x88=0x04` read back correctly. Confirm
   invalid frames neither create phantom touches nor leave an active touch stuck.
-- Verify GPIO1/2 navigation and GPIO0 shared input: short press emits only
-  Confirm (or only Power when the existing short-power option is enabled), and
-  long press emits only Power.
+- Verify GPIO1/2 navigation and independent GPIO0 Power input: a short press
+  never emits Confirm and follows the existing short-power setting; a long
+  press enters sleep.
 - Exercise touch while repeatedly reading/writing RX8010; confirm both devices
   share I²C1 without conflicts or bus/device recreation. Also verify concurrent
   4-bit SDMMC/display use, ADC9 battery, active-low GPIO43 charging, and RX8010
@@ -82,8 +114,9 @@ and app at `0x10000` without overwriting NVS.
   confirm the CPU clock remains at its boot frequency and touch stays responsive.
 - Record free heap, minimum free heap, largest block and PSRAM before/after
   initialization and through repeated touch/RTC/sleep, reading, grayscale and
-  Wi-Fi cycles. The removed M4-only touch task must be absent, I²C handles must
-  be allocated only at startup, and no metric may show a continuing decline.
+  Wi-Fi cycles. The static touch task must retain at least 512 bytes of stack,
+  I²C handles must be allocated only at startup, and no metric may show a
+  continuing decline.
 
-AHT20, SC7A20, runtime panel-batch settings, remote OTA/catalog publication and
+AHT20, SC7A20, manual panel-batch settings, remote OTA/catalog publication and
 complex SD fallback remain outside this experimental target.
