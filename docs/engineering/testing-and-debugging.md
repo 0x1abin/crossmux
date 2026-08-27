@@ -173,8 +173,11 @@ missing `H2O_RUNNER_TOKEN`, API errors, and an unavailable H2O fall back to
 `ubuntu-latest`. The token must be repository-scoped with read-only
 Administration permission. Selection is best effort: a runner that disconnects
 after selection can still leave the selected job queued. Formatting, static
-analysis, unit tests, and all publishing jobs remain GitHub-hosted so persistent
-runner jobs never receive release credentials.
+analysis, unit tests, and GitHub publishing remain GitHub-hosted. Nightly COS
+publishing is the exception: it requires the H2O labels with no fallback, has
+read-only repository contents, and receives COS credentials but no GitHub write
+credential. If H2O is unavailable, that regional job waits while the independent
+GitHub publish job can continue.
 
 ---
 

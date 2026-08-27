@@ -23,7 +23,7 @@ Each target job builds and verifies both variants. Packaging checks the ESP
 image chip ID, required board tag, partition layout, app-slot size, and SHA-256
 before emitting an immutable target manifest.
 
-The publish job writes in this order:
+The global and China publish jobs run independently. Each writes in this order:
 
 1. immutable binaries and checksum files;
 2. immutable target manifests;
@@ -37,12 +37,13 @@ GitHub Release. Both variants and their manifests live in an immutable
 `assets.crossmux.cn`. Region chooses the storage provider; firmware language
 does not.
 
-COS publishing uses a version-pinned, SHA-256-verified COSCLI binary. The
-workflow verifies release tooling before writing any immutable release and
-passes credentials directly to each COS command instead of persisting a CLI
-config file. Required repository secrets are `COS_SECRET_ID`, `COS_SECRET_KEY`,
-`COS_BUCKET`, and `COS_REGION`; `COS_SESSION_TOKEN` is optional. Gitee is not a
-firmware release destination.
+COS publishing runs only on the H2O self-hosted runner and does not fall back to
+a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary
+from the runner's temporary directory. The workflow verifies COSCLI before
+writing any immutable COS object and passes credentials directly to each COS
+command instead of persisting a CLI config file. Required repository secrets
+are `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, and `COS_REGION`;
+`COS_SESSION_TOKEN` is optional. Gitee is not a firmware release destination.
 
 ## Index contract and failure behavior
 

@@ -79,7 +79,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
+  publish_github:
     if: always() && needs.prepare.result == 'success'
     needs: [prepare, build]
     runs-on: ubuntu-latest
@@ -101,17 +101,15 @@ jobs:
       - name: Require at least one complete target pair
         run: test -n "$(find artifacts -name '*-global-manifest.json' -print -quit)"
 
-      - name: Load previous indexes
+      - name: Load previous global index
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p previous/global
           gh release download nightly --repo "$GITHUB_REPOSITORY" \
             --pattern release-index.json --dir previous/global || true
-          curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
-            -o previous/cn.json || true
 
-      - name: Build regional indexes
+      - name: Build global index
         run: |
           updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           python3 scripts/build_nightly_index.py \
@@ -122,14 +120,6 @@ jobs:
             --updated-at "$updated_at" \
             --build-id "$BUILD_ID" \
             --output release-index.json
-          python3 scripts/build_nightly_index.py \
-            --manifests artifacts \
-            --previous previous/cn.json \
-            --region cn \
-            --base-url "https://assets.crossmux.cn/firmware/builds/${BUILD_ID}/" \
-            --updated-at "$updated_at" \
-            --build-id "$BUILD_ID" \
-            --output release-index-cn.json
 
       - name: Build release notes
         env:
@@ -146,16 +136,6 @@ jobs:
             cat ota-notes.md >> nightly-body.md
           fi
 
-      - name: Install COS CLI
-        run: |
-          curl -fsSL \
-            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
-            -o "$RUNNER_TEMP/coscli"
-          echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" \
-            | sha256sum --check -
-          sudo install -m 0755 "$RUNNER_TEMP/coscli" /usr/local/bin/coscli
-          coscli --version
-
       - name: Publish immutable GitHub build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,6 +147,75 @@ jobs:
             --title "CrossMux Nightly ${GITHUB_SHA::7} #${GITHUB_RUN_NUMBER}" \
             --notes-file nightly-body.md \
             --prerelease
+
+      - name: Publish rolling global index last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit nightly --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "CrossMux Nightly (${GITHUB_SHA::7})" \
+              --notes-file nightly-body.md --prerelease
+          else
+            gh release create nightly --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "CrossMux Nightly (${GITHUB_SHA::7})" --notes-file nightly-body.md --prerelease
+          fi
+          gh release upload nightly release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+
+          c3_artifact=artifacts/nightly-xteink_x4
+          if [ -d "$c3_artifact" ]; then
+            cp "$c3_artifact/global/xteink-global-firmware.bin" firmware.bin
+            cp "$c3_artifact/cn/xteink-cn-firmware.bin" firmware-cn.bin
+            gh release upload nightly firmware.bin firmware-cn.bin --repo "$GITHUB_REPOSITORY" --clobber
+          fi
+
+  publish_cn:
+    if: always() && needs.prepare.result == 'success'
+    needs: [prepare, build]
+    runs-on: [self-hosted, Linux, X64, h2o]
+    permissions:
+      contents: read
+    env:
+      BUILD_ID: ${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-*
+          path: artifacts
+
+      - name: Require at least one complete target pair
+        run: test -n "$(find artifacts -name '*-global-manifest.json' -print -quit)"
+
+      - name: Load previous China index
+        run: |
+          mkdir -p previous
+          curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
+            -o previous/cn.json || true
+
+      - name: Build China index
+        run: |
+          python3 scripts/build_nightly_index.py \
+            --manifests artifacts \
+            --previous previous/cn.json \
+            --region cn \
+            --base-url "https://assets.crossmux.cn/firmware/builds/${BUILD_ID}/" \
+            --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-id "$BUILD_ID" \
+            --output release-index-cn.json
+
+      - name: Install COS CLI
+        run: |
+          curl -fsSL \
+            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
+            -o "$RUNNER_TEMP/coscli"
+          echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" \
+            | sha256sum --check -
+          chmod 0755 "$RUNNER_TEMP/coscli"
+          "$RUNNER_TEMP/coscli" --version
 
       - name: Publish immutable COS objects
         env:
@@ -186,7 +235,7 @@ jobs:
             target="${artifact##*/nightly-}"
             for flavor in global cn; do
               [ -d "$artifact/$flavor" ] || continue
-              if ! coscli cp "${cos_args[@]}" "$artifact/$flavor/" \
+              if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" "$artifact/$flavor/" \
                 "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/${flavor}/" \
                 --recursive --forbid-overwrite \
                 --meta 'Cache-Control:public,max-age=31536000,immutable' \
@@ -198,41 +247,25 @@ jobs:
             done
           done
 
-      - name: Publish rolling indexes last
+      - name: Publish rolling China index last
         env:
-          GH_TOKEN: ${{ github.token }}
           COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
           COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
           COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
           COS_BUCKET: ${{ secrets.COS_BUCKET }}
           COS_REGION: ${{ secrets.COS_REGION }}
         run: |
+          set -euo pipefail
           cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
             -e "cos.${COS_REGION}.myqcloud.com")
           if [ -n "$COS_SESSION_TOKEN" ]; then
             cos_args+=(--token "$COS_SESSION_TOKEN")
           fi
-          if ! coscli cp "${cos_args[@]}" release-index-cn.json \
+          if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" release-index-cn.json \
             "cos://${COS_BUCKET}/firmware/releases/nightly/index.json" \
             --meta 'Cache-Control:no-cache' \
             --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
             find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
               2>/dev/null || true
             exit 1
-          fi
-          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit nightly --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "CrossMux Nightly (${GITHUB_SHA::7})" \
-              --notes-file nightly-body.md --prerelease
-          else
-            gh release create nightly --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --title "CrossMux Nightly (${GITHUB_SHA::7})" --notes-file nightly-body.md --prerelease
-          fi
-          gh release upload nightly release-index.json --repo "$GITHUB_REPOSITORY" --clobber
-
-          c3_artifact=artifacts/nightly-xteink_x4
-          if [ -d "$c3_artifact" ]; then
-            cp "$c3_artifact/global/xteink-global-firmware.bin" firmware.bin
-            cp "$c3_artifact/cn/xteink-cn-firmware.bin" firmware-cn.bin
-            gh release upload nightly firmware.bin firmware-cn.bin --repo "$GITHUB_REPOSITORY" --clobber
           fi
