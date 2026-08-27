@@ -31,7 +31,7 @@ Power action and hold-to-sleep behavior. Hold it for about one second to power
 on; the boot gesture is ignored until its first release, so it may remain held
 until the first screen is visible. A new runtime hold uses the existing 400 ms
 software shutdown threshold (about 10 ms when short Power is set to Sleep),
-while a continuous 10-second hold remains the PMIC hard-power-off fallback.
+while a continuous 4-second hold remains the PMIC hard-power-off fallback.
 Audio, QMI8658, and SHTC3 are deliberately not initialized by this target.
 
 GPIO4/GPIO6 short presses emit Left/Right on release. Holding either key for

@@ -51,7 +51,7 @@ enum class Register : uint8_t {
 constexpr uint8_t CHIP_ID = 0x4A;
 constexpr uint8_t ALDO_AUDIO = 0x03;
 constexpr uint8_t ALDO_DISPLAY = 0x04;
-constexpr uint8_t PKEY_TIMING_1S_ON_10S_OFF = 0x0E;
+constexpr uint8_t PKEY_TIMING_1S_ON_4S_OFF = 0x02;
 constexpr uint8_t PKEY_IRQ_MASK = 0x0F;
 constexpr uint8_t PKEY_EDGE_IRQS = PowerKeyState::PRESS_IRQ | PowerKeyState::RELEASE_IRQ;
 bool ready = false;
@@ -81,7 +81,7 @@ bool updateBits(Register reg, uint8_t mask, uint8_t value) {
 
 bool configure() {
   return updateBits(Register::VbusVoltage, 0x0F, 0x06) && updateBits(Register::VbusCurrent, 0x07, 0x04) &&
-         updateBits(Register::Voff, 0x07, 0x00) && updateBits(Register::Key, 0x0F, PKEY_TIMING_1S_ON_10S_OFF) &&
+         updateBits(Register::Voff, 0x07, 0x00) && updateBits(Register::Key, 0x0F, PKEY_TIMING_1S_ON_4S_OFF) &&
          updateBits(Register::Precharge, 0x03, 0x02) && updateBits(Register::ChargeCurrent, 0x1F, 0x08) &&
          updateBits(Register::Termination, 0x0F, 0x01) && updateBits(Register::TargetVoltage, 0x07, 0x03) &&
          updateBits(Register::Backup, 0x07, 0x04) && updateBits(Register::LowBattery, 0xFF, 0x55) &&
