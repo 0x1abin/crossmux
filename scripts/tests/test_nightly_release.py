@@ -52,16 +52,34 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn("find artifacts -type f -print", workflow)
         self.assertNotIn("find artifacts -path '*/global/*'", workflow)
 
+    def test_publish_jobs_keep_credentials_scoped(self):
+        workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
+        github_job, china_job = workflow.split('  publish_cn:\n')
+        github_job = github_job.split('  publish_github:\n')[1]
+        self.assertIn('runs-on: ubuntu-latest', github_job)
+        self.assertNotIn('COS_SECRET_', github_job)
+        self.assertIn('runs-on: [self-hosted, Linux, X64, h2o]', china_job)
+        self.assertIn('persist-credentials: false', china_job)
+        self.assertNotIn("select_runner.outputs['runs-on']", china_job)
+        self.assertNotIn('GH_TOKEN:', china_job)
+
     def test_coscli_is_verified_before_publishing(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
+        china_job = workflow.split('  publish_cn:\n')[1]
         self.assertIn('coscli-v1.0.8-linux-amd64', workflow)
         self.assertIn(
             '7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91', workflow
         )
         self.assertLess(
-            workflow.index('Install COS CLI'), workflow.index('Publish immutable GitHub build')
+            china_job.index('Install COS CLI'), china_job.index('Publish immutable COS objects')
+        )
+        self.assertLess(
+            china_job.index('Publish immutable COS objects'),
+            china_job.index('Publish rolling China index last'),
         )
         self.assertNotIn('coscli config add', workflow)
+        self.assertNotIn('/usr/local/bin/coscli', china_job)
+        self.assertIn('"$RUNNER_TEMP/coscli" cp', china_job)
         self.assertIn('cos://${COS_BUCKET}/firmware/builds/', workflow)
         self.assertIn('cos_args+=(--token "$COS_SESSION_TOKEN")', workflow)
         self.assertIn('--fail-output-path "$RUNNER_TEMP/coscli-errors"', workflow)
