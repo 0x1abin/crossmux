@@ -52,6 +52,16 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn("find artifacts -type f -print", workflow)
         self.assertNotIn("find artifacts -path '*/global/*'", workflow)
 
+    def test_coscli_is_verified_before_publishing(self):
+        workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
+        self.assertIn('coscli-v1.0.8-linux-amd64', workflow)
+        self.assertIn(
+            '7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91', workflow
+        )
+        self.assertLess(
+            workflow.index('Install COS CLI'), workflow.index('Publish immutable GitHub build')
+        )
+
     def write_image(self, chip_id=0x0009, board='eego_a4'):
         image = bytearray(24)
         image[0] = 0xE9
