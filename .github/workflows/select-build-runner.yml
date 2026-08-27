@@ -1,0 +1,57 @@
+name: Select build runner
+
+on:
+  workflow_call:
+    secrets:
+      runner_status_token:
+        required: false
+    outputs:
+      runs-on:
+        description: JSON runner labels for fromJSON()
+        value: ${{ jobs.select.outputs.runner }}
+      reason:
+        description: Human-readable selection reason
+        value: ${{ jobs.select.outputs.reason }}
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.choose.outputs.runner }}
+      reason: ${{ steps.choose.outputs.reason }}
+    steps:
+      - id: choose
+        name: Prefer idle H2O for trusted builds
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.runner_status_token }}
+          TRUSTED_SOURCE: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          runner='"ubuntu-latest"'
+
+          if [[ "$TRUSTED_SOURCE" != "true" ]]; then
+            reason="untrusted pull request"
+          elif [[ -z "$GH_TOKEN" ]]; then
+            reason="runner status token unavailable"
+          elif h2o_name="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runners" \
+              --jq '.runners[] | select(.name == "H2O" and .status == "online" and .busy == false and ([.labels[].name] | index("h2o") != null)) | .name' \
+              2>/dev/null
+          )"; then
+            if [[ -n "$h2o_name" ]]; then
+              runner='["self-hosted","Linux","X64","h2o"]'
+              reason="H2O is online and idle"
+            else
+              reason="H2O is offline or busy"
+            fi
+          else
+            reason="runner status API unavailable"
+          fi
+
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "### Build runner selection" >> "$GITHUB_STEP_SUMMARY"
+          echo "- $reason" >> "$GITHUB_STEP_SUMMARY"

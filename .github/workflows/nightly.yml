@@ -18,6 +18,11 @@ permissions:
   contents: read
 
 jobs:
+  select_runner:
+    uses: ./.github/workflows/select-build-runner.yml
+    secrets:
+      runner_status_token: ${{ secrets.H2O_RUNNER_TOKEN }}
+
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -28,12 +33,12 @@ jobs:
         run: echo "matrix=$(python3 scripts/package_nightly_target.py --matrix)" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: prepare
+    needs: [prepare, select_runner]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     name: ${{ matrix.targetId }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
       - uses: actions/checkout@v6
         with:

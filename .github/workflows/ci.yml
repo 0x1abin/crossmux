@@ -17,6 +17,11 @@ env:
   UV_HTTP_RETRIES: 10
 
 jobs:
+  select_runner:
+    uses: ./.github/workflows/select-build-runner.yml
+    secrets:
+      runner_status_token: ${{ secrets.H2O_RUNNER_TOKEN }}
+
   clang-format:
     runs-on: ubuntu-latest
     steps:
@@ -73,7 +78,8 @@ jobs:
 
   build-default:
     name: Build X4 and X4 Pro
-    runs-on: ubuntu-latest
+    needs: select_runner
+    runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -93,6 +99,7 @@ jobs:
         run: uv pip install --system -U pioarduino==6.1.19
 
       - name: Cache PlatformIO packages
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ~/.platformio/.cache
@@ -166,6 +173,7 @@ jobs:
       - build-default
       - clang-format
       - cppcheck
+      - select_runner
       - unit-tests
     if: always()
     runs-on: ubuntu-latest

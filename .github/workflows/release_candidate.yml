@@ -4,9 +4,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-release-candidate:
+  select_runner:
     if: startsWith(github.ref_name, 'release/')
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/select-build-runner.yml
+    secrets:
+      runner_status_token: ${{ secrets.H2O_RUNNER_TOKEN }}
+
+  build-release-candidate:
+    needs: select_runner
+    runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -26,6 +32,7 @@ jobs:
         run: uv pip install --system -U pioarduino==6.1.19
 
       - name: Cache PlatformIO packages
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ~/.platformio/.cache
