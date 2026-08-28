@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.client
 import json
 import re
 import time
@@ -26,7 +27,7 @@ def fetch_bytes(url, attempts=3):
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 return response.read()
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError) as error:
             if attempt + 1 == attempts:
                 raise RuntimeError(f'failed to download {url}: {error}') from error
             time.sleep(2 ** attempt)

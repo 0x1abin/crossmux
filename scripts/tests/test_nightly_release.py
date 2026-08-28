@@ -19,6 +19,21 @@ import verify_nightly_release
 
 
 class NightlyTargetTest(unittest.TestCase):
+    def test_fetch_retries_incomplete_reads(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.side_effect = [
+            verify_nightly_release.http.client.IncompleteRead(b'partial', 1),
+            b'complete',
+        ]
+        with mock.patch.object(
+            verify_nightly_release.urllib.request, 'urlopen', return_value=response
+        ) as urlopen, mock.patch.object(verify_nightly_release.time, 'sleep'):
+            self.assertEqual(
+                verify_nightly_release.fetch_bytes('https://assets.crossmux.cn/asset.bin'),
+                b'complete',
+            )
+        self.assertEqual(urlopen.call_count, 2)
+
     def test_matrix_has_c3_and_six_s3_targets(self):
         matrix = package_nightly_target.matrix()['include']
         self.assertEqual(len(matrix), 7)
