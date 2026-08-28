@@ -47,7 +47,7 @@ constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_TEXT_AA};
 
 constexpr StrId LINE_SPACING_IDS[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE};
-constexpr StrId SYNTHETIC_BOLD_IDS[] = {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_STANDARD,
+constexpr StrId SYNTHETIC_BOLD_IDS[] = {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_LIGHT, StrId::STR_FAKE_BOLD_STANDARD,
                                         StrId::STR_FAKE_BOLD_HEAVY};
 static_assert(std::size(SYNTHETIC_BOLD_IDS) == CrossPointSettings::SYNTHETIC_BOLD_COUNT);
 constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,

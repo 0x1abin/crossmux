@@ -127,10 +127,11 @@ To convert your own TrueType/OpenType fonts:
       --output-dir ./MyFont/
 
 **Text Settings > Style > Synthetic Bold** replaces EPUB bold faces with the
-regular or italic face thickened by one (Standard) or two (Heavy) horizontal
-pixels at render time. It does not change font metrics, wrapping, or the
-`.cpfont` format, and it does not affect menus or status-bar text. Standard is
-the default for newly initialized settings; an existing saved choice is kept.
+regular or italic face thickened by one (Light), two (Standard), or three
+(Heavy) horizontal pixels at render time. It does not change font metrics,
+wrapping, or the `.cpfont` format, and it does not affect menus or status-bar
+text. Standard is the default; existing Standard and Heavy choices retain their
+names and move to the stronger two- and three-pixel effects on upgrade.
 
 ### Available Unicode interval presets
 

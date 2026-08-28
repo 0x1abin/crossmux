@@ -72,7 +72,7 @@ class GfxRenderer {
 
  private:
   static constexpr size_t BW_BUFFER_CHUNK_SIZE = 8000;  // 8KB chunks to allow for non-contiguous memory
-  static constexpr uint8_t MAX_SYNTHETIC_BOLD_PIXELS = 2;
+  static constexpr uint8_t MAX_SYNTHETIC_BOLD_PIXELS = 3;
 
   HalDisplay& display;
   RenderMode renderMode;
