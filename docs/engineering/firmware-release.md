@@ -19,9 +19,9 @@ total. Each image is later aliased by the legacy `global` and `zh-CN` pointers.
 
 ## Publishing
 
-Each target job builds once and packages two compatibility variants. Packaging checks the ESP
-image chip ID, required board tag, partition layout, app-slot size, and SHA-256
-before emitting an immutable target manifest.
+Each target job builds once and packages one binary set plus two compatibility
+manifests. Packaging checks the ESP image chip ID, required board tag, partition
+layout, app-slot size, and SHA-256 before emitting the manifests.
 
 The global and China publish jobs run independently. Each writes in this order:
 
@@ -30,12 +30,13 @@ The global and China publish jobs run independently. Each writes in this order:
 3. rolling regional indexes.
 
 The global index is the `release-index.json` asset of the rolling `nightly`
-GitHub Release. Both variants and their manifests live in an immutable
-`nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index is
-`/firmware/releases/nightly/index.json`; both variants live under
-`/firmware/builds/<build-id>/<target>/<variant>/` in COS and are served through
-`assets.crossmux.cn`. Region chooses the storage provider; both variant pointers
-reference identical firmware bytes and differing hashes fail publication.
+GitHub Release. The unified binaries and compatibility manifests live in an
+immutable `nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index
+is `/firmware/releases/nightly/index.json`; each target's single binary set and
+both manifests live under `/firmware/builds/<build-id>/<target>/` in COS and are
+served through `assets.crossmux.cn`. Region chooses the storage provider; both
+variant manifests reference the same neutral binary names and differing hashes
+fail publication.
 
 COS publishing runs only on the H2O self-hosted runner and does not fall back to
 a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary
@@ -52,11 +53,12 @@ map. Each target repeats its identity and channel capabilities and contains
 global and `zh-CN` pointers with version, CrossMux SHA, SDK SHA, publish time,
 and immutable manifest URL.
 
-A target advances only when both variants are valid and have the same CrossMux
-revision, SDK revision, version, and firmware SHA-256. A missing variant retains that target's previous pointer;
-other targets may still advance. A malformed complete pair fails publishing.
-Unknown targets from an older index are discarded. Historical objects are
-never overwritten, so rollback changes only the rolling index pointer.
+A target advances only when both compatibility manifests are valid and have the
+same CrossMux revision, SDK revision, version, and assets. A
+missing manifest retains that target's previous pointer; other targets may still
+advance. A malformed complete pair fails publishing. Unknown targets from an
+older index are discarded. Historical objects are never overwritten, so
+rollback changes only the rolling index pointer.
 
 ## Consumers and safety
 

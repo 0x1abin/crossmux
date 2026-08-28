@@ -43,11 +43,7 @@ def manifest_url(base_url, region, target_id, flavor):
     name = manifest_name(target_id, flavor)
     if region == 'global':
         return urljoin(base_url, name)
-    return urljoin(base_url, f'{target_id}/{FLAVOR_TOKENS[flavor]}/{name}')
-
-
-def firmware_sha(manifest):
-    return next(asset.get('sha256') for asset in manifest['assets'] if asset.get('role') == 'firmware')
+    return urljoin(base_url, f'{target_id}/{name}')
 
 
 def build_index(manifest_root, previous, region, base_url, updated_at, build_id):
@@ -78,8 +74,8 @@ def build_index(manifest_root, previous, region, base_url, updated_at, build_id)
             raise ValueError(f'{target_id} flavor SDK revisions do not match')
         if len({manifest['version'] for manifest in manifests.values()}) != 1:
             raise ValueError(f'{target_id} flavor versions do not match')
-        if len({firmware_sha(manifest) for manifest in manifests.values()}) != 1:
-            raise ValueError(f'{target_id} flavor firmware hashes do not match')
+        if len({json.dumps(manifest['assets'], sort_keys=True) for manifest in manifests.values()}) != 1:
+            raise ValueError(f'{target_id} flavor assets do not match')
         targets[target_id] = {
             'targetId': target_id,
             'models': target['models'],

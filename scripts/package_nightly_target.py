@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package one model-specific Nightly flavor and emit its verified manifest."""
+"""Package one model-specific Nightly target and emit compatibility manifests."""
 
 import argparse
 import configparser
@@ -92,9 +92,9 @@ def verify_firmware(path, chip_id, board_tag):
     raise SystemExit(f'{path.name} does not contain board tag {board_tag!r}')
 
 
-def package_target(root, target_id, flavor, output):
+def package_target(root, target_id, output):
     target = TARGETS[target_id]
-    environment = environment_for(target_id, flavor)
+    environment = environment_for(target_id, 'global')
     build = root / '.pio/build' / environment
     output.mkdir(parents=True, exist_ok=True)
     verify_partition_csv(root)
@@ -103,7 +103,7 @@ def package_target(root, target_id, flavor, output):
     assets = []
     for role, source_name, offset in segments:
         source = find_boot_app0() if role == 'boot_app0' else build / source_name
-        destination = output / asset_name(target_id, flavor, source_name)
+        destination = output / asset_name(target_id, source_name)
         copy_asset(source, destination)
         assets.append({
             'role': role,
@@ -131,8 +131,7 @@ def package_target(root, target_id, flavor, output):
         'supportedChannels': target['supportedChannels'],
         'environment': environment,
         'chip': target['chip'],
-        'flavor': flavor,
-        'version': version_for(config['crosspoint']['version'], target_id, flavor, short_sha),
+        'version': version_for(config['crosspoint']['version'], target_id, 'global', short_sha),
         'crossmuxSha': git_value(root, 'rev-parse', 'HEAD'),
         'sdkSha': git_value(root / 'freeink-sdk', 'rev-parse', 'HEAD'),
         'assets': assets,
@@ -141,20 +140,23 @@ def package_target(root, target_id, flavor, output):
         manifest['partitionProfile'] = 'crossmux-sticky-v1'
         manifest['flash'] = {'size': 0x1000000, 'mode': 'dio', 'frequency': '80m'}
 
-    manifest_path = output / manifest_name(target_id, flavor)
-    manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
-    checksum_paths = [output / asset['name'] for asset in assets] + [manifest_path]
-    checksum_name = f"{target['deviceSlug']}-{FLAVOR_TOKENS[flavor]}-SHA256SUMS"
+    manifest_paths = []
+    for flavor in FLAVOR_TOKENS:
+        manifest_path = output / manifest_name(target_id, flavor)
+        manifest_path.write_text(json.dumps({**manifest, 'flavor': flavor}, indent=2) + '\n')
+        manifest_paths.append(manifest_path)
+
+    checksum_paths = [output / asset['name'] for asset in assets] + manifest_paths
+    checksum_name = f"{target['deviceSlug']}-SHA256SUMS"
     (output / checksum_name).write_text(
         ''.join(f'{sha256(path)}  {path.name}\n' for path in checksum_paths)
     )
-    print(f"Packaged {target_id}/{flavor} {manifest['version']} in {output}")
+    print(f"Packaged {target_id} {manifest['version']} in {output}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('target', nargs='?', choices=TARGETS)
-    parser.add_argument('--flavor', choices=FLAVOR_TOKENS, default='global')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--matrix', action='store_true')
     args = parser.parse_args()
@@ -165,9 +167,8 @@ def main():
         parser.error('target is required unless --matrix is used')
 
     root = Path(__file__).resolve().parent.parent
-    token = FLAVOR_TOKENS[args.flavor]
-    output = (args.output or root / 'dist' / args.target / token).resolve()
-    package_target(root, args.target, args.flavor, output)
+    output = (args.output or root / 'dist' / args.target).resolve()
+    package_target(root, args.target, output)
 
 
 if __name__ == '__main__':

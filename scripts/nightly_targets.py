@@ -93,9 +93,9 @@ def version_for(base_version, target_id, flavor, short_sha):
     return f"{'-'.join(parts)}-rc+{short_sha[:7]}"
 
 
-def asset_name(target_id, flavor, source_name):
+def asset_name(target_id, source_name):
     target = TARGETS[target_id]
-    return f"{target['deviceSlug']}-{FLAVOR_TOKENS[flavor]}-{source_name}"
+    return f"{target['deviceSlug']}-{source_name}"
 
 
 def manifest_name(target_id, flavor):

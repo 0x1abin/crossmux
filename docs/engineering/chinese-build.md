@@ -157,9 +157,9 @@ pio run -e sticky -e x4pro -e papermono -e eego_a4 \
   -e murphy_m4 -e waveshare_epaper_397
 ```
 
-Nightly builds each hardware target once, then publishes the identical firmware
-under the legacy `global` and `zh-CN` schema-v1 manifests. Publishing rejects a
-pair whose firmware SHA-256 differs.
+Nightly builds and stores one neutrally named binary set per hardware target.
+The legacy `global` and `zh-CN` schema-v1 manifests both reference that set;
+publishing rejects a pair whose asset names, sizes, or SHA-256 values differ.
 See [firmware-release.md](firmware-release.md) for the release and index contract.
 
 The committed headers were regenerated with source SHA-256

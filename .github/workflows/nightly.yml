@@ -62,15 +62,12 @@ jobs:
       - name: Build unified target
         run: pio run -e "${{ matrix.environment }}"
 
-      - name: Package and verify target pair
+      - name: Package and verify unified target
         run: |
           set -euo pipefail
-          python3 scripts/package_nightly_target.py "${{ matrix.targetId }}" --flavor global \
-            --output "dist/${{ matrix.targetId }}/global"
-          python3 scripts/package_nightly_target.py "${{ matrix.targetId }}" --flavor zh-CN \
-            --output "dist/${{ matrix.targetId }}/cn"
-          (cd "dist/${{ matrix.targetId }}/global" && sha256sum --check *-SHA256SUMS)
-          (cd "dist/${{ matrix.targetId }}/cn" && sha256sum --check *-SHA256SUMS)
+          python3 scripts/package_nightly_target.py "${{ matrix.targetId }}" \
+            --output "dist/${{ matrix.targetId }}"
+          (cd "dist/${{ matrix.targetId }}" && sha256sum --check *-SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
         with:
@@ -164,9 +161,12 @@ jobs:
 
           c3_artifact=artifacts/nightly-xteink_x4
           if [ -d "$c3_artifact" ]; then
-            cp "$c3_artifact/global/xteink-global-firmware.bin" firmware.bin
-            cp "$c3_artifact/cn/xteink-cn-firmware.bin" firmware-cn.bin
-            gh release upload nightly firmware.bin firmware-cn.bin --repo "$GITHUB_REPOSITORY" --clobber
+            cp "$c3_artifact/xteink-firmware.bin" firmware.bin
+            gh release upload nightly firmware.bin --repo "$GITHUB_REPOSITORY" --clobber
+            if gh release view nightly --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '.assets[].name' | grep -Fxq firmware-cn.bin; then
+              gh release delete-asset nightly firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
+            fi
           fi
 
   publish_cn:
@@ -233,18 +233,15 @@ jobs:
           fi
           for artifact in artifacts/nightly-*; do
             target="${artifact##*/nightly-}"
-            for flavor in global cn; do
-              [ -d "$artifact/$flavor" ] || continue
-              if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" "$artifact/$flavor/" \
-                "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/${flavor}/" \
-                --recursive --forbid-overwrite \
-                --meta 'Cache-Control:public,max-age=31536000,immutable' \
-                --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
-                find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
-                  2>/dev/null || true
-                exit 1
-              fi
-            done
+            if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" "$artifact/" \
+              "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/" \
+              --recursive --forbid-overwrite \
+              --meta 'Cache-Control:public,max-age=31536000,immutable' \
+              --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
+              find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
+                2>/dev/null || true
+              exit 1
+            fi
           done
 
       - name: Publish rolling China index last

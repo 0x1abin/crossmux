@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -43,10 +44,59 @@ class NightlyTargetTest(unittest.TestCase):
         )
         self.assertNotIn('beta', nightly_targets.version_for('1.5.7', 'sticky', 'global', '1234567'))
 
-    def test_github_release_includes_both_variants(self):
+    def test_workflow_packages_one_binary_set(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
         self.assertIn("find artifacts -type f -print", workflow)
         self.assertNotIn("find artifacts -path '*/global/*'", workflow)
+        self.assertEqual(workflow.count('python3 scripts/package_nightly_target.py "${{ matrix.targetId }}"'), 1)
+        self.assertNotIn('for flavor in global cn', workflow)
+        self.assertIn('cp "$c3_artifact/xteink-firmware.bin" firmware.bin', workflow)
+        self.assertIn('gh release delete-asset nightly firmware-cn.bin', workflow)
+
+    def test_package_contains_one_binary_set_and_two_compatible_manifests(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            build = root / '.pio/build/sticky_nightly'
+            build.mkdir(parents=True)
+            (build / 'bootloader.bin').write_bytes(b'bootloader')
+            (build / 'partitions.bin').write_bytes(b'partitions')
+            (build / 'firmware.bin').write_bytes(self.write_image(board='sticky').read_bytes())
+            boot_app0 = root / 'boot_app0.bin'
+            boot_app0.write_bytes(b'boot_app0')
+            (root / 'platformio.ini').write_text('[crosspoint]\nversion = 1.5.7\n')
+            output = root / 'dist/sticky'
+
+            def git_value(_root, *args):
+                return 'a' * (7 if '--short=7' in args else 40)
+
+            with (
+                mock.patch.object(package_nightly_target, 'verify_partition_csv'),
+                mock.patch.object(package_nightly_target, 'find_boot_app0', return_value=boot_app0),
+                mock.patch.object(package_nightly_target, 'git_value', side_effect=git_value),
+            ):
+                package_nightly_target.package_target(root, 'sticky', output)
+
+            self.assertEqual(
+                {path.name for path in output.iterdir()},
+                {
+                    'sticky-bootloader.bin',
+                    'sticky-partitions.bin',
+                    'sticky-boot_app0.bin',
+                    'sticky-firmware.bin',
+                    'sticky-global-manifest.json',
+                    'sticky-cn-manifest.json',
+                    'sticky-SHA256SUMS',
+                },
+            )
+            manifests = [
+                json.loads((output / nightly_targets.manifest_name('sticky', flavor)).read_text())
+                for flavor in nightly_targets.FLAVOR_TOKENS
+            ]
+            self.assertEqual(manifests[0]['assets'], manifests[1]['assets'])
+            self.assertEqual(
+                {key: value for key, value in manifests[0].items() if key != 'flavor'},
+                {key: value for key, value in manifests[1].items() if key != 'flavor'},
+            )
 
     def test_publish_jobs_keep_credentials_scoped(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
@@ -123,7 +173,11 @@ class NightlyIndexTest(unittest.TestCase):
                 'version': f'1.5.7-rc+{revision[:7]}',
                 'crossmuxSha': revision,
                 'sdkSha': sdk_revision,
-                'assets': [{'role': 'firmware', 'name': 'firmware.bin', 'sha256': 'd' * 64}],
+                'assets': [{
+                    'role': 'firmware',
+                    'name': nightly_targets.asset_name(target_id, 'firmware.bin'),
+                    'sha256': 'd' * 64,
+                }],
             }
             (self.root / nightly_targets.manifest_name(target_id, flavor)).write_text(json.dumps(manifest))
 
@@ -151,6 +205,26 @@ class NightlyIndexTest(unittest.TestCase):
             'https://example.com/nightly/sticky-cn-manifest.json',
         )
 
+    def test_china_variants_share_one_target_directory_and_binary(self):
+        self.write_pair('sticky')
+        index = build_nightly_index.build_index(
+            self.root, None, 'cn', 'https://assets.example/firmware/builds/test/', 'now', 'test'
+        )
+        variants = index['targets']['sticky']['variants']
+        self.assertEqual(
+            variants['global']['manifestUrl'],
+            'https://assets.example/firmware/builds/test/sticky/sticky-global-manifest.json',
+        )
+        self.assertEqual(
+            variants['zh-CN']['manifestUrl'],
+            'https://assets.example/firmware/builds/test/sticky/sticky-cn-manifest.json',
+        )
+        manifests = [
+            json.loads((self.root / nightly_targets.manifest_name('sticky', flavor)).read_text())
+            for flavor in nightly_targets.FLAVOR_TOKENS
+        ]
+        self.assertEqual(manifests[0]['assets'], manifests[1]['assets'])
+
     def test_does_not_advance_incomplete_pair(self):
         self.write_pair('sticky')
         (self.root / nightly_targets.manifest_name('sticky', 'zh-CN')).unlink()
@@ -170,13 +244,13 @@ class NightlyIndexTest(unittest.TestCase):
                 self.root, None, 'global', 'https://example.com/', 'now', 'test'
             )
 
-    def test_rejects_mismatched_firmware_pair(self):
+    def test_rejects_mismatched_asset_pair(self):
         self.write_pair('sticky')
         chinese = self.root / nightly_targets.manifest_name('sticky', 'zh-CN')
         manifest = json.loads(chinese.read_text())
         manifest['assets'][0]['sha256'] = 'e' * 64
         chinese.write_text(json.dumps(manifest))
-        with self.assertRaisesRegex(ValueError, 'firmware hashes do not match'):
+        with self.assertRaisesRegex(ValueError, 'assets do not match'):
             build_nightly_index.build_index(
                 self.root, None, 'global', 'https://example.com/', 'now', 'test'
             )
