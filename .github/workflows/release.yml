@@ -25,6 +25,14 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Validate release tag
+        run: |
+          version="$(python3 -c 'import configparser; config = configparser.ConfigParser(); config.read("platformio.ini"); print(config["crosspoint"]["version"])')"
+          case "$GITHUB_REF_NAME" in
+            "$version"|"v$version") ;;
+            *) echo "::error::Release tag $GITHUB_REF_NAME does not match firmware version $version"; exit 1 ;;
+          esac
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
