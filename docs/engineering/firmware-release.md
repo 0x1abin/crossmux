@@ -58,11 +58,11 @@ writing any immutable COS object and passes credentials directly to each COS
 command instead of persisting a CLI config file. Required repository secrets
 are `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, and `COS_REGION`;
 `COS_SESSION_TOKEN` is optional. Gitee is not a firmware release destination.
-The COS identity also needs `cos:GetBucketVersioning`,
-`cos:GetBucketObjectVersions`, `cos:DeleteObject`, and
-`cos:DeleteMultipleObjects`. Cleanup detects versioned buckets and removes
-every version of an obsolete build prefix rather than leaving hidden historical
-objects.
+The COS identity also needs `cos:GetBucket` for the current-object listing,
+`cos:GetBucketVersioning` to detect the bucket state,
+`cos:GetBucketObjectVersions` for versioned cleanup, `cos:DeleteObject`, and
+`cos:DeleteMultipleObjects`. Cleanup detects versioned buckets and removes every
+version of an obsolete build prefix rather than leaving hidden historical objects.
 
 ## Index contract and failure behavior
 
