@@ -141,8 +141,6 @@ jobs:
         run: |
           set -euo pipefail
           for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397; do
-            python3 scripts/package_nightly_target.py "$target" --flavor global
-            python3 scripts/package_nightly_target.py "$target" --flavor zh-CN
-            (cd "dist/$target/global" && sha256sum --check *-SHA256SUMS)
-            (cd "dist/$target/cn" && sha256sum --check *-SHA256SUMS)
+            python3 scripts/package_nightly_target.py "$target"
+            (cd "dist/$target" && sha256sum --check *-SHA256SUMS)
           done
