@@ -19,9 +19,9 @@ total. Each image is later aliased by the legacy `global` and `zh-CN` pointers.
 
 ## Publishing
 
-Each target job builds once and packages two compatibility variants. Packaging checks the ESP
-image chip ID, required board tag, partition layout, app-slot size, and SHA-256
-before emitting an immutable target manifest.
+Each target job builds once and packages one binary set plus two compatibility
+manifests. Packaging checks the ESP image chip ID, required board tag, partition
+layout, app-slot size, and SHA-256 before emitting the manifests.
 
 The global and China publish jobs run independently. Each writes in this order:
 
@@ -29,13 +29,27 @@ The global and China publish jobs run independently. Each writes in this order:
 2. immutable target manifests;
 3. rolling regional indexes.
 
+All seven targets must build successfully before either region publishes.
+Publishing also fails if the previous rolling index cannot be loaded because
+that index protects the immediately preceding build during cleanup. Once both
+regions publish, CI resolves every manifest and verifies each distinct asset's
+size and SHA-256 before deleting obsolete builds.
+
 The global index is the `release-index.json` asset of the rolling `nightly`
-GitHub Release. Both variants and their manifests live in an immutable
-`nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index is
-`/firmware/releases/nightly/index.json`; both variants live under
-`/firmware/builds/<build-id>/<target>/<variant>/` in COS and are served through
-`assets.crossmux.cn`. Region chooses the storage provider; both variant pointers
-reference identical firmware bytes and differing hashes fail publication.
+GitHub Release. The unified binaries and compatibility manifests live in an
+immutable `nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index
+is `/firmware/releases/nightly/index.json`; each target's single binary set and
+both manifests live under `/firmware/builds/<build-id>/<target>/` in COS and are
+served through `assets.crossmux.cn`. Region chooses the storage provider; both
+variant manifests reference the same neutral binary names and differing hashes
+fail publication.
+
+At steady state, GitHub and COS retain the current build and the build or builds
+referenced by the previous index. A scheduled successful Nightly therefore
+keeps roughly 24 hours of rollback data. Failed builds do not publish or clean
+up anything. The first complete run can temporarily retain more than two build
+names when the preceding index contains target-level fallbacks; the next
+complete run converges to exactly the current and previous build.
 
 COS publishing runs only on the H2O self-hosted runner and does not fall back to
 a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary
@@ -44,6 +58,11 @@ writing any immutable COS object and passes credentials directly to each COS
 command instead of persisting a CLI config file. Required repository secrets
 are `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, and `COS_REGION`;
 `COS_SESSION_TOKEN` is optional. Gitee is not a firmware release destination.
+The COS identity also needs `cos:GetBucketVersioning`,
+`cos:GetBucketObjectVersions`, `cos:DeleteObject`, and
+`cos:DeleteMultipleObjects`. Cleanup detects versioned buckets and removes
+every version of an obsolete build prefix rather than leaving hidden historical
+objects.
 
 ## Index contract and failure behavior
 
@@ -52,11 +71,11 @@ map. Each target repeats its identity and channel capabilities and contains
 global and `zh-CN` pointers with version, CrossMux SHA, SDK SHA, publish time,
 and immutable manifest URL.
 
-A target advances only when both variants are valid and have the same CrossMux
-revision, SDK revision, version, and firmware SHA-256. A missing variant retains that target's previous pointer;
-other targets may still advance. A malformed complete pair fails publishing.
-Unknown targets from an older index are discarded. Historical objects are
-never overwritten, so rollback changes only the rolling index pointer.
+Every target advances together only when both compatibility manifests are valid
+and have the same CrossMux revision, SDK revision, version, and assets. A
+missing or malformed manifest prevents the whole Nightly from publishing.
+Build objects are never overwritten; cleanup runs only after the new rolling
+indexes and their assets pass verification.
 
 ## Consumers and safety
 
