@@ -360,11 +360,12 @@ jobs:
           COS_REGION: ${{ secrets.COS_REGION }}
         run: |
           set -euo pipefail
-          cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
+          cos_args=(--init-skip -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
             -e "cos.${COS_REGION}.myqcloud.com")
           if [ -n "$COS_SESSION_TOKEN" ]; then
             cos_args+=(--token "$COS_SESSION_TOKEN")
           fi
+          quiet_cos_args=(--disable-log "${cos_args[@]}")
           versioning="$("$RUNNER_TEMP/coscli" bucket-versioning --method get \
             "${cos_args[@]}" "cos://${COS_BUCKET}")"
           list_args=(--limit -1)
@@ -373,7 +374,7 @@ jobs:
             list_args+=(--recursive --all-versions)
             rm_args+=(--all-versions)
           fi
-          "$RUNNER_TEMP/coscli" ls "${cos_args[@]}" \
+          "$RUNNER_TEMP/coscli" ls "${quiet_cos_args[@]}" \
             "cos://${COS_BUCKET}/firmware/builds/" "${list_args[@]}" \
             > cos-builds.txt
           python3 scripts/nightly_retention.py \
@@ -383,7 +384,7 @@ jobs:
             --candidates cos-builds.txt \
             > obsolete-cos-builds.txt
           while IFS= read -r build_id; do
-            if ! "$RUNNER_TEMP/coscli" rm "${cos_args[@]}" \
+            if ! "$RUNNER_TEMP/coscli" rm "${quiet_cos_args[@]}" \
               "cos://${COS_BUCKET}/firmware/builds/${build_id}/" "${rm_args[@]}" \
               --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
               find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
