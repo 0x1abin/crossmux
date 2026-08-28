@@ -14,6 +14,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: nightly-publish
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -104,7 +108,7 @@ jobs:
         run: |
           mkdir -p previous/global
           gh release download nightly --repo "$GITHUB_REPOSITORY" \
-            --pattern release-index.json --dir previous/global || true
+            --pattern release-index.json --dir previous/global
 
       - name: Build global index
         run: |
@@ -163,10 +167,11 @@ jobs:
           if [ -d "$c3_artifact" ]; then
             cp "$c3_artifact/xteink-firmware.bin" firmware.bin
             gh release upload nightly firmware.bin --repo "$GITHUB_REPOSITORY" --clobber
-            if gh release view nightly --repo "$GITHUB_REPOSITORY" --json assets \
-              --jq '.assets[].name' | grep -Fxq firmware-cn.bin; then
-              gh release delete-asset nightly firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
-            fi
+          fi
+          legacy_assets="$(gh release view nightly --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')"
+          if grep -Fxq firmware-cn.bin <<< "$legacy_assets"; then
+            gh release delete-asset nightly firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
           fi
 
   publish_cn:
@@ -194,7 +199,7 @@ jobs:
         run: |
           mkdir -p previous
           curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
-            -o previous/cn.json || true
+            -o previous/cn.json
 
       - name: Build China index
         run: |
@@ -266,3 +271,18 @@ jobs:
               2>/dev/null || true
             exit 1
           fi
+
+  verify_publish:
+    needs: [publish_github, publish_cn]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify published Nightly indexes and assets
+        run: |
+          python3 scripts/verify_nightly_release.py \
+            --index-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/release-index.json?run=${GITHUB_RUN_ID}" \
+            --expected-sha "$GITHUB_SHA"
+          python3 scripts/verify_nightly_release.py \
+            --index-url "https://assets.crossmux.cn/firmware/releases/nightly/index.json?run=${GITHUB_RUN_ID}" \
+            --expected-sha "$GITHUB_SHA"

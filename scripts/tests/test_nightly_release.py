@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 import tempfile
@@ -13,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 import build_nightly_index
 import nightly_targets
 import package_nightly_target
+import verify_nightly_release
 
 
 class NightlyTargetTest(unittest.TestCase):
@@ -52,6 +54,19 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertNotIn('for flavor in global cn', workflow)
         self.assertIn('cp "$c3_artifact/xteink-firmware.bin" firmware.bin', workflow)
         self.assertIn('gh release delete-asset nightly firmware-cn.bin', workflow)
+
+    def test_workflow_fails_closed_and_verifies_both_regions(self):
+        workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
+        self.assertIn('group: nightly-publish', workflow)
+        self.assertNotIn('--dir previous/global || true', workflow)
+        self.assertNotIn('-o previous/cn.json || true', workflow)
+        rolling = workflow.split('- name: Publish rolling global index last', 1)[1].split('  publish_cn:', 1)[0]
+        c3_start = rolling.index('c3_artifact=')
+        c3_end = rolling.index('          fi\n', c3_start)
+        self.assertGreater(rolling.index('legacy_assets='), c3_end)
+        verify = workflow.split('  verify_publish:', 1)[1]
+        self.assertIn('needs: [publish_github, publish_cn]', verify)
+        self.assertEqual(verify.count('python3 scripts/verify_nightly_release.py'), 2)
 
     def test_package_contains_one_binary_set_and_two_compatible_manifests(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -255,6 +270,132 @@ class NightlyIndexTest(unittest.TestCase):
                 self.root, None, 'global', 'https://example.com/', 'now', 'test'
             )
 
+
+class PublishedNightlyTest(unittest.TestCase):
+    def setUp(self):
+        self.index_url = (
+            'https://github.com/0x1abin/crossmux/releases/download/nightly/release-index.json'
+        )
+        self.release_url = (
+            'https://github.com/0x1abin/crossmux/releases/download/nightly-build-test/'
+        )
+        self.current_sha = 'a' * 40
+        self.old_sha = 'c' * 40
+        self.sdk_sha = 'b' * 40
+        self.store = {}
+        self.fetches = {}
+        targets = {}
+        for index, (target_id, target) in enumerate(nightly_targets.TARGETS.items()):
+            revision = self.old_sha if index == 0 else self.current_sha
+            assets = []
+            for role, name, offset in verify_nightly_release.expected_assets(target_id):
+                data = f'{target_id}/{role}'.encode()
+                self.store[self.release_url + name] = data
+                assets.append({
+                    'role': role,
+                    'name': name,
+                    'offset': offset,
+                    'size': len(data),
+                    'sha256': hashlib.sha256(data).hexdigest(),
+                })
+            variants = {}
+            for flavor in nightly_targets.FLAVOR_TOKENS:
+                version = f'1.5.7-rc+{revision[:7]}'
+                manifest = {
+                    'schemaVersion': 1,
+                    'channel': 'nightly',
+                    'targetId': target_id,
+                    'models': target['models'],
+                    'deviceSlug': target['deviceSlug'],
+                    'boardTag': target['boardTag'],
+                    'supportedChannels': target['supportedChannels'],
+                    'environment': nightly_targets.environment_for(target_id, flavor),
+                    'flavor': flavor,
+                    'version': version,
+                    'crossmuxSha': revision,
+                    'sdkSha': self.sdk_sha,
+                    'assets': assets,
+                }
+                url = self.release_url + nightly_targets.manifest_name(target_id, flavor)
+                self.store[url] = json.dumps(manifest).encode()
+                variants[flavor] = {
+                    'version': version,
+                    'crossmuxSha': revision,
+                    'sdkSha': self.sdk_sha,
+                    'publishedAt': 'now',
+                    'manifestUrl': url,
+                }
+            targets[target_id] = {
+                'targetId': target_id,
+                'models': target['models'],
+                'deviceSlug': target['deviceSlug'],
+                'boardTag': target['boardTag'],
+                'supportedChannels': target['supportedChannels'],
+                'variants': variants,
+            }
+        self.index = {
+            'schemaVersion': 1,
+            'channel': 'nightly',
+            'updatedAt': 'now',
+            'buildId': 'test',
+            'targets': targets,
+        }
+        self.write_index()
+
+    def write_index(self):
+        self.store[self.index_url] = json.dumps(self.index).encode()
+
+    def fetch(self, url):
+        self.fetches[url] = self.fetches.get(url, 0) + 1
+        return self.store[url]
+
+    def test_verifies_current_and_retained_targets_with_one_asset_fetch(self):
+        result = verify_nightly_release.verify_release(
+            self.index_url, self.current_sha, self.fetch
+        )
+        self.assertEqual(result['targets'], len(nightly_targets.TARGETS))
+        self.assertEqual(result['currentTargets'], len(nightly_targets.TARGETS) - 1)
+        for url in self.store:
+            if url.endswith('.bin'):
+                self.assertEqual(self.fetches[url], 1)
+
+    def test_accepts_legacy_assets_for_retained_target(self):
+        target_id = 'xteink_x4'
+        cn_url = self.release_url + nightly_targets.manifest_name(target_id, 'zh-CN')
+        manifest = json.loads(self.store[cn_url])
+        old_name = 'xteink-cn-firmware.bin'
+        data = b'legacy-cn-firmware'
+        manifest['assets'][0].update({
+            'name': old_name,
+            'size': len(data),
+            'sha256': hashlib.sha256(data).hexdigest(),
+        })
+        self.store[cn_url] = json.dumps(manifest).encode()
+        self.store[self.release_url + old_name] = data
+        result = verify_nightly_release.verify_release(
+            self.index_url, self.current_sha, self.fetch
+        )
+        self.assertEqual(result['currentTargets'], len(nightly_targets.TARGETS) - 1)
+
+    def test_rejects_missing_target(self):
+        self.index['targets'].pop('sticky')
+        self.write_index()
+        with self.assertRaisesRegex(ValueError, 'canonical target set'):
+            verify_nightly_release.verify_release(self.index_url, self.current_sha, self.fetch)
+
+    def test_rejects_manifest_difference(self):
+        url = self.release_url + nightly_targets.manifest_name('sticky', 'zh-CN')
+        manifest = json.loads(self.store[url])
+        manifest['unexpected'] = True
+        self.store[url] = json.dumps(manifest).encode()
+        with self.assertRaisesRegex(ValueError, 'differ beyond flavor'):
+            verify_nightly_release.verify_release(self.index_url, self.current_sha, self.fetch)
+
+    def test_rejects_corrupt_asset(self):
+        url = self.release_url + nightly_targets.asset_name('sticky', 'firmware.bin')
+        self.store[url] += b'corrupt'
+        with self.assertRaisesRegex(ValueError, 'size or SHA-256'):
+            verify_nightly_release.verify_release(self.index_url, self.current_sha, self.fetch)
 
 if __name__ == '__main__':
     unittest.main()

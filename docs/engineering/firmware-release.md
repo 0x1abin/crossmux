@@ -29,6 +29,11 @@ The global and China publish jobs run independently. Each writes in this order:
 2. immutable target manifests;
 3. rolling regional indexes.
 
+Publishing fails if the previous rolling index cannot be loaded; a transient
+read error must not turn a partial build into an index that drops targets. Once
+both regions publish, CI resolves every manifest and verifies each distinct
+asset's size and SHA-256 before declaring the run successful.
+
 The global index is the `release-index.json` asset of the rolling `nightly`
 GitHub Release. The unified binaries and compatibility manifests live in an
 immutable `nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index
