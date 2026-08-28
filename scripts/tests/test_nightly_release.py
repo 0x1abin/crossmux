@@ -49,12 +49,15 @@ class NightlyTargetTest(unittest.TestCase):
 
     def test_workflow_packages_one_binary_set(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
+        hardware_workflow = (ROOT / '.github/workflows/hardware-ci.yml').read_text()
         self.assertIn("find artifacts -type f -print", workflow)
         self.assertNotIn("find artifacts -path '*/global/*'", workflow)
         self.assertEqual(workflow.count('python3 scripts/package_nightly_target.py "${{ matrix.targetId }}"'), 1)
         self.assertNotIn('for flavor in global cn', workflow)
         self.assertIn('cp "$c3_artifact/xteink-firmware.bin" firmware.bin', workflow)
         self.assertIn('gh release delete-asset nightly firmware-cn.bin', workflow)
+        self.assertNotIn('--flavor', hardware_workflow)
+        self.assertIn('(cd "dist/$target" && sha256sum --check *-SHA256SUMS)', hardware_workflow)
 
     def test_workflow_fails_closed_and_verifies_both_regions(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
