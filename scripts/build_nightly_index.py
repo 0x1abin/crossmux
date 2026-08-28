@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge successful target pairs into a regional rolling Nightly index."""
+"""Build a complete regional rolling Nightly index."""
 
 import argparse
 import json
@@ -46,36 +46,32 @@ def manifest_url(base_url, region, target_id, flavor):
     return urljoin(base_url, f'{target_id}/{name}')
 
 
-def build_index(manifest_root, previous, region, base_url, updated_at, build_id):
-    previous_targets = previous.get('targets', {}) if previous else {}
-    targets = {
-        target_id: target
-        for target_id, target in previous_targets.items()
-        if target_id in TARGETS
-    }
+def build_index(manifest_root, region, base_url, updated_at, build_id):
+    targets = {}
+    crossmux_revisions = set()
+    sdk_revisions = set()
     for target_id, target in TARGETS.items():
         manifests = {}
         for flavor in FLAVOR_TOKENS:
             matches = list(manifest_root.rglob(manifest_name(target_id, flavor)))
             if len(matches) != 1:
-                manifests = {}
-                break
+                raise ValueError(f'expected one {target_id}/{flavor} manifest, found {len(matches)}')
             manifest = read_json(matches[0])
             if not valid_manifest(manifest, target_id, flavor):
                 raise ValueError(f'invalid {target_id}/{flavor} manifest')
             manifests[flavor] = manifest
-        if len(manifests) != len(FLAVOR_TOKENS):
-            continue
         revisions = {manifest['crossmuxSha'] for manifest in manifests.values()}
         if len(revisions) != 1:
             raise ValueError(f'{target_id} flavor revisions do not match')
-        sdk_revisions = {manifest['sdkSha'] for manifest in manifests.values()}
-        if len(sdk_revisions) != 1:
+        target_sdk_revisions = {manifest['sdkSha'] for manifest in manifests.values()}
+        if len(target_sdk_revisions) != 1:
             raise ValueError(f'{target_id} flavor SDK revisions do not match')
         if len({manifest['version'] for manifest in manifests.values()}) != 1:
             raise ValueError(f'{target_id} flavor versions do not match')
         if len({json.dumps(manifest['assets'], sort_keys=True) for manifest in manifests.values()}) != 1:
             raise ValueError(f'{target_id} flavor assets do not match')
+        crossmux_revisions.update(revisions)
+        sdk_revisions.update(target_sdk_revisions)
         targets[target_id] = {
             'targetId': target_id,
             'models': target['models'],
@@ -93,6 +89,10 @@ def build_index(manifest_root, previous, region, base_url, updated_at, build_id)
                 for flavor, manifest in manifests.items()
             },
         }
+    if len(crossmux_revisions) != 1:
+        raise ValueError('target CrossMux revisions do not match')
+    if len(sdk_revisions) != 1:
+        raise ValueError('target SDK revisions do not match')
     return {
         'schemaVersion': 1,
         'channel': 'nightly',
@@ -105,7 +105,6 @@ def build_index(manifest_root, previous, region, base_url, updated_at, build_id)
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--manifests', type=Path, required=True)
-    parser.add_argument('--previous', type=Path)
     parser.add_argument('--region', choices=('global', 'cn'), required=True)
     parser.add_argument('--base-url', required=True)
     parser.add_argument('--updated-at', required=True)
@@ -113,12 +112,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
 
-    previous = read_json(args.previous) if args.previous and args.previous.is_file() else None
-    if previous and (previous.get('schemaVersion') != 1 or previous.get('channel') != 'nightly'):
-        raise SystemExit('previous index has an unsupported schema')
     index = build_index(
         args.manifests,
-        previous,
         args.region,
         args.base_url.rstrip('/') + '/',
         args.updated_at,

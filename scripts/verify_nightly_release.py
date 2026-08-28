@@ -110,15 +110,15 @@ def verify_release(index_url, expected_sha, fetch=fetch_bytes):
         versions = {manifest['version'] for manifest in manifests.values()}
         if len(revisions) != 1 or len(sdk_revisions) != 1 or len(versions) != 1:
             raise ValueError(f'{target_id} compatibility manifest revisions differ')
-        is_current = manifests['global']['crossmuxSha'] == expected_sha
-        if is_current:
-            comparable = [
-                {key: value for key, value in manifest.items() if key != 'flavor'}
-                for manifest in manifests.values()
-            ]
-            if comparable[0] != comparable[1]:
-                raise ValueError(f'{target_id} compatibility manifests differ beyond flavor')
-            current_targets += 1
+        if revisions != {expected_sha}:
+            raise ValueError(f'{target_id} does not point to the current revision')
+        comparable = [
+            {key: value for key, value in manifest.items() if key != 'flavor'}
+            for manifest in manifests.values()
+        ]
+        if comparable[0] != comparable[1]:
+            raise ValueError(f'{target_id} compatibility manifests differ beyond flavor')
+        current_targets += 1
 
         expected = expected_assets(target_id)
         seen_urls = set()
@@ -131,7 +131,7 @@ def verify_release(index_url, expected_sha, fetch=fetch_bytes):
                 name = asset.get('name') if isinstance(asset, dict) else None
                 if not isinstance(asset, dict) or asset.get('role') != role or not isinstance(
                     name, str
-                ) or not ASSET_NAME.fullmatch(name) or (is_current and name != neutral_name) or asset.get(
+                ) or not ASSET_NAME.fullmatch(name) or name != neutral_name or asset.get(
                     'offset'
                 ) != offset or type(asset.get('size')) is not int or asset['size'] <= 0 or not SHA256.fullmatch(
                     str(asset.get('sha256', ''))
@@ -147,11 +147,9 @@ def verify_release(index_url, expected_sha, fetch=fetch_bytes):
                 if len(data) != asset['size'] or hashlib.sha256(data).hexdigest() != asset['sha256']:
                     raise ValueError(f'{target_id}/{name} failed size or SHA-256 verification')
                 asset_count += 1
-        if is_current and any(len(urls) != 1 for urls in role_urls.values()):
+        if any(len(urls) != 1 for urls in role_urls.values()):
             raise ValueError(f'{target_id} compatibility manifests do not share one binary set')
 
-    if current_targets == 0:
-        raise ValueError('published index did not advance any target to the current revision')
     return {'targets': len(targets), 'currentTargets': current_targets, 'assets': asset_count}
 
 
