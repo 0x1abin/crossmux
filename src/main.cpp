@@ -37,6 +37,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
+#include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
@@ -190,6 +191,17 @@ void silentRestartToReader() {
   LOG_DBG("MAIN", "Silent restart (target=reader)");
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
+  ESP.restart();
+}
+
+void restartToHomeAfterStorageHandoff() {
+  if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
+  silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Restart after storage handoff (target=home)");
+  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  delay(50);
+  handoffUsbOtgToSerialJtag();
   ESP.restart();
 }
 
@@ -423,11 +435,13 @@ void setup() {
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
-      // If USB power caused a cold boot, go back to sleep
+      // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
-#if FREEINK_DEVICE_PAPERMONO
-      // There is no armable GPIO wake because the button is behind the PMIC.
-      // Sleeping here would strand the device in a USB-replug boot loop.
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_PAPERMONO
+      // X4 Pro must stay awake so USB Serial/JTAG remains available after
+      // leaving USB Drive and reconnecting the cable. Paper Mono has no
+      // armable GPIO wake because its button is behind the PMIC. Sleeping
+      // either device here would strand it in a USB-replug boot loop.
       break;
 #else
       powerManager.startDeepSleep(gpio);
@@ -553,6 +567,23 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+
+  if (activityManager.requiresExclusiveStorageLoop()) {
+    // USB Drive handed the raw SD card to the host. Do not run screenshots,
+    // sleep, shortcuts, or normal navigation while its filesystem is detached.
+    activityManager.loop();
+    if (activityManager.preventAutoSleep()) {
+      powerManager.setPowerSaving(false);
+      delay(10);
+    } else {
+      // No host is active, so a slower loop is safe. The activity itself times
+      // out the raw-storage handoff rather than entering deep sleep detached.
+      powerManager.setPowerSaving(true);
+      delay(50);
+    }
+    return;
+  }
+
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
   renderer.setFadingFix(SETTINGS.fadingFix);
