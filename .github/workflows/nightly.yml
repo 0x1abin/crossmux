@@ -375,17 +375,24 @@ jobs:
           if [ -n "$COS_SESSION_TOKEN" ]; then
             cos_args+=(--token "$COS_SESSION_TOKEN")
           fi
-          quiet_cos_args=(--disable-log "${cos_args[@]}")
-          versioning="$("$RUNNER_TEMP/coscli" bucket-versioning --method get \
-            "${cos_args[@]}" "cos://${COS_BUCKET}")"
+          if ! versioning="$("$RUNNER_TEMP/coscli" bucket-versioning --method get \
+            "${cos_args[@]}" "cos://${COS_BUCKET}" 2>&1)"; then
+            printf '%s\n' "$versioning"
+            echo "::error::COS versioning lookup failed; verify cos:GetBucketVersioning"
+            exit 1
+          fi
           list_args=(--limit -1)
           rm_args=(--recursive --force)
           if grep -Eq 'Enabled|Suspended' <<< "$versioning"; then
             rm_args+=(--all-versions)
           fi
-          "$RUNNER_TEMP/coscli" ls "${quiet_cos_args[@]}" \
+          if ! "$RUNNER_TEMP/coscli" ls "${cos_args[@]}" \
             "cos://${COS_BUCKET}/firmware/builds/" "${list_args[@]}" \
-            > cos-builds.txt
+            > cos-builds.txt 2>&1; then
+            cat cos-builds.txt
+            echo "::error::COS object listing failed; verify cos:GetBucket"
+            exit 1
+          fi
           python3 scripts/nightly_retention.py \
             --storage cos \
             --current "$BUILD_ID" \
@@ -393,7 +400,7 @@ jobs:
             --candidates cos-builds.txt \
             > obsolete-cos-builds.txt
           while IFS= read -r build_id; do
-            if ! "$RUNNER_TEMP/coscli" rm "${quiet_cos_args[@]}" \
+            if ! "$RUNNER_TEMP/coscli" rm "${cos_args[@]}" \
               "cos://${COS_BUCKET}/firmware/builds/${build_id}/" "${rm_args[@]}" \
               --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
               find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \

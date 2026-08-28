@@ -99,10 +99,10 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn('--cleanup-tag --yes', workflow)
         self.assertIn('--recursive --force', workflow)
         cleanup = workflow.split('- name: Delete obsolete COS Nightly builds', 1)[1]
-        self.assertIn('quiet_cos_args=(--disable-log "${cos_args[@]}")', cleanup)
         versioning = cleanup.split('versioning=', 1)[1].split('list_args=', 1)[0]
         self.assertIn('"${cos_args[@]}"', versioning)
-        self.assertNotIn('quiet_cos_args', versioning)
+        self.assertIn('cos:GetBucketVersioning', versioning)
+        self.assertIn('2>&1', versioning)
 
     def test_package_contains_one_binary_set_and_two_compatible_manifests(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -190,6 +190,13 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertNotIn('list_args+=(--recursive --all-versions)', cleanup)
         self.assertIn('rm_args+=(--all-versions)', cleanup)
         self.assertIn('-name error.report -exec cat {} +', workflow)
+        self.assertNotIn('--disable-log', cleanup)
+        listing = cleanup.split('if ! "$RUNNER_TEMP/coscli" ls', 1)[1].split(
+            'python3 scripts/nightly_retention.py', 1
+        )[0]
+        self.assertIn('"${cos_args[@]}"', listing)
+        self.assertIn('cos:GetBucket', listing)
+        self.assertIn('2>&1', listing)
 
     def write_image(self, chip_id=0x0009, board='eego_a4'):
         image = bytearray(24)
