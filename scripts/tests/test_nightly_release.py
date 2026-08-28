@@ -78,6 +78,11 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn('cos://${COS_BUCKET}/firmware/builds/${build_id}/', workflow)
         self.assertIn('--cleanup-tag --yes', workflow)
         self.assertIn('--recursive --force', workflow)
+        cleanup = workflow.split('- name: Delete obsolete COS Nightly builds', 1)[1]
+        self.assertIn('quiet_cos_args=(--disable-log "${cos_args[@]}")', cleanup)
+        versioning = cleanup.split('versioning=', 1)[1].split('list_args=', 1)[0]
+        self.assertIn('"${cos_args[@]}"', versioning)
+        self.assertNotIn('quiet_cos_args', versioning)
 
     def test_package_contains_one_binary_set_and_two_compatible_manifests(self):
         with tempfile.TemporaryDirectory() as temp:
