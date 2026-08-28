@@ -446,7 +446,6 @@ void setup() {
   const auto onboardingMode =
       settingsLoaded ? LanguageSelectActivity::Mode::Upgrade : LanguageSelectActivity::Mode::Initial;
   const bool requiresOnboarding = CrossPointSettings::requiresOnboarding(SETTINGS.onboardingVersion);
-  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightOn != 0);
 #ifndef SIMULATOR
   halClock.setUseChinaServers(SETTINGS.contentProfile == CrossPointSettings::ContentProfile::China);
 #endif
@@ -487,6 +486,8 @@ void setup() {
     default:
       break;
   }
+
+  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, SETTINGS.frontlightOn != 0);
 
   // Recovery firmware mode: hold a side button together with power at boot. X4 Pro uses
   // BTN_DOWN/GPIO7 because BTN_UP/GPIO0 is an ESP32-S3 boot strap; other boards keep BTN_UP.
