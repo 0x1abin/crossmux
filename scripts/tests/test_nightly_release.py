@@ -74,8 +74,10 @@ class NightlyTargetTest(unittest.TestCase):
         verify = workflow.split('  verify_publish:', 1)[1]
         self.assertIn('needs: [publish_github, publish_cn]', verify)
         self.assertEqual(verify.count('python3 scripts/verify_nightly_release.py'), 2)
-        self.assertIn('  cleanup_github:\n    needs: verify_publish', workflow)
-        self.assertIn('  cleanup_cn:\n    needs: verify_publish', workflow)
+        self.assertIn(
+            '  cleanup_github:\n    needs: [verify_publish, publish_github]', workflow
+        )
+        self.assertIn('  cleanup_cn:\n    needs: [verify_publish, publish_cn]', workflow)
         self.assertEqual(workflow.count('python3 scripts/nightly_retention.py'), 2)
         self.assertIn('gh release delete "$build_tag"', workflow)
         self.assertIn('cos://${COS_BUCKET}/firmware/builds/${build_id}/', workflow)
@@ -164,6 +166,14 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn('cos://${COS_BUCKET}/firmware/builds/', workflow)
         self.assertIn('cos_args+=(--token "$COS_SESSION_TOKEN")', workflow)
         self.assertIn('--fail-output-path "$RUNNER_TEMP/coscli-errors"', workflow)
+
+    def test_cleanup_reuses_the_published_attempt_and_lists_current_cos_objects_only(self):
+        workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
+        self.assertIn('BUILD_TAG: ${{ needs.publish_github.outputs.build_tag }}', workflow)
+        self.assertIn('BUILD_ID: ${{ needs.publish_cn.outputs.build_id }}', workflow)
+        cleanup = workflow.split('  cleanup_cn:', 1)[1]
+        self.assertNotIn('list_args+=(--recursive --all-versions)', cleanup)
+        self.assertIn('rm_args+=(--all-versions)', cleanup)
         self.assertIn('-name error.report -exec cat {} +', workflow)
 
     def write_image(self, chip_id=0x0009, board='eego_a4'):
