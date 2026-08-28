@@ -160,6 +160,13 @@ positions content-based: KOReader XPaths resolve to an exact chapter offset,
 and the current layout derives the corresponding page. For binary cache
 formats, see `docs/file-formats.md`.
 
+**Settings → System → Restore System Settings** removes `settings.json` plus
+saved Wi-Fi, OPDS, and KOReader configuration (including temporary and legacy
+settings files), then restarts before any in-memory store can write those files
+again. Session state, recent books, reading progress/statistics, bookmarks,
+books, and render caches are deliberately preserved. Removing `settings.json`
+also clears the completed startup-guide version, so onboarding runs again.
+
 ## Networking architecture
 
 Network file transfer is controlled by `src/activities/network/CrossPointWebServerActivity.h` and served by `src/network/CrossPointWebServer.h`.

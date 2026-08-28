@@ -155,6 +155,9 @@ action**.
   headers, optional subheaders, button hints, and footers have one authoritative
   boundary. Related text keeps at least 4 px of separation, independent blocks
   keep at least 12 px, and custom drawing is clipped to that body.
+* `ConfirmationActivity` uses one standard presentation: a 12 pt bold heading
+  and a page body wrapped to at most two 10 pt lines. It computes those lines in
+  `onEnter()`, never in `render()`, so button-driven redraws stay allocation-free.
 * Center a progress state with `GUI.measureProgressBarHeight()`, then use the Y
   returned by `GUI.drawProgressBar()` for everything that follows. This keeps
   percentage text and subsequent details correct when a theme changes fonts.
