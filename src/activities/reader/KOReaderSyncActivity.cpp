@@ -133,16 +133,11 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   {
     RenderLock lock(*this);
     state = SYNCING;
-    statusMessage = tr(STR_SYNCING_TIME);
-  }
-  requestUpdate(true);
-
-  {
-    RenderLock lock(*this);
     statusMessage = tr(STR_CALC_HASH);
   }
   requestUpdate(true);
 
+  // KOSync requests from CrossPoint do not include a client timestamp.
   performSync();
 }
 
