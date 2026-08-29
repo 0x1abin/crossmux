@@ -22,6 +22,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/CrossMuxEndpoints.h"
@@ -39,6 +40,23 @@ constexpr size_t kMaxFamilyNameBytes = 64;
 constexpr size_t kMaxDescriptionBytes = 160;
 constexpr size_t kMaxBaseUrlBytes = 256;
 constexpr size_t kMaxFontFileBytes = 25 * 1024 * 1024;
+constexpr uint8_t kDownloadProgressStepPercent = 10;
+
+constexpr uint8_t downloadProgressPercent(const size_t completed, const size_t total) {
+  if (total == 0) return 0;
+  const size_t boundedCompleted = completed < total ? completed : total;
+  return static_cast<uint8_t>(static_cast<uint64_t>(boundedCompleted) * 100 / total);
+}
+
+constexpr bool shouldRefreshDownloadProgress(const uint8_t previous, const uint8_t current) {
+  return current < 100 && current >= previous + kDownloadProgressStepPercent;
+}
+
+static_assert(downloadProgressPercent(9, 100) == 9);
+static_assert(downloadProgressPercent(110, 100) == 100);
+static_assert(!shouldRefreshDownloadProgress(0, 9));
+static_assert(shouldRefreshDownloadProgress(0, 10));
+static_assert(!shouldRefreshDownloadProgress(90, 100));  // The verified final frame is drawn synchronously.
 
 #ifdef ENABLE_CHINESE_VERSION
 std::atomic<bool> chineseFontPromptShownThisBoot{false};
@@ -260,6 +278,7 @@ bool FontDownloadActivity::startAutomaticDownload() {
   accelerationCompleted_ = false;
   currentFileIndex_ = 0;
   currentFileTotal_ = familyIt->fileCount;
+  resetDownloadProgress(familyIt->totalSize);
   downloadSingle(downloadingFamilyIndex_);
   return true;
 }
@@ -441,6 +460,8 @@ void FontDownloadActivity::downloadAll() {
     if (downloadFamily(families_[i]) != DownloadResult::Success) return;
   }
 
+  finishDownloadProgress();
+
   const ManifestFamily* selected = nullptr;
   for (const auto& family : families_) {
     if (family.installed && family.name == SdCardFontSystem::COMPLETE_CHINESE_NOTO_SANS_FAMILY) {
@@ -463,6 +484,8 @@ void FontDownloadActivity::updateAll() {
     if (downloadFamily(families_[i]) != DownloadResult::Success) return;
   }
 
+  finishDownloadProgress();
+
   {
     RenderLock lock(*this);
     state_ = COMPLETE;
@@ -477,6 +500,7 @@ void FontDownloadActivity::downloadSingle(const int familyIndex) {
   auto& family = families_[familyIndex];
   const DownloadResult result = downloadFamily(family);
   if (result == DownloadResult::Success) {
+    finishDownloadProgress();
     selectDownloadedFontAndPreview(family.name.c_str());
   } else if (result == DownloadResult::Cancelled && purpose_ == Purpose::ReaderAutoInstall && !goHomeRequested_) {
     finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
@@ -555,6 +579,26 @@ bool FontDownloadActivity::isVerifiedFontFile(const char* path, const ManifestFi
   return fontInstaller_.validateCpfontFile(path) && computeFileCrc32(path, actualCrc) && actualCrc == file.crc32;
 }
 
+void FontDownloadActivity::resetDownloadProgress(const size_t total) {
+  downloadProgress_ = 0;
+  downloadTotal_ = total;
+  lastProgressRefreshPercent_ = 0;
+}
+
+void FontDownloadActivity::updateDownloadProgress(const size_t completed) {
+  downloadProgress_ = std::min(completed, downloadTotal_);
+  const uint8_t percent = downloadProgressPercent(downloadProgress_, downloadTotal_);
+  if (!shouldRefreshDownloadProgress(lastProgressRefreshPercent_, percent)) return;
+  lastProgressRefreshPercent_ = percent;
+  requestUpdate(true);
+}
+
+void FontDownloadActivity::finishDownloadProgress() {
+  downloadProgress_ = downloadTotal_;
+  lastProgressRefreshPercent_ = 100;
+  requestUpdateAndWait();
+}
+
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const ManifestFamily& family,
                                                                         const ManifestFile& file) {
   char fileName[128];
@@ -568,11 +612,13 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
   FontInstaller::buildFontPath(family.name.c_str(), fileName, destPath, sizeof(destPath));
   char downloadPath[136];
   snprintf(downloadPath, sizeof(downloadPath), "%s.part", destPath);
+  const size_t fileStartProgress = downloadProgress_;
 
   if (isVerifiedFontFile(destPath, file)) {
     Storage.remove(downloadPath);
     LOG_INF("FONT", "Skipping verified file: %s", fileName);
     currentFileIndex_++;
+    updateDownloadProgress(fileStartProgress + file.size);
     return DownloadResult::Success;
   }
 
@@ -580,9 +626,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
   NetworkStartup::prepare(renderer);
   const auto result = HttpDownloader::downloadToFile(
       url, downloadPath,
-      [this](size_t downloaded, size_t total) {
-        fileProgress_ = downloaded;
-        fileTotal_ = total;
+      [this, fileStartProgress, fileSize = file.size](size_t downloaded, size_t) {
         mappedInput.update();
         if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
           cancelRequested_ = true;
@@ -593,7 +637,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
           goHomeRequested_ = true;
         }
         UiAppHost::routeTouch(mappedInput);
-        requestUpdate(true);
+        updateDownloadProgress(fileStartProgress + std::min(downloaded, fileSize));
       },
       &cancelRequested_);
 
@@ -647,22 +691,22 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFile(const Ma
   }
   if (hadPrevious) Storage.remove(backupPath);
   currentFileIndex_++;
+  updateDownloadProgress(fileStartProgress + file.size);
   return DownloadResult::Success;
 }
 
 FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(ManifestFamily& family) {
   const bool wasInstalled = family.installed;
   const bool hadUpdate = family.hasUpdate;
+  const bool enteringDownload = state_ != DOWNLOADING;
   {
     RenderLock lock(*this);
     state_ = DOWNLOADING;
     downloadingFamilyIndex_ = static_cast<int>(&family - families_.data());
-    fileProgress_ = 0;
-    fileTotal_ = 0;
     cancelRequested_ = false;
     goHomeRequested_ = false;
   }
-  requestUpdateAndWait();
+  if (enteringDownload) requestUpdateAndWait();
 
   if (!fontInstaller_.ensureFamilyDir(family.name.c_str())) {
     RenderLock lock(*this);
@@ -673,14 +717,6 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
 
   for (size_t i = 0; i < family.fileCount; i++) {
     const auto& file = files_[family.fileOffset + i];
-
-    {
-      RenderLock lock(*this);
-      fileProgress_ = 0;
-      fileTotal_ = file.size;
-    }
-    requestUpdateAndWait();
-
     const auto result = downloadFile(family, file);
     if (result != DownloadResult::Success) {
       family.installed = wasInstalled;
@@ -768,6 +804,7 @@ void FontDownloadActivity::retryDownloadOperation() {
     case DownloadOperation::Single:
       if (downloadingFamilyIndex_ >= 0 && downloadingFamilyIndex_ < static_cast<int>(families_.size())) {
         currentFileTotal_ = families_[downloadingFamilyIndex_].fileCount;
+        resetDownloadProgress(families_[downloadingFamilyIndex_].totalSize);
       }
       downloadSingle(downloadingFamilyIndex_);
       return;
@@ -775,12 +812,14 @@ void FontDownloadActivity::retryDownloadOperation() {
       for (const auto& family : families_) {
         if (!family.installed) currentFileTotal_ += family.fileCount;
       }
+      resetDownloadProgress(totalDownloadSize());
       downloadAll();
       return;
     case DownloadOperation::UpdateAll:
       for (const auto& family : families_) {
         if (family.hasUpdate) currentFileTotal_ += family.fileCount;
       }
+      resetDownloadProgress(totalUpdateSize());
       updateAll();
       return;
     case DownloadOperation::None:
@@ -849,6 +888,7 @@ void FontDownloadActivity::activateSelected() {
     for (const auto& f : families_) {
       if (!f.installed) currentFileTotal_ += f.fileCount;
     }
+    resetDownloadProgress(totalDownloadSize());
     downloadAll();
   } else if (isUpdateAllRow(nav.selected)) {
     operation_ = DownloadOperation::UpdateAll;
@@ -859,6 +899,7 @@ void FontDownloadActivity::activateSelected() {
     for (const auto& f : families_) {
       if (f.hasUpdate) currentFileTotal_ += f.fileCount;
     }
+    resetDownloadProgress(totalUpdateSize());
     updateAll();
   } else {
     // The special rows disappear when a download starts, so a stale selection
@@ -872,6 +913,7 @@ void FontDownloadActivity::activateSelected() {
       accelerationCompleted_ = false;
       currentFileIndex_ = 0;
       currentFileTotal_ = family.fileCount;
+      resetDownloadProgress(family.totalSize);
       downloadSingle(familyIndex);
     } else {
       operation_ = DownloadOperation::None;
@@ -1098,20 +1140,19 @@ void FontDownloadActivity::render(RenderLock&&) {
   } else if (state_ == DOWNLOADING) {
     const auto& family = families_[downloadingFamilyIndex_];
 
+    const size_t displayedFile = std::min(currentFileIndex_ + 1, currentFileTotal_);
     std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + family.name + " (" +
-                             std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
-    renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, statusText.c_str());
-
-    float progress = 0;
-    if (fileTotal_ > 0) {
-      progress = static_cast<float>(fileProgress_) / static_cast<float>(fileTotal_);
-    }
-
-    int barY = centerY + metrics.verticalSpacing;
-    GUI.drawProgressBar(
-        renderer,
-        Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-        static_cast<int>(progress * 100), 100);
+                             std::to_string(displayedFile) + "/" + std::to_string(currentFileTotal_) + ")";
+    const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+    const Rect textBounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+    const int sectionGap = SubpageLayout::sectionGap(metrics);
+    const int blockHeight = lineHeight + sectionGap + GUI.measureProgressBarHeight(renderer, metrics.progressBarHeight);
+    int y = SubpageLayout::centeredTop(content, blockHeight);
+    UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, y, statusText.c_str());
+    y += lineHeight + sectionGap;
+    GUI.drawProgressBar(renderer, Rect{textBounds.x, y, textBounds.width, metrics.progressBarHeight}, downloadProgress_,
+                        downloadTotal_);
 
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

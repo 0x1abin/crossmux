@@ -15,6 +15,8 @@ There are three ways to install fonts:
 4. A single download selects that family and opens **Text Settings** for
    preview. **Download All** prefers `NotoSansSC` (or the first valid catalog
    family when it is absent); **Update All** keeps the current selection.
+   Each operation uses one byte-weighted progress bar across all of its font
+   files and refreshes it after at least 10 percentage points of progress.
 5. Preview any family or size you want. Leaving **Text Settings** caches only
    the final SD font and size in internal Flash. The preprocessing page appears
    because a download marks the selected font as changed; ordinary layout or

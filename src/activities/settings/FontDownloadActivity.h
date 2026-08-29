@@ -86,8 +86,9 @@ class FontDownloadActivity final : public UiListActivity {
   // Download progress
   size_t currentFileIndex_ = 0;
   size_t currentFileTotal_ = 0;
-  size_t fileProgress_ = 0;
-  size_t fileTotal_ = 0;
+  size_t downloadProgress_ = 0;
+  size_t downloadTotal_ = 0;
+  uint8_t lastProgressRefreshPercent_ = 0;
   int downloadingFamilyIndex_ = -1;
   std::string errorMessage_;
   bool cancelRequested_ = false;
@@ -135,6 +136,9 @@ class FontDownloadActivity final : public UiListActivity {
   void finishAutomaticFlow(ExitRoute route);
   const char* automaticErrorText() const;
   bool fetchAndParseManifest();
+  void resetDownloadProgress(size_t total);
+  void updateDownloadProgress(size_t completed);
+  void finishDownloadProgress();
   DownloadResult downloadFile(const ManifestFamily& family, const ManifestFile& file);
   DownloadResult downloadFamily(ManifestFamily& family);
   void downloadSingle(int familyIndex);
