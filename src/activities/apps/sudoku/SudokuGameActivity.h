@@ -5,6 +5,7 @@
 #include "../../Activity.h"
 #include "../GameSaveDebouncer.h"
 #include "SudokuBoard.h"
+#include "components/OptionPopup.h"
 
 class SudokuGameActivity final : public Activity {
  public:
@@ -46,7 +47,6 @@ class SudokuGameActivity final : public Activity {
   // Drawing
   void renderGenerating();
   void renderPlaying();
-  void renderGameMenu();
   void renderWon();
   void drawTitleBar();
   void drawGrid(int x0, int y0);
@@ -74,7 +74,7 @@ class SudokuGameActivity final : public Activity {
   void useHint();
   void resetGame();
   void resumeFromMenu();  // state = Playing + reset timer base
-  uint8_t menuSel = 0;
+  OptionPopup gameMenu;
   static constexpr uint8_t MENU_ITEM_COUNT = 7;
 
   // Portrait layout. Single source of truth for fixed element sizes and vertical anchors.

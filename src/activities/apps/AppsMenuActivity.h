@@ -2,23 +2,21 @@
 
 #include <I18n.h>
 
-#include "../../util/ButtonNavigator.h"
-#include "../Activity.h"
+#include <vector>
+
+#include "activities/UiListActivity.h"
 
 // Apps menu — the single entry-point on the home screen for all non-reader sub-apps
 // (Sudoku, Gomoku, Ugly Avatar, ...). The full list is the constexpr `kAppEntries` table
 // in AppsMenuActivity.cpp; add a new app by assigning a stable AppId, appending one row,
 // and adding goTo<App>() in ActivityManager. See src/activities/apps/README.md.
-class AppsMenuActivity final : public Activity {
+class AppsMenuActivity final : public UiListActivity {
  public:
   AppsMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("AppsMenu", renderer, mappedInput) {}
+      : UiListActivity("AppsMenu", renderer, mappedInput) {}
   ~AppsMenuActivity() override = default;
 
   void onEnter() override;
-  void onExit() override;
-  void loop() override;
-  void render(RenderLock&&) override;
   MainTab mainTab() const override { return MainTab::Apps; }
   void selectMainTabContentEdge(MainTabContentEdge edge) override;
 
@@ -30,11 +28,21 @@ class AppsMenuActivity final : public Activity {
  private:
   static int getVisibleAppCount();
   static int getAppIndexForVisibleIndex(int visibleIndex);
+  int listCount() const override { return getVisibleAppCount(); }
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  bool handleCustomInput() override;
+  void onBackButton() override;
+  void drawChrome() override;
+  void drawFooter() override;
   bool usesIconLayout() const;
   int iconIndexFromPoint(int x, int y) const;
+  void rebuildRowItems();
   void openSelected();
   void drawIconGrid(const Rect& rect, int visibleCount, bool showSelection) const;
 
-  ButtonNavigator buttonNavigator;
-  int selected = 0;
+  // Allocated once on entry and reused for every repaint. The app catalog is
+  // bounded to 32 entries; dynamic storage avoids pinning the maximum in every
+  // live Apps activity while keeping render allocation-free.
+  std::vector<freeink::ui::ListItem> rowItems;
 };

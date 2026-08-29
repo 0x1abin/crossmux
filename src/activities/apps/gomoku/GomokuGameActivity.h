@@ -6,6 +6,7 @@
 #include "../GameSaveDebouncer.h"
 #include "GomokuBoard.h"
 #include "GomokuStore.h"
+#include "components/OptionPopup.h"
 
 class GomokuGameActivity final : public Activity {
  public:
@@ -49,7 +50,7 @@ class GomokuGameActivity final : public Activity {
   bool aiThinkingArmed = false;
   bool aiThinkingShown = false;
 
-  uint8_t menuSel = 0;
+  OptionPopup gameMenu;
 
   // End-game outcome (set when state transitions to GameOver).
   // Keeps recording idempotent: stats are written exactly once per game.
@@ -66,7 +67,6 @@ class GomokuGameActivity final : public Activity {
 
   // Drawing
   void renderPlaying();
-  void renderGameMenu();
   void renderGameOver();
   void drawTitleBar();
   void drawBoard();

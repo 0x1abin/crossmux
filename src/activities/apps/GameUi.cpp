@@ -4,10 +4,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "GfxRenderer.h"
-#include "MappedInputManager.h"
-#include "fontIds.h"
-
 void gameFormatElapsed(uint32_t ms, char* out, size_t outLen) {
   const uint32_t totalSec = ms / 1000;
   const uint32_t mm = (totalSec / 60) % 100;
@@ -40,79 +36,11 @@ bool gameIntersectionFromPoint(const int originX, const int originY, const int p
 Rect gameTouchActionRect(const int screenWidth, const int screenHeight, const int sidePadding, const int gap,
                          const int height, const int index, const int count) {
   if (screenWidth <= 0 || screenHeight <= 0 || height <= 0 || count <= 0 || index < 0 || index >= count) return Rect{};
+  constexpr int MIN_ACTION_GAP = 6;
   const int safePadding = std::max(0, sidePadding);
-  const int safeGap = std::max(0, gap);
+  const int safeGap = count > 1 ? std::max(MIN_ACTION_GAP, gap) : 0;
   const int availableWidth = screenWidth - safePadding * 2 - safeGap * (count - 1);
   if (availableWidth < count) return Rect{};
   const int width = availableWidth / count;
   return Rect{safePadding + index * (width + safeGap), screenHeight - safePadding - height, width, height};
-}
-
-Rect gameMenuPanelRect(const int screenWidth, const int screenHeight, const int width, const int titleHeight,
-                       const int rowHeight, const int rowCount) {
-  if (screenWidth <= 0 || screenHeight <= 0 || width <= 0 || titleHeight < 0 || rowHeight <= 0 || rowCount <= 0) {
-    return Rect{};
-  }
-  const int height = titleHeight + rowHeight * rowCount + 4;
-  if (width > screenWidth || height > screenHeight) return Rect{};
-  return Rect{(screenWidth - width) / 2, (screenHeight - height) / 2, width, height};
-}
-
-GameMenuInputResult gameHandleMenuInput(MappedInputManager& input, const Rect& panel, const int titleHeight,
-                                        const int rowHeight, const int itemCount, uint8_t& selected) {
-  if (itemCount <= 0 || itemCount > UINT8_MAX || panel.width <= 0 || panel.height <= 0 || titleHeight < 0 ||
-      rowHeight <= 0) {
-    return GameMenuInputResult::None;
-  }
-
-  int touched = -1;
-  const auto touch =
-      input.rowTouch(touched, panel.y + titleHeight, rowHeight, itemCount, panel.x, panel.x + panel.width, rowHeight);
-  if (touch != MappedInputManager::RowTouch::None) {
-    selected = static_cast<uint8_t>(touched);
-    return touch == MappedInputManager::RowTouch::Tap ? GameMenuInputResult::Activated
-                                                      : GameMenuInputResult::SelectionChanged;
-  }
-
-  if (input.wasPressed(MappedInputManager::Button::Up) || input.wasPressed(MappedInputManager::Button::Left)) {
-    selected = static_cast<uint8_t>((selected + itemCount - 1) % itemCount);
-    return GameMenuInputResult::SelectionChanged;
-  }
-  if (input.wasPressed(MappedInputManager::Button::Down) || input.wasPressed(MappedInputManager::Button::Right)) {
-    selected = static_cast<uint8_t>((selected + 1) % itemCount);
-    return GameMenuInputResult::SelectionChanged;
-  }
-  if (input.wasReleased(MappedInputManager::Button::Confirm)) return GameMenuInputResult::Activated;
-  if (input.wasReleased(MappedInputManager::Button::Back)) return GameMenuInputResult::Dismissed;
-  return GameMenuInputResult::None;
-}
-
-void gameDrawMenu(const GfxRenderer& renderer, const Rect& panel, const int titleHeight, const int rowHeight,
-                  const char* title, const GameMenuItem* items, const int itemCount, const int selected) {
-  if (panel.width <= 0 || panel.height <= 0 || titleHeight < 0 || rowHeight <= 0 || !title || !items ||
-      itemCount <= 0) {
-    return;
-  }
-
-  renderer.fillRect(panel.x, panel.y, panel.width, panel.height, false);
-  renderer.drawRect(panel.x, panel.y, panel.width, panel.height, 2, true);
-  renderer.fillRect(panel.x + 2, panel.y + titleHeight, panel.width - 4, 1, true);
-
-  const int itemTextHeight = renderer.getTextHeight(UI_12_FONT_ID);
-  const int hintTextHeight = renderer.getTextHeight(UI_10_FONT_ID);
-  renderer.drawText(UI_12_FONT_ID, panel.x + 12, panel.y + gameCenterY(titleHeight, itemTextHeight), title);
-
-  for (int i = 0; i < itemCount; ++i) {
-    const int rowY = panel.y + titleHeight + i * rowHeight;
-    const bool inverted = i == selected;
-    if (inverted) renderer.fillRect(panel.x + 1, rowY, panel.width - 2, rowHeight, true);
-
-    const char* label = items[i].label ? items[i].label : "";
-    renderer.drawText(UI_12_FONT_ID, panel.x + 12, rowY + gameCenterY(rowHeight, itemTextHeight), label, !inverted);
-    const char* hint = items[i].hint;
-    if (!hint || hint[0] == '\0') continue;
-    const int hintWidth = renderer.getTextWidth(UI_10_FONT_ID, hint);
-    renderer.drawText(UI_10_FONT_ID, panel.x + panel.width - 12 - hintWidth,
-                      rowY + gameCenterY(rowHeight, hintTextHeight) + 2, hint, !inverted);
-  }
 }

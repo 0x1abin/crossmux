@@ -135,30 +135,17 @@ void SudokuGameActivity::handleInputWon() {
 
 void SudokuGameActivity::enterGameMenu() {
   state = State::GameMenu;
-  menuSel = 0;
+  const char* options[MENU_ITEM_COUNT] = {
+      tr(STR_GAME_RESUME),    tr(STR_SUDOKU_TOGGLE_NOTES), tr(STR_SUDOKU_USE_HINT), tr(STR_SUDOKU_CHECK_ERRORS),
+      tr(STR_SUDOKU_RESTART), tr(STR_GAME_NEW_GAME),       tr(STR_GAME_EXIT),
+  };
+  gameMenu.show(tr(STR_GAME_GAME_MENU), options, MENU_ITEM_COUNT, 0,
+                [this](const int index) { runMenuItem(static_cast<uint8_t>(index)); });
 }
 
 void SudokuGameActivity::handleInputGameMenu() {
-  constexpr int titleHeight = 28;
-  constexpr int rowHeight = 32;
-  constexpr int width = 320;
-  const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), width, titleHeight,
-                                       rowHeight, MENU_ITEM_COUNT);
-  switch (gameHandleMenuInput(mappedInput, panel, titleHeight, rowHeight, MENU_ITEM_COUNT, menuSel)) {
-    case GameMenuInputResult::None:
-      return;
-    case GameMenuInputResult::SelectionChanged:
-      requestUpdate();
-      return;
-    case GameMenuInputResult::Activated:
-      runMenuItem(menuSel);
-      requestUpdate();
-      return;
-    case GameMenuInputResult::Dismissed:
-      resumeFromMenu();
-      requestUpdate();
-      return;
-  }
+  gameMenu.handleInput(mappedInput, [this] { requestUpdate(); });
+  if (!gameMenu.isActive() && state == State::GameMenu) resumeFromMenu();
 }
 
 void SudokuGameActivity::runMenuItem(uint8_t i) {
@@ -433,7 +420,7 @@ void SudokuGameActivity::render(RenderLock&&) {
       break;
     case State::GameMenu:
       renderPlaying();
-      renderGameMenu();
+      if (gameMenu.processRender(renderer, mappedInput)) return;
       break;
     case State::Won:
       renderWon();
@@ -464,7 +451,7 @@ void SudokuGameActivity::renderPlaying() {
 void SudokuGameActivity::drawTitleBar() {
   const int w = renderer.getScreenWidth();
   // Bottom border at TITLE_BAR_H. 1px so plain drawLine is fine.
-  renderer.drawLine(0, TITLE_BAR_H, w, TITLE_BAR_H, true);
+  renderer.drawLine(0, TITLE_BAR_H, w - 1, TITLE_BAR_H, true);
 
   const int textH = renderer.getTextHeight(kStatusFont);
   const int y = gameCenterY(TITLE_BAR_H, textH);
@@ -723,29 +710,4 @@ void SudokuGameActivity::renderWon() {
   }
 
   drawFooter();
-}
-
-void SudokuGameActivity::renderGameMenu() {
-  // Compact modal sized for English; 7 rows × rowH + title.
-  constexpr int titleH = 28;
-  constexpr int rowH = 32;
-  const Rect panel =
-      gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 320, titleH, rowH, MENU_ITEM_COUNT);
-  const char* hintNotes = notesMode ? tr(STR_SUDOKU_MODE_NOTES) : tr(STR_SUDOKU_MODE_NORMAL);
-  char hintHint[16];
-  if (hintsLeft > 0) {
-    snprintf(hintHint, sizeof(hintHint), tr(STR_SUDOKU_HINTS_LEFT), static_cast<int>(hintsLeft));
-  } else {
-    snprintf(hintHint, sizeof(hintHint), "%s", tr(STR_SUDOKU_NO_HINTS));
-  }
-  const GameMenuItem items[MENU_ITEM_COUNT] = {
-      {tr(STR_GAME_RESUME), ""},
-      {tr(STR_SUDOKU_TOGGLE_NOTES), hintNotes},
-      {tr(STR_SUDOKU_USE_HINT), hintHint},
-      {tr(STR_SUDOKU_CHECK_ERRORS), ""},
-      {tr(STR_SUDOKU_RESTART), ""},
-      {tr(STR_GAME_NEW_GAME), ""},
-      {tr(STR_GAME_EXIT), tr(STR_GAME_HOME)},
-  };
-  gameDrawMenu(renderer, panel, titleH, rowH, tr(STR_GAME_GAME_MENU), items, MENU_ITEM_COUNT, menuSel);
 }
