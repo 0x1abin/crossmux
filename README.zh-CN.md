@@ -4,7 +4,7 @@
 
 **CrossMux** 是 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 的社区 fork：在原有电子书阅读体验之上，新增 Apps 应用中心、更丰富的待机表盘，以及包含 33 种语言的统一固件。
 
-**版本：** CrossMux 1.5.7（基于 CrossPoint Reader 1.5.0，并同步上游 `develop` 至 `eef20504`）
+**版本：** CrossMux 1.5.8（基于 CrossPoint Reader 1.5.0，并同步上游 `develop` 至 `eef20504`）
 
 **运行设备：** 基于 ESP32-C3 的 Xteink [X4](https://www.xteink.com/products/xteink-x4) 与 [X3](https://www.xteink.com/products/xteink-x3)。
 

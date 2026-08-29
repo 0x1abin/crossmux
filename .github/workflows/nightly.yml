@@ -1,4 +1,4 @@
-name: Nightly
+name: Firmware Release
 
 on:
   schedule:
@@ -13,9 +13,12 @@ on:
         description: 'Chinese OTA release notes (2-8 lines, max 32 characters each)'
         required: true
         type: string
+  push:
+    tags:
+      - '*.*.*'
 
 concurrency:
-  group: nightly-publish
+  group: firmware-${{ github.event_name == 'push' && 'stable' || 'nightly' }}-publish
   cancel-in-progress: false
 
 permissions:
@@ -30,212 +33,239 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.targets.outputs.matrix }}
+      channel: ${{ steps.release.outputs.channel }}
+      matrix: ${{ steps.release.outputs.matrix }}
+      build_id: ${{ steps.release.outputs.build_id }}
+      build_tag: ${{ steps.release.outputs.build_tag }}
     steps:
       - uses: actions/checkout@v6
-      - id: targets
-        run: echo "matrix=$(python3 scripts/package_nightly_target.py --matrix)" >> "$GITHUB_OUTPUT"
+      - id: release
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            channel=stable
+            version="$(python3 -c 'import configparser; c=configparser.ConfigParser(); c.read("platformio.ini"); print(c["crosspoint"]["version"])')"
+            if [[ ! "$GITHUB_REF_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "$GITHUB_REF_NAME" != "$version" ]; then
+              echo "::error::Stable tag $GITHUB_REF_NAME does not match firmware version $version"
+              exit 1
+            fi
+          else
+            channel=nightly
+          fi
+          build_id="${channel}-build-${GITHUB_SHA}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          echo "build_tag=$build_id" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(python3 scripts/package_nightly_target.py --channel "$channel" --matrix)" >> "$GITHUB_OUTPUT"
+
+  notes:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Build release notes
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          NOTES_EN: ${{ inputs.notes_en }}
+          NOTES_ZH: ${{ inputs.notes_zh }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" = stable ]; then
+            notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+            test -f "$notes"
+            cp "$notes" release-body.md
+            git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > tag-message.txt
+            python3 scripts/generate_ota_notes.py --input tag-message.txt --output ota-notes.md
+            test -s ota-notes.md
+            printf '\n' >> release-body.md
+            cat ota-notes.md >> release-body.md
+          else
+            printf 'Nightly build `%s` from `main`.\n' "${GITHUB_SHA::7}" > release-body.md
+            if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+              python3 scripts/generate_ota_notes.py \
+                --en-notes="$NOTES_EN" --zh-notes="$NOTES_ZH" --output ota-notes.md
+              test -s ota-notes.md
+              printf '\n' >> release-body.md
+              cat ota-notes.md >> release-body.md
+            fi
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-release-notes
+          path: |
+            release-body.md
+            ota-notes.md
+          if-no-files-found: warn
+          retention-days: 1
 
   build:
     needs: [prepare, select_runner]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    name: ${{ matrix.targetId }}
+    name: ${{ matrix.targetId }} (${{ needs.prepare.outputs.channel }})
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
-
       - uses: astral-sh/setup-uv@v7
         with:
           version: latest
           enable-cache: false
-
       - name: Install PlatformIO Core
         run: uv pip install --system -U pioarduino==6.1.19
-
       - name: Set seven-character build revision
         run: echo "CROSSPOINT_RC_HASH=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-
       - name: Build unified target
         run: pio run -e "${{ matrix.environment }}"
-
       - name: Package and verify unified target
         run: |
           set -euo pipefail
           python3 scripts/package_nightly_target.py "${{ matrix.targetId }}" \
+            --channel "${{ needs.prepare.outputs.channel }}" \
             --output "dist/${{ matrix.targetId }}"
           (cd "dist/${{ matrix.targetId }}" && sha256sum --check *-SHA256SUMS)
-
       - uses: actions/upload-artifact@v4
         with:
-          name: nightly-${{ matrix.targetId }}
+          name: firmware-${{ needs.prepare.outputs.channel }}-${{ matrix.targetId }}
           path: dist/${{ matrix.targetId }}
           if-no-files-found: error
           retention-days: 14
 
   publish_github:
-    needs: [prepare, build]
+    needs: [prepare, notes, build]
     runs-on: ubuntu-latest
-    outputs:
-      build_tag: ${{ steps.build.outputs.build_tag }}
     permissions:
       contents: write
-    env:
-      BUILD_ID: ${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
-      BUILD_TAG: nightly-build-${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - id: build
-        run: echo "build_tag=$BUILD_TAG" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@v4
         with:
-          pattern: nightly-*
+          pattern: firmware-${{ needs.prepare.outputs.channel }}-*
           path: artifacts
-
-      - name: Load previous global index
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-release-notes
+          path: notes
+      - name: Load previous global Nightly index
+        if: needs.prepare.outputs.channel == 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p previous/global
           gh release download nightly --repo "$GITHUB_REPOSITORY" \
             --pattern release-index.json --dir previous/global
-
       - uses: actions/upload-artifact@v4
+        if: needs.prepare.outputs.channel == 'nightly'
         with:
           name: previous-global-index
           path: previous/global/release-index.json
           if-no-files-found: error
           retention-days: 1
-
       - name: Build global index
-        run: |
-          updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          python3 scripts/build_nightly_index.py \
-            --manifests artifacts \
-            --region global \
-            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${BUILD_TAG}/" \
-            --updated-at "$updated_at" \
-            --build-id "$BUILD_ID" \
-            --output release-index.json
-
-      - name: Build release notes
         env:
-          NOTES_EN: ${{ inputs.notes_en }}
-          NOTES_ZH: ${{ inputs.notes_zh }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          BUILD_ID: ${{ needs.prepare.outputs.build_id }}
+          BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
         run: |
-          printf 'Nightly build `%s` from `main`.\n' "${GITHUB_SHA::7}" > nightly-body.md
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            python3 scripts/generate_ota_notes.py \
-              --en-notes="$NOTES_EN" \
-              --zh-notes="$NOTES_ZH" \
-              --output ota-notes.md
-            printf '\n' >> nightly-body.md
-            cat ota-notes.md >> nightly-body.md
-          fi
-
+          notes_args=()
+          [ ! -f notes/ota-notes.md ] || notes_args+=(--release-notes notes/ota-notes.md)
+          python3 scripts/build_nightly_index.py \
+            --channel "$CHANNEL" --manifests artifacts --region global \
+            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${BUILD_TAG}/" \
+            --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-id "$BUILD_ID" \
+            --output release-index.json "${notes_args[@]}"
       - name: Publish immutable GitHub build
         env:
           GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
         run: |
           mapfile -t assets < <(find artifacts -type f -print)
           gh release create "$BUILD_TAG" "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "CrossMux Nightly ${GITHUB_SHA::7} #${GITHUB_RUN_NUMBER}" \
-            --notes-file nightly-body.md \
-            --prerelease
-
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "CrossMux ${CHANNEL^} ${GITHUB_SHA::7} #${GITHUB_RUN_NUMBER}" \
+            --notes-file notes/release-body.md --prerelease
       - name: Publish rolling global index last
         env:
           GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit nightly --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "CrossMux Nightly (${GITHUB_SHA::7})" \
-              --notes-file nightly-body.md --prerelease
+          title="CrossMux ${CHANNEL^} (${GITHUB_SHA::7})"
+          if gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "$title" --notes-file notes/release-body.md --prerelease
           else
-            gh release create nightly --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --title "CrossMux Nightly (${GITHUB_SHA::7})" --notes-file nightly-body.md --prerelease
+            gh release create "$CHANNEL" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "$title" --notes-file notes/release-body.md --prerelease
           fi
-          gh release upload nightly release-index.json --repo "$GITHUB_REPOSITORY" --clobber
-
-          c3_artifact=artifacts/nightly-xteink_x4
-          if [ -d "$c3_artifact" ]; then
-            cp "$c3_artifact/xteink-firmware.bin" firmware.bin
-            gh release upload nightly firmware.bin --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$CHANNEL" release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+          if [ -d "artifacts/firmware-${CHANNEL}-xteink_x4" ]; then
+            cp "artifacts/firmware-${CHANNEL}-xteink_x4/xteink-firmware.bin" firmware.bin
+            gh release upload "$CHANNEL" firmware.bin --repo "$GITHUB_REPOSITORY" --clobber
           fi
-          legacy_assets="$(gh release view nightly --repo "$GITHUB_REPOSITORY" \
+          legacy_assets="$(gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name')"
           if grep -Fxq firmware-cn.bin <<< "$legacy_assets"; then
-            gh release delete-asset nightly firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
+            gh release delete-asset "$CHANNEL" firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
           fi
 
   publish_cn:
-    needs: [prepare, build]
+    needs: [prepare, notes, build]
     runs-on: [self-hosted, Linux, X64, h2o]
-    outputs:
-      build_id: ${{ steps.build.outputs.build_id }}
     permissions:
       contents: read
-    env:
-      BUILD_ID: ${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-
-      - id: build
-        run: echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@v4
         with:
-          pattern: nightly-*
+          pattern: firmware-${{ needs.prepare.outputs.channel }}-*
           path: artifacts
-
-      - name: Load previous China index
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-release-notes
+          path: notes
+      - name: Load previous China Nightly index
+        if: needs.prepare.outputs.channel == 'nightly'
         run: |
           mkdir -p previous
           curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
             -o previous/cn.json
-
       - uses: actions/upload-artifact@v4
+        if: needs.prepare.outputs.channel == 'nightly'
         with:
           name: previous-cn-index
           path: previous/cn.json
           if-no-files-found: error
           retention-days: 1
-
       - name: Build China index
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          BUILD_ID: ${{ needs.prepare.outputs.build_id }}
         run: |
+          notes_args=()
+          [ ! -f notes/ota-notes.md ] || notes_args+=(--release-notes notes/ota-notes.md)
           python3 scripts/build_nightly_index.py \
-            --manifests artifacts \
-            --region cn \
+            --channel "$CHANNEL" --manifests artifacts --region cn \
             --base-url "https://assets.crossmux.cn/firmware/builds/${BUILD_ID}/" \
-            --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --build-id "$BUILD_ID" \
-            --output release-index-cn.json
-
+            --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-id "$BUILD_ID" \
+            --output release-index-cn.json "${notes_args[@]}"
       - name: Install COS CLI
         run: |
-          curl -fsSL \
-            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
+          curl -fsSL https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
             -o "$RUNNER_TEMP/coscli"
           echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" \
             | sha256sum --check -
           chmod 0755 "$RUNNER_TEMP/coscli"
           "$RUNNER_TEMP/coscli" --version
-
       - name: Publish immutable COS objects
         env:
           COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
@@ -243,26 +273,22 @@ jobs:
           COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
           COS_BUCKET: ${{ secrets.COS_BUCKET }}
           COS_REGION: ${{ secrets.COS_REGION }}
+          BUILD_ID: ${{ needs.prepare.outputs.build_id }}
         run: |
           set -euo pipefail
           cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
             -e "cos.${COS_REGION}.myqcloud.com")
-          if [ -n "$COS_SESSION_TOKEN" ]; then
-            cos_args+=(--token "$COS_SESSION_TOKEN")
-          fi
-          for artifact in artifacts/nightly-*; do
-            target="${artifact##*/nightly-}"
+          [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
+          for artifact in artifacts/firmware-*; do
+            target="${artifact##*-}"
             if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" "$artifact/" \
               "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/" \
-              --recursive --forbid-overwrite \
-              --meta 'Cache-Control:public,max-age=31536000,immutable' \
+              --recursive --forbid-overwrite --meta 'Cache-Control:public,max-age=31536000,immutable' \
               --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
-              find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
-                2>/dev/null || true
+              find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + 2>/dev/null || true
               exit 1
             fi
           done
-
       - name: Publish rolling China index last
         env:
           COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
@@ -270,97 +296,119 @@ jobs:
           COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
           COS_BUCKET: ${{ secrets.COS_BUCKET }}
           COS_REGION: ${{ secrets.COS_REGION }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           set -euo pipefail
           cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
             -e "cos.${COS_REGION}.myqcloud.com")
-          if [ -n "$COS_SESSION_TOKEN" ]; then
-            cos_args+=(--token "$COS_SESSION_TOKEN")
-          fi
+          [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
           if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" release-index-cn.json \
-            "cos://${COS_BUCKET}/firmware/releases/nightly/index.json" \
-            --meta 'Cache-Control:no-cache' \
-            --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
-            find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
-              2>/dev/null || true
+            "cos://${COS_BUCKET}/firmware/releases/${CHANNEL}/index.json" \
+            --meta 'Cache-Control:no-cache' --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
+            find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + 2>/dev/null || true
             exit 1
           fi
 
   verify_publish:
-    needs: [publish_github, publish_cn]
+    needs: [prepare, publish_github, publish_cn]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Verify published Nightly indexes and assets
+      - name: Verify published indexes and assets
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          python3 scripts/verify_nightly_release.py \
-            --index-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/nightly/release-index.json?run=${GITHUB_RUN_ID}" \
+          python3 scripts/verify_nightly_release.py --channel "$CHANNEL" \
+            --index-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL}/release-index.json?run=${GITHUB_RUN_ID}" \
             --expected-sha "$GITHUB_SHA"
-          python3 scripts/verify_nightly_release.py \
-            --index-url "https://assets.crossmux.cn/firmware/releases/nightly/index.json?run=${GITHUB_RUN_ID}" \
+          python3 scripts/verify_nightly_release.py --channel "$CHANNEL" \
+            --index-url "https://assets.crossmux.cn/firmware/releases/${CHANNEL}/index.json?run=${GITHUB_RUN_ID}" \
             --expected-sha "$GITHUB_SHA"
+
+  publish_stable_release:
+    if: needs.prepare.outputs.channel == 'stable'
+    needs: [prepare, notes, build, verify_publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-stable-xteink_x4
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-release-notes
+          path: notes
+      - name: Publish versioned compatibility release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp artifacts/xteink-firmware.bin firmware.bin
+          cp artifacts/xteink-firmware.bin firmware-cn.bin
+          cp artifacts/xteink-bootloader.bin bootloader.bin
+          cp artifacts/xteink-partitions.bin partitions.bin
+          assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "CrossMux $GITHUB_REF_NAME" --notes-file notes/release-body.md --latest
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --title "CrossMux $GITHUB_REF_NAME" --notes-file notes/release-body.md --latest
+          fi
 
   cleanup_github:
-    needs: [verify_publish, publish_github]
+    if: needs.prepare.outputs.channel == 'nightly'
+    needs: [prepare, verify_publish, publish_github]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      BUILD_TAG: ${{ needs.publish_github.outputs.build_tag }}
+      BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/download-artifact@v4
         with:
           name: previous-global-index
           path: previous/global
-
       - name: Delete obsolete GitHub Nightly builds
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 \
-            --json tagName --jq '.[].tagName' > github-releases.txt
-          python3 scripts/nightly_retention.py \
-            --storage github \
-            --current "$BUILD_TAG" \
-            --previous-index previous/global/release-index.json \
-            --candidates github-releases.txt \
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' \
+            > github-releases.txt
+          python3 scripts/nightly_retention.py --storage github --current "$BUILD_TAG" \
+            --previous-index previous/global/release-index.json --candidates github-releases.txt \
             > obsolete-github-builds.txt
           while IFS= read -r build_tag; do
-            gh release delete "$build_tag" --repo "$GITHUB_REPOSITORY" \
-              --cleanup-tag --yes
+            gh release delete "$build_tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
           done < obsolete-github-builds.txt
 
   cleanup_cn:
-    needs: [verify_publish, publish_cn]
+    if: needs.prepare.outputs.channel == 'nightly'
+    needs: [prepare, verify_publish, publish_cn]
     runs-on: [self-hosted, Linux, X64, h2o]
     permissions:
       contents: read
     env:
-      BUILD_ID: ${{ needs.publish_cn.outputs.build_id }}
+      BUILD_ID: ${{ needs.prepare.outputs.build_id }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-
       - uses: actions/download-artifact@v4
         with:
           name: previous-cn-index
           path: previous
-
       - name: Install COS CLI
         run: |
-          curl -fsSL \
-            https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
+          curl -fsSL https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
             -o "$RUNNER_TEMP/coscli"
           echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" \
             | sha256sum --check -
           chmod 0755 "$RUNNER_TEMP/coscli"
-          "$RUNNER_TEMP/coscli" --version
-
       - name: Delete obsolete COS Nightly builds
         env:
           COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
@@ -372,39 +420,28 @@ jobs:
           set -euo pipefail
           cos_args=(--init-skip -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
             -e "cos.${COS_REGION}.myqcloud.com")
-          if [ -n "$COS_SESSION_TOKEN" ]; then
-            cos_args+=(--token "$COS_SESSION_TOKEN")
-          fi
+          [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
           if ! versioning="$("$RUNNER_TEMP/coscli" bucket-versioning --method get \
             "${cos_args[@]}" "cos://${COS_BUCKET}" 2>&1)"; then
             printf '%s\n' "$versioning"
             echo "::error::COS versioning lookup failed; verify cos:GetBucketVersioning"
             exit 1
           fi
-          list_args=(--limit -1)
           rm_args=(--recursive --force)
-          if grep -Eq 'Enabled|Suspended' <<< "$versioning"; then
-            rm_args+=(--all-versions)
-          fi
+          grep -Eq 'Enabled|Suspended' <<< "$versioning" && rm_args+=(--all-versions)
           if ! "$RUNNER_TEMP/coscli" ls "${cos_args[@]}" \
-            "cos://${COS_BUCKET}/firmware/builds/" "${list_args[@]}" \
-            > cos-builds.txt 2>&1; then
+            "cos://${COS_BUCKET}/firmware/builds/" --limit -1 > cos-builds.txt 2>&1; then
             cat cos-builds.txt
             echo "::error::COS object listing failed; verify cos:GetBucket"
             exit 1
           fi
-          python3 scripts/nightly_retention.py \
-            --storage cos \
-            --current "$BUILD_ID" \
-            --previous-index previous/cn.json \
-            --candidates cos-builds.txt \
-            > obsolete-cos-builds.txt
+          python3 scripts/nightly_retention.py --storage cos --current "$BUILD_ID" \
+            --previous-index previous/cn.json --candidates cos-builds.txt > obsolete-cos-builds.txt
           while IFS= read -r build_id; do
             if ! "$RUNNER_TEMP/coscli" rm "${cos_args[@]}" \
               "cos://${COS_BUCKET}/firmware/builds/${build_id}/" "${rm_args[@]}" \
               --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
-              find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + \
-                2>/dev/null || true
+              find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + 2>/dev/null || true
               exit 1
             fi
           done < obsolete-cos-builds.txt

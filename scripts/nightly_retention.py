@@ -11,7 +11,8 @@ from nightly_targets import FLAVOR_TOKENS, TARGETS
 
 
 BUILD_ID = r'[0-9a-f]{40}-[0-9]+-[0-9]+'
-NAMESPACE_TEXT = {'github': rf'nightly-build-{BUILD_ID}', 'cos': BUILD_ID}
+NIGHTLY_BUILD = rf'nightly-build-{BUILD_ID}'
+NAMESPACE_TEXT = {'github': NIGHTLY_BUILD, 'cos': rf'(?:nightly-build-)?{BUILD_ID}'}
 NAMESPACE = {storage: re.compile(rf'^{pattern}$') for storage, pattern in NAMESPACE_TEXT.items()}
 FIND_NAMESPACE = {
     storage: re.compile(rf'(?<![a-z0-9-])({pattern})(?![a-z0-9-])')
@@ -19,9 +20,9 @@ FIND_NAMESPACE = {
 }
 MANIFEST_PATH = {
     'github': re.compile(
-        rf'^/0x1abin/crossmux/releases/download/(nightly-build-{BUILD_ID})/[^/]+-manifest\.json$'
+        rf'^/0x1abin/crossmux/releases/download/({NIGHTLY_BUILD})/[^/]+-manifest\.json$'
     ),
-    'cos': re.compile(rf'^/firmware/builds/({BUILD_ID})/'),
+    'cos': re.compile(rf'^/firmware/builds/((?:nightly-build-)?{BUILD_ID})/'),
 }
 HOST = {'github': 'github.com', 'cos': 'assets.crossmux.cn'}
 
