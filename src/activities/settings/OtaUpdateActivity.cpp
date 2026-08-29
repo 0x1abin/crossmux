@@ -466,7 +466,7 @@ void OtaUpdateActivity::render(RenderLock&&) {
       UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, top, tr(STR_UPDATE_COMPLETE), true,
                                 EpdFontFamily::BOLD);
       UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, top + titleHeight + relatedGap,
-                                tr(STR_POWER_ON_HINT));
+                                tr(STR_AUTO_RESTART_HINT));
       break;
     }
     case State::WifiSelection:
