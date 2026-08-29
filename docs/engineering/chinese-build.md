@@ -280,8 +280,8 @@ repository.
 
 ## Known limitations
 
-- **No bold/italic CJK glyphs**: the bitmaps come from a single NotoSansSC-Regular subset. The Settings page gives its four top-level Chinese category labels a fixed one-pixel synthetic bold; other UI elements that pass `EpdFontFamily::Style::Bold` render the regular weight under CN.
-- **Offline reader fallback is 12pt only**: install an SD `.cpfont` family for other reading sizes and styles. The INX Settings categories also remain at the theme-defined 12pt because the unified firmware has no resident 16pt CJK UI face.
+- **No bold/italic CJK glyphs**: the bitmaps come from a single NotoSansSC-Regular subset. UI elements that pass `EpdFontFamily::Style::Bold` render the regular weight under CN.
+- **Offline reader fallback is 12pt only**: install an SD `.cpfont` family for other reading sizes and styles.
 - **Rare characters render as □ in reader at SMALL until an SD font is installed**: the 12pt bitmap uses the complete 3500-char pool plus required glyphs. It omits classical/scientific rarities, Traditional Chinese variants, and uncommon names outside that set; for example, `璟` is intentionally absent. The reader offers the complete-font downloader on the first detected missing glyph.
 - **No Traditional Chinese UI locale**: only `ZH_CN` is present; broader CJK book coverage depends on the selected SD font.
 
