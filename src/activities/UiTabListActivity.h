@@ -56,7 +56,7 @@ class UiTabListActivity : public UiListActivity {
   // --- screen helpers --------------------------------------------------------
   // The shared tab band: theme-driven pill treatment (label-hugging Lyra vs
   // full-slot RoundedRaff), Lyra focused band wash, always-on divider.
-  void buildTabBar(UiScreen& screen);
+  void buildTabBar(UiScreen& screen, bool boldLabels = false);
   // Ring-aware counterpart of syncListViewport: measures rows, applies the
   // one-shot follow to the remembered row, clamps, and writes
   // props.selectedIndex = ring - 1. hasSubtitle: see syncListViewport().
