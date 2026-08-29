@@ -1745,7 +1745,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
   } else {
 #if FREEINK_DEVICE_EEGO_A4
-    if (needsTextGrayscale) {
+    // Inverted (night mode) disables the grayscale display path, so the
+    // "defer the base to the gray pass" optimization would never push FAST
+    // pages to the panel (screen frozen while progress still advances).
+    // Fall back to the per-page B/W display, which inverts correctly.
+    if (needsTextGrayscale && !renderer.display.isInverted()) {
       const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
       if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
     } else {
