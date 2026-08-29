@@ -44,6 +44,7 @@ full reasoning, examples, and edge cases.
 11. **Edit sources, not generated files** (`*.generated.h`, `I18n*` generated headers). → [generated-files.md](docs/engineering/generated-files.md)
 12. **Verify repo context before any git op; ask before committing.** Unqualified PR requests target `0x1abin/crossmux:main` via `origin` without asking; an explicit user target overrides this default. Never stage `.gitignore`d files. → [git-workflow.md](docs/engineering/git-workflow.md)
 13. **One physical button gesture causes one action.** Normal Activities read the shared input snapshot; across popups and Activities, gate inherited held buttons and consume the triggering release. → [ui-and-input.md](docs/engineering/ui-and-input.md)
+14. **Adjacent interactive controls keep at least 6 px of visible space.** Their hit regions must not overlap, and drawing plus hit-testing must use the same geometry source. → [touch-and-ui.md](docs/contributing/touch-and-ui.md)
 
 ## Quick Reference
 

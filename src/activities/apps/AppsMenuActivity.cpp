@@ -7,12 +7,14 @@
 #include <string>
 
 #include "../../components/UITheme.h"
+#include "../../components/UiAppHelpers.h"
 #include "../../components/icons/inx_apps.h"
-#include "../../util/PaginationDots.h"
 #include "CrossPointSettings.h"
 #include "InxItemLayout.h"
 #include "OpdsServerStore.h"
 #include "fontIds.h"
+
+namespace fui = freeink::ui;
 
 namespace {
 
@@ -111,20 +113,6 @@ constexpr bool appIdsAreUnique() {
   return true;
 }
 
-constexpr bool usesSideScrollBar(const CrossPointSettings::UI_THEME theme) {
-  switch (theme) {
-    case CrossPointSettings::LYRA:
-    case CrossPointSettings::LYRA_3_COVERS:
-    case CrossPointSettings::LYRA_CAROUSEL:
-    case CrossPointSettings::INX:
-      return true;
-    case CrossPointSettings::CLASSIC:
-    case CrossPointSettings::ROUNDEDRAFF:
-      return false;
-  }
-  return false;
-}
-
 static_assert(kAppCount <= 32, "the app catalog must fit hiddenAppsMask");
 static_assert(static_cast<uint8_t>(AppId::Count) <= 32, "hiddenAppsMask supports at most 32 stable app IDs");
 static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_APP_ID,
@@ -182,7 +170,8 @@ int AppsMenuActivity::getVisibleAppCount() {
 }
 
 void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
-  selected = MainTabs::contentEdgeIndex(edge, getVisibleAppCount());
+  nav.selected = MainTabs::contentEdgeIndex(edge, getVisibleAppCount());
+  nav.follow(getVisibleAppCount());
 }
 
 int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
@@ -191,12 +180,23 @@ int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
 }
 
 void AppsMenuActivity::onEnter() {
-  Activity::onEnter();
-  selected = 0;
-  requestUpdate();
+  UiListActivity::onEnter();
+  rebuildRowItems();
 }
 
-void AppsMenuActivity::onExit() { Activity::onExit(); }
+void AppsMenuActivity::rebuildRowItems() {
+  rowItems.clear();
+  rowItems.reserve(static_cast<size_t>(getVisibleAppCount()));
+  for (int visibleIndex = 0; visibleIndex < getVisibleAppCount(); ++visibleIndex) {
+    const int appIndex = getAppIndexForVisibleIndex(visibleIndex);
+    if (appIndex < 0) continue;
+    fui::ListItem item;
+    item.label = I18N.get(kAppEntries[appIndex].titleId);
+    item.icon = listIconFor(kAppEntries[appIndex].icon, 32);
+    item.actionValue = static_cast<int16_t>(visibleIndex);
+    rowItems.push_back(item);
+  }
+}
 
 bool AppsMenuActivity::usesIconLayout() const {
   return UITheme::getInstance().hasMainTabs() &&
@@ -208,67 +208,59 @@ int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
   const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int height = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
   return InxGridGeometry::indexFromPoint(x, y - top, renderer.getScreenWidth(), height,
-                                         InxGridGeometry::pageStart(selected, getVisibleAppCount()),
+                                         InxGridGeometry::pageStart(nav.selected, getVisibleAppCount()),
                                          getVisibleAppCount());
 }
 
 void AppsMenuActivity::openSelected() {
-  const int appIndex = getAppIndexForVisibleIndex(selected);
+  const int appIndex = getAppIndexForVisibleIndex(nav.selected);
   if (appIndex >= 0) (activityManager.*kAppEntries[appIndex].open)();
 }
 
-void AppsMenuActivity::loop() {
+void AppsMenuActivity::activateIndex(const int index) {
+  app.clearTapFlash();
+  nav.selected = index;
+  openSelected();
+}
+
+bool AppsMenuActivity::handleCustomInput() {
+  if (!usesIconLayout()) return false;
+
   const int visibleCount = getVisibleAppCount();
-  if (usesIconLayout()) {
-    int x = 0;
-    int y = 0;
-    if (mappedInput.wasScreenTouchDown(x, y)) {
-      const int touched = iconIndexFromPoint(x, y);
-      if (touched >= 0 && touched != selected) {
-        selected = touched;
-        requestUpdate();
-      }
-      return;
-    }
-    if (mappedInput.wasScreenTapped(x, y)) {
-      const int touched = iconIndexFromPoint(x, y);
-      if (touched >= 0) {
-        selected = touched;
-        openSelected();
-      }
-      return;
-    }
-    const auto swipe = mappedInput.wasSwipe();
-    if (swipe == MappedInputManager::SwipeDir::Up) {
-      selected = ButtonNavigator::nextPageIndex(selected, visibleCount, InxGridGeometry::itemsPerPage);
+  int x = 0;
+  int y = 0;
+  if (mappedInput.wasScreenTouchDown(x, y)) {
+    const int touched = iconIndexFromPoint(x, y);
+    if (touched >= 0 && touched != nav.selected) {
+      nav.selected = touched;
       requestUpdate();
-      return;
     }
-    if (swipe == MappedInputManager::SwipeDir::Down) {
-      selected = ButtonNavigator::previousPageIndex(selected, visibleCount, InxGridGeometry::itemsPerPage);
-      requestUpdate();
-      return;
+    return true;
+  }
+  if (mappedInput.wasScreenTapped(x, y)) {
+    const int touched = iconIndexFromPoint(x, y);
+    if (touched >= 0) {
+      nav.selected = touched;
+      openSelected();
     }
+    return true;
   }
-
-  buttonNavigator.onNext([this, visibleCount] {
-    selected = ButtonNavigator::nextIndex(selected, visibleCount);
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up) {
+    nav.selected = ButtonNavigator::nextPageIndex(nav.selected, visibleCount, InxGridGeometry::itemsPerPage);
     requestUpdate();
-  });
-  buttonNavigator.onPrevious([this, visibleCount] {
-    selected = ButtonNavigator::previousIndex(selected, visibleCount);
-    requestUpdate();
-  });
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    openSelected();
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    activityManager.goHome();
+    return true;
   }
+  if (swipe == MappedInputManager::SwipeDir::Down) {
+    nav.selected = ButtonNavigator::previousPageIndex(nav.selected, visibleCount, InxGridGeometry::itemsPerPage);
+    requestUpdate();
+    return true;
+  }
+  return false;
 }
 
 void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, const bool showSelection) const {
-  const int start = InxGridGeometry::pageStart(selected, visibleCount);
+  const int start = InxGridGeometry::pageStart(nav.selected, visibleCount);
   const int cellWidth = rect.width / InxGridGeometry::columns;
   const int cellHeight = rect.height / InxGridGeometry::rows;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
@@ -282,7 +274,7 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, co
     const int column = slot % InxGridGeometry::columns;
     const int row = slot / InxGridGeometry::columns;
     const Rect cell{rect.x + column * cellWidth + 4, rect.y + row * cellHeight + 4, cellWidth - 8, cellHeight - 8};
-    const bool isSelected = showSelection && visibleIndex == selected;
+    const bool isSelected = showSelection && visibleIndex == nav.selected;
     if (isSelected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
 
     const int iconX = cell.x + (cell.width - iconSize) / 2;
@@ -297,18 +289,13 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, co
   GUI.drawSideScrollBar(renderer, rect, visibleCount, start, InxGridGeometry::itemsPerPage);
 }
 
-void AppsMenuActivity::render(RenderLock&&) {
+void AppsMenuActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
-
-  renderer.clearScreen();
-  drawPageHeader(Rect{0, metrics.topPadding, sw, metrics.headerHeight}, tr(STR_APPS_TITLE));
-
   const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const int visibleCount = getVisibleAppCount();
-  const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   const bool showSelection = showMainTabContentSelection();
 
   if (visibleCount == 0) {
@@ -316,41 +303,29 @@ void AppsMenuActivity::render(RenderLock&&) {
   } else if (usesIconLayout()) {
     drawIconGrid(Rect{0, listY, sw, listH}, visibleCount, showSelection);
   } else {
-    // Halved inter-row gap (8 -> 4 on LYRA) keeps the home-tile look but tightens the list.
-    const int spacing = metrics.menuSpacing / 2;
-    const int rowStep = metrics.menuRowHeight + spacing;
-    // Number of rows that fit: n rows occupy n*rowHeight + (n-1)*spacing <= listH.
-    const int perPage = std::max(1, (listH + spacing) / rowStep);
-    const int totalPages = (visibleCount + perPage - 1) / perPage;
-    const int page = selected / perPage;
-    const int pageStart = page * perPage;
-    const int pageCount = std::min(perPage, visibleCount - pageStart);
-
-    // ponytail: scan at most 32 entries instead of keeping a RAM-backed filtered list.
-    GUI.drawButtonMenu(
-        renderer, Rect{0, listY, sw, listH}, pageCount, showSelection ? selected - pageStart : -1,
-        [pageStart](int i) {
-          const int appIndex = getAppIndexForVisibleIndex(i + pageStart);
-          return appIndex >= 0 ? std::string(I18N.get(kAppEntries[appIndex].titleId)) : std::string();
-        },
-        [pageStart](int i) {
-          const int appIndex = getAppIndexForVisibleIndex(i + pageStart);
-          return appIndex >= 0 ? kAppEntries[appIndex].icon : UIIcon::None;
-        },
-        spacing);
-
-    if (totalPages > 1) {
-      if (usesSideScrollBar(theme)) {
-        GUI.drawSideScrollBar(renderer, Rect{0, listY, sw, listH}, visibleCount, pageStart, perPage);
-      } else {
-        const int dotsY = listY + listH - 8;
-        drawPaginationDots(renderer, sw, dotsY, totalPages, page);
-      }
-    }
+    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    screen.setContentMargin(fui::Insets{static_cast<int16_t>(listY), static_cast<int16_t>(sw - (safe.x + safe.width)),
+                                        static_cast<int16_t>(sh - (safe.y + safe.height)),
+                                        static_cast<int16_t>(safe.x)});
+    fui::ListProps props;
+    props.items = rowItems.data();
+    props.count = static_cast<uint16_t>(rowItems.size());
+    props.action = ACTION_ROW;
+    props.inputMask = fui::InputTouch;
+    syncListViewport(screen, props);
+    screen.list(props);
   }
+}
 
+void AppsMenuActivity::drawChrome() {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  drawPageHeader(Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_APPS_TITLE));
+}
+
+void AppsMenuActivity::drawFooter() {
+  const int visibleCount = getVisibleAppCount();
   const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_SELECT), visibleCount > 1);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-
-  renderer.displayBuffer();
 }
+
+void AppsMenuActivity::onBackButton() { activityManager.goHome(); }

@@ -6,6 +6,7 @@
 #include "../../../util/ButtonNavigator.h"
 #include "../../Activity.h"
 #include "GomokuStore.h"
+#include "components/OptionPopup.h"
 
 class GomokuMenuActivity final : public Activity {
  public:
@@ -35,9 +36,8 @@ class GomokuMenuActivity final : public Activity {
 
   // Difficulty modal state. Active when the user picked an AI option and we
   // need them to pick a level before launching the game.
-  bool showingAiDifficulty = false;
+  OptionPopup difficultyPopup;
   uint8_t pendingAiBoardSize = 15;
-  int aiDifficultySel = static_cast<int>(GomokuAiLevel::Medium);
 
   // Resume slot info for the "Continue Game" subtitle.
   bool hasResume = false;
@@ -51,6 +51,4 @@ class GomokuMenuActivity final : public Activity {
   void onSelect();
   void renderList();
   void renderStats();
-  void renderAiDifficulty();
-  void handleAiDifficultyInput();
 };

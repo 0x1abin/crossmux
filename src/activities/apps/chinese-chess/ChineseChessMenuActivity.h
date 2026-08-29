@@ -6,6 +6,7 @@
 #include "../../../util/ButtonNavigator.h"
 #include "../../Activity.h"
 #include "ChineseChessStore.h"
+#include "components/OptionPopup.h"
 
 class ChineseChessMenuActivity final : public Activity {
  public:
@@ -32,8 +33,7 @@ class ChineseChessMenuActivity final : public Activity {
   bool showingStats = false;
   ChineseChessStats cachedStats;
 
-  bool showingAiDifficulty = false;
-  int aiDifficultySel = static_cast<int>(ChineseChessAiLevel::Medium);
+  OptionPopup difficultyPopup;
 
   bool hasResume = false;
   ChineseChessMode resumeMode = ChineseChessMode::TwoPlayer;
@@ -45,6 +45,4 @@ class ChineseChessMenuActivity final : public Activity {
   void onSelect();
   void renderList();
   void renderStats();
-  void renderAiDifficulty();
-  void handleAiDifficultyInput();
 };

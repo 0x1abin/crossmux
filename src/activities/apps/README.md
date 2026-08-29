@@ -119,13 +119,12 @@ Choose the smallest pattern that fits:
 |---|---|---|
 | Stateless, single screen | `avatar/UglyAvatarActivity` | `Activity`, `GameUi` action geometry; no Store or menu Activity |
 | Stateful, single screen | `2048/Game2048Activity`, `woodfish/WoodfishActivity` | Board/state object plus `GameSaveDebouncer` or an app-specific idle checkpoint |
-| Board game with launcher | `sudoku/` | Separate Board, Store, MenuActivity, GameActivity; `GameUi` menu/input helpers |
+| Board game with launcher | `sudoku/` | Separate Board, Store, MenuActivity, GameActivity; `OptionPopup` for in-game menus |
 
-`GameMenuItem` is a fixed-array row descriptor (`label` plus optional `hint`).
-Use `gameHandleMenuInput()` for touch and logical-button navigation and switch
-exhaustively on its result. Use `gameDrawMenu()` for the matching modal. Keep
-rules, win detection, AI, and persistence in the game: they are not framework
-concerns.
+Use `OptionPopup` for in-game action and difficulty menus. It owns touch hit
+testing, logical-button navigation, and the inherited-input barrier. Build its
+labels when the popup opens, not during rendering. Keep rules, win detection,
+AI, and persistence in the game: they are not framework concerns.
 
 ---
 

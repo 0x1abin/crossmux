@@ -84,6 +84,36 @@ See [`FileBrowserActivity`](../../src/activities/home/FileBrowserActivity.cpp)'s
 - `TextStyle.maxLines` defaults to 1 and truncates with an ellipsis. Set `maxLines` explicitly on any dialog headline or message that can wrap.
 - Everything stays allocation-free in steady state. A local `std::vector` inside `buildScreen()` is **not** allocation-free even with `reserve()` first: it starts at zero capacity on every call, `reserve()` allocates, and the destructor frees that storage before the call returns — real allocator work and fragmentation risk on every repaint (cursor move, tap flash, ...), not just on data changes. Build `ListItem` rows into activity-owned storage instead, reserved once when the underlying data loads (`onEnter()`/a `load*()` — see the skeleton above and `FileBrowserActivity::rebuildRowItems()`), and reused unchanged by every `buildScreen()` call. Use a fixed-capacity array (e.g. `ListItem rows[MAX]`, as `OptionPopup` and `KOReaderSyncActivity`'s action rows do) when the count is small and bounded. Do not hold FUI `props` across renders — only the row storage they point into.
 
+### Spacing and hit geometry
+
+Adjacent interactive controls must have at least **6 px of visible background**
+between them in every theme and orientation. A theme token may request more
+space, but never less. Hit regions must stay inside their control's drawn
+rectangle and must not overlap a neighbour.
+
+Calculate each rectangle once and pass that same value to both drawing and
+interaction registration. Do not repeat the arithmetic in a touch handler.
+FreeInkUI components already follow this rule; custom surfaces should expose a
+small geometry helper, as `gameTouchActionRect()` does.
+
+```cpp
+const Rect action = actionRect(index);  // one source of truth
+drawAction(action, label);
+frame.hit(action, ACTION_SELECT, index, fui::InputTouch);
+```
+
+Do not draw tightly packed buttons and then enlarge each hit area into the gap:
+that creates ambiguous taps even when the visible controls appear separate.
+
+Review every interactive screen for:
+
+- a touch path and a logical-button path to every action;
+- tap activation on release, with press used only for feedback;
+- swipe/page gestures that never activate the row beneath them;
+- at least 6 px between adjacent controls and no overlapping hit rectangles;
+- shared drawing/hit geometry in every supported orientation;
+- no allocation while rendering or routing steady-state input.
+
 ### Component inventory
 
 All under `freeink-sdk/libs/ui/FreeInkUI/include/components/`:

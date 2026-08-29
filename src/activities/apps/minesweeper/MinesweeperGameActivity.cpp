@@ -245,7 +245,19 @@ void MinesweeperGameActivity::flushSave() {
 
 void MinesweeperGameActivity::enterGameMenu() {
   state = State::GameMenu;
-  menuSel = 0;
+  const bool isFlagged =
+      cursorR < board.rows && cursorC < board.cols && board.at(cursorR, cursorC).state == MinesweeperBoard::Flagged;
+  const char* options[MENU_ITEM_COUNT] = {
+      tr(STR_GAME_RESUME),
+      tr(STR_MINESWEEPER_TOGGLE_MODE),
+      isFlagged ? tr(STR_MINESWEEPER_UNFLAG_HERE) : tr(STR_MINESWEEPER_FLAG_HERE),
+      tr(STR_MINESWEEPER_USE_HINT),
+      tr(STR_MINESWEEPER_RESTART),
+      tr(STR_GAME_NEW_GAME),
+      tr(STR_GAME_EXIT),
+  };
+  gameMenu.show(tr(STR_GAME_GAME_MENU), options, MENU_ITEM_COUNT, 0,
+                [this](const int index) { runMenuItem(static_cast<uint8_t>(index)); });
 }
 
 void MinesweeperGameActivity::handleInputPlaying() {
@@ -316,26 +328,8 @@ void MinesweeperGameActivity::handleInputPlaying() {
 }
 
 void MinesweeperGameActivity::handleInputGameMenu() {
-  constexpr int titleHeight = 28;
-  constexpr int rowHeight = 32;
-  constexpr int width = 340;
-  const Rect panel = gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), width, titleHeight,
-                                       rowHeight, MENU_ITEM_COUNT);
-  switch (gameHandleMenuInput(mappedInput, panel, titleHeight, rowHeight, MENU_ITEM_COUNT, menuSel)) {
-    case GameMenuInputResult::None:
-      return;
-    case GameMenuInputResult::SelectionChanged:
-      requestUpdate();
-      return;
-    case GameMenuInputResult::Activated:
-      runMenuItem(menuSel);
-      requestUpdate();
-      return;
-    case GameMenuInputResult::Dismissed:
-      resumeFromMenu();
-      requestUpdate();
-      return;
-  }
+  gameMenu.handleInput(mappedInput, [this] { requestUpdate(); });
+  if (!gameMenu.isActive() && state == State::GameMenu) resumeFromMenu();
 }
 
 void MinesweeperGameActivity::runMenuItem(uint8_t i) {
@@ -403,7 +397,7 @@ void MinesweeperGameActivity::render(RenderLock&&) {
       break;
     case State::GameMenu:
       renderPlaying();
-      renderGameMenu();
+      if (gameMenu.processRender(renderer, mappedInput)) return;
       break;
     case State::Won:
       renderEnd(true);
@@ -432,7 +426,7 @@ void MinesweeperGameActivity::renderPlaying() {
 
 void MinesweeperGameActivity::drawTitleBar() {
   const int w = renderer.getScreenWidth();
-  renderer.drawLine(0, TITLE_BAR_H, w, TITLE_BAR_H, true);
+  renderer.drawLine(0, TITLE_BAR_H, w - 1, TITLE_BAR_H, true);
 
   const int textH = renderer.getTextHeight(kStatusFont);
   const int y = gameCenterY(TITLE_BAR_H, textH);
@@ -668,32 +662,4 @@ void MinesweeperGameActivity::renderEnd(bool won) {
   }
 
   drawFooter();
-}
-
-void MinesweeperGameActivity::renderGameMenu() {
-  // Compact modal sized for English; MENU_ITEM_COUNT rows × rowH + title.
-  constexpr int titleH = 28;
-  constexpr int rowH = 32;
-  const Rect panel =
-      gameMenuPanelRect(renderer.getScreenWidth(), renderer.getScreenHeight(), 340, titleH, rowH, MENU_ITEM_COUNT);
-  const bool isFlagged =
-      (cursorR < board.rows && cursorC < board.cols && board.at(cursorR, cursorC).state == MinesweeperBoard::Flagged);
-  const char* flagItemLabel = isFlagged ? tr(STR_MINESWEEPER_UNFLAG_HERE) : tr(STR_MINESWEEPER_FLAG_HERE);
-  const char* hintMode = flagMode ? tr(STR_MINESWEEPER_MODE_FLAG) : tr(STR_MINESWEEPER_MODE_DIG);
-  char hintHint[16];
-  if (hintsLeft > 0) {
-    snprintf(hintHint, sizeof(hintHint), tr(STR_MINESWEEPER_HINTS_LEFT), static_cast<int>(hintsLeft));
-  } else {
-    snprintf(hintHint, sizeof(hintHint), "%s", tr(STR_MINESWEEPER_NO_HINTS));
-  }
-  const GameMenuItem items[MENU_ITEM_COUNT] = {
-      {tr(STR_GAME_RESUME), ""},
-      {tr(STR_MINESWEEPER_TOGGLE_MODE), hintMode},
-      {flagItemLabel, ""},
-      {tr(STR_MINESWEEPER_USE_HINT), hintHint},
-      {tr(STR_MINESWEEPER_RESTART), ""},
-      {tr(STR_GAME_NEW_GAME), ""},
-      {tr(STR_GAME_EXIT), tr(STR_GAME_HOME)},
-  };
-  gameDrawMenu(renderer, panel, titleH, rowH, tr(STR_GAME_GAME_MENU), items, MENU_ITEM_COUNT, menuSel);
 }

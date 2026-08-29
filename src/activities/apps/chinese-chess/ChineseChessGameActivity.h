@@ -7,6 +7,7 @@
 #include "ChineseChessAI.h"
 #include "ChineseChessBoard.h"
 #include "ChineseChessStore.h"
+#include "components/OptionPopup.h"
 
 class ChineseChessGameActivity final : public Activity {
  public:
@@ -57,7 +58,7 @@ class ChineseChessGameActivity final : public Activity {
   bool aiThinkingArmed = false;
   bool aiThinkingShown = false;
 
-  uint8_t menuSel = 0;
+  OptionPopup gameMenu;
 
   bool statsRecorded = false;
   bool resignedFlag = false;
@@ -69,7 +70,6 @@ class ChineseChessGameActivity final : public Activity {
 
   // Drawing
   void renderPlaying();
-  void renderGameMenu();
   void renderGameOver();
   void drawTitleBar();
   void drawBoard();

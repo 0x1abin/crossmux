@@ -100,8 +100,8 @@ class Activity {
     Activated  // tap landed on a row: selectedIndex is updated, caller activates it
   };
 
-  // Shared touch handling for selectable list screens: touchdown highlights the
-  // touched row, a tap selects and reports Activated. The caller supplies the
-  // list band and runs its own activate action on Activated.
+  // Compatibility path for legacy theme lists: touchdown highlights, tap
+  // activates, and vertical swipe changes a whole page without activation.
+  // New screens use UiListActivity and its separate selection/viewport state.
   ListTouchResult handleListTouch(int& selectedIndex, int itemCount, int listTop, int listHeight, bool hasSubtitle);
 };

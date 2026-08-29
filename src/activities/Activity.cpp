@@ -4,6 +4,7 @@
 #include "CrossPointSettings.h"
 #include "I18n.h"
 #include "components/UITheme.h"
+#include "util/ButtonNavigator.h"
 
 void Activity::onEnter() { LOG_DBG("ACT", "Entering activity: %s", name.c_str()); }
 
@@ -70,6 +71,18 @@ Activity::ListTouchResult Activity::handleListTouch(int& selectedIndex, const in
   if (mappedInput.wasListItemTapped(touched, itemCount, selectedIndex, listTop, listHeight, hasSubtitle)) {
     selectedIndex = touched;
     return ListTouchResult::Activated;
+  }
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+    const int pageItems = GUI.getListPageItems(listHeight, hasSubtitle);
+    const int next = swipe == MappedInputManager::SwipeDir::Up
+                         ? ButtonNavigator::nextPageIndex(selectedIndex, itemCount, pageItems)
+                         : ButtonNavigator::previousPageIndex(selectedIndex, itemCount, pageItems);
+    if (next != selectedIndex) {
+      selectedIndex = next;
+      requestUpdate();
+    }
+    return ListTouchResult::Consumed;
   }
   return ListTouchResult::None;
 }

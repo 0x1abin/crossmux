@@ -5,6 +5,7 @@
 #include "../../Activity.h"
 #include "../GameSaveDebouncer.h"
 #include "MinesweeperBoard.h"
+#include "components/OptionPopup.h"
 
 class MinesweeperGameActivity final : public Activity {
  public:
@@ -37,7 +38,7 @@ class MinesweeperGameActivity final : public Activity {
   bool resumeRequested = false;
   bool statsRecorded = false;
 
-  uint8_t menuSel = 0;
+  OptionPopup gameMenu;
   static constexpr uint8_t MENU_ITEM_COUNT = 7;
 
   // Portrait layout. Board occupies the same vertical slot as Sudoku's grid
@@ -57,7 +58,6 @@ class MinesweeperGameActivity final : public Activity {
 
   // Drawing
   void renderPlaying();
-  void renderGameMenu();
   void renderEnd(bool won);
   void drawTitleBar();
   void drawBoard();
