@@ -30,6 +30,15 @@ constexpr char SETTINGS_FILE_BIN[] = "/.crosspoint/settings.bin";
 constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 constexpr char LANG_FILE_BIN[] = "/.crosspoint/language.bin";
 constexpr char LANG_FILE_BAK[] = "/.crosspoint/language.bin.bak";
+constexpr uint8_t FAKE_BOLD_VERSION = 1;
+constexpr std::array<uint8_t, 3> LEGACY_FAKE_BOLD_MIGRATION = {
+    CrossPointSettings::SYNTHETIC_BOLD_OFF,
+    CrossPointSettings::SYNTHETIC_BOLD_STANDARD,
+    CrossPointSettings::SYNTHETIC_BOLD_HEAVY,
+};
+static_assert(LEGACY_FAKE_BOLD_MIGRATION[0] == CrossPointSettings::SYNTHETIC_BOLD_OFF);
+static_assert(LEGACY_FAKE_BOLD_MIGRATION[1] == CrossPointSettings::SYNTHETIC_BOLD_STANDARD);
+static_assert(LEGACY_FAKE_BOLD_MIGRATION[2] == CrossPointSettings::SYNTHETIC_BOLD_HEAVY);
 
 // Stack buffer for "<key>_obf" key construction — avoids a std::string
 // allocation per obfuscated setting on every save and load.
@@ -197,6 +206,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     }
   }
 
+  doc["fakeBoldVersion"] = FAKE_BOLD_VERSION;
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   doc["frontButtonBack"] = frontButtonBack;
   doc["frontButtonConfirm"] = frontButtonConfirm;
@@ -309,6 +319,16 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       }
       s.*(info.valuePtr) = v;
     }
+  }
+
+  if ((doc["fakeBoldVersion"] | static_cast<uint8_t>(0)) < FAKE_BOLD_VERSION) {
+    if (doc["fakeBold"].is<uint8_t>()) {
+      const uint8_t legacyFakeBold = doc["fakeBold"].as<uint8_t>();
+      if (legacyFakeBold < LEGACY_FAKE_BOLD_MIGRATION.size()) {
+        fakeBold = LEGACY_FAKE_BOLD_MIGRATION[legacyFakeBold];
+      }
+    }
+    needsResave = true;
   }
 
   if (doc["sleepTimeoutMinutes"].isNull() && !doc["sleepTimeout"].isNull()) {

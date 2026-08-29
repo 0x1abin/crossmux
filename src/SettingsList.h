@@ -275,8 +275,9 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                             StrId::STR_CAT_READER)
             .withTextSettings(),
         SettingInfo::Enum(StrId::STR_FAKE_BOLD, &CrossPointSettings::fakeBold,
-                          {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_STANDARD, StrId::STR_FAKE_BOLD_HEAVY}, "fakeBold",
-                          StrId::STR_CAT_READER)
+                          {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_LIGHT, StrId::STR_FAKE_BOLD_STANDARD,
+                           StrId::STR_FAKE_BOLD_HEAVY},
+                          "fakeBold", StrId::STR_CAT_READER)
             .withTextSettings(),
         SettingInfo::Toggle(StrId::STR_FOCUS_READING, &CrossPointSettings::focusReadingEnabled, "focusReadingEnabled",
                             StrId::STR_CAT_READER)

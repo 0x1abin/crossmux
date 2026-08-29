@@ -353,21 +353,24 @@ static void drawGlyphPixel(const GfxRenderer& renderer, const int x, const int y
   renderer.drawPixel(x, y, pixelState);
   if (syntheticBoldPixels == 0) return;
   renderer.drawPixel(x + 1, y, pixelState);
-  if (syntheticBoldPixels == 2) renderer.drawPixel(x + 2, y, pixelState);
+  if (syntheticBoldPixels >= 2) renderer.drawPixel(x + 2, y, pixelState);
+  if (syntheticBoldPixels >= 3) renderer.drawPixel(x + 3, y, pixelState);
 }
 
 constexpr uint8_t dilate2BitCoverage(const uint8_t current, const uint8_t previous1, const uint8_t previous2,
-                                     const uint8_t pixels) {
+                                     const uint8_t previous3, const uint8_t pixels) {
   uint8_t darkest = current;
   if (pixels >= 1 && previous1 > darkest) darkest = previous1;
   if (pixels >= 2 && previous2 > darkest) darkest = previous2;
+  if (pixels >= 3 && previous3 > darkest) darkest = previous3;
   return darkest;
 }
 
-static_assert(dilate2BitCoverage(0, 1, 0, 1) == 1);  // Light edge extends one pixel.
-static_assert(dilate2BitCoverage(3, 1, 0, 1) == 3);  // A gray neighbor cannot lighten black.
-static_assert(dilate2BitCoverage(0, 0, 3, 2) == 3);  // Heavy extends two pixels.
-static_assert(dilate2BitCoverage(0, 3, 3, 0) == 0);  // Off preserves the original coverage.
+static_assert(dilate2BitCoverage(0, 1, 0, 0, 1) == 1);  // Light extends one pixel.
+static_assert(dilate2BitCoverage(3, 1, 0, 0, 1) == 3);  // A gray neighbor cannot lighten black.
+static_assert(dilate2BitCoverage(0, 0, 3, 0, 2) == 3);  // Standard extends two pixels.
+static_assert(dilate2BitCoverage(0, 0, 0, 3, 3) == 3);  // Heavy extends three pixels.
+static_assert(dilate2BitCoverage(0, 3, 3, 3, 0) == 0);  // Off preserves the original coverage.
 
 static uint8_t get2BitCoverage(const uint8_t* bitmap, const int pixelPosition) {
   const uint8_t byte = bitmap[pixelPosition >> 2];
@@ -531,6 +534,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
 
         uint8_t previous1 = 0;
         uint8_t previous2 = 0;
+        uint8_t previous3 = 0;
         const int outputWidth = width + syntheticBoldPixels;
         for (int glyphX = 0; glyphX < outputWidth; glyphX++) {
           int screenX, screenY;
@@ -544,8 +548,9 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
 
           const uint8_t current =
               glyphX < width ? get2BitCoverage(bitmap, glyphY * width + glyphX) : 0;  // White tail extends the edge.
-          const uint8_t coverage = dilate2BitCoverage(current, previous1, previous2, syntheticBoldPixels);
+          const uint8_t coverage = dilate2BitCoverage(current, previous1, previous2, previous3, syntheticBoldPixels);
           draw2BitGlyphPixel(renderer, renderMode, screenX, screenY, pixelState, coverage);
+          previous3 = previous2;
           previous2 = previous1;
           previous1 = current;
         }
