@@ -3,21 +3,32 @@
 #include <array>
 
 #include "MurphyM4Batch.h"
+#include "MurphyM4BatchDetection.h"
 
-TEST(MurphyM4Batch, ClassifiesRiseTimeAndRejectsGuardBand) {
-  EXPECT_EQ(freeink::classifyMurphyM4RiseTime(2000), freeink::MurphyM4BatchProbe::Second);
-  EXPECT_EQ(freeink::classifyMurphyM4RiseTime(4500), freeink::MurphyM4BatchProbe::Second);
-  EXPECT_EQ(freeink::classifyMurphyM4RiseTime(5200), freeink::MurphyM4BatchProbe::First);
-  EXPECT_EQ(freeink::classifyMurphyM4RiseTime(10000), freeink::MurphyM4BatchProbe::First);
-  EXPECT_EQ(freeink::classifyMurphyM4RiseTime(4800), freeink::MurphyM4BatchProbe::Inconclusive);
-  EXPECT_EQ(freeink::classifyMurphyM4RiseTime(15000), freeink::MurphyM4BatchProbe::Inconclusive);
+TEST(MurphyM4Batch, ConfirmsOnlyMatchedFirstBatchChannels) {
+  EXPECT_TRUE(MurphyM4BatchDetection::isFirstBatch(6008, 6050));
+  EXPECT_TRUE(MurphyM4BatchDetection::isFirstBatch(5200, 5200));
+  EXPECT_TRUE(MurphyM4BatchDetection::isFirstBatch(10000, 10000));
+  EXPECT_TRUE(MurphyM4BatchDetection::isFirstBatch(5200, 6500));
+  EXPECT_TRUE(MurphyM4BatchDetection::isFirstBatch(10000, 7500));
+}
+
+TEST(MurphyM4Batch, DefaultsOutsideFirstBatchGates) {
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(5199, 5200));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(5200, 5199));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(10001, 10000));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(10000, 10001));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(10000, 5200));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(5200, 6501));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(6218, 3109));
+  EXPECT_FALSE(MurphyM4BatchDetection::isFirstBatch(0, 0));
 }
 
 TEST(MurphyM4Batch, MedianRejectsOutliers) {
-  std::array<uint32_t, freeink::MURPHY_M4_BATCH_SAMPLE_COUNT> samples = {
+  std::array<uint32_t, MurphyM4BatchDetection::SAMPLE_COUNT> samples = {
       6900, 12000, 6800, 7000, 100, 6950, 6850,
   };
-  EXPECT_EQ(freeink::medianMurphyM4RiseTime(samples), 6900U);
+  EXPECT_EQ(MurphyM4BatchDetection::median(samples), 6900U);
 }
 
 TEST(MurphyM4Batch, AppliesReferenceTouchCalibration) {
