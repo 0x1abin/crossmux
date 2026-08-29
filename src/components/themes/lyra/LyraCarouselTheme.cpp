@@ -72,9 +72,12 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
                                             bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                                             std::function<bool()> storeCoverBuffer) const {
   (void)bufferRestored;
+  (void)storeCoverBuffer;
+  coverBufferStored = false;
   if (recentBooks.empty()) {
     lastCenterIndex_ = -1;
     drawEmptyRecents(renderer, rect);
+    coverRendered = true;
     return;
   }
 
@@ -125,8 +128,7 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     renderer.drawText(UI_12_FONT_ID, centerX + (kCenterCoverWidth - titleWidth) / 2, textY, title.c_str(), true,
                       EpdFontFamily::BOLD);
 
-    coverBufferStored = storeCoverBuffer();
-    coverRendered = coverBufferStored;
+    coverRendered = true;
   }
 
   if (coversFocused) {
