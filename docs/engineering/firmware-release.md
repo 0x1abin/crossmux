@@ -1,21 +1,23 @@
 # Firmware Release Architecture
 
-CrossMux has two release channels: `stable` and `nightly`. Hardware identity is
-not a release channel. X3/X4 and the six ESP32-S3 targets share the Nightly
-pipeline; S3 targets currently declare only `nightly` in `supportedChannels`.
+CrossMux has two release channels, `stable` and `nightly`, managed by one
+channel-aware pipeline. Hardware identity is not a release channel. Stable
+currently contains the shared X3/X4 image; X3/X4 and the six ESP32-S3 targets
+share Nightly, with S3 targets declaring only `nightly` in `supportedChannels`.
 
 ## Canonical targets
 
 [`scripts/nightly_targets.py`](../../scripts/nightly_targets.py) is the release
-source of truth. Each target defines its runtime models, artifact slug, embedded
-board tag, PlatformIO environments, chip, install capability, and supported
-channels. The workflow, packager, index builder, and tests must import this table
-rather than copy it.
+source of truth despite its compatibility filename. Each target defines its
+runtime models, artifact slug, embedded board tag, per-channel PlatformIO
+environments, chip, install capability, and supported channels. The workflow,
+packager, index builder, and tests import this table rather than copy it.
 
 The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
-image. Sticky, X4 Pro, Paper Mono, EEGO A4, Murphy M4, and Waveshare ePaper 3.97
-each produce their own ESP32-S3 image. There are seven Nightly environments in
-total. Each image is later aliased by the legacy `global` and `zh-CN` pointers.
+image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky, X4 Pro,
+Paper Mono, EEGO A4, Murphy M4, and Waveshare ePaper 3.97 each produce their own
+ESP32-S3 Nightly image. Each image is aliased by the compatibility `global` and
+`zh-CN` pointers.
 
 ## Publishing
 
@@ -29,20 +31,21 @@ The global and China publish jobs run independently. Each writes in this order:
 2. immutable target manifests;
 3. rolling regional indexes.
 
-All seven targets must build successfully before either region publishes.
-Publishing also fails if the previous rolling index cannot be loaded because
-that index protects the immediately preceding build during cleanup. Once both
-regions publish, CI resolves every manifest and verifies each distinct asset's
-size and SHA-256 before deleting obsolete builds.
+Every target selected for a channel must build successfully before either region
+publishes. Nightly also requires its previous rolling index because that index
+protects the immediately preceding build during cleanup. Once both regions
+publish, CI resolves every manifest and verifies each distinct asset's size and
+SHA-256. Cleanup then runs for Nightly only; Stable builds are retained.
 
-The global index is the `release-index.json` asset of the rolling `nightly`
-GitHub Release. The unified binaries and compatibility manifests live in an
-immutable `nightly-build-<sha>-<run>-<attempt>` GitHub Release. The China index
-is `/firmware/releases/nightly/index.json`; each target's single binary set and
-both manifests live under `/firmware/builds/<build-id>/<target>/` in COS and are
-served through `assets.crossmux.cn`. Region chooses the storage provider; both
-variant manifests reference the same neutral binary names and differing hashes
-fail publication.
+The global index is the `release-index.json` asset of the rolling `stable` or
+`nightly` GitHub Release. Binaries and compatibility manifests live in an
+immutable `<channel>-build-<sha>-<run>-<attempt>` GitHub Release. China indexes
+are `/firmware/releases/<channel>/index.json`; target assets live under
+`/firmware/builds/<channel>-build-<sha>-<run>-<attempt>/<target>/` in COS. Region chooses the storage
+provider; both variant manifests reference the same neutral binary names and
+differing hashes fail publication. After Stable verification, the version tag
+also receives the legacy `firmware.bin`, `firmware-cn.bin`, `bootloader.bin`,
+and `partitions.bin` assets.
 
 At steady state, GitHub and COS retain the current build and the build or builds
 referenced by the previous index. A scheduled successful Nightly therefore
@@ -67,13 +70,14 @@ version of an obsolete build prefix rather than leaving hidden historical object
 ## Index contract and failure behavior
 
 The schema-v1 index contains `channel`, `updatedAt`, `buildId`, and a `targets`
-map. Each target repeats its identity and channel capabilities and contains
-global and `zh-CN` pointers with version, CrossMux SHA, SDK SHA, publish time,
-and immutable manifest URL.
+map, plus optional regional `releaseNotes`. Each target repeats its identity and
+channel capabilities and contains `global` and `zh-CN` pointers with version,
+CrossMux SHA, SDK SHA, publish time, and immutable manifest URL. Stable requires
+both release-note locales.
 
 Every target advances together only when both compatibility manifests are valid
 and have the same CrossMux revision, SDK revision, version, and assets. A
-missing or malformed manifest prevents the whole Nightly from publishing.
+missing or malformed manifest prevents the whole channel from publishing.
 Build objects are never overwritten; cleanup runs only after the new rolling
 indexes and their assets pass verification.
 

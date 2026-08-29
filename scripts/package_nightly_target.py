@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package one model-specific Nightly target and emit compatibility manifests."""
+"""Package one model-specific firmware target and emit compatibility manifests."""
 
 import argparse
 import configparser
@@ -12,6 +12,7 @@ from pathlib import Path
 
 from nightly_targets import (
     FLAVOR_TOKENS,
+    CHANNELS,
     TARGETS,
     asset_name,
     environment_for,
@@ -23,6 +24,11 @@ FULL_INSTALL_SEGMENTS = (
     ('bootloader', 'bootloader.bin', 0x0000),
     ('partitions', 'partitions.bin', 0x8000),
     ('boot_app0', 'boot_app0.bin', 0xE000),
+    ('firmware', 'firmware.bin', 0x10000),
+)
+STABLE_C3_SEGMENTS = (
+    ('bootloader', 'bootloader.bin', 0x0000),
+    ('partitions', 'partitions.bin', 0x8000),
     ('firmware', 'firmware.bin', 0x10000),
 )
 OTA_SEGMENT = (('firmware', 'firmware.bin', 0x10000),)
@@ -92,14 +98,22 @@ def verify_firmware(path, chip_id, board_tag):
     raise SystemExit(f'{path.name} does not contain board tag {board_tag!r}')
 
 
-def package_target(root, target_id, output):
+def package_target(root, target_id, channel, output):
     target = TARGETS[target_id]
-    environment = environment_for(target_id, 'global')
+    if channel not in target['supportedChannels']:
+        raise SystemExit(f'{target_id} does not support the {channel} channel')
+    environment = environment_for(target_id, channel, 'global')
     build = root / '.pio/build' / environment
     output.mkdir(parents=True, exist_ok=True)
     verify_partition_csv(root)
 
-    segments = FULL_INSTALL_SEGMENTS if target['fullInstall'] else OTA_SEGMENT
+    segments = (
+        FULL_INSTALL_SEGMENTS
+        if target['fullInstall']
+        else STABLE_C3_SEGMENTS
+        if channel == 'stable'
+        else OTA_SEGMENT
+    )
     assets = []
     for role, source_name, offset in segments:
         source = find_boot_app0() if role == 'boot_app0' else build / source_name
@@ -123,7 +137,7 @@ def package_target(root, target_id, output):
     short_sha = git_value(root, 'rev-parse', '--short=7', 'HEAD')
     manifest = {
         'schemaVersion': 1,
-        'channel': 'nightly',
+        'channel': channel,
         'targetId': target_id,
         'models': target['models'],
         'deviceSlug': target['deviceSlug'],
@@ -131,7 +145,9 @@ def package_target(root, target_id, output):
         'supportedChannels': target['supportedChannels'],
         'environment': environment,
         'chip': target['chip'],
-        'version': version_for(config['crosspoint']['version'], target_id, 'global', short_sha),
+        'version': version_for(
+            config['crosspoint']['version'], target_id, channel, 'global', short_sha
+        ),
         'crossmuxSha': git_value(root, 'rev-parse', 'HEAD'),
         'sdkSha': git_value(root / 'freeink-sdk', 'rev-parse', 'HEAD'),
         'assets': assets,
@@ -157,18 +173,19 @@ def package_target(root, target_id, output):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('target', nargs='?', choices=TARGETS)
+    parser.add_argument('--channel', choices=CHANNELS, required=True)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--matrix', action='store_true')
     args = parser.parse_args()
     if args.matrix:
-        print(json.dumps(matrix(), separators=(',', ':')))
+        print(json.dumps(matrix(args.channel), separators=(',', ':')))
         return
     if not args.target:
         parser.error('target is required unless --matrix is used')
 
     root = Path(__file__).resolve().parent.parent
-    output = (args.output or root / 'dist' / args.target).resolve()
-    package_target(root, args.target, output)
+    output = (args.output or root / 'dist' / args.channel / args.target).resolve()
+    package_target(root, args.target, args.channel, output)
 
 
 if __name__ == '__main__':

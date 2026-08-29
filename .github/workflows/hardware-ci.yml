@@ -141,6 +141,6 @@ jobs:
         run: |
           set -euo pipefail
           for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397; do
-            python3 scripts/package_nightly_target.py "$target"
+            python3 scripts/package_nightly_target.py "$target" --channel nightly
             (cd "dist/$target" && sha256sum --check *-SHA256SUMS)
           done

@@ -156,8 +156,7 @@ pio run -t upload && pio device monitor
 | Core Build Check | `.github/workflows/ci.yml` | Builds `default` (shared X3/X4) and `x4pro` |
 | Hardware CI | `.github/workflows/hardware-ci.yml` | Builds all simulators and global S3 targets for hardware-sensitive changes or manual runs |
 | Format Check | `.github/workflows/pr-formatting-check.yml` | Validates clang-format |
-| Release Build | `.github/workflows/release.yml` | Production releases |
-| RC Build | `.github/workflows/release_candidate.yml` | Release candidates |
+| Firmware Release | `.github/workflows/nightly.yml` | Stable releases from SemVer tags and scheduled/manual Nightly releases |
 
 **Rules**:
 - **Fix CI failures BEFORE** requesting review
