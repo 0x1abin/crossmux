@@ -2025,7 +2025,7 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
   return true;
 }
 
-bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
+bool Operation::beginBrowseCache(const WeReadStore::BookRecord& book) {
   reset();
   if (!isSafeProtocolToken(book.bookId)) {
     error_ = Error::Protocol;
@@ -2033,7 +2033,7 @@ bool Operation::beginBrowseCache(const WeReadStore::ShelfRecord& book) {
     return false;
   }
   kind_ = Kind::Browse;
-  book_ = WeReadStore::bookRecord(book);
+  book_ = book;
   browseKind_ = WeReadBrowse::Kind::PopularHighlights;
   browseCursor_ = {};
   WeReadStore::loadSession(session_);

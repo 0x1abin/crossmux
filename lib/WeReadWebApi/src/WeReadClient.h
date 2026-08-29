@@ -92,7 +92,7 @@ class Operation {
   bool begin(Kind kind, const WeReadStore::ShelfRecord* book = nullptr, DownloadOptions options = {},
              ShelfCoverScope shelfCoverScope = ShelfCoverScope::None);
   bool beginProgressSync(const char* bookId, ProgressSyncInput input, ProgressSyncMode mode);
-  bool beginBrowseCache(const WeReadStore::ShelfRecord& book);
+  bool beginBrowseCache(const WeReadStore::BookRecord& book);
   Event step(WeReadStore::WorkCallback callback = nullptr, void* callbackContext = nullptr);
   void cancel();
   void reset();

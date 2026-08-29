@@ -14,6 +14,7 @@ on:
       - lib/hal/**
       - lib/EpdFont/**
       - lib/GfxRenderer/**
+      - lib/WeReadWebApi/**
       - src/MappedInputManager.*
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
@@ -21,6 +22,7 @@ on:
       - src/main.cpp
       - src/activities/ActivityManager.*
       - src/activities/apps/AppsMenuActivity.cpp
+      - src/activities/apps/weread/**
       - src/activities/boot_sleep/**
       - src/activities/reader/**
       - src/activities/settings/**
@@ -42,6 +44,7 @@ on:
       - lib/hal/**
       - lib/EpdFont/**
       - lib/GfxRenderer/**
+      - lib/WeReadWebApi/**
       - src/MappedInputManager.*
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
@@ -49,6 +52,7 @@ on:
       - src/main.cpp
       - src/activities/ActivityManager.*
       - src/activities/apps/AppsMenuActivity.cpp
+      - src/activities/apps/weread/**
       - src/activities/boot_sleep/**
       - src/activities/reader/**
       - src/activities/settings/**

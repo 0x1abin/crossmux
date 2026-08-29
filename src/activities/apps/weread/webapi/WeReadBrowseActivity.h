@@ -12,7 +12,7 @@ class WeReadBrowseActivity final : public Activity {
  public:
   WeReadBrowseActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WeReadClient::Operation& operation,
                        const WeReadStore::ShelfRecord& book)
-      : Activity("WeReadBrowse", renderer, mappedInput), operation_(operation), book_(book) {}
+      : Activity("WeReadBrowse", renderer, mappedInput), operation_(operation), book_(WeReadStore::bookRecord(book)) {}
 
   void onEnter() override;
   void onExit() override;
@@ -27,7 +27,7 @@ class WeReadBrowseActivity final : public Activity {
   static constexpr int kMaxTextPages = 128;
 
   WeReadClient::Operation& operation_;
-  WeReadStore::ShelfRecord book_;
+  WeReadStore::BookRecord book_;
   ButtonNavigator navigator_;
   HalFile index_;
   HalFile text_;
