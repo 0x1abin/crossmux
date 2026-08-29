@@ -92,7 +92,7 @@ explicitly authorized:
 - Simulator: its host compatibility self-test, all four CrossMux simulator
   environments, and the CrossMux CMake/CTest host suite.
 - CrossMux: index/conflict-marker checks, `git diff --check`, `pio run`,
-  `pio run -e gh_release_cn`, and extra build environments.
+  `pio run -e gh_release`, and extra build environments.
 
 Report local checks, dependency Draft PRs, CrossMux Draft PR, CI, deployment,
 and physical-device acceptance separately.

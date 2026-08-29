@@ -678,7 +678,7 @@ def run_crossmux_builds(
         print("Skipping PlatformIO builds because --skip-builds was passed.")
         return
     run(["pio", "run"], cwd=root, capture=False)
-    run(["pio", "run", "-e", "gh_release_cn"], cwd=root, capture=False)
+    run(["pio", "run", "-e", "gh_release"], cwd=root, capture=False)
     for env in extra_envs:
         run(["pio", "run", "-e", env], cwd=root, capture=False)
 
