@@ -473,11 +473,13 @@ location is not migrated or read.
   `<bookId>/chapters/NNNNNN.images`, and transient `<bookId>/images.work`
   indexes start with a 12-byte little-endian header:
   `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
-  Their magic values are `WRS5` (`0x35535257`) and `WRT2` (`0x32545257`);
+  Their magic values are `WRS6` (`0x36535257`) and `WRT2` (`0x32545257`);
   image indexes use `WRI2` (`0x32495257`) and image work indexes use `WIP1`
   (`0x31504957`). Version is currently `1`.
-- Shelf records contain fixed `bookId[64]`, `title[192]`, and `author[96]`
-  fields followed by `uint32 readUpdateTime`. TOC records contain fixed
+- Shelf records contain fixed `bookId[64]`, `title[192]`, `author[96]`, and
+  validated HTTPS `coverUrl[512]` fields followed by `uint32 readUpdateTime`.
+  Cover URLs use a JPEG/PNG suffix or an extensionless path whose downloaded
+  bytes must identify as JPEG/PNG. TOC records contain fixed
   `chapterUid[64]`, `title[192]`, `uint32 wordCount`,
   `uint32 chapterIdx`, and a paid flag.
 - `WRI2` records contain a generated EPUB-relative `href[64]` and the original
@@ -557,6 +559,12 @@ location is not migrated or read.
   generated EPUB's `cover-image`; only source `.part` files and `cover.v2.bmp.part`
   are transient. The pre-v2 `<bookId>/cover.bmp` is not read or migrated. A failed
   fetch or conversion does not replace an existing v2 BMP.
+- A directly returned complete EPUB remains unchanged. When its validated WeRead
+  cover source is available, the source is atomically copied to the EPUB's
+  path-keyed cache directory as `cover.override`. The EPUB loader identifies
+  JPEG or PNG from the file signature, prefers the EPUB's internal cover, and
+  uses the override only as a fallback. A valid override makes an earlier empty
+  thumbnail marker retryable.
 - The WeRead menu's cache-clear action preserves `session.bin`,
   `disclaimer.accepted`, `/WeRead/*.epub`, and the reader caches
   for those EPUB files. It recursively removes every other entry below
@@ -570,10 +578,12 @@ Writers use `.part` plus atomic replacement, so a damaged or interrupted index
 is never exposed as current data.
 
 `WRA1` replaces the pre-release `WRD3` session marker after the application
-rename. `WRS5` rejects `WRS4` shelves because shelf records now include
-`readUpdateTime`; a successful sync rewrites them in descending timestamp
-order while preserving server order for ties. Existing per-book detail,
-cover, and EPUB files are retained. `WRS4` rejected `WRS3` shelves whose book
+rename. `WRS6` rejects `WRS5` shelves because shelf records now include a
+validated cover URL; a successful sync rebuilds the shelf index while retaining
+existing per-book detail, cover, EPUB, and reading-progress files. `WRS5`
+rejected `WRS4` shelves because shelf records added `readUpdateTime`; records
+are rewritten in descending timestamp order while preserving server order for
+ties. `WRS4` rejected `WRS3` shelves whose book
 titles could be overwritten by nested category titles. A cached chapter
 without a valid `WRI2` index is downloaded again so pre-image-support chapter
 caches cannot silently lose figures. `WRI2` also rejects chapters generated

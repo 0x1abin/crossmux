@@ -12,7 +12,7 @@ using Md5Function = bool (*)(const uint8_t* data, size_t len, char out[33]);
 using ByteSink = bool (*)(void* ctx, const uint8_t* data, size_t len);
 
 enum class ChapterResponse : uint8_t { Content, AuthenticationRequired, Retryable, Error };
-enum class ImageType : uint8_t { None, Jpeg, Png };
+enum class ImageType : uint8_t { None, Detect, Jpeg, Png };
 
 ChapterResponse classifyChapterResponse(int status, bool emptyObject);
 bool isEmptyJsonObject(const uint8_t* data, size_t len);
@@ -22,6 +22,7 @@ bool isAllowedXhtmlTag(const char* name);
 size_t safeXhtmlTextRunLength(const uint8_t* data, size_t len, bool plainText);
 bool extractImageAttributes(const char* tag, char* source, size_t sourceSize, char* alt, size_t altSize);
 ImageType normalizeImageUrl(const char* source, char* output, size_t outputSize);
+ImageType normalizeCoverImageUrl(const char* source, char* output, size_t outputSize);
 uint32_t parseUint32OrZero(const char* value, size_t len);
 uint32_t hashAppId(const char* value, size_t len);
 bool hasUsablePclts(const char* value);

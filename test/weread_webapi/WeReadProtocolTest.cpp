@@ -52,6 +52,10 @@ struct OperationTestPeer {
   }
   static bool imageAttemptPending(const uint8_t attempts) { return Operation::imageAttemptPending(attempts); }
   static bool imageRedirectAllowed(const uint8_t redirects) { return Operation::imageRedirectAllowed(redirects); }
+  static WeReadProtocol::ImageType selectCoverUrl(const char* detailUrl, const char* shelfUrl, char* output,
+                                                  const size_t outputSize) {
+    return Operation::selectCoverUrl(detailUrl, shelfUrl, output, outputSize);
+  }
   static bool validChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
     return Operation::validChapterRange(first, last, count);
   }
@@ -285,6 +289,39 @@ TEST(WeReadProtocol, NormalizesOnlyBoundedHttpsJpegAndPngUrls) {
             ImageType::None);
   const std::string tooLong = "https://cdn.example/" + std::string(600, 'a') + ".png";
   EXPECT_EQ(WeReadProtocol::normalizeImageUrl(tooLong.c_str(), normalized, sizeof(normalized)), ImageType::None);
+}
+
+TEST(WeReadProtocol, PrefersDetailCoverAndFallsBackToShelfCover) {
+  char output[512] = {};
+  const auto select = WeReadClient::OperationTestPeer::selectCoverUrl;
+
+  EXPECT_EQ(select("https://detail.example/cover.png", "https://shelf.example/cover.jpg", output, sizeof(output)),
+            WeReadProtocol::ImageType::Png);
+  EXPECT_STREQ(output, "https://detail.example/cover.png");
+
+  EXPECT_EQ(select("", "//shelf.example/cover.jpg", output, sizeof(output)), WeReadProtocol::ImageType::Jpeg);
+  EXPECT_STREQ(output, "https://shelf.example/cover.jpg");
+
+  EXPECT_EQ(select("https://detail.example/cover.webp", "https://shelf.example/cover.gif", output, sizeof(output)),
+            WeReadProtocol::ImageType::None);
+  EXPECT_STREQ(output, "");
+}
+
+TEST(WeReadProtocol, AcceptsOnlySafeExtensionlessCoverUrlsForTypeDetection) {
+  char output[512] = {};
+
+  EXPECT_EQ(WeReadProtocol::normalizeCoverImageUrl("//cdn.example/path/cover-id", output, sizeof(output)),
+            WeReadProtocol::ImageType::Detect);
+  EXPECT_STREQ(output, "https://cdn.example/path/cover-id");
+  EXPECT_EQ(WeReadProtocol::normalizeCoverImageUrl("https://cdn.example/path/cover.webp", output, sizeof(output)),
+            WeReadProtocol::ImageType::None);
+  EXPECT_EQ(WeReadProtocol::normalizeCoverImageUrl("http://cdn.example/path/cover-id", output, sizeof(output)),
+            WeReadProtocol::ImageType::None);
+
+  EXPECT_EQ(WeReadClient::OperationTestPeer::selectCoverUrl("https://detail.example/cover-id",
+                                                            "https://shelf.example/cover.jpg", output, sizeof(output)),
+            WeReadProtocol::ImageType::Detect);
+  EXPECT_STREQ(output, "https://detail.example/cover-id");
 }
 
 TEST(WeReadProtocol, RejectsUnsafeOrOversizedRuntimeCookiesWithoutMutation) {

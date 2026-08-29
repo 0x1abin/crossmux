@@ -14,7 +14,7 @@ constexpr const char* kRoot = "/.crosspoint/weread";
 constexpr const char* kDisclaimerAcceptancePath = "/.crosspoint/weread/disclaimer.accepted";
 constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
-constexpr uint32_t kShelfMagic = 0x35535257;            // WRS5
+constexpr uint32_t kShelfMagic = 0x36535257;            // WRS6
 constexpr uint32_t kTocMagic = 0x32545257;              // WRT2
 constexpr uint32_t kImageMagic = 0x32495257;            // WRI2
 constexpr uint32_t kImageWorkMagic = 0x31504957;        // WIP1
@@ -66,9 +66,20 @@ struct ShelfRecord {
   char bookId[64] = {};
   char title[192] = {};
   char author[96] = {};
+  char coverUrl[512] = {};
   uint32_t readUpdateTime = 0;
 };
-static_assert(sizeof(ShelfRecord) == 356);
+static_assert(sizeof(ShelfRecord) == 868);
+
+struct BookRecord {
+  char bookId[64] = {};
+  char title[192] = {};
+  char author[96] = {};
+  uint32_t readUpdateTime = 0;
+};
+static_assert(sizeof(BookRecord) == 356);
+
+BookRecord bookRecord(const ShelfRecord& shelf);
 
 enum class ShelfSortResult : uint8_t {
   Ok,
@@ -194,6 +205,7 @@ std::string initialProgressPath(const char* bookId);
 std::string detailPath(const std::string& bookDir);
 std::string coverPath(const std::string& bookDir);
 std::string finalBookPath(const ShelfRecord& book);
+std::string finalBookPath(const BookRecord& book);
 bool findBookIdForPath(const std::string& path, char* bookId, size_t bookIdSize);
 bool parseGeneratedChapterHref(const std::string& href, uint32_t& tocIndex);
 bool mapFractionToChapter(const std::string& path, float fraction, TocRecord& chapter, uint32_t& chapterOffset);
