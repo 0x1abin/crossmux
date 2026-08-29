@@ -1,98 +1,98 @@
 ---
 name: sync-upstream
-description: Automate and review CrossMux/CrossPoint upstream repository synchronization. Use when the user asks to sync, update, compare, or merge upstream changes, especially upstream/develop, into this repo through a new branch and pull request instead of committing directly on main or the active target branch. Covers overlap review, upstream-preferred conflict policy, remote/base detection, agent sync branch creation, squash-sync fallback, validation builds, pushing to origin, and opening a draft PR.
+description: Inspect, rehearse, and publish approval-gated upstream synchronization for CrossMux, its FreeInk SDK fork, and its CrossPoint Simulator fork. Use when comparing or syncing upstream changes through isolated candidates and separate draft pull requests.
 ---
 
 # Sync Upstream
 
-Use this skill when syncing upstream changes into the current repo. The default
-source is `upstream/develop`, because that is the current upstream integration
-branch for this project. Never commit directly on `main` or the
-super.engineering target branch.
+Synchronize three components in order:
 
-## Primary Command
+1. `Free-Ink/freeink-sdk:main` into `0x1abin/freeink-sdk:main`.
+2. `crosspoint-reader/crosspoint-simulator:main` into
+   `0x1abin/crosspoint-simulator:main`.
+3. `crosspoint-reader/crosspoint-reader:develop` into CrossMux, pinning both
+   reviewed fork revisions.
 
-From the repository root, run:
+Never commit directly on a component's base branch. Never merge a dependency
+pull request or flash hardware as part of this skill.
+
+## Staged workflow
+
+Run one phase at a time from the CrossMux repository root:
 
 ```bash
 python3 .claude/skills/sync-upstream/scripts/sync_upstream.py inspect
-python3 .claude/skills/sync-upstream/scripts/sync_upstream.py run --draft
+python3 .claude/skills/sync-upstream/scripts/sync_upstream.py start --component sdk
+python3 .claude/skills/sync-upstream/scripts/sync_upstream.py publish \
+  --component sdk --candidate /path/printed/by/start --draft
 ```
 
-Private forks can append repeatable build environments, for example
-`--extra-build-env gh_weread_pro`.
+Repeat `start` and `publish` for `simulator`, then `crossmux`. `start` prepares
+an isolated candidate and prints its path; it never commits, pushes, or opens a
+pull request. `publish` is a separate, externally mutating step and requires
+the user's explicit authorization in the current conversation. There is no
+one-command happy path.
 
-`run --draft` does the whole happy path:
+`inspect` always checks all three components. If a dependency fork is behind,
+sync it even when the incoming CrossMux commit does not change that dependency.
+Do not start `simulator` until the SDK fork contains its parent `main`; do not
+start `crossmux` until both dependency forks contain their parent `main` and no
+corresponding sync pull request remains open.
 
-1. Reads the super.engineering target branch with `sc worktree status --json`
-   when available.
-2. Fetches `origin/<base>` and `upstream/develop`.
-3. Creates a new `agent/sync-upstream-develop-<sha>` branch from `origin/<base>`.
-4. Merges upstream without committing yet.
-5. Runs repository sanity checks and both build commands.
-6. Commits, pushes to `origin`, and opens a draft PR.
+## Mandatory manual review
 
-Check the `inspect` output before `run`. If `base_branch` is not the intended
-CrossMux integration branch, pass `--base-branch main` or set the worktree target
-outside this skill before continuing.
+Do not choose a side automatically. Manual review is required for:
 
-If the merge stops with conflicts, resolve them, stage only the intended files,
-then continue with:
+- every Git-unmerged path;
+- every file changed on both sides since their merge base, even if Git merged
+  it cleanly;
+- different files or symbols that replace, duplicate, or alter the same
+  behavior or call path.
 
-```bash
-python3 .claude/skills/sync-upstream/scripts/sync_upstream.py publish --draft
-```
+Before resolving anything, ask the user interactively. Prefer the structured
+user-input control when it is available and present at most three behavior
+decisions per batch. Otherwise ask explicit numbered options and stop for the
+answer. A static conflict report is context, not completed review.
 
-## Conflict Policy
+Present each decision with:
 
-- Review behavioral overlap before resolving file conflicts. When upstream now
-  provides the same capability and satisfies CrossMux business requirements,
-  use the upstream implementation and remove the duplicate local path.
-- Keep a CrossMux-local implementation only for a requirement upstream does not
-  meet. Limit it to that gap and record the reason in the PR body; do not retain
-  parallel implementations merely because the local one landed first.
-- For Chinese support, prefer upstream's generic CJK parsing, layout, rendering,
-  and font mechanisms. Preserve CN-build-only behavior only where upstream does
-  not provide the same offline, first-boot, glyph-coverage, distribution, or
-  flash-budget guarantees.
-- `.skills/SKILL.md` is a thin map. When upstream changes it, follow
-  `docs/engineering/upstream-merge-policy.md`: keep the map thin, route deep
-  content into `docs/engineering/`, and do not drop upstream hunks silently.
-- Preserve CrossMux-local behavior, branding, docs, apps, and release settings
-  unless the user explicitly asks to remove them.
-- For i18n YAML, preserve a union of flat keys. Keep Chinese build behavior and
-  existing translations unless an upstream key intentionally replaces them.
-- For submodules, verify the old directory is clean before removing stale
-  directories, then run `git submodule update --init --recursive`.
-- If an upstream change is intentionally skipped as out of scope, mention the
-  skipped hunk in the PR body.
-- When an upstream change alters a cache layout or pagination, advance the
-  CrossMux per-flavor cache versions above every shipped value and update
-  `docs/file-formats.md`.
+1. the local behavior;
+2. the upstream behavior;
+3. the compatibility and product impact;
+4. a recommendation without treating it as approval.
+
+Offer the local version, upstream version, and any safe combined resolution as
+mutually exclusive options, putting the recommendation first without treating
+it as approval. Files may share one question only when they form one behavior
+chain; list every covered review item in that question. After each answer,
+restate the locked choice before applying it, then continue asking until every
+review item is covered. Do not resolve, stage, commit, push, or open a pull
+request for an unanswered item.
+
+Pass one `--review-note` per approved review item when publishing; the script
+refuses to publish a candidate with review items and no recorded decision.
+Include every decision in the Draft PR body. If there were no review items,
+record that fact instead. Keep interaction in the agent workflow: do not add a
+terminal prompt or another CLI phase between `start` and `publish`.
+
+Use CodeGraph when available to trace shared symbols and call paths; otherwise
+use `rg` and source inspection. Preserve CrossMux-specific branding, apps,
+release settings, translations, and device behavior unless the user explicitly
+approves changing them. Continue to follow the cache-version, thin-map,
+submodule, i18n, HAL, input, and allocation rules in `AGENTS.md` and
+`docs/engineering/`.
 
 ## Validation
 
-The script runs these before publishing unless `--skip-builds` is explicitly
-used:
+`publish` performs component-specific checks unless `--skip-builds` was
+explicitly authorized:
 
-```bash
-git diff --check
-git diff --cached --check
-pio run
-pio run -e gh_release_cn
-```
+- SDK: its four existing host test scripts, then the CrossMux PlatformIO
+  validation and any repeatable `--extra-build-env` values.
+- Simulator: its host compatibility self-test, all four CrossMux simulator
+  environments, and the CrossMux CMake/CTest host suite.
+- CrossMux: index/conflict-marker checks, `git diff --check`, `pio run`,
+  `pio run -e gh_release_cn`, and extra build environments.
 
-It also checks for unresolved index entries and conflict markers in tracked
-files.
-
-## Self-Review
-
-- [ ] The current branch is not the base branch.
-- [ ] Only the upstream sync is in the diff; unrelated local files are not
-      staged.
-- [ ] `.skills/SKILL.md` still follows the thin-map policy.
-- [ ] Submodules are initialized and no stale SDK directory was staged by
-      accident.
-- [ ] Both build commands passed, or the PR explicitly explains why they were
-      skipped.
-- [ ] The PR is a draft unless the user requested a ready-for-review PR.
+Report local checks, dependency Draft PRs, CrossMux Draft PR, CI, deployment,
+and physical-device acceptance separately.
