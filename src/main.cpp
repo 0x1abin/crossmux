@@ -612,6 +612,11 @@ void setup() {
     APP_STATE.openEpubPath = "";
     APP_STATE.readerActivityLoadCount++;
     APP_STATE.saveToFile();
+    // Splashless wake leaves the retained sleep frame on the panel; without a
+    // clean first paint the reader shows the previous screen's residue (A4
+    // grayscale panels ghost worst). Mirror the Home branch's HALF refresh so
+    // reader resume also clears the retained frame.
+    if (needsWakeRefresh) renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
     activityManager.goToReader(path, allowFastInitialReaderRefresh);
   }
 
