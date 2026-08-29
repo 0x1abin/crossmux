@@ -1559,6 +1559,25 @@ void WeReadActivity::handleMainInput() {
     return;
   }
 
+  switch (mappedInput.wasSwipe()) {
+    case MappedInputManager::SwipeDir::Left:
+      mainFocus_.store(MainFocus::Content);
+      selectMainTab(MainTab::Manage);
+      requestUpdate();
+      return;
+    case MappedInputManager::SwipeDir::Right:
+      mainFocus_.store(MainFocus::Content);
+      selectMainTab(MainTab::Shelf);
+      requestUpdate();
+      return;
+    case MappedInputManager::SwipeDir::Up:
+    case MappedInputManager::SwipeDir::Down:
+      if (mainTab_.load() == MainTab::Shelf) mainFocus_.store(MainFocus::Content);
+      break;
+    case MappedInputManager::SwipeDir::None:
+      break;
+  }
+
   if (mainFocus_.load() == MainFocus::Tabs) {
     handleMainTabInput();
     return;
@@ -1663,13 +1682,20 @@ void WeReadActivity::handleShelfInput() {
   }
 
   const auto swipe = mappedInput.wasSwipe();
-  if (count > 0 && (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right)) {
-    const int selected = shelfSelected_.load();
-    const int target = swipe == MappedInputManager::SwipeDir::Left
-                           ? ButtonNavigator::nextPageIndex(selected, count, itemsPerPage)
-                           : ButtonNavigator::previousPageIndex(selected, count, itemsPerPage);
-    moveShelfSelection(target, itemsPerPage);
-    return;
+  if (count > 0) {
+    switch (swipe) {
+      case MappedInputManager::SwipeDir::Up:
+        moveShelfSelection(ButtonNavigator::nextPageIndex(shelfSelected_.load(), count, itemsPerPage), itemsPerPage);
+        return;
+      case MappedInputManager::SwipeDir::Down:
+        moveShelfSelection(ButtonNavigator::previousPageIndex(shelfSelected_.load(), count, itemsPerPage),
+                           itemsPerPage);
+        return;
+      case MappedInputManager::SwipeDir::Left:
+      case MappedInputManager::SwipeDir::Right:
+      case MappedInputManager::SwipeDir::None:
+        break;
+    }
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
