@@ -35,18 +35,26 @@ has no Home key, so `H` is ignored. It does not replace hardware tests for
 display batches/ghosting, FT6336U IRQ/reset behavior, SDMMC contention, PWM
 curves, PSRAM, or standby current.
 
-M4 batch detection runs before the normal GPIO input setup. R13 is a second
-100 kΩ pull-up in parallel on GPIO1/KEY1; together with the key's 100 nF
-capacitor it halves the charge time on batch 2. The firmware measures seven
-50%-charge times in a fixed 28-byte stack array, caches only a result outside
-the guard band in NVS key `cphw/m4_batch_v1`, and otherwise falls back to batch
-2 without caching. A pressed Up key therefore cannot permanently select the
-wrong batch. `HalGPIO::begin()` applies the result to touch before input starts;
-`HalDisplay::begin()` reads the same HAL state before constructing the immutable
-SSD1677 batch configuration. No batch state allocates from the heap.
+M4 batch detection runs before the normal GPIO input setup. GPIO1/KEY1 has a
+100 kΩ pull-up and 100 nF capacitor and serves as the reference channel.
+GPIO2/KEY2 has the same network; R13 is a second 100 kΩ pull-up in parallel on
+that channel and should halve its charge time on batch 2. The firmware measures
+seven paired 50%-charge times in two fixed arrays (56 stack bytes). It confirms
+batch 1 only when both medians are 5200–10000 µs and GPIO2/GPIO1 is 75–125%.
+Any pressed key, failed discharge, timeout, out-of-range sample, ratio mismatch,
+or other result uses the market-default batch 2.
+
+Only a confirmed batch 1 is cached in `cphw/m4_batch_v2`. A cached First value
+is restored directly; Second, damaged, and missing values trigger a fresh safe
+probe and are not deleted. Batch 2 is never written, so it is rechecked on each
+boot and remains the fallback. `HalGPIO::begin()` applies the result to touch
+before input starts; `HalDisplay::begin()` reads the same HAL state before
+constructing the immutable SSD1677 batch configuration. The probe uses no heap
+allocation.
 [ESP32-S3 Datasheet v2.2](https://documentation.espressif.com/esp32_s3_datasheet_en.pdf)
-Table 2-8 maps GPIO1 to ADC1_CH0; its documented 60 µs power-up low glitch is
-also shorter than the 50 ms settle delay before the charged reference sample.
+Table 2-8 maps GPIO1 to ADC1_CH0 and GPIO2 to ADC1_CH1; its documented 60 µs
+power-up low glitch is also shorter than the 50 ms settle delay before the
+charged reference samples.
 
 Batch 1 (no R13) uses the `0x3C` pseudo-temperature and touch short-axis range
 `[-52,553]`; batch 2 (R13 fitted) uses `0x50` and `[-47,514]`. The selected
@@ -54,10 +62,14 @@ temperature is applied to HALF and window refreshes. For recovery or hardware
 diagnostics, `-DFREEINK_MURPHY_M4_BATCH1=1` forces batch 1 and bypasses the
 probe. The product UI deliberately has no manual batch setting.
 
-First-batch hardware validation measured 101 charge-time samples on GPIO1:
-median 6008 µs, range 6004–6059 µs, and coefficient of variation 0.379%.
-This passes the batch-1 interval and 10% stability gate. Second-batch hardware
-validation remains required before removing the experimental release gate.
+The available GPIO1 reference-channel data is stable: first-batch hardware
+measured a 6008 µs median across 101 samples (6004–6059 µs, 0.379% coefficient
+of variation), while known second-batch hardware measured 6218 µs
+(6170–6233 µs, 101/101 valid). Their overlap proves GPIO1 alone cannot identify
+the batch. GPIO2/R13 has not been sampled on hardware, so the production rule
+does not attempt to identify batch 2; it only confirms the no-R13 first-batch
+topology and otherwise uses batch 2. A first-batch restart log has confirmed
+that an existing `m4_batch_v2=First` cache still restores batch 1.
 
 The first-batch input build was also sampled for 70 seconds after startup. The
 touch task retained at least 1120 bytes of its 3072-byte static stack while
@@ -89,11 +101,12 @@ and app at `0x10000` without overwriting NVS.
 
 ## Hardware release gate
 
-- Verify direction, edge pattern, Full/Fast/Half/window/grayscale and ghosting
-  on the second display batch; the first-batch RC probe stability gate is
-  complete. Confirm first boot probes and caches the right batch, later boots
-  use the cache, and holding Up during an uncached probe cannot persist a
-  result.
+- Before changing the first-batch gate, measure paired GPIO1/GPIO2 RC samples
+  and verify its absolute and ratio bounds. Confirm only a positive first-batch
+  result is cached, a later boot restores that cache, and holding Up or Down
+  during an uncached probe cannot persist a result. Verify direction, edge
+  pattern, Full/Fast/Half/window/grayscale and ghosting on the second display
+  batch.
 - Verify four-corner touch, swipes and rotations, including a short touch while
   an e-paper refresh blocks the main loop; confirm GPIO46 remains unusable and
   that GPIO7 display reset is followed by successful FT6336U reinitialization
