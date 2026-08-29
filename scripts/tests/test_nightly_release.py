@@ -87,7 +87,7 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn('cp artifacts/xteink-firmware.bin firmware-cn.bin', workflow)
         self.assertIn('gh release delete-asset "$CHANNEL" firmware-cn.bin', workflow)
         self.assertNotIn('--flavor', hardware_workflow)
-        self.assertIn('(cd "dist/$target" && sha256sum --check *-SHA256SUMS)', hardware_workflow)
+        self.assertIn('(cd "dist/nightly/$target" && sha256sum --check *-SHA256SUMS)', hardware_workflow)
 
     def test_workflow_fails_closed_and_verifies_both_regions(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
