@@ -102,10 +102,17 @@ class WeReadStoreTest : public ::testing::Test {
 TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
   ASSERT_TRUE(WeReadStore::ensureRoot());
   {
-    constexpr uint32_t kLegacyShelfMagic = 0x34535257;  // WRS4
+    struct LegacyShelfRecord {
+      char bookId[64] = {};
+      char title[192] = {};
+      char author[96] = {};
+      uint32_t readUpdateTime = 0;
+    };
+    static_assert(sizeof(LegacyShelfRecord) == 356);
+    constexpr uint32_t kLegacyShelfMagic = 0x35535257;  // WRS5
     WeReadStore::IndexWriter legacyShelf;
-    ASSERT_TRUE(legacyShelf.begin(WeReadStore::kShelfPath, kLegacyShelfMagic, sizeof(WeReadStore::ShelfRecord)));
-    WeReadStore::ShelfRecord record;
+    ASSERT_TRUE(legacyShelf.begin(WeReadStore::kShelfPath, kLegacyShelfMagic, sizeof(LegacyShelfRecord)));
+    LegacyShelfRecord record;
     strcpy(record.bookId, "legacy-book");
     ASSERT_TRUE(legacyShelf.append(&record));
     ASSERT_TRUE(legacyShelf.finish());
@@ -122,6 +129,7 @@ TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
     snprintf(record.bookId, sizeof(record.bookId), "book-%03u", i);
     snprintf(record.title, sizeof(record.title), "标题-%03u", i);
     snprintf(record.author, sizeof(record.author), "作者-%03u", i);
+    snprintf(record.coverUrl, sizeof(record.coverUrl), "https://cdn.example/cover-%03u.jpg", i);
     ASSERT_TRUE(shelf.append(&record));
   }
   ASSERT_EQ(shelf.count(), 600U);
@@ -135,6 +143,7 @@ TEST_F(WeReadStoreTest, StreamsLargeShelfAndTocIndexesAndRejectsCorruption) {
   ASSERT_TRUE(WeReadStore::readShelfRecord(shelfFile, 599, shelfRecord));
   EXPECT_STREQ(shelfRecord.bookId, "book-599");
   EXPECT_STREQ(shelfRecord.title, "标题-599");
+  EXPECT_STREQ(shelfRecord.coverUrl, "https://cdn.example/cover-599.jpg");
 
   const std::string tocPath = WeReadStore::tocPath("book-599");
   ASSERT_TRUE(Storage.ensureDirectoryExists(WeReadStore::bookDirectory("book-599").c_str()));

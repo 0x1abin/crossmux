@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "WeReadBrowse.h"
@@ -258,6 +259,18 @@ class Operation {
   }
   static constexpr bool imageAttemptPending(const uint8_t attempts) { return attempts < 2; }
   static constexpr bool imageRedirectAllowed(const uint8_t redirects) { return redirects < kMaxImageRedirects; }
+  static WeReadProtocol::ImageType selectCoverUrl(const char* detailUrl, const char* shelfUrl, char* output,
+                                                  const size_t outputSize) {
+    if (!output || outputSize == 0) return WeReadProtocol::ImageType::None;
+    output[0] = '\0';
+    WeReadProtocol::ImageType type = WeReadProtocol::normalizeCoverImageUrl(detailUrl, output, outputSize);
+    if (type != WeReadProtocol::ImageType::None) return type;
+    output[0] = '\0';
+    type = WeReadProtocol::normalizeCoverImageUrl(shelfUrl, output, outputSize);
+    if (type != WeReadProtocol::ImageType::None) return type;
+    output[0] = '\0';
+    return type;
+  }
   static constexpr bool validChapterRange(const uint32_t first, const uint32_t last, const uint32_t count) {
     return count > 0 && first <= last && last < count;
   }
@@ -343,11 +356,12 @@ class Operation {
   Event inspectPrimary();
   Event decodeChapter(bool plainText);
   Event finishWholeBook(const std::string& source);
+  bool persistCoverOverride();
   Event cancelNow();
   Error prepareImageWork(WeReadStore::WorkCallback callback, void* callbackContext);
   Event downloadNextImage();
   Error requestImage(WeReadStore::ImageRecord& image, WeReadStore::ImageWorkState& state, uint8_t& attempts,
-                     uint8_t& redirects, bool trackProgress);
+                     uint8_t& redirects, bool trackProgress, WeReadProtocol::ImageType* detectedType = nullptr);
 
   Phase phase_ = Phase::Idle;
   Phase resumePhase_ = Phase::Idle;
@@ -360,7 +374,8 @@ class Operation {
   ProgressSyncMode progressSyncMode_ = ProgressSyncMode::Compare;
   ProgressSyncResult progressSyncResult_;
   WeReadStore::Session session_;
-  WeReadStore::ShelfRecord book_;
+  WeReadStore::BookRecord book_;
+  std::unique_ptr<char[]> shelfCoverUrl_;
   WeReadStore::TocRecord chapter_;
   WeReadHttpClient::Session bookSession_;
   HalFile indexFile_;

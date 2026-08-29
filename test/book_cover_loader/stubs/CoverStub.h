@@ -8,6 +8,7 @@
 namespace cover_stub {
 inline int epubThumbnailGenerations = 0;
 inline int fullCoverGenerations = 0;
+inline int overrideConversions = 0;
 
 inline bool writeBmp(const std::string& path) {
   std::array<uint8_t, 66> bytes{};
@@ -25,7 +26,6 @@ inline bool writeBmp(const std::string& path) {
   bytes[58] = 0xFF;
   bytes[59] = 0xFF;
   bytes[60] = 0xFF;
-
   HalFile file;
   return Storage.openFileForWrite("TEST", path, file) && file.write(bytes.data(), bytes.size()) == bytes.size();
 }

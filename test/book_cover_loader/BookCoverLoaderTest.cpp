@@ -23,6 +23,7 @@ class BookCoverLoaderTest : public ::testing::Test {
     ASSERT_TRUE(Storage.begin());
     cover_stub::epubThumbnailGenerations = 0;
     cover_stub::fullCoverGenerations = 0;
+    cover_stub::overrideConversions = 0;
   }
 
   void TearDown() override {
@@ -35,6 +36,13 @@ class BookCoverLoaderTest : public ::testing::Test {
     std::ofstream output(root / (path + 1), std::ios::binary | std::ios::trunc);
     ASSERT_TRUE(output.good());
     output << "book";
+  }
+
+  void writeOverride(const std::initializer_list<uint8_t> bytes) {
+    ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub"));
+    std::ofstream output(hostPath("/.crosspoint/epub/cover.override"), std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(output.good());
+    for (const uint8_t byte : bytes) output.put(static_cast<char>(byte));
   }
 
   std::filesystem::path hostPath(const char* path) const { return root / (path + 1); }
@@ -121,6 +129,60 @@ TEST_F(BookCoverLoaderTest, PreservesCoverlessEpubMarker) {
 
   EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated).empty());
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, UsesOverrideAfterInternalEpubCoverFails) {
+  writeBook("/coverless.epub");
+  writeOverride({0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0});
+
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(cover_stub::overrideConversions, 1);
+}
+
+TEST_F(BookCoverLoaderTest, PrefersInternalEpubCoverOverOverride) {
+  writeBook("/book.epub");
+  writeOverride({0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0});
+
+  EXPECT_FALSE(BookCoverLoader::ensureThumbnail("/book.epub", 226).empty());
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(cover_stub::overrideConversions, 0);
+}
+
+TEST_F(BookCoverLoaderTest, RetriesEmptyMarkerWhenOverrideAppears) {
+  writeBook("/coverless.epub");
+  bool generated = true;
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated).empty());
+  writeOverride({0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0});
+
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 2);
+  EXPECT_EQ(cover_stub::overrideConversions, 1);
+}
+
+TEST_F(BookCoverLoaderTest, IgnoresInvalidOverrideAfterEmptyMarker) {
+  writeBook("/coverless.epub");
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/coverless.epub", 226).empty());
+  writeOverride({'n', 'o', 't', '-', 'a', 'n', '-', 'i', 'm', 'a', 'g', 'e'});
+
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/coverless.epub", 226).empty());
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(cover_stub::overrideConversions, 0);
+}
+
+TEST_F(BookCoverLoaderTest, UsesOverrideForFullEpubCover) {
+  writeBook("/coverless.epub");
+  writeOverride({0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0});
+
+  std::string title;
+  std::string author;
+  EXPECT_EQ(BookCoverLoader::ensureFullCover("/coverless.epub", &title, &author), "/.crosspoint/epub/cover.bmp");
+  EXPECT_EQ(title, "EPUB title");
+  EXPECT_EQ(author, "EPUB author");
+  EXPECT_EQ(cover_stub::overrideConversions, 1);
 }
 
 TEST_F(BookCoverLoaderTest, RejectsMissingBook) {

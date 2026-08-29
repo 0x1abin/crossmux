@@ -462,29 +462,32 @@ bool extractImageAttributes(const char* tag, char* source, const size_t sourceSi
   return source[0] != '\0';
 }
 
-ImageType normalizeImageUrl(const char* source, char* output, const size_t outputSize) {
-  if (!source || !output || outputSize < 10) return ImageType::None;
+namespace {
+
+bool normalizeHttpsUrl(const char* source, char* output, const size_t outputSize, const char*& path,
+                       const char*& pathEnd) {
+  if (!source || !output || outputSize < 10) return false;
   size_t written = 0;
   if (source[0] == '/' && source[1] == '/') {
     static constexpr char kScheme[] = "https:";
-    if (sizeof(kScheme) - 1 >= outputSize) return ImageType::None;
+    if (sizeof(kScheme) - 1 >= outputSize) return false;
     memcpy(output, kScheme, sizeof(kScheme) - 1);
     written = sizeof(kScheme) - 1;
   } else {
     static constexpr char kScheme[] = "https://";
     for (size_t i = 0; i < sizeof(kScheme) - 1; ++i) {
-      if (!source[i] || std::tolower(static_cast<unsigned char>(source[i])) != kScheme[i]) return ImageType::None;
+      if (!source[i] || std::tolower(static_cast<unsigned char>(source[i])) != kScheme[i]) return false;
       output[written++] = kScheme[i];
     }
     source += sizeof(kScheme) - 1;
   }
 
   while (*source && *source != '#') {
-    if (written + 1 >= outputSize) return ImageType::None;
+    if (written + 1 >= outputSize) return false;
     const unsigned char value = static_cast<unsigned char>(*source);
     if (value <= 0x20 || value == 0x7F || value == '"' || value == '\'' || value == '<' || value == '>' ||
         value == '\\') {
-      return ImageType::None;
+      return false;
     }
     if (strncmp(source, "&amp;", 5) == 0) {
       output[written++] = '&';
@@ -496,17 +499,21 @@ ImageType normalizeImageUrl(const char* source, char* output, const size_t outpu
   output[written] = '\0';
 
   const char* host = output + 8;
-  const char* path = strchr(host, '/');
-  if (!path || path == host || host[0] == '.' || path[-1] == '.') return ImageType::None;
+  path = strchr(host, '/');
+  if (!path || path == host || host[0] == '.' || path[-1] == '.') return false;
   bool previousDot = false;
   for (const char* cursor = host; cursor < path; ++cursor) {
     const unsigned char value = static_cast<unsigned char>(*cursor);
-    if (!std::isalnum(value) && value != '.' && value != '-') return ImageType::None;
-    if (value == '.' && previousDot) return ImageType::None;
+    if (!std::isalnum(value) && value != '.' && value != '-') return false;
+    if (value == '.' && previousDot) return false;
     previousDot = value == '.';
   }
-  const char* pathEnd = strchr(path, '?');
+  pathEnd = strchr(path, '?');
   if (!pathEnd) pathEnd = output + written;
+  return pathEnd > path && pathEnd[-1] != '/';
+}
+
+ImageType imageTypeFromPath(const char* path, const char* pathEnd) {
   const char* extension = pathEnd;
   while (extension > path && extension[-1] != '.') --extension;
   if (extension == path || extension[-1] != '.') return ImageType::None;
@@ -520,6 +527,28 @@ ImageType normalizeImageUrl(const char* source, char* output, const size_t outpu
   };
   if (extensionIs("jpg") || extensionIs("jpeg")) return ImageType::Jpeg;
   return extensionIs("png") ? ImageType::Png : ImageType::None;
+}
+
+}  // namespace
+
+ImageType normalizeImageUrl(const char* source, char* output, const size_t outputSize) {
+  const char* path = nullptr;
+  const char* pathEnd = nullptr;
+  if (!normalizeHttpsUrl(source, output, outputSize, path, pathEnd)) return ImageType::None;
+  return imageTypeFromPath(path, pathEnd);
+}
+
+ImageType normalizeCoverImageUrl(const char* source, char* output, const size_t outputSize) {
+  const char* path = nullptr;
+  const char* pathEnd = nullptr;
+  if (!normalizeHttpsUrl(source, output, outputSize, path, pathEnd)) return ImageType::None;
+  const ImageType type = imageTypeFromPath(path, pathEnd);
+  if (type != ImageType::None) return type;
+  const char* filename = pathEnd;
+  while (filename > path && filename[-1] != '/') --filename;
+  return filename < pathEnd && memchr(filename, '.', static_cast<size_t>(pathEnd - filename)) == nullptr
+             ? ImageType::Detect
+             : ImageType::None;
 }
 
 bool PsvtsExtractor::reset() {

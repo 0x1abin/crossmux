@@ -614,11 +614,22 @@ std::string detailPath(const std::string& bookDir) { return bookDir + "/detail.b
 
 std::string coverPath(const std::string& bookDir) { return bookDir + "/cover.v2.bmp"; }
 
-std::string finalBookPath(const ShelfRecord& book) {
+BookRecord bookRecord(const ShelfRecord& shelf) {
+  BookRecord book;
+  memcpy(book.bookId, shelf.bookId, sizeof(book.bookId));
+  memcpy(book.title, shelf.title, sizeof(book.title));
+  memcpy(book.author, shelf.author, sizeof(book.author));
+  book.readUpdateTime = shelf.readUpdateTime;
+  return book;
+}
+
+std::string finalBookPath(const BookRecord& book) {
   const std::string title = StringUtils::sanitizeFilename(book.title, 80);
   const std::string id = StringUtils::sanitizeFilename(book.bookId, 40);
   return "/WeRead/" + title + "-" + id + ".epub";
 }
+
+std::string finalBookPath(const ShelfRecord& book) { return finalBookPath(bookRecord(book)); }
 
 bool findBookIdForPath(const std::string& path, char* bookId, const size_t bookIdSize) {
   if (!bookId || bookIdSize == 0) return false;
