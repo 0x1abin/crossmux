@@ -145,6 +145,14 @@ TEST(InxNavigation, KeepsRecentPagesInsideBounds) {
   }
 }
 
+TEST(InxNavigation, ReservesRecentFooterWithOrWithoutButtonHints) {
+  EXPECT_EQ(InxRecentGeometry::footerReservedHeight, 40);
+  EXPECT_EQ(InxRecentGeometry::contentHeight(480, 66, 0), 374);
+  EXPECT_EQ(InxRecentGeometry::contentHeight(480, 66, 40), 374);
+  EXPECT_EQ(InxRecentGeometry::contentHeight(480, 66, 56), 358);
+  EXPECT_EQ(InxRecentGeometry::contentHeight(80, 60, 0), 0);
+}
+
 TEST(InxNavigation, FitsOriginalCoverRatioInsideBounds) {
   EXPECT_EQ(InxCoverGeometry::fit(0, 250).width, 0);
   EXPECT_EQ(InxCoverGeometry::fit(170, 250).width, 170);

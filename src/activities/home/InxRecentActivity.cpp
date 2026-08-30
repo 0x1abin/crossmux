@@ -31,7 +31,7 @@ Rect contentRect(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   return Rect{0, top, renderer.getScreenWidth(),
-              renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing};
+              InxRecentGeometry::contentHeight(renderer.getScreenHeight(), top, metrics.buttonHintsHeight)};
 }
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
