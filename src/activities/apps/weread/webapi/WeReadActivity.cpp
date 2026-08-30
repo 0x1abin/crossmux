@@ -1611,7 +1611,7 @@ void WeReadActivity::handleShelfInput() {
       } else {
         break;
       }
-      return;
+      [[fallthrough]];
     case ShelfNavigationGesture::PreviousPressed:
     case ShelfNavigationGesture::NextPressed:
     case ShelfNavigationGesture::PreviousPageHandled:
