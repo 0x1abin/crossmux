@@ -101,6 +101,21 @@ class PinUpdateTest(unittest.TestCase):
         self.assertEqual(pins, (sha, sha))
 
 
+class BuildValidationTest(unittest.TestCase):
+    def test_crossmux_uses_current_release_environment(self):
+        with patch.object(sync_upstream, "run") as run:
+            sync_upstream.run_crossmux_builds(Path("/tmp/crossmux"), False, ["extra"])
+
+        self.assertEqual(
+            [invocation.args[0] for invocation in run.call_args_list],
+            [
+                ["pio", "run"],
+                ["pio", "run", "-e", "gh_release"],
+                ["pio", "run", "-e", "extra"],
+            ],
+        )
+
+
 class ReviewGateTest(unittest.TestCase):
     def test_pr_body_pairs_each_review_item_with_its_decision(self):
         state = {
