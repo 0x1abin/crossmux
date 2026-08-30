@@ -58,7 +58,7 @@ class HalGPIO {
  private:
   DeviceType _deviceType = DeviceType::X4;
 #if FREEINK_DEVICE_MURPHY_M4
-  freeink::MurphyM4Batch _murphyM4Batch = freeink::defaultMurphyM4Batch();
+  freeink::MurphyM4Batch _murphyM4Batch = freeink::MurphyM4Batch::Second;
 #endif
 
  public:
@@ -69,6 +69,7 @@ class HalGPIO {
   inline bool deviceIsX4() const { return _deviceType == DeviceType::X4; }
 #if FREEINK_DEVICE_MURPHY_M4
   freeink::MurphyM4Batch murphyM4Batch() const { return _murphyM4Batch; }
+  bool saveMurphyM4Batch(freeink::MurphyM4Batch batch);
 #endif
   bool isXteinkDevice() const;
 

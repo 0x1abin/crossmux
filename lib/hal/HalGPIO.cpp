@@ -11,10 +11,7 @@
 #include "Waveshare397Power.h"
 
 #if FREEINK_DEVICE_MURPHY_M4
-#include <array>
-#include <optional>
-
-#include "MurphyM4BatchDetection.h"
+#include "MurphyM4BatchPreference.h"
 #endif
 
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
@@ -60,12 +57,7 @@ constexpr char HW_NAMESPACE[] = "cphw";
 constexpr char NVS_KEY_DEV_OVERRIDE[] = "dev_ovr";  // 0=auto, 1=x4, 2=x3
 constexpr char NVS_KEY_DEV_CACHED[] = "dev_det";    // 0=unknown, 1=x4, 2=x3
 #if FREEINK_DEVICE_MURPHY_M4
-constexpr char NVS_KEY_M4_BATCH[] = "m4_batch_v2";
-constexpr uint8_t NVS_M4_BATCH_FIRST = 1;
-constexpr uint16_t M4_CHARGED_ADC_MIN = 3000;
-constexpr uint32_t M4_CHARGE_SETTLE_MS = 50;
-constexpr uint32_t M4_DISCHARGE_US = 2000;
-constexpr uint32_t M4_RISE_TIMEOUT_US = 15000;
+constexpr char NVS_KEY_M4_BATCH[] = "m4_batch_v3";
 #endif
 
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
@@ -84,11 +76,12 @@ uint8_t readNvsUChar(const char* key, const uint8_t defaultValue) {
   return value;
 }
 
-void writeNvsUChar(const char* key, const uint8_t value) {
+bool writeNvsUChar(const char* key, const uint8_t value) {
   Preferences prefs;
-  if (!prefs.begin(HW_NAMESPACE, false)) return;
-  prefs.putUChar(key, value);
+  if (!prefs.begin(HW_NAMESPACE, false)) return false;
+  const bool written = prefs.putUChar(key, value) == sizeof(value);
   prefs.end();
+  return written;
 }
 
 NvsDeviceValue readNvsDeviceValue(const char* key, NvsDeviceValue defaultValue) {
@@ -142,102 +135,10 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 }
 
 #if FREEINK_DEVICE_MURPHY_M4
-bool hasCachedFirstMurphyM4Batch() { return readNvsUChar(NVS_KEY_M4_BATCH, 0) == NVS_M4_BATCH_FIRST; }
-
-struct MurphyM4ProbePin {
-  uint8_t pin;
-  uint16_t chargedAdc = 0;
-};
-
-struct MurphyM4ProbeMeasurement {
-  uint32_t referenceMedianUs = 0;
-  uint32_t targetMedianUs = 0;
-};
-
-std::optional<MurphyM4ProbePin> configureMurphyM4ProbePin(const int8_t pin) {
-  if (pin < 0) return std::nullopt;
-  const gpio_num_t gpioPin = static_cast<gpio_num_t>(pin);
-  analogSetPinAttenuation(static_cast<uint8_t>(pin), ADC_11db);
-  gpio_set_pull_mode(gpioPin, GPIO_FLOATING);
-  gpio_set_direction(gpioPin, GPIO_MODE_INPUT);
-  return MurphyM4ProbePin{static_cast<uint8_t>(pin)};
-}
-
-std::optional<uint32_t> measureMurphyM4RiseTime(const MurphyM4ProbePin& probePin) {
-  const gpio_num_t gpioPin = static_cast<gpio_num_t>(probePin.pin);
-  gpio_set_level(gpioPin, 0);
-  gpio_set_direction(gpioPin, GPIO_MODE_OUTPUT);
-  delayMicroseconds(M4_DISCHARGE_US);
-  if (analogRead(probePin.pin) > probePin.chargedAdc / 10) {
-    gpio_set_direction(gpioPin, GPIO_MODE_INPUT);
-    return std::nullopt;
-  }
-
-  gpio_set_direction(gpioPin, GPIO_MODE_INPUT);
-  const uint32_t startedAt = micros();
-  while (analogRead(probePin.pin) < probePin.chargedAdc / 2) {
-    if (micros() - startedAt > M4_RISE_TIMEOUT_US) return std::nullopt;
-  }
-  return micros() - startedAt;
-}
-
-std::optional<MurphyM4ProbeMeasurement> probeMurphyM4Batch() {
-  auto referencePin = configureMurphyM4ProbePin(BoardConfig::ACTIVE.input.up);
-  auto targetPin = configureMurphyM4ProbePin(BoardConfig::ACTIVE.input.down);
-  if (!referencePin || !targetPin || referencePin->pin == targetPin->pin) {
-    return std::nullopt;
-  }
-
-  delay(M4_CHARGE_SETTLE_MS);
-  referencePin->chargedAdc = analogRead(referencePin->pin);
-  targetPin->chargedAdc = analogRead(targetPin->pin);
-  if (referencePin->chargedAdc < M4_CHARGED_ADC_MIN || targetPin->chargedAdc < M4_CHARGED_ADC_MIN) {
-    return std::nullopt;
-  }
-
-  std::array<uint32_t, MurphyM4BatchDetection::SAMPLE_COUNT> referenceRiseTimes{};
-  std::array<uint32_t, MurphyM4BatchDetection::SAMPLE_COUNT> targetRiseTimes{};
-  for (std::size_t index = 0; index < referenceRiseTimes.size(); ++index) {
-    const auto referenceRiseTime = measureMurphyM4RiseTime(*referencePin);
-    const auto targetRiseTime = measureMurphyM4RiseTime(*targetPin);
-    if (!referenceRiseTime || !targetRiseTime) return std::nullopt;
-    referenceRiseTimes[index] = *referenceRiseTime;
-    targetRiseTimes[index] = *targetRiseTime;
-  }
-
-  return MurphyM4ProbeMeasurement{MurphyM4BatchDetection::median(referenceRiseTimes),
-                                  MurphyM4BatchDetection::median(targetRiseTimes)};
-}
-
-freeink::MurphyM4Batch detectMurphyM4Batch() {
-#if defined(FREEINK_MURPHY_M4_BATCH1) && FREEINK_MURPHY_M4_BATCH1
-  LOG_INF("HW", "Murphy M4 batch forced to first by build flag");
-  return freeink::MurphyM4Batch::First;
-#else
-  if (hasCachedFirstMurphyM4Batch()) {
-    LOG_INF("HW", "Murphy M4 batch 1 from NVS cache");
-    return freeink::MurphyM4Batch::First;
-  }
-
-  const auto measurement = probeMurphyM4Batch();
-  if (measurement &&
-      MurphyM4BatchDetection::isFirstBatch(measurement->referenceMedianUs, measurement->targetMedianUs)) {
-    writeNvsUChar(NVS_KEY_M4_BATCH, NVS_M4_BATCH_FIRST);
-    LOG_INF("HW", "Murphy M4 batch probe: first (gpio1=%lu us gpio2=%lu us)",
-            static_cast<unsigned long>(measurement->referenceMedianUs),
-            static_cast<unsigned long>(measurement->targetMedianUs));
-    return freeink::MurphyM4Batch::First;
-  }
-
-  if (measurement) {
-    LOG_INF("HW", "Murphy M4 batch probe did not confirm first (gpio1=%lu us gpio2=%lu us); using batch 2",
-            static_cast<unsigned long>(measurement->referenceMedianUs),
-            static_cast<unsigned long>(measurement->targetMedianUs));
-  } else {
-    LOG_ERR("HW", "Murphy M4 batch probe failed; using batch 2");
-  }
-  return freeink::MurphyM4Batch::Second;
-#endif
+freeink::MurphyM4Batch loadMurphyM4Batch() {
+  const uint8_t stored =
+      readNvsUChar(NVS_KEY_M4_BATCH, MurphyM4BatchPreference::encode(freeink::MurphyM4Batch::Second));
+  return MurphyM4BatchPreference::decode(stored);
 }
 #endif
 
@@ -270,11 +171,20 @@ void HalGPIO::begin() {
   InputManager::setButtonHook(wavesharePowerButtonHook);
 #endif
 #if FREEINK_DEVICE_MURPHY_M4
-  _murphyM4Batch = detectMurphyM4Batch();
+  _murphyM4Batch = loadMurphyM4Batch();
+  LOG_INF("HW", "Murphy M4 batch %u selected", _murphyM4Batch == freeink::MurphyM4Batch::First ? 1U : 2U);
   inputMgr.setMurphyM4Batch(_murphyM4Batch);
 #endif
   inputMgr.begin();
 }
+
+#if FREEINK_DEVICE_MURPHY_M4
+bool HalGPIO::saveMurphyM4Batch(const freeink::MurphyM4Batch batch) {
+  if (writeNvsUChar(NVS_KEY_M4_BATCH, MurphyM4BatchPreference::encode(batch))) return true;
+  LOG_ERR("HW", "Failed to save Murphy M4 batch");
+  return false;
+}
+#endif
 
 void HalGPIO::update() {
   inputMgr.update();

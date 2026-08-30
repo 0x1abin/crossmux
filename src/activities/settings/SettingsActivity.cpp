@@ -6,6 +6,9 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
+#if FREEINK_DEVICE_MURPHY_M4
+#include <HalGPIO.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -250,6 +253,22 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(
       SettingInfo::Action(StrId::STR_RESTORE_SYSTEM_SETTINGS, SettingAction::RestoreSystemSettings));
+#if FREEINK_DEVICE_MURPHY_M4
+  systemSettings.push_back(
+      SettingInfo::DynamicEnum(
+          StrId::STR_M4_HARDWARE_BATCH, {StrId::STR_M4_BATCH_1, StrId::STR_M4_BATCH_2},
+          [] { return gpio.murphyM4Batch() == freeink::MurphyM4Batch::First ? 0 : 1; },
+          [this](const uint8_t value) {
+            const auto batch = value == 0 ? freeink::MurphyM4Batch::First : freeink::MurphyM4Batch::Second;
+            if (gpio.saveMurphyM4Batch(batch)) {
+              silentRestart();
+              return;
+            }
+            optionPopup.show(StrId::STR_FAILED_LOWER, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, [](int) {});
+            requestUpdate();
+          })
+          .withManagedEnumPicker());
+#endif
   // Keep the existing CrossMux OTA proxy flow. Build-only boards compile this
   // UI but are intentionally absent from release assets in this sync.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));

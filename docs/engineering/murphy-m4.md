@@ -35,41 +35,22 @@ has no Home key, so `H` is ignored. It does not replace hardware tests for
 display batches/ghosting, FT6336U IRQ/reset behavior, SDMMC contention, PWM
 curves, PSRAM, or standby current.
 
-M4 batch detection runs before the normal GPIO input setup. GPIO1/KEY1 has a
-100 kΩ pull-up and 100 nF capacitor and serves as the reference channel.
-GPIO2/KEY2 has the same network; R13 is a second 100 kΩ pull-up in parallel on
-that channel and should halve its charge time on batch 2. The firmware measures
-seven paired 50%-charge times in two fixed arrays (56 stack bytes). It confirms
-batch 1 only when both medians are 5200–10000 µs and GPIO2/GPIO1 is 75–125%.
-Any pressed key, failed discharge, timeout, out-of-range sample, ratio mismatch,
-or other result uses the market-default batch 2.
+M4 does not probe its hardware batch. Missing, unreadable, or invalid preference
+data selects the market-default batch 2. The Hardware Batch row appears directly
+above Check for updates in System settings. Opening it shows a Batch 1/Batch 2
+picker with the active batch selected; cancelling or selecting that same value
+does not write or restart. A changed value is written to `cphw/m4_batch_v3` and
+takes effect through an immediate restart. A failed NVS write leaves the active
+batch unchanged and does not restart. The former automatic-detection key
+`cphw/m4_batch_v2` is deliberately ignored, so an upgrade without an explicit
+manual choice also starts on batch 2.
 
-Only a confirmed batch 1 is cached in `cphw/m4_batch_v2`. A cached First value
-is restored directly; Second, damaged, and missing values trigger a fresh safe
-probe and are not deleted. Batch 2 is never written, so it is rechecked on each
-boot and remains the fallback. `HalGPIO::begin()` applies the result to touch
-before input starts; `HalDisplay::begin()` reads the same HAL state before
-constructing the immutable SSD1677 batch configuration. The probe uses no heap
-allocation.
-[ESP32-S3 Datasheet v2.2](https://documentation.espressif.com/esp32_s3_datasheet_en.pdf)
-Table 2-8 maps GPIO1 to ADC1_CH0 and GPIO2 to ADC1_CH1; its documented 60 µs
-power-up low glitch is also shorter than the 50 ms settle delay before the
-charged reference samples.
-
-Batch 1 (no R13) uses the `0x3C` pseudo-temperature and touch short-axis range
-`[-52,553]`; batch 2 (R13 fitted) uses `0x50` and `[-47,514]`. The selected
-temperature is applied to HALF and window refreshes. For recovery or hardware
-diagnostics, `-DFREEINK_MURPHY_M4_BATCH1=1` forces batch 1 and bypasses the
-probe. The product UI deliberately has no manual batch setting.
-
-The available GPIO1 reference-channel data is stable: first-batch hardware
-measured a 6008 µs median across 101 samples (6004–6059 µs, 0.379% coefficient
-of variation), while known second-batch hardware measured 6218 µs
-(6170–6233 µs, 101/101 valid). Their overlap proves GPIO1 alone cannot identify
-the batch. GPIO2/R13 has not been sampled on hardware, so the production rule
-does not attempt to identify batch 2; it only confirms the no-R13 first-batch
-topology and otherwise uses batch 2. A first-batch restart log has confirmed
-that an existing `m4_batch_v2=First` cache still restores batch 1.
+`HalGPIO::begin()` reads the preference and applies it to touch before input
+starts. `HalDisplay::begin()` reads the same HAL state before constructing the
+immutable SSD1677 batch configuration. Batch 1 (no R13) uses the `0x3C`
+pseudo-temperature and touch short-axis range `[-52,553]`; batch 2 (R13 fitted)
+uses `0x50` and `[-47,514]`. The selected temperature is applied to HALF and
+window refreshes.
 
 The first-batch input build was also sampled for 70 seconds after startup. The
 touch task retained at least 1120 bytes of its 3072-byte static stack while
@@ -101,12 +82,12 @@ and app at `0x10000` without overwriting NVS.
 
 ## Hardware release gate
 
-- Before changing the first-batch gate, measure paired GPIO1/GPIO2 RC samples
-  and verify its absolute and ratio bounds. Confirm only a positive first-batch
-  result is cached, a later boot restores that cache, and holding Up or Down
-  during an uncached probe cannot persist a result. Verify direction, edge
-  pattern, Full/Fast/Half/window/grayscale and ghosting on the second display
-  batch.
+- With no `m4_batch_v3` value, and with only the retired `m4_batch_v2` value,
+  confirm batch 2 is selected. Select each batch from System settings and verify
+  the device restarts into the matching direction, edge pattern,
+  Full/Fast/Half/window/grayscale behavior, touch calibration, and ghosting.
+  Simulate an NVS write failure and confirm the device reports failure without
+  restarting or changing the active batch.
 - Verify four-corner touch, swipes and rotations, including a short touch while
   an e-paper refresh blocks the main loop; confirm GPIO46 remains unusable and
   that GPIO7 display reset is followed by successful FT6336U reinitialization
@@ -131,5 +112,5 @@ and app at `0x10000` without overwriting NVS.
   I²C handles must be allocated only at startup, and no metric may show a
   continuing decline.
 
-AHT20, SC7A20, manual panel-batch settings, remote OTA/catalog publication and
-complex SD fallback remain outside this experimental target.
+AHT20, SC7A20, remote OTA/catalog publication and complex SD fallback remain
+outside this experimental target.
