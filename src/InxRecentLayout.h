@@ -6,6 +6,12 @@
 enum class InxRecentLayout : uint8_t { Flow, Grid, List, Icons, Cover, Count };
 
 namespace InxRecentGeometry {
+inline constexpr int footerReservedHeight = 40;
+
+constexpr int contentHeight(const int screenHeight, const int top, const int buttonHintsHeight) {
+  return std::max(0, screenHeight - top - std::max(buttonHintsHeight, footerReservedHeight));
+}
+
 constexpr int itemsPerPage(const InxRecentLayout layout) {
   switch (layout) {
     case InxRecentLayout::Flow:
