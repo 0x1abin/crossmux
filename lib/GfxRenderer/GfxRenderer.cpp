@@ -461,6 +461,59 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   }
 }
 
+// Render one two-line CJK paragraph lead without allocating a second glyph buffer.
+// Destination pixels sample the existing bitmap directly, preserving the current font and grayscale path.
+static void renderFocusLead(const GfxRenderer& renderer, const GfxRenderer::RenderMode renderMode,
+                            const EpdFontFamily& fontFamily, const uint32_t cp, const int cursorX, const int cursorY,
+                            const bool pixelState, const EpdFontFamily::Style style,
+                            const uint8_t syntheticBoldPixels) {
+  const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
+  if (!glyph) return;
+
+  const EpdFontData* fontData = fontFamily.getData(style);
+  const int srcW = glyph->width;
+  const int srcH = glyph->height;
+  if (srcW <= 0 || srcH <= 0) return;
+  const int dstW = EpdFontFamily::scaleFocusLeadMetric(srcW);
+  const int dstH = EpdFontFamily::scaleFocusLeadMetric(srcH);
+  const int baseX = cursorX + EpdFontFamily::scaleFocusLeadMetric(glyph->left);
+  const int baseY = cursorY - glyph->top;
+
+  if (!renderer.glyphIntersectsStrip(baseX, baseY, baseX + dstW - 1 + syntheticBoldPixels, baseY + dstH - 1)) {
+    return;
+  }
+
+  const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
+  if (!bitmap) return;
+
+  if (fontData->is2Bit) {
+    for (int dstY = 0; dstY < dstH; ++dstY) {
+      const int srcY = dstY / 2;
+      uint8_t previous1 = 0;
+      uint8_t previous2 = 0;
+      for (int dstX = 0; dstX < dstW + syntheticBoldPixels; ++dstX) {
+        const uint8_t current = dstX < dstW ? get2BitCoverage(bitmap, srcY * srcW + dstX / 2) : 0;
+        const uint8_t coverage = dilate2BitCoverage(current, previous1, previous2, syntheticBoldPixels);
+        draw2BitGlyphPixel(renderer, renderMode, baseX + dstX, baseY + dstY, pixelState, coverage);
+        previous2 = previous1;
+        previous1 = current;
+      }
+    }
+    return;
+  }
+
+  for (int dstY = 0; dstY < dstH; ++dstY) {
+    const int srcY = dstY / 2;
+    for (int dstX = 0; dstX < dstW; ++dstX) {
+      const int srcX = dstX / 2;
+      const int pos = srcY * srcW + srcX;
+      if ((bitmap[pos >> 3] >> (7 - (pos & 7))) & 1) {
+        drawGlyphPixel(renderer, baseX + dstX, baseY + dstY, pixelState, syntheticBoldPixels);
+      }
+    }
+  }
+}
+
 template <TextRotation rotation = TextRotation::None>
 static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                            const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
@@ -650,6 +703,7 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
 
   int w = 0, h = 0;
   fontIt->second.getTextDimensions(renderedText, &w, &h, style);
+  if ((style & EpdFontFamily::FOCUS_LEAD) != 0) w = EpdFontFamily::scaleFocusLeadMetric(w);
   return w;
 }
 
@@ -668,6 +722,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 
   const uint8_t activeSyntheticBoldPixels =
       syntheticBoldPixels != 0 && (style & EpdFontFamily::BOLD) != 0 ? syntheticBoldPixels : 0;
+  const bool isFocusLead = (style & EpdFontFamily::FOCUS_LEAD) != 0;
   const auto renderStyle =
       activeSyntheticBoldPixels != 0
           ? static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(style) & ~static_cast<uint8_t>(EpdFontFamily::BOLD))
@@ -759,9 +814,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       // Halve the advance so the cursor advances by the same amount the scaled glyph
       // actually occupies, keeping spacing correct without needing a separate smaller font.
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+    } else if (isFocusLead) {
+      prevAdvanceFP = EpdFontFamily::scaleFocusLeadMetric(prevAdvanceFP);
     }
 
-    if (isSupSub) {
+    if (isFocusLead) {
+      renderFocusLead(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle, activeSyntheticBoldPixels);
+    } else if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
       renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle, activeSyntheticBoldPixels);
     } else {
@@ -2146,6 +2205,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   auto sdIt = sdCardFonts_.find(resolvedFontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
+    const bool isFocusLead = (style & EpdFontFamily::FOCUS_LEAD) != 0;
     const uint8_t styleIdx = resolveSdCardStyle(*sdIt->second, style);
     int widthPx = 0;
     int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: previous glyph's advance
@@ -2174,7 +2234,10 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
       prevAdvanceFP = static_cast<int32_t>(sdIt->second->getAdvanceOrLoad(cp, styleIdx));
       // SUP/SUB glyphs render at 50% scale (renderCharScaled), so halve the advance
       // to keep measurement consistent with drawText and the builtin-font path below.
-      if (isSupSub) prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+      if (isSupSub)
+        prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+      else if (isFocusLead)
+        prevAdvanceFP = EpdFontFamily::scaleFocusLeadMetric(prevAdvanceFP);
       havePrev = true;
     }
     if (havePrev) widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
@@ -2192,6 +2255,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   int widthPx = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = fontIt->second;
+  const bool isFocusLead = (style & EpdFontFamily::FOCUS_LEAD) != 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
     // RTL vowel marks (niqqud/harakat) are zero-advance overlays in drawText — no width.
     if (BidiUtils::isTransparentMark(cp)) {
@@ -2213,6 +2277,8 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     prevAdvanceFP = glyph ? glyph->advanceX : 0;
     if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+    } else if (isFocusLead) {
+      prevAdvanceFP = EpdFontFamily::scaleFocusLeadMetric(prevAdvanceFP);
     }
     prevCp = cp;
   }

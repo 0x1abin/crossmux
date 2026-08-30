@@ -100,11 +100,11 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 56 / 57
+### Version 58
 
-> Unified firmware uses the CJK-capable cache version **57**. Version 56 was the
-> former Latin-build counter; its layout is identical, but font metrics differ,
-> so old pagination caches are deliberately invalidated.
+> Unified firmware uses the CJK-capable cache version **58**. Versions 56/57
+> were the former per-flavor counters; their byte layout is identical, but font
+> metrics differ, so old pagination caches are deliberately invalidated.
 >
 > Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37
 > invalidated cached word positions after Arabic contextual shaping began measuring
@@ -127,9 +127,9 @@ if (parsedSize != fileSize) {
 > indent and default CJK paragraph indents use two ideograph advances instead of
 > three space advances. Versions 56/57 invalidate pagination for focus-word
 > break opportunities, image viewport clamping, and the extra-wide line-spacing
-> option. The counters remain distinct and above every
-> previously shipped value so a firmware-flavor swap cannot read the other flavor's
-> stale cache.
+> option. Version 58 keeps the byte layout unchanged but invalidates word styles
+> and positions for two-line CJK Focus Reading paragraph leads. It remains above
+> every previously shipped value, so stale pagination is always rebuilt.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
@@ -177,8 +177,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 54
-#define CHINESE_VERSION 55
+#define LATIN_VERSION 56
+#define CHINESE_VERSION 58
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -209,7 +209,9 @@ enum WordStyle : u8 {
     UNDERLINE = 4,
     STRIKETHROUGH = 8,
     SUP = 16,
-    SUB = 32
+    SUB = 32,
+    RUBY_CONTINUE = 64,
+    FOCUS_LEAD = 128
 };
 
 enum TextAlign : u8 {

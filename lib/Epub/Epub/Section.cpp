@@ -29,8 +29,9 @@ namespace {
 //   52 / 53 - ruby/CJK justification layout and 256-byte footnote hrefs
 //   54 / 55 - one-shot soft-flush indentation and two-CJK-character defaults
 //   56 / 57 - focus-word break opportunities, image viewport clamping, and extra-wide line spacing
+//   58      - two-line CJK Focus Reading paragraph leads
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 57;
+constexpr uint8_t SECTION_FILE_VERSION = 58;
 #else
 constexpr uint8_t SECTION_FILE_VERSION = 56;
 #endif

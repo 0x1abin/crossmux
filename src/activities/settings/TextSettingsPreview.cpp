@@ -1,12 +1,14 @@
 #include "TextSettingsPreview.h"
 
 #include <EpdFontFamily.h>
+#include <Epub/FocusReadingRules.h>
 #include <Epub/ParsedText.h>
 #include <Epub/blocks/BlockStyle.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Utf8.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -45,14 +47,18 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
 
   // Feed one space-separated word at a time; addWord handles NFC/CJK/RTL/focus splitting
   const char* text = I18N.get(StrId::STR_FONT_PREVIEW_TEXT);
+  const auto* first = reinterpret_cast<const unsigned char*>(text);
+  const bool previewCjkLead =
+      SETTINGS.focusReadingEnabled != 0 && focusReading::isHanIdeograph(utf8NextCodepoint(&first));
   std::string word;
   word.reserve(strlen(text));
-  bool firstWord = true;
+  size_t wordIndex = 0;
   for (const char* p = text;; p++) {
     if (*p == ' ' || *p == '\0') {
       if (!word.empty()) {
-        parsed.addWord(word, firstWord ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-        firstWord = false;
+        const size_t boldSampleIndex = previewCjkLead ? 1 : 0;
+        parsed.addWord(word, wordIndex == boldSampleIndex ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+        wordIndex++;
         word.clear();
       }
       if (*p == '\0') break;
@@ -131,9 +137,10 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
   // Draw the sample twice so the paragraph gap is visible
   GfxRenderer::SyntheticBoldScope syntheticBold(renderer, SETTINGS.fakeBold);
   int y = textTop;
+  const bool singleLineFocusLead = layout.lines.size() == 1 && layout.lines.front()->hasFocusLead();
   for (int paragraph = 0; paragraph < 2; paragraph++) {
     for (const auto& line : layout.lines) {
-      if (y + lineH > textBottomLimit) return;
+      if (y + lineH + (singleLineFocusLead ? lineAdvance : 0) > textBottomLimit) return;
       line->render(renderer, fontId, textLeft, y);
       const int guideY = y + lineAdvance + SETTINGS.readingGuideLineOffset;
       if (SETTINGS.readingGuideLineEnabled &&
@@ -142,6 +149,7 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
       }
       y += lineAdvance;
     }
+    if (singleLineFocusLead) y += lineAdvance;
     y += paragraphGap;
   }
 }
