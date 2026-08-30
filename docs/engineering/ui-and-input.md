@@ -107,6 +107,13 @@ may run after the edge's frame. Do not simulate consumption with another
 Touch input remains independent; only arm a physical-button barrier when that
 button is actually held.
 
+Settings enums normally cycle in place when they have two choices and open an
+`OptionPopup` when they have more. A dynamic enum marked with
+`withManagedEnumPicker()` always opens the popup and receives callbacks only
+when the selected index changes. Its setter owns the complete change lifecycle,
+including persistence, error feedback, and any required restart; the generic
+settings flow must not save or rebuild after it returns.
+
 ## Touch Coordinate and Gesture Layers
 
 Touch controllers keep their sampling, power, and panel-mount transforms in
