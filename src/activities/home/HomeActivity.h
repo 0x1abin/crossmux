@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -11,6 +12,8 @@
 struct Rect;
 
 class HomeActivity final : public Activity {
+  enum class CarouselUpdateScope { None, MenuOnly, Full };
+
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
   bool recentsLoading = false;
@@ -18,9 +21,10 @@ class HomeActivity final : public Activity {
   bool firstRenderDone = false;
   bool hasOpdsServers = false;
   int lastCarouselBookIndex = 0;
-  bool coverRendered = false;              // Track if cover has been rendered once
-  bool coverBufferStored = false;          // Track if cover buffer is stored
-  bool coverBufferUnavailable = false;     // Stop retrying an optional snapshot after OOM
+  bool coverRendered = false;           // Track if cover has been rendered once
+  bool coverBufferStored = false;       // Track if cover buffer is stored
+  bool coverBufferUnavailable = false;  // Stop retrying an optional snapshot after OOM
+  std::atomic<CarouselUpdateScope> carouselUpdateScope{CarouselUpdateScope::None};
   std::unique_ptr<uint8_t[]> coverBuffer;  // HomeActivity's own buffer for cover image
   size_t coverBufferSize = 0;              // Bytes allocated to coverBuffer
   // Logical rect last passed to drawRecentBookCover. The cover snapshot only
@@ -48,6 +52,10 @@ class HomeActivity final : public Activity {
   void onStandbyOpen();
 
   int getMenuItemCount() const;
+  static constexpr bool canRenderCarouselMenuOnly(bool isCarousel, bool recentsLoaded, CarouselUpdateScope scope) {
+    return isCarousel && recentsLoaded && scope == CarouselUpdateScope::MenuOnly;
+  }
+  void requestCarouselUpdate(CarouselUpdateScope scope);
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer

@@ -89,6 +89,17 @@ int HomeActivity::getMenuItemCount() const {
   return count;
 }
 
+void HomeActivity::requestCarouselUpdate(CarouselUpdateScope scope) {
+  if (scope == CarouselUpdateScope::Full) {
+    carouselUpdateScope = scope;
+  } else {
+    // A queued full redraw must not be downgraded by a later menu event.
+    CarouselUpdateScope expected = CarouselUpdateScope::None;
+    carouselUpdateScope.compare_exchange_strong(expected, CarouselUpdateScope::MenuOnly);
+  }
+  requestUpdate();
+}
+
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
   const auto& books = RECENT_BOOKS.getBooks();
@@ -207,7 +218,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   recentsLoading = false;
   coverRendered = false;
   coverBufferStored = false;
-  requestUpdate();
+  requestCarouselUpdate(CarouselUpdateScope::Full);
 }
 
 void HomeActivity::onEnter() {
@@ -239,8 +250,7 @@ void HomeActivity::onExit() {
 bool HomeActivity::storeCoverBuffer() {
   if (coverBufferUnavailable) return false;
 
-  // Keep the carousel's ~40-44 KB snapshot out of the heap while missing
-  // thumbnails are decoded; the final cover render will cache it instead.
+  // Thumbnail generation may borrow the framebuffer; cache only the final render.
   if (!recentsLoaded) return false;
 
   // render() must have already set the cover rect; without it we'd be back to
@@ -333,7 +343,7 @@ void HomeActivity::loop() {
       } else {
         selectorIndex = bookCount + ButtonNavigator::nextIndex(rowIndex, renderedMenuCount);
       }
-      requestUpdate();
+      requestCarouselUpdate(coversFocused ? CarouselUpdateScope::Full : CarouselUpdateScope::MenuOnly);
       return;
     }
     if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
@@ -343,7 +353,7 @@ void HomeActivity::loop() {
       } else {
         selectorIndex = bookCount + ButtonNavigator::previousIndex(rowIndex, renderedMenuCount);
       }
-      requestUpdate();
+      requestCarouselUpdate(coversFocused ? CarouselUpdateScope::Full : CarouselUpdateScope::MenuOnly);
       return;
     }
     if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
@@ -355,7 +365,7 @@ void HomeActivity::loop() {
         } else {
           selectorIndex = std::clamp(lastCarouselBookIndex, 0, bookCount - 1);
         }
-        requestUpdate();
+        requestCarouselUpdate(CarouselUpdateScope::Full);
       }
       return;
     }
@@ -383,7 +393,7 @@ void HomeActivity::loop() {
         } else {
           selectorIndex = bookCount + ButtonNavigator::nextIndex(rowIndex, renderedMenuCount);
         }
-        requestUpdate();
+        requestCarouselUpdate(coversFocused ? CarouselUpdateScope::Full : CarouselUpdateScope::MenuOnly);
         return;
       case MappedInputManager::SwipeDir::Right:
         if (coversFocused) {
@@ -392,7 +402,7 @@ void HomeActivity::loop() {
         } else {
           selectorIndex = bookCount + ButtonNavigator::previousIndex(rowIndex, renderedMenuCount);
         }
-        requestUpdate();
+        requestCarouselUpdate(coversFocused ? CarouselUpdateScope::Full : CarouselUpdateScope::MenuOnly);
         return;
       case MappedInputManager::SwipeDir::Up:
       case MappedInputManager::SwipeDir::Down:
@@ -403,7 +413,7 @@ void HomeActivity::loop() {
           } else {
             selectorIndex = std::clamp(lastCarouselBookIndex, 0, bookCount - 1);
           }
-          requestUpdate();
+          requestCarouselUpdate(CarouselUpdateScope::Full);
         }
         return;
       case MappedInputManager::SwipeDir::None:
@@ -441,7 +451,7 @@ void HomeActivity::loop() {
     }
     if (selectorIndex != touchedBook) {
       selectorIndex = touchedBook;
-      requestUpdate();
+      requestCarouselUpdate(CarouselUpdateScope::Full);
     }
     return;
   }
@@ -473,7 +483,11 @@ void HomeActivity::loop() {
     if (menuTouch == MappedInputManager::RowTouch::Down) {
       if (selectorIndex != touchedIndex) {
         selectorIndex = touchedIndex;
-        requestUpdate();
+        if (isCarousel) {
+          requestCarouselUpdate(CarouselUpdateScope::MenuOnly);
+        } else {
+          requestUpdate();
+        }
       }
     } else {
       selectorIndex = touchedIndex;
@@ -500,29 +514,16 @@ void HomeActivity::loop() {
 }
 
 void HomeActivity::render(RenderLock&&) {
+  static_assert(canRenderCarouselMenuOnly(true, true, CarouselUpdateScope::MenuOnly));
+  static_assert(!canRenderCarouselMenuOnly(false, true, CarouselUpdateScope::MenuOnly));
+  static_assert(!canRenderCarouselMenuOnly(true, false, CarouselUpdateScope::MenuOnly));
+  static_assert(!canRenderCarouselMenuOnly(true, true, CarouselUpdateScope::Full));
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
-
-  renderer.clearScreen();
-  bool bufferRestored = coverBufferStored && restoreCoverBuffer();
-
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding},
-                 metrics.homeShowRecentBookTitle && !recentBooks.empty() ? recentBooks[0].title.c_str() : nullptr);
-
-  // Record the tile rect so storeCoverBuffer (called from the theme) knows
-  // which sub-region of the framebuffer to snapshot. ~16 KB in Portrait
-  // instead of the 48 KB full framebuffer the previous bind captured.
-  coverRectX = 0;
-  coverRectY = metrics.homeTopPadding;
-  coverRectW = pageWidth;
-  coverRectH = metrics.homeCoverTileHeight;
-
-  GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
-                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          std::bind(&HomeActivity::storeCoverBuffer, this));
 
   const int homeMenuItemCount = hasOpdsServers ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
   const bool showContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
@@ -537,20 +538,60 @@ void HomeActivity::render(RenderLock&&) {
   }
 
   if (showContinueReading) {
-    // Insert Continue Reading at the top if enabled in theme
     menuItems.insert(menuItems.begin(), tr(STR_CONTINUE_READING));
     menuIcons.insert(menuIcons.begin(), Book);
   }
 
-  GUI.drawHomeMenu(
-      renderer,
-      Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
-           pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
-                         metrics.homeMenuTopOffset + metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()),
-      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
-      [&menuItems](int index) { return std::string(menuItems[index]); },
-      [&menuIcons](int index) { return menuIcons[index]; });
+  const Rect headerRect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding};
+  const Rect menuRect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
+                      pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
+                                    metrics.homeMenuTopOffset + metrics.buttonHintsHeight)};
+  auto drawHeader = [&] {
+    GUI.drawHeader(renderer, headerRect,
+                   metrics.homeShowRecentBookTitle && !recentBooks.empty() ? recentBooks[0].title.c_str() : nullptr);
+  };
+  auto drawMenu = [&] {
+    GUI.drawHomeMenu(
+        renderer, menuRect, static_cast<int>(menuItems.size()),
+        metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
+        [&menuItems](int index) { return std::string(menuItems[index]); },
+        [&menuIcons](int index) { return menuIcons[index]; });
+  };
+
+  const CarouselUpdateScope updateScope = carouselUpdateScope.exchange(CarouselUpdateScope::None);
+  const bool menuOnlyUpdate = canRenderCarouselMenuOnly(isCarousel, recentsLoaded, updateScope);
+  if (menuOnlyUpdate) {
+    renderer.fillRect(headerRect.x, headerRect.y, headerRect.width, headerRect.height, false);
+    drawHeader();
+    renderer.fillRect(0, pageHeight - metrics.menuRowHeight, pageWidth, metrics.menuRowHeight, false);
+    drawMenu();
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (isCarousel) {
+    coverRendered = false;
+    coverBufferStored = false;
+  }
+
+  renderer.clearScreen();
+  bool bufferRestored = coverBufferStored && restoreCoverBuffer();
+
+  drawHeader();
+
+  // Record the tile rect so storeCoverBuffer (called from the theme) knows
+  // which sub-region of the framebuffer to snapshot. ~16 KB in Portrait
+  // instead of the 48 KB full framebuffer the previous bind captured.
+  coverRectX = 0;
+  coverRectY = metrics.homeTopPadding;
+  coverRectW = pageWidth;
+  coverRectH = metrics.homeCoverTileHeight;
+
+  GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
+                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
+                          std::bind(&HomeActivity::storeCoverBuffer, this));
+
+  drawMenu();
 
   if (!isCarousel) {
     const auto labels = mappedInput.mapLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "",
