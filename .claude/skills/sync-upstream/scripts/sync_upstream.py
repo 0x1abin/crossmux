@@ -95,6 +95,7 @@ class DependencyStatus:
     parent_in_fork: bool
     open_pr: bool
     overlap_paths: tuple[str, ...]
+    latest_parent_sha: str | None = None
 
     @property
     def action(self) -> str:
@@ -258,6 +259,21 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     return git_success(root, "merge-base", "--is-ancestor", ancestor, descendant)
 
 
+def select_upstream_sha(
+    root: Path, latest_ref: str, pinned_sha: str | None, component: str
+) -> tuple[str, str]:
+    latest_sha = full_sha(root, latest_ref)
+    if pinned_sha is None:
+        return latest_sha, latest_sha
+    if not re.fullmatch(r"[0-9a-f]{40}", pinned_sha) or not is_ancestor(
+        root, pinned_sha, latest_ref
+    ):
+        raise RuntimeError(
+            f"Pinned {component} SHA {pinned_sha} is not an ancestor of its upstream branch."
+        )
+    return pinned_sha, latest_sha
+
+
 def changed_paths(root: Path, base: str, tip: str) -> set[str]:
     output = git_output(root, "diff", "--name-only", f"{base}..{tip}")
     return {line for line in output.splitlines() if line}
@@ -339,28 +355,41 @@ def sync_pr_open(root: Path, dependency: Dependency, parent_sha: str) -> bool:
 
 
 def inspect_dependency(
-    root: Path, dependency: Dependency, *, check_pr: bool = True
+    root: Path,
+    dependency: Dependency,
+    *,
+    check_pr: bool = True,
+    upstream_pin: str | None = None,
 ) -> DependencyStatus:
     parent_ref = f"refs/sync-upstream/{dependency.name}/parent-main"
     fork_ref = f"refs/sync-upstream/{dependency.name}/fork-main"
     fetch_url_ref(root, dependency.parent_url, "main", parent_ref)
     fetch_url_ref(root, dependency.fork_url, "main", fork_ref)
-    parent_sha = full_sha(root, parent_ref)
+    parent_sha, latest_parent_sha = select_upstream_sha(
+        root, parent_ref, upstream_pin, dependency.name
+    )
     return DependencyStatus(
         name=dependency.name,
         parent_sha=parent_sha,
         fork_sha=full_sha(root, fork_ref),
-        parent_in_fork=is_ancestor(root, parent_ref, fork_ref),
+        parent_in_fork=is_ancestor(root, parent_sha, fork_ref),
         open_pr=sync_pr_open(root, dependency, parent_sha) if check_pr else False,
-        overlap_paths=overlap_paths(root, fork_ref, parent_ref),
+        overlap_paths=overlap_paths(root, fork_ref, parent_sha),
+        latest_parent_sha=latest_parent_sha,
     )
 
 
 def inspect_dependencies(
-    root: Path, *, check_pr: bool = True
+    root: Path,
+    *,
+    check_pr: bool = True,
+    upstream_pins: dict[str, str] | None = None,
 ) -> dict[str, DependencyStatus]:
+    pins = upstream_pins or {}
     return {
-        name: inspect_dependency(root, dependency, check_pr=check_pr)
+        name: inspect_dependency(
+            root, dependency, check_pr=check_pr, upstream_pin=pins.get(name)
+        )
         for name, dependency in DEPENDENCIES.items()
     }
 
@@ -442,12 +471,12 @@ def clone_dependency_candidate(
     branch = branch_name(dependency.name, status.parent_sha)
     git(candidate, "switch", "-c", branch, "origin/main")
     overlaps = sorted(
-        set(overlap_paths(candidate, "origin/main", "upstream/main"))
+        set(overlap_paths(candidate, "origin/main", status.parent_sha))
         | set(behavior_overlaps)
     )
     conflicts = merge_without_commit(
         candidate,
-        "upstream/main",
+        status.parent_sha,
         f"chore: sync {dependency.name} upstream main ({status.parent_sha[:8]})",
     )
     state: dict[str, object] = {
@@ -472,6 +501,7 @@ def clone_crossmux_candidate(
     statuses: dict[str, DependencyStatus],
     candidate: Path,
     behavior_overlaps: Sequence[str],
+    upstream_sha: str,
 ) -> dict[str, object]:
     candidate.parent.mkdir(parents=True, exist_ok=True)
     run(["git", "clone", str(ctx.root), str(candidate)], cwd=ctx.root)
@@ -481,18 +511,16 @@ def clone_crossmux_candidate(
     git(candidate, "remote", "add", "upstream", upstream_url)
     fetch_branch(candidate, "origin", ctx.base_branch)
     fetch_branch(candidate, "upstream", ctx.upstream_branch)
-    upstream_ref = f"refs/remotes/upstream/{ctx.upstream_branch}"
     base_ref = f"refs/remotes/origin/{ctx.base_branch}"
-    upstream_sha = full_sha(candidate, upstream_ref)
     base_sha = full_sha(candidate, base_ref)
     branch = branch_name("crossmux", upstream_sha)
     git(candidate, "switch", "-C", branch, base_ref)
     overlaps = sorted(
-        set(overlap_paths(candidate, base_ref, upstream_ref)) | set(behavior_overlaps)
+        set(overlap_paths(candidate, base_ref, upstream_sha)) | set(behavior_overlaps)
     )
     conflicts = merge_without_commit(
         candidate,
-        upstream_ref,
+        upstream_sha,
         f"chore: sync upstream {ctx.upstream_branch} into {ctx.base_branch} ({upstream_sha[:8]})",
     )
     if not conflicts:
@@ -614,12 +642,16 @@ def simulator_pins(text: str) -> tuple[str, ...]:
 
 
 def inspect_crossmux(
-    ctx: Context, statuses: dict[str, DependencyStatus]
+    ctx: Context,
+    statuses: dict[str, DependencyStatus],
+    upstream_pin: str | None = None,
 ) -> dict[str, object]:
     fetch_branch(ctx.root, ctx.origin_remote, ctx.base_branch)
     fetch_branch(ctx.root, ctx.upstream_remote, ctx.upstream_branch)
     base_sha = full_sha(ctx.root, ctx.origin_base_ref)
-    upstream_sha = full_sha(ctx.root, ctx.upstream_ref)
+    upstream_sha, latest_upstream_sha = select_upstream_sha(
+        ctx.root, ctx.upstream_ref, upstream_pin, "crossmux"
+    )
     platformio = git_output(ctx.root, "show", f"{ctx.origin_base_ref}:platformio.ini")
     cmake = git_output(ctx.root, "show", f"{ctx.origin_base_ref}:test/CMakeLists.txt")
     pins = simulator_pins(platformio + "\n" + cmake)
@@ -628,7 +660,7 @@ def inspect_crossmux(
     )
     fully_synced = (
         dependencies_ready
-        and is_ancestor(ctx.root, ctx.upstream_ref, ctx.origin_base_ref)
+        and is_ancestor(ctx.root, upstream_sha, ctx.origin_base_ref)
         and gitlink_sha(ctx.root, ctx.origin_base_ref) == statuses["sdk"].fork_sha
         and len(pins) == 2
         and all(pin == statuses["simulator"].fork_sha for pin in pins)
@@ -640,7 +672,8 @@ def inspect_crossmux(
             else ("ready" if dependencies_ready else "blocked-by-dependencies")
         ),
         "base_sha": base_sha,
-        "overlap_paths": overlap_paths(ctx.root, ctx.origin_base_ref, ctx.upstream_ref),
+        "latest_upstream_sha": latest_upstream_sha,
+        "overlap_paths": overlap_paths(ctx.root, ctx.origin_base_ref, upstream_sha),
         "simulator_pins": pins,
         "upstream_sha": upstream_sha,
     }
@@ -878,16 +911,36 @@ def push_and_create_pr(
         os.unlink(body_path)
 
 
+def parse_upstream_pin(value: str) -> tuple[str, str]:
+    match = re.fullmatch(r"(sdk|simulator|crossmux)=([0-9a-f]{40})", value)
+    if not match:
+        raise argparse.ArgumentTypeError(
+            "upstream pin must be COMPONENT=40_HEX_SHA"
+        )
+    return match.group(1), match.group(2)
+
+
+def upstream_pins(args: argparse.Namespace) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for component, sha in getattr(args, "upstream_pin", []):
+        if component in pins:
+            raise RuntimeError(f"Duplicate upstream pin for {component}.")
+        pins[component] = sha
+    return pins
+
+
 def cmd_inspect(args: argparse.Namespace) -> int:
     ctx = build_context(args)
-    statuses = inspect_dependencies(ctx.root)
-    crossmux = inspect_crossmux(ctx, statuses)
+    pins = upstream_pins(args)
+    statuses = inspect_dependencies(ctx.root, upstream_pins=pins)
+    crossmux = inspect_crossmux(ctx, statuses, pins.get("crossmux"))
     summary = {
         "crossmux": crossmux,
         "dependencies": {
             name: {
                 "action": status.action,
                 "fork_sha": status.fork_sha,
+                "latest_parent_sha": status.latest_parent_sha,
                 "open_pr": status.open_pr,
                 "overlap_paths": status.overlap_paths,
                 "parent_sha": status.parent_sha,
@@ -902,17 +955,18 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     ctx = build_context(args)
-    statuses = inspect_dependencies(ctx.root)
+    pins = upstream_pins(args)
+    statuses = inspect_dependencies(ctx.root, upstream_pins=pins)
     expected = next_component(statuses)
     if args.component != expected:
         raise RuntimeError(
             f"Next component is {expected!r}; refusing to start {args.component!r}."
         )
     if args.component == "crossmux":
-        crossmux_status = inspect_crossmux(ctx, statuses)
+        crossmux_status = inspect_crossmux(ctx, statuses, pins.get("crossmux"))
         if crossmux_status["action"] == "up-to-date":
             raise RuntimeError("crossmux is already up to date.")
-        upstream_sha = full_sha(ctx.root, ctx.upstream_ref)
+        upstream_sha = str(crossmux_status["upstream_sha"])
     else:
         status = statuses[args.component]
         if status.action != "sync-required":
@@ -922,7 +976,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         upstream_sha = status.parent_sha
     candidate = candidate_path(args.component, upstream_sha, args.candidate_root)
     if candidate.exists():
-        state = refresh_candidate(candidate, read_state(candidate))
+        state = read_state(candidate)
+        if cast(dict[str, str], state.get("upstream_pins", {})) != pins:
+            raise RuntimeError("Candidate upstream pins do not match this command.")
+        state = refresh_candidate(candidate, state)
         recorded_overlaps = cast(list[str], state["overlap_paths"])
         state["overlap_paths"] = sorted(
             set(recorded_overlaps) | set(args.behavior_overlap)
@@ -940,7 +997,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 0
     if args.component == "crossmux":
         state = clone_crossmux_candidate(
-            ctx, statuses, candidate, args.behavior_overlap
+            ctx, statuses, candidate, args.behavior_overlap, upstream_sha
         )
     else:
         state = clone_dependency_candidate(
@@ -950,13 +1007,19 @@ def cmd_start(args: argparse.Namespace) -> int:
             candidate,
             args.behavior_overlap,
         )
+    state["upstream_pins"] = pins
+    write_state(candidate, state)
     summarize_state(candidate, state)
     return 0
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
     candidate = Path(args.candidate).resolve()
-    state = refresh_candidate(candidate, read_state(candidate))
+    state = read_state(candidate)
+    pins = upstream_pins(args)
+    if cast(dict[str, str], state.get("upstream_pins", {})) != pins:
+        raise RuntimeError("Candidate upstream pins do not match this command.")
+    state = refresh_candidate(candidate, state)
     if state["component"] != args.component:
         raise RuntimeError(
             f"Candidate is for {state['component']!r}, not {args.component!r}."
@@ -973,7 +1036,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
     validate_index(candidate)
     root = repo_root()
     if args.component == "sdk":
-        current = inspect_dependency(root, DEPENDENCIES["sdk"])
+        current = inspect_dependency(
+            root, DEPENDENCIES["sdk"], upstream_pin=pins.get("sdk")
+        )
         if (
             current.parent_sha != state["upstream_sha"]
             or current.fork_sha != state["base_sha"]
@@ -983,7 +1048,9 @@ def cmd_publish(args: argparse.Namespace) -> int:
             )
         validate_sdk_candidate(candidate, root, args.skip_builds, args.extra_build_env)
     elif args.component == "simulator":
-        current = inspect_dependency(root, DEPENDENCIES["simulator"])
+        current = inspect_dependency(
+            root, DEPENDENCIES["simulator"], upstream_pin=pins.get("simulator")
+        )
         if (
             current.parent_sha != state["upstream_sha"]
             or current.fork_sha != state["base_sha"]
@@ -994,8 +1061,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         validate_simulator_candidate(candidate, root, args.skip_builds)
     else:
         ctx = build_context(args)
-        statuses = inspect_dependencies(root)
-        current_crossmux = inspect_crossmux(ctx, statuses)
+        statuses = inspect_dependencies(root, upstream_pins=pins)
+        current_crossmux = inspect_crossmux(ctx, statuses, pins.get("crossmux"))
         if (
             current_crossmux["base_sha"] != state["base_sha"]
             or current_crossmux["upstream_sha"] != state["upstream_sha"]
@@ -1040,6 +1107,14 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--upstream-remote", default="upstream")
     parser.add_argument("--base-branch", default="auto")
     parser.add_argument("--upstream-branch", default=DEFAULT_UPSTREAM_BRANCH)
+    parser.add_argument(
+        "--upstream-pin",
+        action="append",
+        default=[],
+        type=parse_upstream_pin,
+        metavar="COMPONENT=SHA",
+        help="freeze sdk, simulator, or crossmux at an upstream commit; repeatable",
+    )
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
