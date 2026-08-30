@@ -1,7 +1,7 @@
 # Upstream-Merge Policy for `CLAUDE.md` / `.skills/SKILL.md`
 
 > How to resolve conflicts on the development guide when syncing upstream into
-> `main`. This is the rule the daily sync routine and any human resolver must
+> `main`. This is the rule the manual sync routine and any human resolver must
 > follow. Read it whenever `.skills/SKILL.md` appears in a sync PR's conflict list.
 
 ## The structural invariant

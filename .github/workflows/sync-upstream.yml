@@ -1,6 +1,6 @@
 name: Sync upstream master
 
-# Daily: keep a standing PR that merges upstream master into main.
+# Manually maintain a standing PR that merges upstream master into main.
 # - Clean merge  -> push the merge to chore/sync-upstream and open/refresh the PR.
 # - Conflicts    -> reset the branch, open/refresh the PR, label it
 #                   `needs-claude-resolution` and list the conflicted files.
@@ -9,8 +9,6 @@ name: Sync upstream master
 # clicks merge on the PR.
 
 on:
-  schedule:
-    - cron: '0 0 * * *'   # 00:00 UTC = 08:00 Asia/Shanghai
   workflow_dispatch:
 
 permissions:
@@ -106,7 +104,7 @@ jobs:
             n="$(find_open_pr)"
             if [ -z "$n" ]; then
               body="$(printf '%s\n' \
-                "Automated daily merge of upstream \`master\` into \`${BASE}\`." \
+                "Manually triggered merge of upstream \`master\` into \`${BASE}\`." \
                 "" \
                 "Maintained by \`.github/workflows/sync-upstream.yml\`. Review and merge when green." \
                 "Conflicts (if any) are resolved automatically by the scheduled Claude routine.")"
