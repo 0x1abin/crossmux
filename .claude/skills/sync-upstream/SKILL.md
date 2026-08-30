@@ -33,6 +33,19 @@ pull request. `publish` is a separate, externally mutating step and requires
 the user's explicit authorization in the current conversation. There is no
 one-command happy path.
 
+To finish one immutable snapshot while parent branches continue moving, pass
+the same repeatable pins to every phase:
+
+```bash
+--upstream-pin sdk=<sha> \
+--upstream-pin simulator=<sha> \
+--upstream-pin crossmux=<sha>
+```
+
+Each pin must be a full commit SHA reachable from that component's configured
+upstream branch. A pinned workflow tolerates a parent branch fast-forward, but
+still stops on a rewritten parent history or any Fork/base movement.
+
 `inspect` always checks all three components. If a dependency fork is behind,
 sync it even when the incoming CrossMux commit does not change that dependency.
 Do not start `simulator` until the SDK fork contains its parent `main`; do not

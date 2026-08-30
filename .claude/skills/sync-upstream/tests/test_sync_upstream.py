@@ -101,6 +101,189 @@ class PinUpdateTest(unittest.TestCase):
         self.assertEqual(pins, (sha, sha))
 
 
+class UpstreamSnapshotPinTest(unittest.TestCase):
+    def test_cli_parses_one_pin_per_component(self):
+        pins = {
+            "sdk": "a" * 40,
+            "simulator": "b" * 40,
+            "crossmux": "c" * 40,
+        }
+        args = sync_upstream.parse_args(
+            [
+                "inspect",
+                *sum(
+                    (["--upstream-pin", f"{component}={sha}"] for component, sha in pins.items()),
+                    [],
+                ),
+            ]
+        )
+        self.assertEqual(sync_upstream.upstream_pins(args), pins)
+
+    def test_cli_rejects_invalid_and_duplicate_pins(self):
+        with self.assertRaises(SystemExit):
+            sync_upstream.parse_args(["inspect", "--upstream-pin", "sdk=short"])
+        args = sync_upstream.parse_args(
+            [
+                "inspect",
+                "--upstream-pin",
+                "sdk=" + "a" * 40,
+                "--upstream-pin",
+                "sdk=" + "b" * 40,
+            ]
+        )
+        with self.assertRaisesRegex(RuntimeError, "Duplicate upstream pin"):
+            sync_upstream.upstream_pins(args)
+
+    def test_selects_ancestor_pin_and_rejects_other_history(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir) / "repo"
+            init_repo(repo)
+            commit_file(repo, "value.txt", "base\n", "base")
+            pinned = command(repo, "git", "rev-parse", "HEAD")
+            command(repo, "git", "switch", "-c", "side")
+            commit_file(repo, "side.txt", "side\n", "side")
+            unrelated = command(repo, "git", "rev-parse", "HEAD")
+            command(repo, "git", "switch", "main")
+            commit_file(repo, "value.txt", "latest\n", "latest")
+            latest = command(repo, "git", "rev-parse", "HEAD")
+
+            self.assertEqual(
+                sync_upstream.select_upstream_sha(repo, "main", pinned, "sdk"),
+                (pinned, latest),
+            )
+            with self.assertRaisesRegex(RuntimeError, "not an ancestor"):
+                sync_upstream.select_upstream_sha(
+                    repo, "main", unrelated, "sdk"
+                )
+
+    def test_dependency_gate_uses_pin_after_parent_fast_forward(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            parent = temp / "parent"
+            init_repo(parent)
+            commit_file(parent, "value.txt", "base\n", "base")
+            pinned = command(parent, "git", "rev-parse", "HEAD")
+            fork = temp / "fork"
+            command(temp, "git", "clone", str(parent), str(fork))
+            commit_file(parent, "value.txt", "latest\n", "latest")
+            latest = command(parent, "git", "rev-parse", "HEAD")
+            root = temp / "root"
+            init_repo(root)
+            dependency = sync_upstream.Dependency("sdk", "parent", "fork")
+
+            with patch.object(
+                sync_upstream.Dependency,
+                "parent_url",
+                new_callable=PropertyMock,
+                return_value=str(parent),
+            ), patch.object(
+                sync_upstream.Dependency,
+                "fork_url",
+                new_callable=PropertyMock,
+                return_value=str(fork),
+            ):
+                result = sync_upstream.inspect_dependency(
+                    root, dependency, check_pr=False, upstream_pin=pinned
+                )
+
+            self.assertEqual(result.parent_sha, pinned)
+            self.assertEqual(result.latest_parent_sha, latest)
+            self.assertEqual(result.action, "up-to-date")
+
+    def test_publish_accepts_pinned_parent_fast_forward(self):
+        pinned = "a" * 40
+        fork = "b" * 40
+        state = {
+            "component": "sdk",
+            "conflict_paths": [],
+            "review_items": [],
+            "upstream_pins": {"sdk": pinned},
+            "upstream_sha": pinned,
+            "base_sha": fork,
+        }
+        args = argparse.Namespace(
+            candidate="/tmp/not-used",
+            component="sdk",
+            review_note=[],
+            skip_builds=True,
+            extra_build_env=[],
+            upstream_pin=[("sdk", pinned)],
+        )
+        current = sync_upstream.DependencyStatus(
+            "sdk", pinned, fork, True, False, (), "c" * 40
+        )
+        with patch.object(
+            sync_upstream, "read_state", return_value=state
+        ), patch.object(
+            sync_upstream, "refresh_candidate", return_value=state
+        ), patch.object(
+            sync_upstream, "validate_index"
+        ), patch.object(
+            sync_upstream, "repo_root", return_value=Path("/tmp/root")
+        ), patch.object(
+            sync_upstream, "inspect_dependency", return_value=current
+        ), patch.object(
+            sync_upstream, "validate_sdk_candidate"
+        ), patch.object(
+            sync_upstream, "commit_candidate"
+        ), patch.object(
+            sync_upstream, "push_and_create_pr"
+        ) as publish:
+            self.assertEqual(sync_upstream.cmd_publish(args), 0)
+            publish.assert_called_once()
+
+    def test_crossmux_start_uses_frozen_target(self):
+        pinned = "c" * 40
+        pins = {
+            "sdk": "a" * 40,
+            "simulator": "b" * 40,
+            "crossmux": pinned,
+        }
+        statuses = {
+            "sdk": status("sdk", "up-to-date"),
+            "simulator": status("simulator", "up-to-date"),
+        }
+        args = argparse.Namespace(
+            component="crossmux",
+            candidate_root="/tmp/candidates",
+            behavior_overlap=[],
+            upstream_pin=list(pins.items()),
+        )
+        context = sync_upstream.Context(
+            Path("/tmp/root"), "main", "upstream", "origin", "develop"
+        )
+        crossmux_status = {"action": "ready", "upstream_sha": pinned}
+        state = {
+            "conflict_paths": [],
+            "overlap_paths": [],
+            "review_items": [],
+        }
+        with patch.object(
+            sync_upstream, "build_context", return_value=context
+        ), patch.object(
+            sync_upstream, "inspect_dependencies", return_value=statuses
+        ), patch.object(
+            sync_upstream, "inspect_crossmux", return_value=crossmux_status
+        ), patch.object(
+            sync_upstream,
+            "candidate_path",
+            return_value=Path("/tmp/missing-crossmux-pin-candidate"),
+        ), patch.object(
+            sync_upstream, "clone_crossmux_candidate", return_value=state
+        ) as clone, patch.object(
+            sync_upstream, "write_state"
+        ), patch.object(sync_upstream, "summarize_state"):
+            self.assertEqual(sync_upstream.cmd_start(args), 0)
+
+        clone.assert_called_once_with(
+            context,
+            statuses,
+            Path("/tmp/missing-crossmux-pin-candidate"),
+            [],
+            pinned,
+        )
+
+
 class BuildValidationTest(unittest.TestCase):
     def test_crossmux_uses_current_release_environment(self):
         with patch.object(sync_upstream, "run") as run:
