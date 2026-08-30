@@ -54,6 +54,7 @@ struct SettingInfo {
   bool obfuscated = false;               // Save/load via base64 obfuscation (passwords)
   bool inTextSettings = false;           // Surfaced in the Text Settings screen; hidden from the flat Reader list
   bool inReadingStatsSettings = false;   // Surfaced in Reading Stats Settings; hidden from the flat Reader list
+  bool managedEnumPicker = false;        // Always open a picker; the dynamic setter owns the change lifecycle
 
   // Direct char[] string fields (for settings stored in CrossPointSettings)
   size_t stringOffset = 0;
@@ -77,6 +78,11 @@ struct SettingInfo {
 
   SettingInfo& withReadingStatsSettings() {
     inReadingStatsSettings = true;
+    return *this;
+  }
+
+  SettingInfo& withManagedEnumPicker() {
+    managedEnumPicker = true;
     return *this;
   }
 

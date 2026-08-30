@@ -601,10 +601,14 @@ void SettingsActivity::toggleCurrentSetting() {
                                     ? static_cast<uint8_t>(setting.enumValues.size())
                                     : static_cast<uint8_t>(setting.enumStringValues.size());
     const uint8_t cur = setting.valueGetter();
-    if (totalValues > 2) {
+    if (totalValues > 2 || setting.managedEnumPicker) {
       const auto valueSetter = setting.valueSetter;
-      auto onSelect = [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
-        valueSetter(idx);
+      const bool managedPicker = setting.managedEnumPicker;
+      auto onSelect = [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged, managedPicker,
+                       cur](const int idx) {
+        if (idx == cur) return;
+        valueSetter(static_cast<uint8_t>(idx));
+        if (managedPicker) return;
         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
         SETTINGS.saveToFile();
         rebuildSettingsLists();
