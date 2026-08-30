@@ -131,22 +131,20 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
 
   LOG_DBG("KOSync", "WiFi connected, starting sync");
 
+  // Keep the station fully awake for the short sync transaction. The web server
+  // does the same because ESP32 modem sleep can introduce multi-second network
+  // stalls that surface as HTTP timeouts. WiFi is torn down when this activity exits.
+  WiFi.setSleep(false);
+  LOG_DBG("KOSync", "WiFi sleep disabled for sync");
+
   {
     RenderLock lock(*this);
     state = SYNCING;
-    statusMessage = tr(STR_SYNCING_TIME);
-  }
-  requestUpdate(true);
-
-  // KOReader's HTTPS request needs a fresh, trustworthy system time.
-  if (!halClock.syncNow()) LOG_ERR("KOSync", "Clock sync failed; continuing with the current system time");
-
-  {
-    RenderLock lock(*this);
     statusMessage = tr(STR_CALC_HASH);
   }
   requestUpdate(true);
 
+  // KOSync requests from CrossPoint do not include a client timestamp.
   performSync();
 }
 

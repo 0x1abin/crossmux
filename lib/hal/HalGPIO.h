@@ -127,13 +127,19 @@ class HalGPIO {
   bool restoreTouchAfterDisplayReset();
   void setSharedConfirmPowerShortPressEmitsPower(bool enabled);
 
-  // Verify power button was held long enough after wakeup.
+  // Verify that the physical power button remains held through input debounce.
   // Returns true if verification succeeded, false if device should return to sleep.
   // Should only be called when wakeup reason is PowerButton.
+  bool verifyPowerButtonWakeup();
   bool verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed);
 
   // Check if USB is connected
   bool isUsbConnected() const;
+
+  // Whether a cold boot with no USB detected can be trusted to mean a held
+  // power button (Xteink-style button-energized rail with reliable USB
+  // detection). When false, cold boots always proceed to a normal boot.
+  bool coldBootImpliesPowerButton() const;
 
   // Returns true once per edge (plug or unplug) since the last update()
   bool wasUsbStateChanged() const;

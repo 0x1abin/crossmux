@@ -235,6 +235,12 @@ class GfxRenderer {
   }
   void clearNextRefreshOverride() const { nextRefreshOverridePending = false; }
   void requestNextFullRefresh() const { requestNextRefresh(HalDisplay::FULL_REFRESH); }
+  // One-shot: the next displayBuffer()/displayBufferAsync() call uses `mode`
+  // instead of what its caller asked for, then the override clears itself.
+  // Lets a closing overlay (the control center's refresh tile) hand a
+  // ghost-cleanup waveform to the repaint of whatever screen is underneath,
+  // which it cannot reach directly.
+  void promoteNextRefresh(const HalDisplay::RefreshMode mode) const { requestNextRefresh(mode); }
   // Non-blocking refresh: starts the waveform and returns so CPU work (e.g.
   // grayscale strip rendering) can overlap the panel's refresh time. The
   // framebuffer must stay untouched until waitRefreshComplete(). Falls back to
@@ -412,8 +418,17 @@ class GfxRenderer {
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const;
   bool supportsStripGrayscale() const;
   bool combinesGrayscaleBase() const;
-  bool storeBwBuffer();    // Returns true if buffer was stored successfully
-  void restoreBwBuffer();  // Restore and free the stored buffer
+  bool storeBwBuffer();  // Returns true if buffer was stored successfully
+  // Restore and free the stored buffer. resyncPanelBaseline rewrites the
+  // controller's differential baseline to the restored frame — correct after
+  // a grayscale render (the glass matches the stored BW plane), WRONG when
+  // the glass shows content painted after the store (overlay chrome): the
+  // next differential would treat that content as already erased and leave
+  // it on the glass. Such callers pass false so the baseline keeps tracking
+  // what was last pushed.
+  void restoreBwBuffer(bool resyncPanelBaseline = true);
+  // Free a stored buffer without restoring it (the page under it changed).
+  void discardStoredBwBuffer() { freeBwBufferChunks(); }
   void cleanupGrayscaleWithFrameBuffer() const;
 
   // Font helpers

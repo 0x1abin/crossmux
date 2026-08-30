@@ -6,7 +6,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
-#if FREEINK_DEVICE_MURPHY_M4
+#if FREEINK_DEVICE_MURPHY_M4 && !defined(SIMULATOR)
 #include <HalGPIO.h>
 #endif
 
@@ -212,8 +212,8 @@ void SettingsActivity::rebuildSettingsLists() {
     }
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       // The sunlight fading fix is a grayscale-waveform compensation that does
-      // not apply on the X4 Pro (plain OTP waveform, no custom grayscale LUT).
-      if (setting.valuePtr == &CrossPointSettings::fadingFix && BoardConfig::isX4Pro()) {
+      // not apply on the X4 Pro / X4 Classic (plain OTP waveform, same panels).
+      if (setting.valuePtr == &CrossPointSettings::fadingFix && (BoardConfig::isX4Pro() || FREEINK_DEVICE_X4CLASSIC)) {
         continue;
       }
       displaySettings.push_back(setting);
@@ -253,7 +253,7 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(
       SettingInfo::Action(StrId::STR_RESTORE_SYSTEM_SETTINGS, SettingAction::RestoreSystemSettings));
-#if FREEINK_DEVICE_MURPHY_M4
+#if FREEINK_DEVICE_MURPHY_M4 && !defined(SIMULATOR)
   systemSettings.push_back(
       SettingInfo::DynamicEnum(
           StrId::STR_M4_HARDWARE_BATCH, {StrId::STR_M4_BATCH_1, StrId::STR_M4_BATCH_2},
@@ -419,6 +419,13 @@ void SettingsActivity::activateIndex(const int index) {
   // a lingering tap flash would gray an unrelated element.
   app.clearTapFlash();
   toggleCurrentSetting();
+  // Tap-first: a tapped row is not a cursor position. Leaving it focused
+  // (inverted) after the tap meant the row stayed black once its sub-screen or
+  // popup closed, and Back then had to clear that focus before a second Back
+  // left Settings. Hand the focus back to the tab band; the viewport stays put.
+  if (mappedInput.hasTouch()) {
+    activeNav().selected = 0;
+  }
 }
 
 void SettingsActivity::onRowAction(const fui::ActionEvent& event) {

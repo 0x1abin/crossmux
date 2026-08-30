@@ -86,41 +86,31 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
 
 void RoundedRaffTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                                   bool selected) const {
-  if (tabs.empty()) {
-    return;
-  }
+  if (tabs.empty()) return;
 
   const int slotWidth = rect.width / static_cast<int>(tabs.size());
   const int tabY = rect.y + 4;
   const int tabHeight = rect.height - 12;
-
   for (size_t i = 0; i < tabs.size(); i++) {
     const int slotX = rect.x + static_cast<int>(i) * slotWidth;
     const int tabX = slotX + 4;
     const int tabWidth = slotWidth - 8;
     const auto& tab = tabs[i];
-
     if (tab.selected) {
       renderer.fillRoundedRect(tabX, tabY, tabWidth, tabHeight, 18, selected ? Color::Black : Color::DarkGray);
     }
-
     const int textWidth = renderer.getTextWidth(kTitleFontId, tab.label, EpdFontFamily::BOLD);
     const int textX = slotX + (slotWidth - textWidth) / 2;
     const int textY = tabY + (tabHeight - renderer.getLineHeight(kTitleFontId)) / 2;
-    renderer.drawText(kTitleFontId, textX, textY, tab.label, !(tab.selected), EpdFontFamily::BOLD);
+    renderer.drawText(kTitleFontId, textX, textY, tab.label, !tab.selected, EpdFontFamily::BOLD);
   }
-
-  // Full-width divider between tabs and setting rows.
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 }
 
 bool RoundedRaffTheme::tabIndexFromPoint(const GfxRenderer& renderer, const Rect rect, const std::vector<TabInfo>& tabs,
                                          const int x, const int y, int& index) const {
   (void)renderer;
-  if (tabs.empty() || y < rect.y || y >= rect.y + rect.height || x < rect.x || x >= rect.x + rect.width) {
-    return false;
-  }
-
+  if (tabs.empty() || y < rect.y || y >= rect.y + rect.height || x < rect.x || x >= rect.x + rect.width) return false;
   const int slotWidth = std::max(1, rect.width / static_cast<int>(tabs.size()));
   index = std::min(static_cast<int>(tabs.size()) - 1, (x - rect.x) / slotWidth);
   return true;

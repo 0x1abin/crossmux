@@ -87,6 +87,7 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
       case UIIcon::Settings:
         return Settings2Icon;
       case UIIcon::Transfer:
+      case UIIcon::Usb:
         return TransferIcon;
       case UIIcon::Library:
         return LibraryIcon;

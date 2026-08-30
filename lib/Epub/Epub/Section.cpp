@@ -29,10 +29,11 @@ namespace {
 //   52 / 53 - ruby/CJK justification layout and 256-byte footnote hrefs
 //   54 / 55 - one-shot soft-flush indentation and two-CJK-character defaults
 //   56 / 57 - focus-word break opportunities, image viewport clamping, and extra-wide line spacing
+//   58 / 59 - simple HTML table rows laid out as positioned columns
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 57;
+constexpr uint8_t SECTION_FILE_VERSION = 59;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 56;
+constexpr uint8_t SECTION_FILE_VERSION = 58;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -373,8 +374,19 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
 
   if (spec.embeddedStyle) {
     ctx->cssParser = epub->getCssParser();
-    if (ctx->cssParser && !ctx->cssParser->loadFromCache()) {
-      LOG_ERR("SCT", "Failed to load CSS from cache");
+    if (ctx->cssParser) {
+      const CssParser::CacheLoadResult cacheResult = ctx->cssParser->loadFromCache();
+      if (cacheResult == CssParser::CacheLoadResult::LowMemory) {
+        LOG_ERR("SCT", "Insufficient heap to hydrate CSS; section build deferred");
+        ctx->cssParser->clear();
+        file.close();
+        Storage.remove(binTmpPath().c_str());
+        if (!ctx->reusedHtml) Storage.remove(ctx->tmpHtmlPath.c_str());
+        return false;
+      }
+      if (cacheResult == CssParser::CacheLoadResult::Invalid) {
+        LOG_ERR("SCT", "Failed to load CSS from cache");
+      }
     }
   }
 

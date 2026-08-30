@@ -1,5 +1,6 @@
 #include "ActivityManager.h"
 
+#include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <HalDisplay.h>
@@ -41,6 +42,7 @@
 #include "home/InxRecentActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
+#include "network/UsbDriveActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
@@ -92,7 +94,9 @@ void ActivityManager::renderTaskLoop() {
     // starving the main task and freezing the device.
     if (currentActivity && pendingAction.load() == PendingAction::None) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
-      display.setInverted(SETTINGS.screenInverted && currentActivity->appliesNightMode());
+      // Night mode is a global output polarity applied to every activity.
+      // The sleep screen forces normal polarity itself (SleepActivity).
+      display.setInverted(SETTINGS.screenInverted != 0);
       currentActivity->render(std::move(lock));
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
@@ -108,9 +112,21 @@ void ActivityManager::renderTaskLoop() {
 }
 
 void ActivityManager::loop() {
+  if (mappedInput.consumeSuppressedRelease()) return;
+
+  if (currentActivity && currentActivity->requiresExclusiveStorageLoop()) {
+    currentActivity->loop();
+    // An exclusive-storage activity must restart rather than navigate away:
+    // processing a pending action here could re-enable filesystem users while
+    // the USB host still owns the raw SD card.
+    if (requestedUpdate.exchange(false) && renderTaskHandle) {
+      xTaskNotify(renderTaskHandle, 1, eIncrement);
+    }
+    return;
+  }
+
   if (currentActivity && pendingAction.load() == PendingAction::None) {
     if (handleMainTabInput()) return;
-
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
       if (currentActivity->handleHomeGesture()) {
         return;
@@ -119,7 +135,16 @@ void ActivityManager::loop() {
       return;
     }
 
-    if (currentActivity->name != "FrontlightPanel" && mappedInput.wasLightPanelGesture()) {
+    // Touch users can also open the global control center from the status bar.
+    bool statusBarTap = false;
+    if (mappedInput.hasTouch() &&
+        (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
+         currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection")) {
+      int tx = 0;
+      int ty = 0;
+      statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty < 44;
+    }
+    if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
       auto panel = makeUniqueNoThrow<FrontlightPanelActivity>(renderer, mappedInput);
       if (!panel) {
         LOG_ERR("ACT", "OOM: frontlight panel (%u bytes)", static_cast<unsigned>(sizeof(FrontlightPanelActivity)));
@@ -354,6 +379,19 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
 
 void ActivityManager::goToFileTransfer() { replaceActivityWith<CrossPointWebServerActivity>(); }
 
+void ActivityManager::goToUsbDrive() {
+#if FREEINK_CAP_USB_MSC
+  auto activity = makeUniqueNoThrow<UsbDriveActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: USB Drive activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+#else
+  LOG_ERR("ACT", "USB Drive requested in a build without USB Drive capability");
+#endif
+}
+
 void ActivityManager::goToSettings() { replaceActivityWith<SettingsActivity>(); }
 
 void ActivityManager::goToUglyAvatar() { replaceActivityWith<UglyAvatarActivity>(); }
@@ -507,6 +545,10 @@ void ActivityManager::popActivity() {
 }
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
+
+bool ActivityManager::requiresExclusiveStorageLoop() const {
+  return currentActivity && currentActivity->requiresExclusiveStorageLoop();
+}
 
 bool ActivityManager::isReaderActivity() const {
   return std::any_of(stackActivities.begin(), stackActivities.end(),
