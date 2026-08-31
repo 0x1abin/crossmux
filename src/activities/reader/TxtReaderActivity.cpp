@@ -750,7 +750,7 @@ void TxtReaderActivity::renderPage() {
 #endif
 
 #if FREEINK_DEVICE_EEGO_A4
-  if (SETTINGS.textAntiAliasing && !renderer.display.isInverted()) {
+  if (SETTINGS.textAntiAliasing && !renderer.isInverted()) {
     // A4 single-refresh grayscale path: content + status bar are already in the
     // framebuffer, so renderAntiAliased stores them, clears, re-renders the same
     // content AND status bar in gray and displays once. We skip the BW display

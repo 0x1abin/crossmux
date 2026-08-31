@@ -311,6 +311,25 @@ bool EpubReaderActivity::loadBook() {
   return true;
 }
 
+void EpubReaderActivity::reloadBook() {
+  if (!epub) return;
+  // The online extender atomically replaced the EPUB file with a longer
+  // spine. Force a re-parse (drop book.bin) but keep progress.bin so the
+  // reader restores the same chapter/page.
+  const std::string cachePath = epub->getCachePath();
+  const std::string bookBin = cachePath + "/book.bin";
+  if (Storage.exists(bookBin.c_str())) Storage.remove(bookBin.c_str());
+  epub.reset();
+  section.reset();
+  endOfBookOptions.reset();
+  endOfBookOptionsReady.store(false, std::memory_order_release);
+  if (!loadBook()) {
+    finish();
+    return;
+  }
+  requestUpdate();
+}
+
 void EpubReaderActivity::openReaderMenu() {
   pendingManualTurn = 0;
   const int currentPage = section ? section->currentPage + 1 : 0;
@@ -411,6 +430,11 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
 void EpubReaderActivity::loop() {
   if (!epub) {
     finish();
+    return;
+  }
+
+  if (tickOnlineExtender()) {
+    requestUpdate();
     return;
   }
 
@@ -1749,7 +1773,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // "defer the base to the gray pass" optimization would never push FAST
     // pages to the panel (screen frozen while progress still advances).
     // Fall back to the per-page B/W display, which inverts correctly.
-    if (needsTextGrayscale && !renderer.display.isInverted()) {
+    if (needsTextGrayscale && !renderer.isInverted()) {
       const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
       if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
     } else {
