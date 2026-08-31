@@ -5,3 +5,4 @@ pyyaml>=6.0.3
 # jieba is wordfreq's tokenizer dependency for Chinese.
 wordfreq>=3.0
 jieba>=0.42
+zopfli>=0.2.0

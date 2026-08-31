@@ -100,10 +100,10 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 56 / 57
+### Versions 58 / 59
 
-> Unified firmware uses the CJK-capable cache version **57**. Version 56 was the
-> former Latin-build counter; its layout is identical, but font metrics differ,
+> Unified firmware uses the CJK-capable cache version **59**. Version 58 is the
+> Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
 > Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37
@@ -127,7 +127,9 @@ if (parsedSize != fileSize) {
 > indent and default CJK paragraph indents use two ideograph advances instead of
 > three space advances. Versions 56/57 invalidate pagination for focus-word
 > break opportunities, image viewport clamping, and the extra-wide line-spacing
-> option. The counters remain distinct and above every
+> option. Versions 58/59 additionally invalidate pagination because simple HTML
+> table rows are laid out as positioned columns rather than flattened paragraphs
+> with synthetic labels. The counters remain distinct and above every
 > previously shipped value so a firmware-flavor swap cannot read the other flavor's
 > stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
@@ -141,7 +143,8 @@ This changes each serialized footnote record from 128 to 288 bytes, so older
 section caches must be discarded and rebuilt.
 
 Versions 52/53 also invalidate cached word positions after ruby and CJK justification
-layout changes.
+layout changes. Versions 58/59 keep the serialized layout unchanged and invalidate
+pagination for the table-column layout.
 
 Versions 50/51 add a header offset and a `uint32_t` entry per page for the
 visible-text offset LUT. The other section LUTs remain unchanged.
@@ -177,8 +180,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 54
-#define CHINESE_VERSION 55
+#define LATIN_VERSION 58
+#define CHINESE_VERSION 59
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256

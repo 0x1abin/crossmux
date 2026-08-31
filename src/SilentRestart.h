@@ -9,3 +9,7 @@
 void silentRestart();                                                // home screen
 void silentRestartToReader(bool suppressChineseFontPrompt = false);  // currently-open EPUB (APP_STATE.openEpubPath)
 void silentRestartToReaderAndPreloadChineseFont(uint8_t pointSize);
+
+// Reboots immediately after an activity releases exclusive raw storage. The
+// RTC target ensures setup() lands on Home instead of resuming a reader.
+void restartToHomeAfterStorageHandoff();
