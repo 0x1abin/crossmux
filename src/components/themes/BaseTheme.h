@@ -176,6 +176,7 @@ enum UIIcon {
   Achievements,
   Calculator,
   Woodfish,
+  ShengBei,
   Usb
 };
 

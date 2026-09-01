@@ -25,9 +25,12 @@ class HalTiltSensor {
   bool _hadActivity = false;       // Non-consuming flag for sleep timer
   bool _inTilt = false;            // Currently tilted past threshold
   bool _isAwake = false;           // Tracks power state
+  bool _forcedAwake = false;       // Explicitly held awake by an activity (e.g. ShengBei)
   unsigned long _initMs = 0;       // Timestamp of sensor init
   unsigned long _lastTiltMs = 0;   // Debounce / cooldown
   unsigned long _wakeMs = 0;       // Timestamp of last wake() for stabilization
+
+  unsigned long _lastShakeMs = 0;  // Cooldown for shake gesture
 
   // Tuning constants
   static constexpr float RATE_THRESHOLD_DPS = 270.0f;      // Deg/sec speed to trigger flick
@@ -55,6 +58,12 @@ class HalTiltSensor {
 
   // Poll the accelerometer and update tilt gesture state.
   void update(const uint8_t mode, const uint8_t orientation, const bool inReader);
+
+  // Poll for a vigorous shake gesture (useful for casting blocks/dice apps).
+  bool pollShake();
+
+  // Read raw 6-axis sample if available and awake.
+  bool readSample(Imu::Sample& sample) const;
 
   // Returns true once per tilt-forward gesture (next page direction).
   // Consumed on read — subsequent calls return false until next gesture.
