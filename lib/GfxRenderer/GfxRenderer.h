@@ -252,6 +252,12 @@ class GfxRenderer {
   // fadingFix isn't forcing the blocking path. Callers can skip overlap
   // scaffolding (e.g. whole-plane grayscale buffers) when false.
   bool supportsAsyncRefresh() const;
+  // True while the display renders inverted (night mode). Grayscale display
+  // paths are deliberately disabled while inverted, so callers that defer the
+  // B/W base to a gray pass must fall back to a per-page B/W display.
+  // Non-inline: the host-test HalDisplay (crosspoint-simulator) lacks
+  // isInverted(), and the header is compiled by test targets.
+  bool isInverted() const;
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   // void displayWindow(int x, int y, int width, int height) const;
   void invertScreen() const;

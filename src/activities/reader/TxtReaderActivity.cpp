@@ -750,13 +750,14 @@ void TxtReaderActivity::renderPage() {
 #endif
 
 #if FREEINK_DEVICE_EEGO_A4
-  if (SETTINGS.textAntiAliasing) {
+  if (SETTINGS.textAntiAliasing && !renderer.isInverted()) {
     // A4 single-refresh grayscale path: content + status bar are already in the
     // framebuffer, so renderAntiAliased stores them, clears, re-renders the same
     // content AND status bar in gray and displays once. We skip the BW display
     // so there is no BW-then-AA double refresh (which flashed and left the bottom
     // status bar wiped), and the gray pass includes the status bar so it stays
-    // visible on the final frame.
+    // visible on the final frame. Inverted (night mode) disables the grayscale
+    // display, so the per-page B/W path must run or the panel never updates.
     const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
     if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
     ReaderUtils::renderAntiAliased(renderer, [this, &renderLines]() {
