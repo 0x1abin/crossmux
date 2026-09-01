@@ -1670,8 +1670,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool manualRefreshPending = forcedRefreshPending;
   forcedRefreshPending = false;
   const bool cleanImageBasePending = manualRefreshPending || pagesUntilFullRefresh <= 1;
-  const bool needsTextGrayscale = SETTINGS.textAntiAliasing;
-  const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
+  // Night mode renders crisp B/W; the SDK disables every grayscale display path.
+  const bool grayscaleEnabled = !renderer.isInverted();
+  const bool needsTextGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
+  const bool needsAnyGrayscale = grayscaleEnabled && (SETTINGS.textAntiAliasing || pageHasImages);
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
   // Paper Mono only (no other panel combines): defer the B/W base activation so
   // the gray planes join it in a single waveform. Displaying the base
@@ -1745,11 +1747,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
   } else {
 #if FREEINK_DEVICE_EEGO_A4
-    // Inverted (night mode) disables the grayscale display path, so the
-    // "defer the base to the gray pass" optimization would never push FAST
-    // pages to the panel (screen frozen while progress still advances).
-    // Fall back to the per-page B/W display, which inverts correctly.
-    if (needsTextGrayscale && !renderer.isInverted()) {
+    if (needsTextGrayscale) {
       const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
       if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
     } else {
