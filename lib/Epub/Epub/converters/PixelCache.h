@@ -57,6 +57,9 @@ struct PixelCache {
 
   static constexpr int MIN_BAND_ROWS = 16;
   static constexpr size_t MAX_BAND_BYTES = 24 * 1024;  // band working-set ceiling
+  static constexpr int requiredBandRows(int imageHeight, int maxBlockDstRows) {
+    return imageHeight < maxBlockDstRows ? imageHeight : maxBlockDstRows;
+  }
 
   // Open the cache file, write the header, and allocate a band buffer big enough
   // to hold the tallest single decode block (maxBlockDstRows output rows).
@@ -78,11 +81,11 @@ struct PixelCache {
     if (maxRowsByMem < 1) maxRowsByMem = 1;
     if ((size_t)wantRows > maxRowsByMem) wantRows = (int)maxRowsByMem;
 
-    // A single decode block must fit inside the band, otherwise streaming would
-    // drop rows. This only fails for pathological upscales that could not be
-    // cached at all; fall back to the no-cache path.
-    if (wantRows < maxBlockDstRows) {
-      LOG_ERR("IMG", "Cache band too small (%d < %d rows) for %dx%d", wantRows, maxBlockDstRows, w, h);
+    // A single decode block must fit inside the band, except when the complete
+    // image is shorter than that block. Otherwise streaming would drop rows.
+    const int requiredRows = requiredBandRows(h, maxBlockDstRows);
+    if (wantRows < requiredRows) {
+      LOG_ERR("IMG", "Cache band too small (%d < %d rows) for %dx%d", wantRows, requiredRows, w, h);
       return false;
     }
     bandRows = wantRows;
@@ -185,3 +188,6 @@ struct PixelCache {
     }
   }
 };
+
+static_assert(8 >= PixelCache::requiredBandRows(8, 12));
+static_assert(8 < PixelCache::requiredBandRows(100, 12));

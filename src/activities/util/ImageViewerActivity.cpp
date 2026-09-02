@@ -19,6 +19,13 @@ constexpr const char* TRANSPARENT_PREVIEW_PATH = "/.crosspoint/image_preview.tra
 constexpr const char* SLEEP_IMAGE_PATH = "/sleep.bmp";
 constexpr const char* SLEEP_IMAGE_PART_PATH = "/sleep.bmp.part";
 constexpr const char* SLEEP_IMAGE_BACKUP_PATH = "/sleep.bmp.bak";
+
+Rect sleepCoverActionRect(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return Rect(metrics.contentSidePadding,
+              renderer.getScreenHeight() - metrics.contentSidePadding - metrics.menuRowHeight,
+              renderer.getScreenWidth() - metrics.contentSidePadding * 2, metrics.menuRowHeight);
+}
 }  // namespace
 
 ImageViewerActivity::ImageViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path)
@@ -131,6 +138,9 @@ void ImageViewerActivity::onEnter() {
 
       // Draw UI hints on the base layer
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      if (mappedInput.hasTouch()) {
+        GUI.drawActionButton(renderer, sleepCoverActionRect(renderer), tr(STR_SET_SLEEP_COVER));
+      }
       // Single pass for non-grayscale images
 
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -283,6 +293,15 @@ void ImageViewerActivity::loop() {
   if (swipe == MappedInputManager::SwipeDir::Right) {
     openSibling(-1);
     return;
+  }
+
+  if (mappedInput.hasTouch()) {
+    const Rect sleepCoverAction = sleepCoverActionRect(renderer);
+    if (mappedInput.wasTapInRect(sleepCoverAction.x, sleepCoverAction.y, sleepCoverAction.width,
+                                 sleepCoverAction.height)) {
+      showSleepCoverOptions();
+      return;
+    }
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
