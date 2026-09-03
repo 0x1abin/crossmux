@@ -66,7 +66,12 @@ constexpr uint8_t MAX_PAGE_TURN_RATE = 30;
 // (that helper also gates power management). Overlay refresh choices are per-panel:
 // this family runs the grayscale anti-aliasing pass, so chrome painted over a
 // fresh page needs the HALF ghost-cleanup and closing re-renders the page.
-bool xteinkClassPanel() { return gpio.isXteinkDevice() || BoardConfig::isX4Pro() || FREEINK_DEVICE_X4CLASSIC; }
+// EEGO A4 runs the same grayscale AA pass on its UC8279C 4-gray panel, so its
+// overlay paints need the identical full-waveform treatment: a FAST differential
+// after the AA waveform leaves the covered page ghosting through the chrome.
+bool xteinkClassPanel() {
+  return gpio.isXteinkDevice() || BoardConfig::isX4Pro() || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_EEGO_A4;
+}
 
 constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
 constexpr size_t initialBookmarkCacheCapacity = 16;
@@ -1776,7 +1781,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // Night mode renders crisp B/W; the SDK disables every grayscale display path.
   const bool grayscaleEnabled = !renderer.isInverted();
   const bool needsTextGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
+#if FREEINK_DEVICE_EEGO_A4
+  // A4 single-refresh design: displayGrayBuffer() replaces the B/W base on the
+  // panel, so whatever the gray pass draws IS the final frame. With text AA
+  // off, the gray pass would render only the page's images (see
+  // renderGrayscalePass) and wipe the text the base frame just showed —
+  // reported as "image pages show only the image, no text". When there is no
+  // AA to render, skip the grayscale pipeline entirely: image pages fall back
+  // to the plain B/W frame, which keeps text and image together.
+  const bool needsAnyGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
+#else
   const bool needsAnyGrayscale = grayscaleEnabled && (SETTINGS.textAntiAliasing || pageHasImages);
+#endif
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
   // Paper Mono only (no other panel combines): defer the B/W base activation so
   // the gray planes join it in a single waveform. Displaying the base
@@ -2231,13 +2247,6 @@ void EpubReaderActivity::openOverlay(Overlay target) {
   // chrome straight onto it and push one refresh. requestUpdate() would
   // re-render the whole page first: slow, and visibly wrong, since that repaint
   // lands before the overlay does.
-  //
-  // Refresh mode: FAST for every overlay paint, first open included. The AA
-  // pass only grays glyph edges, and residue a FAST differential leaves under
-  // the sheet has not shown in practice; it also self-heals on the
-  // Xteink-class panels, whose close path re-renders the page. If text or
-  // images ever visibly ghost through the chrome, restore a HALF cleanup on
-  // the first open (see #2190 for the mechanism).
   if (section) {
     // Serialize against the render task: renderBook may be mid-page (status
     // bar included) in the shared framebuffer, and painting the chrome from
@@ -2247,6 +2256,15 @@ void EpubReaderActivity::openOverlay(Overlay target) {
       // Snapshot the clean page so stepping back from a panel to the toolbar
       // (and closing, where supported) can restore it without a re-render.
       overlayPageStored = renderer.storeBwBuffer();
+#if FREEINK_DEVICE_EEGO_A4
+      // The page under the chrome is a grayscale AA frame: its gray MSB plane
+      // (DTM1) survives in the controller RAM and ghosts through the overlay
+      // even after a full waveform (only DTM2 is rewritten). Write the BW page
+      // into both planes so the chrome opens over a clean B/W state — the
+      // frontlight panel's "refresh and become B/W" handoff. The close path
+      // re-renders the AA page to restore the gray look.
+      renderer.cleanupGrayscaleWithFrameBuffer();
+#endif
     } else if (overlayPageStored) {
       // Overlay -> overlay: wipe the previous chrome (toolbar header, sheet,
       // progress row) back to the clean page so none of it shows around or
@@ -2257,7 +2275,10 @@ void EpubReaderActivity::openOverlay(Overlay target) {
       overlayPageStored = renderer.storeBwBuffer();
     }
     renderOverlay();
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    // Grayscale-panel boards (Xteink class + EEGO A4) just ran the AA waveform
+    // on the page under the chrome; a FAST differential would ghost the covered
+    // text through the overlay. Push the full-waveform HALF instead.
+    renderer.displayBuffer(xteinkClassPanel() ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
   } else {
     requestUpdate();  // no page yet: renderBook() draws the overlay once it is
   }
@@ -2270,6 +2291,13 @@ void EpubReaderActivity::closeOverlayToPage() {
   overlay = Overlay::None;
   overlayPopup.dismiss();  // an option picker cannot outlive its panel
   toolbarUi.reset();       // ~1 KB of interaction table + props, only needed while open
+#if FREEINK_DEVICE_EEGO_A4
+  // The AA page return sits on top of the B/W chrome frame (openOverlay's
+  // cleanup wrote both planes); force the reader's next render onto the full
+  // waveform so the AA pass comes back clean — the frontlight panel's onExit
+  // handoff.
+  renderer.requestNextFullRefresh();
+#endif
   if (!xteinkClassPanel() && overlayPageStored) {
     RenderLock lock;  // the render task shares the framebuffer
     // No baseline resync: the glass shows the chrome, and erasing it needs
