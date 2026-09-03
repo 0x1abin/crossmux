@@ -1,8 +1,6 @@
 name: Firmware Release
 
 on:
-  schedule:
-    - cron: '0 23 * * *' # daily 07:00 Asia/Shanghai
   workflow_dispatch:
     inputs:
       notes_en:
