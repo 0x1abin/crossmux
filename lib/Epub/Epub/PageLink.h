@@ -93,8 +93,8 @@ class PageLinkList {
   bool allocationFailed() const { return allocationFailed_; }
   PageLink* begin() { return entries_.get(); }
   const PageLink* begin() const { return entries_.get(); }
-  PageLink* end() { return size_ ? entries_.get() + size_ : entries_.get(); }
-  const PageLink* end() const { return size_ ? entries_.get() + size_ : entries_.get(); }
+  PageLink* end() { return entries_ ? &entries_[size_] : nullptr; }
+  const PageLink* end() const { return entries_ ? &entries_[size_] : nullptr; }
   PageLink& operator[](const size_t index) { return entries_[index]; }
   const PageLink& operator[](const size_t index) const { return entries_[index]; }
 };
