@@ -366,6 +366,12 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
             "sleepTimeoutMinutes", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+        SettingInfo::Enum(StrId::STR_SOUND_FEEDBACK, &CrossPointSettings::soundFeedbackLevel,
+                          {StrId::STR_STATE_OFF, StrId::STR_SOUND_FEEDBACK_LOW, StrId::STR_SOUND_FEEDBACK_MEDIUM,
+                           StrId::STR_SOUND_FEEDBACK_HIGH},
+                          "soundFeedbackLevel", StrId::STR_CAT_SYSTEM),
+#endif
         SettingInfo::Toggle(StrId::STR_REMOVE_READ_FROM_RECENTS, &CrossPointSettings::removeReadBooksFromRecents,
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,

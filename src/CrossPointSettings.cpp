@@ -41,6 +41,12 @@ static_assert(LEGACY_FAKE_BOLD_MIGRATION[0] == CrossPointSettings::SYNTHETIC_BOL
 static_assert(LEGACY_FAKE_BOLD_MIGRATION[1] == CrossPointSettings::SYNTHETIC_BOLD_STANDARD);
 static_assert(LEGACY_FAKE_BOLD_MIGRATION[2] == CrossPointSettings::SYNTHETIC_BOLD_HEAVY);
 
+constexpr uint8_t migrateLegacySoundFeedback(const bool enabled) {
+  return enabled ? CrossPointSettings::SOUND_FEEDBACK_MEDIUM : CrossPointSettings::SOUND_FEEDBACK_OFF;
+}
+static_assert(migrateLegacySoundFeedback(false) == CrossPointSettings::SOUND_FEEDBACK_OFF);
+static_assert(migrateLegacySoundFeedback(true) == CrossPointSettings::SOUND_FEEDBACK_MEDIUM);
+
 // Stack buffer for "<key>_obf" key construction — avoids a std::string
 // allocation per obfuscated setting on every save and load.
 constexpr size_t OBF_KEY_BUF = 64;
@@ -253,6 +259,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   bool needsResave = false;
 
   auto clamp = [](uint8_t val, uint8_t maxVal, uint8_t def) -> uint8_t { return val < maxVal ? val : def; };
+
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+  if (doc["soundFeedbackLevel"].isNull() && !doc["soundFeedbackEnabled"].isNull()) {
+    soundFeedbackLevel = migrateLegacySoundFeedback(doc["soundFeedbackEnabled"].as<uint8_t>() != 0);
+    needsResave = true;
+  }
+#endif
 
   // Legacy migration: the aggregate statusBar field predates the split fields.
   if (doc["statusBarChapterPageCount"].isNull()) {

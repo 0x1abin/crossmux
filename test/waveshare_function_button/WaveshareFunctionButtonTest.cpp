@@ -15,9 +15,31 @@ FunctionButtonGesture::State settle(FunctionButtonGesture& gesture, uint8_t raw,
 
 }  // namespace
 
+TEST(WaveshareFunctionButton, PhysicalPressEdgesDoNotWaitForGestureClassification) {
+  FunctionButtonGesture gesture;
+
+  auto state = settle(gesture, FunctionButtonGesture::LEFT, 0);
+  EXPECT_EQ(state.physicalPressed, FunctionButtonGesture::LEFT);
+  EXPECT_EQ(state.pressed, 0);
+  settle(gesture, 0, 20);
+
+  state = settle(gesture, FunctionButtonGesture::RIGHT, 40);
+  EXPECT_EQ(state.physicalPressed, FunctionButtonGesture::RIGHT);
+  EXPECT_EQ(state.pressed, 0);
+  settle(gesture, 0, 60);
+
+  state = settle(gesture, FunctionButtonGesture::CONFIRM, 80);
+  EXPECT_EQ(state.physicalPressed, FunctionButtonGesture::CONFIRM);
+  EXPECT_EQ(state.pressed, 0);
+  state = gesture.update(FunctionButtonGesture::CONFIRM, 380);
+  EXPECT_EQ(state.physicalPressed, 0);
+  EXPECT_EQ(state.pressed, FunctionButtonGesture::CONFIRM);
+}
+
 TEST(WaveshareFunctionButton, BackDebouncesAndTracksLevel) {
   FunctionButtonGesture gesture;
   auto state = settle(gesture, FunctionButtonGesture::BACK, 10);
+  EXPECT_EQ(state.physicalPressed, FunctionButtonGesture::BACK);
   EXPECT_EQ(state.pressed, FunctionButtonGesture::BACK);
   EXPECT_EQ(state.down, FunctionButtonGesture::BACK);
 
@@ -29,6 +51,7 @@ TEST(WaveshareFunctionButton, BackDebouncesAndTracksLevel) {
 TEST(WaveshareFunctionButton, DirectionShortPressEmitsOnceOnRelease) {
   FunctionButtonGesture gesture;
   auto state = settle(gesture, FunctionButtonGesture::LEFT, 10);
+  EXPECT_EQ(state.physicalPressed, FunctionButtonGesture::LEFT);
   EXPECT_EQ(state.pressed, 0);
   EXPECT_EQ(state.down, 0);
 
@@ -107,7 +130,9 @@ TEST(WaveshareFunctionButton, DoubleClickAcceptsExactBoundaryAndEmitsBackOnce) {
   FunctionButtonGesture gesture;
   settle(gesture, FunctionButtonGesture::CONFIRM, 0);
   settle(gesture, 0, 50);  // pending confirm starts at 55 ms
-  settle(gesture, FunctionButtonGesture::CONFIRM, 355);
+  auto secondPress = settle(gesture, FunctionButtonGesture::CONFIRM, 355);
+  EXPECT_EQ(secondPress.physicalPressed, FunctionButtonGesture::CONFIRM);
+  EXPECT_EQ(secondPress.pressed, 0);
   auto state = settle(gesture, 0, 400);
 
   EXPECT_EQ(state.pressed, FunctionButtonGesture::BACK);

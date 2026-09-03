@@ -114,6 +114,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
   enum class ContentProfile : uint8_t { Global = 0, China = 1 };
 
+  enum SOUND_FEEDBACK_LEVEL {
+    SOUND_FEEDBACK_OFF = 0,
+    SOUND_FEEDBACK_LOW = 1,
+    SOUND_FEEDBACK_MEDIUM = 2,
+    SOUND_FEEDBACK_HIGH = 3,
+    SOUND_FEEDBACK_LEVEL_COUNT
+  };
+
   // Front button hardware identifiers (for remapping)
   enum FRONT_BUTTON_HARDWARE {
     FRONT_HW_BACK = 0,
@@ -365,6 +373,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   char dictionaryName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Physical-button audio feedback level. Surfaced only by capable builds.
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+  uint8_t soundFeedbackLevel = SOUND_FEEDBACK_MEDIUM;
+#else
+  uint8_t soundFeedbackLevel = SOUND_FEEDBACK_OFF;
+#endif
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
   uint8_t removeReadBooksFromRecents = 0;
   // Move epub to /Read/ folder on SD card when finished (0 = disabled, 1 = enabled)

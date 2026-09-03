@@ -137,6 +137,11 @@ bool setDisplayPower(bool enabled) {
   return updateBits(Register::LdoOn, ALDO_DISPLAY, enabled ? ALDO_DISPLAY : 0);
 }
 
+bool setAudioPower(bool enabled) {
+  if (!ready && !begin()) return false;
+  return updateBits(Register::LdoOn, ALDO_AUDIO, enabled ? ALDO_AUDIO : 0);
+}
+
 bool readBatteryPercentage(uint16_t& percent) {
   if (!ready && !begin()) return false;
   uint8_t status = 0;
