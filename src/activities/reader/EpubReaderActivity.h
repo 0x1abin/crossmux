@@ -2,6 +2,7 @@
 
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
+#include <Epub/PageLink.h>
 #include <Epub/Section.h>
 
 #include <atomic>
@@ -94,6 +95,9 @@ class EpubReaderActivity final : public ReaderActivity {
 
   // Footnote support
   FootnoteList currentPageFootnotes;
+  PageLinkList currentPageLinks;
+  int currentPageLinkMarginLeft = 0;
+  int currentPageLinkMarginTop = 0;
   struct SavedPosition {
     int spineIndex;
     int pageNumber;

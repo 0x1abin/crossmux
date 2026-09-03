@@ -100,9 +100,9 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 58 / 59
+### Versions 60 / 61
 
-> Unified firmware uses the CJK-capable cache version **59**. Version 58 is the
+> Unified firmware uses the CJK-capable cache version **61**. Version 60 is the
 > Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
@@ -129,7 +129,10 @@ if (parsedSize != fileSize) {
 > break opportunities, image viewport clamping, and the extra-wide line-spacing
 > option. Versions 58/59 additionally invalidate pagination because simple HTML
 > table rows are laid out as positioned columns rather than flattened paragraphs
-> with synthetic labels. The counters remain distinct and above every
+> with synthetic labels. Versions 60/61 append internal-link rectangles to each
+> page and invalidate pagination for inline direction inheritance, stripped
+> closing-block spacing, and preserved superscript/subscript on internal links.
+> The counters remain distinct and above every
 > previously shipped value so a firmware-flavor swap cannot read the other flavor's
 > stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
@@ -137,6 +140,10 @@ if (parsedSize != fileSize) {
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Versions 60/61 append the internal-link rectangles produced during text layout
+to each serialized page. The reader uses these rectangles for touch navigation;
+older caches are rebuilt because they contain no link geometry.
 
 Versions 52/53 increase the fixed-size footnote href field from 96 to 256 bytes.
 This changes each serialized footnote record from 128 to 288 bytes, so older

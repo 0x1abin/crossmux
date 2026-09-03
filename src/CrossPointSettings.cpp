@@ -240,6 +240,12 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // Keep the legacy marker current so rollback to a split-SKU firmware retains
   // the selected service region.
   doc["langSku"] = contentProfile == ContentProfile::China ? "cn" : "global";
+
+  // A uint16_t mask, so it does not fit the uint8_t generic loop. Omitted while
+  // unconfigured, so the default keeps following the UI language.
+  if (keyboardLayouts != 0) {
+    doc["keyboardLayouts"] = keyboardLayouts;
+  }
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc) {
@@ -421,6 +427,11 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
   onboardingVersion = doc["onboardingVersion"].is<uint8_t>() ? doc["onboardingVersion"].as<uint8_t>() : 0;
+
+  // Absent means unconfigured, which is the default.
+  if (doc["keyboardLayouts"].is<uint16_t>()) {
+    keyboardLayouts = doc["keyboardLayouts"].as<uint16_t>();
+  }
 
   if (needsResave) {
     LOG_DBG("CPS", "Resaving settings to update format");

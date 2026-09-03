@@ -15,7 +15,7 @@
 #include "MurphyM4BatchPreference.h"
 #endif
 
-#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
 #include <soc/usb_serial_jtag_reg.h>
 #endif
 
@@ -315,9 +315,8 @@ bool HalGPIO::verifyPowerButtonWakeup(const uint16_t requiredDurationMs, const b
   return inputMgr.getPowerButtonHeldTime() >= calibratedDuration;
 }
 
-#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_WAVESHARE_EPAPER_397
-// X4 Pro has no confirmed VBUS GPIO. A USB data host is observable through the
-// USB Serial/JTAG SOF counter; keep the last positive result across nearby polls.
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+// Keep the last positive USB Serial/JTAG SOF result across nearby polls.
 static bool usbHostSofActive() {
   static uint32_t lastFrame = 0;
   static unsigned long lastAdvanceMs = 0;
@@ -358,9 +357,6 @@ bool HalGPIO::isUsbConnected() const {
   if (BoardConfig::ACTIVE.usbDetect >= 0) {
     return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
   }
-#if FREEINK_DEVICE_X4PRO
-  if (usbHostSofActive()) return true;
-#endif
   // No digital USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
   // divider): infer external power from charging state instead. BatteryMonitor
   // picks the board's best source — charger IC status, gauge Current() sign, or

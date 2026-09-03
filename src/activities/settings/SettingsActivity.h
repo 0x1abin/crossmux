@@ -31,6 +31,7 @@ enum class SettingAction {
   ManageDictionaries,
   TextSettings,
   About,
+  KeyboardLayouts,
 };
 
 struct SettingInfo {
