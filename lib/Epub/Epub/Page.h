@@ -2,11 +2,13 @@
 #include <HalStorage.h>
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "FootnoteEntry.h"
+#include "PageLink.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
 
@@ -78,6 +80,8 @@ class Page {
   std::vector<std::unique_ptr<PageElement>> elements;
   FootnoteList footnotes;
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = FootnoteList::MAX_SIZE;
+  PageLinkList links;
+  static constexpr uint16_t MAX_LINKS_PER_PAGE = PageLinkList::MAX_SIZE;
 
   // Zero-based visible-codepoint offset where this page starts. Not part of the serialized page
   // body (it lives in the section's visible-offset LUT); Section::loadPage* fills it in from the
@@ -86,6 +90,8 @@ class Page {
   uint32_t visibleTextOffset = 0;
 
   void addFootnote(const char* number, const char* href);
+
+  bool addLink(const char* href, int16_t x, int16_t y, int16_t width, int16_t height);
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
   void renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;

@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG 62e48ce6d05ef360558d809eb43ecd422d0e5c29
+  GIT_TAG dacbbbcdc133a052f9122347429fdcb8cddf80af
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -88,3 +88,6 @@ add_subdirectory(murphy_m4_input)
 add_subdirectory(system_settings_reset)
 add_subdirectory(font_cache_manager)
 add_subdirectory(css_parser)
+add_subdirectory(chapter_html_slim_parser)
+add_subdirectory(ligature_guard)
+add_subdirectory(page_link)

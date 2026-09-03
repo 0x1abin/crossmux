@@ -9,6 +9,7 @@
 #if FREEINK_DEVICE_MURPHY_M4 && !defined(SIMULATOR)
 #include <HalGPIO.h>
 #endif
+#include <Memory.h>
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +25,7 @@
 #include "FontDownloadActivity.h"
 #include "InxItemLayout.h"
 #include "KOReaderSettingsActivity.h"
+#include "KeyboardLayoutsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "MappedInputManager.h"
 #include "OpdsServerListActivity.h"
@@ -274,6 +276,7 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
@@ -737,6 +740,13 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::About:
         startActivityForResultWith<AboutActivity>(resultHandler);
         break;
+      case SettingAction::KeyboardLayouts:
+        if (auto activity = makeUniqueNoThrow<KeyboardLayoutsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: KeyboardLayoutsActivity");
+        }
+        break;
       case SettingAction::None:
         // Do nothing
         break;
@@ -930,8 +940,8 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const bool boldChineseCategories = I18N.getLanguage() == Language::ZH_CN;
   // Content below the GUI.drawHeader band, above the button hints.
-  screen.setContentMargin(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
-                                      static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
 
   if (usesAccordion()) {
     const auto counts = accordionSettingCounts();

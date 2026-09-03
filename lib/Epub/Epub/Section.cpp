@@ -30,10 +30,11 @@ namespace {
 //   54 / 55 - one-shot soft-flush indentation and two-CJK-character defaults
 //   56 / 57 - focus-word break opportunities, image viewport clamping, and extra-wide line spacing
 //   58 / 59 - simple HTML table rows laid out as positioned columns
+//   60 / 61 - touch-link rectangles, inline direction inheritance, block spacing, and linked sup/sub
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 59;
+constexpr uint8_t SECTION_FILE_VERSION = 61;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 58;
+constexpr uint8_t SECTION_FILE_VERSION = 60;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /

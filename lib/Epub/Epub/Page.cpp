@@ -36,6 +36,27 @@ void Page::addFootnote(const char* number, const char* href) {
   entry->href[sizeof(entry->href) - 1] = '\0';
 }
 
+bool Page::addLink(const char* href, const int16_t x, const int16_t y, const int16_t width, const int16_t height) {
+  if (!href || width <= 0 || height <= 0 || links.size() >= MAX_LINKS_PER_PAGE) return false;
+  const size_t hrefLen = strnlen(href, sizeof(PageLink::href));
+  if (hrefLen == 0 || hrefLen == sizeof(PageLink::href)) return false;
+
+  auto* link = links.append();
+  if (!link) {
+    if (links.allocationFailed()) {
+      LOG_ERR("PGE", "OOM: page link storage (%u bytes)",
+              static_cast<unsigned>(PageLinkList::MAX_SIZE * sizeof(PageLink)));
+    }
+    return false;
+  }
+  memcpy(link->href, href, hrefLen + 1);
+  link->x = x;
+  link->y = y;
+  link->width = width;
+  link->height = height;
+  return true;
+}
+
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
 }
@@ -200,6 +221,20 @@ bool Page::serialize(HalFile& file) const {
     }
   }
 
+  const uint16_t linkCount = std::min<uint16_t>(links.size(), MAX_LINKS_PER_PAGE);
+  serialization::writePod(file, linkCount);
+  for (uint16_t i = 0; i < linkCount; i++) {
+    const auto& link = links[i];
+    if (file.write(link.href, sizeof(link.href)) != sizeof(link.href)) {
+      LOG_ERR("PGE", "Failed to write link %u", i);
+      return false;
+    }
+    serialization::writePod(file, link.x);
+    serialization::writePod(file, link.y);
+    serialization::writePod(file, link.width);
+    serialization::writePod(file, link.height);
+  }
+
   return true;
 }
 
@@ -275,6 +310,41 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
     }
     entry.number[sizeof(entry.number) - 1] = '\0';
     entry.href[sizeof(entry.href) - 1] = '\0';
+  }
+
+  uint16_t linkCount = 0;
+  if (!serialization::readPod(file, linkCount)) return nullptr;
+  if (linkCount > MAX_LINKS_PER_PAGE) {
+    LOG_ERR("PGE", "Invalid link count %u", linkCount);
+    return nullptr;
+  }
+  if (!page->links.resize(linkCount)) {
+    constexpr size_t SERIALIZED_LINK_SIZE = FOOTNOTE_HREF_LEN + 4 * sizeof(int16_t);
+    const size_t bytesToSkip = static_cast<size_t>(linkCount) * SERIALIZED_LINK_SIZE;
+    const size_t position = file.position();
+    const size_t fileSize = file.size();
+    LOG_ERR("PGE", "OOM: dropping %u page links (%u bytes)", linkCount, static_cast<unsigned>(bytesToSkip));
+    if (position > fileSize || bytesToSkip > fileSize - position || !file.seek(position + bytesToSkip)) {
+      LOG_ERR("PGE", "Failed to skip page links after OOM");
+      return nullptr;
+    }
+    return page;
+  }
+  for (uint16_t i = 0; i < linkCount; i++) {
+    auto& link = page->links[i];
+    if (file.read(link.href, sizeof(link.href)) != sizeof(link.href)) {
+      LOG_ERR("PGE", "Failed to read link %u", i);
+      return nullptr;
+    }
+    link.href[sizeof(link.href) - 1] = '\0';
+    if (!serialization::readPod(file, link.x) || !serialization::readPod(file, link.y) ||
+        !serialization::readPod(file, link.width) || !serialization::readPod(file, link.height)) {
+      return nullptr;
+    }
+    if (link.href[0] == '\0' || link.width <= 0 || link.height <= 0) {
+      LOG_ERR("PGE", "Invalid link geometry %u", i);
+      return nullptr;
+    }
   }
 
   return page;
