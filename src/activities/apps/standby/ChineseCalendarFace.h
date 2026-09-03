@@ -22,7 +22,7 @@ class ChineseCalendarFace final : public StandbyFace {
  public:
   void onEnter() override;
   void onExit() override;
-  bool tick() override;
+  TickResult tick() override;
   void render(GfxRenderer& renderer, const Rect& viewport) override;
   StrId titleId() const override;
   uint32_t secondsUntilNextWake() const override;

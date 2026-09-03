@@ -139,3 +139,45 @@ TEST(StandbyTime, UsesTickingFallbackUntilClockBecomesValid) {
   EXPECT_EQ(hour, 11u);
   EXPECT_EQ(minute, 4u);
 }
+
+TEST(StandbyTime, LightSleepRequiresIdleAndInactivePeripherals) {
+  EXPECT_FALSE(standby_time::shouldLightSleep(34999u, false, false, false, true));
+  EXPECT_TRUE(standby_time::shouldLightSleep(35000u, false, false, false, true));
+  EXPECT_FALSE(standby_time::shouldLightSleep(35000u, true, false, false, true));
+  EXPECT_FALSE(standby_time::shouldLightSleep(35000u, false, true, false, true));
+  EXPECT_FALSE(standby_time::shouldLightSleep(35000u, false, false, true, true));
+  EXPECT_FALSE(standby_time::shouldLightSleep(35000u, false, false, false, false));
+}
+
+TEST(StandbyTime, DetectsTenMinuteDisplayBucketChanges) {
+  halClock.now = 0;
+  constexpr uint32_t startMs = 100000u;
+  arduinoTestMillis = startMs;
+  const auto bucketAtMinute = [](const uint32_t elapsedMinutes) {
+    arduinoTestMillis = startMs + elapsedMinutes * 60000u;
+    return standby_time::getTenMinuteBucket(startMs);
+  };
+
+  const uint8_t bucket38 = bucketAtMinute(0);
+
+  EXPECT_FALSE(standby_time::didTenMinuteBucketChange(-1, bucket38));
+
+  const uint8_t bucket39 = bucketAtMinute(1);
+  EXPECT_EQ(bucket39, bucket38);
+  EXPECT_FALSE(standby_time::didTenMinuteBucketChange(bucket38, bucket39));
+
+  const uint8_t bucket40 = bucketAtMinute(2);
+  EXPECT_NE(bucket40, bucket39);
+  EXPECT_TRUE(standby_time::didTenMinuteBucketChange(bucket39, bucket40));
+
+  const uint8_t bucket19 = bucketAtMinute(41);
+  const uint8_t bucket20 = bucketAtMinute(42);
+  EXPECT_TRUE(standby_time::didTenMinuteBucketChange(bucket19, bucket20));
+
+  const uint8_t bucket59 = bucketAtMinute(21);
+  const uint8_t bucket00 = bucketAtMinute(22);
+  EXPECT_TRUE(standby_time::didTenMinuteBucketChange(bucket59, bucket00));
+
+  const uint8_t delayedBucket = bucketAtMinute(55);
+  EXPECT_TRUE(standby_time::didTenMinuteBucketChange(bucket20, delayedBucket));
+}

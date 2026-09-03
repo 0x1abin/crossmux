@@ -25,6 +25,8 @@ class HalPowerManager {
   SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
 
  public:
+  enum class LightSleepWakeReason : uint8_t { Timer, PowerButton, Failed };
+
 #if BOARD_HAS_PSRAM
   static constexpr int LOW_POWER_FREQ = 80;  // MHz
 #else
@@ -41,6 +43,12 @@ class HalPowerManager {
   // Setup wake up GPIO and enter deep sleep
   // Should be called inside main loop() to handle the currentLockMode
   void startDeepSleep(HalGPIO& gpio) const;
+
+  // Only the runtime-selected X3 profiles have validated standby wake wiring.
+  bool canStandbyLightSleep(const HalGPIO& gpio) const;
+
+  // Enter one light-sleep cycle. GPIO and timer wake sources are removed before returning.
+  LightSleepWakeReason lightSleepFor(uint32_t seconds) const;
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;

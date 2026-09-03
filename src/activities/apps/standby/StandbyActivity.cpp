@@ -9,6 +9,12 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 
+#if CROSSPOINT_EMULATED == 0
+#include <HalDisplay.h>
+#include <HalGPIO.h>
+#include <HalPowerManager.h>
+#endif
+
 #include <algorithm>
 #include <string>
 
@@ -32,6 +38,9 @@ namespace {
 constexpr uint32_t kWifiTimeoutMs = 15000u;  // Same as WifiSelectionActivity
 constexpr uint32_t kNtpTimeoutMs = 12000u;
 constexpr uint32_t kSyncDelayMs = 1500u;
+#if CROSSPOINT_EMULATED == 0
+constexpr uint32_t kMaxLightSleepSeconds = 60u;
+#endif
 
 // Face factory table. Add new faces by appending a row here and including the
 // corresponding header above. Each entry also declares an isAvailable()
@@ -135,9 +144,7 @@ void StandbyActivity::onExit() {
       break;
     case SyncState::WifiConnecting:
     case SyncState::ClockSyncing:
-      WiFi.disconnect(false);
-      delay(100);
-      WiFi.mode(WIFI_OFF);
+      stopTimeSyncWifi();
       break;
   }
   syncState_ = SyncState::Idle;
@@ -257,11 +264,13 @@ void StandbyActivity::promptForWifi() {
 void StandbyActivity::onWifiResult(const ActivityResult& result) {
   if (result.isCancelled) {
     LOG_DBG("STANDBY", "WiFi UI cancelled; clock remains unavailable");
+    stopTimeSyncWifi();
+    syncState_ = SyncState::Idle;
     return;
   }
   if (TimeUtils::isClockValid()) {
     LOG_DBG("STANDBY", "WiFi UI returned with a trustworthy clock");
-    finishTimeSync();
+    completeTimeSync();
     return;
   }
 
@@ -273,7 +282,8 @@ void StandbyActivity::onWifiResult(const ActivityResult& result) {
 void StandbyActivity::beginClockSync() {
   if (!halClock.requestSync()) {
     LOG_ERR("STANDBY", "Clock sync could not start");
-    finishTimeSync();
+    stopTimeSyncWifi();
+    syncState_ = SyncState::Idle;
     return;
   }
   syncState_ = SyncState::ClockSyncing;
@@ -303,9 +313,7 @@ void StandbyActivity::pumpTimeSync() {
 
       LOG_DBG("STANDBY", "Silent WiFi sync failed (status=%d, t=%ums)", static_cast<int>(status),
               static_cast<unsigned>(elapsed));
-      WiFi.disconnect(false);
-      delay(100);
-      WiFi.mode(WIFI_OFF);
+      stopTimeSyncWifi();
       syncState_ = SyncState::Idle;
       if (!g_promptedForWifiThisSession)
         promptForWifi();
@@ -318,28 +326,31 @@ void StandbyActivity::pumpTimeSync() {
         case ClockSyncState::Succeeded:
           g_promptedForWifiThisSession = false;
           LOG_DBG("STANDBY", "Clock synchronized");
-          finishTimeSync();
+          completeTimeSync();
           return;
         case ClockSyncState::Failed:
           LOG_DBG("STANDBY", "Clock sync failed");
-          finishTimeSync();
+          stopTimeSyncWifi();
+          syncState_ = SyncState::Idle;
           return;
         case ClockSyncState::Idle:
           if (elapsed < kNtpTimeoutMs) return;
           LOG_DBG("STANDBY", "Clock sync stopped");
-          finishTimeSync();
+          stopTimeSyncWifi();
+          syncState_ = SyncState::Idle;
           return;
         case ClockSyncState::Syncing:
           if (elapsed < kNtpTimeoutMs) return;
           LOG_DBG("STANDBY", "Clock sync timed out");
-          finishTimeSync();
+          stopTimeSyncWifi();
+          syncState_ = SyncState::Idle;
           return;
       }
       break;
   }
 }
 
-void StandbyActivity::finishTimeSync() {
+void StandbyActivity::stopTimeSyncWifi() {
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);
@@ -348,8 +359,70 @@ void StandbyActivity::finishTimeSync() {
   // active (see HalPowerManager.cpp). Return value is ignored;
   // ESP_ERR_WIFI_NOT_INIT is fine if we never connected.
   esp_wifi_deinit();
+}
+
+void StandbyActivity::completeTimeSync() {
+  stopTimeSyncWifi();
   syncState_ = SyncState::Idle;
+  lastInputMs_ = millis();
   requestUpdate();
+}
+
+void StandbyActivity::processFaceTick(const bool waitForUpdate) {
+  if (!currentFace_) return;
+
+  switch (currentFace_->tick()) {
+    case StandbyFace::TickResult::None:
+      return;
+    case StandbyFace::TickResult::Redraw:
+      break;
+    case StandbyFace::TickResult::RedrawWithGhostCleanup:
+#if CROSSPOINT_EMULATED == 0
+      if (gpio.isXteinkDevice()) renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+#endif
+      break;
+  }
+
+  if (waitForUpdate)
+    requestUpdateAndWait();
+  else
+    requestUpdate();
+}
+
+bool StandbyActivity::tryLightSleep(const uint32_t idleMs) {
+#if CROSSPOINT_EMULATED == 0
+  if (mode_ != DisplayMode::Immersive || !currentFace_) return false;
+
+  const bool syncActive = syncState_ != SyncState::Idle;
+  const bool wifiActive = WiFi.getMode() != WIFI_MODE_NULL;
+  const bool hardwareAllowed = powerManager.canStandbyLightSleep(gpio);
+  if (!standby_time::shouldLightSleep(idleMs, syncActive, wifiActive, gpio.isUsbConnected(), hardwareAllowed)) {
+    return false;
+  }
+
+  const uint32_t seconds = std::clamp<uint32_t>(currentFace_->secondsUntilNextWake(), 1, kMaxLightSleepSeconds);
+  HalPowerManager::LightSleepWakeReason wakeReason;
+  {
+    RenderLock lock;
+    wakeReason = powerManager.lightSleepFor(seconds);
+  }
+  switch (wakeReason) {
+    case HalPowerManager::LightSleepWakeReason::Timer:
+      processFaceTick(true);
+      return true;
+    case HalPowerManager::LightSleepWakeReason::PowerButton:
+      mode_ = DisplayMode::Normal;
+      lastInputMs_ = millis();
+      requestUpdate();
+      return true;
+    case HalPowerManager::LightSleepWakeReason::Failed:
+      lastInputMs_ = millis();
+      return true;
+  }
+#else
+  (void)idleMs;
+#endif
+  return false;
 }
 
 void StandbyActivity::loop() {
@@ -453,22 +526,16 @@ void StandbyActivity::loop() {
 
   pumpTimeSync();
 
-  // After 5 s of idle, hide chrome and let the face fill the screen. From
-  // there the framework's idle-3 s auto-downclock kicks in (HalPowerManager →
-  // LOW_POWER_FREQ, 10 MHz). We keep preventAutoSleep() returning true so the
-  // device will NOT auto-deep-sleep — standby is a clock and must keep showing
-  // the time. The deep-sleep timer is short-circuited in main.cpp via
-  // preventAutoSleep(); downclocking is unaffected because main.cpp only
-  // resets lastActivityTime on real user input, not on preventAutoSleep().
   const uint32_t idle = millis() - lastInputMs_;
   if (mode_ == DisplayMode::Normal && idle >= 5000u) {
     mode_ = DisplayMode::Immersive;
     requestUpdate();
+    return;
   }
 
-  if (currentFace_ && currentFace_->tick()) {
-    requestUpdate();
-  }
+  if (tryLightSleep(idle)) return;
+
+  processFaceTick(false);
 }
 
 void StandbyActivity::render(RenderLock&&) {
