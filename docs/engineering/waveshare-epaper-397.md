@@ -1,7 +1,8 @@
 # Waveshare ESP32-S3 ePaper 3.97
 
 Experimental hardware target: ESP32-S3, 16 MiB flash,
-8 MiB PSRAM, 800×480 SSD1677, 4-bit SDMMC, AXP2101, and PCF85063A.
+8 MiB PSRAM, 800×480 SSD1677, 4-bit SDMMC, AXP2101, PCF85063A,
+and ES8311/NS4150B audio.
 
 ```bash
 pio run -e waveshare_epaper_397
@@ -17,7 +18,8 @@ pio device monitor --port /dev/tty.usbmodem101 --baud 115200
 | SDMMC | CLK 16, CMD 17, D0/D1/D2/D3 15/7/8/18; 4-bit |
 | I²C | SDA 41, SCL 42; 400 kHz |
 | RTC | PCF85063A at `0x51` |
-| PMIC | AXP2101 at `0x34`; IRQ on GPIO38; ALDO3 supplies the EPD |
+| PMIC | AXP2101 at `0x34`; IRQ on GPIO38; ALDO1/2 supply audio and ALDO3 supplies the EPD |
+| Audio | ES8311 at `0x18`; MCLK 13, BCLK 14, WS 47, DOUT 48; NS4150B enable 39 |
 | Buttons | Back 0, Left 4, Function 5, Right 6; active-low |
 
 Function single-click emits Confirm after the 300 ms double-click window. A
@@ -32,7 +34,31 @@ on; the boot gesture is ignored until its first release, so it may remain held
 until the first screen is visible. A new runtime hold uses the existing 400 ms
 software shutdown threshold (about 10 ms when short Power is set to Sleep),
 while a continuous 4-second hold remains the PMIC hard-power-off fallback.
-Audio, QMI8658, and SHTC3 are deliberately not initialized by this target.
+QMI8658 and SHTC3 are deliberately not initialized by this target.
+
+System Settings exposes **Sound Feedback** with Off/Low/Medium/High levels;
+Medium is the default on this target. Low/Medium map to the previous Medium/High
+ES8311 volume values 85/100. High keeps codec volume 100 and applies saturating
+1.75x PCM gain (about +4.9 dB). Debounced physical Left/Right presses play
+`select`; physical Confirm, Back, and Power presses play `tap` immediately,
+before click/double-click/hold business classification. A hold produces no extra
+cue. The two 16 kHz mono PCM WAVs are embedded only in this build.
+
+The build opts into `CROSSPOINT_CAP_SOUND_FEEDBACK`. `SoundFeedback` owns cue
+selection, settings interpretation, RIFF data-chunk parsing, calibration, and
+PCM gain; `HalAudioOutput` owns the AudioManager and board power lifecycle; the
+FreeInk AudioManager owns codec/I²S streaming. Adding another speaker board
+requires a reviewed calibration and capability opt-in, not a copy of the cue
+player. The embedded WAV data chunks are located at runtime, so playback does
+not assume a 44-byte header.
+
+When a cue is already playing, the next physical press interrupts and replaces
+it at the next PCM buffer boundary; input handling never waits for playback.
+The I²S line is primed before the NS4150B is raised, followed by a Waveshare-only
+10 ms amp-settle interval so the 10 ms `select` waveform is not clipped. Off
+stops playback and powers down the codec, amplifier, and AXP2101 audio rails.
+The wake gesture remains absorbed. A screenshot chord may play the constituent
+physical-key cues, but screenshot recognition adds no cue of its own.
 
 GPIO4/GPIO6 short presses emit Left/Right on release. Holding either key for
 650 ms instead emits and holds Up/Down respectively; releasing it produces only
@@ -59,6 +85,13 @@ AXP2101 shutdown path then removes system power.
 - Visually check full, fast/windowed, half, and four-gray refreshes; repeat sleep/wake three times.
 - Repeat Back, Left, Right, Function single/double/hold, and side Power gestures three times; one gesture must
   produce one action.
+- With Sound Feedback at its fresh-install Medium default, confirm physical Left/Right presses play audible `select`
+  and Confirm/Back/Power presses play `tap` without waiting for release or gesture classification. Confirm long Power
+  plays once at press, while a wake-held Power button remains silent.
+- Check Off/Low/Medium/High persistence across reboot and verify the three audible levels are clearly distinct.
+- Press buttons rapidly 100 times and switch Sound Feedback levels ten times. Confirm each new cue interrupts the prior
+  cue without blocking input, the amplifier does not pop or stutter, and serial free-heap/largest-block readings do not
+  trend downward.
 - Open an EPUB from SD, turn pages, and confirm progress/settings writes survive reboot.
 - Set the RTC, reboot and fully power-cycle, then confirm restored time.
 - Check battery percentage and charging; unplug USB, run on battery, shut down, then hold the side key until the first

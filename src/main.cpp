@@ -53,6 +53,10 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+#include <SoundFeedback.h>
+#endif
+
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
 ActivityManager activityManager(renderer, mappedInputManager);
@@ -66,6 +70,17 @@ static unsigned long lastX4ProPowerClickAt = 0;
 namespace {
 constexpr unsigned long X4PRO_POWER_DOUBLE_CLICK_MS = 500;
 constexpr unsigned long X4PRO_POWER_CLICK_MAX_HOLD_MS = 300;
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+static_assert(CrossPointSettings::SOUND_FEEDBACK_OFF == static_cast<uint8_t>(SoundFeedback::Level::Off));
+static_assert(CrossPointSettings::SOUND_FEEDBACK_LOW == static_cast<uint8_t>(SoundFeedback::Level::Low));
+static_assert(CrossPointSettings::SOUND_FEEDBACK_MEDIUM == static_cast<uint8_t>(SoundFeedback::Level::Medium));
+static_assert(CrossPointSettings::SOUND_FEEDBACK_HIGH == static_cast<uint8_t>(SoundFeedback::Level::High));
+static_assert(HalGPIO::BTN_BACK == SoundFeedback::BUTTON_BACK &&
+              HalGPIO::BTN_CONFIRM == SoundFeedback::BUTTON_CONFIRM &&
+              HalGPIO::BTN_LEFT == SoundFeedback::BUTTON_LEFT && HalGPIO::BTN_RIGHT == SoundFeedback::BUTTON_RIGHT &&
+              HalGPIO::BTN_UP == SoundFeedback::BUTTON_UP && HalGPIO::BTN_DOWN == SoundFeedback::BUTTON_DOWN &&
+              HalGPIO::BTN_POWER == SoundFeedback::BUTTON_POWER);
+#endif
 }  // namespace
 
 // A wake hold must never become an in-app power-button action.  Boot may continue
@@ -304,6 +319,9 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   halTiltSensor.deepSleep();
   Frontlight.setOn(false);
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+  SoundFeedback::shutdown();
+#endif
   display.deepSleep();
 #if !FREEINK_DEVICE_EEGO_A4
   Storage.prepareForDeepSleep();
@@ -750,6 +768,10 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+  SoundFeedback::update(SETTINGS.soundFeedbackLevel, gpio.physicalPressedMask());
+#endif
 
   if (activityManager.requiresExclusiveStorageLoop()) {
     // USB Drive handed the raw SD card to the host. Do not run screenshots,
