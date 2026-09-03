@@ -30,14 +30,16 @@ struct StandbyRetention {
   int activeLevel;
 };
 
-StandbyRetention x3StandbyRetention() {
+StandbyRetention standbyRetention() {
   const auto& board = BoardConfig::ACTIVE;
   switch (board.board) {
+    case BoardConfig::Board::XteinkX4:
+      return {board.power.latch0, HIGH};
     case BoardConfig::Board::XteinkX3:
     case BoardConfig::Board::XteinkX3Uc8279:
       return {board.sd.powerEnable, board.sd.powerActiveHigh ? HIGH : LOW};
     default:
-      // X4 failed hardware validation; all other profiles remain unvalidated.
+      // All other profiles remain unvalidated.
       return {BoardConfig::PIN_UNASSIGNED, LOW};
   }
 }
@@ -163,12 +165,12 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 }
 
 bool HalPowerManager::canStandbyLightSleep(const HalGPIO& gpio) const {
-  return gpio.isXteinkDevice() && BoardConfig::ACTIVE.input.power >= 0 && x3StandbyRetention().pin >= 0;
+  return gpio.isXteinkDevice() && BoardConfig::ACTIVE.input.power >= 0 && standbyRetention().pin >= 0;
 }
 
 HalPowerManager::LightSleepWakeReason HalPowerManager::lightSleepFor(const uint32_t seconds) const {
   const int8_t powerPin = BoardConfig::ACTIVE.input.power;
-  const StandbyRetention retention = x3StandbyRetention();
+  const StandbyRetention retention = standbyRetention();
   if (seconds == 0 || powerPin < 0 || retention.pin < 0) {
     LOG_ERR("PWR", "Invalid light-sleep request: seconds=%u powerPin=%d retentionPin=%d",
             static_cast<unsigned>(seconds), powerPin, retention.pin);
@@ -188,14 +190,15 @@ HalPowerManager::LightSleepWakeReason HalPowerManager::lightSleepFor(const uint3
     const auto keepFirstError = [&](const esp_err_t current) {
       if (cleanupError == ESP_OK && current != ESP_OK) cleanupError = current;
     };
+    keepFirstError(gpio_set_intr_type(static_cast<gpio_num_t>(powerPin), GPIO_INTR_DISABLE));
     keepFirstError(esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO));
     keepFirstError(esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER));
     keepFirstError(gpio_sleep_sel_en(retentionPin));
     return cleanupError;
   };
 
-  // ESP32-C3 isolates ordinary GPIOs in light sleep. Keep the X3 SD rail
-  // actively driven instead of allowing GPIO13 to float.
+  // ESP32-C3 isolates ordinary GPIOs in light sleep. Keep the X3 SD rail or
+  // X4 battery latch actively driven instead of allowing GPIO13 to float.
   esp_err_t error = gpio_set_level(retentionPin, retention.activeLevel);
   if (error == ESP_OK) error = gpio_set_direction(retentionPin, GPIO_MODE_OUTPUT);
   if (error == ESP_OK) error = gpio_sleep_sel_dis(retentionPin);

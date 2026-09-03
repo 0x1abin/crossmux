@@ -44,17 +44,18 @@ tagged image for a different board.
 
 ## Standby-display light sleep
 
-Standby-display light sleep is currently enabled only for the runtime-selected
-X3/X3 UC8279 profiles. The HAL arms GPIO3 plus a timer and consumes the released
-power button before returning to the Activity. ESP32-C3 isolates ordinary GPIOs
-in light sleep, so the HAL exempts GPIO13 from that isolation and keeps the X3 SD
-rail powered. Display state and all other power rails remain unchanged.
+Standby-display light sleep is enabled for the runtime-selected X3/X3 UC8279 and
+X4 profiles. The HAL arms GPIO3 plus a timer and consumes the released power
+button before returning to the Activity. ESP32-C3 isolates ordinary GPIOs in
+light sleep, so the HAL exempts GPIO13 from that isolation: it keeps the X3 SD
+rail powered or the X4 battery latch asserted. Display state and all other power
+rails remain unchanged.
 
-X4 light sleep is disabled because hardware testing entered a cold-boot state
-instead of resuming. X4 and all S3 targets remain in the normal downclocked
-standby loop. Add a target only after its wake polarity, repeated wake,
-peripheral recovery, USB behavior, and sleep current have passed hardware
-validation; a successful build is not that acceptance test.
+Repeated timer wake, power-button wake, and button, display, and SD recovery
+after wake passed hardware validation on both X3 and X4. X4 sleep current has
+not yet been quantified, so no measured power reduction is claimed. All S3
+targets remain in the normal downclocked standby loop; a successful build alone
+is not a hardware acceptance test.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.
