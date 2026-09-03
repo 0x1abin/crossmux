@@ -30,6 +30,7 @@
 #include "apps/pixel-switch/PixelSwitchActivity.h"
 #include "apps/reading-stats/ReadingStatsActivity.h"
 #include "apps/reading-stats/ReadingStatsMenuActivity.h"
+#include "apps/shengbei/ShengBeiActivity.h"
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
 #include "apps/woodfish/WoodfishActivity.h"
@@ -508,6 +509,8 @@ void ActivityManager::goToPixelSwitch() { replaceActivityWith<PixelSwitchActivit
 void ActivityManager::goToCalculator() { replaceActivityWith<CalculatorActivity>(); }
 
 void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); }
+
+void ActivityManager::goToShengBei() { replaceActivityWith<ShengBeiActivity>(); }
 
 void ActivityManager::goToGame2048() { replaceActivityWith<Game2048Activity>(); }
 

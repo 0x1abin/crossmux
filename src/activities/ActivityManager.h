@@ -126,6 +126,7 @@ class ActivityManager {
   void goToPixelSwitch();
   void goToCalculator();
   void goToWoodfish();
+  void goToShengBei();
   void goToAirPage();
   void goToBuddy();
   void goToStandby();

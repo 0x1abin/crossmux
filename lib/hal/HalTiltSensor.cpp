@@ -13,6 +13,46 @@ bool HalTiltSensor::readGyro(float& gx, float& gy, float& gz) const {
   return true;
 }
 
+bool HalTiltSensor::readSample(Imu::Sample& sample) const {
+  if (!_available || !_isAwake) return false;
+  return _sdkImu.read(sample);
+}
+
+bool HalTiltSensor::pollShake() {
+  if (!_available) return false;
+  if (!_isAwake) {
+    wake();
+    return false;
+  }
+
+  const unsigned long now = millis();
+  if ((now - _wakeMs) < WAKE_STABILIZE_MS) return false;
+  if ((now - _lastPollMs) < 25) return false;  // ~40 Hz
+  _lastPollMs = now;
+
+  Imu::Sample s;
+  if (!_sdkImu.read(s)) return false;
+
+  // Compute dynamic-overload acceleration bias |totalAcc - 1.0g| and 3-axis
+  // combined angular velocity. Cast-cup apps (e.g. ShengBei) need a more
+  // deliberate two-hand shake than the single-axis 270 dps wrist-flick used
+  // for tilt page-turn, so we require either substantial dynamic overload
+  // OR very strong overall motion.
+  const float totalAcc = sqrtf(s.ax * s.ax + s.ay * s.ay + s.az * s.az);
+  const float accDelta = fabsf(totalAcc - 1.0f);
+  const float gyroMag = sqrtf(s.gx * s.gx + s.gy * s.gy + s.gz * s.gz);
+
+  if ((now - _lastShakeMs) >= 800) {
+    if ((accDelta > 0.95f && gyroMag > 300.0f) || accDelta > 1.35f || gyroMag > 450.0f) {
+      _lastShakeMs = now;
+      _hadActivity = true;
+      LOG_INF("GYR", "Deliberate shake detected! accDelta=%.2f g, gyroMag=%.1f dps", accDelta, gyroMag);
+      return true;
+    }
+  }
+  return false;
+}
+
 void HalTiltSensor::begin() {
   _available = _sdkImu.begin();
   if (_available) {
@@ -34,6 +74,7 @@ bool HalTiltSensor::wake() {
     return false;
   }
 
+  _forcedAwake = true;
   if (!_sdkImu.wake()) {
     LOG_ERR("GYR", "IMU wake failed");
     return false;
@@ -51,6 +92,7 @@ bool HalTiltSensor::deepSleep() {
     return false;
   }
 
+  _forcedAwake = false;
   if (!_sdkImu.sleep()) {
     LOG_ERR("GYR", "IMU sleep failed");
     return false;
@@ -64,6 +106,14 @@ bool HalTiltSensor::deepSleep() {
 
 void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const bool inReader) {
   if (!_available) {
+    return;
+  }
+
+  // If ShengBei or another app explicitly holds the sensor awake, do not force-sleep it
+  if (_forcedAwake) {
+    if (!_isAwake) {
+      _isAwake = wake();
+    }
     return;
   }
 
