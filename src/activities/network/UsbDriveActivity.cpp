@@ -140,11 +140,11 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
       static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), static_cast<int16_t>(metrics.contentSidePadding),
       static_cast<int16_t>(metrics.buttonHintsHeight), static_cast<int16_t>(metrics.contentSidePadding)});
 
-  auto messageStyle = screen.theme().smallText;
+  auto messageStyle = screen.theme().titleText;
   messageStyle.align = fui::TextAlign::Center;
   messageStyle.bold = true;
   messageStyle.maxLines = 2;
-  auto detailStyle = screen.theme().smallText;
+  auto detailStyle = screen.theme().bodyText;
   detailStyle.align = fui::TextAlign::Center;
   detailStyle.maxLines = 3;
 
