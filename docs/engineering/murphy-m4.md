@@ -100,6 +100,13 @@ and app at `0x10000` without overwriting NVS.
   share I²C1 without conflicts or bus/device recreation. Also verify concurrent
   4-bit SDMMC/display use, ADC9 battery, active-low GPIO43 charging, and RX8010
   power-loss retention/VLF handling.
+- Confirm USB Serial/JTAG logging and flashing still work after a normal boot. Open File Transfer > USB Drive and
+  verify a host can mount the SD card, copy, rename, delete, and read a large file. Safely eject or disconnect while
+  idle, then confirm the device reboots Home, remounts the SD card, and opens a transferred EPUB. Repeat three times.
+- Enter USB Drive without a connected host, cancel, and confirm the device reboots Home with the SD card mounted.
+  Also verify the five-minute host timeout. Record `ESP.getFreeHeap()`, `ESP.getMinFreeHeap()`, and
+  `ESP.getMaxAllocHeap()` before entry and after reboot; use external UART to record the same values while MSC is
+  active when available.
 - Measure GPIO47/48 at about 25 kHz / 10-bit and verify the gamma curve at
   0/1/5/50/100%, both color-temperature endpoints, off, and wake restoration.
 - Cycle deep sleep and confirm GPIO10/45 rails turn off, frontlight is off,
