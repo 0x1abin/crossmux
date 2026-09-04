@@ -5,10 +5,10 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../GameUi.h"
 #include "GomokuGameActivity.h"
+#include "activities/apps/GameUi.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 
 GomokuMenuActivity::GomokuMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("GomokuMenu", renderer, mappedInput) {}

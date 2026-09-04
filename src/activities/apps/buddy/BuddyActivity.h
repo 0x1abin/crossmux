@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
 #include "BuddyGenerator.h"
+#include "activities/Activity.h"
 
 class BuddyActivity final : public Activity {
  public:

@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "../../../util/ButtonNavigator.h"
-#include "../../Activity.h"
 #include "ChineseChessStore.h"
+#include "activities/Activity.h"
 #include "components/OptionPopup.h"
+#include "util/ButtonNavigator.h"
 
 class ChineseChessMenuActivity final : public Activity {
  public:

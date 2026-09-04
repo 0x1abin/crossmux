@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "../../../util/ButtonNavigator.h"
-#include "../../Activity.h"
 #include "SudokuBoard.h"
 #include "SudokuStore.h"
+#include "activities/Activity.h"
+#include "util/ButtonNavigator.h"
 
 class SudokuMenuActivity final : public Activity {
  public:

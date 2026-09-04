@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../Activity.h"
 #include "CalculatorState.h"
+#include "activities/Activity.h"
 
 class CalculatorActivity final : public Activity {
  public:

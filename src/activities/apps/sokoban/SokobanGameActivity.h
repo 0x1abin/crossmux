@@ -2,10 +2,10 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "../GameSaveDebouncer.h"
 #include "SokobanBoard.h"
 #include "SokobanStore.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 #include "levels_data.h"
 
 class SokobanGameActivity final : public Activity {

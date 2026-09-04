@@ -6,12 +6,12 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../GameUi.h"
 #include "SudokuGenerator.h"
 #include "SudokuMenuActivity.h"
 #include "SudokuStore.h"
+#include "activities/apps/GameUi.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 
 namespace {
 

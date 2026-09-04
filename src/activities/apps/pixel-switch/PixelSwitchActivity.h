@@ -5,8 +5,8 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
 #include "PixelSwitchState.h"
+#include "activities/Activity.h"
 
 class PixelSwitchActivity final : public Activity {
  public:

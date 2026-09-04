@@ -6,12 +6,12 @@
 #include <cstdint>
 #include <string>
 
-#include "../../components/UITheme.h"
-#include "../../components/UiAppHelpers.h"
-#include "../../components/icons/inx_apps.h"
 #include "CrossPointSettings.h"
 #include "InxItemLayout.h"
 #include "OpdsServerStore.h"
+#include "components/UITheme.h"
+#include "components/UiAppHelpers.h"
+#include "components/icons/inx_apps.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;

@@ -5,13 +5,13 @@
 #include <memory>
 #include <string>
 
-#include "../../../CrossPointSettings.h"
-#include "../../../components/UITheme.h"
 #include "AchievementsActivity.h"
 #include "AppMetricCard.h"
+#include "CrossPointSettings.h"
 #include "ReadingHeatmapActivity.h"
 #include "ReadingProfileActivity.h"
 #include "ReadingStatsActivity.h"
+#include "components/UITheme.h"
 
 namespace {
 

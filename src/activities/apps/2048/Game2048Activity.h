@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "../GameSaveDebouncer.h"
 #include "Game2048Board.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 
 // Classic 2048: swipe to slide and merge tiles. Single-Activity app (no menu) — entering
 // resumes any in-progress game; Confirm starts a fresh game in place. Auto-saves with a

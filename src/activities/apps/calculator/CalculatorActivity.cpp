@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <array>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 
 namespace {
 

@@ -5,11 +5,11 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../../util/ConfirmationActivity.h"
-#include "../GameUi.h"
 #include "Game2048Store.h"
+#include "activities/apps/GameUi.h"
+#include "activities/util/ConfirmationActivity.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 
 namespace {
 

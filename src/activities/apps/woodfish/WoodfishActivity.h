@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
+#include "activities/Activity.h"
 
 struct Rect;
 

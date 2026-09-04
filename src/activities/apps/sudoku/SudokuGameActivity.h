@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "../GameSaveDebouncer.h"
 #include "SudokuBoard.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 #include "components/OptionPopup.h"
 
 class SudokuGameActivity final : public Activity {

@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#include "../../../util/TimeUtils.h"
+#include "util/TimeUtils.h"
 
 namespace standby_time {
 namespace {

@@ -10,12 +10,12 @@
 #include <cstdio>
 #include <string>
 
-#include "../../../NetworkStartup.h"
-#include "../../../WifiCredentialStore.h"
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../../network/WifiSelectionActivity.h"
-#include "../airpage/AirPageDeviceId.h"
+#include "NetworkStartup.h"
+#include "WifiCredentialStore.h"
+#include "activities/apps/airpage/AirPageDeviceId.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 
 namespace {
 

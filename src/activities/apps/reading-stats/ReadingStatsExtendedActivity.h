@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../Activity.h"
+#include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
 class ReadingStatsExtendedActivity final : public Activity {
