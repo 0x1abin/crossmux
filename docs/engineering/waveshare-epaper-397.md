@@ -96,6 +96,12 @@ AXP2101 shutdown path then removes system power.
 - Set the RTC, reboot and fully power-cycle, then confirm restored time.
 - Check battery percentage and charging; unplug USB, run on battery, shut down, then hold the side key until the first
   screen is visible before releasing it. Repeat three times and confirm the boot gesture never triggers shutdown.
+- Confirm USB Serial/JTAG logging and flashing still work after a normal boot. Open File Transfer > USB Drive and
+  verify a host can mount the SD card, copy, rename, delete, and read a large file. Safely eject or disconnect while
+  idle, then confirm the device reboots Home, remounts the SD card, and opens a transferred EPUB. Repeat three times.
+- Enter USB Drive without a connected host, cancel, and confirm the device reboots Home with the SD card mounted.
+  Record `ESP.getFreeHeap()`, `ESP.getMinFreeHeap()`, and `ESP.getMaxAllocHeap()` before entry and after reboot; use
+  external UART to record the same values while MSC is active when available.
 
 Automated builds and serial logs do not substitute for the visual, button, or
 battery checks above. Record incomplete checks as pending rather than accepted.
