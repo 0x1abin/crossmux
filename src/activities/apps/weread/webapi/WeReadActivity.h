@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "activities/apps/weread/WeReadBackend.h"
 #include "activities/Activity.h"
+#include "activities/apps/weread/WeReadBackend.h"
 #include "components/OptionPopup.h"
 #include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"

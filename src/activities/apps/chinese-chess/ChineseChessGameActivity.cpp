@@ -6,10 +6,10 @@
 
 #include <cstdio>
 
+#include "ChineseChessMenuActivity.h"
 #include "activities/apps/GameUi.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "ChineseChessMenuActivity.h"
 
 namespace {
 

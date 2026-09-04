@@ -5,10 +5,10 @@
 
 #include <cstdio>
 
+#include "ChineseChessGameActivity.h"
 #include "activities/apps/GameUi.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "ChineseChessGameActivity.h"
 
 ChineseChessMenuActivity::ChineseChessMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("ChineseChessMenu", renderer, mappedInput) {}

@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include "activities/Activity.h"
 #include "AchievementsStore.h"
+#include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
 class AchievementsActivity final : public Activity {

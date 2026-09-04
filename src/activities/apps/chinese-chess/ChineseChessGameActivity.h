@@ -2,11 +2,11 @@
 
 #include <cstdint>
 
-#include "activities/Activity.h"
-#include "activities/apps/GameSaveDebouncer.h"
 #include "ChineseChessAI.h"
 #include "ChineseChessBoard.h"
 #include "ChineseChessStore.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 #include "components/OptionPopup.h"
 
 class ChineseChessGameActivity final : public Activity {

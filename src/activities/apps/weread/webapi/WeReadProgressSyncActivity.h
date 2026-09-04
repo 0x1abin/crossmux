@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <string>
 
+#include "activities/Activity.h"
 #include "activities/apps/weread/WeReadBackend.h"
 #include "activities/apps/weread/WeReadProgressContext.h"
-#include "activities/Activity.h"
 
 class Epub;
 struct CrossPointPosition;

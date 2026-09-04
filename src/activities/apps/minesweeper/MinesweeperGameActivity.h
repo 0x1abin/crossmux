@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
+#include "MinesweeperBoard.h"
 #include "activities/Activity.h"
 #include "activities/apps/GameSaveDebouncer.h"
-#include "MinesweeperBoard.h"
 #include "components/OptionPopup.h"
 
 class MinesweeperGameActivity final : public Activity {

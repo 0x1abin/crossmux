@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "activities/Activity.h"
-#include "util/ButtonNavigator.h"
 #include "MinesweeperBoard.h"
 #include "MinesweeperStore.h"
+#include "activities/Activity.h"
+#include "util/ButtonNavigator.h"
 
 class MinesweeperMenuActivity final : public Activity {
  public:

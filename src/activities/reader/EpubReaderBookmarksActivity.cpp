@@ -5,11 +5,11 @@
 
 #include <algorithm>
 
-#include "util/BookmarkFile.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+#include "util/BookmarkFile.h"
 
 namespace fui = freeink::ui;
 

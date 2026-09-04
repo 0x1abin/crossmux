@@ -6,11 +6,11 @@
 
 #include <cstdio>
 
+#include "GomokuAI.h"
+#include "GomokuMenuActivity.h"
 #include "activities/apps/GameUi.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "GomokuAI.h"
-#include "GomokuMenuActivity.h"
 
 namespace {
 

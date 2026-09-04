@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <string>
 
-#include "activities/Activity.h"
 #include "AirPageConnection.h"
 #include "AirPageImageStore.h"
+#include "activities/Activity.h"
 #include "components/OptionPopup.h"
 #include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"

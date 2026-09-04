@@ -19,7 +19,6 @@
 #include <iterator>
 #include <limits>
 
-#include "util/BookmarkFile.h"
 #include "AchievementsStore.h"
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
@@ -44,6 +43,7 @@
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "util/BookCacheUtils.h"
+#include "util/BookmarkFile.h"
 #include "util/ReadingBackground.h"
 #include "util/ReadingGuideLine.h"
 #ifdef ENABLE_CHINESE_VERSION

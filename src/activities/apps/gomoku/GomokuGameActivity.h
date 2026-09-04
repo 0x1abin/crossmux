@@ -2,10 +2,10 @@
 
 #include <cstdint>
 
-#include "activities/Activity.h"
-#include "activities/apps/GameSaveDebouncer.h"
 #include "GomokuBoard.h"
 #include "GomokuStore.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 #include "components/OptionPopup.h"
 
 class GomokuGameActivity final : public Activity {

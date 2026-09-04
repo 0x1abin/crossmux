@@ -18,12 +18,12 @@
 #include <algorithm>
 #include <string>
 
+#include "CrossPointSettings.h"
+#include "NetworkStartup.h"
 #include "activities/ActivityResult.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "util/PaginationDots.h"
 #include "util/TimeUtils.h"
-#include "CrossPointSettings.h"
-#include "NetworkStartup.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "ChineseCalendarFace.h"
 #endif
