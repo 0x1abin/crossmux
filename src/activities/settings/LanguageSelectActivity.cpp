@@ -15,16 +15,6 @@
 
 namespace fui = freeink::ui;
 
-namespace {
-constexpr CrossPointSettings::ContentProfile initialProfileFor(const Language language) {
-  return language == Language::ZH_CN ? CrossPointSettings::ContentProfile::China
-                                     : CrossPointSettings::ContentProfile::Global;
-}
-
-static_assert(initialProfileFor(Language::ZH_CN) == CrossPointSettings::ContentProfile::China);
-static_assert(initialProfileFor(Language::EN) == CrossPointSettings::ContentProfile::Global);
-}  // namespace
-
 LanguageSelectActivity::LanguageSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const Mode mode)
     : UiListActivity("LanguageSelect", renderer, mappedInput), mode_(mode) {}
 
@@ -71,26 +61,19 @@ void LanguageSelectActivity::activateIndex(const int index) {
   const uint8_t previousFontPointSize = SETTINGS.fontPointSize;
   const uint32_t previousHiddenAppsMask = SETTINGS.hiddenAppsMask;
   const uint8_t previousOnboardingVersion = SETTINGS.onboardingVersion;
-  SETTINGS.language = langIndex;
+  SETTINGS.applyLanguageSelection(langIndex);
   const Language language = static_cast<Language>(langIndex);
   const bool simplifiedChinese = language == Language::ZH_CN;
   switch (mode_) {
     case Mode::Settings:
       break;
     case Mode::Initial:
-      SETTINGS.contentProfile = initialProfileFor(language);
       SETTINGS.clockUtcOffsetQ = simplifiedChinese ? 80 : 48;
       SETTINGS.fontFamily = CrossPointSettings::NOTOSANS;
       SETTINGS.fontPointSize = 12;
-      if (simplifiedChinese) {
-        SETTINGS.hiddenAppsMask &= ~CrossPointSettings::CHINA_ONLY_APPS_MASK;
-      } else {
-        SETTINGS.hiddenAppsMask |= CrossPointSettings::CHINA_ONLY_APPS_MASK;
-      }
       SETTINGS.onboardingVersion = CrossPointSettings::CURRENT_ONBOARDING_VERSION;
       break;
     case Mode::Upgrade:
-      SETTINGS.contentProfile = initialProfileFor(language);
       SETTINGS.onboardingVersion = CrossPointSettings::CURRENT_ONBOARDING_VERSION;
       break;
   }
@@ -115,10 +98,10 @@ void LanguageSelectActivity::activateIndex(const int index) {
     I18N.setLanguage(language);
   }
 
-  if (isOnboarding()) {
 #ifndef SIMULATOR
-    halClock.setUseChinaServers(SETTINGS.contentProfile == CrossPointSettings::ContentProfile::China);
+  halClock.setUseChinaServers(SETTINGS.contentProfile == CrossPointSettings::ContentProfile::China);
 #endif
+  if (isOnboarding()) {
     onGoHome();
   } else {
     finish();

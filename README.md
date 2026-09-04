@@ -16,7 +16,7 @@ What CrossMux adds on top of upstream:
 - **WeRead** (微信读书): scan to sign in, browse your shelf, download books, read them offline as EPUBs, and sync reading progress. The reader keeps one **Sync Progress** action: recognized standard WeRead books use WeRead sync, while other EPUBs keep KOReader sync. New WeRead downloads also make a best-effort cloud-progress fetch before caching content so the first open can start at the remote position.
 - **Reading analytics**: reading stats, a monthly reading heatmap, a reading profile, and achievements — backed by an SD-stored JSON history.
 - **Standby faces**: a hand-drawn "sloppy" clock and a Chinese almanac/calendar face (老黄历), with optional 4-level grayscale enhancement and inverse display.
-- **Unified language firmware**: 33 UI languages, embedded Simplified-Chinese UI fallback fonts, and runtime `.cn`/`.com` content profiles selected on first start.
+- **Unified language firmware**: 33 UI languages, embedded Simplified-Chinese UI fallback fonts, and runtime `.cn`/`.com` content profiles that follow the selected language.
 - **Desktop simulator** for developing and previewing the UI on the host.
 
 > **WeRead security notice:** WeRead uses an unofficial Web protocol that may
@@ -208,9 +208,9 @@ pio run --target upload
 
 ### Build the unified language firmware
 
-Every hardware target has one firmware. On first start, choosing Simplified
-Chinese locks the China content profile (`crossmux.cn`); every other language
-locks Global (`crossmux.com`). Later language changes do not change that profile.
+Every hardware target has one firmware. Choosing Simplified Chinese selects the
+China content profile (`crossmux.cn`); every other language selects Global
+(`crossmux.com`). Changing the language later updates the profile and regional apps too.
 
 The CJK font headers are committed to the repo, so a normal build needs no extra asset steps:
 

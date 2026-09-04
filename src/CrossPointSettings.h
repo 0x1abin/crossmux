@@ -413,7 +413,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontlightOn = 0;
   uint8_t frontlightRestoreOnWake = 1;
   // Language setting (Language enum index). Fresh devices start in English and
-  // choose their UI language and locked content profile in the startup guide.
+  // choose their UI language and matching content profile in the startup guide.
   // Resolved out-of-line in CrossPointSettings.cpp so the generated
   // I18nKeys.h header doesn't leak into every consumer of this header.
   // Factory reset reconstructs the settings and the startup guide asks again.
@@ -497,6 +497,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   ReaderRenderSpec readerRenderSpec(uint16_t viewportWidth, uint16_t viewportHeight) const;
 
   static const char* getFilePath() { return "/.crosspoint/settings.json"; }
+  // Keep the UI language, service region, and regional-app defaults in sync.
+  // The caller persists the resulting settings.
+  void applyLanguageSelection(uint8_t languageIndex);
   bool loadFromFile();
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);

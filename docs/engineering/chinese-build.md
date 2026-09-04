@@ -4,9 +4,9 @@
 > the compact embedded CJK fallback, and CJK font regeneration.
 
 Every hardware target now builds one firmware. The base environment always
-enables the existing CJK code paths while the first-start language guide saves
-`ContentProfile::China` only for `Language::ZH_CN`; all other choices save
-`ContentProfile::Global`. Later UI-language changes do not alter that profile.
+enables the existing CJK code paths. Selecting `Language::ZH_CN` uses
+`ContentProfile::China`; every other language uses `ContentProfile::Global`.
+The startup guide and later UI-language changes apply the same rule.
 
 | Resource | Unified behavior |
 |---|---|
@@ -15,7 +15,7 @@ enables the existing CJK code paths while the first-start language guide saves
 | Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time. |
 | EPUB/TXT | Unicode CJK parsing, line breaking and missing-glyph detection are always compiled and trigger from text content. |
 | Regional apps | WeRead and Chinese Chess are compiled once and exposed only for the China content profile. |
-| Services | China uses `crossmux.cn`, OTA variant `cn`, UTC+8 NTP defaults; Global uses `crossmux.com`, variant `global`, UTC+0 defaults. |
+| Services | China uses `crossmux.cn`, OTA variant `cn`, and China NTP servers; Global uses `crossmux.com`, variant `global`, and international NTP servers. Initial onboarding alone sets the default UTC offset. |
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
 
@@ -233,7 +233,7 @@ least 512 KiB, so broad pool expansion must be measured in the built image.
 
 ## Complete Chinese SD fonts
 
-The unified firmware chooses the catalog host from the locked content profile:
+The unified firmware chooses the catalog host from the language-selected content profile:
 
 ```text
 https://crossmux.cn/api/assets/fonts/m<manifest>-b<binary>/fonts.json

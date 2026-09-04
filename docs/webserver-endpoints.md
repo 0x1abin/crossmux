@@ -23,7 +23,7 @@ the IP address shown on the device screen.
 
 The routes are identical in every firmware. Both page locales are embedded;
 Simplified-Chinese device UI selects `zh-CN`, and every other UI language uses
-the English pages. This follows UI language, not the locked content profile.
+the English pages. Page locale follows the UI language directly.
 
 ## Device Status
 
