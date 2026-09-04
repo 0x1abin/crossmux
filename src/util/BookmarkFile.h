@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "../BookmarkEntry.h"
+#include "BookmarkEntry.h"
 
 // Per-book bookmark persistence. Takes the book's path; bookmark-file path
 // derivation (BookmarkUtil) and directory creation are hidden inside.

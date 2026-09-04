@@ -7,9 +7,9 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../GameUi.h"
+#include "activities/apps/GameUi.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 #include "MinesweeperGenerator.h"
 #include "MinesweeperMenuActivity.h"
 #include "MinesweeperStore.h"

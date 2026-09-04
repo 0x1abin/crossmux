@@ -5,7 +5,7 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
+#include "components/UITheme.h"
 #include "MinesweeperGameActivity.h"
 
 namespace {

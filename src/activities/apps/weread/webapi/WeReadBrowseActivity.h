@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "../WeReadBackend.h"
+#include "activities/apps/weread/WeReadBackend.h"
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 

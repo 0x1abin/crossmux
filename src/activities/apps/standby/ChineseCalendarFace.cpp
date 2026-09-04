@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "../../../util/TimeUtils.h"
+#include "util/TimeUtils.h"
 #include "ChineseAlmanac.h"
 #include "I18nKeys.h"
 #include "fontIds.h"

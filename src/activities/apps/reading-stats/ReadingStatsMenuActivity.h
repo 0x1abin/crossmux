@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../../util/ButtonNavigator.h"
-#include "../../Activity.h"
+#include "activities/Activity.h"
+#include "util/ButtonNavigator.h"
 
 // Sub-menu hub for the Reading Analytics suite. Reached from the Apps menu via
 // ActivityManager::goToReadingStatsMenu(); lists the suite's screens and pushes

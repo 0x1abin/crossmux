@@ -5,8 +5,8 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 #include "SudokuGameActivity.h"
 
 SudokuMenuActivity::SudokuMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

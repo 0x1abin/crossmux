@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <string>
 
-#include "../WeReadBackend.h"
-#include "../WeReadProgressContext.h"
+#include "activities/apps/weread/WeReadBackend.h"
+#include "activities/apps/weread/WeReadProgressContext.h"
 #include "activities/Activity.h"
 
 class Epub;

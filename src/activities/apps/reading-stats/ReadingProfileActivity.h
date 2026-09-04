@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "../../Activity.h"
+#include "activities/Activity.h"
 
 struct ReadingProfileAxisSummary {
   StrId labelId = StrId::STR_NONE_OPT;

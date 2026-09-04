@@ -10,8 +10,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 #include "WoodfishAssets.h"
 #include "WoodfishStore.h"
 

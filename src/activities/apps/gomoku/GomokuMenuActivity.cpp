@@ -5,9 +5,9 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../GameUi.h"
+#include "activities/apps/GameUi.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 #include "GomokuGameActivity.h"
 
 GomokuMenuActivity::GomokuMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

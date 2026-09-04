@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "../GameSaveDebouncer.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 #include "GomokuBoard.h"
 #include "GomokuStore.h"
 #include "components/OptionPopup.h"

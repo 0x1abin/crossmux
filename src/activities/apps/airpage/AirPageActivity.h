@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-#include "../../Activity.h"
+#include "activities/Activity.h"
 #include "AirPageConnection.h"
 #include "AirPageImageStore.h"
 #include "components/OptionPopup.h"

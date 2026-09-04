@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "../../Activity.h"
+#include "activities/Activity.h"
 #include "StandbyFace.h"
 
 struct ActivityResult;

@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "../../Activity.h"
-#include "../GameSaveDebouncer.h"
+#include "activities/Activity.h"
+#include "activities/apps/GameSaveDebouncer.h"
 #include "ChineseChessAI.h"
 #include "ChineseChessBoard.h"
 #include "ChineseChessStore.h"

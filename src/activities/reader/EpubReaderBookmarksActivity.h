@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "../../BookmarkEntry.h"
+#include "BookmarkEntry.h"
 #include "activities/UiListActivity.h"
 #include "components/OptionPopup.h"
 

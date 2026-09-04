@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "../../../util/ButtonNavigator.h"
-#include "../../Activity.h"
+#include "activities/Activity.h"
+#include "util/ButtonNavigator.h"
 #include "GomokuStore.h"
 #include "components/OptionPopup.h"
 

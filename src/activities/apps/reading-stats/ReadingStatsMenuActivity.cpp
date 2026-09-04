@@ -5,8 +5,8 @@
 #include <memory>
 #include <string>
 
-#include "../../../CrossPointSettings.h"
-#include "../../../components/UITheme.h"
+#include "CrossPointSettings.h"
+#include "components/UITheme.h"
 #include "AchievementsActivity.h"
 #include "AppMetricCard.h"
 #include "ReadingHeatmapActivity.h"

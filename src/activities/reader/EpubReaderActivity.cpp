@@ -19,7 +19,7 @@
 #include <iterator>
 #include <limits>
 
-#include "../../util/BookmarkFile.h"
+#include "util/BookmarkFile.h"
 #include "AchievementsStore.h"
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"

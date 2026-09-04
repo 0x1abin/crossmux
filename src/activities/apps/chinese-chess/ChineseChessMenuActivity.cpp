@@ -5,9 +5,9 @@
 
 #include <cstdio>
 
-#include "../../../components/UITheme.h"
-#include "../../../fontIds.h"
-#include "../GameUi.h"
+#include "activities/apps/GameUi.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
 #include "ChineseChessGameActivity.h"
 
 ChineseChessMenuActivity::ChineseChessMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

@@ -18,10 +18,10 @@
 #include <algorithm>
 #include <string>
 
-#include "../../../util/PaginationDots.h"
-#include "../../../util/TimeUtils.h"
-#include "../../ActivityResult.h"
-#include "../../network/WifiSelectionActivity.h"
+#include "activities/ActivityResult.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "util/PaginationDots.h"
+#include "util/TimeUtils.h"
 #include "CrossPointSettings.h"
 #include "NetworkStartup.h"
 #ifdef ENABLE_CHINESE_VERSION
