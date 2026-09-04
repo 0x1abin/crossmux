@@ -131,7 +131,7 @@ AI, and persistence in the game: they are not framework concerns.
 ### 6. (Optional) Conditional / compile-flag-gated apps
 
 Regional apps such as Chinese Chess and WeRead are compiled into the unified
-firmware and hidden unless the locked content profile is China.
+firmware and hidden unless the current language selects the China content profile.
 
 A conditional app uses a **two-layer guard**: ifdef at every reference site, plus a `build_src_filter` exclusion in `platformio.ini` so the app's `.cpp` files aren't compiled at all when the flag is off. The ifdef alone is not enough — without the filter, the app's translation units still compile (and fail, since they freely reference each other without inner ifdefs).
 

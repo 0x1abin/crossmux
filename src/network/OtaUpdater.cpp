@@ -47,7 +47,7 @@ static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly-1234567"));
 static_assert(!isSameNightlyBuild("1.5.2", "nightly-5064d90"));
 static_assert(!isSameNightlyBuild("1.5.2-rc+5064d90", "nightly"));
 
-// The locked content profile supplies the OTA host and release asset variant.
+// The language-selected content profile supplies the OTA host and release asset variant.
 // The web proxy re-exposes it as a minimal
 // GitHub-release-shaped JSON whose single asset is always named "firmware.bin"
 // — that's the literal ReleaseJsonParser matches on.

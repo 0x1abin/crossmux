@@ -41,6 +41,25 @@ static_assert(LEGACY_FAKE_BOLD_MIGRATION[0] == CrossPointSettings::SYNTHETIC_BOL
 static_assert(LEGACY_FAKE_BOLD_MIGRATION[1] == CrossPointSettings::SYNTHETIC_BOLD_STANDARD);
 static_assert(LEGACY_FAKE_BOLD_MIGRATION[2] == CrossPointSettings::SYNTHETIC_BOLD_HEAVY);
 
+constexpr CrossPointSettings::ContentProfile contentProfileForLanguage(const Language language) {
+  return language == Language::ZH_CN ? CrossPointSettings::ContentProfile::China
+                                     : CrossPointSettings::ContentProfile::Global;
+}
+
+constexpr uint32_t regionalAppMaskForProfile(const uint32_t hiddenAppsMask,
+                                             const CrossPointSettings::ContentProfile profile) {
+  return profile == CrossPointSettings::ContentProfile::China
+             ? hiddenAppsMask & ~CrossPointSettings::CHINA_ONLY_APPS_MASK
+             : hiddenAppsMask | CrossPointSettings::CHINA_ONLY_APPS_MASK;
+}
+
+static_assert(contentProfileForLanguage(Language::ZH_CN) == CrossPointSettings::ContentProfile::China);
+static_assert(contentProfileForLanguage(Language::EN) == CrossPointSettings::ContentProfile::Global);
+static_assert(regionalAppMaskForProfile(UINT32_MAX, CrossPointSettings::ContentProfile::China) ==
+              (UINT32_MAX & ~CrossPointSettings::CHINA_ONLY_APPS_MASK));
+static_assert(regionalAppMaskForProfile(0, CrossPointSettings::ContentProfile::Global) ==
+              CrossPointSettings::CHINA_ONLY_APPS_MASK);
+
 constexpr uint8_t migrateLegacySoundFeedback(const bool enabled) {
   return enabled ? CrossPointSettings::SOUND_FEEDBACK_MEDIUM : CrossPointSettings::SOUND_FEEDBACK_OFF;
 }
@@ -155,6 +174,12 @@ bool isSettingAvailableForPersistence(const SettingInfo& setting) {
 }
 
 }  // namespace
+
+void CrossPointSettings::applyLanguageSelection(const uint8_t languageIndex) {
+  language = languageIndex;
+  contentProfile = contentProfileForLanguage(static_cast<Language>(languageIndex));
+  hiddenAppsMask = regionalAppMaskForProfile(hiddenAppsMask, contentProfile);
+}
 
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
   const uint8_t mapping[] = {settings.frontButtonBack, settings.frontButtonConfirm, settings.frontButtonLeft,
@@ -418,8 +443,8 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
   }
 
-  // Migrate the split-build region marker. Language and service region are
-  // deliberately independent after onboarding.
+  // Migrate the split-build region marker before enforcing the current rule
+  // that UI language and service region move together.
   const char* langSku = doc["langSku"] | "";
   const uint8_t storedProfile = doc["contentProfile"].is<uint8_t>() ? doc["contentProfile"].as<uint8_t>() : UINT8_MAX;
   if (storedProfile <= static_cast<uint8_t>(ContentProfile::China)) {
@@ -437,6 +462,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
   if (!I18n::isLanguageAvailable(static_cast<Language>(language))) {
     language = defaultLanguageIndex();
+    needsResave = true;
+  }
+  if (contentProfile != contentProfileForLanguage(static_cast<Language>(language))) {
+    applyLanguageSelection(language);
     needsResave = true;
   }
   onboardingVersion = doc["onboardingVersion"].is<uint8_t>() ? doc["onboardingVersion"].as<uint8_t>() : 0;
@@ -493,8 +522,7 @@ bool CrossPointSettings::migrateLanguageBinaryFile() {
     return false;
   }
 
-  language = static_cast<uint8_t>(V1_LANGUAGES[oldIndex]);
-  contentProfile = static_cast<Language>(language) == Language::ZH_CN ? ContentProfile::China : ContentProfile::Global;
+  applyLanguageSelection(static_cast<uint8_t>(V1_LANGUAGES[oldIndex]));
   Storage.rename(LANG_FILE_BIN, LANG_FILE_BAK);
   saveToFile();
   LOG_DBG("CPS", "Migrated language.bin into settings.json");
