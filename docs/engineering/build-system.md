@@ -35,6 +35,7 @@
   * `slim`: Minimal build (no serial logging)
   * `sticky`: Seeed Sticky ESP32-S3 development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 development build
+  * `x4c`: Xteink X4 Classic ESP32-S3 build-only development build
   * `papermono`: M5Stack PaperMono ESP32-S3 development build
   * `eego_a4`: eego A4 ESP32-S3 experimental development build
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
@@ -44,13 +45,19 @@
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
 
-The six S3 environments are separate hardware binaries, but each is a unified
+The seven S3 environments are separate hardware binaries, but each is a unified
 language firmware. `bin/ci-check` builds them together with the default C3 target.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
-CI workflow builds all four simulators and all six S3 environments when
+CI workflow builds all four simulators and all seven S3 environments when
 hardware-sensitive files change, and can also be started manually.
+
+Bluetooth Page Turner Beta is compiled only into these seven S3 development and
+`*_nightly` environments. C3, release-candidate, stable, and `gh_release*`
+environments do not link the BLE host. Sticky and eego A4 use the custom-core
+controller-only NimBLE configuration; X4 Pro, X4 Classic, and PaperMono retain
+their prebuilt `dio_opi` core so the TinyUSB MSC component graph remains intact.
 
 ## Desktop Simulator
 

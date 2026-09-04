@@ -1,0 +1,4 @@
+add_executable(ble_key_mapping_tests BleKeyMappingTest.cpp)
+target_include_directories(ble_key_mapping_tests PRIVATE ${REPO_ROOT}/src)
+target_link_libraries(ble_key_mapping_tests PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(ble_key_mapping_tests)

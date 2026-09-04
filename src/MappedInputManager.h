@@ -3,6 +3,8 @@
 #include <BoardConfig.h>
 #include <HalGPIO.h>
 
+#include <array>
+
 class GfxRenderer;
 namespace freeink {
 namespace ui {
@@ -27,8 +29,11 @@ class MappedInputManager {
     ScreenLeft,
     ScreenRight,
     ScreenUp,
-    ScreenDown
+    ScreenDown,
+    Count
   };
+  static constexpr uint8_t kButtonCount = static_cast<uint8_t>(Button::Count);
+  static_assert(kButtonCount <= 16, "button edge masks use uint16_t");
   enum class SwipeDir { None, Left, Right, Up, Down };
 
   struct Labels {
@@ -117,6 +122,9 @@ class MappedInputManager {
   // Returns the raw front button index that was pressed this frame (or -1 if none).
   int getPressedFrontButton() const;
 
+  void setBleCaptureMode(bool enabled);
+  bool takeCapturedBleKey(uint8_t& kind, uint8_t& value);
+
   // True when the control axis is flipped relative to the physical buttons: always on touch boards,
   // or when button-only boards opt in, while the screen is currently INVERTED / LANDSCAPE_CCW.
   [[nodiscard]] bool isNavDirectionSwapped() const;
@@ -133,6 +141,8 @@ class MappedInputManager {
   Button mapScreenDirection(Button button) const;
   Labels mapFrontLabels(const char* back, const char* confirm, const char* left, const char* right) const;
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
+  bool bleEdge(const std::array<bool, kButtonCount>& edges, Button button) const;
+  void pollBle() const;
   // SDK edge classification (fui::edgeSwipe) + the shared decode/held-time
   // bookkeeping; the wrappers below give each edge its board meaning.
   bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;
@@ -154,6 +164,14 @@ class MappedInputManager {
   mutable unsigned long touchHeldOverrideAt = 0;
   mutable uint16_t longPressFiredButtons = 0;
   mutable uint16_t suppressedReleaseButtons = 0;
+  mutable std::array<bool, kButtonCount> blePressEdges{};
+  mutable std::array<bool, kButtonCount> bleReleaseEdges{};
+  mutable std::array<bool, kButtonCount> blePendingEdges{};
+  mutable bool bleActivityThisFrame = false;
+  bool bleCaptureMode = false;
+  mutable bool bleHasCaptured = false;
+  mutable uint8_t bleCapturedKind = 0xFF;
+  mutable uint8_t bleCapturedValue = 0;
 #if FREEINK_CAP_TOUCH
   bool powerConfirmClickFrame = false;
 #endif

@@ -12,12 +12,14 @@
 #include <cstdint>
 #include <string>
 
+#include "BleInput.h"
 #include "I18n.h"
 #include "RecentBooksStore.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
+#include "components/icons/bluetooth.h"
 #include "components/icons/bookmark.h"
 #include "fontIds.h"
 #include "util/TimeUtils.h"
@@ -31,6 +33,8 @@ constexpr int bookmarkStatusIconWidth = 16;
 constexpr int bookmarkStatusIconHeight = 14;
 constexpr int bookmarkStatusIconGap = 4;
 constexpr int bookmarkStatusIconTopCrop = 2;
+constexpr int bluetoothStatusIconWidth = 16;
+constexpr int bluetoothStatusIconHeight = 16;
 
 void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
   constexpr int bytesPerRow = bookmarkStatusIconWidth / 8;
@@ -39,6 +43,16 @@ void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int 
       const uint8_t byte = BookmarkStatusIcon[(row + bookmarkStatusIconTopCrop) * bytesPerRow + col / 8];
       const uint8_t mask = 1U << (7 - (col % 8));
       renderer.drawPixel(x + col, y + row, (byte & mask) != 0);
+    }
+  }
+}
+
+void drawBluetoothStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
+  constexpr int bytesPerRow = bluetoothStatusIconWidth / 8;
+  for (int row = 0; row < bluetoothStatusIconHeight; ++row) {
+    for (int col = 0; col < bluetoothStatusIconWidth; ++col) {
+      const uint8_t byte = BluetoothStatusIcon[row * bytesPerRow + col / 8];
+      renderer.drawPixel(x + col, y + row, (byte & (1U << (7 - col % 8))) == 0);
     }
   }
 }
@@ -982,6 +996,12 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       rightClusterWidth += clockTextWidth + 10;
     }
     renderer.drawText(STATUS_NUMERIC_FONT_ID, clockX, textY, timeBuf);
+  }
+
+  if (showStatusBarTextLane && bleinput::isConnected()) {
+    const int bluetoothGap = leftClusterWidth > 0 ? bookmarkStatusIconGap : 0;
+    drawBluetoothStatusIcon(renderer, leftClusterX + leftClusterWidth + bluetoothGap, textY + 3);
+    leftClusterWidth += bluetoothStatusIconWidth + bluetoothGap;
   }
 
   // Draw Bookmark

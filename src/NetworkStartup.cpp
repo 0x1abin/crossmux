@@ -9,6 +9,7 @@
 #include <sdkconfig.h>
 #endif
 
+#include "BleInput.h"
 #include "SdCardFontSystem.h"
 #include "activities/RenderLock.h"
 
@@ -60,6 +61,7 @@ void prepare(GfxRenderer& renderer) {
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
+  bleinput::stop();
   prepare(renderer);
   return WiFi.mode(mode);
 }

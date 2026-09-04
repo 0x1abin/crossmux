@@ -556,6 +556,18 @@ bool ActivityManager::isReaderActivity() const {
          (currentActivity && currentActivity->isReaderActivity());
 }
 
+bool ActivityManager::keepsBluetoothAlive() const {
+  return std::any_of(stackActivities.begin(), stackActivities.end(),
+                     [](const auto& activity) { return activity->keepsBluetoothAlive(); }) ||
+         (currentActivity && currentActivity->keepsBluetoothAlive());
+}
+
+bool ActivityManager::deferBluetoothStart() const {
+  return std::any_of(stackActivities.begin(), stackActivities.end(),
+                     [](const auto& activity) { return activity->deferBluetoothStart(); }) ||
+         (currentActivity && currentActivity->deferBluetoothStart());
+}
+
 bool ActivityManager::handleForcedRefresh() { return currentActivity && currentActivity->handleForcedRefresh(); }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }

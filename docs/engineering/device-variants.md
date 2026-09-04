@@ -1,6 +1,6 @@
 # Device Variants — X3/X4 and Build-Only S3 Targets
 
-> Sticky, X4 Pro, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
+> Sticky, X4 Pro, X4 Classic, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
 > and [Waveshare ePaper 3.97](waveshare-epaper-397.md) are separate ESP32-S3
 > compile-time targets. The one-binary rule in this document applies only to
 > the ESP32-C3 X3/X4 pair.
@@ -22,12 +22,13 @@ pio run -e gh_release        # all 33 UI languages and both content profiles
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
-All six supported ESP32-S3 devices use separate builds because their boards,
+All seven ESP32-S3 devices use separate builds because their boards,
 displays, input, storage, and power profiles differ from the combined ESP32-C3
 image:
 
 ```bash
 pio run -e x4pro
+pio run -e x4c
 pio run -e papermono
 pio run -e sticky
 pio run -e eego_a4
@@ -35,7 +36,9 @@ pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 ```
 
-All six S3 targets are part of the shared Nightly matrix. Each target builds
+Six S3 targets are published by the shared Nightly matrix. X4 Classic has the
+same `x4c_nightly` build and Hardware CI coverage, but remains build-only and is
+not added to the public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
@@ -55,6 +58,10 @@ after wake passed hardware validation on both X3 and X4. X4 sleep current has
 not yet been quantified, so no measured power reduction is claimed. All S3
 targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
+
+Bluetooth Page Turner Beta is available in all seven S3 development and Nightly
+builds, including the build-only X4 Classic target. It is disabled by default;
+C3 and stable/release builds are unchanged.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.

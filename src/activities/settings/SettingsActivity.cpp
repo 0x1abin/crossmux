@@ -17,6 +17,7 @@
 #include <cstring>
 
 #include "AppVisibilitySettingsActivity.h"
+#include "BluetoothSettingsActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
@@ -247,6 +248,9 @@ void SettingsActivity::rebuildSettingsLists() {
     controlsSettings.insert(controlsSettings.begin(),
                             SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   }
+#if FREEINK_CAP_BLE_HID_HOST
+  controlsSettings.push_back(SettingInfo::Action(StrId::STR_BLUETOOTH, SettingAction::Bluetooth));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_APP_VISIBILITY, SettingAction::AppVisibility));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::DateTime));
@@ -671,6 +675,11 @@ void SettingsActivity::toggleCurrentSetting() {
     switch (setting.action) {
       case SettingAction::RemapFrontButtons:
         startActivityForResultWith<ButtonRemapActivity>(resultHandler);
+        break;
+      case SettingAction::Bluetooth:
+#if FREEINK_CAP_BLE_HID_HOST
+        startActivityForResultWith<BluetoothSettingsActivity>(resultHandler);
+#endif
         break;
       case SettingAction::CustomiseStatusBar:
         startActivityForResultWith<StatusBarSettingsActivity>(resultHandler);

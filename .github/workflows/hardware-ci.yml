@@ -16,6 +16,8 @@ on:
       - lib/GfxRenderer/**
       - lib/WeReadWebApi/**
       - src/MappedInputManager.*
+      - src/Ble*
+      - src/BtLibraryInUseShim.cpp
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
       - src/SettingsList.h
@@ -27,11 +29,14 @@ on:
       - src/activities/reader/**
       - src/activities/settings/**
       - src/activities/util/IntervalSelectionActivity.*
+      - src/components/icons/bluetooth.h
       - src/network/**
       - scripts/package_nightly_target.py
       - scripts/build_nightly_index.py
       - scripts/nightly_targets.py
       - scripts/tests/test_nightly_release.py
+      - scripts/patch_ble_keyboard_host.py
+      - scripts/patch_bt_mem.py
   pull_request:
     paths:
       - .github/workflows/ci.yml
@@ -46,6 +51,8 @@ on:
       - lib/GfxRenderer/**
       - lib/WeReadWebApi/**
       - src/MappedInputManager.*
+      - src/Ble*
+      - src/BtLibraryInUseShim.cpp
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
       - src/SettingsList.h
@@ -57,11 +64,14 @@ on:
       - src/activities/reader/**
       - src/activities/settings/**
       - src/activities/util/IntervalSelectionActivity.*
+      - src/components/icons/bluetooth.h
       - src/network/**
       - scripts/package_nightly_target.py
       - scripts/build_nightly_index.py
       - scripts/nightly_targets.py
       - scripts/tests/test_nightly_release.py
+      - scripts/patch_ble_keyboard_host.py
+      - scripts/patch_bt_mem.py
   workflow_dispatch:
 
 permissions:
@@ -127,6 +137,7 @@ jobs:
             -e simulator_murphy_m4 \
             -e sticky_nightly \
             -e x4pro_nightly \
+            -e x4c_nightly \
             -e papermono_nightly \
             -e eego_a4_nightly \
             -e murphy_m4_nightly \
