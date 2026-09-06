@@ -259,6 +259,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
       RenderLock lock(*this);
       state_ = ERROR;
     }
+    requestUpdate();
     return;
   }
 
@@ -279,6 +280,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
       state_ = FAMILY_LIST;
     }
   }
+  requestUpdate();
 }
 
 bool FontDownloadActivity::startAutomaticDownload() {

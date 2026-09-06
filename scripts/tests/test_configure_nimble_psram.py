@@ -31,10 +31,10 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
         config = configparser.ConfigParser(interpolation=None)
         config.read(Path(__file__).resolve().parents[2] / "platformio.ini")
         for name in config.sections():
-            if name.startswith("s3_ble"):
+            if name.startswith("s3_ble") or name in ("c3_ble", "ble_host"):
                 continue
             # BLE references belong only to the development/Nightly envs above,
-            # never shared hardware/base profiles or release/C3/simulator envs.
+            # never shared hardware/base profiles or release/simulator envs.
             if name.startswith("env:") and not (
                 "gh_release" in name or "simulator" in name or name in ("env:default", "env:slim")
             ):
@@ -50,6 +50,9 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
 
         class BuildEnv(dict):
+            def GetProjectOption(self, name, default):
+                return self.get(name, default)
+
             def subst(self, value):
                 return str(root) if value == "$PROJECT_DIR" else value
 
@@ -79,6 +82,13 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
         self.assertEqual(
             env.object_flags, ["-Os", "-include", str(root / "src/platform/NimblePsramConfig.h")]
         )
+        env["custom_nimble_config"] = "src/platform/NimbleC3Config.h"
+        runpy.run_path(
+            str(root / "scripts/configure_nimble_psram.py"),
+            init_globals={"env": env, "Import": lambda _: None},
+        )
+        self.assertIs(env.callback(env, node), node)
+        self.assertEqual(env.dependency, (node, str(root / "src/platform/NimbleC3Config.h")))
 
 
 if __name__ == "__main__":

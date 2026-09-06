@@ -189,6 +189,13 @@ Do not infer hardware acceptance from host serialization stubs or successful
 firmware builds. Binary images, original books and device-specific raw logs are
 local artifacts and are not committed to the repository.
 
+### C3 Bluetooth page-turner development validation
+
+See [C3 Bluetooth](c3-bluetooth.md) for the opt-in build profile, lifecycle and
+font-memory ownership, reproducible checks, X4 evidence and remaining acceptance
+limits. Default/release BLE remains disabled. Distinguish host/build success,
+application hash verification and physical-device acceptance.
+
 ### Distinguishing TCP Stalls, Watchdogs, and Restarts
 
 - A task-watchdog failure prints the task watchdog banner and subscribed task

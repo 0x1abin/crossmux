@@ -1,4 +1,5 @@
 #include <GfxRenderer.h>
+#include <Logging.h>
 #include <gtest/gtest.h>
 
 #include "BleInput.h"
@@ -54,6 +55,34 @@ TEST_F(BleInputTest, InternalGateBoundariesRemainUnchanged) {
     bleinput::stop();
     probes = 0;
   }
+}
+
+TEST_F(BleInputTest, RepeatedRejectionsKeepRetryingWithoutRepeatingDiagnostics) {
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::Started);
+  bleinput::stop();
+  largestInternal = 29684;
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::LowMemory);
+  const auto firstLogs = testLogCount;
+  const auto firstRecovery = renderer.cache.releases;
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::LowMemory);
+  EXPECT_EQ(testLogCount, firstLogs);
+  EXPECT_EQ(renderer.cache.releases, firstRecovery + 1);
+  freeInternal = 0;
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::LowMemory);
+  EXPECT_GT(testLogCount, firstLogs);
+  freeInternal = 100 * 1024;
+  largestInternal = 40 * 1024;
+#if !CROSSPOINT_BLE_HOST_PSRAM
+  BleHid.beginResult = false;
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::Failed);
+  const auto failedLogs = testLogCount;
+  const auto begins = BleHid.begins;
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::Failed);
+  EXPECT_EQ(testLogCount, failedLogs);
+  EXPECT_EQ(BleHid.begins, begins + 1);
+  BleHid.beginResult = true;
+#endif
+  EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::Started);
 }
 
 TEST_F(BleInputTest, RunningHostDoesNotAllocateOrStartAgain) {

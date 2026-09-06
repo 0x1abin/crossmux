@@ -16,6 +16,9 @@ class Node:
 class BleHostCompatTest(unittest.TestCase):
     def test_build_local_copy_tracks_source_and_never_writes_sdk(self):
         class BuildEnv(dict):
+            def GetProjectOption(self, name, default):
+                return self.get(name, default)
+
             def subst(self, value):
                 return value.replace("$PROJECT_DIR", str(root))
 
@@ -71,6 +74,12 @@ class BleHostCompatTest(unittest.TestCase):
                     env.action([target], [source], env)
                 self.assertEqual(sdk.read_text(), content)
                 self.assertEqual(target.path.read_text(), previous)
+
+            env["custom_nimble_config"] = "src/platform/NimbleC3Config.h"
+            target = env.callback(env, source)
+            c3_config = str(root / env["custom_nimble_config"])
+            self.assertEqual(env.flags["CCFLAGS"][-2:], ["-include", c3_config])
+            self.assertIn((target, c3_config), env["dependencies"])
 
 
 if __name__ == "__main__":

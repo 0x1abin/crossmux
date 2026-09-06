@@ -105,7 +105,7 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 
     if (http.aborted()) return HttpDownloader::ABORTED;
     if (status < 0) {
-      LOG_ERR("HTTP", "wolfSSL request failed: %s", url.c_str());
+      LOG_ERR("HTTP", "wolfSSL request failed: status=%d url=%s", status, url.c_str());
       return HttpDownloader::HTTP_ERROR;
     }
     if (isRedirect(status)) {

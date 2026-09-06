@@ -59,9 +59,15 @@ not yet been quantified, so no measured power reduction is claimed. All S3
 targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
 
-Bluetooth Page Turner Beta is available in all seven S3 development and Nightly
-builds, including the build-only X4 Classic target. It is disabled by default;
-C3 and stable/release builds are unchanged.
+Bluetooth Page Turner Beta is compiled into all seven S3 development and Nightly
+builds, including the build-only X4 Classic target. The runtime setting is
+disabled by default. C3 `default`, stable/release, RC and slim profiles do not
+enable BLE. The opt-in `c3_ble` candidate uses internal RAM, a Flash controller
+and paged coverage indexes for large SD fonts; it does not inherit S3 PSRAM or
+IPC flags. The HAL protects its entire BLE host lifetime from manual 10 MHz
+idle downclocking. X4 user tests confirm reading/page-turner operation, while
+quantitative endurance and X3 hardware acceptance remain separate.
+See [C3 Bluetooth](c3-bluetooth.md) for configuration, ownership and validation.
 
 Sticky, X4 Pro, X4 Classic, Paper Mono, EEGO A4, Murphy M4 and Waveshare 3.97 BLE
 development/Nightly builds use `s3_ble_psram`. Its middleware forces the external

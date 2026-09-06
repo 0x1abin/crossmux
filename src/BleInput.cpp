@@ -116,22 +116,42 @@ void logMemory(const char* phase, const MemorySnapshot& memory) {
 #endif
 }
 
-bool passesGate(const MemorySnapshot& memory, const StartContext context) {
+enum class GateFailure : uint8_t { None, InternalFree, InternalBlock, Psram, HostStart };
+GateFailure lastGateFailure = GateFailure::None;
+StartContext lastGateContext = StartContext::Reader;
+
+GateFailure gateFailure(const MemorySnapshot& memory, const StartContext context) {
   const size_t minFree = context == StartContext::Reader ? kReaderMinFreeInternal : kExplicitMinFreeInternal;
   const size_t minLargest = context == StartContext::Reader ? kReaderMinLargestInternal : kExplicitMinLargestInternal;
-  LOG_INF("BLE", "start gate: internal=%u largest=%u required=%u/%u", static_cast<unsigned>(memory.freeInternal),
-          static_cast<unsigned>(memory.largestInternal), static_cast<unsigned>(minFree),
-          static_cast<unsigned>(minLargest));
-  if (memory.freeInternal < minFree || memory.largestInternal < minLargest) return false;
+  if (memory.freeInternal < minFree) return GateFailure::InternalFree;
+  if (memory.largestInternal < minLargest) return GateFailure::InternalBlock;
 #if CROSSPOINT_BLE_HOST_PSRAM && !defined(SIMULATOR)
   if (memory.freePsram < kMinFreePsram || memory.largestPsram < kMinLargestPsram) {
-    LOG_ERR("BLE", "PSRAM gate failed: required=%u/%u", static_cast<unsigned>(kMinFreePsram),
-            static_cast<unsigned>(kMinLargestPsram));
-    return false;
+    return GateFailure::Psram;
   }
 #endif
-  return true;
+  return GateFailure::None;
 }
+
+void reportStartFailure(const GateFailure failure, const StartContext context, const MemorySnapshot& before,
+                        const MemorySnapshot& after) {
+  if (failure == lastGateFailure && context == lastGateContext) return;
+  lastGateFailure = failure;
+  lastGateContext = context;
+  logMemory("before start", before);
+  logMemory("start rejected", after);
+  LOG_ERR(
+      "BLE", "Start rejected: reason=%u required internal=%u/%u", static_cast<unsigned>(failure),
+      static_cast<unsigned>(context == StartContext::Reader ? kReaderMinFreeInternal : kExplicitMinFreeInternal),
+      static_cast<unsigned>(context == StartContext::Reader ? kReaderMinLargestInternal : kExplicitMinLargestInternal));
+#if CROSSPOINT_BLE_HOST_PSRAM
+  if (failure == GateFailure::Psram) {
+    LOG_ERR("BLE", "Required PSRAM=%u/%u", static_cast<unsigned>(kMinFreePsram),
+            static_cast<unsigned>(kMinLargestPsram));
+  }
+#endif
+}
+
 #endif
 
 }  // namespace
@@ -152,9 +172,9 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
 #else
   if (BleHid.isRunning()) return StartResult::AlreadyRunning;
 
-  auto memory = readMemory();
-  logMemory("before start", memory);
-  if (!passesGate(memory, context)) {
+  const auto before = readMemory();
+  auto memory = before;
+  if (gateFailure(memory, context) != GateFailure::None) {
     switch (context) {
       case StartContext::Reader:
         // Keep reading fonts registered; only discard rebuildable caches.
@@ -166,8 +186,11 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
         break;
     }
     memory = readMemory();
-    logMemory("after memory recovery", memory);
-    if (!passesGate(memory, context)) return StartResult::LowMemory;
+  }
+  const auto failure = gateFailure(memory, context);
+  if (failure != GateFailure::None) {
+    reportStartFailure(failure, context, before, memory);
+    return StartResult::LowMemory;
   }
 
 #if CROSSPOINT_BLE_HOST_PSRAM && !defined(SIMULATOR)
@@ -189,10 +212,10 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
 
   HalPowerManager::Lock powerLock;
   if (!BleHid.begin("CrossMux")) {
-    LOG_ERR("BLE", "BLE HID host start failed");
-    logDiagnostics("start failed");
+    reportStartFailure(GateFailure::HostStart, context, before, readMemory());
     return StartResult::Failed;
   }
+  lastGateFailure = GateFailure::None;
   LOG_INF("BLE", "BLE HID host started");
   logDiagnostics("after start");
   return StartResult::Started;

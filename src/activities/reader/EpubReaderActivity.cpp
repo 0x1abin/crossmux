@@ -186,6 +186,71 @@ uint8_t getStatsChapterProgressPercent(const int currentPage, const int pageCoun
 
 }  // namespace
 
+bool EpubReaderActivity::needsPartialRebuild() const {
+  return section && !section->isBuilding() && section->isPartial() && failedBuildSpine_ != currentSpineIndex &&
+         section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount);
+}
+
+bool EpubReaderActivity::deferBluetoothStart() const {
+  // Preparation blocks a new host, not an existing reader/menu connection.
+  return !section || section->isBuilding() || section->pageCount == 0 || needsPartialRebuild();
+}
+
+void EpubReaderActivity::prepareChapterBuild() {
+  bleinput::stop();
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  // Reclaim arenas before parser allocations interleave with them; retain the
+  // selected font and coverage index for both layout and subsequent reading.
+  if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
+#endif
+}
+
+bool EpubReaderActivity::updateChapterBuild() {
+  if (RenderLock::peek()) return true;
+  RenderLock lock;
+  if (!section) return true;
+
+  if (needsPartialRebuild() && buildViewportWidth > 0) {
+    const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
+    prepareChapterBuild();
+    if (!section->startBuild(buildSpec)) {
+      if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
+      return false;
+    }
+    LOG_DBG("ERS", "Reader near partial watermark (%d/%d), resuming extension build", section->currentPage,
+            section->pageCount);
+  }
+  if (!section->isBuilding()) return true;
+
+  bool suspendForBluetooth = false;
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  suspendForBluetooth = SETTINGS.bluetoothEnabled;
+#endif
+  // A paused parser still owns its heap. Build beyond the restart margin, then
+  // persist a partial cache and release the parser before BLE may reconnect.
+  const int buildWindow = BUILD_WINDOW_AHEAD + (suspendForBluetooth ? PARTIAL_REBUILD_START_MARGIN : 0);
+  const bool pendingReposition = cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0;
+  if (((!suspendForBluetooth && section->isPartial()) || (suspendForBluetooth && pendingReposition) ||
+       static_cast<int>(section->pageCount) < section->currentPage + buildWindow) &&
+      buildTickHeapGate()) {
+    if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
+      if (!handleBuildFailure("background build", section->buildError())) requestUpdate();
+      return false;
+    }
+    if (section->isBuildComplete() && applyDeferredReposition()) requestUpdate();
+  }
+
+  if (suspendForBluetooth && section->isBuilding() && !pendingReposition &&
+      static_cast<int>(section->pageCount) >= section->currentPage + buildWindow) {
+    section->suspendBuild();
+    if (section->buildError() != Section::BuildError::None) {
+      if (!handleBuildFailure("partial suspend", section->buildError())) requestUpdate();
+      return false;
+    }
+  }
+  return true;
+}
+
 EpubReaderActivity::~EpubReaderActivity() {
   ImageBlock::setExtractor(nullptr, nullptr);
   discardOverlayPage();
@@ -549,33 +614,7 @@ void EpubReaderActivity::loop() {
     }
   }
 
-  if (section && !section->isBuilding() && section->isPartial() && !RenderLock::peek() && buildViewportWidth > 0 &&
-      failedBuildSpine_ != currentSpineIndex &&
-      section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount)) {
-    RenderLock lock;
-    const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
-    if (!section->startBuild(buildSpec)) {
-      if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
-      return;
-    } else {
-      LOG_DBG("ERS", "Reader near partial watermark (%d/%d), resuming extension build", section->currentPage,
-              section->pageCount);
-    }
-  }
-
-  if (section && section->isBuilding() && !RenderLock::peek() &&
-      (section->isPartial() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD) &&
-      buildTickHeapGate()) {
-    RenderLock lock;
-    if (section->isBuilding() && buildTickHeapGate()) {
-      if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
-        if (!handleBuildFailure("background build", section->buildError())) requestUpdate();
-        return;
-      } else if (section->isBuildComplete() && applyDeferredReposition()) {
-        requestUpdate();
-      }
-    }
-  }
+  if (!updateChapterBuild()) return;
 
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
   clearEndOfBookOptionsIfNeeded();
@@ -1460,7 +1499,6 @@ void EpubReaderActivity::renderBook() {
             ? std::nullopt
             : cachedVisibleTextOffset;
     if (!cacheComplete) {
-      bleinput::stop();
       if (section->isPartial()) {
         LOG_DBG("ERS", "Partial cache found (%d pages), resuming build...", section->pageCount);
       } else {
@@ -1469,6 +1507,7 @@ void EpubReaderActivity::renderBook() {
 
       const bool needsFullBuild = pendingPercentJump;
       if (needsFullBuild) {
+        prepareChapterBuild();
         GUI.drawPopup(renderer, tr(STR_INDEXING));
         pagesUntilFullRefresh = 1;
         const auto popupFn = [this]() {
@@ -1511,6 +1550,7 @@ void EpubReaderActivity::renderBook() {
           const unsigned long buildStartMs = millis();
           bool started;
           {
+            prepareChapterBuild();
             GfxRenderer::FrameBufferLoan loan(renderer);
             started = section->startBuild(renderSpec, [this] { showBuildPopup(renderer, pagesUntilFullRefresh); });
           }
@@ -1585,7 +1625,7 @@ void EpubReaderActivity::renderBook() {
     pagesUntilFullRefresh = 1;
   }
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
-    bleinput::stop();
+    if (!section->isBuilding()) prepareChapterBuild();
     if (!section->isBuilding() && !section->startBuild(renderSpec)) {
       if (handleBuildFailure("partial start", section->buildError())) return;
       showBuildError();

@@ -120,6 +120,9 @@ class EpubReaderActivity final : public ReaderActivity {
   static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   bool buildTickHeapGate();
+  void prepareChapterBuild();
+  bool needsPartialRebuild() const;
+  bool updateChapterBuild();
   bool stylesDisabledForSession_ = false;
   int renderedSpineIndex_ = -1;
   int failedBuildSpine_ = -1;
@@ -214,7 +217,7 @@ class EpubReaderActivity final : public ReaderActivity {
 
   bool skipLoopDelay() override;
   bool preventAutoSleep() override { return automaticPageTurnActive; }
-  bool deferBluetoothStart() const override { return section && section->isBuilding(); }
+  bool deferBluetoothStart() const override;
 
   ScreenshotInfo getScreenshotInfo() const override;
   CrossPointPosition getCurrentPosition() const;

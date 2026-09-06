@@ -10,6 +10,10 @@
 
 #include <cassert>
 
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+#include <BleKeyboardHost.h>
+#endif
+
 #include "HalGPIO.h"
 #include "Waveshare397Power.h"
 
@@ -73,6 +77,11 @@ void HalPowerManager::setPowerSaving(bool enabled) {
     // Wifi is active, force disabling power saving
     enabled = false;
   }
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  // Manual 10 MHz downclocking bypasses the controller's IDF power locks.
+  // Protect the entire host lifetime, including scans and reconnect attempts.
+  if (BleHid.isRunning()) enabled = false;
+#endif
 
   // Note: We don't use mutex here to avoid too much overhead,
   // it's not very important if we read a slightly stale value for currentLockMode
@@ -85,6 +94,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
       return;
     }
     isLowPower = true;
+    LOG_DBG("PWR", "CPU frequency now %u MHz", getCpuFrequencyMhz());
 
   } else if ((!enabled || mode != None) && isLowPower) {
     LOG_DBG("PWR", "Restoring normal CPU frequency");
@@ -93,6 +103,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
       return;
     }
     isLowPower = false;
+    LOG_DBG("PWR", "CPU frequency now %u MHz", getCpuFrequencyMhz());
   }
 
   // Otherwise, no change needed

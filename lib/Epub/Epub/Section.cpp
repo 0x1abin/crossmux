@@ -716,6 +716,12 @@ void Section::suspendBuild() {
       partialBytesConsumed_ = consumed;
       partialTotalBytes_ = build_->totalBytes;
       LOG_INF("SCT", "Suspended build: %u pages persisted", builtPageCount_);
+    } else {
+      // A failed rename may have removed the old partial. Do not expose its
+      // stale page count to a reader that continues after suspension.
+      buildError_ = BuildError::Io;
+      partial_ = false;
+      partialPageCount_ = 0;
     }
   }
 
