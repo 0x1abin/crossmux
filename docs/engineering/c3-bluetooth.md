@@ -118,9 +118,10 @@ this is not a runtime fragmentation improvement. Artifact SHA256 values:
 
 Review artifacts are local under `/private/tmp/crossmux-c3-review/`. The C3
 application checksum/hash passes `esptool image-info`; it has **not been flashed**.
-SDK startup/scan ownership changes are tracked in
-[FreeInk SDK PR #23](https://github.com/0x1abin/freeink-sdk/pull/23); merge that
-dependency before the CrossMux PR.
+SDK startup/scan ownership changes were merged in
+[FreeInk SDK PR #23](https://github.com/0x1abin/freeink-sdk/pull/23). The gitlink
+pins merge commit `5faf69e8fdd4f3f959faa99c8814a38c117d7678`, whose source tree
+is identical to the SDK revision used for the review checks above.
 
 September 6–7 X4 evidence before the review refactor:
 
