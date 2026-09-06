@@ -1,0 +1,2 @@
+#pragma once
+#define CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL 1

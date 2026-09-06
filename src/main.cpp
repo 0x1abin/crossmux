@@ -84,19 +84,29 @@ static_assert(HalGPIO::BTN_BACK == SoundFeedback::BUTTON_BACK &&
 #endif
 
 void updateBluetoothLifecycle() {
+#if FREEINK_CAP_BLE_HID_HOST
   static unsigned long nextStartAttemptAt = 0;
-  const bool wanted = SETTINGS.bluetoothEnabled && activityManager.keepsBluetoothAlive() &&
-                      !activityManager.deferBluetoothStart() && !activityManager.requiresExclusiveStorageLoop() &&
-                      WiFi.getMode() == WIFI_MODE_NULL;
-  if (!wanted) {
+  const auto wanted = [] {
+    return SETTINGS.bluetoothEnabled && activityManager.keepsBluetoothAlive() &&
+           !activityManager.deferBluetoothStart() && !activityManager.requiresExclusiveStorageLoop() &&
+           WiFi.getMode() == WIFI_MODE_NULL;
+  };
+  if (!wanted()) {
     bleinput::stop();
     return;
   }
   if (bleinput::isRunning() || RenderLock::peek() || millis() < nextStartAttemptAt) return;
-  const auto result = bleinput::ensureStarted(bleinput::StartContext::Reader);
+  // Non-reader pages that keep an existing link alive own their explicit start
+  // attempts; only readers use the automatic reader-memory gate and retry loop.
+  if (!activityManager.isReaderActivity()) return;
+  RenderLock lock;
+  // Rendering may have started a chapter build while we were acquiring the lock.
+  if (!wanted() || !activityManager.isReaderActivity() || bleinput::isRunning()) return;
+  const auto result = bleinput::ensureStarted(renderer, bleinput::StartContext::Reader);
   if (result == bleinput::StartResult::LowMemory || result == bleinput::StartResult::Failed) {
     nextStartAttemptAt = millis() + 2000;
   }
+#endif
 }
 }  // namespace
 
@@ -792,6 +802,7 @@ void loop() {
   const bool bluetoothConnected = bleinput::isConnected();
   if (bluetoothConnected != bluetoothWasConnected) {
     bluetoothWasConnected = bluetoothConnected;
+    bleinput::logDiagnostics(bluetoothConnected ? "connected" : "disconnected");
     if (activityManager.isReaderActivity()) activityManager.requestUpdate();
   }
 
@@ -823,6 +834,7 @@ void loop() {
   if (Serial && millis() - lastMemPrint >= 10000) {
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
             ESP.getHeapSize(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+    if (bleinput::isRunning()) bleinput::logDiagnostics("running");
     lastMemPrint = millis();
   }
 

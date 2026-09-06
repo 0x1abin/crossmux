@@ -63,6 +63,36 @@ Bluetooth Page Turner Beta is available in all seven S3 development and Nightly
 builds, including the build-only X4 Classic target. It is disabled by default;
 C3 and stable/release builds are unchanged.
 
+Sticky, X4 Pro, X4 Classic, Paper Mono, EEGO A4, Murphy M4 and Waveshare 3.97 BLE
+development/Nightly builds use `s3_ble_psram`. Its middleware forces the external
+allocator configuration into NimBLE-Arduino sources only, after `sdkconfig.h`;
+the existing core, controller and task stacks are not migrated. Sticky retains
+its controller-only core and DRAM framebuffer. Release builds do not inherit
+this configuration.
+
+The diagnostic PSRAM mode additionally requires 256 KiB free and a 32 KiB
+contiguous PSRAM block. Before starting the Host it allocates and immediately
+frees a 16-byte probe through the linked NimBLE allocator, rejecting allocation
+failure or a non-PSRAM address. It never silently falls back to internal RAM.
+`BLE` logs report internal/PSRAM free, historical minimum and largest block at
+start, stop, link transitions and every ten seconds while running, plus task
+stack high-water marks. Historical minima are since boot, not per-phase peaks.
+These are diagnostic safeguards, not a measured production memory budget.
+
+All BLE start callers hold the render lock and use `BleInput` for the memory
+gate, at most one recovery, and immediate recheck/start. Bluetooth settings and
+key mapping use the same Explicit gate (70 KiB free / 24 KiB largest internal
+block); only a rejected gate unloads the SD reading font and clears font caches.
+An already-running host neither recovers memory nor initializes again.
+
+Reader BLE startup keeps its 80 KiB free / 32 KiB largest internal-block gate.
+On a low-memory start attempt, it releases rebuildable font caches under the
+render lock and immediately retries without unloading the reading font. If the
+gate still fails, it retries after two seconds. Chapter building, Wi-Fi, USB
+Drive and sleep still stop BLE; eligible readers restart the host afterwards
+and use the SDK's bonded-device reconnection. Hardware reconnection and memory
+headroom must be verified on-device, not inferred from a successful build.
+
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.
 

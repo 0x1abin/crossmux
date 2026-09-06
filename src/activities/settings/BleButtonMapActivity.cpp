@@ -8,6 +8,7 @@
 #include "BleInput.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "activities/RenderLock.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -26,7 +27,8 @@ const BleButtonMapActivity::Function BleButtonMapActivity::kFunctions[kFunctionC
 void BleButtonMapActivity::onEnter() {
   captureTarget = -1;
   UiListActivity::onEnter();
-  const auto result = bleinput::ensureStarted(bleinput::StartContext::Explicit);
+  RenderLock lock;
+  const auto result = bleinput::ensureStarted(renderer, bleinput::StartContext::Explicit);
   if (result == bleinput::StartResult::LowMemory) unavailable = tr(STR_BT_LOW_MEMORY);
   if (result == bleinput::StartResult::Unavailable || result == bleinput::StartResult::Failed) {
     unavailable = tr(STR_BT_UNAVAILABLE);

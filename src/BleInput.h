@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+class GfxRenderer;
+
 namespace bleinput {
 
 enum class StartContext : uint8_t { Reader, Explicit };
@@ -15,9 +17,13 @@ inline constexpr size_t kReaderMinFreeInternal = 80 * 1024;
 inline constexpr size_t kReaderMinLargestInternal = 32 * 1024;
 inline constexpr size_t kExplicitMinFreeInternal = 70 * 1024;
 inline constexpr size_t kExplicitMinLargestInternal = 24 * 1024;
+inline constexpr size_t kMinFreePsram = 256 * 1024;
+inline constexpr size_t kMinLargestPsram = 32 * 1024;
 
-StartResult ensureStarted(StartContext context);
+// Caller holds RenderLock across lifecycle checks, memory recovery and startup.
+StartResult ensureStarted(GfxRenderer& renderer, StartContext context);
 void stop();
+void logDiagnostics(const char* phase);
 bool encodeKey(const freeink::KeyEvent& event, uint8_t& kind, uint8_t& value);
 void describeKey(uint8_t kind, uint8_t value, char* out, size_t outLen);
 

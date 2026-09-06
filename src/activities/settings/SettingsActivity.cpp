@@ -678,7 +678,11 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Bluetooth:
 #if FREEINK_CAP_BLE_HID_HOST
-        startActivityForResultWith<BluetoothSettingsActivity>(resultHandler);
+        releaseListsForMemoryHungryChild();
+        if (!startActivityForResultWith<BluetoothSettingsActivity>(resultHandler)) {
+          rebuildSettingsLists();
+          requestUpdate();
+        }
 #endif
         break;
       case SettingAction::CustomiseStatusBar:

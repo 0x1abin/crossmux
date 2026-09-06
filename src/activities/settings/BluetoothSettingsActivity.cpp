@@ -11,6 +11,7 @@
 #include "BleInput.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "activities/RenderLock.h"
 #include "components/UITheme.h"
 
 #if FREEINK_CAP_BLE_HID_HOST
@@ -40,7 +41,11 @@ void BluetoothSettingsActivity::setBanner(const char* text) {
 }
 
 bool BluetoothSettingsActivity::ensureAvailable() {
-  const auto result = bleinput::ensureStarted(bleinput::StartContext::Explicit);
+  bleinput::StartResult result;
+  {
+    RenderLock lock;
+    result = bleinput::ensureStarted(renderer, bleinput::StartContext::Explicit);
+  }
   if (result == bleinput::StartResult::Started || result == bleinput::StartResult::AlreadyRunning) return true;
   setBanner(result == bleinput::StartResult::LowMemory ? tr(STR_BT_LOW_MEMORY) : tr(STR_BT_UNAVAILABLE));
   requestUpdate();
@@ -98,9 +103,10 @@ void BluetoothSettingsActivity::enterScanView() {
 }
 
 void BluetoothSettingsActivity::connectTo(const char* address) {
-  if (!ensureAvailable() || !BleHid.connect(address)) {
+  awaitingConnect = false;
+  if (!ensureAvailable()) return;
+  if (!BleHid.connect(address)) {
     setBanner(tr(STR_BT_CONNECTION_FAILED));
-    awaitingConnect = false;
     return;
   }
   awaitingConnect = true;
