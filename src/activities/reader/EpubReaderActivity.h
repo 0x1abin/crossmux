@@ -110,7 +110,6 @@ class EpubReaderActivity final : public ReaderActivity {
 
   uint16_t buildViewportWidth = 0;
   uint16_t buildViewportHeight = 0;
-  bool partialRebuildStartFailed = false;
 
   int lastSavedSpineIndex = -1;
   int lastSavedPage = -1;
@@ -125,7 +124,7 @@ class EpubReaderActivity final : public ReaderActivity {
   int renderedSpineIndex_ = -1;
   int failedBuildSpine_ = -1;
   ReaderRenderSpec effectiveRenderSpec(uint16_t width, uint16_t height) const;
-  bool retryWithoutStyles();
+  bool handleBuildFailure(const char* stage);
   bool buildHeapPaused = false;
   static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
   static constexpr size_t RENDER_MIN_MAX_ALLOC = 24 * 1024;

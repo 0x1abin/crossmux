@@ -380,15 +380,15 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   // Header is written with the incomplete-version sentinel; finalizeBuild() commits it.
   writeSectionFileHeader(spec);
 
-  auto ctx = makeUniqueNoThrow<BuildContext>();
-  if (!ctx) {
+  build_ = makeUniqueNoThrow<BuildContext>();
+  if (!build_) {
     LOG_ERR("SCT", "OOM: BuildContext");
     buildError_ = BuildError::OutOfMemory;
-    file.close();
-    Storage.remove(binTmpPath().c_str());
+    releaseBuildResources();
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
     return false;
   }
+  auto& ctx = build_;
   // htmlCached == "htmlPath is the live cache" (reused, or just promoted). finalizeBuild/abandonBuild
   // then leave the cached HTML alone; only an un-promoted temp (rename failed) is theirs to clean up.
   ctx->reusedHtml = htmlCached;
@@ -408,10 +408,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
       if (cacheResult == CssParser::CacheLoadResult::LowMemory) {
         LOG_ERR("SCT", "Insufficient heap to hydrate CSS");
         buildError_ = BuildError::OutOfMemory;
-        ctx->cssParser->clear();
-        file.close();
-        Storage.remove(binTmpPath().c_str());
-        if (!ctx->reusedHtml) Storage.remove(ctx->tmpHtmlPath.c_str());
+        releaseBuildResources();
         return false;
       }
       if (cacheResult == CssParser::CacheLoadResult::Invalid) {
@@ -457,20 +454,16 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   if (!ctx->parser) {
     LOG_ERR("SCT", "OOM: ChapterHtmlSlimParser");
     buildError_ = BuildError::OutOfMemory;
-    if (ctx->cssParser) ctx->cssParser->clear();
-    file.close();
-    Storage.remove(binTmpPath().c_str());
-    if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
+    releaseBuildResources();
     return false;
   }
 
   Hyphenator::setPreferredLanguage(epub->getLanguage());
-  build_ = std::move(ctx);
 
   if (!build_->parser->beginParse()) {
     LOG_ERR("SCT", "Failed to begin parse");
     if (build_->parser->allocationFailed()) buildError_ = BuildError::OutOfMemory;
-    abandonBuild();
+    releaseBuildResources();
     return false;
   }
   build_->totalBytes = build_->parser->parseTotalBytes();
@@ -686,8 +679,7 @@ bool Section::finalizeBuild() {
   }
 
   const bool committed = commitBuildFile(SECTION_FILE_VERSION, 0, 0);
-  if (build_->cssParser) build_->cssParser->clear();
-  build_.reset();
+  releaseBuildResources();
   if (!committed) {
     buildError_ = BuildError::Io;
     // commitBuildFile removed filePath before the failed swap, so nothing valid remains.
@@ -727,40 +719,34 @@ void Section::suspendBuild() {
     }
   }
 
-  if (build_->parser) build_->parser->abortParse();
-  if (build_->cssParser) build_->cssParser->clear();
-  if (!committed && file) {
-    // Explicit close() required before remove (member variable, O_RDWR handle).
-    file.close();
-    Storage.remove(binTmpPath().c_str());
-  }
-  if (!build_->reusedHtml && Storage.exists(build_->tmpHtmlPath.c_str())) {
-    Storage.remove(build_->tmpHtmlPath.c_str());
-  }
-  build_.reset();
+  releaseBuildResources();
   buildComplete_ = false;
   pageCount = partial_ ? partialPageCount_ : 0;
   builtPageCount_ = 0;
 }
 
+void Section::releaseBuildResources() {
+  if (build_) {
+    if (build_->parser) build_->parser->abortParse();
+    if (build_->cssParser) build_->cssParser->clear();
+    if (!build_->reusedHtml && Storage.exists(build_->tmpHtmlPath.c_str())) {
+      Storage.remove(build_->tmpHtmlPath.c_str());
+    }
+  }
+  // The member file must be closed before removing an uncommitted build.
+  if (file) file.close();
+  if (Storage.exists(binTmpPath().c_str())) Storage.remove(binTmpPath().c_str());
+  build_.reset();
+}
+
 void Section::abandonBuild() {
   if (!build_) return;
-  if (build_->parser) build_->parser->abortParse();
-  if (build_->cssParser) build_->cssParser->clear();
-  if (file) {
-    // Explicit close() required before remove (member variable, O_RDWR handle).
-    file.close();
-    Storage.remove(binTmpPath().c_str());
-  }
+  releaseBuildResources();
   // A parse error would recur against the same HTML, so drop any partial too -- resuming
   // from it would just re-enter the failing build every open.
   if (Storage.exists(filePath.c_str())) {
     Storage.remove(filePath.c_str());
   }
-  if (!build_->reusedHtml && Storage.exists(build_->tmpHtmlPath.c_str())) {
-    Storage.remove(build_->tmpHtmlPath.c_str());
-  }
-  build_.reset();
   buildComplete_ = false;
   partial_ = false;
   partialPageCount_ = 0;

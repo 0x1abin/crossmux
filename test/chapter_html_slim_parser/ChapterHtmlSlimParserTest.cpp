@@ -455,6 +455,67 @@ TEST_F(SectionMemoryTest, LayoutOomAndWriteErrorNeverCommitCache) {
   expectNoCache();
 }
 
+TEST_F(SectionMemoryTest, InitializationFailureReleasesResourcesAndPreservesPriorCache) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  for (const bool partial : {false, true}) {
+    {
+      Section original(epub, 0, renderer);
+      ASSERT_TRUE(original.startBuild(spec));
+      ASSERT_TRUE(original.buildSomeMore(partial ? 1 : 0));
+    }
+    for (const size_t size : {sizeof(Section::BuildContext), sizeof(ChapterHtmlSlimParser), sizeof(ParsedText)}) {
+      SCOPED_TRACE(size);
+      const auto cachePath = epub->cachePath + "/sections/0.bin";
+      std::ifstream beforeFile(cachePath, std::ios::binary);
+      const std::string before{std::istreambuf_iterator<char>(beforeFile), {}};
+      {
+        Section section(epub, 0, renderer);
+        ASSERT_TRUE(section.loadSectionFile(spec));
+        failObjectSize = size;
+        EXPECT_FALSE(section.startBuild(spec));
+        EXPECT_EQ(failObjectSize, 0U);
+        EXPECT_EQ(section.buildError(), Section::BuildError::OutOfMemory);
+        EXPECT_FALSE(section.isBuilding());
+        EXPECT_FALSE(section.file.isOpen());
+        EXPECT_FALSE(std::filesystem::exists(section.binTmpPath()));
+      }
+      std::ifstream afterFile(cachePath, std::ios::binary);
+      EXPECT_EQ((std::string{std::istreambuf_iterator<char>(afterFile), {}}), before);
+      Section restored(epub, 0, renderer);
+      ASSERT_TRUE(restored.loadSectionFile(spec));
+      EXPECT_EQ(restored.isPartial(), partial);
+    }
+  }
+}
+
+TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
+  std::string html = "<html><body><p id='start'>";
+  for (int i = 0; i < 900; ++i) html += "中文正文";
+  html += "<ruby>汉字<rt>han zi</rt></ruby><a href='#note'>[1]</a></p>";
+  for (int i = 0; i < 80; ++i) html += "<p>English paragraph words.</p>";
+  html += "<p id='note'>Footnote text.</p></body></html>";
+  writeHtml(html);
+  laidOutWords.clear();
+  collectedFootnotes.clear();
+  spec.embeddedStyle = false;
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.createSectionFile(spec));
+  const auto path = epub->cachePath + "/sections/0.bin";
+  std::ifstream file(path, std::ios::binary);
+  const std::string bytes{std::istreambuf_iterator<char>(file), {}};
+  uint64_t digest = 14695981039346656037ULL;
+  const auto append = [&digest](const std::string& value) {
+    for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
+  };
+  append(bytes);
+  for (const auto& word : laidOutWords) append(word);
+  for (const auto& href : collectedFootnotes) append(href);
+  EXPECT_EQ(digest, 13330287791149729058ULL);  // Pre-refactor cache, text and footnotes.
+}
+
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
   writeHtml("<html><body><p>text</p></body></html>");
   CssParser css(epub->cachePath);
@@ -475,6 +536,17 @@ TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
   spec.embeddedStyle = false;
   ASSERT_TRUE(section.createSectionFile(spec));
   EXPECT_EQ(css.ruleCount(), 0U);
+  spec.embeddedStyle = true;
+  failNextArray = true;
+  EXPECT_FALSE(section.startBuild(spec));
+  EXPECT_EQ(section.buildError(), Section::BuildError::OutOfMemory);
+  EXPECT_FALSE(section.isBuilding());
+  EXPECT_FALSE(section.file.isOpen());
+  EXPECT_FALSE(std::filesystem::exists(section.binTmpPath()));
+  EXPECT_EQ(css.ruleCount(), 0U);
+  spec.embeddedStyle = false;
+  Section restored(epub, 0, renderer);
+  EXPECT_TRUE(restored.loadSectionFile(spec));
 }
 
 }  // namespace

@@ -24,10 +24,11 @@ bool readAt(size_t, void*, size_t, size_t) { return false; }
 namespace {
 size_t arrayAllocations = 0;
 size_t failArraySize = 0;
+size_t failArrayAt = 0;
 }  // namespace
 void* operator new[](size_t size, const std::nothrow_t&) noexcept {
   ++arrayAllocations;
-  if (size == failArraySize) return nullptr;
+  if (size == failArraySize || arrayAllocations == failArrayAt) return nullptr;
   try {
     return ::operator new[](size);
   } catch (...) {
@@ -64,6 +65,7 @@ class SdCardFontMemoryTest : public ::testing::Test {
   }
   void TearDown() override {
     failArraySize = 0;
+    failArrayAt = 0;
     ESP = {};
     std::filesystem::remove(path);
   }
@@ -98,6 +100,37 @@ TEST_F(SdCardFontMemoryTest, MiniGrowthFailurePreservesOldGlyphsAndBitmap) {
   EXPECT_EQ(data->glyph, glyph);
   EXPECT_EQ(data->glyph[0].advanceX, 9);
   EXPECT_EQ(data->intervalCount, 1U);
+}
+
+TEST_F(SdCardFontMemoryTest, EveryReplacementAllocationFailureKeepsPublishedCache) {
+  ASSERT_EQ(font.prewarm("A", 1, false, false), 1);
+  auto& style = font.styles_[0];
+  const auto* data = style.epdFont.data;
+  const auto* intervals = data->intervals;
+  const auto* glyphs = data->glyph;
+  const auto* bitmap = data->bitmap;
+  const uint32_t cps[] = {'A', 'B'};
+  // Union first, then replacement intervals, glyphs, bitmap and mappings.
+  for (size_t allocation = 2; allocation <= 5; ++allocation) {
+    SCOPED_TRACE(allocation);
+    arrayAllocations = 0;
+    failArrayAt = allocation;
+    EXPECT_LT(font.prewarmStyle(0, cps, 2, false, false), 0);
+    EXPECT_EQ(arrayAllocations, allocation);  // No later allocations after failure.
+    EXPECT_EQ(style.epdFont.data, data);
+    EXPECT_EQ(data->intervals, intervals);
+    EXPECT_EQ(data->glyph, glyphs);
+    EXPECT_EQ(data->bitmap, bitmap);
+    EXPECT_EQ(data->intervalCount, 1U);
+    EXPECT_EQ(data->glyph[0].advanceX, 9);
+  }
+  failArrayAt = 0;
+  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), 0);
+  EXPECT_EQ(style.miniGlyphCount, 2U);
+  EXPECT_EQ(style.miniGlyphs[1].advanceX, 13);
+  arrayAllocations = 0;
+  for (int batch = 0; batch < 3; ++batch) EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), 0);
+  EXPECT_EQ(arrayAllocations, 0U);
 }
 
 TEST_F(SdCardFontMemoryTest, AdvanceGrowthFailurePreservesOldTable) {

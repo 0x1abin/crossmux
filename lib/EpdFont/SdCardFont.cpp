@@ -1140,8 +1140,13 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   if (glyphBytes && !glyphs) return growthFailed();
   auto bitmap = newBitmapBytes ? makeUniqueNoThrow<uint8_t[]>(bitmapBytes) : nullptr;
   if (newBitmapBytes && !bitmap) return growthFailed();
-  auto preparedMappings = makeUniqueNoThrow<CpGlyphMapping[]>(cpCount);
-  if (!preparedMappings) return growthFailed();
+#endif
+  auto mappings = makeUniqueNoThrow<CpGlyphMapping[]>(cpCount);
+  if (!mappings) {
+    LOG_ERR("SDCF", "Failed to allocate mapping array for style %u", styleIdx);
+    return -1;
+  }
+#ifndef BOARD_HAS_PSRAM
   // No more cache allocations are needed before glyph data is written.
   s.epdFont.data = &s.stubData;
   if (intervals) {
@@ -1159,15 +1164,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
     s.miniBitmap = bitmap.release();
     s.miniBitmapCapacity = bitmapBytes;
   }
-  // Existing C-style cleanup below owns this buffer on every exit path.
-  CpGlyphMapping* mappings = preparedMappings.release();
-#else
-  CpGlyphMapping* mappings = new (std::nothrow) CpGlyphMapping[cpCount];
 #endif
-  if (!mappings) {
-    LOG_ERR("SDCF", "Failed to allocate mapping array for style %u", styleIdx);
-    return -1;
-  }
 
   uint32_t validCount = 0;
   for (uint32_t i = 0; i < cpCount; i++) {
@@ -1182,7 +1179,6 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
 
   if (validCount == 0) {
     freeStyleMiniData(s);
-    delete[] mappings;
     s.epdFont.data = &s.stubData;
     return missed;
   }
@@ -1199,12 +1195,12 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   memset(&s.miniData, 0, sizeof(s.miniData));
   s.epdFont.data = &s.stubData;
 
+#ifdef BOARD_HAS_PSRAM
   if (!ensureArrayCapacity(s.miniIntervals, s.miniIntervalCapacity, validCount)) {
     LOG_ERR("SDCF", "Failed to allocate mini intervals for style %u", styleIdx);
-    delete[] mappings;
     return -1;
   }
-
+#endif
   s.miniIntervalCount = 0;
   uint32_t rangeStart = 0;
   for (uint32_t i = 1; i <= validCount; i++) {
@@ -1218,12 +1214,13 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   }
 
   // Mini glyph array (reused across pages when it fits)
+#ifdef BOARD_HAS_PSRAM
   if (!ensureArrayCapacity(s.miniGlyphs, s.miniGlyphCapacity, validCount)) {
     LOG_ERR("SDCF", "Failed to allocate mini glyphs for style %u", styleIdx);
-    delete[] mappings;
     freeStyleMiniData(s);
     return -1;
   }
+#endif
   s.miniGlyphCount = validCount;
 
   FontFile file(filePath_, &useFlash_, flashPayloadSize_);
@@ -1251,7 +1248,6 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
         break;
       case GlyphReadResult::Failed:
         LOG_ERR("SDCF", "Prewarm: failed to read glyph %d (style %u)", gIdx, styleIdx);
-        delete[] mappings;
         freeStyleMiniData(s);
         return -1;
     }
@@ -1268,12 +1264,13 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
       totalBitmapSize += s.miniGlyphs[i].dataLength;
     }
 
+#ifdef BOARD_HAS_PSRAM
     if (!ensureArrayCapacity(s.miniBitmap, s.miniBitmapCapacity, totalBitmapSize)) {
       LOG_ERR("SDCF", "Failed to allocate mini bitmap (%u bytes) for style %u", totalBitmapSize, styleIdx);
-      delete[] mappings;
       freeStyleMiniData(s);
       return -1;
     }
+#endif
     s.miniBitmapUsed = totalBitmapSize;  // underuse-hysteresis signal for resetStyleMiniData
 
     uint32_t miniBitmapOffset = 0;
@@ -1299,7 +1296,6 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
           break;
         case GlyphReadResult::Failed:
           LOG_ERR("SDCF", "Prewarm: failed to read bitmap (style %u)", styleIdx);
-          delete[] mappings;
           freeStyleMiniData(s);
           return -1;
       }
@@ -1311,7 +1307,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   }
 
   uint32_t sdTime = millis() - sdStart;
-  delete[] mappings;
+  mappings.reset();
 
   // Full render prewarm: load the persistent kern classes + ligatures (one-time
   // per style, small — the big matrix is NOT loaded here) and then build the
