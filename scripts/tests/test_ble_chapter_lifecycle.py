@@ -40,7 +40,6 @@ class ChapterLifecycleTest(unittest.TestCase):
     def test_readiness_build_boundaries_and_retry(self):
         constants = '\n'.join(re.findall(r'constexpr int (?:BUILD_WINDOW_AHEAD|PARTIAL_REBUILD_START_MARGIN|BACKGROUND_BUILD_PAGES_PER_TICK) = \d+;', (ROOT / 'src/activities/reader/EpubReaderActivity.h').read_text()))
         self.assertEqual(constants.count(';'), 3)
-        background = EPUB[EPUB.index('  if (section && !section->isBuilding() && section->isPartial()'):EPUB.index('  const bool atEndOfBook = currentSpineIndex > 0')]
         harness = r'''
 #include <cassert>
 #include <optional>
@@ -64,8 +63,10 @@ struct Cache { int releases=0; void releaseSdFontCaches() { assert(!running); ++
 struct { Cache cache; Cache* getFontCacheManager() { return &cache; } } renderer;
 struct RenderLock {
  static inline bool held=false;
+ static inline int depth=0;
  static inline void (*onAcquire)()=nullptr;
- RenderLock() { if(onAcquire) onAcquire(); }
+ RenderLock() { if(onAcquire) onAcquire(); ++depth; }
+ ~RenderLock() { --depth; }
  static bool peek() { return held; }
 };
 using ReaderRenderSpec=int;
@@ -78,15 +79,15 @@ struct Section {
  bool isPartial() const { return partial; }
  bool isBuildComplete() const { return complete; }
  BuildError buildError() const { return error; }
- bool startBuild(int) { assert(!running); ++begins; building=true; return true; }
+ bool startBuild(int) { assert(!running && RenderLock::depth==1); ++begins; building=true; return true; }
  bool buildSomeMore(int pages) {
-   assert(!running);
+   assert(!running && RenderLock::depth==1);
    if(fail) { building=false; error=BuildError::Io; return false; }
    pageCount+=pages;
    if(pageCount>=end) { complete=true; building=false; partial=false; }
    return true;
  }
- void suspendBuild() { assert(building); building=false; partial=true; ++suspends; }
+ void suspendBuild() { assert(building && RenderLock::depth==1); building=false; partial=true; ++suspends; }
 };
 struct EpubReaderActivity {
  Section* section=nullptr;
@@ -95,7 +96,8 @@ struct EpubReaderActivity {
  int cachedChapterTotalPageCount=0, failures=0, updates=0;
  bool deferBluetoothStart() const;
  void prepareChapterBuild();
- void background();
+ bool needsPartialRebuild() const;
+ bool updateChapterBuild();
  bool buildTickHeapGate() { return true; }
  int effectiveRenderSpec(int,int) { return 0; }
  bool handleBuildFailure(const char*,Section::BuildError) { ++failures; return false; }
@@ -115,7 +117,8 @@ unsigned long now=0;
 unsigned long millis() { return now; }
 '''
         production = constants + '\n' + method(EPUB, 'bool EpubReaderActivity::deferBluetoothStart() const') + '\n' + method(EPUB, 'void EpubReaderActivity::prepareChapterBuild()')
-        production += '\nvoid EpubReaderActivity::background() {\n' + background + '\n}\n'
+        production += '\n' + method(EPUB, 'bool EpubReaderActivity::needsPartialRebuild() const')
+        production += '\n' + method(EPUB, 'bool EpubReaderActivity::updateChapterBuild()')
         production += method((ROOT / 'src/main.cpp').read_text(), 'void updateBluetoothLifecycle()')
         checks = r'''
 int main() {
@@ -145,9 +148,18 @@ int main() {
  bleinput::result=bleinput::StartResult::Started; now=4000;
  updateBluetoothLifecycle(); assert(running);
 #endif
+ RenderLock::held=true;
+ assert(reader.updateChapterBuild());
+ assert(section.begins==0); // Busy rendering must never trigger construction.
+ RenderLock::held=false;
+ // A render that invalidates the section before lock acquisition must not
+ // dereference the old section or start a build.
+ RenderLock::onAcquire=[] { reader.section=nullptr; };
+ assert(reader.updateChapterBuild());
+ RenderLock::onAcquire=nullptr; reader.section=&section;
  section.currentPage=15; assert(reader.deferBluetoothStart());
- reader.background(); assert(!running && section.begins==1); // Stop precedes background allocations.
- for(int i=0;i<100 && section.building;++i) reader.background();
+ reader.updateChapterBuild(); assert(!running && section.begins==1); // Stop precedes background allocations.
+ for(int i=0;i<100 && section.building;++i) reader.updateChapterBuild();
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
  assert(section.partial && section.suspends==1 && section.pageCount<section.end);
 #else
@@ -159,11 +171,11 @@ int main() {
  assert(running);
 #endif
  section.partial=true; section.currentPage=section.pageCount-1; section.fail=true;
- reader.background(); assert(!running && !section.building && reader.failures==1);
+ reader.updateChapterBuild(); assert(!running && !section.building && reader.failures==1);
  section.fail=false; section.partial=false; section.complete=false; section.building=true;
  section.currentPage=0; section.pageCount=2; section.end=8;
  reader.cachedVisibleTextOffset=42;
- for(int i=0;i<10 && section.building;++i) reader.background();
+ for(int i=0;i<10 && section.building;++i) reader.updateChapterBuild();
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
  assert(section.complete && !reader.cachedVisibleTextOffset); // Reposition waits for final count.
 #else

@@ -31,7 +31,7 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
         config = configparser.ConfigParser(interpolation=None)
         config.read(Path(__file__).resolve().parents[2] / "platformio.ini")
         for name in config.sections():
-            if name.startswith("s3_ble") or name == "c3_ble":
+            if name.startswith("s3_ble") or name in ("c3_ble", "ble_host"):
                 continue
             # BLE references belong only to the development/Nightly envs above,
             # never shared hardware/base profiles or release/simulator envs.

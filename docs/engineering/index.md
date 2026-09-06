@@ -16,6 +16,7 @@ that matches your task — don't load everything at once.
 | [ui-and-input.md](ui-and-input.md) | Rendering UI, handling orientation, mapping buttons, or using the `GUI`/UITheme macro and `tr()`. |
 | [generated-files.md](generated-files.md) | Editing HTML pages, i18n translations, or fonts (anything produced by a build script). |
 | [testing-and-debugging.md](testing-and-debugging.md) | Building, monitoring, debugging crashes, verifying changes, or reading CI workflows. |
+| [c3-bluetooth.md](c3-bluetooth.md) | Reviewing the opt-in C3 BLE profile, reader lifecycle, paged font indexes, build isolation, or X4 validation limits. |
 | [git-workflow.md](git-workflow.md) | Any git operation: detecting repo context, branching, commit format, or deciding whether to commit. |
 | [cache-management.md](cache-management.md) | Changing a cache binary layout, invalidating caches, or bumping a format version. (Byte-level formats: [../file-formats.md](../file-formats.md).) |
 | [sd-card-font-cache.md](sd-card-font-cache.md) | Reviewing the SD-card reader-font cache, its inactive-OTA-slot backend, rollback boundary, commit protocol, SD fallback, progress UI, or performance logs. |

@@ -80,14 +80,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
   // Manual 10 MHz downclocking bypasses the controller's IDF power locks.
   // Protect the entire host lifetime, including scans and reconnect attempts.
-  const bool bleRunning = BleHid.isRunning();
-  static bool loggedBleHold = false;
-  if (enabled && bleRunning && !loggedBleHold) {
-    LOG_INF("PWR", "BLE blocks idle downclock: actual=%u MHz normal=%d MHz", getCpuFrequencyMhz(), normalFreq);
-    loggedBleHold = true;
-  }
-  if (!bleRunning) loggedBleHold = false;
-  if (bleRunning) enabled = false;
+  if (BleHid.isRunning()) enabled = false;
 #endif
 
   // Note: We don't use mutex here to avoid too much overhead,

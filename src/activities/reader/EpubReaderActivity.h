@@ -121,6 +121,8 @@ class EpubReaderActivity final : public ReaderActivity {
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   bool buildTickHeapGate();
   void prepareChapterBuild();
+  bool needsPartialRebuild() const;
+  bool updateChapterBuild();
   bool stylesDisabledForSession_ = false;
   int renderedSpineIndex_ = -1;
   int failedBuildSpine_ = -1;

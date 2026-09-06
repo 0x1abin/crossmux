@@ -347,7 +347,8 @@ class SdCardFont {
   bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
-  // -1 means absent; -2 means index I/O failed (never cache it as a missing glyph).
+  static constexpr int32_t GLYPH_INDEX_IO_ERROR = -2;
+  // Negative results distinguish missing coverage (-1) from a retryable I/O error.
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile* file = nullptr) const;
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
   int32_t findPagedGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile& file) const;

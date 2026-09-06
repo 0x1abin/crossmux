@@ -6,9 +6,6 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
-#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-#include <esp_heap_caps.h>
-#endif
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -735,15 +732,6 @@ void Section::suspendBuild() {
 }
 
 void Section::releaseBuildResources() {
-#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-  if (build_) {
-    LOG_INF("SCT", "Build release: section=%p path=%p/%u context=%p/%u parser=%p/%u lut=%p/%u spine=%d", this,
-            filePath.c_str(), static_cast<unsigned>(filePath.capacity() + 1), build_.get(),
-            static_cast<unsigned>(sizeof(BuildContext)), build_->parser.get(),
-            static_cast<unsigned>(sizeof(ChapterHtmlSlimParser)), build_->lut.data(),
-            static_cast<unsigned>(build_->lut.capacity() * sizeof(PageLutEntry)), spineIndex);
-  }
-#endif
   if (build_) {
     if (build_->parser) build_->parser->abortParse();
     if (build_->cssParser) build_->cssParser->clear();
@@ -755,12 +743,6 @@ void Section::releaseBuildResources() {
   if (file) file.close();
   if (Storage.exists(binTmpPath().c_str())) Storage.remove(binTmpPath().c_str());
   build_.reset();
-#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-  constexpr uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-  LOG_INF("SCT", "Build resources released: spine=%d internal=%u largest=%u", spineIndex,
-          static_cast<unsigned>(heap_caps_get_free_size(caps)),
-          static_cast<unsigned>(heap_caps_get_largest_free_block(caps)));
-#endif
 }
 
 void Section::abandonBuild() {

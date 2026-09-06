@@ -81,59 +81,6 @@ int main() {
                 ], check=True, capture_output=True)
                 subprocess.run([str(exe)], check=True)
 
-    def test_heap_diagnostic_batches_unordered_heaps_and_logs_outside_heap_lock(self):
-        source = (ROOT / "src/BleInput.cpp").read_text()
-        method = source.split("void logInternalHeapBlocks() {", 1)[1].split("\n#endif", 1)[0]
-        method = "void logInternalHeapBlocks() {" + method
-        harness = r'''
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <vector>
-struct walker_heap_into_t { intptr_t start, end; };
-struct walker_block_info_t { void* ptr; size_t size; bool used; };
-constexpr int MALLOC_CAP_INTERNAL=1, MALLOC_CAP_8BIT=2;
-bool walking=false;
-std::vector<uintptr_t> addresses;
-void testLog(const char*, const char*, void* heap, void* ptr, unsigned size, unsigned used) {
-  assert(!walking);
-  const auto address=reinterpret_cast<uintptr_t>(ptr);
-  assert(address > reinterpret_cast<uintptr_t>(heap));
-  assert(size==32 && used==(address/64)%2);
-  addresses.push_back(address);
-}
-#define LOG_INF(...) testLog(__VA_ARGS__)
-void heap_caps_walk(int caps, bool (*callback)(walker_heap_into_t, walker_block_info_t, void*), void* ctx) {
-  assert(caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
-  walking=true;
-  // Registration order is not address order. Include more than one batch per heap.
-  for(intptr_t base : {0x3000, 0x1000, 0x2000}) {
-    for(int i=1;i<=19;++i) {
-      uintptr_t address=base+64*i;
-      if(!callback({base, base+0x1000}, {reinterpret_cast<void*>(address),32,bool((address/64)%2)},ctx)) break;
-    }
-  }
-  walking=false;
-}
-'''
-        checks = r'''
-int main() {
-  logInternalHeapBlocks();
-  assert(addresses.size()==57);
-  unsigned index=0;
-  for(uintptr_t base : {0x1000, 0x2000, 0x3000})
-    for(int i=1;i<=19;++i) assert(addresses[index++]==base+64*i);
-}
-'''
-        with tempfile.TemporaryDirectory() as directory:
-            cpp = Path(directory) / "heap.cpp"
-            cpp.write_text(harness + method + checks)
-            exe = Path(directory) / "heap"
-            result = subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
-                "-std=c++17", str(cpp), "-o", str(exe)], text=True, capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            subprocess.run([str(exe)], check=True)
-
     def test_c3_candidate_is_not_enabled_in_default_or_releases(self):
         config = configparser.ConfigParser(interpolation=None)
         config.read(ROOT / "platformio.ini")

@@ -358,17 +358,6 @@ void SdCardFont::freeStyleAll(PerStyle& s) {
 // --- Global free/cleanup ---
 
 void SdCardFont::releaseResidentCaches() {
-#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-  for (uint8_t i = 0; i < MAX_STYLES; ++i) {
-    const auto& s = styles_[i];
-    if (!s.present || (!s.miniBitmap && !s.miniGlyphs && !advanceTable_[i])) continue;
-    LOG_INF("SDCF", "Cache release: font=%p style=%u bitmap=%p/%u glyphs=%p/%u intervals=%p/%u advance=%p/%u", this, i,
-            s.miniBitmap, static_cast<unsigned>(s.miniBitmapCapacity), s.miniGlyphs,
-            static_cast<unsigned>(s.miniGlyphCapacity * sizeof(EpdGlyph)), s.miniIntervals,
-            static_cast<unsigned>(s.miniIntervalCapacity * sizeof(EpdUnicodeInterval)), advanceTable_[i],
-            static_cast<unsigned>(advanceTableSize_[i] * sizeof(AdvanceEntry)));
-  }
-#endif
   clearOverflow();
   clearPersistentCache();
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
@@ -993,7 +982,7 @@ int32_t SdCardFont::findPagedGlyphIndex(const PerStyle& s, uint32_t codepoint, F
     if (!file.seekSet(s.intervalsFileOffset + first * sizeof(EpdUnicodeInterval)) ||
         file.read(s.intervalPage, bytes) != static_cast<int>(bytes)) {
       LOG_ERR("SDCF", "Failed to read interval page %u", page);
-      return -2;
+      return GLYPH_INDEX_IO_ERROR;
     }
     s.cachedIntervalPage = static_cast<int32_t>(page);
   }
@@ -1140,7 +1129,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
       }
       if (inMini) continue;
       const int32_t index = findGlobalGlyphIndex(s, cp, &file);
-      if (index == -2) return -1;
+      if (index == GLYPH_INDEX_IO_ERROR) return -1;
       if (index < 0) {
         missedInMini++;  // not in font coverage: the rebuild couldn't load it either
       } else {
@@ -1203,7 +1192,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
     EpdGlyph glyph{};
     for (uint32_t i = 0; i < cpCount; ++i) {
       const int32_t index = findGlobalGlyphIndex(s, codepoints[i], &file);
-      if (index == -2) return -1;
+      if (index == GLYPH_INDEX_IO_ERROR) return -1;
       if (index < 0) continue;
       ++coveredCount;
       if (readGlyphMetadata(file, styleIdx, static_cast<uint32_t>(index), glyph, true) == GlyphReadResult::Failed) {
@@ -1260,7 +1249,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   uint32_t validCount = 0;
   for (uint32_t i = 0; i < cpCount; i++) {
     int32_t idx = findGlobalGlyphIndex(s, codepoints[i], &file);
-    if (idx == -2) return -1;
+    if (idx == GLYPH_INDEX_IO_ERROR) return -1;
     if (idx >= 0) {
       mappings[validCount].codepoint = codepoints[i];
       mappings[validCount].globalIndex = idx;
@@ -1611,12 +1600,12 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
     uint32_t needCount = 0;
     uint32_t missedThisStyle = 0;
     const int32_t replacementIdx = findGlobalGlyphIndex(s, REPLACEMENT_GLYPH, &file);
-    if (replacementIdx == -2) return -1;
+    if (replacementIdx == GLYPH_INDEX_IO_ERROR) return -1;
     for (uint32_t i = 0; i < cpCount; i++) {
       const uint32_t cp = codepoints[i];
       if (advanceTableLookup(si, cp, nullptr)) continue;  // already cached
       int32_t idx = findGlobalGlyphIndex(s, cp, &file);
-      if (idx == -2) return -1;
+      if (idx == GLYPH_INDEX_IO_ERROR) return -1;
       if (idx < 0) {
         if (replacementIdx < 0) {
           missedThisStyle++;

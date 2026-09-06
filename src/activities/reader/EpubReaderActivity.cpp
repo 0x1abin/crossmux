@@ -186,26 +186,69 @@ uint8_t getStatsChapterProgressPercent(const int currentPage, const int pageCoun
 
 }  // namespace
 
-bool EpubReaderActivity::deferBluetoothStart() const {
-  // A null section also covers menu cancellation, chapter jumps and settings
-  // changes until renderBook has restored a readable cache. Partial caches
-  // near their watermark will immediately start another build in loop().
-  if (!section || section->isBuilding() || section->pageCount == 0) return true;
-  return section->isPartial() && failedBuildSpine_ != currentSpineIndex &&
+bool EpubReaderActivity::needsPartialRebuild() const {
+  return section && !section->isBuilding() && section->isPartial() && failedBuildSpine_ != currentSpineIndex &&
          section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount);
 }
 
+bool EpubReaderActivity::deferBluetoothStart() const {
+  // Preparation blocks a new host, not an existing reader/menu connection.
+  return !section || section->isBuilding() || section->pageCount == 0 || needsPartialRebuild();
+}
+
 void EpubReaderActivity::prepareChapterBuild() {
-#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-  bleinput::logDiagnostics("chapter prepare");
-#endif
   bleinput::stop();
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-  // Release rebuildable arenas before parser/LUT allocations interleave with
-  // them. Keep the selected font and its paged coverage index registered.
+  // Reclaim arenas before parser allocations interleave with them; retain the
+  // selected font and coverage index for both layout and subsequent reading.
   if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
-  bleinput::logDiagnostics("chapter caches released");
 #endif
+}
+
+bool EpubReaderActivity::updateChapterBuild() {
+  if (RenderLock::peek()) return true;
+  RenderLock lock;
+  if (!section) return true;
+
+  if (needsPartialRebuild() && buildViewportWidth > 0) {
+    const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
+    prepareChapterBuild();
+    if (!section->startBuild(buildSpec)) {
+      if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
+      return false;
+    }
+    LOG_DBG("ERS", "Reader near partial watermark (%d/%d), resuming extension build", section->currentPage,
+            section->pageCount);
+  }
+  if (!section->isBuilding()) return true;
+
+  bool suspendForBluetooth = false;
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  suspendForBluetooth = SETTINGS.bluetoothEnabled;
+#endif
+  // A paused parser still owns its heap. Build beyond the restart margin, then
+  // persist a partial cache and release the parser before BLE may reconnect.
+  const int buildWindow = BUILD_WINDOW_AHEAD + (suspendForBluetooth ? PARTIAL_REBUILD_START_MARGIN : 0);
+  const bool pendingReposition = cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0;
+  if (((!suspendForBluetooth && section->isPartial()) || (suspendForBluetooth && pendingReposition) ||
+       static_cast<int>(section->pageCount) < section->currentPage + buildWindow) &&
+      buildTickHeapGate()) {
+    if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
+      if (!handleBuildFailure("background build", section->buildError())) requestUpdate();
+      return false;
+    }
+    if (section->isBuildComplete() && applyDeferredReposition()) requestUpdate();
+  }
+
+  if (suspendForBluetooth && section->isBuilding() && !pendingReposition &&
+      static_cast<int>(section->pageCount) >= section->currentPage + buildWindow) {
+    section->suspendBuild();
+    if (section->buildError() != Section::BuildError::None) {
+      if (!handleBuildFailure("partial suspend", section->buildError())) requestUpdate();
+      return false;
+    }
+  }
+  return true;
 }
 
 EpubReaderActivity::~EpubReaderActivity() {
@@ -571,57 +614,7 @@ void EpubReaderActivity::loop() {
     }
   }
 
-  if (section && !section->isBuilding() && section->isPartial() && !RenderLock::peek() && buildViewportWidth > 0 &&
-      failedBuildSpine_ != currentSpineIndex &&
-      section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount)) {
-    RenderLock lock;
-    const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
-    prepareChapterBuild();
-    if (!section->startBuild(buildSpec)) {
-      if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
-      return;
-    } else {
-      LOG_DBG("ERS", "Reader near partial watermark (%d/%d), resuming extension build", section->currentPage,
-              section->pageCount);
-    }
-  }
-
-  // A live parser retains the build heap even when parsing is idle. For C3 BLE,
-  // persist a window beyond the resume margin and release it before reconnecting.
-  bool suspendForBluetooth = false;
-#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
-  suspendForBluetooth = SETTINGS.bluetoothEnabled;
-#endif
-  const int buildWindow = suspendForBluetooth ? PARTIAL_REBUILD_START_MARGIN + BUILD_WINDOW_AHEAD : BUILD_WINDOW_AHEAD;
-  const bool pendingReposition = cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0;
-  if (section && section->isBuilding() && !RenderLock::peek() &&
-      ((!suspendForBluetooth && section->isPartial()) || (suspendForBluetooth && pendingReposition) ||
-       static_cast<int>(section->pageCount) < section->currentPage + buildWindow) &&
-      buildTickHeapGate()) {
-    RenderLock lock;
-    if (section->isBuilding() && buildTickHeapGate()) {
-      if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
-        if (!handleBuildFailure("background build", section->buildError())) requestUpdate();
-        return;
-      } else if (section->isBuildComplete() && applyDeferredReposition()) {
-        requestUpdate();
-      }
-    }
-  }
-
-  if (suspendForBluetooth && section && section->isBuilding() && !RenderLock::peek() && !pendingReposition &&
-      static_cast<int>(section->pageCount) >= section->currentPage + buildWindow) {
-    RenderLock lock;
-    if (!section || !section->isBuilding() || cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0 ||
-        static_cast<int>(section->pageCount) < section->currentPage + buildWindow)
-      return;
-    section->suspendBuild();
-    if (section->buildError() != Section::BuildError::None) {
-      if (!handleBuildFailure("partial suspend", section->buildError())) requestUpdate();
-      return;
-    }
-    bleinput::logDiagnostics("chapter ready (partial)");
-  }
+  if (!updateChapterBuild()) return;
 
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
   clearEndOfBookOptionsIfNeeded();

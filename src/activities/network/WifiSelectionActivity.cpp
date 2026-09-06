@@ -5,8 +5,6 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
-
-#include "BleInput.h"
 #if CROSSPOINT_EMULATED == 0
 #include <esp_mac.h>
 #endif
@@ -508,7 +506,6 @@ void WifiSelectionActivity::checkConnectionStatus() {
   const wl_status_t status = WiFi.status();
 
   if (status == WL_CONNECTED) {
-    bleinput::logDiagnostics("WiFi connected");
     // Successfully connected
     IPAddress ip = WiFi.localIP();
     char ipStr[16];
