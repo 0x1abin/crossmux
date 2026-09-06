@@ -15,7 +15,7 @@ foreach(mode IN ITEMS psram internal unavailable)
   gtest_discover_tests(ble_input_${mode}_tests TEST_PREFIX "${mode}.")
 endforeach()
 
-add_executable(ble_overlay_tests ${CMAKE_CURRENT_BINARY_DIR}/MappedInputManager.cpp
+add_executable(ble_overlay_tests BleOverlayTest.cpp ${CMAKE_CURRENT_BINARY_DIR}/MappedInputManager.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/BleInput.cpp)
 target_include_directories(ble_overlay_tests PRIVATE stubs ${REPO_ROOT}/src
   ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include)

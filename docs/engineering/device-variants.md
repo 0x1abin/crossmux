@@ -83,7 +83,9 @@ All BLE start callers hold the render lock and use `BleInput` for the memory
 gate, at most one recovery, and immediate recheck/start. Bluetooth settings and
 key mapping use the same Explicit gate (70 KiB free / 24 KiB largest internal
 block); only a rejected gate unloads the SD reading font and clears font caches.
-An already-running host neither recovers memory nor initializes again.
+An already-running host neither recovers memory nor initializes again. BLE
+synthetic press and release frames both have zero hold duration, independent of
+previous physical-key or touch durations.
 
 Reader BLE startup keeps its 80 KiB free / 32 KiB largest internal-block gate.
 On a low-memory start attempt, it releases rebuildable font caches under the

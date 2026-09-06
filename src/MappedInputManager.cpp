@@ -183,8 +183,10 @@ bool MappedInputManager::bleEdge(const std::array<bool, kButtonCount>& edges, co
 
 void MappedInputManager::pollBle() const {
 #if FREEINK_CAP_BLE_HID_HOST
-  bleActivityThisFrame = false;
   bleReleaseEdges = blePressEdges;
+  // Synthetic releases are short presses too; never inherit a physical/touch hold.
+  bleActivityThisFrame =
+      std::any_of(bleReleaseEdges.begin(), bleReleaseEdges.end(), [](const bool edge) { return edge; });
   blePressEdges.fill(false);
 
   for (uint8_t i = 0; i < kButtonCount; ++i) {
