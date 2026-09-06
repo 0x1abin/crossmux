@@ -53,6 +53,7 @@ class BleHostCompatTest(unittest.TestCase):
             self.assertEqual(env.flags["CCFLAGS"],
                              ["-include", str(root / "src/platform/BtLibraryInUseShim.h")])
             self.assertIn((target, str(root / "src/platform/BtLibraryInUseShim.h")), env["dependencies"])
+            self.assertIn((target, str(root / "src/platform/BleIpcStack.h")), env["dependencies"])
             self.assertIn(([target], str(root / "scripts/patch_ble_keyboard_host.py")), env["dependencies"])
             self.assertEqual(env["CPPPATH"], ["existing"])
             self.assertTrue(target.path.is_relative_to(Path(directory) / "build"))

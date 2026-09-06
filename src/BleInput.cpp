@@ -104,7 +104,7 @@ void logMemory(const char* phase, const MemorySnapshot& memory) {
 #if !defined(SIMULATOR)
   LOG_INF("BLE", "stack remaining: current=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 #if INCLUDE_xTaskGetHandle
-  for (const char* name : {"nimble_host", "ble-conn", "ActivityManagerRender"}) {
+  for (const char* name : {"ipc0", "ipc1", "nimble_host", "ble-conn", "ActivityManagerRender"}) {
     // FreeRTOS truncates registered task names to this same fixed length.
     char taskName[configMAX_TASK_NAME_LEN];
     snprintf(taskName, sizeof(taskName), "%s", name);

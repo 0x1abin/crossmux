@@ -32,6 +32,12 @@ target_sources(ble_overlay_tests PRIVATE BleSettingsTest.cpp
 target_include_directories(ble_overlay_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_executable(ble_ipc_stack_tests BleIpcStackTest.cpp)
+target_include_directories(ble_ipc_stack_tests PRIVATE stubs ${REPO_ROOT}/src)
+target_compile_definitions(ble_ipc_stack_tests PRIVATE CONFIG_IDF_TARGET_ESP32S3=1 FREEINK_CAP_BLE_HID_HOST=1)
+target_link_libraries(ble_ipc_stack_tests PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(ble_ipc_stack_tests)
+
 add_test(NAME NimblePsramMiddleware
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_configure_nimble_psram.py)
 add_test(NAME BleHostCompat

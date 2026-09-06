@@ -66,6 +66,16 @@ fail the build. The same translation unit includes the `_btLibraryInUse` weak
 shim for both the custom-core bootstrap (which omits application sources) and
 the final firmware, without suppressing NimBLE's Arduino BT usage header.
 
+The pinned prebuilt S3 core still creates 1 KiB IPC stacks. BLE controller
+interrupt allocation can overflow `ipc0`; upstream Arduino lib-builder #386
+raises the budget to 2 KiB. S3 BLE builds use a narrow link adapter at task
+creation to apply that minimum only to `ipc0`/`ipc1` on their matching cores.
+It adds at most 2 KiB of internal stack RAM across both tasks and preserves
+larger configured stacks, allocation failures, other tasks, and the prebuilt
+TinyUSB core. The adapter travels with the same bootstrap-compatible source;
+remove it when the pinned core supplies the upstream budget. BLE diagnostics
+include both IPC stack high-water marks; check them after repeated starts.
+
 When switching from a custom core to a prebuilt target, retain the framework's
 `sdkconfig.orig` marker until PlatformIO restores the original core package.
 Restoring only `sdkconfig` leaves custom IDF archives behind; mixing these with

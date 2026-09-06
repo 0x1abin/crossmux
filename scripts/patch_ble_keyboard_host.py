@@ -39,6 +39,7 @@ def compile_compatible_host(build_env, node):
         + ["-include", shim],
     )[0]
     build_env.Depends(compiled, shim)
+    build_env.Depends(compiled, build_env.subst("$PROJECT_DIR/src/platform/BleIpcStack.h"))
     return compiled
 
 

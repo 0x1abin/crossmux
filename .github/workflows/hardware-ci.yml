@@ -18,6 +18,7 @@ on:
       - src/MappedInputManager.*
       - src/Ble*
       - src/platform/BtLibraryInUseShim.h
+      - src/platform/BleIpcStack.h
       - src/platform/NimblePsramConfig.h
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
@@ -54,6 +55,7 @@ on:
       - src/MappedInputManager.*
       - src/Ble*
       - src/platform/BtLibraryInUseShim.h
+      - src/platform/BleIpcStack.h
       - src/platform/NimblePsramConfig.h
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
