@@ -388,12 +388,11 @@ ReaderRenderSpec EpubReaderActivity::effectiveRenderSpec(const uint16_t width, c
   return spec;
 }
 
-bool EpubReaderActivity::handleBuildFailure(const char* stage) {
+bool EpubReaderActivity::handleBuildFailure(const char* stage, const Section::BuildError error) {
   if (failedBuildSpine_ == currentSpineIndex) return false;
   bool retry = false;
 #ifndef BOARD_HAS_PSRAM
-  retry = section && section->buildError() == Section::BuildError::OutOfMemory && !stylesDisabledForSession_ &&
-          SETTINGS.embeddedStyle != 0;
+  retry = error == Section::BuildError::OutOfMemory && !stylesDisabledForSession_ && SETTINGS.embeddedStyle != 0;
 #endif
   if (retry) {
     // A page number is not a content position after CSS changes. Explicit
@@ -424,9 +423,9 @@ bool EpubReaderActivity::handleBuildFailure(const char* stage) {
   buildHeapPaused = false;
   buildPopupPending = false;
   failedBuildSpine_ = retry ? -1 : currentSpineIndex;
-  LOG_ERR("ERS", "Build failed: spine=%d stage=%s retryWithoutCss=%d (free=%u, min=%u, maxAlloc=%u)", currentSpineIndex,
-          stage, retry, static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMinFreeHeap()),
-          static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  LOG_ERR("ERS", "Build failed: spine=%d stage=%s error=%u retryWithoutCss=%d (free=%u, min=%u, maxAlloc=%u)",
+          currentSpineIndex, stage, static_cast<unsigned>(error), retry, static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMinFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
   if (retry) {
     requestUpdate();
   } else {
@@ -554,7 +553,7 @@ void EpubReaderActivity::loop() {
     RenderLock lock;
     const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
     if (!section->startBuild(buildSpec)) {
-      if (!handleBuildFailure("deferred partial start")) requestUpdate();
+      if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
       return;
     } else {
       LOG_DBG("ERS", "Reader near partial watermark (%d/%d), resuming extension build", section->currentPage,
@@ -568,7 +567,7 @@ void EpubReaderActivity::loop() {
     RenderLock lock;
     if (section->isBuilding() && buildTickHeapGate()) {
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
-        if (!handleBuildFailure("background build")) requestUpdate();
+        if (!handleBuildFailure("background build", section->buildError())) requestUpdate();
         return;
       } else if (section->isBuildComplete() && applyDeferredReposition()) {
         requestUpdate();
@@ -1442,7 +1441,7 @@ void EpubReaderActivity::renderBook() {
     section = makeUniqueNoThrow<Section>(epub, currentSpineIndex, renderer);
     if (!section) {
       LOG_ERR("ERS", "OOM: Section (%u bytes)", static_cast<unsigned>(sizeof(Section)));
-      handleBuildFailure("section allocation");
+      if (handleBuildFailure("section allocation", Section::BuildError::OutOfMemory)) return;
       showBuildError();
       return;
     }
@@ -1475,7 +1474,7 @@ void EpubReaderActivity::renderBook() {
         GfxRenderer::FrameBufferLoan loan(renderer);
         if (!section->createSectionFile(renderSpec, popupFn)) {
           loan.end();
-          if (handleBuildFailure("full build")) return;
+          if (handleBuildFailure("full build", section->buildError())) return;
           showBuildError();
           return;
         }
@@ -1513,7 +1512,7 @@ void EpubReaderActivity::renderBook() {
             started = section->startBuild(renderSpec, [this] { showBuildPopup(renderer, pagesUntilFullRefresh); });
           }
           if (!started) {
-            if (handleBuildFailure("start")) return;
+            if (handleBuildFailure("start", section->buildError())) return;
             showBuildError();
             return;
           }
@@ -1525,7 +1524,7 @@ void EpubReaderActivity::renderBook() {
               showBuildPopup(renderer, pagesUntilFullRefresh);
             }
             if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
-              if (handleBuildFailure("foreground build")) return;
+              if (handleBuildFailure("foreground build", section->buildError())) return;
               showBuildError();
               return;
             }
@@ -1584,13 +1583,13 @@ void EpubReaderActivity::renderBook() {
   }
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
     if (!section->isBuilding() && !section->startBuild(renderSpec)) {
-      if (handleBuildFailure("partial start")) return;
+      if (handleBuildFailure("partial start", section->buildError())) return;
       showBuildError();
       return;
     }
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
-        if (handleBuildFailure("extension build")) return;
+        if (handleBuildFailure("extension build", section->buildError())) return;
         showBuildError();
         return;
       }
@@ -1599,7 +1598,7 @@ void EpubReaderActivity::renderBook() {
   if (section->isBuilding()) {
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
-        if (handleBuildFailure("extension build")) return;
+        if (handleBuildFailure("extension build", section->buildError())) return;
         showBuildError();
         return;
       }
