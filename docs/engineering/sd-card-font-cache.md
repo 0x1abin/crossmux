@@ -18,6 +18,18 @@ released with the font, is never used by UI fallback sizes, and does not change
 the persistent cache format. Allocation failure leaves the existing Flash/SD
 path unchanged.
 
+On no-PSRAM targets, optional advance-table and page prewarm allocations must
+leave 16 KiB free heap and 8 KiB contiguous headroom. Their budgets include
+simultaneously live collection, mapping, staging and replacement buffers; old
+caches are already charged against the live heap. A rejected prewarm keeps
+on-demand font reads available and is not reported as missing glyph coverage.
+Page cache growth acquires all replacement buffers before discarding valid data;
+temporary mappings remain RAII-owned on every exit. The no-PSRAM preparation
+path does not run the PSRAM path's later capacity-growth checks. Its budget
+pre-read uses one stack glyph instead of another heap array of glyph metadata.
+Between chapter parsing batches, the reader releases rebuildable font caches
+when free heap is below 48 KiB or the largest block is below 16 KiB.
+
 The canonical byte layout is documented in
 [file-formats.md](../file-formats.md#sd-card-font-cache).
 
