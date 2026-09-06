@@ -1,5 +1,7 @@
 #include "Section.h"
 
+#include <FontCacheManager.h>
+#include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -31,10 +33,12 @@ namespace {
 //   56 / 57 - focus-word break opportunities, image viewport clamping, and extra-wide line spacing
 //   58 / 59 - simple HTML table rows laid out as positioned columns
 //   60 / 61 - touch-link rectangles, inline direction inheritance, block spacing, and linked sup/sub
+//   62 / 63 - touch-link capability in the render spec
+//   64 / 65 - bounded no-PSRAM soft-flush windows
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 61;
+constexpr uint8_t SECTION_FILE_VERSION = 65;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 60;
+constexpr uint8_t SECTION_FILE_VERSION = 64;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -55,8 +59,23 @@ constexpr uint8_t SECTION_FILE_INCOMPLETE_VERSION = 0;
 constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFE - (SECTION_FILE_VERSION - 28);
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                 sizeof(uint8_t) + sizeof(bool) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
                                  sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+// Called only between layout/render operations; no borrowed glyph pointer is live.
+void reclaimLayoutCaches(GfxRenderer& renderer, const char* stage) {
+#ifndef BOARD_HAS_PSRAM
+  if (ESP.getFreeHeap() >= 48 * 1024 && ESP.getMaxAllocHeap() >= 16 * 1024) return;
+  auto* cache = renderer.getFontCacheManager();
+  if (!cache) return;
+  const auto before = ESP.getFreeHeap();
+  cache->releaseSdFontCaches();
+  if (ESP.getFreeHeap() > before) {
+    LOG_DBG("SCT", "Reclaimed fonts at %s (free=%u->%u, min=%u, maxAlloc=%u)", stage, static_cast<unsigned>(before),
+            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMinFreeHeap()),
+            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  }
+#endif
+}
 }  // namespace
 
 // Out-of-line so the unique_ptr<ChapterHtmlSlimParser> in BuildContext can be
@@ -103,8 +122,9 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.extraParagraphSpacing) + sizeof(spec.paragraphAlignment) +
                                    sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
                                    sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
-                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) +
+                                   sizeof(spec.collectTouchLinks) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -119,6 +139,7 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   serialization::writePod(file, spec.embeddedStyle);
   serialization::writePod(file, spec.imageRendering);
   serialization::writePod(file, spec.focusReadingEnabled);
+  serialization::writePod(file, spec.collectTouchLinks);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -128,6 +149,7 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
 }
 
 bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
+  collectTouchLinks_ = spec.collectTouchLinks;
   if (!Storage.openFileForRead("SCT", filePath, file)) {
     return false;
   }
@@ -156,19 +178,21 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     bool fileEmbeddedStyle = false;
     uint8_t fileImageRendering = 0;
     bool fileFocusReadingEnabled = false;
+    bool fileCollectTouchLinks = false;
     const bool headerValid =
         serialization::readPod(file, fileFontId) && serialization::readPod(file, fileLineCompression) &&
         serialization::readPod(file, fileExtraParagraphSpacing) &&
         serialization::readPod(file, fileParagraphAlignment) && serialization::readPod(file, fileViewportWidth) &&
         serialization::readPod(file, fileViewportHeight) && serialization::readPod(file, fileHyphenationEnabled) &&
         serialization::readPod(file, fileEmbeddedStyle) && serialization::readPod(file, fileImageRendering) &&
-        serialization::readPod(file, fileFocusReadingEnabled);
+        serialization::readPod(file, fileFocusReadingEnabled) && serialization::readPod(file, fileCollectTouchLinks);
 
     if (!headerValid || spec.fontId != fileFontId || spec.lineCompression != fileLineCompression ||
         spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.paragraphAlignment != fileParagraphAlignment ||
         spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
         spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
-        spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled) {
+        spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled ||
+        spec.collectTouchLinks != fileCollectTouchLinks) {
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();
@@ -254,10 +278,13 @@ bool Section::createSectionFile(const ReaderRenderSpec& spec, const std::functio
 }
 
 bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void()>& popupFn) {
+  buildError_ = BuildError::Io;
+  collectTouchLinks_ = spec.collectTouchLinks;
   if (build_) {
     LOG_ERR("SCT", "startBuild called while a build is already active");
     return false;
   }
+  reclaimLayoutCaches(renderer, "start");
   buildComplete_ = false;
   builtPageCount_ = 0;
   // Pages from a loaded partial stay readable (from filePath) while this build writes
@@ -356,6 +383,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   auto ctx = makeUniqueNoThrow<BuildContext>();
   if (!ctx) {
     LOG_ERR("SCT", "OOM: BuildContext");
+    buildError_ = BuildError::OutOfMemory;
     file.close();
     Storage.remove(binTmpPath().c_str());
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
@@ -378,7 +406,8 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
     if (ctx->cssParser) {
       const CssParser::CacheLoadResult cacheResult = ctx->cssParser->loadFromCache();
       if (cacheResult == CssParser::CacheLoadResult::LowMemory) {
-        LOG_ERR("SCT", "Insufficient heap to hydrate CSS; section build deferred");
+        LOG_ERR("SCT", "Insufficient heap to hydrate CSS");
+        buildError_ = BuildError::OutOfMemory;
         ctx->cssParser->clear();
         file.close();
         Storage.remove(binTmpPath().c_str());
@@ -415,13 +444,19 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
       spec.focusReadingEnabled,
       [this, ctxPtr](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex,
                      const uint32_t visibleTextOffset) {
-        ctxPtr->lut.push_back(
-            {this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex, visibleTextOffset});
+        const uint32_t position = this->onPageComplete(std::move(page));
+        if (position == 0) {
+          buildError_ = BuildError::Io;
+          ctxPtr->parser->failIo();
+          return;
+        }
+        ctxPtr->lut.push_back({position, paragraphIndex, listItemIndex, visibleTextOffset});
       },
       spec.embeddedStyle, ctxPtr->contentBase, ctxPtr->imageBasePath, spec.imageRendering, std::move(tocAnchors),
-      popupFn, ctxPtr->cssParser);
+      popupFn, ctxPtr->cssParser, spec.collectTouchLinks);
   if (!ctx->parser) {
     LOG_ERR("SCT", "OOM: ChapterHtmlSlimParser");
+    buildError_ = BuildError::OutOfMemory;
     if (ctx->cssParser) ctx->cssParser->clear();
     file.close();
     Storage.remove(binTmpPath().c_str());
@@ -434,10 +469,12 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
 
   if (!build_->parser->beginParse()) {
     LOG_ERR("SCT", "Failed to begin parse");
+    if (build_->parser->allocationFailed()) buildError_ = BuildError::OutOfMemory;
     abandonBuild();
     return false;
   }
   build_->totalBytes = build_->parser->parseTotalBytes();
+  buildError_ = BuildError::None;
   return true;
 }
 
@@ -451,20 +488,28 @@ bool Section::buildSomeMore(const int maxPages) {
   // would otherwise turn one "small" chunk into a blocking rebuild of the whole watermark.
   const int startCount = builtPageCount_;
   for (;;) {
+    reclaimLayoutCaches(renderer, "parse batch");
     const auto status = build_->parser->parseStep();
-    if (status == ChapterHtmlSlimParser::ParseStatus::Error) {
-      LOG_ERR("SCT", "Parse error during incremental build");
-      abandonBuild();
-      return false;
+    switch (status) {
+      case ChapterHtmlSlimParser::ParseStatus::OutOfMemory:
+        buildError_ = BuildError::OutOfMemory;
+        break;
+      case ChapterHtmlSlimParser::ParseStatus::Error:
+        buildError_ = build_->parser->ioFailed() ? BuildError::Io : BuildError::InvalidData;
+        break;
+      case ChapterHtmlSlimParser::ParseStatus::Done:
+        return finalizeBuild();
+      case ChapterHtmlSlimParser::ParseStatus::More:
+        // Yield once we've laid out the requested number of pages.
+        if (maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) {
+          build_->bytesConsumed = build_->parser->parseBytesConsumed();
+          return true;
+        }
+        continue;
     }
-    if (status == ChapterHtmlSlimParser::ParseStatus::Done) {
-      return finalizeBuild();
-    }
-    // ParseStatus::More: yield once we've laid out the requested number of pages.
-    if (maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) {
-      build_->bytesConsumed = build_->parser->parseBytesConsumed();
-      return true;
-    }
+    LOG_ERR("SCT", "Parse error during incremental build");
+    abandonBuild();
+    return false;
   }
 }
 
@@ -626,6 +671,7 @@ bool Section::finalizeBuild() {
   // Flush the trailing page (emits the last page via the completePageFn into the LUT).
   if (!build_->parser->finishParse()) {
     LOG_ERR("SCT", "Failed to finish section parse");
+    buildError_ = build_->parser->allocationFailed() ? BuildError::OutOfMemory : BuildError::Io;
     abandonBuild();
     return false;
   }
@@ -643,6 +689,7 @@ bool Section::finalizeBuild() {
   if (build_->cssParser) build_->cssParser->clear();
   build_.reset();
   if (!committed) {
+    buildError_ = BuildError::Io;
     // commitBuildFile removed filePath before the failed swap, so nothing valid remains.
     partial_ = false;
     partialPageCount_ = 0;
@@ -733,7 +780,7 @@ std::unique_ptr<Page> Section::loadPageDuringBuild(const int page) {
   // the write cursor so the next onPageComplete keeps appending where it left off.
   const uint32_t writePos = file.position();
   file.seek(pos);
-  auto p = Page::deserialize(file);
+  auto p = Page::deserialize(file, collectTouchLinks_);
   file.seek(writePos);
   if (p) {
     p->visibleTextOffset = build_->lut[page].visibleTextOffset;
@@ -770,7 +817,7 @@ std::unique_ptr<Page> Section::loadPageAt(const int page) const {
   }
 
   if (!f.seek(pagePos)) return nullptr;
-  auto p = Page::deserialize(f);
+  auto p = Page::deserialize(f, collectTouchLinks_);
   if (p) {
     p->visibleTextOffset = visibleTextOffset;
   }

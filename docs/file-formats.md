@@ -100,9 +100,9 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 60 / 61
+### Versions 64 / 65
 
-> Unified firmware uses the CJK-capable cache version **61**. Version 60 is the
+> Unified firmware uses the CJK-capable cache version **65**. Version 64 is the
 > Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
@@ -140,6 +140,15 @@ if (parsedSize != fileSize) {
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Versions 62/63 add `collectTouchLinks` to the header cache key. Devices without
+touch input neither construct nor hydrate link geometry; button footnotes and
+anchors remain available. Partial-cache sentinels change in lockstep to 218/217 for versions 64/65.
+Versions 64/65 also invalidate pagination produced before bounded no-PSRAM
+soft flushing; disabling embedded styles no longer enlarges the token window.
+On devices without PSRAM, a low-memory styled build is discarded and retried
+once without embedded CSS for the reading session. The cache records the actual
+`embeddedStyle=false`; user settings and the selected font are unchanged.
 
 Versions 60/61 append the internal-link rectangles produced during text layout
 to each serialized page. The reader uses these rectangles for touch navigation;
@@ -187,8 +196,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 58
-#define CHINESE_VERSION 59
+#define LATIN_VERSION 64
+#define CHINESE_VERSION 65
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -312,12 +321,22 @@ struct FootnoteEntry {
     char href[FOOTNOTE_HREF_LEN];
 };
 
+struct PageLink {
+    char href[FOOTNOTE_HREF_LEN];
+    s16 x;
+    s16 y;
+    s16 width;
+    s16 height;
+};
+
 struct Page {
     u16 elementCount;
     PageElement elements[elementCount] [[inline]];
 
     u16 footnoteCount;
     FootnoteEntry footnotes[footnoteCount];
+    u16 linkCount; // at most 32; zero when collectTouchLinks=false
+    PageLink links[linkCount];
 };
 
 struct AnchorEntry {
@@ -351,6 +370,7 @@ struct SectionBin {
     bool embeddedStyle;
     u8 imageRendering;
     bool focusReadingEnabled;
+    bool collectTouchLinks;
 
     u16 pageCount;
     u32 pageLutOffset;

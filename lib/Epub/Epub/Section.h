@@ -14,6 +14,13 @@ class ChapterHtmlSlimParser;
 class CssParser;
 
 class Section {
+ public:
+  enum class BuildError { None, OutOfMemory, InvalidData, Io };
+  BuildError buildError() const { return buildError_; }
+
+ private:
+  BuildError buildError_ = BuildError::None;
+  bool collectTouchLinks_ = false;
   std::shared_ptr<Epub> epub;
   const int spineIndex;
   GfxRenderer& renderer;

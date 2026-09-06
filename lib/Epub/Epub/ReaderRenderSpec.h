@@ -6,8 +6,9 @@
 // with a different spec is discarded and rebuilt.
 //
 // Build one via CrossPointSettings::readerRenderSpec(width, height), which
-// fills every field: the settings-derived ones from the store, the viewport
-// from the caller. Taking the viewport as arguments is what keeps a spec from
+// fills settings and viewport fields. The reader supplies collectTouchLinks
+// from the input device and applies any session-only CSS fallback. Taking
+// the viewport as arguments is what keeps a spec from
 // existing in a half-filled state — the 0 defaults below are a last-resort
 // backstop (a 0x0 viewport lays out nothing), not an invitation to omit it.
 struct ReaderRenderSpec {
@@ -21,4 +22,5 @@ struct ReaderRenderSpec {
   bool embeddedStyle = true;
   uint8_t imageRendering = 0;
   bool focusReadingEnabled = false;
+  bool collectTouchLinks = false;
 };

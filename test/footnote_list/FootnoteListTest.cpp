@@ -145,6 +145,7 @@ TEST_F(PageFootnoteOomTest, KeepsBodyAndSkipsFootnotesWhenAllocationFails) {
     ASSERT_EQ(output.write(footnotes[i].number, sizeof(footnotes[i].number)), sizeof(footnotes[i].number));
     ASSERT_EQ(output.write(footnotes[i].href, sizeof(footnotes[i].href)), sizeof(footnotes[i].href));
   }
+  serialization::writePod(output, static_cast<uint16_t>(0));  // links
   const size_t markerPosition = output.position();
   const uint32_t marker = 0x1234ABCD;
   serialization::writePod(output, marker);
@@ -165,4 +166,46 @@ TEST_F(PageFootnoteOomTest, KeepsBodyAndSkipsFootnotesWhenAllocationFails) {
   uint32_t restoredMarker = 0;
   ASSERT_TRUE(serialization::readPod(input, restoredMarker));
   EXPECT_EQ(restoredMarker, marker);
+}
+
+TEST_F(PageFootnoteOomTest, NoTouchSkipsLinksWithoutAllocatingAndKeepsFootnotes) {
+  HalFile output;
+  ASSERT_TRUE(Storage.openFileForWrite("TEST", "/page.bin", output));
+  Page original;
+  original.addFootnote("1", "#note");
+  ASSERT_TRUE(original.addLink("#note", 1, 2, 30, 40));
+  ASSERT_TRUE(original.serialize(output));
+  const auto end = output.position();
+  serialization::writePod(output, static_cast<uint32_t>(0x1234ABCD));
+  output.close();
+  HalFile input;
+  ASSERT_TRUE(Storage.openFileForRead("TEST", "/page.bin", input));
+  lastArrayAllocationSize = 0;
+  auto page = Page::deserialize(input, false);
+  const size_t allocated = lastArrayAllocationSize;
+  ASSERT_NE(page, nullptr);
+  EXPECT_EQ(allocated, sizeof(FootnoteEntry));
+  EXPECT_EQ(page->links.size(), 0U);
+  ASSERT_EQ(page->footnotes.size(), 1U);
+  EXPECT_STREQ(page->footnotes[0].href, "#note");
+  EXPECT_EQ(input.position(), end);
+}
+
+TEST_F(PageFootnoteOomTest, RejectsTruncatedAndOversizedLinksEvenWithoutTouch) {
+  for (const uint16_t count : {uint16_t{1}, uint16_t{33}}) {
+    HalFile output;
+    ASSERT_TRUE(Storage.openFileForWrite("TEST", "/page.bin", output));
+    serialization::writePod(output, uint16_t{0});  // elements
+    serialization::writePod(output, uint16_t{0});  // footnotes
+    serialization::writePod(output, count);
+    serialization::writePod(output, uint8_t{0});  // truncated link
+    output.close();
+    HalFile input;
+    ASSERT_TRUE(Storage.openFileForRead("TEST", "/page.bin", input));
+    lastArrayAllocationSize = 0;
+    auto page = Page::deserialize(input, false);
+    const auto allocated = lastArrayAllocationSize;
+    EXPECT_EQ(page, nullptr);
+    EXPECT_EQ(allocated, 0U);
+  }
 }

@@ -138,6 +138,23 @@ bool ensureArrayCapacity(T*& buf, CapT& capacity, const uint32_t needed) {
 
 }  // namespace
 
+bool SdCardFont::hasCacheHeadroom(const size_t bytes, const size_t largest) {
+#ifndef BOARD_HAS_PSRAM
+  // Reserve space for XML/layout, the grayscale strip and on-demand glyphs.
+  // Existing allocations are already deducted from the live free-heap reading.
+  if (!memory::hasAllocationHeadroom(ESP.getFreeHeap(), ESP.getMaxAllocHeap(), bytes, largest, 16 * 1024, 8 * 1024)) {
+    if (!cacheBudgetSkipped_) {
+      LOG_DBG("SDCF", "Skipping cache prewarm (need=%u, largest=%u, free=%u, maxAlloc=%u)",
+              static_cast<unsigned>(bytes), static_cast<unsigned>(largest), static_cast<unsigned>(ESP.getFreeHeap()),
+              static_cast<unsigned>(ESP.getMaxAllocHeap()));
+      cacheBudgetSkipped_ = true;
+    }
+    return false;
+  }
+#endif
+  return true;
+}
+
 SdCardFont::~SdCardFont() { freeAll(); }
 
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
@@ -297,6 +314,10 @@ void SdCardFont::freeStyleKernLigatureData(PerStyle& s) {
   s.kernRightClasses = nullptr;
   delete[] s.ligaturePairs;
   s.ligaturePairs = nullptr;
+  s.stubData.ligaturePairs = nullptr;
+  s.stubData.ligaturePairCount = 0;
+  s.miniData.ligaturePairs = nullptr;
+  s.miniData.ligaturePairCount = 0;
   s.kernLigLoaded = false;
 }
 
@@ -401,6 +422,11 @@ bool SdCardFont::loadStyleKernLigatureData(PerStyle& s) {
     s.kernLigLoaded = true;
     return true;
   }
+
+  const size_t leftBytes = s.header.kernLeftEntryCount * sizeof(EpdKernClassEntry);
+  const size_t rightBytes = s.header.kernRightEntryCount * sizeof(EpdKernClassEntry);
+  const size_t ligBytes = s.header.ligaturePairCount * sizeof(EpdLigaturePair);
+  if (!hasCacheHeadroom(leftBytes + rightBytes + ligBytes, std::max({leftBytes, rightBytes, ligBytes}))) return false;
 
   FontFile file(filePath_, &useFlash_, flashPayloadSize_);
   if (!file) {
@@ -548,6 +574,13 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   // per-page sizes vary by a few entries, which as free+realloc churn was punching
   // non-coalescing holes in the heap every page turn).
   const uint32_t matrixBytes = static_cast<uint32_t>(numLeft) * numRight;
+  const size_t leftBytes = miniLeftCount > s.miniKernLeftCapacity ? miniLeftCount * sizeof(EpdKernClassEntry) : 0;
+  const size_t rightBytes = miniRightCount > s.miniKernRightCapacity ? miniRightCount * sizeof(EpdKernClassEntry) : 0;
+  const size_t newMatrixBytes = matrixBytes > s.miniKernMatrixCapacity ? matrixBytes : 0;
+  if (!hasCacheHeadroom(leftBytes + rightBytes + newMatrixBytes, std::max({leftBytes, rightBytes, newMatrixBytes}))) {
+    resetMiniKernCounts();
+    return false;
+  }
   if (!ensureArrayCapacity(s.miniKernLeftClasses, s.miniKernLeftCapacity, miniLeftCount) ||
       !ensureArrayCapacity(s.miniKernRightClasses, s.miniKernRightCapacity, miniRightCount) ||
       !ensureArrayCapacity(s.miniKernMatrix, s.miniKernMatrixCapacity, matrixBytes)) {
@@ -937,7 +970,10 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
   // Keep the bounded array sorted so duplicate checks stay logarithmic and every
   // downstream interval/glyph walk can consume it without another sort.
   // Heap-allocated: MAX_PAGE_GLYPHS * 4 = 2048 bytes, too large for stack (limit < 256 bytes)
-  std::unique_ptr<uint32_t[]> codepoints(new (std::nothrow) uint32_t[MAX_PAGE_GLYPHS]);
+  if (!hasCacheHeadroom(MAX_PAGE_GLYPHS * sizeof(uint32_t), MAX_PAGE_GLYPHS * sizeof(uint32_t))) {
+    return PREWARM_SKIPPED;
+  }
+  auto codepoints = makeUniqueNoThrow<uint32_t[]>(MAX_PAGE_GLYPHS);
   if (!codepoints) {
     LOG_ERR("SDCF", "Failed to allocate codepoint buffer (%u bytes)", MAX_PAGE_GLYPHS * 4);
     return -1;
@@ -982,7 +1018,9 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
   int totalMissed = 0;
   for (uint8_t si = 0; si < MAX_STYLES; si++) {
     if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
-    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly, loadKernLig);
+    const int result = prewarmStyle(si, codepoints.get(), cpCount, metadataOnly, loadKernLig);
+    if (result < 0) return result;
+    totalMissed += result;
   }
 
   stats_.prewarmTotalMs = millis() - startMs;
@@ -1033,7 +1071,9 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   std::unique_ptr<uint32_t[]> unionCps;
   if (s.miniGlyphCount > 0 && s.miniIntervalCount > 0) {
     const uint32_t unionMax = s.miniGlyphCount + cpCount;
-    unionCps = makeUniqueNoThrow<uint32_t[]>(unionMax);
+    if (hasCacheHeadroom(unionMax * sizeof(uint32_t), unionMax * sizeof(uint32_t))) {
+      unionCps = makeUniqueNoThrow<uint32_t[]>(unionMax);
+    }
     if (unionCps) {
       uint32_t count = 0;
       for (uint32_t iv = 0; iv < s.miniIntervalCount && count <= MAX_PAGE_GLYPHS; iv++) {
@@ -1061,10 +1101,72 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
     uint32_t codepoint;
     int32_t globalIndex;
   };
+#ifndef BOARD_HAS_PSRAM
+  // Read metadata once before growing anything, so all replacement buffers can
+  // be budgeted and acquired while the old mini-cache is still valid. The
+  // temporary glyph is 16 bytes; the replacement arrays take over existing
+  // cache ownership, adding no permanent allocation.
+  uint32_t bitmapBytes = 0;
+  uint32_t coveredCount = 0;
+  {
+    FontFile file(filePath_, &useFlash_, flashPayloadSize_);
+    EpdGlyph glyph{};
+    for (uint32_t i = 0; i < cpCount; ++i) {
+      const int32_t index = findGlobalGlyphIndex(s, codepoints[i]);
+      if (index < 0) continue;
+      ++coveredCount;
+      if (readGlyphMetadata(file, styleIdx, static_cast<uint32_t>(index), glyph, true) == GlyphReadResult::Failed) {
+        LOG_ERR("SDCF", "Failed to read prewarm budget metadata (glyph=%d, style=%u)", index, styleIdx);
+        return -1;
+      }
+      if (!metadataOnly) bitmapBytes += glyph.dataLength;
+    }
+  }
+  const size_t intervalBytes = coveredCount > s.miniIntervalCapacity ? coveredCount * sizeof(EpdUnicodeInterval) : 0;
+  const size_t glyphBytes = coveredCount > s.miniGlyphCapacity ? coveredCount * sizeof(EpdGlyph) : 0;
+  const size_t newBitmapBytes = bitmapBytes > s.miniBitmapCapacity ? bitmapBytes : 0;
+  const size_t mappingBytes = cpCount * sizeof(CpGlyphMapping);
+  if (!hasCacheHeadroom(mappingBytes + intervalBytes + glyphBytes + newBitmapBytes,
+                        std::max({mappingBytes, intervalBytes, glyphBytes, newBitmapBytes}))) {
+    return PREWARM_SKIPPED;
+  }
+  const auto growthFailed = [] {
+    LOG_ERR("SDCF", "Failed to grow mini cache; keeping previous glyphs");
+    return -1;
+  };
+  auto intervals = intervalBytes ? makeUniqueNoThrow<EpdUnicodeInterval[]>(coveredCount) : nullptr;
+  if (intervalBytes && !intervals) return growthFailed();
+  auto glyphs = glyphBytes ? makeUniqueNoThrow<EpdGlyph[]>(coveredCount) : nullptr;
+  if (glyphBytes && !glyphs) return growthFailed();
+  auto bitmap = newBitmapBytes ? makeUniqueNoThrow<uint8_t[]>(bitmapBytes) : nullptr;
+  if (newBitmapBytes && !bitmap) return growthFailed();
+  auto preparedMappings = makeUniqueNoThrow<CpGlyphMapping[]>(cpCount);
+  if (!preparedMappings) return growthFailed();
+  // No more cache allocations are needed before glyph data is written.
+  s.epdFont.data = &s.stubData;
+  if (intervals) {
+    delete[] s.miniIntervals;
+    s.miniIntervals = intervals.release();
+    s.miniIntervalCapacity = coveredCount;
+  }
+  if (glyphs) {
+    delete[] s.miniGlyphs;
+    s.miniGlyphs = glyphs.release();
+    s.miniGlyphCapacity = coveredCount;
+  }
+  if (bitmap) {
+    delete[] s.miniBitmap;
+    s.miniBitmap = bitmap.release();
+    s.miniBitmapCapacity = bitmapBytes;
+  }
+  // Existing C-style cleanup below owns this buffer on every exit path.
+  CpGlyphMapping* mappings = preparedMappings.release();
+#else
   CpGlyphMapping* mappings = new (std::nothrow) CpGlyphMapping[cpCount];
+#endif
   if (!mappings) {
     LOG_ERR("SDCF", "Failed to allocate mapping array for style %u", styleIdx);
-    return static_cast<int>(cpCount);
+    return -1;
   }
 
   uint32_t validCount = 0;
@@ -1100,7 +1202,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   if (!ensureArrayCapacity(s.miniIntervals, s.miniIntervalCapacity, validCount)) {
     LOG_ERR("SDCF", "Failed to allocate mini intervals for style %u", styleIdx);
     delete[] mappings;
-    return static_cast<int>(cpCount);
+    return -1;
   }
 
   s.miniIntervalCount = 0;
@@ -1120,7 +1222,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
     LOG_ERR("SDCF", "Failed to allocate mini glyphs for style %u", styleIdx);
     delete[] mappings;
     freeStyleMiniData(s);
-    return static_cast<int>(cpCount);
+    return -1;
   }
   s.miniGlyphCount = validCount;
 
@@ -1151,7 +1253,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
         LOG_ERR("SDCF", "Prewarm: failed to read glyph %d (style %u)", gIdx, styleIdx);
         delete[] mappings;
         freeStyleMiniData(s);
-        return static_cast<int>(cpCount);
+        return -1;
     }
   }
   stats_.glyphPrepareTimeUs += micros() - glyphPrepareStartUs;
@@ -1170,7 +1272,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
       LOG_ERR("SDCF", "Failed to allocate mini bitmap (%u bytes) for style %u", totalBitmapSize, styleIdx);
       delete[] mappings;
       freeStyleMiniData(s);
-      return static_cast<int>(cpCount);
+      return -1;
     }
     s.miniBitmapUsed = totalBitmapSize;  // underuse-hysteresis signal for resetStyleMiniData
 
@@ -1199,7 +1301,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
           LOG_ERR("SDCF", "Prewarm: failed to read bitmap (style %u)", styleIdx);
           delete[] mappings;
           freeStyleMiniData(s);
-          return static_cast<int>(cpCount);
+          return -1;
       }
 
       glyph.dataOffset = miniBitmapOffset;
@@ -1310,6 +1412,7 @@ void SdCardFont::mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sor
   uint32_t mergedCap = oldSize + newCount;
   if (mergedCap > ADVANCE_CACHE_LIMIT) mergedCap = ADVANCE_CACHE_LIMIT;
 
+  if (!hasCacheHeadroom(mergedCap * sizeof(AdvanceEntry), mergedCap * sizeof(AdvanceEntry))) return;
   AdvanceEntry* merged = new (std::nothrow) AdvanceEntry[mergedCap];
   if (!merged) {
     LOG_ERR("SDCF", "mergeIntoAdvanceTable: alloc failed (%u entries) style %u", mergedCap, styleIdx);
@@ -1406,6 +1509,12 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
       uint32_t codepoint;
       int32_t glyphIndex;
     };
+    const size_t mappingBytes = cpCount * sizeof(CpIdx);
+    const size_t stagingBytes = cpCount * sizeof(AdvanceEntry);
+    const size_t mergedBytes = std::min(ADVANCE_CACHE_LIMIT, advanceTableSize_[si] + cpCount) * sizeof(AdvanceEntry);
+    if (!hasCacheHeadroom(mappingBytes + stagingBytes + mergedBytes,
+                          std::max({mappingBytes, stagingBytes, mergedBytes})))
+      return PREWARM_SKIPPED;
     std::unique_ptr<CpIdx[]> mappings(new (std::nothrow) CpIdx[cpCount]);
     if (!mappings) {
       LOG_ERR("SDCF", "buildAdvanceTable: failed to allocate mappings for style %u", si);
@@ -1496,6 +1605,8 @@ int SdCardFont::buildAdvanceTableRange(Iter begin, Iter end, bool includeSpace, 
   static constexpr uint32_t MAX_UNIQUE_CODEPOINTS = ADVANCE_CACHE_LIMIT;
   // ~3 KB at the current limit: too large for the task stack, short-lived, and
   // released automatically on every return path.
+  constexpr size_t collectionBytes = (MAX_UNIQUE_CODEPOINTS + 3) * sizeof(uint32_t);
+  if (!hasCacheHeadroom(collectionBytes, collectionBytes)) return PREWARM_SKIPPED;
   auto codepoints = makeUniqueNoThrow<uint32_t[]>(MAX_UNIQUE_CODEPOINTS + 3);
   if (!codepoints) {
     LOG_ERR("SDCF", "buildAdvanceTable: failed to allocate codepoint buffer (%u bytes)",

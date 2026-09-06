@@ -238,7 +238,7 @@ bool Page::serialize(HalFile& file) const {
   return true;
 }
 
-std::unique_ptr<Page> Page::deserialize(HalFile& file) {
+std::unique_ptr<Page> Page::deserialize(HalFile& file, const bool collectTouchLinks) {
   auto page = makeUniqueNoThrow<Page>();
   if (!page) {
     LOG_ERR("PGE", "OOM: Page (%u bytes)", static_cast<unsigned>(sizeof(Page)));
@@ -299,9 +299,8 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
       LOG_ERR("PGE", "Failed to skip footnotes after OOM");
       return nullptr;
     }
-    return page;
   }
-  for (uint16_t i = 0; i < fnCount; i++) {
+  for (uint16_t i = 0; i < page->footnotes.size(); i++) {
     auto& entry = page->footnotes[i];
     if (file.read(entry.number, sizeof(entry.number)) != sizeof(entry.number) ||
         file.read(entry.href, sizeof(entry.href)) != sizeof(entry.href)) {
@@ -318,14 +317,16 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
     LOG_ERR("PGE", "Invalid link count %u", linkCount);
     return nullptr;
   }
-  if (!page->links.resize(linkCount)) {
+  if (!collectTouchLinks || !page->links.resize(linkCount)) {
     constexpr size_t SERIALIZED_LINK_SIZE = FOOTNOTE_HREF_LEN + 4 * sizeof(int16_t);
     const size_t bytesToSkip = static_cast<size_t>(linkCount) * SERIALIZED_LINK_SIZE;
     const size_t position = file.position();
     const size_t fileSize = file.size();
-    LOG_ERR("PGE", "OOM: dropping %u page links (%u bytes)", linkCount, static_cast<unsigned>(bytesToSkip));
+    if (collectTouchLinks) {
+      LOG_ERR("PGE", "OOM: dropping %u page links (%u bytes)", linkCount, static_cast<unsigned>(bytesToSkip));
+    }
     if (position > fileSize || bytesToSkip > fileSize - position || !file.seek(position + bytesToSkip)) {
-      LOG_ERR("PGE", "Failed to skip page links after OOM");
+      LOG_ERR("PGE", "Failed to skip page links");
       return nullptr;
     }
     return page;

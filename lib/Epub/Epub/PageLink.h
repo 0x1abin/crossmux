@@ -35,11 +35,13 @@ class PageLinkList {
   bool allocationFailed_ = false;
 
   bool allocateStorage(const size_t capacity) {
-    entries_ = makeUniqueNoThrow<PageLink[]>(capacity);
-    if (!entries_) {
+    auto entries = makeUniqueNoThrow<PageLink[]>(capacity);
+    if (!entries) {
       allocationFailed_ = true;
       return false;
     }
+    for (size_t i = 0; i < size_; ++i) entries[i] = entries_[i];
+    entries_ = std::move(entries);
     capacity_ = static_cast<uint8_t>(capacity);
     return true;
   }
@@ -63,10 +65,15 @@ class PageLinkList {
 
   PageLink* append() {
     if (size_ >= MAX_SIZE || allocationFailed_) return nullptr;
-    if (!entries_) {
-      // 32 links occupy 8,448 bytes: too large for the task stack. Allocate
-      // once per linked page so growth cannot fragment the C3 heap.
-      if (!allocateStorage(MAX_SIZE)) return nullptr;
+    if (size_ == capacity_) {
+      // Optional hit regions must not reserve 8,448 bytes for a single link
+      // on internal-heap-only devices. Failed growth preserves existing links.
+#ifdef BOARD_HAS_PSRAM
+      constexpr size_t capacity = MAX_SIZE;
+#else
+      const size_t capacity = capacity_ ? std::min<size_t>(capacity_ * 2, MAX_SIZE) : 1;
+#endif
+      if (!allocateStorage(capacity)) return nullptr;
     }
     if (size_ >= capacity_) return nullptr;
     return &entries_[size_++];

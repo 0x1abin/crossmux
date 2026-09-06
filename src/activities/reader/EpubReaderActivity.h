@@ -101,6 +101,8 @@ class EpubReaderActivity final : public ReaderActivity {
   struct SavedPosition {
     int spineIndex;
     int pageNumber;
+    // Fixed-size return stack; offsets survive session CSS fallback without heap storage.
+    std::optional<uint32_t> visibleTextOffset;
   };
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
@@ -119,6 +121,11 @@ class EpubReaderActivity final : public ReaderActivity {
   static constexpr size_t BACKGROUND_BUILD_MIN_FREE_HEAP = 32 * 1024;
   static constexpr size_t BACKGROUND_BUILD_MIN_MAX_ALLOC = 16 * 1024;
   bool buildTickHeapGate();
+  bool stylesDisabledForSession_ = false;
+  int renderedSpineIndex_ = -1;
+  int failedBuildSpine_ = -1;
+  ReaderRenderSpec effectiveRenderSpec(uint16_t width, uint16_t height) const;
+  bool retryWithoutStyles();
   bool buildHeapPaused = false;
   static constexpr size_t RENDER_MIN_FREE_HEAP = 24 * 1024;
   static constexpr size_t RENDER_MIN_MAX_ALLOC = 24 * 1024;
