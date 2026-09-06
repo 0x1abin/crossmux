@@ -100,6 +100,95 @@ pio run -t upload && pio device monitor
    - Add `vTaskDelay(1)` in tight loops
    - Check for blocking I/O operations
 
+### EPUB memory fallback on devices without PSRAM
+
+Styled chapter parsing stops below 48 KiB free heap or 16 KiB largest block.
+Allocation failures also stop parsing, including table and trailing-page layout.
+The reader discards the failed build and retries once with embedded CSS disabled
+for that reading session, retaining the selected font and content offset. XML
+and I/O errors do not trigger this retry. A failed basic build shows the existing
+index-failed popup. No failed build may become a complete or partial cache.
+
+`EpubReaderActivity::handleBuildFailure()` owns the retry decision, reader
+resource cleanup and failure latch for foreground and background builds. Callers
+pass `Section::BuildError` explicitly, including `OutOfMemory` when the Section
+object itself could not be allocated. The
+error popup only draws. `Section::releaseBuildResources()` closes and removes
+uncommitted resources without deciding whether an existing cache is valid:
+initialization failures preserve it, while `abandonBuild()` invalidates it after
+a parse failure. Cleanup leaves `BuildError` available to the reader.
+
+Before starting or continuing a chapter, low-heap no-PSRAM builds reclaim
+rebuildable font caches. Optional font prewarm must leave 16 KiB free heap and
+8 KiB contiguous headroom; a skipped cache uses on-demand reads. Basic layout
+keeps the 320-token soft-flush threshold instead of reverting to 750 tokens.
+
+Build and run the `ChapterHtmlSlimParserTest`, `SdCardFontMemoryTest`, `PageLinkTest`,
+`footnote_list_test`, and `CssParserTest` host targets for fault injection,
+text/offset preservation, and cache capability checks. These include each mini-cache
+replacement allocation failing, initialization failures preserving an existing
+complete/partial cache, and a pre-refactor mixed-text cache/LUT digest. The digest
+uses the host page-serialization stub; it does not establish pixel equivalence.
+`ReaderBuildFailureTest` compiles the actual failure-handling method with
+lightweight collaborators for no-PSRAM and PSRAM policies. It covers allocation
+failure before a Section exists, one CSS retry, target preservation and repeated
+failures; it is not a full Activity or device-lifecycle integration test.
+Build firmware with
+`pio run -e default -e simulator_x3 -e murphy_m4`.
+
+Hardware acceptance still requires **both X3 and X4**: open the reported EPUB
+with a cold section cache using LXGW WenKai size 18, turn across chapters, and
+reopen it. Check text against the source for missing or reordered words/lines.
+Capture `SCT` cache-reclaim, `SDCF` prewarm-budget, `EHP` failure-stage and
+`ERS` fallback/ready/error logs, including
+`free/min/maxAlloc`. Under additional pressure, basic styling or an index error
+is acceptable; a restart or silently incomplete text is not. Exit and reopen to
+confirm the next session attempts the user's embedded-style setting again.
+Compilation and simulator checks do not establish hardware acceptance.
+
+### September 6, 2026: reader memory hardening checkpoint
+
+This checkpoint is **not full hardware acceptance**. The preceding X4 candidate
+application had SHA256
+`7b030e735aa636b96360ce5c7b34d0152526f00edbde601496a9a8800c4b23fa`.
+Application readback matched that candidate and the then-current build byte for
+byte; the indexing failure was not an older firmware image.
+
+With the reported Jobs biography, LXGW WenKai size 18 and Flash font reads:
+
+| Observation | Result |
+| --- | --- |
+| Ordinary reopen at spine 41, saved page 2 | CSS retry occurred; basic layout failed after page 6 |
+| Failing line-break workspace | 334 tokens, 2,672 bytes requested; maxAlloc 2,036 bytes |
+| Free heap after CSS-retry cleanup in failing session | 36,756 bytes |
+| Same candidate after a commanded reset | Spine 41 completed all 11 pages; restored offset 390/page 2 and continued into spine 42 |
+| Free heap after CSS-retry cleanup following reset | 55,808 bytes |
+
+The 19,052-byte difference identifies a session-dependent memory baseline, not
+its owner. Standby clock synchronization/network lifetime is a hypothesis for
+follow-up, not a confirmed leak or a fix included in this checkpoint. A reset
+that permits reading does not resolve the ordinary-reopen failure.
+
+The phase-closing candidate application has SHA256
+`e64b85aa5c8b0f297526a75cdcf66c143211ad7a753ee9ba0bf0b0d9b9cd3da3`
+and is 5,905,008 bytes. Its production source is recorded in commit `ef006bf0`;
+use the binary hash to identify it, since the build began before that commit.
+All 63 targeted host checks, clang-format checks, and the `default`,
+`simulator_x3`, and `murphy_m4` builds passed. The hardware builds reported an
+existing WebSockets dependency warning about deprecated `NetworkClient::flush()`.
+X4 application flashing and hash verification succeeded; a separate capture
+started for this candidate. Reading/visual acceptance remains incomplete and
+must not inherit the preceding candidate's results.
+
+Keep X3 acceptance, SD-direct font mode, and physical text completeness separate.
+For subsequent candidates, record the new application hash and repeat cold-cache
+opening, spine 5 and 41, cross-chapter turns, TOC navigation, exit/reopen, and
+standby/clock-sync followed by reading. An index error during ordinary use fails
+acceptance; safe error handling is acceptable only in additional-pressure tests.
+Do not infer hardware acceptance from host serialization stubs or successful
+firmware builds. Binary images, original books and device-specific raw logs are
+local artifacts and are not committed to the repository.
+
 ### Distinguishing TCP Stalls, Watchdogs, and Restarts
 
 - A task-watchdog failure prints the task watchdog banner and subscribed task

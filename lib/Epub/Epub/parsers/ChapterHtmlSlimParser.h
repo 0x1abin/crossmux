@@ -57,6 +57,7 @@ class ChapterHtmlSlimParser {
   bool focusReadingEnabled;
   const CssParser* cssParser;
   bool embeddedStyle;
+  bool collectTouchLinks;
   uint8_t imageRendering;
   std::string contentBase;
   std::string imageBasePath;
@@ -118,6 +119,11 @@ class ChapterHtmlSlimParser {
   uint32_t currentPageVisibleOffset = 0;
   bool currentPageVisibleOffsetSet = false;
   bool allocationFailed_ = false;
+  bool ioFailed_ = false;
+  bool parseActive_ = false;
+  void stopParsing();
+  void failAllocation(const char* stage);
+  bool checkMemory();
   bool insideBody = false;
   bool htmlEnded_ = false;
   bool syntheticCharacterData = false;
@@ -146,6 +152,7 @@ class ChapterHtmlSlimParser {
   void startNewTextBlock(const BlockStyle& blockStyle);
   void flushPendingAnchor();
   void flushPartWordBuffer();
+  void softFlushTextBlock();
   void fallbackTableRowToStacked();
   void closeTableCell();
   void finishTableRow();
@@ -175,7 +182,8 @@ class ChapterHtmlSlimParser {
       const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t, uint32_t)>& completePageFn,
       const bool embeddedStyle, const std::string& contentBase, const std::string& imageBasePath,
       const uint8_t imageRendering = 0, std::vector<std::string> tocAnchors = {},
-      const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr)
+      const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr,
+      const bool collectTouchLinks = false)
 
       : epub(epub),
         filepath(filepath),
@@ -190,8 +198,9 @@ class ChapterHtmlSlimParser {
         focusReadingEnabled(focusReadingEnabled),
         completePageFn(completePageFn),
         popupFn(popupFn),
-        cssParser(cssParser),
+        cssParser(embeddedStyle ? cssParser : nullptr),
         embeddedStyle(embeddedStyle),
+        collectTouchLinks(collectTouchLinks),
         imageRendering(imageRendering),
         contentBase(contentBase),
         imageBasePath(imageBasePath),
@@ -204,16 +213,23 @@ class ChapterHtmlSlimParser {
 
   // Resumable parse, for the incremental section builder. Drive as:
   //   if (!beginParse()) fail;
-  //   loop: switch (parseStep()) { More: keep going / yield; Done: finishParse(); Error: abortParse(); }
+  //   More: keep going / yield; Done: finishParse(); Error / OutOfMemory: abortParse().
   // Pages are emitted via completePageFn as they complete during parseStep(), so
   // the caller can stop once enough pages are built and resume on a later tick.
-  enum class ParseStatus { More, Done, Error };
+  enum class ParseStatus { More, Done, Error, OutOfMemory };
+  bool allocationFailed() const { return allocationFailed_; }
+  bool ioFailed() const { return ioFailed_; }
+  bool hasFailed() const { return allocationFailed_ || ioFailed_; }
+  void failIo() {
+    ioFailed_ = true;
+    stopParsing();
+  }
   bool beginParse();
   ParseStatus parseStep();
   bool finishParse();  // flush the trailing page and tear down; returns true
   void abortParse();   // tear down without flushing (error / abandon)
 
-  void addLineToPage(std::unique_ptr<TextBlock> line, uint32_t visibleOffset);
+  bool addLineToPage(std::unique_ptr<TextBlock> line, uint32_t visibleOffset);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
 
   // Byte progress of the in-flight parse, used to estimate a still-building section's total page

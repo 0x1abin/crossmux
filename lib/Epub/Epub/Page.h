@@ -99,7 +99,7 @@ class Page {
   void extractImagesNeedingDecode();
   void cacheImagesNeedingDecode(GfxRenderer& renderer, int xOffset, int yOffset);
   bool serialize(HalFile& file) const;
-  static std::unique_ptr<Page> deserialize(HalFile& file);
+  static std::unique_ptr<Page> deserialize(HalFile& file, bool collectTouchLinks = true);
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {

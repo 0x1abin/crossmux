@@ -92,3 +92,5 @@ add_subdirectory(css_parser)
 add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(ligature_guard)
 add_subdirectory(page_link)
+
+add_subdirectory(reader_build_failure)
