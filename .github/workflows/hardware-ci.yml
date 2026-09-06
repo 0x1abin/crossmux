@@ -17,7 +17,8 @@ on:
       - lib/WeReadWebApi/**
       - src/MappedInputManager.*
       - src/Ble*
-      - src/BtLibraryInUseShim.cpp
+      - src/platform/BtLibraryInUseShim.h
+      - src/platform/NimblePsramConfig.h
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
       - src/SettingsList.h
@@ -36,7 +37,7 @@ on:
       - scripts/nightly_targets.py
       - scripts/tests/test_nightly_release.py
       - scripts/patch_ble_keyboard_host.py
-      - scripts/patch_bt_mem.py
+      - scripts/configure_nimble_psram.py
   pull_request:
     paths:
       - .github/workflows/ci.yml
@@ -52,7 +53,8 @@ on:
       - lib/WeReadWebApi/**
       - src/MappedInputManager.*
       - src/Ble*
-      - src/BtLibraryInUseShim.cpp
+      - src/platform/BtLibraryInUseShim.h
+      - src/platform/NimblePsramConfig.h
       - src/NetworkStartup.cpp
       - src/CrossPointSettings.*
       - src/SettingsList.h
@@ -71,7 +73,7 @@ on:
       - scripts/nightly_targets.py
       - scripts/tests/test_nightly_release.py
       - scripts/patch_ble_keyboard_host.py
-      - scripts/patch_bt_mem.py
+      - scripts/configure_nimble_psram.py
   workflow_dispatch:
 
 permissions:

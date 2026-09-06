@@ -61,8 +61,10 @@ if original_sdkconfig.is_file():
                 "\n".join([marker, *lines[1:]]) + "\n", encoding="utf-8"
             )
             print(f"Restored cached Arduino framework for {mcu}")
-    else:
+    elif requested.strip():
         # Recompile only this chip from its original template after config changes.
         original_sdkconfig.replace(target_sdkconfig)
+    # A prebuilt target must retain sdkconfig.orig: PlatformIO uses it to
+    # reinstall the original libraries, not just their configuration header.
 
 request_file.write_text(requested.strip() + "\n", encoding="utf-8")

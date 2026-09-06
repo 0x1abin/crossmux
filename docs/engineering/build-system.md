@@ -59,6 +59,39 @@ environments do not link the BLE host. Sticky and eego A4 use the custom-core
 controller-only NimBLE configuration; X4 Pro, X4 Classic, and PaperMono retain
 their prebuilt `dio_opi` core so the TinyUSB MSC component graph remains intact.
 
+The SDK's obsolete passkey callback is removed only from a generated source copy
+under `$BUILD_DIR/ble-compat`; the SDK and NimBLE dependency sources are never
+rewritten. The source is a build dependency and unexpected callback signatures
+fail the build. The same translation unit includes the `_btLibraryInUse` weak
+shim for both the custom-core bootstrap (which omits application sources) and
+the final firmware, without suppressing NimBLE's Arduino BT usage header.
+
+When switching from a custom core to a prebuilt target, retain the framework's
+`sdkconfig.orig` marker until PlatformIO restores the original core package.
+Restoring only `sdkconfig` leaves custom IDF archives behind; mixing these with
+an untouched `dio_opi` header can omit PSRAM initialization entirely.
+`scripts/tests/test_pioarduino_cache.py` covers this transition.
+
+For isolated cache-switch validation, run builds sequentially with all four
+overrides below (the directories are gitignored). Do not copy compiled core
+packages from an existing PlatformIO installation into this environment.
+
+```bash
+export PLATFORMIO_CORE_DIR="$PWD/.platformio/ble-psram"
+export PLATFORMIO_BUILD_DIR="$PWD/.pio/ble-psram-build"
+export PLATFORMIO_BUILD_CACHE_DIR="$PWD/.cache/ble-psram"
+export IDF_COMPONENT_CACHE_PATH="$PWD/.cache/ble-psram-idf-components"
+pio run -e sticky_nightly
+pio run -e waveshare_epaper_397_nightly
+pio run -e eego_a4_nightly
+pio run -e waveshare_epaper_397_nightly
+```
+
+Use the same overrides when uploading. Check the resulting ELF for the actual
+PSRAM initialization and heap-registration call paths, not just the
+`BOARD_HAS_PSRAM` macro or `psramInit` symbol. Runtime BLE diagnostics must report
+nonzero PSRAM capacity and a successful allocator probe before connection tests.
+
 ## Desktop Simulator
 
 Install SDL2 and `curl` (plus OpenSSL development headers on Linux), place EPUB

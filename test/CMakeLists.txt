@@ -93,3 +93,7 @@ add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(ligature_guard)
 add_subdirectory(page_link)
 add_subdirectory(ble_key_mapping)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME PioarduinoCache
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_pioarduino_cache.py)
