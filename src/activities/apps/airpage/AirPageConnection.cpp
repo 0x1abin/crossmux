@@ -56,8 +56,8 @@ AirPageConnection::Event AirPageConnection::begin(const bool realtime) {
     state_ = realtime_ ? State::BrokerConnecting : State::WifiOnline;
     return Event::StateChanged;
   }
-  state_ = State::Off;
-  return Event::WifiRequired;
+  if (!realtime_) return Event::None;
+  return startWifiAssociation() ? Event::StateChanged : Event::WifiRequired;
 }
 
 void AirPageConnection::stop() {
@@ -89,11 +89,16 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
   retryCount_ = 0;
 
   if (!realtime_) {
+    const bool wifiAssociationPending = state_ == State::WifiConnecting;
     disconnectBroker();
-    if (wifiConnected()) {
+    if (wifiAssociationPending) {
+      state_ = State::Off;
+      teardownWifi();
+    } else if (wifiConnected()) {
       state_ = State::WifiOnline;
     } else {
       state_ = State::Off;
+      teardownWifi();
     }
     return Event::StateChanged;
   }
@@ -104,7 +109,7 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
     state_ = State::BrokerConnecting;
     return Event::StateChanged;
   }
-  return pause(Event::WifiRequired);
+  return startWifiAssociation() ? Event::StateChanged : pause(Event::WifiRequired);
 }
 
 void AirPageConnection::prepareRefresh() {
