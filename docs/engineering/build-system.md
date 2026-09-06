@@ -35,6 +35,7 @@
   * `slim`: Minimal build (no serial logging)
   * `sticky`: Seeed Sticky ESP32-S3 development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 development build
+  * `x4c`: Xteink X4 Classic ESP32-S3 build-only development build
   * `papermono`: M5Stack PaperMono ESP32-S3 development build
   * `eego_a4`: eego A4 ESP32-S3 experimental development build
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
@@ -44,13 +45,62 @@
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
 
-The six S3 environments are separate hardware binaries, but each is a unified
+The seven S3 environments are separate hardware binaries, but each is a unified
 language firmware. `bin/ci-check` builds them together with the default C3 target.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
-CI workflow builds all four simulators and all six S3 environments when
+CI workflow builds all four simulators and all seven S3 environments when
 hardware-sensitive files change, and can also be started manually.
+
+Bluetooth Page Turner Beta is compiled only into these seven S3 development and
+`*_nightly` environments. C3, release-candidate, stable, and `gh_release*`
+environments do not link the BLE host. Sticky and eego A4 use the custom-core
+controller-only NimBLE configuration; X4 Pro, X4 Classic, and PaperMono retain
+their prebuilt `dio_opi` core so the TinyUSB MSC component graph remains intact.
+
+The SDK's obsolete passkey callback is removed only from a generated source copy
+under `$BUILD_DIR/ble-compat`; the SDK and NimBLE dependency sources are never
+rewritten. The source is a build dependency and unexpected callback signatures
+fail the build. The same translation unit includes the `_btLibraryInUse` weak
+shim for both the custom-core bootstrap (which omits application sources) and
+the final firmware, without suppressing NimBLE's Arduino BT usage header.
+
+The pinned prebuilt S3 core still creates 1 KiB IPC stacks. BLE controller
+interrupt allocation can overflow `ipc0`; upstream Arduino lib-builder #386
+raises the budget to 2 KiB. S3 BLE builds use a narrow link adapter at task
+creation to apply that minimum only to `ipc0`/`ipc1` on their matching cores.
+It adds at most 2 KiB of internal stack RAM across both tasks and preserves
+larger configured stacks, allocation failures, other tasks, and the prebuilt
+TinyUSB core. The adapter travels with the same bootstrap-compatible source;
+remove it when the pinned core supplies the upstream budget. BLE diagnostics
+include both IPC stack high-water marks; check them after repeated starts.
+
+When switching from a custom core to a prebuilt target, retain the framework's
+`sdkconfig.orig` marker until PlatformIO restores the original core package.
+Restoring only `sdkconfig` leaves custom IDF archives behind; mixing these with
+an untouched `dio_opi` header can omit PSRAM initialization entirely.
+`scripts/tests/test_pioarduino_cache.py` covers this transition.
+
+For isolated cache-switch validation, run builds sequentially with all four
+overrides below (the directories are gitignored). Do not copy compiled core
+packages from an existing PlatformIO installation into this environment.
+
+```bash
+export PLATFORMIO_CORE_DIR="$PWD/.platformio/ble-psram"
+export PLATFORMIO_BUILD_DIR="$PWD/.pio/ble-psram-build"
+export PLATFORMIO_BUILD_CACHE_DIR="$PWD/.cache/ble-psram"
+export IDF_COMPONENT_CACHE_PATH="$PWD/.cache/ble-psram-idf-components"
+pio run -e sticky_nightly
+pio run -e waveshare_epaper_397_nightly
+pio run -e eego_a4_nightly
+pio run -e waveshare_epaper_397_nightly
+```
+
+Use the same overrides when uploading. Check the resulting ELF for the actual
+PSRAM initialization and heap-registration call paths, not just the
+`BOARD_HAS_PSRAM` macro or `psramInit` symbol. Runtime BLE diagnostics must report
+nonzero PSRAM capacity and a successful allocator probe before connection tests.
 
 ## Desktop Simulator
 

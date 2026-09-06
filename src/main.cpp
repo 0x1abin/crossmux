@@ -29,6 +29,7 @@
 #include <cstring>
 
 #include "AchievementsStore.h"
+#include "BleInput.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
@@ -81,6 +82,32 @@ static_assert(HalGPIO::BTN_BACK == SoundFeedback::BUTTON_BACK &&
               HalGPIO::BTN_UP == SoundFeedback::BUTTON_UP && HalGPIO::BTN_DOWN == SoundFeedback::BUTTON_DOWN &&
               HalGPIO::BTN_POWER == SoundFeedback::BUTTON_POWER);
 #endif
+
+void updateBluetoothLifecycle() {
+#if FREEINK_CAP_BLE_HID_HOST
+  static unsigned long nextStartAttemptAt = 0;
+  const auto wanted = [] {
+    return SETTINGS.bluetoothEnabled && activityManager.keepsBluetoothAlive() &&
+           !activityManager.deferBluetoothStart() && !activityManager.requiresExclusiveStorageLoop() &&
+           WiFi.getMode() == WIFI_MODE_NULL;
+  };
+  if (!wanted()) {
+    bleinput::stop();
+    return;
+  }
+  if (bleinput::isRunning() || RenderLock::peek() || millis() < nextStartAttemptAt) return;
+  // Non-reader pages that keep an existing link alive own their explicit start
+  // attempts; only readers use the automatic reader-memory gate and retry loop.
+  if (!activityManager.isReaderActivity()) return;
+  RenderLock lock;
+  // Rendering may have started a chapter build while we were acquiring the lock.
+  if (!wanted() || !activityManager.isReaderActivity() || bleinput::isRunning()) return;
+  const auto result = bleinput::ensureStarted(renderer, bleinput::StartContext::Reader);
+  if (result == bleinput::StartResult::LowMemory || result == bleinput::StartResult::Failed) {
+    nextStartAttemptAt = millis() + 2000;
+  }
+#endif
+}
 }  // namespace
 
 // A wake hold must never become an in-app power-button action.  Boot may continue
@@ -278,6 +305,7 @@ static bool loadSleepFrameBuffer() {
 
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
+  bleinput::stop();
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
@@ -768,6 +796,15 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+  updateBluetoothLifecycle();
+
+  static bool bluetoothWasConnected = false;
+  const bool bluetoothConnected = bleinput::isConnected();
+  if (bluetoothConnected != bluetoothWasConnected) {
+    bluetoothWasConnected = bluetoothConnected;
+    bleinput::logDiagnostics(bluetoothConnected ? "connected" : "disconnected");
+    if (activityManager.isReaderActivity()) activityManager.requestUpdate();
+  }
 
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
   SoundFeedback::update(SETTINGS.soundFeedbackLevel, gpio.physicalPressedMask());
@@ -797,6 +834,7 @@ void loop() {
   if (Serial && millis() - lastMemPrint >= 10000) {
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
             ESP.getHeapSize(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+    if (bleinput::isRunning()) bleinput::logDiagnostics("running");
     lastMemPrint = millis();
   }
 
@@ -819,7 +857,8 @@ void loop() {
 
   // Check for any real user activity (button, touch, or tilt).
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity()) {
+  if (mappedInputManager.wasAnyPressed() || mappedInputManager.wasAnyReleased() || gpio.wasTouchActivity() ||
+      halTiltSensor.hadActivity()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }
@@ -929,6 +968,7 @@ void loop() {
   const unsigned long activityStartTime = millis();
   const bool readerWasActive = activityManager.isReaderActivity();
   activityManager.loop();
+  updateBluetoothLifecycle();
   const bool readerIsActive = activityManager.isReaderActivity();
   const unsigned long activityDuration = millis() - activityStartTime;
 

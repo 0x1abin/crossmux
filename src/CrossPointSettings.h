@@ -5,6 +5,7 @@
 
 #include <cstdint>
 
+#include "BleKeyMapping.h"
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
 #include "util/ReadingGuideLine.h"
@@ -313,6 +314,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontButtonConfirm = FRONT_HW_CONFIRM;
   uint8_t frontButtonLeft = FRONT_HW_LEFT;
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
+  // BLE HID page-turner settings. The fixed map is 30 bytes and never allocates.
+  uint8_t bluetoothEnabled = 0;
+  bleinput::KeyMap bleKeyMap{};
   // Reader font settings
   uint8_t fontFamily = NOTOSANS;
   // Point size of the reader font. Only sizes the active family actually ships

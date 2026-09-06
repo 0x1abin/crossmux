@@ -21,6 +21,7 @@
 #include <limits>
 
 #include "AchievementsStore.h"
+#include "BleInput.h"
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -224,6 +225,7 @@ bool EpubReaderActivity::loadBook() {
 
   const bool uncached = !Storage.exists((loadedEpub->getCachePath() + "/book.bin").c_str());
   if (uncached) {
+    bleinput::stop();
     disableFastInitialRefresh();
     GUI.drawPopup(renderer, tr(STR_INDEXING));
   }
@@ -1458,6 +1460,7 @@ void EpubReaderActivity::renderBook() {
             ? std::nullopt
             : cachedVisibleTextOffset;
     if (!cacheComplete) {
+      bleinput::stop();
       if (section->isPartial()) {
         LOG_DBG("ERS", "Partial cache found (%d pages), resuming build...", section->pageCount);
       } else {
@@ -1582,6 +1585,7 @@ void EpubReaderActivity::renderBook() {
     pagesUntilFullRefresh = 1;
   }
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
+    bleinput::stop();
     if (!section->isBuilding() && !section->startBuild(renderSpec)) {
       if (handleBuildFailure("partial start", section->buildError())) return;
       showBuildError();

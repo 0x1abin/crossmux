@@ -1,0 +1,49 @@
+#pragma once
+enum class StrId {
+  STR_BT_KEY_ENTER,
+  STR_BT_KEY_BACKSPACE,
+  STR_BT_KEY_TAB,
+  STR_BT_KEY_ESCAPE,
+  STR_BT_KEY_DELETE,
+  STR_DIR_LEFT,
+  STR_DIR_RIGHT,
+  STR_DIR_UP,
+  STR_DIR_DOWN,
+  STR_BT_KEY_HOME,
+  STR_BT_KEY_END,
+  STR_BT_KEY_PAGE_UP,
+  STR_BT_KEY_PAGE_DOWN,
+  STR_BT_KEY_CODE,
+  STR_BLUETOOTH,
+  STR_BT_LOW_MEMORY,
+  STR_BT_UNAVAILABLE,
+  STR_BT_SCAN_PAIR,
+  STR_BT_DISCONNECT,
+  STR_BT_PAIRED_DEVICES,
+  STR_BT_MAP_BUTTONS,
+  STR_BT_NO_DEVICES,
+  STR_SCANNING,
+  STR_BT_NO_PAIRED,
+  STR_BT_CONNECTION_FAILED,
+  STR_CONNECTING,
+  STR_BT_DEVICE_FORGOTTEN,
+  STR_BT_NOT_CONNECTED,
+  STR_BT_CONNECTED_TO,
+  STR_BT_PAGE_FORWARD,
+  STR_BT_PAGE_BACK,
+  STR_CONFIRM,
+  STR_BACK,
+  STR_BT_PRESS_REMOTE,
+  STR_BT_NOT_MAPPED
+};
+using enum StrId;
+inline const char* tr(StrId key) {
+  if (key == STR_BT_LOW_MEMORY) return "low memory";
+  if (key == STR_BT_CONNECTION_FAILED) return "connection failed";
+  if (key == STR_BT_CONNECTED_TO) return "connected to %s";
+  return "%u";
+}
+struct TestI18n {
+  const char* get(StrId key) const { return tr(key); }
+};
+inline TestI18n I18N;

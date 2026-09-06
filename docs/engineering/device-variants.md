@@ -1,6 +1,6 @@
 # Device Variants — X3/X4 and Build-Only S3 Targets
 
-> Sticky, X4 Pro, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
+> Sticky, X4 Pro, X4 Classic, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
 > and [Waveshare ePaper 3.97](waveshare-epaper-397.md) are separate ESP32-S3
 > compile-time targets. The one-binary rule in this document applies only to
 > the ESP32-C3 X3/X4 pair.
@@ -22,12 +22,13 @@ pio run -e gh_release        # all 33 UI languages and both content profiles
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
-All six supported ESP32-S3 devices use separate builds because their boards,
+All seven ESP32-S3 devices use separate builds because their boards,
 displays, input, storage, and power profiles differ from the combined ESP32-C3
 image:
 
 ```bash
 pio run -e x4pro
+pio run -e x4c
 pio run -e papermono
 pio run -e sticky
 pio run -e eego_a4
@@ -35,7 +36,9 @@ pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 ```
 
-All six S3 targets are part of the shared Nightly matrix. Each target builds
+Six S3 targets are published by the shared Nightly matrix. X4 Classic has the
+same `x4c_nightly` build and Hardware CI coverage, but remains build-only and is
+not added to the public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
@@ -55,6 +58,42 @@ after wake passed hardware validation on both X3 and X4. X4 sleep current has
 not yet been quantified, so no measured power reduction is claimed. All S3
 targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
+
+Bluetooth Page Turner Beta is available in all seven S3 development and Nightly
+builds, including the build-only X4 Classic target. It is disabled by default;
+C3 and stable/release builds are unchanged.
+
+Sticky, X4 Pro, X4 Classic, Paper Mono, EEGO A4, Murphy M4 and Waveshare 3.97 BLE
+development/Nightly builds use `s3_ble_psram`. Its middleware forces the external
+allocator configuration into NimBLE-Arduino sources only, after `sdkconfig.h`;
+the existing core, controller and task stacks are not migrated. Sticky retains
+its controller-only core and DRAM framebuffer. Release builds do not inherit
+this configuration.
+
+The diagnostic PSRAM mode additionally requires 256 KiB free and a 32 KiB
+contiguous PSRAM block. Before starting the Host it allocates and immediately
+frees a 16-byte probe through the linked NimBLE allocator, rejecting allocation
+failure or a non-PSRAM address. It never silently falls back to internal RAM.
+`BLE` logs report internal/PSRAM free, historical minimum and largest block at
+start, stop, link transitions and every ten seconds while running, plus task
+stack high-water marks. Historical minima are since boot, not per-phase peaks.
+These are diagnostic safeguards, not a measured production memory budget.
+
+All BLE start callers hold the render lock and use `BleInput` for the memory
+gate, at most one recovery, and immediate recheck/start. Bluetooth settings and
+key mapping use the same Explicit gate (70 KiB free / 24 KiB largest internal
+block); only a rejected gate unloads the SD reading font and clears font caches.
+An already-running host neither recovers memory nor initializes again. BLE
+synthetic press and release frames both have zero hold duration, independent of
+previous physical-key or touch durations.
+
+Reader BLE startup keeps its 80 KiB free / 32 KiB largest internal-block gate.
+On a low-memory start attempt, it releases rebuildable font caches under the
+render lock and immediately retries without unloading the reading font. If the
+gate still fails, it retries after two seconds. Chapter building, Wi-Fi, USB
+Drive and sleep still stop BLE; eligible readers restart the host afterwards
+and use the SDK's bonded-device reconnection. Hardware reconnection and memory
+headroom must be verified on-device, not inferred from a successful build.
 
 The X3-vs-X4 choice is **not** a compile-time decision. Do not add a `-DX3`
 build flag or a `[env:...x3]` — see the next section for why.

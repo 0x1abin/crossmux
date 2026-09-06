@@ -17,6 +17,7 @@
 #include <cstring>
 
 #include "AppVisibilitySettingsActivity.h"
+#include "BluetoothSettingsActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
@@ -247,6 +248,9 @@ void SettingsActivity::rebuildSettingsLists() {
     controlsSettings.insert(controlsSettings.begin(),
                             SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   }
+#if FREEINK_CAP_BLE_HID_HOST
+  controlsSettings.push_back(SettingInfo::Action(StrId::STR_BLUETOOTH, SettingAction::Bluetooth));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_APP_VISIBILITY, SettingAction::AppVisibility));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::DateTime));
@@ -672,6 +676,15 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::RemapFrontButtons:
         startActivityForResultWith<ButtonRemapActivity>(resultHandler);
         break;
+      case SettingAction::Bluetooth:
+#if FREEINK_CAP_BLE_HID_HOST
+        releaseListsForMemoryHungryChild();
+        if (!startActivityForResultWith<BluetoothSettingsActivity>(resultHandler)) {
+          rebuildSettingsLists();
+          requestUpdate();
+        }
+#endif
+        break;
       case SettingAction::CustomiseStatusBar:
         startActivityForResultWith<StatusBarSettingsActivity>(resultHandler);
         break;
@@ -816,20 +829,23 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
   }
 }
 
+void SettingsActivity::releaseListsForMemoryHungryChild() {
+  RenderLock lock(*this);
+  closeRouting();
+  // clear() keeps vector capacity; swap it out so a stacked Settings activity
+  // leaves that heap to the child.
+  std::vector<freeink::ui::ListItem>().swap(rowItems_);
+  std::vector<std::string>().swap(rowValues_);
+  std::vector<std::string>().swap(rowLabels_);
+  std::vector<SettingInfo>().swap(displaySettings);
+  std::vector<SettingInfo>().swap(readerSettings);
+  std::vector<SettingInfo>().swap(controlsSettings);
+  std::vector<SettingInfo>().swap(systemSettings);
+  settingsCount = 0;
+}
+
 void SettingsActivity::openOtaUpdate() {
-  {
-    RenderLock lock(*this);
-    closeRouting();
-    // clear() keeps vector capacity; swap it out so the stacked Settings activity leaves that heap to TLS.
-    std::vector<freeink::ui::ListItem>().swap(rowItems_);
-    std::vector<std::string>().swap(rowValues_);
-    std::vector<std::string>().swap(rowLabels_);
-    std::vector<SettingInfo>().swap(displaySettings);
-    std::vector<SettingInfo>().swap(readerSettings);
-    std::vector<SettingInfo>().swap(controlsSettings);
-    std::vector<SettingInfo>().swap(systemSettings);
-    settingsCount = 0;
-  }
+  releaseListsForMemoryHungryChild();
 
   if (startActivityForResultWith<OtaUpdateActivity>([this](const ActivityResult&) {
         SETTINGS.saveToFile();

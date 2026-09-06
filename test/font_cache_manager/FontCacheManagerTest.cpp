@@ -129,3 +129,27 @@ TEST(FontCacheManagerTest, PrewarmScanDoesNotAllocateHeapMemory) {
 
   EXPECT_EQ(0U, heapAllocationCount);
 }
+
+TEST(FontCacheManagerTest, ResidentCacheReleaseAllocatesNothingAndKeepsFontsAvailable) {
+  SdCardFont readerFont;
+  SdCardFont fallbackFont;
+  FontDecompressor decompressor;
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> sdFonts{{7, &readerFont}, {8, &fallbackFont}};
+  FontCacheManager manager(noBuiltinFonts, sdFonts);
+  manager.setFontDecompressor(&decompressor);
+
+  heapAllocationCount = 0;
+  countHeapAllocations = true;
+  manager.releaseSdFontCaches();
+  countHeapAllocations = false;
+
+  EXPECT_EQ(0U, heapAllocationCount);
+  EXPECT_EQ(1, decompressor.clearCacheCount);
+  EXPECT_EQ(1, readerFont.releaseResidentCachesCount);
+  EXPECT_EQ(1, fallbackFont.releaseResidentCachesCount);
+  manager.prewarmCache(7, "Reader", 1);
+  manager.prewarmCache(8, "Fallback", 1);
+  EXPECT_EQ(1, readerFont.prewarmCallCount);
+  EXPECT_EQ(1, fallbackFont.prewarmCallCount);
+}
