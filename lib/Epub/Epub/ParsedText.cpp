@@ -414,7 +414,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     wordContinues.push_back(continues);
     wordNoSpaceBefore.push_back(noSpaceBefore);
     wordFocusBoundary.push_back(focusBoundary);
-    wordLinkIds.push_back(linkId);
+    if (collectTouchLinks) wordLinkIds.push_back(linkId);
     pushVisibleOffset(tokenOffset);
     if (!rubyTexts.empty()) {
       rubyTexts.push_back("");
@@ -452,7 +452,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     wordContinues.reserve(newCapacity);
     wordNoSpaceBefore.reserve(newCapacity);
     wordFocusBoundary.reserve(newCapacity);
-    wordLinkIds.reserve(newCapacity);
+    if (collectTouchLinks) wordLinkIds.reserve(newCapacity);
     wordVisibleOffsetDeltas.reserve(newCapacity);
   };
 
@@ -524,7 +524,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       wordContinues.push_back(attach);
       wordNoSpaceBefore.push_back(noSpaceBefore);
       wordFocusBoundary.push_back(0);
-      wordLinkIds.push_back(linkId);
+      if (collectTouchLinks) wordLinkIds.push_back(linkId);
       pushVisibleOffset(segmentOffset);
     } else {
       size_t charCount = 0;
@@ -548,7 +548,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         wordContinues.push_back(attach);
         wordNoSpaceBefore.push_back(noSpaceBefore);
         wordFocusBoundary.push_back(0);
-        wordLinkIds.push_back(linkId);
+        if (collectTouchLinks) wordLinkIds.push_back(linkId);
         pushVisibleOffset(segmentOffset);
       } else {
         countPtr = reinterpret_cast<const unsigned char*>(segment.data());
@@ -564,7 +564,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         wordContinues.push_back(attach);
         wordNoSpaceBefore.push_back(noSpaceBefore);
         wordFocusBoundary.push_back(static_cast<uint8_t>(std::min<size_t>(splitByteOffset, 255)));
-        wordLinkIds.push_back(linkId);
+        if (collectTouchLinks) wordLinkIds.push_back(linkId);
         pushVisibleOffset(segmentOffset);
       }
     }
@@ -617,7 +617,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
 }
 
 uint8_t ParsedText::addLinkTarget(const char* href) {
-  if (!href || href[0] == '\0' || strnlen(href, FOOTNOTE_HREF_LEN) >= FOOTNOTE_HREF_LEN ||
+  if (!collectTouchLinks || !href || href[0] == '\0' || strnlen(href, FOOTNOTE_HREF_LEN) >= FOOTNOTE_HREF_LEN ||
       linkTargets.size() >= UINT8_MAX) {
     return 0;
   }
@@ -685,7 +685,7 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
 }
 // Consumes data to minimize memory usage
 bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
-                                       const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                                       const std::function<bool(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                                        const bool includeLastLine) {
   if (words.empty()) {
     return true;
@@ -749,8 +749,9 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   };
 
   for (size_t i = 0; i < lineCount; ++i) {
-    extractLine(i, breakAt(i), i > 0 ? breakAt(i - 1) : 0, lineBreakCount, pageWidth, wordWidths, wordContinues,
-                wordNoSpaceBefore, processLine, renderer, fontId);
+    if (!extractLine(i, breakAt(i), i > 0 ? breakAt(i - 1) : 0, lineBreakCount, pageWidth, wordWidths, wordContinues,
+                     wordNoSpaceBefore, processLine, renderer, fontId))
+      return false;
   }
 
   if (lineCount > 0) {
@@ -765,7 +766,7 @@ bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
     wordNoSpaceBefore.erase(wordNoSpaceBefore.begin(), wordNoSpaceBefore.begin() + consumed);
     wordFocusBoundary.erase(wordFocusBoundary.begin(), wordFocusBoundary.begin() + consumed);
-    wordLinkIds.erase(wordLinkIds.begin(), wordLinkIds.begin() + consumed);
+    if (collectTouchLinks) wordLinkIds.erase(wordLinkIds.begin(), wordLinkIds.begin() + consumed);
     eraseVisibleOffsetPrefix(consumed);
     if (!rubyTexts.empty()) {
       const size_t rtConsumed = std::min(consumed, rubyTexts.size());
@@ -980,7 +981,8 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
   const size_t totalWordCount = words.size();
 
   // One fallible allocation holds both the DP cost and chosen break for every
-  // word. At the parser's 750-word soft limit this is 6 KB on ESP32.
+  // word. Each entry takes 8 bytes on ESP32; the count can grow when splitting
+  // overwide words or retaining an intact Ruby group.
   workspace = makeUniqueNoThrow<LineBreakState[]>(totalWordCount);
   if (!workspace) {
     LOG_ERR("PTX", "OOM: line-break workspace (%u words, %u bytes, free=%u, maxAlloc=%u)",
@@ -1233,7 +1235,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // Emphasis follows the text across the split, so a break at or after the boundary leaves the
   // remainder fully regular.
   wordFocusBoundary.insert(wordFocusBoundary.begin() + wordIndex + 1, focusBoundaryAfter(focusBoundary, chosenOffset));
-  wordLinkIds.insert(wordLinkIds.begin() + wordIndex + 1, wordLinkIds[wordIndex]);
+  if (collectTouchLinks) wordLinkIds.insert(wordLinkIds.begin() + wordIndex + 1, wordLinkIds[wordIndex]);
   wordFocusBoundary[wordIndex] = focusBoundaryBefore(focusBoundary, chosenOffset);
   // Invariant: a boundary is always strictly inside its token, so an all-bold part carries BOLD in
   // its style with boundary 0 and nothing downstream special-cases boundary == size.
@@ -1276,10 +1278,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   return true;
 }
 
-void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, const size_t lastBreakAt,
+bool ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, const size_t lastBreakAt,
                              const size_t lineCount, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<bool>& noSpaceBeforeVec,
-                             const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                             const std::function<bool(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              const GfxRenderer& renderer, const int fontId) {
   const size_t lineWordCount = lineBreak - lastBreakAt;
   const uint32_t lineVisibleOffset = visibleOffsetAt(lastBreakAt);
@@ -1580,7 +1582,7 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
 
   std::vector<TextBlock::LinkSpan> lineLinks;
   std::vector<uint8_t> lineLinkIdsSeen;
-  for (size_t i = 0; i < lineWordCount; i++) {
+  for (size_t i = 0; collectTouchLinks && i < lineWordCount; i++) {
     const uint8_t linkId = wordLinkIds[lastBreakAt + (willReorder ? visualOrderScratch[i] : i)];
     if (linkId == 0 || linkId > linkTargets.size()) continue;
 
@@ -1626,11 +1628,10 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
                                               std::vector<uint16_t>{}, blockStyle, std::move(lineRubyTexts),
                                               std::move(lineLinks));
     if (!block || !block->valid()) {
-      LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
-      return;
+      LOG_ERR("PTX", "OOM: TextBlock arena allocation failed");
+      return false;
     }
-    processLine(std::move(block), lineVisibleOffset);
-    return;
+    return processLine(std::move(block), lineVisibleOffset);
   }
 
   // Each word is one TextBlock entry carrying its own boundary; all that remains is the suffix x
@@ -1649,8 +1650,8 @@ void ParsedText::extractLine(const size_t lineIndex, const size_t lineBreak, con
   auto block = makeUniqueNoThrow<TextBlock>(lineWords, lineXPos, lineWordStyles, outBoundaries, outSuffixX, blockStyle,
                                             std::move(lineRubyTexts), std::move(lineLinks));
   if (!block || !block->valid()) {
-    LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
-    return;
+    LOG_ERR("PTX", "OOM: TextBlock arena allocation failed");
+    return false;
   }
-  processLine(std::move(block), lineVisibleOffset);
+  return processLine(std::move(block), lineVisibleOffset);
 }

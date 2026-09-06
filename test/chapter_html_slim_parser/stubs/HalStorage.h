@@ -1,7 +1,10 @@
 #pragma once
 
+#include <Arduino.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 class HalFile {
@@ -22,6 +25,8 @@ class HalFile {
   size_t write(uint8_t byte) { return write(&byte, 1); }
   bool flush() { return file_ && std::fflush(file_) == 0; }
   bool seekCur(size_t offset) { return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_CUR) == 0; }
+  bool seekSet(size_t offset) { return seek(offset); }
+  bool seek(size_t offset) { return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_SET) == 0; }
   bool close() {
     if (!file_) return false;
     const bool ok = std::fclose(file_) == 0;
@@ -51,7 +56,11 @@ class HalStorage {
     return instance;
   }
   bool openFileForRead(const char*, const std::string& path, HalFile& file) { return file.open(path.c_str(), "rb"); }
-  bool openFileForWrite(const char*, const std::string& path, HalFile& file) { return file.open(path.c_str(), "wb"); }
+  bool openFileForWrite(const char*, const std::string& path, HalFile& file) { return file.open(path.c_str(), "w+b"); }
+  bool mkdir(const char* path) {
+    std::error_code error;
+    return std::filesystem::create_directories(path, error) || std::filesystem::exists(path);
+  }
   bool exists(const char* path) const {
     std::FILE* file = std::fopen(path, "rb");
     if (!file) return false;
@@ -64,5 +73,6 @@ class HalStorage {
 
 #define Storage HalStorage::getInstance()
 
+inline uint32_t micros() { return 0; }
 inline uint32_t millis() { return 0; }
 inline void delay(uint32_t) {}

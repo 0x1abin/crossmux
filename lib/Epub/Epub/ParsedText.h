@@ -54,6 +54,7 @@ class ParsedText {
   std::deque<std::string> rubyTexts;
   BlockStyle blockStyle;
   bool extraParagraphSpacing;
+  bool collectTouchLinks;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
   bool firstLinePending;
@@ -84,18 +85,20 @@ class ParsedText {
                                                   std::vector<bool>& noSpaceBeforeVec);
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
-  void extractLine(size_t lineIndex, size_t lineBreak, size_t lastBreakAt, size_t lineCount, int pageWidth,
+  bool extractLine(size_t lineIndex, size_t lineBreak, size_t lastBreakAt, size_t lineCount, int pageWidth,
                    const std::vector<uint16_t>& wordWidths, const std::vector<bool>& continuesVec,
                    const std::vector<bool>& noSpaceBeforeVec,
-                   const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                   const std::function<bool(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                    const GfxRenderer& renderer, int fontId);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
-                      const bool focusReadingEnabled = false, const BlockStyle& blockStyle = BlockStyle())
+                      const bool focusReadingEnabled = false, const BlockStyle& blockStyle = BlockStyle(),
+                      const bool collectTouchLinks = false)
       : blockStyle(blockStyle),
         extraParagraphSpacing(extraParagraphSpacing),
+        collectTouchLinks(collectTouchLinks),
         hyphenationEnabled(hyphenationEnabled),
         focusReadingEnabled(focusReadingEnabled),
         firstLinePending(true),
@@ -119,6 +122,6 @@ class ParsedText {
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
   bool layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
-                             const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                             const std::function<bool(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              bool includeLastLine = true);
 };

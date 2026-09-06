@@ -1,12 +1,15 @@
 #pragma once
 
 #include <EpdFontFamily.h>
+#include <FontCacheManager.h>
 
 #include <deque>
 #include <string>
 
 class GfxRenderer {
  public:
+  FontCacheManager fontCache;
+  FontCacheManager* getFontCacheManager() { return &fontCache; }
   int getScreenWidth() const { return 480; }
   int getScreenHeight() const { return 800; }
   int getLineHeight(int, float = 1.0f) const { return 16; }

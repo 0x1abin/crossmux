@@ -29,6 +29,8 @@ class SdCardFont {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
   static constexpr uint8_t MAX_STYLES = 4;
+  // Negative prewarm results are unavailable optimizations, not missing glyphs.
+  static constexpr int PREWARM_SKIPPED = -2;
 
   SdCardFont() = default;
   ~SdCardFont();
@@ -306,6 +308,8 @@ class SdCardFont {
   AdvanceEntry* advanceTable_[MAX_STYLES] = {};
   uint32_t advanceTableSize_[MAX_STYLES] = {};
   bool advanceTableLookup(uint8_t styleIdx, uint32_t codepoint, uint16_t* outAdvance) const;
+  bool cacheBudgetSkipped_ = false;
+  bool hasCacheHeadroom(size_t bytes, size_t largest);
   // Merge sortedNew (sorted by codepoint, no overlap with existing) into the
   // advance table for styleIdx, preserving sort order; cap-truncates the tail.
   void mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sortedNew, uint32_t newCount);

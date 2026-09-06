@@ -2,6 +2,7 @@
 
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
+#include <Epub/css/CssParser.h>
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -382,10 +383,66 @@ void EpubReaderActivity::openReaderMenu() {
       !currentPageFootnotes.empty(), !cachedBookmarks.empty());
 }
 
+ReaderRenderSpec EpubReaderActivity::effectiveRenderSpec(const uint16_t width, const uint16_t height) const {
+  auto spec = SETTINGS.readerRenderSpec(width, height);
+  spec.collectTouchLinks = mappedInput.hasTouch();
+  if (stylesDisabledForSession_) spec.embeddedStyle = false;
+  return spec;
+}
+
+bool EpubReaderActivity::handleBuildFailure(const char* stage, const Section::BuildError error) {
+  if (failedBuildSpine_ == currentSpineIndex) return false;
+  bool retry = false;
+#ifndef BOARD_HAS_PSRAM
+  retry = error == Section::BuildError::OutOfMemory && !stylesDisabledForSession_ && SETTINGS.embeddedStyle != 0;
+#endif
+  if (retry) {
+    // A page number is not a content position after CSS changes. Explicit
+    // anchor/percentage/offset requests retain precedence over the displayed page.
+    if (pendingPageJump == std::numeric_limits<uint16_t>::max()) {
+      pendingPercentJump = true;
+      pendingSpineProgress = 1.0f;
+    }
+    if (pendingAnchor.empty() && !pendingPercentJump && !pendingOffsetJump) {
+      if (renderedSpineIndex_ == currentSpineIndex && currentPageVisibleOffset) {
+        pendingOffsetJump = currentPageVisibleOffset;
+      } else if (cachedSpineIndex == currentSpineIndex && cachedVisibleTextOffset) {
+        pendingOffsetJump = cachedVisibleTextOffset;
+      }
+    }
+    pendingPageJump.reset();
+    clearDeferredReposition();
+    nextPageNumber = 0;
+    stylesDisabledForSession_ = true;
+  }
+  if (section) section->abandonBuild();
+  section.reset();
+  if (auto* css = epub->getCssParser()) css->clear();
+  discardOverlayPage();
+  currentPageLinks.clear();
+  currentPageFootnotes.resize(0);
+  if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
+  buildHeapPaused = false;
+  buildPopupPending = false;
+  failedBuildSpine_ = retry ? -1 : currentSpineIndex;
+  LOG_ERR("ERS", "Build failed: spine=%d stage=%s error=%u retryWithoutCss=%d (free=%u, min=%u, maxAlloc=%u)",
+          currentSpineIndex, stage, static_cast<unsigned>(error), retry, static_cast<unsigned>(ESP.getFreeHeap()),
+          static_cast<unsigned>(ESP.getMinFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  if (retry) {
+    requestUpdate();
+  } else {
+    automaticPageTurnActive = false;
+  }
+  return retry;
+}
+
 bool EpubReaderActivity::buildTickHeapGate() {
   const size_t freeHeap = ESP.getFreeHeap();
   const size_t maxBlock = ESP.getMaxAllocHeap();
   buildHeapPaused = freeHeap < BACKGROUND_BUILD_MIN_FREE_HEAP || maxBlock < BACKGROUND_BUILD_MIN_MAX_ALLOC;
+#ifndef BOARD_HAS_PSRAM
+  if (buildHeapPaused && !stylesDisabledForSession_ && SETTINGS.embeddedStyle != 0) return true;
+#endif
   return !buildHeapPaused;
 }
 
@@ -493,13 +550,13 @@ void EpubReaderActivity::loop() {
   }
 
   if (section && !section->isBuilding() && section->isPartial() && !RenderLock::peek() && buildViewportWidth > 0 &&
-      !partialRebuildStartFailed &&
+      failedBuildSpine_ != currentSpineIndex &&
       section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount)) {
     RenderLock lock;
-    const ReaderRenderSpec buildSpec = SETTINGS.readerRenderSpec(buildViewportWidth, buildViewportHeight);
+    const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
     if (!section->startBuild(buildSpec)) {
-      partialRebuildStartFailed = true;
-      LOG_ERR("ERS", "Failed to start deferred partial extension build");
+      if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
+      return;
     } else {
       LOG_DBG("ERS", "Reader near partial watermark (%d/%d), resuming extension build", section->currentPage,
               section->pageCount);
@@ -512,9 +569,8 @@ void EpubReaderActivity::loop() {
     RenderLock lock;
     if (section->isBuilding() && buildTickHeapGate()) {
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
-        LOG_ERR("ERS", "Background section build failed");
-        section.reset();
-        requestUpdate();
+        if (!handleBuildFailure("background build", section->buildError())) requestUpdate();
+        return;
       } else if (section->isBuildComplete() && applyDeferredReposition()) {
         requestUpdate();
       }
@@ -1336,8 +1392,13 @@ void EpubReaderActivity::renderBook() {
   const auto showBuildError = [this]() {
     renderer.clearScreen();
     GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
-    automaticPageTurnActive = false;
   };
+
+  if (failedBuildSpine_ == currentSpineIndex) {
+    showBuildError();
+    return;
+  }
+  failedBuildSpine_ = -1;
 
   if (currentSpineIndex < 0) currentSpineIndex = 0;
   if (currentSpineIndex > epub->getSpineItemsCount()) currentSpineIndex = epub->getSpineItemsCount();
@@ -1374,7 +1435,7 @@ void EpubReaderActivity::renderBook() {
   buildViewportWidth = viewportWidth;
   buildViewportHeight = viewportHeight;
 
-  const ReaderRenderSpec renderSpec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight);
+  const ReaderRenderSpec renderSpec = effectiveRenderSpec(viewportWidth, viewportHeight);
 
   if (!section) {
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
@@ -1382,10 +1443,10 @@ void EpubReaderActivity::renderBook() {
     section = makeUniqueNoThrow<Section>(epub, currentSpineIndex, renderer);
     if (!section) {
       LOG_ERR("ERS", "OOM: Section (%u bytes)", static_cast<unsigned>(sizeof(Section)));
+      if (handleBuildFailure("section allocation", Section::BuildError::OutOfMemory)) return;
       showBuildError();
       return;
     }
-    partialRebuildStartFailed = false;
 
     const bool cacheLoaded = section->loadSectionFile(renderSpec);
     if (cacheLoaded) {
@@ -1415,9 +1476,8 @@ void EpubReaderActivity::renderBook() {
         };
         GfxRenderer::FrameBufferLoan loan(renderer);
         if (!section->createSectionFile(renderSpec, popupFn)) {
-          LOG_ERR("ERS", "Failed to persist page data to SD");
-          section.reset();
           loan.end();
+          if (handleBuildFailure("full build", section->buildError())) return;
           showBuildError();
           return;
         }
@@ -1455,9 +1515,7 @@ void EpubReaderActivity::renderBook() {
             started = section->startBuild(renderSpec, [this] { showBuildPopup(renderer, pagesUntilFullRefresh); });
           }
           if (!started) {
-            LOG_ERR("ERS", "Failed to start section build");
-            section.reset();
-            buildPopupPending = false;
+            if (handleBuildFailure("start", section->buildError())) return;
             showBuildError();
             return;
           }
@@ -1469,9 +1527,7 @@ void EpubReaderActivity::renderBook() {
               showBuildPopup(renderer, pagesUntilFullRefresh);
             }
             if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
-              LOG_ERR("ERS", "Failed during incremental section build");
-              section.reset();
-              buildPopupPending = false;
+              if (handleBuildFailure("foreground build", section->buildError())) return;
               showBuildError();
               return;
             }
@@ -1517,6 +1573,11 @@ void EpubReaderActivity::renderBook() {
       section->currentPage = newPage;
       pendingPercentJump = false;
     }
+    if (stylesDisabledForSession_) {
+      LOG_INF("ERS", "Basic layout ready: spine=%d page=%d (free=%u, min=%u, maxAlloc=%u)", currentSpineIndex,
+              section->currentPage, static_cast<unsigned>(ESP.getFreeHeap()),
+              static_cast<unsigned>(ESP.getMinFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    }
   }
 
   if (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
@@ -1526,15 +1587,13 @@ void EpubReaderActivity::renderBook() {
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
     bleinput::stop();
     if (!section->isBuilding() && !section->startBuild(renderSpec)) {
-      LOG_ERR("ERS", "Failed to start partial extension build");
-      section.reset();
+      if (handleBuildFailure("partial start", section->buildError())) return;
       showBuildError();
       return;
     }
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
-        LOG_ERR("ERS", "Failed during incremental section build");
-        section.reset();
+        if (handleBuildFailure("extension build", section->buildError())) return;
         showBuildError();
         return;
       }
@@ -1543,8 +1602,7 @@ void EpubReaderActivity::renderBook() {
   if (section->isBuilding()) {
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
-        LOG_ERR("ERS", "Failed during incremental section build");
-        section.reset();
+        if (handleBuildFailure("extension build", section->buildError())) return;
         showBuildError();
         return;
       }
@@ -1613,6 +1671,7 @@ void EpubReaderActivity::renderBook() {
     pageLoadRetryCount = 0;
 
     currentPageVisibleOffset = p->visibleTextOffset;
+    renderedSpineIndex_ = currentSpineIndex;
     currentPageFootnotes = std::move(p->footnotes);
     currentPageLinks = std::move(p->links);
     currentPageLinkMarginLeft = orientedMarginLeft;
@@ -1741,7 +1800,9 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
                                getStatsChapterProgressPercent(currentPage, pageCount));
 
   std::optional<uint32_t> offset;
-  if (section && spineIndex == currentSpineIndex && currentPage >= 0 && currentPage < section->pageCount) {
+  if (footnoteDepth > 0 && savedPositions[0].spineIndex == spineIndex && savedPositions[0].pageNumber == currentPage) {
+    offset = savedPositions[0].visibleTextOffset;
+  } else if (section && spineIndex == currentSpineIndex && currentPage >= 0 && currentPage < section->pageCount) {
     offset = (currentPage == section->currentPage && currentPageVisibleOffset.has_value())
                  ? currentPageVisibleOffset
                  : section->getVisibleTextOffsetForPage(static_cast<uint16_t>(currentPage));
@@ -2839,7 +2900,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
   if (!epub) return;
 
   if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
-    savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage};
+    savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage, currentPageVisibleOffset};
     footnoteDepth++;
     LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d", footnoteDepth, currentSpineIndex, section->currentPage);
   }
@@ -2882,6 +2943,10 @@ void EpubReaderActivity::restoreSavedPosition() {
     clearDeferredReposition();
     currentSpineIndex = pos.spineIndex;
     nextPageNumber = pos.pageNumber;
+    pendingAnchor.clear();
+    pendingPercentJump = false;
+    pendingPageJump.reset();
+    pendingOffsetJump = pos.visibleTextOffset;
     section.reset();
   }
   requestUpdate();

@@ -64,6 +64,7 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   if (!parsed.layoutAndExtractLines(renderer, fontId, static_cast<uint16_t>(textWidth),
                                     [&layout, maxLines](std::unique_ptr<TextBlock> line, uint32_t) {
                                       if (layout.lines.size() < maxLines) layout.lines.push_back(std::move(line));
+                                      return true;
                                     })) {
     layout.lines.clear();
   }

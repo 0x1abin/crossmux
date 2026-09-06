@@ -94,6 +94,7 @@ add_subdirectory(ligature_guard)
 add_subdirectory(page_link)
 add_subdirectory(ble_key_mapping)
 add_subdirectory(ble_input)
+add_subdirectory(reader_build_failure)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME PioarduinoCache

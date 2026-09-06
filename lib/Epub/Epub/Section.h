@@ -14,6 +14,13 @@ class ChapterHtmlSlimParser;
 class CssParser;
 
 class Section {
+ public:
+  enum class BuildError { None, OutOfMemory, InvalidData, Io };
+  BuildError buildError() const { return buildError_; }
+
+ private:
+  BuildError buildError_ = BuildError::None;
+  bool collectTouchLinks_ = false;
   std::shared_ptr<Epub> epub;
   const int spineIndex;
   GfxRenderer& renderer;
@@ -66,6 +73,7 @@ class Section {
   uint32_t partialBytesConsumed_ = 0;
   uint32_t partialTotalBytes_ = 0;
   bool finalizeBuild();
+  void releaseBuildResources();
   // Write the LUTs/anchor map (and, for a partial, the watermark trailer), patch the
   // header, stamp the version byte, and swap the tmp .bin over filePath.
   bool commitBuildFile(uint8_t version, uint32_t bytesConsumed, uint32_t totalBytes);
