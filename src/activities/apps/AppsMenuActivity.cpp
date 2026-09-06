@@ -125,8 +125,8 @@ static_assert(appBit(AppId::Woodfish) == (uint32_t{1} << 16), "Woodfish visibili
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
 static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
                   (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |
-                   appBit(AppId::Standby) | appBit(AppId::Buddy) | appBit(AppId::PixelSwitch)),
-              "the default mask must hide Chinese chess, Minesweeper, 2048, Standby, Buddy, and Pixel Switch");
+                   appBit(AppId::Buddy) | appBit(AppId::PixelSwitch)),
+              "the default mask must hide Chinese chess, Minesweeper, 2048, Buddy, and Pixel Switch");
 static_assert(visibleAppCount(0) == kAppCount, "a zero mask must show every compiled app");
 static_assert(visibleAppCount(UINT32_MAX) == 0, "a full mask must hide every compiled app");
 static_assert(visibleAppCount(appBit(AppId::Woodfish)) == kAppCount - 1, "the widened mask must hide Woodfish");

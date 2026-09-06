@@ -355,7 +355,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t inxLibraryLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   uint8_t inxAppsLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   // Show and enable the Standby shortcut on the home screen.
-  uint8_t standbyShortcutEnabled = 0;
+  uint8_t standbyShortcutEnabled = 1;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Power button return from footnotes (1 = enabled, 0 = disabled)
@@ -391,7 +391,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static constexpr uint8_t PIXEL_SWITCH_APP_ID = 12;
   static constexpr uint32_t CHINA_ONLY_APPS_MASK = (uint32_t{1} << 1) | (uint32_t{1} << 4);
   static constexpr uint32_t DEFAULT_HIDDEN_APPS_MASK = (uint32_t{1} << 4) | (uint32_t{1} << 5) | (uint32_t{1} << 6) |
-                                                       (uint32_t{1} << 8) | (uint32_t{1} << BUDDY_APP_ID) |
+                                                       (uint32_t{1} << BUDDY_APP_ID) |
                                                        (uint32_t{1} << PIXEL_SWITCH_APP_ID);
   uint32_t hiddenAppsMask = DEFAULT_HIDDEN_APPS_MASK;
   uint8_t appsCatalogVersion = APPS_CATALOG_VERSION;
