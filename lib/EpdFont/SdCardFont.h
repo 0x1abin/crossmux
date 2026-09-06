@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <sdkconfig.h>
+#endif
+
 #include "EpdFont.h"
 #include "EpdFontData.h"
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
@@ -41,7 +45,7 @@ class SdCardFont {
   SdCardFont(SdCardFont&&) = delete;
   SdCardFont& operator=(SdCardFont&&) = delete;
 
-  // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
+  // Load .cpfont file: validates coverage and records its resident or paged index.
   // Supports v4 (multi-style) format.
   // Returns true on success.
   bool load(const char* path, bool preferFlash = false, bool enablePsramGlyphCache = false);
@@ -185,6 +189,18 @@ class SdCardFont {
     static_assert(sizeof(BmpInterval16) == 6, "BmpInterval16 must remain compact");
     BmpInterval16* bmpIntervals = nullptr;
     bool intervalsAreBmp16 = false;
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+    static constexpr uint32_t INTERVAL_PAGE_SIZE = 32;
+    uint32_t* intervalPageStarts = nullptr;
+    EpdUnicodeInterval* intervalPage = nullptr;
+    mutable int32_t cachedIntervalPage = -1;
+#endif
+    bool hasCoverageIndex() const {
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+      if (intervalPageStarts) return true;
+#endif
+      return fullIntervals || bmpIntervals;
+    }
 
     // Persistent kern-class + ligature tables (lazy-loaded on first prewarm).
     // The full kern MATRIX is NOT resident — on Literata-class fonts a single
@@ -331,7 +347,11 @@ class SdCardFont {
   bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
-  int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
+  // -1 means absent; -2 means index I/O failed (never cache it as a missing glyph).
+  int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile* file = nullptr) const;
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  int32_t findPagedGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile& file) const;
+#endif
   enum class GlyphReadResult : uint8_t { CacheHit, SourceRead, Failed };
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
   bool ensureGlyphCache() const;
@@ -356,6 +376,6 @@ class SdCardFont {
   static const EpdGlyph* onGlyphMiss(void* ctx, uint32_t codepoint);
 
   // Static callback for EpdFontData::coverageHandler: answers hasCodepoint()
-  // from the RAM-resident full interval table, without SD I/O.
+  // through the same coverage index as prewarm and on-demand glyph lookup.
   static bool onCoverageQuery(void* ctx, uint32_t codepoint);
 };

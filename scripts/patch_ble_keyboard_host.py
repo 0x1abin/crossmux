@@ -30,15 +30,22 @@ def compile_compatible_host(build_env, node):
     )
     build_env.Depends(compatible, build_env.subst("$PROJECT_DIR/scripts/patch_ble_keyboard_host.py"))
     shim = build_env.subst("$PROJECT_DIR/src/platform/BtLibraryInUseShim.h")
+    config = build_env.GetProjectOption("custom_nimble_config", "")
+    config_flags = []
+    if config:
+        config = str(Path(build_env.subst("$PROJECT_DIR")) / config)
+        config_flags = ["-include", config]
     compiled = build_env.Object(
         compatible,
         CPPPATH=build_env.get("CPPPATH", []) + [str(Path(node.get_abspath()).parent)],
         # Custom-core bootstrap omits application sources, so the existing weak
         # flag must travel with this library in both bootstrap and final links.
         CCFLAGS=build_env.get("CCFLAGS", [])
-        + ["-include", shim],
+        + ["-include", shim] + config_flags,
     )[0]
     build_env.Depends(compiled, shim)
+    if config:
+        build_env.Depends(compiled, config)
     build_env.Depends(compiled, build_env.subst("$PROJECT_DIR/src/platform/BleIpcStack.h"))
     return compiled
 

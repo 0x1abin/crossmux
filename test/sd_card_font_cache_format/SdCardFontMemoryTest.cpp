@@ -18,8 +18,18 @@
 #undef private
 
 namespace SdCardFontCache {
-bool isValidFor(const char*, size_t*) { return false; }
-bool readAt(size_t, void*, size_t, size_t) { return false; }
+std::vector<uint8_t> flashBytes;
+bool failFlashRead = false;
+bool isValidFor(const char*, size_t* size) {
+  if (flashBytes.empty()) return false;
+  *size = flashBytes.size();
+  return true;
+}
+bool readAt(size_t offset, void* out, size_t bytes, size_t) {
+  if (failFlashRead || offset > flashBytes.size() || bytes > flashBytes.size() - offset) return false;
+  std::memcpy(out, flashBytes.data() + offset, bytes);
+  return true;
+}
 }  // namespace SdCardFontCache
 
 namespace {
@@ -69,6 +79,8 @@ class SdCardFontMemoryTest : public ::testing::Test {
   void TearDown() override {
     failArraySize = 0;
     failArrayAt = 0;
+    SdCardFontCache::flashBytes.clear();
+    SdCardFontCache::failFlashRead = false;
     ESP = {};
     std::filesystem::remove(path);
   }
@@ -173,3 +185,115 @@ TEST_F(SdCardFontMemoryTest, ReleasingResidentCachesClearsPublishedLigaturePoint
   EXPECT_NE(SdCardFont::onGlyphMiss(&font.overflowCtx_[0], 'B'), nullptr);
   EXPECT_EQ(font.getAdvanceOrLoad('B', 0), 13);
 }
+
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+namespace {
+std::vector<uint8_t> pagedFontBytes(uint32_t count = 4001, uint32_t first = 0x10000) {
+  std::vector<uint8_t> bytes(64 + count * sizeof(EpdUnicodeInterval) + count * 2 * sizeof(EpdGlyph), 0);
+  const auto put = [&bytes](size_t at, uint32_t value, size_t size) {
+    for (size_t i = 0; i < size; ++i) bytes[at + i] = static_cast<uint8_t>(value >> (i * 8));
+  };
+  std::memcpy(bytes.data(), "CPFONT\0\0", 8);
+  put(8, CPFONT_VERSION, 2);
+  bytes[12] = 1;
+  put(36, count, 4);
+  put(40, count * 2, 4);
+  bytes[44] = 18;
+  put(56, 64, 4);
+  for (uint32_t i = 0; i < count; ++i) {
+    const size_t at = 64 + i * sizeof(EpdUnicodeInterval);
+    put(at, first + i * 4, 4);
+    put(at + 4, first + i * 4 + 1, 4);
+    put(at + 8, i * 2, 4);
+    for (uint32_t j = 0; j < 2; ++j) {
+      EpdGlyph glyph{};
+      glyph.advanceX = 9 + j;
+      std::memcpy(bytes.data() + 64 + count * sizeof(EpdUnicodeInterval) + (i * 2 + j) * sizeof(EpdGlyph), &glyph,
+                  sizeof(glyph));
+    }
+  }
+  return bytes;
+}
+void writeFontBytes(const std::string& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+}  // namespace
+
+TEST_F(SdCardFontMemoryTest, PagedIndexMatchesFullLookupIncludingNonBmpAndPartialLastPage) {
+  writeFontBytes(path, pagedFontBytes());
+  failArraySize = 4001 * sizeof(EpdUnicodeInterval);
+  ASSERT_TRUE(font.load(path.c_str()));
+  auto& style = font.styles_[0];
+  ASSERT_NE(style.intervalPageStarts, nullptr);
+  EXPECT_EQ(style.fullIntervals, nullptr);
+  EXPECT_EQ(style.bmpIntervals, nullptr);
+  EXPECT_EQ(font.findGlobalGlyphIndex(style, 0xffff), -1);
+  arrayAllocations = 0;
+  for (uint32_t i = 0; i < 4001; ++i) {
+    for (uint32_t j = 0; j < 4; ++j) {
+      EXPECT_EQ(font.findGlobalGlyphIndex(style, 0x10000 + i * 4 + j), j < 2 ? static_cast<int32_t>(i * 2 + j) : -1);
+    }
+  }
+  EXPECT_EQ(arrayAllocations, 0U);
+  EXPECT_TRUE(SdCardFont::onCoverageQuery(&font.overflowCtx_[0], 0x10000));
+  EXPECT_EQ(font.getAdvanceOrLoad(0x10001, 0), 10);
+  const auto* glyph = SdCardFont::onGlyphMiss(&font.overflowCtx_[0], 0x10001);
+  ASSERT_NE(glyph, nullptr);
+  EXPECT_EQ(glyph->advanceX, 10);
+  const uint32_t cps[] = {0x10000, 0x10001, 0x10080, 0x13e80};
+  EXPECT_EQ(font.prewarmStyle(0, cps, 4, true, false), 0);
+  EXPECT_EQ(font.styles_[0].miniGlyphCount, 4U);
+  font.releaseResidentCaches();
+  EXPECT_TRUE(style.hasCoverageIndex());
+  EXPECT_EQ(font.getAdvanceOrLoad(0x10001, 0), 10);
+}
+
+TEST_F(SdCardFontMemoryTest, PagedIndexShortReadIsRetryableAndNotMissingCoverage) {
+  const auto bytes = pagedFontBytes();
+  writeFontBytes(path, bytes);
+  ASSERT_TRUE(font.load(path.c_str()));
+  std::filesystem::resize_file(path, 70);
+  EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x10000), -2);
+  EXPECT_EQ(font.styles_[0].cachedIntervalPage, -1);
+  const uint32_t cp = 0x10000;
+  EXPECT_EQ(font.prewarmStyle(0, &cp, 1, true, false), -1);
+  writeFontBytes(path, bytes);
+  EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], cp), 0);
+}
+
+TEST_F(SdCardFontMemoryTest, PagedIndexFallsBackFromFlashToSd) {
+  SdCardFontCache::flashBytes = pagedFontBytes();
+  writeFontBytes(path, SdCardFontCache::flashBytes);
+  ASSERT_TRUE(font.load(path.c_str(), true));
+  ASSERT_TRUE(font.usingFlash());
+  EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x10000), 0);
+  SdCardFontCache::failFlashRead = true;
+  EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x10080), 64);
+  EXPECT_FALSE(font.usingFlash());
+}
+
+TEST_F(SdCardFontMemoryTest, PagedIndexRejectsCorruptIntervalsAndReleasesFailedAllocations) {
+  auto bytes = pagedFontBytes();
+  bytes[64 + 8] = 7;  // first glyph offset must be zero
+  writeFontBytes(path, bytes);
+  EXPECT_FALSE(font.load(path.c_str()));
+  EXPECT_FALSE(font.loaded_);
+  writeFontBytes(path, pagedFontBytes());
+  for (const size_t bytesToFail : {size_t(126 * 4), size_t(32 * sizeof(EpdUnicodeInterval))}) {
+    failArraySize = bytesToFail;
+    EXPECT_FALSE(font.load(path.c_str()));
+    EXPECT_FALSE(font.styles_[0].hasCoverageIndex());
+  }
+  failArraySize = 0;
+  EXPECT_TRUE(font.load(path.c_str()));
+}
+
+TEST_F(SdCardFontMemoryTest, SmallBmpTableRetainsCompactResidentPath) {
+  writeFontBytes(path, pagedFontBytes(64, 0x4e00));
+  ASSERT_TRUE(font.load(path.c_str()));
+  EXPECT_EQ(font.styles_[0].intervalPageStarts, nullptr);
+  EXPECT_TRUE(font.styles_[0].intervalsAreBmp16);
+  EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x4e81), 65);
+}
+#endif

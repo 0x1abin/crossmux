@@ -63,7 +63,10 @@ void prepare(GfxRenderer& renderer) {
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
   bleinput::stop();
   prepare(renderer);
-  return WiFi.mode(mode);
+  bleinput::logDiagnostics("before WiFi mode");
+  const bool ok = WiFi.mode(mode);
+  bleinput::logDiagnostics(ok ? "after WiFi mode" : "WiFi mode failed");
+  return ok;
 }
 
 }  // namespace NetworkStartup

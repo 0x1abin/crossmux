@@ -42,3 +42,10 @@ add_test(NAME NimblePsramMiddleware
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_configure_nimble_psram.py)
 add_test(NAME BleHostCompat
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ble_host_compat.py)
+add_test(NAME BleHostStartup
+  COMMAND ${Python3_EXECUTABLE}
+    ${REPO_ROOT}/freeink-sdk/libs/network/BleKeyboardHost/test/host/test_startup.py)
+add_test(NAME BleC3Config
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ble_c3_config.py)
+add_test(NAME BleChapterLifecycle
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ble_chapter_lifecycle.py)

@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstring>
 
+#include "BleInput.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
@@ -259,6 +260,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
       RenderLock lock(*this);
       state_ = ERROR;
     }
+    requestUpdate();
     return;
   }
 
@@ -279,6 +281,7 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
       state_ = FAMILY_LIST;
     }
   }
+  requestUpdate();
 }
 
 bool FontDownloadActivity::startAutomaticDownload() {
@@ -353,6 +356,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     return false;
   }
 
+  bleinput::logDiagnostics("before font manifest parse");
   JsonDocument doc;
   DeserializationError err;
   bool manifestTooLarge = false;
@@ -369,6 +373,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     if (!manifestTooLarge) err = deserializeJson(doc, manifestFile);
   }
   Storage.remove(MANIFEST_TMP);
+  bleinput::logDiagnostics("after font manifest parse");
 
   if (manifestTooLarge) {
     LOG_ERR("FONT", "Manifest exceeds %zu bytes", kMaxManifestBytes);

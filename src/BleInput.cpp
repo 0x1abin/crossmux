@@ -109,28 +109,75 @@ void logMemory(const char* phase, const MemorySnapshot& memory) {
     char taskName[configMAX_TASK_NAME_LEN];
     snprintf(taskName, sizeof(taskName), "%s", name);
     if (const auto task = xTaskGetHandle(taskName)) {
-      LOG_INF("BLE", "stack remaining: %s=%u", taskName, static_cast<unsigned>(uxTaskGetStackHighWaterMark(task)));
+      LOG_INF("BLE", "stack remaining: %s=%u task=%p", taskName,
+              static_cast<unsigned>(uxTaskGetStackHighWaterMark(task)), task);
     }
   }
 #endif
 #endif
 }
 
-bool passesGate(const MemorySnapshot& memory, const StartContext context) {
+#if CONFIG_IDF_TARGET_ESP32C3 && !defined(SIMULATOR)
+void logInternalHeapBlocks() {
+  // IDF's heap dump uses the ROM console, not this board's USB log transport.
+  // Walking holds the heap lock: copy a small batch, then log AFTER unlocking.
+  // ponytail: repeated walks are acceptable for this once-per-boot C3 diagnostic.
+  struct Batch {
+    uintptr_t heap = 0;
+    uintptr_t after = 0;
+    uintptr_t nextHeap = UINTPTR_MAX;
+    size_t count = 0;
+    walker_block_info_t blocks[8];
+  } batch;
+  static_assert(sizeof(Batch) <= 256, "Heap diagnostic must keep a bounded stack footprint");
+  for (;;) {
+    batch.count = 0;
+    batch.nextHeap = UINTPTR_MAX;
+    heap_caps_walk(
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT,
+        [](walker_heap_into_t heap, walker_block_info_t block, void* context) {
+          auto& out = *static_cast<Batch*>(context);
+          const auto start = static_cast<uintptr_t>(heap.start);
+          if (start != out.heap) {
+            if (start > out.heap && start < out.nextHeap) out.nextHeap = start;
+            return false;
+          }
+          if (reinterpret_cast<uintptr_t>(block.ptr) <= out.after) return true;
+          out.blocks[out.count++] = block;
+          return out.count < sizeof(out.blocks) / sizeof(out.blocks[0]);
+        },
+        &batch);
+    if (batch.count == 0) {
+      if (batch.nextHeap == UINTPTR_MAX) break;
+      batch.heap = batch.nextHeap;
+      batch.after = 0;
+      continue;
+    }
+    for (size_t i = 0; i < batch.count; ++i) {
+      const auto& block = batch.blocks[i];
+      LOG_INF("BLE", "heap block: heap=%p addr=%p size=%u used=%u", reinterpret_cast<void*>(batch.heap), block.ptr,
+              static_cast<unsigned>(block.size), static_cast<unsigned>(block.used));
+    }
+    batch.after = reinterpret_cast<uintptr_t>(batch.blocks[batch.count - 1].ptr);
+  }
+}
+#endif
+
+enum class GateFailure : uint8_t { None, InternalFree, InternalBlock, Psram, HostStart };
+GateFailure lastGateFailure = GateFailure::None;
+StartContext lastGateContext = StartContext::Reader;
+
+GateFailure gateFailure(const MemorySnapshot& memory, const StartContext context) {
   const size_t minFree = context == StartContext::Reader ? kReaderMinFreeInternal : kExplicitMinFreeInternal;
   const size_t minLargest = context == StartContext::Reader ? kReaderMinLargestInternal : kExplicitMinLargestInternal;
-  LOG_INF("BLE", "start gate: internal=%u largest=%u required=%u/%u", static_cast<unsigned>(memory.freeInternal),
-          static_cast<unsigned>(memory.largestInternal), static_cast<unsigned>(minFree),
-          static_cast<unsigned>(minLargest));
-  if (memory.freeInternal < minFree || memory.largestInternal < minLargest) return false;
+  if (memory.freeInternal < minFree) return GateFailure::InternalFree;
+  if (memory.largestInternal < minLargest) return GateFailure::InternalBlock;
 #if CROSSPOINT_BLE_HOST_PSRAM && !defined(SIMULATOR)
   if (memory.freePsram < kMinFreePsram || memory.largestPsram < kMinLargestPsram) {
-    LOG_ERR("BLE", "PSRAM gate failed: required=%u/%u", static_cast<unsigned>(kMinFreePsram),
-            static_cast<unsigned>(kMinLargestPsram));
-    return false;
+    return GateFailure::Psram;
   }
 #endif
-  return true;
+  return GateFailure::None;
 }
 #endif
 
@@ -152,9 +199,9 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
 #else
   if (BleHid.isRunning()) return StartResult::AlreadyRunning;
 
-  auto memory = readMemory();
-  logMemory("before start", memory);
-  if (!passesGate(memory, context)) {
+  const auto before = readMemory();
+  auto memory = before;
+  if (gateFailure(memory, context) != GateFailure::None) {
     switch (context) {
       case StartContext::Reader:
         // Keep reading fonts registered; only discard rebuildable caches.
@@ -166,9 +213,32 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
         break;
     }
     memory = readMemory();
-    logMemory("after memory recovery", memory);
-    if (!passesGate(memory, context)) return StartResult::LowMemory;
   }
+  const auto failure = gateFailure(memory, context);
+  const bool repeatedHostFailure = lastGateFailure == GateFailure::HostStart && context == lastGateContext;
+  if ((failure == GateFailure::None && !repeatedHostFailure) ||
+      (failure != GateFailure::None && failure != lastGateFailure) || context != lastGateContext) {
+    logMemory("before start", before);
+    if (gateFailure(before, context) != GateFailure::None) logMemory("after memory recovery", memory);
+    LOG_INF("BLE", "start gate: internal=%u largest=%u required=%u/%u reason=%u",
+            static_cast<unsigned>(memory.freeInternal), static_cast<unsigned>(memory.largestInternal),
+            static_cast<unsigned>(context == StartContext::Reader ? kReaderMinFreeInternal : kExplicitMinFreeInternal),
+            static_cast<unsigned>(context == StartContext::Reader ? kReaderMinLargestInternal
+                                                                  : kExplicitMinLargestInternal),
+            static_cast<unsigned>(failure));
+  }
+  if (failure != GateFailure::None) lastGateFailure = failure;
+  lastGateContext = context;
+#if CONFIG_IDF_TARGET_ESP32C3 && !defined(SIMULATOR)
+  static bool dumpedFragmentedHeap = false;
+  const auto requiredBlock = context == StartContext::Reader ? kReaderMinLargestInternal : kExplicitMinLargestInternal;
+  if (!dumpedFragmentedHeap && memory.largestInternal < requiredBlock) {
+    dumpedFragmentedHeap = true;
+    LOG_INF("BLE", "First contiguous-block rejection: internal heap map follows (once per boot)");
+    logInternalHeapBlocks();
+  }
+#endif
+  if (failure != GateFailure::None) return StartResult::LowMemory;
 
 #if CROSSPOINT_BLE_HOST_PSRAM && !defined(SIMULATOR)
   // A stack buffer cannot verify the linked NimBLE allocator. Its C API owns
@@ -189,10 +259,14 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
 
   HalPowerManager::Lock powerLock;
   if (!BleHid.begin("CrossMux")) {
-    LOG_ERR("BLE", "BLE HID host start failed");
-    logDiagnostics("start failed");
+    if (!repeatedHostFailure) {
+      LOG_ERR("BLE", "BLE HID host start failed");
+      logDiagnostics("start failed");
+    }
+    lastGateFailure = GateFailure::HostStart;
     return StartResult::Failed;
   }
+  lastGateFailure = GateFailure::None;
   LOG_INF("BLE", "BLE HID host started");
   logDiagnostics("after start");
   return StartResult::Started;

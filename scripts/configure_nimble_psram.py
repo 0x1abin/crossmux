@@ -1,10 +1,13 @@
-"""Override the host allocator without changing the prebuilt core or libraries."""
+"""Override NimBLE host configuration without changing installed sources."""
 
 import os
 
 Import("env")  # noqa: F821
 
-config = os.path.join(env.subst("$PROJECT_DIR"), "src", "platform", "NimblePsramConfig.h")
+config = os.path.join(
+    env.subst("$PROJECT_DIR"),
+    env.GetProjectOption("custom_nimble_config", "src/platform/NimblePsramConfig.h"),
+)
 
 
 def configure_host(build_env, node):

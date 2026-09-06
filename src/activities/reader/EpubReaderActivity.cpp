@@ -186,6 +186,28 @@ uint8_t getStatsChapterProgressPercent(const int currentPage, const int pageCoun
 
 }  // namespace
 
+bool EpubReaderActivity::deferBluetoothStart() const {
+  // A null section also covers menu cancellation, chapter jumps and settings
+  // changes until renderBook has restored a readable cache. Partial caches
+  // near their watermark will immediately start another build in loop().
+  if (!section || section->isBuilding() || section->pageCount == 0) return true;
+  return section->isPartial() && failedBuildSpine_ != currentSpineIndex &&
+         section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount);
+}
+
+void EpubReaderActivity::prepareChapterBuild() {
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  bleinput::logDiagnostics("chapter prepare");
+#endif
+  bleinput::stop();
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  // Release rebuildable arenas before parser/LUT allocations interleave with
+  // them. Keep the selected font and its paged coverage index registered.
+  if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
+  bleinput::logDiagnostics("chapter caches released");
+#endif
+}
+
 EpubReaderActivity::~EpubReaderActivity() {
   ImageBlock::setExtractor(nullptr, nullptr);
   discardOverlayPage();
@@ -554,6 +576,7 @@ void EpubReaderActivity::loop() {
       section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount)) {
     RenderLock lock;
     const ReaderRenderSpec buildSpec = effectiveRenderSpec(buildViewportWidth, buildViewportHeight);
+    prepareChapterBuild();
     if (!section->startBuild(buildSpec)) {
       if (!handleBuildFailure("deferred partial start", section->buildError())) requestUpdate();
       return;
@@ -563,8 +586,17 @@ void EpubReaderActivity::loop() {
     }
   }
 
+  // A live parser retains the build heap even when parsing is idle. For C3 BLE,
+  // persist a window beyond the resume margin and release it before reconnecting.
+  bool suspendForBluetooth = false;
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  suspendForBluetooth = SETTINGS.bluetoothEnabled;
+#endif
+  const int buildWindow = suspendForBluetooth ? PARTIAL_REBUILD_START_MARGIN + BUILD_WINDOW_AHEAD : BUILD_WINDOW_AHEAD;
+  const bool pendingReposition = cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0;
   if (section && section->isBuilding() && !RenderLock::peek() &&
-      (section->isPartial() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD) &&
+      ((!suspendForBluetooth && section->isPartial()) || (suspendForBluetooth && pendingReposition) ||
+       static_cast<int>(section->pageCount) < section->currentPage + buildWindow) &&
       buildTickHeapGate()) {
     RenderLock lock;
     if (section->isBuilding() && buildTickHeapGate()) {
@@ -575,6 +607,20 @@ void EpubReaderActivity::loop() {
         requestUpdate();
       }
     }
+  }
+
+  if (suspendForBluetooth && section && section->isBuilding() && !RenderLock::peek() && !pendingReposition &&
+      static_cast<int>(section->pageCount) >= section->currentPage + buildWindow) {
+    RenderLock lock;
+    if (!section || !section->isBuilding() || cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0 ||
+        static_cast<int>(section->pageCount) < section->currentPage + buildWindow)
+      return;
+    section->suspendBuild();
+    if (section->buildError() != Section::BuildError::None) {
+      if (!handleBuildFailure("partial suspend", section->buildError())) requestUpdate();
+      return;
+    }
+    bleinput::logDiagnostics("chapter ready (partial)");
   }
 
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
@@ -1460,7 +1506,6 @@ void EpubReaderActivity::renderBook() {
             ? std::nullopt
             : cachedVisibleTextOffset;
     if (!cacheComplete) {
-      bleinput::stop();
       if (section->isPartial()) {
         LOG_DBG("ERS", "Partial cache found (%d pages), resuming build...", section->pageCount);
       } else {
@@ -1469,6 +1514,7 @@ void EpubReaderActivity::renderBook() {
 
       const bool needsFullBuild = pendingPercentJump;
       if (needsFullBuild) {
+        prepareChapterBuild();
         GUI.drawPopup(renderer, tr(STR_INDEXING));
         pagesUntilFullRefresh = 1;
         const auto popupFn = [this]() {
@@ -1511,6 +1557,7 @@ void EpubReaderActivity::renderBook() {
           const unsigned long buildStartMs = millis();
           bool started;
           {
+            prepareChapterBuild();
             GfxRenderer::FrameBufferLoan loan(renderer);
             started = section->startBuild(renderSpec, [this] { showBuildPopup(renderer, pagesUntilFullRefresh); });
           }
@@ -1585,7 +1632,7 @@ void EpubReaderActivity::renderBook() {
     pagesUntilFullRefresh = 1;
   }
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
-    bleinput::stop();
+    if (!section->isBuilding()) prepareChapterBuild();
     if (!section->isBuilding() && !section->startBuild(renderSpec)) {
       if (handleBuildFailure("partial start", section->buildError())) return;
       showBuildError();

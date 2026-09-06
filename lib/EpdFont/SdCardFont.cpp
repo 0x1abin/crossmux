@@ -339,6 +339,13 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
 
 void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  delete[] s.intervalPageStarts;
+  s.intervalPageStarts = nullptr;
+  delete[] s.intervalPage;
+  s.intervalPage = nullptr;
+  s.cachedIntervalPage = -1;
+#endif
   delete[] s.fullIntervals;
   s.fullIntervals = nullptr;
   delete[] s.bmpIntervals;
@@ -351,6 +358,17 @@ void SdCardFont::freeStyleAll(PerStyle& s) {
 // --- Global free/cleanup ---
 
 void SdCardFont::releaseResidentCaches() {
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  for (uint8_t i = 0; i < MAX_STYLES; ++i) {
+    const auto& s = styles_[i];
+    if (!s.present || (!s.miniBitmap && !s.miniGlyphs && !advanceTable_[i])) continue;
+    LOG_INF("SDCF", "Cache release: font=%p style=%u bitmap=%p/%u glyphs=%p/%u intervals=%p/%u advance=%p/%u", this, i,
+            s.miniBitmap, static_cast<unsigned>(s.miniBitmapCapacity), s.miniGlyphs,
+            static_cast<unsigned>(s.miniGlyphCapacity * sizeof(EpdGlyph)), s.miniIntervals,
+            static_cast<unsigned>(s.miniIntervalCapacity * sizeof(EpdUnicodeInterval)), advanceTable_[i],
+            static_cast<unsigned>(advanceTableSize_[i] * sizeof(AdvanceEntry)));
+  }
+#endif
   clearOverflow();
   clearPersistentCache();
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
@@ -666,7 +684,7 @@ void SdCardFont::applyGlyphMissCallback(uint8_t styleIdx) {
 bool SdCardFont::onCoverageQuery(void* ctx, const uint32_t codepoint) {
   const auto* octx = static_cast<OverflowContext*>(ctx);
   const PerStyle& s = octx->self->styles_[octx->styleIdx];
-  if (!s.fullIntervals && !s.bmpIntervals) return false;  // coverage index freed/never loaded
+  if (!s.hasCoverageIndex()) return false;  // coverage index freed/never loaded
   return octx->self->findGlobalGlyphIndex(s, codepoint) >= 0;
 }
 
@@ -870,7 +888,40 @@ bool SdCardFont::loadSelectedSource() {
       return false;
     }
 
-    if (canUseBmp16) {
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+    const size_t residentBytes =
+        s.header.intervalCount * (canUseBmp16 ? sizeof(PerStyle::BmpInterval16) : sizeof(EpdUnicodeInterval));
+    if (residentBytes > 4096) {
+      // Per loaded style: at most 512 B of starts + 384 B of reusable page data.
+      // Too large for a task stack; allocate once, release with the owning font.
+      const uint32_t pages = (s.header.intervalCount + PerStyle::INTERVAL_PAGE_SIZE - 1) / PerStyle::INTERVAL_PAGE_SIZE;
+      auto starts = makeUniqueNoThrow<uint32_t[]>(pages);
+      auto page = makeUniqueNoThrow<EpdUnicodeInterval[]>(PerStyle::INTERVAL_PAGE_SIZE);
+      if (!starts || !page) {
+        LOG_ERR("SDCF", "Failed to allocate paged index (%u + %u bytes)",
+                static_cast<unsigned>(pages * sizeof(uint32_t)),
+                static_cast<unsigned>(PerStyle::INTERVAL_PAGE_SIZE * sizeof(EpdUnicodeInterval)));
+        freeAll();
+        return false;
+      }
+      for (uint32_t j = 0; j < pages; ++j) {
+        if (!file.seekSet(s.intervalsFileOffset + j * PerStyle::INTERVAL_PAGE_SIZE * sizeof(EpdUnicodeInterval)) ||
+            file.read(&iv, sizeof(iv)) != sizeof(iv)) {
+          LOG_ERR("SDCF", "Failed to read interval page start %u", j);
+          freeAll();
+          return false;
+        }
+        starts[j] = iv.first;
+      }
+      s.intervalPageStarts = starts.release();
+      s.intervalPage = page.release();
+      LOG_INF(
+          "SDCF", "Paged index: %u intervals, %u bytes (resident table %u)", s.header.intervalCount,
+          static_cast<unsigned>(pages * sizeof(uint32_t) + PerStyle::INTERVAL_PAGE_SIZE * sizeof(EpdUnicodeInterval)),
+          static_cast<unsigned>(residentBytes));
+    }
+#endif
+    if (!s.hasCoverageIndex() && canUseBmp16) {
       s.bmpIntervals = new (std::nothrow) PerStyle::BmpInterval16[s.header.intervalCount];
       if (!s.bmpIntervals) {
         LOG_ERR("SDCF", "Failed to allocate compact intervals for style %u", i);
@@ -887,7 +938,7 @@ bool SdCardFont::loadSelectedSource() {
                              static_cast<uint16_t>(iv.offset)};
       }
       s.intervalsAreBmp16 = true;
-    } else {
+    } else if (!s.hasCoverageIndex()) {
       s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
       if (!s.fullIntervals) {
         LOG_ERR("SDCF", "Failed to allocate %u intervals for style %u", s.header.intervalCount, i);
@@ -928,7 +979,44 @@ bool SdCardFont::loadSelectedSource() {
 
 // --- Codepoint lookup ---
 
-int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const {
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+int32_t SdCardFont::findPagedGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile& file) const {
+  const uint32_t pages = (s.header.intervalCount + PerStyle::INTERVAL_PAGE_SIZE - 1) / PerStyle::INTERVAL_PAGE_SIZE;
+  const auto* end = std::upper_bound(s.intervalPageStarts, s.intervalPageStarts + pages, codepoint);
+  if (end == s.intervalPageStarts) return -1;
+  const uint32_t page = static_cast<uint32_t>(end - s.intervalPageStarts - 1);
+  const uint32_t first = page * PerStyle::INTERVAL_PAGE_SIZE;
+  const uint32_t count = std::min(PerStyle::INTERVAL_PAGE_SIZE, s.header.intervalCount - first);
+  if (s.cachedIntervalPage != static_cast<int32_t>(page)) {
+    s.cachedIntervalPage = -1;  // a short read must never publish a partial page
+    const size_t bytes = count * sizeof(EpdUnicodeInterval);
+    if (!file.seekSet(s.intervalsFileOffset + first * sizeof(EpdUnicodeInterval)) ||
+        file.read(s.intervalPage, bytes) != static_cast<int>(bytes)) {
+      LOG_ERR("SDCF", "Failed to read interval page %u", page);
+      return -2;
+    }
+    s.cachedIntervalPage = static_cast<int32_t>(page);
+  }
+  for (uint32_t i = 0; i < count; ++i) {
+    const auto& iv = s.intervalPage[i];
+    if (codepoint < iv.first) break;
+    if (codepoint <= iv.last) return static_cast<int32_t>(iv.offset + codepoint - iv.first);
+  }
+  return -1;
+}
+#endif
+
+int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile* file) const {
+#if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
+  if (s.intervalPageStarts) {
+    if (file) return findPagedGlyphIndex(s, codepoint, *file);
+    FontFile source(filePath_, &useFlash_, flashPayloadSize_);
+    return findPagedGlyphIndex(s, codepoint, source);
+  }
+#else
+  (void)file;
+#endif
+  if (!s.hasCoverageIndex()) return -1;
   int left = 0;
   int right = static_cast<int>(s.header.intervalCount) - 1;
   while (left <= right) {
@@ -1030,6 +1118,7 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
                              bool loadKernLig) {
   auto& s = styles_[styleIdx];
+  FontFile file(filePath_, &useFlash_, flashPayloadSize_);
 
   // Idle-prewarm hit: mini data persists across PrewarmScopes (resetStyleMiniData
   // keeps it), so when the previous scope -- typically the idle prewarm of this
@@ -1050,7 +1139,9 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
         }
       }
       if (inMini) continue;
-      if (findGlobalGlyphIndex(s, cp) < 0) {
+      const int32_t index = findGlobalGlyphIndex(s, cp, &file);
+      if (index == -2) return -1;
+      if (index < 0) {
         missedInMini++;  // not in font coverage: the rebuild couldn't load it either
       } else {
         covered = false;
@@ -1109,10 +1200,10 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   uint32_t bitmapBytes = 0;
   uint32_t coveredCount = 0;
   {
-    FontFile file(filePath_, &useFlash_, flashPayloadSize_);
     EpdGlyph glyph{};
     for (uint32_t i = 0; i < cpCount; ++i) {
-      const int32_t index = findGlobalGlyphIndex(s, codepoints[i]);
+      const int32_t index = findGlobalGlyphIndex(s, codepoints[i], &file);
+      if (index == -2) return -1;
       if (index < 0) continue;
       ++coveredCount;
       if (readGlyphMetadata(file, styleIdx, static_cast<uint32_t>(index), glyph, true) == GlyphReadResult::Failed) {
@@ -1168,7 +1259,8 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
 
   uint32_t validCount = 0;
   for (uint32_t i = 0; i < cpCount; i++) {
-    int32_t idx = findGlobalGlyphIndex(s, codepoints[i]);
+    int32_t idx = findGlobalGlyphIndex(s, codepoints[i], &file);
+    if (idx == -2) return -1;
     if (idx >= 0) {
       mappings[validCount].codepoint = codepoints[i];
       mappings[validCount].globalIndex = idx;
@@ -1222,8 +1314,6 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   }
 #endif
   s.miniGlyphCount = validCount;
-
-  FontFile file(filePath_, &useFlash_, flashPayloadSize_);
 
   unsigned long sdStart = millis();
   uint32_t seekCount = 0;
@@ -1472,10 +1562,9 @@ uint16_t SdCardFont::getAdvanceOrLoad(uint32_t codepoint, uint8_t style) const {
   // probes (e.g. the Han-column reference ideograph) legitimately miss here.
   const auto& s = styles_[styleIdx];
   if (!s.present) return 0;
-  const int32_t gIdx = findGlobalGlyphIndex(s, codepoint);
-  if (gIdx < 0) return 0;  // font genuinely lacks this glyph
-
   FontFile file(filePath_, &useFlash_, flashPayloadSize_);
+  const int32_t gIdx = findGlobalGlyphIndex(s, codepoint, &file);
+  if (gIdx < 0) return 0;  // absent glyph or a logged index read failure
   EpdGlyph glyph{};
   if (readGlyphMetadata(file, styleIdx, static_cast<uint32_t>(gIdx), glyph, true) == GlyphReadResult::Failed) {
     LOG_ERR("SDCF", "getAdvanceOrLoad: short glyph read for U+%04X (glyph %d)", codepoint, gIdx);
@@ -1492,6 +1581,7 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
   for (uint8_t si = 0; si < MAX_STYLES; si++) {
     if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
     const auto& s = styles_[si];
+    FontFile file(filePath_, &useFlash_, flashPayloadSize_);
 
     // Stop fetching once the cache is full — further inserts would be dropped
     // by the merge anyway. The renderer fast path tolerates missing entries
@@ -1520,11 +1610,13 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
 
     uint32_t needCount = 0;
     uint32_t missedThisStyle = 0;
-    const int32_t replacementIdx = findGlobalGlyphIndex(s, REPLACEMENT_GLYPH);
+    const int32_t replacementIdx = findGlobalGlyphIndex(s, REPLACEMENT_GLYPH, &file);
+    if (replacementIdx == -2) return -1;
     for (uint32_t i = 0; i < cpCount; i++) {
       const uint32_t cp = codepoints[i];
       if (advanceTableLookup(si, cp, nullptr)) continue;  // already cached
-      int32_t idx = findGlobalGlyphIndex(s, cp);
+      int32_t idx = findGlobalGlyphIndex(s, cp, &file);
+      if (idx == -2) return -1;
       if (idx < 0) {
         if (replacementIdx < 0) {
           missedThisStyle++;
@@ -1544,8 +1636,7 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
     std::sort(mappings.get(), mappings.get() + needCount,
               [](const CpIdx& a, const CpIdx& b) { return a.glyphIndex < b.glyphIndex; });
 
-    // Open file once and read advanceX for each needed glyph.
-    FontFile file(filePath_, &useFlash_, flashPayloadSize_);
+    // Reuse the index file for the glyph reads.
 
     std::unique_ptr<AdvanceEntry[]> staged(new (std::nothrow) AdvanceEntry[needCount]);
     if (!staged) {
@@ -1713,7 +1804,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
 
   if (!self->loaded_ || styleIdx >= MAX_STYLES || !self->styles_[styleIdx].present) return nullptr;
   const auto& s = self->styles_[styleIdx];
-  if (!s.fullIntervals && !s.bmpIntervals) return nullptr;
+  if (!s.hasCoverageIndex()) return nullptr;
 
   // Check overflow cache first (matching both codepoint and style)
   for (uint32_t i = 0; i < self->overflowCount_; i++) {
@@ -1722,8 +1813,8 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
     }
   }
 
-  // Look up global glyph index via full intervals
-  int32_t globalIdx = self->findGlobalGlyphIndex(s, codepoint);
+  FontFile file(self->filePath_, &self->useFlash_, self->flashPayloadSize_);
+  int32_t globalIdx = self->findGlobalGlyphIndex(s, codepoint, &file);
   if (globalIdx < 0) return nullptr;
 
   // Pick overflow slot (ring buffer). Read into temporaries first so the
@@ -1732,8 +1823,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   uint32_t slot = self->overflowNext_;
   bool wasAtCapacity = (self->overflowCount_ == OVERFLOW_CAPACITY);
 
-  // Read glyph metadata into temporary
-  FontFile file(self->filePath_, &self->useFlash_, self->flashPayloadSize_);
+  // Read glyph metadata into temporary using the index cursor.
   EpdGlyph tempGlyph = {};
   if (self->readGlyphMetadata(file, styleIdx, static_cast<uint32_t>(globalIdx), tempGlyph, true) ==
       GlyphReadResult::Failed) {

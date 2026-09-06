@@ -14,6 +14,8 @@
 #include <functional>
 #include <string>
 
+#include "BleInput.h"
+
 #if defined(FREEINK_NET_WOLFSSL)
 #include <SecureHttpClient.h>
 
@@ -105,7 +107,7 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 
     if (http.aborted()) return HttpDownloader::ABORTED;
     if (status < 0) {
-      LOG_ERR("HTTP", "wolfSSL request failed: %s", url.c_str());
+      LOG_ERR("HTTP", "wolfSSL request failed: status=%d url=%s", status, url.c_str());
       return HttpDownloader::HTTP_ERROR;
     }
     if (isRedirect(status)) {
@@ -252,11 +254,14 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
     LOG_ERR("HTTP", "User-Agent exceeds %zu bytes", sizeof(userAgent));
     return HttpDownloader::HTTP_ERROR;
   }
+  bleinput::logDiagnostics("before HTTP request");
 #if defined(FREEINK_NET_WOLFSSL)
-  return runGetWolf(url, username, password, userAgent, sink);
+  const auto result = runGetWolf(url, username, password, userAgent, sink);
 #else
-  return runGet(url, username, password, userAgent, sink);
+  const auto result = runGet(url, username, password, userAgent, sink);
 #endif
+  bleinput::logDiagnostics(result == HttpDownloader::OK ? "after HTTP request" : "HTTP request failed");
+  return result;
 }
 }  // namespace
 

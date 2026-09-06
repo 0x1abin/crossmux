@@ -59,9 +59,35 @@ not yet been quantified, so no measured power reduction is claimed. All S3
 targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
 
-Bluetooth Page Turner Beta is available in all seven S3 development and Nightly
-builds, including the build-only X4 Classic target. It is disabled by default;
-C3 and stable/release builds are unchanged.
+Bluetooth Page Turner Beta is compiled into all seven S3 development and Nightly
+builds, including the build-only X4 Classic target. The runtime setting is
+disabled by default. C3 `default`, stable/release, RC and slim profiles do not
+enable BLE. The C3 default-enablement candidate failed X4 font-load acceptance;
+its inactive `c3_ble` configuration is retained for diagnosis. See
+[testing-and-debugging.md](testing-and-debugging.md) for the hardware findings.
+
+The inactive C3 candidate profile rebuilds a controller-only Arduino core and uses pinned
+NimBLE-Arduino 2.3.8 for the host in internal RAM. `NimbleC3Config.h` is injected
+after core and NimBLE defaults into both NimBLE and the build-local SDK host copy: one
+Central/Observer connection, four bonds, MTU 23, and six blocks in each mbuf
+pool (256/320 bytes), and 12 high-priority HCI events. The C3-only post script
+selects the ESP-IDF Flash controller archive and removes the BT ROM function-table
+linker scripts to match `BT_CTRL_RUN_IN_FLASH_ONLY`; pioarduino otherwise retains
+Arduino's stock archive and ROM mappings after rebuilding the core. Mixing the
+Flash archive with these ROM mappings crashes controller initialization.
+No PSRAM allocator or S3 IPC stack wrapper is enabled.
+The pool sizes bound those buffers only, not the total host/controller heap.
+The SDK's 4096-byte connection worker stack remains dynamically allocated by
+FreeRTOS; its lifetime crosses frames. Task creation failure tears down the
+client and host and returns failure, leaving a later start able to retry.
+
+C3 BLE scans use callback-only NimBLE results; the SDK's existing fixed device
+list owns the copied addresses/names. Large SD-font coverage indexes (over 4 KiB
+resident) use 32-interval pages and a sparse first-codepoint table, without
+changing `.cpfont` or Flash-cache formats. A 4,000-interval style needs 884 B of
+index buffers instead of 48,000 B, plus per-style state and allocator overhead.
+Coverage queries can now read storage; prewarm batches reuse their file cursor.
+Small indexes and profiles without C3 BLE retain the resident representation.
 
 Sticky, X4 Pro, X4 Classic, Paper Mono, EEGO A4, Murphy M4 and Waveshare 3.97 BLE
 development/Nightly builds use `s3_ble_psram`. Its middleware forces the external

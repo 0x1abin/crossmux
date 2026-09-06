@@ -88,20 +88,25 @@ void updateBluetoothLifecycle() {
   static unsigned long nextStartAttemptAt = 0;
   const auto wanted = [] {
     return SETTINGS.bluetoothEnabled && activityManager.keepsBluetoothAlive() &&
-           !activityManager.deferBluetoothStart() && !activityManager.requiresExclusiveStorageLoop() &&
-           WiFi.getMode() == WIFI_MODE_NULL;
+           !activityManager.requiresExclusiveStorageLoop() && WiFi.getMode() == WIFI_MODE_NULL;
   };
   if (!wanted()) {
     bleinput::stop();
     return;
   }
-  if (bleinput::isRunning() || RenderLock::peek() || millis() < nextStartAttemptAt) return;
+  // Preparation blocks new starts, not a link held by a reader's menu. Actual
+  // build entrypoints stop BLE before allocating their working memory.
+  if (bleinput::isRunning() || activityManager.deferBluetoothStart() || RenderLock::peek() ||
+      millis() < nextStartAttemptAt)
+    return;
   // Non-reader pages that keep an existing link alive own their explicit start
   // attempts; only readers use the automatic reader-memory gate and retry loop.
   if (!activityManager.isReaderActivity()) return;
   RenderLock lock;
   // Rendering may have started a chapter build while we were acquiring the lock.
-  if (!wanted() || !activityManager.isReaderActivity() || bleinput::isRunning()) return;
+  if (!wanted() || activityManager.deferBluetoothStart() || !activityManager.isReaderActivity() ||
+      bleinput::isRunning())
+    return;
   const auto result = bleinput::ensureStarted(renderer, bleinput::StartContext::Reader);
   if (result == bleinput::StartResult::LowMemory || result == bleinput::StartResult::Failed) {
     nextStartAttemptAt = millis() + 2000;
