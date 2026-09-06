@@ -2,6 +2,7 @@
 #include <GfxRenderer.h>
 #include <Serialization.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <cstdlib>
@@ -98,7 +99,8 @@ class PageFootnoteOomTest : public ::testing::Test {
  protected:
   void SetUp() override {
     static std::atomic<unsigned> serial{0};
-    root_ = std::filesystem::temp_directory_path() / ("crossmux-footnote-oom-" + std::to_string(serial++));
+    root_ = std::filesystem::temp_directory_path() /
+            ("crossmux-footnote-oom-" + std::to_string(getpid()) + "-" + std::to_string(serial++));
     std::error_code error;
     std::filesystem::remove_all(root_, error);
     ASSERT_TRUE(std::filesystem::create_directories(root_, error));

@@ -3,6 +3,7 @@
 #include <EpdFontData.h>
 #include <SdCardFontCache.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstring>
 #include <deque>
@@ -39,7 +40,9 @@ void* operator new[](size_t size, const std::nothrow_t&) noexcept {
 class SdCardFontMemoryTest : public ::testing::Test {
  protected:
   SdCardFont font;
-  std::string path = (std::filesystem::temp_directory_path() / "crossmux-font-memory.cpfont").string();
+  std::string path =
+      (std::filesystem::temp_directory_path() / ("crossmux-font-memory-" + std::to_string(getpid()) + ".cpfont"))
+          .string();
   void SetUp() override {
     ESP = {};
     font.loaded_ = true;

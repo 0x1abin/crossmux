@@ -2,6 +2,7 @@
 #include <Epub/Page.h>
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
@@ -91,7 +92,8 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
     if (filepath != "unused.xhtml") std::filesystem::remove(filepath);
   }
   void writeHtml(const std::string& html) {
-    filepath = (std::filesystem::temp_directory_path() / "crossmux-parser-oom.xhtml").string();
+    filepath = (std::filesystem::temp_directory_path() / ("crossmux-parser-oom-" + std::to_string(getpid()) + ".xhtml"))
+                   .string();
     std::ofstream(filepath) << html;
   }
 };
@@ -334,7 +336,10 @@ class SectionMemoryTest : public ::testing::Test {
 
   void SetUp() override {
     ESP = {};
-    epub->cachePath = (std::filesystem::temp_directory_path() / "crossmux-section-memory-test").string();
+    // CTest launches each case in a separate process when running in parallel.
+    epub->cachePath =
+        (std::filesystem::temp_directory_path() / ("crossmux-section-memory-test-" + std::to_string(getpid())))
+            .string();
     std::filesystem::remove_all(epub->cachePath);
     std::filesystem::create_directories(epub->cachePath + "/html");
     spec.viewportWidth = 160;
