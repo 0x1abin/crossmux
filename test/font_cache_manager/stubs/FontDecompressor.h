@@ -12,7 +12,7 @@ class FontDecompressor {
     char text[32] = {};
   };
 
-  void clearCache() {}
+  void clearCache() { clearCacheCount++; }
   int prewarmCache(const EpdFontData* fontData, const char* text) {
     auto& call = prewarmCalls[prewarmCallCount++];
     call.fontData = fontData;
@@ -24,4 +24,5 @@ class FontDecompressor {
 
   PrewarmCall prewarmCalls[4] = {};
   int prewarmCallCount = 0;
+  int clearCacheCount = 0;
 };

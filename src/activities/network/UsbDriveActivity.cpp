@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 
+#include "BleInput.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
@@ -13,6 +14,7 @@
 namespace fui = freeink::ui;
 
 void UsbDriveActivity::onEnter() {
+  bleinput::stop();
   Activity::onEnter();
   resetUi();
   app.setScreen(&UsbDriveActivity::driveScreen, this);

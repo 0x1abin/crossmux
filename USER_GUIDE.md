@@ -294,6 +294,14 @@ The Settings screen allows you to configure the device's behavior. There are a f
 
 #### 3.6.3 Controls
 
+- **Bluetooth** *(ESP32-S3 development and Nightly builds only, Beta)*: Enable a
+  BLE HID page turner, scan for eight seconds, connect or disconnect a paired
+  remote, and configure its buttons. Choose an action first, then press the
+  remote key to map Page Forward, Page Back, Confirm, Back, or a direction.
+  Hold Confirm on a paired device to forget it. Bluetooth stops while Wi-Fi,
+  USB Drive, deep sleep, or uncached EPUB pagination needs the memory, then
+  reconnects automatically when reading resumes. The feature is off by default.
+
 - **Remap Front Buttons**: A menu for customising the function of each bottom edge button.
 
 - **Side Button Layout (reader)**: Swap the order of the up and down side buttons from "Prev/Next" (default) to "Next/Prev". You can also disable them entirely. This change is only in effect when reading.
