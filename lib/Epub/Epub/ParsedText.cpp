@@ -981,7 +981,8 @@ bool ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
   const size_t totalWordCount = words.size();
 
   // One fallible allocation holds both the DP cost and chosen break for every
-  // word. At the parser's 750-word soft limit this is 6 KB on ESP32.
+  // word. Each entry takes 8 bytes on ESP32; the count can grow when splitting
+  // overwide words or retaining an intact Ruby group.
   workspace = makeUniqueNoThrow<LineBreakState[]>(totalWordCount);
   if (!workspace) {
     LOG_ERR("PTX", "OOM: line-break workspace (%u words, %u bytes, free=%u, maxAlloc=%u)",

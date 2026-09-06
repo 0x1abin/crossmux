@@ -28,16 +28,10 @@
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
 constexpr size_t PARSE_BUFFER_SIZE = 1024;
 
-// This number comes from PR #73
-// If we have > 750 words buffered up, perform the layout and consume out all but the last line
-// There should be enough here to build out 1-2 full pages and doing this will free up a lot of
-// memory.
-// Spotted when reading Intermezzo, there are some really long text blocks in there.
+// Keep the larger basic-layout window on PSRAM targets. Constrained or styled
+// parsing uses the smaller window, retaining the last line at each soft flush.
 constexpr size_t TEXT_BLOCK_SOFT_FLUSH_WORDS = 750;
-
-// No-PSRAM devices also use this smaller window for basic layout. Disabling
-// CSS must not increase the paragraph peak. It fits a CJK page at font size 14.
-constexpr size_t TEXT_BLOCK_SOFT_FLUSH_WORDS_WITH_CSS = 320;
+constexpr size_t TEXT_BLOCK_SOFT_FLUSH_WORDS_CONSTRAINED = 320;
 
 // Hard cap on the number of anchor IDs recorded per chapter. Legitimate navigation
 // anchors (TOC entries, footnotes, cross-references) rarely exceed a few hundred per
@@ -1785,9 +1779,9 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
 void ChapterHtmlSlimParser::softFlushTextBlock() {
   if (hasFailed() || !currentTextBlock || inRuby || (insideTableCell && !tableRowStacked)) return;
 #ifdef BOARD_HAS_PSRAM
-  const size_t threshold = embeddedStyle ? TEXT_BLOCK_SOFT_FLUSH_WORDS_WITH_CSS : TEXT_BLOCK_SOFT_FLUSH_WORDS;
+  const size_t threshold = embeddedStyle ? TEXT_BLOCK_SOFT_FLUSH_WORDS_CONSTRAINED : TEXT_BLOCK_SOFT_FLUSH_WORDS;
 #else
-  const size_t threshold = TEXT_BLOCK_SOFT_FLUSH_WORDS_WITH_CSS;
+  const size_t threshold = TEXT_BLOCK_SOFT_FLUSH_WORDS_CONSTRAINED;
 #endif
   const size_t wordCount = currentTextBlock->size();
   if (wordCount <= threshold) return;
