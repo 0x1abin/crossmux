@@ -11,34 +11,29 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
         config.read(Path(__file__).resolve().parents[2] / "platformio.ini")
         devices = ("sticky", "x4pro", "x4c", "papermono", "eego_a4", "murphy_m4", "waveshare_epaper_397")
         for device in devices:
-            for suffix in ("", "_nightly"):
-                target = config[f"env:{device}{suffix}"]
-                with self.subTest(target=target.name):
-                    for option in ("lib_deps", "extra_scripts", "build_flags"):
-                        self.assertIn(f"${{s3_ble_psram.{option}}}", target[option])
-        for name in ("env:sticky", "env:sticky_nightly"):
-            self.assertEqual(config[name]["extends"], "sticky_hardware")
-            self.assertEqual(
-                config[name]["custom_sdkconfig"].split(),
-                ["${firmware_tuned.custom_sdkconfig}", "${s3_ble_controller.custom_sdkconfig}"],
-            )
-            self.assertNotIn("BOARD_HAS_PSRAM", config[name]["build_flags"])
+            hardware = f"{device}_hardware"
+            for option in ("lib_deps", "extra_scripts", "build_flags"):
+                self.assertIn(f"${{s3_ble_psram.{option}}}", config[hardware][option])
+            for name in config.sections():
+                if name.startswith("env:") and config[name].get("extends") == hardware:
+                    with self.subTest(target=name):
+                        self.assertIn(f"${{{hardware}.build_flags}}", config[name]["build_flags"])
+                        self.assertNotIn("lib_deps", config[name])
+                        self.assertNotIn("extra_scripts", config[name])
+        self.assertEqual(
+            config["sticky_hardware"]["custom_sdkconfig"].split(),
+            ["${firmware_tuned.custom_sdkconfig}", "${s3_ble_controller.custom_sdkconfig}"],
+        )
         self.assertNotIn("BOARD_HAS_PSRAM", config["sticky_hardware"]["build_flags"])
+        self.assertIn("CONFIG_ARDUINO_LOOP_STACK_SIZE=16384", config["eego_a4_hardware"]["custom_sdkconfig"])
         self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", config["s3_ble_controller"]["custom_sdkconfig"])
         self.assertIn("CONFIG_BT_NIMBLE_ENABLED=n", config["s3_ble_controller"]["custom_sdkconfig"])
 
-    def test_non_ble_profiles_do_not_inherit_ble_configuration(self):
+    def test_generic_base_and_simulators_do_not_inherit_radio_configuration(self):
         config = configparser.ConfigParser(interpolation=None)
         config.read(Path(__file__).resolve().parents[2] / "platformio.ini")
-        for name in config.sections():
-            if name.startswith("s3_ble") or name in ("c3_ble", "ble_host"):
-                continue
-            # BLE references belong only to the development/Nightly envs above,
-            # never shared hardware/base profiles or release/simulator envs.
-            if name.startswith("env:") and not (
-                "gh_release" in name or "simulator" in name or name in ("env:default", "env:slim")
-            ):
-                continue
+        for name in ("base", "firmware_tuned", "env:simulator", "env:simulator_x3",
+                     "env:simulator_eego_a4", "env:simulator_murphy_m4"):
             with self.subTest(profile=name):
                 for value in config[name].values():
                     self.assertNotIn("s3_ble", value)

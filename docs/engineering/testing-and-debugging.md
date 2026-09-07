@@ -191,10 +191,11 @@ local artifacts and are not committed to the repository.
 
 ### C3 Bluetooth page-turner development validation
 
-See [C3 Bluetooth](c3-bluetooth.md) for the opt-in build profile, lifecycle and
-font-memory ownership, reproducible checks, X4 evidence and remaining acceptance
-limits. Default/release BLE remains disabled. Distinguish host/build success,
-application hash verification and physical-device acceptance.
+See [C3 Bluetooth](c3-bluetooth.md) for the shared hardware build profiles,
+lifecycle and font-memory ownership, reproducible checks, X4 evidence and
+remaining acceptance limits. Hardware builds include BLE; the runtime switch
+defaults off. Distinguish host/build success, application hash verification
+and physical-device acceptance.
 
 ### Distinguishing TCP Stalls, Watchdogs, and Restarts
 
