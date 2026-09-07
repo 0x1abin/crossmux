@@ -53,11 +53,15 @@ shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
 CI workflow builds all four simulators and all seven S3 environments when
 hardware-sensitive files change, and can also be started manually.
 
-Bluetooth Page Turner Beta is compiled only into these seven S3 development and
-`*_nightly` environments. C3, release-candidate, stable, and `gh_release*`
-environments do not link the BLE host. Sticky and eego A4 use the custom-core
-controller-only NimBLE configuration; X4 Pro, X4 Classic, and PaperMono retain
-their prebuilt `dio_opi` core so the TinyUSB MSC component graph remains intact.
+Bluetooth Page Turner Beta is compiled into every hardware environment,
+including development, Nightly, release-candidate, stable, and slim builds.
+The runtime Bluetooth switch defaults to off; native simulators use SDK stubs.
+C3 environments inherit the internal-RAM and Flash-controller configuration
+from `c3_hardware`. S3 hardware profiles inherit the PSRAM and IPC configuration.
+Sticky and eego A4 use the custom-core controller-only NimBLE configuration;
+the other five S3 targets retain their prebuilt `dio_opi` core so the TinyUSB
+MSC component graph remains intact. See [C3 Bluetooth](c3-bluetooth.md) for
+memory gates, validation results, and remaining hardware acceptance work.
 
 The SDK's obsolete passkey callback is removed only from a generated source copy
 under `$BUILD_DIR/ble-compat`; the SDK and NimBLE dependency sources are never

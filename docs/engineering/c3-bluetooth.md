@@ -1,8 +1,10 @@
-# ESP32-C3 BLE page-turner candidate
+# ESP32-C3 BLE page-turner support
 
-The shared X3/X4 firmware has an **opt-in** C3 BLE profile. `default`, release,
-RC and slim builds remain BLE-off; the saved Bluetooth switch also defaults to
-off. X4 users have confirmed pairing, physical page/menu keys, chapter changes,
+All hardware firmware builds include BLE support, including the shared X3/X4
+`default`, release, RC and slim profiles. Compilation makes Bluetooth available
+in settings; the saved Bluetooth switch still defaults to **off**. Native
+simulators retain the SDK stub because they have no BLE radio backend.
+X4 users have confirmed pairing, physical page/menu keys, chapter changes,
 alternating EPUBs and subsequent reconnection. This is not X3 hardware acceptance
 or completion of the quantitative endurance matrix below.
 
@@ -39,22 +41,11 @@ reconnect loop, SDK public API, persistent setting or reader menu is introduced.
 
 ## Reproducible build
 
-Add this local-only environment to ignored `platformio.local.ini`:
-
-```ini
-[env:c3_ble_probe]
-extends = env:default
-lib_deps = ${c3_ble.lib_deps}
-extra_scripts = ${c3_ble.extra_scripts}
-custom_nimble_config = ${c3_ble.custom_nimble_config}
-custom_sdkconfig =
-  ${firmware_tuned.custom_sdkconfig}
-  ${c3_ble.custom_sdkconfig}
-build_flags =
-  ${env:default.build_flags}
-  ${c3_ble.build_flags}
-  -DCROSSPOINT_VERSION=\"${crosspoint.version}-dev-c3ble\"
-```
+No local override is needed. Build X3/X4 with `pio run -e default`,
+`-e gh_release`, `-e gh_release_rc`, or `-e slim`. Each inherits `c3_hardware`,
+which supplies the C3 host configuration, tuned controller-only core and Flash
+controller link script. The existing S3 hardware profiles supply their PSRAM
+host configuration to every firmware flavor, including release and RC.
 
 The common `ble_host` profile pins NimBLE-Arduino 2.3.8 and SDK compatibility
 middleware. C3 injects `NimbleC3Config.h` into both NimBLE and the SDK host:
@@ -81,7 +72,8 @@ cmake --build build/test --target ble_input_internal_tests ble_input_psram_tests
   ChapterHtmlSlimParserTest
 ctest --test-dir build/test --output-on-failure \
   -R 'Ble|Nimble|internal\.|psram\.|unavailable\.|SdCardFont|FontCacheManager|ChapterHtmlSlimParser|Section'
-pio run -e c3_ble_probe -e default -e gh_release -e murphy_m4
+pio run -e default -e gh_release -e gh_release_rc -e slim \
+  -e sticky-gh_release -e x4pro-gh_release -e x4c-gh_release -e papermono-gh_release
 ```
 
 Host checks exercise production lifecycle methods, startup failure/retry, input
@@ -89,17 +81,48 @@ isolation, CPU protection, profile/link isolation, paged/resident lookup agreeme
 non-BMP and page boundaries, corrupt files, allocation failures, short-read retry
 and Flash fallback. They do not model the actual controller or prove radio timing.
 
-The September 7 review passed 71 BLE/font checks and 23 chapter/parser checks,
-changed-file formatting, and all four builds above. Default/release ELFs exclude
-NimBLE and paged lookup; S3 retains its host/IPC wrapper and excludes the C3
-controller and paged lookup. C3 resolves controller initialization to Flash,
-includes paged lookup and omits the IPC wrapper. Upstream dependency warnings
-remain (WebSockets deprecation and Arduino/ESP-IDF dependencies).
-The exported compiler commands and preprocessing of actual NimBLE `ble_hs.c`
-and SDK host units confirm the C3 header, internal allocator, one connection,
-MTU 23, Central/Observer roles and 12 events; neither uses the PSRAM override.
+### All-hardware enablement (September 7)
 
-| Review build | Static DRAM | IRAM reservation | Program | Application image |
+All 26 committed hardware environments resolve to BLE-enabled PlatformIO
+configurations. The 14 existing S3 development/Nightly environments retain
+equivalent flags, dependencies, scripts and core options. The 94 related host
+checks and all 43 build/packaging script tests pass; these suites overlap.
+
+Eight firmware builds pass. Every ELF contains the NimBLE host. C3 controller
+initialization resolves to Flash and the actual exported core headers enable
+Flash/controller-only operation, without S3 IPC symbols. S3 retains PSRAM and
+IPC symbols without the C3 paged index or Flash controller; the three USB release
+ELFs also retain TinyUSB/MSC. Every application image passes checksum/hash
+validation. Download interruptions were resolved without source changes.
+
+| Build | Static DRAM | IRAM reservation | Program | Image | SHA256 prefix |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `default` | 65,116 B | 68,608 B | 6,269,913 B | 6,283,904 B | `951416473213` |
+| `gh_release` | 65,092 B | 68,608 B | 6,218,739 B | 6,232,736 B | `2606e030bf82` |
+| `gh_release_rc` | 65,092 B | 68,608 B | 6,218,779 B | 6,232,768 B | `b0f30f369b92` |
+| `slim` | 65,092 B | 68,608 B | 6,137,183 B | 6,151,168 B | `da8bd9c9294b` |
+| `sticky-gh_release` | 75,724 B | 85,248 B | 5,797,587 B | 5,798,096 B | `8b14e6db1cfa` |
+| `x4pro-gh_release` | 99,532 B | 85,760 B | 5,906,130 B | 5,906,640 B | `a9c86613588d` |
+| `x4c-gh_release` | 99,332 B | 85,248 B | 5,882,547 B | 5,883,056 B | `9adddf50f428` |
+| `papermono-gh_release` | 115,924 B | 85,760 B | 5,913,842 B | 5,914,352 B | `0ecddf432350` |
+
+Full hashes, ELF/map files, actual configuration headers and logs are local under
+`/private/tmp/crossmux-ble-all-builds/`. These images have not been flashed; the
+hardware evidence and remaining acceptance matrix below remain separate.
+
+### Earlier review and device evidence
+
+Before all-build enablement, the September 7 review passed 71 BLE/font checks,
+23 chapter/parser checks, changed-file formatting and the four historical
+builds below. At that point, default/release ELFs excluded NimBLE and paged
+lookup; the local C3 candidate included them and resolved controller startup
+to Flash. S3 retained its host/IPC wrapper without C3 code. The exported compiler
+commands and preprocessing of actual NimBLE `ble_hs.c` and SDK host units
+confirmed the C3 internal allocator, one connection, MTU 23, Central/Observer
+roles and 12 events. Upstream dependency warnings remained (WebSockets
+deprecation and Arduino/ESP-IDF dependencies).
+
+| Historical review build | Static DRAM | IRAM reservation | Program | Application image |
 | --- | ---: | ---: | ---: | ---: |
 | `default` | 57,412 B | 67,072 B | 5,896,729 B | 5,910,416 B |
 | `gh_release` | 57,388 B | 67,072 B | 5,845,085 B | 5,858,768 B |
@@ -164,6 +187,8 @@ Cover WenKai 16/18 and Noto, SD-direct and Flash-cached fonts, cold/hot chapter
 caches, and TXT/XTC lifecycle regression. Always verify physical buttons/menu
 response as well as HID delivery. Require at least 512 B task stack headroom,
 no font-selection loss, crashes or sustained decline in equivalent recovered
-heap states. A normal-reading gate failure blocks default enablement; do not
-lower thresholds to pass. X4 Flash JEDEC 85:2018 suspend support was not confirmed
-by the driver, so automatic Flash erase/write suspend remains disabled.
+heap states. Keep any normal-reading gate failure open as a stability issue;
+do not lower thresholds to pass. Enabling compilation in every build does not
+complete this hardware acceptance matrix. X4 Flash JEDEC 85:2018 suspend support
+was not confirmed by the driver, so automatic Flash erase/write suspend remains
+disabled.

@@ -59,22 +59,22 @@ not yet been quantified, so no measured power reduction is claimed. All S3
 targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
 
-Bluetooth Page Turner Beta is compiled into all seven S3 development and Nightly
-builds, including the build-only X4 Classic target. The runtime setting is
-disabled by default. C3 `default`, stable/release, RC and slim profiles do not
-enable BLE. The opt-in `c3_ble` candidate uses internal RAM, a Flash controller
-and paged coverage indexes for large SD fonts; it does not inherit S3 PSRAM or
-IPC flags. The HAL protects its entire BLE host lifetime from manual 10 MHz
-idle downclocking. X4 user tests confirm reading/page-turner operation, while
-quantitative endurance and X3 hardware acceptance remain separate.
-See [C3 Bluetooth](c3-bluetooth.md) for configuration, ownership and validation.
+Bluetooth Page Turner Beta is compiled into every hardware firmware flavor:
+development, Nightly, release, RC and slim where those profiles exist. The
+runtime setting remains disabled by default; existing saved choices are kept.
+Native simulator builds retain the BLE stub.
 
-Sticky, X4 Pro, X4 Classic, Paper Mono, EEGO A4, Murphy M4 and Waveshare 3.97 BLE
-development/Nightly builds use `s3_ble_psram`. Its middleware forces the external
-allocator configuration into NimBLE-Arduino sources only, after `sdkconfig.h`;
-the existing core, controller and task stacks are not migrated. Sticky retains
-its controller-only core and DRAM framebuffer. Release builds do not inherit
-this configuration.
+X3/X4 profiles share `c3_hardware`: internal RAM, a Flash controller and paged
+coverage indexes for large SD fonts. The HAL protects the entire C3 BLE host
+lifetime from manual 10 MHz idle downclocking. Sticky, X4 Pro, X4 Classic, Paper
+Mono, EEGO A4, Murphy M4 and Waveshare 3.97 inherit `s3_ble_psram` through their
+hardware profiles, including release/RC flavors. Sticky and EEGO keep their
+tuned controller-only cores; USB-capable boards keep the prebuilt TinyUSB graph.
+C3 never inherits the S3 allocator or IPC wrapper.
+
+X4 user tests confirm reading/page-turner operation; quantitative endurance and
+X3/other-board hardware acceptance remain separate. See
+[C3 Bluetooth](c3-bluetooth.md) for configuration, ownership and validation.
 
 The diagnostic PSRAM mode additionally requires 256 KiB free and a 32 KiB
 contiguous PSRAM block. Before starting the Host it allocates and immediately
