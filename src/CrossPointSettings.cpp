@@ -24,6 +24,8 @@
 // file that includes CrossPointSettings.h.
 uint8_t CrossPointSettings::defaultLanguageIndex() { return static_cast<uint8_t>(Language::EN); }
 
+uint8_t CrossPointSettings::defaultInxTabPosition() { return BoardConfig::hasTouch() ? INX_TAB_BOTTOM : INX_TAB_TOP; }
+
 namespace {
 
 constexpr uint8_t SETTINGS_FILE_VERSION = 2;
