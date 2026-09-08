@@ -99,3 +99,5 @@ add_subdirectory(reader_build_failure)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME PioarduinoCache
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_pioarduino_cache.py)
+add_test(NAME ControlCenterGesture
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_control_center_gesture.py)
