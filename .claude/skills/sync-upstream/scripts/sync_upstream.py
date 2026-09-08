@@ -681,7 +681,7 @@ def inspect_crossmux(
 
 def check_conflict_markers(root: Path) -> None:
     completed = git(
-        root, "grep", "-n", "-E", f"{'<' * 7}|{'>' * 7}", "--", ".", check=False
+        root, "grep", "-I", "-n", "-E", f"{'<' * 7}|{'>' * 7}", "--", ".", check=False
     )
     if completed.returncode == 0:
         raise RuntimeError("Conflict markers found in tracked files.")
@@ -731,7 +731,9 @@ def validate_sdk_candidate(
         run(["git", "clone", str(crossmux_root), str(checkout)], cwd=crossmux_root)
         if (checkout / "freeink-sdk").exists():
             shutil.rmtree(checkout / "freeink-sdk")
-        os.symlink(candidate, checkout / "freeink-sdk", target_is_directory=True)
+        # Materialize the reviewed index: symlinks break PlatformIO's path matching,
+        # and copying the worktree would also include unreviewed debug/build files.
+        git(candidate, "checkout-index", "--all", f"--prefix={checkout / 'freeink-sdk'}/")
         run_crossmux_builds(checkout, False, extra_envs)
 
 

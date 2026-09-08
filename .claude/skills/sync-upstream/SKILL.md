@@ -107,5 +107,11 @@ explicitly authorized:
 - CrossMux: index/conflict-marker checks, `git diff --check`, `pio run`,
   `pio run -e gh_release`, and extra build environments.
 
+SDK integration builds export the reviewed Git index into a real directory.
+This includes staged, uncommitted resolutions while excluding Git metadata and
+untracked/ignored debug artifacts; directory symlinks break PlatformIO's
+framework dependency path matching. Conflict-marker checks scan text files,
+so binary font bytes cannot produce false conflicts.
+
 Report local checks, dependency Draft PRs, CrossMux Draft PR, CI, deployment,
 and physical-device acceptance separately.
