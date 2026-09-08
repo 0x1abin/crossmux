@@ -83,30 +83,21 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   if (BleHid.isRunning()) enabled = false;
 #endif
 
-  // Note: We don't use mutex here to avoid too much overhead,
-  // it's not very important if we read a slightly stale value for currentLockMode
-  const LockMode mode = currentLockMode;
-
-  if (mode == None && enabled && !isLowPower) {
-    LOG_DBG("PWR", "Going to low-power mode");
-    if (!setCpuFrequencyMhz(LOW_POWER_FREQ)) {
-      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", LOW_POWER_FREQ);
-      return;
+  // Serialize the entire clock transition: Arduino's APB callbacks retain SPI
+  // locks between BEFORE/AFTER, so concurrent frequency changes can deadlock.
+  xSemaphoreTake(modeMutex, portMAX_DELAY);
+  const bool targetLowPower = enabled && currentLockMode == None;
+  if (isLowPower != targetLowPower) {
+    const int targetFrequency = targetLowPower ? LOW_POWER_FREQ : normalFreq;
+    if (setCpuFrequencyMhz(targetFrequency)) {
+      isLowPower = targetLowPower;
+      LOG_DBG("PWR", "CPU frequency now %u MHz", getCpuFrequencyMhz());
+    } else {
+      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", targetFrequency);
     }
-    isLowPower = true;
-    LOG_DBG("PWR", "CPU frequency now %u MHz", getCpuFrequencyMhz());
-
-  } else if ((!enabled || mode != None) && isLowPower) {
-    LOG_DBG("PWR", "Restoring normal CPU frequency");
-    if (!setCpuFrequencyMhz(normalFreq)) {
-      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", normalFreq);
-      return;
-    }
-    isLowPower = false;
-    LOG_DBG("PWR", "CPU frequency now %u MHz", getCpuFrequencyMhz());
   }
 
-  // Otherwise, no change needed
+  xSemaphoreGive(modeMutex);
 #endif
 }
 

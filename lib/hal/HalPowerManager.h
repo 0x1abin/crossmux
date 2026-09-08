@@ -22,7 +22,7 @@ class HalPowerManager {
 
   enum LockMode { None, NormalSpeed };
   LockMode currentLockMode = None;
-  SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
+  SemaphoreHandle_t modeMutex = nullptr;  // Protect lock mode, clock transitions, and isLowPower
 
  public:
   enum class LightSleepWakeReason : uint8_t { Timer, PowerButton, Failed };

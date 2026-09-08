@@ -22,19 +22,48 @@ class BleC3ConfigTest(unittest.TestCase):
             "void HalPowerManager::startDeepSleep", 1)[0]
         harness = r'''
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #define LOG_DBG(...) ((void)0)
 #define LOG_INF(...) ((void)0)
 constexpr int WIFI_MODE_NULL = 0;
+constexpr int portMAX_DELAY = -1;
 struct { int mode = 0; int getMode() { return mode; } } WiFi;
 struct { bool running = false; bool isRunning() { return running; } } BleHid;
 unsigned frequency = 160;
 unsigned getCpuFrequencyMhz() { return frequency; }
-bool setCpuFrequencyMhz(unsigned value) { frequency = value; return true; }
+std::mutex stateMutex, powerModeMutex;
+std::condition_variable changed;
+bool holdClock = false, insideClock = false, contended = false, overlap = false, failClock = false;
+int clockCalls = 0;
+void xSemaphoreTake(std::mutex* mutex, int) {
+    if (!mutex->try_lock()) {
+        { std::lock_guard<std::mutex> guard(stateMutex); contended = true; }
+        changed.notify_all();
+        mutex->lock();
+    }
+}
+void xSemaphoreGive(std::mutex* mutex) { mutex->unlock(); }
+bool setCpuFrequencyMhz(unsigned value) {
+    std::unique_lock<std::mutex> guard(stateMutex);
+    ++clockCalls;
+    overlap |= insideClock;
+    insideClock = true;
+    changed.notify_all();
+    changed.wait(guard, [] { return !holdClock; });
+    insideClock = false;
+    if (failClock) return false;
+    frequency = value;
+    return true;
+}
 struct HalPowerManager {
     enum LockMode { None, NormalSpeed };
     int normalFreq = 160;
     bool isLowPower = false;
     LockMode currentLockMode = None;
+    std::mutex* modeMutex = &powerModeMutex;
     static constexpr int LOW_POWER_FREQ = 10;
     void setPowerSaving(bool enabled);
 };
@@ -44,6 +73,8 @@ int main() {
     HalPowerManager power;
     power.setPowerSaving(true);
     assert(frequency == 10);
+    power.setPowerSaving(true);
+    assert(clockCalls == 1); // Repeated idle requests must not change the clock again.
     BleHid.running = true;
     power.setPowerSaving(true);
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
@@ -68,6 +99,45 @@ int main() {
     assert(frequency == 10);
     power.setPowerSaving(false);
     assert(frequency == 160);
+
+    // GPIO wake queues rendering while the idle main loop also requests normal
+    // speed under the render lock. Hold the first transition to force overlap.
+    power.isLowPower = true;
+    frequency = 10;
+    power.currentLockMode = HalPowerManager::NormalSpeed;
+    holdClock = true;
+    clockCalls = 0;
+    contended = false;
+    std::thread render([&] { power.setPowerSaving(false); });
+    { std::unique_lock<std::mutex> guard(stateMutex);
+      assert(changed.wait_for(guard, std::chrono::seconds(2), [] { return insideClock; })); }
+    std::thread mainLoop([&] { power.setPowerSaving(true); });
+    { std::unique_lock<std::mutex> guard(stateMutex);
+      assert(changed.wait_for(guard, std::chrono::seconds(2), [] { return contended || overlap; }));
+      holdClock = false; }
+    changed.notify_all();
+    render.join(); mainLoop.join();
+    assert(!overlap && clockCalls == 1 && frequency == 160 && !power.isLowPower);
+
+    // Both failed-transition paths must release the mutex and preserve state.
+    power.currentLockMode = HalPowerManager::None;
+    failClock = true;
+    power.setPowerSaving(true);
+    assert(!power.isLowPower && frequency == 160);
+    assert(powerModeMutex.try_lock()); powerModeMutex.unlock();
+    failClock = false;
+    power.setPowerSaving(true);
+    assert(power.isLowPower && frequency == 10);
+    failClock = true;
+    power.setPowerSaving(false);
+    assert(power.isLowPower && frequency == 10);
+    assert(powerModeMutex.try_lock()); powerModeMutex.unlock();
+    failClock = false;
+    power.setPowerSaving(false);
+    assert(!power.isLowPower && frequency == 160);
+    const int restoredCalls = clockCalls;
+    power.setPowerSaving(false);
+    assert(clockCalls == restoredCalls);
 }
 '''
         with tempfile.TemporaryDirectory() as directory:
@@ -76,10 +146,10 @@ int main() {
             exe = Path(directory) / "power"
             for c3, ble in ((1, 1), (1, 0), (0, 1)):
                 subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
-                    "-std=c++17", f"-DCONFIG_IDF_TARGET_ESP32C3={c3}",
+                    "-std=c++17", "-pthread", f"-DCONFIG_IDF_TARGET_ESP32C3={c3}",
                     f"-DFREEINK_CAP_BLE_HID_HOST={ble}", str(cpp), "-o", str(exe),
                 ], check=True, capture_output=True)
-                subprocess.run([str(exe)], check=True)
+                subprocess.run([str(exe)], check=True, timeout=10)
 
     def test_all_hardware_builds_enable_ble_with_target_specific_configuration(self):
         config = configparser.ConfigParser(interpolation=None)

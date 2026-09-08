@@ -50,6 +50,12 @@ if (Storage.openFileForRead("MODULE", "/path/to/file.bin", file)) {
 - `HalStorage` serializes everything via `storageMutex`. Downstream code uses `HalFile` (declared in `<HalStorage.h>`); every method call (read, write, seek, close) takes the mutex. `HalFile`'s destructor also takes the mutex before letting the underlying SdFat `FsFile` close.
 - **Never** call into `SdFat` / `SdSpiCard` / `FsBaseFile` / `SDCardManager` / raw `FsFile` directly — that bypasses the mutex.
 
+**CPU frequency changes must go through `HalPowerManager::setPowerSaving()`**:
+- `modeMutex` protects the target-mode decision, the entire `setCpuFrequencyMhz()` call, and the `isLowPower` update. Update state only after a successful transition; repeated requests for the current state do nothing.
+- Arduino's APB callbacks hold SPI locks between the BEFORE and AFTER callbacks. Concurrent frequency changes can deadlock: one task holds a SPI lock while waiting for the APB callback lock, and another holds the APB callback lock while waiting for that SPI lock. Serializing only the state assignment is insufficient.
+- `HalPowerManager::Lock` sets `NormalSpeed` under `modeMutex`, then releases the mutex **before** calling `setPowerSaving(false)`. Keep that ordering: the mutex is not recursive. Obtain the power lock before starting SPI work. The existing helper supports only one active power lock; it is not a nested-lock counter.
+- Preserve the Wi-Fi/C3 BLE host guards and board-specific frequency restrictions. Light sleep and CPU downclocking are separate decisions; fixing clock serialization must not disable either Bluetooth or standby light sleep.
+
 ---
 
 ## Common Patterns

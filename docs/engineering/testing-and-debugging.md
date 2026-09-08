@@ -292,3 +292,56 @@ GitHub publish job can continue.
 **Flush**: `logSerial.flush();` (force output before crash)
 
 **Port Detection**: Windows: `mode` | Linux: `ls /dev/ttyUSB* /dev/ttyACM*` or `dmesg | grep tty`
+
+### Standby power-button wake on X3/X4
+
+Test on battery power: USB prevents standby light sleep. Disconnect USB, enter
+standby, and leave it untouched for at least 45 seconds (the idle threshold is
+35 seconds). The title disappearing only indicates immersive display mode.
+During light sleep, other buttons should have no effect; a short power-button
+press and release should restore the title and hints without also confirming,
+turning a page, or entering sleep again.
+
+If the clock updates but power-button wake stalls, distinguish GPIO wake from
+the work after wake. Capture the GPIO level, sleep return value, wake reason,
+cleanup result, and entry/exit of CPU frequency restoration with task names.
+In the X4 regression, GPIO3 woke successfully, but `ActivityManager` and
+`loopTask` both entered frequency restoration and neither completed. Timer
+updates waited for rendering, so they did not expose the same concurrency.
+See the [clock serialization invariant](architecture-and-patterns.md).
+
+When collecting the existing RTC log ring (`lib/Logging/Logging.cpp`), avoid
+serial monitors that toggle DTR/RTS: a reset followed by normal startup clears
+the retained log. For a temporary diagnostic build with a log export command,
+open pyserial without changing those lines:
+
+```python
+import serial
+
+class NoResetSerial(serial.Serial):
+    def _update_dtr_state(self):
+        pass
+
+    def _update_rts_state(self):
+        pass
+
+with NoResetSerial("/dev/cu.usbmodem101", 115200, timeout=0.2) as port:
+    # Send the temporary build's log export command here, then read its reply.
+    pass
+```
+
+Reconnect promptly after the wake attempt; frequent draw logs can overwrite
+the small RTC ring. If the app is deadlocked, read RTC memory through the ROM
+loader without booting the app afterward, using symbol addresses from that
+exact ELF. Remove temporary diagnostics before the final build.
+
+Run `python3 -m unittest discover -v -s scripts/tests` for the compiled-production
+power regression in `test_ble_c3_config.py`. It covers BLE/Wi-Fi guards,
+concurrent restoration, repeated requests, failed transitions, and retries.
+Host tests do not prove physical sleep or Bluetooth page turning. Record each
+device and firmware hash separately, including:
+
+- BLE off: ten consecutive power-button wakes and at least ten minutes of clock updates.
+- BLE connected: five cycles of reading/page turning, standby, power-button wake, and resumed Bluetooth page turning.
+- No extra action from the wake gesture; normal buttons, display, and SD reading after leaving standby.
+- Whether the final build without diagnostics was flashed and retested. Report X3 and X4 results independently.
