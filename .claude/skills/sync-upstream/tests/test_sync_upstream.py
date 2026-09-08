@@ -285,6 +285,36 @@ class UpstreamSnapshotPinTest(unittest.TestCase):
 
 
 class BuildValidationTest(unittest.TestCase):
+    def test_sdk_build_materializes_only_the_reviewed_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            crossmux = root / "crossmux"
+            candidate = root / "sdk"
+            init_repo(crossmux)
+            commit_file(crossmux, "README.md", "fixture\n", "initial")
+            init_repo(candidate)
+            commit_file(candidate, "source.cpp", "old source\n", "initial")
+            (candidate / "source.cpp").write_text("reviewed source\n")
+            (candidate / ".gitignore").write_text("*.o\n")
+            command(candidate, "git", "add", "source.cpp", ".gitignore")
+            (candidate / "debug.cpp").write_text("unreviewed\n")
+            (candidate / "build.o").write_bytes(b"ignored build artifact")
+
+            def build(checkout, skipped, extras):
+                sdk = checkout / "freeink-sdk"
+                self.assertFalse(sdk.is_symlink())
+                self.assertEqual((sdk / "source.cpp").read_text(), "reviewed source\n")
+                for excluded in (".git", "debug.cpp", "build.o"):
+                    self.assertFalse((sdk / excluded).exists())
+                self.assertFalse(skipped)
+                self.assertEqual(extras, ["x4c"])
+
+            with patch.object(sync_upstream, "SDK_HOST_TESTS", ()), patch.object(
+                sync_upstream, "run_crossmux_builds", side_effect=build
+            ) as builds:
+                sync_upstream.validate_sdk_candidate(candidate, crossmux, False, ["x4c"])
+            builds.assert_called_once()
+
     def test_crossmux_uses_current_release_environment(self):
         with patch.object(sync_upstream, "run") as run:
             sync_upstream.run_crossmux_builds(Path("/tmp/crossmux"), False, ["extra"])
@@ -300,6 +330,18 @@ class BuildValidationTest(unittest.TestCase):
 
 
 class ReviewGateTest(unittest.TestCase):
+    def test_conflict_scan_ignores_binary_fonts_but_rejects_text_markers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            init_repo(root)
+            (root / "font.ttf").write_bytes(b"\0" + b">" * 7)
+            command(root, "git", "add", "font.ttf")
+            sync_upstream.check_conflict_markers(root)
+            (root / "source.cpp").write_text("<" * 7 + " HEAD\n")
+            command(root, "git", "add", "source.cpp")
+            with self.assertRaisesRegex(RuntimeError, "Conflict markers"):
+                sync_upstream.check_conflict_markers(root)
+
     def test_pr_body_pairs_each_review_item_with_its_decision(self):
         state = {
             "component": "sdk",
