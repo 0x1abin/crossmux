@@ -46,6 +46,7 @@
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+#include "util/ButtonNavigator.h"
 #include "util/ReadingBackground.h"
 #include "util/SystemSettingsReset.h"
 
@@ -59,14 +60,18 @@ enum class AboutRow : uint8_t {
   FirmwareName,
   FirmwareVersion,
   DeviceModel,
-  WifiMacAddress,
+  ChipModel,
   ChipTemperature,
+  WifiMacAddress,
   Uptime,
   HeapFreeTotal,
   LargestHeapBlock,
+  PsramHeapFreeTotal,
   SdUsedTotal,
   Count,
 };
+
+enum class StorageLoadState : uint8_t { Loading, Available, Unavailable };
 
 class AboutActivity final : public Activity {
  public:
@@ -76,22 +81,44 @@ class AboutActivity final : public Activity {
     Activity::onEnter();
     heapInfo = HalSystem::getHeapInfo();
     deviceName = BoardConfig::ACTIVE.name;
-    storageAvailable = Storage.getSpace(sdTotalBytes, sdFreeBytes);
 #ifdef SIMULATOR
+    chipModel = "Simulator";
     wifiMacAvailable = HalSystem::getDeviceId(wifiMac);
     uptimeSeconds = millis() / 1000;
 #else
+    chipModel = HalSystem::getChipModel();
     wifiMacAvailable = HalSystem::getWifiStationMac(wifiMac);
     float temperature = 0.0f;
     temperatureAvailable = HalSystem::getChipTemperatureCelsius(temperature);
     if (temperatureAvailable) chipTemperatureCelsius = static_cast<int>(std::lround(temperature));
     uptimeSeconds = HalSystem::getUptimeSeconds();
 #endif
+    storageLoadState = StorageLoadState::Loading;
+    requestUpdateAndWait();
+    storageLoadState =
+        Storage.getSpace(sdTotalBytes, sdFreeBytes) ? StorageLoadState::Available : StorageLoadState::Unavailable;
     requestUpdate();
   }
 
   void loop() override {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) finish();
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      finish();
+      return;
+    }
+
+    const int pageItems = GUI.getListPageItems(contentRect().height, false);
+    if (pageItems <= 0 || rowCount() <= pageItems) return;
+    int nextPageStart = pageStart;
+    const auto swipe = mappedInput.wasSwipe();
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) || swipe == MappedInputManager::SwipeDir::Up) {
+      nextPageStart = ButtonNavigator::nextPageIndex(pageStart, rowCount(), pageItems);
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) ||
+               swipe == MappedInputManager::SwipeDir::Down) {
+      nextPageStart = ButtonNavigator::previousPageIndex(pageStart, rowCount(), pageItems);
+    }
+    if (nextPageStart == pageStart) return;
+    pageStart = nextPageStart;
+    requestUpdate();
   }
 
   void render(RenderLock&&) override {
@@ -100,25 +127,62 @@ class AboutActivity final : public Activity {
     const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
     GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
                    tr(STR_ABOUT));
-    const Rect content{safeArea.x, safeArea.y + metrics.topPadding + metrics.headerHeight, safeArea.width,
-                       safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
+    const Rect content = contentRect();
     GUI.drawList(
-        renderer, content, static_cast<int>(AboutRow::Count), -1,
-        [](const int index) {
+        renderer, content, rowCount(), pageStart,
+        [this](const int index) {
           static constexpr StrId LABELS[] = {
-              StrId::STR_ABOUT_FIRMWARE_NAME,    StrId::STR_ABOUT_FIRMWARE_VERSION,   StrId::STR_ABOUT_DEVICE_MODEL,
-              StrId::STR_ABOUT_WIFI_MAC_ADDRESS, StrId::STR_ABOUT_CHIP_TEMPERATURE,   StrId::STR_ABOUT_UPTIME,
-              StrId::STR_ABOUT_HEAP_FREE_TOTAL,  StrId::STR_ABOUT_LARGEST_HEAP_BLOCK, StrId::STR_ABOUT_SD_USED_TOTAL,
+              StrId::STR_ABOUT_FIRMWARE_NAME,
+              StrId::STR_ABOUT_FIRMWARE_VERSION,
+              StrId::STR_ABOUT_DEVICE_MODEL,
+              StrId::STR_ABOUT_CHIP_MODEL,
+              StrId::STR_ABOUT_CHIP_TEMPERATURE,
+              StrId::STR_ABOUT_WIFI_MAC_ADDRESS,
+              StrId::STR_ABOUT_UPTIME,
+              StrId::STR_ABOUT_HEAP_FREE_TOTAL,
+              StrId::STR_ABOUT_LARGEST_HEAP_BLOCK,
+              StrId::STR_ABOUT_PSRAM_HEAP_FREE_TOTAL,
+              StrId::STR_ABOUT_SD_USED_TOTAL,
           };
-          return std::string(I18N.get(LABELS[index]));
+          static_assert(sizeof(LABELS) / sizeof(*LABELS) == static_cast<size_t>(AboutRow::Count));
+          return std::string(I18N.get(LABELS[static_cast<size_t>(rowAt(index))]));
         },
-        nullptr, nullptr, [this](const int index) { return rowValue(static_cast<AboutRow>(index)); }, false, nullptr);
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+        nullptr, nullptr, [this](const int index) { return rowValue(rowAt(index)); }, false, nullptr, false);
+    const bool canPage = rowCount() > GUI.getListPageItems(content.height, false);
+    const auto labels =
+        mappedInput.mapLabels(tr(STR_BACK), "", canPage ? tr(STR_DIR_UP) : "", canPage ? tr(STR_DIR_DOWN) : "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
   }
 
  private:
+  Rect contentRect() const {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    return Rect{safeArea.x, safeArea.y + metrics.topPadding + metrics.headerHeight, safeArea.width,
+                safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
+  }
+
+  bool hasPsram() const {
+#ifdef SIMULATOR
+    return false;
+#else
+    return heapInfo.totalPsramBytes > 0;
+#endif
+  }
+
+  int rowCount() const {
+    constexpr int psramRows = 1;
+    return static_cast<int>(AboutRow::Count) - (hasPsram() ? 0 : psramRows);
+  }
+
+  AboutRow rowAt(const int index) const {
+    if (!hasPsram() && index >= static_cast<int>(AboutRow::PsramHeapFreeTotal)) {
+      return static_cast<AboutRow>(index + 1);
+    }
+    return static_cast<AboutRow>(index);
+  }
+
   std::string rowValue(const AboutRow row) const {
     char value[48];
     switch (row) {
@@ -128,6 +192,8 @@ class AboutActivity final : public Activity {
         return CROSSPOINT_VERSION;
       case AboutRow::DeviceModel:
         return deviceName ? deviceName : tr(STR_NOT_AVAILABLE);
+      case AboutRow::ChipModel:
+        return chipModel ? chipModel : tr(STR_NOT_AVAILABLE);
       case AboutRow::WifiMacAddress:
         if (!wifiMacAvailable) return tr(STR_NOT_AVAILABLE);
         snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X", wifiMac[0], wifiMac[1], wifiMac[2], wifiMac[3],
@@ -151,8 +217,23 @@ class AboutActivity final : public Activity {
       case AboutRow::LargestHeapBlock:
         snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(heapInfo.largestFreeBlockBytes / 1024));
         return value;
+      case AboutRow::PsramHeapFreeTotal:
+#ifdef SIMULATOR
+        return tr(STR_NOT_AVAILABLE);
+#else
+        snprintf(value, sizeof(value), "%lu / %lu", static_cast<unsigned long>(heapInfo.freePsramBytes / 1024),
+                 static_cast<unsigned long>(heapInfo.totalPsramBytes / 1024));
+        return value;
+#endif
       case AboutRow::SdUsedTotal: {
-        if (!storageAvailable) return tr(STR_NOT_AVAILABLE);
+        switch (storageLoadState) {
+          case StorageLoadState::Loading:
+            return tr(STR_LOADING);
+          case StorageLoadState::Unavailable:
+            return tr(STR_NOT_AVAILABLE);
+          case StorageLoadState::Available:
+            break;
+        }
         const uint64_t usedTenths = (sdTotalBytes - sdFreeBytes + BYTES_PER_TENTH_GB / 2) / BYTES_PER_TENTH_GB;
         const uint64_t totalTenths = (sdTotalBytes + BYTES_PER_TENTH_GB / 2) / BYTES_PER_TENTH_GB;
         snprintf(value, sizeof(value), "%llu.%llu / %llu.%llu", static_cast<unsigned long long>(usedTenths / 10),
@@ -169,13 +250,15 @@ class AboutActivity final : public Activity {
   HalSystem::HeapInfo heapInfo{};
   HalSystem::DeviceId wifiMac{};
   const char* deviceName = nullptr;
+  const char* chipModel = nullptr;
   uint64_t uptimeSeconds = 0;
   uint64_t sdTotalBytes = 0;
   uint64_t sdFreeBytes = 0;
   int chipTemperatureCelsius = 0;
   bool wifiMacAvailable = false;
   bool temperatureAvailable = false;
-  bool storageAvailable = false;
+  StorageLoadState storageLoadState = StorageLoadState::Loading;
+  int pageStart = 0;
 };
 }  // namespace
 

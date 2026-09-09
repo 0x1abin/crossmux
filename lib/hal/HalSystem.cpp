@@ -135,6 +135,8 @@ void clearPanic() {
 
 const char* getDeviceModel() { return BoardConfig::ACTIVE.name; }
 
+const char* getChipModel() { return ESP.getChipModel(); }
+
 bool getDeviceId(DeviceId& out) {
   out.fill(0);
   if (esp_efuse_mac_get_default(out.data()) != ESP_OK) {
@@ -188,7 +190,8 @@ uint64_t getUptimeSeconds() { return static_cast<uint64_t>(esp_timer_get_time())
 
 HeapInfo getHeapInfo() {
   return {static_cast<uint32_t>(ESP.getFreeHeap()), static_cast<uint32_t>(ESP.getHeapSize()),
-          static_cast<uint32_t>(ESP.getMaxAllocHeap())};
+          static_cast<uint32_t>(ESP.getMaxAllocHeap()), static_cast<uint32_t>(ESP.getFreePsram()),
+          static_cast<uint32_t>(ESP.getPsramSize())};
 }
 
 std::string getPanicInfo(bool full) {
