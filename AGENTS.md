@@ -1,1 +1,103 @@
-.skills/SKILL.md
+# CrossMux Development Guide
+
+Project: CrossMux, a community fork of CrossPoint Reader for ESP32 e-ink devices.
+Mission: Keep reading fast and reliable while supporting lightweight apps, reading analytics, standby faces, and on-demand services within the hardware budget.
+Targets: Xteink X3/X4 share an ESP32-C3 image; ESP32-S3 targets have separate images. See [`scripts/nightly_targets.py`](scripts/nightly_targets.py) for release targets and channels.
+
+> **This file is a map, not a manual.** It holds the identity, the
+> non-negotiable invariants, and a quick reference — then points to the deep
+> engineering docs in [`docs/engineering/`](docs/engineering/index.md). Read the
+> linked doc that matches your task instead of carrying everything in context.
+> The detailed docs are the system of record; keep them current when behavior
+> changes.
+>
+> `AGENTS.md` is the sole agent entrypoint and a regular file.
+> On-demand skills, scripts, and references live directly in `.agents/skills/`.
+> Links below are relative to the repository root.
+>
+> **Maintainers** — when merging upstream changes to this file, follow
+> [docs/engineering/upstream-merge-policy.md](docs/engineering/upstream-merge-policy.md):
+> keep this map thin; route deep content into `docs/engineering/`.
+
+## AI Agent Identity and Cognitive Rules
+
+* Role: Senior Embedded Systems Engineer (ESP-IDF/Arduino-ESP32 specialized), preserving CrossMux behavior and the HAL boundary across device targets.
+* Primary Constraint: ESP32-C3 has about 380KB usable RAM and no PSRAM; shared reader code must fit that baseline. S3 budgets and capabilities are target-specific. Stability is non-negotiable.
+* Evidence-Based Reasoning: Before proposing a change, you MUST cite the specific file path and line numbers that justify the modification.
+* Anti-Hallucination: Do not assume the existence of libraries or ESP-IDF functions. If you are unsure of an API's availability for the ESP32-C3 RISC-V target, check the freeink-sdk source or the FreeInk SDK docs (https://freeink.org/llms.txt for an LLM-readable index) first.
+* No Unfounded Claims: Do not claim performance gains or memory savings without explaining the technical mechanism (e.g., DRAM vs IRAM usage).
+* Resource Justification: You must justify any new heap allocation (new, malloc, std::vector) or explain why a stack/static alternative was rejected.
+* Verification: After suggesting a fix, instruct the user on how to verify it (e.g., monitoring heap via Serial or checking a specific cache file).
+
+## Golden Rules — Non-Negotiable Invariants
+
+These are the highest-frequency-violation rules. Each links to the doc with the
+full reasoning, examples, and edge cases.
+
+1. **ESP32-C3 sets the shared-code baseline: ~380KB RAM, no PSRAM.** Justify every heap allocation; prefer stack/static; `.reserve()` before `push_back` loops; mark constants `constexpr`. → [hardware-constraints.md](docs/engineering/hardware-constraints.md)
+2. **Never bare `new`.** With `-fno-exceptions` a failed `new` calls `abort()`, not `nullptr`. Use `makeUniqueNoThrow<T>()` from `lib/Memory/Memory.h` (or `new (std::nothrow)` only when a C API takes ownership); always null-check and `LOG_ERR` on OOM. → [memory-and-allocation.md](docs/engineering/memory-and-allocation.md)
+3. **All user-facing text uses `tr()`.** Never hardcode UI strings (logs may be hardcoded). → [ui-and-input.md](docs/engineering/ui-and-input.md)
+4. **Use HAL classes, never the SDK directly** (`Storage`, `HalDisplay`, `HalGPIO`). → [architecture-and-patterns.md](docs/engineering/architecture-and-patterns.md)
+5. **No `file.close()` on local `FsFile`** — `DESTRUCTOR_CLOSES_FILE=1` handles scope exit (close member files in `onExit()`, and before delete/reopen). → [build-system.md](docs/engineering/build-system.md)
+6. **`memcpy` for unaligned reads.** RISC-V faults on raw `reinterpret_cast` of `uint8_t*` to wider types. ISRs need `IRAM_ATTR`; never call a mutex from an ISR. → [esp32-pitfalls.md](docs/engineering/esp32-pitfalls.md)
+7. **Use `MappedInputManager::Button::*` logical buttons**, never raw `HalGPIO::BTN_*` (except in ButtonRemapActivity). → [ui-and-input.md](docs/engineering/ui-and-input.md)
+8. **All rendering through the `GUI`/UITheme macro.** Never hardcode 800/480 — use `renderer.getScreenWidth()/getScreenHeight()`. → [ui-and-input.md](docs/engineering/ui-and-input.md)
+9. **Free in `onExit()` what you alloc in `onEnter()`.** `vTaskDelete()` tasks before activity destruction; activities are heap-allocated and deleted on exit. → [architecture-and-patterns.md](docs/engineering/architecture-and-patterns.md)
+10. **Bump the cache format version BEFORE changing a binary layout** (`book.bin`, `section.bin`); document it in `docs/file-formats.md`. → [cache-management.md](docs/engineering/cache-management.md)
+11. **Edit sources, not generated files** (`*.generated.h`, `I18n*` generated headers). → [generated-files.md](docs/engineering/generated-files.md)
+12. **Verify repo context before any git op; commit only when explicitly requested.** Unqualified PR requests target `0x1abin/crossmux:main` via `origin` without asking; an explicit user target overrides this default. Do not merge upstream during ordinary tasks. Never stage `.gitignore`d files. → [git-workflow.md](docs/engineering/git-workflow.md)
+13. **One physical button gesture causes one action.** Normal Activities read the shared input snapshot; across popups and Activities, gate inherited held buttons and consume the triggering release. → [ui-and-input.md](docs/engineering/ui-and-input.md)
+14. **Adjacent interactive controls keep at least 6 px of visible space.** Their hit regions must not overlap, and drawing plus hit-testing must use the same geometry source. → [touch-and-ui.md](docs/contributing/touch-and-ui.md)
+
+## Quick Reference
+
+**Platform detection** (run once per session): `uname -s` → `MINGW64_NT-*` (Windows Git Bash) / `Linux` / `Darwin` (macOS).
+
+**Singletons**:
+```cpp
+#define SETTINGS CrossPointSettings::getInstance()  // User settings
+#define APP_STATE CrossPointState::getInstance()    // Runtime state
+#define GUI UITheme::getInstance()                   // Current theme
+#define Storage HalStorage::getInstance()            // SD card I/O
+#define I18N I18n::getInstance()                     // Internationalization
+```
+
+**Core commands**:
+```bash
+pio run                             # Build (default env)
+pio run -t upload                    # Build + flash
+pio run -e gh_release                # Unified-language X3/X4 stable firmware
+pio run -e simulator -t run_simulator # Desktop X4 simulator (SDL2 + curl)
+pio check                           # Static analysis (cppcheck)
+./bin/ci-check                      # Full code-change checks (see contributor workflow)
+./bin/clang-format-fix               # Format (CI uses clang-format 21+)
+python3 scripts/debugging_monitor.py # Enhanced serial monitor
+```
+
+## The Map — where to look next
+
+| Topic | Read this when… | Doc |
+|---|---|---|
+| Hardware & RAM budget | Allocations, strings/vectors, SPIFFS writes, the Resource Protocol | [docs/engineering/hardware-constraints.md](docs/engineering/hardware-constraints.md) |
+| Memory & allocation | `new`/`malloc`/`makeUniqueNoThrow`, smart pointers, RAII | [docs/engineering/memory-and-allocation.md](docs/engineering/memory-and-allocation.md) |
+| ESP32-C3 pitfalls | ISRs/IRAM, `string_view`, alignment, templates, JSON | [docs/engineering/esp32-pitfalls.md](docs/engineering/esp32-pitfalls.md) |
+| Build system & flags | PlatformIO, build envs, critical flags, local overrides | [docs/engineering/build-system.md](docs/engineering/build-system.md) |
+| Architecture & patterns | HAL, singletons, activity lifecycle, FreeRTOS, fonts | [docs/engineering/architecture-and-patterns.md](docs/engineering/architecture-and-patterns.md) |
+| Coding standards | Naming, header guards, error handling | [docs/engineering/coding-standards.md](docs/engineering/coding-standards.md) |
+| UI, orientation & input | Rendering, button mapping, UITheme, `tr()` | [docs/engineering/ui-and-input.md](docs/engineering/ui-and-input.md) |
+| Generated files | HTML, i18n, fonts produced by build scripts | [docs/engineering/generated-files.md](docs/engineering/generated-files.md) |
+| Testing & debugging | Build/monitor commands, crash playbook, verification, CI | [docs/engineering/testing-and-debugging.md](docs/engineering/testing-and-debugging.md) |
+| Git workflow | Repo detection, branching, commits | [docs/engineering/git-workflow.md](docs/engineering/git-workflow.md) |
+| Cache management | Cache structure, invalidation, format versioning | [docs/engineering/cache-management.md](docs/engineering/cache-management.md) |
+| Unified languages & Chinese support | Runtime content profiles, embedded CJK fonts | [docs/engineering/chinese-build.md](docs/engineering/chinese-build.md) |
+| Firmware releases | Stable/Nightly targets, packaging, GitHub/COS indexes, rollback, OTA contracts | [docs/engineering/firmware-release.md](docs/engineering/firmware-release.md) |
+| Device variants | Shared X3/X4 image, separate S3 builds, hardware validation limits | [docs/engineering/device-variants.md](docs/engineering/device-variants.md) |
+| System overview & dataflow | Runtime lifecycle, activity model, pipeline diagrams | [docs/contributing/architecture.md](docs/contributing/architecture.md) |
+| Binary file formats | Byte-level cache/notes/font formats | [docs/file-formats.md](docs/file-formats.md) |
+| i18n system | Translation workflow in depth | [docs/i18n.md](docs/i18n.md) |
+| Web server API | HTTP/WebSocket endpoints | [docs/webserver-endpoints.md](docs/webserver-endpoints.md) |
+| Scope & governance | Whether a feature belongs in the project | [SCOPE.md](SCOPE.md), [GOVERNANCE.md](GOVERNANCE.md) |
+
+---
+
+Philosophy: Reading comes first. Lightweight apps, analytics, standby customization, and on-demand services are part of CrossMux. New features must justify RAM, Flash, power, and maintenance costs; use [SCOPE.md](SCOPE.md) to evaluate them.

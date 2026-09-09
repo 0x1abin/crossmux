@@ -1,6 +1,6 @@
 # Cache Management & Invalidation
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). The SD-card cache trades flash
+> Deep reference for [AGENTS.md](../../AGENTS.md). The SD-card cache trades flash
 > for RAM/CPU. **Always bump the format version BEFORE changing a binary layout.**
 > For the byte-level binary formats themselves, see
 > [../file-formats.md](../file-formats.md) (canonical reference).

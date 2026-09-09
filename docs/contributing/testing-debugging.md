@@ -1,6 +1,6 @@
 # Testing and Debugging
 
-CrossPoint runs on real hardware, so debugging usually combines local build checks and on-device logs.
+CrossMux runs on real hardware, so debugging usually combines local build checks and on-device logs.
 
 ## Local checks
 
@@ -8,10 +8,12 @@ Make sure `clang-format` 21+ is installed and available in `PATH` before running
 If needed, see [Getting Started](./getting-started.md).
 
 ```sh
-./bin/clang-format-fix
-pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
-pio run
+./bin/ci-check
 ```
+
+For documentation-only changes, check local links, anchors, documented commands,
+and `git diff --check`. For script or workflow changes, run the focused checks.
+Report checks actually run and any hardware verification still needed.
 
 ## Flash and monitor
 
@@ -40,7 +42,8 @@ python3 scripts/debugging_monitor.py
 - Exact steps to reproduce
 - Expected vs actual behavior
 - Serial logs from boot through failure
-- Whether issue reproduces after clearing `.crosspoint/` cache on SD card
+- Whether the issue reproduces after clearing only the affected book cache;
+  back up first, since `/.crosspoint` also holds settings and reading progress
 
 ## Common troubleshooting references
 

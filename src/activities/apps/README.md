@@ -1,8 +1,8 @@
 # Apps
 
-The `apps/` directory holds all non-reader sub-applications shipped on CrossPoint Reader. They share a single entry point on the home screen (the "Apps" tile), a single dispatcher activity (`AppsMenuActivity`), and a small set of conventions documented below.
+The `apps/` directory holds all non-reader sub-applications shipped on CrossMux. They use the Apps launcher (`AppsMenuActivity`) and the conventions below; the main-tab and home navigation expose that launcher.
 
-Reader, file browser, settings, OPDS, etc. are **not** apps — they are core e-reader functions and live as top-level `activities/<feature>/` directories. The `apps/` umbrella is for everything else: games, generators, toys.
+The directory groups app implementations such as games, tools, reading analytics, and WeRead. The launcher also links to core workflows such as file transfer and OPDS; appearing in Apps does not require moving those implementations into this directory.
 
 ---
 
@@ -16,7 +16,7 @@ apps/
 ├── airpage/                    # cloud image display app
 ├── sudoku/                    # one subdirectory per app, files keep the app-name prefix
 ├── gomoku/
-├── chinese-chess/             # conditional — gated by ENABLE_CHINESE_VERSION (see "Conditional apps" below)
+├── chinese-chess/             # shown in the China content profile
 ├── minesweeper/
 ├── woodfish/                  # electronic woodfish with lazy SD checkpointing
 └── avatar/
@@ -72,7 +72,7 @@ failure. Do not construct Activities with `std::make_unique`.
 
 ### 3. Assign an ID and append one row to `kAppEntries`
 
-In `apps/AppsMenuActivity.cpp`:
+Append to the existing definitions in `apps/AppsMenuActivity.cpp`; this is an excerpt, not a replacement catalog:
 
 ```cpp
 enum class AppId : uint8_t {
@@ -80,8 +80,8 @@ enum class AppId : uint8_t {
   Gomoku = 3,
   Minesweeper = 5,
   UglyAvatar = 7,
-  MyApp = 9,  // new, never-reused bit ID
-  Count = 10,
+  MyApp = 17,  // example: use the next unused bit ID in the current catalog
+  Count = 18,
 };
 
 constexpr AppEntry kAppEntries[] = {
@@ -95,7 +95,7 @@ constexpr AppEntry kAppEntries[] = {
 
 The ID is the persisted bit position in `hiddenAppsMask`: allocate the next unused value, never reuse or change existing
 values, and keep conditional-app IDs outside their `#ifdef`. New bits default to visible. Fresh settings hide Chinese
-Chess, Minesweeper, 2048, Standby, and Buddy; existing masks are never overwritten. The menu, launcher, and App Visibility
+Chess, Minesweeper, 2048, Buddy, and Pixel Switch; existing masks are never overwritten. The menu, launcher, and App Visibility
 settings all read this same table; no `switch` or `buildItems()` is needed.
 The visibility mask is 32-bit. `Calculator = 15` and `Woodfish = 16` are stable;
 IDs 17 through 31 remain available.
@@ -128,37 +128,24 @@ AI, and persistence in the game: they are not framework concerns.
 
 ---
 
-### 6. (Optional) Conditional / compile-flag-gated apps
+### 6. Regional visibility
 
-Regional apps such as Chinese Chess and WeRead are compiled into the unified
-firmware and hidden unless the current language selects the China content profile.
+Chinese Chess and WeRead are compiled into the unified firmware. The existing
+`ENABLE_CHINESE_VERSION` compatibility guards remain enabled by the base and
+simulator profiles; do not add a separate Chinese build or source-filter split.
 
-A conditional app uses a **two-layer guard**: ifdef at every reference site, plus a `build_src_filter` exclusion in `platformio.ini` so the app's `.cpp` files aren't compiled at all when the flag is off. The ifdef alone is not enough — without the filter, the app's translation units still compile (and fail, since they freely reference each other without inner ifdefs).
-
-When adding such an app, wrap every line in the four standard add-an-app edits with `#ifdef ENABLE_<FLAG>` and add two `platformio.ini` lines. Concretely, using `chinese-chess` as the reference:
-
-| Touchpoint | What to wrap |
-|---|---|
-| `BaseTheme.h` | The new `UIIcon::<App>` enum variant |
-| `themes/lyra/LyraTheme.cpp` | `#include "components/icons/<app>.h"` and the `case UIIcon::<App>:` branch in `iconForName` |
-| `ActivityManager.{h,cpp}` | The `goTo<App>()` declaration, the `#include "apps/<app>/<App>MenuActivity.h"`, and the `goTo<App>()` definition |
-| `AppsMenuActivity.cpp` | The unconditional stable `AppId` plus the guarded `kAppEntries[]` row (`kAppCount` auto-adjusts) |
-| `main.cpp` | App-specific font objects + `renderer.insertFont(...)` calls, if the app needs a custom font |
-| `lib/EpdFont/builtinFonts/all.h` | `#include` of the app's font header |
-| `platformio.ini` (base) | Add `-<activities/apps/<app>/>` to the default `build_src_filter` |
-| `platformio.ini` (the gated env) | Add `-D<FLAG>` to `build_flags` and `+<activities/apps/<app>/>` to `build_src_filter` |
-| `platformio.ini` (simulator) | Add `-D<FLAG>=1` to `env:simulator` so X4/X3 host builds cover the app |
-
-**Do not** add inner `#ifdef <FLAG>` guards inside the app's own `*.cpp` / `*.h` files — `build_src_filter` already excludes the whole directory, and inner guards would just clutter the source. The app source code stays plain.
-
-i18n keys (`STR_<APP>_*` in `english.yaml`) are **not** ifdef-guarded: the i18n generator has no conditional mechanism, and the few hundred bytes of unused string data in non-gated builds is acceptable.
+The launcher applies `effectiveHiddenMask()` to combine user visibility,
+configured OPDS servers, and the runtime content profile. Global hides the
+`CHINA_ONLY_APPS_MASK` entries. Follow this existing mechanism when an approved
+app needs regional visibility, preserving its stable bit ID and the shared
+visibility settings. See [Chinese support](../../../docs/engineering/chinese-build.md).
 
 ---
 
 ## UI conventions
 
-- **Renderer**: the Apps menu uses `GUI.drawButtonMenu`, not `GUI.drawList`. That gives 32px icons, UI_12 font, 64px rows, vertically centered text — matching the home screen tile style. The Apps menu passes a halved inter-row gap (`metrics.menuSpacing / 2`, i.e. 4px on LYRA) to tighten the list; other callers keep the theme default.
-- **Pagination**: when the list overflows one screen, the Apps menu renders only the current page's slice (offsetting `drawButtonMenu`'s index callbacks). Lyra-family themes use the shared right-side scrollbar; Classic and RoundedRaff retain Standby-style page dots. Item navigation flips pages automatically; no separate page-turn key.
+- **Launcher layout**: `buildScreen()` uses the shared `UiScreen`/FreeInkUI list, or the existing icon-grid layout selected by `usesIconLayout()`. Reuse the list viewport and `InxGridGeometry` for navigation and touch geometry.
+- **Pagination**: the list viewport and icon grid manage their own visible slices. Use the shared navigation helpers and theme scrollbar rather than duplicating row counts or screen dimensions.
 - **Header**: each app draws its own header via `GUI.drawHeader(... tr(STR_<APP>_TITLE))`.
 - **Result layouts**: center multi-line status/result blocks from measured font heights with `gameCenteredBlockY`; reserve the title bar and button-hint area instead of relying on fixed Y offsets.
 - **Back button labels**: the four button hints follow the project standard — `STR_BACK / STR_SELECT / STR_DIR_UP / STR_DIR_DOWN` for menu rows; app-specific actions for in-game screens.
@@ -178,6 +165,8 @@ release. Touch devices add taps on the rendered wooden body; whitespace,
 mallet, ripples, drags, and the system Back gesture are not knocks. Its
 `uint32_t` counter saturates, has no reset action, and is checkpointed to SD
 after 60 seconds idle or on exit.
+
+## AirPage
 
 AirPage always enters on its QR page and stays offline until Refresh or live
 mode needs Wi-Fi. Network-dependent apps use the shared Wi-Fi picker on demand;
@@ -206,7 +195,7 @@ fit-without-cropping BMP before atomically replacing `/sleep.bmp`.
 
 ## Resource budget
 
-Apps run on the same 380KB RAM ceiling as the reader. Specifically:
+Apps share the reader's resource budget: about 380KB usable RAM on ESP32-C3, with target-specific budgets on S3. Specifically:
 
 - **Heap**: allocate at `onEnter()`, free at `onExit()` (Activities are heap-allocated and `delete`d on exit). Don't hold buffers across navigation.
 - **Stack**: keep local function variables under 256 bytes; large buffers go on heap or `static`.
@@ -214,4 +203,6 @@ Apps run on the same 380KB RAM ceiling as the reader. Specifically:
 - **Storage writes**: never save on every user interaction. Debounce save-on-activity-exit, or use `GameSaveDebouncer` (1.5s window). Electronic Woodfish checkpoints its SD-backed counter only after 60 seconds idle or on exit.
 - **Single-buffer framebuffer**: 48KB framebuffer is shared. If an app needs to overlay (modal save UI etc.), use `renderer.storeBwBuffer()` / `restoreBwBuffer()` — see `UglyAvatarActivity::onSave()` for a worked example.
 
-See the top-level `CLAUDE.md` for the full resource protocol; apps are not exempt.
+See [AGENTS.md](../../../AGENTS.md) and the
+[resource protocol](../../../docs/engineering/hardware-constraints.md#the-resource-protocol);
+apps are not exempt.

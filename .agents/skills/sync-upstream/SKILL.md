@@ -21,9 +21,9 @@ pull request or flash hardware as part of this skill.
 Run one phase at a time from the CrossMux repository root:
 
 ```bash
-python3 .claude/skills/sync-upstream/scripts/sync_upstream.py inspect
-python3 .claude/skills/sync-upstream/scripts/sync_upstream.py start --component sdk
-python3 .claude/skills/sync-upstream/scripts/sync_upstream.py publish \
+python3 .agents/skills/sync-upstream/scripts/sync_upstream.py inspect
+python3 .agents/skills/sync-upstream/scripts/sync_upstream.py start --component sdk
+python3 .agents/skills/sync-upstream/scripts/sync_upstream.py publish \
   --component sdk --candidate /path/printed/by/start --draft
 ```
 

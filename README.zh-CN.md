@@ -2,190 +2,117 @@
 
 [English](./README.md) | **简体中文**
 
-**CrossMux** 是 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 的社区 fork：在原有电子书阅读体验之上，新增 Apps 应用中心、更丰富的待机表盘，以及包含 33 种语言的统一固件。
+**CrossMux** 是面向 ESP32 墨水屏设备的 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 社区 fork。以阅读为核心，同时提供轻量应用、阅读分析、待机表盘和按需联网服务。
 
-**版本：** CrossMux 1.5.8（基于 CrossPoint Reader 1.5.0，并同步上游 `develop` 至 `eef20504`）
-
-**运行设备：** 基于 ESP32-C3 的 Xteink [X4](https://www.xteink.com/products/xteink-x4) 与 [X3](https://www.xteink.com/products/xteink-x3)。
-
-> 本文档面向中文用户，重点说明 CrossMux 的中文相关功能与简体中文固件的编译方式。完整的英文说明请见 [README.md](./README.md)。
+[固件发布](https://github.com/0x1abin/crossmux/releases) · [用户指南](./USER_GUIDE.md) · [参与贡献](./docs/contributing/README.md)
 
 ![CrossMux 运行在 Xteink 设备上](./docs/images/cover.jpg)
 
----
+## 核心功能
 
-## CrossMux 相比上游新增了什么
+- **阅读与书库**：EPUB、TXT、XTC/XTCH 和图片，章节导航、书签、词典、自定义字体、阅读背景，以及 KOReader 进度同步。
+- **无线功能**：浏览器传书与设置、Calibre 无线连接、OPDS 下载、WebDAV 和设备 OTA 更新。
+- **Apps 应用中心**：数独、五子棋、中国象棋、扫雷、2048、电子木鱼、Ugly Avatar 等轻量游戏与工具。[应用说明](./src/activities/apps/README.md)。
+- **AirPage**：扫码上传内容，通过手动刷新或前台实时投送显示 BMP/JPEG 图片，也可将图片设为休眠画面。[操作与联网行为](./src/activities/apps/README.md#airpage)。
+- **微信读书**：扫码登录、浏览书架、下载 EPUB 离线阅读和同步进度，在 China 内容区显示。[微信读书说明](./src/activities/apps/weread/README.md)。
+- **阅读分析与待机**：阅读统计、热力图、档案与成就，以及时钟和老黄历表盘。[阅读分析说明](./src/activities/apps/reading-stats/README.md)。
+- **语言与开发**：每个硬件目标使用包含 33 种 UI 语言的统一固件，并提供桌面模拟器辅助开发。
 
-- **Apps 应用中心**（首页的 `Apps` 菜单）：2048、扫雷、数独、五子棋、中国象棋、电子木鱼（支持按键与触屏敲击，累计值永久保留并惰性写盘）、「Ugly Avatar」头像生成器，以及 **AirPage**——扫码上传自定义内容，再通过手动刷新或仅前台运行的 MQTT 实时推送获取并全屏显示 BMP 或 JPEG 图片。AirPage 每次均从二维码页进入，并在刷新或实时模式需要联网时才连接 Wi‑Fi；连接或重连本身不会下载。底部映射按键可进入设置、浏览最近 20 张投送图片或刷新，侧键同步对应图片/刷新操作。图片复用 EPUB 的等比居中与 4 级灰度链路，可手动设为自定义休眠画面，也可在 AirPage 设置中开启“每次投送后自动设置”。刷新失败保留原图，实时连接连续失败约两分钟后暂停并恢复系统自动休眠。应用超过一屏时以页点分页。
-- **微信读书**：扫码登录、浏览个人书架、下载图书、以 EPUB 离线阅读并同步阅读进度。阅读器只保留一个「同步进度」入口：识别出的标准微信书籍优先同步微信读书，其他 EPUB 仍同步 KOReader。新缓存的微信书籍还会在下载正文前尽力预取云端进度，首次打开时可从云端位置继续阅读。
-- **阅读分析**：阅读统计、按月阅读热力图、阅读档案与成就，数据以 JSON 存于 SD 卡。
-- **待机表盘**：手绘风格的「潦草时钟」与中式老黄历表盘，并提供可选的 4 级灰度增强与反色显示模式。
-- **统一语言固件**：选择简体中文时使用 `crossmux.cn`，其它语言使用 `crossmux.com`；后续切换语言会同步内容区和区域应用，中文 UI 使用内嵌 CJK 回退字体。
-- **桌面模拟器**：可在电脑上开发与预览 UI。
+> **微信读书安全提示**：非公开 Web 协议可能变化。真机传输经过加密，但客户端不验证服务器证书与主机名，请仅在可信网络中使用。原生模拟器通过主机信任库验证证书，详见[传输说明](./docs/engineering/chinese-build.md#weread-transport)。
 
-> **微信读书安全提示**：微信读书使用可能随时变化的非公开 Web 协议。真机通过
-> wolfSSL 加密传输，但调用 `setInsecure()`，不会验证服务器 CA 与主机身份，存在
-> 中间人攻击风险；请只在可信网络中使用。原生模拟器仍通过 libcurl 的主机信任库
-> 验证证书。
+## 设备与发布渠道
 
-上游 CrossPoint 的全部能力（EPUB 2/3 渲染、多格式支持、无线传书、OPDS、OTA 等）在 CrossMux 中同样可用，详见 [English README](./README.md#what-can-crosspoint-do)。
+| 设备 | 芯片 | 发布渠道 |
+|---|---|---|
+| Xteink X3 / X4（共用固件） | ESP32-C3 | Stable、Nightly |
+| Seeed Sticky | ESP32-S3 | Nightly |
+| Xteink X4 Pro | ESP32-S3 | Nightly |
+| M5Stack Paper Mono | ESP32-S3 | Nightly |
+| eego A4 | ESP32-S3 | Nightly |
+| Murphy M4 | ESP32-S3 | Nightly |
+| Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 
----
+此表表示配置中的发布目标，不代表所有功能均已通过实机验收。每个 S3 目标使用独立固件。X4 Classic 仅提供构建目标，尚未加入公开发布与 OTA 索引。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
 
-## 编译统一语言固件
+X3/X4 稳定渠道使用 [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable)，开发版本使用 [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly)。[目标表](./scripts/nightly_targets.py) 定义渠道与产物名称；[发布架构](./docs/engineering/firmware-release.md) 说明打包与 OTA。当前源码版本及构建环境以 [platformio.ini](./platformio.ini) 为准。
 
-每个硬件目标只构建一个固件。简体中文对应中国内容区，其它语言对应
-Global 内容区；首次引导和后续语言切换都会同步域名、OTA variant 与区域应用。
+## 安装固件
 
-### 前置条件
+1. 打开 [CrossMux Releases](https://github.com/0x1abin/crossmux/releases)，选择渠道和准确设备型号，按该版本的产物链接与安装说明操作。X3/X4 共用固件，S3 必须按板型选择。
+2. 更换固件前备份 SD 卡数据。使用匹配的安装包；只有应用部分的 `firmware.bin` 不是完整的首次安装镜像。
+3. 对已有固件的 X3/X4，可使用[上游 CrossPoint 网页烧录器](https://crosspointreader.com/#flash-tools)的自定义二进制上传功能：选择 X3/X4，上传 **CrossMux** 应用固件。选择烧录器中的上游版本会安装 CrossPoint。
+4. S3 的安装与恢复请遵循对应[设备文档](./docs/engineering/device-variants.md)和发布说明，不要套用 X3/X4 的烧录命令或偏移地址。
 
-- [pioarduino](https://github.com/pioarduino/pioarduino)，或 VS Code + pioarduino 插件
-- Python 3.8+
-- `clang-format` 21（仅提交代码时需要）
-- 支持数据传输的 USB-C 数据线
+从源码构建并烧录 X3/X4 可使用下方的[开发命令](#开发快速开始)。已安装 CrossMux 时，设备 OTA 按型号、内容区和渠道选择固件；S3 目标没有 Stable 渠道。
 
-### 获取源码
+### USB 锁定的 Xteink 设备
+
+部分设备可能限制 USB 刷写。[上游 Xteink Unlocker](https://crosspointreader.com/#unlock-tool) 是独立工具，使用前请阅读其当前兼容性与恢复说明。不能从 CrossPoint 兼容性推断 CrossMux 可用于锁定设备；刷入不受支持的固件可能导致无法恢复。串口未出现时，也应检查数据线、端口和浏览器权限。
+
+## 中文字体与内容区
+
+每个硬件目标只构建一个统一语言固件。简体中文选择 China 内容区（`crossmux.cn`），其它 UI 语言选择 Global 内容区（`crossmux.com`）。切换 UI 语言会同步内容区和区域应用，包括微信读书与中国象棋。
+
+UI 内置精简的 8/10/12pt 简体中文回退字体。内置阅读字体选项共用 12pt 离线回退；完整字族、其它字号、粗斜体和更广的 Unicode 覆盖使用 SD 卡 `.cpfont` 字体。内嵌字库是子集，生僻字或繁体字可能需要覆盖相应字形的 SD 字体。
+
+可从 **设置 > 阅读器 > 管理字体** 下载字体，或将转换好的字体复制到 SD 卡。安装与转换见 [SD 卡字体](./docs/sd-card-fonts.md)，内嵌字体工具链见[中文支持](./docs/engineering/chinese-build.md)。常规构建无需重新生成字体。
+
+## 开发快速开始
+
+安装 PlatformIO Core（`pio`）和 Python 3；仓库已固定 pioarduino 平台版本。完整代码检查还需要 clang-format 21+、CMake 和 Ninja。环境设置见[开发入门](./docs/contributing/getting-started.md)。
 
 ```bash
 git clone --recursive https://github.com/0x1abin/crossmux.git
 cd crossmux
 
-# 如果克隆时漏掉了 --recursive：
+# 如果尚未初始化子模块：
 git submodule update --init --recursive
-```
 
-### 构建与烧录
+# X3/X4 开发构建
+pio run -e default
 
-仓库已内置 CJK 字体头文件，常规构建无需任何额外的字体处理步骤：
-
-```bash
-# 构建 X3/X4 统一固件
+# X3/X4 统一语言稳定版构建
 pio run -e gh_release
 
-# 构建并烧录到已连接的设备
+# 构建并烧录到已连接的 X3/X4
 pio run -e gh_release -t upload
 ```
 
-构建产物位于 `.pio/build/gh_release/firmware.bin`，也可以通过网页烧录器上传。
+应用固件位于 `.pio/build/gh_release/firmware.bin`。其它板型使用[构建文档](./docs/engineering/build-system.md)中的对应环境。
 
-### 重新生成 CJK 字体（可选）
+### 桌面模拟器
 
-只有在**修改字符集**或**更新内嵌字体**时，才需要重新生成 CJK 点阵字体头文件。完整的字体工具链、字符集策略与 Flash 空间预算说明见 [docs/engineering/chinese-build.md](./docs/engineering/chinese-build.md)。
-
----
-
-## 中文阅读注意事项
-
-简体中文固件在有限的 Flash 空间内做了取舍，使用时请注意：
-
-- **内嵌字体覆盖现代汉语 3500 常用字**（《现代汉语常用字表》）。生僻字、古字、繁体字、部分人名地名用字可能在阅读器中显示为 □。
-- **不支持繁体中文**：本构建为简体专用（`ZH_CN`），繁体字形不在任何字库中。
-- **大号字下中文正文可能留白**：16pt / 18pt（阅读器的 LARGE / EXTRA_LARGE）仅内嵌 UI 所需的小字集，这两档字号是为英文 EPUB 调优的。读中文请切到 MEDIUM 档。
-- **无 CJK 粗体 / 斜体字形**：粗体 / 斜体会回退为常规字重。若需要更多字重，可在 SD 卡上加载自定义字体。
-- 需要扩充字符覆盖范围时，参见 [docs/engineering/chinese-build.md](./docs/engineering/chinese-build.md) 中的「Expanding character coverage」。
-
----
-
-## 烧录固件
-
-### 网页烧录器（推荐）
-
-1. 用 USB-C 连接设备到电脑，并唤醒 / 解锁设备。
-2. 打开 https://crosspointreader.com/#flash-tools ，选择设备型号（X3 或 X4），点击「Custom .bin」上传你构建出的 `firmware.bin`。
-
-### 命令行
-
-1. 安装 [`esptool`](https://github.com/espressif/esptool)：
-
-   ```bash
-   pip install esptool
-   ```
-
-2. 用 USB-C 连接设备，找到串口（Linux 连接后运行 `dmesg`；macOS 可用 `log stream --predicate 'subsystem == "com.apple.iokit"' --info`）。
-3. 烧录：
-
-   ```bash
-   esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 /path/to/firmware.bin
-   ```
-
-   请把 `/dev/ttyACM0` 换成你的实际串口。
-
-### USB 锁定设备说明
-
-部分通过第三方渠道（如 AliExpress）购买的 Xteink 设备出厂即锁定了 USB 刷写。若你的设备被锁定，需要先使用官方的 **Xteink Unlocker** 工具（https://crosspointreader.com/#unlock-tool ）解锁后才能刷写。**直接从 xteink.com 购买的设备不需要此工具。**
-
-> ⚠️ 解锁工具仅官方支持 CrossPoint 与 CrossInk 固件。在已锁定的设备上刷入不受支持的固件，可能导致设备永久变砖或无可恢复路径，操作前务必阅读 [英文 README 的完整警告](./README.md#usb-locked-devices-xteink-unlocker)。
-
----
-
-## 自定义 SD 卡字体
-
-无需重新刷写固件，即可把你自己的 TTF/OTF 转换成可从 SD 卡加载的 `.cpfont` 字体：
-
-1. 打开 https://crosspointreader.com/fonts ，找到「SD-card font builder」表单。
-2. 上传最多四种字形（常规、粗体、斜体、粗斜体），设置字族名、字号与 Unicode 范围。
-3. 下载生成的 `.cpfont` 文件，复制到 SD 卡的 `/fonts/你的字体/`（或 `/.fonts/你的字体/` 以隐藏目录）。
-4. 在设备的字体设置中选择该字体。
-
-> 提示：通过这种方式加载的字体可以补充内置 3500 字之外的字形（包括粗体 / 斜体），适合需要更大字符覆盖或更多字重的中文阅读场景。
-
----
-
-## 文档
-
-- [用户指南（英文）](./USER_GUIDE.md)
-- [简体中文固件构建深度文档](./docs/engineering/chinese-build.md)
-- [Web 服务使用说明](./docs/webserver.md) · [Web 接口](./docs/webserver-endpoints.md)
-- [项目范围 SCOPE](./SCOPE.md) · [贡献文档](./docs/contributing/README.md)
-
----
-
-## 开发快速开始
+安装 SDL2 与 curl（Linux 还需 OpenSSL 开发头文件），将 EPUB 放入 `fs_/books/`，然后运行：
 
 ```bash
-# 构建并烧录（默认英文构建）
-pio run --target upload
-
-# 提交 PR 前的检查
-./bin/clang-format-fix
-pio check -e default
-pio run -e default
+pio run -e simulator -t run_simulator           # X4
+pio run -e simulator_x3 -t run_simulator        # X3
+pio run -e simulator_eego_a4 -t run_simulator   # eego A4
+pio run -e simulator_murphy_m4 -t run_simulator # Murphy M4
 ```
 
-安装 SDL2 与 `curl`（Linux 还需 OpenSSL 开发头文件）后，可把 EPUB 放入
-`fs_/books/`，再运行 CrossMux 使用的桌面模拟器：
+[CrossMux 模拟器 fork](https://github.com/0x1abin/crosspoint-simulator) 的版本固定在 `platformio.ini` 中。它用于预览 UI 和输入流程，不能验证显示波形、耗电或实际硬件时序。
+
+### 检查与调试
 
 ```bash
-# X4
-pio run -e simulator -t run_simulator
-
-# X3
-pio run -e simulator_x3 -t run_simulator
-
-# eego A4
-pio run -e simulator_eego_a4 -t run_simulator
-
-# Murphy M4
-pio run -e simulator_murphy_m4 -t run_simulator
+./bin/ci-check       # 完整代码检查，不改写源文件
+pio device monitor  # 已连接设备的串口日志
 ```
 
-模拟器由固定版本的
-[CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12)
-作为原生 PlatformIO 依赖提供。
+针对性检查和增强串口监视器见[测试与调试](./docs/contributing/testing-debugging.md)。纯文档修改检查链接、命令和空白即可，无需构建固件。
 
-调试日志（先 `python3 -m pip install pyserial colorama matplotlib`）：
+## 文档与贡献
 
-```bash
-# Linux
-python3 scripts/debugging_monitor.py
-# macOS（替换为你的串口）
-python3 scripts/debugging_monitor.py /dev/cu.usbmodem2101
-```
+- [用户指南](./USER_GUIDE.md) · [Web 传书](./docs/webserver.md) · [Web API](./docs/webserver-endpoints.md)
+- [项目范围](./SCOPE.md) · [社区治理](./GOVERNANCE.md) · [贡献指南](./docs/contributing/README.md)
+- [Agent 指南](./AGENTS.md) · [工程文档](./docs/engineering/index.md) · [触屏与 UI](./docs/contributing/touch-and-ui.md)
+- [缓存管理](./docs/engineering/cache-management.md) · [文件格式](./docs/file-formats.md)
 
-更多开发细节见 [English README](./README.md#development-quick-start) 与 [CLAUDE.md](./CLAUDE.md) 中链接的工程文档。
+请在 [CrossMux Issues](https://github.com/0x1abin/crossmux/issues) 反馈问题和提出改进，贡献 PR 以 **`0x1abin/crossmux:main`** 为目标，每个 PR 聚焦一件事并说明验证方式。代码中保留的 CrossPoint 类名和 SD 卡上的 `/.crosspoint` 数据目录是兼容细节，不代表应向上游仓库提交。该目录也保存设置与阅读进度，不要为了清理某本书的缓存而直接删除整个目录。
 
----
+## 致谢
 
-CrossMux / CrossPoint Reader **与 Xteink 及任何设备厂商均无隶属关系**。
+感谢 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 及其贡献者。CrossMux 使用 [FreeInk SDK fork](https://github.com/0x1abin/freeink-sdk) 和模拟器 fork，也感谢 [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader) 的最初启发。
 
-特别感谢 [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader) 项目的启发，以及上游 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 社区。
+CrossMux 与 Xteink 及任何设备厂商均无隶属关系。上游工具与社区独立于本 fork。仓库许可证见 [LICENSE](./LICENSE)。

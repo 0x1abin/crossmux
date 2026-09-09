@@ -1,6 +1,6 @@
 # ESP32-C3 Platform Pitfalls
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). These are RISC-V / flash-cache /
+> Deep reference for [AGENTS.md](../../AGENTS.md). These are RISC-V / flash-cache /
 > toolchain hazards that fault silently — each rule below maps to a real crash class.
 
 ## `std::string_view` and Null Termination

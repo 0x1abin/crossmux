@@ -1,6 +1,6 @@
 # Build System & Build Flags
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). Covers PlatformIO usage, the
+> Deep reference for [AGENTS.md](../../AGENTS.md). Covers PlatformIO usage, the
 > build environments, the critical build flags that change firmware behavior, and
 > personal local overrides.
 
@@ -46,7 +46,8 @@
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
 
 The seven S3 environments are separate hardware binaries, but each is a unified
-language firmware. `bin/ci-check` builds them together with the default C3 target.
+language firmware. `bin/ci-check` builds the default C3 target and six S3 release
+targets; X4 Classic is build-only and covered separately by Hardware CI.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
@@ -119,8 +120,8 @@ pio run -e simulator_murphy_m4 -t run_simulator
 ```
 
 The simulator implementation and launcher come from the pinned
-[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator/tree/6058c3da013fbe1579d41c7c5cc77cd466d37f12)
-fork.
+[`0x1abin/crosspoint-simulator`](https://github.com/0x1abin/crosspoint-simulator)
+fork; the exact revision is recorded in `platformio.ini`.
 The firmware repository does not carry a second host implementation. Arrow
 keys are Up/Down, `P` is Power,
 mouse input provides touch, and `S` sleeps. A4 additionally maps `H` to a short

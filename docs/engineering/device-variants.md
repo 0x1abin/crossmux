@@ -5,7 +5,7 @@
 > compile-time targets. The one-binary rule in this document applies only to
 > the ESP32-C3 X3/X4 pair.
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). How one firmware binary runs
+> Deep reference for [AGENTS.md](../../AGENTS.md). How one firmware binary runs
 > on both the Xteink X3 and X4, how the device is detected at boot, what differs
 > between the two panels, and how to build / flash / verify for X3.
 

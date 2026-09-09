@@ -1,34 +1,27 @@
-# CrossPoint Reader: Claude Code skills
+# CrossMux Agent Skills
 
-Project skills for Claude Code. Claude auto-discovers them and loads one when the
-task matches its `description`; you do not invoke them by hand. They encode how
-this project wants C/C++ written: the judgment calls and self-review gates that
-keep the firmware small, stable, and reviewable.
+Project skills live directly in `.agents/skills/`, alongside their scripts,
+tests, templates, and references. Each skill's description identifies the tasks
+it helps with.
 
-These are written for capable agents, not beginners. They are principle- and
-decision-focused on purpose. They deliberately avoid line-number citations,
-which drift; they anchor on durable names (APIs, types, macros, files).
+[AGENTS.md](../../AGENTS.md) is the sole agent entrypoint. It holds shared rules
+and links to the engineering reference; these skills add task-specific decision
+procedures on demand.
 
-This is separate from `.skills/SKILL.md`, the GitHub coding-agent guide that
-mirrors CLAUDE.md. CLAUDE.md stays the always-loaded rule set; these skills are
-the applied decision procedures that load on demand and add the judgment layer
-CLAUDE.md does not carry.
-
-| Skill | Loads when you are... |
+| Skill | Use when… |
 |---|---|
-| `heap-discipline` | allocating memory: new/malloc/vector/string, buffers, caches |
-| `control-flow-clarity` | writing branching logic, state flags, modes, if/else ladders |
-| `hal-and-abstractions` | touching storage, input, display, settings, i18n, rendering |
-| `scope-discipline` | adding a feature, activity, lib, setting, or dependency |
-| `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
-| `sync-upstream` | syncing latest upstream changes into this repo through a branch and PR |
+| `heap-discipline` | Allocating memory, buffers, strings, or caches |
+| `control-flow-clarity` | Writing branching logic, state flags, or dispatch |
+| `hal-and-abstractions` | Touching storage, input, display, settings, i18n, or rendering |
+| `scope-discipline` | Adding a feature, activity, service, setting, or dependency |
+| `refactor-for-review` | Refactoring, cleaning up, or preparing a focused change for review |
+| `design-xteink-html-prototypes` | Creating X3/X4 HTML UI prototypes with accurate geometry and input behavior |
+| `sync-upstream` | Inspecting or rehearsing upstream synchronization and publishing separately authorized draft PRs |
 
-Each skill ends with a self-review checklist Claude runs against its own diff
-before handing it back. Reviewing a PR? Those checklists double as a fast rubric.
+## Maintaining skills
 
-## Maintaining these
-
-Edit the `SKILL.md` under each directory. Keep them tight. Do not restate
-CLAUDE.md; add the judgment CLAUDE.md cannot afford to carry. Trigger quality
-lives in the `description` field: it must name the situations that should pull
-the skill in, in the words a contributor's task would use.
+Edit the `SKILL.md` in the relevant directory. Keep it focused on decisions
+specific to that task; link to shared rules instead of copying them. Anchor
+references on maintained files, APIs, types, and macros rather than line numbers
+that drift. Keep descriptions specific enough to select the skill for the
+right work.

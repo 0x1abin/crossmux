@@ -1,120 +1,64 @@
 # Git Workflow & Repository Awareness
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). Verify repository context before
-> any git operation, and never commit without explicit request. For the
-> contributor-facing fork/branch/PR flow see
-> [../contributing/development-workflow.md](../contributing/development-workflow.md).
+> Deep reference for [AGENTS.md](../../AGENTS.md). Verify repository context
+> before git operations. The contributor-facing flow is in
+> [development-workflow.md](../contributing/development-workflow.md).
 
-## Repository Detection Protocol
+## Verify the checkout
 
-**CRITICAL**: ALWAYS verify repository context before git operations. This could be:
-- A **fork** with `origin` pointing to personal repo, `upstream` to main repo
-- A **direct clone** with `origin` pointing to main repo
-- Multiple collaborator remotes
+At the start of work, check the repository root, branch, remotes, and local
+changes. A worktree may have a detached HEAD, and a contributor's fork may use
+remote names differently.
 
-**Verification Commands** (run at session start):
 ```bash
-# Check current branch
+git rev-parse --show-toplevel
 git branch --show-current
-
-# Check all remotes
 git remote -v
-
-# Identify main branch name (could be 'main' or 'master')
-git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'
-
-# Check working tree status
 git status --short
 ```
 
-**Example Output** (forked repository):
-```text
-origin      https://github.com/<your-username>/crosspoint-reader.git (fetch/push)
-upstream    https://github.com/crosspoint-reader/crosspoint-reader.git (fetch/push)
-```
+Preserve unrelated user changes. Confirm the intended remote and branch before
+any push, merge, reset, or other history-changing operation.
 
-## Git Operation Rules
+## CrossMux contribution target
 
-1. **Never assume branch names**:
-   ```bash
-   # Bad: git push origin main
-   # Good: git push origin $(git branch --show-current)
-   ```
+- Unqualified PR requests target **`0x1abin/crossmux:main`**. In the maintainer
+  checkout, `origin` is `0x1abin/crossmux`; push the feature branch there when
+  authorized by the PR request. Do not ask for the default target again.
+- An explicit user-supplied repository or base branch overrides that default.
+  If the configured remote differs, resolve the destination before pushing.
+- Contributors using a personal fork push there and open their PR against
+  CrossMux `main`, not upstream CrossPoint `develop` or `master`.
+- Create a focused branch from CrossMux `main`; agents use `codex/<topic>` by
+  default. Human contributors may use `feature/`, `fix/`, `refactor/`, or `docs/`.
 
-2. **Use this project's default PR target**:
-   - For an unqualified PR request, push the feature branch to `origin` and open the PR against
-     `0x1abin/crossmux:main` without asking for the target again.
-   - An explicit user-supplied repository or base branch overrides this default.
-   - Still verify that `origin` resolves to `0x1abin/crossmux` and that the current credentials can push; ask only
-     when the configured repository differs or required access is unavailable.
+## Upstream synchronization is a separate task
 
-3. **Check for upstream changes before starting work**:
-   ```bash
-   # Sync fork with upstream (if applicable)
-   git fetch upstream
-   git merge upstream/main  # or upstream/master
-   ```
+Do not fetch and merge upstream automatically when starting an ordinary change.
+CrossMux integrates its SDK, simulator, and reader upstreams through isolated
+candidates; the current sources and procedure are in the
+[sync-upstream skill](../../.agents/skills/sync-upstream/SKILL.md).
 
-4. **Use explicit remote and branch names**:
-   ```bash
-   # Check remotes first
-   git remote -v
+Only synchronize when the task calls for it. Preserve fork-specific behavior
+and follow the [guide merge policy](upstream-merge-policy.md) when upstream
+changes agent documentation. Publishing or merging is not implied by a read-only
+comparison or local rehearsal.
 
-   # Use explicit syntax
-   git push <remote> <branch>
-   ```
+## Commits and verification
 
-## Branch Naming Convention
+Commit only when the user explicitly requests it. A completed feature, passing
+checks, or successful hardware test is not independent permission to commit.
+A request to create a PR includes preparing and publishing that PR's commits.
+Do not commit directly on the base branch.
 
-**For feature/fix branches**:
-```text
-feature/<short-description>       # New features
-fix/<issue-number>-<description>  # Bug fixes
-refactor/<component-name>         # Code refactoring
-docs/<topic>                      # Documentation updates
-```
+Before staging, inspect the diff and working-tree status. Never force-add
+ignored artifacts such as `.pio/`, `compile_commands.json`, or
+`platformio.local.ini`. Generated sources follow
+[generated-files.md](generated-files.md); edit their inputs and use the
+prescribed generator rather than hand-editing generated output.
 
-**Examples**:
-- `feature/sd-download-progress`
-- `fix/123-orientation-crash`
-- `refactor/hal-storage`
-
-## Commit Message Format
-
-**Pattern**:
-```text
-<type>: <short summary (50 chars max)>
-
-<optional detailed description>
-
-```
-
-**Types**: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
-
-**Example**:
-```text
-feat: add real-time SD download progress bar
-
-Implements progress tracking for book downloads using
-UITheme progress bar component with heap-safe updates.
-
-Tested in all 4 orientations with 5MB+ files.
-```
-
-## When to Commit
-
-**DO commit when**:
-- User explicitly requests: "commit these changes"
-- Feature is complete and tested on device
-- Bug fix is verified working
-- Refactoring preserves all functionality
-- All tests pass (`pio run` succeeds)
-
-**DO NOT commit when**:
-- Changes are untested on actual hardware
-- Build fails or has warnings
-- Experimenting or debugging in progress
-- User hasn't explicitly requested commit
-- Files excluded by `.gitignore` would be included — always run `git status` and cross-check against `.gitignore` before staging (e.g., `*.generated.h`, `.pio/`, `compile_commands.json`, `platformio.local.ini`)
-
-**Rule**: **If uncertain, ASK before committing.**
+Use semantic commit and PR titles such as `docs: align guides with CrossMux` or
+`fix: handle malformed epub`. Keep each change focused. Report checks actually
+run and hardware validation still needed; documentation-only changes do not
+require device tests. Follow [testing-and-debugging.md](testing-and-debugging.md)
+and the contributor workflow for checks appropriate to code changes.

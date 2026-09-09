@@ -1,7 +1,8 @@
 # Hardware Constraints & The Resource Protocol
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). The 380 KB RAM ceiling is the
-> project's primary constraint — every change is judged against it.
+> Deep reference for [AGENTS.md](../../AGENTS.md). The ESP32-C3 baseline is about
+> 380KB usable RAM without PSRAM; shared code must fit it. S3 budgets and
+> capabilities are target-specific.
 
 ## Development Environment Awareness
 
@@ -29,7 +30,7 @@ find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
 
 ## Platform and Hardware Constraints
 
-### Hardware Specs
+### Xteink X4 / ESP32-C3 Baseline
 * MCU: ESP32-C3 (Single-core RISC-V @ 160MHz)
 * RAM: ~380KB usable (VERY LIMITED - primary project constraint)
   * **ESP32-C3 has no PSRAM** and remains the compatibility baseline

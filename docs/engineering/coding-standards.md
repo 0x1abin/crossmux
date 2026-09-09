@@ -1,6 +1,6 @@
 # Coding Standards
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). Naming, header guards, and the
+> Deep reference for [AGENTS.md](../../AGENTS.md). Naming, header guards, and the
 > error-handling philosophy. Memory/RAII rules live in
 > [memory-and-allocation.md](memory-and-allocation.md); platform hazards in
 > [esp32-pitfalls.md](esp32-pitfalls.md).

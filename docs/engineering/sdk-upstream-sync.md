@@ -73,5 +73,5 @@ For repeatable validation, the sync tool exports the reviewed Git index into a
 real directory rather than linking or copying an entire working directory.
 Only staged sources enter the build; untracked debug files, ignored artifacts,
 and Git metadata do not. The conflict scanner checks text files, excluding
-binary font bytes. See the [sync skill](../../.claude/skills/sync-upstream/SKILL.md)
+binary font bytes. See the [sync skill](../../.agents/skills/sync-upstream/SKILL.md)
 for the candidate and publication workflow.

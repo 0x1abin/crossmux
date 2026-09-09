@@ -1,54 +1,48 @@
 ---
 name: scope-discipline
-description: Feature-scope discipline for a dedicated e-reader (not a Swiss Army knife). Use when adding a feature, a new activity, a new lib, a setting, or a dependency, or when a request would grow the firmware's surface. Covers the SCOPE.md test, the RAM-cost vs reading-benefit gate, preferring no-code or existing-mechanism solutions, awareness of the existing activity surface, and how to push back on out-of-scope asks.
+description: Evaluate CrossMux feature scope and resource tradeoffs when adding an activity, app, service, setting, library, or dependency. Reading is the core; lightweight e-ink extensions are allowed subject to RAM, Flash, power, and maintenance costs.
 ---
 
 # Scope Discipline
 
-The mission: do one thing exceptionally well, focused reading on constrained
-hardware. `SCOPE.md` is the source of truth for what is in and out. Read it
-before adding surface. This is the gate to run before writing a new feature.
+[SCOPE.md](../../../SCOPE.md) is the source of truth. CrossMux includes
+lightweight games and tools, reading analytics, standby customization, and
+on-demand services alongside the reader. Do not apply an upstream blanket ban
+on apps, themes, or network connectors to this fork.
 
-## The gate
+## Before adding surface
 
-Before adding a feature, activity, lib, setting, or dependency, answer in order:
+1. Name the concrete reading or lightweight e-ink use case. Check it against
+   the scope document; distinguish a small app or on-demand service from a
+   general-purpose suite or an unbounded background workload.
+2. Check whether an existing activity, setting, helper, or SD asset already
+   covers the need. Extend that mechanism before adding a parallel one.
+3. Account for steady-state and peak RAM, the largest required heap block,
+   Flash/OTA headroom, and persistent storage. ESP32-C3's approximately 380KB
+   usable RAM and lack of PSRAM constrain shared code; S3 capabilities belong
+   to specific targets. Mark estimates and missing measurements explicitly.
+4. Describe network/task lifetime, idle sleep, and cleanup on exit. A foreground
+   live mode needs defined retry and sleep behavior; it is not permission to
+   keep networking alive across unrelated activities.
+5. Explain the maintenance cost of new dependencies, settings, and failure
+   paths. Reuse the existing input, i18n, HAL, and activity lifecycle rules.
 
-1. **Is it in `SCOPE.md`?** Explicitly out: interactive apps (notepad,
-   calculator, games), active connectivity (RSS, news, browser), media/audio
-   playback. If it is out, say so and stop.
-2. **Does it materially improve focused reading?** If the benefit is
-   "nice to have" or serves a different use case, it is out. This is not a PDA.
-3. **What does it cost in RAM and in the largest-free-block budget?** A feature
-   that adds steady-state RAM or a large transient allocation needs a reading
-   benefit that clearly outweighs it. Quantify with `firmware_size_history.py`
-   and `script_profile_mem.sh` rather than guessing.
-4. **Can it be done with no new code?** Prefer an existing activity, an existing
-   setting, or a doc over a new code path. The cheapest feature is the one
-   already built.
+For an out-of-scope proposal, explain the specific conflict with `SCOPE.md` and
+suggest a smaller alternative. Preserve the user's explicit task and scope
+choices; do not silently replace their feature with another project.
 
-If a request fails the gate, push back with the specific reason and the
-`SCOPE.md` basis, and offer the in-scope alternative. Make the call and say why;
-do not just hand over a menu.
+## Settings and activities
 
-## Surface awareness
-
-The firmware already carries dozens of activities. Each new one is permanent
-RAM, permanent maintenance, and another thing every future refactor must not
-break. Default to extending an existing activity or setting before adding a new
-screen. New top-level surface needs a real justification, not "it would be
-convenient."
-
-## Settings are not free
-
-A new setting is a field to persist, migrate, validate, translate, and render,
-plus combinatorial test burden. Add one only when users genuinely need the
-choice; otherwise pick a sensible fixed default.
+A setting needs persistence, validation, translation, rendering, and migration
+consideration. Add one when the user needs a choice, not just because a value
+could be configurable. A new activity adds code and lifecycle responsibilities;
+its actual resident RAM depends on its implementation and must be checked,
+not assumed to be permanently allocated.
 
 ## Self-review
 
-- [ ] Checked against `SCOPE.md`; not on the out-of-scope list.
-- [ ] Stated the concrete reading benefit, not a generic "useful."
-- [ ] Named the RAM/size cost (measured, not guessed) and why the benefit wins.
-- [ ] Checked whether an existing activity/setting/doc already covers it.
-- [ ] New setting (if any) is justified by a real user need, not added
-      "just in case."
+- [ ] The use case fits CrossMux's reading core or lightweight extensions.
+- [ ] Existing mechanisms were checked before adding surface.
+- [ ] RAM, largest-block, Flash, power, and maintenance costs are explained.
+- [ ] Resources and tasks have explicit lifetimes and failure cleanup.
+- [ ] Claims distinguish measured behavior from estimates and simulator checks.

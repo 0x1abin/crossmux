@@ -1,6 +1,6 @@
 # Generated Files & Build Artifacts
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). Some sources are produced by
+> Deep reference for [AGENTS.md](../../AGENTS.md). Some sources are produced by
 > build scripts — edit the source, never the generated output. For the i18n
 > system in depth see [../i18n.md](../i18n.md); for SD-card fonts see
 > [../sd-card-fonts.md](../sd-card-fonts.md).
