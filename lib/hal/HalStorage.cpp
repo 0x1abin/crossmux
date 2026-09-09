@@ -41,16 +41,9 @@ HalStorage::StorageLock::~StorageLock() { xSemaphoreGiveRecursive(HalStorage::ge
 
 bool HalStorage::getSpace(uint64_t& totalBytes, uint64_t& freeBytes) {
   StorageLock lock;
-  totalBytes = 0;
-  freeBytes = 0;
-  if (!SDCard.ready()) return false;
-
-  totalBytes = SDCard.sdTotalBytes();
-  const uint64_t usedBytes = SDCard.sdUsedBytes();
-  if (totalBytes == 0 || usedBytes > totalBytes) return false;
-
-  freeBytes = totalBytes - usedBytes;
-  return true;
+  if (SDCard.getSpace(totalBytes, freeBytes)) return true;
+  LOG_ERR("STORAGE", "Unable to query SD filesystem space");
+  return false;
 }
 
 void HalStorage::prepareForDeepSleep() {

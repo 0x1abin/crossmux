@@ -56,6 +56,18 @@ if (Storage.openFileForRead("MODULE", "/path/to/file.bin", file)) {
 - `HalPowerManager::Lock` sets `NormalSpeed` under `modeMutex`, then releases the mutex **before** calling `setPowerSaving(false)`. Keep that ordering: the mutex is not recursive. Obtain the power lock before starting SPI work. The existing helper supports only one active power lock; it is not a nested-lock counter.
 - Preserve the Wi-Fi/C3 BLE host guards and board-specific frequency restrictions. Light sleep and CPU downclocking are separate decisions; fixing clock serialization must not disable either Bluetooth or standby light sleep.
 
+`Storage.getSpace(totalBytes, freeBytes)` queries filesystem data capacity, not
+raw card size, through the SDK's unified capacity query under the same mutex.
+Both outputs are zero on failure; callers must check the boolean result before
+using them. The SDK derives cluster bytes from 512-byte sectors with 64-bit
+arithmetic because SdFat 2.3.1's FAT `bytesPerCluster()` truncates 64 KiB to zero.
+Successful free-space scans are cached for 20 seconds from completion; failures
+invalidate the cache and are retried on the next query. Mount/unmount resets it.
+The cache is a snapshot, not an immediate accounting of subsequent writes.
+The About page paints its loading state before this synchronous query; input
+waits for the scan to finish. Host simulator capacity comes from `statvfs`, so
+use `python3 scripts/tests/test_sd_space.py` for FAT calculation regressions.
+
 ---
 
 ## Common Patterns
