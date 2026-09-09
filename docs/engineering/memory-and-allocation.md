@@ -1,6 +1,6 @@
 # Memory Safety & Heap Allocation
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). On ESP32-C3 with
+> Deep reference for [AGENTS.md](../../AGENTS.md). On ESP32-C3 with
 > `-fno-exceptions`, a failed bare `new` calls `abort()` — allocation discipline
 > is a stability requirement, not a style preference.
 

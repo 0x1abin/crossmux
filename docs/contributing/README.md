@@ -1,6 +1,6 @@
 # Contributing Docs
 
-This section is a lightweight contributor guide for CrossPoint Reader.
+This section is a lightweight contributor guide for CrossMux, a community fork of CrossPoint Reader.
 It is written for software developers who may be new to embedded development.
 
 - [Getting Started](./getting-started.md)
@@ -9,4 +9,7 @@ It is written for software developers who may be new to embedded development.
 - [Testing and Debugging](./testing-debugging.md)
 - [Touch and UI Development](./touch-and-ui.md)
 
-If you are new, start with [Getting Started](./getting-started.md).
+If you are new, start with [Getting Started](./getting-started.md). Contributions
+target `0x1abin/crossmux:main`. Read [AGENTS.md](../../AGENTS.md) for shared
+engineering rules and the [engineering index](../engineering/index.md) for
+task-specific references.

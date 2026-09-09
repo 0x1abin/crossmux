@@ -1,6 +1,6 @@
 # UI, Orientation & Input
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). All rendering goes through the
+> Deep reference for [AGENTS.md](../../AGENTS.md). All rendering goes through the
 > `GUI`/UITheme macro; all input goes through logical buttons. Hardcoded screen
 > dimensions or raw hardware button indices are bugs.
 

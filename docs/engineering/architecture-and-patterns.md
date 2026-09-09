@@ -1,6 +1,6 @@
 # Architecture & Common Patterns
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). For the big-picture runtime
+> Deep reference for [AGENTS.md](../../AGENTS.md). For the big-picture runtime
 > lifecycle, activity model, and dataflow diagrams, see
 > [../contributing/architecture.md](../contributing/architecture.md). This file
 > covers the agent-facing details: directory layout, the HAL, and the reusable

@@ -1,104 +1,76 @@
-# Upstream-Merge Policy for `CLAUDE.md` / `.skills/SKILL.md`
+# Upstream-Merge Policy for the Agent Guide
 
-> How to resolve conflicts on the development guide when syncing upstream into
-> `main`. This is the rule the manual sync routine and any human resolver must
-> follow. Read it whenever `.skills/SKILL.md` appears in a sync PR's conflict list.
+Use this policy to adapt upstream agent guidance to CrossMux. It covers
+`AGENTS.md`, `.agents/skills/`, legacy inputs such as `CLAUDE.md`,
+`.skills/SKILL.md` and `.claude/skills/`, and any relocated guide bodies.
+The [Sync Upstream skill](../../.agents/skills/sync-upstream/SKILL.md#mandatory-manual-review)
+owns candidate management, interactive decisions, and publication records.
+This document owns content routing and the resulting CrossMux layout.
 
-## The structural invariant
+## Local structure
 
-- `CLAUDE.md` is a **symlink** → `.skills/SKILL.md` (identical on both branches,
-  so the symlink itself never conflicts). The real content lives in
-  `.skills/SKILL.md`.
-- On `main`, `.skills/SKILL.md` is a **thin map** (~90 lines): identity,
-  Golden Rules, a quick reference, and a topic→doc table. The deep
-  firmware-engineering reference lives in [`docs/engineering/`](index.md).
-- **Upstream keeps the old monolithic version** of `.skills/SKILL.md` and keeps
-  editing it. This is expected. Because the two diverged structurally, *every*
-  sync that touches this file produces a content conflict on `.skills/SKILL.md`.
+- `AGENTS.md` is the sole agent entrypoint, a regular file containing CrossMux
+  identity, critical rules, common commands, and reference links.
+- `.agents/skills/` is a real directory for task-specific workflows and their
+  scripts, tests, templates, and references.
+- Deep engineering guidance belongs in existing topics listed in the
+  [engineering index](index.md).
 
-**The job is never to merge the two files line-by-line.** It is to keep
-`main`'s thin map and re-home upstream's new content the same way the original
-refactor did.
+Legacy upstream paths are migration inputs, not destinations. Do not restore
+platform-specific entrypoints or Claude automation. Preserve CrossMux's mission,
+`main` PR target, unified languages, lightweight apps, and target-specific
+hardware budgets when adapting upstream wording.
 
-## What is "live" in the map
+## Inspect the incoming delta
 
-Only these parts of `.skills/SKILL.md` may receive content directly:
+Compare the upstream revision with the merge base, not its whole guide with
+our thin map. In a sync candidate, use the recorded `base_sha` and `upstream_sha`
+as `sync_base_sha` and `sync_upstream_sha`. For a manual merge without candidate
+state, use `HEAD` and `MERGE_HEAD` respectively, before creating the merge commit.
+Run in the repository being merged:
 
-- Project / Mission header
-- **AI Agent Identity and Cognitive Rules**
-- **Golden Rules — Non-Negotiable Invariants** (one line each)
-- **Quick Reference** (singletons, platform detection, core commands)
-- **The Map** table
-- Philosophy footer
+```bash
+sync_merge_base=$(git merge-base "$sync_base_sha" "$sync_upstream_sha")
+git diff --name-status --find-renames "$sync_merge_base" "$sync_upstream_sha"
+git diff "$sync_merge_base" "$sync_upstream_sha" -- \
+  AGENTS.md .agents/skills CLAUDE.md .skills/SKILL.md .claude/skills
+```
 
-Anything upstream adds that is *deep technical detail* does **not** belong in the
-map — it goes into `docs/engineering/`.
+Review clean merges as well as conflicts. Use the unfiltered path list to find
+additions, deletions, renames, and type changes outside the known paths. Read
+referenced bodies and symlink targets from the recorded upstream tree; the
+merged working tree may have lost them. An entrypoint-only change still needs
+its referenced content checked.
 
-## Resolution procedure
+## Route the content
 
-When a sync merge reports a conflict on `.skills/SKILL.md`:
+Account for every incoming hunk through the sync skill's review procedure (or
+the authorized manual merge review). Adapt commands, paths, and authorization
+rules to CrossMux rather than copying upstream workflow instructions verbatim.
 
-1. **Keep ours (the thin map).** The structure is the whole point.
-   ```bash
-   git checkout --ours -- .skills/SKILL.md   # CLAUDE.md symlink auto-resolves (identical both sides)
-   ```
-
-2. **Compute the upstream delta this sync actually brought** — do not diff the
-   whole monolith against the thin map (that's all noise). During
-   `git merge upstream/master`, `MERGE_HEAD` is the upstream tip:
-   ```bash
-   git diff "$(git merge-base HEAD MERGE_HEAD)..MERGE_HEAD" -- .skills/SKILL.md
-   ```
-   This shows exactly what upstream added/changed since the last shared point.
-
-3. **Classify and route each hunk of that delta:**
-
-   | Upstream change | Where it goes |
-   |---|---|
-   | Deep technical content for an existing area | Edit the matching `docs/engineering/<topic>.md` (routing table below) |
-   | A new non-negotiable invariant | Add a one-line **Golden Rule** to the map **and** the full detail to the topic doc |
-   | A brand-new area with no home | Create `docs/engineering/<new>.md`, then add a row to the map's table **and** to [`index.md`](index.md) |
-   | A change to a section still living in the map (Identity / Cognitive Rules, Quick Reference, Philosophy) | Apply it directly in `.skills/SKILL.md` |
-   | Pure reword / typo fix of already-relocated content | Apply in the topic doc only |
-   | Irrelevant to `main` (e.g. BLE — `main` deliberately carries no BLE) | Skip it, and note the omission in the sync PR |
-
-4. **Stage and finish.** `git add .skills/SKILL.md` plus every touched
-   `docs/engineering/*` file, then complete the merge.
-
-## Routing table (section → destination)
-
-Canonical key for step 3 — keep this in sync with [`index.md`](index.md).
-
-| Guide topic | Destination doc |
+| Incoming change | Local destination or disposition |
 |---|---|
-| Hardware specs, the Resource Protocol, platform detection | [hardware-constraints.md](hardware-constraints.md) |
-| Memory safety / RAII, `new` / `malloc` / `makeUniqueNoThrow`, OOM handling | [memory-and-allocation.md](memory-and-allocation.md) |
-| `string_view`, IRAM/flash cache, ISR↔task, RISC-V alignment, template/`std::function` bloat, ArduinoJson v7 | [esp32-pitfalls.md](esp32-pitfalls.md) |
-| PlatformIO, build environments, critical build flags, `platformio.local.ini` | [build-system.md](build-system.md) |
-| Directory structure, HAL, singletons, activity lifecycle, FreeRTOS tasks, fonts | [architecture-and-patterns.md](architecture-and-patterns.md) |
-| Naming, header guards, error-handling philosophy | [coding-standards.md](coding-standards.md) |
-| Orientation-aware logic, logical button mapping, UITheme, `tr()` | [ui-and-input.md](ui-and-input.md) |
-| Generated files & build-artifact workflow (HTML, i18n, fonts) | [generated-files.md](generated-files.md) |
-| Build/monitor commands, crash playbook, verification checklist, CI | [testing-and-debugging.md](testing-and-debugging.md) |
-| Repo detection, git rules, branch naming, commit format, when to commit | [git-workflow.md](git-workflow.md) |
-| Cache structure, invalidation, format versioning | [cache-management.md](cache-management.md) |
-| Unified content profiles, embedded CJK fonts | [chinese-build.md](chinese-build.md) |
+| Deep technical guidance or rewording of relocated content | Existing topic selected from the [engineering index](index.md) |
+| Operational workflow and supporting resources | Corresponding `.agents/skills/` skill; preserve resource permissions and repair links |
+| New critical invariant | Short AGENTS rule plus details in the relevant topic |
+| New topic without an existing home | Focused engineering document with index and AGENTS links |
+| Identity, quick reference, or scope wording | AGENTS, reconciled with CrossMux policy |
+| Upstream-only policy, feature freeze, or inapplicable behavior | Skip with a reason in the review |
 
-## Hard rules
+Resolve modify/delete and symlink conflicts explicitly. Keeping the local
+version of a legacy path does not prove its useful content reached the current
+destination. Avoid duplicating a rule in AGENTS, a skill, and an engineering
+topic; keep detail at its destination and link to it.
 
-- **Never** resolve by taking upstream's monolithic `.skills/SKILL.md` wholesale —
-  that silently undoes the refactor and re-bloats the map.
-- The map stays **≤ ~150 lines**. If a resolution grows it past that, the content
-  belonged in `docs/engineering/`, not the map.
-- **Nothing is dropped silently.** Every upstream hunk is either routed to a doc,
-  promoted to a Golden Rule, applied in the map, or explicitly noted as
-  out-of-scope in the PR.
+## Verification
 
-## Verification (after resolving)
+- AGENTS remains a regular, thin map (about 150 lines or fewer), and skills live
+  in a real directory with working resources.
+- No legacy entrypoints or directories survive; legacy path references serve
+  upstream compatibility only. Preserve third-party copyright and attribution.
+- Relative links, touched Markdown anchors, and `git diff --check` pass.
+- Every incoming hunk has a reviewed destination or an explicit skip reason.
 
-1. `wc -l CLAUDE.md` is still ≤ ~150 lines.
-2. Every relative link in the map and the touched `docs/engineering/*` files
-   resolves (see the link checker pattern in the repo).
-3. The upstream delta from step 2 is fully accounted for (routed / promoted /
-   applied / explicitly skipped).
-4. `pio run` is unaffected — docs are not compiled.
+Standalone guide edits need no firmware build. For a sync, the skill's
+publication checks and authorization requirements still apply; document checks
+do not authorize skipping builds or triggering remote workflows.

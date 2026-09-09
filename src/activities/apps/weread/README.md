@@ -15,14 +15,14 @@ CrossMux 的非官方微信读书客户端，用于扫码登录、同步个人�
 - 打开微信读书不会因固件升级自动扫描或清空全局缓存；章节缓存通过自身版本在用户缓存书籍时逐章更新。管理标签中的 **清除缓存** 会删除书架列表、封面、详情、章节、图片、划线书评、旧版升级标记和临时数据，但保留登录状态、免责声明确认、`/WeRead` 中已缓存的 EPUB 及其阅读进度。
 - 退出登录会返回扫码流程。
 
-构建简体中文固件：
+构建 X3/X4 统一语言固件（选择简体中文启用 China 内容区）：
 
 ```sh
 pio run -e gh_release
 ```
 
 原生模拟器的构建、运行和 SD 卡目录配置见
-[CrossMux simulator fork 文档](https://github.com/0x1abin/crosspoint-simulator/tree/26010239491941025ccdd55da8eab6a7d36d5cc1#setup)。
+[桌面模拟器说明](../../../../docs/engineering/build-system.md#desktop-simulator)；依赖版本以 `platformio.ini` 为准。
 
 ## 代码与数据
 
@@ -49,7 +49,7 @@ pio run -e gh_release
 
 本功能为 CrossMux 提供的非官方第三方功能，与腾讯、微信及微信读书无关。服务可能随官方接口变更而失效。请遵守微信读书用户协议及相关法律法规，并自行承担账号、数据及内容使用风险。
 
-真机传输虽使用 TLS 加密，但由于硬件资源限制，当前不校验服务器 CA 与主机身份，存在中间人攻击风险。请仅在可信网络中使用，并妥善保管保存登录会话的 SD 卡。原生模拟器通过 libcurl 的主机信任库验证证书。更多实现细节见 [简体中文构建说明](../../../../docs/engineering/chinese-build.md#weread-transport)。
+真机传输虽使用 TLS 加密，但由于硬件资源限制，当前不校验服务器 CA 与主机身份，存在中间人攻击风险。请仅在可信网络中使用，并妥善保管保存登录会话的 SD 卡。原生模拟器通过 libcurl 的主机信任库验证证书。更多实现细节见 [统一固件中文支持说明](../../../../docs/engineering/chinese-build.md#weread-transport)。
 
 本项目遵循仓库根目录的 [MIT License](../../../../LICENSE)。上述免责声明不构成额外的许可证限制。
 

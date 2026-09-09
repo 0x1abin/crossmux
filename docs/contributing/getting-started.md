@@ -1,14 +1,15 @@
 # Getting Started
 
-This guide helps you build and run CrossPoint locally.
+This guide helps you build and run CrossMux locally.
 
 ## Prerequisites
 
 - PlatformIO Core (`pio`) or VS Code + PlatformIO IDE
-- Python 3.8+
+- Python 3 (the CI toolchain version is recorded in `.github/workflows/ci.yml`)
+- CMake and Ninja for host tests
 - `clang-format` 21+ in your `PATH` (CI uses clang-format 21)
 - USB-C cable
-- Xteink X4 device for hardware testing
+- A matching device for hardware testing; the default build targets Xteink X3/X4
 
 If `./bin/clang-format-fix` fails with either of these errors, install clang-format 21:
 
@@ -43,8 +44,8 @@ The reported major version must be 21 or newer.
 ## Clone and initialize
 
 ```sh
-git clone --recursive https://github.com/crosspoint-reader/crosspoint-reader
-cd crosspoint-reader
+git clone --recursive https://github.com/0x1abin/crossmux.git
+cd crossmux
 ```
 
 If you already cloned without submodules:
@@ -75,10 +76,16 @@ pio run --target upload
 ## First checks before opening a PR
 
 ```sh
-./bin/clang-format-fix
-pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
-pio run
+./bin/ci-check
 ```
+
+The repository pins the pioarduino platform in `platformio.ini`. `pio run` builds
+the X3/X4 development firmware; `pio run -e gh_release` builds its unified-language
+stable profile. Use the matching environment for other devices; see
+[build environments and simulator setup](../engineering/build-system.md).
+
+Documentation-only changes need local link, command, and whitespace checks,
+not firmware builds.
 
 ## What to read next
 

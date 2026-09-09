@@ -1,20 +1,15 @@
 name: Sync PR build verify
 
-# Gate every upstream-sync PR with the release env set (gh_release +
-# unified gh_release). Lives next to sync-upstream.yml (merge orchestration)
-# but kept as its own file so the two concerns don't entangle:
-#   sync-upstream.yml -> maintain the standing chore/sync-upstream PR
-#   sync-build.yml    -> "would this PR actually ship?" build check
-# ci.yml already covers default-env build + cppcheck + clang-format on
-# every PR. This workflow is the release-env top-up that only the sync
-# branch needs, so the `if:` below scopes it strictly to chore/sync-upstream.
+# Build the unified release for CrossMux candidates created by the
+# sync-upstream skill. Regular PR CI covers the development build and code
+# checks; this workflow adds gh_release and can also be run manually.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
   push:
-    branches: [chore/sync-upstream]
+    branches: ['codex/sync-upstream-*']
   workflow_dispatch:
 
 permissions:
@@ -28,8 +23,8 @@ jobs:
   select_runner:
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/chore/sync-upstream') ||
-      (github.event_name == 'pull_request' && github.head_ref == 'chore/sync-upstream')
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/sync-upstream-')) ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'codex/sync-upstream-'))
     uses: ./.github/workflows/select-build-runner.yml
     secrets:
       runner_status_token: ${{ secrets.H2O_RUNNER_TOKEN }}

@@ -1,6 +1,6 @@
 # Touch and UI Development
 
-CrossPoint runs on touch devices (Seeed Sticky, M5Paper, M5Stack PaperMono, LilyGo T5, Xteink X4 Pro) alongside the button-only Xteink X3/X4. Every screen must work with both input styles.
+CrossMux includes touch-capable ESP32-S3 targets alongside the button-only Xteink X3/X4. Every screen must work with both input styles; see [device variants](../engineering/device-variants.md) for the configured targets and their validation limits.
 
 **There is one supported way to build a new screen: FreeInkUI, hosted through the firmware base classes below.** Touch hit-testing, tap highlighting, long-press, swipe scrolling, and button focus navigation all come from the shared stack; you never hand-roll coordinate math.
 

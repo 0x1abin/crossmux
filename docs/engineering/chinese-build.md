@@ -1,6 +1,6 @@
 # Unified Firmware Chinese Support
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md): runtime content profiles,
+> Deep reference for [AGENTS.md](../../AGENTS.md): runtime content profiles,
 > the compact embedded CJK fallback, and CJK font regeneration.
 
 Every hardware target now builds one firmware. The base environment always

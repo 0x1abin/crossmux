@@ -1,6 +1,6 @@
 # Architecture Overview
 
-CrossPoint is firmware for the Xteink X4 (unaffiliated with Xteink), built with PlatformIO targeting the ESP32-C3 microcontroller.
+CrossMux is a community fork of CrossPoint Reader, built with PlatformIO for ESP32 e-ink devices. Xteink X3/X4 share the ESP32-C3 firmware; ESP32-S3 devices use separate targets behind the HAL/SDK boundary. See [device variants](../engineering/device-variants.md).
 
 At a high level, it is firmware that uses an activity-driven application architecture loop with persistent settings/state, SD-card-first caching, and a rendering pipeline optimized for e-ink constraints.
 

@@ -1,6 +1,6 @@
 # Testing, Debugging & Verification
 
-> Deep reference for [CLAUDE.md](../../CLAUDE.md). Build/quality commands, the
+> Deep reference for [AGENTS.md](../../AGENTS.md). Build/quality commands, the
 > crash playbook, the agent vs human verification split, CI awareness, and live
 > serial debugging. For the contributor-facing quick version see
 > [../contributing/testing-debugging.md](../contributing/testing-debugging.md);
@@ -64,6 +64,10 @@ pio run -t upload && pio device monitor
 ./bin/clang-format-fix
 ```
 
+For documentation-only changes, check local links, anchors, documented commands,
+and `git diff --check`; firmware builds and device tests are unnecessary. For
+script or workflow changes, run the focused checks and report any limitations.
+
 ## Debugging Crashes
 
 **Common Crash Causes**:
@@ -91,8 +95,9 @@ pio run -t upload && pio device monitor
    - Set pointers to `nullptr` after `free()`
 
 4. **Corrupt Cache Files**:
-   - Delete `.crosspoint/` directory on SD card
-   - Forces clean re-parse of all EPUBs
+   - Back up the SD data, then clear only the affected book cache
+   - Do not delete all of `/.crosspoint/` merely to rebuild a book: it also
+     holds settings and reading progress. See [cache-management.md](cache-management.md)
    - Check file format versions in [../file-formats.md](../file-formats.md)
 
 5. **Watchdog Timeout**:
