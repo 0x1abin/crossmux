@@ -353,6 +353,8 @@ class Operation {
   Error decideProgress();
   Error fetchReaderOnce();
   Error fetchShardOnce(const char* endpoint, const std::string& destination);
+  void startDownloadMetrics();
+  void logDownloadMetrics(const char* result) const;
   Event inspectPrimary();
   Event decodeChapter(bool plainText);
   Event finishWholeBook(const std::string& source);
@@ -407,6 +409,13 @@ class Operation {
   unsigned long loginStartedAt_ = 0;
   unsigned long nextActionAt_ = 0;
   unsigned long workStartedAt_ = 0;
+  // Pipeline starts after chapter selection/TOC loading, excluding initial login and TOC requests.
+  unsigned long downloadStartedAt_ = 0;
+  // Wall times include synchronous SD I/O, not just network or CPU work.
+  unsigned long chapterTransferMs_ = 0;
+  unsigned long chapterDecodeMs_ = 0;
+  unsigned long chapterSanitizeMs_ = 0;
+  uint64_t shardBytes_ = 0;  // Received shard bytes, including retry attempts; excludes reader metadata.
   int responseStatus_ = 0;
   uint32_t progressUploadStartedAt_ = 0;
   char previousVid_[64] = {};
