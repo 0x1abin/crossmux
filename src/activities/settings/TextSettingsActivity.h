@@ -21,7 +21,7 @@ class TextSettingsActivity final : public UiTabListActivity {
  public:
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
   enum class InitialFontState : uint8_t { Unchanged, Changed };
-  enum class StartMode : uint8_t { Interactive, PreloadThenExit };
+  enum class StartMode : uint8_t { Interactive, PreviewOnly, PreloadThenExit };
 
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
                        Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged,

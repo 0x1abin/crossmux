@@ -14,6 +14,7 @@
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
+#include "ReaderFontPreview.h"
 #include "ReaderToolbarUi.h"
 #include "components/OptionPopup.h"
 
@@ -86,6 +87,10 @@ class EpubReaderActivity final : public ReaderActivity {
   // use), for enum rows: font size / line spacing / alignment / orientation /
   // auto page turn. Toggle rows stay one-tap toggles, as in Settings.
   OptionPopup overlayPopup;
+  ReaderFontPreview fontPreview;
+  enum class FontPromptState { Idle, Asking, Accepted };
+  FontPromptState fontPromptState = FontPromptState::Idle;
+  bool fontPromptWaitForBackRelease = false;
   // True while a clean-page snapshot (renderer.storeBwBuffer) backs the open
   // overlay, letting panel->toolbar steps restore the page without a full
   // re-render. Discarded on close / whenever the page under the overlay changes.
@@ -164,6 +169,9 @@ class EpubReaderActivity final : public ReaderActivity {
   // Persist the reader text settings, (re)load the selected SD font, and
   // re-paginate the current chapter so changes apply without re-opening the book.
   void applyReaderTextSettings();
+  void finishFontPreview();
+  void handleFontPreloadPrompt();
+  void render(RenderLock&& lock) override;
   // More panel rows.
   void buildMoreActions();
   std::string moreRowName(int row) const;

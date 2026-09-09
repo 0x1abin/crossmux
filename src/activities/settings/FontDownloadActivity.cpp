@@ -902,9 +902,11 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
     return;
   }
 
-  auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                              TextSettingsActivity::Tab::Family,
-                                                              TextSettingsActivity::InitialFontState::Changed);
+  auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(
+      renderer, mappedInput, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
+      TextSettingsActivity::InitialFontState::Changed,
+      startMode_ == StartMode::PreviewOnly ? TextSettingsActivity::StartMode::PreviewOnly
+                                           : TextSettingsActivity::StartMode::Interactive);
   if (!textSettings) {
     LOG_ERR("FONT", "OOM allocating TextSettingsActivity (%zu bytes)", sizeof(TextSettingsActivity));
     RenderLock lock(*this);
@@ -927,7 +929,8 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   }
   startActivityForResult(std::move(textSettings), [this](const ActivityResult& result) {
     RenderLock lock(*this);
-    accelerationCompleted_ = !result.isCancelled && SETTINGS.sdFontFamilyName[0] != '\0';
+    accelerationCompleted_ =
+        startMode_ != StartMode::PreviewOnly && !result.isCancelled && SETTINGS.sdFontFamilyName[0] != '\0';
     state_ = COMPLETE;
     operation_ = DownloadOperation::None;
     renderer.requestNextFullRefresh();

@@ -213,7 +213,13 @@ void TextSettingsActivity::activateIndex(const int index) {
 }
 
 bool TextSettingsActivity::handleCustomInput() {
-  return optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); });
+  const bool handled = optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); });
+  // Automatic preloads only show an informational failure popup. Back and
+  // outside taps acknowledge it too, rather than exposing the picker to retry.
+  if (handled && startMode_ == StartMode::PreloadThenExit && !optionPopup_.isActive() && !exitInProgress_) {
+    completeExit();
+  }
+  return handled;
 }
 
 bool TextSettingsActivity::handleButtons() {
@@ -502,6 +508,14 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   exitInProgress_ = true;
   exitDestination_ = destination;
 
+  if (startMode_ == StartMode::PreviewOnly) {
+    // The reader owns the complete preview session and asks only on return to
+    // the page. Home/sleep must not turn a preview into a Flash write either.
+    SETTINGS.saveToFile();
+    completeExit();
+    return;
+  }
+
   const bool fontChanged = initialFontState_ == InitialFontState::Changed ||
                            currentFamilyIndex_ != initialFamilyIndex_ || SETTINGS.fontPointSize != initialPointSize_;
   if (!fontChanged) {
@@ -547,6 +561,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
 }
 
 void TextSettingsActivity::completeExit() {
+  exitInProgress_ = true;
   if (exitDestination_ == ExitDestination::Home) {
     onGoHome();
   } else {
@@ -567,8 +582,10 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   }
 
   SETTINGS.saveToFile();
-  auto downloader =
-      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage);
+  auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
+      renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage,
+      startMode_ == StartMode::PreviewOnly ? FontDownloadActivity::StartMode::PreviewOnly
+                                           : FontDownloadActivity::StartMode::Normal);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return;
