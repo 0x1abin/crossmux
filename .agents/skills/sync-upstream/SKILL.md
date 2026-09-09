@@ -52,53 +52,60 @@ Do not start `simulator` until the SDK fork contains its parent `main`; do not
 start `crossmux` until both dependency forks contain their parent `main` and no
 corresponding sync pull request remains open.
 
+## Upstream agent-document review
+
+After each `start`, before resolving anything, read the
+[agent-guide merge policy](../../../docs/engineering/upstream-merge-policy.md)
+and inspect the upstream document delta, even when Git reports no conflicts.
+Use the candidate's recorded `base_sha` and `upstream_sha`; follow the policy's
+content routing and verification requirements for CrossMux. Review SDK and
+simulator guide changes too, using each fork's existing document structure.
+The script does not discover cross-path document equivalents or convert content.
+
 ## Mandatory manual review
 
-Do not choose a side automatically. Manual review is required for:
+Review every Git conflict, every file changed on both sides since the merge
+base (including clean merges), and cross-file or cross-symbol behavioral
+overlaps. These include upstream guides whose content has moved into local
+documents and legacy entrypoints reintroduced by a clean merge. Use CodeGraph
+when available, otherwise `rg` and source inspection, to trace shared behavior.
 
-- every Git-unmerged path;
-- every file changed on both sides since their merge base, even if Git merged
-  it cleanly;
-- different files or symbols that replace, duplicate, or alter the same
-  behavior or call path.
+Before resolving an item missing from `review_items`, repeat `start` with one
+`--behavior-overlap` per discovered overlap (a source path or descriptive
+source-to-destination mapping). Reuse the component, remote/base options,
+candidate root, and upstream pins; `--candidate-root` is the candidate's parent
+directory. Check that the printed path, `base_sha`, and `upstream_sha` still
+identify the reviewed candidate. If an unpinned upstream has advanced, `start`
+may select a new candidate: review that snapshot afresh rather than transferring
+old decisions. Do not edit the review state by hand.
 
-Before resolving anything, ask the user interactively. Prefer the structured
-user-input control when it is available and present at most three behavior
-decisions per batch. Otherwise ask explicit numbered options and stop for the
-answer. A static conflict report is context, not completed review.
+Reuse explicit decisions already given in the current conversation for the
+same items and revisions. Otherwise ask interactively before resolving them;
+general sync authorization is not a resolution decision. Prefer structured
+user input, with at most three behavior decisions per batch; otherwise present
+numbered options and wait. Each decision must show local and upstream behavior,
+compatibility/product impact, and a recommendation. Offer applicable local,
+upstream, or combined outcomes without treating the recommendation as approval.
+For documents, identify the incoming increment, local destination, and proposed
+adaptation or skip reason.
 
-Present each decision with:
+Group files only when they form one behavior chain, listing every covered review
+item. Restate each approved choice before applying it. Do not resolve, stage,
+commit, push, or open a PR for unanswered items. Preserve CrossMux branding,
+apps, releases, translations, and device behavior unless explicitly approved
+otherwise; follow the shared rules in [AGENTS.md](../../../AGENTS.md).
 
-1. the local behavior;
-2. the upstream behavior;
-3. the compatibility and product impact;
-4. a recommendation without treating it as approval.
-
-Offer the local version, upstream version, and any safe combined resolution as
-mutually exclusive options, putting the recommendation first without treating
-it as approval. Files may share one question only when they form one behavior
-chain; list every covered review item in that question. After each answer,
-restate the locked choice before applying it, then continue asking until every
-review item is covered. Do not resolve, stage, commit, push, or open a pull
-request for an unanswered item.
-
-Pass one `--review-note` per approved review item when publishing; the script
-refuses to publish a candidate with review items and no recorded decision.
-Include every decision in the Draft PR body. If there were no review items,
-record that fact instead. Keep interaction in the agent workflow: do not add a
-terminal prompt or another CLI phase between `start` and `publish`.
-
-Use CodeGraph when available to trace shared symbols and call paths; otherwise
-use `rg` and source inspection. Preserve CrossMux-specific branding, apps,
-release settings, translations, and device behavior unless the user explicitly
-approves changing them. Continue to follow the cache-version, thin-map,
-submodule, i18n, HAL, input, and allocation rules in `AGENTS.md` and
-`docs/engineering/`.
+When publishing, pass one `--review-note` per approved item in the printed
+`review_items` order. The script checks the count and pairs these notes into the
+Draft PR body; it cannot verify approval. Document notes identify the upstream
+source and local destination or skip reason, accounting for every incoming
+hunk. With no review items, the PR records that fact. Keep this interaction in
+the agent workflow, without terminal prompts or an extra CLI phase.
 
 ## Validation
 
-`publish` performs component-specific checks unless `--skip-builds` was
-explicitly authorized:
+After document verification, `publish` still performs component-specific checks
+unless `--skip-builds` was explicitly authorized:
 
 - SDK: its four existing host test scripts, then the CrossMux PlatformIO
   validation and any repeatable `--extra-build-env` values.
