@@ -81,6 +81,22 @@ the active host, but only `weread.qq.com` and its subdomains receive the WeRead
 Cookie. The connection closes before EPUB packaging, and also closes early
 when free heap falls below 20 KB or the largest block falls below 8 KB.
 
+The pinned SDK owns the maximum-fragment request: `HAVE_MAX_FRAGMENT` remains
+enabled and `SecureClient` requests 2 KiB before the handshake. There is no
+application SNI wrapper. This preserves the effective request on the original
+SDK path; it does not prove that the peer accepted it. HTTP buffer sizes do not
+establish TLS record sizes. Cipher suites and hardware acceleration are unchanged.
+
+Chapter shard merging and Base64 input reuse the Operation's 4 KiB buffer instead
+of allocating a temporary 1 KiB buffer per chapter; Base64 output writes remain
+unchanged. Downloads remain serial on C3 and S3. UI stage numbers and labels share
+one mapping and drawing path; chapter progress refresh requests use 5% buckets,
+while images retain 10% buckets. Unknown totals show waiting text rather than a
+percentage. DEBUG-only diagnostic sampling is compiled out at lower log levels.
+Timing includes synchronous SD I/O and must not be interpreted as pure CPU work.
+See the [WeRead README](../../src/activities/apps/weread/README.md) for measurement
+boundaries, cold-cache test records, and unverified hardware checks.
+
 Device requests call `setInsecure()`: traffic is encrypted, but the CA and host
 identity are not verified. This makes session credentials and downloaded
 content vulnerable to a man-in-the-middle attacker. The native simulator takes
