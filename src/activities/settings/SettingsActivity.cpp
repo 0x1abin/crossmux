@@ -160,7 +160,7 @@ class AboutActivity final : public Activity {
     const auto& metrics = UITheme::getInstance().getMetrics();
     const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
     return Rect{safeArea.x, safeArea.y + metrics.topPadding + metrics.headerHeight, safeArea.width,
-                safeArea.height - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
+                safeArea.height - metrics.topPadding - metrics.headerHeight};
   }
 
   bool hasPsram() const {
