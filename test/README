@@ -13,3 +13,13 @@ Run a single suite directly:
 
 Google Test is fetched via CMake FetchContent on first configure; the pinned
 version lives in test/CMakeLists.txt.
+
+SD capacity regression (standalone, after a default hardware build installs SdFat):
+
+  python3 scripts/tests/test_sd_space.py
+
+An alternative SdFat source directory may be passed as the first argument.
+This compiles the SDK's capacity methods against real FAT32/exFAT partition
+scans on synthetic sectors, with controlled mount, clock, and error inputs.
+It checks 32/64 KiB clusters, empty/full space, invalid counts, scan failures,
+and cache expiry/retry. It does not access a physical SD card.

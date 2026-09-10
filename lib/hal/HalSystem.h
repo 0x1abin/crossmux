@@ -14,6 +14,8 @@ struct HeapInfo {
   uint32_t freeBytes;
   uint32_t totalBytes;
   uint32_t largestFreeBlockBytes;
+  uint32_t freePsramBytes;
+  uint32_t totalPsramBytes;
 };
 
 void begin();
@@ -24,6 +26,7 @@ void clearPanic();
 
 using DeviceId = std::array<uint8_t, 6>;
 const char* getDeviceModel();
+const char* getChipModel();
 bool getDeviceId(DeviceId& out);
 bool getWifiStationMac(DeviceId& out);
 bool getChipTemperatureCelsius(float& out);
