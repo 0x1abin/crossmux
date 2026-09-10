@@ -70,8 +70,7 @@ constexpr StrId kShelfRefreshOptions[] = {
     StrId::STR_YES,
 };
 
-constexpr StrId kPostProcessWaitingLines[] = {
-    StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_1,
+constexpr StrId kPostProcessWaitLines[] = {
     StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_2,
 };
 
@@ -96,6 +95,43 @@ constexpr int kLandscapeShelfColumns = 5;
 constexpr int kLandscapeShelfRows = 2;
 constexpr unsigned long kShelfPageHoldMs = 700;
 constexpr int kNoShelfSelection = -1;
+constexpr uint8_t kDownloadStageCount = 4;
+constexpr uint8_t kChapterProgressBucketCount = 20;
+
+constexpr uint8_t progressBucket(const uint32_t completed, const uint32_t total, const uint8_t bucketCount) {
+  if (total == 0 || bucketCount == 0) return 0;
+  const uint64_t bucket = (static_cast<uint64_t>(completed) * bucketCount) / total;
+  return static_cast<uint8_t>(std::min<uint64_t>(bucket, bucketCount));
+}
+
+struct DownloadStageInfo {
+  uint8_t number;
+  StrId label;
+};
+
+constexpr DownloadStageInfo downloadStageInfo(const WeReadClient::Operation::ProgressStage stage) {
+  switch (stage) {
+    case WeReadClient::Operation::ProgressStage::Chapters:
+      return {1, StrId::STR_WEREAD_CACHING_CHAPTERS};
+    case WeReadClient::Operation::ProgressStage::Preparing:
+      return {2, StrId::STR_WEREAD_PREPARING_RESOURCES};
+    case WeReadClient::Operation::ProgressStage::Images:
+      return {3, StrId::STR_WEREAD_DOWNLOADING_IMAGES};
+    case WeReadClient::Operation::ProgressStage::Packaging:
+      return {4, StrId::STR_WEREAD_PACKAGING_BOOK};
+  }
+  return {};
+}
+
+static_assert(progressBucket(0, 100, kChapterProgressBucketCount) == 0);
+static_assert(progressBucket(4, 100, kChapterProgressBucketCount) == 0);
+static_assert(progressBucket(5, 100, kChapterProgressBucketCount) == 1);
+static_assert(progressBucket(99, 100, kChapterProgressBucketCount) == 19);
+static_assert(progressBucket(100, 100, kChapterProgressBucketCount) == kChapterProgressBucketCount);
+static_assert(downloadStageInfo(WeReadClient::Operation::ProgressStage::Chapters).number == 1);
+static_assert(downloadStageInfo(WeReadClient::Operation::ProgressStage::Preparing).number == 2);
+static_assert(downloadStageInfo(WeReadClient::Operation::ProgressStage::Images).number == 3);
+static_assert(downloadStageInfo(WeReadClient::Operation::ProgressStage::Packaging).number == 4);
 
 constexpr int disclaimerActionGap(const int width, const int themeSpacing) {
   return std::min(std::max(kMinimumDisclaimerActionGap, themeSpacing), std::max(0, width - kDisclaimerActionCount));
@@ -170,27 +206,65 @@ bool drawCachedCover(GfxRenderer& renderer, const std::string& bookDir, const Re
   return true;
 }
 
-void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* title, const char* status,
-                        const uint32_t completed, const uint32_t total) {
+void drawTruncatedProgressTitle(GfxRenderer& renderer, const Rect& content, const int y, const char* title) {
+  constexpr char kEllipsis[] = "\xE2\x80\xA6";
+  char shown[sizeof(WeReadStore::ShelfRecord{}.title) + sizeof(kEllipsis)] = {};
+  snprintf(shown, sizeof(shown), "%s", title ? title : "");
+  size_t length = strlen(shown);
+  const int maxWidth = std::max(1, content.width);
+  if (renderer.getTextWidth(UI_12_FONT_ID, shown, EpdFontFamily::BOLD) > maxWidth) {
+    // ponytail: bounded O(title bytes²) over a 191-byte field; replace only if title storage grows.
+    while (length > 0) {
+      do {
+        --length;
+      } while (length > 0 && (static_cast<uint8_t>(shown[length]) & 0xC0) == 0x80);
+      memcpy(shown + length, kEllipsis, sizeof(kEllipsis));
+      if (renderer.getTextWidth(UI_12_FONT_ID, shown, EpdFontFamily::BOLD) <= maxWidth) break;
+    }
+  }
+  UITheme::drawCenteredText(renderer, content, UI_12_FONT_ID, y, shown, true, EpdFontFamily::BOLD);
+}
+
+void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* title, const char* stageText,
+                        const char* status, const uint32_t completed, const uint32_t total,
+                        const StrId* extraLines = nullptr, const int extraLineCount = 0) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int relatedGap = SubpageLayout::relatedGap(metrics);
   const int sectionGap = SubpageLayout::sectionGap(metrics);
+  const int stageHeight = stageText ? relatedGap + lineHeight : 0;
+  const int statusHeight = status ? relatedGap + lineHeight : 0;
   const int barBlockHeight =
       total > 0 ? sectionGap + GUI.measureProgressBarHeight(renderer, metrics.progressBarHeight) : 0;
-  const int groupHeight = titleHeight + relatedGap + lineHeight + barBlockHeight;
+  const int extraHeight = extraLineCount > 0 ? sectionGap + extraLineCount * lineHeight : 0;
+  const int groupHeight = titleHeight + stageHeight + statusHeight + barBlockHeight + extraHeight;
   int y = content.y + std::max(0, (content.height - groupHeight) / 2);
-  UITheme::drawCenteredText(renderer, content, UI_12_FONT_ID, y, title, true, EpdFontFamily::BOLD);
-  y += titleHeight + relatedGap;
-  UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, status);
-  if (total == 0) return;
+  drawTruncatedProgressTitle(renderer, content, y, title);
+  y += titleHeight;
+  if (stageText) {
+    y += relatedGap;
+    UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, stageText, true, EpdFontFamily::BOLD);
+    y += lineHeight;
+  }
+  if (status) {
+    y += relatedGap;
+    UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, status);
+    y += lineHeight;
+  }
 
-  const int sidePadding = std::min(metrics.contentSidePadding, content.width / 4);
-  GUI.drawProgressBar(renderer,
-                      Rect{content.x + sidePadding, y + lineHeight + sectionGap,
-                           std::max(1, content.width - sidePadding * 2), metrics.progressBarHeight},
-                      completed, total);
+  if (total > 0) {
+    const int sidePadding = std::min(metrics.contentSidePadding, content.width / 4);
+    y = GUI.drawProgressBar(renderer,
+                            Rect{content.x + sidePadding, y + sectionGap, std::max(1, content.width - sidePadding * 2),
+                                 metrics.progressBarHeight},
+                            completed, total);
+  }
+  if (extraLineCount > 0) y += sectionGap;
+  for (int i = 0; i < extraLineCount; ++i) {
+    UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, I18N.get(extraLines[i]));
+    y += lineHeight;
+  }
 }
 
 struct Utf8Glyph {
@@ -804,7 +878,9 @@ void WeReadActivity::updateJobProgress() {
       case Job::Download:
         switch (stage) {
           case WeReadClient::Operation::ProgressStage::Chapters:
-            requestRender = true;
+            requestRender =
+                completed == total || progressBucket(previousCompleted, total, kChapterProgressBucketCount) !=
+                                          progressBucket(completed, total, kChapterProgressBucketCount);
             break;
           case WeReadClient::Operation::ProgressStage::Images:
             requestRender = decileChanged || completed == total;
@@ -2289,7 +2365,7 @@ void WeReadActivity::render(RenderLock&&) {
       header = tr(STR_WEREAD_DISCLAIMER_TITLE);
       break;
     case State::Downloading:
-      header = tr(STR_WEREAD_TAB_SHELF);
+      header = tr(STR_WEREAD_CACHE_BOOK);
       break;
     case State::DetailLoading:
     case State::DetailCoverLoading:
@@ -2408,19 +2484,22 @@ void WeReadActivity::render(RenderLock&&) {
       char status[64];
       snprintf(status, sizeof(status), "%s %u/%u", label ? label : "", static_cast<unsigned>(completed),
                static_cast<unsigned>(total));
-      drawProgressStatus(renderer, content, operation_.progressTitle(), status, completed, total);
+      drawProgressStatus(renderer, content, operation_.progressTitle(), nullptr, status, completed, total);
       break;
     }
     case State::Downloading: {
       const auto stage = progressStage_.load();
       const uint32_t completed = progressCompleted_.load();
-      const uint32_t total = progressTotal_.load();
-      const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      uint32_t total = progressTotal_.load();
+      char status[32] = {};
+      const StrId* lines = nullptr;
+      int lineCount = 0;
       switch (stage) {
         case WeReadClient::Operation::ProgressStage::Preparing:
         case WeReadClient::Operation::ProgressStage::Packaging: {
-          const StrId* lines = kPostProcessWaitingLines;
-          int lineCount = static_cast<int>(sizeof(kPostProcessWaitingLines) / sizeof(kPostProcessWaitingLines[0]));
+          total = 0;
+          lines = kPostProcessWaitLines;
+          lineCount = static_cast<int>(sizeof(kPostProcessWaitLines) / sizeof(kPostProcessWaitLines[0]));
           switch (postProcessNotice_.load()) {
             case PostProcessNotice::None:
             case PostProcessNotice::Waiting:
@@ -2430,33 +2509,22 @@ void WeReadActivity::render(RenderLock&&) {
               lineCount = static_cast<int>(sizeof(kPostProcessLongWaitLines) / sizeof(kPostProcessLongWaitLines[0]));
               break;
           }
-          const int textGap = SubpageLayout::relatedGap(metrics);
-          const int groupHeight = (lineCount + 1) * lineHeight + textGap;
-          int y = content.y + std::max(0, (content.height - groupHeight) / 2);
-          UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, pendingBook_.title);
-          y += lineHeight + textGap;
-          for (int i = 0; i < lineCount; ++i) {
-            UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, I18N.get(lines[i]));
-            y += lineHeight;
-          }
           break;
         }
         case WeReadClient::Operation::ProgressStage::Chapters:
         case WeReadClient::Operation::ProgressStage::Images: {
-          const char* label = stage == WeReadClient::Operation::ProgressStage::Chapters
-                                  ? tr(STR_WEREAD_CACHING_CHAPTERS)
-                                  : tr(STR_WEREAD_DOWNLOADING_IMAGES);
-          char status[64];
-          if (total == 0) {
-            snprintf(status, sizeof(status), "%s", label);
-          } else {
-            snprintf(status, sizeof(status), "%s %u/%u", label, static_cast<unsigned>(completed),
-                     static_cast<unsigned>(total));
+          if (total > 0) {
+            snprintf(status, sizeof(status), "%u/%u", static_cast<unsigned>(completed), static_cast<unsigned>(total));
           }
-          drawProgressStatus(renderer, content, pendingBook_.title, status, completed, total);
           break;
         }
       }
+      const auto info = downloadStageInfo(stage);
+      char stageText[96];
+      snprintf(stageText, sizeof(stageText), tr(STR_WEREAD_DOWNLOAD_STAGE_FMT), static_cast<unsigned>(info.number),
+               static_cast<unsigned>(kDownloadStageCount), I18N.get(info.label));
+      drawProgressStatus(renderer, content, pendingBook_.title, stageText, status[0] ? status : nullptr, completed,
+                         total, lines, lineCount);
       break;
     }
     case State::Error:

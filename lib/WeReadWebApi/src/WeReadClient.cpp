@@ -46,14 +46,29 @@ constexpr unsigned long kClockSyncTimeoutMs = 12000;
 constexpr unsigned long kNetworkRetryBaseMs = 1000;
 constexpr size_t kTransferBufferSize = 1024;
 constexpr size_t kMaxImageBytes = 4 * 1024 * 1024;
-// Local decode/package work uses at most one 1 KB transfer buffer at a time.
+// Shard validation uses one 1 KB transfer buffer; decode/package reuse Operation::ioBuffer_.
 // Keep wider headroom for SD internals and the event-driven progress render.
 constexpr size_t kBookSessionMinFreeHeap = 20 * 1024;
 constexpr size_t kBookSessionMinLargestBlock = 8 * 1024;
 
 void logMemory([[maybe_unused]] const char* phase) {
-  LOG_DBG("WR", "%s: free=%u largest=%u stack=%u", phase, static_cast<unsigned>(ESP.getFreeHeap()),
-          static_cast<unsigned>(ESP.getMaxAllocHeap()), static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#if defined(ENABLE_SERIAL_LOG) && LOG_LEVEL >= 2
+#if defined(SIMULATOR) || defined(CROSSPOINT_EMULATED)
+  constexpr int core = -1;
+#else
+  const int core = xPortGetCoreID();
+#endif
+#if defined(BOARD_HAS_PSRAM)
+  const unsigned freePsram = ESP.getFreePsram();
+  const unsigned largestPsram = ESP.getMaxAllocPsram();
+#else
+  constexpr unsigned freePsram = 0;
+  constexpr unsigned largestPsram = 0;
+#endif
+  LOG_DBG("WR", "%s: core=%d internal=%u largest=%u psram=%u psramLargest=%u stackFree=%u", phase, core,
+          static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()), freePsram,
+          largestPsram, static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
 }
 
 void logJobComplete() {
@@ -1510,11 +1525,13 @@ bool validateShard(const std::string& path) {
   return WeReadProtocol::matchesMd5(expected, 32, actual.c_str(), actual.length());
 }
 
-bool copyShardBody(const std::string& path, HalFile& output, bool& skipFirst, uint8_t* buffer) {
+bool copyShardBody(const std::string& path, HalFile& output, bool& skipFirst, uint8_t* buffer,
+                   const size_t bufferSize) {
+  if (!buffer || bufferSize == 0) return false;
   HalFile input;
   if (!Storage.openFileForRead("WR", path, input) || !input.seek(32)) return false;
   while (input.available()) {
-    const int got = input.read(buffer, kTransferBufferSize);
+    const int got = input.read(buffer, bufferSize);
     if (got <= 0) return false;
     size_t offset = 0;
     if (skipFirst) {
@@ -1565,7 +1582,8 @@ bool decoderSink(void* raw, const uint8_t* data, const size_t len) {
 }
 
 bool combineAndDecode(const std::string* shards, const size_t shardCount, const std::string& bookDir,
-                      std::string& decodedPath) {
+                      std::string& decodedPath, uint8_t* buffer, const size_t bufferSize) {
+  if (!buffer || bufferSize == 0) return false;
   const std::string encodedPath = bookDir + "/encoded.part";
   decodedPath = bookDir + "/decoded.part";
   if (Storage.exists(encodedPath.c_str())) Storage.remove(encodedPath.c_str());
@@ -1573,14 +1591,9 @@ bool combineAndDecode(const std::string* shards, const size_t shardCount, const 
 
   HalFile encoded;
   if (!Storage.openFileForWrite("WR", encodedPath, encoded)) return false;
-  auto buffer = makeUniqueNoThrow<uint8_t[]>(kTransferBufferSize);
-  if (!buffer) {
-    LOG_ERR("WR", "OOM: %u-byte shard buffer", static_cast<unsigned>(kTransferBufferSize));
-    return false;
-  }
   bool skipFirst = true;
   for (size_t i = 0; i < shardCount; ++i) {
-    if (!copyShardBody(shards[i], encoded, skipFirst, buffer.get())) return false;
+    if (!copyShardBody(shards[i], encoded, skipFirst, buffer, bufferSize)) return false;
   }
   encoded.flush();
   encoded.close();
@@ -1593,8 +1606,8 @@ bool combineAndDecode(const std::string* shards, const size_t shardCount, const 
   }
   WeReadProtocol::Base64UrlDecoder decoder(decoderSink, &output);
   while (input.available()) {
-    const int got = input.read(buffer.get(), kTransferBufferSize);
-    if (got <= 0 || !decoder.feed(buffer.get(), static_cast<size_t>(got))) return false;
+    const int got = input.read(buffer, bufferSize);
+    if (got <= 0 || !decoder.feed(buffer, static_cast<size_t>(got))) return false;
   }
   if (!decoder.finish()) return false;
   output.flush();
@@ -1928,6 +1941,11 @@ void Operation::reset() {
   loginStartedAt_ = 0;
   nextActionAt_ = 0;
   workStartedAt_ = 0;
+  downloadStartedAt_ = 0;
+  chapterTransferMs_ = 0;
+  chapterDecodeMs_ = 0;
+  chapterSanitizeMs_ = 0;
+  shardBytes_ = 0;
   responseStatus_ = 0;
   progressUploadStartedAt_ = 0;
   previousVid_[0] = '\0';
@@ -2077,6 +2095,7 @@ bool Operation::setChapterRange(const uint32_t first, const uint32_t last) {
   progressCompleted_ = 0;
   progressTotal_ = chapterRangeCount(first, last, chapterCount_);
   psvts_[0] = '\0';
+  startDownloadMetrics();
   phase_ = Phase::LoadChapter;
   return true;
 }
@@ -2100,6 +2119,7 @@ Operation::Event Operation::cancelNow() {
   if ((kind_ == Kind::Detail || kind_ == Kind::Sync) && !bookDir_.empty()) cleanupDetailTransient(bookDir_);
   error_ = Error::Cancelled;
   phase_ = Phase::Cancelled;
+  if (kind_ == Kind::Download) logDownloadMetrics("cancelled");
   logMemory("job cancelled");
   return Event::Cancelled;
 }
@@ -2159,6 +2179,7 @@ Operation::Event Operation::fail(const Error error) {
   }
   phase_ = Phase::Failed;
   LOG_ERR("WR", "job failed: phase=%u error=%u", static_cast<unsigned>(failedPhase), static_cast<unsigned>(error));
+  if (kind_ == Kind::Download) logDownloadMetrics("failed");
   logMemory("job failed");
   return Event::Failed;
 }
@@ -2942,9 +2963,11 @@ Error Operation::fetchReaderOnce() {
   if (referer_.compare(0, hostLength, kHost) != 0) return Error::Protocol;
   WeReadProtocol::PsvtsExtractor context(psvts_, sizeof(psvts_));
   ResponseSink sink{&context, resetPsvts, extractPsvts, noOpFinish, Error::Protocol};
+  const unsigned long startedAt = millis();
   const Error error =
       requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink, responseStatus_,
                   cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  chapterTransferMs_ += millis() - startedAt;
   if (error != Error::Ok) return error;
   if (responseStatus_ == 401) return Error::SessionExpired;
   if (responseStatus_ == 403 || (responseStatus_ == 200 && !context.complete())) return Error::Unavailable;
@@ -2961,8 +2984,30 @@ Error Operation::fetchShardOnce(const char* endpoint, const std::string& destina
   FileSink context;
   context.path = &destination;
   ResponseSink sink{&context, resetFile, writeFile, finishFile, Error::SdCard};
-  return requestOnce("POST", endpoint, ioBuffer_, bodySize, &session_, referer_.c_str(), sink, responseStatus_, cookie_,
-                     sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const unsigned long startedAt = millis();
+  const Error error =
+      requestOnce("POST", endpoint, ioBuffer_, bodySize, &session_, referer_.c_str(), sink, responseStatus_, cookie_,
+                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  chapterTransferMs_ += millis() - startedAt;
+  shardBytes_ += context.size;
+  return error;
+}
+
+void Operation::startDownloadMetrics() {
+  downloadStartedAt_ = millis();
+  chapterTransferMs_ = 0;
+  chapterDecodeMs_ = 0;
+  chapterSanitizeMs_ = 0;
+  shardBytes_ = 0;
+}
+
+void Operation::logDownloadMetrics(const char* result) const {
+  if (downloadStartedAt_ == 0) return;
+  LOG_INF("WR",
+          "download performance: result=%s pipelineTotalMs=%lu chapterTransferMs=%lu shardBytes=%llu "
+          "combineBase64Ms=%lu xhtmlMs=%lu",
+          result, millis() - downloadStartedAt_, chapterTransferMs_, static_cast<unsigned long long>(shardBytes_),
+          chapterDecodeMs_, chapterSanitizeMs_);
 }
 
 bool Operation::persistCoverOverride() {
@@ -3048,6 +3093,10 @@ Operation::Event Operation::finishWholeBook(const std::string& source) {
   persistInitialProgress();
   if (indexFile_.isOpen()) indexFile_.close();
   phase_ = Phase::Complete;
+  HalFile packaged;
+  const uint64_t packageBytes = Storage.openFileForRead("WR", outputPath_, packaged) ? packaged.fileSize64() : 0;
+  LOG_INF("WR", "whole EPUB complete: bytes=%llu", static_cast<unsigned long long>(packageBytes));
+  logDownloadMetrics("complete");
   logJobComplete();
   return Event::Complete;
 }
@@ -3464,13 +3513,26 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
   const std::string shards[] = {raw0, raw1, raw3};
   std::string decoded;
   const size_t count = plainText ? 2 : 3;
-  if (!combineAndDecode(shards, count, bookDir_, decoded)) return fail(Error::Integrity);
+  const unsigned long combineStartedAt = millis();
+  const bool combined = combineAndDecode(shards, count, bookDir_, decoded, ioBuffer_, sizeof(ioBuffer_));
+  const unsigned long combineMs = millis() - combineStartedAt;
+  chapterDecodeMs_ += combineMs;
+  if (!combined) return fail(Error::Integrity);
   const auto cleanup = [&]() {
     Storage.remove(decoded.c_str());
     Storage.remove(raw0.c_str());
     Storage.remove(raw1.c_str());
     if (!plainText) Storage.remove(raw3.c_str());
   };
+#if defined(ENABLE_SERIAL_LOG) && LOG_LEVEL >= 1
+  uint64_t decodedBytes = 0;
+  {
+    HalFile decodedFile;
+    if (Storage.openFileForRead("WR", decoded, decodedFile)) decodedBytes = decodedFile.fileSize64();
+  }
+#endif
+  LOG_DBG("WR", "chapter combine/Base64: index=%u paid=%u ms=%lu bytes=%llu", static_cast<unsigned>(chapterIndex_),
+          static_cast<unsigned>(chapter_.paid), combineMs, static_cast<unsigned long long>(decodedBytes));
   if (!plainText) {
     uint8_t prefix[4] = {};
     if (readPrefix(decoded, prefix, sizeof(prefix)) && prefix[0] == 'P' && prefix[1] == 'K' && prefix[2] == 3 &&
@@ -3478,13 +3540,6 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
       return finishWholeBook(decoded);
     }
   }
-  uint64_t decodedBytes = 0;
-  {
-    HalFile decodedFile;
-    if (Storage.openFileForRead("WR", decoded, decodedFile)) decodedBytes = decodedFile.fileSize64();
-  }
-  LOG_DBG("WR", "chapter decoded: index=%u paid=%u bytes=%llu", static_cast<unsigned>(chapterIndex_),
-          static_cast<unsigned>(chapter_.paid), static_cast<unsigned long long>(decodedBytes));
   bool hasXhtmlTag = true;
   if (chapter_.paid && !plainText) {
     if (!containsAllowedXhtmlTag(decoded, ioBuffer_, sizeof(ioBuffer_), hasXhtmlTag)) {
@@ -3498,10 +3553,15 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
     cleanup();
     return retryChapterResponse();
   }
+  const unsigned long sanitizeStartedAt = millis();
   const bool ok = WeReadXhtmlCodec::sanitizeChapter(
       decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_), WeReadStore::imageIndexPath(bookDir_, chapterIndex_),
       chapterIndex_, chapter_.title, plainText, reinterpret_cast<uint8_t*>(url_), sizeof(url_),
       reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_));
+  const unsigned long sanitizeMs = millis() - sanitizeStartedAt;
+  chapterSanitizeMs_ += sanitizeMs;
+  LOG_DBG("WR", "chapter XHTML: index=%u ms=%lu bytes=%llu", static_cast<unsigned>(chapterIndex_), sanitizeMs,
+          static_cast<unsigned long long>(decodedBytes));
   cleanup();
   if (!ok) return fail(Error::SdCard);
   phase_ = Phase::AdvanceChapter;
@@ -3877,6 +3937,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       logMemory("toc parsed");
       switch (options_.chapterScope) {
         case DownloadOptions::ChapterScope::WholeBook:
+          startDownloadMetrics();
           phase_ = Phase::LoadChapter;
           return Event::None;
         case DownloadOptions::ChapterScope::SelectRange:
@@ -4116,6 +4177,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       cleanupTransient(bookDir_, "");
       persistInitialProgress();
       phase_ = Phase::Complete;
+      logDownloadMetrics("complete");
       logJobComplete();
       return Event::Complete;
     }
