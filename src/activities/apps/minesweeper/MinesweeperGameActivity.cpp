@@ -22,7 +22,6 @@ constexpr int kHeroFont = NOTOSERIF_16_FONT_ID;        // end-screen big title
 constexpr int kStatValueFont = NOTOSANS_16_FONT_ID;    // end-screen stat columns
 constexpr int kNumberFontBig = NOTOSERIF_16_FONT_ID;   // cell digit (Easy/Medium)
 constexpr int kNumberFontSmall = NOTOSANS_12_FONT_ID;  // cell digit (Hard)
-constexpr unsigned long TOUCH_FLAG_HOLD_MS = 700;
 
 }  // namespace
 
@@ -260,13 +259,41 @@ void MinesweeperGameActivity::enterGameMenu() {
                 [this](const int index) { runMenuItem(static_cast<uint8_t>(index)); });
 }
 
-void MinesweeperGameActivity::handleInputPlaying() {
+// Bottom action bar geometry, scaled from the panel size and measured UP FROM
+// THE SCREEN BOTTOM: this firmware ships several targets with different panels,
+// so absolute pixel offsets would land off-screen or over the board somewhere.
+int MinesweeperGameActivity::actionBarH() const {
+  return std::max(ACTION_BAR_MIN_H, renderer.getScreenHeight() * ACTION_BAR_H_FRAC / 100);
+}
+
+int MinesweeperGameActivity::actionBarY() const {
+  const int h = renderer.getScreenHeight();
+  return h - actionBarH() - std::max(4, h * ACTION_BAR_BOTTOM_FRAC / 100);
+}
+
+// Two equal buttons split across the content width, with the required >= 6 px
+// visible gap between them.
+Rect MinesweeperGameActivity::digButtonRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect modeButton =
-      gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
-                          metrics.menuSpacing, metrics.menuRowHeight, 0, 1);
+  const int side = std::max(8, metrics.contentSidePadding);
+  const int total = renderer.getScreenWidth() - 2 * side;
+  const int w = (total - ACTION_BAR_GAP) / 2;
+  return Rect{side, actionBarY(), w, actionBarH()};
+}
+
+Rect MinesweeperGameActivity::flagButtonRect() const {
+  const Rect dig = digButtonRect();
+  return Rect{dig.x + dig.width + ACTION_BAR_GAP, dig.y, dig.width, dig.height};
+}
+
+void MinesweeperGameActivity::handleInputPlaying() {
   int touchX = 0;
   int touchY = 0;
+  const Rect digButton = digButtonRect();
+  const Rect flagButton = flagButtonRect();
+  const auto inRect = [](const Rect& r, const int x, const int y) {
+    return r.width > 0 && r.height > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+  };
   if (mappedInput.wasScreenTouchDown(touchX, touchY)) {
     int row = 0;
     int column = 0;
@@ -281,10 +308,15 @@ void MinesweeperGameActivity::handleInputPlaying() {
     return;
   }
   if (mappedInput.wasScreenTapped(touchX, touchY)) {
-    if (touchX >= modeButton.x && touchX < modeButton.x + modeButton.width && touchY >= modeButton.y &&
-        touchY < modeButton.y + modeButton.height) {
-      flagMode = !flagMode;
-      scheduleSave();
+    // The action bar is checked before the board: tapping Dig or Flag acts on
+    // the highlighted cell, while tapping the board only aims the cursor.
+    if (inRect(digButton, touchX, touchY)) {
+      doDig();
+      requestUpdate();
+      return;
+    }
+    if (inRect(flagButton, touchX, touchY)) {
+      doFlag();
       requestUpdate();
       return;
     }
@@ -294,13 +326,10 @@ void MinesweeperGameActivity::handleInputPlaying() {
     if (gameGridCellFromPoint(
             Rect{(renderer.getScreenWidth() - BOARD_W) / 2, BOARD_Y, board.cols * size, board.rows * size}, board.rows,
             board.cols, touchX, touchY, row, column)) {
+      // Aim only. Digging/flagging happen through the buttons above, so a
+      // mis-aimed tap can no longer reveal or flag the wrong cell.
       cursorR = static_cast<uint8_t>(row);
       cursorC = static_cast<uint8_t>(column);
-      if (mappedInput.getHeldTime() >= TOUCH_FLAG_HOLD_MS) {
-        doFlag();
-      } else {
-        doDig();
-      }
       requestUpdate();
       return;
     }
@@ -413,13 +442,11 @@ void MinesweeperGameActivity::render(RenderLock&&) {
 void MinesweeperGameActivity::renderPlaying() {
   drawTitleBar();
   drawBoard();
+  // Two explicit targets instead of one mode-toggle button: the player sees
+  // both actions at once, and neither depends on remembering the current mode.
   if (mappedInput.hasTouch()) {
-    const auto& metrics = UITheme::getInstance().getMetrics();
-    GUI.drawActionButton(
-        renderer,
-        gameTouchActionRect(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.contentSidePadding,
-                            metrics.menuSpacing, metrics.menuRowHeight, 0, 1),
-        flagMode ? tr(STR_MINESWEEPER_MODE_FLAG) : tr(STR_MINESWEEPER_MODE_DIG), flagMode);
+    GUI.drawActionButton(renderer, digButtonRect(), tr(STR_MINESWEEPER_MODE_DIG), !flagMode);
+    GUI.drawActionButton(renderer, flagButtonRect(), tr(STR_MINESWEEPER_MODE_FLAG), flagMode);
   }
   drawFooter();
 }

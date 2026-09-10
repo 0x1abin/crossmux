@@ -147,30 +147,83 @@ void GomokuGameActivity::intersectionXY(uint8_t r, uint8_t c, int* x, int* y) co
   *y = boardOriginY() + static_cast<int>(r) * boardPitch();
 }
 
+// The board's own rectangle: the grid plus half a pitch of slop, which is
+// exactly the intersection hit tolerance. Touch inside it aims the cursor.
+Rect GomokuGameActivity::boardTouchRect() const {
+  const int pitch = boardPitch();
+  const int n = board.boardSize;
+  const int ox = boardOriginX();
+  const int oy = boardOriginY();
+  const int len = (n - 1) * pitch;
+  const int pad = pitch / 2;
+  return Rect{ox - pad, oy - pad, len + 2 * pad, len + 2 * pad};
+}
+
+// Bottom action bar geometry, scaled from the panel size rather than pinned to
+// absolute pixels: this firmware ships several targets with different panels, so
+// the bar is measured UP FROM THE SCREEN BOTTOM and sized as a fraction of the
+// panel height, with a floor so it stays a comfortable touch target.
+int GomokuGameActivity::actionBarH() const {
+  return std::max(ACTION_BAR_MIN_H, renderer.getScreenHeight() * ACTION_BAR_H_FRAC / 100);
+}
+
+int GomokuGameActivity::actionBarY() const {
+  const int h = renderer.getScreenHeight();
+  return h - actionBarH() - std::max(4, h * ACTION_BAR_BOTTOM_FRAC / 100);
+}
+
+Rect GomokuGameActivity::actionBarRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int side = std::max(8, metrics.contentSidePadding);
+  return Rect{side, actionBarY(), renderer.getScreenWidth() - 2 * side, actionBarH()};
+}
+
 // ---------- Input ----------
 
 void GomokuGameActivity::handleInputPlaying() {
   int touchX = 0;
   int touchY = 0;
-  int row = 0;
-  int column = 0;
-  if (mappedInput.wasScreenTouchDown(touchX, touchY) &&
-      gameIntersectionFromPoint(boardOriginX(), boardOriginY(), boardPitch(), board.boardSize, board.boardSize, touchX,
-                                touchY, row, column)) {
+  // Touch never places a stone: touching the board only aims the cursor. The
+  // 15x15 grid has 30 px cells, so a finger landing "on" an intersection can
+  // still be aiming at its neighbour; placing on touch turns a mis-aim into an
+  // irreversible move. The bottom action bar commits the stone at the
+  // highlighted cursor, so aiming and committing are separate gestures.
+  const Rect boardRect = boardTouchRect();
+  const Rect placeButton = actionBarRect();
+  const auto inRect = [](const Rect& r, const int x, const int y) {
+    return r.width > 0 && r.height > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+  };
+  const auto aimAt = [&](const int x, const int y) {
+    int row = 0;
+    int column = 0;
+    if (!gameIntersectionFromPoint(boardOriginX(), boardOriginY(), boardPitch(), board.boardSize, board.boardSize, x, y,
+                                   row, column)) {
+      return false;
+    }
+    if (cursorR == static_cast<uint8_t>(row) && cursorC == static_cast<uint8_t>(column)) return false;
     cursorR = static_cast<uint8_t>(row);
     cursorC = static_cast<uint8_t>(column);
     requestUpdate();
-    return;
-  }
-  if (mappedInput.wasScreenTapped(touchX, touchY) &&
-      gameIntersectionFromPoint(boardOriginX(), boardOriginY(), boardPitch(), board.boardSize, board.boardSize, touchX,
-                                touchY, row, column)) {
-    cursorR = static_cast<uint8_t>(row);
-    cursorC = static_cast<uint8_t>(column);
+    return true;
+  };
+
+  // The action bar is checked first: it sits below the board, but checking it up
+  // front keeps the two regions from ever fighting over an edge pixel.
+  if (mappedInput.wasScreenTapped(touchX, touchY) && inRect(placeButton, touchX, touchY)) {
     doPlace();
     requestUpdate();
     return;
   }
+
+  if (mappedInput.wasScreenTouchDown(touchX, touchY) && inRect(boardRect, touchX, touchY)) {
+    aimAt(touchX, touchY);
+  }
+
+  if (mappedInput.wasScreenTapped(touchX, touchY) && inRect(boardRect, touchX, touchY)) {
+    aimAt(touchX, touchY);
+    return;  // aim only — the stone is committed by the action bar or Confirm
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     moveCursor(-1, 0);
     requestUpdate();
@@ -398,6 +451,11 @@ void GomokuGameActivity::renderPlaying() {
   drawBoard();
   drawInfoPanel();
   drawModeLine();
+  // Touch targets: the place button is the only way to commit a stone by touch,
+  // since tapping the board just aims the cursor.
+  if (mappedInput.hasTouch()) {
+    GUI.drawActionButton(renderer, actionBarRect(), tr(STR_GOMOKU_PLACE), true);
+  }
   drawFooter();
 }
 
@@ -527,10 +585,12 @@ void GomokuGameActivity::drawInfoPanel() {
   // Two stat cells, narrower and shorter than v3, centered horizontally.
   // Inside each: a board-sized stone icon next to the count — the colour
   // itself identifies the side, so no "Black"/"White" text label.
-  constexpr int statH = 60;
+  // Anchored just above the action bar (measured from the screen bottom), so
+  // the row stays on-panel on every target instead of running off the bottom.
+  constexpr int statH = 44;
   constexpr int cellW = 160;
   constexpr int cellGap = 24;
-  const int statY = INFO_PANEL_Y;
+  const int statY = std::max(BOARD_AREA_Y, actionBarY() - statH - 6);
   const int totalW = 2 * cellW + cellGap;
   const int statXStart = (sw - totalW) / 2;
   const int statStoneR = stoneRadius();  // matches the board (12 for 15×15, 20 for 9×9)
@@ -579,7 +639,10 @@ void GomokuGameActivity::drawModeLine() {
   if (!aiThinkingArmed) {
     return;
   }
-  renderer.drawCenteredText(kStatusFont, MODE_LINE_Y, tr(STR_GOMOKU_AI_THINKING));
+  // Drawn directly above the action bar: the old anchor (702) was off the
+  // panel entirely, so the "Thinking…" notice never actually appeared.
+  renderer.drawCenteredText(kStatusFont, std::max(0, actionBarY() - renderer.getTextHeight(kStatusFont) - 4),
+                            tr(STR_GOMOKU_AI_THINKING));
 }
 
 // ---------- Footer (button hints) ----------
