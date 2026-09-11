@@ -113,6 +113,6 @@ pio device monitor  # 已连接设备的串口日志
 
 ## 致谢
 
-感谢 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) 及其贡献者。CrossMux 使用 [FreeInk SDK fork](https://github.com/0x1abin/freeink-sdk) 和模拟器 fork，也感谢 [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader) 的最初启发。
+感谢 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)、[Inx](https://github.com/obijuankenobiii/inx)、[cpr-vcodex](https://github.com/franssjz/cpr-vcodex) 及其贡献者，以及带来最初启发的 [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader)。
 
 CrossMux 与 Xteink 及任何设备厂商均无隶属关系。上游工具与社区独立于本 fork。仓库许可证见 [LICENSE](./LICENSE)。

@@ -113,6 +113,6 @@ Report bugs and propose changes in [CrossMux Issues](https://github.com/0x1abin/
 
 ## Credits
 
-CrossMux builds on [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) and its contributors, with the [CrossMux FreeInk SDK fork](https://github.com/0x1abin/freeink-sdk) and simulator fork. Thanks also to [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader) for the original inspiration.
+Thanks to [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader), [Inx](https://github.com/obijuankenobiii/inx), [cpr-vcodex](https://github.com/franssjz/cpr-vcodex), and their contributors, and to [diy-esp32-epub-reader](https://github.com/atomic14/diy-esp32-epub-reader) for the original inspiration.
 
 CrossMux is not affiliated with Xteink or any device manufacturer. Upstream tools and communities are independent of this fork. See [LICENSE](./LICENSE) for the repository license.
