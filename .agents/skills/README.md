@@ -13,6 +13,7 @@ procedures on demand.
 | `heap-discipline` | Allocating memory, buffers, strings, or caches |
 | `control-flow-clarity` | Writing branching logic, state flags, or dispatch |
 | `hal-and-abstractions` | Touching storage, input, display, settings, i18n, or rendering |
+| [`port-device-bsp`](port-device-bsp/SKILL.md) | Bringing new hardware through SDK BSP, CrossMux HAL, builds, and recorded physical acceptance |
 | `scope-discipline` | Adding a feature, activity, service, setting, or dependency |
 | `refactor-for-review` | Refactoring, cleaning up, or preparing a focused change for review |
 | `design-xteink-html-prototypes` | Creating X3/X4 HTML UI prototypes with accurate geometry and input behavior |
