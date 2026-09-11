@@ -268,14 +268,22 @@ verification.
 
 ## Adding a future device variant
 
-The pattern generalizes. To add an "Xn":
+Use the [port-device-bsp skill](../../.agents/skills/port-device-bsp/SKILL.md)
+to establish the hardware contract, select an integration path, and record build
+and physical acceptance evidence.
 
-1. extend `DeviceType` and add `deviceIsXn()` ([HalGPIO.h](../../lib/hal/HalGPIO.h)),
-2. add an I²C (or other) fingerprint pass in `detectDeviceTypeWithFingerprint()`,
-3. add `setDisplayXn()` + the panel's controller path in the SDK `EInkDisplay`,
-4. keep optional peripherals (battery, RTC, IMU) behind their HAL classes and
-   branch layout only where physical geometry requires it,
-5. keep everything runtime-dispatched — do **not** introduce a build env.
+X3/X4 retain their shared image. A future runtime variant may share an image only
+when silicon, partitions, initialization and reliable device identification are
+compatible. Extend detection and panel selection only for that verified case;
+do not add every new board to the X3/X4 `DeviceType` enum.
+
+Otherwise add a separate hardware profile and build environment, following the
+existing S3 targets in [platformio.ini](../../platformio.ini). Reuse the SDK's
+board profiles and controller drivers where supported; keep application access
+to peripherals behind the HAL and adapt layout through renderer geometry.
+Unsupported chip architectures require a platform/toolchain assessment before
+BSP implementation. A successful build is not physical acceptance, and a new
+build target does not automatically enter public Nightly or OTA indexes.
 
 See also: [build-system.md](build-system.md) (envs & flags),
 [hardware-constraints.md](hardware-constraints.md) (RAM/flash budget),
