@@ -197,13 +197,8 @@ bool EpubReaderActivity::deferBluetoothStart() const {
 }
 
 void EpubReaderActivity::prepareChapterBuild() {
-#if FREEINK_CAP_BLE_HID_HOST && !CROSSPOINT_BLE_HOST_PSRAM
-  // A non-PSRAM BLE host (C3 X3/X4) shares internal RAM with the chapter
-  // parser, so it must drop the link here; the host restarts and the remote
-  // reconnects after the build. On PSRAM-hosted BLE (X4 Pro, X4C, Sticky,
-  // EEGO A4, Murphy M4) the parser and the host use separate memory pools:
-  // keep the existing BT connection alive so the page-turn remote does not
-  // disconnect and reconnect on every chapter switch.
+  // C3 and PSRAM hosts retain existing links; parser memory guards still apply.
+#if FREEINK_CAP_BLE_HID_HOST && !CROSSPOINT_BLE_HOST_PSRAM && !CONFIG_IDF_TARGET_ESP32C3
   bleinput::stop();
 #endif
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
@@ -235,7 +230,7 @@ bool EpubReaderActivity::updateChapterBuild() {
   suspendForBluetooth = SETTINGS.bluetoothEnabled;
 #endif
   // A paused parser still owns its heap. Build beyond the restart margin, then
-  // persist a partial cache and release the parser before BLE may reconnect.
+  // persist a partial cache and release the parser to bound its lifetime.
   const int buildWindow = BUILD_WINDOW_AHEAD + (suspendForBluetooth ? PARTIAL_REBUILD_START_MARGIN : 0);
   const bool pendingReposition = cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0;
   if (((!suspendForBluetooth && section->isPartial()) || (suspendForBluetooth && pendingReposition) ||
@@ -298,10 +293,7 @@ bool EpubReaderActivity::loadBook() {
 
   const bool uncached = !Storage.exists((loadedEpub->getCachePath() + "/book.bin").c_str());
   if (uncached) {
-#if FREEINK_CAP_BLE_HID_HOST && !CROSSPOINT_BLE_HOST_PSRAM
-    // Same rationale as prepareChapterBuild(): only a non-PSRAM BLE host drops
-    // the link while the book index is being built. PSRAM-hosted hosts (X4 Pro
-    // et al.) keep the existing connection alive across indexing.
+#if FREEINK_CAP_BLE_HID_HOST && !CROSSPOINT_BLE_HOST_PSRAM && !CONFIG_IDF_TARGET_ESP32C3
     bleinput::stop();
 #endif
     disableFastInitialRefresh();

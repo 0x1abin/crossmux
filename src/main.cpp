@@ -94,8 +94,8 @@ void updateBluetoothLifecycle() {
     bleinput::stop();
     return;
   }
-  // Preparation blocks new starts, not a link held by a reader's menu. Actual
-  // build entrypoints stop BLE before allocating their working memory.
+  // Preparation blocks new starts; C3 and PSRAM readers keep existing links
+  // through chapter construction and book indexing.
   if (bleinput::isRunning() || activityManager.deferBluetoothStart() || RenderLock::peek() ||
       millis() < nextStartAttemptAt)
     return;
