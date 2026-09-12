@@ -1352,12 +1352,18 @@ void FontDownloadActivity::render(RenderLock&&) {
     const char* finalLine = accelerationCompleted_ ? tr(STR_FONT_CACHE_READY)
                             : !selectionUpdated_   ? tr(STR_READER_FONT_SELECTION_PATH)
                                                    : nullptr;
-    const int detailY = centerY;
-    renderer.drawCenteredText(UI_12_FONT_ID, detailY - lineHeight - metrics.verticalSpacing, tr(STR_FONT_INSTALLED),
-                              true, EpdFontFamily::BOLD);
+    const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+    const Rect content = SubpageLayout::contentRect(safeArea, metrics);
+    const int headingHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int sectionGap = SubpageLayout::sectionGap(metrics);
+    const int lineGap = SubpageLayout::relatedGap(metrics);
+    const int blockHeight = headingHeight + sectionGap + lineHeight + (finalLine ? lineGap + lineHeight : 0);
+    const int headingY = SubpageLayout::centeredTop(content, blockHeight);
+    const int detailY = headingY + headingHeight + sectionGap;
+    renderer.drawCenteredText(UI_12_FONT_ID, headingY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, detailY, detail);
     if (finalLine) {
-      renderer.drawCenteredText(UI_10_FONT_ID, detailY + lineHeight + metrics.verticalSpacing, finalLine);
+      renderer.drawCenteredText(UI_10_FONT_ID, detailY + lineHeight + lineGap, finalLine);
     }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
