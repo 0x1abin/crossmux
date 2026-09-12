@@ -1,6 +1,9 @@
 #include "HalPowerManager.h"
 
 #include <BoardConfig.h>
+#if FREEINK_DEVICE_METALIO_EINK4
+#include <MetalioEink4Board.h>
+#endif
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
@@ -156,6 +159,10 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // deep-sleep command while its rail is still up (enterDeepSleep() in main.cpp
   // guarantees that ordering).
   gpio.prepareForDeepSleep();
+#if FREEINK_DEVICE_METALIO_EINK4
+  if (!freeink::metalio::shutdown()) LOG_ERR("PWR", "Metalio shutdown I2C failed");
+  LOG_ERR("PWR", "Metalio still powered after shutdown pulses; falling back to deep sleep");
+#endif
   freeink::PowerManager::powerDownRailsForSleep();
 
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397

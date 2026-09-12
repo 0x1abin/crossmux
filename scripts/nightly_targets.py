@@ -72,6 +72,16 @@ TARGETS = {
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
+    'metalio_eink4': {
+        'deviceSlug': 'metalio-eink4',
+        'models': ['metalio_eink4'],
+        'boardTag': 'metalio_eink4',
+        'chip': 'ESP32-S3',
+        'chipId': 0x0009,
+        'environments': {'nightly': 'metalio_eink4_nightly'},
+        'supportedChannels': ['nightly'],
+        'fullInstall': True,
+    },
 }
 
 FLAVOR_TOKENS = {'global': 'global', 'zh-CN': 'cn'}

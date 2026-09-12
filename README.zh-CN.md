@@ -31,6 +31,7 @@
 | eego A4 | ESP32-S3 | Nightly |
 | Murphy M4 | ESP32-S3 | Nightly |
 | Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
+| [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Nightly |
 
 此表表示配置中的发布目标，不代表所有功能均已通过实机验收。每个 S3 目标使用独立固件。X4 Classic 仅提供构建目标，尚未加入公开发布与 OTA 索引。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
 
@@ -44,6 +45,8 @@ X3/X4 稳定渠道使用 [Stable](https://github.com/0x1abin/crossmux/releases/t
 4. S3 的安装与恢复请遵循对应[设备文档](./docs/engineering/device-variants.md)和发布说明，不要套用 X3/X4 的烧录命令或偏移地址。
 
 从源码构建并烧录 X3/X4 可使用下方的[开发命令](#开发快速开始)。已安装 CrossMux 时，设备 OTA 按型号、内容区和渠道选择固件；S3 目标没有 Stable 渠道。
+
+Metalio E-Ink 4 使用 `metalio-eink4` Nightly 安装包，型号与板型标签为 `metalio_eink4`。两种语言入口指向同一多语言固件。首次安装、接线和真机验收状态见 [Metalio 设备指南](./docs/engineering/metalio-eink4.md)。[全球网页工具](https://crossmux.com)和[中国网页工具](https://crossmux.cn)将在 Web 支持部署完成、发布目录包含匹配的 Nightly 安装包后显示该设备的烧录入口。
 
 ### USB 锁定的 Xteink 设备
 
@@ -79,6 +82,15 @@ pio run -e gh_release -t upload
 ```
 
 应用固件位于 `.pio/build/gh_release/firmware.bin`。其它板型使用[构建文档](./docs/engineering/build-system.md)中的对应环境。
+
+Metalio E-Ink 4 构建命令：
+
+```bash
+pio run -e metalio_eink4
+CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nightly
+```
+
+开发版应用固件位于 `.pio/build/metalio_eink4/firmware.bin`；首次安装还需要匹配的引导程序和分区布局，详见 [Metalio 设备指南](./docs/engineering/metalio-eink4.md)。
 
 ### 桌面模拟器
 

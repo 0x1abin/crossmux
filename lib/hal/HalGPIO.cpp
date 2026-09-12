@@ -1,3 +1,7 @@
+#include <BoardConfig.h>
+#if FREEINK_DEVICE_METALIO_EINK4
+#include <MetalioEink4Board.h>
+#endif
 #include <BatteryMonitor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
@@ -15,7 +19,7 @@
 #include "MurphyM4BatchPreference.h"
 #endif
 
-#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
 #include <soc/usb_serial_jtag_reg.h>
 #endif
 
@@ -176,6 +180,9 @@ void HalGPIO::begin() {
   LOG_INF("HW", "Murphy M4 batch %u selected", _murphyM4Batch == freeink::MurphyM4Batch::First ? 1U : 2U);
   inputMgr.setMurphyM4Batch(_murphyM4Batch);
 #endif
+#if FREEINK_DEVICE_METALIO_EINK4
+  if (!freeink::metalio::begin()) LOG_ERR("HW", "Metalio power/expander initialization failed");
+#endif
   inputMgr.begin();
 }
 
@@ -317,7 +324,7 @@ bool HalGPIO::verifyPowerButtonWakeup(const uint16_t requiredDurationMs, const b
   return inputMgr.getPowerButtonHeldTime() >= calibratedDuration;
 }
 
-#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
 // Keep the last positive USB Serial/JTAG SOF result across nearby polls.
 static bool usbHostSofActive() {
   static uint32_t lastFrame = 0;
@@ -355,6 +362,11 @@ bool HalGPIO::isUsbConnected() const {
   bool connected = false;
   if (Waveshare397Power::externalPowerConnected(connected)) return connected;
   return usbHostSofActive();
+#endif
+#if FREEINK_DEVICE_METALIO_EINK4
+  bool connected = false;
+  if (freeink::metalio::externalPowerConnected(connected)) return connected;
+  if (usbHostSofActive()) return true;
 #endif
   if (BoardConfig::ACTIVE.usbDetect >= 0) {
     return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;

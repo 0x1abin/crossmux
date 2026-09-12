@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <DisplayRefreshContext.h>
 #include <EInkDisplay.h>
 
 class HalDisplay {
@@ -38,13 +39,15 @@ class HalDisplay {
   void drawImageTransparent(const uint8_t* imageData, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                             bool fromProgmem = false) const;
 
-  void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false,
+                     DisplayRefreshContext context = DisplayRefreshContext::Normal);
   // Non-blocking refresh (shadow-free): starts the panel waveform and returns
   // while the panel refreshes on its own. The framebuffer must stay untouched
   // until waitRefreshComplete(), and the caller must rebuild the differential
   // baseline before the next differential update (the tiled grayscale cleanup
   // does). Panels without deferral fall back to a blocking refresh.
-  void displayBufferAsync(RefreshMode mode = RefreshMode::FAST_REFRESH);
+  void displayBufferAsync(RefreshMode mode = RefreshMode::FAST_REFRESH,
+                          DisplayRefreshContext context = DisplayRefreshContext::Normal);
   // Block until a pending deferred refresh completes (no-op when none is).
   void waitRefreshComplete();
   // True when displayBufferAsync() genuinely overlaps (panel driver defers);
@@ -83,7 +86,8 @@ class HalDisplay {
   // follows. On X3, HALF fallback first requests a resync to match
   // displayBuffer(HALF); FAST fallback keeps the OEM differential base waveform
   // ("AA-pre-BW(mid)"). Other panels display normally with `fallback` mode.
-  void displayGrayscaleBase(RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false);
+  void displayGrayscaleBase(RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false,
+                            DisplayRefreshContext context = DisplayRefreshContext::Normal);
 
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);

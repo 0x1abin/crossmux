@@ -9,7 +9,7 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
     def test_all_s3_ble_targets_share_psram_without_changing_sticky_core(self):
         config = configparser.ConfigParser(interpolation=None)
         config.read(Path(__file__).resolve().parents[2] / "platformio.ini")
-        devices = ("sticky", "x4pro", "x4c", "papermono", "eego_a4", "murphy_m4", "waveshare_epaper_397")
+        devices = ("sticky", "x4pro", "x4c", "papermono", "eego_a4", "murphy_m4", "waveshare_epaper_397", "metalio_eink4")
         for device in devices:
             hardware = f"{device}_hardware"
             for option in ("lib_deps", "extra_scripts", "build_flags"):

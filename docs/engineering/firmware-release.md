@@ -2,7 +2,7 @@
 
 CrossMux has two release channels, `stable` and `nightly`, managed by one
 channel-aware pipeline. Hardware identity is not a release channel. Stable
-currently contains the shared X3/X4 image; X3/X4 and the six ESP32-S3 targets
+currently contains the shared X3/X4 image; X3/X4 and the seven ESP32-S3 targets
 share Nightly, with S3 targets declaring only `nightly` in `supportedChannels`.
 
 ## Canonical targets
@@ -15,7 +15,7 @@ packager, index builder, and tests import this table rather than copy it.
 
 The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
 image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky, X4 Pro,
-Paper Mono, EEGO A4, Murphy M4, and Waveshare ePaper 3.97 each produce their own
+Paper Mono, EEGO A4, Murphy M4, Waveshare ePaper 3.97, and Metalio E-Ink 4 each produce their own
 ESP32-S3 Nightly image. Each image is aliased by the compatibility `global` and
 `zh-CN` pointers.
 
