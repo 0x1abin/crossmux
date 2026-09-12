@@ -23,14 +23,18 @@ class GomokuGameActivity final : public Activity {
   enum class State : uint8_t { Playing, GameMenu, GameOver };
 
   // Layout anchors — y values for top-of-section. Title bar / board area /
-  // mode line align with SudokuGameActivity; info-panel content sits a bit
-  // lower than Sudoku's palette for visual balance with the mode line.
+  // mode line align with SudokuGameActivity.
   static constexpr int CONTENT_X = 24;
   static constexpr int TITLE_BAR_H = 36;
-  static constexpr int BOARD_AREA_Y = 60;        // matches Sudoku GRID_Y
-  static constexpr int INFO_PANEL_Y = 540;       // 30 px below Sudoku PALETTE_Y
-  static constexpr int MODE_LINE_Y = 702;        // matches Sudoku MODE_LINE_Y
-  static constexpr uint8_t MENU_ITEM_COUNT = 5;  // Resume / Undo / Resign / New Game / Exit
+  static constexpr int BOARD_AREA_Y = 60;  // matches Sudoku GRID_Y
+  // Bottom action bar, measured UP FROM THE SCREEN BOTTOM as a fraction of the
+  // panel height. This firmware ships many targets with different panel sizes,
+  // so a bar pinned to absolute pixel offsets would land off-screen or overlap
+  // the board somewhere. Everything here scales with getScreenHeight().
+  static constexpr int ACTION_BAR_H_FRAC = 10;      // bar height = screenH / 10
+  static constexpr int ACTION_BAR_MIN_H = 40;       // never smaller than a fingertip
+  static constexpr int ACTION_BAR_BOTTOM_FRAC = 4;  // bottom gap = screenH / 4 / 10
+  static constexpr uint8_t MENU_ITEM_COUNT = 5;     // Resume / Undo / Resign / New Game / Exit
 
   State state = State::Playing;
   GomokuMode mode = GomokuMode::TwoPlayer;
@@ -64,6 +68,13 @@ class GomokuGameActivity final : public Activity {
   int boardOriginY() const;
   int stoneRadius() const;
   void intersectionXY(uint8_t r, uint8_t c, int* x, int* y) const;
+  // Screen-space touch zones. Touch aims the cursor only; the bottom action bar
+  // commits the stone. One geometry source for both drawing and hit-testing.
+  Rect boardTouchRect() const;
+  // Bottom action bar, measured up from the screen bottom (see the constants).
+  int actionBarH() const;
+  int actionBarY() const;
+  Rect actionBarRect() const;
 
   // Drawing
   void renderPlaying();

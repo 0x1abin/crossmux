@@ -48,9 +48,17 @@ class MinesweeperGameActivity final : public Activity {
   static constexpr int TITLE_BAR_H = 36;
   static constexpr int BOARD_Y = 60;   // matches Sudoku GRID_Y
   static constexpr int BOARD_W = 432;  // matches Sudoku GRID_SIZE_PX
-  // End-game screen anchors. The Playing screen only uses the board area and
-  // the footer button hints — everything between board bottom (y=492) and the
-  // footer is intentionally left blank.
+  // Bottom action bar with separate Dig and Flag buttons. Touch on the board
+  // only aims the cursor, so digging and flagging each need their own visible
+  // target; a single mode-toggle button made the current mode invisible at the
+  // moment of use. Sized from the panel height (this firmware ships several
+  // targets) and measured UP FROM THE SCREEN BOTTOM.
+  static constexpr int ACTION_BAR_H_FRAC = 10;      // bar height = screenH / 10
+  static constexpr int ACTION_BAR_MIN_H = 40;       // stay a fingertip target
+  static constexpr int ACTION_BAR_BOTTOM_FRAC = 4;  // bottom gap = screenH / 4 / 10
+  static constexpr int ACTION_BAR_GAP = 8;          // >= the 6 px control spacing rule
+  // End-game screen anchors. The Playing screen uses the board area plus the
+  // action bar; everything between them stays blank.
   static constexpr int ENDGAME_HERO_Y = 524;   // "Cleared!" / "Boom!" headline top
   static constexpr int ENDGAME_STATS_Y = 588;  // top border of the 3-column stat row
 
@@ -82,6 +90,13 @@ class MinesweeperGameActivity final : public Activity {
   void doConfirmAction();  // dispatches dig/flag based on flagMode
   void onGameEnd(bool won);
   void useHint();
+
+  // Bottom action bar geometry, measured up from the screen bottom and scaled
+  // to the panel so it stays on-screen on every target.
+  int actionBarH() const;
+  int actionBarY() const;
+  Rect digButtonRect() const;
+  Rect flagButtonRect() const;
   void resetGameKeepLayout();  // "Restart" — clear reveals, keep mine layout
   void scheduleSave();
   void flushSave();
