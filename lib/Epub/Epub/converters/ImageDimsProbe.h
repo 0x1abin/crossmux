@@ -26,7 +26,9 @@ class ImageDimsProbe : public Print {
   // True only when a valid header was found; fills `out`.
   bool getDimensions(ImageDimensions& out) const;
 
-  // Format seen so far (Unknown until the leading bytes arrived).
+  // Format validated so far. Unknown until a signature has been checked in full
+  // (a bare 0xFF or 0x89 identifies nothing), and still Unknown after a failed
+  // parse.
   Format detectedFormat() const { return format; }
   // Canonical extension for a format, or nullptr when it is not decodable.
   static const char* extensionForFormat(const Format value) {
@@ -45,7 +47,7 @@ class ImageDimsProbe : public Print {
   bool feed(uint8_t b);  // returns false once parsing is finished (found or failed)
 
   enum class State : uint8_t {
-    Sniff,       // first byte decides the format
+    Sniff,       // first byte selects the parser; the format follows on validation
     PngHeader,   // PNG signature + IHDR at fixed offsets
     JpegSoi,     // second SOI byte (0xD8)
     JpegFf,      // expect a 0xFF marker prefix
@@ -58,7 +60,7 @@ class ImageDimsProbe : public Print {
     Failed,
   };
   State state = State::Sniff;
-  Format format = Format::Unknown;  // resolved by the sniff step
+  Format format = Format::Unknown;  // stamped once a signature has been validated
   uint32_t pos = 0;                 // absolute stream offset (PNG fixed-offset parsing)
   uint32_t skipLeft = 0;            // remaining segment bytes to skip
   uint16_t segLen = 0;
