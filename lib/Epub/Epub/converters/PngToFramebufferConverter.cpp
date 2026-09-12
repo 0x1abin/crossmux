@@ -285,12 +285,11 @@ void emitBilinearRow(PngContext& ctx, const int dstY, const uint8_t* rowTop, con
     const int x0 = ctx.cropLeft + sx;
     const int x1 = ctx.cropLeft + sx1;
 
-    const int top = (static_cast<int>(rowTop[x0]) * (kBilinearOne - fxFP) + static_cast<int>(rowTop[x1]) * fxFP) >>
-                    16;
+    const int top = (static_cast<int>(rowTop[x0]) * (kBilinearOne - fxFP) + static_cast<int>(rowTop[x1]) * fxFP) >> 16;
     int gray = top;
     if (fyFP != 0) {
-      const int bot = (static_cast<int>(rowBot[x0]) * (kBilinearOne - fxFP) + static_cast<int>(rowBot[x1]) * fxFP) >>
-                      16;
+      const int bot =
+          (static_cast<int>(rowBot[x0]) * (kBilinearOne - fxFP) + static_cast<int>(rowBot[x1]) * fxFP) >> 16;
       gray = (top * (kBilinearOne - fyFP) + bot * fyFP) >> 16;
     }
     if (gray < 0) gray = 0;
@@ -331,8 +330,8 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   // An unscaled image deliberately stays on the nearest path: at 1:1 the blend
   // weights are degenerate, so bilinear would produce identical pixels for
   // several times the work — and the reader renders a page many times.
-  const bool bilinearScale = ctx->config->bilinearScaling &&
-                             (ctx->dstWidth != ctx->visibleWidth || ctx->dstHeight != ctx->visibleHeight);
+  const bool bilinearScale =
+      ctx->config->bilinearScaling && (ctx->dstWidth != ctx->visibleWidth || ctx->dstHeight != ctx->visibleHeight);
   if (bilinearScale) {
     // PNGdec parses tRNS while decoding, after open() returns, so query the
     // transparent colour here rather than caching its pre-decode value.
@@ -342,8 +341,8 @@ int pngDrawCallback(PNGDRAW* pDraw) {
     if (ctx->havePrevRow && ctx->prevGrayLine) {
       // Every destination row whose source position falls in the interval
       // [visibleSrcY - 1, visibleSrcY) is now fully known.
-      const int64_t bound = (static_cast<int64_t>(visibleSrcY) * ctx->dstHeight + ctx->visibleHeight - 1) /
-                            ctx->visibleHeight;
+      const int64_t bound =
+          (static_cast<int64_t>(visibleSrcY) * ctx->dstHeight + ctx->visibleHeight - 1) / ctx->visibleHeight;
       int last = static_cast<int>(bound);
       if (last > ctx->dstHeight) last = ctx->dstHeight;
       if (last > ctx->nextDstY) {
@@ -559,9 +558,8 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   // 16.16 source-column step for the bilinear sampler. visibleWidth fits well
   // inside int32 after the shift (<= 32767 << 16), and the sampler clamps at the
   // last column anyway.
-  ctx.stepXFP = ctx.dstWidth > 0 ? static_cast<int32_t>((static_cast<int64_t>(ctx.visibleWidth) << 16) /
-                                                       ctx.dstWidth)
-                                 : 0;
+  ctx.stepXFP =
+      ctx.dstWidth > 0 ? static_cast<int32_t>((static_cast<int64_t>(ctx.visibleWidth) << 16) / ctx.dstWidth) : 0;
 
   const int pixelType = png->getPixelType();
   const int bitsPerSample = png->getBpp();

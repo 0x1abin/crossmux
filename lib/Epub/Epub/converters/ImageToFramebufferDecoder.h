@@ -31,7 +31,7 @@ struct RenderConfig {
   // behaviour, one source pixel per output pixel), true = bilinear blend of the
   // source neighbourhood. Callers that must keep the cheap path leave it false.
   bool bilinearScaling = false;
-  std::string cachePath;            // If non-empty, decoder will write pixel cache to this path
+  std::string cachePath;  // If non-empty, decoder will write pixel cache to this path
   DecodeOutput output = DecodeOutput::FrameBufferAndCache;
 };
 
