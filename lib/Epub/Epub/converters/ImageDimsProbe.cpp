@@ -15,8 +15,10 @@ bool ImageDimsProbe::feed(const uint8_t b) {
   switch (state) {
     case State::Sniff:
       if (b == 0xFF) {
+        format = Format::Jpeg;
         state = State::JpegSoi;
       } else if (b == PNG_SIG[0]) {
+        format = Format::Png;
         state = State::PngHeader;
       } else {
         state = State::Failed;

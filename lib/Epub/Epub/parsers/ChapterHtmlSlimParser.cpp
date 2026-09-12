@@ -994,26 +994,38 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
           // Resolve the image path relative to the HTML file
           std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->contentBase + src));
 
-          if (ImageDecoderFactory::isFormatSupported(resolvedPath)) {
-            // Create a unique filename for the cached image
+          // Read the entry's first bytes before deciding anything. They carry both
+          // the dimensions AND the real format, and an EPUB may name an image
+          // without an extension or with a misleading one — while the decoder
+          // lookup is extension-based. Deciding on the href alone dropped those
+          // images silently: no log, no placeholder, the picture just vanished.
+          // The header therefore decides; the path extension is only the fallback.
+          ImageDimensions dims = {0, 0};
+          ImageDimsProbe headerProbe;
+          self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024, /*allowEarlyStop=*/true);
+          bool gotDimensions = headerProbe.getDimensions(dims);
+          const char* sniffedExtension = ImageDimsProbe::extensionForFormat(headerProbe.detectedFormat());
+          const bool recognised = sniffedExtension != nullptr || ImageDecoderFactory::isFormatSupported(resolvedPath);
+
+          if (!recognised) {
+            LOG_ERR("EHP", "Unsupported image entry (neither JPEG/PNG content nor a known extension): %s",
+                    resolvedPath.c_str());
+          } else {
+            // Create a unique filename for the cached image. Prefer the sniffed
+            // format so the cached file always carries an extension the decoder
+            // can act on, whatever the href said.
             std::string ext;
-            size_t extPos = resolvedPath.rfind('.');
-            if (extPos != std::string::npos) {
-              ext = resolvedPath.substr(extPos);
+            if (sniffedExtension != nullptr) {
+              ext = sniffedExtension;
+            } else {
+              const size_t extPos = resolvedPath.rfind('.');
+              if (extPos != std::string::npos) {
+                ext = resolvedPath.substr(extPos);
+              }
             }
             std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
 
             {
-              // Probe the dimensions from the entry's first bytes (early-aborted
-              // inflate, a few KB) instead of extracting the whole image now —
-              // extraction is deferred to the first render of the page (see
-              // ImageBlock's lazy extractor). This is what keeps first-open of an
-              // image-heavy chapter from stalling for seconds per image.
-              ImageDimensions dims = {0, 0};
-              ImageDimsProbe headerProbe;
-              self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024, /*allowEarlyStop=*/true);
-              bool gotDimensions = headerProbe.getDimensions(dims);
-
               if (!gotDimensions) {
                 // No header within the stream (rare) — fall back to extracting the
                 // whole image and probing the file. That can take seconds, so

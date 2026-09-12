@@ -15,11 +15,31 @@
 // PNG: reads the IHDR fields at their fixed offsets (bytes 16..23).
 class ImageDimsProbe : public Print {
  public:
+  // Format identified from the stream's leading bytes. The extension in an
+  // EPUB's href is only a hint — manifests legitimately point at images named
+  // without one — so callers that must choose a decoder should trust this.
+  enum class Format : uint8_t { Unknown, Jpeg, Png };
+
   size_t write(uint8_t b) override;
   size_t write(const uint8_t* data, size_t len) override;
 
   // True only when a valid header was found; fills `out`.
   bool getDimensions(ImageDimensions& out) const;
+
+  // Format seen so far (Unknown until the leading bytes arrived).
+  Format detectedFormat() const { return format; }
+  // Canonical extension for a format, or nullptr when it is not decodable.
+  static const char* extensionForFormat(const Format value) {
+    switch (value) {
+      case Format::Jpeg:
+        return ".jpg";
+      case Format::Png:
+        return ".png";
+      case Format::Unknown:
+        break;
+    }
+    return nullptr;
+  }
 
  private:
   bool feed(uint8_t b);  // returns false once parsing is finished (found or failed)
@@ -38,8 +58,9 @@ class ImageDimsProbe : public Print {
     Failed,
   };
   State state = State::Sniff;
-  uint32_t pos = 0;       // absolute stream offset (PNG fixed-offset parsing)
-  uint32_t skipLeft = 0;  // remaining segment bytes to skip
+  Format format = Format::Unknown;  // resolved by the sniff step
+  uint32_t pos = 0;                 // absolute stream offset (PNG fixed-offset parsing)
+  uint32_t skipLeft = 0;            // remaining segment bytes to skip
   uint16_t segLen = 0;
   bool sofPending = false;  // current segment is a SOF frame header
   uint8_t sofBuf[5] = {0};
