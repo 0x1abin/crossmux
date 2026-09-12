@@ -63,6 +63,12 @@ S3 targets do. Read [device variants](../../../docs/engineering/device-variants.
 and the relevant sections of [platformio.ini](../../../platformio.ini);
 do not add every new board to the X3/X4 `DeviceType` enum.
 
+Before changing a shared driver interface, inspect its callers and enumerate the
+implementations that would need edits. Prefer board configuration or a compatible
+extension that preserves existing entrypoints. Drivers with no required behavior
+change should have zero diff against the starting SDK revision; justify exceptions
+with a concrete need, not signature churn.
+
 ## Integrate through existing layers
 
 - **SDK:** board wiring, controllers, drivers and hardware capabilities. Verify
@@ -87,6 +93,13 @@ and one-gesture/one-action behavior. Do not copy panel waveforms, rail timing or
 calibration values merely because two boards share a controller. Keep calibration
 in the appropriate board configuration unless a user-facing choice is required.
 
+When changing refresh state, distinguish controller RAM baseline validity,
+physical grayscale cleanup still needed, and controller power state. RAM writes
+alone do not prove a physical clean. Carry per-request intent with the request
+rather than a persistent permission for the next call. Commit completion-dependent
+state only after BUSY completion; on timeout, retain unknown state and avoid
+subsequent RAM or sleep commands that require an idle controller.
+
 Account for actual framebuffer stride, dimensions and buffer count, driver scratch
 space, tasks and peak allocations. Separate internal RAM from PSRAM and verify
 Flash/app-slot headroom against the selected partitions. Shared code must fit the
@@ -103,12 +116,26 @@ for required checks. From the repository root, build the selected environment wi
 repository checks (`./bin/ci-check` for code changes). New targets must be built
 explicitly if existing scripts do not include them. Shared SDK/HAL changes require
 existing-device regression coverage, including the shared X3/X4 image; record
-which targets were checked. Compilation and simulator results are separate from
-physical acceptance.
+which targets were checked. Record compilation, hosted CI, flash/hash verification,
+runtime logs and physical acceptance separately; none substitutes for the next.
+Simulator results do not establish physical acceptance.
+
+For display logic changes, compile the real driver and relevant reader helpers in
+focused host checks; use a recording/mock bus for command traces instead of
+extracting production code with source-string slicing. Cover affected synchronous,
+asynchronous, window and fallback paths, including BUSY timeouts. Distinguish text
+antialiasing from grayscale images: test consecutive reading pages, the user's
+periodic cleaning cadence, explicit FULL, grayscale-to-grayscale and grayscale-to-
+menu transitions. A single successful draw does not establish correct reading
+behavior. The [Metalio case](../../../docs/engineering/metalio-eink4.md) records
+these regressions and their resolution; its commands, black-flash count and
+acceptance cycle counts are board-specific examples, not defaults for other panels.
 
 Before writing firmware, match the device, image, partition offsets and recovery
-method. Prepare and verify a recoverable backup before first overwriting factory
-firmware; derive sizes and offsets from this board, not another board's example.
+method. Before first overwriting factory firmware, record the user's confirmation
+of an existing backup or prepare and verify a recoverable backup. If the user has
+confirmed backup and authorized overwrite, do not require another backup. Derive
+sizes and offsets from this board, not another board's example.
 Flash only within the current task's authorization. Reuse existing authorization
 without asking again. Serial capture can use
 `python3 scripts/debugging_monitor.py <port>` from the repository root.
@@ -152,8 +179,14 @@ firmware/SDK revisions, reproduction commands and acceptance status. On resuming
 read that record and inspect current source and hardware revisions before repeating
 checks or asking questions. Revalidate evidence affected by subsequent changes.
 
-Update the target's engineering document with wiring, commands, known limitations
-and evidence. Keep the handoff concise and use this structure:
+After the tested approach is selected, remove superseded experiment flags,
+one-shot permissions and duplicate decisions while preserving needed board-level
+calibration. Review the final SDK diff and CrossMux gitlink, reconcile current
+behavior and pending acceptance in the device document, and update both README
+language versions for new device support. Preserve historical evidence as history,
+not as competing instructions for the current implementation.
+
+Keep the handoff concise and use this structure:
 
 1. Hardware facts and sources, including revision and unresolved assumptions.
 2. Selected route and SDK/HAL/build changes with source evidence.
@@ -190,17 +223,30 @@ specifies otherwise. Inspect existing changes and remotes before acting.
   existing committed gitlink; do not pin a commit available only in a personal fork
   as the default dependency. Report tests against the temporary SDK checkout as such.
 - After the SDK is merged, pin the integrated commit available from the configured
-  SDK remote, rebuild and repeat affected acceptance checks before marking CrossMux
-  ready. If the dependency is still pending, return both PR links and the remaining
+  SDK remote. Compare its source tree with the tested SDK revision and inspect any
+  build-relevant metadata differences; choose rebuilds and acceptance checks based
+  on actual changes. A changed commit SHA alone does not require every build or
+  flash to be repeated. Record the comparison and keep previously untested hardware
+  items pending before judging readiness. If the dependency is still pending,
+  return both PR links and the remaining
   action; do not merge it automatically or poll indefinitely.
 
 Return the PR link(s), verification summary and remaining actions. Do not merge
 PRs or publish firmware as part of contribution submission.
 
 Build/CI integration does not automatically enroll a target in public releases.
-For requested Nightly/OTA/publishing work, read
+For requested Nightly/OTA/Web integration, read
 [firmware releases](../../../docs/engineering/firmware-release.md) and inspect
 `scripts/nightly_targets.py` plus its consumers before changing release mappings.
+Check model, board tag, slug, build environment, channel support, full-install
+assets and indexes against consumer registrations, including Web when applicable.
+Verify legacy language pointers resolve the unified image where that is the
+release contract, and retain wrong-board and malformed-package rejection.
+Check whether existing consumers accept a new target before choosing rollout
+order; if they reject unknown targets, deploy compatible consumers before
+publishing the new index. Discovering a Web dependency does not authorize edits
+to that repository or deployment: report required follow-up outside the user's
+scope and finish the authorized work.
 For requested simulator support, read the simulator sections of the build and
 device references and inspect the pinned simulator integration. Neither optional
 branch replaces hardware acceptance. This workflow does not imply commits, pushes
