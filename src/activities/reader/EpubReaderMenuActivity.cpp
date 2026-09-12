@@ -78,6 +78,7 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   }
   items.push_back({MenuAction::TOGGLE_BOOKMARK, StrId::STR_TOGGLE_BOOKMARK});
   items.push_back({MenuAction::TEXT_SETTINGS, StrId::STR_TEXT_SETTINGS});
+  items.push_back({MenuAction::IMAGE_SCALING, StrId::STR_IMAGE_SCALING});
   items.push_back({MenuAction::NIGHT_MODE, StrId::STR_NIGHT_MODE});
   if (Frontlight.present()) {
     items.push_back({MenuAction::FRONTLIGHT, StrId::STR_FRONTLIGHT});
@@ -91,6 +92,13 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
   items.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
   items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
+  // Row storage is a fixed array, so an over-long list would silently truncate
+  // (and props.count would over-read it). Fail loudly in debug builds instead.
+  if (items.size() > MAX_MENU_ITEMS) {
+    LOG_ERR("ERS", "Reader menu has %u items but only %u row slots", static_cast<unsigned>(items.size()),
+            static_cast<unsigned>(MAX_MENU_ITEMS));
+    items.resize(MAX_MENU_ITEMS);
+  }
 }
 
 void EpubReaderMenuActivity::closeCancelled() {
@@ -150,6 +158,19 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
                            MIN_CUSTOM_PAGE_TURN_RATE, MAX_CUSTOM_PAGE_TURN_RATE, 1, 5);
                        requestUpdate();
                      });
+    requestUpdate();
+    return;
+  }
+
+  if (selectedAction == MenuAction::IMAGE_SCALING) {
+    // One tap cycles, like the frontlight row -- no picker. Nothing renders the
+    // page while this menu is open, so the reader picks the filter up when the
+    // menu closes, not here.
+    const uint8_t current = SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
+    const uint8_t next = static_cast<uint8_t>((current + 1) % CrossPointSettings::IMAGE_SCALING_COUNT);
+    SETTINGS.imageScaling = next;
+    SETTINGS.saveToFile();
+    LOG_INF("ERS", "Image scaling -> %s", next == CrossPointSettings::IMAGE_SCALING_BILINEAR ? "bilinear" : "nearest");
     requestUpdate();
     return;
   }
@@ -216,7 +237,7 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
 
   // menuRowItems's labels/actionValue were set once in the constructor (see
   // buildMenuRowItems()); only rows with live values need refreshing here.
-  for (size_t i = 0; i < menuItems.size(); i++) {
+  for (size_t i = 0; i < rowCount(); i++) {
     const auto action = menuItems[i].action;
     if (action == MenuAction::ROTATE_SCREEN) {
       menuRowItems[i].value = I18N.get(orientationLabels[pendingOrientation]);
@@ -224,6 +245,12 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
       menuRowItems[i].value = pageTurnLabels[selectedPageTurnOption];
     } else if (action == MenuAction::NIGHT_MODE) {
       menuRowItems[i].value = I18N.get(SETTINGS.screenInverted ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
+    } else if (action == MenuAction::IMAGE_SCALING) {
+      // Show the filter in use, like the night-mode and frontlight rows do. The
+      // index is clamped so a settings file written by a newer build cannot read
+      // past the label list.
+      const size_t mode = SETTINGS.imageScaling < imageScalingLabels.size() ? SETTINGS.imageScaling : 0;
+      menuRowItems[i].value = I18N.get(imageScalingLabels[mode]);
     } else if (action == MenuAction::FRONTLIGHT) {
       menuRowItems[i].value = I18N.get(Frontlight.isOn() ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
     }
@@ -231,10 +258,16 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
 
   fui::ListProps props;
   props.items = menuRowItems;
-  props.count = static_cast<uint16_t>(menuItems.size());
+  props.count = static_cast<uint16_t>(rowCount());
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
+  // The trailing value slot is NOT one of ListProps' theme-inherit sentinels
+  // (list.h documents rowHeight/rowGap/sidePadding/rowRadius only), so leaving
+  // valueText at its zero default measures and draws nothing: every live row here
+  // — night mode, orientation, page turn, frontlight, image scaling — rendered
+  // with an empty value. Take the theme's body style like the settings list does.
+  props.valueText = screen.theme().bodyText;
   syncListViewport(screen, props);
   screen.list(props);
 }

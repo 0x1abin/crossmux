@@ -1443,6 +1443,13 @@ void EpubReaderActivity::renderBook() {
   currentPageLinks.clear();
   if (!epub) return;
 
+  // Apply the reader's image-resampling choice before anything is drawn. The
+  // setting can change from the reader menu, which does NOT reload the book, so
+  // syncing only in loadBook() left the previous filter in force for the rest of
+  // the session — the menu looked like it did nothing. The setter is a no-op
+  // when the filter has not changed, so this costs a compare per render.
+  ImageBlock::setBilinearScaling(SETTINGS.imageScaling == CrossPointSettings::IMAGE_SCALING_BILINEAR);
+
   const auto showPendingSyncSaveError = [this]() {
     if (pendingSyncSaveError) {
       pendingSyncSaveError = false;
@@ -2464,6 +2471,13 @@ void EpubReaderActivity::closeOverlayToPage() {
   overlay = Overlay::None;
   overlayPopup.dismiss();  // an option picker cannot outlive its panel
   toolbarUi.reset();       // ~1 KB of interaction table + props, only needed while open
+  // A panel row toggled in place (image scaling) applies here and only here:
+  // the snapshot below holds pixels decoded with the old filter, so drop it to
+  // fall through to the re-render path instead of restoring them.
+  if (imageScalingDirty) {
+    imageScalingDirty = false;
+    discardOverlayPage();
+  }
 #if FREEINK_DEVICE_EEGO_A4
   // The AA page return sits on top of the B/W chrome frame (openOverlay's
   // cleanup wrote both planes); force the reader's next render onto the full
@@ -2971,6 +2985,14 @@ std::string EpubReaderActivity::moreRowValue(int row) const {
       return SETTINGS.screenInverted ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case MA::FRONTLIGHT:
       return Frontlight.isOn() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case MA::IMAGE_SCALING: {
+      // Same labels the reader menu's option popup offers, so the row's value
+      // and the popup's highlighted entry always agree.
+      static constexpr StrId kScaling[] = {StrId::STR_IMAGE_SCALING_NEAREST, StrId::STR_IMAGE_SCALING_BILINEAR};
+      static_assert(std::size(kScaling) == CrossPointSettings::IMAGE_SCALING_COUNT, "image scaling labels");
+      const size_t mode = SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
+      return I18N.get(kScaling[mode]);
+    }
     default:
       return "";
   }
@@ -3007,6 +3029,30 @@ void EpubReaderActivity::activateMoreRow(int row) {
         toggleAutoPageTurn(static_cast<uint8_t>(PAGE_TURN_RATES[idx]));
       });
       paintOverlayPopup();
+      return;
+    }
+    case MA::IMAGE_SCALING: {
+      // A plain on/off-style row like the frontlight one: one tap cycles, no
+      // picker. The value only reaches the page when the overlay closes, so the
+      // row repaints the panel over the page snapshot instead of re-rendering
+      // the page (which would decode the image twice in a row).
+      const uint8_t current =
+          SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
+      const uint8_t next = static_cast<uint8_t>((current + 1) % CrossPointSettings::IMAGE_SCALING_COUNT);
+      SETTINGS.imageScaling = next;
+      SETTINGS.saveToFile();
+      imageScalingDirty = true;
+      LOG_INF("ERS", "Image scaling -> %s",
+              next == CrossPointSettings::IMAGE_SCALING_BILINEAR ? "bilinear" : "nearest");
+      RenderLock lock;  // the render task shares the framebuffer
+      if (overlayPageStored) {
+        // Clean page back first (the sheet's old value text is not
+        // background-filled), then re-snapshot it and lay the panel on top.
+        renderer.restoreBwBuffer(/*resyncPanelBaseline=*/false);
+        overlayPageStored = renderer.storeBwBuffer();
+      }
+      renderOverlay();
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
       return;
     }
     case MA::NIGHT_MODE:
