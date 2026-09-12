@@ -230,10 +230,13 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     return 1;
   }
 
-  // === Bilinear interpolation (upscale: fineScale > 1.0) ===
-  // Smooths block boundaries that would otherwise create visible banding
-  // on progressive JPEG DC-only decode (1/8 resolution upscaled to target).
-  if (fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) {
+  // === Bilinear interpolation ===
+  // Used for upscaling (smooths the block boundaries that a progressive JPEG's
+  // DC-only 1/8 decode would otherwise band), and for downscaling when the
+  // reader asks for it — nearest neighbour drops source detail and produces
+  // stair-step edges on scaled artwork.
+  const bool bilinearRequested = ctx->config != nullptr && ctx->config->bilinearScaling;
+  if ((fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) || bilinearRequested) {
     // Pre-compute safe X range where lx0 and lx0+1 are both in [0, validW-1].
     // Only the left/right edge pixels (typically 0-2 and 1-8 respectively) need clamping.
     int safeXStart = (int)(((int64_t)blockX * fineScaleFPX + FP_MASK) >> FP_SHIFT);
