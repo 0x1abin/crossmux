@@ -192,6 +192,9 @@ and 232-byte glyph scratch buffer, too large for the activity task stack.
 Only one font-map entry is added on entry and removed on exit; no additional
 framebuffer or SD font is needed.
 
+The default sleep screen is Light. Existing saved sleep-screen selections are
+preserved; the default applies when no selection has been saved.
+
 ## Retained Framebuffer Updates
 
 The firmware has one framebuffer, and its contents remain available after
