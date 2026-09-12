@@ -17,7 +17,21 @@ class MetalioTest(unittest.TestCase):
 #include <cstdint>
 #include <vector>
 #include <utility>
-constexpr int INPUT_PULLUP=2, OUTPUT=1, LOW=0;
+#include <climits>
+#include <cmath>
+#include <algorithm>
+#define IRAM_ATTR
+constexpr int INPUT_PULLUP=2, INPUT_PULLDOWN=4, ADC_11db=3, OUTPUT=1, LOW=0, HIGH=1, INPUT=0, FALLING=3;
+inline int Serial=0;
+inline int gpio0=HIGH;
+inline int digitalRead(int pin) { return pin==0 ? gpio0 : HIGH; }
+inline void analogSetAttenuation(int) {}
+inline int analogRead(int) { return 4095; }
+inline int analogReadMilliVolts(int) { return 3300; }
+inline void (*touchIrq)(void*)=nullptr;
+inline void* touchArg=nullptr;
+inline void attachInterruptArg(int,void (*fn)(void*),void* arg,int) { touchIrq=fn; touchArg=arg; }
+inline void detachInterrupt(int) {}
 inline uint32_t clockMs=0;
 inline std::vector<unsigned> waits;
 inline std::vector<std::pair<int,int>> modes;
@@ -37,6 +51,7 @@ struct MockWire {
   std::vector<Transaction> transactions;
   std::vector<uint8_t> data;
   std::array<uint8_t,2> input{0xff,0xff};
+  std::array<uint8_t,5> touch{};
   uint8_t status=3, address=0;
   unsigned cursor=0;
   bool fail=false;
@@ -50,9 +65,37 @@ struct MockWire {
   }
   uint8_t requestFrom(uint8_t,uint8_t count,uint8_t) { cursor=0; return count; }
   int available() { return 0; }
-  uint8_t read() { return address==0x20 ? input.at(cursor++) : status; }
+  uint8_t read() { return address==0x20 ? input.at(cursor++) : address==0x15 ? touch.at(cursor++) : status; }
 };
 inline MockWire Wire;
+''')
+            (tmp / "driver").mkdir()
+            (tmp / "driver/gpio.h").write_text(r'''
+#pragma once
+using gpio_num_t=int;
+inline void gpio_hold_dis(int) {}
+inline void gpio_hold_en(int) {}
+''')
+            (tmp / "freertos").mkdir()
+            (tmp / "freertos/FreeRTOS.h").write_text(r'''
+#pragma once
+using QueueHandle_t=void*; using TaskHandle_t=void*;
+constexpr int pdTRUE=1, pdPASS=1;
+#define pdMS_TO_TICKS(x) (x)
+''')
+            (tmp / "freertos/queue.h").write_text(r'''
+#pragma once
+inline void* xQueueCreate(int,int) { return nullptr; }
+inline int xQueueReceive(void*,void*,int) { return 0; }
+inline int xQueueSend(void*,const void*,int) { return 0; }
+inline void xQueueReset(void*) {}
+''')
+            (tmp / "freertos/task.h").write_text(r'''
+#pragma once
+inline int xTaskCreate(void (*)(void*),const char*,unsigned,void*,unsigned,void**) { return 0; }
+inline int xTaskCreatePinnedToCore(void (*)(void*),const char*,unsigned,void*,int,void**,int) { return 0; }
+inline void vTaskDelay(unsigned) {}
+inline void vTaskDelete(void*) {}
 ''')
             # Compile the actual renderer transform, not a second implementation of it.
             renderer = (ROOT / "lib/GfxRenderer/GfxRenderer.cpp").read_text()
@@ -62,6 +105,7 @@ inline MockWire Wire;
 #include <cassert>
 #include <Cst816sInput.h>
 #include <MetalioEink4Board.h>
+#include <InputManager.h>
 struct GfxRenderer {
  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
  Orientation orientation=Portrait;
@@ -137,7 +181,11 @@ int main() {
  assert((waits==std::vector<unsigned>{10,120}));
  assert(!powerButtonPressed(true)); assert(!powerButtonPressed(true));
  assert(!powerButtonPressed(false)); assert(powerButtonPressed(true));
- Wire.input={0x7f,0xfe}; assert(buttons()==((1<<4)|(1<<5)));
+ Wire.input={0x7f,0xff}; assert(buttons()==(1<<5)); // P0.7 is Down.
+ clockMs+=21; Wire.input={0xff,0xff}; assert(buttons()==0);
+ clockMs+=21; Wire.input={0xff,0xfe}; assert(buttons()==(1<<4)); // P1.0 is Up.
+ clockMs+=21; assert(buttons()==(1<<4)); // Held state survives successful reads.
+ clockMs+=21; Wire.input={0x7f,0xfe}; assert(buttons()==((1<<4)|(1<<5)));
  clockMs+=21; Wire.fail=true; assert(buttons()==0);
  clockMs+=2001; Wire.fail=false; Wire.input={0xff,0xff}; assert(buttons()==0);
  bool connected=false; assert(externalPowerConnected(connected) && connected);
@@ -155,12 +203,45 @@ int main() {
    assert(bool(value & POWER_PULSE)==(i%2==0));
  }
  Wire.fail=true; assert(!shutdown());
+ Wire.fail=false; Wire.input={0xff,0xff};
+ InputManager input;
+ input.begin();
+ auto sample=[&]() { clockMs+=25; input.update(); clockMs+=25; input.update(); };
+ sample();
+ gpio0=LOW; sample();
+ assert(input.isPressed(InputManager::BTN_CONFIRM));
+ assert(!input.isPressed(InputManager::BTN_BACK));
+ gpio0=HIGH; sample(); assert(!input.isPressed(InputManager::BTN_CONFIRM));
+ auto touch=[&](unsigned x,unsigned y,unsigned count) {
+   Wire.touch={static_cast<uint8_t>(count),static_cast<uint8_t>(x>>8),static_cast<uint8_t>(x),
+               static_cast<uint8_t>(y>>8),static_cast<uint8_t>(y)};
+   assert(touchIrq); touchIrq(touchArg); sample();
+ };
+ for (auto [x,key] : {std::pair{400u,InputManager::BTN_LEFT},std::pair{240u,InputManager::BTN_RIGHT}}) {
+   touch(x,900,1); assert(input.isPressed(key));
+   assert(!input.isPressed(InputManager::BTN_UP) && !input.isPressed(InputManager::BTN_DOWN));
+   touch(x,900,0); assert(!input.isPressed(key));
+ }
+ touch(400,900,1); Wire.fail=true; sample();
+ assert(!input.isPressed(InputManager::BTN_LEFT));
+ Wire.fail=false; clockMs+=2001; touch(0,0,0);
+ // Existing Home tap/hold events remain independent of navigation button bits.
+ touch(80,900,1);
+ Wire.touch[0]=0; touchIrq(touchArg); clockMs+=25; input.update();
+ assert(input.wasHomeKeyTapped() && !input.wasHomeKeyLongPressed());
+ sample(); assert(!input.wasHomeKeyTapped());
+ touch(80,900,1); clockMs+=700; input.update();
+ assert(input.wasHomeKeyLongPressed());
+ Wire.touch[0]=0; touchIrq(touchArg); clockMs+=25; input.update();
+ assert(!input.wasHomeKeyTapped() && !input.wasHomeKeyLongPressed());
+
 }
 '''.replace("TRANSFORM", transform)
             (tmp / "test.cpp").write_text(source)
             subprocess.run(["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
                             "-I" + str(tmp), "-I" + str(SDK / "BoardConfig/include"),
-                            "-I" + str(SDK / "InputManager/include"), str(tmp / "test.cpp"),
+                            "-I" + str(SDK / "InputManager/include"), "-DFREEINK_DEVICE_METALIO_EINK4=1",
+                            str(SDK / "InputManager/src/InputManager.cpp"), str(tmp / "test.cpp"),
                             "-o", str(tmp / "test")], check=True)
             subprocess.run([str(tmp / "test")], check=True)
 
