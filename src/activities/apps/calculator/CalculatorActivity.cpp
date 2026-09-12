@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 
+#include "CalculatorFont.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -52,7 +53,8 @@ CalculatorLayout layoutFor(const GfxRenderer& renderer) {
 
   const int displayTop = header.y + header.height + metrics.verticalSpacing / 2;
   const int availableHeight = std::max(0, bottom - displayTop);
-  const int displayHeight = std::max(112, availableHeight / 4);
+  const int minimumDisplayHeight = 2 * renderer.getLineHeight(calculator::DISPLAY_FONT_ID) + 3 * sectionSpacing;
+  const int displayHeight = std::max(minimumDisplayHeight, availableHeight / 4);
   const Rect displayArea{left, displayTop, width, displayHeight};
 
   const int gridTop = displayArea.y + displayArea.height + sectionSpacing;
@@ -151,13 +153,17 @@ void drawBackspaceIcon(const GfxRenderer& renderer, const Rect key, const bool b
 
 void CalculatorActivity::onEnter() {
   Activity::onEnter();
+  renderer.insertFont(calculator::DISPLAY_FONT_ID, calculator::displayFontFamily);
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   state_.reset();
   selected_ = kInitialSelection;
   requestUpdate();
 }
 
-void CalculatorActivity::onExit() { Activity::onExit(); }
+void CalculatorActivity::onExit() {
+  renderer.removeFont(calculator::DISPLAY_FONT_ID);
+  Activity::onExit();
+}
 
 void CalculatorActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -223,17 +229,23 @@ void CalculatorActivity::render(RenderLock&&) {
   const CalculatorLayout layout = layoutFor(renderer);
   GUI.drawHeader(renderer, layout.header, tr(STR_CALCULATOR_TITLE));
 
-  const char* expression = state_.expressionText();
-  const int expressionWidth = renderer.getTextWidth(UI_12_FONT_ID, expression);
-  const int expressionY = layout.display.y + sectionSpacing;
-  renderer.drawText(UI_12_FONT_ID, layout.display.x + layout.display.width - expressionWidth, expressionY, expression);
+  {
+    const GfxRenderer::ClipScope clip(renderer, layout.display.x, layout.display.y, layout.display.width,
+                                      layout.display.height);
+    const char* expression = state_.expressionText();
+    const int expressionWidth = renderer.getTextWidth(calculator::DISPLAY_FONT_ID, expression);
+    const int expressionY = layout.display.y + sectionSpacing;
+    renderer.drawText(calculator::DISPLAY_FONT_ID, layout.display.x + layout.display.width - expressionWidth,
+                      expressionY, expression);
 
-  const char* result = state_.hasError() ? tr(STR_CALCULATOR_ERROR) : state_.resultText();
-  const int resultWidth = renderer.getTextWidth(NOTOSANS_18_FONT_ID, result, EpdFontFamily::BOLD);
-  const int resultLineHeight = renderer.getLineHeight(NOTOSANS_18_FONT_ID);
-  const int resultY = layout.display.y + layout.display.height - resultLineHeight - sectionSpacing;
-  renderer.drawText(NOTOSANS_18_FONT_ID, layout.display.x + layout.display.width - resultWidth, resultY, result, true,
-                    EpdFontFamily::BOLD);
+    const int resultFontId = state_.hasError() ? UI_12_FONT_ID : calculator::DISPLAY_FONT_ID;
+    const char* result = state_.hasError() ? tr(STR_CALCULATOR_ERROR) : state_.resultText();
+    const int resultWidth = renderer.getTextWidth(resultFontId, result, EpdFontFamily::BOLD);
+    const int resultLineHeight = renderer.getLineHeight(resultFontId);
+    const int resultY = layout.display.y + layout.display.height - resultLineHeight - sectionSpacing;
+    renderer.drawText(resultFontId, layout.display.x + layout.display.width - resultWidth, resultY, result, true,
+                      EpdFontFamily::BOLD);
+  }
 
   const EpdFontFamily::Style keyStyle =
       metrics.optionPopupOptionFontBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;

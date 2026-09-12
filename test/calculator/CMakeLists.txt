@@ -13,3 +13,17 @@ target_link_libraries(CalculatorStateTest PRIVATE
 )
 
 gtest_discover_tests(CalculatorStateTest)
+
+add_executable(CalculatorFontTest
+  CalculatorFontTest.cpp
+  ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
+  ${REPO_ROOT}/lib/EpdFont/EpdFontFamily.cpp
+  ${REPO_ROOT}/lib/Utf8/Utf8.cpp
+)
+target_include_directories(CalculatorFontTest PRIVATE
+  ${REPO_ROOT}/src/activities/apps/calculator
+  ${REPO_ROOT}/lib/EpdFont
+  ${REPO_ROOT}/lib/Utf8
+)
+target_compile_options(CalculatorFontTest PRIVATE -UNDEBUG)
+add_test(NAME CalculatorFontTest COMMAND CalculatorFontTest)
