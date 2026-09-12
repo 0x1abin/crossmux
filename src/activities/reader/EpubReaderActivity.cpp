@@ -11,6 +11,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <SdCardFontCache.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -572,6 +573,19 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
 void EpubReaderActivity::loop() {
   if (!epub) {
     finish();
+    return;
+  }
+
+  if (fontPromptState != FontPromptState::Idle) {
+    lastPageTurnTime = millis();
+    handleFontPreloadPrompt();
+    return;
+  }
+  // Child activities suspend this loop; their temporary Overlay::None is not
+  // a return to reading. Panel/tool switches retain the same preview session.
+  if (overlay == Overlay::None && fontPreview.active()) {
+    lastPageTurnTime = millis();
+    finishFontPreview();
     return;
   }
 
@@ -1412,6 +1426,12 @@ void EpubReaderActivity::onReturnFromEndOfBook() {
 bool EpubReaderActivity::skipLoopDelay() {
   return section && section->isBuilding() && !buildHeapPaused &&
          (section->isPartial() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD);
+}
+
+void EpubReaderActivity::render(RenderLock&& lock) {
+  ReaderActivity::render(std::move(lock));
+  // Rebuild the page underneath, including after a global control-center visit.
+  if (fontPromptState != FontPromptState::Idle) overlayPopup.processRender(renderer, mappedInput);
 }
 
 void EpubReaderActivity::renderBook() {
@@ -2320,7 +2340,9 @@ void EpubReaderActivity::showTextRowPopup(const int row) {
       }
       overlayPopup.show(StrId::STR_FONT_SIZE, labels, curIdx, [this, sizes](int idx) {
         if (idx < 0 || idx >= static_cast<int>(sizes.size())) return;
+        if (SETTINGS.fontPointSize == sizes[idx]) return;
         SETTINGS.fontPointSize = sizes[idx];
+        SETTINGS.sdFontFlashPreload = 0;
         applyTextSettingLive();
       });
       break;
@@ -2374,6 +2396,8 @@ void EpubReaderActivity::openOverlay(Overlay target) {
       toolbarUi->nav().top = panelIndex;
       break;
     case Overlay::Text:
+      static_assert(sizeof(SETTINGS.sdFontFamilyName) == 32);
+      fontPreview.begin(SETTINGS.sdFontFamilyName, SETTINGS.fontPointSize, SETTINGS.sdFontFlashPreload != 0);
       panelIndex = 0;
       toolbarUi->nav().reset();
       break;
@@ -2642,8 +2666,9 @@ void EpubReaderActivity::handleOverlayInput() {
         overlay = Overlay::None;
         overlayPopup.dismiss();
         discardOverlayPage();
-        auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(renderer, mappedInput, &sdFontSystem.registry(),
-                                                                    TextSettingsActivity::Tab::Family);
+        auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(
+            renderer, mappedInput, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
+            TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::PreviewOnly);
         if (!textSettings) {
           LOG_ERR("ERS", "OOM allocating text settings");
           overlay = Overlay::Text;
@@ -2812,11 +2837,11 @@ void EpubReaderActivity::paintOverlayPopup() {
 
 void EpubReaderActivity::applyReaderTextSettings() {
   SETTINGS.saveToFile();
+  RenderLock lock;
   // (Re)load or unload the selected SD-card font for the current family/size.
   // The reader otherwise only loads SD fonts on book open, so without this an
   // in-reader font change wouldn't take effect until re-opening the book.
   sdFontSystem.ensureLoaded(renderer);
-  RenderLock lock;
   if (section) {
     rememberCurrentContentOffset();
     cachedSpineIndex = currentSpineIndex;
@@ -2824,6 +2849,88 @@ void EpubReaderActivity::applyReaderTextSettings() {
     nextPageNumber = section->currentPage;
   }
   section.reset();  // force re-pagination with the new settings
+}
+
+void EpubReaderActivity::finishFontPreview() {
+  const auto* family = sdFontSystem.registry().findFamily(SETTINGS.sdFontFamilyName);
+  const auto* file = family ? family->findNearestSize(SETTINGS.fontPointSize) : nullptr;
+  const bool cached = file && SdCardFontCache::isValidFor(file->path.c_str());
+  const auto decision = fontPreview.finish(SETTINGS.sdFontFamilyName, SETTINGS.fontPointSize, cached);
+  switch (decision) {
+    case ReaderFontPreview::Decision::Keep:
+      return;
+    case ReaderFontPreview::Decision::Enable: {
+      RenderLock lock;
+      const bool reload = SETTINGS.sdFontFlashPreload == 0;
+      SETTINGS.sdFontFlashPreload = 1;
+      // ensureLoaded's same-family/size fast path does not change the source.
+      if (reload) sdFontSystem.releaseLoadedFont(renderer);
+      sdFontSystem.ensureLoaded(renderer);
+      break;
+    }
+    case ReaderFontPreview::Decision::Disable:
+    case ReaderFontPreview::Decision::Ask:
+      SETTINGS.sdFontFlashPreload = 0;
+      break;
+  }
+  SETTINGS.saveToFile();
+  if (decision != ReaderFontPreview::Decision::Ask) return;
+
+  {
+    RenderLock lock;
+    constexpr StrId options[] = {StrId::STR_FONT_PRELOAD_START, StrId::STR_FONT_PRELOAD_SKIP};
+    fontPromptState = FontPromptState::Asking;
+    fontPromptWaitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
+    overlayPopup.show(StrId::STR_FONT_PRELOAD_CONFIRM, options, static_cast<int>(std::size(options)), 1,
+                      [this](int index) {
+                        RenderLock lock;
+                        if (index == 0) fontPromptState = FontPromptState::Accepted;
+                      });
+  }
+  requestUpdate();
+}
+
+void EpubReaderActivity::handleFontPreloadPrompt() {
+  if (fontPromptWaitForBackRelease) {
+    fontPromptWaitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
+    return;  // Consume the inherited release as well as the hold.
+  }
+  overlayPopup.handleInput(mappedInput, [this] { requestUpdate(); });
+  if (overlayPopup.isActive()) return;
+
+  const bool accepted = fontPromptState == FontPromptState::Accepted;
+  {
+    RenderLock lock;
+    fontPromptState = FontPromptState::Idle;
+    overlayPopup.dismiss();
+  }
+  if (!accepted) {
+    requestUpdate();
+    return;
+  }
+
+  // ActivityManager owns this existing progress activity across loop frames;
+  // stack storage cannot outlive this call. No second font/cache buffer is added.
+  auto preload = makeUniqueNoThrow<TextSettingsActivity>(
+      renderer, mappedInput, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
+      TextSettingsActivity::InitialFontState::Changed, TextSettingsActivity::StartMode::PreloadThenExit);
+  if (!preload) {
+    LOG_ERR("ERS", "OOM allocating font preload activity (%zu bytes)", sizeof(TextSettingsActivity));
+    SETTINGS.sdFontFlashPreload = 0;
+    SETTINGS.saveToFile();
+    requestUpdate();
+    return;
+  }
+  startActivityForResult(std::move(preload), [this](const ActivityResult&) {
+    {
+      RenderLock lock;
+      // Also covers a cache that became valid between the prompt and preload.
+      sdFontSystem.releaseLoadedFont(renderer);
+      sdFontSystem.ensureLoaded(renderer);
+    }
+    lastPageTurnTime = millis();
+    requestUpdate();
+  });
 }
 
 // The More panel carries everything the classic list menu offers except the

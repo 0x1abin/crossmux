@@ -19,7 +19,7 @@
 class FontDownloadActivity final : public UiListActivity {
  public:
   enum class Purpose : uint8_t { Manage, PromptThenManage, ReaderAutoInstall };
-  enum class StartMode : uint8_t { Normal, ResumeFontLoadError };
+  enum class StartMode : uint8_t { Normal, PreviewOnly, ResumeFontLoadError };
 
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                 Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal);
