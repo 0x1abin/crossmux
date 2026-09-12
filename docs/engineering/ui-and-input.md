@@ -179,6 +179,22 @@ action**.
   logical selection and viewport remain intact, and FreeInkUI's active touch
   feedback plus semantic values such as checks and switches remain visible.
 
+The calculator registers a dedicated built-in Noto Sans 18pt regular/bold family
+for its expression and result, then unregisters it on exit. Legacy reader font
+IDs (including `NOTOSANS_18_FONT_ID`) resolve to the 12pt offline fallback and
+must not be used to select a larger display font. The two display rows reserve
+their actual line heights plus at least 12 px spacing; overflowing text is
+right-aligned and clipped to the display area. Error messages use the UI font
+and its language fallback. Key labels retain their existing font.
+The font tables stay in Flash. Drawing reuses the renderer's decompression
+cache: the calculator's digits/operators require at most a 14,675-byte group
+and 232-byte glyph scratch buffer, too large for the activity task stack.
+Only one font-map entry is added on entry and removed on exit; no additional
+framebuffer or SD font is needed.
+
+The default sleep screen is Light. Existing saved sleep-screen selections are
+preserved; the default applies when no selection has been saved.
+
 ## Retained Framebuffer Updates
 
 The firmware has one framebuffer, and its contents remain available after
