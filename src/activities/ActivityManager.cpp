@@ -258,15 +258,15 @@ bool ActivityManager::handleMainTabInput() {
   if (!currentActivity || !currentActivity->usesMainTabBar()) return false;
 
   const MainTab currentTab = currentActivity->mainTab();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int tabTop = metrics.topPadding;
-  const int tabBottom = tabTop + metrics.headerHeight;
+  const Rect tabBar = currentActivity->mainTabBarRect();
+  const int tabTop = tabBar.y;
+  const int tabBottom = tabBar.y + tabBar.height;
 
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTapped(x, y)) {
     if (y >= tabTop && y < tabBottom) {
-      const MainTab target = MainTabs::fromX(x, renderer.getScreenWidth());
+      const MainTab target = MainTabs::fromX(x - tabBar.x, tabBar.width);
       if (target != MainTab::None) {
         mainTabFocus = MainTabFocus::Content;
         if (target != currentTab)

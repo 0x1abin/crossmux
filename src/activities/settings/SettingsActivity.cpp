@@ -293,7 +293,8 @@ void SettingsActivity::rebuildSettingsLists() {
     if (setting.category == StrId::STR_NONE_OPT) continue;
     if (!usesAccordion() && (setting.valuePtr == &CrossPointSettings::inxRecentLayout ||
                              setting.valuePtr == &CrossPointSettings::inxLibraryLayout ||
-                             setting.valuePtr == &CrossPointSettings::inxAppsLayout)) {
+                             setting.valuePtr == &CrossPointSettings::inxAppsLayout ||
+                             setting.valuePtr == &CrossPointSettings::inxTabPosition)) {
       continue;
     }
     if (setting.category == StrId::STR_CAT_DISPLAY) {
@@ -1038,9 +1039,14 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
 void SettingsActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const bool boldChineseCategories = I18N.getLanguage() == Language::ZH_CN;
-  // Content below the GUI.drawHeader band, above the button hints.
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
-                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  const Rect content =
+      usesMainTabBar()
+          ? mainTabContentRect()
+          : Rect{0, metrics.topPadding + metrics.headerHeight, renderer.getScreenWidth(),
+                 renderer.getScreenHeight() - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
+  screen.setContentMarginFromScreen(
+      fui::Insets{static_cast<int16_t>(content.y), 0,
+                  static_cast<int16_t>(renderer.getScreenHeight() - content.y - content.height), 0});
 
   if (usesAccordion()) {
     const auto counts = accordionSettingCounts();

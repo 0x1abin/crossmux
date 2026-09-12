@@ -205,8 +205,9 @@ bool AppsMenuActivity::usesIconLayout() const {
 
 int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int height = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const Rect content = mainTabContentRect();
+  const int top = content.y + metrics.verticalSpacing;
+  const int height = content.height - metrics.verticalSpacing * 2;
   return InxGridGeometry::indexFromPoint(x, y - top, renderer.getScreenWidth(), height,
                                          InxGridGeometry::pageStart(nav.selected, getVisibleAppCount()),
                                          getVisibleAppCount());
@@ -293,8 +294,12 @@ void AppsMenuActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
-  const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const Rect mainContent = usesMainTabBar()
+                               ? mainTabContentRect()
+                               : Rect{0, metrics.topPadding + metrics.headerHeight, sw,
+                                      sh - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
+  const int listY = mainContent.y + metrics.verticalSpacing;
+  const int listH = mainContent.height - metrics.verticalSpacing * 2;
   const int visibleCount = getVisibleAppCount();
   const bool showSelection = showMainTabContentSelection();
 
@@ -303,10 +308,8 @@ void AppsMenuActivity::buildScreen(UiScreen& screen) {
   } else if (usesIconLayout()) {
     drawIconGrid(Rect{0, listY, sw, listH}, visibleCount, showSelection);
   } else {
-    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-    screen.setContentMargin(fui::Insets{static_cast<int16_t>(listY), static_cast<int16_t>(sw - (safe.x + safe.width)),
-                                        static_cast<int16_t>(sh - (safe.y + safe.height)),
-                                        static_cast<int16_t>(safe.x)});
+    screen.setContentMarginFromScreen(
+        fui::Insets{static_cast<int16_t>(listY), 0, static_cast<int16_t>(sh - listY - listH), 0});
     fui::ListProps props;
     props.items = rowItems.data();
     props.count = static_cast<uint16_t>(rowItems.size());
