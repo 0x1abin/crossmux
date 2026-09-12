@@ -27,3 +27,20 @@ target_link_libraries(AirPageImageStoreTest PRIVATE
 )
 
 gtest_discover_tests(AirPageImageStoreTest PROPERTIES RUN_SERIAL TRUE)
+
+add_executable(AirPageConnectionTest
+  AirPageConnectionTest.cpp
+  ${REPO_ROOT}/src/activities/apps/airpage/AirPageConnection.cpp
+)
+
+target_include_directories(AirPageConnectionTest BEFORE PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+  ${REPO_ROOT}/src/activities/apps/airpage
+)
+
+target_link_libraries(AirPageConnectionTest PRIVATE
+  crosspoint_test_common
+  GTest::gtest_main
+)
+
+gtest_discover_tests(AirPageConnectionTest)

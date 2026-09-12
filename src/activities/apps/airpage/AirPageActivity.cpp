@@ -592,7 +592,7 @@ void AirPageActivity::applySettingsSelection() {
       const auto event = connection_.setRealtime(enabled);
       if (enabled) {
         applyConnectionEvent(event);
-        if (!connection_.wifiConnected()) openWifiSelection(false);
+        if (event == airpage::AirPageConnection::Event::WifiRequired) openWifiSelection(false);
       } else {
         clearConnectionNotice();
         requestUpdate();
@@ -712,6 +712,17 @@ void AirPageActivity::handleWallpaperResult(const ActivityResult& result) {
 
 void AirPageActivity::handleRefresh() {
   if (phase_ != Phase::Idle) return;
+  switch (connection_.state()) {
+    case airpage::AirPageConnection::State::WifiConnecting:
+    case airpage::AirPageConnection::State::BrokerConnecting:
+      return;
+    case airpage::AirPageConnection::State::Off:
+    case airpage::AirPageConnection::State::WifiOnline:
+    case airpage::AirPageConnection::State::Online:
+    case airpage::AirPageConnection::State::Backoff:
+    case airpage::AirPageConnection::State::Paused:
+      break;
+  }
   if (!connection_.wifiConnected()) {
     openWifiSelection(true);
     return;
@@ -994,15 +1005,14 @@ const char* AirPageActivity::connectionText() const {
 const char* AirPageActivity::refreshActionText() const {
   switch (connection_.state()) {
     case airpage::AirPageConnection::State::Paused:
-      return connection_.wifiConnected() ? tr(STR_RETRY) : tr(STR_CONNECT);
     case airpage::AirPageConnection::State::Backoff:
       return tr(STR_RETRY);
     case airpage::AirPageConnection::State::Off:
       return connection_.wifiConnected() ? tr(STR_AIRPAGE_REFRESH) : tr(STR_CONNECT);
     case airpage::AirPageConnection::State::WifiConnecting:
-      return tr(STR_CONNECT);
-    case airpage::AirPageConnection::State::WifiOnline:
     case airpage::AirPageConnection::State::BrokerConnecting:
+      return tr(STR_CONNECTING);
+    case airpage::AirPageConnection::State::WifiOnline:
     case airpage::AirPageConnection::State::Online:
       return tr(STR_AIRPAGE_REFRESH);
   }
