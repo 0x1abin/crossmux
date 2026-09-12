@@ -34,15 +34,15 @@ class NightlyTargetTest(unittest.TestCase):
             )
         self.assertEqual(urlopen.call_count, 2)
 
-    def test_matrix_has_c3_and_six_s3_targets(self):
+    def test_matrix_has_c3_and_seven_s3_targets(self):
         matrix = package_nightly_target.matrix('nightly')['include']
-        self.assertEqual(len(matrix), 7)
+        self.assertEqual(len(matrix), 8)
         self.assertEqual(
             {entry['targetId'] for entry in matrix},
             set(nightly_targets.TARGETS),
         )
         environments = {entry['environment'] for entry in matrix}
-        self.assertEqual(len(environments), 7)
+        self.assertEqual(len(environments), 8)
         self.assertEqual(
             package_nightly_target.matrix('stable')['include'],
             [{'targetId': 'xteink_x4', 'deviceSlug': 'xteink', 'environment': 'gh_release'}],
@@ -54,6 +54,12 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertEqual(targets['xteink_x4_pro']['boardTag'], 'x4pro')
         self.assertEqual(targets['m5stack_paper_mono']['boardTag'], 'papermono')
         self.assertEqual(targets['eego_a4']['environments']['nightly'], 'eego_a4_nightly')
+        self.assertEqual(targets['metalio_eink4']['models'], ['metalio_eink4'])
+        self.assertEqual(targets['metalio_eink4']['boardTag'], 'metalio_eink4')
+        self.assertEqual(targets['metalio_eink4']['deviceSlug'], 'metalio-eink4')
+        self.assertTrue(targets['metalio_eink4']['fullInstall'])
+        self.assertEqual(nightly_targets.environment_for('metalio_eink4', 'nightly', 'global'),
+                         nightly_targets.environment_for('metalio_eink4', 'nightly', 'zh-CN'))
 
     def test_versions_are_nightly_release_candidates(self):
         self.assertEqual(
@@ -256,6 +262,12 @@ class NightlyTargetTest(unittest.TestCase):
         temp.close()
         self.addCleanup(Path(temp.name).unlink)
         return Path(temp.name)
+
+    def test_metalio_image_rejects_other_boards(self):
+        package_nightly_target.verify_firmware(self.write_image(board='metalio_eink4'), 0x0009, 'metalio_eink4')
+        with self.assertRaises(SystemExit):
+            package_nightly_target.verify_firmware(self.write_image(board='waveshare_epaper_397'),
+                                                  0x0009, 'metalio_eink4')
 
     def test_rejects_wrong_chip_or_board(self):
         package_nightly_target.verify_firmware(self.write_image(), 0x0009, 'eego_a4')

@@ -1,7 +1,7 @@
 # Device Variants — X3/X4 and Build-Only S3 Targets
 
 > Sticky, X4 Pro, X4 Classic, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
-> and [Waveshare ePaper 3.97](waveshare-epaper-397.md) are separate ESP32-S3
+> [Waveshare ePaper 3.97](waveshare-epaper-397.md), and [Metalio E-Ink 4](metalio-eink4.md) are separate ESP32-S3
 > compile-time targets. The one-binary rule in this document applies only to
 > the ESP32-C3 X3/X4 pair.
 
@@ -22,7 +22,7 @@ pio run -e gh_release        # all 33 UI languages and both content profiles
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
-All seven ESP32-S3 devices use separate builds because their boards,
+All eight ESP32-S3 devices use separate builds because their boards,
 displays, input, storage, and power profiles differ from the combined ESP32-C3
 image:
 
@@ -34,9 +34,10 @@ pio run -e sticky
 pio run -e eego_a4
 pio run -e murphy_m4
 pio run -e waveshare_epaper_397
+pio run -e metalio_eink4
 ```
 
-Six S3 targets are published by the shared Nightly matrix. X4 Classic has the
+Seven S3 targets are published by the shared Nightly matrix. X4 Classic has the
 same `x4c_nightly` build and Hardware CI coverage, but remains build-only and is
 not added to the public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
@@ -67,7 +68,7 @@ Native simulator builds retain the BLE stub.
 X3/X4 profiles share `c3_hardware`: internal RAM, a Flash controller and paged
 coverage indexes for large SD fonts. The HAL protects the entire C3 BLE host
 lifetime from manual 10 MHz idle downclocking. Sticky, X4 Pro, X4 Classic, Paper
-Mono, EEGO A4, Murphy M4 and Waveshare 3.97 inherit `s3_ble_psram` through their
+Mono, EEGO A4, Murphy M4, Waveshare 3.97 and Metalio E-Ink 4 inherit `s3_ble_psram` through their
 hardware profiles, including release/RC flavors. Sticky and EEGO keep their
 tuned controller-only cores; USB-capable boards keep the prebuilt TinyUSB graph.
 C3 never inherits the S3 allocator or IPC wrapper.
