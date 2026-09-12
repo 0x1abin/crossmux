@@ -32,8 +32,8 @@ for other boards are rejected by the existing flash/OTA board-tag check.
 | Shared I²C | SDA41 SCL42, 400 kHz, Arduino Wire transaction locking |
 | TCA9555 | `0x20`, INT2 input pull-up; MAIN=P0.6, SCREEN=P0.5, touch reset=P1.1, shutdown pulse=P1.3 |
 | Touch | CST816S `0x15`, active-low IRQ1, reset through the expander |
-| Buttons | BOOT0=Back, POWER3=Power; P0.7=Up/previous, P1.0=Down/next, active-low |
-| Virtual keys | Raw Home=(80,900), Prev=(400,900), Next=(240,900) |
+| Buttons | BOOT0=Confirm, POWER3=Power; P0.7=Down/next, P1.0=Up/previous, active-low |
+| Virtual keys | Raw Home=(80,900) unchanged; Prev=(400,900) → Left, Next=(240,900) → Right |
 | Battery | BQ27220 `0x55`: percentage and gauge-native charging status |
 | Charger | Optional CX25601N `0x6B`: read status only; never interpreted as BQ25896 |
 | RTC | PCF8563 `0x51`, existing system-UTC restore/writeback behavior |
@@ -105,8 +105,12 @@ coordinates are discarded. Screen points map to `(rawY, 479-rawX)`, then pass
 through the normal orientation transform. Crossing from screen to bezel keys
 cancels that contact until release. Home short press returns Home; a 700 ms
 hold uses the existing reader-menu action and consumes the subsequent short
-release. Prev/Next and side buttons use the existing logical mapping, including
-user side-button swaps. Activity transitions retain input suppression.
+release. Bezel Prev/Next now report Left/Right through the existing front-button
+mapping; physical side buttons report Down/Up respectively and retain user
+side-button swaps. Activity transitions retain input suppression. This key-map
+correction follows hardware feedback. The user confirmed the corrected key mapping
+on the physical device; this does not extend the earlier display-retention or
+power-cycle acceptance.
 
 The initial held Power gesture and its release are consumed on every boot.
 Subsequent Power gestures and automatic sleep use existing settings. Shutdown
@@ -254,3 +258,20 @@ inside the configurable SSD1677 driver, with no duplicate platform driver.
 A host compatibility test implements only the original interface and verifies
 all three new hooks dispatch to it. The facade also forwards reading context
 when an inverted grayscale-base request falls back to ordinary display.
+
+### Key mapping validation (2026-09-12)
+
+- Real `InputManager.cpp` host coverage verifies BOOT confirmation, separate
+  expander directions, bezel Left/Right, failed-read release, and unchanged Home
+  tap/hold events. Existing 24 SDK input checks also passed.
+- Both Metalio build environments passed before rebasing onto the latest main.
+  The tested application SHA-256 was
+  `0a76680541efebd688a935ab926fad33173c1c2b4ac5fda19d3db23ac931a7a6`.
+- The initial app0 write verified successfully but the device still selected
+  app1. Reading the actual partition table and OTA metadata identified app1 at
+  `0x650000`; rewriting that slot took 51.1 seconds and passed hash verification.
+  Boot logs confirmed the expected build, SDMMC, RTC and saved settings.
+- The user confirmed the corrected key mapping. Future serial updates must
+  inspect the selected OTA slot; write verification alone does not establish
+  that the new image booted. App-menu logs also reported a drawing-boundary
+  warning; it is separate from this mapping change and was not addressed here.
