@@ -9,17 +9,21 @@ struct GfxRenderer {
   const uint8_t* fb;
   bool combinesGrayscaleBase() const { return false; }
   void displayGrayscaleBase(HalDisplay::RefreshMode mode, DisplayRefreshContext context) const {
-    displayBuffer(mode, context);
+    driver.displayGrayscaleBaseWithContext(bus, fb, mode == HalDisplay::FAST_REFRESH ? Mode::Fast : Mode::Half, false,
+                                           context == DisplayRefreshContext::ContinuousReading
+                                               ? RefreshContext::ContinuousReading
+                                               : RefreshContext::Normal);
   }
   void displayBuffer(HalDisplay::RefreshMode mode, DisplayRefreshContext context) const {
-    driver.display(bus, fb, nullptr, mode == HalDisplay::FAST_REFRESH ? Mode::Fast : Mode::Half, false,
-                   context == DisplayRefreshContext::ContinuousReading ? RefreshContext::ContinuousReading
-                                                                       : RefreshContext::Normal);
+    driver.displayWithContext(bus, fb, nullptr, mode == HalDisplay::FAST_REFRESH ? Mode::Fast : Mode::Half, false,
+                              context == DisplayRefreshContext::ContinuousReading ? RefreshContext::ContinuousReading
+                                                                                  : RefreshContext::Normal);
   }
   void displayBufferAsync(HalDisplay::RefreshMode mode, DisplayRefreshContext context) const {
-    if (driver.displayStart(bus, fb, nullptr, mode == HalDisplay::FAST_REFRESH ? Mode::Fast : Mode::Half, false,
-                            context == DisplayRefreshContext::ContinuousReading ? RefreshContext::ContinuousReading
-                                                                                : RefreshContext::Normal))
+    if (driver.displayStartWithContext(
+            bus, fb, nullptr, mode == HalDisplay::FAST_REFRESH ? Mode::Fast : Mode::Half, false,
+            context == DisplayRefreshContext::ContinuousReading ? RefreshContext::ContinuousReading
+                                                                : RefreshContext::Normal))
       driver.displayFinish(bus, fb);
   }
 };

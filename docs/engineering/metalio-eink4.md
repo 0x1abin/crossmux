@@ -62,7 +62,9 @@ backward-compatible default. `ContinuousReading` allows only a FAST request
 with a synchronized baseline to reuse it. It cannot bypass initial drawing or
 periodic cleaning. Reader helpers supply this context for text pages and XTC;
 menus, image apps and sleep screens use the normal cleanup contract. There is
-no persistent next-call permission. Other panel drivers ignore this context.
+no persistent next-call permission. The SDK facade uses optional `WithContext` hooks whose default implementations
+call the original driver methods. Only SSD1677 overrides these hooks; other
+drivers require no signature or source changes.
 
 One driver decision selects FAST, HALF, FULL or black-pulse cleaning for the
 full-frame and deferred paths; window updates escalate to the same full-frame
@@ -239,3 +241,16 @@ acceptance must each be recorded independently.
 - Local Python checks: 53 passed. SDK input checks: 24 passed, plus the touch
   activity host checks. Post-refactor firmware builds, package hashes, serial
   reflash and PR CI outcomes are recorded separately below as they complete.
+
+### Driver compatibility scope
+
+The original `PanelDriver::display`, `displayStart`, and `displayGrayscaleBase`
+interfaces are unchanged. The three `WithContext` hooks are optional extensions;
+legacy drivers retain their existing virtual dispatch, including specialized
+async and grayscale-base behavior. The 22 files belonging to the other 11 panel
+drivers match SDK dependency `8242f43` byte for byte. The Metalio policy remains
+inside the configurable SSD1677 driver, with no duplicate platform driver.
+
+A host compatibility test implements only the original interface and verifies
+all three new hooks dispatch to it. The facade also forwards reading context
+when an inverted grayscale-base request falls back to ordinary display.
