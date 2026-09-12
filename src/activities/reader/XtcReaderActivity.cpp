@@ -232,7 +232,7 @@ void XtcReaderActivity::renderPage() {
       }
       pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
     } else {
-      renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
+      renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH, DisplayRefreshContext::ContinuousReading);
       pagesUntilFullRefresh--;
     }
 

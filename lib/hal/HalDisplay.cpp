@@ -60,20 +60,32 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
   }
 }
 
-void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+namespace {
+EInkDisplay::RefreshContext convertRefreshContext(DisplayRefreshContext context) {
+  switch (context) {
+    case DisplayRefreshContext::Normal:
+      return EInkDisplay::RefreshContext::Normal;
+    case DisplayRefreshContext::ContinuousReading:
+      return EInkDisplay::RefreshContext::ContinuousReading;
+  }
+  return EInkDisplay::RefreshContext::Normal;
+}
+}  // namespace
+
+void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen, DisplayRefreshContext context) {
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
   }
 
-  einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
+  einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen, convertRefreshContext(context));
 }
 
-void HalDisplay::displayBufferAsync(HalDisplay::RefreshMode mode) {
+void HalDisplay::displayBufferAsync(HalDisplay::RefreshMode mode, DisplayRefreshContext context) {
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
   }
 
-  einkDisplay.displayBufferAsyncNoShadow(convertRefreshMode(mode));
+  einkDisplay.displayBufferAsyncNoShadow(convertRefreshMode(mode), convertRefreshContext(context));
 }
 
 void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
@@ -106,7 +118,7 @@ void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* m
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }
 
-void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) {
+void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen, DisplayRefreshContext context) {
   // X3: a HALF fallback means the caller wants a clean base (e.g. the sleep
   // cover, a full-screen swap from arbitrary prior content). Without this, the
   // X3 grayscale base takes its gentle differential happy path and the prior
@@ -118,7 +130,7 @@ void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) 
     einkDisplay.requestResync(1);
   }
 
-  einkDisplay.displayGrayscaleBase(convertRefreshMode(fallback), turnOffScreen);
+  einkDisplay.displayGrayscaleBase(convertRefreshMode(fallback), turnOffScreen, convertRefreshContext(context));
 }
 
 void HalDisplay::preconditionGrayscale() { einkDisplay.preconditionGrayscale(); }

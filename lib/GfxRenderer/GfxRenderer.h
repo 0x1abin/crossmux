@@ -1,7 +1,8 @@
 #pragma once
-
 #include <EpdFontFamily.h>
 #include <HalDisplay.h>
+
+#include "../hal/DisplayRefreshContext.h"
 
 namespace BidiUtils {
 // Paragraph base direction for the Unicode BiDi algorithm (UAX#9).
@@ -227,7 +228,8 @@ class GfxRenderer {
   int getScreenWidth() const;
   int getScreenHeight() const;
   void tapToLogical(float nx, float ny, int& outX, int& outY) const;
-  void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH,
+                     DisplayRefreshContext context = DisplayRefreshContext::Normal) const;
   // Force the next displayBuffer() to use `mode`, overriding its argument once.
   void requestNextRefresh(const HalDisplay::RefreshMode mode) const {
     nextRefreshOverride = mode;
@@ -246,7 +248,8 @@ class GfxRenderer {
   // framebuffer must stay untouched until waitRefreshComplete(). Falls back to
   // a blocking refresh when fadingFix is enabled or the panel lacks deferral
   // support. See HalDisplay::displayBufferAsync for the baseline contract.
-  void displayBufferAsync(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  void displayBufferAsync(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH,
+                          DisplayRefreshContext context = DisplayRefreshContext::Normal) const;
   void waitRefreshComplete() const;
   // True when displayBufferAsync() genuinely overlaps: panel defers and
   // fadingFix isn't forcing the blocking path. Callers can skip overlap
@@ -413,7 +416,8 @@ class GfxRenderer {
   // Display the framebuffer as the base frame for a grayscale overlay that
   // follows (X3: OEM differential base waveform; others: plain display with
   // `fallback`).
-  void displayGrayscaleBase(HalDisplay::RefreshMode fallback = HalDisplay::HALF_REFRESH) const;
+  void displayGrayscaleBase(HalDisplay::RefreshMode fallback = HalDisplay::HALF_REFRESH,
+                            DisplayRefreshContext context = DisplayRefreshContext::Normal) const;
   void copyGrayscaleLsbBuffers() const;
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;

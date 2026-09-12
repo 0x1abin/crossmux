@@ -1776,7 +1776,7 @@ void GfxRenderer::invertScreen() const {
   }
 }
 
-void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode) const {
+void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
   HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
@@ -1784,10 +1784,15 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode) const {
     effectiveRefreshMode = nextRefreshOverride;
     nextRefreshOverridePending = false;
   }
+#ifdef SIMULATOR
+  (void)context;
   display.displayBuffer(effectiveRefreshMode, fadingFix);
+#else
+  display.displayBuffer(effectiveRefreshMode, fadingFix, context);
+#endif
 }
 
-void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode) const {
+void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
   HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
   if (nextRefreshOverridePending) {
     effectiveRefreshMode = nextRefreshOverride;
@@ -1796,10 +1801,20 @@ void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode) 
   // The async path has no turn-off-screen hook, which the sunlight fading fix
   // relies on; keep those users on the blocking path.
   if (fadingFix) {
+#ifdef SIMULATOR
+    (void)context;
     display.displayBuffer(effectiveRefreshMode, fadingFix);
+#else
+    display.displayBuffer(effectiveRefreshMode, fadingFix, context);
+#endif
     return;
   }
+#ifdef SIMULATOR
+  (void)context;
   display.displayBufferAsync(effectiveRefreshMode);
+#else
+  display.displayBufferAsync(effectiveRefreshMode, context);
+#endif
 }
 
 void GfxRenderer::waitRefreshComplete() const { display.waitRefreshComplete(); }
@@ -2341,8 +2356,13 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 // unused
 // void GfxRenderer::grayscaleRevert() const { display.grayscaleRevert(); }
 
-void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback) const {
+void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback, DisplayRefreshContext context) const {
+#ifdef SIMULATOR
+  (void)context;
   display.displayGrayscaleBase(fallback, fadingFix);
+#else
+  display.displayGrayscaleBase(fallback, fadingFix, context);
+#endif
 }
 
 void GfxRenderer::preconditionGrayscale() const { display.preconditionGrayscale(); }
