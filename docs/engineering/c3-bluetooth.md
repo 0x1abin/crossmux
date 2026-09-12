@@ -15,7 +15,7 @@ or completion of the quantitative endurance matrix below.
 | `HalPowerManager` | Keep normal CPU frequency throughout the C3 host lifetime, including scan/reconnect. Restore ordinary idle policy after stop. The manual 10 MHz idle clock bypasses IDF power locks. |
 | `BleInput` | Apply reader **80/32 KiB** and settings **70/24 KiB** internal free/largest gates. Reader recovery releases rebuildable font caches, retaining the selected font. Identical failure/context logs are suppressed; attempts still run. |
 | `main.cpp` | Maintain an existing reader/menu connection, and automatically start only when reading is ready. Wi-Fi, exclusive storage and leaving the reader stop the host. Keep the existing two-second failed-start retry. |
-| `EpubReaderActivity` | Share the partial-cache restart predicate between readiness and background construction. Evaluate restart/build/suspend under one render lock. Stop BLE **before** all four construction entrypoints allocate. |
+| `EpubReaderActivity` | Share the partial-cache restart predicate between readiness and background construction. Evaluate restart/build/suspend under one render lock. Retain existing C3/PSRAM BLE links during construction and first indexing; reclaim C3 font caches before all four chapter construction entrypoints allocate. Other internal-RAM BLE hosts still stop before building. |
 | `Section` | Own and release parser/build resources. Persist a partial cache on suspension; invalidate page counts and report I/O error if the commit fails. |
 | SDK `BleKeyboardHost` | Own the fixed device list, bonding, eight-second connection timeout and four-second reconnect cadence. C3 callbacks copy discoveries without retaining NimBLE's duplicate result list. Worker allocation failure cleans up and returns false. |
 
@@ -25,6 +25,10 @@ the parser. Merely pausing parsing would retain its heap. Approaching the partia
 watermark resumes the same construction path. Full-index requests and unresolved
 saved-position remapping retain their existing completion requirements. Other
 platforms and Bluetooth-off reading keep their original build window.
+
+Chapter construction and first indexing retain the existing memory thresholds,
+CSS fallback and framebuffer loan. Low memory does not trigger a BLE-disconnect
+fallback. Readiness still defers starting a new host until construction is ready.
 
 Large C3 BLE font coverage tables use 32-entry pages plus sparse first-codepoint
 keys when the resident representation exceeds 4 KiB. A 4,000-interval full table
@@ -80,6 +84,21 @@ Host checks exercise production lifecycle methods, startup failure/retry, input
 isolation, CPU protection, profile/link isolation, paged/resident lookup agreement,
 non-BMP and page boundaries, corrupt files, allocation failures, short-read retry
 and Flash fallback. They do not model the actual controller or prove radio timing.
+
+### Chapter-build connection retention (September 12)
+
+The user reported normal X4 operation with the C3 keep-connection experiment.
+The flashed diagnostic image had SHA256
+`e5b989bb776a1f7aced3b283bb40ad4c7a46b3f9a0d8556f74331573c1dfaac7`;
+write verification and an independent Flash comparison passed. The submitted
+version retains the two connection guards and removes experimental stage logs
+and the local NimBLE debug override. It is a different image and has not inherited
+the diagnostic image's hardware verification.
+
+Lifecycle and index-entry tests cover C3, PSRAM BLE, other internal-RAM BLE and
+unavailable BLE, including stop counts, failure paths and framebuffer return.
+User feedback does not complete the endurance matrix below or distinguish
+full-style success from CSS fallback. X3 hardware validation remains pending.
 
 ### All-hardware enablement (September 7)
 

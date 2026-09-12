@@ -198,7 +198,10 @@ bool EpubReaderActivity::deferBluetoothStart() const {
 }
 
 void EpubReaderActivity::prepareChapterBuild() {
+  // C3 and PSRAM hosts retain existing links; parser memory guards still apply.
+#if FREEINK_CAP_BLE_HID_HOST && !CROSSPOINT_BLE_HOST_PSRAM && !CONFIG_IDF_TARGET_ESP32C3
   bleinput::stop();
+#endif
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
   // Reclaim arenas before parser allocations interleave with them; retain the
   // selected font and coverage index for both layout and subsequent reading.
@@ -228,7 +231,7 @@ bool EpubReaderActivity::updateChapterBuild() {
   suspendForBluetooth = SETTINGS.bluetoothEnabled;
 #endif
   // A paused parser still owns its heap. Build beyond the restart margin, then
-  // persist a partial cache and release the parser before BLE may reconnect.
+  // persist a partial cache and release the parser to bound its lifetime.
   const int buildWindow = BUILD_WINDOW_AHEAD + (suspendForBluetooth ? PARTIAL_REBUILD_START_MARGIN : 0);
   const bool pendingReposition = cachedVisibleTextOffset.has_value() || cachedChapterTotalPageCount != 0;
   if (((!suspendForBluetooth && section->isPartial()) || (suspendForBluetooth && pendingReposition) ||
@@ -291,7 +294,9 @@ bool EpubReaderActivity::loadBook() {
 
   const bool uncached = !Storage.exists((loadedEpub->getCachePath() + "/book.bin").c_str());
   if (uncached) {
+#if FREEINK_CAP_BLE_HID_HOST && !CROSSPOINT_BLE_HOST_PSRAM && !CONFIG_IDF_TARGET_ESP32C3
     bleinput::stop();
+#endif
     disableFastInitialRefresh();
     GUI.drawPopup(renderer, tr(STR_INDEXING));
   }
