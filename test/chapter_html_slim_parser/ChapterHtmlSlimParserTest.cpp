@@ -534,7 +534,10 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   append(bytes);
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
-  EXPECT_EQ(digest, 13330287791149729058ULL);  // Pre-refactor cache, text and footnotes.
+  // Pre-refactor cache, text and footnotes. The expected value tracks
+  // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
+  // moved when the version went 64 -> 66 for the versioned image cache prefix.
+  EXPECT_EQ(digest, 12249067298013490136ULL);
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
