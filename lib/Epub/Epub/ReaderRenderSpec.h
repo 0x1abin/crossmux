@@ -15,6 +15,10 @@ struct ReaderRenderSpec {
   int fontId = 0;
   float lineCompression = 1.0f;
   bool extraParagraphSpacing = false;
+  // Reader-level first-line indent (two CJK characters / three Latin space
+  // advances). Independent of extraParagraphSpacing: paragraphs keep their
+  // indent even when extra paragraph spacing is enabled.
+  bool firstLineIndent = true;
   uint8_t paragraphAlignment = 0;
   uint16_t viewportWidth = 0;
   uint16_t viewportHeight = 0;

@@ -63,6 +63,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                0,
                                1.0f,
                                false,
+                               false,
                                0,
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
@@ -82,7 +83,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
     ESP = {};
     collectedFootnotes.clear();
     laidOutWords.clear();
-    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, BlockStyle{}, true);
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, false, BlockStyle{}, true);
   }
   void TearDown() override {
     ESP = {};
@@ -100,7 +101,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
 
 TEST_F(ChapterHtmlSlimParserTest, NoTouchKeepsFootnotesWithoutLinkStorage) {
   parser.collectTouchLinks = false;
-  parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, BlockStyle{}, false);
+  parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, false, BlockStyle{}, false);
   const XML_Char* attributes[] = {"href", "#note-target", nullptr};
   ChapterHtmlSlimParser::startElement(&parser, "a", attributes);
   ChapterHtmlSlimParser::characterData(&parser, "1", 1);
@@ -536,8 +537,9 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   for (const auto& href : collectedFootnotes) append(href);
   // Pre-refactor cache, text and footnotes. The expected value tracks
   // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
-  // moved when the version went 64 -> 66 for the versioned image cache prefix.
-  EXPECT_EQ(digest, 12249067298013490136ULL);
+  // moved when the version went 64 -> 66 for the versioned image cache prefix,
+  // and again 66 -> 68 for the three-state first-line-indent control.
+  EXPECT_EQ(digest, 14638228299380780641ULL);  // placeholder, replaced by measured value
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {

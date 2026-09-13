@@ -658,6 +658,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.fontId = getReaderFontId();
   spec.lineCompression = getReaderLineCompression();
   spec.extraParagraphSpacing = extraParagraphSpacing != 0;
+  spec.firstLineIndent = firstLineIndent != 0;
   spec.paragraphAlignment = paragraphAlignment;
   spec.viewportWidth = viewportWidth;
   spec.viewportHeight = viewportHeight;

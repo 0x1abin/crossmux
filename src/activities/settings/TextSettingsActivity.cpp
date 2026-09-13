@@ -35,8 +35,8 @@ namespace {
 // Tab labels for Font | Size | Layout | Style.
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
-constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING, StrId::STR_EXTRA_SPACING, StrId::STR_ALIGNMENT,
-                                         StrId::STR_SCREEN_MARGIN};
+constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING, StrId::STR_EXTRA_SPACING,
+                                         StrId::STR_FIRST_LINE_INDENT, StrId::STR_ALIGNMENT, StrId::STR_SCREEN_MARGIN};
 constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_READING_GUIDE_LINE,
                                         StrId::STR_READING_GUIDE_LINE_STYLE,
@@ -295,8 +295,11 @@ const char* TextSettingsActivity::confirmLabelText() const {
   }
   switch (tab_) {
     case Tab::Layout:
-      // Extra Paragraph Spacing toggles; the rest open a picker
-      return ringPos() - 1 == static_cast<int>(LayoutRow::ParaSpacing) ? tr(STR_TOGGLE) : tr(STR_SELECT);
+      // Extra Paragraph Spacing and First Line Indent toggle; the rest open a picker
+      return ringPos() - 1 == static_cast<int>(LayoutRow::ParaSpacing) ||
+                     ringPos() - 1 == static_cast<int>(LayoutRow::FirstLineIndent)
+                 ? tr(STR_TOGGLE)
+                 : tr(STR_SELECT);
     case Tab::Style:
       if (ringPos() > 0) {
         const StyleRow row = styleRowAt(ringPos() - 1);
@@ -601,6 +604,11 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       SETTINGS.saveToFile();
       requestUpdate();
       break;
+    case LayoutRow::FirstLineIndent:
+      SETTINGS.firstLineIndent = !SETTINGS.firstLineIndent;
+      SETTINGS.saveToFile();
+      requestUpdate();
+      break;
     case LayoutRow::LineSpacing:
       optionPopup_.show(StrId::STR_LINE_SPACING, LINE_SPACING_IDS, static_cast<int>(std::size(LINE_SPACING_IDS)),
                         SETTINGS.lineSpacing, [](int idx) {
@@ -643,6 +651,8 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
     }
     case LayoutRow::ParaSpacing:
       return SETTINGS.extraParagraphSpacing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case LayoutRow::FirstLineIndent:
+      return SETTINGS.firstLineIndent ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case LayoutRow::Alignment: {
       const uint8_t v = SETTINGS.paragraphAlignment;
       return v < std::size(ALIGNMENT_IDS) ? I18N.get(ALIGNMENT_IDS[v]) : I18N.get(StrId::STR_JUSTIFY);
