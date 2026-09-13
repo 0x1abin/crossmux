@@ -237,7 +237,12 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
 
   // menuRowItems's labels/actionValue were set once in the constructor (see
   // buildMenuRowItems()); only rows with live values need refreshing here.
-  for (size_t i = 0; i < rowCount(); i++) {
+  // The bound spells out rowCount() instead of calling it: cppcheck cannot follow
+  // menuItems being filled through buildMenuItems' reference parameter, folds the
+  // helper to 0, and then reports the comparison as dead code. Both sites cap on
+  // MAX_MENU_ITEMS, which is what keeps this loop, the fixed array and
+  // props.count in agreement.
+  for (size_t i = 0; i < menuItems.size() && i < MAX_MENU_ITEMS; i++) {
     const auto action = menuItems[i].action;
     if (action == MenuAction::ROTATE_SCREEN) {
       menuRowItems[i].value = I18N.get(orientationLabels[pendingOrientation]);
