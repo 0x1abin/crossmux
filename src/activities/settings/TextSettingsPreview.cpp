@@ -40,8 +40,8 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   style.alignment = toCssAlign(SETTINGS.paragraphAlignment);
   style.textAlignDefined = true;  // honor the user's choice; RTL auto-detected from text
 
-  ParsedText parsed(SETTINGS.extraParagraphSpacing != 0, SETTINGS.hyphenationEnabled != 0,
-                    SETTINGS.focusReadingEnabled != 0, style);
+  ParsedText parsed(SETTINGS.extraParagraphSpacing, SETTINGS.hyphenationEnabled != 0, SETTINGS.focusReadingEnabled != 0,
+                    style);
 
   // Feed one space-separated word at a time; addWord handles NFC/CJK/RTL/focus splitting
   const char* text = I18N.get(StrId::STR_FONT_PREVIEW_TEXT);
@@ -98,7 +98,11 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
 
   const float compression = SETTINGS.getReaderLineCompression();
   const int lineAdvance = std::max(1, renderer.getLineHeight(fontId, compression));
-  const int paragraphGap = SETTINGS.extraParagraphSpacing ? lineAdvance / 2 : 0;
+  constexpr float EXTRA_PARAGRAPH_SPACING_FACTORS[] = {0.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f};
+  const float spacingFactor = SETTINGS.extraParagraphSpacing < std::size(EXTRA_PARAGRAPH_SPACING_FACTORS)
+                                  ? EXTRA_PARAGRAPH_SPACING_FACTORS[SETTINGS.extraParagraphSpacing]
+                                  : 0.0f;
+  const int paragraphGap = static_cast<int>(lineAdvance * spacingFactor);
   const int textTop = top + previewPadding;
   const int textBottomLimit = top + height - labelReserved;
   const int textHeight = textBottomLimit - textTop;
@@ -118,7 +122,7 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .maxLines = maxLines,
                        .lineCompression = compression,
                        .alignment = SETTINGS.paragraphAlignment,
-                       .extraParagraphSpacing = SETTINGS.extraParagraphSpacing != 0,
+                       .extraParagraphSpacing = SETTINGS.extraParagraphSpacing,
                        .focusReading = SETTINGS.focusReadingEnabled != 0,
                        .hyphenation = SETTINGS.hyphenationEnabled != 0};
   if (key != layout.key) {
