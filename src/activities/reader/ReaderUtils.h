@@ -5,7 +5,6 @@
 #include <HalGPIO.h>
 #include <HalTiltSensor.h>
 #include <Logging.h>
-#include <components/bars/tap-zones.h>
 
 #include "MappedInputManager.h"
 #include "ReaderRefresh.h"
@@ -18,11 +17,6 @@ constexpr unsigned long GO_BACK_OR_HOME_MS = GO_HOME_MS;
 constexpr unsigned long SKIP_HOLD_MS = 700;
 constexpr unsigned long BOOKMARK_HOLD_MS = 400;
 constexpr unsigned long BOOKMARK_MESSAGE_DURATION_MS = 2500;
-
-enum ReaderTouchAction : freeink::ui::ActionId {
-  READER_TOUCH_PREV = 1,
-  READER_TOUCH_NEXT = 3,
-};
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   switch (orientation) {
@@ -72,24 +66,43 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
 struct TouchPageTurn {
   bool prev;
   bool next;
+  bool bookmark;
+  bool dictionary;
   unsigned long heldMs;
 };
 
+// Action of the reader tap zone at the given screen point. The screen is
+// split into a 3x3 grid; zones are read from SETTINGS.tapZones (row-major).
+inline uint8_t tapZoneAction(const GfxRenderer& renderer, const int x, const int y) {
+  const int16_t width = static_cast<int16_t>(renderer.getScreenWidth());
+  const int16_t height = static_cast<int16_t>(renderer.getScreenHeight());
+  if (width <= 0 || height <= 0) return CrossPointSettings::TAP_ZONE_NONE;
+  const int col = (x < 0) ? 0 : (x >= width ? 2 : x * 3 / width);
+  const int row = (y < 0) ? 0 : (y >= height ? 2 : y * 3 / height);
+  return SETTINGS.tapZones[row * 3 + col];
+}
+
 inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInputManager& input) {
-  TouchPageTurn result{false, false, 0};
+  TouchPageTurn result{false, false, false, false, 0};
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
   }
 
-  if (SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE) {
-    // Horizontal swipes turn pages; taps remain free for the centered reader-menu
-    // zone. A slow swipe never becomes a long-press chapter skip.
-    const auto dir = input.wasSwipe();
-    if (dir == MappedInputManager::SwipeDir::Left) {
-      result.next = true;
-    } else if (dir == MappedInputManager::SwipeDir::Right) {
-      result.prev = true;
-    }
+  const auto allowsSwipe = [](const uint8_t gesture) {
+    return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::SWIPE_ONLY;
+  };
+  // A direction whose gesture does not accept taps (SWIPE_ONLY or disabled)
+  // contributes no tap zone: its marked zones fall through, as configured.
+  const auto allowsTap = [](const uint8_t gesture) {
+    return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
+  };
+
+  // Horizontal swipes follow the per-direction gesture configuration. The
+  // reader menu owns the vertical swipes, never page turns.
+  const auto swipe = input.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right) {
+    result.next = swipe == MappedInputManager::SwipeDir::Left && allowsSwipe(SETTINGS.pageTurnGesture);
+    result.prev = swipe == MappedInputManager::SwipeDir::Right && allowsSwipe(SETTINGS.previousPageGesture);
     return result;
   }
 
@@ -99,49 +112,41 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
     return result;
   }
 
-  const int16_t width = static_cast<int16_t>(renderer.getScreenWidth());
-  const int16_t height = static_cast<int16_t>(renderer.getScreenHeight());
-  // Outer thirds only: the center column contains the reader-menu tap target
-  // (isTouchMenuTap below), so it must not double as a page turn.
-  const int16_t zoneWidth = width / 3;
-  const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
-  const freeink::ui::TapZone zones[] = {
-      {freeink::ui::Rect{0, 0, zoneWidth, height}, inverted ? READER_TOUCH_NEXT : READER_TOUCH_PREV},
-      {freeink::ui::Rect{static_cast<int16_t>(width - zoneWidth), 0, zoneWidth, height},
-       inverted ? READER_TOUCH_PREV : READER_TOUCH_NEXT},
-  };
-
-  for (const auto& zone : zones) {
-    if (!zone.enabled || !zone.rect.contains(static_cast<int16_t>(x), static_cast<int16_t>(y))) continue;
-    result.prev = zone.action == READER_TOUCH_PREV;
-    result.next = zone.action == READER_TOUCH_NEXT;
-    break;
+  // 3x3 tap-zone lookup. A zone marked for a direction only acts when that
+  // direction's gesture accepts taps; MENU zones are consumed by
+  // isTouchMenuGesture and never turn pages here. BOOKMARK/DICTIONARY zones
+  // need a hold past BOOKMARK_HOLD_MS before release, so an ordinary tap on
+  // them does nothing.
+  const uint8_t action = tapZoneAction(renderer, x, y);
+  const unsigned long heldMs = gpio.lastTouchHeldMs();
+  result.heldMs = heldMs;
+  if (action == CrossPointSettings::TAP_ZONE_PREV && allowsTap(SETTINGS.previousPageGesture)) {
+    result.prev = true;
+  } else if (action == CrossPointSettings::TAP_ZONE_NEXT && allowsTap(SETTINGS.pageTurnGesture)) {
+    result.next = true;
+  } else if (action == CrossPointSettings::TAP_ZONE_BOOKMARK && heldMs >= BOOKMARK_HOLD_MS) {
+    result.bookmark = true;
+  } else if (action == CrossPointSettings::TAP_ZONE_DICTIONARY && heldMs >= BOOKMARK_HOLD_MS) {
+    result.dictionary = true;
   }
-  result.heldMs = gpio.lastTouchHeldMs();
   return result;
 }
 
-// Tap in the center third of the screen: the tap path into the reader menu on
-// every touch board. The page-turn tap zones are the outer horizontal thirds,
-// so the centered rectangle remains free in tap mode. The Off/Swipe Up
-// alternatives are only surfaced on home-key boards (SettingsList), where the
-// menu stays reachable through the key's long-press function.
+// The reader menu opens on a tap in a MENU-marked zone (center-tap mode), the
+// board's existing edge menu gesture, or — in swipe-up mode — the original
+// bottom-edge upward swipe.
 inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager& input) {
   if (!input.hasTouch()) return false;
   if (SETTINGS.showReaderMenu != CrossPointSettings::READER_MENU_TAP) return false;
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) return false;
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
-  const int zoneWidth = width / 3;
-  const int zoneHeight = height / 3;
-  return x >= zoneWidth && x < width - zoneWidth && y >= zoneHeight && y < height - zoneHeight;
+  return tapZoneAction(renderer, x, y) == CrossPointSettings::TAP_ZONE_MENU;
 }
 
-// Reader menu opens on the menu edge-swipe or a center-third tap. On home-key
-// boards a long press of the capacitive key runs the user-selected long-press
-// function instead (SETTINGS.longPressMenuFunction), not the menu.
+// Reader menu opens on the menu edge-swipe or a tap in a MENU-marked zone. On
+// home-key boards a long press of the capacitive key runs the user-selected
+// long-press function instead (SETTINGS.longPressMenuFunction), not the menu.
 // Menu gestures honor showReaderMenu independently of touchReaderControls,
 // which only gates page-turn touch zones in detectTouchPageTurn().
 inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {
