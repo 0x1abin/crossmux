@@ -870,8 +870,9 @@ void EpubReaderActivity::loop() {
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
 
-  // Tap-zone long-press actions: a BOOKMARK/DICTIONARY zone keeps reporting
-  // for the whole hold, so fire exactly once and re-arm when the finger lifts.
+  // Tap-zone long-press actions: a BOOKMARK/DICTIONARY zone reports once on
+  // finger lift (held >= BOOKMARK_HOLD_MS). touchHoldHandled guards against a
+  // re-report and is re-armed on the next release.
   if (mappedInput.wasScreenTouchReleased()) {
     touchHoldHandled = false;
   }

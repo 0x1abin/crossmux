@@ -97,27 +97,12 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
   };
 
-  // Long-press on a BOOKMARK/DICTIONARY zone: fires once the finger has been
-  // held still (within tap slop) for BOOKMARK_HOLD_MS, reported on every frame
-  // of the hold — EpubReaderActivity consumes it once and re-arms on release.
-  // PREV/NEXT zones (or unconfigured spots) fall through untouched, so their
-  // eventual lift still reports as a tap and keeps the original page-turn /
-  // chapter-skip behavior.
-  float holdNX = 0.0f;
-  float holdNY = 0.0f;
-  unsigned long holdHeldMs = 0;
-  if (gpio.isTouchTapCandidate(holdNX, holdNY, holdHeldMs) && holdHeldMs >= BOOKMARK_HOLD_MS) {
-    int holdX = 0;
-    int holdY = 0;
-    renderer.tapToLogical(holdNX, holdNY, holdX, holdY);
-    const uint8_t holdAction = tapZoneAction(renderer, holdX, holdY);
-    if (holdAction == CrossPointSettings::TAP_ZONE_BOOKMARK) {
-      result.bookmark = true;
-    } else if (holdAction == CrossPointSettings::TAP_ZONE_DICTIONARY) {
-      result.dictionary = true;
-    }
-    return result;
-  }
+  // Long-press on a BOOKMARK/DICTIONARY zone fires when the finger lifts after
+  // being held still (within tap slop) for BOOKMARK_HOLD_MS — the action
+  // happens on release, never while the finger is still down. PREV/NEXT zones
+  // (or unconfigured spots) keep their plain tap behavior on lift regardless of
+  // hold duration, so the original page-turn / chapter-skip behavior is
+  // unchanged.
 
   // Horizontal swipes follow the per-direction gesture configuration. The
   // reader menu owns the vertical swipes, never page turns.
@@ -134,13 +119,20 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  // 3x3 tap-zone lookup. A zone marked for a direction only acts when that
-  // direction's gesture accepts taps; MENU zones are consumed by
-  // isTouchMenuGesture and never turn pages here. BOOKMARK/DICTIONARY zones
-  // are long-press only (handled above), so an ordinary tap on them does
-  // nothing.
+  // 3x3 tap-zone lookup, evaluated on release. A BOOKMARK/DICTIONARY zone only
+  // fires when the contact was held for BOOKMARK_HOLD_MS (the SDK latches the
+  // contact duration at release); a quick tap on those zones does nothing. A
+  // zone marked for a direction only acts when that direction's gesture accepts
+  // taps; MENU zones are consumed by isTouchMenuGesture and never turn pages
+  // here.
   const uint8_t action = tapZoneAction(renderer, x, y);
   result.heldMs = gpio.lastTouchHeldMs();
+  if (result.heldMs >= BOOKMARK_HOLD_MS &&
+      (action == CrossPointSettings::TAP_ZONE_BOOKMARK || action == CrossPointSettings::TAP_ZONE_DICTIONARY)) {
+    result.bookmark = action == CrossPointSettings::TAP_ZONE_BOOKMARK;
+    result.dictionary = action == CrossPointSettings::TAP_ZONE_DICTIONARY;
+    return result;
+  }
   if (action == CrossPointSettings::TAP_ZONE_PREV && allowsTap(SETTINGS.previousPageGesture)) {
     result.prev = true;
   } else if (action == CrossPointSettings::TAP_ZONE_NEXT && allowsTap(SETTINGS.pageTurnGesture)) {
