@@ -96,8 +96,8 @@ void TapZoneSettingsActivity::render(RenderLock&&) {
   for (int row = 0; row < 3; ++row) {
     for (int col = 0; col < 3; ++col) {
       const uint8_t zone = static_cast<uint8_t>(row * 3 + col);
-      const Rect cell{static_cast<int16_t>(col * cellW), static_cast<int16_t>(row * cellH),
-                      static_cast<int16_t>(cellW), static_cast<int16_t>(cellH)};
+      const Rect cell{static_cast<int16_t>(col * cellW), static_cast<int16_t>(row * cellH), static_cast<int16_t>(cellW),
+                      static_cast<int16_t>(cellH)};
       const bool selected = zone == selectedZone;
       // Selected cell is inverted (filled) so the focused zone is obvious on
       // an e-ink screen; its label draws white.

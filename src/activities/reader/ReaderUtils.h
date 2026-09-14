@@ -82,7 +82,7 @@ inline uint8_t tapZoneAction(const GfxRenderer& renderer, const int x, const int
   return SETTINGS.tapZones[row * 3 + col];
 }
 
-inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInputManager& input) {
+inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input) {
   TouchPageTurn result{false, false, false, false, 0};
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
