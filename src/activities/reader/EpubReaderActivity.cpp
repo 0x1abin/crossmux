@@ -870,16 +870,21 @@ void EpubReaderActivity::loop() {
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
 
-  // Tap-zone long-press actions: a BOOKMARK/DICTIONARY zone only fires after a
-  // hold past BOOKMARK_HOLD_MS, so short taps on them are inert.
-  if (touch.bookmark) {
+  // Tap-zone long-press actions: a BOOKMARK/DICTIONARY zone keeps reporting
+  // for the whole hold, so fire exactly once and re-arm when the finger lifts.
+  if (mappedInput.wasScreenTouchReleased()) {
+    touchHoldHandled = false;
+  }
+  if (touch.bookmark && !touchHoldHandled) {
+    touchHoldHandled = true;
     addBookmark();
     showBookmarkMessage = true;
     bookmarkMessageTime = millis();
     requestUpdate();
     return;
   }
-  if (touch.dictionary) {
+  if (touch.dictionary && !touchHoldHandled) {
+    touchHoldHandled = true;
     openDictionaryWordSelect();
     return;
   }

@@ -97,6 +97,28 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
     return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
   };
 
+  // Long-press on a BOOKMARK/DICTIONARY zone: fires once the finger has been
+  // held still (within tap slop) for BOOKMARK_HOLD_MS, reported on every frame
+  // of the hold — EpubReaderActivity consumes it once and re-arms on release.
+  // PREV/NEXT zones (or unconfigured spots) fall through untouched, so their
+  // eventual lift still reports as a tap and keeps the original page-turn /
+  // chapter-skip behavior.
+  float holdNX = 0.0f;
+  float holdNY = 0.0f;
+  unsigned long holdHeldMs = 0;
+  if (gpio.isTouchTapCandidate(holdNX, holdNY, holdHeldMs) && holdHeldMs >= BOOKMARK_HOLD_MS) {
+    int holdX = 0;
+    int holdY = 0;
+    renderer.tapToLogical(holdNX, holdNY, holdX, holdY);
+    const uint8_t holdAction = tapZoneAction(renderer, holdX, holdY);
+    if (holdAction == CrossPointSettings::TAP_ZONE_BOOKMARK) {
+      result.bookmark = true;
+    } else if (holdAction == CrossPointSettings::TAP_ZONE_DICTIONARY) {
+      result.dictionary = true;
+    }
+    return result;
+  }
+
   // Horizontal swipes follow the per-direction gesture configuration. The
   // reader menu owns the vertical swipes, never page turns.
   const auto swipe = input.wasSwipe();
@@ -115,19 +137,14 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
   // 3x3 tap-zone lookup. A zone marked for a direction only acts when that
   // direction's gesture accepts taps; MENU zones are consumed by
   // isTouchMenuGesture and never turn pages here. BOOKMARK/DICTIONARY zones
-  // need a hold past BOOKMARK_HOLD_MS before release, so an ordinary tap on
-  // them does nothing.
+  // are long-press only (handled above), so an ordinary tap on them does
+  // nothing.
   const uint8_t action = tapZoneAction(renderer, x, y);
-  const unsigned long heldMs = gpio.lastTouchHeldMs();
-  result.heldMs = heldMs;
+  result.heldMs = gpio.lastTouchHeldMs();
   if (action == CrossPointSettings::TAP_ZONE_PREV && allowsTap(SETTINGS.previousPageGesture)) {
     result.prev = true;
   } else if (action == CrossPointSettings::TAP_ZONE_NEXT && allowsTap(SETTINGS.pageTurnGesture)) {
     result.next = true;
-  } else if (action == CrossPointSettings::TAP_ZONE_BOOKMARK && heldMs >= BOOKMARK_HOLD_MS) {
-    result.bookmark = true;
-  } else if (action == CrossPointSettings::TAP_ZONE_DICTIONARY && heldMs >= BOOKMARK_HOLD_MS) {
-    result.dictionary = true;
   }
   return result;
 }

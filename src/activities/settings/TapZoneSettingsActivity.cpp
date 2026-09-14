@@ -19,18 +19,18 @@ bool allowsTap(const uint8_t gesture) {
 //   taps (a SWIPE_ONLY or disabled direction contributes no tap zone);
 // - MENU only exists in center-tap menu mode;
 // - BOOKMARK/DICTIONARY fire on a long press, never an ordinary tap.
-// Returns the number of entries written to out.
+// Writes at most max entries (callers pass the size of out) and returns the
+// number written.
 int buildZoneOptions(uint8_t* out, const int max) {
   int n = 0;
-  if (allowsTap(SETTINGS.previousPageGesture)) out[n++] = CrossPointSettings::TAP_ZONE_PREV;
-  if (allowsTap(SETTINGS.pageTurnGesture)) out[n++] = CrossPointSettings::TAP_ZONE_NEXT;
-  if (SETTINGS.showReaderMenu == CrossPointSettings::READER_MENU_TAP) {
+  if (n < max && allowsTap(SETTINGS.previousPageGesture)) out[n++] = CrossPointSettings::TAP_ZONE_PREV;
+  if (n < max && allowsTap(SETTINGS.pageTurnGesture)) out[n++] = CrossPointSettings::TAP_ZONE_NEXT;
+  if (n < max && SETTINGS.showReaderMenu == CrossPointSettings::READER_MENU_TAP) {
     out[n++] = CrossPointSettings::TAP_ZONE_MENU;
   }
-  out[n++] = CrossPointSettings::TAP_ZONE_BOOKMARK;
-  out[n++] = CrossPointSettings::TAP_ZONE_DICTIONARY;
-  out[n++] = CrossPointSettings::TAP_ZONE_NONE;
-  (void)max;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_BOOKMARK;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_DICTIONARY;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_NONE;
   return n;
 }
 
