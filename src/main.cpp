@@ -217,9 +217,6 @@ void silentRestart() {
 
 void silentRestartToReader(const bool suppressChineseFontPrompt) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-#if FREEINK_CAP_TOUCH
-  if (finishWifiSessionWithoutRestart()) return;
-#endif
   silentRebootTarget = static_cast<uint32_t>(suppressChineseFontPrompt ? SilentRebootTarget::ReaderSuppressFontPrompt
                                                                        : SilentRebootTarget::Reader);
   silentRebootFontPointSize = 0;
