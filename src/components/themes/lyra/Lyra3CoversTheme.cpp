@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -17,6 +18,17 @@ namespace {
 constexpr int hPaddingInSelection = 8;
 constexpr int cornerRadius = 6;
 }  // namespace
+
+int Lyra3CoversTheme::recentBookIndexAt(int x, int screenWidth) const {
+  // Three recent-book covers are laid out side by side: tile i spans
+  // [contentSidePadding + tileWidth * i, contentSidePadding + tileWidth * (i + 1)).
+  const int tileWidth = (screenWidth - 2 * Lyra3CoversMetrics::values.contentSidePadding) / 3;
+  if (tileWidth <= 0) {
+    return 0;
+  }
+  const int index = (x - Lyra3CoversMetrics::values.contentSidePadding) / tileWidth;
+  return std::clamp(index, 0, Lyra3CoversMetrics::values.homeRecentBooksCount - 1);
+}
 
 void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored,

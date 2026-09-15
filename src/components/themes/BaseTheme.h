@@ -320,6 +320,12 @@ class BaseTheme {
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;
+  // Map a horizontal tap position inside the recent-books cover strip on the
+  // home screen to the index of the cover that was touched. Single-cover
+  // themes render only one tile and return 0; multi-cover themes (Lyra3Covers
+  // and the like) override this so a touch directly selects the book whose
+  // cover the finger is on, matching what the page-turn keys already do.
+  virtual int recentBookIndexAt(int x, int screenWidth) const;
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon, int rowSpacing = -1) const;
