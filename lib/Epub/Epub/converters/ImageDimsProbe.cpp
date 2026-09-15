@@ -14,6 +14,13 @@ constexpr uint8_t PNG_SIG[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 bool ImageDimsProbe::feed(const uint8_t b) {
   switch (state) {
     case State::Sniff:
+      // The format is deliberately NOT set here. A bare 0xFF or 0x89 only picks
+      // the parser; it does not identify a JPEG or a PNG, and callers use
+      // detectedFormat() to accept an entry the extension gate would have
+      // rejected. Assigning it on the first byte made FF 00 and 89 58 look like
+      // supported images, which sent them through extraction and a decoder retry
+      // instead of being skipped. Each branch below stamps the format once its
+      // own signature has actually been validated.
       if (b == 0xFF) {
         state = State::JpegSoi;
       } else if (b == PNG_SIG[0]) {
@@ -32,6 +39,8 @@ bool ImageDimsProbe::feed(const uint8_t b) {
           state = State::Failed;
           return false;
         }
+        // All eight bytes have now matched: this is a PNG.
+        if (pos == 7) format = Format::Png;
       } else if (pos >= 12 && pos < 16) {
         if (b != "IHDR"[pos - 12]) {
           state = State::Failed;
@@ -55,6 +64,9 @@ bool ImageDimsProbe::feed(const uint8_t b) {
         state = State::Failed;
         return false;
       }
+      // SOI (FF D8) is the shortest complete JPEG signature; stamp it here, never
+      // on the leading 0xFF alone.
+      format = Format::Jpeg;
       state = State::JpegFf;
       return true;
 

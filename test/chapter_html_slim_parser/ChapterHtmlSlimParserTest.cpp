@@ -398,6 +398,22 @@ TEST_F(SectionMemoryTest, OomAbandonsBuildAndBasicRetryPreservesBodyAndOffsets) 
   EXPECT_FALSE(restored.loadSectionFile(spec));
 }
 
+// Recognising an image by its content instead of its href extension hands an
+// imageCounter value to entries the old extension gate skipped, so a rebuilt
+// chapter numbers its images differently. The extracted-image namespace is
+// versioned for that reason: a pre-upgrade "img_*" file (and the .pxc beside it)
+// must never be picked up again, because ImageBlock::ensureExtracted() accepts
+// whatever file already sits at the path without checking where it came from.
+// Bump this prefix in lockstep with SECTION_FILE_VERSION.
+TEST_F(SectionMemoryTest, ImageCacheNamespaceIsVersionedSoPreUpgradeFilesAreNotReused) {
+  writeHtml("<html><body><p>plain text</p></body></html>");
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.startBuild(spec));
+  ASSERT_TRUE(section.build_ != nullptr);
+  EXPECT_NE(section.build_->imageBasePath.find("/img2_"), std::string::npos)
+      << "image cache base path was " << section.build_->imageBasePath;
+}
+
 TEST_F(SectionMemoryTest, ReclaimsCachesBeforeStartAndContinuation) {
   std::string html = "<html><body>";
   for (int i = 0; i < 500; ++i) html += "<p>word</p>";
@@ -518,7 +534,10 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   append(bytes);
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
-  EXPECT_EQ(digest, 13330287791149729058ULL);  // Pre-refactor cache, text and footnotes.
+  // Pre-refactor cache, text and footnotes. The expected value tracks
+  // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
+  // moved when the version went 64 -> 66 for the versioned image cache prefix.
+  EXPECT_EQ(digest, 12249067298013490136ULL);
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {

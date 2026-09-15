@@ -130,6 +130,31 @@ TEST(ZipImageProbe, FindsJpegFrameWithinSixteenKilobytePrefix) {
   EXPECT_EQ(dimensions.height, 240);
 }
 
+// A leading 0xFF or 0x89 only selects a parser; it does not identify a format.
+// Callers use detectedFormat() to accept an entry the href extension would have
+// rejected, so a truncated signature must stay Unknown instead of claiming
+// JPEG/PNG and sending the entry through extraction plus a decoder retry.
+TEST(ZipImageProbe, SignsAFormatOnlyOnceItsSignatureIsValidated) {
+  const auto formatOf = [](const std::vector<uint8_t>& bytes) {
+    ImageDimsProbe probe;
+    for (const uint8_t b : bytes) probe.write(b);
+    return probe.detectedFormat();
+  };
+
+  EXPECT_EQ(formatOf({0xFF}), ImageDimsProbe::Format::Unknown);
+  EXPECT_EQ(formatOf({0xFF, 0x00}), ImageDimsProbe::Format::Unknown);
+  EXPECT_EQ(formatOf({0x89}), ImageDimsProbe::Format::Unknown);
+  EXPECT_EQ(formatOf({0x89, 0x58}), ImageDimsProbe::Format::Unknown);
+  // Seven of the eight PNG signature bytes is not a PNG yet.
+  EXPECT_EQ(formatOf({0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A}), ImageDimsProbe::Format::Unknown);
+  // A JPEG that starts with SOI but never reaches a frame header is still a JPEG.
+  EXPECT_EQ(formatOf({0xFF, 0xD8, 0xFF, 0xD9}), ImageDimsProbe::Format::Jpeg);
+
+  // The shortest complete JPEG signature, and the full PNG one.
+  EXPECT_EQ(formatOf({0xFF, 0xD8}), ImageDimsProbe::Format::Jpeg);
+  EXPECT_EQ(formatOf({0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}), ImageDimsProbe::Format::Png);
+}
+
 TEST(ZipImageProbe, RejectsTruncatedDeflateStream) {
   constexpr uint8_t TRUNCATED_DEFLATE[] = {0xeb, 0x0c, 0xf0};
   InflateReader inflate;

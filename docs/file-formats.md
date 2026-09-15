@@ -100,9 +100,9 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 64 / 65
+### Versions 66 / 67
 
-> Unified firmware uses the CJK-capable cache version **65**. Version 64 is the
+> Unified firmware uses the CJK-capable cache version **67**. Version 66 is the
 > Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
@@ -143,12 +143,18 @@ current reader settings, the section is discarded and rebuilt.
 
 Versions 62/63 add `collectTouchLinks` to the header cache key. Devices without
 touch input neither construct nor hydrate link geometry; button footnotes and
-anchors remain available. Partial-cache sentinels change in lockstep to 218/217 for versions 64/65.
+anchors remain available. Partial-cache sentinels change in lockstep to 216/215 for versions 66/67.
 Versions 64/65 also invalidate pagination produced before bounded no-PSRAM
 soft flushing; disabling embedded styles no longer enlarges the token window.
 On devices without PSRAM, a low-memory styled build is discarded and retried
 once without embedded CSS for the reading session. The cache records the actual
 `embeddedStyle=false`; user settings and the selected font are unchanged.
+
+Versions 66/67 keep the serialized layout unchanged but invalidate pagination
+because content-based image recognition can change image indexes within a section.
+Extracted images and their pixel caches now use the `img2_` prefix to prevent
+reuse of older `img_` files with different source images. Old `img_` files remain
+unused until the existing whole-book **Delete cache** action removes them.
 
 Versions 60/61 append the internal-link rectangles produced during text layout
 to each serialized page. The reader uses these rectangles for touch navigation;
@@ -196,8 +202,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 64
-#define CHINESE_VERSION 65
+#define LATIN_VERSION 66
+#define CHINESE_VERSION 67
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
