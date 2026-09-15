@@ -96,3 +96,8 @@ void BookStyleStore::updateStyle(const std::string& bookPath, const BookStyle& s
 
   saveToFile();
 }
+
+void BookStyleStore::clear() {
+  styles.clear();
+  saveToFile();
+}
