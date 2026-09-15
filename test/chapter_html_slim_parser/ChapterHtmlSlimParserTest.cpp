@@ -539,7 +539,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
   // moved when the version went 64 -> 66 for the versioned image cache prefix,
   // and again 66 -> 68 for the three-state first-line-indent control.
-  EXPECT_EQ(digest, 14638228299380780641ULL);  // placeholder, replaced by measured value
+  EXPECT_EQ(digest, 5933012731734531086ULL);  // v69/v68 cache (three-state first-line indent), text and footnotes.
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {

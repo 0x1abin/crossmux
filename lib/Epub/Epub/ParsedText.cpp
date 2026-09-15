@@ -666,15 +666,20 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   if (!isFirstLine || !firstLinePending || !isNaturalAlign) {
     return 0;
   }
-  // The reader-level first-line-indent toggle decides the indent outright:
-  //  - On:  every paragraph gets the reader's own two-CJK-character /
-  //         three-space indent.
-  //  - Off: no first-line indent at all, overriding the book's CSS text-indent
-  //         whether embedded styles are on or off.
+  // The reader-level first-line-indent control has three states:
+  //  - Auto: keep the book's own CSS text-indent (or none when the book does
+  //    not set one), the stock behaviour.
+  //  - Indent: every paragraph gets the reader's own two-CJK-character /
+  //    three-space indent.
+  //  - NoIndent: no first-line indent at all, overriding the book's CSS
+  //    text-indent whether embedded styles are on or off.
   // Extra paragraph spacing never affects the indent, so turning it on no
   // longer wipes out a book's built-in first-line indent.
-  if (!firstLineIndent) {
+  if (firstLineIndent == FirstLineIndent::NoIndent) {
     return 0;
+  }
+  if (firstLineIndent == FirstLineIndent::Auto) {
+    return blockStyle.textIndentDefined ? blockStyle.textIndent : 0;
   }
   const int spaceIndent = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
   const bool hasCjkText =
