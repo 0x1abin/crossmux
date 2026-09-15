@@ -53,6 +53,9 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
 
   // Remember this book's style as its own entry. Persists on change.
   void updateStyle(const std::string& bookPath, const BookStyle& style);
+
+  // Forget every remembered book style. Persists immediately.
+  void clear();
 };
 
 #define BOOK_STYLES BookStyleStore::getInstance()

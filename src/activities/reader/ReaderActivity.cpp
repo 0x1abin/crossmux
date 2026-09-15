@@ -75,15 +75,21 @@ void applyStyleToSettings(const BookStyle& style) {
 }  // namespace
 
 void ReaderActivity::applyBookStyle() {
+  // The per-book memory can be turned off from the text settings; then every
+  // book opens with the global settings, exactly like the stock firmware.
+  if (!SETTINGS.bookStyleMemory) return;
   BookStyle style;
   // Books without their own entry keep the global settings from the settings
-  // screen, exactly like the stock firmware behaved.
+  // screen.
   if (!BOOK_STYLES.findStyle(bookPath, style)) return;
   applyStyleToSettings(style);
   SETTINGS.saveToFile();
 }
 
-void ReaderActivity::saveBookStyle() { BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings()); }
+void ReaderActivity::saveBookStyle() {
+  if (!SETTINGS.bookStyleMemory) return;
+  BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
+}
 
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
