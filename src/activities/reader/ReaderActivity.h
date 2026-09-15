@@ -35,6 +35,11 @@ class ReaderActivity : public Activity {
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}
 
+  // Per-book style restore/save (see BookStyleStore). applyBookStyle() runs
+  // before loadBook(); saveBookStyle() runs on exit.
+  void applyBookStyle();
+  void saveBookStyle();
+
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
   bool endOfBookMenuActive() const;
