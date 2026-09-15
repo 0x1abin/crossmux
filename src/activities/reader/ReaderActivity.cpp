@@ -84,18 +84,17 @@ void ReaderActivity::applyBookStyle() {
   // The per-book memory can be turned off from the text settings; then every
   // book opens with the global settings, exactly like the stock firmware.
   if (!SETTINGS.bookStyleMemory) return;
-  BookStyle style;
-  // Books without their own entry keep the global settings from the settings
-  // screen.
-  if (!BOOK_STYLES.findStyle(bookPath, style)) return;
-  // Snapshot the global settings before applying this book's own style, so
-  // leaving the book restores the values from the settings screen. The
-  // snapshot is deliberately not persisted: the settings file always keeps
-  // the user's global values, never a single book's style.
+  // Snapshot the global settings once on enter, for every book, so any style
+  // changes made while reading stay with this book and the global values are
+  // restored on exit.
   if (!globalSettingsSnapshotted_) {
     globalSettingsSnapshot_ = snapshotStyleFromSettings();
     globalSettingsSnapshotted_ = true;
   }
+  BookStyle style;
+  // Books without their own entry keep the global settings from the settings
+  // screen.
+  if (!BOOK_STYLES.findStyle(bookPath, style)) return;
   applyStyleToSettings(style);
 }
 
@@ -103,9 +102,12 @@ void ReaderActivity::saveBookStyle() {
   if (!SETTINGS.bookStyleMemory) return;
   BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
   // Restore the global settings so the next book — whether or not it has its
-  // own entry — opens with the values from the settings screen.
+  // own entry — opens with the values from the settings screen. The reader's
+  // style menus persist their changes to the settings file, so also write the
+  // restored values back to disk to undo that.
   if (globalSettingsSnapshotted_) {
     applyStyleToSettings(globalSettingsSnapshot_);
+    SETTINGS.saveToFile();
     globalSettingsSnapshotted_ = false;
   }
 }
