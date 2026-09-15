@@ -16,6 +16,9 @@ void styleToJson(JsonObject obj, const BookStyle& style) {
   obj["extraParagraphSpacing"] = style.extraParagraphSpacing;
   obj["fakeBold"] = style.fakeBold;
   obj["textAntiAliasing"] = style.textAntiAliasing;
+  obj["readingGuideLineEnabled"] = style.readingGuideLineEnabled;
+  obj["readingGuideLineStyle"] = style.readingGuideLineStyle;
+  obj["readingGuideLineOffset"] = style.readingGuideLineOffset;
 }
 
 // Reads a BookStyle from a JSON object. Unknown or out-of-range values fall
@@ -36,6 +39,9 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   style.extraParagraphSpacing = obj["extraParagraphSpacing"] | 0;
   style.fakeBold = obj["fakeBold"] | CrossPointSettings::SYNTHETIC_BOLD_STANDARD;
   style.textAntiAliasing = obj["textAntiAliasing"] | 1;
+  style.readingGuideLineEnabled = obj["readingGuideLineEnabled"] | 0;
+  style.readingGuideLineStyle = obj["readingGuideLineStyle"] | static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
+  style.readingGuideLineOffset = obj["readingGuideLineOffset"] | CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT;
   return true;
 }
 

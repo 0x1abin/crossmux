@@ -10,9 +10,9 @@
 
 // Per-book reader typography snapshot. Persisted per book path so a book
 // reopens with exactly the style (font family/size, line spacing, alignment,
-// extra paragraph spacing, synthetic bold, anti-aliasing) it had when it was
-// last closed. Books without their own entry keep the global settings from the
-// settings screen untouched.
+// reading guide line, extra paragraph spacing, synthetic bold, anti-aliasing)
+// it had when it was last closed. Books without their own entry keep the
+// global settings from the settings screen untouched.
 struct BookStyle {
   uint8_t fontFamily = CrossPointSettings::NOTOSANS;
   char sdFontFamilyName[32] = "";
@@ -22,6 +22,9 @@ struct BookStyle {
   uint8_t extraParagraphSpacing = 0;
   uint8_t fakeBold = CrossPointSettings::SYNTHETIC_BOLD_STANDARD;
   uint8_t textAntiAliasing = 1;
+  uint8_t readingGuideLineEnabled = 0;
+  uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
+  int8_t readingGuideLineOffset = CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT;
 };
 
 // Persisted at /.crosspoint/book_styles.json. One entry per book path (path is

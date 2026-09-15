@@ -58,6 +58,9 @@ BookStyle snapshotStyleFromSettings() {
   style.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
   style.fakeBold = SETTINGS.fakeBold;
   style.textAntiAliasing = SETTINGS.textAntiAliasing;
+  style.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
+  style.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
+  style.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
   return style;
 }
 
@@ -70,6 +73,9 @@ void applyStyleToSettings(const BookStyle& style) {
   SETTINGS.extraParagraphSpacing = style.extraParagraphSpacing;
   SETTINGS.fakeBold = style.fakeBold;
   SETTINGS.textAntiAliasing = style.textAntiAliasing;
+  SETTINGS.readingGuideLineEnabled = style.readingGuideLineEnabled;
+  SETTINGS.readingGuideLineStyle = style.readingGuideLineStyle;
+  SETTINGS.readingGuideLineOffset = style.readingGuideLineOffset;
 }
 
 }  // namespace
@@ -82,13 +88,26 @@ void ReaderActivity::applyBookStyle() {
   // Books without their own entry keep the global settings from the settings
   // screen.
   if (!BOOK_STYLES.findStyle(bookPath, style)) return;
+  // Snapshot the global settings before applying this book's own style, so
+  // leaving the book restores the values from the settings screen. The
+  // snapshot is deliberately not persisted: the settings file always keeps
+  // the user's global values, never a single book's style.
+  if (!globalSettingsSnapshotted_) {
+    globalSettingsSnapshot_ = snapshotStyleFromSettings();
+    globalSettingsSnapshotted_ = true;
+  }
   applyStyleToSettings(style);
-  SETTINGS.saveToFile();
 }
 
 void ReaderActivity::saveBookStyle() {
   if (!SETTINGS.bookStyleMemory) return;
   BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
+  // Restore the global settings so the next book — whether or not it has its
+  // own entry — opens with the values from the settings screen.
+  if (globalSettingsSnapshotted_) {
+    applyStyleToSettings(globalSettingsSnapshot_);
+    globalSettingsSnapshotted_ = false;
+  }
 }
 
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
