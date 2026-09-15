@@ -81,16 +81,16 @@ void applyStyleToSettings(const BookStyle& style) {
 }  // namespace
 
 void ReaderActivity::applyBookStyle() {
-  // The per-book memory can be turned off from the text settings; then every
-  // book opens with the global settings, exactly like the stock firmware.
-  if (!SETTINGS.bookStyleMemory) return;
   // Snapshot the global settings once on enter, for every book, so any style
   // changes made while reading stay with this book and the global values are
-  // restored on exit.
+  // restored on exit — even when per-book memory is turned off mid-session.
   if (!globalSettingsSnapshotted_) {
     globalSettingsSnapshot_ = snapshotStyleFromSettings();
     globalSettingsSnapshotted_ = true;
   }
+  // The per-book memory can be turned off from the text settings; then every
+  // book opens with the global settings, exactly like the stock firmware.
+  if (!SETTINGS.bookStyleMemory) return;
   BookStyle style;
   // Books without their own entry keep the global settings from the settings
   // screen.
@@ -99,12 +99,16 @@ void ReaderActivity::applyBookStyle() {
 }
 
 void ReaderActivity::saveBookStyle() {
-  if (!SETTINGS.bookStyleMemory) return;
-  BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
-  // Restore the global settings so the next book — whether or not it has its
-  // own entry — opens with the values from the settings screen. The reader's
-  // style menus persist their changes to the settings file, so also write the
-  // restored values back to disk to undo that.
+  // Update the book record only while per-book memory is enabled; disabling it
+  // from the text settings must stop remembering this book's style.
+  if (SETTINGS.bookStyleMemory) {
+    BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
+  }
+  // Always restore an existing global snapshot on exit. The reader's style
+  // menus persist their changes to the settings file, so also write the
+  // restored values back to disk to undo that — otherwise a session that
+  // disabled memory would still leak this book's style into the global
+  // settings for every later book.
   if (globalSettingsSnapshotted_) {
     applyStyleToSettings(globalSettingsSnapshot_);
     SETTINGS.saveToFile();

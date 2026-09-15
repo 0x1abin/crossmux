@@ -7,6 +7,26 @@
 
 namespace {
 
+// Conservative upper bound for the reader font point size. The font system
+// snaps a requested size to the nearest size available for the family, so any
+// value outside the physically useful range is rejected here.
+constexpr uint8_t kMaxFontPointSize = 64;
+// Extra paragraph spacing is the 0..5 selectable multiplier (0=off).
+constexpr uint8_t kMaxExtraParagraphSpacing = 5;
+
+// Reads an integer key from the JSON object. Type-compatible but out-of-range
+// values (e.g. fontPointSize:0 or lineSpacing:255) fall back to `fallback` so
+// a hand-edited or forward-versioned file cannot push the reader into an
+// invalid state.
+template <typename T>
+T boundedInteger(JsonObjectConst obj, const char* key, T fallback, int64_t minValue, int64_t maxValue) {
+  const int64_t v = obj[key] | static_cast<int64_t>(fallback);
+  if (v < minValue || v > maxValue) {
+    return fallback;
+  }
+  return static_cast<T>(v);
+}
+
 void styleToJson(JsonObject obj, const BookStyle& style) {
   obj["fontFamily"] = style.fontFamily;
   obj["sdFontFamilyName"] = style.sdFontFamilyName;
@@ -25,7 +45,8 @@ void styleToJson(JsonObject obj, const BookStyle& style) {
 // back to the defaults so a hand-edited or forward-versioned file cannot push
 // the reader into an invalid state.
 bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
-  style.fontFamily = obj["fontFamily"] | CrossPointSettings::NOTOSANS;
+  style.fontFamily = boundedInteger<uint8_t>(obj, "fontFamily", CrossPointSettings::NOTOSANS, 0,
+                                             CrossPointSettings::FONT_FAMILY_COUNT - 1);
   const char* sdFamily = obj["sdFontFamilyName"] | "";
   if (sdFamily && *sdFamily != '\0') {
     strncpy(style.sdFontFamilyName, sdFamily, sizeof(style.sdFontFamilyName) - 1);
@@ -33,22 +54,30 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   } else {
     style.sdFontFamilyName[0] = '\0';
   }
-  style.fontPointSize = obj["fontPointSize"] | CrossPointSettings::DEFAULT_FONT_POINT_SIZE;
-  style.lineSpacing = obj["lineSpacing"] | CrossPointSettings::NORMAL;
-  style.paragraphAlignment = obj["paragraphAlignment"] | CrossPointSettings::JUSTIFIED;
-  style.extraParagraphSpacing = obj["extraParagraphSpacing"] | 0;
-  style.fakeBold = obj["fakeBold"] | CrossPointSettings::SYNTHETIC_BOLD_STANDARD;
-  style.textAntiAliasing = obj["textAntiAliasing"] | 1;
-  style.readingGuideLineEnabled = obj["readingGuideLineEnabled"] | 0;
-  style.readingGuideLineStyle = obj["readingGuideLineStyle"] | static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
-  style.readingGuideLineOffset = obj["readingGuideLineOffset"] | CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT;
+  style.fontPointSize =
+      boundedInteger<uint8_t>(obj, "fontPointSize", CrossPointSettings::DEFAULT_FONT_POINT_SIZE, 1, kMaxFontPointSize);
+  style.lineSpacing = boundedInteger<uint8_t>(obj, "lineSpacing", CrossPointSettings::NORMAL, 0,
+                                              CrossPointSettings::LINE_COMPRESSION_COUNT - 1);
+  style.paragraphAlignment = boundedInteger<uint8_t>(obj, "paragraphAlignment", CrossPointSettings::JUSTIFIED, 0,
+                                                     CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT - 1);
+  style.extraParagraphSpacing = boundedInteger<uint8_t>(obj, "extraParagraphSpacing", 0, 0, kMaxExtraParagraphSpacing);
+  style.fakeBold = boundedInteger<uint8_t>(obj, "fakeBold", CrossPointSettings::SYNTHETIC_BOLD_STANDARD, 0,
+                                           CrossPointSettings::SYNTHETIC_BOLD_COUNT - 1);
+  style.textAntiAliasing = boundedInteger<uint8_t>(obj, "textAntiAliasing", 1, 0, 1);
+  style.readingGuideLineEnabled = boundedInteger<uint8_t>(obj, "readingGuideLineEnabled", 0, 0, 1);
+  style.readingGuideLineStyle =
+      boundedInteger<uint8_t>(obj, "readingGuideLineStyle", static_cast<uint8_t>(readingGuideLine::Style::ShortDash), 0,
+                              static_cast<uint8_t>(readingGuideLine::Style::Count) - 1);
+  style.readingGuideLineOffset = boundedInteger<int8_t>(
+      obj, "readingGuideLineOffset", CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT,
+      CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN, CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX);
   return true;
 }
 
 }  // namespace
 
 void BookStyleStore::toJson(JsonDocument& doc) const {
-  doc["formatVersion"] = 1;
+  doc["formatVersion"] = kFormatVersion;
   JsonArray arr = doc["books"].to<JsonArray>();
   for (const auto& entry : styles) {
     JsonObject obj = arr.add<JsonObject>();
@@ -58,7 +87,14 @@ void BookStyleStore::toJson(JsonDocument& doc) const {
 }
 
 bool BookStyleStore::fromJson(JsonVariantConst doc) {
+  const int version = doc["formatVersion"] | kFormatVersion;
+  if (version != kFormatVersion) {
+    LOG_ERR("BST", "Unsupported book-style format version %d (expected %d); ignoring file", version, kFormatVersion);
+    return false;
+  }
+
   styles.clear();
+  styles.reserve(MAX_STYLED_BOOKS);
 
   JsonArrayConst arr = doc["books"].as<JsonArrayConst>();
   for (JsonObjectConst obj : arr) {

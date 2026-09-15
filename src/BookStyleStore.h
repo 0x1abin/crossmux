@@ -45,6 +45,7 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
 
  public:
   static constexpr size_t MAX_STYLED_BOOKS = 64;
+  static constexpr int kFormatVersion = 1;
 
   static const char* getFilePath() { return "/.crosspoint/book_styles.json"; }
   void toJson(JsonDocument& doc) const;
