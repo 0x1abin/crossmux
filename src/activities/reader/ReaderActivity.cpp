@@ -146,6 +146,10 @@ void ReaderActivity::loop() {
   if (handleBackNavigation()) return;
 
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
+  // Bookmark / dictionary are EPUB-only actions: TXT and XTC readers have
+  // neither a bookmark store nor a word dictionary, so swallow the long press
+  // here instead of letting the zone fall through to a page turn.
+  if (touch.bookmark || touch.dictionary) return;
   auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;

@@ -514,7 +514,14 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
 }
 
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
-  if (!BoardConfig::hasTouch() && setting.nameId == StrId::STR_TOUCH_READER_CONTROLS) return false;
+  if (!BoardConfig::hasTouch()) {
+    // Touch-only controls: the master switch, the per-direction gestures and
+    // the tap-zone editor all need a touch controller.
+    if (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS || setting.nameId == StrId::STR_PAGE_TURN_GESTURE ||
+        setting.nameId == StrId::STR_PREV_PAGE_GESTURE || setting.nameId == StrId::STR_TAP_ZONES) {
+      return false;
+    }
+  }
   if (!BoardConfig::hasHomeKey() && setting.nameId == StrId::STR_SHOW_READER_MENU) return false;
   const bool frontlightSetting = setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
                                  setting.valuePtr == &CrossPointSettings::frontlightOn ||

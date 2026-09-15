@@ -14,6 +14,52 @@ bool allowsTap(const uint8_t gesture) {
   return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
 }
 
+// Cell geometry for the 3x3 zone grid, used by both rendering and hit-testing
+// so a tap can never land on a different cell than the one that is painted at
+// non-divisible screen sizes. The grid is inset by a safe margin from the
+// display edge and the cells are separated by a visible gap.
+struct ZoneGrid {
+  static constexpr int kSafeMargin = 6;  // inset from the grid area edges
+  static constexpr int kGap = 6;         // visible gap between cells
+
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+  int cellWidth = 0;
+  int cellHeight = 0;
+
+  explicit ZoneGrid(const int gridW, const int gridH) {
+    x = kSafeMargin;
+    y = kSafeMargin;
+    width = gridW - kSafeMargin * 2;
+    height = gridH - kSafeMargin * 2;
+    // Two internal gaps per axis; the remainder (if the size is not exactly
+    // divisible) widens the outer gaps, never the visible cells.
+    cellWidth = (width - kGap * 2) / 3;
+    cellHeight = (height - kGap * 2) / 3;
+  }
+
+  Rect cell(const int row, const int col) const {
+    return Rect{static_cast<int16_t>(x + col * (cellWidth + kGap)), static_cast<int16_t>(y + row * (cellHeight + kGap)),
+                static_cast<int16_t>(cellWidth), static_cast<int16_t>(cellHeight)};
+  }
+
+  // Zone index (row-major) for a point, or -1 when it lands in a gap or
+  // outside the grid. Shares the exact painted rectangles with cell().
+  int zoneAt(const int px, const int py) const {
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 3; ++col) {
+        const Rect r = cell(row, col);
+        if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) {
+          return row * 3 + col;
+        }
+      }
+    }
+    return -1;
+  }
+};
+
 // Build the cycle list of zone actions for the current configuration:
 // - PREV/NEXT are offered only while the matching direction still accepts
 //   taps (a SWIPE_ONLY or disabled direction contributes no tap zone);
@@ -51,12 +97,10 @@ void TapZoneSettingsActivity::loop() {
   int tapX = 0;
   int tapY = 0;
   if (mappedInput.wasScreenTapped(tapX, tapY)) {
-    if (gridW > 0 && gridH > 0 && tapX >= 0 && tapX < gridW && tapY >= 0 && tapY < gridH) {
-      const int col = tapX * 3 / gridW;
-      const int row = tapY * 3 / gridH;
-      if (col >= 0 && col <= 2 && row >= 0 && row <= 2) {
-        cycleZone(static_cast<uint8_t>(row * 3 + col));
-      }
+    const ZoneGrid grid(gridW, gridH);
+    const int zone = grid.zoneAt(tapX, tapY);
+    if (zone >= 0) {
+      cycleZone(static_cast<uint8_t>(zone));
     }
     requestUpdate();
     return;
@@ -86,18 +130,17 @@ void TapZoneSettingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   // Full-screen 3x3 grid: the only chrome is the bottom button hint row, so
-  // the tap zones cover as much of the display as possible.
+  // the tap zones cover as much of the display as possible. Cells are inset
+  // by a safe margin and separated by a visible gap (see ZoneGrid).
   const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
   const int gridW = renderer.getScreenWidth();
   const int gridH = renderer.getScreenHeight() - hintH;
-  const int cellW = gridW / 3;
-  const int cellH = gridH / 3;
+  const ZoneGrid grid(gridW, gridH);
 
   for (int row = 0; row < 3; ++row) {
     for (int col = 0; col < 3; ++col) {
       const uint8_t zone = static_cast<uint8_t>(row * 3 + col);
-      const Rect cell{static_cast<int16_t>(col * cellW), static_cast<int16_t>(row * cellH), static_cast<int16_t>(cellW),
-                      static_cast<int16_t>(cellH)};
+      const Rect cell = grid.cell(row, col);
       const bool selected = zone == selectedZone;
       // Selected cell is inverted (filled) so the focused zone is obvious on
       // an e-ink screen; its label draws white.

@@ -34,8 +34,10 @@ constexpr char LANG_FILE_BAK[] = "/.crosspoint/language.bin.bak";
 constexpr uint8_t FAKE_BOLD_VERSION = 1;
 // Bumped when touch reader controls change shape: v1 folded
 // touchReaderControls into the per-direction gesture pair; v2 dropped the
-// Inverted Tap gesture (folded to Tap Only) and added the 3x3 tap zones.
-constexpr uint8_t TOUCH_CONTROLS_VERSION = 2;
+// Inverted Tap gesture (folded to Tap Only) and added the 3x3 tap zones; v3
+// preserves the legacy Inverted Tap side swap by exchanging the default zones
+// for saves that never had custom ones.
+constexpr uint8_t TOUCH_CONTROLS_VERSION = 3;
 // Legacy PAGE_TURN_GESTURE value of the removed Inverted Tap mode.
 constexpr uint8_t LEGACY_GESTURE_INVERTED_TAP = 3;
 constexpr std::array<uint8_t, 3> LEGACY_FAKE_BOLD_MIGRATION = {
@@ -401,8 +403,11 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // SettingsList loop above already collapsed the old value to Off/On; read the
   // raw document here to recover which legacy mode to preserve. v1 saves may
   // also hold the now-removed Inverted Tap gesture (legacy value 3), which
-  // folds to Tap Only.
-  if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION) {
+  // folds to Tap Only. Saves from the gesture-pair era have no
+  // touchReaderControls key at all and are left untouched (the key check keeps
+  // a version bump from re-running the migration against them).
+  if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
+      !doc["touchReaderControls"].isNull()) {
     const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
     if (legacyTouch == TOUCH_READER_SWIPE) {
       pageTurnGesture = SWIPE_ONLY;
@@ -410,6 +415,18 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     } else if (legacyTouch == TOUCH_READER_INVERTED_TAP) {
       pageTurnGesture = TAP_ONLY;
       previousPageGesture = TAP_ONLY;
+      // Legacy Inverted Tap swapped the page-turn sides (right edge = previous,
+      // left edge = next). Keep that behaviour for saves that never had custom
+      // zones; a save with its own tapZones is preserved untouched.
+      if (doc["tapZones"].isNull()) {
+        for (uint8_t i = 0; i < 9; ++i) {
+          if (tapZones[i] == TAP_ZONE_PREV) {
+            tapZones[i] = TAP_ZONE_NEXT;
+          } else if (tapZones[i] == TAP_ZONE_NEXT) {
+            tapZones[i] = TAP_ZONE_PREV;
+          }
+        }
+      }
     } else if (legacyTouch != TOUCH_READER_OFF) {
       // Legacy Tap mode: taps only, same zones on both directions.
       pageTurnGesture = TAP_ONLY;
