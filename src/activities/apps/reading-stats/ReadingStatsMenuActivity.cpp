@@ -72,8 +72,23 @@ void ReadingStatsMenuActivity::loop() {
   const int count = activeEntryCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  if (handleListTouch(selected, count, listTop, listHeight, false) == ListTouchResult::Activated) {
+
+  // Touch hit-testing must mirror drawButtonMenu's geometry exactly: the first
+  // tile starts at listTop + verticalSpacing and every tile steps by
+  // menuRowHeight + menuSpacing. The generic list hit-test (handleListTouch)
+  // uses list-row geometry instead, whose smaller step drifts from the drawn
+  // tiles so a tap lands on the wrong entry.
+  int touched = -1;
+  const auto touch =
+      mappedInput.rowTouch(touched, listTop + metrics.verticalSpacing, metrics.menuRowHeight + metrics.menuSpacing,
+                           count, 0, INT32_MAX, metrics.menuRowHeight);
+  if (touch == MappedInputManager::RowTouch::Down) {
+    if (selected != touched) {
+      selected = touched;
+      requestUpdate();
+    }
+  } else if (touch == MappedInputManager::RowTouch::Tap) {
+    selected = touched;
     openSelected();
     return;
   }
