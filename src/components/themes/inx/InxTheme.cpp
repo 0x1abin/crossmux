@@ -322,6 +322,21 @@ void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int 
   drawSideScrollBar(renderer, rect, buttonCount, pageStart, pageItems);
 }
 
+InxTheme::MenuRowGeometry InxTheme::getMenuRowGeometry(const GfxRenderer&, const Rect& rect, const int selectedIndex,
+                                                       const int rowCount) const {
+  // Mirror of InxTheme::drawButtonMenu: rows start at rect.y, step by the
+  // fixed row height and are paged.
+  const int pageItems = InxMenuGeometry::pageItems(rect.height);
+  const int pageStart = InxMenuGeometry::pageStart(selectedIndex, rowCount, rect.height);
+  return {rect.y,
+          kRowHeight,
+          kRowHeight,
+          pageStart,
+          std::min(rowCount - pageStart, pageItems),
+          rect.x + kRowPadding,
+          rect.x + rect.width};
+}
+
 void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
                                const int selectedIndex) const {
   if (options.empty()) return;
