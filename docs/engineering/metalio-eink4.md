@@ -388,9 +388,11 @@ A hardware fault or USB supply can keep this loop running indefinitely.
   antialiasing and SDK display waveforms are retained.
 - Final Nightly and repository CI results are recorded with the PR handoff.
 
-The application depends on the companion SDK changes. Keep the committed SDK
-gitlink unchanged until the SDK PR is integrated; reproduce validation with the
-companion SDK branch checked out locally: SDK PR
-[freeink-sdk#29](https://github.com/0x1abin/freeink-sdk/pull/29), branch
-`codex/metalio-touch-haptics-power`, tested commit
-`4512f1441e1ab54dea8d9889cc35e021991413c8`. No merge or firmware publication is part of this work.
+The SDK changes were integrated through
+[freeink-sdk#29](https://github.com/0x1abin/freeink-sdk/pull/29). The application
+pins merged commit `094976e1d47ad7120cf461fec5f6b737eaabf13f`; its source tree
+`fa514adeac892085ec6205645c153b1f6dad4956` exactly matches tested feature commit
+`4512f1441e1ab54dea8d9889cc35e021991413c8`. No SDK source or build-relevant file
+changed during integration. [CrossMux PR #318](https://github.com/0x1abin/crossmux/pull/318)
+contains the application/HAL changes. No application merge or firmware publication
+is part of this work.
