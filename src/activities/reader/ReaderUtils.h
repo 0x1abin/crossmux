@@ -9,6 +9,7 @@
 #include "MappedInputManager.h"
 #include "ReaderRefresh.h"
 #include "activities/ActivityManager.h"
+#include "components/UITheme.h"
 
 namespace ReaderUtils {
 
@@ -71,15 +72,67 @@ struct TouchPageTurn {
   unsigned long heldMs;
 };
 
+// Shared 3x3 tap-zone grid geometry. The reader hit-tests with the exact
+// rectangles the zone editor paints — same safe margin, visible gaps and cell
+// sizes — so a tap in the reader lands on the zone the editor showed, and a
+// tap in a gap or at the display edge is ignored instead of snapping to a
+// neighbouring cell at non-divisible sizes.
+struct TapZoneGrid {
+  static constexpr int kSafeMargin = 6;  // inset from the grid area edges
+  static constexpr int kGap = 6;         // visible gap between cells
+
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+  int cellWidth = 0;
+  int cellHeight = 0;
+
+  explicit TapZoneGrid(const int gridW, const int gridH) {
+    x = kSafeMargin;
+    y = kSafeMargin;
+    width = gridW - kSafeMargin * 2;
+    height = gridH - kSafeMargin * 2;
+    // Two internal gaps per axis; the remainder (if the size is not exactly
+    // divisible) widens the outer gaps, never the visible cells.
+    cellWidth = (width - kGap * 2) / 3;
+    cellHeight = (height - kGap * 2) / 3;
+  }
+
+  Rect cell(const int row, const int col) const {
+    return Rect{static_cast<int16_t>(x + col * (cellWidth + kGap)), static_cast<int16_t>(y + row * (cellHeight + kGap)),
+                static_cast<int16_t>(cellWidth), static_cast<int16_t>(cellHeight)};
+  }
+
+  // Zone index (row-major) for a point, or -1 when it lands in a gap or
+  // outside the grid.
+  int zoneAt(const int px, const int py) const {
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 3; ++col) {
+        const Rect r = cell(row, col);
+        if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) {
+          return row * 3 + col;
+        }
+      }
+    }
+    return -1;
+  }
+};
+
 // Action of the reader tap zone at the given screen point. The screen is
-// split into a 3x3 grid; zones are read from SETTINGS.tapZones (row-major).
+// split into the same 3x3 grid the zone editor paints: inset by the safe
+// margin, separated by visible gaps, excluding the bottom button-hint row.
+// A tap in a gap, in the safe margin, or in the hint row falls through to
+// TAP_ZONE_NONE instead of snapping to a neighbouring cell.
 inline uint8_t tapZoneAction(const GfxRenderer& renderer, const int x, const int y) {
   const int16_t width = static_cast<int16_t>(renderer.getScreenWidth());
   const int16_t height = static_cast<int16_t>(renderer.getScreenHeight());
   if (width <= 0 || height <= 0) return CrossPointSettings::TAP_ZONE_NONE;
-  const int col = (x < 0) ? 0 : (x >= width ? 2 : x * 3 / width);
-  const int row = (y < 0) ? 0 : (y >= height ? 2 : y * 3 / height);
-  return SETTINGS.tapZones[row * 3 + col];
+  const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
+  const TapZoneGrid grid(width, height - hintH);
+  const int zone = grid.zoneAt(x, y);
+  if (zone < 0) return CrossPointSettings::TAP_ZONE_NONE;
+  return SETTINGS.tapZones[zone];
 }
 
 inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input) {
