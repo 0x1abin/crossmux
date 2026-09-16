@@ -15,6 +15,7 @@
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"
+#include "SampleRowClamp.h"
 
 namespace {
 
@@ -252,14 +253,12 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       const int32_t srcFyFP = dstY * invScaleFPY;
       const int32_t fy = srcFyFP & FP_MASK;
       const int32_t fyInv = FP_ONE - fy;
-      int ly0 = (srcFyFP >> FP_SHIFT) - blockY;
-      int ly1 = ly0 + 1;
-      if (ly0 < 0) ly0 = 0;
-      if (ly0 >= blockH) ly0 = blockH - 1;
-      if (ly1 >= blockH) ly1 = blockH - 1;
+      // Both sample rows are clamped inside the block; clamping only the lower
+      // bound of ly0 leaves ly1 at -1 for the first row of a shifted block.
+      const SampleRows rows = sampleRowsFor(dstY, invScaleFPY, blockY, blockH);
 
-      const uint8_t* row0 = &pixels[ly0 * stride];
-      const uint8_t* row1 = &pixels[ly1 * stride];
+      const uint8_t* row0 = &pixels[rows.row0 * stride];
+      const uint8_t* row1 = &pixels[rows.row1 * stride];
 
       // Left edge (with X boundary clamping)
       for (int dstX = dstXStart; dstX < safeXStart; dstX++) {
@@ -347,10 +346,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     if (writeFramebuffer) pw.beginRow(outY);
     if (caching) cw.beginRow(outY, cacheOriginY);
     const int32_t srcFyFP = dstY * invScaleFPY;
-    int ly = (srcFyFP >> FP_SHIFT) - blockY;
-    if (ly < 0) ly = 0;
-    if (ly >= blockH) ly = blockH - 1;
-    const uint8_t* row = &pixels[ly * stride];
+    const uint8_t* row = &pixels[clampSampleRow((srcFyFP >> FP_SHIFT) - blockY, blockH) * stride];
 
     for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
       const int outX = cfgX + dstX;
