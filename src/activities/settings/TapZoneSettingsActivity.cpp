@@ -91,7 +91,6 @@ void TapZoneSettingsActivity::render(RenderLock&&) {
   // and separated by a visible gap (see ReaderUtils::TapZoneGrid, shared with
   // the reader hit-testing), so the painted cells and the reader hit areas
   // cover exactly the same full display.
-  const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
   const ReaderUtils::TapZoneGrid grid(renderer.getScreenWidth(), renderer.getScreenHeight());
 
   for (int row = 0; row < 3; ++row) {
