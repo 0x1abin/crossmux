@@ -1960,7 +1960,9 @@ bool WeReadActivity::isBusy(const State state) {
 const char* WeReadActivity::errorMessage() const {
   switch (error_) {
     case WeReadClient::Error::SdCard:
-      return tr(STR_WEREAD_CACHE_FAILED);
+      return tr(STR_WEREAD_STORAGE_ERROR);
+    case WeReadClient::Error::OutOfMemory:
+      return tr(STR_WEREAD_MEMORY_ERROR);
     case WeReadClient::Error::Network:
       return WiFi.status() == WL_CONNECTED ? tr(STR_WEREAD_HTTP_ERROR) : tr(STR_WEREAD_NO_WIFI);
     case WeReadClient::Error::Unavailable:
@@ -2527,9 +2529,29 @@ void WeReadActivity::render(RenderLock&&) {
                          total, lines, lineCount);
       break;
     }
-    case State::Error:
-      GUI.drawPopup(renderer, errorMessage());
+    case State::Error: {
+      if (error_ != WeReadClient::Error::SdCard && error_ != WeReadClient::Error::OutOfMemory) {
+        GUI.drawPopup(renderer, errorMessage());
+        break;
+      }
+      // Fixed translated lines keep the low-memory error path free of wrapping allocations.
+      const bool storageError = error_ == WeReadClient::Error::SdCard;
+      const char* lines[] = {errorMessage(),
+                             storageError ? tr(STR_WEREAD_CHECK_STORAGE_SPACE) : tr(STR_WEREAD_RESTART_HINT),
+                             storageError ? tr(STR_WEREAD_CHECK_SD_CARD) : nullptr};
+      const int lineCount = storageError ? 3 : 2;
+      const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      const int gap = SubpageLayout::sectionGap(metrics);
+      int y = SubpageLayout::centeredTop(content, lineCount * lineHeight + (lineCount - 1) * gap);
+      const Rect bounds = SubpageLayout::insetHorizontal(content, metrics.contentSidePadding);
+      const GfxRenderer::ClipScope clip(renderer, bounds.x, bounds.y, bounds.width, bounds.height);
+      for (int index = 0; index < lineCount; ++index) {
+        UITheme::drawCenteredText(renderer, bounds, UI_10_FONT_ID, y, lines[index], true,
+                                  index == 0 ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+        y += lineHeight + gap;
+      }
       break;
+    }
     case State::LogoutError:
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGOUT_FAILED));
       break;
