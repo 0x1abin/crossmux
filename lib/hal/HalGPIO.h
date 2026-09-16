@@ -87,6 +87,11 @@ class HalGPIO {
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   uint8_t physicalPressedMask() const;
+#if FREEINK_CAP_HAPTIC
+  bool wasTouchContactPressed() const;
+  void updateHapticFeedback(uint8_t level);
+  void stopHapticFeedback();
+#endif
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
