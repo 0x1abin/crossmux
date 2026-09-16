@@ -45,17 +45,19 @@ void TapZoneSettingsActivity::onEnter() {
 
 void TapZoneSettingsActivity::loop() {
   const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  const int gridW = renderer.getScreenWidth();
-  const int gridH = renderer.getScreenHeight() - hintH;
+  const int screenH = renderer.getScreenHeight();
 
-  // Touch: a tap on a grid cell cycles that cell's action.
+  // Touch: a tap on a grid cell cycles that cell's action. The bottom button
+  // hint row belongs to the hint buttons, so taps there never reach a cell.
   int tapX = 0;
   int tapY = 0;
   if (mappedInput.wasScreenTapped(tapX, tapY)) {
-    const ReaderUtils::TapZoneGrid grid(gridW, gridH);
-    const int zone = grid.zoneAt(tapX, tapY);
-    if (zone >= 0) {
-      cycleZone(static_cast<uint8_t>(zone));
+    if (tapY < screenH - hintH) {
+      const ReaderUtils::TapZoneGrid grid(renderer.getScreenWidth(), screenH);
+      const int zone = grid.zoneAt(tapX, tapY);
+      if (zone >= 0) {
+        cycleZone(static_cast<uint8_t>(zone));
+      }
     }
     requestUpdate();
     return;
@@ -84,14 +86,13 @@ void TapZoneSettingsActivity::loop() {
 void TapZoneSettingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  // Full-screen 3x3 grid: the only chrome is the bottom button hint row, so
-  // the tap zones cover as much of the display as possible. Cells are inset
-  // by a safe margin and separated by a visible gap (see
-  // ReaderUtils::TapZoneGrid, shared with the reader hit-testing).
+  // Full-screen 3x3 grid: the only chrome is the bottom button hint row, which
+  // is drawn over the last row afterwards. Cells are inset by a safe margin
+  // and separated by a visible gap (see ReaderUtils::TapZoneGrid, shared with
+  // the reader hit-testing), so the painted cells and the reader hit areas
+  // cover exactly the same full display.
   const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  const int gridW = renderer.getScreenWidth();
-  const int gridH = renderer.getScreenHeight() - hintH;
-  const ReaderUtils::TapZoneGrid grid(gridW, gridH);
+  const ReaderUtils::TapZoneGrid grid(renderer.getScreenWidth(), renderer.getScreenHeight());
 
   for (int row = 0; row < 3; ++row) {
     for (int col = 0; col < 3; ++col) {

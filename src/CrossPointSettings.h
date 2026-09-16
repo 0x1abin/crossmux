@@ -441,11 +441,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // first). Each zone holds a TAP_ZONE_ACTION; MENU is only meaningful while
   // showReaderMenu is READER_MENU_TAP, where the reader menu opens on a tap in
   // any MENU-marked zone. A direction whose gesture is SWIPE_ONLY (or
-  // disabled) contributes no tap zone: its zones fall through.
+  // disabled) contributes no tap zone: its zones fall through. The default
+  // mirrors the stock outer-thirds behavior: the left/right columns turn pages
+  // over the full height and only the middle cell of the center column opens
+  // the menu, while the center column above/below it does nothing.
   uint8_t tapZones[9] = {
-      TAP_ZONE_PREV, TAP_ZONE_MENU, TAP_ZONE_NEXT,  // top row
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // top row
       TAP_ZONE_PREV, TAP_ZONE_MENU, TAP_ZONE_NEXT,  // middle row
-      TAP_ZONE_PREV, TAP_ZONE_MENU, TAP_ZONE_NEXT,  // bottom row
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // bottom row
   };
   // Reader menu open gesture (SHOW_READER_MENU: off / center tap / bottom-edge
   // up-swipe). Only surfaced on home-key boards, where Home is the capacitive

@@ -120,16 +120,16 @@ struct TapZoneGrid {
 };
 
 // Action of the reader tap zone at the given screen point. The screen is
-// split into the same 3x3 grid the zone editor paints: inset by the safe
-// margin, separated by visible gaps, excluding the bottom button-hint row.
-// A tap in a gap, in the safe margin, or in the hint row falls through to
-// TAP_ZONE_NONE instead of snapping to a neighbouring cell.
+// split into the same full-screen 3x3 grid the zone editor paints: inset by
+// the safe margin, separated by visible gaps. A tap in a gap or in the safe
+// margin falls through to TAP_ZONE_NONE instead of snapping to a neighbouring
+// cell. The reading surface has no bottom button-hint row, so the grid covers
+// the full display exactly like the original outer-thirds zones did.
 inline uint8_t tapZoneAction(const GfxRenderer& renderer, const int x, const int y) {
   const int16_t width = static_cast<int16_t>(renderer.getScreenWidth());
   const int16_t height = static_cast<int16_t>(renderer.getScreenHeight());
   if (width <= 0 || height <= 0) return CrossPointSettings::TAP_ZONE_NONE;
-  const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  const TapZoneGrid grid(width, height - hintH);
+  const TapZoneGrid grid(width, height);
   const int zone = grid.zoneAt(x, y);
   if (zone < 0) return CrossPointSettings::TAP_ZONE_NONE;
   return SETTINGS.tapZones[zone];
