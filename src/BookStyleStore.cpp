@@ -13,6 +13,10 @@ namespace {
 constexpr uint8_t kMaxFontPointSize = 64;
 // Extra paragraph spacing is the 0..5 selectable multiplier (0=off).
 constexpr uint8_t kMaxExtraParagraphSpacing = 5;
+// Longest book path accepted from the JSON file. Book paths come from the
+// reader's file browser and stay well under this; a pathological record cannot
+// inflate the store's resident memory.
+constexpr size_t kMaxBookPathLength = 256;
 
 // Reads an integer key from the JSON object. Type-compatible but out-of-range
 // values (e.g. fontPointSize:0 or lineSpacing:255) fall back to `fallback` so
@@ -100,7 +104,7 @@ bool BookStyleStore::fromJson(JsonVariantConst doc) {
   for (JsonObjectConst obj : arr) {
     if (styles.size() >= MAX_STYLED_BOOKS) break;
     const char* path = obj["path"] | "";
-    if (!path || *path == '\0') continue;
+    if (!path || *path == '\0' || strnlen(path, kMaxBookPathLength + 1) > kMaxBookPathLength) continue;
     BookStyle style;
     if (!styleFromJson(obj, style)) continue;
     styles.push_back({path, style});
