@@ -185,7 +185,9 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     uint16_t fileViewportHeight = 0;
     float fileLineCompression = 0;
     bool fileExtraParagraphSpacing = false;
-    bool fileFirstLineIndent = false;
+    // FirstLineIndent::Auto(0)/Indent(1)/NoIndent(2). Read as a byte so the
+    // three states round-trip; a bool would collapse Indent and NoIndent.
+    uint8_t fileFirstLineIndent = 0;
     uint8_t fileParagraphAlignment = 0;
     bool fileHyphenationEnabled = false;
     bool fileEmbeddedStyle = false;
