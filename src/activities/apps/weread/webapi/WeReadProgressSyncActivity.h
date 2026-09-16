@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 
@@ -55,6 +56,7 @@ class WeReadProgressSyncActivity final : public Activity {
   float remoteFraction_ = 0.0f;
   bool uploadConflict_ = false;
   bool wifiActivated_ = false;
+  std::atomic<bool> fullRefreshPending_{true};
 
   void launchWifiSelection();
   void onWifiSelectionComplete(bool connected);

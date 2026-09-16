@@ -83,6 +83,7 @@ WeReadProgressContext WeReadProgressSyncActivity::makeContext(const Epub& epub, 
 
 void WeReadProgressSyncActivity::onEnter() {
   Activity::onEnter();
+  fullRefreshPending_.store(true);
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 
   WeReadStore::Session session;
@@ -135,6 +136,7 @@ void WeReadProgressSyncActivity::onWifiSelectionComplete(const bool connected) {
     returnToReader();
     return;
   }
+  fullRefreshPending_.store(true);
   state_ = State::Starting;
   requestUpdate();
 }
@@ -501,7 +503,8 @@ void WeReadProgressSyncActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", retryable ? tr(STR_RETRY) : "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
-  renderer.displayBuffer();
+  // Consume this here so a Wi-Fi child cannot use up the sync page's clean refresh.
+  renderer.displayBuffer(fullRefreshPending_.exchange(false) ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
 }
 
 #endif
