@@ -228,5 +228,124 @@ int main() {
 ''')
 
 
+    def test_cover_download_creates_directory_before_request(self):
+        source = (ROOT / 'lib/WeReadWebApi/src/WeReadClient.cpp').read_text()
+        download = method(source, 'Error Operation::fetchCoverSource(')
+        sink = source[source.index('struct FileSink {'):source.index('bool finishFile(')]
+        run_cpp(r"""
+#include <algorithm>
+#include <cassert>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+namespace fs = std::filesystem;
+std::string lastLog;
+void logError(const char*, const char* format, ...) {
+  char buf[512]; va_list args; va_start(args,format);
+  vsnprintf(buf,sizeof(buf),format,args); va_end(args); lastLog=buf;
+}
+#define LOG_ERR(...) logError(__VA_ARGS__)
+bool shortWrite=false;
+struct HalFile {
+  std::ofstream stream;
+  bool isOpen() const { return stream.is_open(); }
+  void close() { stream.close(); }
+  size_t write(const void* data,size_t size) {
+    if (shortWrite) return 0;
+    stream.write(static_cast<const char*>(data),size);
+    return stream.good() ? size : 0;
+  }
+};
+struct {
+  int directoryChecks=0;
+  bool exists(const char* p) { return fs::exists(p); }
+  bool remove(const char* p) { return fs::remove(p); }
+  bool ensureDirectoryExists(const char* p) {
+    ++directoryChecks;
+    std::error_code ec;
+    fs::create_directories(p,ec);
+    return !ec && fs::is_directory(p);
+  }
+  bool openFileForWrite(const char*,const std::string& path,HalFile& file) {
+    file.stream.open(path,std::ios::binary|std::ios::trunc);
+    return file.isOpen();
+  }
+} Storage;
+namespace WeReadProtocol { enum class ImageType { None,Jpeg,Png,Detect }; }
+namespace WeReadStore {
+  bool rootReady=true;
+  bool ensureRoot() { return rootReady; }
+  struct ImageRecord { char href[64]{},url[512]{}; };
+  enum class ImageWorkState { Pending,Skipped,Complete };
+}
+namespace WeReadHttpClient {
+  bool extractHttpsHost(const char* url,char*,size_t) { return strncmp(url,"https://",8)==0; }
+}
+const char* coverSourceName(WeReadProtocol::ImageType type) {
+  return type==WeReadProtocol::ImageType::Png ? "cover.png" : "cover.jpg";
+}
+""" + sink + r"""
+enum class Error { Ok,SdCard,Protocol };
+enum class CoverWorkResult { Skipped,Pending,Complete };
+struct Operation {
+  WeReadProtocol::ImageType coverType_=WeReadProtocol::ImageType::Jpeg;
+  WeReadStore::ImageWorkState coverState_=WeReadStore::ImageWorkState::Pending;
+  char url_[512]="https://cdn.weread.qq.com/cover.jpg",imageHost_[128]{};
+  std::string bookDir_;
+  uint8_t coverAttempts_=0,coverRedirects_=0;
+  int requests=0;
+  Error fetchCoverSource(CoverWorkResult&);
+  Error requestImage(WeReadStore::ImageRecord& image,WeReadStore::ImageWorkState& state,
+                     uint8_t&,uint8_t&,bool,WeReadProtocol::ImageType* detected) {
+    ++requests;
+    assert(fs::is_directory(bookDir_)); // Original code fails here for a shelf-only book.
+    const std::string path=bookDir_+"/"+image.href+".part";
+    FileSink sink; sink.path=&path;
+    const uint8_t data[]={0xff,0xd8,0xff};
+    if (!resetFile(&sink) || !writeFile(&sink,data,sizeof(data))) return Error::SdCard;
+    state=WeReadStore::ImageWorkState::Complete;
+    if (detected) *detected=WeReadProtocol::ImageType::Jpeg;
+    return Error::Ok;
+  }
+};
+""" + download + r"""
+int main(int argc,char** argv) {
+  assert(argc==1);
+  const fs::path root=fs::path(argv[0]).parent_path()/"sd";
+  Operation op; op.bookDir_=(root/"weread"/"new-book").string();
+  CoverWorkResult result;
+  assert(!fs::exists(op.bookDir_));
+  assert(op.fetchCoverSource(result)==Error::Ok && result==CoverWorkResult::Complete);
+  assert(fs::file_size(fs::path(op.bookDir_)/"cover.jpg.part")==3);
+  assert(op.fetchCoverSource(result)==Error::Ok && op.requests==2);
+  WeReadStore::rootReady=false;
+  assert(op.fetchCoverSource(result)==Error::SdCard && op.requests==2);
+  assert(lastLog.find(op.bookDir_)!=std::string::npos);
+  WeReadStore::rootReady=true;
+  op.bookDir_=(root/"not-a-directory").string(); std::ofstream(op.bookDir_) << "keep";
+  assert(op.fetchCoverSource(result)==Error::SdCard && op.requests==2);
+  assert(fs::file_size(op.bookDir_)==4);
+  const int checks=Storage.directoryChecks;
+  for (const char* url : {"", "http://invalid/cover.jpg"}) {
+    strcpy(op.url_,url);
+    assert(op.fetchCoverSource(result)==Error::Ok && result==CoverWorkResult::Skipped);
+  }
+  assert(Storage.directoryChecks==checks && op.requests==2);
+  std::string missing=(root/"missing"/"cover.part").string(); FileSink failed; failed.path=&missing;
+  assert(!resetFile(&failed) && lastLog.find(missing)!=std::string::npos);
+  std::string good=(root/"short.part").string(); FileSink shortSink; shortSink.path=&good;
+  assert(resetFile(&shortSink)); shortWrite=true;
+  const uint8_t bytes[]={1,2,3};
+  assert(!writeFile(&shortSink,bytes,3));
+  assert(shortSink.failure==FileSink::Failure::SdCard && shortSink.size==0);
+  assert(lastLog.find("written=0 expected=3")!=std::string::npos);
+}
+""")
+
+
 if __name__ == '__main__':
     unittest.main()
