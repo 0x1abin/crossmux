@@ -113,30 +113,42 @@ TEST(SampleRowClamp, BothRowsStayInsideTheBlockAcrossRatiosAndOffsets) {
   }
 }
 
-// A 1:1 mapping never leaves its block, and the two sampled rows stay adjacent at
-// the very first and last destination row.
-TEST(SampleRowClamp, HandlesIdentityAndImageEdges) {
-  const int32_t one = kOne;
-  EXPECT_EQ(SampleRows({0, 1}), sampleRowsFor(0, one, 0, 16));
-  EXPECT_EQ(SampleRows({14, 15}), sampleRowsFor(15, one, 0, 16));
-  // Last row of the last block: row1 is clamped back onto the block's final row.
-  EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(16, one, 0, 16));
-
-  // Upscaling (fineScale > 1) repeats rows; both must stay valid at the top edge.
-  const int32_t up = invScaleFP(4, 16);  // 0.25 in FP
-  EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(0, up, 0, 4));
-  EXPECT_EQ(SampleRows({0, 1}), sampleRowsFor(4, up, 0, 4));
-  EXPECT_EQ(SampleRows({3, 3}), sampleRowsFor(15, up, 0, 4));
+// A 1:1 mapping samples the row it lands on plus the next one, and both clamp
+// back into the block at its last row.
+TEST(SampleRowClamp, IdentityMappingNeverLeavesTheBlock) {
+  EXPECT_EQ(SampleRows({0, 1}), sampleRowsFor(0, kOne, 0, 16));
+  EXPECT_EQ(SampleRows({7, 8}), sampleRowsFor(7, kOne, 0, 16));
+  EXPECT_EQ(SampleRows({14, 15}), sampleRowsFor(14, kOne, 0, 16));
+  // Last row of the block, and one row past it: row1 clamps onto row 15.
+  EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(15, kOne, 0, 16));
+  EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(16, kOne, 0, 16));
 }
 
-// Tiny images must not walk before the first row, which is where the original
-// code was reachable: a source smaller than the block height.
-TEST(SampleRowClamp, TinySourcesNeverSampleBeforeTheBlock) {
-  const int32_t fine = fineScaleFP(1, 3);
-  const int32_t inv = invScaleFP(3, 1);
-  const SampleRows rows = sampleRowsFor(dstStart(0, fine), inv, 0, 2);
-  EXPECT_GE(rows.row0, 0);
-  EXPECT_GE(rows.row1, 0);
-  EXPECT_LT(rows.row0, 2);
-  EXPECT_LT(rows.row1, 2);
+// Upscaling repeats rows (4 source rows -> 16 destination rows, step 0.25); the
+// pair must stay inside the block at both ends.
+TEST(SampleRowClamp, UpscalingStaysInsideTheBlockAtBothEnds) {
+  const int32_t inv = invScaleFP(4, 16);
+  EXPECT_EQ(SampleRows({0, 1}), sampleRowsFor(0, inv, 0, 4));
+  EXPECT_EQ(SampleRows({1, 2}), sampleRowsFor(4, inv, 0, 4));
+  EXPECT_EQ(SampleRows({2, 3}), sampleRowsFor(8, inv, 0, 4));
+  EXPECT_EQ(SampleRows({3, 3}), sampleRowsFor(12, inv, 0, 4));
+  EXPECT_EQ(SampleRows({3, 3}), sampleRowsFor(15, inv, 0, 4));
+}
+
+// A block that does not start at source row 0 clamps against its own bounds: the
+// block offset is subtracted before clamping, not after.
+TEST(SampleRowClamp, BlockOffsetClampsAgainstTheBlockNotTheImage) {
+  EXPECT_EQ(SampleRows({0, 1}), sampleRowsFor(16, kOne, 16, 16));
+  EXPECT_EQ(SampleRows({1, 2}), sampleRowsFor(17, kOne, 16, 16));
+  EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(31, kOne, 16, 16));
+  EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(32, kOne, 16, 16));
+}
+
+// A one-row block: every destination row collapses onto that single row, which is
+// the tightest form of the boundary the fix is about.
+TEST(SampleRowClamp, SingleRowBlockCollapsesBothSamplesOntoIt) {
+  const int32_t inv = invScaleFP(1, 3);
+  EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(0, inv, 0, 1));
+  EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(1, inv, 0, 1));
+  EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(2, inv, 0, 1));
 }
