@@ -44,6 +44,15 @@ class ImageBlock final : public Block {
   using ExtractFn = bool (*)(void* ctx, const char* srcPath, const char* destPath);
   static void setExtractor(void* ctx, ExtractFn fn);
 
+  // Reader-scoped resampling filter for inline images. The reader owns the
+  // setting and pushes it in here (the library must not reach into application
+  // settings); false keeps the historical nearest-neighbour path. The filter is
+  // also part of the pixel-cache identity, so toggling it re-decodes instead of
+  // serving pixels produced by the other one.
+  static void setBilinearScaling(bool enabled);
+  // Current filter; the pixel-cache path is derived from it (see getCachePath).
+  static bool bilinearScalingEnabled() { return bilinearScaling; }
+
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 
@@ -61,6 +70,7 @@ class ImageBlock final : public Block {
 
   static void* extractCtx;
   static ExtractFn extractFn;
+  static bool bilinearScaling;  // reader-pushed resampling filter
 
   bool renderInternal(GfxRenderer& renderer, int x, int y, PixelCachePolicy cachePolicy, DecodeOutput output);
 };
