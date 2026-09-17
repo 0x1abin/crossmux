@@ -302,6 +302,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t clockAutoSync = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 0;
+  // Reader-level first-line indent control, one of FirstLineIndent::Auto /
+  // Indent / NoIndent (see lib/Epub/Epub/FirstLineIndent.h). The default
+  // Auto keeps the book's own CSS text-indent untouched; Indent replaces it
+  // with two CJK characters / three Latin spaces; NoIndent forces flush.
+  // Independent of extraParagraphSpacing.
+  uint8_t firstLineIndent = 0;
   uint8_t textAntiAliasing = 1;
   uint8_t fakeBold = SYNTHETIC_BOLD_STANDARD;
   uint8_t readingBackgroundEnabled = 0;
