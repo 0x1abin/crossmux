@@ -26,6 +26,7 @@ parser.add_argument("--zopfli", dest="zopfli", action="store_true", help="Use Zo
 parser.add_argument("--force-autohint", dest="force_autohint", action="store_true", help="Force FreeType auto-hinter instead of native font hinting. Improves stem width consistency for fonts with weak or no native TrueType hints.")
 parser.add_argument("--autohint-font", dest="autohint_fonts", action="append", default=[], metavar="PATH", help="Force the FreeType auto-hinter on one face of the fontstack, named by its path. Repeatable. For stacks that mix a manually hinted face with unhinted ones, where --force-autohint would discard the hints the former does have.")
 parser.add_argument("--pnum", dest="pnum", action="store_true", help="Use proportional numerals (pnum OpenType feature) instead of default tabular figures. Reduces visual gaps between digits in running prose.")
+parser.add_argument("--characters", help="Export only these characters (including any required replacement glyph). Overrides the default and additional intervals.")
 args = parser.parse_args()
 
 import freetype
@@ -289,6 +290,10 @@ def load_glyph(code_point):
     return None
 
 unmerged_intervals = sorted(intervals + add_ints)
+if args.characters is not None:
+    if not args.characters:
+        parser.error("--characters must not be empty")
+    unmerged_intervals = [(cp, cp) for cp in sorted(set(map(ord, args.characters)))]
 intervals = []
 unvalidated_intervals = []
 for i_start, i_end in unmerged_intervals:

@@ -19,9 +19,38 @@ The startup guide and later UI-language changes apply the same rule.
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
 
-| Build (2026-08-27) | Flash | Slot headroom | Static RAM |
+| `gh_release` measurement (2026-09-17) | Image bytes | Slot headroom | Static RAM |
 |---|---:|---:|---:|
-| `gh_release` unified C3 | 5,828,005 B | 725,595 B | 55,604 B |
+| Before font storage changes | 6,371,040 B | 182,560 B | 65,444 B |
+| Calculator font subset | 6,250,624 B | 302,976 B | 65,444 B |
+| Plus shared CJK intervals | 6,190,080 B | 363,520 B | 65,444 B |
+
+These are same-checkout `.bin` measurements, including image padding. The two
+changes save 180,960 B (176.7 KiB) without changing supported CJK characters,
+glyph bitmaps or metrics. Sharing the 2,523-entry Unicode index removes
+60,552 B of duplicate data; the image shrinks by 60,544 B after alignment.
+No new runtime allocations are introduced. The remaining 355 KiB headroom
+is still below the 512 KiB release budget; a further 160,768 B must be removed
+to reach that target. Physical X3/X4 display validation remains outstanding.
+
+Sticky smoke test (2026-09-17): flashed the 5,796,752-byte `sticky` image
+with write/hash verification. Wake, calculator rendering, return to the reader
+and EPUB page turns were observed in serial logs; the tester confirmed normal
+calculator display. The reader used an SD font, so this does not validate the
+built-in 12pt CJK reader fallback. Dedicated 8/10/12pt visual checks remain
+outstanding. Firmware SHA-256:
+`f1bec28a4d10e5e87af9f25c484bad379831fd92be777465b2559c53bb5088d6`.
+
+X3 smoke test (2026-09-17): rebuilt and flashed the 6,190,080-byte
+`gh_release` image to ESP32-C3 MAC `70:af:09:5f:81:3c`; write/hash verification
+passed. Font manifest loading failed after reboot (also confirmed by the tester):
+both automatic and TLS 1.2 handshakes timed out, with only 3,024 / 3,652 bytes
+of free heap respectively. After failure, free/minimum/largest-block heap was
+15,892 / 2,568 / 10,740 bytes. This download check failed; reading/standby
+comparison and physical font display checks remain pending. Local evidence:
+`build/font-shrink-x3-upload.log` and `build/font-shrink-x3-test.log`.
+Firmware SHA-256:
+`e9d00e976050318937830126da43171b71f5494abeecfe5011019fa1c7d1124c`.
 
 A/B OTA remains unchanged: both app slots are 6,553,600 bytes. Release builds
 must stay at or below 6,029,312 bytes to retain at least 512 KiB headroom.
@@ -141,6 +170,18 @@ Public-account books skip this prefetch. See [file-formats.md](../file-formats.m
 for the `WRT2` and `WRP1` layouts and migration rules.
 
 ## Regenerating the CJK fonts
+
+The generator finishes by running `share-cn-font-intervals.py`. It validates
+that the 8/10/12pt interval triples (first, last, glyph offset) are identical,
+then writes `notosans_cjk_common_intervals.h` and references its single
+`inline constexpr` table from those fonts. It refuses mismatches before writing.
+To share indices in existing generated headers without rerasterizing fonts or
+refreshing character sets, run:
+
+```bash
+python3 lib/EpdFont/scripts/share-cn-font-intervals.py
+python3 lib/EpdFont/scripts/share-cn-font-intervals.py --check
+```
 
 ```bash
 # 1. (One-time) install build deps into a venv
@@ -343,7 +384,9 @@ assert common == pool | required and i18n == required
 for size, expected in [(8, 4014), (10, 4014), (12, 4014),
                        (14, 1244), (16, 1244), (18, 1244)]:
     header = (root / f'lib/EpdFont/builtinFonts/notosans_cjk_{size}.h').read_text()
-    intervals = re.search(r'Intervals\[\] = \{(.*?)\n\};', header, re.S).group(1)
+    index_header = ((root / 'lib/EpdFont/builtinFonts/notosans_cjk_common_intervals.h').read_text()
+                    if size <= 12 else header)
+    intervals = re.search(r'Intervals\[\] = \{(.*?)\n\};', index_header, re.S).group(1)
     codepoints = set()
     for first, last in re.findall(r'\{\s*(0x[0-9A-F]+),\s*(0x[0-9A-F]+),', intervals):
         codepoints.update(range(int(first, 16), int(last, 16) + 1))

@@ -32,6 +32,29 @@
 
 ## Modifying Generated Content Workflow
 
+### Calculator display fonts
+
+`CalculatorFont.h` uses generated `calculator_18_regular.h` and
+`calculator_18_bold.h`, not the full reader faces. Rebuild them with:
+
+```bash
+PYTHON=/path/to/font-venv/bin/python bash lib/EpdFont/scripts/build-calculator-fonts.sh
+/path/to/font-venv/bin/python scripts/tests/test_builtin_font_shrink.py --regenerate
+```
+
+Use the dependencies in `lib/EpdFont/scripts/requirements.txt`. The build script
+owns the whitelist: digits, space, `+-×÷.%=e` and U+FFFD. It retains the original
+18pt, 2-bit, proportional-number, compressed Regular/Bold rendering; localized
+errors continue to use the UI font. `fontconvert.py --characters` overrides the
+default/additional intervals only when explicitly supplied. The normal font
+conversion script also regenerates these subsets. Commit the generated font
+headers together with their generator changes. The Python check compares
+decompressed glyph pixels and metrics against the full fonts; the existing
+`CalculatorFontTest` checks metrics and every supported kerning pair.
+
+The CJK generator's shared Unicode indices are described in
+[chinese-build.md](chinese-build.md#regenerating-the-cjk-fonts).
+
 **To change HTML pages**:
 1. Edit source: `src/network/html/<locale>/<pagename>.html`
 2. Build: `pio run` (auto-triggers `scripts/build_html.py`)
