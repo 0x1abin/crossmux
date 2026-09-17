@@ -28,6 +28,8 @@ for size in ${NOTOSANS_FONT_SIZES[@]}; do
   done
 done
 
+PYTHON=python bash build-calculator-fonts.sh
+
 UI_FONT_SIZES=(10 12)
 # Medium, not Regular, is the UI text weight: 1-bit rasterisation at these sizes
 # snaps stems to whole pixels, and Regular lands on 2px where Medium lands on 3.

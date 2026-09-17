@@ -160,5 +160,7 @@ for size in "${CN_FONT_SIZES_I18N[@]}"; do
   emit_size "$size" "$I18N_OTF"
 done
 
+"$PYTHON" share-cn-font-intervals.py
+
 echo ""
 echo "Done. Generated $((${#CN_FONT_SIZES_SMALL[@]} + ${#CN_FONT_SIZES_I18N[@]})) CJK font headers in ../builtinFonts/"
