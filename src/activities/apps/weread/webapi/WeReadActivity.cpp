@@ -1560,12 +1560,16 @@ void WeReadActivity::handleManageInput() {
     }
   };
 
-  const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect content = mainContentBounds();
+  // Hit-test the manage menu with the active theme's drawButtonMenu geometry
+  // (RoundedRaff / Inx derive the row height and page the rows), then map the
+  // visible row back to the true index.
+  const auto geo = GUI.getMenuRowGeometry(renderer, content, manageSelected_, kManageEntryCount);
   int touched = -1;
-  const auto touch = mappedInput.rowTouch(touched, content.y, metrics.menuRowHeight + metrics.menuSpacing,
-                                          kManageEntryCount, content.x, content.x + content.width);
+  const auto touch =
+      mappedInput.rowTouch(touched, geo.firstRowY, geo.rowStep, geo.pageCount, geo.xStart, geo.xEnd, geo.rowHeight);
   if (touch != MappedInputManager::RowTouch::None) {
+    touched += geo.pageStart;
     const bool changed = manageSelected_ != touched || mainFocus_.load() != MainFocus::Content;
     manageSelected_ = touched;
     mainFocus_.store(MainFocus::Content);
