@@ -96,13 +96,14 @@ void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const ch
         std::min(renderer.getTextWidth(SMALL_FONT_ID, subtitle), std::max(0, rect.width / 2 - rightPadding));
     titleRight -= subtitleWidth + kIconGap;
     if (subtitleWidth > 0) {
-      const GfxRenderer::ClipScope clip(renderer, titleRight + kIconGap, titleTop, subtitleWidth,
-                                        renderer.getLineHeight(SMALL_FONT_ID));
-      renderer.drawText(
-          SMALL_FONT_ID, rect.x + rect.width - rightPadding - subtitleWidth,
-          titleTop +
-              std::max(0, (renderer.getLineHeight(NOTOSERIF_12_FONT_ID) - renderer.getLineHeight(SMALL_FONT_ID)) / 2),
-          subtitle);
+      const int subtitleHeight = renderer.getLineHeight(SMALL_FONT_ID);
+      const Rect subtitleRect{
+          titleRight + kIconGap,
+          titleTop + std::max(0, (renderer.getLineHeight(NOTOSERIF_12_FONT_ID) - subtitleHeight) / 2), subtitleWidth,
+          subtitleHeight};
+      const GfxRenderer::ClipScope clip(renderer, subtitleRect.x, subtitleRect.y, subtitleRect.width,
+                                        subtitleRect.height);
+      renderer.drawText(SMALL_FONT_ID, subtitleRect.x, subtitleRect.y, subtitle);
     }
   }
 

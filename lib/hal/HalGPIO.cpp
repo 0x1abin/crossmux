@@ -4,6 +4,7 @@
 #endif
 #include <BatteryMonitor.h>
 #include <HalGPIO.h>
+#include <HapticFeedback.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <Preferences.h>
@@ -183,6 +184,9 @@ void HalGPIO::begin() {
 #if FREEINK_DEVICE_METALIO_EINK4
   if (!freeink::metalio::begin()) LOG_ERR("HW", "Metalio power/expander initialization failed");
 #endif
+#if FREEINK_CAP_HAPTIC
+  if (!freeink::haptic::begin()) LOG_ERR("HW", "Haptic initialization failed; feedback disabled");
+#endif
   inputMgr.begin();
 }
 
@@ -215,6 +219,18 @@ bool HalGPIO::isPressed(uint8_t buttonIndex) const { return inputMgr.isPressed(b
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed(buttonIndex); }
 
 uint8_t HalGPIO::physicalPressedMask() const { return inputMgr.physicalPressedMask(); }
+
+#if FREEINK_CAP_HAPTIC
+bool HalGPIO::wasTouchContactPressed() const { return inputMgr.wasTouchContactPressed(); }
+void HalGPIO::updateHapticFeedback(uint8_t level) {
+  const uint16_t duration = freeink::haptic::pulseDuration(level);
+  if (duration == 0)
+    stopHapticFeedback();
+  else if (wasTouchContactPressed())
+    freeink::haptic::pulse(duration);
+}
+void HalGPIO::stopHapticFeedback() { freeink::haptic::stop(); }
+#endif
 
 bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
 
@@ -260,7 +276,12 @@ bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
 
 void HalGPIO::clearTouchTapEvent() { inputMgr.clearTouchTapEvent(); }
 
-void HalGPIO::prepareForDeepSleep() { inputMgr.prepareForDeepSleep(); }
+void HalGPIO::prepareForDeepSleep() {
+#if FREEINK_CAP_HAPTIC
+  freeink::haptic::prepareForSleep();
+#endif
+  inputMgr.prepareForDeepSleep();
+}
 
 bool HalGPIO::restoreTouchAfterDisplayReset() { return inputMgr.reinitializeTouchAfterSharedReset(); }
 

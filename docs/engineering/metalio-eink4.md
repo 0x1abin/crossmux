@@ -5,7 +5,8 @@ Nightly slug `metalio-eink4`. Hardware reference: `metalio-hw-test` 2.0.51,
 `main/hal/metalio-e-ink-4/config.h`, `IOExpander.hpp`, and its SSD1677 driver.
 The port was developed on SDK `5faf69e8` and rebased onto the current CrossMux
 SDK dependency, including its SD-capacity fix; it does not migrate the reference's
-ESP-IDF/LVGL application or add its audio, cellular, haptic or IMU features.
+ESP-IDF/LVGL application or add its audio, cellular or IMU features. Global touch
+haptic feedback is supported as described below.
 
 ```sh
 pio run -e metalio_eink4
@@ -37,12 +38,14 @@ for other boards are rejected by the existing flash/OTA board-tag check.
 | Battery | BQ27220 `0x55`: percentage and gauge-native charging status |
 | Charger | Optional CX25601N `0x6B`: read status only; never interpreted as BQ25896 |
 | RTC | PCF8563 `0x51`, existing system-UTC restore/writeback behavior |
-| USB | Native USB19/20, Serial/JTAG and existing USB Drive/MSC workflow |
+| USB | Native USB19/20, Serial/JTAG and existing USB Drive/MSC workflow; TCA9555 P0.0 held high for flash/debug routing |
+| Haptic | GPIO44, active-high motor; Off / Low 20 ms / Medium 35 ms / High 60 ms |
 
 The expander preloads safe output levels before setting directions. Main power
 is asserted before screen power; touch reset is held low for 10 ms and settles
 for 120 ms after release. P0.4 amplifier, P0.1 amplifier routing and GPIO44
-motor remain low. Unknown expander lines stay inputs.
+motor start low. P0.0 USB routing is preloaded high before enabling its output.
+Unknown expander lines stay inputs.
 
 ## Display, input and shutdown
 
@@ -115,10 +118,12 @@ power-cycle acceptance.
 The initial held Power gesture and its release are consumed on every boot.
 Subsequent Power gestures and automatic sleep use existing settings. Shutdown
 saves reading state, renders the sleep screen and parks the controller before
-waiting 280 ms and attempting three 100 ms high/100 ms low pulses. If USB keeps
-the MCU alive, restore the idle-high pulse line, log the outcome and enter the
-normal GPIO3-wake deep-sleep fallback. Hardware rails stay powered until the
-panel is parked; shutdown does not reconfigure the charger.
+continuously sending 100 ms high/100 ms low power-key pulses until hardware
+removes power, matching the reference board. MAIN/SCREEN rails stay enabled and
+PA stays off. There is no three-pulse limit or ESP deep-sleep fallback, including
+when USB maintains supply. Initialization retries every second; failed pulse
+writes retry at the same cadence with error logs limited to once per second.
+USB diagnostics remain available. Shutdown does not reconfigure the charger.
 
 CX25601N external-power status is cached for one second. Absent/unreadable
 chargers retry after two seconds and fall back to USB SOF activity and the
@@ -275,3 +280,119 @@ when an inverted grayscale-base request falls back to ordinary display.
   inspect the selected OTA slot; write verification alone does not establish
   that the new image booted. App-menu logs also reported a drawing-boundary
   warning; it is separate from this mapping change and was not addressed here.
+
+
+## 2026-09-16 reference audit and haptic feedback
+
+Reference: `/home/zzb/workspace/ink/Metalio-E-INK4`, particularly
+`main/boards/metalio-e-ink-4/config.h`, `metalio_e_ink_4_board.cc`,
+`metalio_touch.c` and `main/boards/common/IOExpander.hpp`.
+These are software wiring evidence, not a new schematic or physical acceptance.
+Workspace bases: CrossMux `d0889e7224c0`, SDK `e8e0276d0609`, plus local
+uncommitted changes; the SDK gitlink is unchanged.
+
+| Subsystem | Comparison and decision |
+|---|---|
+| SoC / storage | Retain independent S3 N16R8 target, existing dual-OTA layout, SDMMC CLK38/CMD40/D0=39 and input-only DAT3=46; do not copy the reference application partitions. |
+| Display | Panel, 800×480 geometry, SPI pins and 10 MHz agree. Retain the physically selected CrossMux SSD1677 cleaning policy and grayscale lifecycle. |
+| Touch / keys | Native coordinates, three bezel locations, GPIO1 IRQ, expander key pins and 10/120 ms boot reset agree. Add `0xA5=0x03` before deep sleep; failures log and still allow shutdown. Reset on boot restores touch after deep-sleep wake. No new light-sleep policy. |
+| Power / expander | Keep safe latch preload and main/screen rail ordering; repeat 100 ms high/low shutdown pulses until power is cut, without an ESP deep-sleep fallback. Add P0.0 output HIGH for USB flash/debug routing, matching the reference FSUSB42UMX selection. |
+| Haptic | Reference GPIO44 active-high, 35 ms timer pulse. Use board-calibratable 20/35/60 ms feedback for the entire touch surface and capability-gated settings. |
+| Gauge / charger | BQ27220 at 0x55 and optional CX25601N at 0x6B agree. Preserve read-only charger status. Reference charge-current/voltage writes are intentionally not imported. |
+| RTC | Retain PCF8563 at 0x51 and system-UTC restore/writeback. |
+| Audio / microphone | Reference external BT audio module uses UART TX48/RX47 and I²S BCLK6/WS43/DOUT7/DIN17. CrossMux leaves audio/mic capabilities disabled and PA off; codec/module control needs a separate port. |
+| IMU | Reference SC7A20H at 0x19, interrupt on TCA9555 P1.4. CrossMux keeps IMU disabled; no substitute QMI8658 driver or automatic rotation is enabled. |
+| Cellular | Reference NT26 UART TX12/RX11, MRDY21/SRDY5. No CrossMux modem service is introduced. |
+| USB camera | Reference switches P0.0 LOW for camera host use. CrossMux keeps HIGH for existing native-USB debug/MSC; no UVC host driver. |
+| Wi-Fi / BLE | Retain existing CrossMux Wi-Fi and BLE page-turner paths, not the reference voice/network application. |
+
+`FREEINK_CAP_HAPTIC` defaults to Metalio only and can be overridden with
+`-DFREEINK_CAP_HAPTIC=0`. Unsupported boards remain at zero; enabling it on a
+new board requires a motor pin/calibration implementation. The System setting
+`hapticFeedbackLevel` appears immediately after the sound-feedback slot, even
+when sound is unavailable. Values are Off=0, Low=1, Medium=2, High=3; missing or
+invalid stored values use Medium. English/Chinese labels use the existing i18n
+pipeline. Persistence and web exposure use the existing settings registry.
+
+One accepted contact anywhere on the touch surface (screen, including blank
+areas, or Home/Previous/Next) emits one press event before semantic gesture
+classification. Swipes and long holds vibrate once at initial contact; motion,
+release, physical buttons, Bluetooth, cancelled contacts and suppressed activity
+transitions do not add pulses. An active pulse drops new requests rather than queuing/extending
+vibration. Turning feedback off stops the motor before settings save/redraw;
+the main loop also applies Off. Sleep stops it before panel parking and again
+at the HAL input shutdown boundary, which holds GPIO44 LOW through deep-sleep
+GPIO isolation. Board initialization releases that hold even in a capability-off
+build. Light sleep is prevented from replacing the motor output configuration.
+
+The SDK motor driver owns one `esp_timer`, allocated once at initialization and
+reused until reset. The platform API has no static timer allocation alternative;
+its timer task already exists, so no application task/stack is added. The local
+Arduino 3.3.7 S3 `libesp_timer.a` disassembly shows a 32-byte timer payload
+(`esp_timer_create`, calloc arguments 1×32), excluding allocator overhead; this
+is version-specific, not measured heap use. Static state is one handle, one
+critical-section lock and an int64 deadline. No per-pulse heap allocation or
+framebuffer is added. The settings row uses the existing cold-path registry
+allocation for four uint16 labels (8-byte payload plus allocator/row overhead);
+incapable builds compile that row/field out.
+
+GPIO changes and expiry checks share a critical section. A deadline check makes
+an already dispatched old callback harmless after stop/restart. Allocation or
+start failure leaves the motor off and logs the failure. Timing remains subject
+to the shared ESP timer task's scheduling latency; physical pulse duration and
+motor startup at Low require hardware validation.
+
+### Hardware shutdown
+
+Long-press shutdown and automatic sleep share the same Metalio HAL path. After
+saving state, rendering the sleep image, stopping radios/haptics and parking the
+display/touch/storage, SDK `shutdown()` continuously drives P1.3 high for 100 ms
+then low for 100 ms until hardware removes power. MAIN/SCREEN remain enabled,
+PA remains off, and USB diagnostics remain available. Initialization retries
+every second; pulse write errors retry at the original cadence with rate-limited
+logs. The SDK interface is now `[[noreturn]] void`; no GPIO-wake deep-sleep
+fallback is compiled into the Metalio branch. Other devices are unchanged.
+
+The user reported battery exhaustion after about two days following battery-only
+long-press shutdown. The previous three-pulse fallback could leave peripheral
+rails powered during MCU deep sleep; this is a suspected mechanism, not a
+measured root cause. The reference also continuously pulses until power is cut.
+A hardware fault or USB supply can keep this loop running indefinitely.
+
+### Validation and physical evidence
+
+- All 55 script checks passed, including the real InputManager, contact edges,
+  screen/bezel hold/swipe/release and cancellation, motor timer failures/races,
+  capability-disabled compilation, USB preload, touch-sleep command and real
+  reader/SSD1677 cadence. Shutdown tests simulate more than three pulse cycles,
+  permanent/transient I2C failure and initialization failure/recovery.
+- Final ordinary Metalio build passed and was flashed to the user's ESP32-S3
+  revision 0.2, MAC `10:20:ba:6e:08:70`, via `/dev/ttyACM1`. Read-back partition
+  table matches the build; valid OTA sequence 2 selects app1 at `0x650000`.
+  Wrote 6,060,080 bytes in 51.8 seconds; esptool hash verification passed. No
+  settings/data partition or SD data was written.
+- Tested ordinary application SHA-256:
+  `73a430141b0a31da0d86c35934c01c51109aef074021ff3c141f56a5390f64f3`.
+  Post-reset main-loop heap free/minimum/largest block was
+  199,576 / 199,320 / 155,636 B, without observed panic/OOM in the short capture.
+  This is not a sustained heap or battery-current measurement.
+- Earlier shutdown capture showed automatic sleep after 600,000 ms, entry into
+  the continuous pulse loop, a brownout message and serial disconnection. The
+  user confirmed subsequent power-on was manual, not an observed spontaneous
+  restart. This does not establish sustained rail-off or a low battery current.
+- On 2026-09-17 the user reported testing complete and requested the related
+  PRs. No quantitative current, rail-voltage, physical pulse-width or exhaustive
+  sleep-cycle measurements were supplied; those remain unmeasured.
+- The attempted desktop-entry FULL override was withdrawn after user feedback.
+  It is absent from the final changes: original desktop refresh, reading cadence,
+  antialiasing and SDK display waveforms are retained.
+- Final Nightly and repository CI results are recorded with the PR handoff.
+
+The SDK changes were integrated through
+[freeink-sdk#29](https://github.com/0x1abin/freeink-sdk/pull/29). The application
+pins merged commit `094976e1d47ad7120cf461fec5f6b737eaabf13f`; its source tree
+`fa514adeac892085ec6205645c153b1f6dad4956` exactly matches tested feature commit
+`4512f1441e1ab54dea8d9889cc35e021991413c8`. No SDK source or build-relevant file
+changed during integration. [CrossMux PR #318](https://github.com/0x1abin/crossmux/pull/318)
+contains the application/HAL changes. No application merge or firmware publication
+is part of this work.

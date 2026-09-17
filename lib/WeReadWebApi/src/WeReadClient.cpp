@@ -1106,7 +1106,11 @@ bool resetFile(void* raw) {
   sink.size = 0;
   sink.failure = FileSink::Failure::None;
   sink.prefixSize = 0;
-  return Storage.openFileForWrite("WR", *sink.path, sink.file);
+  if (!Storage.openFileForWrite("WR", *sink.path, sink.file)) {
+    LOG_ERR("WR", "Failed to open download file: %s", sink.path->c_str());
+    return false;
+  }
+  return true;
 }
 
 bool writeFile(void* raw, const uint8_t* data, const size_t len) {
@@ -1124,7 +1128,11 @@ bool writeFile(void* raw, const uint8_t* data, const size_t len) {
     memcpy(sink.prefix + sink.prefixSize, data, prefixBytes);
     sink.prefixSize += prefixBytes;
   }
-  if (sink.file.write(data, len) != len) {
+  const size_t written = sink.file.write(data, len);
+  if (written != len) {
+    LOG_ERR("WR", "Download short write: path=%s written=%u expected=%u offset=%u",
+            sink.path ? sink.path->c_str() : "?", static_cast<unsigned>(written), static_cast<unsigned>(len),
+            static_cast<unsigned>(sink.size));
     sink.failure = FileSink::Failure::SdCard;
     return false;
   }
@@ -3323,6 +3331,12 @@ Error Operation::fetchCoverSource(CoverWorkResult& workResult) {
   memcpy(image.url, url_, strlen(url_) + 1);
   if (!WeReadHttpClient::extractHttpsHost(image.url, imageHost_, sizeof(imageHost_))) {
     return Error::Ok;
+  }
+
+  // Shelf-provided URLs skip detail fetching, which normally creates this directory.
+  if (!WeReadStore::ensureRoot() || !Storage.ensureDirectoryExists(bookDir_.c_str())) {
+    LOG_ERR("WR", "Failed to create cover cache directory: %s", bookDir_.c_str());
+    return Error::SdCard;
   }
 
   WeReadProtocol::ImageType detectedType = WeReadProtocol::ImageType::None;

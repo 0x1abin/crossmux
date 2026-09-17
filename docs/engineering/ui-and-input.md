@@ -174,6 +174,9 @@ action**.
   so the caller can draw its fallback cover.
 * INX front-button hints use black text above a 50% gray bottom line. Empty
   actions draw neither label nor line; directional actions use `<` and `>`.
+* INX header subtitles share one rectangle for drawing and clipping, including
+  their vertical centering offset. Clipping at the title's original top cuts off
+  the smaller subtitle's lower glyph rows.
 * On touch hardware, INX list and app-grid navigation focus follows the last
   input modality: touch hides it, while a physical button restores it. The
   logical selection and viewport remain intact, and FreeInkUI's active touch

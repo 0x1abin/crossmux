@@ -6,7 +6,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
-#if FREEINK_DEVICE_MURPHY_M4 && !defined(SIMULATOR)
+#if (FREEINK_DEVICE_MURPHY_M4 || FREEINK_CAP_HAPTIC) && !defined(SIMULATOR)
 #include <HalGPIO.h>
 #endif
 #include <Memory.h>
@@ -698,16 +698,21 @@ void SettingsActivity::toggleCurrentSetting() {
     const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
     if (setting.enumValues.size() > 2) {
       const auto valuePtr = setting.valuePtr;
-      optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()),
-                       currentValue, [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
-                         SETTINGS.*valuePtr = idx;
-                         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
-                         SETTINGS.saveToFile();
-                         if (valuePtr == &CrossPointSettings::uiTheme)
-                           applyUiSettingChange(valuePtr);
-                         else
-                           rebuildSettingsLists();
-                       });
+      optionPopup.show(
+          setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()), currentValue,
+          [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+            SETTINGS.*valuePtr = idx;
+#if FREEINK_CAP_HAPTIC && !defined(SIMULATOR)
+            if (valuePtr == &CrossPointSettings::hapticFeedbackLevel && idx == CrossPointSettings::HAPTIC_FEEDBACK_OFF)
+              gpio.stopHapticFeedback();
+#endif
+            syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+            SETTINGS.saveToFile();
+            if (valuePtr == &CrossPointSettings::uiTheme)
+              applyUiSettingChange(valuePtr);
+            else
+              rebuildSettingsLists();
+          });
       requestUpdate();
       return;
     }

@@ -217,9 +217,6 @@ void silentRestart() {
 
 void silentRestartToReader(const bool suppressChineseFontPrompt) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-#if FREEINK_CAP_TOUCH
-  if (finishWifiSessionWithoutRestart()) return;
-#endif
   silentRebootTarget = static_cast<uint32_t>(suppressChineseFontPrompt ? SilentRebootTarget::ReaderSuppressFontPrompt
                                                                        : SilentRebootTarget::Reader);
   silentRebootFontPointSize = 0;
@@ -350,6 +347,9 @@ void enterDeepSleep(bool fromTimeout = false) {
     WiFi.mode(WIFI_OFF);
   }
 
+#if FREEINK_CAP_HAPTIC
+  gpio.stopHapticFeedback();
+#endif
   halTiltSensor.deepSleep();
   Frontlight.setOn(false);
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
@@ -801,6 +801,9 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+#if FREEINK_CAP_HAPTIC
+  gpio.updateHapticFeedback(SETTINGS.hapticFeedbackLevel);
+#endif
   updateBluetoothLifecycle();
 
   static bool bluetoothWasConnected = false;

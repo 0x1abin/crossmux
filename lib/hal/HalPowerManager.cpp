@@ -108,7 +108,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   Waveshare397Power::waitForPowerButtonRelease();
 #endif
-#ifdef ENABLE_SERIAL_LOG
+#if defined(ENABLE_SERIAL_LOG) && !FREEINK_DEVICE_METALIO_EINK4
   // Tear down HWCDC so the host sees a clean disconnect and the peripheral
   // doesn't hold power domains that interfere with USB-powered GPIO wake.
   // logSerial is the raw HWCDC reference; Serial is the MySerialImpl proxy
@@ -160,9 +160,9 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // guarantees that ordering).
   gpio.prepareForDeepSleep();
 #if FREEINK_DEVICE_METALIO_EINK4
-  if (!freeink::metalio::shutdown()) LOG_ERR("PWR", "Metalio shutdown I2C failed");
-  LOG_ERR("PWR", "Metalio still powered after shutdown pulses; falling back to deep sleep");
-#endif
+  // Keep USB diagnostics available if external power prevents the hardware cut.
+  freeink::metalio::shutdown();
+#else
   freeink::PowerManager::powerDownRailsForSleep();
 
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
@@ -191,6 +191,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();
+#endif
 #endif
 }
 

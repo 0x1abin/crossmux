@@ -20,4 +20,5 @@ class Lyra3CoversTheme : public LyraTheme {
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;
+  int recentBookIndexAt(int x, int screenWidth) const override;
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include <ArduinoJson.h>
+#include <BoardConfig.h>
 #include <Epub/ReaderRenderSpec.h>
 #include <PersistableStore.h>
 
@@ -114,6 +115,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   enum class ContentProfile : uint8_t { Global = 0, China = 1 };
+
+  enum HAPTIC_FEEDBACK_LEVEL {
+    HAPTIC_FEEDBACK_OFF = 0,
+    HAPTIC_FEEDBACK_LOW,
+    HAPTIC_FEEDBACK_MEDIUM,
+    HAPTIC_FEEDBACK_HIGH,
+    HAPTIC_FEEDBACK_LEVEL_COUNT
+  };
 
   enum SOUND_FEEDBACK_LEVEL {
     SOUND_FEEDBACK_OFF = 0,
@@ -382,6 +391,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t soundFeedbackLevel = SOUND_FEEDBACK_MEDIUM;
 #else
   uint8_t soundFeedbackLevel = SOUND_FEEDBACK_OFF;
+#endif
+#if FREEINK_CAP_HAPTIC
+  uint8_t hapticFeedbackLevel = HAPTIC_FEEDBACK_MEDIUM;
 #endif
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
   uint8_t removeReadBooksFromRecents = 0;

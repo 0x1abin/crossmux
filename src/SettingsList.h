@@ -372,6 +372,12 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                            StrId::STR_SOUND_FEEDBACK_HIGH},
                           "soundFeedbackLevel", StrId::STR_CAT_SYSTEM),
 #endif
+#if FREEINK_CAP_HAPTIC
+        SettingInfo::Enum(StrId::STR_HAPTIC_FEEDBACK, &CrossPointSettings::hapticFeedbackLevel,
+                          {StrId::STR_STATE_OFF, StrId::STR_SOUND_FEEDBACK_LOW, StrId::STR_SOUND_FEEDBACK_MEDIUM,
+                           StrId::STR_SOUND_FEEDBACK_HIGH},
+                          "hapticFeedbackLevel", StrId::STR_CAT_SYSTEM),
+#endif
         SettingInfo::Toggle(StrId::STR_REMOVE_READ_FROM_RECENTS, &CrossPointSettings::removeReadBooksFromRecents,
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,

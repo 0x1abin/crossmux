@@ -608,6 +608,12 @@ bool BaseTheme::tabIndexFromPoint(const GfxRenderer& renderer, const Rect rect, 
 
 // Draw the "Recent Book" cover card on the home screen
 // TODO: Refactor method to make it cleaner, split into smaller methods
+int BaseTheme::recentBookIndexAt(int, int) const {
+  // Single-cover themes show only the first recent book; a tap anywhere in
+  // the cover strip therefore selects book 0.
+  return 0;
+}
+
 void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                     const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                     bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
