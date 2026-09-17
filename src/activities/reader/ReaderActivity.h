@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "BookStyleStore.h"
 #include "EndOfBookOptions.h"
 #include "activities/Activity.h"
 
@@ -34,6 +35,17 @@ class ReaderActivity : public Activity {
   virtual void renderBook() = 0;
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}
+
+  // Per-book style restore/save (see BookStyleStore). applyBookStyle() runs
+  // before loadBook(); saveBookStyle() runs on exit. The book's own style is
+  // applied to the in-memory settings only; the values from the settings
+  // screen are snapshotted first and restored on exit, so the global settings
+  // (and their persisted file) are never overwritten by a book's style.
+  void applyBookStyle();
+  void saveBookStyle();
+
+  BookStyle globalSettingsSnapshot_;
+  bool globalSettingsSnapshotted_ = false;
 
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
