@@ -80,6 +80,9 @@ jobs:
     name: Build X4 and X4 Pro
     needs: select_runner
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
+    env:
+      # The self-hosted runner's shared /tmp can fill independently of its disk.
+      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v6
         with:
