@@ -252,6 +252,33 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     TOUCH_READER_CONTROLS_COUNT
   };
 
+  // Per-direction page-turn gestures. Each of Next Page / Previous Page is
+  // configured independently; the tap zones below pick which screen areas turn
+  // pages when the matching gesture allows taps.
+  enum PAGE_TURN_GESTURE {
+    TAP_AND_SWIPE = 0,
+    TAP_ONLY = 1,
+    SWIPE_ONLY = 2,
+    PAGE_TURN_GESTURE_DISABLED = 3,
+    PAGE_TURN_GESTURE_COUNT
+  };
+
+  // Action of a single reader tap zone. The screen is split into a 3x3 grid
+  // (tapZones below, row-major). PREV/NEXT act on a tap (gated by the matching
+  // direction's gesture: a SWIPE_ONLY direction contributes no tap zones).
+  // MENU opens the reader menu on a tap in center-tap mode. BOOKMARK and
+  // DICTIONARY act on a long press (hold past BOOKMARK_HOLD_MS then release)
+  // so an ordinary tap can never trigger them accidentally.
+  enum TAP_ZONE_ACTION {
+    TAP_ZONE_NONE = 0,
+    TAP_ZONE_PREV = 1,
+    TAP_ZONE_NEXT = 2,
+    TAP_ZONE_MENU = 3,
+    TAP_ZONE_BOOKMARK = 4,
+    TAP_ZONE_DICTIONARY = 5,
+    TAP_ZONE_ACTION_COUNT
+  };
+
   // How the reader menu opens on touch boards. Persisted under the legacy
   // "tapForReaderMenu" key: 0/1 keep their old Off/Tap meaning.
   enum SHOW_READER_MENU { READER_MENU_OFF = 0, READER_MENU_TAP = 1, READER_MENU_SWIPE_UP = 2, SHOW_READER_MENU_COUNT };
@@ -418,6 +445,23 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t tiltPageTurn = TILT_OFF;
   // Touch screen reader zones/gestures on boards with a touch controller.
   uint8_t touchReaderControls = TOUCH_READER_ON;
+  // Per-direction page-turn gestures. When the touch reader controls are on,
+  // these pick how the NEXT and PREVIOUS page actions are triggered.
+  uint8_t pageTurnGesture = TAP_AND_SWIPE;
+  uint8_t previousPageGesture = TAP_AND_SWIPE;
+  // Reader tap zones: the screen splits into a 3x3 grid (row-major, top-left
+  // first). Each zone holds a TAP_ZONE_ACTION; MENU is only meaningful while
+  // showReaderMenu is READER_MENU_TAP, where the reader menu opens on a tap in
+  // any MENU-marked zone. A direction whose gesture is SWIPE_ONLY (or
+  // disabled) contributes no tap zone: its zones fall through. The default
+  // mirrors the stock outer-thirds behavior: the left/right columns turn pages
+  // over the full height and only the middle cell of the center column opens
+  // the menu, while the center column above/below it does nothing.
+  uint8_t tapZones[9] = {
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // top row
+      TAP_ZONE_PREV, TAP_ZONE_MENU, TAP_ZONE_NEXT,  // middle row
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // bottom row
+  };
   // Reader menu open gesture (SHOW_READER_MENU: off / center tap / bottom-edge
   // up-swipe). Only surfaced on home-key boards, where Home is the capacitive
   // key and the bottom edge is free; elsewhere it stays at the Tap default.
