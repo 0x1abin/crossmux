@@ -2351,8 +2351,12 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY += blockStyle.paddingBottom;
   }
 
-  // Extra paragraph spacing if enabled.
-  if (extraParagraphSpacing) {
-    currentPageNextY += lineHeight / 2;
+  // Extra paragraph spacing: 0=off, else 0.5x/0.75x/1x/1.25x/1.5x line height.
+  if (extraParagraphSpacing > 0) {
+    constexpr float EXTRA_PARAGRAPH_SPACING_FACTORS[] = {0.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f};
+    const float factor = extraParagraphSpacing < std::size(EXTRA_PARAGRAPH_SPACING_FACTORS)
+                             ? EXTRA_PARAGRAPH_SPACING_FACTORS[extraParagraphSpacing]
+                             : 1.5f;
+    currentPageNextY += static_cast<int16_t>(lineHeight * factor);
   }
 }

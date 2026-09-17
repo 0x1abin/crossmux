@@ -180,7 +180,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     uint16_t fileViewportWidth = 0;
     uint16_t fileViewportHeight = 0;
     float fileLineCompression = 0;
-    bool fileExtraParagraphSpacing = false;
+    uint8_t fileExtraParagraphSpacing = 0;
     uint8_t fileParagraphAlignment = 0;
     bool fileHyphenationEnabled = false;
     bool fileEmbeddedStyle = false;

@@ -14,7 +14,7 @@
 struct ReaderRenderSpec {
   int fontId = 0;
   float lineCompression = 1.0f;
-  bool extraParagraphSpacing = false;
+  uint8_t extraParagraphSpacing = 0;  // 0=off, 1..5=0.5x/0.75x/1x/1.25x/1.5x line height
   uint8_t paragraphAlignment = 0;
   uint16_t viewportWidth = 0;
   uint16_t viewportHeight = 0;
