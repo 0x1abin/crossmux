@@ -29,6 +29,7 @@ class OtaUpdateActivity : public Activity, private UiAppHost {
   OtaUpdater::Channel selectedChannel = OtaUpdater::Channel::Stable;
   int selectedReadyRow = 0;
   bool waitForConfirmRelease = false;
+  bool readingStatsReleased = false;
   unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
   OtaUpdater updater;
   OptionPopup updateConfirmation;
