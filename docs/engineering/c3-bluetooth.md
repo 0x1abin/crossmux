@@ -43,6 +43,15 @@ distinct from missing coverage and must not become a cached missing glyph.
 Font formats, rendering preferences and antialiasing are unchanged. No extra
 reconnect loop, SDK public API, persistent setting or reader menu is introduced.
 
+## Network memory
+
+Wi-Fi startup already stops BLE and returns its dynamic heap; the linked host
+still has a static SRAM cost. X3/X4 OTA and font downloads also save and release
+reading statistics before Wi-Fi selection, then use their existing exit reboot
+to reload them. Settings releases its lists for the font child as it does for
+OTA. See [download memory](network-memory-validation.md) for measurements,
+return-route guarantees and remaining fragmentation/acceptance limits.
+
 ## Reproducible build
 
 No local override is needed. Build X3/X4 with `pio run -e default`,

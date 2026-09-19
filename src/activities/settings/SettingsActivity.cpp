@@ -807,11 +807,11 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResultWith<SdFirmwareUpdateActivity>(resultHandler);
         break;
       case SettingAction::DownloadFonts:
-        startActivityForResultWith<FontDownloadActivity>([this](const ActivityResult&) {
-          SETTINGS.saveToFile();
+        releaseListsForMemoryHungryChild();
+        if (!startActivityForResultWith<FontDownloadActivity>(resultHandler)) {
           rebuildSettingsLists();
           requestUpdate();
-        });
+        }
         break;
       case SettingAction::ManageDictionaries:
         startActivityForResultWith<DictionaryDownloadActivity>([this](const ActivityResult&) {
