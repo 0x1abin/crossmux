@@ -102,6 +102,7 @@ class FontDownloadActivity final : public UiListActivity {
   int downloadingFamilyIndex_ = -1;
   std::string errorMessage_;
   bool cancelRequested_ = false;
+  bool readingStatsReleased_ = false;
   DownloadOperation operation_ = DownloadOperation::None;
   bool selectionUpdated_ = false;
   bool accelerationCompleted_ = false;
