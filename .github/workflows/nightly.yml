@@ -332,7 +332,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: firmware-stable-xteink_x4
+          pattern: firmware-stable-*
+          merge-multiple: true
           path: artifacts
       - uses: actions/download-artifact@v4
         with:
@@ -346,7 +347,7 @@ jobs:
           cp artifacts/xteink-firmware.bin firmware-cn.bin
           cp artifacts/xteink-bootloader.bin bootloader.bin
           cp artifacts/xteink-partitions.bin partitions.bin
-          assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin)
+          assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin artifacts/*)
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
