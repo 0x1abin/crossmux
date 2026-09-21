@@ -74,11 +74,9 @@ constexpr int appIndexForVisibleIndex(const uint32_t hiddenMask, const int visib
   return -1;
 }
 
-constexpr uint32_t effectiveHiddenMask(const uint32_t hiddenMask, const bool hasOpdsServers,
-                                       const CrossPointSettings::ContentProfile profile) {
+constexpr uint32_t effectiveHiddenMask(const uint32_t hiddenMask, const bool hasOpdsServers) {
   uint32_t effective = hiddenMask;
   if (!hasOpdsServers) effective |= appBit(AppId::OpdsBrowser);
-  if (profile == CrossPointSettings::ContentProfile::Global) effective |= CrossPointSettings::CHINA_ONLY_APPS_MASK;
   return effective;
 }
 
@@ -94,19 +92,13 @@ constexpr bool appIdsAreUnique() {
 static_assert(kAppCount <= 32, "the app catalog must fit hiddenAppsMask");
 static_assert(static_cast<uint8_t>(AppId::Count) <= 32, "hiddenAppsMask supports at most 32 stable app IDs");
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
-static_assert(appVisibility::DEFAULT_HIDDEN_APPS_MASK ==
-                  (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |
-                   appBit(AppId::Buddy) | appBit(AppId::PixelSwitch)),
-              "the default mask must hide Chinese chess, Minesweeper, 2048, Buddy, and Pixel Switch");
 static_assert(visibleAppCount(0) == kAppCount, "a zero mask must show every compiled app");
 static_assert(visibleAppCount(UINT32_MAX) == 0, "a full mask must hide every compiled app");
 static_assert(visibleAppCount(appBit(AppId::Woodfish)) == kAppCount - 1, "the widened mask must hide Woodfish");
-static_assert(visibleAppCount(effectiveHiddenMask(0, false, CrossPointSettings::ContentProfile::China)) ==
-                  kAppCount - 1,
+static_assert(visibleAppCount(effectiveHiddenMask(0, false)) == kAppCount - 1,
               "OPDS must be hidden when no server is configured");
-static_assert(visibleAppCount(effectiveHiddenMask(0, true, CrossPointSettings::ContentProfile::Global)) ==
-                  kAppCount - 2,
-              "global profile must hide the two China-only apps");
+static_assert(visibleAppCount(effectiveHiddenMask(0, true)) == kAppCount,
+              "all apps must be available regardless of language");
 static_assert(appIndexForVisibleIndex(appBit(kAppEntries[1].id), 1) == 2,
               "visible indices must skip a hidden middle app");
 
@@ -120,8 +112,7 @@ StrId AppsMenuActivity::getAppTitleId(const int appIndex) {
 
 bool AppsMenuActivity::isAppVisible(const int appIndex) {
   if (appIndex < 0 || appIndex >= kAppCount) return false;
-  const uint32_t hidden = effectiveHiddenMask(SETTINGS.hiddenAppsMask, true, SETTINGS.contentProfile);
-  return (hidden & appBit(kAppEntries[appIndex].id)) == 0;
+  return (SETTINGS.hiddenAppsMask & appBit(kAppEntries[appIndex].id)) == 0;
 }
 
 bool AppsMenuActivity::setAppVisible(const int appIndex, const bool visible) {
@@ -136,8 +127,7 @@ bool AppsMenuActivity::setAppVisible(const int appIndex, const bool visible) {
 }
 
 int AppsMenuActivity::getVisibleAppCount() {
-  return visibleAppCount(
-      effectiveHiddenMask(SETTINGS.hiddenAppsMask, OPDS_STORE.hasServers(), SETTINGS.contentProfile));
+  return visibleAppCount(effectiveHiddenMask(SETTINGS.hiddenAppsMask, OPDS_STORE.hasServers()));
 }
 
 void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
@@ -146,8 +136,7 @@ void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
 }
 
 int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
-  return appIndexForVisibleIndex(
-      effectiveHiddenMask(SETTINGS.hiddenAppsMask, OPDS_STORE.hasServers(), SETTINGS.contentProfile), visibleIndex);
+  return appIndexForVisibleIndex(effectiveHiddenMask(SETTINGS.hiddenAppsMask, OPDS_STORE.hasServers()), visibleIndex);
 }
 
 void AppsMenuActivity::onEnter() {

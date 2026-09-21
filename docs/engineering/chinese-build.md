@@ -14,7 +14,7 @@ The startup guide and later UI-language changes apply the same rule.
 | UI fonts | International 8/10/12pt faces are primary; Simplified-Chinese 8/10/12pt subsets are registered through `setFallbackFont()`. |
 | Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time. |
 | EPUB/TXT | Unicode CJK parsing, line breaking and missing-glyph detection are always compiled and trigger from text content. |
-| Regional apps | WeRead and Chinese Chess are compiled once and exposed only for the China content profile. |
+| Apps | App visibility is independent of language and content profile. WeRead is visible by default in every language; Chinese Chess is hidden by default. Language changes preserve app visibility choices. |
 | Services | China uses `crossmux.cn`, OTA variant `cn`, and China NTP servers; Global uses `crossmux.com`, variant `global`, and international NTP servers. Initial onboarding alone sets the default UTC offset. |
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):

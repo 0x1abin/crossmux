@@ -46,19 +46,8 @@ constexpr CrossPointSettings::ContentProfile contentProfileForLanguage(const Lan
                                      : CrossPointSettings::ContentProfile::Global;
 }
 
-constexpr uint32_t regionalAppMaskForProfile(const uint32_t hiddenAppsMask,
-                                             const CrossPointSettings::ContentProfile profile) {
-  return profile == CrossPointSettings::ContentProfile::China
-             ? hiddenAppsMask & ~CrossPointSettings::CHINA_ONLY_APPS_MASK
-             : hiddenAppsMask | CrossPointSettings::CHINA_ONLY_APPS_MASK;
-}
-
 static_assert(contentProfileForLanguage(Language::ZH_CN) == CrossPointSettings::ContentProfile::China);
 static_assert(contentProfileForLanguage(Language::EN) == CrossPointSettings::ContentProfile::Global);
-static_assert(regionalAppMaskForProfile(UINT32_MAX, CrossPointSettings::ContentProfile::China) ==
-              (UINT32_MAX & ~CrossPointSettings::CHINA_ONLY_APPS_MASK));
-static_assert(regionalAppMaskForProfile(0, CrossPointSettings::ContentProfile::Global) ==
-              CrossPointSettings::CHINA_ONLY_APPS_MASK);
 
 constexpr uint8_t migrateLegacySoundFeedback(const bool enabled) {
   return enabled ? CrossPointSettings::SOUND_FEEDBACK_MEDIUM : CrossPointSettings::SOUND_FEEDBACK_OFF;
@@ -178,7 +167,6 @@ bool isSettingAvailableForPersistence(const SettingInfo& setting) {
 void CrossPointSettings::applyLanguageSelection(const uint8_t languageIndex) {
   language = languageIndex;
   contentProfile = contentProfileForLanguage(static_cast<Language>(languageIndex));
-  hiddenAppsMask = regionalAppMaskForProfile(hiddenAppsMask, contentProfile);
 }
 
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
