@@ -48,8 +48,8 @@
 #include "settings/SettingsActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
-#include "util/UserGuide.h"
 #include "util/ImageViewerActivity.h"
+#include "util/UserGuide.h"
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
