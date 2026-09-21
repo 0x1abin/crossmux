@@ -6,6 +6,7 @@
 
 #include <cstdint>
 
+#include "AppVisibility.h"
 #include "BleKeyMapping.h"
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
@@ -403,13 +404,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t backShortToFileBrowser = 0;
   // Apps menu visibility. Set bits hide stable app IDs.
   static constexpr uint8_t APPS_CATALOG_VERSION = 1;
-  static constexpr uint8_t BUDDY_APP_ID = 10;
-  static constexpr uint8_t PIXEL_SWITCH_APP_ID = 12;
-  static constexpr uint32_t CHINA_ONLY_APPS_MASK = (uint32_t{1} << 1) | (uint32_t{1} << 4);
-  static constexpr uint32_t DEFAULT_HIDDEN_APPS_MASK = (uint32_t{1} << 4) | (uint32_t{1} << 5) | (uint32_t{1} << 6) |
-                                                       (uint32_t{1} << BUDDY_APP_ID) |
-                                                       (uint32_t{1} << PIXEL_SWITCH_APP_ID);
-  uint32_t hiddenAppsMask = DEFAULT_HIDDEN_APPS_MASK;
+  uint32_t hiddenAppsMask = appVisibility::DEFAULT_HIDDEN_APPS_MASK;
   uint8_t appsCatalogVersion = APPS_CATALOG_VERSION;
   uint8_t buddyClaimed = 0;
   // Image rendering mode in EPUB reader
@@ -513,7 +508,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   ReaderRenderSpec readerRenderSpec(uint16_t viewportWidth, uint16_t viewportHeight) const;
 
   static const char* getFilePath() { return "/.crosspoint/settings.json"; }
-  // Keep the UI language, service region, and regional-app defaults in sync.
+  // Keep the UI language and service region in sync; preserve app visibility.
   // The caller persists the resulting settings.
   void applyLanguageSelection(uint8_t languageIndex);
   bool loadFromFile();

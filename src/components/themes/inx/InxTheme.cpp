@@ -28,6 +28,8 @@ constexpr int kMaxValueWidth = 200;
 constexpr int kSideHintY = 345;
 constexpr int kX3SideHintY = 155;
 constexpr int kHintWidth = 80;
+constexpr int kHintBarWidth = kHintWidth * 4 / 5;
+constexpr int kHintBarInset = (kHintWidth - kHintBarWidth) / 2;
 constexpr int kHintBarHeight = 5;
 constexpr int kHintGap = 4;
 
@@ -187,7 +189,7 @@ void InxTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const ch
   for (int i = 0; i < 4; ++i) {
     renderer.fillRect(positions[i], hintY, kHintWidth, buttonHeight, false);
     if (!labels[i] || !*labels[i]) continue;
-    renderer.fillRectDither(positions[i], barY, kHintWidth, kHintBarHeight, Color::DarkGray);
+    renderer.fillRectDither(positions[i] + kHintBarInset, barY, kHintBarWidth, kHintBarHeight, Color::DarkGray);
     drawHintText(renderer, hintLabel(labels[i]), positions[i], hintY, contentBottom);
   }
   renderer.setOrientation(original);

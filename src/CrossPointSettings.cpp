@@ -46,19 +46,8 @@ constexpr CrossPointSettings::ContentProfile contentProfileForLanguage(const Lan
                                      : CrossPointSettings::ContentProfile::Global;
 }
 
-constexpr uint32_t regionalAppMaskForProfile(const uint32_t hiddenAppsMask,
-                                             const CrossPointSettings::ContentProfile profile) {
-  return profile == CrossPointSettings::ContentProfile::China
-             ? hiddenAppsMask & ~CrossPointSettings::CHINA_ONLY_APPS_MASK
-             : hiddenAppsMask | CrossPointSettings::CHINA_ONLY_APPS_MASK;
-}
-
 static_assert(contentProfileForLanguage(Language::ZH_CN) == CrossPointSettings::ContentProfile::China);
 static_assert(contentProfileForLanguage(Language::EN) == CrossPointSettings::ContentProfile::Global);
-static_assert(regionalAppMaskForProfile(UINT32_MAX, CrossPointSettings::ContentProfile::China) ==
-              (UINT32_MAX & ~CrossPointSettings::CHINA_ONLY_APPS_MASK));
-static_assert(regionalAppMaskForProfile(0, CrossPointSettings::ContentProfile::Global) ==
-              CrossPointSettings::CHINA_ONLY_APPS_MASK);
 
 constexpr uint8_t migrateLegacySoundFeedback(const bool enabled) {
   return enabled ? CrossPointSettings::SOUND_FEEDBACK_MEDIUM : CrossPointSettings::SOUND_FEEDBACK_OFF;
@@ -178,7 +167,6 @@ bool isSettingAvailableForPersistence(const SettingInfo& setting) {
 void CrossPointSettings::applyLanguageSelection(const uint8_t languageIndex) {
   language = languageIndex;
   contentProfile = contentProfileForLanguage(static_cast<Language>(languageIndex));
-  hiddenAppsMask = regionalAppMaskForProfile(hiddenAppsMask, contentProfile);
 }
 
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
@@ -408,12 +396,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
                                 object["v"] | static_cast<uint8_t>(0), object["b"] | static_cast<uint8_t>(0xFF));
     }
   }
-  hiddenAppsMask = doc["hiddenAppsMask"].isNull() ? DEFAULT_HIDDEN_APPS_MASK : doc["hiddenAppsMask"].as<uint32_t>();
+  hiddenAppsMask =
+      doc["hiddenAppsMask"].isNull() ? appVisibility::DEFAULT_HIDDEN_APPS_MASK : doc["hiddenAppsMask"].as<uint32_t>();
   const uint8_t storedAppsCatalogVersion = doc["appsCatalogVersion"] | static_cast<uint8_t>(0);
   // Buddy was added at catalog version 1. Hide it exactly once during the
   // upgrade, then preserve the user's visibility choice on later boots.
   if (storedAppsCatalogVersion < APPS_CATALOG_VERSION) {
-    hiddenAppsMask |= uint32_t{1} << BUDDY_APP_ID;
+    hiddenAppsMask |= appVisibility::appBit(appVisibility::AppId::Buddy);
     needsResave = true;
   }
   appsCatalogVersion = APPS_CATALOG_VERSION;

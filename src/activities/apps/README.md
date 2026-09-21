@@ -16,7 +16,7 @@ apps/
 ├── airpage/                    # cloud image display app
 ├── sudoku/                    # one subdirectory per app, files keep the app-name prefix
 ├── gomoku/
-├── chinese-chess/             # shown in the China content profile
+├── chinese-chess/             # hidden by default
 ├── minesweeper/
 ├── woodfish/                  # electronic woodfish with lazy SD checkpointing
 └── avatar/
@@ -72,7 +72,7 @@ failure. Do not construct Activities with `std::make_unique`.
 
 ### 3. Assign an ID and append one row to `kAppEntries`
 
-Append to the existing definitions in `apps/AppsMenuActivity.cpp`; this is an excerpt, not a replacement catalog:
+Append the ID in `src/AppVisibility.h` and the row in `apps/AppsMenuActivity.cpp`; this is an excerpt, not a replacement catalog:
 
 ```cpp
 enum class AppId : uint8_t {
@@ -93,10 +93,13 @@ constexpr AppEntry kAppEntries[] = {
 };
 ```
 
+Define stable IDs and default visibility in `src/AppVisibility.h`; keep titles, icons, and launch actions in the menu table.
+
 The ID is the persisted bit position in `hiddenAppsMask`: allocate the next unused value, never reuse or change existing
 values, and keep conditional-app IDs outside their `#ifdef`. New bits default to visible. Fresh settings hide Chinese
-Chess, Minesweeper, 2048, Buddy, and Pixel Switch; existing masks are never overwritten. The menu, launcher, and App Visibility
-settings all read this same table; no `switch` or `buildItems()` is needed.
+Chess, Minesweeper, 2048, Ugly Avatar, Buddy, Sokoban, Pixel Switch, and Woodfish.
+Existing masks are preserved except for the one-time Buddy migration from catalog version 0.
+The menu, launcher, and App Visibility settings all read this same table; no `switch` or `buildItems()` is needed.
 The visibility mask is 32-bit. `Calculator = 15` and `Woodfish = 16` are stable;
 IDs 17 through 31 remain available.
 
@@ -128,17 +131,18 @@ AI, and persistence in the game: they are not framework concerns.
 
 ---
 
-### 6. Regional visibility
+### 6. Language-independent visibility
 
 Chinese Chess and WeRead are compiled into the unified firmware. The existing
 `ENABLE_CHINESE_VERSION` compatibility guards remain enabled by the base and
 simulator profiles; do not add a separate Chinese build or source-filter split.
 
-The launcher applies `effectiveHiddenMask()` to combine user visibility,
-configured OPDS servers, and the runtime content profile. Global hides the
-`CHINA_ONLY_APPS_MASK` entries. Follow this existing mechanism when an approved
-app needs regional visibility, preserving its stable bit ID and the shared
-visibility settings. See [Chinese support](../../../docs/engineering/chinese-build.md).
+The launcher applies `effectiveHiddenMask()` to combine user visibility and
+configured OPDS servers. The settings toggle reflects the user choice even when
+OPDS is temporarily absent from the menu because no server is configured. App visibility is independent of the UI language and
+content profile. WeRead is visible by default in every language; Chinese Chess
+is hidden by default. Language changes preserve the user's app visibility choices.
+See [Chinese support](../../../docs/engineering/chinese-build.md).
 
 ---
 
