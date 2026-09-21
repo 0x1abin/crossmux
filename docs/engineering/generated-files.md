@@ -32,6 +32,53 @@
 
 ## Modifying Generated Content Workflow
 
+### Bundled first-use user guide
+
+`scripts/build_userguide.py` runs for firmware and simulator builds. It calls
+`scripts/generate_userguide_epub.py --bundled` to package the maintained short
+XHTML guides in `docs/user-guide/{zh-CN,en}.xhtml`, reusing the standard-library
+boot-logo generator for a monochrome cover. This mode has no third-party Python
+dependencies. The separate legacy Markdown export still requires Markdown,
+EbookLib and Pillow; it is not part of firmware builds.
+
+Outputs are ignored: `build/user-guide/*.epub` and
+`src/util/UserGuide.generated.h`. ZIP metadata is fixed for reproducible bytes;
+the two compressed archives together must stay within 128 KiB. Edit the XHTML
+sources or generator, never the generated header. Validate with
+`python3 scripts/tests/test_userguide_epub.py` and the `UserGuideTest` host target.
+
+After SD initialization and recent-list loading, `UserGuide::prepare()` checks
+`/.crosspoint/user-guide.checked`. An existing readable recent list with any
+present book is marked checked immediately. An absent list or a readable list
+with no present books is eligible; an existing list that fails to load is left
+alone. Recovery firmware and panic boots skip the check.
+
+The first `goHome()` after onboarding writes the selected guide to the SD root
+(Simplified Chinese UI selects Chinese; all other languages select English).
+It verifies a temporary file before renaming, adds the standard recent entry
+and thumbnail path, then writes the checked marker. No reader is opened and no
+reading statistics are created. Cover generation remains with the active theme.
+A different existing file at the same destination is preserved and marks the
+check skipped; an unreadable file defers the attempt. Failures retry only on a
+later boot, reusing an identical already-installed EPUB.
+
+The marker is independent of settings and recents: deleting/moving the guide,
+clearing recents, resetting settings, changing language or upgrading firmware
+does not restore/replace it. A new card or explicitly removing the marker allows
+a new check. Card filesystem corruption and removal of the whole `.crosspoint`
+directory are not distinguishable from first use. FAT writes/renames are not a
+power-loss transaction; test interruption recovery on real cards.
+
+Hardware acceptance: on X3/X4, start with a backed-up fresh SD card, select each
+language and inspect ordinary, carousel and INX homes, then open all chapters.
+Repeat after deletion, reset and OTA. Test a full/read-only card and interrupt
+power during copy, recent-save and marker-save stages. The `GUIDE` log reports
+attempt duration and before/after free heap and largest block. Use the existing
+`MEM` serial log for the minimum-ever heap; also measure the subsequent cover
+load, which is not included in the installation timing. Record measurements
+separately from simulator results and compare firmware size with every target's
+OTA slot before publishing.
+
 ### Calculator display fonts
 
 `CalculatorFont.h` uses generated `calculator_18_regular.h` and
