@@ -18,28 +18,8 @@ namespace fui = freeink::ui;
 
 namespace {
 
-// Single source of truth for the Apps menu — add a new app here, then provide the
-// matching `goTo<App>()` in ActivityManager and assign a stable, never-reused AppId.
-enum class AppId : uint8_t {
-  ReadingStats = 0,
-  WeRead = 1,
-  Sudoku = 2,
-  Gomoku = 3,
-  ChineseChess = 4,
-  Minesweeper = 5,
-  Game2048 = 6,
-  UglyAvatar = 7,
-  Standby = 8,
-  AirPage = 9,
-  Buddy = 10,
-  Sokoban = 11,
-  PixelSwitch = 12,
-  FileTransfer = 13,
-  OpdsBrowser = 14,
-  Calculator = 15,
-  Woodfish = 16,
-  Count = 17,
-};
+using appVisibility::appBit;
+using appVisibility::AppId;
 
 struct AppEntry {
   AppId id;
@@ -73,8 +53,6 @@ constexpr AppEntry kAppEntries[] = {
 };
 
 constexpr int kAppCount = static_cast<int>(sizeof(kAppEntries) / sizeof(kAppEntries[0]));
-
-constexpr uint32_t appBit(const AppId id) { return uint32_t{1} << static_cast<uint8_t>(id); }
 
 constexpr int visibleAppCount(const uint32_t hiddenMask) {
   int count = 0;
@@ -115,15 +93,8 @@ constexpr bool appIdsAreUnique() {
 
 static_assert(kAppCount <= 32, "the app catalog must fit hiddenAppsMask");
 static_assert(static_cast<uint8_t>(AppId::Count) <= 32, "hiddenAppsMask supports at most 32 stable app IDs");
-static_assert(static_cast<uint8_t>(AppId::Buddy) == CrossPointSettings::BUDDY_APP_ID,
-              "the Buddy app ID must remain stable");
-static_assert(static_cast<uint8_t>(AppId::PixelSwitch) == CrossPointSettings::PIXEL_SWITCH_APP_ID,
-              "the Pixel Switch app ID must remain stable");
-static_assert(static_cast<uint8_t>(AppId::Calculator) == 15, "the Calculator app ID must remain stable");
-static_assert(static_cast<uint8_t>(AppId::Woodfish) == 16, "the Woodfish app ID must remain stable");
-static_assert(appBit(AppId::Woodfish) == (uint32_t{1} << 16), "Woodfish visibility must use the first widened bit");
 static_assert(appIdsAreUnique(), "stable app IDs must not be reused");
-static_assert(CrossPointSettings::DEFAULT_HIDDEN_APPS_MASK ==
+static_assert(appVisibility::DEFAULT_HIDDEN_APPS_MASK ==
                   (appBit(AppId::ChineseChess) | appBit(AppId::Minesweeper) | appBit(AppId::Game2048) |
                    appBit(AppId::Buddy) | appBit(AppId::PixelSwitch)),
               "the default mask must hide Chinese chess, Minesweeper, 2048, Buddy, and Pixel Switch");
