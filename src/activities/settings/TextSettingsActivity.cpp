@@ -663,7 +663,7 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     case StyleRow::ReadingGuideLine:
       SETTINGS.readingGuideLineEnabled = !SETTINGS.readingGuideLineEnabled;
       rebuildRowItems();
-      activeNav().selected = std::min(activeNav().selected, listCount());
+      activeNav().selected = std::min<int>(activeNav().selected, listCount());
       break;
     case StyleRow::ReadingGuideLineStyle:
       optionPopup_.show(StrId::STR_READING_GUIDE_LINE_STYLE, GUIDE_LINE_STYLE_IDS,
