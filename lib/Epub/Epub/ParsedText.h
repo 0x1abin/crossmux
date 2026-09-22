@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "FirstLineIndent.h"
 #include "blocks/BlockStyle.h"
 #include "blocks/TextBlock.h"
 
@@ -54,6 +55,7 @@ class ParsedText {
   std::deque<std::string> rubyTexts;
   BlockStyle blockStyle;
   uint8_t extraParagraphSpacing;  // 0=off, 1..5=0.5x/0.75x/1x/1.25x/1.5x line height
+  uint8_t firstLineIndent;
   bool collectTouchLinks;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
@@ -93,11 +95,12 @@ class ParsedText {
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
 
  public:
-  explicit ParsedText(const uint8_t extraParagraphSpacing, const bool hyphenationEnabled = false,
-                      const bool focusReadingEnabled = false, const BlockStyle& blockStyle = BlockStyle(),
-                      const bool collectTouchLinks = false)
+  explicit ParsedText(const uint8_t extraParagraphSpacing, const uint8_t firstLineIndent,
+                      const bool hyphenationEnabled = false, const bool focusReadingEnabled = false,
+                      const BlockStyle& blockStyle = BlockStyle(), const bool collectTouchLinks = false)
       : blockStyle(blockStyle),
         extraParagraphSpacing(extraParagraphSpacing),
+        firstLineIndent(firstLineIndent),
         collectTouchLinks(collectTouchLinks),
         hyphenationEnabled(hyphenationEnabled),
         focusReadingEnabled(focusReadingEnabled),
