@@ -666,22 +666,28 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   if (!isFirstLine || !firstLinePending || !isNaturalAlign) {
     return 0;
   }
-  if (blockStyle.textIndentDefined) {
-    if (blockStyle.textIndent < 0 || !extraParagraphSpacing) {
-      return blockStyle.textIndent;
-    }
+  // The reader-level first-line-indent control has three states:
+  //  - Auto: keep the book's own CSS text-indent (or none when the book does
+  //    not set one), the stock behaviour.
+  //  - Indent: every paragraph gets the reader's own two-CJK-character /
+  //    three-space indent.
+  //  - NoIndent: no first-line indent at all, overriding the book's CSS
+  //    text-indent whether embedded styles are on or off.
+  // Extra paragraph spacing never affects the indent, so turning it on no
+  // longer wipes out a book's built-in first-line indent.
+  if (firstLineIndent == FirstLineIndent::NoIndent) {
     return 0;
   }
-  if (!extraParagraphSpacing) {
-    const int spaceIndent = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
-    const bool hasCjkText =
-        std::any_of(words.begin(), words.end(), [](const auto& word) { return containsCjkBreakableCodepoint(word); });
-    if (!hasCjkText) return spaceIndent;
-
-    const int cjkAdvance = renderer.getTextAdvanceX(fontId, "我", EpdFontFamily::REGULAR);
-    return cjkAdvance > 0 ? cjkAdvance * 2 : spaceIndent;
+  if (firstLineIndent == FirstLineIndent::Auto) {
+    return blockStyle.textIndentDefined ? blockStyle.textIndent : 0;
   }
-  return 0;
+  const int spaceIndent = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
+  const bool hasCjkText =
+      std::any_of(words.begin(), words.end(), [](const auto& word) { return containsCjkBreakableCodepoint(word); });
+  if (!hasCjkText) return spaceIndent;
+
+  const int cjkAdvance = renderer.getTextAdvanceX(fontId, "我", EpdFontFamily::REGULAR);
+  return cjkAdvance > 0 ? cjkAdvance * 2 : spaceIndent;
 }
 // Consumes data to minimize memory usage
 bool ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,

@@ -155,6 +155,12 @@ because content-based image recognition can change image indexes within a sectio
 Extracted images and their pixel caches now use the `img2_` prefix to prevent
 reuse of older `img_` files with different source images. Old `img_` files remain
 unused until the existing whole-book **Delete cache** action removes them.
+Versions 68/69 replace the reader-level first-line-indent setting with a
+three-state control (Auto / Indent / NoIndent): Auto keeps the book's own CSS
+text-indent, Indent forces the reader's two-CJK-character / three-space indent,
+and NoIndent forces flush, so the default no longer zeroes a book's own indent
+on upgrade. The 68/69 pairing is reserved to stay clear of the concurrent 66/67
+layout change.
 
 Versions 60/61 append the internal-link rectangles produced during text layout
 to each serialized page. The reader uses these rectangles for touch navigation;
