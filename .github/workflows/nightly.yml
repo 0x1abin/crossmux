@@ -21,6 +21,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   select_runner:
@@ -53,7 +54,9 @@ jobs:
           build_id="${channel}-build-${GITHUB_SHA}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
-          echo "build_tag=$build_id" >> "$GITHUB_OUTPUT"
+          build_tag="$build_id"
+          [ "$channel" != stable ] || build_tag="$GITHUB_REF_NAME"
+          echo "build_tag=$build_tag" >> "$GITHUB_OUTPUT"
           echo "matrix=$(python3 scripts/package_nightly_target.py --channel "$channel" --matrix)" >> "$GITHUB_OUTPUT"
 
   notes:
@@ -74,11 +77,8 @@ jobs:
             notes=".github/release-notes/${GITHUB_REF_NAME}.md"
             test -f "$notes"
             cp "$notes" release-body.md
-            git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > tag-message.txt
-            python3 scripts/generate_ota_notes.py --input tag-message.txt --output ota-notes.md
+            python3 scripts/generate_ota_notes.py --input "$notes" --output ota-notes.md
             test -s ota-notes.md
-            printf '\n' >> release-body.md
-            cat ota-notes.md >> release-body.md
           else
             printf 'Nightly build `%s` from `main`.\n' "${GITHUB_SHA::7}" > release-body.md
             if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
@@ -91,12 +91,13 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: firmware-release-notes
           path: |
             release-body.md
             ota-notes.md
           if-no-files-found: warn
-          retention-days: 1
+          retention-days: 14
 
   build:
     needs: [prepare, select_runner]
@@ -131,6 +132,7 @@ jobs:
           (cd "dist/${{ matrix.targetId }}" && sha256sum --check *-SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: firmware-${{ needs.prepare.outputs.channel }}-${{ matrix.targetId }}
           path: dist/${{ matrix.targetId }}
           if-no-files-found: error
@@ -141,6 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
@@ -156,16 +159,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           mkdir -p previous/global
-          gh release download nightly --repo "$GITHUB_REPOSITORY" \
-            --pattern release-index.json --dir previous/global
+          saved="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
+            --jq '.artifacts[] | select(.name == "previous-global-index") | .id')"
+          if [ -n "$saved" ]; then
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name previous-global-index --dir previous/global
+          elif ! gh release download nightly --repo "$GITHUB_REPOSITORY" \
+            --pattern release-index.json --dir previous/global; then
+            echo "::error::Previous Nightly index unavailable. Run Restore Firmware Channel before retrying."
+            exit 1
+          fi
+          PYTHONPATH=scripts python3 -c 'import json; from nightly_retention import referenced_builds; referenced_builds(json.load(open("previous/global/release-index.json")), "github")'
       - uses: actions/upload-artifact@v4
         if: needs.prepare.outputs.channel == 'nightly'
         with:
+          overwrite: true
           name: previous-global-index
           path: previous/global/release-index.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
       - name: Build global index
         env:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
@@ -179,46 +193,42 @@ jobs:
             --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${BUILD_TAG}/" \
             --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-id "$BUILD_ID" \
             --output release-index.json "${notes_args[@]}"
-      - name: Publish immutable GitHub build
+      - name: Publish GitHub version or Nightly archive
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
           BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
         run: |
-          mapfile -t assets < <(find artifacts -type f -print)
-          gh release create "$BUILD_TAG" "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "CrossMux ${CHANNEL^} ${GITHUB_SHA::7} #${GITHUB_RUN_NUMBER}" \
-            --notes-file notes/release-body.md --prerelease
+          set -euo pipefail
+          if [ "$CHANNEL" = stable ]; then
+            title="CrossMux $GITHUB_REF_NAME"
+          else
+            title="CrossMux Nightly $(date -u +%Y-%m-%d) ${GITHUB_SHA::7}"
+          fi
+          python3 scripts/publish_firmware.py github-assets --channel "$CHANNEL" \
+            --tag "$BUILD_TAG" --sha "$GITHUB_SHA" --title "$title" \
+            --notes notes/release-body.md --assets artifacts
+      - name: Verify GitHub resources before advancing channel
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          python3 scripts/verify_nightly_release.py --channel "$CHANNEL" \
+            --index-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL}/release-index.json" \
+            --index-file release-index.json --expected-sha "$GITHUB_SHA"
       - name: Publish rolling global index last
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          title="CrossMux ${CHANNEL^} (${GITHUB_SHA::7})"
-          if gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "$title" --notes-file notes/release-body.md --prerelease
-          else
-            gh release create "$CHANNEL" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --title "$title" --notes-file notes/release-body.md --prerelease
-          fi
-          gh release upload "$CHANNEL" release-index.json --repo "$GITHUB_REPOSITORY" --clobber
-          if [ -d "artifacts/firmware-${CHANNEL}-xteink_x4" ]; then
-            cp "artifacts/firmware-${CHANNEL}-xteink_x4/xteink-firmware.bin" firmware.bin
-            gh release upload "$CHANNEL" firmware.bin --repo "$GITHUB_REPOSITORY" --clobber
-          fi
-          legacy_assets="$(gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name')"
-          if grep -Fxq firmware-cn.bin <<< "$legacy_assets"; then
-            gh release delete-asset "$CHANNEL" firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
-          fi
+          python3 scripts/publish_firmware.py channel --channel "$CHANNEL" \
+            --index release-index.json
 
   publish_cn:
     needs: [prepare, notes, build]
     runs-on: [self-hosted, Linux, X64, h2o]
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -233,17 +243,30 @@ jobs:
           path: notes
       - name: Load previous China Nightly index
         if: needs.prepare.outputs.channel == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           mkdir -p previous
-          curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
-            -o previous/cn.json
+          saved="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
+            --jq '.artifacts[] | select(.name == "previous-cn-index") | .id')"
+          if [ -n "$saved" ]; then
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name previous-cn-index --dir previous
+          elif ! curl -fsSL https://assets.crossmux.cn/firmware/releases/nightly/index.json \
+            -o previous/cn.json; then
+            echo "::error::Previous China Nightly index unavailable; restore it before retrying. Cleanup cannot be skipped."
+            exit 1
+          fi
+          PYTHONPATH=scripts python3 -c 'import json; from nightly_retention import referenced_builds; referenced_builds(json.load(open("previous/cn.json")), "cos")'
       - uses: actions/upload-artifact@v4
         if: needs.prepare.outputs.channel == 'nightly'
         with:
+          overwrite: true
           name: previous-cn-index
           path: previous/cn.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
       - name: Build China index
         env:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
@@ -273,20 +296,15 @@ jobs:
           COS_REGION: ${{ secrets.COS_REGION }}
           BUILD_ID: ${{ needs.prepare.outputs.build_id }}
         run: |
-          set -euo pipefail
-          cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" \
-            -e "cos.${COS_REGION}.myqcloud.com")
-          [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
-          for artifact in artifacts/firmware-*; do
-            target="${artifact##*-}"
-            if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" "$artifact/" \
-              "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/" \
-              --recursive --forbid-overwrite --meta 'Cache-Control:public,max-age=31536000,immutable' \
-              --fail-output-path "$RUNNER_TEMP/coscli-errors"; then
-              find "$RUNNER_TEMP/coscli-errors" -type f -name error.report -exec cat {} + 2>/dev/null || true
-              exit 1
-            fi
-          done
+          python3 scripts/publish_firmware.py cos-assets --assets artifacts \
+            --build-id "$BUILD_ID" --cli "$RUNNER_TEMP/coscli"
+      - name: Verify COS resources before advancing channel
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          python3 scripts/verify_nightly_release.py --channel "$CHANNEL" \
+            --index-url "https://assets.crossmux.cn/firmware/releases/${CHANNEL}/index.json" \
+            --index-file release-index-cn.json --expected-sha "$GITHUB_SHA"
       - name: Publish rolling China index last
         env:
           COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
@@ -325,37 +343,15 @@ jobs:
 
   publish_stable_release:
     if: needs.prepare.outputs.channel == 'stable'
-    needs: [prepare, notes, build, verify_publish]
+    needs: [prepare, verify_publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: firmware-stable-*
-          merge-multiple: true
-          path: artifacts
-      - uses: actions/download-artifact@v4
-        with:
-          name: firmware-release-notes
-          path: notes
-      - name: Publish versioned compatibility release
+      - name: Mark verified Stable version as Latest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          cp artifacts/xteink-firmware.bin firmware.bin
-          cp artifacts/xteink-firmware.bin firmware-cn.bin
-          cp artifacts/xteink-bootloader.bin bootloader.bin
-          cp artifacts/xteink-partitions.bin partitions.bin
-          assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin artifacts/*)
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "CrossMux $GITHUB_REF_NAME" --notes-file notes/release-body.md --latest
-          else
-            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
-              --verify-tag --title "CrossMux $GITHUB_REF_NAME" --notes-file notes/release-body.md --latest
-          fi
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest
 
   cleanup_github:
     if: needs.prepare.outputs.channel == 'nightly'

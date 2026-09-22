@@ -1,0 +1,30 @@
+name: Restore Firmware Channel
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel to restore from the current COS release (no rebuild or rollback)
+        required: true
+        type: choice
+        options: [stable, nightly]
+
+concurrency:
+  group: firmware-${{ inputs.channel }}-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Verify resources and restore missing channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel }}
+        run: python3 scripts/restore_firmware_channel.py --channel "$CHANNEL"

@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 from nightly_targets import (
-    FLAVOR_TOKENS,
+    FLAVOR_TOKENS, supported_channels, asset_roles, ASSET_OFFSETS,
     CHANNELS,
     TARGETS,
     asset_name,
@@ -20,18 +20,6 @@ from nightly_targets import (
     matrix,
     version_for,
 )
-FULL_INSTALL_SEGMENTS = (
-    ('bootloader', 'bootloader.bin', 0x0000),
-    ('partitions', 'partitions.bin', 0x8000),
-    ('boot_app0', 'boot_app0.bin', 0xE000),
-    ('firmware', 'firmware.bin', 0x10000),
-)
-STABLE_C3_SEGMENTS = (
-    ('bootloader', 'bootloader.bin', 0x0000),
-    ('partitions', 'partitions.bin', 0x8000),
-    ('firmware', 'firmware.bin', 0x10000),
-)
-OTA_SEGMENT = (('firmware', 'firmware.bin', 0x10000),)
 EXPECTED_PARTITIONS = {
     'otadata': (0xE000, 0x2000),
     'app0': (0x10000, 0x640000),
@@ -100,20 +88,15 @@ def verify_firmware(path, chip_id, board_tag):
 
 def package_target(root, target_id, channel, output):
     target = TARGETS[target_id]
-    if channel not in target['supportedChannels']:
+    if channel not in supported_channels(target):
         raise SystemExit(f'{target_id} does not support the {channel} channel')
     environment = environment_for(target_id, channel, 'global')
     build = root / '.pio/build' / environment
     output.mkdir(parents=True, exist_ok=True)
     verify_partition_csv(root)
 
-    segments = (
-        FULL_INSTALL_SEGMENTS
-        if target['fullInstall']
-        else STABLE_C3_SEGMENTS
-        if channel == 'stable'
-        else OTA_SEGMENT
-    )
+    segments = [(role, f'{role}.bin', ASSET_OFFSETS[role])
+                for role in asset_roles(target, channel, target['assetProfile'])]
     assets = []
     for role, source_name, offset in segments:
         source = find_boot_app0() if role == 'boot_app0' else build / source_name
@@ -142,9 +125,10 @@ def package_target(root, target_id, channel, output):
         'models': target['models'],
         'deviceSlug': target['deviceSlug'],
         'boardTag': target['boardTag'],
-        'supportedChannels': target['supportedChannels'],
+        'supportedChannels': supported_channels(target),
         'environment': environment,
         'chip': target['chip'],
+        'assetProfile': target['assetProfile'],
         'version': version_for(
             config['crosspoint']['version'], target_id, channel, 'global', short_sha
         ),
@@ -152,7 +136,7 @@ def package_target(root, target_id, channel, output):
         'sdkSha': git_value(root / 'freeink-sdk', 'rev-parse', 'HEAD'),
         'assets': assets,
     }
-    if target['fullInstall']:
+    if target['assetProfile'] == 's3-ota-v1':
         manifest['partitionProfile'] = 'crossmux-sticky-v1'
         manifest['flash'] = {'size': 0x1000000, 'mode': 'dio', 'frequency': '80m'}
 
