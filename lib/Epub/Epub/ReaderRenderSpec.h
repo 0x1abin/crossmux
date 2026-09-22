@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+#include "FirstLineIndent.h"
+
 // The resolved text-rendering configuration a reader hands to the layout
 // engine. Section-cache validation keys on every field: a section file built
 // with a different spec is discarded and rebuilt.
@@ -15,6 +17,11 @@ struct ReaderRenderSpec {
   int fontId = 0;
   float lineCompression = 1.0f;
   bool extraParagraphSpacing = false;
+  // Reader-level first-line indent, one of FirstLineIndent::Auto/Indent/
+  // NoIndent (see ParsedText.h). Independent of extraParagraphSpacing:
+  // paragraphs keep their indent even when extra paragraph spacing is
+  // enabled.
+  uint8_t firstLineIndent = FirstLineIndent::Auto;
   uint8_t paragraphAlignment = 0;
   uint16_t viewportWidth = 0;
   uint16_t viewportHeight = 0;

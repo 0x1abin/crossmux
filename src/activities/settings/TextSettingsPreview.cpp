@@ -40,7 +40,7 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   style.alignment = toCssAlign(SETTINGS.paragraphAlignment);
   style.textAlignDefined = true;  // honor the user's choice; RTL auto-detected from text
 
-  ParsedText parsed(SETTINGS.extraParagraphSpacing != 0, SETTINGS.hyphenationEnabled != 0,
+  ParsedText parsed(SETTINGS.extraParagraphSpacing != 0, SETTINGS.firstLineIndent, SETTINGS.hyphenationEnabled != 0,
                     SETTINGS.focusReadingEnabled != 0, style);
 
   // Feed one space-separated word at a time; addWord handles NFC/CJK/RTL/focus splitting
@@ -119,6 +119,7 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .lineCompression = compression,
                        .alignment = SETTINGS.paragraphAlignment,
                        .extraParagraphSpacing = SETTINGS.extraParagraphSpacing != 0,
+                       .firstLineIndent = SETTINGS.firstLineIndent,
                        .focusReading = SETTINGS.focusReadingEnabled != 0,
                        .hyphenation = SETTINGS.hyphenationEnabled != 0};
   if (key != layout.key) {

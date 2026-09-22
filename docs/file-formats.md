@@ -100,9 +100,9 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 66 / 67
+### Versions 68 / 69
 
-> Unified firmware uses the CJK-capable cache version **67**. Version 66 is the
+> Unified firmware uses the CJK-capable cache version **69**. Version 68 is the
 > Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
@@ -143,7 +143,7 @@ current reader settings, the section is discarded and rebuilt.
 
 Versions 62/63 add `collectTouchLinks` to the header cache key. Devices without
 touch input neither construct nor hydrate link geometry; button footnotes and
-anchors remain available. Partial-cache sentinels change in lockstep to 216/215 for versions 66/67.
+anchors remain available. Partial-cache sentinels change in lockstep to 214/213 for versions 68/69.
 Versions 64/65 also invalidate pagination produced before bounded no-PSRAM
 soft flushing; disabling embedded styles no longer enlarges the token window.
 On devices without PSRAM, a low-memory styled build is discarded and retried
@@ -155,6 +155,13 @@ because content-based image recognition can change image indexes within a sectio
 Extracted images and their pixel caches now use the `img2_` prefix to prevent
 reuse of older `img_` files with different source images. Old `img_` files remain
 unused until the existing whole-book **Delete cache** action removes them.
+Versions 68/69 add a `uint8 firstLineIndent` header field after
+`extraParagraphSpacing`: Auto (0) keeps the book's CSS text-indent, Indent (1)
+forces two CJK characters or three spaces, and NoIndent (2) removes the indent.
+Auto is the default. Changing modes invalidates both complete and partial caches;
+older caches are rebuilt because their headers lack this field.
+Without a CSS indent, Auto leaves paragraphs unindented. Select Indent to retain
+the implicit indentation used by older firmware when extra paragraph spacing was off.
 
 Versions 60/61 append the internal-link rectangles produced during text layout
 to each serialized page. The reader uses these rectangles for touch navigation;
@@ -202,8 +209,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 66
-#define CHINESE_VERSION 67
+#define LATIN_VERSION 68
+#define CHINESE_VERSION 69
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -369,6 +376,7 @@ struct SectionBin {
     s32 fontId;
     float lineCompression;
     bool extraParagraphSpacing;
+    u8 firstLineIndent;
     u8 paragraphAlignment;
     u16 viewportWidth;
     u16 viewportHeight;

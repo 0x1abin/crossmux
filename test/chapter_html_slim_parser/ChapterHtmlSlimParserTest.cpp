@@ -63,6 +63,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                0,
                                1.0f,
                                false,
+                               false,
                                0,
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
@@ -82,7 +83,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
     ESP = {};
     collectedFootnotes.clear();
     laidOutWords.clear();
-    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, BlockStyle{}, true);
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, false, BlockStyle{}, true);
   }
   void TearDown() override {
     ESP = {};
@@ -100,7 +101,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
 
 TEST_F(ChapterHtmlSlimParserTest, NoTouchKeepsFootnotesWithoutLinkStorage) {
   parser.collectTouchLinks = false;
-  parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, BlockStyle{}, false);
+  parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, false, BlockStyle{}, false);
   const XML_Char* attributes[] = {"href", "#note-target", nullptr};
   ChapterHtmlSlimParser::startElement(&parser, "a", attributes);
   ChapterHtmlSlimParser::characterData(&parser, "1", 1);
@@ -536,8 +537,9 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   for (const auto& href : collectedFootnotes) append(href);
   // Pre-refactor cache, text and footnotes. The expected value tracks
   // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
-  // moved when the version went 64 -> 66 for the versioned image cache prefix.
-  EXPECT_EQ(digest, 12249067298013490136ULL);
+  // moved when the version went 64 -> 66 for the versioned image cache prefix,
+  // and again 66 -> 68 for the three-state first-line-indent control.
+  EXPECT_EQ(digest, 5933012731734531086ULL);  // v69/v68 cache (three-state first-line indent), text and footnotes.
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
@@ -571,6 +573,74 @@ TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
   spec.embeddedStyle = false;
   Section restored(epub, 0, renderer);
   EXPECT_TRUE(restored.loadSectionFile(spec));
+}
+
+TEST_F(ChapterHtmlSlimParserTest, FirstLineIndentPreservesCssAndExplicitOverrides) {
+  for (const bool spacing : {false, true}) {
+    for (const int cssIndent : {-16, 0, 24}) {
+      BlockStyle style;
+      style.textIndentDefined = true;
+      style.textIndent = cssIndent;
+      ParsedText text(spacing, FirstLineIndent::Auto, false, false, style);
+      text.isNaturalAlign = true;
+      text.addWord("word", EpdFontFamily::REGULAR);
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), cssIndent);
+      text.firstLineIndent = FirstLineIndent::NoIndent;
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), 0);
+      text.firstLineIndent = FirstLineIndent::Indent;
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), 12);
+      text.addWord("中文", EpdFontFamily::REGULAR);
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0),
+                2 * renderer.getTextAdvanceX(0, "我", EpdFontFamily::REGULAR));
+      EXPECT_EQ(text.resolveFirstLineIndent(false, renderer, 0), 0);
+      text.firstLinePending = false;
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), 0);
+    }
+  }
+  ParsedText automatic(false, FirstLineIndent::Auto);
+  automatic.isNaturalAlign = true;
+  EXPECT_EQ(automatic.resolveFirstLineIndent(true, renderer, 0), 0);
+}
+
+TEST_F(SectionMemoryTest, FirstLineIndentRoundTripsAndInvalidatesChangedAndLegacyCaches) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  for (const bool partial : {false, true}) {
+    for (const uint8_t mode : {FirstLineIndent::Auto, FirstLineIndent::Indent, FirstLineIndent::NoIndent}) {
+      spec.firstLineIndent = mode;
+      {
+        Section section(epub, 0, renderer);
+        ASSERT_TRUE(section.startBuild(spec));
+        ASSERT_TRUE(section.buildSomeMore(partial ? 1 : 0));
+      }
+      {
+        Section restored(epub, 0, renderer);
+        ASSERT_TRUE(restored.loadSectionFile(spec));
+        EXPECT_EQ(restored.isPartial(), partial);
+      }
+      auto changed = spec;
+      changed.firstLineIndent = (mode + 1) % 3;
+      Section mismatch(epub, 0, renderer);
+      EXPECT_FALSE(mismatch.loadSectionFile(changed));
+    }
+  }
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.createSectionFile(spec));
+  section.file.close();
+  const auto cachePath = epub->cachePath + "/sections/0.bin";
+  {
+    std::fstream file(cachePath, std::ios::binary | std::ios::in | std::ios::out);
+    ASSERT_TRUE(file.good());
+    const char oldVersion = 66;
+    file.write(&oldVersion, 1);
+  }
+  Section legacy(epub, 0, renderer);
+  EXPECT_FALSE(legacy.loadSectionFile(spec));
+  EXPECT_TRUE(legacy.createSectionFile(spec));
+  Section rebuilt(epub, 0, renderer);
+  EXPECT_TRUE(rebuilt.loadSectionFile(spec));
 }
 
 }  // namespace
