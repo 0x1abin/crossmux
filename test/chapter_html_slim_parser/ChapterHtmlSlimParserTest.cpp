@@ -538,8 +538,8 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   // Pre-refactor cache, text and footnotes. The expected value tracks
   // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
   // moved when the version went 64 -> 66 for the versioned image cache prefix,
-  // and again 66 -> 68 for the three-state first-line-indent control.
-  EXPECT_EQ(digest, 5933012731734531086ULL);  // v69/v68 cache (three-state first-line indent), text and footnotes.
+  // then 66 -> 68 for first-line indent and 68 -> 70 for paragraph spacing.
+  EXPECT_EQ(digest, 9535508317497758948ULL);  // v71/v70 cache (paragraph spacing levels), text and footnotes.
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
@@ -626,21 +626,66 @@ TEST_F(SectionMemoryTest, FirstLineIndentRoundTripsAndInvalidatesChangedAndLegac
       EXPECT_FALSE(mismatch.loadSectionFile(changed));
     }
   }
-  Section section(epub, 0, renderer);
-  ASSERT_TRUE(section.createSectionFile(spec));
-  section.file.close();
-  const auto cachePath = epub->cachePath + "/sections/0.bin";
-  {
-    std::fstream file(cachePath, std::ios::binary | std::ios::in | std::ios::out);
-    ASSERT_TRUE(file.good());
-    const char oldVersion = 66;
-    file.write(&oldVersion, 1);
+  for (const char oldVersion : {char{66}, char{68}}) {
+    Section section(epub, 0, renderer);
+    ASSERT_TRUE(section.createSectionFile(spec));
+    section.file.close();
+    const auto cachePath = epub->cachePath + "/sections/0.bin";
+    {
+      std::fstream file(cachePath, std::ios::binary | std::ios::in | std::ios::out);
+      ASSERT_TRUE(file.good());
+      file.write(&oldVersion, 1);
+    }
+    Section legacy(epub, 0, renderer);
+    EXPECT_FALSE(legacy.loadSectionFile(spec));
+    EXPECT_TRUE(legacy.createSectionFile(spec));
+    Section rebuilt(epub, 0, renderer);
+    EXPECT_TRUE(rebuilt.loadSectionFile(spec));
   }
-  Section legacy(epub, 0, renderer);
-  EXPECT_FALSE(legacy.loadSectionFile(spec));
-  EXPECT_TRUE(legacy.createSectionFile(spec));
-  Section rebuilt(epub, 0, renderer);
-  EXPECT_TRUE(rebuilt.loadSectionFile(spec));
+}
+
+TEST_F(ChapterHtmlSlimParserTest, ParagraphSpacingLevelsAddToCssMargins) {
+  constexpr int gaps[] = {0, 8, 12, 16, 20, 24};
+  for (uint8_t level = 0; level < std::size(gaps); ++level) {
+    parser.extraParagraphSpacing = level;
+    parser.currentPage.reset();
+    parser.currentPageNextY = 0;
+    BlockStyle style;
+    style.marginTop = 7;
+    style.marginBottom = 3;
+    parser.currentTextBlock = std::make_unique<ParsedText>(level, FirstLineIndent::Auto, false, false, style);
+    parser.currentTextBlock->addWord("word", EpdFontFamily::REGULAR);
+    parser.makePages();
+    ASSERT_FALSE(parser.hasFailed());
+    EXPECT_EQ(parser.currentPageNextY, 16 + 10 + gaps[level]);
+  }
+}
+
+TEST_F(SectionMemoryTest, ParagraphSpacingLevelsRoundTripWithoutCollapsingToBool) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  spec.firstLineIndent = FirstLineIndent::NoIndent;
+  for (const bool partial : {false, true}) {
+    for (uint8_t level = 0; level <= 5; ++level) {
+      spec.extraParagraphSpacing = level;
+      {
+        Section section(epub, 0, renderer);
+        ASSERT_TRUE(section.startBuild(spec));
+        ASSERT_TRUE(section.buildSomeMore(partial ? 1 : 0));
+      }
+      {
+        Section restored(epub, 0, renderer);
+        ASSERT_TRUE(restored.loadSectionFile(spec));
+        EXPECT_EQ(restored.isPartial(), partial);
+      }
+      auto changed = spec;
+      changed.extraParagraphSpacing = (level + 1) % 6;
+      Section mismatch(epub, 0, renderer);
+      EXPECT_FALSE(mismatch.loadSectionFile(changed));
+    }
+  }
 }
 
 }  // namespace

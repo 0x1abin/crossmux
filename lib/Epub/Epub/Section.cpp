@@ -45,10 +45,11 @@ namespace {
 // already sits at the path (and its .pxc pixel cache) without checking the source.
 //   68 / 69 - first-line indent becomes a three-state control (Auto/Indent/NoIndent);
 //             reserved to stay clear of the concurrent 66/67 layout change
+//   70 / 71 - paragraph spacing stores levels 0..5 as a byte, not a boolean
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 69;
+constexpr uint8_t SECTION_FILE_VERSION = 71;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 68;
+constexpr uint8_t SECTION_FILE_VERSION = 70;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -67,7 +68,7 @@ constexpr uint8_t SECTION_FILE_INCOMPLETE_VERSION = 0;
 // only fails (noisily, via the block-decode error path) when a page is loaded.
 // Derived so the pairing can't be forgotten: 0xFE for v28, 0xFD for v29, ...
 constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFE - (SECTION_FILE_VERSION - 28);
-constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(bool) +
+constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
                                  sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) +
                                  sizeof(bool) + sizeof(bool) + sizeof(uint8_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint32_t) * 5;
@@ -184,7 +185,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     uint16_t fileViewportWidth = 0;
     uint16_t fileViewportHeight = 0;
     float fileLineCompression = 0;
-    bool fileExtraParagraphSpacing = false;
+    uint8_t fileExtraParagraphSpacing = 0;
     // FirstLineIndent::Auto(0)/Indent(1)/NoIndent(2). Read as a byte so the
     // three states round-trip; a bool would collapse Indent and NoIndent.
     uint8_t fileFirstLineIndent = 0;
