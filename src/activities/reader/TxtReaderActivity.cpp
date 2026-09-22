@@ -1014,7 +1014,11 @@ bool TxtReaderActivity::savePageIndexCache() {
     if (!writePodChecked(f, CACHE_MAGIC) || !writePodChecked(f, txt_page_index::CACHE_VERSION) ||
         !writePodChecked(f, fileSize) || !writePodChecked(f, width) || !writePodChecked(f, pageLines) ||
         !writePodChecked(f, fontId) || !writePodChecked(f, margin) || !writePodChecked(f, cachedParagraphAlignment) ||
-        !writePodChecked(f, SETTINGS.extraParagraphSpacing) || !writePodChecked(f, complete) ||
+        // TXT layout only distinguishes "compact" (spacing off) from "spaced"
+        // (spacing on); the EPUB-only multiplier levels 2-5 have no TXT
+        // rendering effect, so persist the actual 0/1 layout behaviour. The
+        // loader (cachedExtraParagraphSpacing > 1) rejects anything else.
+        !writePodChecked(f, SETTINGS.extraParagraphSpacing != 0 ? 1 : 0) || !writePodChecked(f, complete) ||
         !writePodChecked(f, encoding) || !writePodChecked(f, pageCount)) {
       LOG_ERR("TRS", "Short write saving page index header");
       return false;
