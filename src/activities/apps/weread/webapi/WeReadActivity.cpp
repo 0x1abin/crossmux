@@ -28,6 +28,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
@@ -2065,6 +2066,7 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
   const int paragraphSpacing = metrics.verticalSpacing;
   const int textWidth = std::max(0, content.width - metrics.contentSidePadding * 2);
   freeink::ui::GfxRendererTarget target(renderer);
+  applyUiTextAlignment(target);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
   freeink::ui::TextStyle textStyle;
   textStyle.font = freeink::ui::GfxRendererTarget::FONT_BODY;

@@ -234,3 +234,5 @@ shared icon assets and other themes remain unchanged.
 > User-facing text must use the `tr()` macro — see
 > [hardware-constraints.md](hardware-constraints.md) → Resource Protocol rule 5,
 > and the i18n workflow in [generated-files.md](generated-files.md).
+
+INX SDK layout compatibility and regression coverage: [INX theme compatibility](inx-theme-compatibility.md).

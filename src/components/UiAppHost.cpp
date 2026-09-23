@@ -13,6 +13,7 @@ void UiAppHost::resetUi() {
 }
 
 void UiAppHost::renderUi() {
+  applyUiTextAlignment(uiTarget);
   app.setDevice(uiTarget.deviceContext());
   refreshSharedUiThemeTokens(uiTarget);
   app.render();

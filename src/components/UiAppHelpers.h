@@ -65,6 +65,7 @@ inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& t
 // metrics from the body font's line height.
 inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) {
   freeink::ui::GfxRendererTarget target(renderer);
+  applyUiTextAlignment(target);
   const auto spec = uiScaleSpec();
   target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL,
                  UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
