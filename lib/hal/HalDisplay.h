@@ -108,6 +108,8 @@ class HalDisplay {
   // displayBuffer(): a separate B/W refresh first makes the gray pass re-drive
   // the whole text body (a visible flash).
   bool combinesGrayscaleBase() const;
+  bool supportsTextOnlyCombinedBase() const;
+  void cancelGrayscale();
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

@@ -160,23 +160,43 @@ inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputMan
 // and other overlays should be drawn before calling this.
 // Kept as a template to avoid std::function overhead; instantiated once per reader type.
 template <typename RenderFn>
-void renderAntiAliased(GfxRenderer& renderer, RenderFn&& renderFn) {
+void renderAntiAliased(GfxRenderer& renderer, ActivityManager& activityManager, RenderFn&& renderFn) {
+  if (activityManager.isSwitchPending()) {
+    renderer.cancelGrayscale();
+    return;
+  }
   if (!renderer.storeBwBuffer()) {
     LOG_ERR("READER", "Failed to store BW buffer for anti-aliasing");
     // A combined-base panel may still hold a deferred B/W activation; flush it
     // so the page reaches the panel even without its grays.
-    if (renderer.combinesGrayscaleBase()) renderer.cleanupGrayscaleWithFrameBuffer();
+    if (renderer.combinesGrayscaleBase()) {
+      if (activityManager.isSwitchPending()) {
+        renderer.cancelGrayscale();
+      } else {
+        renderer.cleanupGrayscaleWithFrameBuffer();
+      }
+    }
     return;
   }
 
+  const auto cancelled = [&] {
+    if (!activityManager.isSwitchPending()) return false;
+    renderer.setRenderMode(GfxRenderer::BW);
+    if (renderer.combinesGrayscaleBase()) renderer.cancelGrayscale();
+    renderer.restoreBwBuffer(!renderer.combinesGrayscaleBase());
+    return true;
+  };
+  if (cancelled()) return;
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
   renderFn();
+  if (cancelled()) return;
   renderer.copyGrayscaleLsbBuffers();
 
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
   renderFn();
+  if (cancelled()) return;
   renderer.copyGrayscaleMsbBuffers();
 
   renderer.displayGrayBuffer();

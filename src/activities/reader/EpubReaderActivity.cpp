@@ -1918,6 +1918,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ImageBlock::releaseRenderCache();
     renderer.clearScreen();
   }
+  if (pageHasImages) {
+    LOG_DBG("ERS", "Image predecode=%lums cold=%u", millis() - t0, static_cast<unsigned>(pageHasImagesNeedingDecode));
+  }
 
 #ifdef ENABLE_CHINESE_VERSION
   fcm->consumeMissingChineseCodepoint();
@@ -1965,7 +1968,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // the gray planes join it in a single waveform. Displaying the base
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
-  const bool combinedGrayscaleBase = tiledGrayscale && !pageHasImages && renderer.combinesGrayscaleBase();
+  const bool combinedGrayscaleBase =
+      tiledGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
 #if FREEINK_DEVICE_EEGO_A4
   const bool overlapRefresh =
       tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
@@ -2093,7 +2097,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Abort before expensive grayscale display if a push/pop is pending
       if (activityManager.isSwitchPending()) {
         renderer.setRenderMode(GfxRenderer::BW);
-        renderer.cleanupGrayscaleWithFrameBuffer();
+        if (combinedGrayscaleBase) {
+          renderer.cancelGrayscale();
+        } else {
+          renderer.cleanupGrayscaleWithFrameBuffer();
+        }
         return;
       }
 
@@ -2130,14 +2138,22 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           // update diffs against stale contents. On the combined-base path the
           // base activation is still deferred; this cleanup commits it so the
           // page reaches the panel even without its grays.
-          renderer.cleanupGrayscaleWithFrameBuffer();
+          if (combinedGrayscaleBase && activityManager.isSwitchPending()) {
+            renderer.cancelGrayscale();
+          } else {
+            renderer.cleanupGrayscaleWithFrameBuffer();
+          }
         }
       } else {
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
           if (activityManager.isSwitchPending()) {
             renderer.setRenderMode(GfxRenderer::BW);
-            renderer.cleanupGrayscaleWithFrameBuffer();
+            if (combinedGrayscaleBase) {
+              renderer.cancelGrayscale();
+            } else {
+              renderer.cleanupGrayscaleWithFrameBuffer();
+            }
             return;
           }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
@@ -2153,7 +2169,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         for (int y = 0; y < gh; y += STRIP_ROWS) {
           if (activityManager.isSwitchPending()) {
             renderer.setRenderMode(GfxRenderer::BW);
-            renderer.cleanupGrayscaleWithFrameBuffer();
+            if (combinedGrayscaleBase) {
+              renderer.cancelGrayscale();
+            } else {
+              renderer.cleanupGrayscaleWithFrameBuffer();
+            }
             return;
           }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
@@ -2165,6 +2185,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         }
         const auto tGrayMsb = millis();
 
+        if (combinedGrayscaleBase && activityManager.isSwitchPending()) {
+          renderer.setRenderMode(GfxRenderer::BW);
+          renderer.cancelGrayscale();
+          return;
+        }
         renderer.setRenderMode(GfxRenderer::BW);
         renderer.displayGrayBuffer();
         const auto tGrayDisplay = millis();
