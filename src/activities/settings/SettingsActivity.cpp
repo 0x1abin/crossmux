@@ -585,7 +585,7 @@ bool SettingsActivity::handleButtons() {
         expandedCategories =
             (mask != 0 && (expandedCategories & mask) != 0) ? static_cast<uint8_t>(expandedCategories & ~mask) : 0;
         rebuildAccordionRows();
-        nav.selected = std::min(nav.selected, listCount() - 1);
+        nav.selected = std::min<int>(nav.selected, listCount() - 1);
         nav.follow(listCount());
         requestUpdate();
       }
