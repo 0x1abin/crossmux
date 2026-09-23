@@ -19,6 +19,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
 #include "util/ButtonNavigator.h"
@@ -240,6 +241,8 @@ void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea, const int 
   }
 
   fui::GfxRendererTarget target(renderer);
+
+  applyUiTextAlignment(target);
   target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
   const fui::TextStyle style = releaseNoteStyle();
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -306,6 +309,7 @@ void OtaUpdateActivity::renderUpdateAvailable(const Rect& safeArea) {
                               tr(STR_NO_RELEASE_NOTES));
   } else {
     fui::GfxRendererTarget target(renderer);
+    applyUiTextAlignment(target);
     target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
     const fui::TextStyle style = releaseNoteStyle();
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);

@@ -10,6 +10,7 @@
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -147,12 +148,21 @@ void KeyboardEntryActivity::onEnter() {
 void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::currentLayout() const {
-  if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true);
+  const auto builtin = [&](bool symbolLayer, bool numberRow, bool langKey) -> const fui::KeyboardLayout& {
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+    const auto geometry = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX ? fui::KeyboardGeometry::Classic
+                                                                                : fui::KeyboardGeometry::Separated;
+    return fui::builtinKeyboardLayout(layoutId, shifted, symbolLayer, numberRow, langKey, geometry);
+#else
+    return fui::builtinKeyboardLayout(layoutId, shifted, symbolLayer, numberRow, langKey);
+#endif
+  };
+  if (symbols) return builtin(true, false, false);
   if (inputType == InputType::Url) {
     if (urlPanel) return URL_SNIPPET_LAYOUT;
     return shifted ? URL_SHIFT_LAYOUT : URL_LAYOUT;
   }
-  return fui::builtinKeyboardLayout(layoutId, shifted, false, /*numberRow=*/true, showLangKey);
+  return builtin(false, true, showLangKey);
 }
 
 const fui::KeyboardKey* KeyboardEntryActivity::selectedKey() const {
@@ -986,6 +996,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   // half-rebuilt table no matter when it runs relative to this.
   interactions.beginPublishCycle();
   fui::GfxRendererTarget target(renderer);
+  applyUiTextAlignment(target);
   target.setFont(fui::GfxRendererTarget::FONT_SMALL, SMALL_FONT_ID);
   target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_12_FONT_ID);
   const fui::DeviceContext device = target.deviceContext();
@@ -1008,6 +1019,13 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.altText.font = fui::GfxRendererTarget::FONT_SMALL;
   props.gap = static_cast<int16_t>(metrics.keyboardKeySpacing);
   props.padding = fui::Insets{0, 0, 0, 0};
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+    props.geometry = fui::KeyboardGeometry::Classic;
+    props.rowGap = props.gap;
+    props.keyRadius = 0;
+  }
+#endif
   // Fingers land low on the bottom row (occlusion) and there is no key below
   // to catch the miss — extend its hit band down to the button hints bar.
   const int hintsTop = renderer.getScreenHeight() - metrics.buttonHintsHeight;
