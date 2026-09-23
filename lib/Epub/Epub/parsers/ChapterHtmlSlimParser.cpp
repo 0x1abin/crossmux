@@ -432,8 +432,8 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // block is flushed so the chapter starts on a fresh page.
   flushPendingAnchor();
   if (hasFailed()) return;
-  currentTextBlock = makeUniqueNoThrow<ParsedText>(extraParagraphSpacing, hyphenationEnabled, focusReadingEnabled,
-                                                   blockStyle, collectTouchLinks);
+  currentTextBlock = makeUniqueNoThrow<ParsedText>(extraParagraphSpacing, firstLineIndent, hyphenationEnabled,
+                                                   focusReadingEnabled, blockStyle, collectTouchLinks);
   if (!currentTextBlock) {
     LOG_ERR("EHP", "OOM: ParsedText (%u bytes)", static_cast<unsigned>(sizeof(ParsedText)));
     failAllocation("page layout");
@@ -909,8 +909,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     }
 
     self->currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->hyphenationEnabled, self->focusReadingEnabled,
-                                      tableCellBlockStyle, self->collectTouchLinks);
+        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled,
+                                      self->focusReadingEnabled, tableCellBlockStyle, self->collectTouchLinks);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: table cell");
       self->failAllocation("table cell");
@@ -1603,8 +1603,8 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
     self->currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->hyphenationEnabled, self->focusReadingEnabled,
-                                      flowStyle, self->collectTouchLinks);
+        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled,
+                                      self->focusReadingEnabled, flowStyle, self->collectTouchLinks);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block for character data");
       self->failAllocation("text block for character data");
@@ -1988,8 +1988,8 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
     self->currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->hyphenationEnabled, self->focusReadingEnabled,
-                                      flowStyle, self->collectTouchLinks);
+        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled,
+                                      self->focusReadingEnabled, flowStyle, self->collectTouchLinks);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block after table");
       self->failAllocation("text block after table");
@@ -2351,8 +2351,12 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY += blockStyle.paddingBottom;
   }
 
-  // Extra paragraph spacing if enabled.
-  if (extraParagraphSpacing) {
-    currentPageNextY += lineHeight / 2;
+  // Extra paragraph spacing: 0=off, else 0.5x/0.75x/1x/1.25x/1.5x line height.
+  if (extraParagraphSpacing > 0) {
+    constexpr float EXTRA_PARAGRAPH_SPACING_FACTORS[] = {0.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f};
+    const float factor = extraParagraphSpacing < std::size(EXTRA_PARAGRAPH_SPACING_FACTORS)
+                             ? EXTRA_PARAGRAPH_SPACING_FACTORS[extraParagraphSpacing]
+                             : 1.5f;
+    currentPageNextY += static_cast<int16_t>(lineHeight * factor);
   }
 }
