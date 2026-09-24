@@ -2,7 +2,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(GUIDE_HEADER ${REPO_ROOT}/src/util/UserGuide.generated.h)
 add_custom_command(OUTPUT ${GUIDE_HEADER}
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/generate_userguide_epub.py --bundled
-  DEPENDS ${REPO_ROOT}/scripts/generate_userguide_epub.py ${REPO_ROOT}/scripts/gen_boot_logo.py
+  DEPENDS ${REPO_ROOT}/scripts/generate_userguide_epub.py
           ${REPO_ROOT}/docs/user-guide/en.xhtml ${REPO_ROOT}/docs/user-guide/zh-CN.xhtml
 )
 add_executable(UserGuideTest UserGuideTest.cpp ${REPO_ROOT}/src/util/UserGuide.cpp ${GUIDE_HEADER})

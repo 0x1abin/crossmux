@@ -3,7 +3,6 @@
 import io
 from pathlib import Path
 import posixpath
-import struct
 import sys
 import tempfile
 import unittest
@@ -50,11 +49,11 @@ class UserGuideEpubTest(unittest.TestCase):
                         self.assertIn('OEBPS/' + item.get('href'), archive.namelist())
                         self.assertNotIn('font', item.get('media-type'))
                     spine = [item.get('idref') for item in opf.findall('o:spine/o:itemref', ns)]
-                    self.assertEqual(len(spine), 7)  # cover + six short chapters
+                    self.assertEqual(len(spine), 6)
                     self.assertNotIn('nav', spine)
                     self.assertTrue(all(item in items for item in spine))
-                    cover_id = opf.find('o:metadata/o:meta[@name="cover"]', ns).get('content')
-                    self.assertEqual(items[cover_id].get('properties'), 'cover-image')
+                    self.assertIsNone(opf.find('o:metadata/o:meta[@name="cover"]', ns))
+                    self.assertNotIn('OEBPS/cover.png', archive.namelist())
                     for name in archive.namelist():
                         if name.endswith(('.xml', '.opf', '.xhtml')):
                             document = ET.fromstring(archive.read(name))
@@ -68,9 +67,6 @@ class UserGuideEpubTest(unittest.TestCase):
                                         self.assertIn(target.split('#')[0], archive.namelist())
                     nav = ET.fromstring(archive.read('OEBPS/nav.xhtml'))
                     self.assertEqual(len(nav.findall('.//x:nav/x:ol/x:li', ns)), len(spine))
-                    png = archive.read('OEBPS/cover.png')
-                    self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
-                    self.assertEqual(struct.unpack('>IIBB', png[16:26]), (240, 240, 8, 0))
             self.assertLessEqual(total, generator.BUNDLED_BUDGET)
             generator.build_bundled(ROOT / 'docs/user-guide', output, header)
             self.assertEqual(before, header.read_bytes())

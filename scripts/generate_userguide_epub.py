@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the legacy Markdown guide or the bundled bilingual quick-start EPUBs.
 
---bundled uses only the Python standard library and the existing boot-logo generator.
+--bundled uses only the Python standard library and the XHTML sources.
 The standalone legacy Markdown export requires Markdown, EbookLib and Pillow.
 """
 
@@ -338,12 +338,7 @@ BUNDLED_BUDGET = 128 * 1024
 
 def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
     """Package small XHTML sources; fixed ZIP metadata keeps interruption retries reproducible."""
-    from gen_boot_logo import build_rows, write_png
-
     output_dir.mkdir(parents=True, exist_ok=True)
-    cover_path = output_dir / 'cover.png'
-    write_png(build_rows(), cover_path, scale=2)
-    cover = cover_path.read_bytes()
     declarations = []
     total = 0
     ns = {'x': 'http://www.w3.org/1999/xhtml'}
@@ -357,14 +352,11 @@ def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
         body = re.search(r'<body>(.*?)</body>', source, re.DOTALL).group(1)
         chapters = split_chapters(body)
         escaped_title = _html.escape(title)
-        cover_label = '封面' if language == 'zh-CN' else 'Cover'
-        pages = [('cover', cover_label,
-                  f'<h1>{escaped_title}</h1><p><img src="cover.png" alt="CrossMux"/></p>')]
-        pages += [('chapter-' + anchor, chapter_title, fragment) for anchor, chapter_title, fragment in chapters]
+        pages = [('chapter-' + anchor, chapter_title, fragment) for anchor, chapter_title, fragment in chapters]
         items = []
         spine = []
         nav = []
-        files = {'OEBPS/cover.png': cover}
+        files = {}
         for anchor, chapter_title, fragment in pages:
             name = f'{anchor}.xhtml'
             files[f'OEBPS/{name}'] = (
@@ -389,8 +381,7 @@ def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
             f'<dc:identifier id="book-id">crossmux-user-guide-{language}</dc:identifier>'
             f'<dc:title>{escaped_title}</dc:title><dc:language>{language}</dc:language>'
             '<dc:creator>CrossMux</dc:creator><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>'
-            '<meta name="cover" content="cover-image"/></metadata><manifest>'
-            '<item id="cover-image" href="cover.png" media-type="image/png" properties="cover-image"/>'
+            '</metadata><manifest>'
             '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
             f'{"".join(items)}</manifest><spine>{"".join(spine)}</spine></package>'
         ).encode('utf-8')
