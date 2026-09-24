@@ -182,8 +182,9 @@ void renderAntiAliased(GfxRenderer& renderer, ActivityManager& activityManager, 
   const auto cancelled = [&] {
     if (!activityManager.isSwitchPending()) return false;
     renderer.setRenderMode(GfxRenderer::BW);
-    if (renderer.combinesGrayscaleBase()) renderer.cancelGrayscale();
-    renderer.restoreBwBuffer(!renderer.combinesGrayscaleBase());
+    const bool combinedBase = renderer.combinesGrayscaleBase();
+    if (combinedBase) renderer.cancelGrayscale();
+    renderer.restoreBwBuffer(!combinedBase);
     return true;
   };
   if (cancelled()) return;
@@ -199,6 +200,7 @@ void renderAntiAliased(GfxRenderer& renderer, ActivityManager& activityManager, 
   if (cancelled()) return;
   renderer.copyGrayscaleMsbBuffers();
 
+  if (cancelled()) return;
   renderer.displayGrayBuffer();
   renderer.setRenderMode(GfxRenderer::BW);
 
