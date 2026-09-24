@@ -158,6 +158,7 @@ enum UIIcon {
   Sudoku,
   Sokoban,
   Gomoku,
+  Go,
 #ifdef ENABLE_CHINESE_VERSION
   ChineseChess,
   WeRead,
