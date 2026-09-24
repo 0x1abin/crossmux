@@ -23,11 +23,12 @@ path. No image LUT, two-plane encoding or book cache format changes. Paper
 Mono's pre-existing image behavior is unchanged.
 
 Switches discard pending gray data, finish outstanding work, invalidate the
-old baseline and clean once. Continuous text pages do not switch drivers;
-continuous image pages do not gain an extra cleanup. Manual/periodic cleaning
-and wakeup can still have a visible transition. Missing gray data falls back
-to B/W; cancellation discards the page. BUSY failure must stop register writes
-and preserve an unknown baseline until recovery.
+old baseline and clean once. After controller idle sleep, the next text page
+resets the controller before checking BUSY or writing RAM. Continuous text
+pages do not switch drivers; continuous image pages do not gain an extra cleanup.
+Manual/periodic cleaning and wakeup can still have a visible transition.
+Missing gray data falls back to B/W; cancellation discards the page. BUSY
+failure must stop register writes and preserve an unknown baseline until recovery.
 
 ## Board configuration and memory
 
@@ -79,12 +80,12 @@ failure and checks that recovery cleans before resuming.
 
 | Device / batch | Status for this revision |
 | --- | --- |
-| Sticky | Previous `sticky-aa-test2` reported normal by the user; this rebased/default-enabled revision awaits retest |
+| Sticky | User reported normal reading after the shared BUSY/driver-switch fix; this reviewed revision awaits retest |
 | Paper Mono | Existing optical parameters retained; no new device measurement |
 | X4 Pro / Classic, SSD1677 only | Awaiting physical acceptance |
 | Murphy M4, both batches | Awaiting physical acceptance independently |
 | Waveshare ePaper 3.97 | Awaiting physical acceptance |
-| Metalio E-Ink4 | Physical testing remains paused |
+| Metalio E-Ink4 | User reported book opening restored after `1.6.0-metalio-aa-fix1`; extended AA/image optical checks and this reviewed revision await retest |
 
 For each available board, use the same book/font/settings for original versus
 combined firmware. Turn 100 EPUB and 100 TXT pages; record first visible change,
@@ -109,5 +110,6 @@ Other new targets have matching rollback binaries in the package; its
 `-DFREEINK_SSD1677_COMBINED_AA=0`. Rebuild it from this checkout with
 `pio run --project-dir . -c build/ssd1677-text-aa/rollback-platformio.ini -e <target>`.
 Only install a board-matching image after verifying device identity and the
-active application partition. This task does not flash hardware or publish
-Nightly; no new quantitative/optical acceptance is claimed from serial logs.
+active application partition. The Metalio test image was flashed only to the
+verified device's app0 partition; no Nightly was published. No quantitative
+optical acceptance is claimed from serial logs.
