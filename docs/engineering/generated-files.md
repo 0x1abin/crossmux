@@ -36,7 +36,8 @@
 
 `scripts/build_userguide.py` runs for firmware and simulator builds. It calls
 `scripts/generate_userguide_epub.py --bundled` to package the maintained short
-XHTML guides in `docs/user-guide/{zh-CN,en}.xhtml`. The EPUBs have no embedded
+XHTML guides in `docs/user-guide/{zh-CN,en}.xhtml` with a small shared
+`docs/user-guide/style.css`. The EPUBs have no embedded
 cover image or cover page, so the home themes show their standard book fallback.
 This mode has no third-party Python dependencies. The separate legacy Markdown
 export still requires Markdown, EbookLib and Pillow; it is not part of firmware builds.

@@ -339,6 +339,7 @@ BUNDLED_BUDGET = 128 * 1024
 def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
     """Package small XHTML sources; fixed ZIP metadata keeps interruption retries reproducible."""
     output_dir.mkdir(parents=True, exist_ok=True)
+    stylesheet = (source_dir / 'style.css').read_bytes()
     declarations = []
     total = 0
     ns = {'x': 'http://www.w3.org/1999/xhtml'}
@@ -356,13 +357,14 @@ def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
         items = []
         spine = []
         nav = []
-        files = {}
+        files = {'OEBPS/style.css': stylesheet}
         for anchor, chapter_title, fragment in pages:
             name = f'{anchor}.xhtml'
             files[f'OEBPS/{name}'] = (
                 '<?xml version="1.0" encoding="utf-8"?>'
                 f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{language}">'
-                f'<head><title>{_html.escape(chapter_title)}</title></head>'
+                f'<head><title>{_html.escape(chapter_title)}</title>'
+                '<link rel="stylesheet" type="text/css" href="style.css"/></head>'
                 f'<body>{fragment}</body></html>'
             ).encode('utf-8')
             items.append(f'<item id="{anchor}" href="{name}" media-type="application/xhtml+xml"/>')
@@ -383,6 +385,7 @@ def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
             '<dc:creator>CrossMux</dc:creator><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>'
             '</metadata><manifest>'
             '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+            '<item id="style" href="style.css" media-type="text/css"/>'
             f'{"".join(items)}</manifest><spine>{"".join(spine)}</spine></package>'
         ).encode('utf-8')
         files['META-INF/container.xml'] = (

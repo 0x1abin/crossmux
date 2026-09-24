@@ -49,11 +49,25 @@ class UserGuideEpubTest(unittest.TestCase):
                         self.assertIn('OEBPS/' + item.get('href'), archive.namelist())
                         self.assertNotIn('font', item.get('media-type'))
                     spine = [item.get('idref') for item in opf.findall('o:spine/o:itemref', ns)]
-                    self.assertEqual(len(spine), 6)
+                    self.assertEqual(len(spine), 11)
                     self.assertNotIn('nav', spine)
+                    self.assertNotIn('style', spine)
                     self.assertTrue(all(item in items for item in spine))
+                    self.assertEqual(items['style'].get('media-type'), 'text/css')
+                    self.assertEqual(archive.read('OEBPS/style.css'),
+                                     (ROOT / 'docs/user-guide/style.css').read_bytes())
                     self.assertIsNone(opf.find('o:metadata/o:meta[@name="cover"]', ns))
                     self.assertNotIn('OEBPS/cover.png', archive.namelist())
+                    self.assertNotIn('OEBPS/cover.xhtml', archive.namelist())
+                    self.assertIn('OEBPS/' + spine[0] + '.xhtml', archive.namelist())
+                    section = ET.fromstring(archive.read('OEBPS/' + spine[5] + '.xhtml'))
+                    self.assertEqual(len(section.findall('.//x:h3', ns)), 2)
+                    self.assertTrue(section.findall('.//x:blockquote', ns))
+                    self.assertTrue(section.findall('.//x:link[@rel="stylesheet"]', ns))
+                    troubleshooting = ET.fromstring(archive.read('OEBPS/' + spine[9] + '.xhtml'))
+                    self.assertEqual(len(troubleshooting.findall('.//x:h3', ns)), 4)
+                    self.assertTrue(any((p.text or '').startswith('1. ') for p in
+                                        troubleshooting.findall('.//x:p', ns)))
                     for name in archive.namelist():
                         if name.endswith(('.xml', '.opf', '.xhtml')):
                             document = ET.fromstring(archive.read(name))

@@ -4,6 +4,7 @@ add_custom_command(OUTPUT ${GUIDE_HEADER}
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/generate_userguide_epub.py --bundled
   DEPENDS ${REPO_ROOT}/scripts/generate_userguide_epub.py
           ${REPO_ROOT}/docs/user-guide/en.xhtml ${REPO_ROOT}/docs/user-guide/zh-CN.xhtml
+          ${REPO_ROOT}/docs/user-guide/style.css
 )
 add_executable(UserGuideTest UserGuideTest.cpp ${REPO_ROOT}/src/util/UserGuide.cpp ${GUIDE_HEADER})
 target_include_directories(UserGuideTest BEFORE PRIVATE stubs ${REPO_ROOT}/src/util)
