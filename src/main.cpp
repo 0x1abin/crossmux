@@ -57,6 +57,10 @@
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
 #include <SoundFeedback.h>
 #endif
+#if CROSSPOINT_CAP_VOICE_RECORDER
+#include <HalMicrophone.h>
+#include <OpenAiCredentialStore.h>
+#endif
 
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
@@ -607,6 +611,9 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+#if CROSSPOINT_CAP_VOICE_RECORDER
+  OPENAI_STORE.loadFromFile();
+#endif
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -815,7 +822,11 @@ void loop() {
   }
 
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
-  SoundFeedback::update(SETTINGS.soundFeedbackLevel, gpio.physicalPressedMask());
+#if CROSSPOINT_CAP_VOICE_RECORDER
+  // Capture owns the codec and I2S port; a cue would reopen TX mid-recording.
+  if (!HalMicrophone::active())
+#endif
+    SoundFeedback::update(SETTINGS.soundFeedbackLevel, gpio.physicalPressedMask());
 #endif
 
   if (activityManager.requiresExclusiveStorageLoop()) {

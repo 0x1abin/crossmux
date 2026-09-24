@@ -506,6 +506,44 @@ while it is being used, then checkpoints after 60 seconds without a knock or
 once on activity exit. A future layout change must use a new magic and update
 this section.
 
+## Voice Notes recordings and OpenAI key
+
+Only builds with `CROSSPOINT_CAP_VOICE_RECORDER` (currently Waveshare ePaper
+3.97) write these files.
+
+Recordings are `/recordings/RECnnnn.wav`, numbered from `0001` upward (the next
+number is one past the highest on the card). Each is a canonical 44-byte RIFF
+header followed by 16 kHz, mono, 16-bit little-endian PCM:
+
+| Offset | Field |
+|---:|---|
+| 0 | `RIFF`, little-endian `uint32` = 36 + data bytes |
+| 8 | `WAVEfmt `, `uint32 16`, `uint16 1` (PCM), `uint16 1` (mono) |
+| 24 | `uint32 16000` sample rate, `uint32 32000` byte rate |
+| 32 | `uint16 2` block align, `uint16 16` bits per sample |
+| 36 | `data`, little-endian `uint32` data bytes |
+
+The recorder writes the header with zero sizes, rewrites both size fields every
+2 seconds and on stop, so a file cut short by power loss is still a playable
+WAV missing at most the last 2 seconds. Recording stops at 12 minutes (about
+23 MB), under OpenAI's 25 MB upload limit.
+
+A transcript is `/recordings/RECnnnn.txt`, the plain-text body of OpenAI's
+`whisper-1` response (`response_format=text`). It is written to
+`RECnnnn.txt.tmp` and renamed, so a failed download never replaces an earlier
+transcript. Deleting a recording in the app removes both files.
+
+`/.crosspoint/openai.json` holds the API key:
+
+```json
+{ "key_obf": "<base64>" }
+```
+
+`key_obf` is the key XOR-ed with the device eFuse MAC and base64-encoded, the
+same obfuscation as `wifi.json` and `koreader.json` (not encryption; it only
+stops casual reading and binds the file to this chip). The web settings API
+returns only a masked form. Restoring system settings deletes the file.
+
 ## WeRead cache
 
 The Simplified Chinese build keeps WeRead's private data below `/.crosspoint/weread/`.

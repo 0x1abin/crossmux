@@ -33,6 +33,9 @@
 #include "apps/standby/StandbyActivity.h"
 #include "apps/sudoku/SudokuMenuActivity.h"
 #include "apps/woodfish/WoodfishActivity.h"
+#if CROSSPOINT_CAP_VOICE_RECORDER
+#include "apps/voicenotes/VoiceNotesActivity.h"
+#endif
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -508,6 +511,10 @@ void ActivityManager::goToPixelSwitch() { replaceActivityWith<PixelSwitchActivit
 void ActivityManager::goToCalculator() { replaceActivityWith<CalculatorActivity>(); }
 
 void ActivityManager::goToWoodfish() { replaceActivityWith<WoodfishActivity>(); }
+
+#if CROSSPOINT_CAP_VOICE_RECORDER
+void ActivityManager::goToVoiceNotes() { replaceActivityWith<VoiceNotesActivity>(); }
+#endif
 
 void ActivityManager::goToGame2048() { replaceActivityWith<Game2048Activity>(); }
 
