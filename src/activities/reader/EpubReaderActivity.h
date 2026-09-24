@@ -201,6 +201,10 @@ class EpubReaderActivity final : public ReaderActivity {
   // the activity stack, and Pop restores it without onEnter(), so the drift has
   // to be noticed here rather than assumed away.
   uint8_t appliedOrientation = 0;
+  // One-shot latch for tap-zone long-press actions: the hold keeps reporting
+  // for as long as the finger stays down, and this flag makes sure the
+  // bookmark/dictionary action fires exactly once, re-arming on release.
+  bool touchHoldHandled = false;
 
   bool loadBook() override;
   std::string getBookTitle() const override { return epub ? epub->getTitle() : ""; }

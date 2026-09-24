@@ -37,6 +37,7 @@
 #include "SettingsList.h"
 #include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
+#include "TapZoneSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -763,6 +764,9 @@ void SettingsActivity::toggleCurrentSetting() {
     switch (setting.action) {
       case SettingAction::RemapFrontButtons:
         startActivityForResultWith<ButtonRemapActivity>(resultHandler);
+        break;
+      case SettingAction::TapZones:
+        startActivityForResultWith<TapZoneSettingsActivity>(resultHandler);
         break;
       case SettingAction::Bluetooth:
 #if FREEINK_CAP_BLE_HID_HOST

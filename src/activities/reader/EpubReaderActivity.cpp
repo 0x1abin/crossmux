@@ -869,6 +869,27 @@ void EpubReaderActivity::loop() {
   auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
+
+  // Tap-zone long-press actions: a BOOKMARK/DICTIONARY zone reports once on
+  // finger lift (held >= BOOKMARK_HOLD_MS). touchHoldHandled guards against a
+  // re-report and is re-armed on the next release.
+  if (mappedInput.wasScreenTouchReleased()) {
+    touchHoldHandled = false;
+  }
+  if (touch.bookmark && !touchHoldHandled) {
+    touchHoldHandled = true;
+    addBookmark();
+    showBookmarkMessage = true;
+    bookmarkMessageTime = millis();
+    requestUpdate();
+    return;
+  }
+  if (touch.dictionary && !touchHoldHandled) {
+    touchHoldHandled = true;
+    openDictionaryWordSelect();
+    return;
+  }
+
   if (!prevTriggered && !nextTriggered) {
     return;
   }
