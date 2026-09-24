@@ -1,19 +1,24 @@
-# Sticky 三档抗锯齿实验固件
+# Sticky 三档抗锯齿实验固件（历史记录）
+
+本页记录已烧录的 `1.6.0-sticky-aa-test2` 实验镜像。当前源代码的普通
+`sticky` 构建默认启用 SSD1677 纯文字合并抗锯齿，配置及验收状态见
+[ssd1677-text-aa.md](ssd1677-text-aa.md)。当前分支不再提供会误标为
+`sticky-aa-test2` 的旧实验构建目标；下述实机结果不自动适用于当前代码。
 
 本实验针对阅读翻页中“黑白正文先出现，字边随后变平滑”的中间态。普通纯文字
 EPUB/TXT 页会先准备正文和灰阶，再提交一次合并波形。三档为黑／灰／白，两个
 抗锯齿灰度合并为一个中间灰。Sticky 实机已确认纯文字翻页无独立黑白正文过渡。
 
-## 构建与边界
+## 当前构建与历史边界
 
 ```sh
-pio run -e sticky_aa_test
+pio run -e sticky -e sticky_aa_rollback
 python3 freeink-sdk/libs/display/FreeInkDisplay/test/host/test_sticky_combined_aa.py
 ```
 
-`sticky_aa_test` 继承 Sticky 硬件配置，启用 `FREEINK_STICKY_COMBINED_AA=1`，版本
-为 `1.6.0-sticky-aa-test2`，设备标识仍为 `sticky`。其他构建环境和 Nightly 清单
-不启用实验开关。不能将 Paper Mono 的整机固件刷到 Sticky。
+历史 `sticky_aa_test` 使用 Sticky 硬件配置，版本为
+`1.6.0-sticky-aa-test2`，设备标识仍为 `sticky`。下述安装和日志说明仅适用于
+该历史镜像；不能将 Paper Mono 的整机固件刷到 Sticky。
 
 SDK 复用 PaperMonoDriver 的三档合并算法，Sticky 分支保留 X+/Y− 扫描和原始
 字节顺序、40 MHz 默认 SPI、黑白 `0xFF` / 清理 `0xF7`、灰阶前独立 `0xC0`
@@ -37,7 +42,7 @@ SDK 在每次灰阶正文开始时清理旧暂存数据。HAL 的 `cancelGraysca
 的正文和灰阶，重新允许下一次绘制；阅读器切换 Activity 时调用。灰阶不完整／工作区
 分配失败则显示完整黑白页，避免留下未提交页面。
 
-## 安装与回退
+## 历史镜像的安装与回退
 
 适用于已经运行 CrossMux、使用当前双 OTA 分区布局的 Sticky：
 
@@ -47,7 +52,7 @@ SDK 在每次灰阶正文开始时清理旧暂存数据。HAL 的 `cancelGraysca
 4. 重启后确认版本为 `1.6.0-sticky-aa-test2`，开启文字抗锯齿，使用浅色阅读背景。
 5. 回退时使用相同的 SD 卡固件更新入口，选择 `sticky-rollback.bin`。
 
-回退文件由同一工作区的 `sticky-gh_release` 构建，关闭实验驱动，保留原 Sticky
+当时交付的回退文件由同一工作区的 `sticky-gh_release` 构建，关闭实验驱动，保留原 Sticky
 显示路径；不是从设备读取的完整闪存备份。首次安装和其他分区布局应走项目原有
 Sticky 安装流程。测试版仅烧录已核对身份的 Sticky，不推送 Nightly。
 
@@ -72,10 +77,3 @@ TXT 各连续翻页 100 次。分别记录按键到首次变化、首次变化�
 
 验收：普通文字页不独立提交黑白正文；文字灰边可辨识、底色正常、残影不持续加重。
 驱动主机测试和固件编译通过只算软件验证；图片质量和跨路径清理以 Sticky 实机反馈为准。
-
-## Subsequent default-enabled implementation
-
-The rebased SSD1677 rollout is documented in [ssd1677-text-aa.md](ssd1677-text-aa.md).
-The acceptance recorded above applies to the archived test2 image, not automatically
-to the new revision. Ordinary Sticky now defaults to text-only combined AA; build
-`sticky_aa_rollback` to restore the original path on the new baseline.
