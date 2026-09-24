@@ -72,3 +72,10 @@ TXT 各连续翻页 100 次。分别记录按键到首次变化、首次变化�
 
 验收：普通文字页不独立提交黑白正文；文字灰边可辨识、底色正常、残影不持续加重。
 驱动主机测试和固件编译通过只算软件验证；图片质量和跨路径清理以 Sticky 实机反馈为准。
+
+## Subsequent default-enabled implementation
+
+The rebased SSD1677 rollout is documented in [ssd1677-text-aa.md](ssd1677-text-aa.md).
+The acceptance recorded above applies to the archived test2 image, not automatically
+to the new revision. Ordinary Sticky now defaults to text-only combined AA; build
+`sticky_aa_rollback` to restore the original path on the new baseline.

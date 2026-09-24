@@ -1964,7 +1964,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool needsAnyGrayscale = grayscaleEnabled && (SETTINGS.textAntiAliasing || pageHasImages);
 #endif
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
-  // Paper Mono only (no other panel combines): defer the B/W base activation so
+  // Combined text AA: defer the B/W base activation so
   // the gray planes join it in a single waveform. Displaying the base
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
