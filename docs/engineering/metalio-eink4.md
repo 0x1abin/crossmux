@@ -14,6 +14,7 @@ CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nigh
 pio run -e metalio_eink4 -t upload --upload-port <verified-metalio-port>
 pio device monitor --port <verified-metalio-port> --baud 115200
 python3 -m unittest discover -s scripts/tests -p 'test_metalio_eink4.py'
+python3 freeink-sdk/libs/hardware/BoardConfig/test/host/test_metalio_charger.py
 ```
 
 The target uses the existing 16 MiB flash dual-OTA partition layout and the
@@ -36,7 +37,7 @@ for other boards are rejected by the existing flash/OTA board-tag check.
 | Buttons | BOOT0=Confirm, POWER3=Power; P0.7=Down/next, P1.0=Up/previous, active-low |
 | Virtual keys | Raw Home=(80,900) unchanged; Prev=(400,900) → Left, Next=(240,900) → Right |
 | Battery | BQ27220 `0x55`: percentage and gauge-native charging status |
-| Charger | Optional CX25601N `0x6B`: read status only; never interpreted as BQ25896 |
+| Charger | Optional CX25601N `0x6B`: fixed charge parameters at boot; status is never interpreted as BQ25896 |
 | RTC | PCF8563 `0x51`, existing system-UTC restore/writeback behavior |
 | USB | Native USB19/20, Serial/JTAG and existing USB Drive/MSC workflow; TCA9555 P0.0 held high for flash/debug routing |
 | Haptic | GPIO44, active-high motor; Off / Low 20 ms / Medium 35 ms / High 60 ms |
@@ -129,9 +130,17 @@ CX25601N external-power status is cached for one second. Absent/unreadable
 chargers retry after two seconds and fall back to USB SOF activity and the
 existing gauge charging indication. On legacy boards, a full battery connected
 to a charge-only source may not be distinguishable from disconnected power.
-No charge voltage/current, watchdog, private register, or dynamic-regulation
-writes are performed; battery compatibility must be established separately
-before introducing any charger control.
+On boot, after the shared I2C bus starts, the HAL passes its fixed policy to
+the SDK charger interface, which probes CX25601N register `0x38`. If present,
+the SDK disables charging while setting VREG to 4350 mV, IPRECHG to 240 mA,
+ITERM to 60 mA, ICHG and IINDPM to 480 mA (the chip's
+80 mA step rounds a 500 mA request down), then enables hardware termination
+and charging with HIZ and the watchdog cleared. A missing chip or failed I2C
+operation is logged without blocking boot; failure after charging is disabled
+leaves it disabled to avoid charging with partially updated parameters.
+This policy assumes a battery rated for 4.35 V charging. It does not change
+DPDM detection, private registers, the existing status path, or add a
+dynamic-regulation/recharge task. It has not yet been physically accepted.
 
 ## Acceptance
 
@@ -146,8 +155,10 @@ for complete acceptance; the dated session records only the observations made:
   held across boot, and contacts crossing activity/popup boundaries.
 - Open an EPUB from SD, turn pages, save progress/settings and verify after
   reboot. Missing SD must use the existing recoverable SD-error screen.
-- Set RTC, reset and remove power; verify UTC recovery. Test charging/unplugging
-  with and without CX25601N and when the battery reaches full.
+- Set RTC, reset and remove power; verify UTC recovery. With CX25601N, read
+  back VREG/ICHG/IINDPM/IPRECHG/ITERM/EN_TERM/EN_CHG, then measure battery
+  current and charging state on plug/unplug, full charge, and reboot. Confirm
+  an older board without CX25601N still boots and reports power as before.
 - USB MSC copy/rename/delete/large-file read; eject/cancel/disconnect and verify
   reboot, SD remount and opening the transferred book. Repeat three times.
 - Existing Wi-Fi transfer/OTA and BLE page turner connect/disconnect/reconnect.
@@ -298,7 +309,7 @@ uncommitted changes; the SDK gitlink is unchanged.
 | Touch / keys | Native coordinates, three bezel locations, GPIO1 IRQ, expander key pins and 10/120 ms boot reset agree. Add `0xA5=0x03` before deep sleep; failures log and still allow shutdown. Reset on boot restores touch after deep-sleep wake. No new light-sleep policy. |
 | Power / expander | Keep safe latch preload and main/screen rail ordering; repeat 100 ms high/low shutdown pulses until power is cut, without an ESP deep-sleep fallback. Add P0.0 output HIGH for USB flash/debug routing, matching the reference FSUSB42UMX selection. |
 | Haptic | Reference GPIO44 active-high, 35 ms timer pulse. Use board-calibratable 20/35/60 ms feedback for the entire touch surface and capability-gated settings. |
-| Gauge / charger | BQ27220 at 0x55 and optional CX25601N at 0x6B agree. Preserve read-only charger status. Reference charge-current/voltage writes are intentionally not imported. |
+| Gauge / charger | BQ27220 at 0x55 and optional CX25601N at 0x6B agree. At this audit, charger control was intentionally deferred; the current boot-time configuration above supersedes that decision. |
 | RTC | Retain PCF8563 at 0x51 and system-UTC restore/writeback. |
 | Audio / microphone | Reference external BT audio module uses UART TX48/RX47 and I²S BCLK6/WS43/DOUT7/DIN17. CrossMux leaves audio/mic capabilities disabled and PA off; codec/module control needs a separate port. |
 | IMU | Reference SC7A20H at 0x19, interrupt on TCA9555 P1.4. CrossMux keeps IMU disabled; no substitute QMI8658 driver or automatic rotation is enabled. |
