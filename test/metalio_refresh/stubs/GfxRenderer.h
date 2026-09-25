@@ -8,6 +8,7 @@ struct GfxRenderer {
   EpdBus& bus;
   const uint8_t* fb;
   bool combinesGrayscaleBase() const { return false; }
+  bool supportsTextOnlyCombinedBase() const { return false; }
   void displayGrayscaleBase(HalDisplay::RefreshMode mode, DisplayRefreshContext context) const {
     driver.displayGrayscaleBaseWithContext(bus, fb, mode == HalDisplay::FAST_REFRESH ? Mode::Fast : Mode::Half, false,
                                            context == DisplayRefreshContext::ContinuousReading

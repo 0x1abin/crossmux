@@ -23,6 +23,8 @@ that matches your task — don't load everything at once.
 | [chinese-build.md](chinese-build.md) | Working on unified-firmware content profiles or embedded CJK fonts. |
 | [firmware-release.md](firmware-release.md) | Changing Nightly targets, packaging, GitHub/COS publishing, regional indexes, rollback, or OTA release contracts. |
 | [device-variants.md](device-variants.md) | Building or flashing for the Xteink X3 vs X4, runtime device detection (one binary, both panels), and the per-device hardware differences. |
+| [ssd1677-text-aa.md](ssd1677-text-aa.md) | Default S3 SSD1677 text AA, original image routing, PSRAM fallback, calibration and validation. |
+| [sticky-aa-test.md](sticky-aa-test.md) | Historical Sticky test2 firmware and its physical observations. |
 | [eego-a4.md](eego-a4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 eego A4 target. |
 | [murphy-m4.md](murphy-m4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 Murphy M4 target. |
 | [waveshare-epaper-397.md](waveshare-epaper-397.md) | Building, flashing, or hardware-validating the experimental Waveshare ESP32-S3 ePaper 3.97 target. |

@@ -760,7 +760,7 @@ void TxtReaderActivity::renderPage() {
     // display, so the per-page B/W path must run or the panel never updates.
     const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
     if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
-    ReaderUtils::renderAntiAliased(renderer, [this, &renderLines]() {
+    ReaderUtils::renderAntiAliased(renderer, activityManager, [this, &renderLines]() {
       renderLines();
       renderStatusBar();
     });
@@ -768,11 +768,14 @@ void TxtReaderActivity::renderPage() {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
 #else
-  // Other devices keep the upstream behavior: show the BW frame first, then
-  // the gray pass.
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
-  if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+  const bool needsGrayscale = SETTINGS.textAntiAliasing && !renderer.isInverted();
+  if (needsGrayscale && !SETTINGS.readingBackgroundEnabled) {
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  } else {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  }
+  if (needsGrayscale) {
+    ReaderUtils::renderAntiAliased(renderer, activityManager, [&renderLines]() { renderLines(); });
   }
 #endif
   const auto tDisplay = millis();

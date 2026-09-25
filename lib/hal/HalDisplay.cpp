@@ -67,6 +67,8 @@ EInkDisplay::RefreshContext convertRefreshContext(DisplayRefreshContext context)
       return EInkDisplay::RefreshContext::Normal;
     case DisplayRefreshContext::ContinuousReading:
       return EInkDisplay::RefreshContext::ContinuousReading;
+    case DisplayRefreshContext::TextOnlyAntiAliasing:
+      return EInkDisplay::RefreshContext::TextOnlyAntiAliasing;
   }
   return EInkDisplay::RefreshContext::Normal;
 }
@@ -155,6 +157,15 @@ void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, ui
 bool HalDisplay::supportsStripGrayscale() const { return einkDisplay.supportsStripGrayscale(); }
 
 bool HalDisplay::combinesGrayscaleBase() const { return einkDisplay.combinesGrayscaleBase(); }
+
+bool HalDisplay::supportsTextOnlyCombinedBase() const { return einkDisplay.supportsTextOnlyCombinedBase(); }
+
+void HalDisplay::cancelGrayscale() {
+  if (!einkDisplay.combinesGrayscaleBase()) return;
+  einkDisplay.abortPostRefresh();
+  // Discard staged planes and re-arm the next render without touching the glass.
+  einkDisplay.beginDisplayWork();
+}
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 

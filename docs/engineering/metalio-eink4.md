@@ -396,3 +396,19 @@ pins merged commit `094976e1d47ad7120cf461fec5f6b737eaabf13f`; its source tree
 changed during integration. [CrossMux PR #318](https://github.com/0x1abin/crossmux/pull/318)
 contains the application/HAL changes. No application merge or firmware publication
 is part of this work.
+
+## 2026-09-25 combined text AA recovery
+
+The identified ESP32-S3 unit (USB serial and MAC `10:20:ba:6e:08:70`) booted
+from CrossMux app0 at `0x10000`. Its earlier default-AA image entered the home
+activity and logged completed refreshes, but the user reported that opening a
+book did not work. The shared display fix waits for an outstanding asynchronous
+refresh before routing and resets a sleeping SSD1677 before checking BUSY.
+
+Only app0 was replaced with `1.6.0-metalio-aa-fix1` (SHA-256
+`99f56c7792832d1fb809aec19fbedd38d05b352161d96f2736c814c3942d5397`);
+`esptool verify-flash` matched. The SD card mounted and the main loop ran with
+no captured panic or BUSY timeout. The user then reported that book opening was
+restored. This does not measure gray tone, residual ink or 100-page EPUB/TXT
+performance. The subsequent code review also consolidates controller wakeup
+paths; that revision still needs physical retesting.
