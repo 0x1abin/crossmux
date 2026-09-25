@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "BookStyleStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderFontSizes.h"
@@ -44,7 +45,9 @@ constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_HYPHENATION,
                                         StrId::STR_EMBEDDED_STYLE,
                                         StrId::STR_FAKE_BOLD,
-                                        StrId::STR_TEXT_AA};
+                                        StrId::STR_TEXT_AA,
+                                        StrId::STR_BOOK_STYLE_MEMORY,
+                                        StrId::STR_CLEAR_BOOK_STYLES};
 
 constexpr StrId LINE_SPACING_IDS[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE};
 constexpr StrId FIRST_LINE_INDENT_IDS[] = {StrId::STR_FIRST_LINE_INDENT_AUTO, StrId::STR_FIRST_LINE_INDENT_INDENT,
@@ -306,7 +309,7 @@ const char* TextSettingsActivity::confirmLabelText() const {
       if (ringPos() > 0) {
         const StyleRow row = styleRowAt(ringPos() - 1);
         if (row == StyleRow::ReadingGuideLineStyle || row == StyleRow::ReadingGuideLineOffset ||
-            row == StyleRow::FakeBold) {
+            row == StyleRow::FakeBold || row == StyleRow::ClearBookStyles) {
           return tr(STR_SELECT);
         }
       }
@@ -729,6 +732,19 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     case StyleRow::AntiAliasing:
       SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
       break;
+    case StyleRow::BookStyleMemory:
+      SETTINGS.bookStyleMemory = !SETTINGS.bookStyleMemory;
+      break;
+    case StyleRow::ClearBookStyles: {
+      // Two-step confirm: forgetting every book's style is not recoverable.
+      constexpr StrId CONFIRM_OPTIONS[] = {StrId::STR_CANCEL, StrId::STR_OK_BUTTON};
+      optionPopup_.show(StrId::STR_CLEAR_BOOK_STYLES_CONFIRM, CONFIRM_OPTIONS,
+                        static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [](int idx) {
+                          if (idx == 1) BOOK_STYLES.clear();
+                        });
+      requestUpdate();
+      return;
+    }
 
     default:
       return;
@@ -760,6 +776,10 @@ std::string TextSettingsActivity::styleValueText(int row) const {
     }
     case StyleRow::AntiAliasing:
       return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::BookStyleMemory:
+      return SETTINGS.bookStyleMemory ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ClearBookStyles:
+      return "";
 
     default:
       return "";
@@ -769,7 +789,8 @@ std::string TextSettingsActivity::styleValueText(int row) const {
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
   if (ringPos() == 0 || tab_ != Tab::Style) return false;
   const StyleRow row = styleRowAt(ringPos() - 1);
-  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
+  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing ||
+         row == StyleRow::BookStyleMemory || row == StyleRow::ClearBookStyles;
 }
 
 TextSettingsActivity::StyleRow TextSettingsActivity::styleRowAt(int visibleIndex) const {
