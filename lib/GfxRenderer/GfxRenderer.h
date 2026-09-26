@@ -428,6 +428,8 @@ class GfxRenderer {
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const;
   bool supportsStripGrayscale() const;
   bool combinesGrayscaleBase() const;
+  bool supportsTextOnlyCombinedBase() const;
+  void cancelGrayscale() const;
   bool storeBwBuffer();  // Returns true if buffer was stored successfully
   // Restore and free the stored buffer. resyncPanelBaseline rewrites the
   // controller's differential baseline to the restored frame — correct after

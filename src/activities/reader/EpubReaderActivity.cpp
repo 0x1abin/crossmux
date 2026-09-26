@@ -1918,6 +1918,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ImageBlock::releaseRenderCache();
     renderer.clearScreen();
   }
+  if (pageHasImages) {
+    LOG_DBG("ERS", "Image predecode=%lums cold=%u", millis() - t0, static_cast<unsigned>(pageHasImagesNeedingDecode));
+  }
 
 #ifdef ENABLE_CHINESE_VERSION
   fcm->consumeMissingChineseCodepoint();
@@ -1961,11 +1964,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool needsAnyGrayscale = grayscaleEnabled && (SETTINGS.textAntiAliasing || pageHasImages);
 #endif
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
-  // Paper Mono only (no other panel combines): defer the B/W base activation so
+  // Combined text AA: defer the B/W base activation so
   // the gray planes join it in a single waveform. Displaying the base
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
-  const bool combinedGrayscaleBase = tiledGrayscale && !pageHasImages && renderer.combinesGrayscaleBase();
+  const bool combinedGrayscaleBase =
+      tiledGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
 #if FREEINK_DEVICE_EEGO_A4
   const bool overlapRefresh =
       tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
@@ -2050,6 +2054,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
     const size_t planeBytes = static_cast<size_t>(gwBytes) * gh;
+    const auto abandonGrayscale = [&] {
+      renderer.setRenderMode(GfxRenderer::BW);
+      if (combinedGrayscaleBase)
+        renderer.cancelGrayscale();
+      else
+        renderer.cleanupGrayscaleWithFrameBuffer();
+    };
 
     auto renderPlaneToBuffer = [&](const bool lsbPlane, uint8_t* buf) {
       renderer.setRenderMode(lsbPlane ? GfxRenderer::GRAYSCALE_LSB : GfxRenderer::GRAYSCALE_MSB);
@@ -2092,8 +2103,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       // Abort before expensive grayscale display if a push/pop is pending
       if (activityManager.isSwitchPending()) {
-        renderer.setRenderMode(GfxRenderer::BW);
-        renderer.cleanupGrayscaleWithFrameBuffer();
+        abandonGrayscale();
         return;
       }
 
@@ -2130,14 +2140,17 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           // update diffs against stale contents. On the combined-base path the
           // base activation is still deferred; this cleanup commits it so the
           // page reaches the panel even without its grays.
-          renderer.cleanupGrayscaleWithFrameBuffer();
+          if (combinedGrayscaleBase && activityManager.isSwitchPending()) {
+            abandonGrayscale();
+          } else {
+            renderer.cleanupGrayscaleWithFrameBuffer();
+          }
         }
       } else {
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
           if (activityManager.isSwitchPending()) {
-            renderer.setRenderMode(GfxRenderer::BW);
-            renderer.cleanupGrayscaleWithFrameBuffer();
+            abandonGrayscale();
             return;
           }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
@@ -2152,8 +2165,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
           if (activityManager.isSwitchPending()) {
-            renderer.setRenderMode(GfxRenderer::BW);
-            renderer.cleanupGrayscaleWithFrameBuffer();
+            abandonGrayscale();
             return;
           }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
@@ -2165,6 +2177,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         }
         const auto tGrayMsb = millis();
 
+        if (combinedGrayscaleBase && activityManager.isSwitchPending()) {
+          abandonGrayscale();
+          return;
+        }
         renderer.setRenderMode(GfxRenderer::BW);
         renderer.displayGrayBuffer();
         const auto tGrayDisplay = millis();

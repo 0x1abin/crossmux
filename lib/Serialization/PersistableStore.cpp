@@ -30,7 +30,7 @@ bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& 
     written = serializeJson(doc, file);
     file.flush();
   }
-  if (written == 0) {
+  if (written == 0 || written != measureJson(doc)) {
     Storage.remove(tempPath.c_str());
     LOG_ERR("PERSIST", "Failed to serialize %s", targetPath.c_str());
     return false;

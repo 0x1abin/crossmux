@@ -33,10 +33,10 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
 // re-drive the whole text body (a visible flash). Other panels display
 // normally. Same refresh-cadence bookkeeping as displayWithRefreshCycle.
 inline void displayBaseWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
-  if (!renderer.combinesGrayscaleBase()) {
+  if (!renderer.supportsTextOnlyCombinedBase()) {
     displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
     return;
   }
-  renderer.displayGrayscaleBase(consumeRefreshMode(pagesUntilFullRefresh), DisplayRefreshContext::ContinuousReading);
+  renderer.displayGrayscaleBase(consumeRefreshMode(pagesUntilFullRefresh), DisplayRefreshContext::TextOnlyAntiAliasing);
 }
 }  // namespace ReaderUtils

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head><title>CrossMux User Guide</title></head>
+<body>
+<h2>1. Getting Started</h2>
+<p>The CrossMux Quick User Guide covers the essentials of your first reading session. CrossMux is lightweight reading firmware for ESP32-based e-ink devices, primarily for EPUB, TXT, and other books.</p>
+<p>To get started:</p>
+<p>1. Insert the SD card and turn on the device.</p>
+<p>2. Choose the interface language.</p>
+<p>3. Copy books to the SD card.</p>
+<p>4. Open a book from Library or Browse Files.</p>
+<p>5. Adjust the font, font size, and sleep timeout in Settings.</p>
+<blockquote><p>Do not casually delete <code>/.crosspoint/</code> from the SD card. It stores reading progress, caches, and some settings.</p></blockquote>
+<p>Official website: https://crossmux.com/</p>
+<h2>2. Basic Controls</h2>
+<p>Button positions and counts vary by device. Follow the on-screen hints and your current button mapping:</p>
+<ul>
+<li><strong>Confirm:</strong> open the selected item or enter a menu.</li>
+<li><strong>Back:</strong> return to the previous screen or close a menu.</li>
+<li><strong>Previous item / page:</strong> move or turn backward.</li>
+<li><strong>Next item / page:</strong> move or turn forward.</li>
+<li><strong>Power:</strong> power, sleep, or a shortcut according to the device.</li>
+<li><strong>Reset:</strong> use only if the device has a reset control and stops responding.</li>
+</ul>
+<p>Some devices allow button remapping under Settings &gt; Controls. Touch-capable devices also let you tap on-screen controls.</p>
+<h2>3. Reading Books</h2>
+<p>CrossMux can browse EPUB, TXT, XTC / XTCH, and image files such as BMP and JPEG. Available formats and controls may vary by device.</p>
+<p>While reading, use the mapped page controls to turn pages. Press Confirm to open the reader menu and Back to close it or return.</p>
+<p>The reader menu may provide chapters, bookmarks, dictionary lookup, auto page turn, orientation, position jump, and screenshots. Check your device's menu for available options.</p>
+<p>The first opening of an EPUB may take longer while pagination data is generated. Later opens are usually faster.</p>
+<h2>4. Reader Settings</h2>
+<p>Open Settings &gt; Reader &gt; Text Settings to adjust font, font size, line spacing, margins, and paragraph layout. Look in the reading or display settings for orientation, text anti-aliasing, and image display options.</p>
+<p>Changing font or layout settings may require pagination again.</p>
+<h2>5. E-Ink Refresh</h2>
+<p>Brief flashing, inversion, or light ghosting during page turns is normal for e-ink displays.</p>
+<p>Use Settings &gt; Display &gt; Refresh Frequency to adjust how often a full refresh occurs. If ghosting becomes noticeable, use your device's manual full-screen refresh action.</p>
+<h2>6. Adding Books</h2>
+<h3>SD Card</h3>
+<p>Power off and remove the SD card. Use a card reader to copy books onto it, for example into <code>/Books/</code>. Safely eject the card, put it back, and open the book from Library or Browse Files.</p>
+<h3>Wi-Fi Transfer</h3>
+<p>Open File Transfer from home and choose an available mode, such as Join Network, Create Hotspot, or Calibre Wireless. After connecting, the device shows a QR code or web address. Open the address on a phone or computer to upload, download, or manage files.</p>
+<blockquote><p>The web file service has no login authentication. Use it only on trusted networks and exit File Transfer when finished.</p></blockquote>
+<h2>7. Fonts and Dictionaries</h2>
+<p>Install fonts from Settings &gt; Reader &gt; Manage Fonts. For manual installation, put font-family folders containing <code>.cpfont</code> files under <code>/.fonts/</code> or <code>/fonts/</code> on the SD card, following the font instructions.</p>
+<p>Offline dictionaries support StarDict and can be installed from Settings &gt; Reader &gt; Manage Dictionaries.</p>
+<h2>8. Sleep and Battery Life</h2>
+<p>Set the idle sleep timeout under Settings &gt; System &gt; Time to Sleep.</p>
+<p>For longer battery life:</p>
+<ul>
+<li>Exit Wi-Fi transfer when finished.</li>
+<li>Turn off the frontlight or Bluetooth when your device has them and they are not needed.</li>
+<li>Choose a suitable sleep timeout.</li>
+</ul>
+<h2>9. Firmware Updates</h2>
+<p>Only install CrossMux firmware intended for your exact device model. Update information is available at:</p>
+<ul>
+<li>Website: https://crossmux.com/</li>
+<li>GitHub: https://github.com/0x1abin/crossmux</li>
+<li>Releases: https://github.com/0x1abin/crossmux/releases</li>
+</ul>
+<p>On devices that support OTA updates, open Settings &gt; System &gt; Check for updates. Do not disconnect power, remove the SD card, or force-reset during an update.</p>
+<h2>10. Troubleshooting</h2>
+<h3>EPUB Will Not Open</h3>
+<p>1. Restart the device.</p>
+<p>2. Delete this book's cache and reopen it.</p>
+<p>3. Copy the EPUB again.</p>
+<p>4. Convert the EPUB again with Calibre.</p>
+<p>5. Install a matching CrossMux firmware update.</p>
+<h3>Missing Chinese Characters</h3>
+<p>Install a <code>.cpfont</code> font containing the required Chinese characters, select it, and reopen the book.</p>
+<h3>Wi-Fi Network Not Found</h3>
+<p>Make sure the network uses 2.4 GHz Wi-Fi, and check the password and signal strength.</p>
+<h3>Device Is Unresponsive</h3>
+<p>If the device has a Reset control, reset and restart it. If the problem continues, verify that the firmware matches the device model.</p>
+<h2>11. Important Notes</h2>
+<ul>
+<li>Do not bend or heavily press the e-ink display.</li>
+<li>Back up important SD-card books and data regularly.</li>
+<li>Do not casually delete <code>/.crosspoint/</code>.</li>
+<li>Do not flash firmware intended for another device model.</li>
+</ul>
+<p>For more information: https://crossmux.com/</p>
+</body>
+</html>

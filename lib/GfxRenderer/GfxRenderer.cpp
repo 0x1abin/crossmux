@@ -30,6 +30,15 @@ bool combinesGrayscaleBase(const Display& display) {
   if constexpr (requires { display.combinesGrayscaleBase(); }) return display.combinesGrayscaleBase();
   return false;
 }
+template <typename Display>
+bool supportsTextOnlyCombinedBase(const Display& display) {
+  if constexpr (requires { display.supportsTextOnlyCombinedBase(); }) return display.supportsTextOnlyCombinedBase();
+  return combinesGrayscaleBase(display);
+}
+template <typename Display>
+void cancelGrayscale(Display& display) {
+  if constexpr (requires { display.cancelGrayscale(); }) display.cancelGrayscale();
+}
 }  // namespace
 
 namespace {
@@ -2400,6 +2409,10 @@ void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch
 bool GfxRenderer::supportsStripGrayscale() const { return display.supportsStripGrayscale(); }
 
 bool GfxRenderer::combinesGrayscaleBase() const { return ::combinesGrayscaleBase(display); }
+
+bool GfxRenderer::supportsTextOnlyCombinedBase() const { return ::supportsTextOnlyCombinedBase(display); }
+
+void GfxRenderer::cancelGrayscale() const { ::cancelGrayscale(display); }
 
 void GfxRenderer::freeBwBufferChunks() {
   for (auto& bwBufferChunk : bwBufferChunks) {

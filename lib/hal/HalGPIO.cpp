@@ -182,7 +182,29 @@ void HalGPIO::begin() {
   inputMgr.setMurphyM4Batch(_murphyM4Batch);
 #endif
 #if FREEINK_DEVICE_METALIO_EINK4
-  if (!freeink::metalio::begin()) LOG_ERR("HW", "Metalio power/expander initialization failed");
+  if (!freeink::metalio::begin()) {
+    LOG_ERR("HW", "Metalio power/expander initialization failed");
+  } else {
+    constexpr freeink::metalio::ChargerConfig charger{4350, 240, 60, 480, 480};  // 500 mA request -> 480 mA.
+    uint8_t partInfo = 0;
+    switch (freeink::metalio::configureCharger(charger, partInfo)) {
+      case freeink::metalio::ChargerConfigResult::Configured:
+        LOG_INF("PWR", "CX25601N 0x%02X ready: VREG=4350mV ICHG=480mA IINDPM=480mA", partInfo);
+        break;
+      case freeink::metalio::ChargerConfigResult::ProbeFailed:
+        LOG_INF("PWR", "CX25601N not detected at 0x%02X; using hardware defaults", freeink::metalio::CHARGER);
+        break;
+      case freeink::metalio::ChargerConfigResult::BusNotReady:
+        LOG_ERR("PWR", "CX25601N configuration skipped: Metalio I2C bus not ready");
+        break;
+      case freeink::metalio::ChargerConfigResult::InvalidConfig:
+        LOG_ERR("PWR", "CX25601N configuration rejected: invalid charge parameters");
+        break;
+      case freeink::metalio::ChargerConfigResult::IoError:
+        LOG_ERR("PWR", "CX25601N configuration failed at 0x%02X", freeink::metalio::CHARGER);
+        break;
+    }
+  }
 #endif
 #if FREEINK_CAP_HAPTIC
   if (!freeink::haptic::begin()) LOG_ERR("HW", "Haptic initialization failed; feedback disabled");
