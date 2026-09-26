@@ -98,6 +98,16 @@ add_subdirectory(ble_input)
 add_subdirectory(reader_build_failure)
 add_subdirectory(reader_font_preview)
 
+# Font fallback reuses the existing Unicode mark classification.
+foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest)
+  target_sources(${font_test} PRIVATE
+    ${REPO_ROOT}/lib/MiniBidi/minibidi.c
+    ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp)
+  target_include_directories(${font_test} PRIVATE
+    ${REPO_ROOT}/lib/MiniBidi
+    ${REPO_ROOT}/test/minibidi_arabic/stubs)
+endforeach()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME BuiltinFontShrink
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_builtin_font_shrink.py)

@@ -5,6 +5,7 @@
 
 #include "lib/EpdFont/EpdFont.h"
 #include "lib/EpdFont/EpdFontData.h"
+#include "lib/EpdFont/MissingGlyph.h"
 
 // ============================================================================
 // Synthetic test font
@@ -407,7 +408,7 @@ TEST(EpdFont, CoveredGlyphDoesNotReportReplacement) {
 
 TEST(EpdFont, MissingGlyphReportsReplacement) {
   bool usedReplacement = false;
-  EXPECT_EQ(replacementFont().getGlyph(0x749F, &usedReplacement), &kReplacementGlyphs[0]);
+  EXPECT_EQ(replacementFont().getGlyph(0x749F, &usedReplacement), nullptr);
   EXPECT_TRUE(usedReplacement);
 }
 
@@ -472,21 +473,45 @@ TEST(EpdFont, PairConsistencyViaFont) {
   EXPECT_EQ(oo_gap_after_o, oo_gap_bare);
 }
 
-// Null-glyph handling: when a codepoint has no glyph (and no replacement
-// glyph), the pending advance from the previous glyph must still be flushed.
-// Without the flush fix, the glyph after the null would overlap the one before.
-TEST(EpdFont, NullGlyphAdvancePreserved) {
-  // 'Z' (0x5A) is not in our font and there's no U+FFFD, so getGlyph returns null.
-  // "oZo" should lay out as: o1 at 0, Z skipped (advance flushed), o2 at 9.
-  //   toPixel(145) = 9 (o's advance, no kern since Z resets prevCp).
-  //   w = 9 + 8 = 17
-  EXPECT_EQ(textWidth("oZo"), 17);
+TEST(EpdFont, MissingGlyphReservesOutlineWidth) {
+  // ascender 12: 9px square, 1px bearing on each side, 11px advance.
+  EXPECT_EQ(textWidth("Z"), 10);
+  EXPECT_EQ(textWidth("oZo"), 28);
+  EXPECT_EQ(textWidth("oZZo"), 39);
+  EXPECT_EQ(textWidth("Zo"), 19);
+  EXPECT_EQ(textWidth("oZ"), 19);
+  EXPECT_EQ(textWidth("ZZ"), 21);
+  int w = 0, h = 0;
+  replacementFont().getTextDimensions("Z", &w, &h);
+  EXPECT_EQ(w, textWidth("Z"));
+  EXPECT_EQ(h, 9);
+  EXPECT_EQ(replacementFont().getGlyph(REPLACEMENT_GLYPH), &kReplacementGlyphs[0]);
+}
 
-  // Multi-null: "oZZo" -- two consecutive nulls, advance still preserved.
-  EXPECT_EQ(textWidth("oZZo"), 17);
+TEST(EpdFont, MissingGlyphMetricsScaleAndIgnoreNonPrintingCharacters) {
+  EXPECT_EQ(missingGlyph::metrics(24, 'Z').width, 18);
+  EXPECT_EQ(missingGlyph::metrics(24, 'Z').advanceX, 20 * 16);
+  EXPECT_EQ(missingGlyph::metrics(-1, 'Z').width, 4);
+  EXPECT_EQ(missingGlyph::metrics(10000, 'Z').width, 255);
+  for (const uint32_t cp :
+       {0x20, 0xA0, 0xAD, 0x3000, 0x200B, 0x200D, 0x2060, 0xFE0F, 0xFEFF, 0xE0100, 0x301, 0x5B0, 0x64E}) {
+    SCOPED_TRACE(cp);
+    EXPECT_EQ(missingGlyph::metrics(24, cp).width, 0);
+    EXPECT_EQ(missingGlyph::metrics(24, cp).advanceX, 0);
+  }
+  EXPECT_EQ(textWidth("o\xCC\x81o"), textWidth("oo"));
+  EXPECT_EQ(textWidth("o\xD6\xB0o"), textWidth("oo"));
+}
 
-  // Null at start: "Zo" -- no pending advance to flush, o renders at 0.
-  EXPECT_EQ(textWidth("Zo"), 8);
+TEST(EpdFont, MissingGlyphDoesNotUseKerningClassesLeftInSubsetFont) {
+  auto data = kTestFontData;
+  // 'T' still has kerning classes but its glyph is no longer in the subset.
+  data.intervals = kIntervals + 1;
+  data.intervalCount = 3;
+  EpdFont font(&data);
+  int w = 0, h = 0;
+  font.getTextDimensions("Ta", &w, &h);
+  EXPECT_EQ(w, 11 + 7);
 }
 
 TEST(EpdFont, HeightCalculation) {

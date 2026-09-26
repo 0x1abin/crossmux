@@ -236,3 +236,16 @@ shared icon assets and other themes remain unchanged.
 > and the i18n workflow in [generated-files.md](generated-files.md).
 
 INX SDK layout compatibility and regression coverage: [INX theme compatibility](inx-theme-compatibility.md).
+
+### Missing glyphs
+
+After the existing font selection/fallback and SD on-demand lookup, unsupported
+visible characters render as hollow squares. `missingGlyph::metrics` is shared
+by text bounds, advances, SD advance prewarm and rendering: the side is three
+quarters of the font ascender (clamped to 4–255 px), with one pixel of spacing
+on each side and the bottom aligned to the baseline. The outline is procedural;
+it allocates no bitmap or heap storage. SUP/SUB halves the metrics, and rotated
+text uses the same orientation mapping as real glyphs. Missing glyphs do not
+participate in kerning. Missing whitespace, controls, zero-width formatters and
+combining marks produce no square. Real U+FFFD text is still rendered when the
+font contains it; missing characters no longer borrow its glyph or width.
