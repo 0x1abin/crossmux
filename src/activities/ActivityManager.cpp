@@ -26,6 +26,7 @@
 #include "apps/weread/WeReadActivity.h"
 #endif
 #include "apps/gomoku/GomokuMenuActivity.h"
+#include "apps/go/GoMenuActivity.h"
 #include "apps/minesweeper/MinesweeperMenuActivity.h"
 #include "apps/pixel-switch/PixelSwitchActivity.h"
 #include "apps/reading-stats/ReadingStatsActivity.h"
@@ -504,6 +505,7 @@ void ActivityManager::goToSudoku() { replaceActivityWith<SudokuMenuActivity>(); 
 void ActivityManager::goToSokoban() { replaceActivityWith<SokobanGameActivity>(); }
 
 void ActivityManager::goToGomoku() { replaceActivityWith<GomokuMenuActivity>(); }
+void ActivityManager::goToGo() { replaceActivityWith<GoMenuActivity>(); }
 
 void ActivityManager::goToMinesweeper() { replaceActivityWith<MinesweeperMenuActivity>(); }
 

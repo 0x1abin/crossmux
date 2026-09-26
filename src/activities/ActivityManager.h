@@ -122,6 +122,7 @@ class ActivityManager {
   void goToSudoku();
   void goToSokoban();
   void goToGomoku();
+  void goToGo();
   void goToMinesweeper();
   void goToPixelSwitch();
   void goToCalculator();
