@@ -29,6 +29,12 @@ history independently of RAM cleanup and reject failed/unknown handoffs.
 The shared EPUB/TXT helper preserves the r2 distinction between an unstarted
 cycle (0) and actual periodic cleanup debt (1).
 
+The reader owns cadence and submits the existing text-AA intent; the SDK owns
+handoff eligibility. A separate permission context is unnecessary. Original
+drivers centralize failed-completion handling and discard deferred history, so
+a late completion cannot revive a timed-out frame. The rollback paths keep
+this failure protection. Per-activation logs require `SSD1677_PROBE_DEBUG`.
+
 **Physical evidence:** the user confirmed the extra flash disappeared with
 Metalio `1.6.0-metalio-transition-r2`. That confirmation concerns the reported
 entry/first-turn symptom, not a completed 100-page ghosting test. Sticky,
@@ -112,7 +118,7 @@ combined buffers, RAM-only gray synchronization, asynchronous completion and
 failed power-down during a driver handoff. CrossMux reader checks distinguish
 entry counter 0 from due counter 1 and preserve manual/periodic correction.
 Local build logs, firmware hashes and test results for the 2026-09-26 default
-rollout are recorded in `build/reader-transition-defaults/VALIDATION.md` (local
+rollout and follow-up review are recorded in `build/reader-transition-review/VALIDATION.md` (local
 artifact directory, not committed). These checks do not replace panel testing.
 
 ## Physical acceptance record
