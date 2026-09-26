@@ -430,6 +430,9 @@ class GfxRenderer {
   bool supportsStripGrayscale() const;
   bool combinesGrayscaleBase() const;
   bool supportsTextOnlyCombinedBase() const;
+  bool supportsReaderTransitions() const;
+  bool supportsContinuousImageReading() const;
+  bool canUseTextTransition() const;
   void cancelGrayscale() const;
   bool storeBwBuffer();  // Returns true if buffer was stored successfully
   // Restore and free the stored buffer. resyncPanelBaseline rewrites the

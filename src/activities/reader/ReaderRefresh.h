@@ -1,9 +1,15 @@
 #pragma once
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
+#include <Logging.h>
 
 namespace ReaderUtils {
-inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh) {
+inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh, bool deferClean = false) {
+  if (deferClean && pagesUntilFullRefresh <= 1) {
+    // Keep the debt: the next ordinary page must still clean.
+    pagesUntilFullRefresh = 1;
+    return HalDisplay::FAST_REFRESH;
+  }
   const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
   if (pagesUntilFullRefresh <= 1) {
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -32,11 +38,24 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
 // out as one waveform — displaying the base separately makes the gray pass
 // re-drive the whole text body (a visible flash). Other panels display
 // normally. Same refresh-cadence bookkeeping as displayWithRefreshCycle.
-inline void displayBaseWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
+inline void displayBaseWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh, bool manualRefresh) {
   if (!renderer.supportsTextOnlyCombinedBase()) {
     displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
     return;
   }
-  renderer.displayGrayscaleBase(consumeRefreshMode(pagesUntilFullRefresh), DisplayRefreshContext::TextOnlyAntiAliasing);
+  if (renderer.supportsReaderTransitions()) renderer.waitRefreshComplete();
+  const bool transition = !manualRefresh && renderer.canUseTextTransition();
+  if (transition && pagesUntilFullRefresh == 0) {
+    // Zero is an unstarted reading cycle, not periodic cleanup debt. The
+    // trusted full-target handoff replaces the entry refresh only.
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    LOG_INF("RDR", "Text transition: initial reading cycle started");
+    renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH, DisplayRefreshContext::TextOnlyAntiAliasingTransition);
+    return;
+  }
+  if (transition && pagesUntilFullRefresh <= 1) LOG_INF("RDR", "Text transition: periodic clean deferred to next page");
+  renderer.displayGrayscaleBase(
+      consumeRefreshMode(pagesUntilFullRefresh, transition),
+      transition ? DisplayRefreshContext::TextOnlyAntiAliasingTransition : DisplayRefreshContext::TextOnlyAntiAliasing);
 }
 }  // namespace ReaderUtils

@@ -109,6 +109,9 @@ class HalDisplay {
   // the whole text body (a visible flash).
   bool combinesGrayscaleBase() const;
   bool supportsTextOnlyCombinedBase() const;
+  bool supportsReaderTransitions() const;
+  bool supportsContinuousImageReading() const;
+  bool canUseTextTransition() const;
   void cancelGrayscale();
 
   // Runtime geometry passthrough

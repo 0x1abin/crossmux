@@ -16,6 +16,12 @@ class MetalioDisplayTest(unittest.TestCase):
             ROOT / "test/metalio_refresh/stubs", ROOT / "lib/hal",
             ROOT / "src/activities/reader"))
 
+    def test_transition_reader_sequences(self):
+        trace.run_trace(ROOT / "test/metalio_refresh/test_reader_refresh.cpp", (
+            ROOT / "test/metalio_refresh/stubs", ROOT / "lib/hal",
+            ROOT / "src/activities/reader"), defines=(
+                "FREEINK_SSD1677_READER_TRANSITIONS=1",))
+
 
 if __name__ == "__main__":
     unittest.main()
