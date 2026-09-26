@@ -100,9 +100,9 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 70 / 71
+### Versions 72 / 73
 
-> Unified firmware uses the CJK-capable cache version **71**. Version 70 is the
+> Unified firmware uses the CJK-capable cache version **73**. Version 72 is the
 > Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
@@ -137,13 +137,18 @@ if (parsedSize != fileSize) {
 > stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
 
+Versions 72/73 keep the binary layout unchanged but invalidate complete and partial
+pagination caches because missing glyphs now reserve a visible outline placeholder.
+The outline is sized from the active font ascender and replaces implicit U+FFFD
+fallback. Existing source-offset progress, metadata and chapter indexes are retained.
+
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
 
 Versions 62/63 add `collectTouchLinks` to the header cache key. Devices without
 touch input neither construct nor hydrate link geometry; button footnotes and
-anchors remain available. Partial-cache sentinels change in lockstep to 212/211 for versions 70/71.
+anchors remain available. Partial-cache sentinels change in lockstep to 210/209 for versions 72/73.
 Versions 64/65 also invalidate pagination produced before bounded no-PSRAM
 soft flushing; disabling embedded styles no longer enlarges the token window.
 On devices without PSRAM, a low-memory styled build is discarded and retried
@@ -216,8 +221,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 70
-#define CHINESE_VERSION 71
+#define LATIN_VERSION 72
+#define CHINESE_VERSION 73
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -439,9 +444,9 @@ if (parsedSize != fileSize) {
 
 TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
 
-`index.bin` version 7 is a little-endian page-offset checkpoint. Its fixed
+`index.bin` version 8 is a little-endian page-offset checkpoint. Its fixed
 header contains, in order: `uint32 magic` (`TXTI`, `0x54585449`), `uint8
-version` (`7`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
+version` (`8`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
 `int32 fontId`, `int32 screenMargin`, `uint8 paragraphAlignment`, `uint8
 extraParagraphSpacing`, `uint8 complete`, `uint8 encoding` (`0` unknown/ASCII,
 `1` UTF-8, `2` GBK), and `uint32 knownPageCount`. It is followed by `knownPageCount`
@@ -451,12 +456,10 @@ marked complete.
 
 An incomplete index contains only pages discovered while reading. It is
 checkpointed every 32 known page starts and when the reader exits; the final
-page marks it complete and makes `knownPageCount` exact. Version 4 indexes omit
-`complete`; versions 4 and 5 omit `encoding`. These legacy indexes are reused
-only when the file prefix is confirmed UTF-8, because offsets produced before
-GBK decoding are not valid GBK page boundaries. Versions 4 through 6 omit
-`extraParagraphSpacing`; they remain reusable only while paragraph spacing is
-enabled, which preserves their pagination behavior. A wrong magic, unsupported
+page marks it complete and makes `knownPageCount` exact. Version 8 retains the
+version-7 byte layout but rejects all earlier page indexes: missing-glyph outline
+advances change page boundaries. Both complete and partial indexes are rebuilt.
+A wrong magic, unsupported
 version, truncated payload, changed file size, changed layout setting,
 non-monotonic offset, or out-of-range offset invalidates the index. Writers
 flush `index.bin.tmp` before replacing the prior checkpoint.

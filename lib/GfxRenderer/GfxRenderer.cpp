@@ -6,6 +6,7 @@
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
+#include <MissingGlyph.h>
 #include <SdCardFont.h>
 #include <Utf8.h>
 
@@ -396,6 +397,31 @@ static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::R
   renderer.drawPixel(x, y, renderMode == GfxRenderer::BW ? pixelState : pixel.state);
 }
 
+// Outline fallback has no font bitmap and uses the same metrics as layout.
+template <TextRotation rotation = TextRotation::None>
+static void renderMissingGlyph(const GfxRenderer& renderer, const EpdFontData& fontData, const uint32_t cp,
+                               const int cursorX, const int cursorY, const bool pixelState, const bool scaled = false) {
+  const EpdGlyph glyph = missingGlyph::metrics(fontData.ascender, cp);
+  if (glyph.width == 0) return;
+  const int width = scaled ? (glyph.width + 1) / 2 : glyph.width;
+  const int height = scaled ? (glyph.height + 1) / 2 : glyph.height;
+  const int left = scaled ? glyph.left / 2 : glyph.left;
+  const int top = scaled ? glyph.top / 2 : glyph.top;
+  if constexpr (rotation == TextRotation::Rotated90CW) {
+    const int x = cursorX + fontData.ascender - top;
+    const int y = cursorY - left - width + 1;
+    if (renderer.glyphIntersectsStrip(x, y, x + height - 1, y + width - 1)) {
+      renderer.drawRect(x, y, height, width, pixelState);
+    }
+  } else {
+    const int x = cursorX + left;
+    const int y = cursorY - top;
+    if (renderer.glyphIntersectsStrip(x, y, x + width - 1, y + height - 1)) {
+      renderer.drawRect(x, y, width, height, pixelState);
+    }
+  }
+}
+
 // Shared glyph rendering logic for normal and rotated text.
 // Coordinate mapping and cursor advance direction are selected at compile time via the template parameter.
 // Render a glyph at 50% scale. Used for SUP/SUB style bits.
@@ -410,9 +436,12 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
                              const bool pixelState, const EpdFontFamily::Style style,
                              const uint8_t syntheticBoldPixels) {
   const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
-  if (!glyph) return;
-
   const EpdFontData* fontData = fontFamily.getData(style);
+  if (!glyph) {
+    renderMissingGlyph(renderer, *fontData, cp, cursorX, cursorY, pixelState, true);
+    return;
+  }
+
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
   if (!bitmap) return;
 
@@ -479,15 +508,12 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
                            const bool pixelState, const EpdFontFamily::Style style,
                            const uint8_t syntheticBoldPixels = 0) {
   const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
+  const EpdFontData* fontData = fontFamily.getData(style);
   if (!glyph) {
-    // Missing glyph is a known limitation (subset fonts, rare characters). The reader
-    // renders □ tofu via the absence of an EpdGlyph here. DBG-level so simulator/dev
-    // logs aren't flooded; release builds (LOG_LEVEL=0/1) suppress this entirely.
-    LOG_DBG("GFX", "No glyph for codepoint U+%04X", cp);
+    renderMissingGlyph<rotation>(renderer, *fontData, cp, cursorX, cursorY, pixelState);
     return;
   }
 
-  const EpdFontData* fontData = fontFamily.getData(style);
   const bool is2Bit = fontData->is2Bit;
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
@@ -717,6 +743,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   const char* textCursor = renderedText;
   uint32_t cp;
   uint32_t prevCp = 0;
+  bool prevMissing = false;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&textCursor)))) {
     // RTL vowel marks (Hebrew niqqud, Arabic harakat) ride the combining-mark
     // path: zero-advance overlays on the preceding base glyph (applyBidiVisual
@@ -743,14 +770,6 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 #endif
     cp = font.applyLigatures(cp, textCursor, renderStyle);
 
-    // Differential rounding: snap (previous advance + current kern) as one unit so
-    // identical character pairs always produce the same pixel step regardless of
-    // where they fall on the line.
-    if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, renderStyle);  // 4.4 fixed-point kern
-      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);             // snap 12.4 fixed-point to nearest pixel
-    }
-
 #ifdef ENABLE_CHINESE_VERSION
     bool usedReplacement = false;
     const EpdGlyph* glyph = font.getGlyph(cp, renderStyle, &usedReplacement);
@@ -761,10 +780,18 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     const EpdGlyph* glyph = font.getGlyph(cp, renderStyle);
 #endif
 
-    lastBaseLeft = glyph ? glyph->left : 0;
-    lastBaseWidth = glyph ? glyph->width : 0;
-    lastBaseTop = glyph ? glyph->top : 0;
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
+    const bool missing = glyph == nullptr;
+    if (prevCp != 0) {
+      const auto kernFP = missing || prevMissing ? 0 : font.getKerning(prevCp, cp, renderStyle);
+      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
+    }
+    const EpdGlyph placeholder = missing ? missingGlyph::metrics(font.getData(renderStyle)->ascender, cp) : EpdGlyph{};
+    if (missing) glyph = &placeholder;
+
+    lastBaseLeft = glyph->left;
+    lastBaseWidth = glyph->width;
+    lastBaseTop = glyph->top;
+    prevAdvanceFP = glyph->advanceX;  // 12.4 fixed-point
 
     const bool isSupSub = (renderStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
     if (isSupSub) {
@@ -781,6 +808,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
                                          activeSyntheticBoldPixels);
     }
     prevCp = cp;
+    prevMissing = missing;
   }
 }
 
@@ -2181,7 +2209,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     bool havePrev = false;
     while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
       // RTL vowel marks (niqqud/harakat) are zero-advance overlays in drawText — no width.
-      if (BidiUtils::isTransparentMark(cp)) {
+      if (missingGlyph::isCombining(cp)) {
         continue;
       }
       // Differential rounding: snap each glyph step to a pixel individually, matching
@@ -2218,32 +2246,32 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
 
   uint32_t cp;
   uint32_t prevCp = 0;
+  bool prevMissing = false;
   int widthPx = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = fontIt->second;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
     // RTL vowel marks (niqqud/harakat) are zero-advance overlays in drawText — no width.
-    if (BidiUtils::isTransparentMark(cp)) {
-      continue;
-    }
-    if (utf8IsCombiningMark(cp)) {
+    if (missingGlyph::isCombining(cp)) {
       continue;
     }
     cp = font.applyLigatures(cp, text, style);
 
+    const EpdGlyph* glyph = font.getGlyph(cp, style);
+    const bool missing = glyph == nullptr;
     // Differential rounding: snap (previous advance + current kern) together,
     // matching drawText so measurement and rendering agree exactly.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      widthPx += fp4::toPixel(prevAdvanceFP + kernFP);         // snap 12.4 fixed-point to nearest pixel
+      const auto kernFP = missing || prevMissing ? 0 : font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
+      widthPx += fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
-    const EpdGlyph* glyph = font.getGlyph(cp, style);
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;
+    prevAdvanceFP = glyph ? glyph->advanceX : missingGlyph::metrics(font.getData(style)->ascender, cp).advanceX;
     if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
     }
     prevCp = cp;
+    prevMissing = missing;
   }
   widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
   return widthPx;
@@ -2308,6 +2336,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
 
   uint32_t cp;
   uint32_t prevCp = 0;
+  bool prevMissing = false;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
     // RTL vowel marks (Hebrew niqqud, Arabic harakat) ride the combining-mark
     // path: zero-advance overlays on the preceding base glyph (applyBidiVisual
@@ -2334,13 +2363,6 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
 #endif
     cp = font.applyLigatures(cp, text, style);
 
-    // Differential rounding: snap (previous advance + current kern) as one unit,
-    // subtracting for the rotated coordinate direction.
-    if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
-    }
-
 #ifdef ENABLE_CHINESE_VERSION
     bool usedReplacement = false;
     const EpdGlyph* glyph = font.getGlyph(cp, style, &usedReplacement);
@@ -2351,13 +2373,22 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     const EpdGlyph* glyph = font.getGlyph(cp, style);
 #endif
 
-    lastBaseLeft = glyph ? glyph->left : 0;
-    lastBaseWidth = glyph ? glyph->width : 0;
-    lastBaseTop = glyph ? glyph->top : 0;
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
+    const bool missing = glyph == nullptr;
+    if (prevCp != 0) {
+      const auto kernFP = missing || prevMissing ? 0 : font.getKerning(prevCp, cp, style);
+      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);
+    }
+    const EpdGlyph placeholder = missing ? missingGlyph::metrics(font.getData(style)->ascender, cp) : EpdGlyph{};
+    if (missing) glyph = &placeholder;
+
+    lastBaseLeft = glyph->left;
+    lastBaseWidth = glyph->width;
+    lastBaseTop = glyph->top;
+    prevAdvanceFP = glyph->advanceX;  // 12.4 fixed-point
 
     renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, x, lastBaseY, black, style);
     prevCp = cp;
+    prevMissing = missing;
   }
 }
 

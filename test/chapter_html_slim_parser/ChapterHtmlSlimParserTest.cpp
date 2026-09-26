@@ -527,11 +527,16 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   ASSERT_TRUE(section.createSectionFile(spec));
   const auto path = epub->cachePath + "/sections/0.bin";
   std::ifstream file(path, std::ios::binary);
-  const std::string bytes{std::istreambuf_iterator<char>(file), {}};
+  std::string bytes{std::istreambuf_iterator<char>(file), {}};
   uint64_t digest = 14695981039346656037ULL;
   const auto append = [&digest](const std::string& value) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
+  ASSERT_FALSE(bytes.empty());
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 72);
+  // This test uses a layout stub: only the version byte changes. Normalize it
+  // to prove the pre-existing layout/text/footnote digest is unchanged.
+  bytes.front() = 70;
   append(bytes);
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
@@ -626,7 +631,7 @@ TEST_F(SectionMemoryTest, FirstLineIndentRoundTripsAndInvalidatesChangedAndLegac
       EXPECT_FALSE(mismatch.loadSectionFile(changed));
     }
   }
-  for (const char oldVersion : {char{66}, char{68}}) {
+  for (const uint8_t oldVersion : {66, 68, 70, 71, 212, 211}) {
     Section section(epub, 0, renderer);
     ASSERT_TRUE(section.createSectionFile(spec));
     section.file.close();
@@ -634,7 +639,7 @@ TEST_F(SectionMemoryTest, FirstLineIndentRoundTripsAndInvalidatesChangedAndLegac
     {
       std::fstream file(cachePath, std::ios::binary | std::ios::in | std::ios::out);
       ASSERT_TRUE(file.good());
-      file.write(&oldVersion, 1);
+      file.write(reinterpret_cast<const char*>(&oldVersion), 1);
     }
     Section legacy(epub, 0, renderer);
     EXPECT_FALSE(legacy.loadSectionFile(spec));

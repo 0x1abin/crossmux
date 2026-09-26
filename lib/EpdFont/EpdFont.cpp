@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "MissingGlyph.h"
+
 void EpdFont::getTextBounds(const char* string, const int startX, const int startY, int* minX, int* minY, int* maxX,
                             int* maxY) const {
   *minX = startX;
@@ -22,33 +24,25 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   uint32_t cp;
   uint32_t prevCp = 0;
+  bool prevMissing = false;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
-    const bool isCombining = utf8IsCombiningMark(cp);
+    const bool isCombining = missingGlyph::isCombining(cp);
 
     if (!isCombining) {
       cp = applyLigatures(cp, string);
     }
 
     const EpdGlyph* glyph = getGlyph(cp);
-    if (!glyph) {
-      // Keep cursor movement stable when a base glyph is missing, but don't attach subsequent
-      // combining marks to stale base metrics.
-      if (!isCombining) {
-        lastBaseX += fp4::toPixel(prevAdvanceFP);  // flush pending advance before resetting
-        prevCp = 0;
-        prevAdvanceFP = 0;
-        lastBaseLeft = 0;
-        lastBaseWidth = 0;
-        lastBaseTop = 0;
-      }
-      continue;
-    }
+    const bool missing = glyph == nullptr;
+    if (missing && isCombining) continue;
+    const EpdGlyph placeholder = missing ? missingGlyph::metrics(data->ascender, cp) : EpdGlyph{};
+    if (missing) glyph = &placeholder;
 
     const combiningMark::Anchor anchor = combiningMark::anchorFor(cp);
     const int raiseBy = isCombining ? combiningMark::raiseAboveBase(anchor, glyph->top, glyph->height, lastBaseTop) : 0;
 
     if (!isCombining && prevCp != 0) {
-      const auto kernFP = getKerning(prevCp, cp);  // 4.4 fixed-point kern
+      const auto kernFP = missing || prevMissing ? 0 : getKerning(prevCp, cp);
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
     }
 
@@ -68,6 +62,7 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
       lastBaseTop = glyph->top;
       prevAdvanceFP = glyph->advanceX;  // 12.4 fixed-point
       prevCp = cp;
+      prevMissing = missing;
     }
   }
 }
@@ -237,10 +232,7 @@ const EpdGlyph* EpdFont::getGlyph(const uint32_t cp, bool* const usedReplacement
     if (loaded) return loaded;
   }
 
-  if (cp != REPLACEMENT_GLYPH) {
-    if (usedReplacement) *usedReplacement = true;
-    return getGlyph(REPLACEMENT_GLYPH);
-  }
+  if (usedReplacement) *usedReplacement = true;
   return nullptr;
 }
 

@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "EpdFontFamily.h"
+#include "MissingGlyph.h"
 #include "SdCardFontAlgorithms.h"
 
 static_assert(sizeof(EpdGlyph) == 16, "EpdGlyph must be 16 bytes to match .cpfont file layout");
@@ -1061,9 +1062,6 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
     if (text) collectUniqueCodepoints(text, codepoints.get(), cpCount, MAX_PAGE_GLYPHS);
   }
 
-  // Always include the replacement character
-  sd_card_font_algorithms::insertSortedUnique(REPLACEMENT_GLYPH, codepoints.get(), cpCount, MAX_PAGE_GLYPHS);
-
   // Add ligature output codepoints from all styles being prewarmed.
   // Skip during metadata-only prewarm (layout measurement) to avoid loading
   // kern/lig data for all styles upfront (~22KB per style). Kern/lig is
@@ -1553,7 +1551,8 @@ uint16_t SdCardFont::getAdvanceOrLoad(uint32_t codepoint, uint8_t style) const {
   if (!s.present) return 0;
   FontFile file(filePath_, &useFlash_, flashPayloadSize_);
   const int32_t gIdx = findGlobalGlyphIndex(s, codepoint, &file);
-  if (gIdx < 0) return 0;  // absent glyph or a logged index read failure
+  if (gIdx == GLYPH_INDEX_IO_ERROR) return 0;  // Retry on the next lookup; never cache an I/O failure.
+  if (gIdx < 0) return missingGlyph::metrics(s.header.ascender, codepoint).advanceX;
   EpdGlyph glyph{};
   if (readGlyphMetadata(file, styleIdx, static_cast<uint32_t>(gIdx), glyph, true) == GlyphReadResult::Failed) {
     LOG_ERR("SDCF", "getAdvanceOrLoad: short glyph read for U+%04X (glyph %d)", codepoint, gIdx);
@@ -1573,8 +1572,7 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
     FontFile file(filePath_, &useFlash_, flashPayloadSize_);
 
     // Stop fetching once the cache is full — further inserts would be dropped
-    // by the merge anyway. The renderer fast path tolerates missing entries
-    // (returns 0); the slow path is still correct for those codepoints.
+    // by the merge anyway. getAdvanceOrLoad resolves uncached entries on demand.
     if (advanceTableSize_[si] >= ADVANCE_CACHE_LIMIT) continue;
 
     // For each codepoint in `codepoints`, skip those already cached, then
@@ -1599,19 +1597,13 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
 
     uint32_t needCount = 0;
     uint32_t missedThisStyle = 0;
-    const int32_t replacementIdx = findGlobalGlyphIndex(s, REPLACEMENT_GLYPH, &file);
-    if (replacementIdx == GLYPH_INDEX_IO_ERROR) return -1;
     for (uint32_t i = 0; i < cpCount; i++) {
       const uint32_t cp = codepoints[i];
       if (advanceTableLookup(si, cp, nullptr)) continue;  // already cached
       int32_t idx = findGlobalGlyphIndex(s, cp, &file);
       if (idx == GLYPH_INDEX_IO_ERROR) return -1;
       if (idx < 0) {
-        if (replacementIdx < 0) {
-          missedThisStyle++;
-          continue;
-        }
-        idx = replacementIdx;
+        missedThisStyle++;
       }
       mappings[needCount].codepoint = cp;
       mappings[needCount].glyphIndex = idx;
@@ -1639,6 +1631,11 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
     int32_t lastReadIndex = INT32_MIN;
     for (uint32_t i = 0; i < needCount; i++) {
       const int32_t gIdx = mappings[i].glyphIndex;
+      if (gIdx < 0) {
+        const uint32_t cp = mappings[i].codepoint;
+        staged[fetched++] = {cp, missingGlyph::metrics(s.header.ascender, cp).advanceX};
+        continue;
+      }
       const auto result =
           readGlyphMetadata(file, si, static_cast<uint32_t>(gIdx), tempGlyph, gIdx != lastReadIndex + 1);
       if (result == GlyphReadResult::Failed) {
