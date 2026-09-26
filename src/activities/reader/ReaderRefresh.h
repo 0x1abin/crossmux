@@ -1,7 +1,6 @@
 #pragma once
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
-#include <Logging.h>
 
 namespace ReaderUtils {
 inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh, bool deferClean = false) {
@@ -45,17 +44,14 @@ inline void displayBaseWithRefreshCycle(const GfxRenderer& renderer, int& pagesU
   }
   if (renderer.supportsReaderTransitions()) renderer.waitRefreshComplete();
   const bool transition = !manualRefresh && renderer.canUseTextTransition();
+  HalDisplay::RefreshMode mode;
   if (transition && pagesUntilFullRefresh == 0) {
-    // Zero is an unstarted reading cycle, not periodic cleanup debt. The
-    // trusted full-target handoff replaces the entry refresh only.
+    // A trusted entry starts the cycle; a real due counter (1) keeps its debt.
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-    LOG_INF("RDR", "Text transition: initial reading cycle started");
-    renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH, DisplayRefreshContext::TextOnlyAntiAliasingTransition);
-    return;
+    mode = HalDisplay::FAST_REFRESH;
+  } else {
+    mode = consumeRefreshMode(pagesUntilFullRefresh, transition);
   }
-  if (transition && pagesUntilFullRefresh <= 1) LOG_INF("RDR", "Text transition: periodic clean deferred to next page");
-  renderer.displayGrayscaleBase(
-      consumeRefreshMode(pagesUntilFullRefresh, transition),
-      transition ? DisplayRefreshContext::TextOnlyAntiAliasingTransition : DisplayRefreshContext::TextOnlyAntiAliasing);
+  renderer.displayGrayscaleBase(mode, DisplayRefreshContext::TextOnlyAntiAliasing);
 }
 }  // namespace ReaderUtils

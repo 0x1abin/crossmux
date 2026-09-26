@@ -47,7 +47,7 @@ int main() {
   due = 0;
   ReaderUtils::displayBaseWithRefreshCycle(renderer, due, false);
   assert(due == SETTINGS.getRefreshFrequency() && renderer.lastMode == HalDisplay::FAST_REFRESH);
-  assert(renderer.lastContext == DisplayRefreshContext::TextOnlyAntiAliasingTransition);
+  assert(renderer.lastContext == DisplayRefreshContext::TextOnlyAntiAliasing);
   renderer.transition = false;
   // The first actual page turn must not inherit artificial entry cleanup debt.
   ReaderUtils::displayBaseWithRefreshCycle(renderer, due, false);
@@ -65,7 +65,7 @@ int main() {
   due = 1;
   ReaderUtils::displayBaseWithRefreshCycle(renderer, due, false);
   assert(due == 1 && renderer.lastMode == HalDisplay::FAST_REFRESH);
-  assert(renderer.lastContext == DisplayRefreshContext::TextOnlyAntiAliasingTransition);
+  assert(renderer.lastContext == DisplayRefreshContext::TextOnlyAntiAliasing);
   renderer.transition = false;
   ReaderUtils::displayBaseWithRefreshCycle(renderer, due, false);
   assert(due == SETTINGS.getRefreshFrequency() && renderer.lastMode == HalDisplay::HALF_REFRESH);

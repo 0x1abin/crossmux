@@ -71,8 +71,6 @@ EInkDisplay::RefreshContext convertRefreshContext(DisplayRefreshContext context)
       return EInkDisplay::RefreshContext::TextOnlyAntiAliasing;
     case DisplayRefreshContext::ImageReading:
       return EInkDisplay::RefreshContext::ImageReading;
-    case DisplayRefreshContext::TextOnlyAntiAliasingTransition:
-      return EInkDisplay::RefreshContext::TextOnlyAntiAliasingTransition;
   }
   return EInkDisplay::RefreshContext::Normal;
 }
