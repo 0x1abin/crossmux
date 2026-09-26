@@ -69,6 +69,8 @@ EInkDisplay::RefreshContext convertRefreshContext(DisplayRefreshContext context)
       return EInkDisplay::RefreshContext::ContinuousReading;
     case DisplayRefreshContext::TextOnlyAntiAliasing:
       return EInkDisplay::RefreshContext::TextOnlyAntiAliasing;
+    case DisplayRefreshContext::ImageReading:
+      return EInkDisplay::RefreshContext::ImageReading;
   }
   return EInkDisplay::RefreshContext::Normal;
 }
@@ -159,6 +161,9 @@ bool HalDisplay::supportsStripGrayscale() const { return einkDisplay.supportsStr
 bool HalDisplay::combinesGrayscaleBase() const { return einkDisplay.combinesGrayscaleBase(); }
 
 bool HalDisplay::supportsTextOnlyCombinedBase() const { return einkDisplay.supportsTextOnlyCombinedBase(); }
+bool HalDisplay::supportsReaderTransitions() const { return einkDisplay.supportsReaderTransitions(); }
+bool HalDisplay::supportsContinuousImageReading() const { return einkDisplay.supportsContinuousImageReading(); }
+bool HalDisplay::canUseTextTransition() const { return einkDisplay.canUseTextTransition(); }
 
 void HalDisplay::cancelGrayscale() {
   if (!einkDisplay.combinesGrayscaleBase()) return;

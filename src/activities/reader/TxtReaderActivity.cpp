@@ -769,8 +769,10 @@ void TxtReaderActivity::renderPage() {
   }
 #else
   const bool needsGrayscale = SETTINGS.textAntiAliasing && !renderer.isInverted();
+  const bool manualRefreshPending = forcedRefreshPending;
+  forcedRefreshPending = false;
   if (needsGrayscale && !SETTINGS.readingBackgroundEnabled) {
-    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
   } else {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }

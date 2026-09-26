@@ -2415,6 +2415,30 @@ bool GfxRenderer::combinesGrayscaleBase() const { return ::combinesGrayscaleBase
 
 bool GfxRenderer::supportsTextOnlyCombinedBase() const { return ::supportsTextOnlyCombinedBase(display); }
 
+bool GfxRenderer::supportsReaderTransitions() const {
+#ifdef SIMULATOR
+  return false;
+#else
+  return display.supportsReaderTransitions();
+#endif
+}
+
+bool GfxRenderer::supportsContinuousImageReading() const {
+#ifdef SIMULATOR
+  return false;
+#else
+  return display.supportsContinuousImageReading();
+#endif
+}
+
+bool GfxRenderer::canUseTextTransition() const {
+#ifdef SIMULATOR
+  return false;
+#else
+  return display.canUseTextTransition();
+#endif
+}
+
 void GfxRenderer::cancelGrayscale() const { ::cancelGrayscale(display); }
 
 void GfxRenderer::freeBwBufferChunks() {
