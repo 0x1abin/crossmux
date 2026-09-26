@@ -15,6 +15,8 @@ namespace {
 // honest without constant flashing (same cadence as recording).
 constexpr uint32_t REFRESH_STEP_SECONDS = 5;
 constexpr int SKIP_SECONDS = 10;
+// Same hold threshold the reader uses to tell a chapter skip from a page turn.
+constexpr unsigned long VOLUME_HOLD_MS = 700;
 
 void formatClock(char* out, const size_t outLen, const uint32_t seconds) {
   snprintf(out, outLen, "%02u:%02u", static_cast<unsigned>(seconds / 60), static_cast<unsigned>(seconds % 60));
@@ -44,6 +46,7 @@ void VoiceNotesPlayActivity::onEnter() {
 }
 
 void VoiceNotesPlayActivity::onExit() {
+  popup_.dismiss();
   // Sleep or any other exit path must release the speaker and the file.
   voicenotes::player::close();
   Activity::onExit();
@@ -79,6 +82,17 @@ void VoiceNotesPlayActivity::skip(const int seconds) {
   }
 }
 
+void VoiceNotesPlayActivity::showVolumeMenu() {
+  const StrId options[] = {StrId::STR_SOUND_FEEDBACK_LOW, StrId::STR_SOUND_FEEDBACK_MEDIUM,
+                           StrId::STR_SOUND_FEEDBACK_HIGH};
+  popup_.show(StrId::STR_VOICE_NOTES_VOLUME, options, 3, static_cast<int>(voicenotes::player::volume()),
+              [](const int choice) {
+                if (choice < 0 || choice > static_cast<int>(voicenotes::player::Volume::High)) return;
+                voicenotes::player::setVolume(static_cast<voicenotes::player::Volume>(choice));
+              });
+  requestUpdate();
+}
+
 void VoiceNotesPlayActivity::loop() {
   using Button = MappedInputManager::Button;
 
@@ -95,11 +109,26 @@ void VoiceNotesPlayActivity::loop() {
     return;
   }
 
+  // The clock is not refreshed under the popup; resync it when the popup closes.
+  if (popup_.handleInput(mappedInput, [this] {
+        if (state_ == State::Playing) shownSeconds_ = voicenotes::player::positionSeconds();
+        requestUpdate();
+      })) {
+    return;
+  }
+
   if (mappedInput.wasPressed(Button::Confirm) || mappedInput.wasPressed(Button::Back) ||
       mappedInput.wasPressed(Button::NavPrevious) || mappedInput.wasPressed(Button::NavNext)) {
     pressSeen_ = true;
   }
   if (pressSeen_) {
+    // A hold fires while the button is still down and swallows its release, so
+    // it never also skips.
+    if (state_ != State::Error && (mappedInput.wasLongPressed(Button::NavPrevious, VOLUME_HOLD_MS) ||
+                                   mappedInput.wasLongPressed(Button::NavNext, VOLUME_HOLD_MS))) {
+      showVolumeMenu();
+      return;
+    }
     if (mappedInput.wasReleased(Button::Back) ||
         (state_ == State::Error && mappedInput.wasReleased(Button::Confirm))) {
       finish();
@@ -173,6 +202,7 @@ void VoiceNotesPlayActivity::render(RenderLock&&) {
   y += titleHeight + sectionGap;
   UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, y, clockLine);
 
+  if (popup_.processRender(renderer, mappedInput)) return;
   const auto labels =
       mappedInput.mapLabels(tr(STR_BACK), playing ? tr(STR_VOICE_NOTES_PAUSE) : tr(STR_VOICE_NOTES_PLAY),
                             tr(STR_VOICE_NOTES_SKIP_BACK), tr(STR_VOICE_NOTES_SKIP_FORWARD));

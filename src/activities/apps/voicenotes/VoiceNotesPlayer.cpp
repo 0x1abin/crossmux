@@ -5,6 +5,7 @@
 #include <HalAudioOutput.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <SoundFeedback.h>
 
 #include <atomic>
 #include <cstring>
@@ -14,9 +15,22 @@
 namespace voicenotes::player {
 namespace {
 
-// Codec output percent. Recordings are quiet speech from the onboard mic, so
-// play at the calibrated Medium feedback level (WAVESHARE_397_CALIBRATION).
-constexpr uint8_t PLAYBACK_VOLUME = 85;
+// Reuse the sound-feedback calibration so Low/Medium/High match the system
+// setting of the same name: a codec percent per level, plus a digital PCM gain
+// for High because the codec is already at 100% for Medium.
+constexpr const SoundFeedback::Calibration& CALIBRATION = SoundFeedback::WAVESHARE_397_CALIBRATION;
+
+SoundFeedback::Level levelFor(const Volume volume) {
+  switch (volume) {
+    case Volume::Low:
+      return SoundFeedback::Level::Low;
+    case Volume::High:
+      return SoundFeedback::Level::High;
+    case Volume::Medium:
+    default:
+      return SoundFeedback::Level::Medium;
+  }
+}
 
 // Static rather than heap: the playback task reads these through plain function
 // pointers, and a single HalFile handle is all a recording needs.
@@ -28,6 +42,8 @@ uint32_t dataBytes = 0;
 // audio task is stopped.
 std::atomic<uint32_t> dataPos{0};
 uint32_t startPos = 0;
+// Written by the main task, read by the audio task for the High PCM gain.
+std::atomic<Volume> currentVolume{Volume::Medium};
 
 bool seekSource(const size_t position) {
   // AudioManager seeks relative to the start of the stream it was given, which
@@ -48,6 +64,16 @@ int readSource(uint8_t* dst, const size_t length) {
   const int n = file.read(dst, want);
   if (n < 0) return -1;
   const int whole = n & ~1;
+  const SoundFeedback::Level level = levelFor(currentVolume.load());
+  if (level == SoundFeedback::Level::High) {
+    // memcpy, not a cast: dst carries no 16-bit alignment guarantee.
+    for (int offset = 0; offset + 2 <= whole; offset += 2) {
+      int16_t sample = 0;
+      memcpy(&sample, dst + offset, sizeof(sample));
+      sample = SoundFeedback::scalePcmSample(sample, level, CALIBRATION);
+      memcpy(dst + offset, &sample, sizeof(sample));
+    }
+  }
   dataPos.store(pos + static_cast<uint32_t>(whole));
   return whole;
 }
@@ -89,7 +115,8 @@ bool play(const uint32_t fromSecond) {
   uint32_t from = fromSecond * BYTES_PER_SECOND;
   if (from >= dataBytes) from = 0;  // at the end: replay from the start
   startPos = from;
-  if (!HalAudioOutput::playPcm(readSource, seekSource, SAMPLE_RATE, 1, PLAYBACK_VOLUME)) {
+  const uint8_t codecVolume = SoundFeedback::volumeForLevel(levelFor(currentVolume.load()), CALIBRATION);
+  if (!HalAudioOutput::playPcm(readSource, seekSource, SAMPLE_RATE, 1, codecVolume)) {
     LOG_ERR("VNP", "Speaker unavailable");
     return false;
   }
@@ -118,6 +145,14 @@ uint32_t positionSeconds() { return dataPos.load() / BYTES_PER_SECOND; }
 
 uint32_t durationSeconds() { return dataBytes / BYTES_PER_SECOND; }
 
+Volume volume() { return currentVolume.load(); }
+
+void setVolume(const Volume volume) {
+  currentVolume.store(volume);
+  // setVolume() is a no-op while the codec is powered down; play() applies it.
+  HalAudioOutput::setVolume(SoundFeedback::volumeForLevel(levelFor(volume), CALIBRATION));
+}
+
 }  // namespace voicenotes::player
 
 #else
@@ -131,6 +166,8 @@ bool active() { return false; }
 bool playing() { return false; }
 uint32_t positionSeconds() { return 0; }
 uint32_t durationSeconds() { return 0; }
+Volume volume() { return Volume::Medium; }
+void setVolume(Volume) {}
 }  // namespace voicenotes::player
 
 #endif

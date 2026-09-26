@@ -6,10 +6,11 @@
 
 #include "VoiceNotesStore.h"
 #include "activities/Activity.h"
+#include "components/OptionPopup.h"
 
 // Child of VoiceNotesActivity: plays one recording through the speaker.
-// Confirm pauses/resumes, previous/next skip 10 s, Back stops and returns to
-// the list.
+// Confirm pauses/resumes, previous/next skip 10 s, holding previous/next opens
+// the playback volume popup, Back stops and returns to the list.
 class VoiceNotesPlayActivity final : public Activity {
  public:
   VoiceNotesPlayActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const char* recordingName);
@@ -26,6 +27,7 @@ class VoiceNotesPlayActivity final : public Activity {
   void startAt(uint32_t second);
   void pause();
   void skip(int seconds);
+  void showVolumeMenu();
 
   char name_[voicenotes::NAME_LEN] = {};
   State state_ = State::Error;
@@ -34,4 +36,6 @@ class VoiceNotesPlayActivity final : public Activity {
   // One gesture, one action: a button still held from the list's popup must be
   // released before a press here counts.
   bool pressSeen_ = false;
+  // Playback keeps running while the popup is open.
+  OptionPopup popup_;
 };

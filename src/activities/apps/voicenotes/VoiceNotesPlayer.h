@@ -7,6 +7,10 @@
 // static instance: one recording plays at a time. All calls are main task only.
 namespace voicenotes::player {
 
+// Playback loudness, chosen from the play screen's volume popup. Kept for the
+// rest of the session (until reboot) so the next recording plays the same.
+enum class Volume : uint8_t { Low, Medium, High };
+
 // Opens the WAV and validates its header. Does not start the speaker.
 bool open(const char* wavPath);
 // Starts (or restarts) output at `fromSecond`, clamped to the recording.
@@ -23,5 +27,9 @@ bool active();
 bool playing();
 uint32_t positionSeconds();
 uint32_t durationSeconds();
+
+Volume volume();
+// Applies immediately when playing; otherwise takes effect on the next play().
+void setVolume(Volume volume);
 
 }  // namespace voicenotes::player
