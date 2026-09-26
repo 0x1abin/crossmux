@@ -145,9 +145,6 @@ EpdFont cjk10Font(&notosans_cjk_10);
 EpdFontFamily cjk10FontFamily(&cjk10Font);
 EpdFont cjk12Font(&notosans_cjk_12);
 EpdFontFamily cjk12FontFamily(&cjk12Font);
-constexpr int CJK_UI_8_FONT_ID = 0x434A4B08;
-constexpr int CJK_UI_10_FONT_ID = 0x434A4B0A;
-constexpr int CJK_UI_12_FONT_ID = 0x434A4B0C;
 
 // Chinese chess piece glyphs (subset CJK font, 14 characters at 16pt).
 EpdFont chineseChessPieceFont(&chinese_chess_16);

@@ -11,11 +11,36 @@ The startup guide and later UI-language changes apply the same rule.
 | Resource | Unified behavior |
 |---|---|
 | i18n | `gen_i18n.py` always emits all 33 languages. |
-| UI fonts | International 8/10/12pt faces are primary; Simplified-Chinese 8/10/12pt subsets are registered through `setFallbackFont()`. |
-| Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time. |
+| UI fonts | International 8/10/12pt faces are primary; Simplified-Chinese subsets remain the built-in fallback. PSRAM-equipped S3 devices additionally use the selected SD family at matching sizes for multilingual missing glyphs. |
+| Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time, plus optional S3 UI sizes. |
 | EPUB/TXT | Unicode CJK parsing, line breaking and missing-glyph detection are always compiled and trigger from text content. |
 | Apps | App visibility is independent of language and content profile. WeRead is visible by default in every language; Chinese Chess is hidden by default. Language changes preserve app visibility choices. |
 | Services | China uses `crossmux.cn`, OTA variant `cn`, and China NTP servers; Global uses `crossmux.com`, variant `global`, and international NTP servers. Initial onboarding alone sets the default UTC offset. |
+
+**S3 UI fallback residency**
+
+`SdCardFontSystem::setupUiFallbacks()` enables SD UI sizes only on real ESP32-S3
+PSRAM targets with `memory::psramHasHeadroom(0, 0, 0)`. No-PSRAM unified builds
+retain their previous one-reader-size policy, independently of UI language.
+The renderer retains two ordered candidates per UI face: SD first, embedded
+CJK second. Removing an SD font clears only that candidate, so network memory
+release and failed font reloads cannot erase the built-in Chinese fallback.
+
+At most three extra `.cpfont` instances live alongside the reader font; matching
+reader/UI sizes share one instance. The manager reserves four tracking records
+before loading. These fonts need dynamic, file-dependent coverage indices and
+text caches across screens, so task-stack or static font buffers are unsuitable.
+The existing file limits bound additional resident coverage indices to
+`3 × 4 styles × 4096 intervals × 12 bytes = 576 KiB` (BMP-only indices use half).
+This is the index ceiling, not total heap use: font objects and existing text
+mini-caches also consume memory. Loading remains fallible. UI-only sizes do not
+request another 1 MiB PSRAM glyph cache or flash preload. All are released by
+the existing manager unload path.
+
+Verify on S3 with an SD family containing 8/10/12pt files: check multilingual
+file names, switch families, and enter/leave network features while observing
+`SDMGR` load logs and free/largest internal heap blocks. Check a missing or corrupt
+UI-size file still leaves Chinese UI usable. C3 must load no extra UI sizes.
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
 
