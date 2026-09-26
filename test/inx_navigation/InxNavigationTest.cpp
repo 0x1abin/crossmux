@@ -62,6 +62,23 @@ TEST(InxNavigation, WrapsAcrossFiveTabs) {
   EXPECT_EQ(MainTabs::contentEdgeIndex(MainTabContentEdge::Last, 10), 9);
 }
 
+TEST(InxNavigation, PlacesTabsWithoutOverlappingContent) {
+  constexpr MainTabLayout top = MainTabs::layout(800, 0, 66, 40, false);
+  EXPECT_EQ(top.tabTop, 0);
+  EXPECT_EQ(top.contentTop, 66);
+  EXPECT_EQ(top.contentBottom, 760);
+
+  constexpr MainTabLayout bottom = MainTabs::layout(800, 0, 66, 40, true);
+  EXPECT_EQ(bottom.tabTop, 694);
+  EXPECT_EQ(bottom.contentTop, 0);
+  EXPECT_EQ(bottom.contentBottom, 694);
+
+  constexpr MainTabLayout touchBottom = MainTabs::layout(480, 5, 45, 0, true);
+  EXPECT_EQ(touchBottom.tabTop, 435);
+  EXPECT_EQ(touchBottom.contentTop, 5);
+  EXPECT_EQ(touchBottom.contentBottom, 435);
+}
+
 TEST(InxNavigation, ScrollsListPagesWithoutMovingSelection) {
   freeink::ui::ListNav nav;
   nav.selected = 2;

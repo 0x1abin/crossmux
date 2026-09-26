@@ -27,13 +27,6 @@ constexpr int kHomeBatteryWidth = 15;
 constexpr int kHomeBatteryHeight = 12;
 constexpr int kHomeBatteryRightMargin = 12;
 
-Rect contentRect(const GfxRenderer& renderer) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  return Rect{0, top, renderer.getScreenWidth(),
-              InxRecentGeometry::contentHeight(renderer.getScreenHeight(), top, metrics.buttonHintsHeight)};
-}
-
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
 
 void drawMiniProgress(const GfxRenderer& renderer, const Rect rect, const uint8_t percent) {
@@ -107,6 +100,18 @@ void InxRecentActivity::selectMainTabContentEdge(const MainTabContentEdge edge) 
 InxRecentLayout InxRecentActivity::layout() const {
   const auto value = static_cast<InxRecentLayout>(SETTINGS.inxRecentLayout);
   return value < InxRecentLayout::Count ? value : InxRecentLayout::Flow;
+}
+
+Rect InxRecentActivity::contentRect() const {
+  Rect content = mainTabContentRect();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int topInset = mainTabsAtBottom() ? metrics.batteryBarHeight : 0;
+  content.y += topInset + metrics.verticalSpacing;
+  content.height -= topInset + metrics.verticalSpacing * 2;
+  if (!mainTabsAtBottom()) {
+    content.height = InxRecentGeometry::contentHeight(renderer.getScreenHeight(), content.y, metrics.buttonHintsHeight);
+  }
+  return content;
 }
 
 const ReadingBookStats* InxRecentActivity::statsAt(const int index) const {
@@ -337,7 +342,7 @@ bool InxRecentActivity::prepareNextMissingCover() {
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
   if (!books || books->empty()) return -1;
-  const Rect content = contentRect(renderer);
+  const Rect content = contentRect();
   if (x < content.x || x >= content.x + content.width || y < content.y || y >= content.y + content.height) return -1;
 
   const InxRecentLayout currentLayout = layout();
@@ -558,7 +563,7 @@ void InxRecentActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   drawPageHeader(Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
-  const Rect content = contentRect(renderer);
+  const Rect content = contentRect();
 
   if (!books || books->empty()) {
     UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_RECENT_BOOKS), 2);
@@ -587,9 +592,10 @@ void InxRecentActivity::render(RenderLock&&) {
   const auto labels = mainTabButtonLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN),
                                           books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  const int batteryY = mainTabsAtBottom() ? metrics.topPadding + 5 : renderer.getScreenHeight() - 30;
   GUI.drawBatteryRight(renderer,
-                       Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth,
-                            renderer.getScreenHeight() - 30, kHomeBatteryWidth, kHomeBatteryHeight},
+                       Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth, batteryY,
+                            kHomeBatteryWidth, kHomeBatteryHeight},
                        SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   if (prepareNextMissingCover()) return;
   renderer.displayBuffer();

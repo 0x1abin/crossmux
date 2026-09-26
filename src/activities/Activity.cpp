@@ -33,9 +33,27 @@ bool Activity::showMainTabContentSelection() const {
          (!usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content);
 }
 
+bool Activity::mainTabsAtBottom() const { return SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM; }
+
+MainTabLayout Activity::mainTabLayout() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return MainTabs::layout(renderer.getScreenHeight(), metrics.topPadding, metrics.headerHeight,
+                          metrics.buttonHintsHeight, mainTabsAtBottom());
+}
+
+Rect Activity::mainTabBarRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return Rect{0, mainTabLayout().tabTop, renderer.getScreenWidth(), metrics.headerHeight};
+}
+
+Rect Activity::mainTabContentRect() const {
+  const MainTabLayout layout = mainTabLayout();
+  return Rect{0, layout.contentTop, renderer.getScreenWidth(), layout.contentBottom - layout.contentTop};
+}
+
 void Activity::drawPageHeader(const Rect& rect, const char* title, const char* subtitle) const {
   if (usesMainTabBar()) {
-    GUI.drawMainTabBar(renderer, rect, mainTab());
+    GUI.drawMainTabBar(renderer, mainTabBarRect(), mainTab());
   } else {
     GUI.drawHeader(renderer, rect, title, subtitle);
   }

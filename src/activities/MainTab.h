@@ -8,6 +8,12 @@ enum class MainTab : uint8_t { None, Recent, Library, Apps, Settings, Statistics
 enum class MainTabFocus : uint8_t { Tabs, Content };
 enum class MainTabContentEdge : uint8_t { First, Last };
 
+struct MainTabLayout {
+  int tabTop;
+  int contentTop;
+  int contentBottom;
+};
+
 namespace MainTabs {
 inline constexpr std::array<MainTab, 5> values = {MainTab::Recent, MainTab::Library, MainTab::Apps, MainTab::Settings,
                                                   MainTab::Statistics};
@@ -33,6 +39,13 @@ constexpr MainTab fromX(const int x, const int width) {
 }
 
 constexpr MainTab backTarget(const MainTab tab) { return tab == MainTab::Recent ? MainTab::None : MainTab::Recent; }
+
+constexpr MainTabLayout layout(const int screenHeight, const int topPadding, const int tabHeight, const int bottomInset,
+                               const bool tabsAtBottom) {
+  const int usableBottom = screenHeight - bottomInset;
+  return tabsAtBottom ? MainTabLayout{usableBottom - tabHeight, topPadding, usableBottom - tabHeight}
+                      : MainTabLayout{topPadding, topPadding + tabHeight, usableBottom};
+}
 
 constexpr int contentEdgeIndex(const MainTabContentEdge edge, const int count) {
   if (count <= 0) return 0;

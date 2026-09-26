@@ -580,8 +580,12 @@ void ReadingStatsActivity::renderInx() {
   const int screenHeight = renderer.getScreenHeight();
   drawPageHeader(Rect{0, metrics.topPadding, screenWidth, metrics.headerHeight}, tr(STR_READING_STATS));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight;
-  const int contentBottom = screenHeight - metrics.buttonHintsHeight;
+  const Rect mainContent =
+      usesMainTabBar() ? mainTabContentRect()
+                       : Rect{0, metrics.topPadding + metrics.headerHeight, screenWidth,
+                              screenHeight - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
+  const int contentTop = mainContent.y;
+  const int contentBottom = mainContent.y + mainContent.height;
   const Rect content{18, contentTop + 6, screenWidth - 36, std::max(1, contentBottom - contentTop - 12)};
   const auto& books = READING_STATS.getBooks();
   const int pageTitleHeight = renderer.getLineHeight(NOTOSERIF_14_FONT_ID);
