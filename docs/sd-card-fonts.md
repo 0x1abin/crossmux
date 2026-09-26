@@ -60,16 +60,29 @@ There are three ways to install fonts:
 
 3. Insert the SD card and power on your CrossPoint reader
 
-## CJK in the User Interface
+## Missing Glyphs in the User Interface
 
 Unified firmware registers embedded Simplified-Chinese 8/10/12pt subsets as
-fallbacks for the compact international UI fonts. No extra SD UI sizes stay
-resident, preserving contiguous heap. Japanese, Korean, Traditional Chinese,
-and uncommon Han glyphs outside those subsets may still show replacement boxes.
+fallbacks for the compact international UI fonts.
 
-Reader content uses only the selected reader-size `.cpfont` at runtime. The
-built-in 12pt subset is an offline fallback; install a complete CJK family for
-broader coverage, other point sizes, and style variants.
+On ESP32-S3 devices with working PSRAM and at least the existing 256 KiB
+PSRAM reserve, the selected SD font family also supplies matching 8/10/12pt
+UI fallbacks. Install those exact sizes alongside your reader size. The loader
+probes Han, Hiragana, Katakana, Hangul, Greek, Cyrillic, Hebrew, Arabic, Thai,
+and Devanagari coverage before loading extra sizes. Missing files or failed
+loads leave the embedded fallback in place. No fonts are downloaded automatically.
+
+As upstream does, when the primary font lacks a non-ASCII character covered by
+the SD fallback, the entire string is measured and drawn using that face.
+This is not per-character font mixing: a string mixing scripts still needs a
+font covering those scripts. If the SD face cannot supply any missing character,
+the embedded Chinese subset is tried next. Unloading or switching SD fonts
+preserves that embedded fallback.
+
+C3, devices without PSRAM, and simulators keep only the selected reader-size
+`.cpfont` resident. Japanese, Korean, Traditional Chinese, and uncommon Han
+glyphs outside the embedded subsets may still show replacement boxes there.
+The built-in 12pt reader subset remains an offline fallback.
 
 ## Available Pre-Built Fonts
 

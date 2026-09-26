@@ -110,3 +110,6 @@ add_test(NAME DownloadMemoryLifecycle
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_download_memory_lifecycle.py)
 add_test(NAME InxStyleCompatibility
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_style_compat.py)
+
+add_test(NAME UiFontFallback
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)

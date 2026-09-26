@@ -7,6 +7,11 @@
 
 class GfxRenderer;
 
+// Shared by built-in registration and SD UI fallback setup.
+inline constexpr int CJK_UI_8_FONT_ID = 0x434A4B08;
+inline constexpr int CJK_UI_10_FONT_ID = 0x434A4B0A;
+inline constexpr int CJK_UI_12_FONT_ID = 0x434A4B0C;
+
 /// Facade that owns the SD card font registry, manager, and resolver logic.
 /// Hides implementation details behind a single begin() + ensureLoaded() API.
 class SdCardFontSystem {
@@ -57,9 +62,9 @@ class SdCardFontSystem {
   }
 
  private:
-  // In global builds, load size-matched SD CJK fallbacks for the built-in UI
-  // fonts. CN builds already embed their UI glyphs and keep only the reader
-  // size resident to preserve contiguous heap.
+  // PSRAM-equipped S3 devices load size-matched SD UI fallbacks while retaining
+  // the embedded CJK subsets as backups. No-PSRAM unified builds keep only the
+  // reader size resident to preserve contiguous heap.
   void setupUiFallbacks(GfxRenderer& renderer);
 
   SdCardFontRegistry registry_;

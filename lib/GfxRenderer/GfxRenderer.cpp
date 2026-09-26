@@ -196,23 +196,25 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
   if (fbIt == fallbackFontMap_.end()) {
     return fontId;  // no fallback registered for this font
   }
-  const int fallbackFontId = fbIt->second;
   const auto fontIt = fontMap.find(fontId);
-  const auto fallbackIt = fontMap.find(fallbackFontId);
-  if (fontIt == fontMap.end() || fallbackIt == fontMap.end()) {
-    return fontId;  // unknown primary or fallback not loaded — let the caller handle it
-  }
+  if (fontIt == fontMap.end()) return fontId;
   const EpdFontFamily& primary = fontIt->second;
-  const EpdFontFamily& fallback = fallbackIt->second;
-  const char* cursor = text;
-  uint32_t cp;
-  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
-    // Only redirect for CJK the primary font cannot draw but the fallback can.
-    // Latin/symbol strings the built-in UI fonts already cover are left
-    // untouched, and a partial-coverage fallback (e.g. kana-only) is not worth
-    // dragging the whole string into for glyphs it would also miss.
-    if (utf8IsCjkCodepoint(cp) && !primary.hasCodepoint(cp, style) && fallback.hasCodepoint(cp, style)) {
-      return fallbackFontId;
+  for (const int fallbackFontId : fbIt->second) {
+    if (fallbackFontId == 0) continue;
+    const auto fallbackIt = fontMap.find(fallbackFontId);
+    if (fallbackIt == fontMap.end()) continue;
+    const EpdFontFamily& fallback = fallbackIt->second;
+    const char* cursor = text;
+    uint32_t cp;
+    while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
+#if CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+      const bool eligible = cp >= 0x80;
+#else
+      const bool eligible = utf8IsCjkCodepoint(cp);
+#endif
+      if (eligible && !primary.hasCodepoint(cp, style) && fallback.hasCodepoint(cp, style)) {
+        return fallbackFontId;
+      }
     }
   }
   return fontId;
@@ -222,13 +224,14 @@ void GfxRenderer::prewarmFallbackText(const int fontId, const TextGetter getter,
                                       const uint32_t textCount, const EpdFontFamily::Style style) const {
   if (getter == nullptr || textCount == 0) return;
 
-  int fallbackFontId = fontId;
-  for (uint32_t i = 0; i < textCount && fallbackFontId == fontId; i++) {
+  auto sdIt = sdCardFonts_.end();
+  for (uint32_t i = 0; i < textCount && sdIt == sdCardFonts_.end(); i++) {
     const char* text = getter(ctx, i);
-    if (text && *text) fallbackFontId = resolveTextFontId(fontId, text, style);
+    if (text == nullptr || *text == '\0') continue;
+    const int fallbackFontId = resolveTextFontId(fontId, text, style);
+    if (fallbackFontId != fontId) sdIt = sdCardFonts_.find(fallbackFontId);
   }
-  const auto sdIt = sdCardFonts_.find(fallbackFontId);
-  if (fallbackFontId == fontId || sdIt == sdCardFonts_.end()) return;
+  if (sdIt == sdCardFonts_.end()) return;
 
   struct BatchContext {
     TextGetter getter;

@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <cstring>
 #include <iterator>
@@ -22,18 +23,18 @@ void snapFontPointSizeTo(const uint8_t availablePointSize) {
   SETTINGS.saveToFile();
 }
 
-#ifndef ENABLE_CHINESE_VERSION
-// Global-build UI fonts and their physical point sizes (at 150 DPI, matching
-// the SD-font converter). CN builds already embed Simplified-Chinese UI fonts
-// and deliberately avoid keeping three additional SD font sizes resident.
+#if !defined(ENABLE_CHINESE_VERSION) || \
+    (CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED))
+// Physical point sizes at 150 DPI, matching the SD-font converter.
 struct UiFontSize {
   int fontId;
   uint8_t pointSize;
+  int builtinFallbackId;
 };
 constexpr UiFontSize kUiFontSizes[] = {
-    {SMALL_FONT_ID, 8},
-    {UI_10_FONT_ID, 10},
-    {UI_12_FONT_ID, 12},
+    {SMALL_FONT_ID, 8, CJK_UI_8_FONT_ID},
+    {UI_10_FONT_ID, 10, CJK_UI_10_FONT_ID},
+    {UI_12_FONT_ID, 12, CJK_UI_12_FONT_ID},
 };
 #endif
 
@@ -163,30 +164,38 @@ bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
 }
 
 void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
-#ifdef ENABLE_CHINESE_VERSION
-  // Unified firmware has built-in 8/10/12pt Simplified-Chinese UI fallbacks.
-  // Keep only the selected reader-size SD font resident: loading
-  // three more broad-CJK sizes leaves too little contiguous heap for EPUB image
-  // decoding and glyph prewarm.
+#if defined(ENABLE_CHINESE_VERSION) && \
+    !(CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED))
+  // No-PSRAM firmware keeps only the reader size resident.
   (void)renderer;
   return;
 #else
+#if CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  if (!memory::psramHasHeadroom(0, 0, 0)) return;
+#endif
   const std::string& familyName = manager_.currentFamilyName();
   if (familyName.empty()) return;  // no SD family loaded — nothing to fall back to
 
   const auto* family = registry_.findFamily(familyName);
   if (!family) return;
 
-  // Probe before paying for the UI sizes. Skip Latin-only families and, in the
-  // CN build, avoid loading duplicate SD sizes when the built-in UI fonts
-  // already cover the same script.
+  // Probe the reader face before loading additional UI sizes.
   const auto readerIt = renderer.getFontMap().find(manager_.getFontId(familyName));
   if (readerIt == renderer.getFontMap().end()) return;
-  // One representative codepoint per script: Han, Hiragana, Katakana, Hangul.
-  static constexpr uint32_t kCjkProbes[] = {0x4E00, 0x3042, 0x30A2, 0xAC00};
+#if CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  // Match upstream: Han, kana, Hangul, Greek, Cyrillic, Hebrew, Arabic, Thai, Devanagari.
+  static constexpr uint32_t kFallbackProbes[] = {0x4E00, 0x3042, 0x30A2, 0xAC00, 0x03B1,
+                                                 0x0430, 0x05D0, 0x0627, 0x0E01, 0x0905};
+#else
+  static constexpr uint32_t kFallbackProbes[] = {0x4E00, 0x3042, 0x30A2, 0xAC00};
+#endif
   bool needsFallback = false;
-  for (const uint32_t cp : kCjkProbes) {
+  for (const uint32_t cp : kFallbackProbes) {
     if (!readerIt->second.hasCodepoint(cp)) continue;
+#if CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+    // A primary face covering the probe may still lack other glyphs in that script.
+    needsFallback = true;
+#else
     for (const auto& ui : kUiFontSizes) {
       const auto primaryIt = renderer.getFontMap().find(ui.fontId);
       if (primaryIt != renderer.getFontMap().end() && !primaryIt->second.hasCodepoint(cp)) {
@@ -194,17 +203,18 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
         break;
       }
     }
+#endif
     if (needsFallback) break;
   }
   if (!needsFallback) {
-    LOG_DBG("SDFS", "%s adds no CJK UI coverage - skipping fallback sizes", familyName.c_str());
+    LOG_DBG("SDFS", "%s adds no UI coverage - skipping fallback sizes", familyName.c_str());
     return;
   }
 
   for (const auto& ui : kUiFontSizes) {
     const int sdFontId = manager_.loadFamilyExtraSize(*family, renderer, ui.pointSize);
     if (sdFontId != 0) {
-      renderer.setFallbackFont(ui.fontId, sdFontId);
+      renderer.setFallbackFont(ui.fontId, sdFontId, ui.builtinFallbackId);
     } else {
       LOG_DBG("SDFS", "No %u pt SD glyphs for UI fallback in %s", ui.pointSize, familyName.c_str());
     }

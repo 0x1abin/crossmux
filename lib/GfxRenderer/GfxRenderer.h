@@ -15,6 +15,8 @@ enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
 class FontCacheManager;
 class SdCardFont;
 
+#include <algorithm>
+#include <array>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -130,17 +132,11 @@ class GfxRenderer {
   mutable int clipX1 = 0;
   mutable int clipY1 = 0;
 
-  // CJK UI font fallback map: primary UI font id -> a size-matched built-in or
-  // SD font id that carries CJK glyphs. When a string drawn or measured with a
-  // mapped primary font contains a CJK codepoint the primary cannot render, the
-  // whole string is routed to the mapped fallback so it appears at the same
-  // point size as the surrounding UI text. See resolveTextFontId().
-  std::map<int, int> fallbackFontMap_;
+  // Ordered UI fallbacks: optional SD face, then the built-in CJK subset.
+  // Resolve the whole string through one face for consistent draw/measure metrics.
+  std::map<int, std::array<int, 2>> fallbackFontMap_;
 
-  // If `text` contains a CJK codepoint that `fontId` cannot render and `fontId`
-  // has a registered fallback, returns the fallback id; otherwise returns
-  // fontId unchanged. The whole string is routed as a unit so each draw/measure
-  // call stays single-font (consistent bit depth, metrics, wrapping).
+  // Return the first fallback that covers a codepoint missing from the primary.
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
   void ensureSdGlyphsResident(int fontId, const char* text, EpdFontFamily::Style style, bool metadataOnly) const;
 
@@ -182,8 +178,12 @@ class GfxRenderer {
     fontMap.erase(fontId);
     sdCardFonts_.erase(fontId);
     sdCardFontScales_.erase(fontId);
-    std::erase_if(fallbackFontMap_,
-                  [fontId](const auto& mapping) { return mapping.first == fontId || mapping.second == fontId; });
+    for (auto& [primary, fallbacks] : fallbackFontMap_) {
+      std::replace(fallbacks.begin(), fallbacks.end(), fontId, 0);
+    }
+    std::erase_if(fallbackFontMap_, [fontId](const auto& mapping) {
+      return mapping.first == fontId || (mapping.second[0] == 0 && mapping.second[1] == 0);
+    });
   }
   void setFontCacheManager(FontCacheManager* m) { fontCacheManager_ = m; }
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
@@ -207,9 +207,10 @@ class GfxRenderer {
   }
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
   bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
-  // Register a size-matched CJK UI fallback (see fallbackFontMap_).
-  // The fallback may be built in or loaded from SD.
-  void setFallbackFont(int primaryFontId, int fallbackFontId) { fallbackFontMap_[primaryFontId] = fallbackFontId; }
+  // Register size-matched UI fallbacks; the built-in backup survives SD unload.
+  void setFallbackFont(int primaryFontId, int fallbackFontId, int backupFontId = 0) {
+    fallbackFontMap_[primaryFontId] = {fallbackFontId, backupFontId};
+  }
   // Ensure SD card font glyph data is loaded for the given text. Called from layout code
   // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on non-SD fonts (no-op).
   // styleMask: bitmask of styles to prepare (bit 0=regular, 1=bold, 2=italic, 3=bold-italic).
