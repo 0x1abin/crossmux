@@ -14,6 +14,9 @@
 
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
+#if CROSSPOINT_CAP_VOICE_RECORDER
+#include "OpenAiCredentialStore.h"
+#endif
 #include "ReaderFontSizes.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/SettingsActivity.h"
@@ -466,6 +469,15 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
               KOREADER_STORE.saveToFile();
             },
             "koSyncBehavior", StrId::STR_KOREADER_SYNC),
+#if CROSSPOINT_CAP_VOICE_RECORDER
+        // --- Voice Notes (web-only, uses OpenAiCredentialStore) ---
+        // The getter returns a mask, never the key; "secret" in the key name
+        // makes the web page render a password field.
+        SettingInfo::DynamicString(
+            StrId::STR_OPENAI_API_KEY, [] { return OPENAI_STORE.maskedApiKey(); },
+            [](const std::string& v) { OPENAI_STORE.applyWebValue(v); }, "openaiSecretKey",
+            StrId::STR_VOICE_NOTES_TITLE),
+#endif
         // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
         SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
                             "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),
