@@ -11,6 +11,10 @@ using SeekCallback = bool (*)(size_t position);
 bool playPcm(ReadCallback read, SeekCallback seek, uint32_t sampleRate, uint8_t channels, uint8_t volume);
 bool restart(uint8_t volume);
 void setVolume(uint8_t volume);
+// Ends the current playback but keeps the codec powered for a quick restart.
+void stop();
+// True while the playback task is still streaming or draining.
+bool isPlaying();
 void shutdown();
 
 }  // namespace HalAudioOutput

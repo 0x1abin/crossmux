@@ -61,6 +61,8 @@
 #if CROSSPOINT_CAP_VOICE_RECORDER
 #include <HalMicrophone.h>
 #include <OpenAiCredentialStore.h>
+
+#include "activities/apps/voicenotes/VoiceNotesPlayer.h"
 #endif
 
 GfxRenderer renderer(display);
@@ -826,7 +828,8 @@ void loop() {
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
 #if CROSSPOINT_CAP_VOICE_RECORDER
   // Capture owns the codec and I2S port; a cue would reopen TX mid-recording.
-  if (!HalMicrophone::active())
+  // Recording playback owns TX; a cue would replace the recording's stream.
+  if (!HalMicrophone::active() && !voicenotes::player::active())
 #endif
     SoundFeedback::update(SETTINGS.soundFeedbackLevel, gpio.physicalPressedMask());
 #endif

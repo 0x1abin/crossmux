@@ -6,6 +6,7 @@
 
 #include <cstdio>
 
+#include "VoiceNotesPlayActivity.h"
 #include "VoiceNotesRecordActivity.h"
 #include "VoiceNotesTranscribeActivity.h"
 #include "components/UITheme.h"
@@ -120,8 +121,13 @@ void VoiceNotesActivity::showActions(const int recordingIndex) {
   if (recordingIndex < 0 || recordingIndex >= static_cast<int>(recordings_.size())) return;
   const auto& rec = recordings_[recordingIndex];
 
-  const char* labels[3];
+  const char* labels[4];
   int count = 0;
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+  popupActions_[count] = Action::Play;
+  labels[count++] = tr(STR_VOICE_NOTES_PLAY);
+#endif
+  const int transcribeIndex = count;
   popupActions_[count] = Action::Transcribe;
   labels[count++] = tr(STR_VOICE_NOTES_TRANSCRIBE);
   if (rec.hasTranscript) {
@@ -133,7 +139,7 @@ void VoiceNotesActivity::showActions(const int recordingIndex) {
 
   popupRecording_ = recordingIndex;
   // A recording with a transcript most often gets reopened to read it.
-  const int initial = rec.hasTranscript ? 1 : 0;
+  const int initial = rec.hasTranscript ? transcribeIndex + 1 : 0;
   const int optionCount = count;
   popup_.show(rec.name, labels, count, initial, [this, optionCount](const int choice) {
     if (choice < 0 || choice >= optionCount) return;
@@ -147,6 +153,9 @@ void VoiceNotesActivity::runAction(const Action action, const int recordingIndex
   if (recordingIndex < 0 || recordingIndex >= static_cast<int>(recordings_.size())) return;
   const char* name = recordings_[recordingIndex].name;
   switch (action) {
+    case Action::Play:
+      startActivityForResultWith<VoiceNotesPlayActivity>([this](const ActivityResult&) { requestUpdate(); }, name);
+      break;
     case Action::Transcribe:
       startActivityForResultWith<VoiceNotesTranscribeActivity>([this](const ActivityResult&) { reload(); }, name);
       break;

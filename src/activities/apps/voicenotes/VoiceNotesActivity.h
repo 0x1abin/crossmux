@@ -8,7 +8,7 @@
 #include "components/OptionPopup.h"
 
 // Voice Notes app: row 0 starts a recording; each recording row opens an
-// action popup (transcribe, view transcript, delete).
+// action popup (play, transcribe, view transcript, delete).
 class VoiceNotesActivity final : public UiListActivity {
  public:
   explicit VoiceNotesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -19,7 +19,7 @@ class VoiceNotesActivity final : public UiListActivity {
   void render(RenderLock&&) override;
 
  private:
-  enum class Action : uint8_t { Transcribe, ViewTranscript, Delete };
+  enum class Action : uint8_t { Play, Transcribe, ViewTranscript, Delete };
 
   int listCount() const override { return static_cast<int>(rowItems_.size()); }
   void buildScreen(UiScreen& screen) override;
@@ -40,7 +40,7 @@ class VoiceNotesActivity final : public UiListActivity {
   std::vector<std::string> durations_;
   std::vector<freeink::ui::ListItem> rowItems_;
   OptionPopup popup_;
-  Action popupActions_[3] = {};
+  Action popupActions_[4] = {};
   int popupRecording_ = -1;
   // Popup choices run on the next loop pass: acting inside the callback could
   // replace the popup (or this Activity) while its std::function executes.

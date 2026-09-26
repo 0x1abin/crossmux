@@ -68,6 +68,12 @@ void setVolume(const uint8_t volume) {
   if (initialized) audio.setVolume(volume);
 }
 
+void stop() {
+  if (initialized) audio.stop();
+}
+
+bool isPlaying() { return initialized && audio.isPlaying(); }
+
 void shutdown() {
   if (!initialized) return;
   audio.powerDown();
