@@ -60,7 +60,7 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertEqual(targets['metalio_eink4']['models'], ['metalio_eink4'])
         self.assertEqual(targets['metalio_eink4']['boardTag'], 'metalio_eink4')
         self.assertEqual(targets['metalio_eink4']['deviceSlug'], 'metalio-eink4')
-        self.assertTrue(targets['metalio_eink4']['fullInstall'])
+        self.assertEqual(targets['metalio_eink4']['assetProfile'], 's3-ota-v1')
         self.assertEqual(nightly_targets.environment_for('metalio_eink4', 'nightly', 'global'),
                          nightly_targets.environment_for('metalio_eink4', 'nightly', 'zh-CN'))
 
@@ -85,19 +85,22 @@ class NightlyTargetTest(unittest.TestCase):
     def test_workflow_packages_one_binary_set(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
         hardware_workflow = (ROOT / '.github/workflows/hardware-ci.yml').read_text()
-        self.assertIn("find artifacts -type f -print", workflow)
+        self.assertIn('scripts/publish_firmware.py github-assets', workflow)
         self.assertNotIn("find artifacts -path '*/global/*'", workflow)
         self.assertEqual(
             workflow.count('python3 scripts/package_nightly_target.py "${{ matrix.targetId }}"'), 1
         )
         self.assertIn('--channel "${{ needs.prepare.outputs.channel }}"', workflow)
         self.assertNotIn('for flavor in global cn', workflow)
-        self.assertIn('pattern: firmware-stable-*', workflow)
-        self.assertIn('merge-multiple: true', workflow)
-        self.assertIn('assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin artifacts/*)', workflow)
-        self.assertIn('cp artifacts/xteink-firmware.bin firmware.bin', workflow)
-        self.assertIn('cp artifacts/xteink-firmware.bin firmware-cn.bin', workflow)
-        self.assertIn('gh release delete-asset "$CHANNEL" firmware-cn.bin', workflow)
+        self.assertNotIn('artifacts/firmware-stable-xteink_x4', workflow)
+        self.assertNotIn('--firmware', workflow)
+        self.assertNotIn('gh release delete-asset', workflow)
+        self.assertIn('build_tag="$GITHUB_REF_NAME"', workflow)
+        self.assertIn('--input "$notes"', workflow)
+        self.assertNotIn('tag-message.txt', workflow)
+        promotion = workflow.split('  publish_stable_release:', 1)[1].split('  cleanup_github:', 1)[0]
+        self.assertIn('--latest', promotion)
+        self.assertNotIn('upload', promotion)
         self.assertNotIn('--flavor', hardware_workflow)
         self.assertIn('(cd "dist/nightly/$target" && sha256sum --check *-SHA256SUMS)', hardware_workflow)
 
@@ -111,13 +114,22 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertNotIn('-o previous/cn.json || true', workflow)
         self.assertNotIn('--previous previous/', workflow)
         self.assertNotIn('name: nightly-previous-', workflow)
-        rolling = workflow.split('- name: Publish rolling global index last', 1)[1].split(
-            '  publish_cn:', 1
-        )[0]
-        self.assertGreater(rolling.index('legacy_assets='), rolling.index('xteink-firmware.bin'))
+        self.assertIn('Run Restore Firmware Channel before retrying', workflow)
+        self.assertIn('--name previous-global-index --dir previous/global', workflow)
+        self.assertIn('--name previous-cn-index --dir previous', workflow)
+        self.assertEqual(workflow.count('overwrite: true'), 4)
+        self.assertLess(workflow.index('Verify GitHub resources before advancing channel'),
+                        workflow.index('Publish rolling global index last'))
+        self.assertLess(workflow.index('Verify COS resources before advancing channel'),
+                        workflow.index('Publish rolling China index last'))
         verify = workflow.split('  verify_publish:', 1)[1]
         self.assertIn('needs: [prepare, publish_github, publish_cn]', verify)
         self.assertEqual(verify.count('python3 scripts/verify_nightly_release.py'), 2)
+        self.assertIn('--index-file release-index.json', workflow)
+        self.assertIn('--index-file release-index-cn.json', workflow)
+        recovery = (ROOT / '.github/workflows/restore-firmware.yml').read_text()
+        self.assertIn('group: firmware-${{ inputs.channel }}-publish', recovery)
+        self.assertNotIn('cleanup', recovery)
         self.assertIn(
             '  cleanup_github:\n    if:', workflow
         )
@@ -214,6 +226,27 @@ class NightlyTargetTest(unittest.TestCase):
                 ['bootloader', 'partitions', 'firmware'],
             )
 
+    def test_c3_channels_use_one_profile_and_reject_incomplete_new_packages(self):
+        target = nightly_targets.TARGETS['xteink_x4']
+        for channel in ('stable', 'nightly'):
+            self.assertEqual(nightly_targets.asset_roles(target, channel, target['assetProfile']),
+                             ['bootloader', 'partitions', 'firmware'])
+        self.assertEqual(nightly_targets.asset_roles(target, 'nightly'), ['firmware'])
+        with self.assertRaises(ValueError):
+            nightly_targets.asset_roles(target, 'nightly', 's3-ota-v1')
+
+    def test_new_target_joins_stable_through_environment_configuration(self):
+        target = dict(nightly_targets.TARGETS['metalio_eink4'])
+        target['environments'] = {'nightly': 'future_nightly'}
+        with mock.patch.dict(nightly_targets.TARGETS, {'future_target': target}):
+            self.assertNotIn('future_target', nightly_targets.targets_for('stable'))
+            target['environments']['stable'] = 'future_release'
+            self.assertEqual(nightly_targets.supported_channels(target), ['stable', 'nightly'])
+            self.assertIn({'targetId': 'future_target', 'deviceSlug': target['deviceSlug'],
+                           'environment': 'future_release'}, nightly_targets.matrix('stable')['include'])
+            self.assertEqual(verify_nightly_release.expected_assets('future_target', 'stable', target['assetProfile']),
+                             verify_nightly_release.expected_assets('metalio_eink4', 'nightly', target['assetProfile']))
+
     def test_publish_jobs_keep_credentials_scoped(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
         github_job, china_job = workflow.split('  publish_cn:\n')
@@ -224,7 +257,12 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn('runs-on: [self-hosted, Linux, X64, h2o]', china_job)
         self.assertIn('persist-credentials: false', china_job)
         self.assertNotIn("select_runner.outputs['runs-on']", china_job)
-        self.assertNotIn('GH_TOKEN:', china_job)
+        self.assertIn('contents: read', china_job)
+        self.assertNotIn('contents: write', china_job)
+        self.assertEqual(china_job.count('GH_TOKEN:'), 1)
+        snapshot_step = china_job.split('Load previous China Nightly index', 1)[1].split('      - uses:', 1)[0]
+        self.assertIn('GH_TOKEN:', snapshot_step)
+        self.assertNotIn('GH_TOKEN:', china_job.split('Publish immutable COS objects', 1)[1])
 
     def test_coscli_is_verified_before_publishing(self):
         workflow = (ROOT / '.github/workflows/nightly.yml').read_text()
@@ -306,7 +344,7 @@ class NightlyIndexTest(unittest.TestCase):
                 'models': target['models'],
                 'deviceSlug': target['deviceSlug'],
                 'boardTag': target['boardTag'],
-                'supportedChannels': target['supportedChannels'],
+                'supportedChannels': nightly_targets.supported_channels(target),
                 'environment': nightly_targets.environment_for(target_id, channel, flavor),
                 'chip': target['chip'],
                 'flavor': flavor,
@@ -340,6 +378,23 @@ class NightlyIndexTest(unittest.TestCase):
             index['targets']['sticky']['variants']['zh-CN']['manifestUrl'],
             'https://example.com/nightly/sticky-cn-manifest.json',
         )
+
+    def test_promoted_target_is_included_without_index_builder_changes(self):
+        target = dict(nightly_targets.TARGETS['metalio_eink4'])
+        target['environments'] = {**target['environments'], 'stable': 'metalio_release'}
+        with mock.patch.dict(nightly_targets.TARGETS, {'metalio_eink4': target}):
+            self.write_all_pairs(channel='stable')
+            index = build_nightly_index.build_index(self.root, 'global', 'https://example.com/1.7.0/',
+                'now', 'stable-build-test', 'stable', {'en': ['One', 'Two'], 'zh': ['一', '二']})
+            self.assertIn('metalio_eink4', index['targets'])
+            for flavor in nightly_targets.FLAVOR_TOKENS:
+                path = self.root / nightly_targets.manifest_name('metalio_eink4', flavor)
+                data = json.loads(path.read_text())
+                data['version'] = '1.7.1'
+                path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, 'Stable target versions'):
+                build_nightly_index.build_index(self.root, 'global', 'https://example.com/1.7.0/',
+                    'now', 'stable-build-test', 'stable', {'en': ['One', 'Two'], 'zh': ['一', '二']})
 
     def test_china_variants_share_one_target_directory_and_binary(self):
         self.write_all_pairs()
@@ -520,8 +575,9 @@ class PublishedNightlyTest(unittest.TestCase):
                     'models': target['models'],
                     'deviceSlug': target['deviceSlug'],
                     'boardTag': target['boardTag'],
-                    'supportedChannels': target['supportedChannels'],
+                    'supportedChannels': nightly_targets.supported_channels(target),
                     'environment': nightly_targets.environment_for(target_id, 'nightly', flavor),
+                    'chip': target['chip'],
                     'flavor': flavor,
                     'version': version,
                     'crossmuxSha': revision,
@@ -542,7 +598,7 @@ class PublishedNightlyTest(unittest.TestCase):
                 'models': target['models'],
                 'deviceSlug': target['deviceSlug'],
                 'boardTag': target['boardTag'],
-                'supportedChannels': target['supportedChannels'],
+                'supportedChannels': nightly_targets.supported_channels(target),
                 'variants': variants,
             }
         self.index = {
@@ -570,6 +626,28 @@ class PublishedNightlyTest(unittest.TestCase):
         for url in self.store:
             if url.endswith('.bin'):
                 self.assertEqual(self.fetches[url], 1)
+
+    def test_new_c3_profile_requires_the_complete_verified_asset_set(self):
+        for flavor in nightly_targets.FLAVOR_TOKENS:
+            url = self.release_url + nightly_targets.manifest_name('xteink_x4', flavor)
+            manifest = json.loads(self.store[url])
+            manifest['assetProfile'] = 'c3-ota-v1'
+            self.store[url] = json.dumps(manifest).encode()
+        with self.assertRaisesRegex(ValueError, 'asset count'):
+            verify_nightly_release.verify_release(self.index_url, self.current_sha, 'nightly', self.fetch)
+        assets = []
+        for role, name, offset in verify_nightly_release.expected_assets('xteink_x4', 'nightly', 'c3-ota-v1'):
+            data = role.encode()
+            self.store[self.release_url + name] = data
+            assets.append({'role': role, 'name': name, 'offset': offset, 'size': len(data),
+                           'sha256': hashlib.sha256(data).hexdigest()})
+        for flavor in nightly_targets.FLAVOR_TOKENS:
+            url = self.release_url + nightly_targets.manifest_name('xteink_x4', flavor)
+            manifest = json.loads(self.store[url])
+            manifest['assets'] = assets
+            self.store[url] = json.dumps(manifest).encode()
+        self.assertEqual(verify_nightly_release.verify_release(
+            self.index_url, self.current_sha, 'nightly', self.fetch)['targets'], 8)
 
     def test_rejects_target_from_previous_revision(self):
         target_id = 'xteink_x4'

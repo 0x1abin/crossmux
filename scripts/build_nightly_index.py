@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from generate_ota_notes import extract_notes
-from nightly_targets import CHANNELS, FLAVOR_TOKENS, TARGETS, environment_for, manifest_name, targets_for
+from nightly_targets import supported_channels, CHANNELS, FLAVOR_TOKENS, TARGETS, environment_for, manifest_name, targets_for
 
 
 def read_json(path):
@@ -19,11 +19,13 @@ def valid_manifest(manifest, target_id, flavor, channel):
     return (
         manifest.get('schemaVersion') == 1
         and manifest.get('channel') == channel
+        and manifest.get('chip') == target['chip']
+        and ('assetProfile' not in manifest or manifest['assetProfile'] == target['assetProfile'])
         and manifest.get('targetId') == target_id
         and manifest.get('models') == target['models']
         and manifest.get('deviceSlug') == target['deviceSlug']
         and manifest.get('boardTag') == target['boardTag']
-        and manifest.get('supportedChannels') == target['supportedChannels']
+        and manifest.get('supportedChannels') == supported_channels(target)
         and manifest.get('environment') == environment_for(target_id, channel, flavor)
         and manifest.get('flavor') == flavor
         and isinstance(manifest.get('crossmuxSha'), str)
@@ -51,6 +53,7 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
     targets = {}
     crossmux_revisions = set()
     sdk_revisions = set()
+    release_versions = set()
     for target_id, target in targets_for(channel).items():
         manifests = {}
         for flavor in FLAVOR_TOKENS:
@@ -71,6 +74,7 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
             raise ValueError(f'{target_id} flavor versions do not match')
         if len({json.dumps(manifest['assets'], sort_keys=True) for manifest in manifests.values()}) != 1:
             raise ValueError(f'{target_id} flavor assets do not match')
+        release_versions.add(manifests['global']['version'])
         crossmux_revisions.update(revisions)
         sdk_revisions.update(target_sdk_revisions)
         targets[target_id] = {
@@ -78,7 +82,7 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
             'models': target['models'],
             'deviceSlug': target['deviceSlug'],
             'boardTag': target['boardTag'],
-            'supportedChannels': target['supportedChannels'],
+            'supportedChannels': supported_channels(target),
             'variants': {
                 flavor: {
                     'version': manifest['version'],
@@ -94,6 +98,8 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
         raise ValueError('target CrossMux revisions do not match')
     if len(sdk_revisions) != 1:
         raise ValueError('target SDK revisions do not match')
+    if channel == 'stable' and len(release_versions) != 1:
+        raise ValueError('Stable target versions do not match')
     if channel == 'stable' and release_notes is None:
         raise ValueError('Stable release notes are required')
     index = {

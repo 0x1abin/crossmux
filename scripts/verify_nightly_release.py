@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import json
 import re
+from pathlib import Path
 import time
 import urllib.error
 import urllib.request
@@ -13,13 +14,13 @@ from urllib.parse import urljoin, urlparse
 
 from build_nightly_index import valid_manifest
 from generate_ota_notes import validate_notes
-from nightly_targets import CHANNELS, FLAVOR_TOKENS, TARGETS, asset_name, manifest_name, targets_for
+from nightly_targets import ASSET_OFFSETS, supported_channels, asset_roles, CHANNELS, FLAVOR_TOKENS, TARGETS, asset_name, manifest_name, targets_for
 
 
 SHA40 = re.compile(r'^[0-9a-f]{40}$')
 SHA256 = re.compile(r'^[0-9a-f]{64}$')
 ASSET_NAME = re.compile(r'^[a-z0-9][a-z0-9._-]*\.bin$')
-OFFSETS = {'bootloader': 0x0000, 'partitions': 0x8000, 'boot_app0': 0xE000, 'firmware': 0x10000}
+OFFSETS = ASSET_OFFSETS
 
 
 def fetch_bytes(url, attempts=3):
@@ -41,14 +42,17 @@ def read_json(url, fetch):
         raise ValueError(f'invalid JSON at {url}') from error
 
 
-def validate_url(url, index_url, channel):
+def validate_url(url, index_url, channel, version=None):
     parsed = urlparse(url)
     index_host = urlparse(index_url).hostname
-    if parsed.scheme != 'https':
+    if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment:
         raise ValueError(f'published URL is not HTTPS: {url}')
     if index_host == 'github.com':
-        valid = parsed.hostname == 'github.com' and parsed.path.startswith(
-            f'/0x1abin/crossmux/releases/download/{channel}-build-'
+        match = re.fullmatch(r'/0x1abin/crossmux/releases/download/([^/]+)/[a-z0-9][a-z0-9._-]*', parsed.path)
+        tag = match[1] if match else ''
+        valid = parsed.hostname == 'github.com' and bool(match) and (
+            tag.startswith(f'{channel}-build-')
+            or (channel == 'stable' and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', tag) and tag == version)
         )
     elif index_host == 'assets.crossmux.cn':
         valid = parsed.hostname == 'assets.crossmux.cn' and parsed.path.startswith('/firmware/builds/')
@@ -58,14 +62,8 @@ def validate_url(url, index_url, channel):
         raise ValueError(f'published URL is outside the expected release path: {url}')
 
 
-def expected_assets(target_id, channel):
-    roles = (
-        tuple(OFFSETS)
-        if TARGETS[target_id]['fullInstall']
-        else ('bootloader', 'partitions', 'firmware')
-        if channel == 'stable'
-        else ('firmware',)
-    )
+def expected_assets(target_id, channel, profile=None):
+    roles = asset_roles(TARGETS[target_id], channel, profile)
     return [(role, asset_name(target_id, f'{role}.bin'), OFFSETS[role]) for role in roles]
 
 
@@ -87,14 +85,16 @@ def verify_release(index_url, expected_sha, channel, fetch=fetch_bytes):
     if not isinstance(targets, dict) or set(targets) != set(canonical_targets):
         raise ValueError(f'published {channel} index does not contain the canonical target set')
 
+    release_versions = set()
+    release_sdks = set()
     current_targets = 0
     asset_count = 0
     for target_id, target in canonical_targets.items():
         entry = targets[target_id]
         if not isinstance(entry, dict) or any(
             entry.get(key) != target[key]
-            for key in ('models', 'deviceSlug', 'boardTag', 'supportedChannels')
-        ) or entry.get('targetId') != target_id:
+            for key in ('models', 'deviceSlug', 'boardTag')
+        ) or entry.get('supportedChannels') != supported_channels(target) or entry.get('targetId') != target_id:
             raise ValueError(f'invalid {target_id} index entry')
         variants = entry.get('variants')
         if not isinstance(variants, dict) or set(variants) != set(FLAVOR_TOKENS):
@@ -111,7 +111,7 @@ def verify_release(index_url, expected_sha, channel, fetch=fetch_bytes):
             manifest_url = pointer.get('manifestUrl')
             if not isinstance(manifest_url, str) or not manifest_url.endswith(manifest_name(target_id, flavor)):
                 raise ValueError(f'invalid {target_id}/{flavor} manifest URL')
-            validate_url(manifest_url, index_url, channel)
+            validate_url(manifest_url, index_url, channel, pointer['version'])
             manifest = read_json(manifest_url, fetch)
             if not valid_manifest(manifest, target_id, flavor, channel):
                 raise ValueError(f'invalid {target_id}/{flavor} manifest')
@@ -134,9 +134,11 @@ def verify_release(index_url, expected_sha, channel, fetch=fetch_bytes):
         ]
         if comparable[0] != comparable[1]:
             raise ValueError(f'{target_id} compatibility manifests differ beyond flavor')
+        release_versions.update(versions)
+        release_sdks.update(sdk_revisions)
         current_targets += 1
 
-        expected = expected_assets(target_id, channel)
+        expected = expected_assets(target_id, channel, manifests['global'].get('assetProfile'))
         seen_urls = set()
         role_urls = {role: set() for role, _name, _offset in expected}
         for flavor, manifest in manifests.items():
@@ -154,7 +156,7 @@ def verify_release(index_url, expected_sha, channel, fetch=fetch_bytes):
                 ):
                     raise ValueError(f'{target_id}/{flavor} has an invalid {role} asset')
                 asset_url = urljoin(manifest_urls[flavor], name)
-                validate_url(asset_url, index_url, channel)
+                validate_url(asset_url, index_url, channel, manifest['version'])
                 role_urls[role].add(asset_url)
                 if asset_url in seen_urls:
                     continue
@@ -166,16 +168,22 @@ def verify_release(index_url, expected_sha, channel, fetch=fetch_bytes):
         if any(len(urls) != 1 for urls in role_urls.values()):
             raise ValueError(f'{target_id} compatibility manifests do not share one binary set')
 
+    if len(release_sdks) != 1 or (channel == 'stable' and len(release_versions) != 1):
+        raise ValueError('release target SDK revisions or Stable versions do not match')
     return {'targets': len(targets), 'currentTargets': current_targets, 'assets': asset_count}
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--index-url', required=True)
+    parser.add_argument('--index-file', type=Path, help='Validate a candidate index against already published assets')
     parser.add_argument('--expected-sha', required=True)
     parser.add_argument('--channel', choices=CHANNELS, required=True)
     args = parser.parse_args()
-    result = verify_release(args.index_url, args.expected_sha, args.channel)
+    def fetch(url):
+        return args.index_file.read_bytes() if args.index_file and url == args.index_url else fetch_bytes(url)
+
+    result = verify_release(args.index_url, args.expected_sha, args.channel, fetch=fetch)
     print(
         f"Verified {result['targets']} targets ({result['currentTargets']} current) "
         f"and {result['assets']} assets from {args.index_url}"
