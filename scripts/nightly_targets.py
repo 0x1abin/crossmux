@@ -18,8 +18,8 @@ TARGETS = {
         'boardTag': 'sticky',
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
-        'environments': {'nightly': 'sticky_nightly'},
-        'supportedChannels': ['nightly'],
+        'environments': {'stable': 'sticky-gh_release', 'nightly': 'sticky_nightly'},
+        'supportedChannels': ['stable', 'nightly'],
         'fullInstall': True,
     },
     'xteink_x4_pro': {

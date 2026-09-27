@@ -17,6 +17,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
+#include "ReadingStatsStore.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -196,6 +197,20 @@ void FontDownloadActivity::onEnter() {
 }
 
 void FontDownloadActivity::startWifiSelection() {
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  if (!readingStatsReleased_) {
+    RenderLock lock(*this);
+    if (!READING_STATS.releaseMemoryForNetwork()) {
+      if (purpose_ == Purpose::ReaderAutoInstall) {
+        finishAutomaticFlow(ExitRoute::ReaderSuppressPrompt);
+      } else {
+        finish();
+      }
+      return;
+    }
+    readingStatsReleased_ = true;
+  }
+#endif
   if (!startActivityForResultWith<WifiSelectionActivity>(
           [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); })) {
     if (purpose_ == Purpose::ReaderAutoInstall) {
@@ -218,7 +233,8 @@ void FontDownloadActivity::onExit() {
     LOG_INF("FONT", "Network phase complete: free=%u, maxAlloc=%u", static_cast<unsigned>(ESP.getFreeHeap()),
             static_cast<unsigned>(ESP.getMaxAllocHeap()));
   }
-  if (!wifiWasEnabled && exitRoute_ != ExitRoute::ReaderPreloadChineseFont) return;
+  // A cancelled/failed Wi-Fi launch still needs to reload the saved statistics.
+  if (!wifiWasEnabled && !readingStatsReleased_ && exitRoute_ != ExitRoute::ReaderPreloadChineseFont) return;
 
   switch (exitRoute_) {
     case ExitRoute::Home:

@@ -796,6 +796,16 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
 int BaseTheme::getMenuRowHeight(const GfxRenderer&) const { return UITheme::getInstance().getMetrics().menuRowHeight; }
 
+BaseTheme::MenuRowGeometry BaseTheme::getMenuRowGeometry(const GfxRenderer&, const Rect& rect, const int,
+                                                         const int rowCount) const {
+  // Mirror of drawButtonMenu: rows start below the rect at the vertical
+  // spacing offset and step by row height + spacing, spanning the content
+  // width between the side paddings.
+  const auto& m = BaseMetrics::values;
+  return {rect.y + m.verticalSpacing,    m.menuRowHeight + m.menuSpacing,           m.menuRowHeight, 0, rowCount,
+          rect.x + m.contentSidePadding, rect.x + rect.width - m.contentSidePadding};
+}
+
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, const int buttonCount, const int selectedIndex,
                                const std::function<std::string(int)>& buttonLabel,
                                const std::function<UIIcon(int)>& rowIcon, const int rowSpacing) const {

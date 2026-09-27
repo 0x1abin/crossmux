@@ -760,7 +760,7 @@ void TxtReaderActivity::renderPage() {
     // display, so the per-page B/W path must run or the panel never updates.
     const auto mode = ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh);
     if (mode == HalDisplay::HALF_REFRESH) renderer.displayGrayscaleBase(mode);
-    ReaderUtils::renderAntiAliased(renderer, [this, &renderLines]() {
+    ReaderUtils::renderAntiAliased(renderer, activityManager, [this, &renderLines]() {
       renderLines();
       renderStatusBar();
     });
@@ -768,11 +768,16 @@ void TxtReaderActivity::renderPage() {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
 #else
-  // Other devices keep the upstream behavior: show the BW frame first, then
-  // the gray pass.
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
-  if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+  const bool needsGrayscale = SETTINGS.textAntiAliasing && !renderer.isInverted();
+  const bool manualRefreshPending = forcedRefreshPending;
+  forcedRefreshPending = false;
+  if (needsGrayscale && !SETTINGS.readingBackgroundEnabled) {
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
+  } else {
+    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  }
+  if (needsGrayscale) {
+    ReaderUtils::renderAntiAliased(renderer, activityManager, [&renderLines]() { renderLines(); });
   }
 #endif
   const auto tDisplay = millis();
@@ -1014,8 +1019,12 @@ bool TxtReaderActivity::savePageIndexCache() {
     if (!writePodChecked(f, CACHE_MAGIC) || !writePodChecked(f, txt_page_index::CACHE_VERSION) ||
         !writePodChecked(f, fileSize) || !writePodChecked(f, width) || !writePodChecked(f, pageLines) ||
         !writePodChecked(f, fontId) || !writePodChecked(f, margin) || !writePodChecked(f, cachedParagraphAlignment) ||
-        !writePodChecked(f, SETTINGS.extraParagraphSpacing) || !writePodChecked(f, complete) ||
-        !writePodChecked(f, encoding) || !writePodChecked(f, pageCount)) {
+        // TXT layout only distinguishes "compact" (spacing off) from "spaced"
+        // (spacing on); the EPUB-only multiplier levels 2-5 have no TXT
+        // rendering effect, so persist the actual 0/1 layout behaviour. The
+        // loader (cachedExtraParagraphSpacing > 1) rejects anything else.
+        !writePodChecked(f, static_cast<uint8_t>(SETTINGS.extraParagraphSpacing != 0)) ||
+        !writePodChecked(f, complete) || !writePodChecked(f, encoding) || !writePodChecked(f, pageCount)) {
       LOG_ERR("TRS", "Short write saving page index header");
       return false;
     }

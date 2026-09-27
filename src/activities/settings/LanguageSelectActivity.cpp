@@ -59,7 +59,6 @@ void LanguageSelectActivity::activateIndex(const int index) {
   const uint8_t previousClockUtcOffsetQ = SETTINGS.clockUtcOffsetQ;
   const uint8_t previousFontFamily = SETTINGS.fontFamily;
   const uint8_t previousFontPointSize = SETTINGS.fontPointSize;
-  const uint32_t previousHiddenAppsMask = SETTINGS.hiddenAppsMask;
   const uint8_t previousOnboardingVersion = SETTINGS.onboardingVersion;
   SETTINGS.applyLanguageSelection(langIndex);
   const Language language = static_cast<Language>(langIndex);
@@ -83,7 +82,6 @@ void LanguageSelectActivity::activateIndex(const int index) {
     SETTINGS.clockUtcOffsetQ = previousClockUtcOffsetQ;
     SETTINGS.fontFamily = previousFontFamily;
     SETTINGS.fontPointSize = previousFontPointSize;
-    SETTINGS.hiddenAppsMask = previousHiddenAppsMask;
     SETTINGS.onboardingVersion = previousOnboardingVersion;
     LOG_ERR("LANG", "Failed to save language selection");
     for (int i = 0; i < totalItems; ++i) {

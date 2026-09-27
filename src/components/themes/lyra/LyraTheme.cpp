@@ -589,3 +589,17 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
   }
 }
+
+LyraTheme::MenuRowGeometry LyraTheme::getMenuRowGeometry(const GfxRenderer&, const Rect& rect, const int,
+                                                         const int rowCount) const {
+  // Mirror of LyraTheme::drawButtonMenu: unlike Base, Lyra draws rows from
+  // rect.y with no vertical offset, so the touch origin must match.
+  const auto& m = LyraMetrics::values;
+  return {rect.y,
+          m.menuRowHeight + m.menuSpacing,
+          m.menuRowHeight,
+          0,
+          rowCount,
+          rect.x + m.contentSidePadding,
+          rect.x + rect.width - m.contentSidePadding};
+}

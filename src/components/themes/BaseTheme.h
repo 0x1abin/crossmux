@@ -329,6 +329,23 @@ class BaseTheme {
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon, int rowSpacing = -1) const;
+  // Touch geometry exactly as drawButtonMenu paints it. Activities that draw a
+  // button menu must drive their row hit-testing from this, never from a fixed
+  // metrics table: Lyra draws from rect.y without the vertical offset, and the
+  // RoundedRaff / Inx themes derive the row height from the font and page the
+  // rows, so a Base-only assumption drifts from the visuals.
+  struct MenuRowGeometry {
+    int firstRowY = 0;  // y of the first visible row (theme offset applied)
+    int rowStep = 0;    // y step between visible rows
+    int rowHeight = 0;  // drawn row height (rows with a smaller height than
+                        // the step don't accept taps in the gap)
+    int pageStart = 0;  // first visible index (paging themes); 0 otherwise
+    int pageCount = 0;  // visible rows on this page; the full count otherwise
+    int xStart = 0;     // horizontal tap bounds of the row
+    int xEnd = INT32_MAX;
+  };
+  virtual MenuRowGeometry getMenuRowGeometry(const GfxRenderer& renderer, const Rect& rect, int selectedIndex,
+                                             int rowCount) const;
   virtual void drawHomeMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                             const std::function<std::string(int index)>& buttonLabel,
                             const std::function<UIIcon(int index)>& rowIcon) const;
