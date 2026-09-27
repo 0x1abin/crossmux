@@ -1,5 +1,7 @@
 #include "VoiceNotesRecorder.h"
 
+#if CROSSPOINT_CAP_VOICE_RECORDER
+
 #include <Arduino.h>
 #include <HalMicrophone.h>
 #include <Logging.h>
@@ -168,3 +170,12 @@ void VoiceNotesRecorder::run() {
     failed_.store(true);
   }
 }
+
+#else
+
+// No microphone HAL on this build (and none in the simulator): recording never starts.
+bool VoiceNotesRecorder::start(const char*) { return false; }
+void VoiceNotesRecorder::stop() {}
+uint32_t VoiceNotesRecorder::elapsedSeconds() const { return 0; }
+
+#endif

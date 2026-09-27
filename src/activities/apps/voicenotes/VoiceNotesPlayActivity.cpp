@@ -129,8 +129,7 @@ void VoiceNotesPlayActivity::loop() {
       showVolumeMenu();
       return;
     }
-    if (mappedInput.wasReleased(Button::Back) ||
-        (state_ == State::Error && mappedInput.wasReleased(Button::Confirm))) {
+    if (mappedInput.wasReleased(Button::Back) || (state_ == State::Error && mappedInput.wasReleased(Button::Confirm))) {
       finish();
       return;
     }

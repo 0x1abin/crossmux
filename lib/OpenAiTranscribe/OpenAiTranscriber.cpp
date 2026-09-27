@@ -4,13 +4,28 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
+#if CROSSPOINT_CAP_VOICE_RECORDER
 #include <SecureClient.h>
+#endif
 #include <strings.h>
 
 #include <cstdio>
 #include <cstring>
 
 namespace OpenAiTranscriber {
+
+#if !CROSSPOINT_CAP_VOICE_RECORDER
+
+// Only recorder builds upload; the simulator also lacks SecureNet's TLS client.
+Result transcribe(const char*, const char*, const char*, const ProgressCallback&) {
+  Result result;
+  result.status = Status::ConnectFailed;
+  snprintf(result.message, sizeof(result.message), "%s", "Transcription is unavailable on this build");
+  return result;
+}
+
+#else
+
 namespace {
 
 constexpr char HOST[] = "api.openai.com";
@@ -441,5 +456,7 @@ Result transcribe(const char* apiKey, const char* wavPath, const char* txtPath, 
   }
   return result;
 }
+
+#endif  // CROSSPOINT_CAP_VOICE_RECORDER
 
 }  // namespace OpenAiTranscriber
