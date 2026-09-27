@@ -7,12 +7,13 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include <Epub/FirstLineIndent.h>
 
 // Per-book reader typography snapshot. Persisted per book path so a book
 // reopens with exactly the style (font family/size, line spacing, alignment,
-// reading guide line, extra paragraph spacing, synthetic bold, anti-aliasing)
-// it had when it was last closed. Books without their own entry keep the
-// global settings from the settings screen untouched.
+// reading guide line, extra paragraph spacing, first-line indent, synthetic
+// bold, anti-aliasing) it had when it was last closed. Books without their own
+// entry keep the global settings from the settings screen untouched.
 struct BookStyle {
   uint8_t fontFamily = CrossPointSettings::NOTOSANS;
   char sdFontFamilyName[32] = "";
@@ -20,6 +21,7 @@ struct BookStyle {
   uint8_t lineSpacing = CrossPointSettings::NORMAL;
   uint8_t paragraphAlignment = CrossPointSettings::JUSTIFIED;
   uint8_t extraParagraphSpacing = 0;
+  uint8_t firstLineIndent = FirstLineIndent::Auto;
   uint8_t fakeBold = CrossPointSettings::SYNTHETIC_BOLD_STANDARD;
   uint8_t textAntiAliasing = 1;
   uint8_t readingGuideLineEnabled = 0;

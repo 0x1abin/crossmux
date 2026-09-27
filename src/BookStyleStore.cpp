@@ -38,6 +38,7 @@ void styleToJson(JsonObject obj, const BookStyle& style) {
   obj["lineSpacing"] = style.lineSpacing;
   obj["paragraphAlignment"] = style.paragraphAlignment;
   obj["extraParagraphSpacing"] = style.extraParagraphSpacing;
+  obj["firstLineIndent"] = style.firstLineIndent;
   obj["fakeBold"] = style.fakeBold;
   obj["textAntiAliasing"] = style.textAntiAliasing;
   obj["readingGuideLineEnabled"] = style.readingGuideLineEnabled;
@@ -65,6 +66,8 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   style.paragraphAlignment = boundedInteger<uint8_t>(obj, "paragraphAlignment", CrossPointSettings::JUSTIFIED, 0,
                                                      CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT - 1);
   style.extraParagraphSpacing = boundedInteger<uint8_t>(obj, "extraParagraphSpacing", 0, 0, kMaxExtraParagraphSpacing);
+  style.firstLineIndent = boundedInteger<uint8_t>(obj, "firstLineIndent", FirstLineIndent::Auto, FirstLineIndent::Auto,
+                                                  FirstLineIndent::NoIndent);
   style.fakeBold = boundedInteger<uint8_t>(obj, "fakeBold", CrossPointSettings::SYNTHETIC_BOLD_STANDARD, 0,
                                            CrossPointSettings::SYNTHETIC_BOLD_COUNT - 1);
   style.textAntiAliasing = boundedInteger<uint8_t>(obj, "textAntiAliasing", 1, 0, 1);

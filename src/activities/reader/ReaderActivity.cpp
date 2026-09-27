@@ -56,6 +56,7 @@ BookStyle snapshotStyleFromSettings() {
   style.lineSpacing = SETTINGS.lineSpacing;
   style.paragraphAlignment = SETTINGS.paragraphAlignment;
   style.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  style.firstLineIndent = SETTINGS.firstLineIndent;
   style.fakeBold = SETTINGS.fakeBold;
   style.textAntiAliasing = SETTINGS.textAntiAliasing;
   style.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
@@ -71,6 +72,7 @@ void applyStyleToSettings(const BookStyle& style) {
   SETTINGS.lineSpacing = style.lineSpacing;
   SETTINGS.paragraphAlignment = style.paragraphAlignment;
   SETTINGS.extraParagraphSpacing = style.extraParagraphSpacing;
+  SETTINGS.firstLineIndent = style.firstLineIndent;
   SETTINGS.fakeBold = style.fakeBold;
   SETTINGS.textAntiAliasing = style.textAntiAliasing;
   SETTINGS.readingGuideLineEnabled = style.readingGuideLineEnabled;
@@ -81,16 +83,19 @@ void applyStyleToSettings(const BookStyle& style) {
 }  // namespace
 
 void ReaderActivity::applyBookStyle() {
-  // Snapshot the global settings once on enter, for every book, so any style
-  // changes made while reading stay with this book and the global values are
-  // restored on exit — even when per-book memory is turned off mid-session.
+  // The per-book memory can be turned off from the text settings; then every
+  // book opens with the global settings, exactly like the stock firmware.
+  // When it was off before this book opened, take no snapshot either, so
+  // ordinary typography edits keep the stock behaviour and persist as-is
+  // (memory disabled throughout must not roll edits back on exit).
+  if (!SETTINGS.bookStyleMemory) return;
+  // Snapshot the global settings once on enter, for every styled book, so any
+  // style changes made while reading stay with this book and the global values
+  // are restored on exit — even when per-book memory is turned off mid-session.
   if (!globalSettingsSnapshotted_) {
     globalSettingsSnapshot_ = snapshotStyleFromSettings();
     globalSettingsSnapshotted_ = true;
   }
-  // The per-book memory can be turned off from the text settings; then every
-  // book opens with the global settings, exactly like the stock firmware.
-  if (!SETTINGS.bookStyleMemory) return;
   BookStyle style;
   // Books without their own entry keep the global settings from the settings
   // screen.
