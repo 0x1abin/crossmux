@@ -157,6 +157,11 @@ void ReaderActivity::onExit() {
   // Remember the typography this book ended with, both as its own entry and as
   // the default style for books that have no entry yet.
   saveBookStyle();
+  // saveBookStyle() restored the global settings (incl. font family). Re-sync
+  // the loaded font cache with the restored values so an SD-card font applied
+  // by this book's style (which also registers UI fallbacks) is unloaded again;
+  // otherwise the UI would keep rendering with the book's font after exit.
+  sdFontSystem.ensureLoaded(renderer);
 
   Activity::onExit();
 
