@@ -14,6 +14,26 @@ bool HalTiltSensor::readGyro(float& gx, float& gy, float& gz) const {
 }
 
 void HalTiltSensor::begin() {
+#if FREEINK_DEVICE_READPICO
+  // This board's IMU is an SC7A20H: a 3-axis ACCELEROMETER with no gyroscope at
+  // all (sc7a20h.h; Imu.cpp reports gx = gy = gz = 0 for ImuType::Sc7a20h). The
+  // tilt page-turn gesture below is driven purely by angular rate against
+  // RATE_THRESHOLD_DPS (270 dps), so it can never fire here, and inventing an
+  // accelerometer-based replacement gesture is explicitly out of scope.
+  //
+  // So the part is not brought up at all. That is deliberate, not an omission:
+  //   * isAvailable() stays false, which is exactly the gate src/SettingsList.h
+  //     uses to keep "Tilt page turn" out of Controls — the user is never offered
+  //     a setting that cannot work.
+  //   * no I2C traffic, no 12.5 Hz sampling and no standby wake are spent on a
+  //     sensor no consumer can use (the reference firmware powers it down again
+  //     right after its boot identity check for the same reason).
+  //   * update()/wake()/deepSleep() all early-return on !_available, so the
+  //     main loop's halTiltSensor.update(...) and enterDeepSleep()'s
+  //     deepSleep() become free no-ops.
+  LOG_INF("GYR", "SC7A20H has no gyroscope; tilt page turn unavailable on this board");
+  return;
+#else
   _available = _sdkImu.begin();
   if (_available) {
     _initMs = millis();
@@ -27,6 +47,7 @@ void HalTiltSensor::begin() {
     return;
   }
   LOG_ERR("GYR", "SDK IMU not found");
+#endif
 }
 
 bool HalTiltSensor::wake() {

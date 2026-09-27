@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <DisplayRefreshContext.h>
 #include <EInkDisplay.h>
 
@@ -26,9 +27,28 @@ class HalDisplay {
   // (~770ms each on X3).
   void begin(bool seamless = false);
 
-  // Display dimensions
+  // Compile-time geometry, in the panel's NATIVE scan frame (source columns x
+  // gate lines) — the same frame the SDK facade reports at runtime, before any
+  // orientation rotation. These are the initializers GfxRenderer's members start
+  // from; GfxRenderer::begin() replaces them with the live values from
+  // display.getDisplayWidth()/getDisplayHeight()/getDisplayWidthBytes()/
+  // getBufferSize() (GfxRenderer.cpp:134-137), which is the single source of
+  // truth for layout. Nothing in CrossMux may hardcode 800/480 instead of asking
+  // the renderer (golden rule #8).
+  //
+  // Every target except Read Pico keeps the SDK's 800x480 / 48,000-byte default
+  // verbatim, including the X3 whose 792x528 panel is a runtime override on top
+  // of it. Read Pico's panel is 1216x684 with a 103,968-byte 1-bpp framebuffer
+  // (read-pico.md 1.2), so it cannot ride the 800x480 default: a compile-time
+  // consumer sized from it would be 2.2x too small. The device term comes from
+  // the frozen profile, not from a repeated literal.
+#if FREEINK_DEVICE_READPICO
+  static constexpr uint16_t DISPLAY_WIDTH = BoardConfig::READ_PICO.displayWidth;
+  static constexpr uint16_t DISPLAY_HEIGHT = BoardConfig::READ_PICO.displayHeight;
+#else
   static constexpr uint16_t DISPLAY_WIDTH = EInkDisplay::DISPLAY_WIDTH;
   static constexpr uint16_t DISPLAY_HEIGHT = EInkDisplay::DISPLAY_HEIGHT;
+#endif
   static constexpr uint16_t DISPLAY_WIDTH_BYTES = DISPLAY_WIDTH / 8;
   static constexpr uint32_t BUFFER_SIZE = DISPLAY_WIDTH_BYTES * DISPLAY_HEIGHT;
 
@@ -109,7 +129,10 @@ class HalDisplay {
   // the whole text body (a visible flash).
   bool combinesGrayscaleBase() const;
 
-  // Runtime geometry passthrough
+  // Runtime geometry passthrough — the authoritative source for every layout
+  // decision (GfxRenderer reads exactly these in its begin()). Prefer them over
+  // the compile-time constants above, which only describe the panel before the
+  // driver reports its real geometry.
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;
   uint16_t getDisplayWidthBytes() const;

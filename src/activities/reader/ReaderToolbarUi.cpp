@@ -3,6 +3,7 @@
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -71,6 +72,16 @@ ReaderToolbarUi::Routed ReaderToolbarUi::route(const MappedInputManager& input) 
   // (dragPermille set), and re-paginating a chapter per frame would be seconds
   // of work per swipe.
   if (pending_.event == Event::Scrub && !touch.snap.touchReleased) pending_.event = Event::None;
+#ifdef TOUCH_PROBE_DEBUG
+  // TEMP probe: what the toolbar actually receives, and what it resolves that to.
+  // routed=0 means the tap never reached this component at all; routed=1 with
+  // event=0 means it reached the frame but matched no hit rect (a geometry
+  // disagreement); any other event is a working tap.
+  LOG_DBG("FUI", "route routed=%d snap(p=%d r=%d h=%d) xy=(%d,%d) -> event=%d value=%d", touch.routed ? 1 : 0,
+          touch.snap.touchPressed ? 1 : 0, touch.snap.touchReleased ? 1 : 0, touch.snap.touchHeld ? 1 : 0,
+          static_cast<int>(touch.snap.touchX), static_cast<int>(touch.snap.touchY),
+          static_cast<int>(pending_.event), static_cast<int>(pending_.value));
+#endif
   return pending_;
 }
 
