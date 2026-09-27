@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Generate an EPUB from USER_GUIDE.md."""
+"""Generate the legacy Markdown guide or the bundled bilingual quick-start EPUBs.
+
+--bundled uses only the Python standard library and the XHTML sources.
+The standalone legacy Markdown export requires Markdown, EbookLib and Pillow.
+"""
 
 import html as _html
 import io
 import re
+import argparse
+import json
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
-
-import markdown
-from ebooklib import epub
-from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).parent.parent
 SOURCE_MD = ROOT / "USER_GUIDE.md"
@@ -119,6 +123,7 @@ hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 
 def make_cover_png() -> bytes:
     """Generate a full-size (480×800) cover image with logo, title, and subtitle."""
+    from PIL import Image, ImageDraw, ImageFont
     cover = Image.new('RGB', (COVER_W, COVER_H), color=(255, 255, 255))
     draw = ImageDraw.Draw(cover)
 
@@ -254,6 +259,9 @@ def make_xhtml(title: str, body: str) -> bytes:
 
 
 def build_epub():
+    import markdown
+    from ebooklib import epub
+
     source = SOURCE_MD.read_text(encoding='utf-8')
     source = strip_toc(source)
     source = preprocess_callouts(source)
@@ -325,5 +333,102 @@ def build_epub():
     print(f'Generated: {OUTPUT_EPUB}')
 
 
+BUNDLED_BUDGET = 128 * 1024
+
+
+def build_bundled(source_dir: Path, output_dir: Path, header_path: Path):
+    """Package small XHTML sources; fixed ZIP metadata keeps interruption retries reproducible."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stylesheet = (source_dir / 'style.css').read_bytes()
+    declarations = []
+    total = 0
+    ns = {'x': 'http://www.w3.org/1999/xhtml'}
+    for language, symbol, filename in (
+        ('zh-CN', 'Chinese', 'CrossMux用户手册.epub'),
+        ('en', 'English', 'CrossMux User Guide.epub'),
+    ):
+        source = (source_dir / f'{language}.xhtml').read_text(encoding='utf-8')
+        root = ET.fromstring(source)
+        title = root.find('x:head/x:title', ns).text
+        body = re.search(r'<body>(.*?)</body>', source, re.DOTALL).group(1)
+        chapters = split_chapters(body)
+        escaped_title = _html.escape(title)
+        pages = [('chapter-' + anchor, chapter_title, fragment) for anchor, chapter_title, fragment in chapters]
+        items = []
+        spine = []
+        nav = []
+        files = {'OEBPS/style.css': stylesheet}
+        for anchor, chapter_title, fragment in pages:
+            name = f'{anchor}.xhtml'
+            files[f'OEBPS/{name}'] = (
+                '<?xml version="1.0" encoding="utf-8"?>'
+                f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{language}">'
+                f'<head><title>{_html.escape(chapter_title)}</title>'
+                '<link rel="stylesheet" type="text/css" href="style.css"/></head>'
+                f'<body>{fragment}</body></html>'
+            ).encode('utf-8')
+            items.append(f'<item id="{anchor}" href="{name}" media-type="application/xhtml+xml"/>')
+            spine.append(f'<itemref idref="{anchor}"/>')
+            nav.append(f'<li><a href="{name}">{_html.escape(chapter_title)}</a></li>')
+        files['OEBPS/nav.xhtml'] = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" '
+            f'xml:lang="{language}"><head><title>{escaped_title}</title></head>'
+            f'<body><nav epub:type="toc"><ol>{"".join(nav)}</ol></nav></body></html>'
+        ).encode('utf-8')
+        files['OEBPS/content.opf'] = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            f'<dc:identifier id="book-id">crossmux-user-guide-{language}</dc:identifier>'
+            f'<dc:title>{escaped_title}</dc:title><dc:language>{language}</dc:language>'
+            '<dc:creator>CrossMux</dc:creator><meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>'
+            '</metadata><manifest>'
+            '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+            '<item id="style" href="style.css" media-type="text/css"/>'
+            f'{"".join(items)}</manifest><spine>{"".join(spine)}</spine></package>'
+        ).encode('utf-8')
+        files['META-INF/container.xml'] = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+            '</rootfiles></container>'
+        ).encode('utf-8')
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, 'w') as archive:
+            archive.writestr(zipfile.ZipInfo('mimetype'), b'application/epub+zip')
+            for name, data in files.items():
+                archive.writestr(zipfile.ZipInfo(name), data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        data = output.getvalue()
+        total += len(data)
+        (output_dir / filename).write_bytes(data)
+        array = '\n'.join('    ' + ', '.join(f'0x{b:02x}' for b in data[i:i + 16]) + ','
+                          for i in range(0, len(data), 16))
+        declarations.append(f'inline constexpr uint8_t {symbol}Data[] = {{\n{array}\n}};\n'
+                            f'inline constexpr Asset {symbol} = {{{symbol}Data, sizeof({symbol}Data), '
+                            f'{json.dumps("/" + filename, ensure_ascii=False)}, '
+                            f'{json.dumps(title, ensure_ascii=False)}}};\n')
+    if total > BUNDLED_BUDGET:
+        raise ValueError(f'Bundled guides exceed 128 KiB budget: {total} bytes')
+    header = ('// Generated by scripts/generate_userguide_epub.py; do not edit.\n'
+              '#pragma once\n#include <cstddef>\n#include <cstdint>\n'
+              'namespace bundled_user_guide {\n'
+              'struct Asset { const uint8_t* data; size_t size; const char* path; const char* title; };\n'
+              + ''.join(declarations) + '}\n')
+    header_path.parent.mkdir(parents=True, exist_ok=True)
+    if not header_path.exists() or header_path.read_text(encoding='utf-8') != header:
+        header_path.write_text(header, encoding='utf-8')
+    print(f'Bundled user guides: {total} / {BUNDLED_BUDGET} bytes')
+
+
 if __name__ == '__main__':
-    build_epub()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--bundled', action='store_true')
+    parser.add_argument('--source-dir', type=Path, default=ROOT / 'docs/user-guide')
+    parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/user-guide')
+    parser.add_argument('--header', type=Path, default=ROOT / 'src/util/UserGuide.generated.h')
+    args = parser.parse_args()
+    if args.bundled:
+        build_bundled(args.source_dir, args.output_dir, args.header)
+    else:
+        build_epub()

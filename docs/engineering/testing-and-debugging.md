@@ -350,3 +350,10 @@ device and firmware hash separately, including:
 - BLE connected: five cycles of reading/page turning, standby, power-button wake, and resumed Bluetooth page turning.
 - No extra action from the wake gesture; normal buttons, display, and SD reading after leaving standby.
 - Whether the final build without diagnostics was flashed and retested. Report X3 and X4 results independently.
+
+## X3/X4 font downloads and OTA memory
+
+See [download memory](network-memory-validation.md) for the BLE/static-heap
+findings, foreground statistics lifetime, diagnostic review and hardware
+regression procedure. The production lifecycle check runs as
+`DownloadMemoryLifecycle` in the host suite.

@@ -128,6 +128,11 @@ class HalDisplay {
   // displayBuffer(): a separate B/W refresh first makes the gray pass re-drive
   // the whole text body (a visible flash).
   bool combinesGrayscaleBase() const;
+  bool supportsTextOnlyCombinedBase() const;
+  bool supportsReaderTransitions() const;
+  bool supportsContinuousImageReading() const;
+  bool canUseTextTransition() const;
+  void cancelGrayscale();
 
   // Runtime geometry passthrough — the authoritative source for every layout
   // decision (GfxRenderer reads exactly these in its begin()). Prefer them over

@@ -11,6 +11,7 @@
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/icons/customListIcons.h"
+#include "components/icons/inx_apps.h"
 #include "components/icons/listIcons.h"
 
 // Shared glue for activities hosting a FreeInkApp: the font-bound render
@@ -64,6 +65,7 @@ inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& t
 // metrics from the body font's line height.
 inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) {
   freeink::ui::GfxRendererTarget target(renderer);
+  applyUiTextAlignment(target);
   const auto spec = uiScaleSpec();
   target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL,
                  UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
@@ -103,6 +105,13 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
       case UIIcon::Bookmark:
         return freeink::ui::bitmapFromIcon(icon_bookmark_32);
       default:
+        // App-specific icons (Transfer, AirPage, ...) have no Lucide asset;
+        // reuse the Inx grid artwork instead. It is the same 32x32 MSB-first
+        // 0-is-ink layout freeink::Icon expects, so wrap it directly.
+        if (const uint8_t* bits = InxAppIcons::get(icon)) {
+          const freeink::Icon appIcon{32, 32, 16, bits};
+          return freeink::ui::bitmapFromIcon(appIcon);
+        }
         return {};
     }
   }

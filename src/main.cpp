@@ -53,6 +53,7 @@
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
+#include "util/UserGuide.h"
 
 #if CROSSPOINT_CAP_SOUND_FEEDBACK
 #include <SoundFeedback.h>
@@ -144,9 +145,6 @@ EpdFont cjk10Font(&notosans_cjk_10);
 EpdFontFamily cjk10FontFamily(&cjk10Font);
 EpdFont cjk12Font(&notosans_cjk_12);
 EpdFontFamily cjk12FontFamily(&cjk12Font);
-constexpr int CJK_UI_8_FONT_ID = 0x434A4B08;
-constexpr int CJK_UI_10_FONT_ID = 0x434A4B0A;
-constexpr int CJK_UI_12_FONT_ID = 0x434A4B0C;
 
 // Chinese chess piece glyphs (subset CJK font, 14 characters at 16pt).
 EpdFont chineseChessPieceFont(&chinese_chess_16);
@@ -658,7 +656,8 @@ void setup() {
   const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
-  RECENT_BOOKS.loadFromFile();
+  const bool recentsLoaded = RECENT_BOOKS.loadFromFile();
+  if (!recoveryFirmwareMode && !HalSystem::isRebootFromPanic()) UserGuide::prepare(recentsLoaded);
   READING_STATS.loadFromFile();
   ACHIEVEMENTS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));

@@ -45,6 +45,16 @@ struct PngContext {
 
   uint8_t* grayLineBuffer{nullptr};
   uint8_t* alphaLineBuffer{nullptr};
+  // Bilinear needs the source row below AND above the destination row, but
+  // PNGdec streams one scanline at a time. Holding the previous row lets an
+  // output row be emitted once the second of its two source rows has arrived,
+  // which is why bilinear emission is one interval behind (see nextDstY).
+  uint8_t* prevGrayLine{nullptr};
+  bool havePrevRow{false};
+  int nextDstY{0};  // next destination row to emit in bilinear mode
+  // 16.16 source-column step for the bilinear sampler, computed once per image so
+  // the inner loop never divides.
+  int32_t stepXFP{0};
   uint32_t lastYieldMs{0};  // throttle state for yieldDuringDecode()
 };
 
@@ -227,6 +237,80 @@ void convertLineToGray(const uint8_t* pPixels, uint8_t* grayLine, int width, int
   }
 }
 
+// 16.16 fixed point for the bilinear weights (no FPU assumptions).
+constexpr int kBilinearOne = 1 << 16;
+
+// Bilinear emission for one destination row. `rowTop`/`rowBot` are the two
+// source rows bracketing it (the same pointer when the position lands exactly on
+// a row) and `fyFP` is the weight towards `rowBot`. Horizontal sampling blends
+// the two neighbouring source columns with the same fixed-point scheme, so a
+// scaled image gets a continuous ramp instead of nearest-neighbour stair steps.
+void emitBilinearRow(PngContext& ctx, const int dstY, const uint8_t* rowTop, const uint8_t* rowBot, const int fyFP,
+                     DirectPixelWriter& pw, const bool writeFramebuffer) {
+  const int outY = ctx.config->y + dstY;
+  if (outY >= ctx.screenHeight) return;
+  if (writeFramebuffer) pw.beginRow(outY);
+
+  // The cache streams to disk one row at a time; a flush failure stops caching
+  // for the rest of the decode so a partial band is never written past.
+  bool caching = ctx.caching;
+  DirectCacheWriter cw;
+  if (caching) {
+    if (!ctx.cache.advanceTo(dstY)) {
+      caching = false;
+      ctx.caching = false;
+    } else {
+      cw.init(ctx.cache.buffer, ctx.cache.bytesPerRow, ctx.cache.bandRows, ctx.cache.originX);
+      cw.beginRow(outY, ctx.config->y + ctx.cache.bandStart);
+    }
+  }
+
+  const bool useDithering = ctx.config->useDithering;
+  const int lastX = ctx.visibleWidth > 0 ? ctx.visibleWidth - 1 : 0;
+  // Source column advances by a fixed 16.16 step, so no division is needed per
+  // pixel (a 64-bit divide per pixel cost more than the interpolation itself).
+  const int32_t stepXFP = ctx.stepXFP;
+  int32_t srcXFP = 0;
+
+  for (int dstX = 0; dstX < ctx.dstWidth; dstX++) {
+    const int outX = ctx.config->x + dstX;
+    int sx = srcXFP >> 16;
+    int fxFP = srcXFP & 0xFFFF;
+    srcXFP += stepXFP;
+    if (sx >= lastX) {
+      sx = lastX;
+      fxFP = 0;
+    }
+    const int sx1 = (sx + 1 <= lastX) ? sx + 1 : lastX;
+    const int x0 = ctx.cropLeft + sx;
+    const int x1 = ctx.cropLeft + sx1;
+
+    const int top = (static_cast<int>(rowTop[x0]) * (kBilinearOne - fxFP) + static_cast<int>(rowTop[x1]) * fxFP) >> 16;
+    int gray = top;
+    if (fyFP != 0) {
+      const int bot =
+          (static_cast<int>(rowBot[x0]) * (kBilinearOne - fxFP) + static_cast<int>(rowBot[x1]) * fxFP) >> 16;
+      gray = (top * (kBilinearOne - fyFP) + bot * fyFP) >> 16;
+    }
+    if (gray < 0) gray = 0;
+    if (gray > 255) gray = 255;
+    const uint8_t sample = static_cast<uint8_t>(gray);
+
+    if (outX >= ctx.screenWidth) continue;
+    const uint8_t alpha = ctx.alphaLineBuffer ? ctx.alphaLineBuffer[x0] : 255;
+    if (alpha < 8 || alpha <= alphaThreshold4x4(outX, outY)) continue;
+    uint8_t ditheredGray;
+    if (useDithering) {
+      ditheredGray = applyBayerDither4Level(sample, outX, outY);
+    } else {
+      const int level = sample / 85;
+      ditheredGray = static_cast<uint8_t>(level > 3 ? 3 : level);
+    }
+    if (writeFramebuffer) pw.writePixel(outX, ditheredGray, ctx.alphaLineBuffer != nullptr);
+    if (caching) cw.writePixel(outX, ditheredGray);
+  }
+}
+
 int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
@@ -237,6 +321,49 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   int srcWidth = ctx->srcWidth;
   if (srcY < ctx->cropTop || srcY >= ctx->cropTop + ctx->visibleHeight) return 1;
   const int visibleSrcY = srcY - ctx->cropTop;
+
+  // Bilinear runs on its own row budget: it emits one source interval behind so
+  // an output row can be blended against the two source rows that bracket it.
+  // That is why it bypasses the nearest-neighbour row mapping (and its early
+  // return) entirely.
+  //
+  // An unscaled image deliberately stays on the nearest path: at 1:1 the blend
+  // weights are degenerate, so bilinear would produce identical pixels for
+  // several times the work — and the reader renders a page many times.
+  const bool bilinearScale =
+      ctx->config->bilinearScaling && (ctx->dstWidth != ctx->visibleWidth || ctx->dstHeight != ctx->visibleHeight);
+  if (bilinearScale) {
+    // PNGdec parses tRNS while decoding, after open() returns, so query the
+    // transparent colour here rather than caching its pre-decode value.
+    convertLineToGray(pDraw->pPixels, ctx->grayLineBuffer, srcWidth, pDraw->iPixelType, pDraw->iBpp, pDraw->pPalette,
+                      pDraw->iHasAlpha, ctx->decoder ? ctx->decoder->getTransparentColor() : 0, ctx->alphaLineBuffer);
+
+    if (ctx->havePrevRow && ctx->prevGrayLine) {
+      // Every destination row whose source position falls in the interval
+      // [visibleSrcY - 1, visibleSrcY) is now fully known.
+      const int64_t bound =
+          (static_cast<int64_t>(visibleSrcY) * ctx->dstHeight + ctx->visibleHeight - 1) / ctx->visibleHeight;
+      int last = static_cast<int>(bound);
+      if (last > ctx->dstHeight) last = ctx->dstHeight;
+      if (last > ctx->nextDstY) {
+        const bool writeFramebuffer = ctx->config->output == DecodeOutput::FrameBufferAndCache;
+        DirectPixelWriter pw;
+        if (writeFramebuffer) pw.init(*ctx->renderer);
+        for (int dstY = ctx->nextDstY; dstY < last; dstY++) {
+          const int64_t srcPos = (static_cast<int64_t>(dstY) * ctx->visibleHeight << 16) / ctx->dstHeight;
+          emitBilinearRow(*ctx, dstY, ctx->prevGrayLine, ctx->grayLineBuffer, static_cast<int>(srcPos & 0xFFFF), pw,
+                          writeFramebuffer);
+        }
+        ctx->nextDstY = last;
+      }
+    }
+
+    if (ctx->prevGrayLine) {
+      memcpy(ctx->prevGrayLine, ctx->grayLineBuffer, static_cast<size_t>(srcWidth));
+    }
+    ctx->havePrevRow = true;
+    return 1;
+  }
 
   // Map source rows with the exact output-height ratio. During downscaling,
   // multiple source rows can select the same output row; during upscaling, one
@@ -428,6 +555,11 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     ctx.dstHeight = (int)(ctx.visibleHeight * ctx.scale);
   }
   ctx.lastDstY = -1;  // Reset row tracking
+  // 16.16 source-column step for the bilinear sampler. visibleWidth fits well
+  // inside int32 after the shift (<= 32767 << 16), and the sampler clamps at the
+  // last column anyway.
+  ctx.stepXFP =
+      ctx.dstWidth > 0 ? static_cast<int32_t>((static_cast<int64_t>(ctx.visibleWidth) << 16) / ctx.dstWidth) : 0;
 
   const int pixelType = png->getPixelType();
   const int bitsPerSample = png->getBpp();
@@ -465,7 +597,11 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   // for color-key and indexed transparency. Reserve the alpha line whenever
   // the caller requests preservation; opaque pixels simply store alpha 255.
   const bool retainAlpha = config.preserveAlpha;
-  const size_t lineBufferBytes = grayBufSize * (retainAlpha ? 2u : 1u);
+  const bool bilinearMode = config.bilinearScaling;
+  // Bilinear holds one extra source row (the previous scanline) so an output row
+  // can be blended vertically; nearest needs only the current one.
+  const size_t alphaAndCurrent = grayBufSize * (retainAlpha ? 2u : 1u);
+  const size_t lineBufferBytes = alphaAndCurrent + (bilinearMode ? grayBufSize : 0u);
   auto lineBuffers = makeUniqueNoThrow<uint8_t[]>(lineBufferBytes);
   if (!lineBuffers) {
     LOG_ERR("PNG", "Failed to allocate PNG line buffers (%u bytes)", static_cast<unsigned>(lineBufferBytes));
@@ -473,6 +609,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
   ctx.grayLineBuffer = lineBuffers.get();
   ctx.alphaLineBuffer = retainAlpha ? ctx.grayLineBuffer + grayBufSize : nullptr;
+  ctx.prevGrayLine = bilinearMode ? ctx.grayLineBuffer + alphaAndCurrent : nullptr;
+  ctx.havePrevRow = false;
+  ctx.nextDstY = 0;
 
   // Stream the pixel cache to disk. PNGdec delivers source scanlines top to
   // bottom and we emit at most one (downscaled) output row per callback, so the
@@ -493,6 +632,20 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   ctx.lastYieldMs = decodeStart;
   rc = png->decode(&ctx, 0);
   unsigned long decodeTime = millis() - decodeStart;
+
+  // Bilinear emits one source interval behind, so the last destination rows are
+  // still outstanding: they sit on the final source row and have no row below,
+  // so flush them against that row alone (vertical weight 0 keeps the horizontal
+  // interpolation).
+  if (rc == PNG_SUCCESS && config.bilinearScaling && ctx.havePrevRow && ctx.prevGrayLine) {
+    const bool writeFramebuffer = config.output == DecodeOutput::FrameBufferAndCache;
+    DirectPixelWriter pw;
+    if (writeFramebuffer) pw.init(renderer);
+    for (int dstY = ctx.nextDstY; dstY < ctx.dstHeight; dstY++) {
+      emitBilinearRow(ctx, dstY, ctx.prevGrayLine, ctx.prevGrayLine, 0, pw, writeFramebuffer);
+    }
+    ctx.nextDstY = ctx.dstHeight;
+  }
 
   ctx.grayLineBuffer = nullptr;
   ctx.alphaLineBuffer = nullptr;

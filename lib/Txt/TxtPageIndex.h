@@ -12,14 +12,12 @@ constexpr uint8_t LEGACY_CACHE_VERSION = 4;
 constexpr uint8_t LAZY_CACHE_VERSION = 5;
 constexpr uint8_t ENCODING_CACHE_VERSION = 6;
 constexpr uint8_t PARAGRAPH_LAYOUT_CACHE_VERSION = 7;
-constexpr uint8_t CACHE_VERSION = PARAGRAPH_LAYOUT_CACHE_VERSION;
+constexpr uint8_t CACHE_VERSION = 8;  // Missing-glyph advances change pagination, including partial indexes.
 constexpr size_t CHECKPOINT_PAGE_COUNT = 32;
 
 enum class AdvanceResult : uint8_t { Unchanged, PageAdded, Completed };
 
-inline bool isSupportedCacheVersion(const uint8_t version) {
-  return version >= LEGACY_CACHE_VERSION && version <= CACHE_VERSION;
-}
+inline bool isSupportedCacheVersion(const uint8_t version) { return version == CACHE_VERSION; }
 
 inline bool canReuseCacheVersion(const uint8_t version, const bool confirmedUtf8) {
   return isSupportedCacheVersion(version) && (version >= ENCODING_CACHE_VERSION || confirmedUtf8);

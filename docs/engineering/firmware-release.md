@@ -2,8 +2,8 @@
 
 CrossMux has two release channels, `stable` and `nightly`, managed by one
 channel-aware pipeline. Hardware identity is not a release channel. Stable
-currently contains the shared X3/X4 image; X3/X4 and the seven ESP32-S3 targets
-share Nightly, with S3 targets declaring only `nightly` in `supportedChannels`.
+contains the shared X3/X4 image and a separate Sticky image. Both targets support
+`stable` and `nightly`; the other six ESP32-S3 release targets remain Nightly-only.
 
 ## Canonical targets
 
@@ -14,7 +14,8 @@ environments, chip, install capability, and supported channels. The workflow,
 packager, index builder, and tests import this table rather than copy it.
 
 The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
-image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky, X4 Pro,
+image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky Stable uses
+`sticky-gh_release`. Sticky, X4 Pro,
 Paper Mono, EEGO A4, Murphy M4, Waveshare ePaper 3.97, and Metalio E-Ink 4 each produce their own
 ESP32-S3 Nightly image. Each image is aliased by the compatibility `global` and
 `zh-CN` pointers.
@@ -45,7 +46,8 @@ are `/firmware/releases/<channel>/index.json`; target assets live under
 provider; both variant manifests reference the same neutral binary names and
 differing hashes fail publication. After Stable verification, the version tag
 also receives the legacy `firmware.bin`, `firmware-cn.bin`, `bootloader.bin`,
-and `partitions.bin` assets.
+and `partitions.bin` assets, alongside the neutral binaries, compatibility manifests,
+and checksum files for every Stable target.
 
 At steady state, GitHub and COS retain the current build and the build or builds
 referenced by the previous index. A scheduled successful Nightly therefore

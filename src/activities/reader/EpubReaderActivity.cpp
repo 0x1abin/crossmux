@@ -1443,6 +1443,13 @@ void EpubReaderActivity::renderBook() {
   currentPageLinks.clear();
   if (!epub) return;
 
+  // Apply the reader's image-resampling choice before anything is drawn. The
+  // setting can change from the reader menu, which does NOT reload the book, so
+  // syncing only in loadBook() left the previous filter in force for the rest of
+  // the session — the menu looked like it did nothing. The setter is a no-op
+  // when the filter has not changed, so this costs a compare per render.
+  ImageBlock::setBilinearScaling(SETTINGS.imageScaling == CrossPointSettings::IMAGE_SCALING_BILINEAR);
+
   const auto showPendingSyncSaveError = [this]() {
     if (pendingSyncSaveError) {
       pendingSyncSaveError = false;
@@ -1918,6 +1925,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     ImageBlock::releaseRenderCache();
     renderer.clearScreen();
   }
+  if (pageHasImages) {
+    LOG_DBG("ERS", "Image predecode=%lums cold=%u", millis() - t0, static_cast<unsigned>(pageHasImagesNeedingDecode));
+  }
 
 #ifdef ENABLE_CHINESE_VERSION
   fcm->consumeMissingChineseCodepoint();
@@ -1961,11 +1971,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool needsAnyGrayscale = grayscaleEnabled && (SETTINGS.textAntiAliasing || pageHasImages);
 #endif
   const bool tiledGrayscale = needsAnyGrayscale && renderer.supportsStripGrayscale();
-  // Paper Mono only (no other panel combines): defer the B/W base activation so
+  // Combined text AA: defer the B/W base activation so
   // the gray planes join it in a single waveform. Displaying the base
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
-  const bool combinedGrayscaleBase = tiledGrayscale && !pageHasImages && renderer.combinesGrayscaleBase();
+  const bool combinedGrayscaleBase =
+      tiledGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
 #if FREEINK_DEVICE_EEGO_A4
   const bool overlapRefresh =
       tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
@@ -2025,12 +2036,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // Image pages use one base refresh before the grayscale pass. FAST leaves
     // the panel receptive to the gray waveform; pending cleanup still honors
     // the scheduled/manual HALF refresh.
-    renderer.displayBuffer(cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-    pagesUntilFullRefresh = 1;
+    if (renderer.supportsContinuousImageReading()) {
+      renderer.displayBuffer(ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh),
+                             DisplayRefreshContext::ImageReading);
+    } else {
+      renderer.displayBuffer(cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH,
+                             DisplayRefreshContext::ImageReading);
+      pagesUntilFullRefresh = 1;
+    }
   } else if (combinedGrayscaleBase) {
     // Stash the base without activating; displayGrayBuffer() below commits
     // base + grays as one waveform.
-    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
   } else {
 #if FREEINK_DEVICE_EEGO_A4
     if (needsTextGrayscale) {
@@ -2050,6 +2067,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
     const size_t planeBytes = static_cast<size_t>(gwBytes) * gh;
+    const auto abandonGrayscale = [&] {
+      renderer.setRenderMode(GfxRenderer::BW);
+      if (combinedGrayscaleBase)
+        renderer.cancelGrayscale();
+      else
+        renderer.cleanupGrayscaleWithFrameBuffer();
+    };
 
     auto renderPlaneToBuffer = [&](const bool lsbPlane, uint8_t* buf) {
       renderer.setRenderMode(lsbPlane ? GfxRenderer::GRAYSCALE_LSB : GfxRenderer::GRAYSCALE_MSB);
@@ -2092,8 +2116,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       // Abort before expensive grayscale display if a push/pop is pending
       if (activityManager.isSwitchPending()) {
-        renderer.setRenderMode(GfxRenderer::BW);
-        renderer.cleanupGrayscaleWithFrameBuffer();
+        abandonGrayscale();
         return;
       }
 
@@ -2130,14 +2153,17 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           // update diffs against stale contents. On the combined-base path the
           // base activation is still deferred; this cleanup commits it so the
           // page reaches the panel even without its grays.
-          renderer.cleanupGrayscaleWithFrameBuffer();
+          if (combinedGrayscaleBase && activityManager.isSwitchPending()) {
+            abandonGrayscale();
+          } else {
+            renderer.cleanupGrayscaleWithFrameBuffer();
+          }
         }
       } else {
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
           if (activityManager.isSwitchPending()) {
-            renderer.setRenderMode(GfxRenderer::BW);
-            renderer.cleanupGrayscaleWithFrameBuffer();
+            abandonGrayscale();
             return;
           }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
@@ -2152,8 +2178,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
         for (int y = 0; y < gh; y += STRIP_ROWS) {
           if (activityManager.isSwitchPending()) {
-            renderer.setRenderMode(GfxRenderer::BW);
-            renderer.cleanupGrayscaleWithFrameBuffer();
+            abandonGrayscale();
             return;
           }
           const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
@@ -2165,6 +2190,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         }
         const auto tGrayMsb = millis();
 
+        if (combinedGrayscaleBase && activityManager.isSwitchPending()) {
+          abandonGrayscale();
+          return;
+        }
         renderer.setRenderMode(GfxRenderer::BW);
         renderer.displayGrayBuffer();
         const auto tGrayDisplay = millis();
@@ -2464,6 +2493,13 @@ void EpubReaderActivity::closeOverlayToPage() {
   overlay = Overlay::None;
   overlayPopup.dismiss();  // an option picker cannot outlive its panel
   toolbarUi.reset();       // ~1 KB of interaction table + props, only needed while open
+  // A panel row toggled in place (image scaling) applies here and only here:
+  // the snapshot below holds pixels decoded with the old filter, so drop it to
+  // fall through to the re-render path instead of restoring them.
+  if (imageScalingDirty) {
+    imageScalingDirty = false;
+    discardOverlayPage();
+  }
 #if FREEINK_DEVICE_EEGO_A4
   // The AA page return sits on top of the B/W chrome frame (openOverlay's
   // cleanup wrote both planes); force the reader's next render onto the full
@@ -2971,6 +3007,14 @@ std::string EpubReaderActivity::moreRowValue(int row) const {
       return SETTINGS.screenInverted ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case MA::FRONTLIGHT:
       return Frontlight.isOn() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case MA::IMAGE_SCALING: {
+      // Same labels the reader menu's option popup offers, so the row's value
+      // and the popup's highlighted entry always agree.
+      static constexpr StrId kScaling[] = {StrId::STR_IMAGE_SCALING_NEAREST, StrId::STR_IMAGE_SCALING_BILINEAR};
+      static_assert(std::size(kScaling) == CrossPointSettings::IMAGE_SCALING_COUNT, "image scaling labels");
+      const size_t mode = SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
+      return I18N.get(kScaling[mode]);
+    }
     default:
       return "";
   }
@@ -3007,6 +3051,30 @@ void EpubReaderActivity::activateMoreRow(int row) {
         toggleAutoPageTurn(static_cast<uint8_t>(PAGE_TURN_RATES[idx]));
       });
       paintOverlayPopup();
+      return;
+    }
+    case MA::IMAGE_SCALING: {
+      // A plain on/off-style row like the frontlight one: one tap cycles, no
+      // picker. The value only reaches the page when the overlay closes, so the
+      // row repaints the panel over the page snapshot instead of re-rendering
+      // the page (which would decode the image twice in a row).
+      const uint8_t current =
+          SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
+      const uint8_t next = static_cast<uint8_t>((current + 1) % CrossPointSettings::IMAGE_SCALING_COUNT);
+      SETTINGS.imageScaling = next;
+      SETTINGS.saveToFile();
+      imageScalingDirty = true;
+      LOG_INF("ERS", "Image scaling -> %s",
+              next == CrossPointSettings::IMAGE_SCALING_BILINEAR ? "bilinear" : "nearest");
+      RenderLock lock;  // the render task shares the framebuffer
+      if (overlayPageStored) {
+        // Clean page back first (the sheet's old value text is not
+        // background-filled), then re-snapshot it and lay the panel on top.
+        renderer.restoreBwBuffer(/*resyncPanelBaseline=*/false);
+        overlayPageStored = renderer.storeBwBuffer();
+      }
+      renderOverlay();
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
       return;
     }
     case MA::NIGHT_MODE:

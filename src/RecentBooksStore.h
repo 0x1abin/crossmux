@@ -31,7 +31,8 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   bool fromJson(JsonVariantConst doc);
 
   // Add a book to the recent list (moves to front if already exists)
-  void addBook(const std::string& path, const std::string& title, const std::string& author,
+  // Returns whether the updated list was persisted; the in-memory list is updated even on failure.
+  bool addBook(const std::string& path, const std::string& title, const std::string& author,
                const std::string& coverBmpPath);
 
   void updateBook(const std::string& path, const std::string& title, const std::string& author,

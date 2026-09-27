@@ -25,7 +25,7 @@
 | Device | Chip | Published channels |
 |---|---|---|
 | Xteink X3 / X4 (shared image) | ESP32-C3 | Stable, Nightly |
-| Seeed Sticky | ESP32-S3 | Nightly |
+| [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Nightly |
 | Xteink X4 Pro | ESP32-S3 | Nightly |
 | M5Stack Paper Mono | ESP32-S3 | Nightly |
 | eego A4 | ESP32-S3 | Nightly |

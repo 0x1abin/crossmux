@@ -242,6 +242,26 @@ int RoundedRaffTheme::getMenuRowHeight(const GfxRenderer& renderer) const {
   return renderer.getLineHeight(kTitleFontId) + 20;
 }
 
+RoundedRaffTheme::MenuRowGeometry RoundedRaffTheme::getMenuRowGeometry(const GfxRenderer& renderer, const Rect& rect,
+                                                                       const int selectedIndex,
+                                                                       const int rowCount) const {
+  // Mirror of RoundedRaffTheme::drawButtonMenu: row height is derived from the
+  // font, rows start at rect.y (no vertical offset) and the theme pages them.
+  const auto& m = RoundedRaffMetrics::values;
+  const int rowHeight = renderer.getLineHeight(kTitleFontId) + 20;
+  const int rowStep = rowHeight + kSelectableRowGap;
+  const int pageItems = std::max(1, rect.height / rowStep);
+  const int safeSelected = std::max(0, selectedIndex);
+  const int pageStart = (safeSelected / pageItems) * pageItems;
+  return {rect.y,
+          rowStep,
+          rowHeight,
+          pageStart,
+          std::min(rowCount - pageStart, pageItems),
+          rect.x + m.contentSidePadding,
+          rect.x + rect.width - m.contentSidePadding};
+}
+
 void RoundedRaffTheme::drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode,
                                      int contentStartX, int contentWidth) const {
   const auto& metrics = UITheme::getInstance().getMetrics();

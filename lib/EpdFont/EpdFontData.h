@@ -224,8 +224,8 @@ typedef struct {
 
   /// On-demand glyph loading for fonts that don't keep all glyphs in RAM (e.g. SD card fonts).
   /// Called by getGlyph() when a codepoint is not found in the interval table.
-  /// Returns a valid EpdGlyph* with correct metadata, or nullptr to fall back to the
-  /// replacement glyph.  The returned pointer is valid until the next glyphMissHandler
+  /// Returns a valid EpdGlyph* with correct metadata, or nullptr for the renderer's
+  /// outline placeholder. The returned pointer is valid until the next glyphMissHandler
   /// call that causes a ring-buffer eviction — callers must consume it (measure or draw)
   /// before requesting another missed glyph.
   const EpdGlyph* (*glyphMissHandler)(void* ctx, uint32_t codepoint);

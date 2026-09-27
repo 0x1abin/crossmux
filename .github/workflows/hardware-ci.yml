@@ -99,6 +99,10 @@ jobs:
     needs: select_runner
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
+      - name: Use runner temporary directory
+        # Avoid the self-hosted runner's shared /tmp tmpfs.
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive

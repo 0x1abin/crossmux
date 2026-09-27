@@ -71,9 +71,30 @@ void ReadingStatsMenuActivity::openSelected() {
 void ReadingStatsMenuActivity::loop() {
   const int count = activeEntryCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const int sw = renderer.getScreenWidth();
+  const int sh = renderer.getScreenHeight();
   const int listTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listHeight = renderer.getScreenHeight() - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  if (handleListTouch(selected, count, listTop, listHeight, false) == ListTouchResult::Activated) {
+  const int listH = sh - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+
+  // Hit-test with the theme's own drawButtonMenu geometry so a tap lands on
+  // the drawn rows under every theme: Lyra draws from rect.y without the
+  // vertical offset, and RoundedRaff / Inx derive the row height from the font
+  // and page the rows. The geometry's pageStart maps the visible row back to
+  // the true index.
+  const auto geo = GUI.getMenuRowGeometry(renderer, Rect{0, listTop, sw, listH}, selected, count);
+  int touched = -1;
+  const auto touch =
+      mappedInput.rowTouch(touched, geo.firstRowY, geo.rowStep, geo.pageCount, geo.xStart, geo.xEnd, geo.rowHeight);
+  if (touch == MappedInputManager::RowTouch::Down || touch == MappedInputManager::RowTouch::Tap) {
+    touched += geo.pageStart;
+  }
+  if (touch == MappedInputManager::RowTouch::Down) {
+    if (selected != touched) {
+      selected = touched;
+      requestUpdate();
+    }
+  } else if (touch == MappedInputManager::RowTouch::Tap) {
+    selected = touched;
     openSelected();
     return;
   }

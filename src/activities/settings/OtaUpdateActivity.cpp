@@ -13,11 +13,13 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
+#include "ReadingStatsStore.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
 #include "util/ButtonNavigator.h"
@@ -160,6 +162,17 @@ void OtaUpdateActivity::beginWifiSelection() {
   onWifiSelectionComplete(true);
   return;
 #endif
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  if (!readingStatsReleased) {
+    RenderLock lock(*this);
+    if (!READING_STATS.releaseMemoryForNetwork()) {
+      state = State::Failed;
+      requestUpdate();
+      return;
+    }
+    readingStatsReleased = true;
+  }
+#endif
   // ActivityManager owns the child across frames, so stack/static lifetime is invalid.
   auto wifiSelection = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
   if (!wifiSelection) {
@@ -185,13 +198,14 @@ void OtaUpdateActivity::beginWifiSelection() {
 void OtaUpdateActivity::onExit() {
   Activity::onExit();
 
-  // Success path reboots via the ShuttingDown state's plain ESP.restart()
-  // (loop() above) so the new firmware boots normally. Back-out paths land
-  // here with wifi still active; silent-restart to free the LWIP/mbedTLS
-  // fragmentation, same as the other wifi activities.
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
+  const bool wifiWasEnabled = WiFi.getMode() != WIFI_MODE_NULL;
+  if (wifiWasEnabled) {
     WiFi.disconnect(false);
     delay(30);
+  }
+  // Reload saved statistics even if Wi-Fi allocation/selection never completed.
+  // Successful OTA installation uses the existing plain restart into the new image.
+  if (wifiWasEnabled || readingStatsReleased) {
     silentRestart();
   }
 }
@@ -227,6 +241,8 @@ void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea, const int 
   }
 
   fui::GfxRendererTarget target(renderer);
+
+  applyUiTextAlignment(target);
   target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
   const fui::TextStyle style = releaseNoteStyle();
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -293,6 +309,7 @@ void OtaUpdateActivity::renderUpdateAvailable(const Rect& safeArea) {
                               tr(STR_NO_RELEASE_NOTES));
   } else {
     fui::GfxRendererTarget target(renderer);
+    applyUiTextAlignment(target);
     target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
     const fui::TextStyle style = releaseNoteStyle();
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);

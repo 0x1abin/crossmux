@@ -347,5 +347,49 @@ int main(int argc,char** argv) {
 """)
 
 
+    def test_txt_spacing_keeps_cache_fields_byte_aligned(self):
+        import re
+        source = (ROOT / 'src/activities/reader/TxtReaderActivity.cpp').read_text()
+        read = method(source, 'bool readPodChecked(')
+        write = method(source, 'bool writePodChecked(')
+        expression = re.search(
+            r'!writePodChecked\(f, (.*SETTINGS\.extraParagraphSpacing.*?)\)\s*\|\|\s*!writePodChecked\(f, complete\)',
+            source).group(1)
+        run_cpp(r'''
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+struct HalFile {
+  std::vector<uint8_t> bytes;
+  size_t position=0;
+  size_t write(const uint8_t* data,size_t size) {bytes.insert(bytes.end(),data,data+size);return size;}
+  int read(uint8_t* data,size_t size) {
+    if(position+size>bytes.size()) return 0;
+    std::memcpy(data,bytes.data()+position,size);position+=size;return static_cast<int>(size);
+  }
+};
+struct {uint8_t extraParagraphSpacing=0;} SETTINGS;
+''' + 'template<typename T>\n' + read + '\ntemplate<typename T>\n' + write + r'''
+int main() {
+  for(uint8_t level=0;level<=5;++level) {
+    SETTINGS.extraParagraphSpacing=level;
+    HalFile f;
+    assert(writePodChecked(f, ''' + expression + r'''));
+    const uint8_t complete=1, encoding=1;
+    const uint32_t pageCount=7;
+    assert(writePodChecked(f,complete));assert(writePodChecked(f,encoding));assert(writePodChecked(f,pageCount));
+    assert(f.bytes.size()==7);
+    HalFile reopened=f;
+    uint8_t spacing=255,loadedComplete=0,loadedEncoding=0;uint32_t loadedPages=0;
+    assert(readPodChecked(reopened,spacing));assert(readPodChecked(reopened,loadedComplete));
+    assert(readPodChecked(reopened,loadedEncoding));assert(readPodChecked(reopened,loadedPages));
+    assert(spacing==(level!=0) && loadedComplete==1 && loadedEncoding==1 && loadedPages==7);
+    assert(reopened.position==reopened.bytes.size());
+  }
+}
+''')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -56,6 +56,8 @@ class InxTheme final : public LyraTheme {
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon, int rowSpacing = -1) const override;
+  MenuRowGeometry getMenuRowGeometry(const GfxRenderer& renderer, const Rect& rect, int selectedIndex,
+                                     int rowCount) const override;
   void drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
                        int selectedIndex) const override;
   void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const override;

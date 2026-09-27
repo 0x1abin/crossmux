@@ -45,7 +45,10 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertEqual(len(environments), 8)
         self.assertEqual(
             package_nightly_target.matrix('stable')['include'],
-            [{'targetId': 'xteink_x4', 'deviceSlug': 'xteink', 'environment': 'gh_release'}],
+            [
+                {'targetId': 'xteink_x4', 'deviceSlug': 'xteink', 'environment': 'gh_release'},
+                {'targetId': 'sticky', 'deviceSlug': 'sticky', 'environment': 'sticky-gh_release'},
+            ],
         )
 
     def test_runtime_models_and_board_tags_are_explicit(self):
@@ -89,6 +92,9 @@ class NightlyTargetTest(unittest.TestCase):
         )
         self.assertIn('--channel "${{ needs.prepare.outputs.channel }}"', workflow)
         self.assertNotIn('for flavor in global cn', workflow)
+        self.assertIn('pattern: firmware-stable-*', workflow)
+        self.assertIn('merge-multiple: true', workflow)
+        self.assertIn('assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin artifacts/*)', workflow)
         self.assertIn('cp artifacts/xteink-firmware.bin firmware.bin', workflow)
         self.assertIn('cp artifacts/xteink-firmware.bin firmware-cn.bin', workflow)
         self.assertIn('gh release delete-asset "$CHANNEL" firmware-cn.bin', workflow)
@@ -128,49 +134,54 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertIn('2>&1', versioning)
 
     def test_package_contains_one_binary_set_and_two_compatible_manifests(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            build = root / '.pio/build/sticky_nightly'
-            build.mkdir(parents=True)
-            (build / 'bootloader.bin').write_bytes(b'bootloader')
-            (build / 'partitions.bin').write_bytes(b'partitions')
-            (build / 'firmware.bin').write_bytes(self.write_image(board='sticky').read_bytes())
-            boot_app0 = root / 'boot_app0.bin'
-            boot_app0.write_bytes(b'boot_app0')
-            (root / 'platformio.ini').write_text('[crosspoint]\nversion = 1.5.7\n')
-            output = root / 'dist/sticky'
+        for channel in ('stable', 'nightly'):
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                build = root / '.pio/build' / nightly_targets.environment_for('sticky', channel, 'global')
+                build.mkdir(parents=True)
+                (build / 'bootloader.bin').write_bytes(b'bootloader')
+                (build / 'partitions.bin').write_bytes(b'partitions')
+                (build / 'firmware.bin').write_bytes(self.write_image(board='sticky').read_bytes())
+                boot_app0 = root / 'boot_app0.bin'
+                boot_app0.write_bytes(b'boot_app0')
+                (root / 'platformio.ini').write_text('[crosspoint]\nversion = 1.6.0\n')
+                output = root / 'dist/sticky'
 
-            def git_value(_root, *args):
-                return 'a' * (7 if '--short=7' in args else 40)
+                def git_value(_root, *args):
+                    return 'a' * (7 if '--short=7' in args else 40)
 
-            with (
-                mock.patch.object(package_nightly_target, 'verify_partition_csv'),
-                mock.patch.object(package_nightly_target, 'find_boot_app0', return_value=boot_app0),
-                mock.patch.object(package_nightly_target, 'git_value', side_effect=git_value),
-            ):
-                package_nightly_target.package_target(root, 'sticky', 'nightly', output)
+                with (
+                    mock.patch.object(package_nightly_target, 'verify_partition_csv'),
+                    mock.patch.object(package_nightly_target, 'find_boot_app0', return_value=boot_app0),
+                    mock.patch.object(package_nightly_target, 'git_value', side_effect=git_value),
+                ):
+                    package_nightly_target.package_target(root, 'sticky', channel, output)
 
-            self.assertEqual(
-                {path.name for path in output.iterdir()},
-                {
-                    'sticky-bootloader.bin',
-                    'sticky-partitions.bin',
-                    'sticky-boot_app0.bin',
-                    'sticky-firmware.bin',
-                    'sticky-global-manifest.json',
-                    'sticky-cn-manifest.json',
-                    'sticky-SHA256SUMS',
-                },
-            )
-            manifests = [
-                json.loads((output / nightly_targets.manifest_name('sticky', flavor)).read_text())
-                for flavor in nightly_targets.FLAVOR_TOKENS
-            ]
-            self.assertEqual(manifests[0]['assets'], manifests[1]['assets'])
-            self.assertEqual(
-                {key: value for key, value in manifests[0].items() if key != 'flavor'},
-                {key: value for key, value in manifests[1].items() if key != 'flavor'},
-            )
+                self.assertEqual(
+                    {path.name for path in output.iterdir()},
+                    {
+                        'sticky-bootloader.bin',
+                        'sticky-partitions.bin',
+                        'sticky-boot_app0.bin',
+                        'sticky-firmware.bin',
+                        'sticky-global-manifest.json',
+                        'sticky-cn-manifest.json',
+                        'sticky-SHA256SUMS',
+                    },
+                )
+                manifests = [
+                    json.loads((output / nightly_targets.manifest_name('sticky', flavor)).read_text())
+                    for flavor in nightly_targets.FLAVOR_TOKENS
+                ]
+                self.assertEqual(manifests[0]['assets'], manifests[1]['assets'])
+                self.assertEqual(
+                    {key: value for key, value in manifests[0].items() if key != 'flavor'},
+                    {key: value for key, value in manifests[1].items() if key != 'flavor'},
+                )
+
+                self.assertEqual(manifests[0]['channel'], channel)
+                self.assertEqual(manifests[0]['version'], '1.6.0' if channel == 'stable' else '1.6.0-sticky-rc+aaaaaaa')
+                self.assertEqual(manifests[0]['supportedChannels'], ['stable', 'nightly'])
 
     def test_stable_package_has_release_version_and_legacy_migration_roles(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -350,7 +361,7 @@ class NightlyIndexTest(unittest.TestCase):
         ]
         self.assertEqual(manifests[0]['assets'], manifests[1]['assets'])
 
-    def test_stable_index_requires_notes_and_contains_only_x3_x4(self):
+    def test_stable_index_requires_notes_and_contains_x3_x4_and_sticky(self):
         self.write_all_pairs(channel='stable')
         with self.assertRaisesRegex(ValueError, 'Stable release notes are required'):
             build_nightly_index.build_index(
@@ -360,7 +371,7 @@ class NightlyIndexTest(unittest.TestCase):
         index = build_nightly_index.build_index(
             self.root, 'global', 'https://example.com/', 'now', 'test', 'stable', notes
         )
-        self.assertEqual(set(index['targets']), {'xteink_x4'})
+        self.assertEqual(set(index['targets']), {'xteink_x4', 'sticky'})
         self.assertEqual(index['releaseNotes'], {'global': notes['en'], 'zh-CN': notes['zh']})
 
     def test_rejects_incomplete_target_set(self):

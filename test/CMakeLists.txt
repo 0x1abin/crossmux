@@ -77,6 +77,7 @@ add_subdirectory(gfx_two_bit_mapping)
 add_subdirectory(dictionary_resource)
 add_subdirectory(reading_guide_line)
 add_subdirectory(png_conversion)
+add_subdirectory(sample_row_clamp)
 add_subdirectory(reading_background)
 add_subdirectory(file_edit)
 add_subdirectory(memory_safety)
@@ -87,6 +88,7 @@ add_subdirectory(bitmap_memory_source)
 add_subdirectory(murphy_m4_batch)
 add_subdirectory(murphy_m4_input)
 add_subdirectory(system_settings_reset)
+add_subdirectory(user_guide)
 add_subdirectory(font_cache_manager)
 add_subdirectory(css_parser)
 add_subdirectory(chapter_html_slim_parser)
@@ -97,10 +99,33 @@ add_subdirectory(ble_input)
 add_subdirectory(reader_build_failure)
 add_subdirectory(reader_font_preview)
 
+# Font fallback reuses the existing Unicode mark classification.
+foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest)
+  target_sources(${font_test} PRIVATE
+    ${REPO_ROOT}/lib/MiniBidi/minibidi.c
+    ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp)
+  target_include_directories(${font_test} PRIVATE
+    ${REPO_ROOT}/lib/MiniBidi
+    ${REPO_ROOT}/test/minibidi_arabic/stubs)
+endforeach()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME WeReadLogout
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_weread_logout.py)
+add_test(NAME BuiltinFontShrink
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_builtin_font_shrink.py)
 add_test(NAME PioarduinoCache
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_pioarduino_cache.py)
 add_test(NAME ControlCenterGesture
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_control_center_gesture.py)
 add_test(NAME ReadingUiRegressions
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reading_ui_regressions.py)
+add_test(NAME DownloadMemoryLifecycle
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_download_memory_lifecycle.py)
+add_test(NAME InxStyleCompatibility
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_style_compat.py)
+add_test(NAME InxRecentThumbnails
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/check_recent_thumbnails.py ${CMAKE_CXX_COMPILER})
+
+add_test(NAME UiFontFallback
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)

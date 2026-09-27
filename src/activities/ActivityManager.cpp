@@ -49,6 +49,7 @@
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "util/ImageViewerActivity.h"
+#include "util/UserGuide.h"
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -465,6 +466,9 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 }
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
+  if (!CrossPointSettings::requiresOnboarding(SETTINGS.onboardingVersion)) {
+    UserGuide::installIfPending(static_cast<Language>(SETTINGS.language) == Language::ZH_CN);
+  }
   if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
     mainTabFocus = MainTabFocus::Tabs;
     mainTabEntryReleasePending = false;

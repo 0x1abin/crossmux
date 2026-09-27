@@ -39,6 +39,7 @@ class WeReadActivity final : public Activity {
     OpenBook,
     Error,
     LogoutError,
+    LogoutCacheWarning,
     ClearingCache,
     CacheCleared,
     CacheClearError

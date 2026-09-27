@@ -6,6 +6,7 @@
 
 #include <cstdint>
 
+#include "AppVisibility.h"
 #include "BleKeyMapping.h"
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
@@ -256,6 +257,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // "tapForReaderMenu" key: 0/1 keep their old Off/Tap meaning.
   enum SHOW_READER_MENU { READER_MENU_OFF = 0, READER_MENU_TAP = 1, READER_MENU_SWIPE_UP = 2, SHOW_READER_MENU_COUNT };
 
+  // Resampling filter for images drawn inside the reader. Nearest is the
+  // historical behaviour (one source pixel per output pixel); bilinear blends
+  // neighbours, which costs a little more per pixel but removes the stair-step
+  // edges and moire that nearest-neighbour produces on scaled artwork.
+  // Reader-scoped on purpose: covers, sleep screens and other chrome keep the
+  // cheaper path.
+  enum IMAGE_SCALING { IMAGE_SCALING_NEAREST = 0, IMAGE_SCALING_BILINEAR = 1, IMAGE_SCALING_COUNT };
+
   enum QUICK_RESUME_SLEEP_SCREEN {
     QUICK_RESUME_NEVER = 0,
     QUICK_RESUME_AFTER_TIMEOUT = 1,
@@ -302,6 +311,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t clockAutoSync = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 0;
+  // Reader-level first-line indent control, one of FirstLineIndent::Auto /
+  // Indent / NoIndent (see lib/Epub/Epub/FirstLineIndent.h). The default
+  // Auto keeps the book's own CSS text-indent untouched; Indent replaces it
+  // with two CJK characters / three Latin spaces; NoIndent forces flush.
+  // Independent of extraParagraphSpacing.
+  uint8_t firstLineIndent = 0;
   uint8_t textAntiAliasing = 1;
   uint8_t fakeBold = SYNTHETIC_BOLD_STANDARD;
   uint8_t readingBackgroundEnabled = 0;
@@ -378,6 +393,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Focus Reading - emphasizes the first part of words with bold
   uint8_t focusReadingEnabled = 0;
   uint8_t readerMenuStyle = READER_MENU_LIST;
+  // Image resampling inside the reader (see IMAGE_SCALING). Applies to inline
+  // book images only; reader chrome and other activities are untouched.
+  uint8_t imageScaling = IMAGE_SCALING_NEAREST;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
   // Prefer the internal Flash cache for the selected SD reader font.
@@ -403,13 +421,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t backShortToFileBrowser = 0;
   // Apps menu visibility. Set bits hide stable app IDs.
   static constexpr uint8_t APPS_CATALOG_VERSION = 1;
-  static constexpr uint8_t BUDDY_APP_ID = 10;
-  static constexpr uint8_t PIXEL_SWITCH_APP_ID = 12;
-  static constexpr uint32_t CHINA_ONLY_APPS_MASK = (uint32_t{1} << 1) | (uint32_t{1} << 4);
-  static constexpr uint32_t DEFAULT_HIDDEN_APPS_MASK = (uint32_t{1} << 4) | (uint32_t{1} << 5) | (uint32_t{1} << 6) |
-                                                       (uint32_t{1} << BUDDY_APP_ID) |
-                                                       (uint32_t{1} << PIXEL_SWITCH_APP_ID);
-  uint32_t hiddenAppsMask = DEFAULT_HIDDEN_APPS_MASK;
+  uint32_t hiddenAppsMask = appVisibility::DEFAULT_HIDDEN_APPS_MASK;
   uint8_t appsCatalogVersion = APPS_CATALOG_VERSION;
   uint8_t buddyClaimed = 0;
   // Image rendering mode in EPUB reader
@@ -513,7 +525,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   ReaderRenderSpec readerRenderSpec(uint16_t viewportWidth, uint16_t viewportHeight) const;
 
   static const char* getFilePath() { return "/.crosspoint/settings.json"; }
-  // Keep the UI language, service region, and regional-app defaults in sync.
+  // Keep the UI language and service region in sync; preserve app visibility.
   // The caller persists the resulting settings.
   void applyLanguageSelection(uint8_t languageIndex);
   bool loadFromFile();

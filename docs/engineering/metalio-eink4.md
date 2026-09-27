@@ -14,6 +14,7 @@ CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nigh
 pio run -e metalio_eink4 -t upload --upload-port <verified-metalio-port>
 pio device monitor --port <verified-metalio-port> --baud 115200
 python3 -m unittest discover -s scripts/tests -p 'test_metalio_eink4.py'
+python3 freeink-sdk/libs/hardware/BoardConfig/test/host/test_metalio_charger.py
 ```
 
 The target uses the existing 16 MiB flash dual-OTA partition layout and the
@@ -36,7 +37,7 @@ for other boards are rejected by the existing flash/OTA board-tag check.
 | Buttons | BOOT0=Confirm, POWER3=Power; P0.7=Down/next, P1.0=Up/previous, active-low |
 | Virtual keys | Raw Home=(80,900) unchanged; Prev=(400,900) → Left, Next=(240,900) → Right |
 | Battery | BQ27220 `0x55`: percentage and gauge-native charging status |
-| Charger | Optional CX25601N `0x6B`: read status only; never interpreted as BQ25896 |
+| Charger | Optional CX25601N `0x6B`: fixed charge parameters at boot; status is never interpreted as BQ25896 |
 | RTC | PCF8563 `0x51`, existing system-UTC restore/writeback behavior |
 | USB | Native USB19/20, Serial/JTAG and existing USB Drive/MSC workflow; TCA9555 P0.0 held high for flash/debug routing |
 | Haptic | GPIO44, active-high motor; Off / Low 20 ms / Medium 35 ms / High 60 ms |
@@ -50,7 +51,9 @@ Unknown expander lines stay inputs.
 ## Display, input and shutdown
 
 Metalio uses the shared SSD1677 driver with board-specific parameters. Explicit
-FULL is `0xF7`; ordinary FAST is `0xFC`. Initial drawing, periodic HALF and
+FULL is `0xF7`; ordinary B/W/image FAST is `0xFC`. Text AA uses the custom
+single-activation path documented [below](#text-aa-after-the-2026-09-28-review).
+Initial drawing, periodic HALF and
 physical grayscale cleanup use two FAST phases: establish black from a white
 previous plane, then paint the target from black. Each phase finishes before
 RAM changes, and final BW/RED planes match the target. The BSP's HALF `0xD7` /
@@ -76,7 +79,8 @@ overlap. BUSY timeouts keep the baseline unknown, prevent further RAM/sleep
 commands while busy, and do not mark the controller powered off. `0xCC` leaves
 analog power on, so shutdown still performs the required park sequence.
 
-No LUT, voltage, SPI rate or discharge delay was changed. Constant fills use
+The BlackPulse cleanup changes retain the LUT, voltage, SPI rate and discharge
+delay. Constant fills use
 the existing 128-byte stack chunk; grayscale retains strip rendering and its
 board-configurable LUT. No additional full-screen buffer or polling task is
 added. The framebuffer is 48,000 bytes; SDMMC retains its existing 4 KiB DMA
@@ -129,9 +133,17 @@ CX25601N external-power status is cached for one second. Absent/unreadable
 chargers retry after two seconds and fall back to USB SOF activity and the
 existing gauge charging indication. On legacy boards, a full battery connected
 to a charge-only source may not be distinguishable from disconnected power.
-No charge voltage/current, watchdog, private register, or dynamic-regulation
-writes are performed; battery compatibility must be established separately
-before introducing any charger control.
+On boot, after the shared I2C bus starts, the HAL passes its fixed policy to
+the SDK charger interface, which probes CX25601N register `0x38`. If present,
+the SDK disables charging while setting VREG to 4350 mV, IPRECHG to 240 mA,
+ITERM to 60 mA, ICHG and IINDPM to 480 mA (the chip's
+80 mA step rounds a 500 mA request down), then enables hardware termination
+and charging with HIZ and the watchdog cleared. A missing chip or failed I2C
+operation is logged without blocking boot; failure after charging is disabled
+leaves it disabled to avoid charging with partially updated parameters.
+This policy assumes a battery rated for 4.35 V charging. It does not change
+DPDM detection, private registers, the existing status path, or add a
+dynamic-regulation/recharge task. It has not yet been physically accepted.
 
 ## Acceptance
 
@@ -146,8 +158,10 @@ for complete acceptance; the dated session records only the observations made:
   held across boot, and contacts crossing activity/popup boundaries.
 - Open an EPUB from SD, turn pages, save progress/settings and verify after
   reboot. Missing SD must use the existing recoverable SD-error screen.
-- Set RTC, reset and remove power; verify UTC recovery. Test charging/unplugging
-  with and without CX25601N and when the battery reaches full.
+- Set RTC, reset and remove power; verify UTC recovery. With CX25601N, read
+  back VREG/ICHG/IINDPM/IPRECHG/ITERM/EN_TERM/EN_CHG, then measure battery
+  current and charging state on plug/unplug, full charge, and reboot. Confirm
+  an older board without CX25601N still boots and reports power as before.
 - USB MSC copy/rename/delete/large-file read; eject/cancel/disconnect and verify
   reboot, SD remount and opening the transferred book. Repeat three times.
 - Existing Wi-Fi transfer/OTA and BLE page turner connect/disconnect/reconnect.
@@ -298,7 +312,7 @@ uncommitted changes; the SDK gitlink is unchanged.
 | Touch / keys | Native coordinates, three bezel locations, GPIO1 IRQ, expander key pins and 10/120 ms boot reset agree. Add `0xA5=0x03` before deep sleep; failures log and still allow shutdown. Reset on boot restores touch after deep-sleep wake. No new light-sleep policy. |
 | Power / expander | Keep safe latch preload and main/screen rail ordering; repeat 100 ms high/low shutdown pulses until power is cut, without an ESP deep-sleep fallback. Add P0.0 output HIGH for USB flash/debug routing, matching the reference FSUSB42UMX selection. |
 | Haptic | Reference GPIO44 active-high, 35 ms timer pulse. Use board-calibratable 20/35/60 ms feedback for the entire touch surface and capability-gated settings. |
-| Gauge / charger | BQ27220 at 0x55 and optional CX25601N at 0x6B agree. Preserve read-only charger status. Reference charge-current/voltage writes are intentionally not imported. |
+| Gauge / charger | BQ27220 at 0x55 and optional CX25601N at 0x6B agree. At this audit, charger control was intentionally deferred; the current boot-time configuration above supersedes that decision. |
 | RTC | Retain PCF8563 at 0x51 and system-UTC restore/writeback. |
 | Audio / microphone | Reference external BT audio module uses UART TX48/RX47 and I²S BCLK6/WS43/DOUT7/DIN17. CrossMux leaves audio/mic capabilities disabled and PA off; codec/module control needs a separate port. |
 | IMU | Reference SC7A20H at 0x19, interrupt on TCA9555 P1.4. CrossMux keeps IMU disabled; no substitute QMI8658 driver or automatic rotation is enabled. |
@@ -396,3 +410,48 @@ pins merged commit `094976e1d47ad7120cf461fec5f6b737eaabf13f`; its source tree
 changed during integration. [CrossMux PR #318](https://github.com/0x1abin/crossmux/pull/318)
 contains the application/HAL changes. No application merge or firmware publication
 is part of this work.
+
+## 2026-09-25 combined text AA recovery
+
+The identified ESP32-S3 unit (USB serial and MAC `10:20:ba:6e:08:70`) booted
+from CrossMux app0 at `0x10000`. Its earlier default-AA image entered the home
+activity and logged completed refreshes, but the user reported that opening a
+book did not work. The shared display fix waits for an outstanding asynchronous
+refresh before routing and resets a sleeping SSD1677 before checking BUSY.
+
+Only app0 was replaced with `1.6.0-metalio-aa-fix1` (SHA-256
+`99f56c7792832d1fb809aec19fbedd38d05b352161d96f2736c814c3942d5397`);
+`esptool verify-flash` matched. The SD card mounted and the main loop ran with
+no captured panic or BUSY timeout. The user then reported that book opening was
+restored. This does not measure gray tone, residual ink or 100-page EPUB/TXT
+performance. The subsequent code review also consolidates controller wakeup
+paths; that revision still needs physical retesting.
+
+## Text AA after the 2026-09-28 review
+
+Normal and Nightly Metalio builds now use the endpoint-preserving text-turn
+core described in [SSD1677 text AA](ssd1677-text-aa.md). The user confirmed that
+the tested `g24-b32-w32-d0-khold` candidate meets synchronous AA expectations
+and resolves fading status text, guides and body strokes. Its timing and
+analog settings are retained. `metalio_eink4_transition_experiment` remains a
+diagnostic build of the same behavior; the multi-stage experimental flags
+and duplicated Metalio update function are retired.
+
+The final selector policy refreshes all target black and white pixels on a
+changed page and keeps static gray idle. Identical pages do not drive. One
+shared submission flow handles power settling, cancellation, BUSY failure and
+committed glass state; Metalio still parks with `0x83`. First entry, images,
+inversion, manual/periodic cleanup and recovery retain their safe paths.
+The existing eight PSRAM planes are reused without per-page allocation.
+
+The comparison images and hashes remain local under
+`build/metalio-aa-calibration/`, including the accepted candidate
+`w32-d0-khold/firmware.bin` (5,935,232 bytes; SHA-256
+`cf5649adbf31e4333f67dd693e52510559d397de9f9b429c3b2e545ada3553d1`).
+It was written only to verified Metalio MAC `10:20:ba:6e:08:70`, active app1
+at `0x650000`, with independent digest verification and startup confirmation.
+The consolidation itself is verified by host traces and builds; no additional
+flash is performed for publication. Detailed recorded 100-page/video acceptance
+remains pending. The shared document carries current test and rollback commands
+and the default rollout on Sticky, both SSD1677 Murphy M4 batches and Waveshare
+3.97. Those panels' independent optical acceptance remains pending.

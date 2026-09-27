@@ -74,6 +74,8 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
+  // One reader face plus at most three UI sizes; reuse this capacity on reload.
+  loaded_.reserve(4);
   if (loadFile(*selected, family.name.c_str(), renderer, preferFlash, true) == 0) {
     return false;
   }

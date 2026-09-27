@@ -15,6 +15,17 @@ int16_t scrollInset(const Profile& profile, const uint8_t side) {
 }
 }  // namespace ui_theme_detail
 
+// Keep INX's original advance-based alignment, including one-digit controls.
+inline void applyUiTextAlignment(freeink::ui::GfxRendererTarget& target) {
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  target.setTextCentering(SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX
+                              ? freeink::ui::TextCentering::Advance
+                              : freeink::ui::TextCentering::InkBounds);
+#else
+  (void)target;
+#endif
+}
+
 // Merges the active UITheme's shape (row gaps, radii, insets, selection
 // style) with the uiScale-derived sizes into FreeInkUI theme tokens: the
 // theme says what lists look like, the scale says how big they are.
@@ -25,6 +36,11 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
 
   fui::ThemeTokens tokens = fui::themeTokensForLineHeight(target.lineHeight(fui::GfxRendererTarget::FONT_BODY));
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+    tokens.listLayoutPolicy = fui::ListLayoutPolicy::ThemeRow;
+  }
+#endif
   tokens.listRowGap = static_cast<int16_t>(metrics.listRowGap);
   tokens.listRowRadius = static_cast<uint8_t>(metrics.listRowRadius);
   tokens.listInset = static_cast<int16_t>(metrics.listInset);
