@@ -125,7 +125,7 @@ bool BookStyleStore::findStyle(const std::string& bookPath, BookStyle& out) cons
   return true;
 }
 
-void BookStyleStore::updateStyle(const std::string& bookPath, const BookStyle& style) {
+bool BookStyleStore::updateStyle(const std::string& bookPath, const BookStyle& style) {
   const bool entryKnown =
       std::any_of(styles.begin(), styles.end(), [&](const BookStyleEntry& entry) { return entry.path == bookPath; });
   if (entryKnown) {
@@ -143,10 +143,21 @@ void BookStyleStore::updateStyle(const std::string& bookPath, const BookStyle& s
     styles.push_back({bookPath, style});
   }
 
-  saveToFile();
+  const bool saved = saveToFile();
+  if (!saved) {
+    // The in-memory record stays (this session still applies it), but the
+    // change will not survive a reboot. The low-level writer already logged
+    // the specific SD failure; surface the store-level consequence too.
+    LOG_ERR("BST", "Failed to persist book style for %s; change lost on reboot", bookPath.c_str());
+  }
+  return saved;
 }
 
-void BookStyleStore::clear() {
+bool BookStyleStore::clear() {
   styles.clear();
-  saveToFile();
+  const bool saved = saveToFile();
+  if (!saved) {
+    LOG_ERR("BST", "Failed to persist cleared book styles; old file remains on disk");
+  }
+  return saved;
 }

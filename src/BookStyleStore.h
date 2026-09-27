@@ -57,11 +57,16 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
   // has no own entry (the reader then keeps the global settings).
   bool findStyle(const std::string& bookPath, BookStyle& out) const;
 
-  // Remember this book's style as its own entry. Persists on change.
-  void updateStyle(const std::string& bookPath, const BookStyle& style);
+  // Remember this book's style as its own entry. Persists on change and
+  // returns whether the file write succeeded; the in-memory record is kept in
+  // either case so this session still uses it, but a false return means the
+  // change will not survive a reboot (caller should log).
+  bool updateStyle(const std::string& bookPath, const BookStyle& style);
 
-  // Forget every remembered book style. Persists immediately.
-  void clear();
+  // Forget every remembered book style. Persists immediately and returns
+  // whether the file write succeeded (the in-memory store is cleared either
+  // way).
+  bool clear();
 };
 
 #define BOOK_STYLES BookStyleStore::getInstance()
