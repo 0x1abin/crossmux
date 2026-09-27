@@ -46,6 +46,10 @@ class ReaderActivity : public Activity {
 
   BookStyle globalSettingsSnapshot_;
   bool globalSettingsSnapshotted_ = false;
+  // Set once loadBook() succeeded; saveBookStyle() only records the book's
+  // style when the book was actually opened, so a failed load (missing file,
+  // corrupt book) cannot write a stale entry under this path.
+  bool bookOpened_ = false;
 
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */

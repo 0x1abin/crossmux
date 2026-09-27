@@ -104,9 +104,10 @@ void ReaderActivity::applyBookStyle() {
 }
 
 void ReaderActivity::saveBookStyle() {
-  // Update the book record only while per-book memory is enabled; disabling it
-  // from the text settings must stop remembering this book's style.
-  if (SETTINGS.bookStyleMemory) {
+  // Update the book record only while per-book memory is enabled and the book
+  // was actually opened (a failed load must not write a stale entry under this
+  // path); disabling memory from the text settings stops remembering too.
+  if (SETTINGS.bookStyleMemory && bookOpened_) {
     BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
   }
   // Always restore an existing global snapshot on exit. The reader's style
@@ -144,6 +145,7 @@ void ReaderActivity::onEnter() {
     finish();
     return;
   }
+  bookOpened_ = true;
 
   APP_STATE.openEpubPath = bookPath;
   APP_STATE.saveToFile();
