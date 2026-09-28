@@ -51,7 +51,9 @@ Unknown expander lines stay inputs.
 ## Display, input and shutdown
 
 Metalio uses the shared SSD1677 driver with board-specific parameters. Explicit
-FULL is `0xF7`; ordinary FAST is `0xFC`. Initial drawing, periodic HALF and
+FULL is `0xF7`; ordinary B/W/image FAST is `0xFC`. Text AA uses the custom
+single-activation path documented [below](#text-aa-after-the-2026-09-28-review).
+Initial drawing, periodic HALF and
 physical grayscale cleanup use two FAST phases: establish black from a white
 previous plane, then paint the target from black. Each phase finishes before
 RAM changes, and final BW/RED planes match the target. The BSP's HALF `0xD7` /
@@ -77,7 +79,8 @@ overlap. BUSY timeouts keep the baseline unknown, prevent further RAM/sleep
 commands while busy, and do not mark the controller powered off. `0xCC` leaves
 analog power on, so shutdown still performs the required park sequence.
 
-No LUT, voltage, SPI rate or discharge delay was changed. Constant fills use
+The BlackPulse cleanup changes retain the LUT, voltage, SPI rate and discharge
+delay. Constant fills use
 the existing 128-byte stack chunk; grayscale retains strip rendering and its
 board-configurable LUT. No additional full-screen buffer or polling task is
 added. The framebuffer is 48,000 bytes; SDMMC retains its existing 4 KiB DMA
@@ -423,3 +426,32 @@ no captured panic or BUSY timeout. The user then reported that book opening was
 restored. This does not measure gray tone, residual ink or 100-page EPUB/TXT
 performance. The subsequent code review also consolidates controller wakeup
 paths; that revision still needs physical retesting.
+
+## Text AA after the 2026-09-28 review
+
+Normal and Nightly Metalio builds now use the endpoint-preserving text-turn
+core described in [SSD1677 text AA](ssd1677-text-aa.md). The user confirmed that
+the tested `g24-b32-w32-d0-khold` candidate meets synchronous AA expectations
+and resolves fading status text, guides and body strokes. Its timing and
+analog settings are retained. `metalio_eink4_transition_experiment` remains a
+diagnostic build of the same behavior; the multi-stage experimental flags
+and duplicated Metalio update function are retired.
+
+The final selector policy refreshes all target black and white pixels on a
+changed page and keeps static gray idle. Identical pages do not drive. One
+shared submission flow handles power settling, cancellation, BUSY failure and
+committed glass state; Metalio still parks with `0x83`. First entry, images,
+inversion, manual/periodic cleanup and recovery retain their safe paths.
+The existing eight PSRAM planes are reused without per-page allocation.
+
+The comparison images and hashes remain local under
+`build/metalio-aa-calibration/`, including the accepted candidate
+`w32-d0-khold/firmware.bin` (5,935,232 bytes; SHA-256
+`cf5649adbf31e4333f67dd693e52510559d397de9f9b429c3b2e545ada3553d1`).
+It was written only to verified Metalio MAC `10:20:ba:6e:08:70`, active app1
+at `0x650000`, with independent digest verification and startup confirmation.
+The consolidation itself is verified by host traces and builds; no additional
+flash is performed for publication. Detailed recorded 100-page/video acceptance
+remains pending. The shared document carries current test and rollback commands
+and the default rollout on Sticky, both SSD1677 Murphy M4 batches and Waveshare
+3.97. Those panels' independent optical acceptance remains pending.
