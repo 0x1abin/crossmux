@@ -7,27 +7,30 @@ with no images or reading background use this path. Images, covers, inverted
 pages, manual/periodic cleanup and unknown-history recovery retain their
 existing driver and cleanup policy.
 
-## Platform defaults and candidates
+## Platform defaults
 
-| Platform | Combined AA | Endpoint-preserving text turn | Candidate build |
+| Platform | Combined AA | Endpoint-preserving text turn | Build |
 |---|---|---|---|
-| Metalio E-Ink4 | default | default; user confirmed synchronous AA and fading fix | `metalio_eink4_transition_experiment` (diagnostics) |
-| Sticky | default | opt-in pending panel acceptance | `sticky_text_aa_candidate` |
-| Murphy M4, both SSD1677 batches | default | opt-in pending acceptance for each batch | `murphy_m4_text_aa_candidate` |
-| Waveshare ePaper 3.97 | default | opt-in pending panel acceptance | `waveshare_epaper_397_text_aa_candidate` |
+| Metalio E-Ink4 | default | default; user confirmed synchronous AA and fading fix | `metalio_eink4` |
+| Sticky | default | default; panel acceptance pending | `sticky` |
+| Murphy M4, both SSD1677 batches | default | default; acceptance pending for each batch | `murphy_m4` |
+| Waveshare ePaper 3.97 | default | default; panel acceptance pending | `waveshare_epaper_397` |
 | X4 Pro / X4 Classic | off | off | original B/W + gray overlay |
 | Paper Mono, UC controllers, EEGO A4, ESP32-C3 | existing behavior | unchanged | existing environments |
 
-Normal/release/Nightly inherit the defaults. Candidate builds use the same
-shared core with the selected board's voltage tail, border, scan orientation,
-sleep key and power-off control. Murphy's original-driver batch selection and
+Normal/release/Nightly inherit the SDK defaults without per-environment enable
+flags. The maintainer requested default rollout on all four platforms; the
+three separate candidate environments have been removed.
+`metalio_eink4_transition_experiment` retains diagnostics for the same default
+behavior. Each platform uses the shared core with its voltage tail, border,
+scan orientation, sleep key and power-off control. Murphy's original-driver batch selection and
 temperature policy remain intact. These panels' independent calibration entries
 are retained; equal initial frame counts do not establish equal optical results.
 
 `FREEINK_SSD1677_TEXT_TURN_AA=0` restores the previous balanced text waveform
-without disabling combined staging or trusted handoffs. Setting it to 1 opts
-other combined-AA boards into the new text turn. `FREEINK_SSD1677_COMBINED_AA=0`
-restores the original driver, and `FREEINK_SSD1677_READER_TRANSITIONS=0` restores
+without disabling combined staging or trusted handoffs.
+`FREEINK_SSD1677_COMBINED_AA=0` restores the original driver, and
+`FREEINK_SSD1677_READER_TRANSITIONS=0` restores
 prepass handoffs. X4 Pro/Classic remain excluded by default. No settings or public
 API are added. The earlier `FREEINK_METALIO_TEXT_EDGE_*` experiment is retired.
 
@@ -66,7 +69,7 @@ black lengths reuse that board's calibration; preparation, endpoint start and
 white duration are independent fields. Bounded build overrides
 `FREEINK_SSD1677_TEXT_WHITE_FRAMES=32/40/48` and
 `FREEINK_SSD1677_TEXT_BLACK_DELAY=0/8/16/24` are available for calibration.
-The other boards' candidate starts at Metalio's nominal 32+24/32/32 timing,
+The other boards use Metalio's nominal 32+24/32/32 timing,
 with their original analog parameters. No foreign-panel voltage set is imported.
 
 Eligibility requires a completed, trusted baseline, FAST text intent, normal
@@ -101,8 +104,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_
 python3 freeink-sdk/libs/display/FreeInkDisplay/test/host/run_pro.py
 python3 freeink-sdk/libs/display/FreeInkDisplay/test/host/test_ssd1677.py
 ./bin/ci-check
-pio run -e metalio_eink4 -e metalio_eink4_transition_experiment -e gh_release
-pio run -e sticky_text_aa_candidate -e murphy_m4_text_aa_candidate -e waveshare_epaper_397_text_aa_candidate
+pio run -e metalio_eink4 -e sticky -e murphy_m4 -e waveshare_epaper_397 -e gh_release
 ```
 
 Recording-bus tests cover all nine W/G/B transitions, static black maintenance,
@@ -111,8 +113,9 @@ frame-by-frame LUT decoding. They exercise all 12 bounded white/delay choices,
 100 successive changed/repeated targets without additional allocations,
 pre/post-submission cancellation, rail/pixel BUSY failure, recovery, parking,
 sleep, cleanup and original image routing. The platform matrix covers both
-Murphy batches, native/mirrored scan, UC exclusion, rollback and Metalio's new
-default. Reader tests preserve cleanup debt and manual/periodic refresh cadence.
+Murphy batches, native/mirrored scan, UC exclusion, rollback and the new defaults
+on all four platforms without an explicit enable flag. Reader tests preserve
+cleanup debt and manual/periodic refresh cadence.
 Software tests do not measure pigment behavior.
 
 ## Physical evidence and rollout
@@ -124,7 +127,9 @@ met synchronous-AA expectations. Its SHA-256 is
 Source snapshots, prior images, hashes, upload and startup evidence are retained
 locally under `build/metalio-aa-calibration/`. The independent 100-page/video
 record is not available; do not present user feedback as a measured endurance
-or latency result. Other platforms' new waveform remains opt-in.
+or latency result. Sticky, both Murphy batches and Waveshare are enabled by
+maintainer request; independent optical acceptance for those panels is still
+pending.
 
 For each panel/batch, start with manual cleanup, fix book/font/orientation,
 lighting and cadence, and compare at least 20 fixed-page round trips followed
@@ -139,4 +144,4 @@ The previously rejected two-activation B/W-then-gray structure and subsequent
 changed-pixels-only endpoint variant are superseded by this design. Do not
 restore them as fallback candidates. For later hardware installation, verify
 board identity and active OTA slot and write only the matching application.
-Publishing a PR or building a candidate does not establish its panel acceptance.
+Publishing a PR or building firmware does not establish its panel acceptance.

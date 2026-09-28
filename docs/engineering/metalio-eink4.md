@@ -453,4 +453,5 @@ at `0x650000`, with independent digest verification and startup confirmation.
 The consolidation itself is verified by host traces and builds; no additional
 flash is performed for publication. Detailed recorded 100-page/video acceptance
 remains pending. The shared document carries current test and rollback commands
-and the candidate status of the other SSD1677 platforms.
+and the default rollout on Sticky, both SSD1677 Murphy M4 batches and Waveshare
+3.97. Those panels' independent optical acceptance remains pending.
