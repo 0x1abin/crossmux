@@ -1,11 +1,21 @@
-// Host regression tests for the block row mapping used by the JPEG framebuffer
+// Host regression tests for the block index mapping used by the JPEG framebuffer
 // converter's bilinear path.
 //
-// Review finding on PR #308: `ly1 = ly0 + 1` was computed before clamping, and
-// only ly0's lower bound was clamped, so the first destination row of a shifted
-// block could leave ly1 negative and form `row1 = pixels + ly1 * stride` before
-// the decoded block. These tests drive the real helper the converter calls, with
-// the same 16.16 arithmetic the converter uses.
+// Review finding on PR #308 (rows): `ly1 = ly0 + 1` was computed before
+// clamping, and only ly0's lower bound was clamped, so the first destination row
+// of a shifted block could leave ly1 negative and form `row1 = pixels + ly1 *
+// stride` before the decoded block.
+//
+// Review finding on PR #308 (columns): the interior fast path assumed its own
+// range split had already excluded the block boundary. It had not, because the
+// split is derived from fineScaleFPX while the samples come from invScaleFPX,
+// and both divide with truncation. For 100x100 -> 60x60 the block at x = 80
+// starts its interior at dstX = 48, whose first sample is
+// (48 * 109226) >> 16 - 80 = -1.
+//
+// These tests drive the same helpers the converter now calls on both axes, with
+// the same 16.16 arithmetic, and sweep the block boundaries under non-integer
+// ratios.
 
 #include <SampleRowClamp.h>
 
@@ -28,14 +38,21 @@ int32_t invScaleFP(const int srcSize, const int dstSize) {
   return static_cast<int32_t>(static_cast<int64_t>(srcSize) * kOne / dstSize);
 }
 
-// Mirrors the callback's destination range for one source block.
-int dstStart(const int blockY, const int32_t fineScale) {
-  return static_cast<int>((static_cast<int64_t>(blockY) * fineScale) >> 16);
+// Mirrors the callback's destination range start for one source block, on either
+// axis. `blockOffset` is the block's first source row or column.
+int dstStart(const int blockOffset, const int32_t fineScale) {
+  return static_cast<int>((static_cast<int64_t>(blockOffset) * fineScale) >> 16);
+}
+
+// Mirrors the callback's interior split start on X: the first destination column
+// whose source column is meant to be inside the block.
+int interiorStartX(const int blockX, const int32_t fineScale) {
+  return static_cast<int>((static_cast<int64_t>(blockX) * fineScale + 0xFFFF) >> 16);
 }
 
 }  // namespace
 
-// The exact case from the review: 100x100 -> 60x60, the 16x16 block at y = 16.
+// The exact case from the row review: 100x100 -> 60x60, the 16x16 block at y = 16.
 TEST(SampleRowClamp, ClampsBothRowsForTheReviewReproduction) {
   constexpr int srcSize = 100;
   constexpr int dstSize = 60;
@@ -62,16 +79,45 @@ TEST(SampleRowClamp, ClampsBothRowsForTheReviewReproduction) {
   EXPECT_LT(rows.row1, blockH);
 }
 
-TEST(SampleRowClamp, ClampSampleRowHoldsTheBlockBounds) {
-  EXPECT_EQ(0, clampSampleRow(-1000, 16));
-  EXPECT_EQ(0, clampSampleRow(-1, 16));
-  EXPECT_EQ(0, clampSampleRow(0, 16));
-  EXPECT_EQ(15, clampSampleRow(15, 16));
-  EXPECT_EQ(15, clampSampleRow(16, 16));
-  EXPECT_EQ(15, clampSampleRow(1000, 16));
-  // Degenerate blocks clamp to their only row; callers reject blockH <= 0 first.
-  EXPECT_EQ(0, clampSampleRow(-5, 1));
-  EXPECT_EQ(0, clampSampleRow(5, 1));
+// The exact case from the column review: the same 100x100 -> 60x60 geometry, the
+// 16-wide block at x = 80. The interior split starts at dstX = 48 and its first
+// sample would be -1 without the clamp.
+TEST(SampleRowClamp, ClampsBothColumnsForTheInteriorLoopReproduction) {
+  constexpr int srcSize = 100;
+  constexpr int dstSize = 60;
+  constexpr int blockW = 16;
+  constexpr int blockX = 80;
+
+  const int32_t fine = fineScaleFP(dstSize, srcSize);
+  const int32_t inv = invScaleFP(srcSize, dstSize);
+  ASSERT_EQ(39321, fine);
+  ASSERT_EQ(109226, inv);
+
+  const int splitStart = interiorStartX(blockX, fine);
+  ASSERT_EQ(48, splitStart);
+
+  // Documenting the defect shape: the split's own first sample falls one column
+  // before the block, which is what the interior loop used to index.
+  EXPECT_EQ(-1, (splitStart * inv >> 16) - blockX);
+
+  const SampleCols cols = sampleColsFor(splitStart, inv, blockX, blockW);
+  EXPECT_EQ(0, cols.col0);
+  EXPECT_EQ(0, cols.col1);
+  EXPECT_GE(cols.col0, 0);
+  EXPECT_LT(cols.col0, blockW);
+  EXPECT_LT(cols.col1, blockW);
+}
+
+TEST(SampleRowClamp, ClampSampleIndexHoldsTheExtentBounds) {
+  EXPECT_EQ(0, clampSampleIndex(-1000, 16));
+  EXPECT_EQ(0, clampSampleIndex(-1, 16));
+  EXPECT_EQ(0, clampSampleIndex(0, 16));
+  EXPECT_EQ(15, clampSampleIndex(15, 16));
+  EXPECT_EQ(15, clampSampleIndex(16, 16));
+  EXPECT_EQ(15, clampSampleIndex(1000, 16));
+  // Degenerate blocks clamp to their only index; callers reject extent <= 0 first.
+  EXPECT_EQ(0, clampSampleIndex(-5, 1));
+  EXPECT_EQ(0, clampSampleIndex(5, 1));
 }
 
 // Sweeps every destination row of every block for a spread of ratios, including
@@ -113,6 +159,44 @@ TEST(SampleRowClamp, BothRowsStayInsideTheBlockAcrossRatiosAndOffsets) {
   }
 }
 
+// The same sweep on X, covering every destination column of every block - the
+// interior range included, which is the path the second review finding reported.
+TEST(SampleRowClamp, BothColumnsStayInsideTheBlockAcrossRatiosAndOffsets) {
+  const std::vector<int> srcSizes = {1, 2, 3, 15, 16, 17, 100, 101, 640, 1000};
+  const std::vector<int> dstSizes = {1, 2, 3, 7, 15, 16, 17, 33, 60, 99, 100, 333, 640};
+  const std::vector<int> blockWidths = {1, 2, 3, 8, 15, 16};
+
+  for (const int srcSize : srcSizes) {
+    for (const int dstSize : dstSizes) {
+      const int32_t fine = fineScaleFP(dstSize, srcSize);
+      const int32_t inv = invScaleFP(srcSize, dstSize);
+      if (fine <= 0 || inv <= 0) continue;
+
+      for (const int blockW : blockWidths) {
+        for (int blockX = 0; blockX < srcSize; blockX += blockW) {
+          const int start = dstStart(blockX, fine);
+          const int srcEnd = blockX + blockW;
+          const int end = srcEnd >= srcSize ? dstSize : dstStart(srcEnd, fine);
+
+          for (int dstX = start; dstX < end; ++dstX) {
+            const SampleCols cols = sampleColsFor(dstX, inv, blockX, blockW);
+            // A column pointer or index built from either sample has to land
+            // inside the block's valid columns.
+            ASSERT_GE(cols.col0, 0) << "src " << srcSize << " dst " << dstSize << " blockW " << blockW << " blockX "
+                                    << blockX << " dstX " << dstX;
+            ASSERT_GE(cols.col1, 0) << "src " << srcSize << " dst " << dstSize << " blockW " << blockW << " blockX "
+                                    << blockX << " dstX " << dstX;
+            ASSERT_LT(cols.col0, blockW);
+            ASSERT_LT(cols.col1, blockW);
+            EXPECT_LE(cols.col1 - cols.col0, 1);
+            EXPECT_GE(cols.col1 - cols.col0, 0);
+          }
+        }
+      }
+    }
+  }
+}
+
 // A 1:1 mapping samples the row it lands on plus the next one, and both clamp
 // back into the block at its last row.
 TEST(SampleRowClamp, IdentityMappingNeverLeavesTheBlock) {
@@ -122,6 +206,14 @@ TEST(SampleRowClamp, IdentityMappingNeverLeavesTheBlock) {
   // Last row of the block, and one row past it: row1 clamps onto row 15.
   EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(15, kOne, 0, 16));
   EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(16, kOne, 0, 16));
+}
+
+TEST(SampleRowClamp, IdentityColumnsNeverLeaveTheBlock) {
+  EXPECT_EQ(SampleCols({0, 1}), sampleColsFor(0, kOne, 0, 16));
+  EXPECT_EQ(SampleCols({7, 8}), sampleColsFor(7, kOne, 0, 16));
+  EXPECT_EQ(SampleCols({14, 15}), sampleColsFor(14, kOne, 0, 16));
+  EXPECT_EQ(SampleCols({15, 15}), sampleColsFor(15, kOne, 0, 16));
+  EXPECT_EQ(SampleCols({15, 15}), sampleColsFor(16, kOne, 0, 16));
 }
 
 // Upscaling repeats rows (4 source rows -> 16 destination rows, step 0.25); the
@@ -135,6 +227,15 @@ TEST(SampleRowClamp, UpscalingStaysInsideTheBlockAtBothEnds) {
   EXPECT_EQ(SampleRows({3, 3}), sampleRowsFor(15, inv, 0, 4));
 }
 
+TEST(SampleRowClamp, UpscalingColumnsStayInsideTheBlockAtBothEnds) {
+  const int32_t inv = invScaleFP(4, 16);
+  EXPECT_EQ(SampleCols({0, 1}), sampleColsFor(0, inv, 0, 4));
+  EXPECT_EQ(SampleCols({1, 2}), sampleColsFor(4, inv, 0, 4));
+  EXPECT_EQ(SampleCols({2, 3}), sampleColsFor(8, inv, 0, 4));
+  EXPECT_EQ(SampleCols({3, 3}), sampleColsFor(12, inv, 0, 4));
+  EXPECT_EQ(SampleCols({3, 3}), sampleColsFor(15, inv, 0, 4));
+}
+
 // A block that does not start at source row 0 clamps against its own bounds: the
 // block offset is subtracted before clamping, not after.
 TEST(SampleRowClamp, BlockOffsetClampsAgainstTheBlockNotTheImage) {
@@ -144,6 +245,13 @@ TEST(SampleRowClamp, BlockOffsetClampsAgainstTheBlockNotTheImage) {
   EXPECT_EQ(SampleRows({15, 15}), sampleRowsFor(32, kOne, 16, 16));
 }
 
+TEST(SampleRowClamp, BlockOffsetClampsColumnsAgainstTheBlockNotTheImage) {
+  EXPECT_EQ(SampleCols({0, 1}), sampleColsFor(16, kOne, 16, 16));
+  EXPECT_EQ(SampleCols({1, 2}), sampleColsFor(17, kOne, 16, 16));
+  EXPECT_EQ(SampleCols({15, 15}), sampleColsFor(31, kOne, 16, 16));
+  EXPECT_EQ(SampleCols({15, 15}), sampleColsFor(32, kOne, 16, 16));
+}
+
 // A one-row block: every destination row collapses onto that single row, which is
 // the tightest form of the boundary the fix is about.
 TEST(SampleRowClamp, SingleRowBlockCollapsesBothSamplesOntoIt) {
@@ -151,4 +259,13 @@ TEST(SampleRowClamp, SingleRowBlockCollapsesBothSamplesOntoIt) {
   EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(0, inv, 0, 1));
   EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(1, inv, 0, 1));
   EXPECT_EQ(SampleRows({0, 0}), sampleRowsFor(2, inv, 0, 1));
+}
+
+// The X counterpart, which is also the shape a partially decoded block has when
+// JPEGDEC reports iWidthUsed < iWidth.
+TEST(SampleRowClamp, SingleColumnBlockCollapsesBothSamplesOntoIt) {
+  const int32_t inv = invScaleFP(1, 3);
+  EXPECT_EQ(SampleCols({0, 0}), sampleColsFor(0, inv, 0, 1));
+  EXPECT_EQ(SampleCols({0, 0}), sampleColsFor(1, inv, 0, 1));
+  EXPECT_EQ(SampleCols({0, 0}), sampleColsFor(2, inv, 0, 1));
 }

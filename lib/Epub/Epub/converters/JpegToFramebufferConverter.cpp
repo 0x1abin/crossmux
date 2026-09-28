@@ -260,21 +260,17 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       const uint8_t* row0 = &pixels[rows.row0 * stride];
       const uint8_t* row1 = &pixels[rows.row1 * stride];
 
-      // Left edge (with X boundary clamping)
+      // Left edge: the source column falls before the block, so both sampled
+      // columns come from the shared clamp instead of local bounds logic.
       for (int dstX = dstXStart; dstX < safeXStart; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 < 0) lx0 = 0;
-        if (lx1 < 0) lx1 = 0;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
         uint8_t dithered;
@@ -288,16 +284,22 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         if (caching) cw.writePixel(outX, dithered);
       }
 
-      // Interior (no X boundary checks — lx0 and lx0+1 guaranteed in bounds)
+      // Interior. The range split above is an optimisation, not a guarantee: it
+      // is computed from fineScaleFPX while the samples below come from
+      // invScaleFPX, and both divide with truncation, so the split start can be
+      // one destination column too early. For 100x100 -> 60x60 the block at
+      // x = 80 starts its interior at dstX = 48, whose first sample is
+      // (48 * 109226) >> 16 - 80 = -1. Sample through the same clamp as the
+      // edges rather than trusting the split.
       for (int dstX = safeXStart; dstX < safeXEnd; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        const int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx0 + 1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
         uint8_t dithered;
@@ -311,19 +313,16 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         if (caching) cw.writePixel(outX, dithered);
       }
 
-      // Right edge (with X boundary clamping)
+      // Right edge: the source column runs past the block's valid columns.
       for (int dstX = safeXEnd; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
         uint8_t dithered;
@@ -346,14 +345,12 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     if (writeFramebuffer) pw.beginRow(outY);
     if (caching) cw.beginRow(outY, cacheOriginY);
     const int32_t srcFyFP = dstY * invScaleFPY;
-    const uint8_t* row = &pixels[clampSampleRow((srcFyFP >> FP_SHIFT) - blockY, blockH) * stride];
+    const uint8_t* row = &pixels[clampSampleIndex((srcFyFP >> FP_SHIFT) - blockY, blockH) * stride];
 
     for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
       const int outX = cfgX + dstX;
       const int32_t srcFxFP = dstX * invScaleFPX;
-      int lx = (srcFxFP >> FP_SHIFT) - blockX;
-      if (lx < 0) lx = 0;
-      if (lx >= validW) lx = validW - 1;
+      const int lx = clampSampleIndex((srcFxFP >> FP_SHIFT) - blockX, validW);
       uint8_t gray = row[lx];
 
       uint8_t dithered;
