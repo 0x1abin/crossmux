@@ -44,11 +44,16 @@ existing thumbnails remain valid when that height is requested, other heights
 are generated on demand, and the legacy home-height fallback remains available.
 Larger drawn covers still cannot recover detail absent from the source image.
 
-TXT `index.bin` version 7 stores a partial or complete lazy page index, the
+TXT `index.bin` version 8 stores a partial or complete lazy page index, the
 detected source encoding, and the paragraph-spacing mode. It is invalidated by
 file-size, viewport, font, margin, alignment, or paragraph-spacing changes; see
 [file-formats.md](../file-formats.md#txt-reader-cache) for its byte layout and
-legacy-version compatibility behavior.
+legacy-version invalidation behavior.
+
+EPUB section versions 72/73 and TXT index version 8 invalidate older complete and
+partial pagination because missing glyphs now occupy an ascender-scaled outline
+box. Reopening a book rebuilds pagination automatically; metadata, chapter
+indexes and source-offset reading progress are retained.
 
 TXT `chapters.bin` version 1 is an optional source-offset chapter index built
 the first time the chapter list opens. It is independent of pagination and is

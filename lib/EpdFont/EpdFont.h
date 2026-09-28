@@ -10,7 +10,9 @@ class EpdFont {
   ~EpdFont() = default;
   void getTextDimensions(const char* string, int* w, int* h) const;
 
+  // Missing glyphs return nullptr. Callers use missingGlyph::metrics for the outline fallback.
   const EpdGlyph* getGlyph(uint32_t cp) const;
+  // usedReplacement reports an absent source glyph; no font-owned replacement is substituted.
   const EpdGlyph* getGlyph(uint32_t cp, bool* usedReplacement) const;
 
   /// Returns true if this font covers `cp`: either via its in-RAM interval

@@ -10,6 +10,49 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class UiFontFallbackTest(unittest.TestCase):
+    def test_missing_outline_geometry(self):
+        renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
+        program = r'''
+#include <cassert>
+#include "MissingGlyph.h"
+namespace BidiUtils { bool isTransparentMark(uint32_t) { return false; } }
+enum class TextRotation { None, Rotated90CW };
+struct GfxRenderer {
+  mutable int calls=0, x=0, y=0, w=0, h=0;
+  mutable bool black=false;
+  bool visible=true;
+  bool glyphIntersectsStrip(int,int,int,int) const { return visible; }
+  void drawRect(int px,int py,int pw,int ph,bool state) const {
+    ++calls; x=px; y=py; w=pw; h=ph; black=state;
+  }
+};
+template <TextRotation rotation = TextRotation::None>
+''' + method(renderer, 'static void renderMissingGlyph(') + r'''
+int main() {
+  EpdFontData font{}; font.ascender=12;
+  GfxRenderer r;
+  renderMissingGlyph(r,font,0x1F9EA,20,30,true);
+  assert(r.calls==1 && r.x==21 && r.y==21 && r.w==9 && r.h==9 && r.black);
+  renderMissingGlyph(r,font,0x1F9EA,20,30,false,true);
+  assert(r.calls==2 && r.x==20 && r.y==26 && r.w==5 && r.h==5 && !r.black);
+  renderMissingGlyph<TextRotation::Rotated90CW>(r,font,0x1F9EA,20,30,true);
+  assert(r.calls==3 && r.x==23 && r.y==21 && r.w==9 && r.h==9);
+  for (uint32_t cp : {0x20,0xA0,0x200D,0xFE0F,0x301}) renderMissingGlyph(r,font,cp,20,30,true);
+  assert(r.calls==3);
+  r.visible=false;
+  renderMissingGlyph(r,font,0x1F9EA,20,30,true);
+  assert(r.calls==3);
+}
+'''
+        with tempfile.TemporaryDirectory(prefix='missing-outline-') as directory:
+            cpp = Path(directory) / 'check.cpp'
+            exe = Path(directory) / 'check'
+            cpp.write_text(program)
+            subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+                            '-I', str(ROOT / 'lib/EpdFont'), '-I', str(ROOT / 'lib/Utf8'),
+                            '-I', str(ROOT / 'lib/MiniBidi'), str(cpp), '-o', str(exe)], check=True)
+            subprocess.run([str(exe)], check=True)
+
     def test_fallback_lifecycle(self):
         renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
         header = (ROOT / 'lib/GfxRenderer/GfxRenderer.h').read_text()
@@ -26,6 +69,7 @@ class UiFontFallbackTest(unittest.TestCase):
 #include <string>
 #include <vector>
 #include "Utf8.h"
+#include "MissingGlyph.h"
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
 constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
@@ -39,31 +83,29 @@ enum class BidiBaseDir { AUTO };
 bool isTransparentMark(uint32_t) { return false; }
 }
 const char* resolveVisualText(const char* text, std::string&, BidiUtils::BidiBaseDir) { return text; }
-namespace combiningMark {
-int anchorFor(uint32_t) { return 0; }
-int raiseAboveBase(int,int,int,int) { return 0; }
-int anchorOver(int,int,int,int,int,int) { return 0; }
-}
-namespace fp4 { int toPixel(int value) { return value/16; } }
-struct EpdGlyph { int top=0, height=8, left=0, width=8, advanceX=128; };
 const void* measured=nullptr;
 const void* drawn=nullptr;
+std::vector<int> drawnXs;
 struct EpdFontFamily {
   enum Style { REGULAR=0, BOLD=1, SUP=16, SUB=32 };
   std::set<uint32_t> coverage;
+  const EpdFontData* getData(Style) const { static EpdFontData data{}; data.ascender=12; return &data; }
   bool hasCodepoint(uint32_t cp, Style = REGULAR) const { return coverage.contains(cp); }
   void getTextDimensions(const char*, int* w, int* h, Style) const { measured=this; *w=8; *h=8; }
-  const EpdGlyph* getGlyph(uint32_t, Style, bool* replaced=nullptr) const {
-    static EpdGlyph glyph; if (replaced) *replaced=false; return &glyph;
+  const EpdGlyph* getGlyph(uint32_t cp, Style style, bool* replaced=nullptr) const {
+    static EpdGlyph glyph{8,8,128,0,8,0,0};
+    const bool found=hasCodepoint(cp,style);
+    if (replaced) *replaced=!found;
+    return found ? &glyph : nullptr;
   }
   uint32_t applyLigatures(uint32_t cp, const char*&, Style) const { return cp; }
   int getKerning(uint32_t,uint32_t,Style) const { return 0; }
 };
 enum class TextRotation { None };
 template<TextRotation> void renderCharImpl(const auto&, int, const EpdFontFamily& font, uint32_t,
-                                         int,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; }
+                                         int x,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; drawnXs.push_back(x); }
 void renderCharScaled(const auto&, int, const EpdFontFamily& font, uint32_t,
-                      int,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; }
+                      int x,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; drawnXs.push_back(x); }
 struct FontCacheManager {
   bool isScanning() const { return false; }
   void recordText(const char*,int,EpdFontFamily::Style) {}
@@ -212,6 +254,12 @@ int main() {
         assert(r.resolveTextFontId(id,"一")==id+3);
       }
     }
+    drawnXs.clear();
+    r.drawText(1,0,0,"A龘龘A");
+    assert((drawnXs==std::vector<int>{0,8,19,30}));
+    drawnXs.clear();
+    r.drawText(1,0,0,"A龘龘A",true,EpdFontFamily::SUP);
+    assert((drawnXs==std::vector<int>{0,4,10,16}));
     s.manager_.unloadAll(r);
     assert(r.sdCardFonts_.empty());
     for (int id=1; id<=3; ++id) assert(r.resolveTextFontId(id,"一")==id+3);
@@ -257,7 +305,8 @@ int main() {
                     subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                     '-DENABLE_CHINESE_VERSION=1', f'-DEXPECT_ENABLED={int(enabled)}',
                                     *[f'-D{value}' for value in defines],
-                                    '-I', str(ROOT / 'lib/Utf8'), str(cpp),
+                                    '-I', str(ROOT / 'lib/Utf8'), '-I', str(ROOT / 'lib/EpdFont'),
+                                    '-I', str(ROOT / 'lib/MiniBidi'), str(cpp),
                                     str(ROOT / 'lib/Utf8/Utf8.cpp'), '-o', str(exe)], check=True)
                     subprocess.run([str(exe)], check=True)
 
