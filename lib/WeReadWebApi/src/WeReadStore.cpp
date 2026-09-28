@@ -306,12 +306,20 @@ bool saveSession(const Session& session) {
   return Storage.writeFile(kSessionPath, encoded);
 }
 
-bool clearSession() { return !Storage.exists(kSessionPath) || Storage.remove(kSessionPath); }
+bool clearSession() {
+  if (!Storage.exists(kSessionPath) || Storage.remove(kSessionPath)) return true;
+  LOG_ERR("WR", "Failed to remove session: %s", kSessionPath);
+  return false;
+}
 
 bool clearShelf() {
   bool ok = true;
-  if (Storage.exists(kShelfPath)) ok = Storage.remove(kShelfPath) && ok;
-  if (Storage.exists(kShelfPartPath)) ok = Storage.remove(kShelfPartPath) && ok;
+  for (const char* path : {kShelfPath, kShelfPartPath}) {
+    if (Storage.exists(path) && !Storage.remove(path)) {
+      LOG_ERR("WR", "Failed to remove shelf index: %s", path);
+      ok = false;
+    }
+  }
   return ok;
 }
 
