@@ -1976,7 +1976,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
   const bool combinedGrayscaleBase =
+#if FREEINK_DEVICE_READPICO
+      // Read Pico has no strip uploads (whole-plane grayscale) but its panel CAN join
+      // the base and the grey planes into a single waveform, so it must not be gated
+      // behind tiledGrayscale. This is what removes the extra full panel refresh per
+      // anti-aliased page: the base is stashed and displayGrayBuffer() presents both.
+      needsAnyGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled &&
+      renderer.supportsTextOnlyCombinedBase();
+#else
       tiledGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
+#endif
 #if FREEINK_DEVICE_EEGO_A4
   const bool overlapRefresh =
       tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
@@ -2226,7 +2235,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Abort early if a push/pop is pending (e.g. user opened menu)
       if (activityManager.isSwitchPending()) {
         renderer.setRenderMode(GfxRenderer::BW);
-        renderer.restoreBwBuffer();
+        // A combined base was only stashed, so it has to be flushed, not restored.
+        // / A combined base was only stashed, so it must be flushed, not restored.
+        if (combinedGrayscaleBase)
+          renderer.cancelGrayscale();
+        else
+          renderer.restoreBwBuffer();
         return;
       }
 
@@ -2239,7 +2253,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Abort before the expensive grayscale display if a push/pop is pending
       if (activityManager.isSwitchPending()) {
         renderer.setRenderMode(GfxRenderer::BW);
-        renderer.restoreBwBuffer();
+        // A combined base was only stashed, so it has to be flushed, not restored.
+        // / A combined base was only stashed, so it must be flushed, not restored.
+        if (combinedGrayscaleBase)
+          renderer.cancelGrayscale();
+        else
+          renderer.restoreBwBuffer();
         return;
       }
       renderer.displayGrayBuffer();
