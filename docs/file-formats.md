@@ -601,7 +601,10 @@ location is not migrated or read.
   atomically replaces the manifest and the old slot is removed. Interrupted,
   cancelled, or failed refreshes leave the prior manifest and slot readable.
   The manifest is accepted only for the current session's `wr_vid`; logout or
-  an account change removes the entire browse-cache root. The old disposable
+  an account change attempts to remove the entire browse-cache root. Once the
+  session is deleted, a logout cache-cleanup failure is reported separately and
+  cannot return to the old shelf. Account-change cleanup must succeed before
+  the new session is saved. The old disposable
   `/.crosspoint/weread/browse/` directory is deleted as legacy data and is not
   migrated. These files do not change any book or EPUB cache version.
 - A successfully converted, aspect-preserving 2-bit cover of at most 112×164 is stored as

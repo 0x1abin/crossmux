@@ -99,6 +99,8 @@ add_subdirectory(reader_build_failure)
 add_subdirectory(reader_font_preview)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME WeReadLogout
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_weread_logout.py)
 add_test(NAME BuiltinFontShrink
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_builtin_font_shrink.py)
 add_test(NAME PioarduinoCache
