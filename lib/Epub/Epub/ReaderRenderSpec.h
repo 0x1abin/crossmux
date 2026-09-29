@@ -23,6 +23,10 @@ struct ReaderRenderSpec {
   // enabled.
   uint8_t firstLineIndent = FirstLineIndent::Auto;
   uint8_t paragraphAlignment = 0;
+  // Vertical bottom-align: redistributes each non-final page's text lines so
+  // the last line reaches the content bottom with even spacing. Keyed into the
+  // section cache so a toggle change rebuilds cached pages.
+  bool verticalBottomAlign = false;
   uint16_t viewportWidth = 0;
   uint16_t viewportHeight = 0;
   bool hyphenationEnabled = false;

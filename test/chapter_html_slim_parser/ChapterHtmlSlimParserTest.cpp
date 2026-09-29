@@ -65,6 +65,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                false,
                                false,
                                0,
+                               false,  // verticalBottomAlign
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
                                false,
@@ -533,18 +534,19 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 72);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 73);
   // This test uses a layout stub: only the version byte changes. Normalize it
   // to prove the pre-existing layout/text/footnote digest is unchanged.
   bytes.front() = 70;
   append(bytes);
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
-  // Pre-refactor cache, text and footnotes. The expected value tracks
-  // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
-  // moved when the version went 64 -> 66 for the versioned image cache prefix,
-  // then 66 -> 68 for first-line indent and 68 -> 70 for paragraph spacing.
-  EXPECT_EQ(digest, 9535508317497758948ULL);  // v71/v70 cache (paragraph spacing levels), text and footnotes.
+  // Pre-refactor cache, text and footnotes. The expected value tracks the
+  // section cache header: the digest moved each time the header gained a field
+  // (image-prefix 64->66, first-line indent 66->68, paragraph spacing 68->70,
+  // and this PR's vertical bottom-align toggle). The leading version byte is
+  // normalized to 70 so a version bump alone never moves the digest.
+  EXPECT_EQ(digest, 10887485767492609804ULL);  // v73/v70 cache (bottom-align), text and footnotes.
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
@@ -691,6 +693,47 @@ TEST_F(SectionMemoryTest, ParagraphSpacingLevelsRoundTripWithoutCollapsingToBool
       EXPECT_FALSE(mismatch.loadSectionFile(changed));
     }
   }
+}
+
+TEST_F(ChapterHtmlSlimParserTest, VerticalBottomAlignDistributesEvenlyToContentBottom) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 80;  // four lines at 0/20/40/60; last bottom = 80
+
+  Page page;
+  for (int16_t i = 0; i < 4; ++i) {
+    page.elements.push_back(std::unique_ptr<PageElement>(new PageLine(nullptr, 0, i * 20)));
+  }
+  parser.applyVerticalBottomAlign(&page);
+
+  // leftover = 100 - 80 = 20 over 3 gaps -> +6/gap plus remainder 2 spread on the
+  // first two gaps. First line stays at the top; the last line shifts by the full
+  // leftover so its bottom lands exactly on viewportHeight.
+  ASSERT_EQ(page.elements.size(), 4U);
+  EXPECT_EQ(page.elements[0]->yPos, 0);
+  EXPECT_EQ(page.elements[1]->yPos, 20 + 7);
+  EXPECT_EQ(page.elements[2]->yPos, 40 + 14);
+  EXPECT_EQ(page.elements[3]->yPos, 60 + 20);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, VerticalBottomAlignCapsSparsePageGapGrowth) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 20;  // two lines at 0 and 20; last bottom = 20
+
+  Page page;
+  page.elements.push_back(std::unique_ptr<PageElement>(new PageLine(nullptr, 0, 0)));
+  page.elements.push_back(std::unique_ptr<PageElement>(new PageLine(nullptr, 0, 20)));
+  parser.applyVerticalBottomAlign(&page);
+
+  // leftover = 80 over one gap, but the safety cap is lineHeight/2 = 10: the gap
+  // grows by only 10 (second line -> y 30) and the excess stays at the bottom,
+  // instead of one enormous gap in the middle of a two-line page.
+  ASSERT_EQ(page.elements.size(), 2U);
+  EXPECT_EQ(page.elements[0]->yPos, 0);
+  EXPECT_EQ(page.elements[1]->yPos, 30);
 }
 
 }  // namespace
