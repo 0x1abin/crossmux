@@ -135,6 +135,16 @@ class GfxRenderer {
   // Ordered UI fallbacks: optional SD face, then the built-in CJK subset.
   // Resolve the whole string through one face for consistent draw/measure metrics.
   std::map<int, std::array<int, 2>> fallbackFontMap_;
+  // fontId -> the family it should actually resolve to (see setPreferredFont()).
+  std::map<int, int> preferredFontMap_;
+  // Retired SD face id -> the UI slot it served (see registerFontIdFallback()). Survives
+  // removeFont(), which is what makes a stale id recoverable rather than fatal.
+  std::map<int, int> retiredFontIdFallback_;
+
+  // The family a font id really resolves to (identity unless rebound). EVERY path that
+  // looks a family up -- glyph coverage, metrics, preloading -- must go through this,
+  // or a rebound id is laid out with the built-in face and drawn in the SD one.
+  int resolveFontFamilyId(int fontId) const;
 
   // Return the first fallback that covers a codepoint missing from the primary.
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
@@ -210,6 +220,28 @@ class GfxRenderer {
   // Register size-matched UI fallbacks; the built-in backup survives SD unload.
   void setFallbackFont(int primaryFontId, int fallbackFontId, int backupFontId = 0) {
     fallbackFontMap_[primaryFontId] = {fallbackFontId, backupFontId};
+  }
+  // Rebind which family a font id actually resolves to, leaving fontMap untouched.
+  // Read Pico sets this so its whole UI renders in the selected reading family at the
+  // UI's own point sizes; without it only the handful of screens that go through
+  // uiScaleSpec() get those sizes, and the ~70 that pass UI_10_FONT_ID / UI_12_FONT_ID
+  // straight to the renderer keep the built-in faces.
+  //
+  // Resolving here -- rather than swapping fontMap entries, which insertFont() refuses
+  // -- keeps measuring and drawing on one face, because every text and metric path goes
+  // through resolveFontFamilyId(). The built-in family stays reachable via this id's
+  // fallback entry, so glyphs the SD face lacks still render. Empty by default, so
+  // every other target behaves exactly as before.
+  void setPreferredFont(int fontId, int preferredFontId) { preferredFontMap_[fontId] = preferredFontId; }
+  void clearPreferredFonts() { preferredFontMap_.clear(); }
+  // Record what a (transient) SD face id stood for, so it can still be resolved after
+  // the family that supplied it is unloaded. A screen built while family A was active
+  // holds A's ids; switching to family B removes them, and without this the stale id
+  // resolves to nothing and every glyph on that screen draws as blank. Registering the
+  // UI slot it served keeps the text readable on the built-in face until the screen is
+  // rebuilt, at which point it picks up family B.
+  void registerFontIdFallback(int retiredFontId, int fallbackFontId) {
+    retiredFontIdFallback_[retiredFontId] = fallbackFontId;
   }
   // Ensure SD card font glyph data is loaded for the given text. Called from layout code
   // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on non-SD fonts (no-op).
