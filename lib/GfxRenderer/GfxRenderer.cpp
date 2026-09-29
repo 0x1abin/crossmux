@@ -1037,10 +1037,10 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   // Clip in logical space.
   const int screenW = getScreenWidth();
   const int screenH = getScreenHeight();
-  const int lx0 = std::max(0, x);
-  const int ly0 = std::max(0, y);
-  const int lx1 = std::min(screenW, x + width);
-  const int ly1 = std::min(screenH, y + height);
+  const int lx0 = std::max(x, clipActive ? std::max(0, clipX0) : 0);
+  const int ly0 = std::max(y, clipActive ? std::max(0, clipY0) : 0);
+  const int lx1 = std::min(x + width, clipActive ? std::min(screenW, clipX1) : screenW);
+  const int ly1 = std::min(y + height, clipActive ? std::min(screenH, clipY1) : screenH);
   if (lx0 >= lx1 || ly0 >= ly1) return;
 
   // Rotate the two opposing logical corners into physical-framebuffer space.
