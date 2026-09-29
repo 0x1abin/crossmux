@@ -105,7 +105,7 @@ class EpubReaderActivity final : public ReaderActivity {
   // does NOT re-render the page: the overlay page snapshot was decoded with the
   // old filter, so it is dropped on close and the page re-decodes once there.
   bool imageScalingDirty = false;
-  int autoTurnOption = 0;  // auto page-turn option: 0=off, 1..3=rates[1..3], 4=custom
+  int autoTurnOption = 0;                // auto page-turn option: 0=off, 1..3=rates[1..3], 4=custom
   uint8_t customAutoPageTurnRate_ = 15;  // custom rate used when autoTurnOption == 4
   std::vector<EpubReaderMenuActivity::MenuItem> moreItems;
 
