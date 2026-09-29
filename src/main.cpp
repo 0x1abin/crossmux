@@ -589,11 +589,10 @@ void setup() {
   const bool wakeHoldVerified = wakeupReason != HalGPIO::WakeupReason::PowerButton || gpio.verifyPowerButtonWakeup();
 #endif
 
-  // Read Pico step 4 (IMU): a no-op there — the board's SC7A20H is an
-  // accelerometer with no gyroscope, so HalTiltSensor::begin() deliberately does
-  // not bring it up and reports the gesture unavailable (which is also what keeps
-  // "Tilt page turn" out of the settings list). On every other target this is the
-  // IMU bring-up. halClock.begin() restores the system clock from the board RTC
+  // IMU bring-up on every target. Read Pico's SC7A20H is an accelerometer with no
+  // gyroscope, so HalTiltSensor differentiates the gravity component for the tilt
+  // page-turn gesture instead of reading an angular rate; the thresholds are converted
+  // from the same 270 dps. halClock.begin() restores the system clock from the board RTC
   // when the system clock is invalid; Read Pico's RTC is the PMU, whose hooks
   // BoardReadPico::begin() already installed.
   halTiltSensor.begin();

@@ -32,13 +32,28 @@ class HalTiltSensor {
   // Tuning constants
   static constexpr float RATE_THRESHOLD_DPS = 270.0f;      // Deg/sec speed to trigger flick
   static constexpr float NEUTRAL_RATE_DPS = 50.0f;         // Must stop moving below this rate before next trigger
+  // Boards whose IMU has no gyroscope (SC7A20H, Read Pico) drive the same gesture from
+  // the accelerometer's gravity component. Rotating about the tilt axis gives
+  // a = g*sin(theta), so da/dt = g*cos(theta)*omega and at small angles da/dt = g*omega.
+  // Dividing by g cancels it, so 1 dps == pi/180 g/s and the gyro thresholds convert
+  // exactly: 270 dps -> 4.71 g/s, 50 dps -> 0.87 g/s. Same flick, same feel.
+  static constexpr float DPS_TO_GPS = 0.0174533f;
+  static constexpr float RATE_THRESHOLD_GPS = RATE_THRESHOLD_DPS * DPS_TO_GPS;
+  static constexpr float NEUTRAL_RATE_GPS = NEUTRAL_RATE_DPS * DPS_TO_GPS;
   static constexpr unsigned long COOLDOWN_MS = 600;        // Minimum ms between triggers
   static constexpr unsigned long POLL_INTERVAL_MS = 50;    // 20 Hz polling
   static constexpr unsigned long WAKE_STABILIZE_MS = 300;  // Ignore readings after wake
 
   mutable unsigned long _lastPollMs = 0;
 
+  // Set when the active IMU is an accelerometer with no gyroscope, so the tilt axis is
+  // differentiated from gravity instead of read as an angular rate.
+  bool _accelOnly = false;
+  float _lastTiltG = 0.0f;  // Previous gravity-component sample, for the rate
+  unsigned long _lastTiltGMs = 0;
+
   bool readGyro(float& gx, float& gy, float& gz) const;
+  bool readAccel(float& ax, float& ay, float& az) const;
 
  public:
   // Call after BoardConfig has selected the active device.
