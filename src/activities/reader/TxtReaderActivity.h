@@ -85,6 +85,9 @@ class TxtReaderActivity final : public ReaderActivity {
 
   bool loadBook() override;
   std::string getBookTitle() const override { return txt ? txt->getTitle() : ""; }
+
+  bool handleZoneShortAction(uint8_t action) override;
+  bool handleZoneLongAction(uint8_t action) override;
   bool handleFormatInput() override;
   void renderBook() override;
 

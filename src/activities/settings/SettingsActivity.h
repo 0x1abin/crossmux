@@ -33,6 +33,7 @@ enum class SettingAction {
   TextSettings,
   About,
   KeyboardLayouts,
+  TapZones,
 };
 
 struct SettingInfo {

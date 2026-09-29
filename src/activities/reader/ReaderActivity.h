@@ -31,6 +31,20 @@ class ReaderActivity : public Activity {
   virtual bool isAtEndOfBook() const = 0;
   virtual void onReturnFromEndOfBook() {}
 
+  // Tap-zone action dispatch. The base implementation handles the actions that
+  // every reader shares (orientation, frontlight, home); subclasses extend it
+  // with reader-specific actions (bookmark / dictionary / chapter / percent /
+  // KOReader / auto turn). Returning false leaves the action unhandled, which
+  // the loop treats as "not supported on this reader" and swallows.
+  virtual bool handleZoneShortAction(uint8_t action);
+  virtual bool handleZoneLongAction(uint8_t action);
+
+  // Rotate the reading orientation by +1 (clockwise) / -1 (counter-clockwise)
+  // and toggle the frontlight. Shared by all readers; orientation reflows are
+  // handled by each reader's own rendering pass on the next update.
+  void rotateOrientation(int delta);
+  void toggleFrontlight();
+
   virtual void renderBook() = 0;
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}

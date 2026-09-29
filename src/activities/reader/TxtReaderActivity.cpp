@@ -119,6 +119,30 @@ bool TxtReaderActivity::handleFormatInput() {
   return false;
 }
 
+
+bool TxtReaderActivity::handleZoneShortAction(const uint8_t action) {
+  // TXT has no bookmark / dictionary / KOReader sync / percent jump: only the
+  // base actions (orientation, frontlight, home) and the chapter jump apply
+  // to short taps.
+  if (action == CrossPointSettings::TAP_ZONE_CHAPTER) {
+    openChapterSelection();
+    return true;
+  }
+  return ReaderActivity::handleZoneShortAction(action);
+}
+
+bool TxtReaderActivity::handleZoneLongAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
+    case CrossPointSettings::TAP_ZONE_LONG_MENU:
+      // TXT has no reader menu: the chapter selector doubles as its menu.
+      openChapterSelection();
+      return true;
+    default:
+      return ReaderActivity::handleZoneLongAction(action);
+  }
+}
+
 bool TxtReaderActivity::pageTurn(const bool isForward) {
   if (!initialized || pageOffsets.empty()) return false;
   READING_STATS.noteActivity();

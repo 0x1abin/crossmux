@@ -45,6 +45,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "activities/util/IntervalSelectionActivity.h"
 #include "util/BookCacheUtils.h"
 #include "util/BookmarkFile.h"
 #include "util/ReadingBackground.h"
@@ -76,7 +77,7 @@ bool xteinkClassPanel() {
   return gpio.isXteinkDevice() || BoardConfig::isX4Pro() || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_EEGO_A4;
 }
 
-constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
+constexpr int PAGE_TURN_RATES[] = {0, 3, 6, 12};
 constexpr size_t initialBookmarkCacheCapacity = 16;
 constexpr float bookmarkProgressEpsilon = 0.0001f;
 
@@ -653,6 +654,28 @@ void EpubReaderActivity::loop() {
     pendingReadFolderMove = false;
   }
 
+  // An option picker opened from a tap zone (e.g. the auto page-turn rate
+  // dialog) owns all input while active, exactly like the one over the More
+  // panel (which handleOverlayInput() gates when overlay != None).
+  if (overlay == Overlay::None && overlayPopup.isActive()) {
+    // The tap zone opened this popup on the same contact's release frame; the
+    // SDK touch snapshot can keep reporting that release for a loop pass or
+    // two, which OptionPopup would read as an outside tap and dismiss the
+    // fresh dialog. Ignore touch input for a short window after opening so
+    // the opening gesture drains completely (buttons still work).
+    if (millis() < popupTouchIgnoreUntilMs_) {
+      return;
+    }
+    overlayPopup.handleInput(mappedInput, [this] {
+      if (overlayPopup.isActive()) {
+        paintOverlayPopup();  // highlight moved
+        return;
+      }
+      requestUpdate();  // popup closed: repaint the clean page
+    });
+    return;
+  }
+
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
 
   if (showBookmarkMessage && (millis() - bookmarkMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
@@ -818,6 +841,21 @@ void EpubReaderActivity::loop() {
     }
   }
 
+  // Tap-zone short/long actions beyond the shared base set (bookmark,
+  // dictionary, chapter, percent, KOReader, auto turn, menu). Long-press
+  // bookmark/dictionary return false here so they keep flowing through the
+  // dedicated hold/release handling below; everything else dispatches now,
+  // ahead of the page-turn and footnote input.
+  if (touch.longPress && touch.longAction != CrossPointSettings::TAP_ZONE_LONG_NONE &&
+      handleZoneLongAction(touch.longAction)) {
+    requestUpdate();
+    return;
+  }
+  if (!touch.longPress && touch.action != CrossPointSettings::TAP_ZONE_NONE && handleZoneShortAction(touch.action)) {
+    requestUpdate();
+    return;
+  }
+
   if (footnoteDepth > 0 && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       mappedInput.getHeldTime() < ReaderUtils::GO_BACK_OR_HOME_MS) {
     restoreSavedPosition();
@@ -915,6 +953,99 @@ void EpubReaderActivity::loop() {
     pageTurn(true);
   }
   requestUpdate();
+}
+
+bool EpubReaderActivity::handleZoneShortAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_CHAPTER:
+      openChapterSelector();
+      return true;
+    case CrossPointSettings::TAP_ZONE_BOOKMARK:
+      addBookmark();
+      showBookmarkMessage = true;
+      bookmarkMessageTime = millis();
+      return true;
+    case CrossPointSettings::TAP_ZONE_DICTIONARY:
+      openDictionaryWordSelect();
+      return true;
+    case CrossPointSettings::TAP_ZONE_KOREADER:
+      return launchKOReaderSync();
+    case CrossPointSettings::TAP_ZONE_AUTO_TURN:
+      showAutoPageTurnPopup();
+      return true;
+    case CrossPointSettings::TAP_ZONE_JUMP_PERCENT: {
+      float bookProgress = 0.0f;
+      if (epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
+        const float chapterProgress =
+            static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+        bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+      }
+      const int initialPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
+      startActivityForResultWith<EpubReaderPercentSelectionActivity>(
+          [this](const ActivityResult& result) {
+            READING_STATS.resumeSession();
+            if (!result.isCancelled) {
+              jumpToPercent(std::get<PercentResult>(result.data).percent);
+            }
+            requestUpdate();
+          },
+          initialPercent);
+      return true;
+    }
+    default:
+      return ReaderActivity::handleZoneShortAction(action);
+  }
+}
+
+bool EpubReaderActivity::handleZoneLongAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_LONG_BOOKMARK:
+    case CrossPointSettings::TAP_ZONE_LONG_DICTIONARY:
+      // Handled by the dedicated touch.bookmark/touch.dictionary path below.
+      return false;
+    case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
+      openChapterSelector();
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_MENU:
+      if (SETTINGS.showReaderMenu != CrossPointSettings::READER_MENU_TAP) return false;
+      if (usesToolbarMenu() && section) {
+        openOverlay(Overlay::Toolbar);
+      } else {
+        openReaderMenu();
+      }
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_KOREADER:
+      return launchKOReaderSync();
+    case CrossPointSettings::TAP_ZONE_LONG_AUTO_TURN:
+      showAutoPageTurnPopup();
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_JUMP_PERCENT:
+      return handleZoneShortAction(CrossPointSettings::TAP_ZONE_JUMP_PERCENT);
+    default:
+      return ReaderActivity::handleZoneLongAction(action);
+  }
+}
+
+void EpubReaderActivity::openChapterSelector() {
+  if (!epub) return;
+  const int spineIdx = currentSpineIndex;
+  startActivityForResultWith<EpubReaderChapterSelectionActivity>(
+      [this](const ActivityResult& result) {
+        READING_STATS.resumeSession();
+        if (result.isCancelled) {
+          requestUpdate();
+          return;
+        }
+        const auto& chapterResult = std::get<ChapterResult>(result.data);
+        RenderLock lock;
+        clearDeferredReposition();
+        currentSpineIndex = chapterResult.spineIndex;
+        pendingAnchor = chapterResult.anchor;
+        nextPageNumber = 0;
+        section.reset();
+        requestUpdate();
+      },
+      epub, spineIdx);
 }
 
 bool EpubReaderActivity::jumpToFraction(float fraction) {
@@ -2876,6 +3007,45 @@ void EpubReaderActivity::paintOverlayPopup() {
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 
+// Auto page-turn rate picker, opened from the More panel and from the tap
+// zones. The option list matches the reader menu (Off / 3 / 6 / 12 / Custom)
+// so both entry points offer exactly the same rates.
+void EpubReaderActivity::showAutoPageTurnPopup() {
+  static constexpr int kCustomOption = 4;  // index of the Custom entry
+  std::vector<std::string> labels;
+  labels.reserve(std::size(PAGE_TURN_RATES) + 1);
+  labels.emplace_back(tr(STR_STATE_OFF));
+  for (size_t i = 1; i < std::size(PAGE_TURN_RATES); ++i) labels.push_back(std::to_string(PAGE_TURN_RATES[i]));
+  labels.emplace_back(tr(STR_CUSTOM));
+  const int current = (autoTurnOption == kCustomOption) ? kCustomOption
+                       : (autoTurnOption < 0 ? 0 : autoTurnOption);
+  overlayPopup.show(StrId::STR_AUTO_TURN_PAGES_PER_MIN, labels, current, [this](int idx) {
+    if (idx == kCustomOption) {
+      // Custom rate reuses the same interval picker as the reader menu.
+      startActivityForResultWith<IntervalSelectionActivity>(
+          [this](const ActivityResult& result) {
+            READING_STATS.resumeSession();
+            if (!result.isCancelled) {
+              customAutoPageTurnRate_ = std::get<IntervalResult>(result.data).value;
+              autoTurnOption = kCustomOption;
+              toggleAutoPageTurn(customAutoPageTurnRate_);
+            }
+            requestUpdate();
+          },
+          "AutoPageTurnRate", StrId::STR_AUTO_TURN_PAGES_PER_MIN, customAutoPageTurnRate_, 1, MAX_PAGE_TURN_RATE, 1,
+          5);
+      return;
+    }
+    autoTurnOption = idx;
+    toggleAutoPageTurn(static_cast<uint8_t>(PAGE_TURN_RATES[idx]));
+  });
+  // The opening tap's release edge can linger in the SDK snapshot; suppress
+  // touch input briefly so the fresh dialog is not dismissed as an outside tap
+  // (see the gate in loop()).
+  popupTouchIgnoreUntilMs_ = millis() + 150;
+  paintOverlayPopup();
+}
+
 void EpubReaderActivity::applyReaderTextSettings() {
   SETTINGS.saveToFile();
   RenderLock lock;
@@ -3000,6 +3170,7 @@ std::string EpubReaderActivity::moreRowValue(int row) const {
     case MA::ROTATE_SCREEN:
       return I18N.get(kOrient[SETTINGS.orientation % CrossPointSettings::ORIENTATION_COUNT]);
     case MA::AUTO_PAGE_TURN:
+      if (autoTurnOption == 4) return std::to_string(customAutoPageTurnRate_);
       return (autoTurnOption == 0 || autoTurnOption >= static_cast<int>(std::size(PAGE_TURN_RATES)))
                  ? std::string(tr(STR_STATE_OFF))
                  : std::to_string(PAGE_TURN_RATES[autoTurnOption]);
@@ -3041,18 +3212,9 @@ void EpubReaderActivity::activateMoreRow(int row) {
       paintOverlayPopup();
       return;
     }
-    case MA::AUTO_PAGE_TURN: {
-      std::vector<std::string> labels;
-      labels.reserve(std::size(PAGE_TURN_RATES));
-      labels.emplace_back(tr(STR_STATE_OFF));
-      for (size_t i = 1; i < std::size(PAGE_TURN_RATES); ++i) labels.push_back(std::to_string(PAGE_TURN_RATES[i]));
-      overlayPopup.show(StrId::STR_AUTO_TURN_PAGES_PER_MIN, labels, autoTurnOption, [this](int idx) {
-        autoTurnOption = idx;
-        toggleAutoPageTurn(static_cast<uint8_t>(PAGE_TURN_RATES[idx]));
-      });
-      paintOverlayPopup();
+    case MA::AUTO_PAGE_TURN:
+      showAutoPageTurnPopup();
       return;
-    }
     case MA::IMAGE_SCALING: {
       // A plain on/off-style row like the frontlight one: one tap cycles, no
       // picker. The value only reaches the page when the overlay closes, so the
