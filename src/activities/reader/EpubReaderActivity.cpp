@@ -963,7 +963,19 @@ void EpubReaderActivity::loop() {
 bool EpubReaderActivity::handleZoneShortAction(const uint8_t action) {
   switch (action) {
     case CrossPointSettings::TAP_ZONE_CHAPTER:
-      openChapterSelector();
+      // Jump straight to the next chapter, matching the toolbar's NextChapter
+      // control (the chapter picker stays reachable via the reader menu).
+      if (epub) {
+        const int target = std::clamp(currentSpineIndex + 1, 0, epub->getSpineItemsCount() - 1);
+        if (target != currentSpineIndex) {
+          RenderLock lock;
+          clearDeferredReposition();
+          nextPageNumber = 0;
+          currentSpineIndex = target;
+          section.reset();
+          requestUpdate();
+        }
+      }
       return true;
     case CrossPointSettings::TAP_ZONE_BOOKMARK:
       addBookmark();
@@ -1008,8 +1020,7 @@ bool EpubReaderActivity::handleZoneLongAction(const uint8_t action) {
       // Handled by the dedicated touch.bookmark/touch.dictionary path below.
       return false;
     case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
-      openChapterSelector();
-      return true;
+      return handleZoneShortAction(CrossPointSettings::TAP_ZONE_CHAPTER);
     case CrossPointSettings::TAP_ZONE_LONG_MENU:
       if (SETTINGS.showReaderMenu != CrossPointSettings::READER_MENU_TAP) return false;
       if (usesToolbarMenu() && section) {
