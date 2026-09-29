@@ -577,12 +577,11 @@ void ReadingStatsActivity::renderInx() {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
   drawPageHeader(Rect{0, metrics.topPadding, screenWidth, metrics.headerHeight}, tr(STR_READING_STATS));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight;
-  const int contentBottom = screenHeight - metrics.buttonHintsHeight;
-  const Rect content{18, contentTop + 6, screenWidth - 36, std::max(1, contentBottom - contentTop - 12)};
+  const Rect mainContent = pageContentRect();
+  const Rect content{mainContent.x + 18, mainContent.y + 6, mainContent.width - 36,
+                     std::max(1, mainContent.height - 12)};
   const auto& books = READING_STATS.getBooks();
   const int pageTitleHeight = renderer.getLineHeight(NOTOSERIF_14_FONT_ID);
   const int bookTitleHeight = renderer.getLineHeight(NOTOSERIF_12_FONT_ID);

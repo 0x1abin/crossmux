@@ -49,6 +49,7 @@ class InxRecentActivity final : public Activity {
   int thumbnailHeight = 0;
 
   InxRecentLayout layout() const;
+  Rect contentRect() const;
   const ReadingBookStats* statsAt(int index) const;
   int indexFromPoint(int x, int y) const;
   void openSelected();

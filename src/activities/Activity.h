@@ -15,8 +15,6 @@
 #include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
 
-struct Rect;
-
 class Activity {
   friend class ActivityManager;
 
@@ -97,6 +95,10 @@ class Activity {
   MappedInputManager::Labels mainTabButtonLabels(const char* back, const char* confirm, bool canMove,
                                                  bool showTabDirections = true) const;
   bool showMainTabContentSelection() const;
+  bool mainTabsAtBottom() const;
+  bool hasMainTabStatusBar() const;
+  MainTabLayout mainTabLayout() const;
+  Rect pageContentRect() const;
   void drawPageHeader(const Rect& rect, const char* title, const char* subtitle = nullptr) const;
 
   enum class ListTouchResult : uint8_t {

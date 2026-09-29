@@ -138,12 +138,17 @@ void ActivityManager::loop() {
 
     // Touch users can also open the global control center from the status bar.
     bool statusBarTap = false;
-    if (mappedInput.hasTouch() &&
-        (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
-         currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection")) {
+    if (mappedInput.hasTouch()) {
       int tx = 0;
       int ty = 0;
-      statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty < 44;
+      if (currentActivity->usesMainTabBar()) {
+        const Rect status = currentActivity->mainTabLayout().statusBar;
+        statusBarTap = mappedInput.wasScreenTapped(tx, ty) && tx >= status.x && tx < status.x + status.width &&
+                       ty >= status.y && ty < status.y + status.height;
+      } else if (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
+                 currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection") {
+        statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty >= 0 && ty < 44;
+      }
     }
     if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
       auto panel = makeUniqueNoThrow<FrontlightPanelActivity>(renderer, mappedInput);
@@ -259,15 +264,15 @@ bool ActivityManager::handleMainTabInput() {
   if (!currentActivity || !currentActivity->usesMainTabBar()) return false;
 
   const MainTab currentTab = currentActivity->mainTab();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int tabTop = metrics.topPadding;
-  const int tabBottom = tabTop + metrics.headerHeight;
+  const Rect tabBar = currentActivity->mainTabLayout().tabBar;
+  const int tabTop = tabBar.y;
+  const int tabBottom = tabBar.y + tabBar.height;
 
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTapped(x, y)) {
     if (y >= tabTop && y < tabBottom) {
-      const MainTab target = MainTabs::fromX(x, renderer.getScreenWidth());
+      const MainTab target = MainTabs::fromX(x - tabBar.x, tabBar.width);
       if (target != MainTab::None) {
         mainTabFocus = MainTabFocus::Content;
         if (target != currentTab)

@@ -15,6 +15,7 @@
 #include "components/icons/inx_apps.h"
 #include "components/icons/inx_tabs.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 namespace {
 constexpr int kIconSize = 38;
@@ -393,19 +394,37 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
 
 void InxTheme::drawMainTabBar(const GfxRenderer& renderer, const Rect rect, const MainTab selected) const {
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
-  const int tabCount = static_cast<int>(MainTabs::values.size());
-  const int iconY = rect.y + std::max(0, (rect.height - kIconSize) / 2);
+  constexpr int bottomIconInset = 6;
+  const bool tabsAtBottom = SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM;
+  const int iconY =
+      rect.y + std::max(0, tabsAtBottom ? rect.height - kIconSize - bottomIconInset : (rect.height - kIconSize) / 2);
+  const int indicatorY = tabsAtBottom ? rect.y : rect.y + rect.height - kUnderlineHeight;
 
   for (size_t i = 0; i < MainTabs::values.size(); ++i) {
     const MainTab tab = MainTabs::values[i];
-    const int left = rect.x + rect.width * static_cast<int>(i) / tabCount;
-    const int right = rect.x + rect.width * (static_cast<int>(i) + 1) / tabCount;
+    const auto bounds = MainTabs::tabBounds(static_cast<int>(i), rect.width);
+    const int left = rect.x + bounds.left;
+    const int right = rect.x + bounds.right;
     const int iconX = left + (right - left - kIconSize) / 2;
     if (const uint8_t* icon = iconForTab(tab)) drawInxIcon(renderer, icon, iconX, iconY);
     if (tab == selected) {
-      renderer.fillRect(iconX, rect.y + rect.height - kUnderlineHeight, kIconSize, kUnderlineHeight);
+      renderer.fillRect(iconX, indicatorY, kIconSize, kUnderlineHeight);
     }
   }
 
-  renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
+  if (!tabsAtBottom) {
+    renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
+  }
+}
+
+void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect) const {
+  char time[9] = "--:--";
+  TimeUtils::formatCurrentTime(time, sizeof(time), SETTINGS.clockFormat == 1);
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int textY = rect.y + (rect.height - renderer.getLineHeight(STATUS_NUMERIC_FONT_ID)) / 2;
+  renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x + metrics.contentSidePadding, textY, time);
+  drawBatteryRight(renderer,
+                   Rect{rect.x + rect.width - metrics.contentSidePadding - metrics.batteryWidth, textY,
+                        metrics.batteryWidth, metrics.batteryHeight},
+                   SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
 }

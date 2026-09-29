@@ -154,7 +154,21 @@ action**.
 * INX top-level tabs are owned by `ActivityManager`; only Activities with a
   non-`None` `MainTab` participate. Left/Right and tab touches are consumed
   before the page sees them, while reader and feature subpages remain outside
-  the top-level loop.
+  the top-level loop. `SETTINGS.inxTabPosition` places this shared bar at the
+  top or bottom; touch devices default to the bottom. In bottom mode, touch
+  devices share a 28 px top status bar across all five main tabs, with the clock
+  on the left and battery on the right. It uses the configured clock format,
+  time zone and battery percentage visibility, and updates only when the page
+  renders. Tapping the status bar opens the control center. Its drawing and hit
+  region share the main-tab layout, which also reserves viewable margins and
+  at least 6 px between the status bar, content and navigation. Other modes
+  retain the INX home battery on the opposite edge from the tabs.
+  `Activity::mainTabLayout()` resolves complete status, content and navigation
+  rectangles in one pass; `pageContentRect()` also owns the normal-header
+  fallback, so pages do not repeat the main-tab eligibility/layout calculation.
+  Bottom navigation is 56 px high, with 38 px icons, 6 px bottom padding and
+  a 38 × 5 px top selection marker. Only top navigation draws a full-width
+  separator; device viewable margins and button-hint reservations remain additional.
 * `GUI.drawProgressBar()` returns the first free Y coordinate after the bar and
   optional percentage line. Callers place following text from that value rather
   than reproducing the theme's font or spacing calculations.

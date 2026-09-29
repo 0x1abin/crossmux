@@ -36,6 +36,7 @@ class AppsMenuActivity final : public UiListActivity {
   void drawChrome() override;
   void drawFooter() override;
   bool usesIconLayout() const;
+  Rect appContentRect() const;
   int iconIndexFromPoint(int x, int y) const;
   void rebuildRowItems();
   void openSelected();

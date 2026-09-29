@@ -163,11 +163,17 @@ bool AppsMenuActivity::usesIconLayout() const {
          InxGridGeometry::layoutFrom(SETTINGS.inxAppsLayout) == InxItemLayout::Icons;
 }
 
+Rect AppsMenuActivity::appContentRect() const {
+  const int spacing = UITheme::getInstance().getMetrics().verticalSpacing;
+  Rect content = pageContentRect();
+  content.y += spacing;
+  content.height -= spacing * 2;
+  return content;
+}
+
 int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int height = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  return InxGridGeometry::indexFromPoint(x, y - top, renderer.getScreenWidth(), height,
+  const Rect content = appContentRect();
+  return InxGridGeometry::indexFromPoint(x - content.x, y - content.y, content.width, content.height,
                                          InxGridGeometry::pageStart(nav.selected, getVisibleAppCount()),
                                          getVisibleAppCount());
 }
@@ -221,19 +227,16 @@ bool AppsMenuActivity::handleCustomInput() {
 
 void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, const bool showSelection) const {
   const int start = InxGridGeometry::pageStart(nav.selected, visibleCount);
-  const int cellWidth = rect.width / InxGridGeometry::columns;
-  const int cellHeight = rect.height / InxGridGeometry::rows;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  constexpr int iconScale = 2;
-  constexpr int iconSize = InxAppIcons::size * iconScale;
 
   for (int slot = 0; slot < InxGridGeometry::itemsPerPage && start + slot < visibleCount; ++slot) {
     const int visibleIndex = start + slot;
     const int appIndex = getAppIndexForVisibleIndex(visibleIndex);
     if (appIndex < 0) continue;
-    const int column = slot % InxGridGeometry::columns;
-    const int row = slot / InxGridGeometry::columns;
-    const Rect cell{rect.x + column * cellWidth + 4, rect.y + row * cellHeight + 4, cellWidth - 8, cellHeight - 8};
+    const auto bounds = InxGridGeometry::cellBounds(slot, rect.width, rect.height);
+    const Rect cell{rect.x + bounds.x, rect.y + bounds.y, bounds.width, bounds.height};
+    const int iconScale = cell.height >= InxAppIcons::size * 2 + lineHeight + 18 ? 2 : 1;
+    const int iconSize = InxAppIcons::size * iconScale;
     const bool isSelected = showSelection && visibleIndex == nav.selected;
     if (isSelected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
 
@@ -250,23 +253,20 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, co
 }
 
 void AppsMenuActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
-  const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const Rect content = appContentRect();
   const int visibleCount = getVisibleAppCount();
   const bool showSelection = showMainTabContentSelection();
 
   if (visibleCount == 0) {
-    UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
+    UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
   } else if (usesIconLayout()) {
-    drawIconGrid(Rect{0, listY, sw, listH}, visibleCount, showSelection);
+    drawIconGrid(content, visibleCount, showSelection);
   } else {
-    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-    screen.setContentMargin(fui::Insets{static_cast<int16_t>(listY), static_cast<int16_t>(sw - (safe.x + safe.width)),
-                                        static_cast<int16_t>(sh - (safe.y + safe.height)),
-                                        static_cast<int16_t>(safe.x)});
+    screen.setContentMarginFromScreen(
+        fui::Insets{static_cast<int16_t>(content.y), static_cast<int16_t>(sw - content.x - content.width),
+                    static_cast<int16_t>(sh - content.y - content.height), static_cast<int16_t>(content.x)});
     fui::ListProps props;
     props.items = rowItems.data();
     props.count = static_cast<uint16_t>(rowItems.size());
