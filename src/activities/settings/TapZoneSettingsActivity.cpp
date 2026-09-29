@@ -3,9 +3,9 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <cmath>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -184,8 +184,8 @@ void TapZoneSettingsActivity::loop() {
 // A space is a preferred break point; otherwise the string is split per
 // character, so CJK labels also wrap instead of overflowing their cell.
 static const int kLabelMaxLines = 3;
-static int wrapLabel(const GfxRenderer& renderer, const int font, const char* text,
-                     const int maxWidth, char lines[][32], const int maxLines) {
+static int wrapLabel(const GfxRenderer& renderer, const int font, const char* text, const int maxWidth,
+                     char lines[][32], const int maxLines) {
   int count = 0;
   const char* start = text;
   while (*start != '\0' && count < maxLines) {
@@ -249,18 +249,18 @@ void TapZoneSettingsActivity::render(RenderLock&&) {
       char shortLine[32];
       snprintf(shortLine, sizeof(shortLine), "%s %s", tr(STR_TAP_ZONE_SHORT), zoneLabel(shortAction));
       char shortLines[kLabelMaxLines][32];
-      const int shortRows = hasShort ? wrapLabel(renderer, UI_10_FONT_ID, shortLine, maxW, shortLines, kLabelMaxLines) : 0;
+      const int shortRows =
+          hasShort ? wrapLabel(renderer, UI_10_FONT_ID, shortLine, maxW, shortLines, kLabelMaxLines) : 0;
       char longLine[32];
       snprintf(longLine, sizeof(longLine), "%s %s", tr(STR_TAP_ZONE_LONG), zoneLongLabel(longAction));
       char longLines[kLabelMaxLines][32];
-      const int longRows =
-          hasLong ? wrapLabel(renderer, UI_10_FONT_ID, longLine, maxW, longLines, kLabelMaxLines) : 0;
+      const int longRows = hasLong ? wrapLabel(renderer, UI_10_FONT_ID, longLine, maxW, longLines, kLabelMaxLines) : 0;
       const int totalRows = shortRows + longRows;
       if (totalRows == 0) {
         const char* none = zoneLabel(CrossPointSettings::TAP_ZONE_NONE);
         const int noneW = renderer.getTextWidth(UI_10_FONT_ID, none);
-        renderer.drawText(UI_10_FONT_ID, cell.x + (cell.width - noneW) / 2,
-                          cell.y + (cell.height - textH) / 2, none, true);
+        renderer.drawText(UI_10_FONT_ID, cell.x + (cell.width - noneW) / 2, cell.y + (cell.height - textH) / 2, none,
+                          true);
       } else {
         const int blockY = cell.y + (cell.height - textH * totalRows) / 2;
         for (int i = 0; i < shortRows; ++i) {
@@ -269,7 +269,8 @@ void TapZoneSettingsActivity::render(RenderLock&&) {
         }
         for (int i = 0; i < longRows; ++i) {
           const int w = renderer.getTextWidth(UI_10_FONT_ID, longLines[i]);
-          renderer.drawText(UI_10_FONT_ID, cell.x + (cell.width - w) / 2, blockY + textH * (shortRows + i), longLines[i], true);
+          renderer.drawText(UI_10_FONT_ID, cell.x + (cell.width - w) / 2, blockY + textH * (shortRows + i),
+                            longLines[i], true);
         }
       }
     }
@@ -545,7 +546,8 @@ static void fillRoundRect(const int x, const int y, const int w, const int h, co
   }
 }
 
-static void drawRoundRectBorder(const int x, const int y, const int w, const int h, const int r, GfxRenderer& renderer) {
+static void drawRoundRectBorder(const int x, const int y, const int w, const int h, const int r,
+                                GfxRenderer& renderer) {
   renderer.drawLine(x + r, y, x + w - r, y, 1, true);
   renderer.drawLine(x + r, y + h - 1, x + w - r, y + h - 1, 1, true);
   renderer.drawLine(x, y + r, x, y + h - r, 1, true);
@@ -558,7 +560,6 @@ static void drawRoundRectBorder(const int x, const int y, const int w, const int
     renderer.fillRect(x + w - 1 - i, y + h - 1 - (r - len), 1, 1, true);
   }
 }
-
 
 void TapZoneSettingsActivity::renderPopup() {
   const int screenW = renderer.getScreenWidth();
@@ -580,8 +581,8 @@ void TapZoneSettingsActivity::renderPopup() {
   char title[24];
   snprintf(title, sizeof(title), "Zone %d", popupZone);
   const int titleW = renderer.getTextWidth(UI_10_FONT_ID, title);
-  renderer.drawText(UI_10_FONT_ID, px + (panelW - titleW) / 2, py + (kPopupTitleH - renderer.getLineHeight(UI_10_FONT_ID)) / 2,
-                    title, true);
+  renderer.drawText(UI_10_FONT_ID, px + (panelW - titleW) / 2,
+                    py + (kPopupTitleH - renderer.getLineHeight(UI_10_FONT_ID)) / 2, title, true);
   renderer.drawLine(px + 1, py + kPopupTitleH - 1, px + panelW - 2, py + kPopupTitleH - 1, 1, true);
 
   const uint8_t shortAction = ReaderUtils::zoneRawShortAction(popupZone);
@@ -592,8 +593,8 @@ void TapZoneSettingsActivity::renderPopup() {
   for (int i = 0; i < popupRowCount; ++i) {
     const int ry = rowY + i * kPopupRowH;
     const bool isShort = i < popupShortRows;
-    const bool isCurrent = !popupRows[i].isHeader && (isShort ? popupRows[i].value == shortAction
-                                                             : popupRows[i].value == longAction);
+    const bool isCurrent =
+        !popupRows[i].isHeader && (isShort ? popupRows[i].value == shortAction : popupRows[i].value == longAction);
     const bool isCursor = i == popupCursor;
 
     if (popupRows[i].isHeader) {

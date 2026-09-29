@@ -981,8 +981,7 @@ bool EpubReaderActivity::handleZoneShortAction(const uint8_t action) {
     case CrossPointSettings::TAP_ZONE_JUMP_PERCENT: {
       float bookProgress = 0.0f;
       if (epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
-        const float chapterProgress =
-            static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+        const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
         bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
       }
       const int initialPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
@@ -3031,8 +3030,7 @@ void EpubReaderActivity::showAutoPageTurnPopup() {
   labels.emplace_back(tr(STR_STATE_OFF));
   for (size_t i = 1; i < std::size(PAGE_TURN_RATES); ++i) labels.push_back(std::to_string(PAGE_TURN_RATES[i]));
   labels.emplace_back(tr(STR_CUSTOM));
-  const int current = (autoTurnOption == kCustomOption) ? kCustomOption
-                       : (autoTurnOption < 0 ? 0 : autoTurnOption);
+  const int current = (autoTurnOption == kCustomOption) ? kCustomOption : (autoTurnOption < 0 ? 0 : autoTurnOption);
   overlayPopup.show(StrId::STR_AUTO_TURN_PAGES_PER_MIN, labels, current, [this](int idx) {
     if (idx == kCustomOption) {
       // Custom rate reuses the same interval picker as the reader menu.
@@ -3046,8 +3044,7 @@ void EpubReaderActivity::showAutoPageTurnPopup() {
             }
             requestUpdate();
           },
-          "AutoPageTurnRate", StrId::STR_AUTO_TURN_PAGES_PER_MIN, customAutoPageTurnRate_, 1, MAX_PAGE_TURN_RATE, 1,
-          5);
+          "AutoPageTurnRate", StrId::STR_AUTO_TURN_PAGES_PER_MIN, customAutoPageTurnRate_, 1, MAX_PAGE_TURN_RATE, 1, 5);
       return;
     }
     autoTurnOption = idx;

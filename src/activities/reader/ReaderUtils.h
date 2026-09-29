@@ -75,9 +75,9 @@ struct TouchPageTurn {
   bool next = false;
   bool bookmark = false;
   bool dictionary = false;
-  bool longPress = false;    // the contact was held past BOOKMARK_HOLD_MS
-  uint8_t action = 0;        // short-press zone action (TAP_ZONE_ACTION, PREV/NEXT/MENU handled here)
-  uint8_t longAction = 0;    // long-press zone action (TAP_ZONE_LONG_ACTION)
+  bool longPress = false;  // the contact was held past BOOKMARK_HOLD_MS
+  uint8_t action = 0;      // short-press zone action (TAP_ZONE_ACTION, PREV/NEXT/MENU handled here)
+  uint8_t longAction = 0;  // long-press zone action (TAP_ZONE_LONG_ACTION)
   unsigned long heldMs = 0;
 };
 
@@ -100,7 +100,7 @@ struct TapZoneGrid {
   int cellHeight = 0;
   int miniWidth = 0;
   int miniHeight = 0;
-  int miniMidWidth = 0;   // top/bottom edge-middle zones: wide strips
+  int miniMidWidth = 0;  // top/bottom edge-middle zones: wide strips
   int miniMidHeight = 0;
 
   explicit TapZoneGrid(const int gridW, const int gridH) {
@@ -205,13 +205,20 @@ inline int tapZoneAt(const GfxRenderer& renderer, const int x, const int y) {
 // each corner / edge-middle small zone maps to the main cell it sits in.
 inline int miniFallbackZone(const int zone) {
   switch (zone - 9) {
-    case 0: return 0;  // top-left     -> top-left main cell
-    case 1: return 2;  // top-right    -> top-right main cell
-    case 2: return 6;  // bottom-left  -> bottom-left main cell
-    case 3: return 8;  // bottom-right -> bottom-right main cell
-    case 4: return 1;  // top-middle   -> top-middle main cell
-    case 5: return 7;  // bottom-middle-> bottom-middle main cell
-    default: return -1;
+    case 0:
+      return 0;  // top-left     -> top-left main cell
+    case 1:
+      return 2;  // top-right    -> top-right main cell
+    case 2:
+      return 6;  // bottom-left  -> bottom-left main cell
+    case 3:
+      return 8;  // bottom-right -> bottom-right main cell
+    case 4:
+      return 1;  // top-middle   -> top-middle main cell
+    case 5:
+      return 7;  // bottom-middle-> bottom-middle main cell
+    default:
+      return -1;
   }
 }
 
@@ -308,7 +315,8 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     // its original long-press behaviour, everything else falls through to the
     // short action below (PREV/NEXT long-press still turns pages).
     const uint8_t shortAction = zoneShortAction(zone);
-    if (shortAction == CrossPointSettings::TAP_ZONE_BOOKMARK || shortAction == CrossPointSettings::TAP_ZONE_DICTIONARY) {
+    if (shortAction == CrossPointSettings::TAP_ZONE_BOOKMARK ||
+        shortAction == CrossPointSettings::TAP_ZONE_DICTIONARY) {
       result.bookmark = shortAction == CrossPointSettings::TAP_ZONE_BOOKMARK;
       result.dictionary = shortAction == CrossPointSettings::TAP_ZONE_DICTIONARY;
       return result;

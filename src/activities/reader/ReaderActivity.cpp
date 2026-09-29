@@ -227,8 +227,8 @@ bool ReaderActivity::handleZoneLongAction(const uint8_t action) {
 }
 
 void ReaderActivity::rotateOrientation(const int delta) {
-  const uint8_t next = static_cast<uint8_t>(
-      (SETTINGS.orientation + delta + CrossPointSettings::ORIENTATION_COUNT) % CrossPointSettings::ORIENTATION_COUNT);
+  const uint8_t next = static_cast<uint8_t>((SETTINGS.orientation + delta + CrossPointSettings::ORIENTATION_COUNT) %
+                                            CrossPointSettings::ORIENTATION_COUNT);
   if (next == SETTINGS.orientation) return;
   SETTINGS.orientation = next;
   SETTINGS.saveToFile();

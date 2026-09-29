@@ -45,7 +45,7 @@ class TapZoneSettingsActivity final : public Activity {
   int stepOverHeaders(int index, int delta) const;
   const char* zoneLabel(uint8_t action) const;
   const char* zoneLongLabel(uint8_t action) const;
-  const char* zoneShortName(uint8_t action) const;     // two-char short label (short-press space)
+  const char* zoneShortName(uint8_t action) const;  // two-char short label (short-press space)
   void drawMiniLabel(const Rect& cell, const char* label) const;
   void drawDashedRect(int x, int y, int w, int h) const;
   void renderPopup();

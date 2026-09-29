@@ -393,7 +393,6 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
 
-
   // Touch reader gestures: the single touchReaderControls selector (Off / Tap /
   // Swipe / Inverted Tap) folded into the per-direction gesture pair. The
   // SettingsList loop above already collapsed the old value to Off/On; read the

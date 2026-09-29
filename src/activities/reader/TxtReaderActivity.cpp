@@ -119,7 +119,6 @@ bool TxtReaderActivity::handleFormatInput() {
   return false;
 }
 
-
 bool TxtReaderActivity::handleZoneShortAction(const uint8_t action) {
   // TXT has no bookmark / dictionary / KOReader sync / percent jump: only the
   // base actions (orientation, frontlight, home) and the chapter jump apply

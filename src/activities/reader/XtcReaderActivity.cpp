@@ -76,7 +76,6 @@ bool XtcReaderActivity::handleFormatInput() {
   return false;
 }
 
-
 bool XtcReaderActivity::handleZoneShortAction(const uint8_t action) {
   // XTC comics have no bookmark / dictionary / KOReader sync / percent jump:
   // only the base actions (orientation, frontlight, home) and the chapter jump

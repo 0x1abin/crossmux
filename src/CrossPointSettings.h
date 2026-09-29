@@ -295,10 +295,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // behavior regardless of hold duration.
   enum TAP_ZONE_LONG_ACTION {
     TAP_ZONE_LONG_NONE = 0,
-    TAP_ZONE_LONG_BOOKMARK = 1,   // add a bookmark (EPUB readers)
-    TAP_ZONE_LONG_DICTIONARY = 2, // open the dictionary word picker (EPUB readers)
-    TAP_ZONE_LONG_CHAPTER = 3,    // jump to a chapter (EPUB / TXT / XTC readers)
-    TAP_ZONE_LONG_MENU = 4,       // open the reader menu / chapter list (tap menu mode)
+    TAP_ZONE_LONG_BOOKMARK = 1,    // add a bookmark (EPUB readers)
+    TAP_ZONE_LONG_DICTIONARY = 2,  // open the dictionary word picker (EPUB readers)
+    TAP_ZONE_LONG_CHAPTER = 3,     // jump to a chapter (EPUB / TXT / XTC readers)
+    TAP_ZONE_LONG_MENU = 4,        // open the reader menu / chapter list (tap menu mode)
     TAP_ZONE_LONG_ROTATE_CW = 5,
     TAP_ZONE_LONG_ROTATE_CCW = 6,
     TAP_ZONE_LONG_FRONTLIGHT = 7,
@@ -517,8 +517,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Layout: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right,
   // 4=top-middle, 5=bottom-middle. All default to NONE.
   uint8_t miniZones[6] = {
-      TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE,
-      TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE,
+      TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE,
   };
   // Reader menu open gesture (SHOW_READER_MENU: off / center tap / bottom-edge
   // up-swipe). Only surfaced on home-key boards, where Home is the capacitive
