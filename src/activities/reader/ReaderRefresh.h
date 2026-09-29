@@ -9,7 +9,20 @@ inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh, bo
     pagesUntilFullRefresh = 1;
     return HalDisplay::FAST_REFRESH;
   }
-  const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+  // The due page cleans the panel. Read Pico needs GC16 (FULL_REFRESH): GL16 (HALF)
+  // keeps an already-white background and never pre-blackens, so it cannot clear the
+  // gray floor that differential turns accumulate -- it only changes the waveform.
+  // FULL drives every pixel black then white, which is what actually resets the panel,
+  // and it propagates: EpdiyLcdDriver::displayGray steps Fast up to Half but leaves Full
+  // alone, so the base and grey planes go out together as GC16. Ordinary pages stay
+  // FAST -> GL16: anti-aliasing preserved, no flash. Vendor firmware cleans the same way
+  // every APP_GC16_EVERY = 14 pages.
+#if FREEINK_DEVICE_READPICO
+  const auto cleanMode = HalDisplay::FULL_REFRESH;
+#else
+  const auto cleanMode = HalDisplay::HALF_REFRESH;
+#endif
+  const auto mode = (pagesUntilFullRefresh <= 1) ? cleanMode : HalDisplay::FAST_REFRESH;
   if (pagesUntilFullRefresh <= 1) {
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
