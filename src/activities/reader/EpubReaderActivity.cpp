@@ -852,7 +852,12 @@ void EpubReaderActivity::loop() {
     return;
   }
   if (!touch.longPress && touch.action != CrossPointSettings::TAP_ZONE_NONE && handleZoneShortAction(touch.action)) {
-    requestUpdate();
+    // A tap-zone option picker (auto page-turn) painted its own frame in
+    // showAutoPageTurnPopup(); skipping the page re-render avoids the page
+    // push flashing the fresh dialog away and back.
+    if (!overlayPopup.isActive()) {
+      requestUpdate();
+    }
     return;
   }
 
@@ -1928,6 +1933,15 @@ void EpubReaderActivity::renderBook() {
     // residue a FAST differential leaves under the chrome has not shown in
     // practice; restore a HALF cleanup here if text ever visibly ghosts
     // through the sheet (see #2190 for the mechanism).
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
+
+  // An option picker opened directly over the reading page (tap-zone actions
+  // such as auto page-turn) rides on top of the freshly rendered page. The
+  // toolbar-menu popup is drawn together with its panel above; repaint this one
+  // after the page push so a page re-render cannot wipe it off screen.
+  if (overlay == Overlay::None && overlayPopup.isActive()) {
+    overlayPopup.render(renderer);
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   }
 }
