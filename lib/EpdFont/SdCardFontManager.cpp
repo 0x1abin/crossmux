@@ -100,6 +100,13 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
 }
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
+  // NOTE: the preferred-font rebinds (GfxRenderer::setPreferredFont) are deliberately
+  // NOT cleared here. They are the UI's font binding, and clearing them makes the UI
+  // silently fall back to the built-in faces until something happens to call
+  // setupUiFallbacks() again -- which not every release path does. resolveFontFamilyId()
+  // instead checks that the rebound family is still registered and falls back on its own
+  // while it is absent, so the rebind resumes by itself once the same deterministic id
+  // is loaded again. Family changes simply re-register over the old entries.
   renderer.clearSdCardFonts();
   for (auto& lf : loaded_) {
     // removeFont drops only mappings that reference this SD font, preserving
