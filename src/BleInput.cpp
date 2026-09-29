@@ -183,6 +183,14 @@ StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
       case StartContext::Explicit:
         sdFontSystem.releaseLoadedFont(renderer);
         if (auto* cache = renderer.getFontCacheManager()) cache->clearCache();
+        // Same guard as NetworkStartup::prepare(): dropping the family only helps if it
+        // enlarges the largest internal block, which is what the gate above tests. When
+        // it does not -- the family's tables live in PSRAM -- the release buys nothing
+        // while costing the UI the glyph fallback it draws CJK with, and an SD font id
+        // a screen already resolved goes stale. Put the family back in that case.
+        if (readMemory().largestInternal <= before.largestInternal) {
+          sdFontSystem.ensureLoaded(renderer);
+        }
         break;
     }
     memory = readMemory();
