@@ -1981,8 +1981,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // the base and the grey planes into a single waveform, so it must not be gated
       // behind tiledGrayscale. This is what removes the extra full panel refresh per
       // anti-aliased page: the base is stashed and displayGrayBuffer() presents both.
-      needsAnyGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled &&
-      renderer.supportsTextOnlyCombinedBase();
+      //
+      // Image pages are included here, unlike the shared branch below. Its
+      // !pageHasImages exists because a strip-upload driver has to re-send the
+      // affected strip to build the base; this whole-plane path stashes the entire
+      // framebuffer, illustration and all, so displayGrayBuffer() composes the page
+      // from it either way and the panel is still driven exactly once.
+      needsAnyGrayscale && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
 #else
       tiledGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
 #endif
