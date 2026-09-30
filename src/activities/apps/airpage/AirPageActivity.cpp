@@ -116,7 +116,7 @@ void AirPageActivity::onEnter() {
   uploadUrl_ += "/?id=";
   uploadUrl_ += deviceId;
   char displayParams[48];
-  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray16",
+  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray4",
            static_cast<unsigned>(renderer.getDisplayHeight()), static_cast<unsigned>(renderer.getDisplayWidth()));
   uploadUrl_ += displayParams;
 
