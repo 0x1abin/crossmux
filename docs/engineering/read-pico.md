@@ -40,7 +40,8 @@ until physical acceptance is recorded.
 - PMU commands hold the existing recursive I²C lock across request, wait and
   response. Response bytes belong to the caller's fixed 44-byte stack buffer.
   This serializes RTC/VCOM requests without a second mutex allocation; the
-  shared bus waits for the bounded PMU round trip too.
+  shared bus waits for the bounded PMU round trip too. Cached status fields use
+  atomics because input polling reads them while command recovery updates them.
 - Highlevel/base/selector allocation failures unwind owned buffers. Sleep
   releases the renderer tasks and buffers, allowing a later initialization.
   Line queues still own separately aligned 304-byte rows. Their pointer tables
@@ -51,7 +52,8 @@ until physical acceptance is recorded.
   families; unload or a missing size falls back to embedded fonts. No retired
   font-ID map or allocation during font-ID lookup is needed. The built-in reader
   picker advertises only its actual 12 pt face; installed SD families expose
-  their own sizes. Network and explicit BLE preparation do not immediately reload released fonts.
+  their own sizes. Network and explicit BLE preparation do not immediately
+  reload released fonts.
 - Toolbar is the Read Pico first-boot default and respects saved settings.
   AirPage keeps the shared four-tone request supported by the current pipeline.
 
@@ -71,9 +73,12 @@ font/image tests, and the SDK SSD1677/combined-AA checks. The review candidate's
 host transaction checks compile the complete driver, wrapper, highlevel and PMU
 source. They cover mode selection, unchanged FULL, rail/draw failure recovery,
 seven injected allocation failures, sleep/reinitialization, queue allocation size
-and simultaneous RTC/VCOM commands. These are software checks, not electrical
-or optical acceptance. Full CI and final dependency checks are recorded in the
-PR descriptions when complete.
+and simultaneous RTC/VCOM/input polling, including stale-session recovery.
+Full `./bin/ci-check` passed format, static analysis, all seven existing hardware
+environments and 597 host tests. The official `ba3c44d7` SDK separately passed
+the shared `gh_release` build and cppcheck. Combination builds and exact final
+candidate revisions are recorded in the PR descriptions. These are software
+checks, not electrical or optical acceptance.
 
 Physical acceptance remains pending: record the exact firmware/SDK revisions,
 boot and heap logs, text/image turns across periodic and manual cleanups,
