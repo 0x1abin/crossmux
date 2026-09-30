@@ -123,7 +123,12 @@ oriented insets. The legacy UITheme safe-area and list-capacity calculations now
 use the same area on Read Pico. FreeInkUI drawing and touch routing share the
 resulting layout; the raw touch calibration is unchanged. Verify the lowest row,
 progress bar and bottom controls in all four rotations, including taps near the
-new boundary, before accepting the clearance.
+new boundary, before accepting the clearance. The user confirmed the recently
+read screen's battery and bottom controls are fully visible after the first
+upload. Reader status text drops the old additional 4 px upward offset, placing
+its battery, clock and page counters 4 px closer to the safe bottom edge; the
+recently read screen keeps its accepted geometry. This final reader adjustment
+still needs visible-screen confirmation.
 
 ### Optional measurements
 
@@ -148,10 +153,35 @@ build_flags =
   -DFREEINK_READPICO_DIAGNOSTICS=1
 ```
 
-No physical device is available in this review. The PMU transaction keeps its
-existing bus lock; separate it only after measured touch latency justifies the
-additional lock. Collect latency during RTC/VCOM retries, heap/largest-block
-watermarks, reading turns and sleep/wake before tuning queues or memory reserves.
+The PMU transaction keeps its existing bus lock; separate it only after measured
+touch latency justifies the additional lock. Collect latency during RTC/VCOM
+retries, heap/largest-block watermarks, reading turns and sleep/wake before tuning
+queues or memory reserves.
+
+### Initial device check
+
+At the user's request, CrossMux `c4b6cee2` with SDK `4af3673` was uploaded through
+USB Serial/JTAG to the connected ESP32-S3 revision 0.2 (16 MB Flash, 8 MB PSRAM).
+`pio run -e readpico -t upload --upload-port <verified-readpico-port>` passed,
+including the uploader's written-data digest verification. This is the normal
+`readpico` build; the optional diagnostic build was compiled separately.
+The uploaded `firmware.bin` SHA-256 is
+`fa23c6feac5bbc8ba145a453500393e449261b5481819cbda7e5de19a3c5cd68`.
+
+The captured boot and first 30 seconds of operation show the board, PMU,
+SC7A20H, external RTC, SDMMC and panel initializing successfully. Menu navigation
+appears in the input/activity logs without panic or OOM. Immediately after panel
+initialization, reported free PSRAM was 6,283,572 bytes and free internal heap
+112,763 bytes. At 20 seconds, internal free/minimum/largest block were
+77,867 / 67,979 / 31,732 bytes. These are one-session observations, not a leak,
+latency or long-term stability test.
+
+The existing serial screenshot command returned only part of the 103,968-byte
+buffer; no screenshot was accepted. The bottom 24 px clearance has the user's
+confirmation on the recently read screen; rotated controls remain pending.
+Reading refresh modes, calibrated tilt, PMU contention, battery operation and
+three sleep/wake cycles remain pending. Local evidence is kept under
+`.pio/readpico-flash-round2/` (ignored, not a repository dependency).
 
 ### CI dependency follow-up
 
