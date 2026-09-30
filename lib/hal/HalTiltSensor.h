@@ -30,8 +30,8 @@ class HalTiltSensor {
   unsigned long _wakeMs = 0;       // Timestamp of last wake() for stabilization
 
   // Tuning constants
-  static constexpr float RATE_THRESHOLD_DPS = 270.0f;      // Deg/sec speed to trigger flick
-  static constexpr float NEUTRAL_RATE_DPS = 50.0f;         // Must stop moving below this rate before next trigger
+  static constexpr float RATE_THRESHOLD_DPS = 270.0f;  // Deg/sec speed to trigger flick
+  static constexpr float NEUTRAL_RATE_DPS = 50.0f;     // Must stop moving below this rate before next trigger
   // Boards whose IMU has no gyroscope (SC7A20H, Read Pico) drive the same gesture from
   // the accelerometer's gravity component. Rotating about the tilt axis gives
   // a = g*sin(theta), so da/dt = g*cos(theta)*omega and at small angles da/dt = g*omega.

@@ -60,7 +60,11 @@ void HalTiltSensor::begin() {
   // by differentiating the gravity component, so the part is brought up like any other
   // and update() takes the accelerometer path. isAvailable() then reports true, which is
   // the gate SettingsList uses to offer "Tilt page turn".
+#if FREEINK_DEVICE_READPICO
   _accelOnly = BoardConfig::ACTIVE.sensors.imuType == BoardConfig::ImuType::Sc7a20h;
+#else
+  _accelOnly = false;
+#endif
 
   _initMs = millis();
   _lastPollMs = millis();
