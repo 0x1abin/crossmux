@@ -9,24 +9,36 @@ rail timing and factory-PMU VCOM handling; neither calibration nor scan timing
 was retuned in this review. The application still supplies four tones through
 its existing 2-bit masks; this change does not add a native 16-tone image pipeline.
 
-CrossMux PR [#350](https://github.com/0x1abin/crossmux/pull/350) depends on SDK PR
-[#35](https://github.com/0x1abin/freeink-sdk/pull/35). Until the SDK is merged,
-CrossMux keeps main's official gitlink `ba3c44d7a56548389f00608ad36947ddf5dd80fc`.
-A normal recursive checkout therefore cannot build `readpico` yet. Test the
-combination explicitly:
+SDK PR [#35](https://github.com/0x1abin/freeink-sdk/pull/35) is merged. CrossMux pins
+the reviewed SDK main commit `2d40f2bafe143999988eecd8374ce0b8c1a36a59`, so a normal
+recursive checkout includes the Read Pico drivers:
 
 ```bash
 git submodule update --init --recursive
-git -C freeink-sdk fetch origin refs/pull/35/head
-git -C freeink-sdk switch --detach FETCH_HEAD
 pio run -e readpico -e gh_release
 python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py
 python3 scripts/tests/test_ui_font_fallback.py
 ```
 
-After SDK #35 is merged, update the official gitlink to that reviewed main
-commit and repeat the builds. Keep Read Pico outside Nightly/OTA/Web releases
-until physical acceptance is recorded.
+### Nightly and Web release integration — 2026-10-01
+
+Read Pico is included in the Nightly target table as `readpico`, using the
+`readpico_nightly` environment and version `<version>-readpico-rc+<sha7>`. This
+environment inherits the board profile and normal S3 Nightly logging; it does not
+wait for a USB Serial connection at boot. Stable remains unsupported.
+
+Packaging emits one ESP32-S3 binary set, a checksum file, and `global` / `zh-CN`
+compatibility manifests referencing the same assets. Target, slug and board tag
+are `readpico`; the model list also accepts the SDK runtime name `read_pico`.
+The website displays **MindReset Read Pico**, at 684 × 1216,
+and reuses the existing S3 download, full-install and inactive-slot OTA paths.
+The option appears only after a regional Nightly index includes the target.
+First installation replaces the factory partition layout; back up the full
+16 MB Flash before proceeding. Later compatible installations use OTA.
+
+This release-channel inclusion does not close the physical acceptance items
+recorded below. Real-device reading, sleep/wake, browser installation and OTA
+acceptance remain separate from build and package verification.
 
 ### Review fixes
 
@@ -206,15 +218,13 @@ planned as part of the frozen-version merge.
 
 ### CI dependency follow-up
 
-SDK #35 gains a standalone Read Pico host-check workflow. CrossMux adds the
-accelerometer/gyroscope check to its existing host suite. After SDK #35 merges,
-update CrossMux's official gitlink to the reviewed SDK main commit, append
-`readpico` to `bin/ci-check` and the Hardware CI build invocation, and run
-`python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py` in the
-existing host-test CI step. Repeat full checks and the shared `gh_release` build
-with a normal recursive checkout. Until then the combination checkout above is
-required; no conditional skip or temporary SDK pin is used in permanent CI.
-Read Pico remains excluded from Nightly/OTA/Web publishing.
+SDK #35 includes a standalone Read Pico host-check workflow. CrossMux runs
+`python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py` in its
+existing host-test CI step and local `bin/ci-check`. Local hardware checks build
+`readpico`; Hardware CI builds and verifies the `readpico_nightly` package. The
+official merged SDK gitlink supplies these drivers without a temporary PR pin or
+conditional skip. The existing accelerometer/gyroscope check remains in the host
+suite.
 
 ## Historical port investigation
 

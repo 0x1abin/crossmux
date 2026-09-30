@@ -1,3 +1,4 @@
+import configparser
 import hashlib
 import json
 import sys
@@ -34,15 +35,15 @@ class NightlyTargetTest(unittest.TestCase):
             )
         self.assertEqual(urlopen.call_count, 2)
 
-    def test_matrix_has_c3_and_seven_s3_targets(self):
+    def test_matrix_has_c3_and_eight_s3_targets(self):
         matrix = package_nightly_target.matrix('nightly')['include']
-        self.assertEqual(len(matrix), 8)
+        self.assertEqual(len(matrix), 9)
         self.assertEqual(
             {entry['targetId'] for entry in matrix},
             set(nightly_targets.TARGETS),
         )
         environments = {entry['environment'] for entry in matrix}
-        self.assertEqual(len(environments), 8)
+        self.assertEqual(len(environments), 9)
         self.assertEqual(
             package_nightly_target.matrix('stable')['include'],
             [
@@ -63,6 +64,32 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertTrue(targets['metalio_eink4']['fullInstall'])
         self.assertEqual(nightly_targets.environment_for('metalio_eink4', 'nightly', 'global'),
                          nightly_targets.environment_for('metalio_eink4', 'nightly', 'zh-CN'))
+
+    def test_readpico_release_contract(self):
+        self.assertEqual(nightly_targets.TARGETS['readpico'], {
+            'deviceSlug': 'readpico',
+            'models': ['readpico', 'read_pico'],
+            'boardTag': 'readpico',
+            'chip': 'ESP32-S3',
+            'chipId': 0x0009,
+            'environments': {'nightly': 'readpico_nightly'},
+            'supportedChannels': ['nightly'],
+            'fullInstall': True,
+        })
+        for flavor in nightly_targets.FLAVOR_TOKENS:
+            self.assertEqual(nightly_targets.environment_for('readpico', 'nightly', flavor), 'readpico_nightly')
+            self.assertEqual(nightly_targets.version_for('1.6.0', 'readpico', 'nightly', flavor, '12345678'),
+                             '1.6.0-readpico-rc+1234567')
+        with self.assertRaises(KeyError):
+            nightly_targets.environment_for('readpico', 'stable', 'global')
+        self.assertNotIn('readpico', nightly_targets.targets_for('stable'))
+        self.assertIn('-e readpico_nightly', (ROOT / '.github/workflows/hardware-ci.yml').read_text())
+        config = configparser.ConfigParser()
+        config.read(ROOT / 'platformio.ini')
+        environment = config['env:readpico_nightly']
+        self.assertEqual(environment['extends'], 'readpico_hardware')
+        self.assertIn('${s3_nightly.build_flags}', environment['build_flags'])
+        self.assertNotIn('CROSSPOINT_WAIT_FOR_USB_SERIAL', environment['build_flags'])
 
     def test_versions_are_nightly_release_candidates(self):
         self.assertEqual(

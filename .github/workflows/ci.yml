@@ -165,6 +165,7 @@ jobs:
         run: |
           bash freeink-sdk/libs/book/FreeInkBook/test/host/run.sh
           bash freeink-sdk/libs/ui/FreeInkUI/test/host/run.sh
+          python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py
 
       - name: Run hardware packaging tests
         run: python3 -m unittest discover -v -s scripts/tests

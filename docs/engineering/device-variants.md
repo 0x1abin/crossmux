@@ -1,7 +1,8 @@
 # Device Variants — X3/X4 and Build-Only S3 Targets
 
 > Sticky, X4 Pro, X4 Classic, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
-> [Waveshare ePaper 3.97](waveshare-epaper-397.md), and [Metalio E-Ink 4](metalio-eink4.md) are separate ESP32-S3
+> [Waveshare ePaper 3.97](waveshare-epaper-397.md), [Metalio E-Ink 4](metalio-eink4.md),
+> and [MindReset Read Pico](read-pico.md) are separate ESP32-S3
 > compile-time targets. The one-binary rule in this document applies only to
 > the ESP32-C3 X3/X4 pair.
 
@@ -22,7 +23,7 @@ pio run -e gh_release        # all 33 UI languages and both content profiles
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
-All eight ESP32-S3 devices use separate builds because their boards,
+All nine ESP32-S3 devices use separate builds because their boards,
 displays, input, storage, and power profiles differ from the combined ESP32-C3
 image:
 
@@ -35,9 +36,11 @@ pio run -e eego_a4
 pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 pio run -e metalio_eink4
+pio run -e readpico
 ```
 
-Seven S3 targets are published by the shared Nightly matrix. X4 Classic has the
+Eight S3 targets are published by the shared Nightly matrix, including MindReset
+Read Pico (`readpico_nightly`). X4 Classic has the
 same `x4c_nightly` build and Hardware CI coverage, but remains build-only and is
 not added to the public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
