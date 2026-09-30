@@ -2046,7 +2046,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   renderStatusBar();
   const auto tBwRender = millis();
 
-  if (pageHasImages) {
+  if (combinedGrayscaleBase) {
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
+  } else if (pageHasImages) {
     // Image pages use one base refresh before the grayscale pass. FAST leaves
     // the panel receptive to the gray waveform; pending cleanup still honors
     // the scheduled/manual HALF refresh.
@@ -2058,10 +2060,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                              DisplayRefreshContext::ImageReading);
       pagesUntilFullRefresh = 1;
     }
-  } else if (combinedGrayscaleBase) {
-    // Stash the base without activating; displayGrayBuffer() below commits
-    // base + grays as one waveform.
-    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
   } else {
 #if FREEINK_DEVICE_EEGO_A4
     if (needsTextGrayscale) {
