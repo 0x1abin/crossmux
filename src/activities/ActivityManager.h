@@ -126,6 +126,9 @@ class ActivityManager {
   void goToPixelSwitch();
   void goToCalculator();
   void goToWoodfish();
+#if CROSSPOINT_CAP_VOICE_RECORDER
+  void goToVoiceNotes();
+#endif
   void goToAirPage();
   void goToBuddy();
   void goToStandby();

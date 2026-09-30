@@ -19,7 +19,7 @@ pio device monitor --port /dev/tty.usbmodem101 --baud 115200
 | I²C | SDA 41, SCL 42; 400 kHz |
 | RTC | PCF85063A at `0x51` |
 | PMIC | AXP2101 at `0x34`; IRQ on GPIO38; ALDO1/2 supply audio and ALDO3 supplies the EPD |
-| Audio | ES8311 at `0x18`; MCLK 13, BCLK 14, WS 47, DOUT 48; NS4150B enable 39 |
+| Audio | ES8311 at `0x18`; MCLK 13, BCLK 14, WS 47, DOUT 48, DIN 21 (mic); NS4150B enable 39 |
 | Buttons | Back 0, Left 4, Function 5, Right 6; active-low |
 
 Function single-click emits Confirm after the 300 ms double-click window. A
@@ -79,6 +79,31 @@ pages use only the selector path and do not run a four-gray `0xD7`, 500 ms
 settle, or hard-reset sequence. Deep sleep sends `0x10/0x01`; the existing
 AXP2101 shutdown path then removes system power.
 
+## Voice Notes (microphone capture)
+
+The board's analog microphone feeds the ES8311 ADC, whose serial output
+(ASDOUT) is wired to GPIO21. BoardConfig only describes the playback path
+(`NO_MIC`, and `freeink::Microphone` is PDM-only), so `CROSSPOINT_CAP_VOICE_RECORDER`
+enables a CrossMux-side `HalMicrophone` that keeps the DIN pin locally. Moving
+it into the SDK as an I2S-codec `MicConfig` is a follow-up.
+
+`HalMicrophone::begin()` shuts down `HalAudioOutput` (freeing `I2S_NUM_0` and
+the codec), raises the AXP2101 audio rail, starts an I2S RX channel at 16 kHz
+with MCLK = 256·fs, then resets the ES8311 and programs the ADC path (analog
+mic, 24 dB PGA, DAC muted). `end()` powers the ADC down and drops the rail; the
+next feedback cue re-initializes playback on its own. While capture is active
+the main loop skips `SoundFeedback::update()`, so button cues neither reopen
+I²S TX nor end up in the recording.
+
+The Voice Notes app records from a FreeRTOS task pinned to core 0 (priority 5,
+6 KB stack) into `/recordings/RECnnnn.wav`; 8×512-frame DMA buffers give
+256 ms of slack against SD write stalls. Transcription streams the WAV to
+`api.openai.com/v1/audio/transcriptions` (`whisper-1`) over the SDK's wolfSSL
+`SecureClient` in 4 KB chunks, so peak extra RAM is one chunk plus the TLS
+session. The API key is set on the web Settings page under Voice Notes. Wi-Fi
+comes up only for a user-started transcription and is turned off afterwards if
+the app started it. File layouts are in `docs/file-formats.md`.
+
 ## Physical acceptance gate
 
 - Confirm boot without panic/OOM and successful PSRAM, AXP2101, SDMMC, and RTC initialization.
@@ -102,6 +127,16 @@ AXP2101 shutdown path then removes system power.
 - Enter USB Drive without a connected host, cancel, and confirm the device reboots Home with the SD card mounted.
   Record `ESP.getFreeHeap()`, `ESP.getMinFreeHeap()`, and `ESP.getMaxAllocHeap()` before entry and after reboot; use
   external UART to record the same values while MSC is active when available.
+
+- Voice Notes: record 30 s, then copy `/recordings/REC0001.wav` to a computer and confirm clean 16 kHz mono audio of
+  the right length. Record again and pull power mid-recording; the file must still play, short by at most 2 s. Press
+  buttons while recording and confirm no cue plays or is captured, then confirm cues return after leaving the app.
+  Let a recording hit the 12-minute limit once.
+- Voice Notes transcription: set the OpenAI key on the web Settings page, reload, and confirm only the mask is shown.
+  Transcribe from the app with Wi-Fi off, confirm `REC0001.txt` opens in the reader and Wi-Fi is off afterwards.
+  Repeat with a wrong key (OpenAI's error is shown), with Back during upload (cancels), and with the access point
+  switched off mid-upload (clean error). Record free heap and largest block before and after five
+  record-and-transcribe cycles; they must not trend downward.
 
 Automated builds and serial logs do not substitute for the visual, button, or
 battery checks above. Record incomplete checks as pending rather than accepted.

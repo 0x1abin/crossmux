@@ -44,6 +44,7 @@
 #include "components/icons/sudoku.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
+#include "components/icons/voice_notes.h"
 #include "components/icons/wifi.h"
 #include "components/icons/woodfish.h"
 #include "fontIds.h"
@@ -136,6 +137,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return CalculatorIcon;
       case UIIcon::Woodfish:
         return WoodfishIcon;
+      case UIIcon::VoiceNotes:
+        return VoiceNotesIcon;
       default:
         return nullptr;
     }
