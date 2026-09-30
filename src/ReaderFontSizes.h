@@ -13,16 +13,7 @@
 
 // The unified firmware keeps one offline reader fallback. Other point sizes and
 // style variants are supplied by installed SD-card font families.
-#if FREEINK_DEVICE_READPICO
-// Read Pico offers 16 and 18 pt. Its panel is far denser than the X3/X4 baseline
-// denser than the X3/X4 baseline the single-size list was chosen for, so the
-// larger step is worth having in the picker. This changes only which sizes are
-// SELECTABLE: no new font is embedded, and a unit without an installed 16 pt
-// .cpfont family snaps back to 12 via snapToNearestPointSize().
-inline constexpr uint8_t BUILTIN_READER_POINT_SIZES[] = {16, 18};
-#else
 inline constexpr uint8_t BUILTIN_READER_POINT_SIZES[] = {12};
-#endif
 
 // Point sizes selectable for the active reader font, ascending: the SD family's
 // installed sizes when `sdFamilyName` names one the registry knows, otherwise
