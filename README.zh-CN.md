@@ -95,6 +95,8 @@ CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nigh
 
 Read Pico（小纸 Pico）构建命令：
 
+FreeInk SDK PR #35 合入前，请先按[设备指南](./docs/engineering/read-pico.md#current-implementation--2026-09-30)临时切换 SDK，再构建。
+
 ```bash
 pio run -e readpico
 ```

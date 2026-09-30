@@ -1,5 +1,9 @@
 # Read Pico: update onto upstream main (done)
 
+> Historical record of the earlier port. For the active epdiy implementation,
+> dependency checkout, review fixes and pending acceptance, use
+> [read-pico.md](read-pico.md#current-implementation--2026-09-30).
+
 Result: **the Read Pico port now builds on the latest upstream main.** `pio run -e
 readpico` → SUCCESS, Flash 89.9% (5,892,271 B), RAM 32.6%.
 

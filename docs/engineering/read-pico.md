@@ -1,5 +1,93 @@
 # Read Pico (小纸 Pico, RDP-G01-W)
 
+## Current implementation — 2026-09-30
+
+Read Pico uses the SDK's **epdiy LCD_CAM + GDMA + RMT** backend for the
+E0470A01 1216×684 raw parallel panel. The earlier Lovyan i80 experiment and
+converted waveforms have been removed. `ReadPicoPower.cpp` retains the board's
+rail timing and factory-PMU VCOM handling; neither calibration nor scan timing
+was retuned in this review. The application still supplies four tones through
+its existing 2-bit masks; this change does not add a native 16-tone image pipeline.
+
+CrossMux PR [#350](https://github.com/0x1abin/crossmux/pull/350) depends on SDK PR
+[#35](https://github.com/0x1abin/freeink-sdk/pull/35). Until the SDK is merged,
+CrossMux keeps main's official gitlink `ba3c44d7a56548389f00608ad36947ddf5dd80fc`.
+A normal recursive checkout therefore cannot build `readpico` yet. Test the
+combination explicitly:
+
+```bash
+git submodule update --init --recursive
+git -C freeink-sdk fetch origin refs/pull/35/head
+git -C freeink-sdk switch --detach FETCH_HEAD
+pio run -e readpico -e gh_release
+python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py
+python3 scripts/tests/test_ui_font_fallback.py
+```
+
+After SDK #35 is merged, update the official gitlink to that reviewed main
+commit and repeat the builds. Keep Read Pico outside Nightly/OTA/Web releases
+until physical acceptance is recorded.
+
+### Review fixes
+
+- Combined B/W + gray presentation carries the requested refresh profile.
+  Ordinary grayscale uses GL16; scheduled/manual FULL uses GC16 even when
+  pixels are unchanged. Image pages enter this combined path before the ordinary
+  image-base path, so they do not activate a second B/W waveform first.
+- Failed rail bring-up skips drawing. A failed waveform leaves the baseline
+  unknown; the next attempt clears physically and forces GC16. The highlevel
+  copy paths advance `back_fb` only after a successful draw.
+- PMU commands hold the existing recursive I²C lock across request, wait and
+  response. Response bytes belong to the caller's fixed 44-byte stack buffer.
+  This serializes RTC/VCOM requests without a second mutex allocation; the
+  shared bus waits for the bounded PMU round trip too.
+- Highlevel/base/selector allocation failures unwind owned buffers. Sleep
+  releases the renderer tasks and buffers, allowing a later initialization.
+  Line queues still own separately aligned 304-byte rows. Their pointer tables
+  now use `sizeof(pointer)`: on the S3, two 64-entry tables request 512 bytes
+  rather than 38,912 bytes, a **38,400-byte reduction in allocation requests**.
+- UI keeps stable embedded font-slot IDs. Read Pico binds the slots to exact
+  12/12/14 pt faces from the selected SD family when available, including Latin
+  families; unload or a missing size falls back to embedded fonts. No retired
+  font-ID map or allocation during font-ID lookup is needed. The built-in reader
+  picker advertises only its actual 12 pt face; installed SD families expose
+  their own sizes. Network preparation does not immediately reload released fonts.
+- Toolbar is the Read Pico first-boot default and respects saved settings.
+  AirPage keeps the shared four-tone request supported by the current pipeline.
+
+### Validation record
+
+SDK rebased onto `ab8c859389725bc91a0d44c2de32c24c64fc893b`; CrossMux onto
+`64282343da004f434edf1f4ccb0a6170888e523f`. Both original histories are saved
+locally as `codex/backup-readpico-before-rebase` in their respective repositories.
+SDK's final rebase tree equals the original port plus main's eight changed paths.
+CrossMux range-diff preserves every nonempty source commit; SDK-only pointer
+bumps become empty because the official dependency stays at main. The only
+additional rebase-stage commit fixes the font test harness's resolver interface.
+Both original PR branches were updated with leases naming their saved old SHAs.
+
+The rebase combination passed `readpico` and `gh_release` builds, 59 relevant
+font/image tests, and the SDK SSD1677/combined-AA checks. The review candidate's
+host transaction checks compile the complete driver, wrapper, highlevel and PMU
+source. They cover mode selection, unchanged FULL, rail/draw failure recovery,
+seven injected allocation failures, sleep/reinitialization, queue allocation size
+and simultaneous RTC/VCOM commands. These are software checks, not electrical
+or optical acceptance. Full CI and final dependency checks are recorded in the
+PR descriptions when complete.
+
+Physical acceptance remains pending: record the exact firmware/SDK revisions,
+boot and heap logs, text/image turns across periodic and manual cleanups,
+grayscale-to-menu transitions, touch/strip/power gestures, SD read/write,
+RTC synchronization during refresh, battery/USB readings, shutdown and at least
+three sleep/wake cycles. Confirm saved menu/font choices survive reboot.
+
+## Historical port investigation
+
+The dated notes below preserve the original hardware evidence and experiments.
+Earlier build flags, Lovyan interfaces, refs, blockers and validation statements
+are historical; the current implementation and commands above take precedence.
+
+
 Read Pico is an ESP32-S3 e-paper dev board from Shenzhen MindReset Technology
 Co., Ltd. Its 4.7" panel (E0470A01) has **no on-glass controller**: the MCU clocks
 every gate line through the ESP32-S3 LCD (i80) peripheral, and a SY7636A PMIC
@@ -1532,5 +1620,3 @@ the same pattern found no other site, and `HalDisplay::BUFFER_SIZE` was already
 
 **Latent upstream bug.** Any future panel whose framebuffer exceeds 64 KB would hit this,
 so the fix is worth keeping even though only this board currently trips it.
-
-

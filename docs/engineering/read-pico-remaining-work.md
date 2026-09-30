@@ -1,5 +1,9 @@
 # Read Pico（小纸 Pico）适配 — 未完成事项交接记录
 
+> Historical record of the earlier port. For the active epdiy implementation,
+> dependency checkout, review fixes and pending acceptance, use
+> [read-pico.md](read-pico.md#current-implementation--2026-09-30).
+
 > 状态：**已编译通过（2026-09-25），未烧写，未做真机验收。** 本文件记录剩下没做的事、
 > 必须由人决策的岔路口、已知缺陷，以及恢复工作时的入口。设备事实与冻结接口规格见
 > [read-pico.md](read-pico.md)（89,629 B）。

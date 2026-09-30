@@ -95,6 +95,8 @@ The development application is `.pio/build/metalio_eink4/firmware.bin`; first in
 
 For Read Pico (小纸 Pico):
 
+Until FreeInk SDK PR #35 is merged, first follow the temporary SDK checkout in the [Read Pico guide](./docs/engineering/read-pico.md#current-implementation--2026-09-30).
+
 ```bash
 pio run -e readpico
 ```
