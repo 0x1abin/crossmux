@@ -460,6 +460,35 @@ class NightlyRetentionTest(unittest.TestCase):
             }
         return {'schemaVersion': 1, 'channel': 'nightly', 'targets': targets}
 
+    def test_previous_target_set_can_differ_from_current_targets(self):
+        current = f'nightly-build-{"a" * 40}-10-1'
+        previous = f'nightly-build-{"b" * 40}-9-1'
+        fallback = f'nightly-build-{"c" * 40}-8-1'
+        obsolete = f'nightly-build-{"d" * 40}-7-1'
+        for storage in ('github', 'cos'):
+            for removed_target in (None, 'retired_device'):
+                with self.subTest(storage=storage, removed_target=removed_target):
+                    index = self.previous_index(storage, previous, fallback)
+                    entry = index['targets'].pop('readpico')
+                    if removed_target:
+                        entry['targetId'] = removed_target
+                        index['targets'][removed_target] = entry
+                    self.assertEqual(
+                        nightly_retention.obsolete_builds(
+                            storage, current, index,
+                            '\n'.join((current, previous, fallback, obsolete)),
+                        ),
+                        [obsolete],
+                    )
+
+    def test_rejects_empty_previous_target_set(self):
+        for targets in ({}, None, []):
+            with self.subTest(targets=targets):
+                with self.assertRaisesRegex(ValueError, 'non-empty target set'):
+                    nightly_retention.referenced_builds(
+                        {'schemaVersion': 1, 'channel': 'nightly', 'targets': targets}, 'cos'
+                    )
+
     def test_github_keeps_current_and_every_build_in_previous_index(self):
         current = f'nightly-build-{"a" * 40}-10-1'
         previous = f'nightly-build-{"b" * 40}-9-1'
