@@ -111,6 +111,20 @@ baseline without triggering a page turn. Gyroscope targets retain 50 ms polling.
 Host checks cover both paths; existing gesture thresholds still need hardware
 calibration.
 
+### Bottom clearance
+
+The reported bottom-edge obstruction is provisionally handled by portrait
+`viewableInsets = {9, 3, 24, 3}` (top/right/bottom/left, in pixels). The 24 px
+bottom value is a starting clearance, not a measured bezel dimension. Tune this
+single board-profile value against the visible glass on hardware.
+
+Reader text/status bars and FreeInkUI screens already consume the renderer's
+oriented insets. The legacy UITheme safe-area and list-capacity calculations now
+use the same area on Read Pico. FreeInkUI drawing and touch routing share the
+resulting layout; the raw touch calibration is unchanged. Verify the lowest row,
+progress bar and bottom controls in all four rotations, including taps near the
+new boundary, before accepting the clearance.
+
 ### Optional measurements
 
 `FREEINK_READPICO_DIAGNOSTICS=1` enables two fixed 12-byte statistics records and
