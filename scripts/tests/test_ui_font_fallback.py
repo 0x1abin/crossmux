@@ -136,12 +136,15 @@ struct GfxRenderer {
   void prewarmFallbackText(int,const char*,EpdFontFamily::Style=EpdFontFamily::REGULAR) const;
   std::map<int, EpdFontFamily> fontMap;
   std::map<int, std::array<int, 2>> fallbackFontMap_;
+  std::map<int, int> preferredFontMap_;
+  std::map<int, int> retiredFontIdFallback_;
   using TextGetter = const char* (*)(const void*, uint32_t);
   void prewarmFallbackText(int,TextGetter,const void*,uint32_t,EpdFontFamily::Style=EpdFontFamily::REGULAR) const;
   std::map<int, SdCardFont*> sdCardFonts_;
   std::map<int, int> sdCardFontScales_;
   const auto& getFontMap() const { return fontMap; }
   int resolveTextFontId(int, const char*, EpdFontFamily::Style = EpdFontFamily::REGULAR) const;
+  int resolveFontFamilyId(int) const;
   void clearSdCardFonts() { sdCardFonts_.clear(); sdCardFontScales_.clear(); }
 ''' + method(header, 'void setFallbackFont(') + '\n' + method(header, 'void removeFont(') + r'''
 };
@@ -190,7 +193,8 @@ struct SdCardFontSystem {
   SdCardFontManager manager_;
   void setupUiFallbacks(GfxRenderer&);
 };
-''' + table + '\n' + method(renderer, 'int GfxRenderer::resolveTextFontId(') + '\n'
+''' + table + '\n' + method(renderer, 'int GfxRenderer::resolveFontFamilyId(') + '\n'
+        program += method(renderer, 'int GfxRenderer::resolveTextFontId(') + '\n'
         for name in ('bool SdCardFontManager::loadFamily(', 'int SdCardFontManager::loadFamilyExtraSize(',
                      'void SdCardFontManager::unloadAll(', 'int SdCardFontManager::getFontId('):
             program += method(manager, name) + '\n'
