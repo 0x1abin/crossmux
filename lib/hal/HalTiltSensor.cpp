@@ -90,6 +90,11 @@ bool HalTiltSensor::wake() {
   _lastTiltMs = millis();
   _wakeMs = millis();
   _isAwake = true;
+  if (_accelOnly) {
+    _lastTiltGMs = 0;
+    _inTilt = false;
+    clearPendingEvents();
+  }
   return true;
 }
 
@@ -115,6 +120,14 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
   }
 
   const bool shouldBeAwake = mode != CrossPointTiltPageTurn::TILT_OFF && inReader;
+  if (_accelOnly && (mode != _accelMode || orientation != _accelOrientation || shouldBeAwake != _accelReading)) {
+    _accelMode = static_cast<CrossPointTiltPageTurn::Value>(mode);
+    _accelOrientation = static_cast<CrossPointOrientation::Value>(orientation);
+    _accelReading = shouldBeAwake;
+    _lastTiltGMs = 0;
+    _inTilt = false;
+    clearPendingEvents();
+  }
   if (shouldBeAwake && !_isAwake) {
     _isAwake = wake();
     return;
@@ -134,7 +147,8 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
     return;
   }
 
-  if ((now - _lastPollMs) < POLL_INTERVAL_MS) {
+  const unsigned long pollInterval = _accelOnly ? ACCEL_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
+  if ((now - _lastPollMs) < pollInterval) {
     return;
   }
   _lastPollMs = now;
@@ -148,6 +162,7 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
   if (_accelOnly) {
     float ax, ay, az;
     if (!readAccel(ax, ay, az)) {
+      _lastTiltGMs = 0;
       return;
     }
     // The gyro measures angular rate ABOUT the tilt axis; the accelerometer measures the
@@ -160,9 +175,12 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
     // gyro's rotation rate for the same physical sway; flipping here rather than inside
     // tiltAxisFor() leaves the gyro boards' convention exactly as it was.
     const float sample = -tiltAxisFor(mode, orientation, ax, ay);
-    tiltAxis = (_lastTiltGMs != 0 && now > _lastTiltGMs)
-                   ? (sample - _lastTiltG) * 1000.0f / static_cast<float>(now - _lastTiltGMs)
-                   : 0.0f;
+    if (_lastTiltGMs == 0) {
+      _lastTiltG = sample;
+      _lastTiltGMs = now;
+      return;
+    }
+    tiltAxis = (sample - _lastTiltG) * 1000.0f / static_cast<float>(now - _lastTiltGMs);
     _lastTiltG = sample;
     _lastTiltGMs = now;
     rateThreshold = RATE_THRESHOLD_GPS;

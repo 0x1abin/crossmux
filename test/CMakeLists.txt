@@ -129,3 +129,6 @@ add_test(NAME InxRecentThumbnails
 
 add_test(NAME UiFontFallback
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)
+
+add_test(NAME HalTiltGestures
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
