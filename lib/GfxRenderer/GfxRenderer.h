@@ -137,10 +137,6 @@ class GfxRenderer {
   std::map<int, std::array<int, 2>> fallbackFontMap_;
   // fontId -> the family it should actually resolve to (see setPreferredFont()).
   std::map<int, int> preferredFontMap_;
-  // Retired SD face id -> the UI slot it served (see registerFontIdFallback()). Survives
-  // removeFont(), which is what makes a stale id recoverable rather than fatal.
-  std::map<int, int> retiredFontIdFallback_;
-
   // The family a font id really resolves to (identity unless rebound). EVERY path that
   // looks a family up -- glyph coverage, metrics, preloading -- must go through this,
   // or a rebound id is laid out with the built-in face and drawn in the SD one.
@@ -188,6 +184,8 @@ class GfxRenderer {
     fontMap.erase(fontId);
     sdCardFonts_.erase(fontId);
     sdCardFontScales_.erase(fontId);
+    std::erase_if(preferredFontMap_,
+                  [fontId](const auto& mapping) { return mapping.first == fontId || mapping.second == fontId; });
     for (auto& [primary, fallbacks] : fallbackFontMap_) {
       std::replace(fallbacks.begin(), fallbacks.end(), fontId, 0);
     }
@@ -234,15 +232,6 @@ class GfxRenderer {
   // every other target behaves exactly as before.
   void setPreferredFont(int fontId, int preferredFontId) { preferredFontMap_[fontId] = preferredFontId; }
   void clearPreferredFonts() { preferredFontMap_.clear(); }
-  // Record what a (transient) SD face id stood for, so it can still be resolved after
-  // the family that supplied it is unloaded. A screen built while family A was active
-  // holds A's ids; switching to family B removes them, and without this the stale id
-  // resolves to nothing and every glyph on that screen draws as blank. Registering the
-  // UI slot it served keeps the text readable on the built-in face until the screen is
-  // rebuilt, at which point it picks up family B.
-  void registerFontIdFallback(int retiredFontId, int fallbackFontId) {
-    retiredFontIdFallback_[retiredFontId] = fallbackFontId;
-  }
   // Ensure SD card font glyph data is loaded for the given text. Called from layout code
   // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on non-SD fonts (no-op).
   // styleMask: bitmask of styles to prepare (bit 0=regular, 1=bold, 2=italic, 3=bold-italic).

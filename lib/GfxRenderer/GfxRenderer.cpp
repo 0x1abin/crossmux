@@ -208,15 +208,6 @@ int GfxRenderer::resolveFontFamilyId(const int fontId) const {
   const auto it = preferredFontMap_.find(fontId);
   const int candidate = (it != preferredFontMap_.end()) ? it->second : fontId;
   if (fontMap.find(candidate) != fontMap.end()) return candidate;
-  // The requested id -- or the family it was rebound to -- is no longer registered. An
-  // SD face is removed from fontMap whenever its family is released (WiFi, BLE, the
-  // reader) or replaced by a settings change, and a screen built before that still holds
-  // the old id. Returning it would make every draw log "[ERR] [GFX] Font N not found" and
-  // render nothing, blanking the whole screen. Recover through the UI slot that id used
-  // to serve: that slot is either the built-in face (always registered) or rebound to the
-  // new family, so the text stays readable either way.
-  const auto retired = retiredFontIdFallback_.find(fontId);
-  if (retired != retiredFontIdFallback_.end()) return retired->second;
   return fontId;
 }
 
@@ -244,7 +235,7 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
     uint32_t cp;
     while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
 #if CONFIG_IDF_TARGET_ESP32S3 && defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
-      const bool eligible = cp >= 0x80;
+      const bool eligible = effectiveFontId != fontId || cp >= 0x80;
 #else
       const bool eligible = utf8IsCjkCodepoint(cp);
 #endif

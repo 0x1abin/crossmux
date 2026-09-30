@@ -62,21 +62,6 @@ void prepare(GfxRenderer& renderer) {
     sdFontSystem.releaseLoadedFont(renderer);
     if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
   }
-
-  // Releasing only helps WiFi if it actually enlarges the largest allocatable
-  // internal block -- free bytes alone are not what the radio needs. On Read Pico
-  // the SD family's tables live in PSRAM, so dropping it changes freeInternal but
-  // leaves largestInternalBlock at its 31,732-byte ceiling, meaning the release buys
-  // nothing while costing the UI the glyph fallback it draws CJK with (WiFi and
-  // AirPage then render in the built-in faces). Put the family back when the release
-  // did not move the block the gate is actually about; targets where it does help
-  // keep the old behaviour because the comparison fails.
-  const MemorySnapshot after = readMemorySnapshot();
-  LOG_DBG("NET", "Released render memory for the network: largest internal block %u -> %u",
-          static_cast<unsigned>(before.largestInternalBlock), static_cast<unsigned>(after.largestInternalBlock));
-  if (after.largestInternalBlock <= before.largestInternalBlock) {
-    sdFontSystem.ensureLoaded(renderer);
-  }
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {

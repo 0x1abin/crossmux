@@ -38,15 +38,6 @@ class SdCardFontSystem {
   /// adoptCompleteChineseNotoSans() can probe the reader size cheaply.
   int resolveFontId(const char* familyName, uint8_t pointSize) const;
 
-  /// Resolve the SD font ID for a UI point size, additively loading that exact
-  /// size from the active family when it is not resident yet. A requested size
-  /// already resident (typically the reader face) is reused without loading, so
-  /// CrossPointSettings::getReaderFontId() keeps its old behaviour. Returns 0 when
-  /// the family ships no face at that size, which makes the caller keep its
-  /// built-in UI font. Requires begin() or ensureLoaded() to have supplied the
-  /// renderer.
-  int resolveUiFontId(const char* familyName, uint8_t pointSize);
-
   /// Access the registry (e.g. for settings UI to enumerate available fonts).
   const SdCardFontRegistry& registry() const { return registry_; }
 
@@ -80,9 +71,6 @@ class SdCardFontSystem {
 
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;
-  // Last renderer passed to begin()/ensureLoaded(); needed to additively load
-  // extra UI sizes on demand. Null until either has run.
-  GfxRenderer* renderer_ = nullptr;
   std::atomic<bool> registryDirty_{false};
 };
 

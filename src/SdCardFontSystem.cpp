@@ -52,16 +52,13 @@ constexpr uint8_t kReadPicoUiPointSizes[] = {12, 12, 14};
 }  // namespace
 
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
-  renderer_ = &renderer;
   registry_.discover();
   adoptCompleteChineseNotoSans();
 
   // Register this system as the SD font ID resolver in settings.
   // Uses a static trampoline since CrossPointSettings stores a plain function pointer.
-  // resolveUiFontId() (not resolveFontId()) so a UI size that is not resident is
-  // additively loaded; a size that is resident is reused without loading.
   SETTINGS.sdFontIdResolver = [](void* ctx, const char* familyName, uint8_t pointSize) -> int {
-    return static_cast<SdCardFontSystem*>(ctx)->resolveUiFontId(familyName, pointSize);
+    return static_cast<SdCardFontSystem*>(ctx)->resolveFontId(familyName, pointSize);
   };
   SETTINGS.sdFontResolverCtx = this;
 
@@ -87,7 +84,6 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache) {
-  renderer_ = &renderer;
   // If the web server (or another task) installed/deleted fonts, re-discover.
   // Track whether we just re-discovered so we can force a reload below even
   // when the wanted family/size still maps to the same point size — the file
@@ -203,6 +199,8 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
   const auto* family = registry_.findFamily(familyName);
   if (!family) return;
 
+  renderer.clearPreferredFonts();
+#if !FREEINK_DEVICE_READPICO
   // Probe the reader face before loading additional UI sizes.
   const auto readerIt = renderer.getFontMap().find(manager_.getFontId(familyName));
   if (readerIt == renderer.getFontMap().end()) return;
@@ -235,6 +233,8 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
     return;
   }
 
+#endif
+
   for (size_t i = 0; i < std::size(kUiFontSizes); ++i) {
     const auto& ui = kUiFontSizes[i];
 #if FREEINK_DEVICE_READPICO
@@ -253,10 +253,6 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
       // path on the SD face; this id's own fontMap entry (the built-in UI font) becomes
       // the fallback for glyphs the SD face lacks, then the embedded CJK subset.
       renderer.setPreferredFont(ui.fontId, exactId);
-      // Remember what this SD id stood for. Once the family is unloaded or replaced, a
-      // screen that already holds the id recovers through ui.fontId instead of drawing
-      // nothing -- the stale-id blank screen.
-      renderer.registerFontIdFallback(exactId, ui.fontId);
       renderer.setFallbackFont(ui.fontId, ui.fontId, ui.builtinFallbackId);
 #else
       renderer.setFallbackFont(ui.fontId, exactId, ui.builtinFallbackId);
@@ -270,8 +266,7 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
       // without the UI sizes should fall back to the flashed fonts, not silently render
       // the UI at some other point size.
       renderer.setFallbackFont(ui.fontId, ui.builtinFallbackId, 0);
-      LOG_DBG("SDFS", "No %u pt SD glyphs in %s - UI stays on the built-in fonts", pointSize,
-              familyName.c_str());
+      LOG_DBG("SDFS", "No %u pt SD glyphs in %s - UI stays on the built-in fonts", pointSize, familyName.c_str());
     }
   }
 #endif
@@ -282,25 +277,4 @@ int SdCardFontSystem::resolveFontId(const char* familyName, uint8_t /*pointSize*
   // SETTINGS.fontPointSize, so the size argument is implicit — always return
   // that font's ID. ensureLoaded() must have run for the current settings first.
   return manager_.getFontId(familyName);
-}
-
-int SdCardFontSystem::resolveUiFontId(const char* familyName, uint8_t pointSize) {
-  if (familyName == nullptr || familyName[0] == '\0' || pointSize == 0) return 0;
-
-  // Only the active family can supply extra faces; anything else is a stale name.
-  const auto* family = registry_.findFamily(familyName);
-  if (family != nullptr && renderer_ != nullptr) {
-    // Additively load this exact size if the family ships it. A size already
-    // resident (the reader face, or a UI size resolved earlier) is reused and
-    // nothing is loaded — this is what keeps getReaderFontId() a no-op.
-    const int id = manager_.loadFamilyExtraSize(*family, *renderer_, pointSize);
-    if (id != 0) return id;
-    LOG_DBG("SDFS", "No %u pt face in %s for UI", pointSize, familyName);
-  }
-
-  // The family ships no face at this size. Return 0 so the caller keeps its
-  // built-in UI font: the reader face is usually a very different size, and
-  // substituting it would silently blow the slot up (e.g. a 14 pt title becoming
-  // the 22 pt reader face) rather than degrade to something readable.
-  return 0;
 }

@@ -137,7 +137,6 @@ struct GfxRenderer {
   std::map<int, EpdFontFamily> fontMap;
   std::map<int, std::array<int, 2>> fallbackFontMap_;
   std::map<int, int> preferredFontMap_;
-  std::map<int, int> retiredFontIdFallback_;
   using TextGetter = const char* (*)(const void*, uint32_t);
   void prewarmFallbackText(int,TextGetter,const void*,uint32_t,EpdFontFamily::Style=EpdFontFamily::REGULAR) const;
   std::map<int, SdCardFont*> sdCardFonts_;
@@ -145,6 +144,8 @@ struct GfxRenderer {
   const auto& getFontMap() const { return fontMap; }
   int resolveTextFontId(int, const char*, EpdFontFamily::Style = EpdFontFamily::REGULAR) const;
   int resolveFontFamilyId(int) const;
+  void clearPreferredFonts() { preferredFontMap_.clear(); }
+  void setPreferredFont(int id,int preferred) { preferredFontMap_[id]=preferred; }
   void clearSdCardFonts() { sdCardFonts_.clear(); sdCardFontScales_.clear(); }
 ''' + method(header, 'void setFallbackFont(') + '\n' + method(header, 'void removeFont(') + r'''
 };
@@ -221,6 +222,33 @@ int main() {
     assert(s.manager_.loadFamily(s.registry_.family, r, readerSize));
     s.setupUiFallbacks(r);
     constexpr bool enabled = EXPECT_ENABLED;
+    if constexpr (EXPECT_READPICO) {
+      const bool active=memory::healthy;
+      assert(s.manager_.loads==(active ? 2 : 1)); // shared 12 pt + title 14 pt
+      for (int id=1; id<=3; ++id) {
+        const int chosen=active ? (id==3 ? 114 : 112) : id;
+        assert(r.resolveFontFamilyId(id)==chosen);
+        measured=drawn=nullptr;
+        r.getTextWidth(id,"A");
+        r.drawText(id,0,0,"A");
+        assert(measured==&r.fontMap.at(chosen) && drawn==measured);
+      }
+      if (active) {
+        r.fontMap.at(112).coverage.erase('A');
+        assert(r.resolveTextFontId(2,"A")==2); // SD faces may omit ASCII too
+      }
+      s.manager_.unloadAll(r);
+      assert(r.preferredFontMap_.empty());
+      for (int id=1; id<=3; ++id) assert(r.resolveFontFamilyId(id)==id);
+      memory::healthy=true;
+      s.registry_.family.files.erase(12);
+      assert(s.manager_.loadFamily(s.registry_.family,r,14));
+      s.setupUiFallbacks(r);
+      assert(r.resolveFontFamilyId(1)==1 && r.resolveFontFamilyId(2)==2);
+      assert(r.resolveFontFamilyId(3)==114);
+      s.manager_.unloadAll(r);
+      continue;
+    }
     const bool active = enabled && scenario!=3 && scenario!=4;
     assert(s.manager_.loads == (active ? (scenario==0 || scenario==6 ? 4 : 3) : 1));
     assert(s.manager_.readerCacheLoads==1);
@@ -294,6 +322,7 @@ int main() {
 }
 '''
         configurations = (
+            ('readpico', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'FREEINK_DEVICE_READPICO=1'], True),
             ('s3', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM'], True),
             ('c3', ['CONFIG_IDF_TARGET_ESP32C3=1'], False),
             ('s3_no_psram', ['CONFIG_IDF_TARGET_ESP32S3=1'], False),
@@ -308,6 +337,7 @@ int main() {
                 with self.subTest(target=name):
                     subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                     '-DENABLE_CHINESE_VERSION=1', f'-DEXPECT_ENABLED={int(enabled)}',
+                                    f'-DEXPECT_READPICO={int(name == "readpico")}',
                                     *[f'-D{value}' for value in defines],
                                     '-I', str(ROOT / 'lib/Utf8'), '-I', str(ROOT / 'lib/EpdFont'),
                                     '-I', str(ROOT / 'lib/MiniBidi'), str(cpp),
