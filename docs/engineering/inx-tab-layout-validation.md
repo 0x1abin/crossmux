@@ -1,159 +1,151 @@
 # Inx tab layout validation
 
-Validated against main `03a9c7ce4daa28fbac81c62b4d9b82d5a792b60e`, with its pinned
-FreeInk SDK `34d36ecc37b192f0082cb889a8bb53c887b8d096` and simulator
-`dacbbbcdc133a052f9122347429fdcb8cddf80af`.
+## Current behavior
 
-The touch-only bottom-tab layout reserves a 28 px status bar inside the board's
-viewable margins, then a 6 px gap, content, another 6 px gap, and navigation.
-All five tabs share this geometry. The clock follows the configured format and
-time zone; invalid time displays `--:--`. It updates on page renders, without
-adding periodic display refreshes. Battery percentage follows its existing setting.
+The source is based on main `03a9c7ce4daa28fbac81c62b4d9b82d5a792b60e`,
+with pinned FreeInk SDK `34d36ecc37b192f0082cb889a8bb53c887b8d096`
+and simulator `dacbbbcdc133a052f9122347429fdcb8cddf80af`.
 
-Bottom navigation is 56 px high and has no full-width separator. Its centered
-38 × 5 px selected marker stays on the top edge. The 38 px icons sit 6 px above
-the navigation area's bottom edge, leaving a 7 px gap below the selected marker.
-The inset is visual padding inside navigation, additional to the board's safe
-margins. Touch bottom-tab pages gain 6 px of content compared with the tested
-32/58 px bars, or 26 px compared with the earlier 44/66 px bars.
-Physical-button hints and the tabs' 6 px horizontal gaps remain.
-Top-tab rendering and the reader/subpages retain their existing geometry.
+The Tab-position setting appears only for Inx, in the device UI and
+English/Chinese web settings. Touch devices default to Bottom; button-only
+devices default to Top. Existing saved choices and the settings schema are
+preserved.
 
-## Layout ownership
+Touch Inx bottom-tab pages share a 28 px upper status area, a 6 px gap,
+content, another 6 px gap, and 56 px navigation. Recent, Library, Apps, Settings
+and Statistics display local time on the left and battery on the right.
+Time follows the configured format and time zone; invalid time shows `--:--`.
+It updates only on page renders, without periodic refreshes or wake-ups.
+Tapping the upper status area opens the existing control center.
 
-- `Activity::mainTabLayout()` resolves device margins once and returns the
-  complete status, content and navigation rectangles. Drawing and input consume
-  those rectangles; there is no retained layout cache or extra allocation.
-- `Activity::pageContentRect()` owns the main-tab / regular-header choice for
-  all five pages. Individual pages only reserve their own internal spacing.
-- App-grid drawing and touch lookup share the same content rectangle and cell
-  bounds. Geometry uses the existing `Rect` type from a lightweight header,
-  without importing theme implementations or duplicating rectangle types.
-- Tab preference defaults are initialized directly from the board's touch
-  capability. Existing saved values and the settings schema are unchanged;
-  no separate default-value function or host-test stub is needed.
+Bottom navigation has no full-width separator. The centered 38 × 5 px selected
+marker stays on its upper edge; 38 px icons sit 6 px above its bottom edge,
+leaving 7 px below the marker. Oriented hardware margins, physical-button hints
+and the tabs' 6 px horizontal gaps remain reserved.
 
-## Automated checks
+With top tabs, touch Inx Recent displays only its bottom-right battery inside
+the existing 40 px footer. It neither formats nor draws a footer clock and adds
+no footer touch action. Both status placements use a 12 px logical-screen-edge
+inset, with hardware margins as minimum limits rather than additive padding.
+Clock and battery percentage share the numeric font and baseline; positioning
+compensates for the battery icon's internal 6 px offset and inclusive edge
+pixels. Drawing is clipped to the supplied rectangle; percentage visibility
+uses the existing setting.
+
+Top-tab navigation, non-touch home battery, other themes, reader/subpages,
+content reservations and input rectangles keep their established behavior.
+
+### Ownership and review
+
+- `Activity::mainTabLayout()` returns status, content and navigation rectangles;
+  drawing and hit testing share them. `pageContentRect()` owns the main-tab /
+  regular-header choice; pages reserve only their own internal spacing.
+- App-grid drawing and touch lookup share cell bounds and the lightweight
+  `Rect` type. No layout cache or extra allocation is introduced.
+- `drawMainTabStatusBar()` owns both status placements. Only bottom tabs use
+  the existing time formatter and 9-byte stack buffer; the top-tab Recent
+  footer reuses its battery alignment without a second clock implementation.
+- The existing separate renderer correction intersects logical clipping before
+  rotation, preventing partial list-row fills from covering neighboring UI.
+- Review found no need for another production abstraction. The latest update
+  publishes the final corner alignment directly, without intermediate
+  clock-addition/removal commits, and consolidates repeated validation prose.
+  No public interface, dependency or configuration is added by this follow-up.
+
+## Verification methods
 
 ```sh
 cmake -S test -B build/test
-cmake --build build/test --target InxNavigationTest TimeUtilsTest -j 4
-ctest --test-dir build/test -R 'InxNavigation|TimeUtils|ControlCenterGesture|InxStyleCompatibility' --output-on-failure
 cmake --build build/test -j 4
 ctest --test-dir build/test --output-on-failure -j 4
+ctest --test-dir build/test -R 'InxNavigation|TimeUtils|ControlCenterGesture|InxStyleCompatibility' --output-on-failure
 python3 -m unittest discover -v -s scripts/tests
 ./bin/clang-format-fix --check
+git diff --check
 pio run -e simulator -e simulator_eego_a4 -e simulator_murphy_m4
+pio run -e metalio_eink4
 ```
 
-The 30 focused checks cover tab order, drawing/hit bounds and gaps, status-bar
-eligibility, content reservations, app-grid hit bounds, and valid/invalid
-12/24-hour time formatting. Layout tests include nonzero horizontal/vertical
-safe-area origins and theme top padding in both tab positions. The control-center
-dispatch harness uses the production layout type and exercises all five pages
-at each status-rectangle edge and outside it, including the content gap,
-zero-height status bars (top tabs), and non-touch input.
+Host checks cover tab order, shared drawing/hit bounds, inert gaps, status
+eligibility, safe-area origins, content reservations, app-grid boundaries,
+control-center edge taps, time formatting, Metalio firmware/display behavior
+and renderer clipping. The production status/footer seam additionally checks
+hardware limits, percentage visibility, invalid time, both clock formats and
+that the top-tab footer does not call time formatting.
 
-The compact-layout checks additionally cover the 28/56 px bars, 6 px content
-gain, and control-center rejection of taps inside the former taller status area.
-All 30 focused checks pass, as do two existing two-bit renderer checks, four
-Metalio firmware/display checks, one SDK charger check, five reading-UI checks,
-repository formatting and whitespace checks.
-The complete host suite passes 579/579 tests. Python discovery runs 72 tests:
-71 pass and one font-regeneration check is skipped by its default policy.
+Native runs use isolated `CROSSPOINT_SIM_SD` directories and the simulator's
+scripted input interface. For example, its `.crosspoint/settings.json` can start
+with `{"uiTheme":5,"language":"EN","onboardingVersion":1,"clockUtcOffsetQ":80}`.
+Omitting `inxTabPosition` tests the board default; `0` selects Top and `1`
+Bottom. Use `language: "ZH_CN"` and `clockFormat: 1` for Chinese and 12-hour time.
 
-The optimized rectangle fill now intersects the existing logical clip rectangle
-before rotation, keeping partial trailing rows inside their list body. The host
-regression compares the production fill against a per-pixel reference across all
-four orientations, solid/dither fills, off-screen and empty clips, and full/strip
-framebuffers. It fails without the correction and passes with it:
+Main menus normally run in portrait. Landscape stress checks temporarily
+change the live renderer orientation at `InxRecentActivity::onEnter()` using
+GDB; they add no menu-rotation setting. Normalized input coordinates account
+for the simulator parsing the schedule before this breakpoint. A separate
+GDB override fixes time or injects invalid time and larger status bounds.
 
-```sh
-python3 -m unittest discover -v -s scripts/tests -p 'test_gfx_fill_clip.py'
-```
+## Latest local results
 
-## Native simulator checks
+The final-layout verification on 2026-09-30 retains the source behavior of the
+previously verified no-footer-clock candidate. Logs and local artifacts remain
+in ignored directories; none are part of the PR.
 
-All twelve native scenarios pass using isolated simulated SD cards:
+- Complete host suite: 579/579 pass. Python discovery: 72 pass and one
+  font-regeneration check skipped by default policy. Formatting and whitespace
+  checks pass.
+- All 38 native scenarios pass: A4/M4 empty and 25-book lists, English/Chinese,
+  top/bottom navigation, Classic, button-only X4, percentage visibility, invalid
+  time, larger hardware bounds, and all five populated Recent layouts at
+  480 × 800 and 800 × 480. Pixel comparisons confirm all 196 rendered frames
+  match the previous final-layout baseline exactly.
+- Additional 480 × 800 interaction checks pass: control-center open/close on
+  all five pages, inert status/tab gaps, passive footer, and first/last library
+  items opened by touch. Saved Top/Bottom preferences are retained.
+- `simulator`, `simulator_eego_a4`, `simulator_murphy_m4` and regular
+  `metalio_eink4` builds pass. Metalio reports 99,732 bytes static RAM and
+  5,932,515 bytes Flash; these are whole-image totals, not measured savings.
+- The application is 5,933,008 bytes and fits the 6,553,600-byte OTA slot.
+  ESP32-S3 identity, Metalio board tag, partition layout, checksum and image
+  validation hash pass. SHA-256:
+  `8db1ef0ede41f2e76c7c29e8fb6e6347f004a3ea7dd59b376e73be5c0c8b1821`.
 
-| Device | Scenarios |
-| --- | --- |
-| A4 | English empty state, Chinese 25-book list, English landscape, top tabs, hidden battery percentage |
-| Murphy M4 | Chinese empty state, English 25-book list, Chinese landscape, top tabs, Classic theme |
-| X4 (no touch) | Default top tabs and explicitly selected bottom tabs, with button navigation |
+This rebuilt application is stored in
+`.cache/firmware/metalio_eink4-inx-pr-final/`, with its build and validation logs.
+It is an application image for the existing CrossMux Wi-Fi update flow, not a
+merged full-install image. It has not been flashed. The earlier no-footer-clock
+candidate and device backups are preserved.
 
-Each Inx run visits Recent, Library, Apps, Settings and Statistics.
-Saved Top and Bottom preferences are retained. On the 28/56 px layout, additional
-480 × 800 native runs open and close the control center on all five pages,
-reject taps in the former taller status area and between adjacent tabs, and open
-the first and last books of a 25-book library using touch navigation.
+## Historical device records and limits
 
-The visual checks verify the absence of a full-width bottom separator, the
-38 × 5 px selected marker, 7 px marker-to-icon gap, 6 px bottom padding,
-time/battery visibility, preserved safe margins and X4 button hints. Murphy M4
-portrait uses 480 × 800; A4 and landscape runs provide additional regression
-coverage. All 56 page pixel checks pass, including the A4 Chinese long-list
-library page with a partial trailing row. Its background no longer overwrites
-the path band or selected Tab marker. Top-tab and Classic checks retain the
-previous rendering. Verification artifacts stay in local ignored directories.
+The following records identify older images; they are not flashing or physical
+acceptance evidence for the current candidate.
 
-Use `CROSSPOINT_SIM_SD` to select an isolated SD directory. Its
-`.crosspoint/settings.json` can start with
-`{"uiTheme":5,"language":"EN","onboardingVersion":1,"clockUtcOffsetQ":80}`.
-Omitting `inxTabPosition` tests the board default; `0` selects top, `1` bottom.
-Use `language: "ZH_CN"` and `clockFormat: 1` for Chinese and a 12-hour clock.
+- Compact-v2 application: 5,932,816 bytes, SHA-256
+  `0fcce94784607a994c6635b86d964408063cb5d91a1619f13f94da5750a9bdbb`.
+  The active application slot was flashed and independently verified; USB reset
+  loaded saved settings and reached Inx Recent.
+- Corner-alignment application with the now-removed footer clock:
+  5,933,008 bytes, SHA-256
+  `c0968a79e03a4a857964c8bb0cdb0d2287a32a7f648db24d034fa9c7b1ef2b7e`.
+  After explicit authorization on 2026-09-29, the same Metalio device's complete
+  active app1 slot was backed up and verified before writing at `0x650000`.
+  Write and independent application verification matched; USB reset identified
+  Metalio, loaded saved settings and entered Inx Recent. No bootloader, partition
+  table, OTA metadata or configuration partition was manually rewritten.
+- Initial no-footer-clock candidate: 5,933,008 bytes, SHA-256
+  `4be4b6aad317861ce58cd629f6f3910987c1370ea56cd7675354a156c7a873cf`.
+  Its 30 related host checks, 72 Python checks plus one skip, three simulator
+  builds and regular Metalio build passed. Across 196 native frames, 25 lost
+  only the footer clock and all other pixels remained identical. It was not
+  flashed.
 
-Example A4 bottom-tab navigation:
+A previously recorded local C3 link failure involved `ble_base_funcs_reset`,
+`ble_42_adv_funcs_reset` and related BLE symbols. It was reproduced on
+unmodified main `03a9c7ce`; C3 was not rerun for this follow-up. This is a local
+baseline limitation, not a claim about current remote CI. No BLE/toolchain
+workaround is included.
 
-```sh
-CROSSPOINT_SIM_SD=/tmp/inx-sd \
-CROSSPOINT_SIM_INPUT_SCRIPT='2100:TAP:0.3,0.93;3200:TAP:0.5,0.93;4300:TAP:0.7,0.93;5400:TAP:0.9,0.93;6500:TAP:0.3,0.04;7800:QUIT' \
-xvfb-run -a .pio/build/simulator_eego_a4/program
-```
-
-Main menus currently run in portrait. The landscape stress checks temporarily
-set the live renderer orientation using GDB at `InxRecentActivity::onEnter()`;
-they do not add a menu-rotation setting. Use normalized scripted coordinates
-because the simulator parses its input schedule before this breakpoint.
-
-```gdb
-break InxRecentActivity::onEnter()
-commands
-silent
-call (void) 'GfxRenderer::setOrientation(GfxRenderer::Orientation)'(&renderer, 1)
-disable 1
-continue
-end
-run
-```
-
-Physical touch-controller behavior, EPD ghosting, refresh timing, and power
-consumption still require device validation; the simulator does not model them.
-
-## Hardware build results
-
-The compact Metalio test build uses `pio run -e metalio_eink4` with the existing
-isolated PlatformIO core/package directory and serial logging enabled. Its
-application image is intended for the existing CrossMux Wi-Fi update flow.
-Build sizes, image identity, checksums and test logs accompany the local artifact.
-All three simulator builds and the Metalio build pass. Metalio reports 99,732
-bytes static RAM and 5,932,315 bytes Flash; the application file is 5,932,816
-bytes and fits the 6,553,600-byte OTA slot. These are whole-image sizes.
-Chip ID, board tag, source/binary partitions and image integrity checks pass.
-
-The Metalio candidate was written to the existing test device's active
-application slot, independently verified, and USB-reset into the Inx Recent
-page with its saved settings. The application SHA-256 is
-`0fcce94784607a994c6635b86d964408063cb5d91a1619f13f94da5750a9bdbb`.
-The commit-history cleanup does not change the tested source. These checks
-establish flashing and startup, not physical layout/touch/power acceptance.
-
-The default C3 build compiles but fails to link with missing
-`ble_base_funcs_reset`, `ble_42_adv_funcs_reset` and related BLE controller symbols
-referenced by ESP-IDF's `bt.c`. The same failure occurs in the existing package
-cache, a freshly provisioned isolated core, and an unmodified checkout of main
-`03a9c7ce`. Therefore the C3 build is **not passing in this environment**; the
-baseline comparison establishes that this failure also occurs without the Inx
-changes. No BLE/toolchain workaround is included in this UI change.
-This baseline comparison was recorded previously; the C3 build was not rerun
-for the compact-layout update.
+Simulator checks and flashing/startup records do not establish physical bezel
+occlusion, touch feel, EPD ghosting, refresh timing or power consumption. Those
+remain device acceptance items.

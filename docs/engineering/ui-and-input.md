@@ -161,8 +161,14 @@ action**.
   time zone and battery percentage visibility, and updates only when the page
   renders. Tapping the status bar opens the control center. Its drawing and hit
   region share the main-tab layout, which also reserves viewable margins and
-  at least 6 px between the status bar, content and navigation. Other modes
-  retain the INX home battery on the opposite edge from the tabs.
+  at least 6 px between the status bar, content and navigation. With top tabs,
+  the touch INX Recent page displays only its bottom-right battery inside the
+  existing 40 px footer reservation; it neither formats nor draws a footer clock
+  and has no new touch action. Both placements use a 12 px logical-screen-edge
+  inset, clamped to the board's oriented viewable margins rather than added to
+  them. Clock and battery percentage share the numeric font and text baseline;
+  positioning compensates for the battery icon's internal 6 px vertical offset. The clock
+  uses a 9-byte stack buffer. Non-touch devices retain their existing home battery.
   `Activity::mainTabLayout()` resolves complete status, content and navigation
   rectangles in one pass; `pageContentRect()` also owns the normal-header
   fallback, so pages do not repeat the main-tab eligibility/layout calculation.
