@@ -150,7 +150,8 @@ jobs:
             -e eego_a4_nightly \
             -e murphy_m4_nightly \
             -e waveshare_epaper_397_nightly \
-            -e metalio_eink4_nightly | tee pio.log
+            -e metalio_eink4_nightly \
+            -e readpico_nightly | tee pio.log
 
       - name: Record firmware stats
         run: |
@@ -164,7 +165,7 @@ jobs:
       - name: Verify hardware packages
         run: |
           set -euo pipefail
-          for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397 metalio_eink4; do
+          for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397 metalio_eink4 readpico; do
             python3 scripts/package_nightly_target.py "$target" --channel nightly
             (cd "dist/nightly/$target" && sha256sum --check *-SHA256SUMS)
           done
