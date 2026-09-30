@@ -51,7 +51,7 @@ until physical acceptance is recorded.
   families; unload or a missing size falls back to embedded fonts. No retired
   font-ID map or allocation during font-ID lookup is needed. The built-in reader
   picker advertises only its actual 12 pt face; installed SD families expose
-  their own sizes. Network preparation does not immediately reload released fonts.
+  their own sizes. Network and explicit BLE preparation do not immediately reload released fonts.
 - Toolbar is the Read Pico first-boot default and respects saved settings.
   AirPage keeps the shared four-tone request supported by the current pipeline.
 
