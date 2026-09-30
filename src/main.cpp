@@ -643,17 +643,9 @@ void setup() {
   HalSystem::checkPanic();
 
   const bool settingsLoaded = SETTINGS.loadFromFile();
-  // Touch panels use the toolbar menu: it paints over the page in one refresh, while the
-  // list style pushes a full-screen activity. Two things matter here.
-  //   1. It must run AFTER loadFromFile(): assigning it before the load looked correct,
-  //      but the persisted value silently overwrote it, so the toolbar only ever appeared
-  //      when the saved setting happened to be TOOLBAR.
-  //   2. The guard is BoardConfig::hasTouch() (the panel capability, fixed at compile
-  //      time), NOT gpio.hasTouch(). The runtime probe has not necessarily completed this
-  //      early in boot, and while it reported false here the reader's mappedInput.hasTouch()
-  //      reported true -- so the force was skipped and a touch reader kept the list style,
-  //      dropping a centre tap straight into the full menu instead of the toolbar.
-  if (BoardConfig::hasTouch()) SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
+#if FREEINK_DEVICE_READPICO
+  if (!settingsLoaded) SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
+#endif
   const auto onboardingMode =
       settingsLoaded ? LanguageSelectActivity::Mode::Upgrade : LanguageSelectActivity::Mode::Initial;
   const bool requiresOnboarding = CrossPointSettings::requiresOnboarding(SETTINGS.onboardingVersion);
