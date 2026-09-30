@@ -63,6 +63,9 @@ keeps roughly 24 hours of rollback data. Failed builds do not publish or clean
 up anything. The first complete run can temporarily retain more than two build
 names when the preceding index contains target-level fallbacks; the next
 complete run converges to exactly the current and previous build.
+The previous index may have a different target set when devices are added or
+removed. Cleanup requires a non-empty target set and valid variant manifest
+URLs, and protects every build referenced by that historical index.
 
 COS publishing runs only on the H2O self-hosted runner and does not fall back to
 a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary

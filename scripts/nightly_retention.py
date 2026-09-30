@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-from nightly_targets import FLAVOR_TOKENS, TARGETS
+from nightly_targets import FLAVOR_TOKENS
 
 
 BUILD_ID = r'[0-9a-f]{40}-[0-9]+-[0-9]+'
@@ -31,8 +31,8 @@ def referenced_builds(index, storage):
     if not isinstance(index, dict) or index.get('schemaVersion') != 1 or index.get('channel') != 'nightly':
         raise ValueError('invalid previous Nightly index envelope')
     targets = index.get('targets')
-    if not isinstance(targets, dict) or set(targets) != set(TARGETS):
-        raise ValueError('previous Nightly index does not contain the canonical target set')
+    if not isinstance(targets, dict) or not targets:
+        raise ValueError('previous Nightly index must contain a non-empty target set')
 
     builds = set()
     for target_id, entry in targets.items():
