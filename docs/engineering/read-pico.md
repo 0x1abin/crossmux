@@ -86,6 +86,71 @@ grayscale-to-menu transitions, touch/strip/power gestures, SD read/write,
 RTC synchronization during refresh, battery/USB readings, shutdown and at least
 three sleep/wake cycles. Confirm saved menu/font choices survive reboot.
 
+## Second convergence review — 2026-09-30
+
+The LCD, renderer and board initialization interfaces in the local vendored
+library now return errors to `epdiyLcdBegin()`. IRQ/GDMA/buffer, semaphore and
+worker-creation failures release only resources actually created. Teardown is
+idempotent and never deletes a null task handle. The generic SDK `PanelDriver`
+interface is unchanged. The native checks compile the complete production LCD,
+renderer, line queue and clear code; raw register operations are modeled, while
+resource APIs record ownership and inject failures. They do not prove electrical
+behavior or ISR timing on a device.
+
+Synchronous clear runs with feed tasks idle, borrows an existing feed buffer,
+and constructs its mask directly. It no longer allocates scratch buffers per
+phase. Clear phase counts, panel timings and waveform data remain unchanged.
+Grayscale composition writes both pixels of each byte together; all 64 paired
+base/LSB/MSB combinations are checked across byte and row boundaries. Reduced
+framebuffer read/modify/write traffic is a mechanism, not a measured speed gain.
+
+The accelerometer-only gesture path polls at 80 ms to match the configured
+SC7A20H 12.5 Hz rate. Wake, reader entry, orientation/mode changes and failed
+reads invalidate the derivative baseline. The first valid sample establishes a
+baseline without triggering a page turn. Gyroscope targets retain 50 ms polling.
+Host checks cover both paths; existing gesture thresholds still need hardware
+calibration.
+
+### Optional measurements
+
+`FREEINK_READPICO_DIAGNOSTICS=1` enables two fixed 12-byte statistics records and
+bounded stack timing guards, with no heap allocation. It is absent from normal
+builds. PMU logs report command count, last/max lock wait and last/max command
+hold duration. Display logs report conversion time, its maximum and the existing
+diff/scan/copy timings. PMU statistics update under the existing I²C lock;
+frame statistics use the serialized display path. Diagnostic logging itself adds
+latency, so compare ordinary builds too. `ENABLE_SERIAL_LOG` is required for PMU
+console output.
+
+For a temporary diagnostic build, copy `platformio.ini` to a temporary config,
+append this environment and pass that file to `pio run -c <temporary-config>
+-e readpico_diagnostics` from the repository root:
+
+```ini
+[env:readpico_diagnostics]
+extends = env:readpico
+build_flags =
+  ${env:readpico.build_flags}
+  -DFREEINK_READPICO_DIAGNOSTICS=1
+```
+
+No physical device is available in this review. The PMU transaction keeps its
+existing bus lock; separate it only after measured touch latency justifies the
+additional lock. Collect latency during RTC/VCOM retries, heap/largest-block
+watermarks, reading turns and sleep/wake before tuning queues or memory reserves.
+
+### CI dependency follow-up
+
+SDK #35 gains a standalone Read Pico host-check workflow. CrossMux adds the
+accelerometer/gyroscope check to its existing host suite. After SDK #35 merges,
+update CrossMux's official gitlink to the reviewed SDK main commit, append
+`readpico` to `bin/ci-check` and the Hardware CI build invocation, and run
+`python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py` in the
+existing host-test CI step. Repeat full checks and the shared `gh_release` build
+with a normal recursive checkout. Until then the combination checkout above is
+required; no conditional skip or temporary SDK pin is used in permanent CI.
+Read Pico remains excluded from Nightly/OTA/Web publishing.
+
 ## Historical port investigation
 
 The dated notes below preserve the original hardware evidence and experiments.

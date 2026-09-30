@@ -30,11 +30,9 @@ void HalDisplay::begin(bool seamless) {
   if (!BoardReadPico::ready()) {
     LOG_ERR("DISP", "FCA9555 expander is not up; EPD rails cannot be sequenced");
   }
-  // Watermarks for the unfalsified PSRAM/DMA budget (read-pico.md 2.6, B6/B7):
-  // the step framebuffer (1.59 MiB), the gray canvas (812 KiB) and the 103,968-byte
-  // facade framebuffer are PSRAM, while Panel_EPD's LUT expansion table is a
-  // ~56.5 KiB INTERNAL DMA block whose allocation failure is silent. One line
-  // before and after is what the hardware run needs to settle both rows.
+  // epdiy owns 4bpp front/back/difference buffers in PSRAM (~1.59 MiB here),
+  // plus the SDK's B/W base and selector planes. Feed queues, DMA buffers and
+  // renderer tasks need internal RAM; track free space and largest blocks.
   LOG_INF("DISP", "PSRAM free=%u maxBlock=%u internal free=%u maxBlock=%u before panel init",
           static_cast<unsigned>(ESP.getFreePsram()), static_cast<unsigned>(ESP.getMaxAllocPsram()),
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
@@ -46,7 +44,7 @@ void HalDisplay::begin(bool seamless) {
   einkDisplay.begin();
 
 #if FREEINK_DEVICE_READPICO
-  // The facade publishes the driver's real geometry (LgfxEpdDriver::geometry():
+  // The facade publishes the driver's real geometry (EpdiyLcdDriver::geometry():
   // 1216 x 684 -> 152 bytes/row -> 103,968 bytes for Read Pico). Every consumer
   // must read it from here; see the constants note in HalDisplay.h.
   LOG_INF("DISP", "panel %ux%u (%u bytes/row, %u-byte framebuffer); PSRAM free=%u maxBlock=%u internal free=%u",
