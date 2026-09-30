@@ -1976,7 +1976,21 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
   const bool combinedGrayscaleBase =
+#if FREEINK_DEVICE_READPICO
+      // Read Pico has no strip uploads (whole-plane grayscale) but its panel CAN join
+      // the base and the grey planes into a single waveform, so it must not be gated
+      // behind tiledGrayscale. This is what removes the extra full panel refresh per
+      // anti-aliased page: the base is stashed and displayGrayBuffer() presents both.
+      //
+      // Image pages are included here, unlike the shared branch below. Its
+      // !pageHasImages exists because a strip-upload driver has to re-send the
+      // affected strip to build the base; this whole-plane path stashes the entire
+      // framebuffer, illustration and all, so displayGrayBuffer() composes the page
+      // from it either way and the panel is still driven exactly once.
+      needsAnyGrayscale && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
+#else
       tiledGrayscale && !pageHasImages && !SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase();
+#endif
 #if FREEINK_DEVICE_EEGO_A4
   const bool overlapRefresh =
       tiledGrayscale && renderer.supportsAsyncRefresh() && !pageHasImages && !needsTextGrayscale;
@@ -2032,7 +2046,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   renderStatusBar();
   const auto tBwRender = millis();
 
-  if (pageHasImages) {
+  if (combinedGrayscaleBase) {
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
+  } else if (pageHasImages) {
     // Image pages use one base refresh before the grayscale pass. FAST leaves
     // the panel receptive to the gray waveform; pending cleanup still honors
     // the scheduled/manual HALF refresh.
@@ -2044,10 +2060,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                              DisplayRefreshContext::ImageReading);
       pagesUntilFullRefresh = 1;
     }
-  } else if (combinedGrayscaleBase) {
-    // Stash the base without activating; displayGrayBuffer() below commits
-    // base + grays as one waveform.
-    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
   } else {
 #if FREEINK_DEVICE_EEGO_A4
     if (needsTextGrayscale) {
@@ -2226,7 +2238,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Abort early if a push/pop is pending (e.g. user opened menu)
       if (activityManager.isSwitchPending()) {
         renderer.setRenderMode(GfxRenderer::BW);
-        renderer.restoreBwBuffer();
+        // A combined base was only stashed, so it has to be flushed, not restored.
+        // / A combined base was only stashed, so it must be flushed, not restored.
+        if (combinedGrayscaleBase)
+          renderer.cancelGrayscale();
+        else
+          renderer.restoreBwBuffer();
         return;
       }
 
@@ -2239,7 +2256,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Abort before the expensive grayscale display if a push/pop is pending
       if (activityManager.isSwitchPending()) {
         renderer.setRenderMode(GfxRenderer::BW);
-        renderer.restoreBwBuffer();
+        // A combined base was only stashed, so it has to be flushed, not restored.
+        // / A combined base was only stashed, so it must be flushed, not restored.
+        if (combinedGrayscaleBase)
+          renderer.cancelGrayscale();
+        else
+          renderer.restoreBwBuffer();
         return;
       }
       renderer.displayGrayBuffer();

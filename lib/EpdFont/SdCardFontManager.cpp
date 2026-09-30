@@ -100,6 +100,7 @@ int SdCardFontManager::loadFamilyExtraSize(const SdCardFontFamilyInfo& family, G
 }
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
+  renderer.clearPreferredFonts();
   renderer.clearSdCardFonts();
   for (auto& lf : loaded_) {
     // removeFont drops only mappings that reference this SD font, preserving

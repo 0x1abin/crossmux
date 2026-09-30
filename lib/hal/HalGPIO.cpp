@@ -2,6 +2,9 @@
 #if FREEINK_DEVICE_METALIO_EINK4
 #include <MetalioEink4Board.h>
 #endif
+#if FREEINK_DEVICE_READPICO
+#include <BoardReadPico.h>
+#endif
 #include <BatteryMonitor.h>
 #include <HalGPIO.h>
 #include <HapticFeedback.h>
@@ -26,6 +29,61 @@
 
 // Global HalGPIO instance
 HalGPIO gpio;
+
+#if FREEINK_DEVICE_READPICO
+// --- Read Pico input model ---------------------------------------------------
+//
+// The board has NO GPIO buttons. Navigation comes from the CST836U
+// two-point touch panel plus three capacitive key zones in the strip of the
+// touch panel BELOW the drawn image (raw y > 1300 vs display y <= 1215;
+// centres x = 80/240/400, pitch 160 — BoardReadPicoPins.h, main/ui/ui_menu.h).
+// The board support library owns that hit test
+// (BoardReadPico::keyStripHook(), installed on InputManager's button hook by
+// BoardReadPico::begin()) because the SDK seam can only express `1 << BTN_*`,
+// and it maps the zones as:
+//
+//   KEY1 (x = 80)  -> BTN_UP       -> Button::Up / Button::PageBack
+//   KEY2 (x = 240) -> BTN_BACK     -> Button::Back   (返回上一级 / go back)
+//   KEY3 (x = 400) -> BTN_DOWN     -> Button::Down / Button::PageForward
+//
+// Why this mapping and not the reference firmware's (KEY1 = previous page,
+// KEY2 = full GC16 redraw, KEY3 = menu)?
+//   * The `1 << BTN_*` seam cannot express "redraw" or "menu" — those are not
+//     buttons, and inventing a BTN_* index for them would leak a device action
+//     into the shared logical-button space (golden rule #7).
+//   * Emitting exactly the indices the X3/X4 side rocker already drives makes
+//     the strip keys interchangeable with it at the logical layer, so every
+//     existing one-gesture/one-action barrier applies unchanged (golden rule
+//     #13): MappedInputManager's longPressFiredButtons/suppressedReleaseButtons
+//     release consumption, and ActivityManager's mainTabEntryReleasePending
+//     held-key gate, both key off these buttons.
+//   * The middle zone used to be BTN_CONFIRM, mirroring the X4's front confirm.
+//     It is BTN_BACK now: the same index the X3/X4 back key drives, and the same
+//     "leave this level" role eego-a4's Back plays. Selection moved to the touch
+//     panel — a centre-third tap opens the reader menu (ReaderUtils.h
+//     isTouchMenuTap) and list rows are tapped directly — so the middle zone no
+//     longer has to be Confirm, and Back was otherwise unreachable from the
+//     hardware. Key2 reaches SETTINGS.frontButtonBack = FRONT_HW_BACK =
+//     BTN_BACK with no remap, exactly as Key2-as-Confirm used to reach
+//     frontButtonConfirm.
+//
+// Back is now reachable from three places on this board: the middle strip zone
+// above, the left-edge swipe MappedInputManager::wasPressed(Button::Back)
+// accepts for every board, and the reader header tap
+// (MappedInputManager::wasHeaderTapBack, enabled for this board alongside
+// eego-a4).
+//
+// The gesture is a LEVEL from the chip (a zone reports held while the finger is
+// on it), so it rides InputManager's ordinary debounce/edge machinery exactly
+// like a GPIO button: one press edge, one release edge, held time tracked by
+// getHeldTime(). No HAL-side latch is layered on top — a second barrier here
+// would suppress the release that MappedInputManager is already tracking.
+static_assert(InputManager::BTN_UP == HalGPIO::BTN_UP && InputManager::BTN_CONFIRM == HalGPIO::BTN_CONFIRM &&
+                  InputManager::BTN_DOWN == HalGPIO::BTN_DOWN,
+              "Read Pico strip keys must use the same BTN_* indices HalGPIO re-exports");
+static_assert(HalGPIO::BTN_UP != HalGPIO::BTN_CONFIRM && HalGPIO::BTN_CONFIRM != HalGPIO::BTN_DOWN,
+              "Each Read Pico key zone must land on its own logical button");
+#endif
 
 namespace X3GPIO {
 
@@ -173,6 +231,34 @@ void HalGPIO::begin() {
 #else
   _deviceType = DeviceType::X4;
 #endif
+#if FREEINK_DEVICE_READPICO
+  // BOARD PHASE, before anything else on this board: shared I2C (SDA39/SCL40,
+  // 400 kHz), the FCA9555 expander self-test + Port-0 configuration, the
+  // MODE/TP_RST preload, the CST836U reset pulse, the CW32L010 PMU handshake and
+  // the accelerometer identity probe. Everything downstream is gated by that
+  // expander — P0.3 SY_EN and P0.4 VCOM_EN (EPD rails), P0.1 XOE, P0.7 touch
+  // reset, P0.6 card detect — and a CST836U that went to its own deep sleep is
+  // reachable only through the P0.7 pulse, so this has to run first
+  // (read-pico.md 1.4/1.6). BoardReadPico::begin() also registers the
+  // InputManager strip-key hook, the BatteryMonitor PMU hook and the Rtc PMU
+  // time hooks, so battery/time/keys are only meaningful after it returns.
+  //
+  // A board that never answered is reported and the boot continues: the panel
+  // stays dark, keys/touch are dead and the PMU reports no battery, but nothing
+  // aborts. Do NOT call InputManager::setButtonHook() anywhere in this file for
+  // this device — BoardReadPico::begin() owns that single hook slot for the
+  // three capacitive key zones, and any later registration would replace it.
+  if (!BoardReadPico::begin()) {
+    LOG_ERR("HW", "Read Pico board bring-up failed: FCA9555 did not answer");
+  }
+  // INPUT PHASE is deferred to beginInput(), which src/main.cpp calls right after
+  // the panel is up. The panel's power sequence (SY7636A writes + PGOOD polling)
+  // owns the shared I2C bus while it runs, and the reference firmware also
+  // initialises the EPD before the touch driver (read_pico_init.c: epd_init then
+  // cst836u_init). Sequencing, not a hard electrical dependency: the CST836U is
+  // always powered and its reset already ran above.
+  return;
+#endif
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   InputManager::setButtonHook(wavesharePowerButtonHook);
 #endif
@@ -210,6 +296,17 @@ void HalGPIO::begin() {
   if (!freeink::haptic::begin()) LOG_ERR("HW", "Haptic initialization failed; feedback disabled");
 #endif
   inputMgr.begin();
+  inputBegun = true;
+}
+
+void HalGPIO::beginInput() {
+  // Idempotent: begin() already did it on every target that does not defer, and
+  // main.cpp's post-display call plus the safety net in update() can both reach
+  // this point on the target that does.
+  if (inputBegun) return;
+  inputBegun = true;
+  LOG_INF("HW", "Starting input backends");
+  inputMgr.begin();
 }
 
 #if FREEINK_DEVICE_MURPHY_M4
@@ -221,6 +318,13 @@ bool HalGPIO::saveMurphyM4Batch(const freeink::MurphyM4Batch batch) {
 #endif
 
 void HalGPIO::update() {
+#if FREEINK_DEVICE_READPICO
+  // Safety net for the deferred INPUT PHASE (see begin()): a consumer that polls
+  // input before the panel came up gets the touch backend started here rather
+  // than silently reading nothing. Not an ordering bug worth aborting over — the
+  // whole point of the deferral is an electrical preference, not a requirement.
+  beginInput();
+#endif
   inputMgr.update();
   const bool buttonActivity = inputMgr.wasPressed(BTN_BACK) || inputMgr.wasPressed(BTN_CONFIRM) ||
                               inputMgr.wasPressed(BTN_LEFT) || inputMgr.wasPressed(BTN_RIGHT) ||

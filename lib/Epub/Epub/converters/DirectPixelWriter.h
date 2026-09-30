@@ -157,7 +157,15 @@ struct DirectPixelWriter {
     const int sy = phyY - originY;
     if (static_cast<unsigned>(sy) >= static_cast<unsigned>(clipRows)) return;
 
-    const uint16_t byteIndex = static_cast<uint16_t>(sy * displayWidthBytes + (phyX >> 3));
+    // uint32_t, NOT uint16_t: this index has to cover the whole framebuffer,
+    // which is `displayWidthBytes * panelHeight` bytes. On the boards this was
+    // written for it happened to fit in 16 bits (X4: 100 x 480 -> 47,999 max;
+    // X3: 99 x 528 -> 52,271 max), so the narrower type was invisible. Read
+    // Pico's panel is 1216/8 = 152 bytes x 684 rows = 103,968 bytes, and every
+    // index past 65,535 wrapped to an earlier row: inline images were written to
+    // the wrong place ("错位") while text stayed correct, because
+    // GfxRenderer::drawPixel() already indexes with uint32_t.
+    const uint32_t byteIndex = static_cast<uint32_t>(sy * displayWidthBytes + (phyX >> 3));
     const uint8_t bitMask = 1 << (7 - (phyX & 7));
 
     if (GfxRenderer::framebufferState(mode, pixel.state)) {
