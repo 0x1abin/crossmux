@@ -31,6 +31,154 @@ def run_cpp(program):
 
 
 class ReadingUiRegressionTest(unittest.TestCase):
+    def test_inx_corner_status_and_touch_home_footer(self):
+        theme = (ROOT / 'src/components/themes/inx/InxTheme.cpp').read_text()
+        home = (ROOT / 'src/activities/home/InxRecentActivity.cpp').read_text()
+        status = method(theme, 'void InxTheme::drawMainTabStatusBar(')
+        render = method(home, 'void InxRecentActivity::render(')
+        footer = render[render.index('  if (usesMainTabBar()'):render.index('  if (prepareNextMissingCover()')]
+        run_cpp(r'''
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <initializer_list>
+struct Rect { int x, y, width, height; };
+constexpr int STATUS_NUMERIC_FONT_ID = 1;
+struct CrossPointSettings {
+  enum { INX_TAB_TOP, INX_TAB_BOTTOM };
+  enum class HIDE_BATTERY_PERCENTAGE { SHOW, HIDE_ALWAYS };
+};
+struct {
+  int inxTabPosition = CrossPointSettings::INX_TAB_BOTTOM, clockFormat = 0;
+  CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{};
+} SETTINGS;
+struct Metrics { int batteryWidth=16, batteryHeight=12, topPadding=0; };
+struct UITheme {
+  static UITheme& getInstance() { static UITheme ui; return ui; }
+  const Metrics& getMetrics() const { static Metrics m; return m; }
+};
+namespace TimeUtils {
+bool valid=true, formatted12=false;
+int calls=0;
+bool formatCurrentTime(char* out, size_t size, bool hour12) {
+  assert(size == 9); ++calls; formatted12=hour12;
+  if (!valid) return false;
+  std::strcpy(out, hour12 ? "12:59 PM" : "23:59"); return true;
+}
+}
+struct GfxRenderer {
+  int width=480, height=800, top=9, right=3, bottom=3, left=3;
+  mutable int clocks=0, clockX=0, clockY=0;
+  mutable char clock[9]{};
+  mutable Rect clip{};
+  mutable bool clipped=false;
+  struct ClipScope {
+    const GfxRenderer& r;
+    ClipScope(const GfxRenderer& r, int x, int y, int w, int h):r(r) {
+      r.clip={x,y,w,h}; r.clipped=true;
+    }
+    ~ClipScope() { r.clipped=false; }
+  };
+  int getScreenWidth() const { return width; }
+  int getScreenHeight() const { return height; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=top; *r=right; *b=bottom; *l=left; }
+  void drawText(int font, int x, int y, const char* text) const {
+    assert(font == STATUS_NUMERIC_FONT_ID && clipped);
+    ++clocks; clockX=x; clockY=y; std::strcpy(clock,text);
+  }
+};
+struct InxTheme {
+  mutable Rect battery{};
+  mutable bool percentage=false;
+  void drawBatteryRight(const GfxRenderer& r, Rect rect, bool show) const {
+    assert(r.clipped); battery=rect; percentage=show;
+  }
+  void drawMainTabStatusBar(const GfxRenderer&, Rect) const;
+};
+''' + status + r'''
+namespace InxRecentGeometry { constexpr int footerReservedHeight=40; }
+constexpr int kHomeBatteryRightMargin=12, kHomeBatteryWidth=15, kHomeBatteryHeight=12;
+struct Input { bool touch=true; bool hasTouch() const { return touch; } };
+struct Gui {
+  int statusCalls=0, legacyCalls=0;
+  Rect footer{};
+  InxTheme theme;
+  void drawMainTabStatusBar(const GfxRenderer& r, Rect rect) {
+    ++statusCalls; footer=rect; theme.drawMainTabStatusBar(r,rect);
+  }
+  void drawBatteryRight(const GfxRenderer&, Rect, bool) { ++legacyCalls; }
+} GUI;
+struct InxRecentActivity {
+  GfxRenderer renderer;
+  Input mappedInput;
+  bool inx=true;
+  bool usesMainTabBar() const { return inx; }
+  bool mainTabsAtBottom() const { return SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM; }
+  bool hasMainTabStatusBar() const { return inx && mappedInput.touch && mainTabsAtBottom(); }
+  void drawFooter() {
+    const int width=renderer.getScreenWidth();
+    const auto& metrics=UITheme::getInstance().getMetrics();
+''' + footer + r'''
+  }
+};
+int main() {
+  for (bool landscape : {false,true}) for (bool largeInsets : {false,true})
+    for (bool hour12 : {false,true}) for (bool valid : {false,true}) for (bool hide : {false,true}) {
+      GfxRenderer r;
+      if (landscape) { r.width=800; r.height=480; }
+      if (largeInsets) { r.top=20; r.left=18; r.right=21; r.bottom=18; }
+      SETTINGS.clockFormat=hour12;
+      SETTINGS.hideBatteryPercentage=hide ? CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS
+                                         : CrossPointSettings::HIDE_BATTERY_PERCENTAGE::SHOW;
+      TimeUtils::valid=valid;
+      for (bool bottom : {false,true}) {
+        SETTINGS.inxTabPosition=bottom ? CrossPointSettings::INX_TAB_BOTTOM : CrossPointSettings::INX_TAB_TOP;
+        const Rect rect=bottom ? Rect{r.left,r.top,r.width-r.left-r.right,28}
+                               : Rect{r.left,r.height-40,r.width-r.left-r.right,40-r.bottom};
+        InxTheme theme;
+        const int clocks=r.clocks, formats=TimeUtils::calls;
+        theme.drawMainTabStatusBar(r,rect);
+        assert(!r.clipped && theme.percentage == !hide);
+        assert(r.clocks-clocks == bottom && TimeUtils::calls-formats == bottom);
+        assert(r.width-theme.battery.x-theme.battery.width == std::max(12,r.right+1));
+        assert(theme.battery.x+theme.battery.width < rect.x+rect.width);
+        const int iconY=theme.battery.y+6;
+        if (bottom) assert(iconY == std::max(12,r.top));
+        else {
+          assert(r.height-iconY-theme.battery.height == std::max(12,r.bottom+1));
+          assert(theme.battery.y+6+theme.battery.height < rect.y+rect.height);
+        }
+        assert(iconY >= rect.y && iconY+theme.battery.height <= rect.y+rect.height);
+        if (bottom) {
+          assert(r.clockX == std::max(12,r.left) && theme.battery.y == r.clockY);
+          assert(r.clockX+8*8+6 < theme.battery.x-4*8);
+          assert(TimeUtils::formatted12 == hour12);
+          assert(std::strcmp(r.clock, !valid ? "--:--" : hour12 ? "12:59 PM" : "23:59") == 0);
+        }
+      }
+      const int clocks=r.clocks;
+      InxTheme{}.drawMainTabStatusBar(r,{0,0,0,28});
+      InxTheme{}.drawMainTabStatusBar(r,{0,0,480,0});
+      assert(r.clocks == clocks);
+    }
+  for (bool inx : {false,true}) for (bool touch : {false,true}) for (bool bottom : {false,true}) {
+    GUI.statusCalls=GUI.legacyCalls=0;
+    SETTINGS.inxTabPosition=bottom ? CrossPointSettings::INX_TAB_BOTTOM : CrossPointSettings::INX_TAB_TOP;
+    InxRecentActivity home; home.inx=inx; home.mappedInput.touch=touch;
+    const int formats=TimeUtils::calls;
+    home.drawFooter();
+    assert(home.renderer.clocks == 0 && TimeUtils::calls == formats);
+    const bool footer=inx && touch && !bottom;
+    assert(GUI.statusCalls == footer);
+    assert(GUI.legacyCalls == (!footer && !home.hasMainTabStatusBar()));
+    if (footer) {
+      assert(GUI.footer.y == 760 && GUI.footer.height == 37);
+      assert(GUI.theme.battery.y == 770 && GUI.theme.battery.x == 452);
+    }
+  }
+}
+''')
+
     def test_header_subtitle_is_inside_clip(self):
         source = (ROOT / 'src/components/themes/inx/InxTheme.cpp').read_text()
         code = method(source, 'void InxTheme::drawHeader(')

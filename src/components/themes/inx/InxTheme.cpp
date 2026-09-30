@@ -418,13 +418,22 @@ void InxTheme::drawMainTabBar(const GfxRenderer& renderer, const Rect rect, cons
 }
 
 void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect) const {
-  char time[9] = "--:--";
-  TimeUtils::formatCurrentTime(time, sizeof(time), SETTINGS.clockFormat == 1);
+  if (rect.width <= 0 || rect.height <= 0) return;
+  constexpr int edgeInset = 12;
+  constexpr int batteryTextOffset = 6;  // drawBatteryRight offsets the icon below the text origin.
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int textY = rect.y + (rect.height - renderer.getLineHeight(STATUS_NUMERIC_FONT_ID)) / 2;
-  renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x + metrics.contentSidePadding, textY, time);
-  drawBatteryRight(renderer,
-                   Rect{rect.x + rect.width - metrics.contentSidePadding - metrics.batteryWidth, textY,
-                        metrics.batteryWidth, metrics.batteryHeight},
+  const bool tabsAtBottom = SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM;
+  // The battery cap and numeric glyphs include the positioning edge pixel.
+  const int right = std::min(rect.x + rect.width - 1, renderer.getScreenWidth() - edgeInset);
+  const int textY = tabsAtBottom ? std::max(rect.y, edgeInset) - batteryTextOffset
+                                 : std::min(rect.y + rect.height - 1, renderer.getScreenHeight() - edgeInset) -
+                                       metrics.batteryHeight - batteryTextOffset;
+  const GfxRenderer::ClipScope clip(renderer, rect.x, rect.y, rect.width, rect.height);
+  if (tabsAtBottom) {
+    char time[9] = "--:--";
+    TimeUtils::formatCurrentTime(time, sizeof(time), SETTINGS.clockFormat == 1);
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, std::max(rect.x, edgeInset), textY, time);
+  }
+  drawBatteryRight(renderer, Rect{right - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
                    SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
 }

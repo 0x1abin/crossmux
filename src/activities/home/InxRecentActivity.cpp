@@ -592,7 +592,13 @@ void InxRecentActivity::render(RenderLock&&) {
   const auto labels = mainTabButtonLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN),
                                           books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  if (!hasMainTabStatusBar()) {
+  if (usesMainTabBar() && mappedInput.hasTouch() && !mainTabsAtBottom()) {
+    int top, right, bottom, left;
+    renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+    const int footerTop = renderer.getScreenHeight() - InxRecentGeometry::footerReservedHeight;
+    GUI.drawMainTabStatusBar(renderer, Rect{left, footerTop, std::max(0, width - left - right),
+                                            std::max(0, renderer.getScreenHeight() - bottom - footerTop)});
+  } else if (!hasMainTabStatusBar()) {
     const int batteryY = mainTabsAtBottom() ? metrics.topPadding + 5 : renderer.getScreenHeight() - 30;
     GUI.drawBatteryRight(renderer,
                          Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth, batteryY,
