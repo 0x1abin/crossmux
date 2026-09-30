@@ -127,8 +127,17 @@ new boundary, before accepting the clearance. The user confirmed the recently
 read screen's battery and bottom controls are fully visible after the first
 upload. Reader status text drops the old additional 4 px upward offset, placing
 its battery, clock and page counters 4 px closer to the safe bottom edge; the
-recently read screen keeps its accepted geometry. This final reader adjustment
-still needs visible-screen confirmation.
+recently read screen keeps its accepted geometry. The user reported obstruction
+after this reader adjustment. The current firmware is intentionally frozen for
+merging; the reader footer remains a known issue to fix in a later change.
+
+The frozen firmware code at CrossMux `f63170ac` with SDK `4af3673` passed the
+full pre-integration `./bin/ci-check`: formatting, static analysis, the seven
+existing hardware builds and all 598 host tests. SDK resource/transaction checks
+and the FreeInkUI host suite also passed. The normal Read Pico image was built
+and flashed; the optional diagnostics configuration compiled separately before
+the final footer adjustment. This validation does not accept the known optical
+issue or the remaining physical checks.
 
 ### Optional measurements
 
@@ -182,6 +191,18 @@ confirmation on the recently read screen; rotated controls remain pending.
 Reading refresh modes, calibrated tilt, PMU contention, battery operation and
 three sleep/wake cycles remain pending. Local evidence is kept under
 `.pio/readpico-flash-round2/` (ignored, not a repository dependency).
+
+After the user reported excessive space beneath the reader footer, the 4 px
+status-text adjustment was uploaded as CrossMux `f63170ac` with the same SDK.
+Written-data digest verification passed again; the image SHA-256 is
+`f133b643d7b5c65edb8b887d6e9ebeb55066f48539a6260aec9012f4f759e3ee`.
+Its recorded normal boot shows the same successful peripheral initialization and
+no observed panic/OOM. Internal free heap was 83,771 bytes at both 10 and 20
+seconds (minimum 77,211, largest block 36,852). The second image and runtime log
+are retained under `.pio/readpico-flash-footer/`. Reader-footer visual acceptance
+failed: the user reported obstruction after the 4 px adjustment. No additional
+Flash backup was performed for this upload, and no firmware or further upload is
+planned as part of the frozen-version merge.
 
 ### CI dependency follow-up
 
