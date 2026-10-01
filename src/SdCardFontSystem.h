@@ -12,6 +12,10 @@ inline constexpr int CJK_UI_8_FONT_ID = 0x434A4B08;
 inline constexpr int CJK_UI_10_FONT_ID = 0x434A4B0A;
 inline constexpr int CJK_UI_12_FONT_ID = 0x434A4B0C;
 
+// Reader footer slots keep their original sizes when Read Pico enlarges the UI.
+inline constexpr int READER_STATUS_FONT_ID = 0x52534208;
+inline constexpr int READER_ESTIMATE_FONT_ID = 0x5253420A;
+
 /// Facade that owns the SD card font registry, manager, and resolver logic.
 /// Hides implementation details behind a single begin() + ensureLoaded() API.
 class SdCardFontSystem {

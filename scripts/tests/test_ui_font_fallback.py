@@ -72,8 +72,9 @@ int main() {
 #include "MissingGlyph.h"
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
-constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
-constexpr int CJK_UI_8_FONT_ID=4, CJK_UI_10_FONT_ID=5, CJK_UI_12_FONT_ID=6;
+inline constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
+inline constexpr int CJK_UI_8_FONT_ID=4, CJK_UI_10_FONT_ID=5, CJK_UI_12_FONT_ID=6;
+constexpr int READER_STATUS_FONT_ID=7, READER_ESTIMATE_FONT_ID=8;
 namespace memory {
 bool healthy = true;
 bool psramHasHeadroom(size_t, size_t, size_t) { return healthy; }
@@ -152,7 +153,7 @@ struct GfxRenderer {
 struct SdCardFontFileInfo { uint8_t pointSize; };
 struct SdCardFontFamilyInfo {
   std::string name="test";
-  std::map<uint8_t, SdCardFontFileInfo> files{{8,{8}},{10,{10}},{12,{12}},{14,{14}}};
+  std::map<uint8_t, SdCardFontFileInfo> files{{8,{8}},{10,{10}},{12,{12}},{14,{14}},{20,{20}}};
   const SdCardFontFileInfo* findFile(uint8_t size) const {
     auto it=files.find(size); return it == files.end() ? nullptr : &it->second;
   }
@@ -169,6 +170,7 @@ struct SdCardFontManager {
   int getFontId(const std::string&) const;
   int loadFile(const SdCardFontFileInfo& file, const char*, GfxRenderer& r, bool flash, bool cache) {
     if (file.pointSize==failSize) return 0;
+    assert(loaded_.size()<loaded_.capacity()); // every face fits the preallocated slots
     ++loads;
     readerCacheLoads += cache;
     assert(!flash);
@@ -205,26 +207,35 @@ struct SdCardFontSystem {
             program += method(renderer, name) + '\n'
         program += method(system, 'void SdCardFontSystem::setupUiFallbacks(') + r'''
 int main() {
-  for (int scenario=0; scenario<7; ++scenario) {
+  for (int scenario=0; scenario<8; ++scenario) {
     GfxRenderer r;
     for (int id=1; id<=3; ++id) {
       r.fontMap[id]={{'A'}};
       r.fontMap[id+3]={{'A',0x4E00}};
       r.setFallbackFont(id,id+3);
     }
+    r.fontMap[READER_STATUS_FONT_ID]=r.fontMap[SMALL_FONT_ID];
+    r.fontMap[READER_ESTIMATE_FONT_ID]=r.fontMap[UI_10_FONT_ID];
+    r.setFallbackFont(READER_STATUS_FONT_ID,CJK_UI_8_FONT_ID);
+    r.setFallbackFont(READER_ESTIMATE_FONT_ID,CJK_UI_10_FONT_ID);
     SdCardFontSystem s;
     if (scenario==1) s.registry_.family.files.erase(10);
     if (scenario==2) s.manager_.failSize=8;
     if (scenario==3) s.manager_.coverage={'A'};
     if (scenario==6) s.manager_.coverage={'A',0x03B1};
     memory::healthy = scenario!=4;
-    const int readerSize = scenario==5 ? 12 : 14;
+    const int readerSize = scenario==7 ? 20 : scenario==5 ? 12 : 14;
     assert(s.manager_.loadFamily(s.registry_.family, r, readerSize));
+    const auto capacity=s.manager_.loaded_.capacity();
+    assert(capacity==(EXPECT_READPICO ? 5 : 4));
     s.setupUiFallbacks(r);
+    assert(s.manager_.loaded_.capacity()==capacity);
     constexpr bool enabled = EXPECT_ENABLED;
     if constexpr (EXPECT_READPICO) {
       const bool active=memory::healthy;
-      assert(s.manager_.loads==(active ? 2 : 1)); // shared 12 pt + title 14 pt
+      const int extraSizes=scenario==7 ? 4 : (scenario==1 || scenario==2) ? 2 : 3;
+      assert(s.manager_.loads==(active ? 1+extraSizes : 1));
+      assert(s.manager_.readerCacheLoads==1); // footer faces have no PSRAM glyph arena
       for (int id=1; id<=3; ++id) {
         const int chosen=active ? (id==3 ? 114 : 112) : id;
         assert(r.resolveFontFamilyId(id)==chosen);
@@ -233,6 +244,29 @@ int main() {
         r.drawText(id,0,0,"A");
         assert(measured==&r.fontMap.at(chosen) && drawn==measured);
       }
+      const int loads=s.manager_.loads;
+      s.setupUiFallbacks(r);
+      assert(s.manager_.loads==loads); // already-resident 8/10 pt faces are reused
+      for (int id : {READER_STATUS_FONT_ID,READER_ESTIMATE_FONT_ID}) {
+        const int pt=id==READER_STATUS_FONT_ID ? 8 : 10;
+        const int fallback=id==READER_STATUS_FONT_ID ? CJK_UI_8_FONT_ID : CJK_UI_10_FONT_ID;
+        const bool loaded=active && !(scenario==1 && pt==10) && !(scenario==2 && pt==8);
+        const int chosen=loaded ? 100+pt : id;
+        assert(r.resolveFontFamilyId(id)==chosen);
+        for (const char* text : {"A","一"}) {
+          const int resolved=r.resolveTextFontId(id,text);
+          const int expected=std::string(text)=="一" && (!loaded || scenario==3 || scenario==6) ? fallback : chosen;
+          assert(resolved==expected);
+          measured=drawn=nullptr;
+          r.getTextWidth(id,text);
+          r.drawText(id,0,0,text);
+          assert(measured==&r.fontMap.at(expected) && drawn==measured);
+        }
+        if (loaded) {
+          r.fontMap.at(chosen).coverage.erase('A');
+          assert(r.resolveTextFontId(id,"A")==id);
+        }
+      }
       if (active) {
         r.fontMap.at(112).coverage.erase('A');
         assert(r.resolveTextFontId(2,"A")==2); // SD faces may omit ASCII too
@@ -240,17 +274,29 @@ int main() {
       s.manager_.unloadAll(r);
       assert(r.preferredFontMap_.empty());
       for (int id=1; id<=3; ++id) assert(r.resolveFontFamilyId(id)==id);
+      assert(r.resolveFontFamilyId(READER_STATUS_FONT_ID)==READER_STATUS_FONT_ID);
+      assert(r.resolveTextFontId(READER_STATUS_FONT_ID,"一")==CJK_UI_8_FONT_ID);
+      assert(r.resolveFontFamilyId(READER_ESTIMATE_FONT_ID)==READER_ESTIMATE_FONT_ID);
       memory::healthy=true;
       s.registry_.family.files.erase(12);
       assert(s.manager_.loadFamily(s.registry_.family,r,14));
       s.setupUiFallbacks(r);
       assert(r.resolveFontFamilyId(1)==1 && r.resolveFontFamilyId(2)==2);
       assert(r.resolveFontFamilyId(3)==114);
+      assert(r.resolveFontFamilyId(READER_STATUS_FONT_ID)==(scenario==2 ? READER_STATUS_FONT_ID : 108));
+      assert(r.resolveFontFamilyId(READER_ESTIMATE_FONT_ID)==(scenario==1 ? READER_ESTIMATE_FONT_ID : 110));
+      s.manager_.unloadAll(r);
+      s.registry_.family.name="other";
+      s.registry_.family.files.erase(8);
+      assert(s.manager_.loadFamily(s.registry_.family,r,14));
+      s.setupUiFallbacks(r);
+      assert(r.resolveFontFamilyId(READER_STATUS_FONT_ID)==READER_STATUS_FONT_ID);
+      assert(r.resolveTextFontId(READER_STATUS_FONT_ID,"一")==CJK_UI_8_FONT_ID);
       s.manager_.unloadAll(r);
       continue;
     }
     const bool active = enabled && scenario!=3 && scenario!=4;
-    assert(s.manager_.loads == (active ? (scenario==0 || scenario==6 ? 4 : 3) : 1));
+    assert(s.manager_.loads == (active ? (scenario==0 || scenario==6 || scenario==7 ? 4 : 3) : 1));
     assert(s.manager_.readerCacheLoads==1);
     assert(r.resolveTextFontId(1,"A")==1);
     assert(r.resolveTextFontId(1,"")==1);

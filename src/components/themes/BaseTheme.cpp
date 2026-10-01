@@ -15,6 +15,7 @@
 #include "BleInput.h"
 #include "I18n.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
@@ -892,6 +893,13 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
                               const bool fillMargin, const bool isPageBookmarked, const bool pageCountEstimated) const {
+#if FREEINK_DEVICE_READPICO
+  constexpr int textFontId = READER_STATUS_FONT_ID;
+  constexpr int estimateFontId = READER_ESTIMATE_FONT_ID;
+#else
+  constexpr int textFontId = SMALL_FONT_ID;
+  constexpr int estimateFontId = UI_10_FONT_ID;
+#endif
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -937,16 +945,16 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       snprintf(progressStr, sizeof(progressStr), "%d/%d", currentPage, pageCount);
     }
 
-    int progressTextWidth = renderer.getTextWidth(SMALL_FONT_ID, progressStr);
-    const int estimateWidth = showEstimate ? renderer.getTextWidth(UI_10_FONT_ID, "~") : 0;
+    int progressTextWidth = renderer.getTextWidth(textFontId, progressStr);
+    const int estimateWidth = showEstimate ? renderer.getTextWidth(estimateFontId, "~") : 0;
     constexpr int estimateGap = 2;
     const int estimateSpacing = showEstimate ? estimateGap : 0;
     const int progressX = rightClusterX - estimateWidth - estimateSpacing - progressTextWidth;
     if (showEstimate) {
-      const int estimateY = textY + (renderer.getLineHeight(SMALL_FONT_ID) - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
-      renderer.drawText(UI_10_FONT_ID, progressX, estimateY, "~");
+      const int estimateY = textY + (renderer.getLineHeight(textFontId) - renderer.getLineHeight(estimateFontId)) / 2;
+      renderer.drawText(estimateFontId, progressX, estimateY, "~");
     }
-    renderer.drawText(SMALL_FONT_ID, progressX + estimateWidth + estimateSpacing, textY, progressStr);
+    renderer.drawText(textFontId, progressX + estimateWidth + estimateSpacing, textY, progressStr);
 
     rightClusterWidth += estimateWidth + estimateSpacing + progressTextWidth;
   }
@@ -1049,18 +1057,18 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     int availableTitleSpace = rendererableScreenWidth - 2 * titleMarginLeftAdjusted;
 
     int titleWidth;
-    titleWidth = renderer.getTextWidth(SMALL_FONT_ID, title.c_str());
+    titleWidth = renderer.getTextWidth(textFontId, title.c_str());
     if (titleWidth > availableTitleSpace) {
       // Not enough space to center on the screen, center it within the remaining space instead
       availableTitleSpace = rendererableScreenWidth - titleMarginLeft - titleMarginRight;
       titleMarginLeftAdjusted = titleMarginLeft;
     }
     if (titleWidth > availableTitleSpace) {
-      title = renderer.truncatedText(SMALL_FONT_ID, title.c_str(), availableTitleSpace);
-      titleWidth = renderer.getTextWidth(SMALL_FONT_ID, title.c_str());
+      title = renderer.truncatedText(textFontId, title.c_str(), availableTitleSpace);
+      titleWidth = renderer.getTextWidth(textFontId, title.c_str());
     }
 
-    renderer.drawText(SMALL_FONT_ID,
+    renderer.drawText(textFontId,
                       titleMarginLeftAdjusted + metrics.statusBarHorizontalMargin + orientedMarginLeft +
                           (availableTitleSpace - titleWidth) / 2,
                       textY, title.c_str());

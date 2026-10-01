@@ -32,9 +32,11 @@ struct UiFontSize {
   int builtinFallbackId;
 };
 constexpr UiFontSize kUiFontSizes[] = {
-    {SMALL_FONT_ID, 8, CJK_UI_8_FONT_ID},
-    {UI_10_FONT_ID, 10, CJK_UI_10_FONT_ID},
+    {SMALL_FONT_ID, 8, CJK_UI_8_FONT_ID},         {UI_10_FONT_ID, 10, CJK_UI_10_FONT_ID},
     {UI_12_FONT_ID, 12, CJK_UI_12_FONT_ID},
+#if FREEINK_DEVICE_READPICO
+    {READER_STATUS_FONT_ID, 8, CJK_UI_8_FONT_ID}, {READER_ESTIMATE_FONT_ID, 10, CJK_UI_10_FONT_ID},
+#endif
 };
 #if FREEINK_DEVICE_READPICO
 // Read Pico's 4.7" 1216x684 panel is ~300 PPI, roughly double the other targets'
@@ -42,10 +44,14 @@ constexpr UiFontSize kUiFontSizes[] = {
 // and read as too small. These replace the table's point sizes on this device only;
 // every other target keeps the shared values above.
 //
-// Order matches kUiFontSizes: SMALL, UI_10 (body), UI_12 (title). Chosen on the glass
+// Order matches kUiFontSizes: SMALL, UI_10 (body), UI_12 (title), footer, estimate.
+// Footer sizes stay at 8/10 pt. Extra faces reuse resident sizes and the manager's
+// bounded, uncached SD loader; no additional PSRAM glyph arena is allocated.
+// Enlarged UI sizes were chosen on the glass
 // -- 16/18 was too large, and the fallback when a family ships no such size is the
 // built-in face at its ORIGINAL size.
-constexpr uint8_t kReadPicoUiPointSizes[] = {12, 12, 14};
+constexpr uint8_t kReadPicoUiPointSizes[] = {12, 12, 14, 8, 10};
+static_assert(std::size(kReadPicoUiPointSizes) == std::size(kUiFontSizes));
 #endif
 #endif
 
