@@ -51,6 +51,40 @@ class EpubReaderActivity final : public ReaderActivity {
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
   unsigned long lastRenderCompleteMs = 0;
+
+#if FREEINK_DEVICE_READPICO
+  // --- Off-path anti-aliased page cache -------------------------------------
+  // An anti-aliased turn needs three full-frame images: the 1bpp B/W base, the
+  // grayscale LSB plane and the MSB plane. Rendering them costs roughly 700 ms
+  // and none of it depends on the user, so it is done at idle for the page the
+  // reader is about to show. The turn then only copies the three images into
+  // place (~12 ms) and pays for the panel push itself (~560 ms), which is what
+  // puts a turn at about 600 ms. Raw pointers rather than memory::ByteBuffer so
+  // this header needs no extra include; heap_caps_malloc takes ownership the
+  // same way, and freePageCache() is the single release point.
+  uint8_t* pageCacheBase_ = nullptr;   // page + reading guide lines, no status bar
+  uint8_t* pageCacheLsb_ = nullptr;    // grayscale LSB plane
+  uint8_t* pageCacheMsb_ = nullptr;    // grayscale MSB plane
+  uint8_t* pageCacheStash_ = nullptr;  // the live page, parked while the cache is built
+  int pageCachePage_ = -1;
+  int pageCacheSpine_ = -1;
+  int pageCacheMarginTop_ = 0;
+  int pageCacheMarginRight_ = 0;
+  int pageCacheMarginBottom_ = 0;
+  int pageCacheMarginLeft_ = 0;
+  unsigned long pageCacheEpoch_ = 0;
+  // Bumped by every renderContents(); a cache built at epoch E is consumed by
+  // exactly the render that still sees E, and retired by everything after it.
+  unsigned long renderEpoch_ = 0;
+  bool pageCacheValid_ = false;
+  bool pageCacheAllocated_ = false;
+  bool pageCacheFailed_ = false;
+
+  bool pageCacheEligible();
+  bool pageCacheMatches(int page, int mTop, int mRight, int mBottom, int mLeft) const;
+  bool preparePageCache();
+  void freePageCache();
+#endif
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;
