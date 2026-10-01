@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -59,8 +60,8 @@ constexpr int pageStart(const int selected, const int itemCount) {
 constexpr int indexFromPoint(const int x, const int y, const int width, const int height, const int start,
                              const int itemCount) {
   if (x < 0 || y < 0 || x >= width || y >= height || width <= 0 || height <= 0) return -1;
-  const int column = x * columns / width;
-  const int row = y * rows / height;
+  const int column = std::min(columns - 1, x / std::max(1, width / columns));
+  const int row = std::min(rows - 1, y / std::max(1, height / rows));
   const int index = start + row * columns + column;
   return index < itemCount ? index : -1;
 }

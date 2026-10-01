@@ -9,6 +9,7 @@
 #include "CrossPointSettings.h"
 #include "InxItemLayout.h"
 #include "OpdsServerStore.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "components/icons/inx_apps.h"
@@ -17,6 +18,16 @@
 namespace fui = freeink::ui;
 
 namespace {
+
+Rect contentRect(const GfxRenderer& renderer, const bool mainTabs) {
+  auto& theme = UITheme::getInstance();
+  const auto& metrics = theme.getMetrics();
+  const Rect header = mainTabs ? SubpageLayout::headerRect(theme.getScreenSafeArea(renderer, false, false), metrics)
+                               : Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight};
+  const int top = header.y + header.height + metrics.verticalSpacing;
+  return Rect{0, top, renderer.getScreenWidth(),
+              std::max(0, renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing)};
+}
 
 using appVisibility::appBit;
 using appVisibility::AppId;
@@ -164,10 +175,8 @@ bool AppsMenuActivity::usesIconLayout() const {
 }
 
 int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int height = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  return InxGridGeometry::indexFromPoint(x, y - top, renderer.getScreenWidth(), height,
+  const Rect content = contentRect(renderer, usesMainTabBar());
+  return InxGridGeometry::indexFromPoint(x - content.x, y - content.y, content.width, content.height,
                                          InxGridGeometry::pageStart(nav.selected, getVisibleAppCount()),
                                          getVisibleAppCount());
 }
@@ -250,23 +259,23 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, co
 }
 
 void AppsMenuActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
   const int sw = renderer.getScreenWidth();
   const int sh = renderer.getScreenHeight();
-  const int listY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listH = sh - listY - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const Rect content = contentRect(renderer, usesMainTabBar());
+  const int listY = content.y;
   const int visibleCount = getVisibleAppCount();
   const bool showSelection = showMainTabContentSelection();
 
   if (visibleCount == 0) {
-    UITheme::drawCenteredWrappedText(renderer, Rect{0, listY, sw, listH}, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
+    UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
   } else if (usesIconLayout()) {
-    drawIconGrid(Rect{0, listY, sw, listH}, visibleCount, showSelection);
+    drawIconGrid(content, visibleCount, showSelection);
   } else {
     const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-    screen.setContentMargin(fui::Insets{static_cast<int16_t>(listY), static_cast<int16_t>(sw - (safe.x + safe.width)),
-                                        static_cast<int16_t>(sh - (safe.y + safe.height)),
-                                        static_cast<int16_t>(safe.x)});
+    // Only the top reservation is absolute; preserve the existing side/footer margins.
+    screen.setContentMargin(fui::Insets{
+        static_cast<int16_t>(listY - (usesMainTabBar() ? safe.y : 0)), static_cast<int16_t>(sw - (safe.x + safe.width)),
+        static_cast<int16_t>(sh - (safe.y + safe.height)), static_cast<int16_t>(safe.x)});
     fui::ListProps props;
     props.items = rowItems.data();
     props.count = static_cast<uint16_t>(rowItems.size());

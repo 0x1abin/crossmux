@@ -27,7 +27,8 @@ constexpr MainTab adjacent(const MainTab tab, const int direction) {
 
 constexpr MainTab fromX(const int x, const int width) {
   if (x < 0 || width <= 0 || x >= width) return MainTab::None;
-  const int index = x * static_cast<int>(values.size()) / width;
+  // Invert the floor-rounded boundaries used by drawMainTabBar().
+  const int index = ((x + 1) * static_cast<int>(values.size()) - 1) / width;
   return values[index];
 }
 

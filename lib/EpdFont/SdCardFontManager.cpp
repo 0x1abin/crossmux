@@ -74,8 +74,12 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  // One reader face plus at most three UI sizes; reuse this capacity on reload.
+  // Reuse capacity on reload; ReadPico also keeps the original footer sizes.
+#if FREEINK_DEVICE_READPICO
+  loaded_.reserve(5);
+#else
   loaded_.reserve(4);
+#endif
   if (loadFile(*selected, family.name.c_str(), renderer, preferFlash, true) == 0) {
     return false;
   }

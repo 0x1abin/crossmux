@@ -12,6 +12,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "components/themes/inx/InxTheme.h"
@@ -23,15 +24,9 @@ namespace {
 constexpr int kGap = 8;
 constexpr int kPagePadding = 18;
 constexpr int kProgressHeight = 6;
-constexpr int kHomeBatteryWidth = 15;
-constexpr int kHomeBatteryHeight = 12;
-constexpr int kHomeBatteryRightMargin = 12;
-
 Rect contentRect(const GfxRenderer& renderer) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  return Rect{0, top, renderer.getScreenWidth(),
-              InxRecentGeometry::contentHeight(renderer.getScreenHeight(), top, metrics.buttonHintsHeight)};
+  auto& theme = UITheme::getInstance();
+  return InxRecentGeometry::contentRect(theme.getScreenSafeArea(renderer, false, false), theme.getMetrics());
 }
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
@@ -341,37 +336,8 @@ bool InxRecentActivity::prepareNextMissingCover() {
 }
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
-  if (!books || books->empty()) return -1;
-  const Rect content = contentRect(renderer);
-  if (x < content.x || x >= content.x + content.width || y < content.y || y >= content.y + content.height) return -1;
-
-  const InxRecentLayout currentLayout = layout();
-  const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), currentLayout);
-  int columns = 1;
-  int rows = 1;
-  switch (currentLayout) {
-    case InxRecentLayout::Grid:
-      columns = 2;
-      rows = 2;
-      break;
-    case InxRecentLayout::List:
-      rows = 5;
-      break;
-    case InxRecentLayout::Icons:
-      columns = 3;
-      rows = 3;
-      break;
-    case InxRecentLayout::Flow:
-    case InxRecentLayout::Cover:
-      return selected;
-    case InxRecentLayout::Count:
-      return -1;
-  }
-
-  const int column = std::min(columns - 1, (x - content.x) * columns / std::max(1, content.width));
-  const int row = std::min(rows - 1, (y - content.y) * rows / std::max(1, content.height));
-  const int index = start + row * columns + column;
-  return index < static_cast<int>(books->size()) ? index : -1;
+  return InxRecentGeometry::indexFromPoint(contentRect(renderer), x, y, selected,
+                                           books ? static_cast<int>(books->size()) : 0, layout());
 }
 
 void InxRecentActivity::loop() {
@@ -432,31 +398,30 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   const auto sideSize = InxCoverGeometry::fit(carousel.width, std::max(1, center.height * 90 / 100));
   const int sideTop = center.y + (center.height - sideSize.height) / 2;
   const int sideGap = std::max(kGap, content.width * 4 / 100);
-  {
-    const GfxRenderer::ClipScope clip(renderer, carousel.x, carousel.y, carousel.width, carousel.height);
-    if (selected > 0) {
-      drawBookCover(selected - 1, Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height});
-    }
-    if (selected + 1 < count) {
-      drawBookCover(selected + 1, Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height});
-    }
-    drawBookCover(selected, center);
-    if (showSelection) drawThickFrame(renderer, center);
+  // The render scope clips side covers and all following text to the content area.
+  if (selected > 0) {
+    drawBookCover(selected - 1, Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height});
   }
+  if (selected + 1 < count) {
+    drawBookCover(selected + 1, Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height});
+  }
+  drawBookCover(selected, center);
+  if (showSelection) drawThickFrame(renderer, center);
 
   const int dividerY = carousel.y + carousel.height + 10;
   renderer.drawLine(content.x, dividerY, content.x + content.width - 1, dividerY, true);
   const int textY = dividerY + 15;
-  drawBookText(renderer, book, kPagePadding, textY, content.width - kPagePadding * 2, true);
+  const int textX = content.x + kPagePadding;
+  drawBookText(renderer, book, textX, textY, content.width - kPagePadding * 2, true);
 
   const ReadingBookStats* stats = statsAt(selected);
   const uint8_t progress = progressOf(stats);
   const int progressY = textY + 58;
   const int progressWidth = std::max(24, (content.width - kPagePadding * 2) / 2);
-  drawMiniProgress(renderer, Rect{kPagePadding, progressY, progressWidth, kProgressHeight}, progress);
+  drawMiniProgress(renderer, Rect{textX, progressY, progressWidth, kProgressHeight}, progress);
   char percent[8];
   snprintf(percent, sizeof(percent), "%u%%", static_cast<unsigned>(progress));
-  renderer.drawText(SMALL_FONT_ID, kPagePadding + progressWidth + 12,
+  renderer.drawText(SMALL_FONT_ID, textX + progressWidth + 12,
                     progressY - (renderer.getLineHeight(SMALL_FONT_ID) - kProgressHeight) / 2, percent);
 
   const int metricsTop = progressY + 34;
@@ -468,10 +433,10 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   char chapter[8];
   snprintf(sessions, sizeof(sessions), "%u", stats ? static_cast<unsigned>(stats->sessions) : 0U);
   snprintf(chapter, sizeof(chapter), "%u%%", stats ? static_cast<unsigned>(stats->chapterProgressPercent) : 0U);
-  drawMetric(renderer, kPagePadding, metricsTop, total.c_str(), tr(STR_TOTAL_TIME), metricWidth);
-  drawMetric(renderer, kPagePadding + metricWidth + kGap, metricsTop, sessions, tr(STR_SESSIONS), metricWidth);
-  drawMetric(renderer, kPagePadding, metricsTop + metricHeight, last.c_str(), tr(STR_LAST_SESSION), metricWidth);
-  drawMetric(renderer, kPagePadding + metricWidth + kGap, metricsTop + metricHeight, chapter, tr(STR_CHAPTER_PROGRESS),
+  drawMetric(renderer, textX, metricsTop, total.c_str(), tr(STR_TOTAL_TIME), metricWidth);
+  drawMetric(renderer, textX + metricWidth + kGap, metricsTop, sessions, tr(STR_SESSIONS), metricWidth);
+  drawMetric(renderer, textX, metricsTop + metricHeight, last.c_str(), tr(STR_LAST_SESSION), metricWidth);
+  drawMetric(renderer, textX + metricWidth + kGap, metricsTop + metricHeight, chapter, tr(STR_CHAPTER_PROGRESS),
              metricWidth);
 }
 
@@ -560,41 +525,43 @@ void InxRecentActivity::drawCover(const Rect& content) {
 
 void InxRecentActivity::render(RenderLock&&) {
   renderer.clearScreen();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int width = renderer.getScreenWidth();
-  drawPageHeader(Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
-  const Rect content = contentRect(renderer);
+  auto& theme = UITheme::getInstance();
+  const auto& metrics = theme.getMetrics();
+  const Rect safeArea = theme.getScreenSafeArea(renderer, false, false);
+  drawPageHeader(SubpageLayout::headerRect(safeArea, metrics), tr(STR_MENU_RECENT_BOOKS));
+  const Rect content = InxRecentGeometry::contentRect(safeArea, metrics);
 
-  if (!books || books->empty()) {
-    UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_RECENT_BOOKS), 2);
-  } else {
-    switch (layout()) {
-      case InxRecentLayout::Flow:
-        drawFlow(content);
-        break;
-      case InxRecentLayout::Grid:
-        drawGrid(content);
-        break;
-      case InxRecentLayout::List:
-        drawList(content);
-        break;
-      case InxRecentLayout::Icons:
-        drawIcons(content);
-        break;
-      case InxRecentLayout::Cover:
-        drawCover(content);
-        break;
-      case InxRecentLayout::Count:
-        break;
+  if (content.width > 0 && content.height > 0) {
+    const GfxRenderer::ClipScope clip(renderer, content.x, content.y, content.width, content.height);
+    if (!books || books->empty()) {
+      UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_RECENT_BOOKS), 2);
+    } else {
+      switch (layout()) {
+        case InxRecentLayout::Flow:
+          drawFlow(content);
+          break;
+        case InxRecentLayout::Grid:
+          drawGrid(content);
+          break;
+        case InxRecentLayout::List:
+          drawList(content);
+          break;
+        case InxRecentLayout::Icons:
+          drawIcons(content);
+          break;
+        case InxRecentLayout::Cover:
+          drawCover(content);
+          break;
+        case InxRecentLayout::Count:
+          break;
+      }
     }
   }
 
   const auto labels = mainTabButtonLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN),
                                           books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawBatteryRight(renderer,
-                       Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth,
-                            renderer.getScreenHeight() - 30, kHomeBatteryWidth, kHomeBatteryHeight},
+  GUI.drawBatteryRight(renderer, InxRecentGeometry::batteryRect(safeArea),
                        SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   if (prepareNextMissingCover()) return;
   renderer.displayBuffer();

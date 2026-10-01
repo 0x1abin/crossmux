@@ -26,7 +26,7 @@ python3 scripts/tests/test_ui_font_fallback.py
 
 The `simulator_readpico` native environment runs the reader with a 1216×684 scan
 framebuffer and 684×1216 portrait UI, native sixteen-level image output, the
-current `{9,3,24,3}` portrait insets and Read Pico's 12/12/14 pt SD UI fonts.
+SDK-aligned `{5,5,8,5}` portrait insets and Read Pico's 12/12/14 pt SD UI fonts.
 Missing fonts and sizes fall back to the embedded faces. Mouse tap, hold and swipe
 follow orientation; Up/Escape/Down stand in for the three capacitive keys. `P`
 represents the PMU power key and is the only sleep wake input. `S` requests sleep.
@@ -44,7 +44,7 @@ uses the current AirPage and custom sleep-image paths. Closing the EPUB toolbar
 restores the firmware's B/W page snapshot, including its image geometry.
 
 The PlatformIO and host-test dependencies pin simulator commit
-[`4bad3f81`](https://github.com/0x1abin/crosspoint-simulator/commit/4bad3f813af59b2827eba66f1a216c332a292dbf).
+[`33e585ff`](https://github.com/0x1abin/crosspoint-simulator/commit/33e585ff6452ea03f6a164f51e379f065e8c2e54).
 A normal checkout needs no local dependency override.
 
 Build/run with `pio run -e simulator_readpico -t run_simulator`. Keep test SD data
@@ -186,6 +186,72 @@ not instrumented optical measurement. Separate BMP/JPEG comparison across all
 four orientations, at least three recorded sleep/wake cycles and long-term
 ghosting remain unverified.
 
+### Current footer fonts and INX home geometry — 2026-10-01
+
+Read Pico's reader footer uses independent stable font slots: chapter title,
+page counters and reading percentage use **8 pt**, and the estimate marker `~`
+uses **10 pt**. Measurement, truncation and drawing use those same slots. The
+selected SD family supplies exact sizes when available; a missing or failed face
+uses the corresponding embedded font and Chinese fallback. Existing instances
+are reused across slots, and font switching/unload clears their bindings. The
+manager reserves five instances on Read Pico (reader plus 8/10/12/14 pt), avoiding
+vector growth during loading; other targets retain four. Other UI slots remain
+12/12/14 pt on Read Pico, and battery percentage remains embedded 8 pt.
+
+The current board profile is `viewableInsets = {5, 5, 8, 5}` in portrait
+(top/right/bottom/left, pixels). The 8 px physical edge rotates with the existing
+orientation transform: portrait bottom, clockwise landscape left, inverted
+portrait top, counterclockwise landscape right. These are layout insets, not
+measured bezel dimensions. Reader text and existing safe-area consumers adopt
+them; the reader progress bar retains its fill-to-screen-edge behavior.
+
+INX home derives its tabs, five book layouts, empty state and battery from
+`UITheme::getInstance().getScreenSafeArea(renderer, false, false)`, with theme
+padding inside that area. All five INX main pages (recent, files, apps, settings and statistics) share
+header geometry and integer tab boundaries for drawing and touch. Home
+content is clipped to one shared rectangle. The internal footer reserve is the
+larger of 40 px and button-hint height, deducted once. Read Pico's battery text
+starts **24 px above the safe bottom**; other targets retain 30 px. The 15×12 px
+icon starts 6 px below the text and keeps the 12 px internal right offset. In
+portrait this gives 14 px below the icon and 17 px to its right. Home font sizes,
+weights and line spacing are unchanged. The four other main pages reserve
+content below the same header, while retaining their bottom layouts. Apps use
+the same content rectangle for grid drawing and hit testing; non-INX headers
+and embedded pickers retain their existing geometry.
+
+#### Historical local UI firmware tests
+
+These snapshots used SDK `2d40f2bafe143999988eecd8374ce0b8c1a36a59` plus local
+native-grayscale changes. They are historical device evidence, not the final
+isolated PR candidate. Firmware, hashes and test/build/flash/boot logs remain in
+the ignored directories below. Each upload checked the device/partitions/active
+slot, wrote app0 only at `0x10000`, verified the written digest and preserved data
+partitions and boot selection. Only the first snapshot made a backup.
+
+| Snapshot directory under `.pio/` | Layout | Firmware SHA-256 |
+| --- | --- | --- |
+| `readpico-footer-20261001` | Footer 8/10 pt; previous insets | `7ee5773a8a0dd47b3510e1653f0f617c968e93babadd3a40895848d94d7d5020` |
+| `inx-safe-area-20261001` | INX safe area; uniform 5 px | `16b217b1bc01b2f01d281378320c3d1a12a676a6fdd9bc96bc4b2cd0b5868698` |
+| `readpico-bottom8-20261001` | Bottom 8 px; battery offset 30 px | `fe498001ae1b647a755298712b0c61f7427748fb4d3752f14e3f74f8403abb50` |
+| `readpico-home-battery6-20261001` | Bottom 8 px; battery offset 24 px | `6dbae4ebe0ff9635098bb73763167cb355eafd74b732e28278c81fe4347695a2` |
+
+Those snapshots passed the font/layout checks and `readpico` / `gh_release`
+builds recorded beside each image. Their 40-second boot captures confirmed
+Read Pico, SDMMC and display initialization, with no observed panic/OOM.
+The last image was 5,904,928 bytes; idle internal free/minimum/largest block
+was 75,459 / 69,003 / 31,732 bytes at 10/20/30 seconds. Five `GFX Outside range`
+warnings occurred during Boot before InxRecent; similar warnings occurred in
+the first footer snapshot, but not in the two intermediate captures. Their cause
+is undiagnosed. Physical acceptance remains pending: verify long Chinese chapter
+and book titles, footer/percentage/estimate readability, battery clearance,
+all five home layouts, edge taps and page turns in all four orientations.
+
+The isolated PR candidate starts from the latest CrossMux and SDK main branches;
+it includes only the font and layout changes above. Its exact revisions, build
+hashes and check results are recorded separately under `.pio/readpico-pr-review/`
+and in the paired PR descriptions. It is not flashed again by this PR task;
+historical startup logs do not establish final-candidate physical acceptance.
+
 ### Validation record
 
 SDK rebased onto `ab8c859389725bc91a0d44c2de32c24c64fc893b`; CrossMux onto
@@ -240,12 +306,12 @@ baseline without triggering a page turn. Gyroscope targets retain 50 ms polling.
 Host checks cover both paths; existing gesture thresholds still need hardware
 calibration.
 
-### Bottom clearance
+### Historical 24 px bottom clearance
 
-The reported bottom-edge obstruction is provisionally handled by portrait
-`viewableInsets = {9, 3, 24, 3}` (top/right/bottom/left, in pixels). The 24 px
-bottom value is a starting clearance, not a measured bezel dimension. Tune this
-single board-profile value against the visible glass on hardware.
+The frozen 2026-09-30 firmware used portrait `viewableInsets = {9, 3, 24, 3}`
+(top/right/bottom/left, in pixels). The observations below belong to that older
+configuration. Its provisional 24 px clearance was not a measured bezel dimension;
+the current configuration is described above.
 
 Reader text/status bars and FreeInkUI screens already consume the renderer's
 oriented insets. The legacy UITheme safe-area and list-capacity calculations now
@@ -257,8 +323,8 @@ read screen's battery and bottom controls are fully visible after the first
 upload. Reader status text drops the old additional 4 px upward offset, placing
 its battery, clock and page counters 4 px closer to the safe bottom edge; the
 recently read screen keeps its accepted geometry. The user reported obstruction
-after this reader adjustment. The current firmware is intentionally frozen for
-merging; the reader footer remains a known issue to fix in a later change.
+after this reader adjustment. That firmware was frozen for merging with
+reader-footer obstruction recorded as an outstanding issue.
 
 The frozen firmware code at CrossMux `f63170ac` with SDK `4af3673` passed the
 full pre-integration `./bin/ci-check`: formatting, static analysis, the seven

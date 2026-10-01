@@ -3,6 +3,7 @@
 #include "ActivityManager.h"
 #include "CrossPointSettings.h"
 #include "I18n.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "util/ButtonNavigator.h"
 
@@ -35,7 +36,10 @@ bool Activity::showMainTabContentSelection() const {
 
 void Activity::drawPageHeader(const Rect& rect, const char* title, const char* subtitle) const {
   if (usesMainTabBar()) {
-    GUI.drawMainTabBar(renderer, rect, mainTab());
+    auto& theme = UITheme::getInstance();
+    GUI.drawMainTabBar(renderer,
+                       SubpageLayout::headerRect(theme.getScreenSafeArea(renderer, false, false), theme.getMetrics()),
+                       mainTab());
   } else {
     GUI.drawHeader(renderer, rect, title, subtitle);
   }
