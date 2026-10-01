@@ -6,12 +6,14 @@ Read Pico uses the SDK's **epdiy LCD_CAM + GDMA + RMT** backend for the
 E0470A01 1216×684 raw parallel panel. The earlier Lovyan i80 experiment and
 converted waveforms have been removed. `ReadPicoPower.cpp` retains the board's
 rail timing and factory-PMU VCOM handling; neither calibration nor scan timing
-was retuned in this review. The application still supplies four tones through
-its existing 2-bit masks; this change does not add a native 16-tone image pipeline.
+was retuned in this review. Reader text keeps its existing four-tone
+2-bit masks; AirPage and unfiltered custom sleep images use the native sixteen-tone
+path described below.
 
-SDK PR [#35](https://github.com/0x1abin/freeink-sdk/pull/35) is merged. CrossMux pins
-the reviewed SDK main commit `2d40f2bafe143999988eecd8374ce0b8c1a36a59`, so a normal
-recursive checkout includes the Read Pico drivers:
+SDK PR [#35](https://github.com/0x1abin/freeink-sdk/pull/35) is merged. This native
+grayscale extension depends on SDK PR [#36](https://github.com/0x1abin/freeink-sdk/pull/36)
+and pins its commit `fe12c72f9ca7dc72929c3203e204e700986f8d97`. Merge SDK #36 before
+the paired CrossMux PR; a recursive checkout includes the required Read Pico drivers:
 
 ```bash
 git submodule update --init --recursive
@@ -67,7 +69,73 @@ acceptance remain separate from build and package verification.
   their own sizes. Network and explicit BLE preparation do not immediately
   reload released fonts.
 - Toolbar is the Read Pico first-boot default and respects saved settings.
-  AirPage keeps the shared four-tone request supported by the current pipeline.
+  AirPage requests the board capability: Read Pico uses native sixteen-tone image output.
+
+### Native sixteen-level images — 2026-10-01
+
+`READ_PICO.grayscaleLevels = 16`; omitted legacy profiles remain at `4`. The
+capability flows through FreeInkDisplay, HalDisplay and GfxRenderer. AirPage's
+portrait QR parameters remain `w=684&h=1216`, now with `mode=gray16`.
+
+AirPage BMP/JPEG and unfiltered custom sleep BMPs borrow the existing 415,872-byte
+4bpp front framebuffer. Native brightness is `0` black / `15` white, even pixels
+in low nibbles, with `(gray + 8) / 17` mapping and the usual orientation transform.
+Ordinary commits use GL16; unknown baseline and fault recovery retain GC16. The
+existing back buffer, 1bpp base and AA selectors are reused. No additional
+full-screen allocation is introduced. BMP scratch is at most 10,240 bytes;
+JPEG uses the existing fallible decoder and bounded row/MCU workspace. A B/W
+proxy supports modal menus; closing them restores the original native image.
+
+AirPage stores and displays historical originals. Set Cover preserves BMP bytes;
+JPEG uses the existing Gray8 BMP writer selected by an explicit output enum.
+Short writes fail and the `.part/.bak` installation transaction remains in place.
+Native sleep decode/refresh failure displays the default screen. Text AA, book
+covers, alpha sleep overlays and all existing filters retain their prior paths.
+
+The initial local checkout, including separate font work, passed `readpico`,
+599 host checks, SDK facade tests and the complete SDK transaction harness on
+H2O Linux (diagnostics on/off). Formatting and cppcheck also passed. The broader
+hardware build was stopped at the user's request; its earlier X4 Pro attempt
+failed on undefined `USBMSC` / `USB` in `UsbMassStorage.cpp`, so full-platform
+validation is not recorded as passing.
+
+The isolated grayscale-only PR candidate passed formatting and the `readpico`
+build. Its macOS host run passed 598/599 checks; the sole `UiFontFallback` failure
+is Clang's unused-constant warning, reproduced on unchanged main. No font changes
+are included in this PR. NativeGrayscale additionally passed without any
+`.pio/libdeps` cache, using the firmware's existing pinned JPEGDEC source through
+CMake. The isolated firmware was built but not flashed again.
+
+The connected ESP32-S3 Read Pico was backed up and flashed **only at app0
+`0x10000`**; the live partition layout and boot selection were checked first.
+The uploader verified the written image. The 5,904,768-byte firmware SHA-256 is
+`e01c746963db6df1053cff8eb3018d7c6a8f90da9ef3c24010677d77736f0cba`.
+Backups, firmware, logs and BMP/JPEG staircase fixtures are retained locally in
+`.pio/readpico-gray16-20261001/`. Boot/NVS/OTA metadata and SD content were not
+written. The existing font work is included in this local firmware.
+
+The serial capture started after early initialization. At 14/24/34 seconds it
+recorded 75,679 bytes free internal heap, a 69,559-byte minimum and a 31,732-byte
+largest block. Opening AirPage completed Wi-Fi and MQTT connection; during Wi-Fi
+setup free heap was 43,815 bytes, minimum 42,259, largest block 31,732. No panic
+or OOM was observed in this captured window. Four further 684×1216 JPEG downloads
+and decodes completed (1,490–1,636 ms decoding); stable AirPage free heap was
+42,791 bytes, minimum 33,167, largest block 31,732. This measures decoding, not
+panel refresh latency. A later cover save completed JPEG-to-8-bit-BMP conversion;
+closing Confirmation decoded the native JPEG again. Sleep loaded the resulting
+684×1216 `/sleep.bmp` and entered deep sleep, disconnecting USB. Minimum internal
+free heap reached 33,151 bytes. These traces confirm the software flow, not the
+appearance of the image. The user confirmed normal screen and touch behavior and
+the `gray16` QR mode. After wake, serial reconnected and idle heap returned to
+75,679 bytes (minimum 69,559, largest block 31,732); early wake initialization
+was not captured.
+
+Initial physical acceptance **passed by user observation**: sixteen tones are
+distinguishable with the expected black/white polarity; the saved unfiltered
+sleep cover, modal dismissal and wake behave normally. This is a visual report,
+not instrumented optical measurement. Separate BMP/JPEG comparison across all
+four orientations, at least three recorded sleep/wake cycles and long-term
+ghosting remain unverified.
 
 ### Validation record
 

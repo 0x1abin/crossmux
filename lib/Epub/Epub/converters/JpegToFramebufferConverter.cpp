@@ -207,6 +207,16 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     }
   }
 
+  const auto writeSample = [&](int outX, int outY, uint8_t gray) {
+    if (ctx->config->output == DecodeOutput::NativeGrayscale16) {
+      renderer.drawGrayscale16Pixel(outX, outY, gray);
+      return;
+    }
+    const uint8_t level = useDithering ? applyBayerDither4Level(gray, outX, outY) : gray / 85;
+    if (writeFramebuffer) pw.writePixel(outX, level);
+    if (caching) cw.writePixel(outX, level);
+  };
+
   // === 1:1 fast path: no scaling math ===
   if (fineScaleFPX == FP_ONE && fineScaleFPY == FP_ONE) {
     for (int dstY = dstYStart; dstY < dstYEnd; dstY++) {
@@ -217,15 +227,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         uint8_t gray = row[dstX - blockX];
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
     }
     return 1;
@@ -273,15 +275,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
 
       // Interior. The range split above is an optimisation, not a guarantee: it
@@ -302,15 +296,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
 
       // Right edge: the source column runs past the block's valid columns.
@@ -325,15 +311,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
     }
     return 1;
@@ -353,15 +331,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       const int lx = clampSampleIndex((srcFxFP >> FP_SHIFT) - blockX, validW);
       uint8_t gray = row[lx];
 
-      uint8_t dithered;
-      if (useDithering) {
-        dithered = applyBayerDither4Level(gray, outX, outY);
-      } else {
-        dithered = gray / 85;
-        if (dithered > 3) dithered = 3;
-      }
-      if (writeFramebuffer) pw.writePixel(outX, dithered);
-      if (caching) cw.writePixel(outX, dithered);
+      writeSample(outX, outY, gray);
     }
   }
 
@@ -398,6 +368,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
                                                      const RenderConfig& config) {
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
+  if (config.output == DecodeOutput::NativeGrayscale16 &&
+      (!renderer.isGrayscale16Active() || !config.cachePath.empty()))
+    return false;
   const bool cacheOnly = config.output == DecodeOutput::CacheOnly;
   if (cacheOnly && config.cachePath.empty()) {
     LOG_ERR("JPG", "Cache-only decode requires a cache path");

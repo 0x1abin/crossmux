@@ -15,6 +15,7 @@ struct ImageDimensions {
 enum class DecodeOutput : uint8_t {
   FrameBufferAndCache,
   CacheOnly,
+  NativeGrayscale16,  // Gray8 samples directly to a borrowed native frame; no pixel cache.
 };
 
 struct RenderConfig {

@@ -37,6 +37,26 @@ bool supportsTextOnlyCombinedBase(const Display& display) {
   return combinesGrayscaleBase(display);
 }
 template <typename Display>
+uint8_t grayscaleLevels(const Display& display) {
+  if constexpr (requires { display.getGrayscaleLevels(); }) return display.getGrayscaleLevels();
+  return 4;  // Simulator HAL has no native image path.
+}
+template <typename Display>
+uint8_t* beginNativeGray(Display& display) {
+  if constexpr (requires { display.beginGrayscale16(); }) return display.beginGrayscale16();
+  return nullptr;
+}
+template <typename Display>
+bool commitNativeGray(Display& display) {
+  if constexpr (requires { display.commitGrayscale16(); }) return display.commitGrayscale16();
+  return false;
+}
+template <typename Display>
+void cancelNativeGray(Display& display) {
+  if constexpr (requires { display.cancelGrayscale16(); }) display.cancelGrayscale16();
+}
+
+template <typename Display>
 void cancelGrayscale(Display& display) {
   if constexpr (requires { display.cancelGrayscale(); }) display.cancelGrayscale();
 }
@@ -1511,6 +1531,75 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
         }
         runStart = -1;
       }
+    }
+  }
+  return true;
+}
+
+uint8_t GfxRenderer::getGrayscaleLevels() const { return grayscaleLevels(display); }
+
+bool GfxRenderer::beginGrayscale16() {
+  if (grayscale16Buffer || _stripActive || !frameBuffer || getGrayscaleLevels() != 16) return false;
+  grayscale16Buffer = beginNativeGray(display);
+  if (!grayscale16Buffer) return false;
+  setRenderMode(BW);
+  clearScreen();  // Retain a B/W proxy for popup drawing and subsequent AA.
+  return true;
+}
+
+bool GfxRenderer::commitGrayscale16() const {
+  if (!grayscale16Buffer) return false;
+  grayscale16Buffer = nullptr;
+  return commitNativeGray(display);
+}
+
+void GfxRenderer::cancelGrayscale16() const {
+  if (grayscale16Buffer) cancelNativeGray(display);
+  grayscale16Buffer = nullptr;
+}
+
+void GfxRenderer::drawGrayscale16Pixel(const int x, const int y, const uint8_t gray) const {
+  if (!grayscale16Buffer || x < 0 || y < 0 || x >= getScreenWidth() || y >= getScreenHeight()) return;
+  int px, py;
+  rotateCoordinates(orientation, x, y, &px, &py, panelWidth, panelHeight);
+  const size_t index = static_cast<size_t>(py) * (panelWidth / 2) + px / 2;
+  const uint8_t level = (static_cast<unsigned>(gray) + 8) / 17;
+  const unsigned shift = (px & 1) * 4;
+  grayscale16Buffer[index] = (grayscale16Buffer[index] & ~(0x0Fu << shift)) | (level << shift);
+  drawPixel(x, y, level < 8);
+}
+
+bool GfxRenderer::drawBitmapGrayscale16(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
+                                        const int maxHeight, const float cropX, const float cropY) const {
+  if (!grayscale16Buffer || !std::isfinite(cropX) || !std::isfinite(cropY) || cropX < 0 || cropX >= 1 || cropY < 0 ||
+      cropY >= 1 || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0)
+    return false;
+  const int width = bitmap.getWidth(), height = bitmap.getHeight();
+  const int cropPixX = std::floor(width * cropX / 2), cropPixY = std::floor(height * cropY / 2);
+  float scale = 1;
+  if (maxWidth > 0) scale = std::min(scale, maxWidth / ((1 - cropX) * width));
+  if (maxHeight > 0) scale = std::min(scale, maxHeight / ((1 - cropY) * height));
+  // At most 2048 Gray8 pixels + 8192 source bytes, bounded by Bitmap headers.
+  if (!bitmap.ensureDrawScratch(static_cast<size_t>(width) + bitmap.getRowBytes())) {
+    LOG_ERR("GFX", "Failed to allocate native BMP rows");
+    return false;
+  }
+  const int sourceWidth = width - cropPixX * 2, sourceHeight = height - cropPixY * 2;
+  const int targetWidth = std::floor((sourceWidth - 1) * scale) + 1;
+  const int targetHeight = std::floor((sourceHeight - 1) * scale) + 1;
+  uint8_t* row = bitmap.drawScratch.get();
+  uint8_t* source = row + width;
+  for (int fileY = 0; fileY < height; ++fileY) {
+    if (bitmap.readNextRow(row, source, nullptr, Bitmap::RowOutput::Gray8) != BmpReaderError::Ok) return false;
+    const int sourceY = bitmap.isTopDown() ? fileY : height - 1 - fileY;
+    if (sourceY < cropPixY || sourceY >= height - cropPixY) continue;
+    const int relativeY = sourceY - cropPixY;
+    const int destY = (relativeY * targetHeight + sourceHeight - 1) / sourceHeight;
+    // Select one source row per destination row, independent of BMP row order.
+    if (destY >= targetHeight || destY * sourceHeight / targetHeight != relativeY) continue;
+    for (int destX = 0; destX < targetWidth; ++destX) {
+      const int sourceX = cropPixX + destX * sourceWidth / targetWidth;
+      drawGrayscale16Pixel(x + destX, y + destY, row[sourceX]);
     }
   }
   return true;

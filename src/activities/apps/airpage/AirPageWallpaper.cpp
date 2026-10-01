@@ -1,5 +1,6 @@
 #include "AirPageWallpaper.h"
 
+#include <HalDisplay.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -57,7 +58,9 @@ bool AirPageWallpaper::writePart(const SelectedImage& selected) {
           !Storage.openFileForWrite("AIRP", kSleepImagePartPath, output)) {
         return false;
       }
-      const bool converted = JpegToBmpConverter::jpegFileToBmpStream(input, output, /*crop=*/false);
+      const auto format =
+          display.getGrayscaleLevels() == 16 ? JpegToBmpConverter::Output::Gray8 : JpegToBmpConverter::Output::Gray2;
+      const bool converted = JpegToBmpConverter::jpegFileToBmpStream(input, output, /*crop=*/false, format);
       output.flush();
       return converted;
     }
