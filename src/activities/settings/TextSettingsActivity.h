@@ -46,6 +46,8 @@ class TextSettingsActivity final : public UiTabListActivity {
     EmbeddedStyle,
     FakeBold,
     AntiAliasing,
+    BookStyleMemory,
+    ClearBookStyles,
     Count
   };
   static constexpr int HIDDEN_GUIDE_ROW_COUNT =
