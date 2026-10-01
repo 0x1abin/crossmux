@@ -45,6 +45,26 @@ bool supportsTextOnlyCombinedBase(const Display& display) {
   return combinesGrayscaleBase(display);
 }
 template <typename Display>
+uint8_t grayscaleLevels(const Display& display) {
+  if constexpr (requires { display.getGrayscaleLevels(); }) return display.getGrayscaleLevels();
+  return 4;  // Simulator HAL has no native image path.
+}
+template <typename Display>
+uint8_t* beginNativeGray(Display& display) {
+  if constexpr (requires { display.beginGrayscale16(); }) return display.beginGrayscale16();
+  return nullptr;
+}
+template <typename Display>
+bool commitNativeGray(Display& display) {
+  if constexpr (requires { display.commitGrayscale16(); }) return display.commitGrayscale16();
+  return false;
+}
+template <typename Display>
+void cancelNativeGray(Display& display) {
+  if constexpr (requires { display.cancelGrayscale16(); }) display.cancelGrayscale16();
+}
+
+template <typename Display>
 void cancelGrayscale(Display& display) {
   if constexpr (requires { display.cancelGrayscale(); }) display.cancelGrayscale();
 }
@@ -131,6 +151,9 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
 }
 
 void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask) const {
+  // Preload must target the face the text is drawn in, or the glyphs never reach the
+  // SD font's resident cache and the text renders blank.
+  fontId = resolveFontFamilyId(fontId);
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
     std::string shaped;
@@ -147,9 +170,10 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_
   // thrash the page-bounded cache, so it is intentionally omitted.
 }
 
-void GfxRenderer::ensureSdCardFontReady(const int fontId, const char* const* segments, const size_t* segmentLens,
+void GfxRenderer::ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* segmentLens,
                                         const size_t segmentCount, const bool includeSpace, const bool includeHyphen,
                                         const uint8_t styleMask) const {
+  fontId = resolveFontFamilyId(fontId);
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
     // Augment the persistent advance-only table for layout measurement.
@@ -274,16 +298,27 @@ void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
   }
 }
 
+int GfxRenderer::resolveFontFamilyId(const int fontId) const {
+  const auto it = preferredFontMap_.find(fontId);
+  const int candidate = (it != preferredFontMap_.end()) ? it->second : fontId;
+  if (fontMap.find(candidate) != fontMap.end()) return candidate;
+  return fontId;
+}
+
 int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const EpdFontFamily::Style style) const {
-  if (fallbackFontMap_.empty() || text == nullptr || *text == '\0') {
-    return fontId;
-  }
+  // A target may rebind a UI id to the SD family its UI is drawn in (setPreferredFont).
+  // Resolving it here, instead of swapping fontMap entries, keeps measuring and drawing
+  // on one face -- both call this function.
+  const int effectiveFontId = resolveFontFamilyId(fontId);
+
+  // Fallbacks stay keyed by the requested id; for a rebound id the entry names the
+  // built-in family, which is exactly what the SD face should fall back to.
   const auto fbIt = fallbackFontMap_.find(fontId);
-  if (fbIt == fallbackFontMap_.end()) {
-    return fontId;  // no fallback registered for this font
+  if (fbIt == fallbackFontMap_.end() || text == nullptr || *text == '\0') {
+    return effectiveFontId;
   }
-  const auto fontIt = fontMap.find(fontId);
-  if (fontIt == fontMap.end()) return fontId;
+  const auto fontIt = fontMap.find(effectiveFontId);
+  if (fontIt == fontMap.end()) return effectiveFontId;
   const EpdFontFamily& primary = fontIt->second;
   for (const int fallbackFontId : fbIt->second) {
     if (fallbackFontId == 0) continue;
@@ -293,13 +328,13 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
     const char* cursor = text;
     uint32_t cp;
     while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
-      const bool eligible = cp >= 0x80;
+      const bool eligible = effectiveFontId != fontId || cp >= 0x80;
       if (eligible && !primary.hasCodepoint(cp, style) && fallback.hasCodepoint(cp, style)) {
         return fallbackFontId;
       }
     }
   }
-  return fontId;
+  return effectiveFontId;
 }
 
 void GfxRenderer::prewarmFallbackText(const int fontId, const TextGetter getter, const void* ctx,
@@ -334,8 +369,10 @@ void GfxRenderer::prewarmFallbackText(const int fontId, const char* text, const 
   if (resolvedFontId != fontId) ensureSdGlyphsResident(resolvedFontId, text, style, false);
 }
 
-void GfxRenderer::ensureSdGlyphsResident(const int fontId, const char* text, const EpdFontFamily::Style style,
+void GfxRenderer::ensureSdGlyphsResident(int fontId, const char* text, const EpdFontFamily::Style style,
                                          const bool metadataOnly) const {
+  // Residency must be tracked against the face the text is drawn in.
+  fontId = resolveFontFamilyId(fontId);
   const auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt == sdCardFonts_.end()) return;
   const uint8_t styleMask = static_cast<uint8_t>(1u << (static_cast<uint8_t>(style) & 0x03));
@@ -1599,6 +1636,75 @@ bool GfxRenderer::drawBitmapCropToFill(const Bitmap& bitmap, const int x, const 
   return true;
 }
 
+uint8_t GfxRenderer::getGrayscaleLevels() const { return grayscaleLevels(display); }
+
+bool GfxRenderer::beginGrayscale16() {
+  if (grayscale16Buffer || _stripActive || !frameBuffer || getGrayscaleLevels() != 16) return false;
+  grayscale16Buffer = beginNativeGray(display);
+  if (!grayscale16Buffer) return false;
+  setRenderMode(BW);
+  clearScreen();  // Retain a B/W proxy for popup drawing and subsequent AA.
+  return true;
+}
+
+bool GfxRenderer::commitGrayscale16() const {
+  if (!grayscale16Buffer) return false;
+  grayscale16Buffer = nullptr;
+  return commitNativeGray(display);
+}
+
+void GfxRenderer::cancelGrayscale16() const {
+  if (grayscale16Buffer) cancelNativeGray(display);
+  grayscale16Buffer = nullptr;
+}
+
+void GfxRenderer::drawGrayscale16Pixel(const int x, const int y, const uint8_t gray) const {
+  if (!grayscale16Buffer || x < 0 || y < 0 || x >= getScreenWidth() || y >= getScreenHeight()) return;
+  int px, py;
+  rotateCoordinates(orientation, x, y, &px, &py, panelWidth, panelHeight);
+  const size_t index = static_cast<size_t>(py) * (panelWidth / 2) + px / 2;
+  const uint8_t level = (static_cast<unsigned>(gray) + 8) / 17;
+  const unsigned shift = (px & 1) * 4;
+  grayscale16Buffer[index] = (grayscale16Buffer[index] & ~(0x0Fu << shift)) | (level << shift);
+  drawPixel(x, y, level < 8);
+}
+
+bool GfxRenderer::drawBitmapGrayscale16(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
+                                        const int maxHeight, const float cropX, const float cropY) const {
+  if (!grayscale16Buffer || !std::isfinite(cropX) || !std::isfinite(cropY) || cropX < 0 || cropX >= 1 || cropY < 0 ||
+      cropY >= 1 || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0)
+    return false;
+  const int width = bitmap.getWidth(), height = bitmap.getHeight();
+  const int cropPixX = std::floor(width * cropX / 2), cropPixY = std::floor(height * cropY / 2);
+  float scale = 1;
+  if (maxWidth > 0) scale = std::min(scale, maxWidth / ((1 - cropX) * width));
+  if (maxHeight > 0) scale = std::min(scale, maxHeight / ((1 - cropY) * height));
+  // At most 2048 Gray8 pixels + 8192 source bytes, bounded by Bitmap headers.
+  if (!bitmap.ensureDrawScratch(static_cast<size_t>(width) + bitmap.getRowBytes())) {
+    LOG_ERR("GFX", "Failed to allocate native BMP rows");
+    return false;
+  }
+  const int sourceWidth = width - cropPixX * 2, sourceHeight = height - cropPixY * 2;
+  const int targetWidth = std::floor((sourceWidth - 1) * scale) + 1;
+  const int targetHeight = std::floor((sourceHeight - 1) * scale) + 1;
+  uint8_t* row = bitmap.drawScratch.get();
+  uint8_t* source = row + width;
+  for (int fileY = 0; fileY < height; ++fileY) {
+    if (bitmap.readNextRow(row, source, nullptr, Bitmap::RowOutput::Gray8) != BmpReaderError::Ok) return false;
+    const int sourceY = bitmap.isTopDown() ? fileY : height - 1 - fileY;
+    if (sourceY < cropPixY || sourceY >= height - cropPixY) continue;
+    const int relativeY = sourceY - cropPixY;
+    const int destY = (relativeY * targetHeight + sourceHeight - 1) / sourceHeight;
+    // Select one source row per destination row, independent of BMP row order.
+    if (destY >= targetHeight || destY * sourceHeight / targetHeight != relativeY) continue;
+    for (int destX = 0; destX < targetWidth; ++destX) {
+      const int sourceX = cropPixX + destX * sourceWidth / targetWidth;
+      drawGrayscale16Pixel(x + destX, y + destY, row[sourceX]);
+    }
+  }
+  return true;
+}
+
 bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY, const bool preserveTransparency) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
@@ -2276,7 +2382,10 @@ bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8
   return true;
 }
 
-int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style style) const {
+int GfxRenderer::getSpaceWidth(int fontId, const EpdFontFamily::Style style) const {
+  // Metrics must follow a rebound id, or a row is measured in the built-in face and
+  // then drawn in the SD one. See setPreferredFont().
+  fontId = resolveFontFamilyId(fontId);
   // Advance table fast-path for SD card fonts during layout
   auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
@@ -2293,8 +2402,10 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
   return spaceGlyph ? fp4::toPixel(spaceGlyph->advanceX) : 0;  // snap 12.4 fixed-point to nearest pixel
 }
 
-int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
+int GfxRenderer::getSpaceAdvance(int fontId, const uint32_t leftCp, const uint32_t rightCp,
                                  const EpdFontFamily::Style style) const {
+  // Metrics must follow a rebound id (see setPreferredFont()).
+  fontId = resolveFontFamilyId(fontId);
   // Advance table fast-path for SD card fonts during layout.
   // Kern data is not loaded during layout (consistent with previous metadataOnly behavior),
   // so we return just the space advance without kerning.
@@ -2315,15 +2426,16 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   return fp4::toPixel(spaceAdvanceFP + kernFP);
 }
 
-int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
-                            const EpdFontFamily::Style style, const int8_t tracking) const {
+int GfxRenderer::getKerning(int fontId, const uint32_t leftCp, const uint32_t rightCp, const EpdFontFamily::Style style,
+                            const int8_t tracking) const {
+  fontId = resolveFontFamilyId(fontId);
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) return 0;
   const int kernFP = fontIt->second.getKerning(leftCp, rightCp, style);      // 4.4 fixed-point
   return fp4::toPixel(kernFP) + trackingBetween(leftCp, rightCp, tracking);  // snap 4.4 fixed-point to nearest pixel
 }
 
-int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style, const int8_t tracking,
+int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, const int8_t tracking,
                                  const BidiUtils::BidiBaseDir baseDir, const TextMeasureMode mode) const {
   // Match the font drawText would use for CJK-bearing strings (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
@@ -2419,7 +2531,10 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   return widthPx;
 }
 
-int GfxRenderer::getFontAscenderSize(const int fontId) const {
+int GfxRenderer::getFontAscenderSize(int fontId) const {
+  // Row height / ascender must follow a rebound id, or the row is sized for the
+  // built-in face and the SD face is clipped out of it. See setPreferredFont().
+  fontId = resolveFontFamilyId(fontId);
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
@@ -2429,7 +2544,9 @@ int GfxRenderer::getFontAscenderSize(const int fontId) const {
   return fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
 }
 
-int GfxRenderer::getLineHeight(const int fontId) const {
+int GfxRenderer::getLineHeight(int fontId) const {
+  // Row height must follow a rebound id (see setPreferredFont()).
+  fontId = resolveFontFamilyId(fontId);
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
@@ -2439,11 +2556,15 @@ int GfxRenderer::getLineHeight(const int fontId) const {
   return fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY;
 }
 
-int GfxRenderer::getLineHeight(const int fontId, const float compression) const {
+int GfxRenderer::getLineHeight(int fontId, const float compression) const {
+  // Row height must follow a rebound id (see setPreferredFont()).
+  fontId = resolveFontFamilyId(fontId);
   return static_cast<int>(getLineHeight(fontId) * compression + 0.5f);
 }
 
-int GfxRenderer::getTextHeight(const int fontId) const {
+int GfxRenderer::getTextHeight(int fontId) const {
+  // Text height must follow a rebound id (see setPreferredFont()).
+  fontId = resolveFontFamilyId(fontId);
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);

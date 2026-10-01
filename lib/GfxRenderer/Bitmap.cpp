@@ -281,7 +281,7 @@ BmpReaderError Bitmap::parseHeaders() {
 }
 
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
-BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow) const {
+BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow, RowOutput output) const {
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
   if (sourceRead(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
 
@@ -294,6 +294,12 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* o
 
   // Helper lambda to pack 2bpp color into the output stream
   auto packPixel = [&](const uint8_t lum, const bool opaque = true) {
+    if (output == RowOutput::Gray8) {
+      data[currentX] = lum;
+      if (opacityRow) opacityRow[currentX] = opaque;
+      ++currentX;
+      return;
+    }
     uint8_t color;
     if (atkinsonDitherer) {
       color = atkinsonDitherer->processPixel(adjustPixel(lum), currentX);
@@ -376,9 +382,9 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* o
       return BmpReaderError::UnsupportedBpp;
   }
 
-  if (atkinsonDitherer)
+  if (output == RowOutput::PackedGray2 && atkinsonDitherer)
     atkinsonDitherer->nextRow();
-  else if (fsDitherer)
+  else if (output == RowOutput::PackedGray2 && fsDitherer)
     fsDitherer->nextRow();
 
   // Flush remaining bits if width is not a multiple of 4

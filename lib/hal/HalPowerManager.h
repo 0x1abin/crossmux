@@ -44,7 +44,11 @@ class HalPowerManager {
   // Should be called inside main loop() to handle the currentLockMode
   void startDeepSleep(HalGPIO& gpio) const;
 
-  // Only the runtime-selected X3 profiles have validated standby wake wiring.
+  // True when this board can run a light-sleep cycle at all. Only the
+  // runtime-selected X3 profiles and Read Pico have validated standby wake
+  // wiring; every other target reports false. Read Pico's is valid whenever the
+  // FCA9555 came up, and its wake set is armed in HalPowerManager.cpp (IOE INT#
+  // GPIO41, low level) rather than from a GPIO power pin.
   bool canStandbyLightSleep(const HalGPIO& gpio) const;
 
   // Enter one light-sleep cycle. GPIO and timer wake sources are removed before returning.

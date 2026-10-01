@@ -32,6 +32,7 @@
 | Murphy M4 | ESP32-S3 | Nightly |
 | Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Nightly |
+| [Read Pico（小纸 Pico）](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
 此表表示配置中的发布目标，不代表所有功能均已通过实机验收。每个 S3 目标使用独立固件。X4 Classic 仅提供构建目标，尚未加入公开发布与 OTA 索引。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
 
@@ -91,6 +92,18 @@ CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nigh
 ```
 
 开发版应用固件位于 `.pio/build/metalio_eink4/firmware.bin`；首次安装还需要匹配的引导程序和分区布局，详见 [Metalio 设备指南](./docs/engineering/metalio-eink4.md)。
+
+Read Pico（小纸 Pico）构建命令：
+
+FreeInk SDK PR #35 合入前，请先按[设备指南](./docs/engineering/read-pico.md#current-implementation--2026-09-30)临时切换 SDK，再构建。
+
+```bash
+pio run -e readpico
+```
+
+Windows 上运行 `pio` 前请先设置 `PYTHONIOENCODING=utf-8`，否则 PlatformIO 打印阿拉伯语 i18n 语言行时可能编码崩溃、构建静默卡住。
+
+应用固件位于 `.pio/build/readpico/firmware.bin`。首次安装为**整表烧录**——`bootloader@0x0`、`partitions@0x8000`、`boot_app0@0xe000`、`app@0x10000`——且须先有一份已核验的整片（16 MiB）备份，因为本仓库分区表与板厂出厂 `partitions_16M.csv` 在 `0xE000` 冲突且 app 槽大小不同。本轮该目标**仅提供构建**：未加入 Nightly/OTA/Web 发布映射，也尚无实机验收记录。引脚表、冻结的构建参数与待办验收清单见 [Read Pico 设备指南](./docs/engineering/read-pico.md)。
 
 ### 桌面模拟器
 

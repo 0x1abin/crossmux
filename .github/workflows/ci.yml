@@ -49,6 +49,9 @@ jobs:
   cppcheck:
     runs-on: ubuntu-latest
     steps:
+      - name: Isolate PlatformIO toolchains
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
@@ -64,14 +67,22 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U pioarduino==6.1.19
+        run: uv pip install --system -U pioarduino==6.2.0
+
+      - name: Prepare platform tools
+        run: python scripts/patch_pioarduino_cache.py --prepare-platform
 
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
-          path: ~/.platformio/.cache
+          path: ${{ env.PLATFORMIO_CORE_DIR }}/.cache
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
+
+      - name: Install cppcheck runtime dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpcre3
 
       - name: Run cppcheck
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
@@ -81,6 +92,9 @@ jobs:
     needs: select_runner
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
+      - name: Isolate PlatformIO toolchains
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
+
       - name: Use runner temporary directory
         # Avoid the self-hosted runner's shared /tmp tmpfs.
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
@@ -100,13 +114,16 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U pioarduino==6.1.19
+        run: uv pip install --system -U pioarduino==6.2.0
+
+      - name: Prepare platform tools
+        run: python scripts/patch_pioarduino_cache.py --prepare-platform
 
       - name: Cache PlatformIO packages
         if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
-          path: ~/.platformio/.cache
+          path: ${{ env.PLATFORMIO_CORE_DIR }}/.cache
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
@@ -140,6 +157,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Install build tools
         run: |
@@ -165,6 +183,7 @@ jobs:
         run: |
           bash freeink-sdk/libs/book/FreeInkBook/test/host/run.sh
           bash freeink-sdk/libs/ui/FreeInkUI/test/host/run.sh
+          python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py
 
       - name: Run hardware packaging tests
         run: python3 -m unittest discover -v -s scripts/tests

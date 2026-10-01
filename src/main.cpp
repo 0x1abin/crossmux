@@ -413,6 +413,15 @@ bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false)
 #endif
 
   display.begin(seamless);
+#if FREEINK_DEVICE_READPICO
+  // Read Pico step 4 of 5 (see the boot-order note in setup()): the panel has
+  // stepped through its own rails by now — BoardReadPico::epdPrepare/On/Off are
+  // the board's LgfxEpdPowerHooks, so the SY7636A enable (FCA9555 P0.3), VCOM and
+  // the PGOOD wait all ran inside display.begin(). Only now does the CST836U
+  // probe go out on the shared 400 kHz bus, which is what HalGPIO::begin()
+  // deferred. Idempotent, so any other path that initialises the panel is safe.
+  gpio.beginInput();
+#endif
 #if FREEINK_DEVICE_MURPHY_M4
   if (!gpio.restoreTouchAfterDisplayReset()) {
     LOG_ERR("MAIN", "Failed to restore Murphy M4 touch after display reset");
@@ -535,6 +544,35 @@ void continueChineseFontInstall(const uint8_t expectedPointSize) {
 void setup() {
   BoardConfig::holdPowerRails();
 
+  // --- Read Pico boot order (read-pico.md 1.4) ------------------------------
+  // This board's bring-up is ordered by its power tree, and the reference
+  // firmware uses the same order (read_pico_init.c: board I2C + expander and the
+  // touch reset first, then the EPD, then the accelerometer/touch drivers):
+  //
+  //   1. shared I2C, SDA39/SCL40 at 400 kHz
+  //   2. FCA9555 expander + PMU handshake + CST836U reset pulse
+  //   3. SY7636A EPD rails, then the panel itself
+  //   4. touch backend (and the IMU, which this board does not use)
+  //   5. SD card
+  //
+  // 1-2 is gpio.begin() below (BoardReadPico::begin()): nothing downstream can
+  // be sequenced before the expander answers, because it enables the SY7636A
+  // (P0.3), drives XOE (P0.1), gates the touch reset (P0.7), senses PGOOD (P0.5)
+  // and carries the card detect (P0.6). 3-4 is setupDisplayAndFonts(): the
+  // SY7636A sequence is the board's LgfxEpdPowerHooks inside display.begin(),
+  // and gpio.beginInput() brings the CST836U up immediately after it.
+  //
+  // 5 (SD) deliberately stays where it is, ahead of the panel: storage is a
+  // boot-time dependency in CrossMux — SETTINGS/APP_STATE/reading state are read
+  // from it before any activity exists, and the SD-failure path itself paints a
+  // screen — and this board's SDMMC pins (CLK38/CMD42/D0=44) share nothing with
+  // the shared I2C bus (39/40) or the EPD bus (3..21, 45..48), so mounting late
+  // would reorder shared setup code for every target with no hardware reason.
+  // The board only needs the expander to be up first, which gpio.begin() does.
+  //
+  // Every step degrades instead of aborting: a dead expander leaves the panel
+  // dark and the keys dead (logged), a missing card shows the SD error screen,
+  // and a failed PMU handoff leaves battery/RTC/power-off reporting unknown.
 #ifdef ENABLE_SERIAL_LOG
 #ifdef CROSSPOINT_WAIT_FOR_USB_SERIAL
   // Development builds preserve reliable early CDC logs; release builds let
@@ -577,6 +615,13 @@ void setup() {
   const bool silentRebootLightOn = isSilentReboot && (silentRebootPayload & SILENT_REBOOT_LIGHT_ON) != 0;
   silentRebootPayload = 0;
 
+  // On Read Pico this pair is steps 1-2 of the boot order above: gpio.begin()
+  // runs BoardReadPico::begin() (shared I2C, FCA9555 self-test + Port-0 config,
+  // CST836U reset pulse, PMU handshake, accelerometer identity probe) before
+  // anything else on that board is touched, and it deliberately leaves that
+  // board's input backends unstarted. powerManager.begin() installs the same
+  // board's PMU host-shutdown hook, so it has to follow. Every other target is
+  // unchanged.
   gpio.begin();
   powerManager.begin();
 
@@ -589,6 +634,12 @@ void setup() {
   const bool wakeHoldVerified = wakeupReason != HalGPIO::WakeupReason::PowerButton || gpio.verifyPowerButtonWakeup();
 #endif
 
+  // IMU bring-up on every target. Read Pico's SC7A20H is an accelerometer with no
+  // gyroscope, so HalTiltSensor differentiates the gravity component for the tilt
+  // page-turn gesture instead of reading an angular rate; the thresholds are converted
+  // from the same 270 dps. halClock.begin() restores the system clock from the board RTC
+  // when the system clock is invalid; Read Pico's RTC is the PMU, whose hooks
+  // BoardReadPico::begin() already installed.
   halTiltSensor.begin();
   halClock.begin();
 
@@ -614,6 +665,11 @@ void setup() {
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
+  // Read Pico step 5: 1-bit SDMMC, mounted by attempt. The FCA9555 card-detect
+  // line (P0.6) is a hint for the failure log only and never a mount gate
+  // (read-pico.md B11), so a card that the expander misreads still mounts, and an
+  // unreadable card lands here — the error screen below is the controlled path,
+  // nothing aborts.
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
     const bool fontsReady = setupDisplayAndFonts(isSilentReboot);
@@ -631,8 +687,10 @@ void setup() {
 
   HalSystem::checkPanic();
 
-  if (gpio.hasTouch()) SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
   const bool settingsLoaded = SETTINGS.loadFromFile();
+#if FREEINK_DEVICE_READPICO
+  if (!settingsLoaded) SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
+#endif
   const auto onboardingMode =
       settingsLoaded ? LanguageSelectActivity::Mode::Upgrade : LanguageSelectActivity::Mode::Initial;
   const bool requiresOnboarding = CrossPointSettings::requiresOnboarding(SETTINGS.onboardingVersion);
@@ -686,7 +744,7 @@ void setup() {
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
-    FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
+    FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_READPICO
       // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
       // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
       // (its button is behind the PMIC). EEGO A4's post-flash reset reads as
@@ -694,8 +752,12 @@ void setup() {
       // USB-power cold boot and sleep. Waveshare 3.97 hits both: its side key is
       // behind the AXP2101 (input.power == PIN_UNASSIGNED) and it is a native-USB
       // S3, so startDeepSleep() there is a PMIC shutdown on every cabled boot.
-      // Sleeping any of these here would strand the device in a USB-replug boot
-      // loop (or sleep right after a flash).
+      // Read Pico is the same class of device and would be worse: its power key is
+      // PMU-owned (input.power == PIN_UNASSIGNED), it is a native-USB S3 whose
+      // console is USB Serial/JTAG, and its "off" is a PMU host shutdown whose only
+      // wake sources are the PMU key / AC-in / RTC alarm — so a cabled boot with a
+      // charging battery (isUsbConnected() reads the PMU charge state) would drop
+      // the EN rail immediately and look like a boot loop to the user.
       break;
 #else
       Storage.prepareForDeepSleep();

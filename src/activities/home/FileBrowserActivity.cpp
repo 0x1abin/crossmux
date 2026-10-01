@@ -869,9 +869,8 @@ void FileBrowserActivity::render(RenderLock&& lock) {
 }
 
 size_t FileBrowserActivity::findEntry(const std::string& name) const {
-  for (size_t i = 0; i < files.size(); i++)
-    if (files[i] == name) return i;
-  return 0;
+  const auto found = std::find(files.begin(), files.end(), name);
+  return found == files.end() ? 0 : static_cast<size_t>(found - files.begin());
 }
 
 void formatFileName(const std::string& filename, char* buffer, const size_t bufferSize) {

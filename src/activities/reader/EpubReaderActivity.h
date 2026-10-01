@@ -102,6 +102,10 @@ class EpubReaderActivity final : public ReaderActivity {
   bool overlayRefreshPending = false;
   void pushOverlayRefresh();
   void settleOverlayRefresh();
+  // The More panel's image-scaling row is a one-tap toggle that deliberately
+  // does NOT re-render the page: the overlay page snapshot was decoded with the
+  // old filter, so it is dropped on close and the page re-decodes once there.
+  bool imageScalingDirty = false;
   int autoTurnOption = 0;  // current auto page-turn rate index (More panel)
   std::vector<EpubReaderMenuActivity::MenuItem> moreItems;
 

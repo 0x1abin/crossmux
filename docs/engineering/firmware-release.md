@@ -3,7 +3,7 @@
 CrossMux has two release channels, `stable` and `nightly`, managed by one
 channel-aware pipeline. Hardware identity is not a release channel. Stable
 contains the shared X3/X4 image and a separate Sticky image. Both targets support
-`stable` and `nightly`; the other six ESP32-S3 release targets remain Nightly-only.
+`stable` and `nightly`; the other seven ESP32-S3 release targets remain Nightly-only.
 
 ## Canonical targets
 
@@ -16,9 +16,17 @@ packager, index builder, and tests import this table rather than copy it.
 The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
 image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky Stable uses
 `sticky-gh_release`. Sticky, X4 Pro,
-Paper Mono, EEGO A4, Murphy M4, Waveshare ePaper 3.97, and Metalio E-Ink 4 each produce their own
+Paper Mono, EEGO A4, Murphy M4, Waveshare ePaper 3.97, Metalio E-Ink 4, and MindReset Read Pico each produce their own
 ESP32-S3 Nightly image. Each image is aliased by the compatibility `global` and
 `zh-CN` pointers.
+
+Read Pico uses `readpico_nightly`, with artifact slug and board tag `readpico`.
+The model list accepts both `readpico` and the SDK runtime name `read_pico`.
+Its full-install package uses the existing 16 MB S3 partition
+profile. The Web flasher displays it as **MindReset Read Pico**; Stable OTA returns
+`unsupported_channel`. First installation replaces the factory partition layout
+and requires a complete Flash backup. See [Read Pico](read-pico.md) for hardware
+evidence and the outstanding physical acceptance checks.
 
 ## Publishing
 
@@ -50,11 +58,19 @@ and `partitions.bin` assets, alongside the neutral binaries, compatibility manif
 and checksum files for every Stable target.
 
 At steady state, GitHub and COS retain the current build and the build or builds
-referenced by the previous index. A scheduled successful Nightly therefore
-keeps roughly 24 hours of rollback data. Failed builds do not publish or clean
-up anything. The first complete run can temporarily retain more than two build
-names when the preceding index contains target-level fallbacks; the next
+referenced by the previous index. Normally this means two immutable builds; the
+rollback window depends on release frequency. Failed builds do not publish or
+clean up anything. The first complete run can temporarily retain more than two
+build names when the preceding index contains target-level fallbacks; the next
 complete run converges to exactly the current and previous build.
+
+Cleanup validates a nonempty historical target map and every target's identity,
+compatibility variants, and regional manifest URL. Historical targets need not
+match today's canonical target table: adding or retiring a device must still
+protect every build referenced by the previous index. New published indexes
+continue to require the complete canonical target set. A cleanup failure after
+verified publication leaves the new firmware available and retains extra old
+builds until a subsequent successful cleanup.
 
 COS publishing runs only on the H2O self-hosted runner and does not fall back to
 a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary

@@ -2,7 +2,7 @@
 """Sync review check: production menus/tabs with fixed host metrics, not full pages.
 
 Requires the reviewed Reader 93e98bb and pre-sync 9d02f498 Git objects fetched by
-the sync workflow; intentionally not registered in offline/shallow-clone CTest.
+the sync workflow; CI fetches full history for these fixed references.
 FREEINK_SDK_ROOT selects the reviewed candidate; defaults to the pinned SDK.
 """
 import os
@@ -184,6 +184,7 @@ def actions(directory):
 #include <vector>
 #include <cstdint>
 #include <variant>
+#define LOG_ERR(...) ((void)0)
 bool inx=false;
 struct UITheme { static UITheme& getInstance(){static UITheme t;return t;} bool hasMainTabs(){return inx;} };
 struct { bool light=false; bool present(){return light;} } Frontlight;
@@ -247,6 +248,9 @@ int main(){
   std::vector<MenuItem> actual,expected;
   a.buildMenuItems(actual,flags&2,flags&4);
   if(inx) a.historical(expected,flags&2,flags&4); else a.reference(expected,flags&2,flags&4);
+  // main added one shared image-filter row; retain every pre-sync row's order.
+  auto night=std::find_if(expected.begin(),expected.end(),[](const MenuItem& row){return row.action==MenuAction::NIGHT_MODE;});
+  expected.insert(night,{MenuAction::IMAGE_SCALING,StrId::STR_IMAGE_SCALING});
   assert(actual==expected);
  }
  for(bool isInx:{false,true}) {

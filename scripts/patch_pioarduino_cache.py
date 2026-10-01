@@ -8,6 +8,24 @@ def cache_matches(requested, cached_request):
     return bool(requested.strip()) and requested.strip() == cached_request.strip()
 
 
+if "--prepare-platform" in sys.argv:
+    from platformio.package.manager.platform import PlatformPackageManager
+    from platformio.project.config import ProjectConfig
+
+    config = ProjectConfig.get_instance()
+    package = PlatformPackageManager().install(config.get("env:default", "platform"), skip_dependencies=True)
+    platform_file = Path(package.path) / "platform.py"
+    source = platform_file.read_text(encoding="utf-8")
+    old_tools = 'COMMON_IDF_PACKAGES = [\n    "tool-cmake",\n    "tool-ninja",\n    "tool-scons",'
+    new_tools = old_tools.replace('\n    "tool-scons",', "")
+    # The platform installer must not replace the Core's running SCons package.
+    if old_tools in source:
+        platform_file.write_text(source.replace(old_tools, new_tools, 1), encoding="utf-8")
+    elif new_tools not in source:
+        raise RuntimeError("Unsupported pioarduino IDF tool list")
+    raise SystemExit(0)
+
+
 if "--self-test" in sys.argv:
     assert cache_matches("CONFIG_A=y\nCONFIG_B=n", "CONFIG_A=y\nCONFIG_B=n")
     assert not cache_matches("CONFIG_A=y", "CONFIG_A=y\nCONFIG_B=n")
@@ -81,6 +99,16 @@ if original_sdkconfig.is_file():
         original_sdkconfig.replace(target_sdkconfig)
     # A prebuilt target must retain sdkconfig.orig: PlatformIO uses it to
     # reinstall the original libraries, not just their configuration header.
+
+if rebuild:
+    # IDF component environments clone application flags before post hooks.
+    # Keep SDK/bootstrap objects non-LTO: GCC merges incompatible DRAM_ATTR
+    # sections otherwise. The child Arduino pass reads the original project
+    # flags again once these libraries are cached, retaining application LTO.
+    env.Replace(
+        BUILD_FLAGS=[flag for flag in env.get("BUILD_FLAGS", []) if not str(flag).startswith("-flto")],
+        BUILD_UNFLAGS=[flag for flag in env.get("BUILD_UNFLAGS", []) if flag != "-fno-lto"],
+    )
 
 if rebuild and not board.get("build.esp-idf.sdkconfig_path", ""):
     # Resolved Kconfig values override sdkconfig.defaults, even across SDK upgrades.

@@ -571,18 +571,20 @@ void SleepActivity::onEnter() {
 }
 
 void SleepActivity::renderCustomSleepScreen() const {
+  const bool native = renderer.getGrayscaleLevels() == 16 &&
+                      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
   // Look for sleep.bmp on the root of the sd card to determine if we should
   // render a custom sleep screen instead of the default.
   // This takes priority over the /sleep folder.
   HalFile file;
   if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
-    Bitmap bitmap(file, true,
+    Bitmap bitmap(file, !native,
                   renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
                       display.getController() == HalDisplay::Controller::SSD1677 &&
                       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading: /sleep.bmp");
-      renderBitmapSleepScreen(bitmap);
+      renderBitmapSleepScreen(bitmap, false, native);
       file.close();
       return;
     }
@@ -599,12 +601,12 @@ void SleepActivity::renderCustomSleepScreen() const {
     if (Storage.openFileForRead("SLP", selectedPath, randFile)) {
       LOG_DBG("SLP", "Randomly loading: %s", selectedPath.c_str());
       delay(100);
-      Bitmap bitmap(randFile, true,
+      Bitmap bitmap(randFile, !native,
                     renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
                         display.getController() == HalDisplay::Controller::SSD1677 &&
                         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-        renderBitmapSleepScreen(bitmap);
+        renderBitmapSleepScreen(bitmap, false, native);
         randFile.close();
         return;
       }
@@ -636,7 +638,8 @@ void SleepActivity::renderDefaultSleepScreen() const {
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
-void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool preserveBackground) const {
+void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool preserveBackground,
+                                            const bool nativeCustomImage) const {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
   const auto placement = calculateBitmapPlacement(bitmap.getWidth(), bitmap.getHeight(), renderer);
@@ -652,6 +655,19 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
   const bool hasGreyscale =
       bitmap.hasGreyscale() && (preserveBackground || SETTINGS.sleepScreenCoverFilter ==
                                                           CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
+
+  if (nativeCustomImage && !preserveBackground && renderer.getGrayscaleLevels() == 16 &&
+      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER) {
+    const bool displayed = renderer.beginGrayscale16() &&
+                           renderer.drawBitmapGrayscale16(bitmap, x, y, pageWidth, pageHeight, cropX, cropY) &&
+                           renderer.commitGrayscale16();
+    renderer.cancelGrayscale16();
+    if (!displayed) {
+      LOG_ERR("SLP", "Native grayscale sleep image failed");
+      renderDefaultSleepScreen();
+    }
+    return;
+  }
 
   if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, preserveBackground)) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);

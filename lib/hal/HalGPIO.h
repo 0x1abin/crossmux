@@ -49,6 +49,7 @@ class HalGPIO {
 
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
+  bool inputBegun = false;  // InputManager::begin() ran exactly once
   std::atomic<InputModality> inputModality{InputModality::Touch};
   bool inputModalityChanged = false;
 
@@ -81,6 +82,16 @@ class HalGPIO {
 
   // Start button GPIO and setup SPI for screen and SD card
   void begin();
+
+  // Bring the input backends up: button pins plus the touch controller
+  // (InputManager::begin()). Split out of begin() because a board can have a real
+  // ordering dependency between its panel rails and its input devices — on Read
+  // Pico the CST836U probe must not run before the SY7636A rails are sequenced,
+  // so src/main.cpp calls this right after display.begin(). Idempotent, and
+  // update() calls it as a safety net: an un-begun InputManager reports no input
+  // at all, which on a touch-only board would be a brick, so an ordering
+  // preference must never be able to cause that.
+  void beginInput();
 
   // Button input methods
   void update();

@@ -15,6 +15,7 @@ struct ImageDimensions {
 enum class DecodeOutput : uint8_t {
   FrameBufferAndCache,
   CacheOnly,
+  NativeGrayscale16,  // Gray8 samples directly to a borrowed native frame; no pixel cache.
 };
 
 struct RenderConfig {
@@ -27,7 +28,11 @@ struct RenderConfig {
   float sourceCropX = 0.0f;         // Fraction cropped equally from the left and right edges
   float sourceCropY = 0.0f;         // Fraction cropped equally from the top and bottom edges
   bool preserveAlpha = false;       // Skip transparent pixels instead of compositing them against white
-  std::string cachePath;            // If non-empty, decoder will write pixel cache to this path
+  // Resampling filter for the scale step: false = nearest neighbour (historical
+  // behaviour, one source pixel per output pixel), true = bilinear blend of the
+  // source neighbourhood. Callers that must keep the cheap path leave it false.
+  bool bilinearScaling = false;
+  std::string cachePath;  // If non-empty, decoder will write pixel cache to this path
   DecodeOutput output = DecodeOutput::FrameBufferAndCache;
 };
 

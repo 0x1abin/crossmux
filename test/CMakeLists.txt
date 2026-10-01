@@ -20,13 +20,23 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG f78f233f9acb9daa26832b0ff39ba096a6378349
+  GIT_TAG 89c882bae0056b545a81434cd7e39af9893ba9a2
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest crosspoint_simulator)
+
+# Reuse the firmware's JPEGDEC pin; its CMake target requires ESP-IDF.
+FetchContent_Declare(jpegdec
+  GIT_REPOSITORY https://github.com/bitbank2/JPEGDEC.git
+  GIT_TAG 86282979224c8a32fd51e091ed5a35b0c699a52b
+)
+FetchContent_GetProperties(jpegdec)
+if(NOT jpegdec_POPULATED)
+  FetchContent_Populate(jpegdec)
+endif()
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
@@ -81,6 +91,7 @@ add_subdirectory(gfx_two_bit_mapping)
 add_subdirectory(dictionary_resource)
 add_subdirectory(reading_guide_line)
 add_subdirectory(png_conversion)
+add_subdirectory(sample_row_clamp)
 add_subdirectory(reading_background)
 add_subdirectory(file_edit)
 add_subdirectory(memory_safety)
@@ -155,3 +166,13 @@ add_test(NAME ThemeCheckboxRows COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/
 add_test(NAME LegacyThemeListGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_legacy_list_adapter.py)
 
 add_test(NAME InxSettingControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_setting_controls.py)
+
+add_test(NAME HalTiltGestures
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
+
+add_test(NAME NativeGrayscale
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_native_grayscale.py
+    ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)
+set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
+
+add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)

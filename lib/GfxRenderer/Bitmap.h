@@ -88,7 +88,9 @@ class Bitmap {
   Bitmap(Bitmap&&) = delete;
   Bitmap& operator=(Bitmap&&) = delete;
   BmpReaderError parseHeaders();
-  BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr) const;
+  enum class RowOutput { PackedGray2, Gray8 };
+  BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr,
+                             RowOutput output = RowOutput::PackedGray2) const;
   BmpReaderError rewindToData() const;
   int getWidth() const { return width; }
   int getHeight() const { return height; }

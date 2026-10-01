@@ -1,6 +1,7 @@
 #include <Epub/Page.h>
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
@@ -19,7 +20,8 @@ namespace {
 
 class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
  protected:
-  std::string filepath = (std::filesystem::temp_directory_path() / "upstream-parser.xhtml").string();
+  std::string filepath =
+      (std::filesystem::temp_directory_path() / ("upstream-parser-" + std::to_string(getpid()) + ".xhtml")).string();
   GfxRenderer renderer;
   CssParser cssParser{"/tmp"};
   ChapterHtmlSlimParser parser{nullptr,
@@ -41,11 +43,13 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                0,
                                {},
                                nullptr,
-                               &cssParser, true};
+                               &cssParser,
+                               true};
 
   void SetUp() override {
     std::ofstream(filepath) << "<html/>";
-    parser.currentTextBlock = std::make_unique<ParsedText>(false, FirstLineIndent::Auto, false, false, BlockStyle{}, true);
+    parser.currentTextBlock =
+        std::make_unique<ParsedText>(false, FirstLineIndent::Auto, false, false, BlockStyle{}, true);
   }
   void TearDown() override { std::filesystem::remove(filepath); }
 };
@@ -63,7 +67,7 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
         ++lines;
         EXPECT_TRUE(line->getRubyTexts().empty());
         return true;
-},
+      },
       false);
   EXPECT_EQ(lines, 1u);
   const size_t retainedWords = text.size();
@@ -75,7 +79,7 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
     EXPECT_EQ(line->getRubyTexts().back(), "c");
     for (size_t i = 0; i + 1 < retainedWords; ++i) EXPECT_TRUE(line->getRubyTexts()[i].empty());
     return true;
-});
+  });
   EXPECT_EQ(lines, 2u);
 }
 
@@ -230,7 +234,7 @@ TEST(TextSpacingLayout, TrackingSeparatesCjkTokensAndScalesWordSpaces) {
           EXPECT_EQ(line->wordXpos(3), 28);  // 8 px glyph plus 150% of a 4 px space, no tracking
           EXPECT_EQ(line->wordXpos(4), 35);
           return true;
-},
+        },
         true, -1, 150);
     EXPECT_EQ(lines, 1u);
   }
@@ -248,8 +252,13 @@ TEST(TextSpacingLayout, WordSpacingChangesWrapThreshold) {
     text.addWord("ab", EpdFontFamily::REGULAR);
     text.addWord("cd", EpdFontFamily::REGULAR);
     unsigned lines = 0;
-    text.layoutAndExtractLines(renderer, 0, 36, [&](std::unique_ptr<TextBlock>, auto) { ++lines;   return true;
-}, true, 0, percent);
+    text.layoutAndExtractLines(
+        renderer, 0, 36,
+        [&](std::unique_ptr<TextBlock>, auto) {
+          ++lines;
+          return true;
+        },
+        true, 0, percent);
     EXPECT_EQ(lines, percent > 100 ? 2u : 1u);  // 16 + 16 + scaled 4 px space
   }
 }
@@ -290,7 +299,7 @@ TEST(TextSpacingLayout, CachedPageRestoresSpacing) {
         EXPECT_EQ(cached->wordCount(), original->wordCount());
         for (uint16_t i = 0; i < original->wordCount(); ++i) EXPECT_EQ(cached->wordXpos(i), original->wordXpos(i));
         return true;
-},
+      },
       true, -2, 50);
   EXPECT_EQ(lines, 1u);
   std::filesystem::remove(path);
@@ -334,7 +343,7 @@ TEST(KoreanLayout, HangulWordsStayWholeAndWrapAtSpaces) {
       auto& words = lines.emplace_back();
       for (uint16_t i = 0; i < line->wordCount(); ++i) words.emplace_back(line->wordText(i));
       return true;
-});
+    });
     // 가나다 라마 is 24 + 4 + 16 px; adding 3개를 would need 72 px, and no break exists inside it.
     const std::vector<std::vector<std::string>> expected{{"가나다", "라마"}, {"3개를"}, {"iPhone을"}};
     EXPECT_EQ(lines, expected);
@@ -357,7 +366,7 @@ TEST(KoreanLayout, JustifiedHangulStretchesOnlyWordSpaces) {
     EXPECT_EQ(line->wordXpos(1), 22);
     EXPECT_EQ(line->wordXpos(2), 44);
     return true;
-});
+  });
   EXPECT_EQ(lines, 2u);
 }
 
@@ -375,7 +384,7 @@ TEST(KoreanLayout, HangulGluedAcrossInlineStyleIsUnbreakable) {
     auto& words = lines.emplace_back();
     for (uint16_t i = 0; i < line->wordCount(); ++i) words.emplace_back(line->wordText(i));
     return true;
-});
+  });
   // 가나 한국 fits in 36 px, but 어 is glued to 한국, so the whole word moves down.
   const std::vector<std::vector<std::string>> expected{{"가나"}, {"한국", "어"}};
   EXPECT_EQ(lines, expected);

@@ -197,6 +197,8 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   fillBatteryIcon(renderer, iconRect, percentage);
 }
 
+// Retain the established theme component interface.
+// cppcheck-suppress functionStatic
 int BaseTheme::measureProgressBarHeight(const GfxRenderer& renderer, const int barHeight,
                                         const bool showPercentage) const {
   constexpr int percentageGap = 15;
@@ -285,6 +287,8 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   renderer.setOrientation(orig_orientation);
 }
 
+// Retain the established theme component interface.
+// cppcheck-suppress functionStatic
 bool BaseTheme::buttonHintsVisible() const { return !gpio.hasTouch() && SETTINGS.showButtonHints; }
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
@@ -371,6 +375,8 @@ int BaseTheme::getListPageItems(int contentHeight, bool hasSubtitle) const {
   return std::max(1, (contentHeight + gap) / rowStep);
 }
 
+// Retain the established theme component interface.
+// cppcheck-suppress functionStatic
 void BaseTheme::drawSideScrollBar(const GfxRenderer& renderer, Rect rect, const int itemCount, const int pageStartIndex,
                                   const int pageItems) const {
   if (itemCount <= pageItems || pageItems <= 0 || rect.height <= 0) return;
@@ -988,7 +994,10 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
-  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4;
+  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom;
+#if !FREEINK_DEVICE_READPICO
+  textY -= 4;
+#endif
 
   int leftClusterX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
   int rightClusterX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight;
@@ -1174,6 +1183,8 @@ void BaseTheme::drawTextField(const GfxRenderer& renderer, Rect rect, const int 
   }
 }
 
+// Retain the established theme component interface.
+// cppcheck-suppress functionStatic
 bool BaseTheme::drawSelectionBackground(const GfxRenderer& renderer, const Rect rect) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   renderer.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, metrics.optionPopupSelectionRadius,

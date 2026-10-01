@@ -26,6 +26,14 @@ class HalStorage {
   bool begin();
   bool ready() const;
   bool getSpace(uint64_t& totalBytes, uint64_t& freeBytes);
+  // Physical card-detect hint, when the board has one (Read Pico: FCA9555 P0.6,
+  // active-low). ADVISORY ONLY, never a mount gate: the frozen round-1 decision
+  // is mount-by-attempt (docs/engineering/read-pico.md B11), because a CD line
+  // can be wrong about a card that mounts fine, and a failed expander read must
+  // never be reported as "present" or as "absent". Returns false on boards with
+  // no CD line and on any read failure, so a caller that wants a real answer must
+  // combine it with the mount result — do not render "no card" from false alone.
+  bool cardDetectAsserted() const;
   // Stop the SD card for deep sleep: unmount, stop the SDMMC host, and release
   // the bus pads (no-op on SPI boards). Call only after all file users have
   // stopped; open HalFiles become invalid. A deep-sleep wake resets the MCU and

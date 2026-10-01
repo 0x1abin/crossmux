@@ -49,6 +49,8 @@ class SdCardFontSystem {
 
   /// Resolve an SD card font ID from family name + reader point size.
   /// Returns 0 if not found. Used by CrossPointSettings::getReaderFontId().
+  /// Pure lookup: never loads and never mutates residency, so
+  /// adoptCompleteChineseNotoSans() can probe the reader size cheaply.
   int resolveFontId(const char* familyName, uint8_t pointSize) const;
 
   /// Access the registry (e.g. for settings UI to enumerate available fonts).

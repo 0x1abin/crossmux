@@ -15,6 +15,7 @@
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"
+#include "SampleRowClamp.h"
 
 namespace {
 
@@ -206,6 +207,16 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     }
   }
 
+  const auto writeSample = [&](int outX, int outY, uint8_t gray) {
+    if (ctx->config->output == DecodeOutput::NativeGrayscale16) {
+      renderer.drawGrayscale16Pixel(outX, outY, gray);
+      return;
+    }
+    const uint8_t level = useDithering ? applyBayerDither4Level(gray, outX, outY) : gray / 85;
+    if (writeFramebuffer) pw.writePixel(outX, level);
+    if (caching) cw.writePixel(outX, level);
+  };
+
   // === 1:1 fast path: no scaling math ===
   if (fineScaleFPX == FP_ONE && fineScaleFPY == FP_ONE) {
     for (int dstY = dstYStart; dstY < dstYEnd; dstY++) {
@@ -216,24 +227,19 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         uint8_t gray = row[dstX - blockX];
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
     }
     return 1;
   }
 
-  // === Bilinear interpolation (upscale: fineScale > 1.0) ===
-  // Smooths block boundaries that would otherwise create visible banding
-  // on progressive JPEG DC-only decode (1/8 resolution upscaled to target).
-  if (fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) {
+  // === Bilinear interpolation ===
+  // Used for upscaling (smooths the block boundaries that a progressive JPEG's
+  // DC-only 1/8 decode would otherwise band), and for downscaling when the
+  // reader asks for it — nearest neighbour drops source detail and produces
+  // stair-step edges on scaled artwork.
+  const bool bilinearRequested = ctx->config != nullptr && ctx->config->bilinearScaling;
+  if ((fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) || bilinearRequested) {
     // Pre-compute safe X range where lx0 and lx0+1 are both in [0, validW-1].
     // Only the left/right edge pixels (typically 0-2 and 1-8 respectively) need clamping.
     int safeXStart = (int)(((int64_t)blockX * fineScaleFPX + FP_MASK) >> FP_SHIFT);
@@ -249,90 +255,63 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       const int32_t srcFyFP = dstY * invScaleFPY;
       const int32_t fy = srcFyFP & FP_MASK;
       const int32_t fyInv = FP_ONE - fy;
-      int ly0 = (srcFyFP >> FP_SHIFT) - blockY;
-      int ly1 = ly0 + 1;
-      if (ly0 < 0) ly0 = 0;
-      if (ly0 >= blockH) ly0 = blockH - 1;
-      if (ly1 >= blockH) ly1 = blockH - 1;
+      // Both sample rows are clamped inside the block; clamping only the lower
+      // bound of ly0 leaves ly1 at -1 for the first row of a shifted block.
+      const SampleRows rows = sampleRowsFor(dstY, invScaleFPY, blockY, blockH);
 
-      const uint8_t* row0 = &pixels[ly0 * stride];
-      const uint8_t* row1 = &pixels[ly1 * stride];
+      const uint8_t* row0 = &pixels[rows.row0 * stride];
+      const uint8_t* row1 = &pixels[rows.row1 * stride];
 
-      // Left edge (with X boundary clamping)
+      // Left edge: the source column falls before the block, so both sampled
+      // columns come from the shared clamp instead of local bounds logic.
       for (int dstX = dstXStart; dstX < safeXStart; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 < 0) lx0 = 0;
-        if (lx1 < 0) lx1 = 0;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
 
-      // Interior (no X boundary checks — lx0 and lx0+1 guaranteed in bounds)
+      // Interior. The range split above is an optimisation, not a guarantee: it
+      // is computed from fineScaleFPX while the samples below come from
+      // invScaleFPX, and both divide with truncation, so the split start can be
+      // one destination column too early. For 100x100 -> 60x60 the block at
+      // x = 80 starts its interior at dstX = 48, whose first sample is
+      // (48 * 109226) >> 16 - 80 = -1. Sample through the same clamp as the
+      // edges rather than trusting the split.
       for (int dstX = safeXStart; dstX < safeXEnd; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        const int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx0 + 1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
 
-      // Right edge (with X boundary clamping)
+      // Right edge: the source column runs past the block's valid columns.
       for (int dstX = safeXEnd; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
     }
     return 1;
@@ -344,28 +323,15 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     if (writeFramebuffer) pw.beginRow(outY);
     if (caching) cw.beginRow(outY, cacheOriginY);
     const int32_t srcFyFP = dstY * invScaleFPY;
-    int ly = (srcFyFP >> FP_SHIFT) - blockY;
-    if (ly < 0) ly = 0;
-    if (ly >= blockH) ly = blockH - 1;
-    const uint8_t* row = &pixels[ly * stride];
+    const uint8_t* row = &pixels[clampSampleIndex((srcFyFP >> FP_SHIFT) - blockY, blockH) * stride];
 
     for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
       const int outX = cfgX + dstX;
       const int32_t srcFxFP = dstX * invScaleFPX;
-      int lx = (srcFxFP >> FP_SHIFT) - blockX;
-      if (lx < 0) lx = 0;
-      if (lx >= validW) lx = validW - 1;
+      const int lx = clampSampleIndex((srcFxFP >> FP_SHIFT) - blockX, validW);
       uint8_t gray = row[lx];
 
-      uint8_t dithered;
-      if (useDithering) {
-        dithered = applyBayerDither4Level(gray, outX, outY);
-      } else {
-        dithered = gray / 85;
-        if (dithered > 3) dithered = 3;
-      }
-      if (writeFramebuffer) pw.writePixel(outX, dithered);
-      if (caching) cw.writePixel(outX, dithered);
+      writeSample(outX, outY, gray);
     }
   }
 
@@ -402,6 +368,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
                                                      const RenderConfig& config) {
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
+  if (config.output == DecodeOutput::NativeGrayscale16 &&
+      (!renderer.isGrayscale16Active() || !config.cachePath.empty()))
+    return false;
   const bool cacheOnly = config.output == DecodeOutput::CacheOnly;
   if (cacheOnly && config.cachePath.empty()) {
     LOG_ERR("JPG", "Cache-only decode requires a cache path");

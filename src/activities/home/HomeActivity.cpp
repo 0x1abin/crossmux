@@ -525,7 +525,7 @@ void HomeActivity::loop() {
     // Side page buttons walk the covers, front Left/Right walk the tabs
     // (selectorIndex is flat: books first, then the tab items). A press while
     // selection sits in the other band jumps into this band first.
-    const int bookCount = static_cast<int>(recentBooks.size());
+    const int coverCount = static_cast<int>(recentBooks.size());
     const auto cycleBand = [this](const int base, const int count, const int dir) {
       if (count <= 0) return;
       int idx = selectorIndex - base;
@@ -538,14 +538,14 @@ void HomeActivity::loop() {
       requestUpdate();
     };
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up},
-                                         [&cycleBand, bookCount] { cycleBand(0, bookCount, -1); });
+                                         [&cycleBand, coverCount] { cycleBand(0, coverCount, -1); });
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down},
-                                         [&cycleBand, bookCount] { cycleBand(0, bookCount, +1); });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [&cycleBand, bookCount, menuCount] {
-      cycleBand(bookCount, menuCount - bookCount, -1);
+                                         [&cycleBand, coverCount] { cycleBand(0, coverCount, +1); });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [&cycleBand, coverCount, menuCount] {
+      cycleBand(coverCount, menuCount - coverCount, -1);
     });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [&cycleBand, bookCount, menuCount] {
-      cycleBand(bookCount, menuCount - bookCount, +1);
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [&cycleBand, coverCount, menuCount] {
+      cycleBand(coverCount, menuCount - coverCount, +1);
     });
     return;
   }
