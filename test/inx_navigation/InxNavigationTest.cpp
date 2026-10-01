@@ -153,6 +153,96 @@ TEST(InxNavigation, ReservesRecentFooterWithOrWithoutButtonHints) {
   EXPECT_EQ(InxRecentGeometry::contentHeight(80, 60, 0), 0);
 }
 
+TEST(InxNavigation, PositionsRecentHeaderContentAndBatteryInsideSafeArea) {
+  for (const Rect safe : {Rect{5, 5, 674, 1203}, Rect{8, 5, 1203, 674}, Rect{5, 8, 674, 1203}, Rect{5, 5, 1203, 674}}) {
+    for (const int hints : {0, 40, 56}) {
+      auto metrics = InxMetrics::values;
+      metrics.buttonHintsHeight = hints;
+      const Rect header = SubpageLayout::headerRect(safe, metrics);
+      const Rect content = InxRecentGeometry::contentRect(safe, metrics);
+      const Rect battery = InxRecentGeometry::batteryRect(safe);
+      EXPECT_EQ(header.x, safe.x);
+      EXPECT_EQ(header.y, safe.y);
+      EXPECT_EQ(header.width, safe.width);
+      EXPECT_EQ(header.height, 66);
+      EXPECT_EQ(content.x, header.x);
+      EXPECT_EQ(content.y, header.y + header.height);
+      EXPECT_EQ(content.width, header.width);
+      EXPECT_EQ(content.y + content.height, safe.y + safe.height - std::max(40, hints));
+      EXPECT_EQ(battery.x + battery.width, safe.x + safe.width - 12);
+      EXPECT_EQ(battery.y, safe.y + safe.height - 30);
+      EXPECT_GE(battery.y, content.y + content.height);
+      EXPECT_LE(battery.y + 6 + battery.height, safe.y + safe.height);
+    }
+  }
+}
+
+TEST(InxNavigation, PreservesRecentGeometryWithoutBezelInsets) {
+  auto metrics = InxMetrics::values;
+  metrics.buttonHintsHeight = 0;
+  const Rect screen{0, 0, 480, 800};
+  const Rect header = SubpageLayout::headerRect(screen, metrics);
+  const Rect content = InxRecentGeometry::contentRect(screen, metrics);
+  const Rect battery = InxRecentGeometry::batteryRect(screen);
+  EXPECT_EQ(header.x, 0);
+  EXPECT_EQ(header.y, 0);
+  EXPECT_EQ(header.width, 480);
+  EXPECT_EQ(header.height, 66);
+  EXPECT_EQ(content.x, 0);
+  EXPECT_EQ(content.y, 66);
+  EXPECT_EQ(content.width, 480);
+  EXPECT_EQ(content.height, 694);
+  EXPECT_EQ(battery.x, 453);
+  EXPECT_EQ(battery.y, 770);
+  EXPECT_EQ(battery.width, 15);
+  EXPECT_EQ(battery.height, 12);
+  EXPECT_EQ(SubpageLayout::headerRect(Rect{5, 5, 20, 40}, metrics).height, 40);
+  EXPECT_EQ(InxRecentGeometry::contentRect(Rect{5, 5, 20, 40}, metrics).height, 0);
+}
+
+TEST(InxNavigation, MatchesMainTabDrawingAtEveryRoundedBoundary) {
+  for (const int width : {480, 674, 1203, 1206}) {
+    const int count = static_cast<int>(MainTabs::values.size());
+    for (int i = 0; i < count; ++i) {
+      const int left = width * i / count;
+      const int right = width * (i + 1) / count;
+      for (int x = left; x < right; ++x) EXPECT_EQ(MainTabs::fromX(x, width), MainTabs::values[i]);
+    }
+    EXPECT_EQ(MainTabs::fromX(-1, width), MainTab::None);
+    EXPECT_EQ(MainTabs::fromX(width, width), MainTab::None);
+  }
+}
+
+TEST(InxNavigation, HitsAllRecentLayoutsRelativeToContentAndRejectsFooter) {
+  auto metrics = InxMetrics::values;
+  metrics.buttonHintsHeight = 0;
+  for (const Rect safe : {Rect{5, 5, 674, 1203}, Rect{8, 5, 1203, 674}, Rect{5, 8, 674, 1203}, Rect{5, 5, 1203, 674}}) {
+    const Rect content = InxRecentGeometry::contentRect(safe, metrics);
+    for (const auto layout : {InxRecentLayout::Flow, InxRecentLayout::Grid, InxRecentLayout::List,
+                              InxRecentLayout::Icons, InxRecentLayout::Cover}) {
+      for (const int selected : {0, 9}) {
+        const int columns = layout == InxRecentLayout::Grid ? 2 : layout == InxRecentLayout::Icons ? 3 : 1;
+        const int rows = InxRecentGeometry::itemsPerPage(layout) / columns;
+        const int start = InxRecentGeometry::pageStart(selected, 10, layout);
+        for (int row = 0; row < rows; ++row) {
+          for (int column = 0; column < columns; ++column) {
+            const int expected = start + row * columns + column;
+            const int x = content.x + column * (content.width / columns);
+            const int y = content.y + row * (content.height / rows);
+            EXPECT_EQ(InxRecentGeometry::indexFromPoint(content, x, y, selected, 10, layout),
+                      expected < 10 ? expected : -1);
+          }
+        }
+      }
+      EXPECT_EQ(InxRecentGeometry::indexFromPoint(content, content.x, content.y, 0, 0, layout), -1);
+      EXPECT_EQ(InxRecentGeometry::indexFromPoint(content, content.x - 1, content.y, 0, 10, layout), -1);
+      EXPECT_EQ(InxRecentGeometry::indexFromPoint(content, content.x + content.width, content.y, 0, 10, layout), -1);
+      EXPECT_EQ(InxRecentGeometry::indexFromPoint(content, content.x, content.y - 1, 0, 10, layout), -1);
+      EXPECT_EQ(InxRecentGeometry::indexFromPoint(content, content.x, content.y + content.height, 0, 10, layout), -1);
+    }
+  }
+}
+
 TEST(InxNavigation, FitsOriginalCoverRatioInsideBounds) {
   EXPECT_EQ(InxCoverGeometry::fit(0, 250).width, 0);
   EXPECT_EQ(InxCoverGeometry::fit(170, 250).width, 170);
@@ -192,6 +282,20 @@ TEST(InxNavigation, ValidatesItemLayoutsAndGridBounds) {
   EXPECT_EQ(InxGridGeometry::indexFromPoint(0, 100, 300, 400, 12, 15), -1);
   EXPECT_EQ(InxGridGeometry::indexFromPoint(-1, 0, 300, 400, 0, 12), -1);
   EXPECT_EQ(InxGridGeometry::indexFromPoint(300, 0, 300, 400, 0, 12), -1);
+}
+
+TEST(InxNavigation, MatchesAppGridCellsAtRoundedBoundaries) {
+  for (const Rect content : {Rect{0, 71, 684, 1145}, Rect{0, 71, 1216, 613}, Rect{0, 74, 684, 1142}}) {
+    const int cellWidth = content.width / InxGridGeometry::columns;
+    const int cellHeight = content.height / InxGridGeometry::rows;
+    for (int row = 0; row < InxGridGeometry::rows; ++row) {
+      for (int col = 0; col < InxGridGeometry::columns; ++col) {
+        EXPECT_EQ(
+            InxGridGeometry::indexFromPoint(col * cellWidth, row * cellHeight, content.width, content.height, 0, 12),
+            row * InxGridGeometry::columns + col);
+      }
+    }
+  }
 }
 
 TEST(InxNavigation, MapsAccordionRowsWithoutFlatteningSettings) {

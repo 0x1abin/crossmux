@@ -19,6 +19,7 @@
 #include "apps/buddy/BuddyActivity.h"
 #include "apps/calculator/CalculatorActivity.h"
 #include "apps/sokoban/SokobanGameActivity.h"
+#include "components/SubpageLayout.h"
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/chinese-chess/ChineseChessMenuActivity.h"
 #endif
@@ -260,14 +261,17 @@ bool ActivityManager::handleMainTabInput() {
 
   const MainTab currentTab = currentActivity->mainTab();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int tabTop = metrics.topPadding;
-  const int tabBottom = tabTop + metrics.headerHeight;
+  const Rect tabRect =
+      SubpageLayout::headerRect(UITheme::getInstance().getScreenSafeArea(renderer, false, false), metrics);
+  const auto insideTabs = [&](const int x, const int y) {
+    return x >= tabRect.x && x < tabRect.x + tabRect.width && y >= tabRect.y && y < tabRect.y + tabRect.height;
+  };
 
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTapped(x, y)) {
-    if (y >= tabTop && y < tabBottom) {
-      const MainTab target = MainTabs::fromX(x, renderer.getScreenWidth());
+    if (insideTabs(x, y)) {
+      const MainTab target = MainTabs::fromX(x - tabRect.x, tabRect.width);
       if (target != MainTab::None) {
         mainTabFocus = MainTabFocus::Content;
         if (target != currentTab)
@@ -284,7 +288,7 @@ bool ActivityManager::handleMainTabInput() {
     return false;
   }
 
-  if (mainTabFocus == MainTabFocus::Tabs && mappedInput.wasScreenTouchDown(x, y) && (y < tabTop || y >= tabBottom)) {
+  if (mainTabFocus == MainTabFocus::Tabs && mappedInput.wasScreenTouchDown(x, y) && !insideTabs(x, y)) {
     mainTabFocus = MainTabFocus::Content;
     requestUpdate();
     return false;

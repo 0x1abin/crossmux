@@ -42,6 +42,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
@@ -1044,7 +1045,10 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const bool boldChineseCategories = I18N.getLanguage() == Language::ZH_CN;
   // Content below the GUI.drawHeader band, above the button hints.
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+  const Rect header = usesMainTabBar() ? SubpageLayout::headerRect(
+                                             UITheme::getInstance().getScreenSafeArea(renderer, false, false), metrics)
+                                       : Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight};
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(header.y + header.height), 0,
                                                 static_cast<int16_t>(metrics.buttonHintsHeight), 0});
 
   if (usesAccordion()) {

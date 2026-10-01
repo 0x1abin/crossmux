@@ -20,6 +20,7 @@
 #include "ReadingStatsExtendedActivity.h"
 #include "ReadingStatsStore.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
@@ -580,7 +581,10 @@ void ReadingStatsActivity::renderInx() {
   const int screenHeight = renderer.getScreenHeight();
   drawPageHeader(Rect{0, metrics.topPadding, screenWidth, metrics.headerHeight}, tr(STR_READING_STATS));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight;
+  const Rect header = usesMainTabBar() ? SubpageLayout::headerRect(
+                                             UITheme::getInstance().getScreenSafeArea(renderer, false, false), metrics)
+                                       : Rect{0, metrics.topPadding, screenWidth, metrics.headerHeight};
+  const int contentTop = header.y + header.height;
   const int contentBottom = screenHeight - metrics.buttonHintsHeight;
   const Rect content{18, contentTop + 6, screenWidth - 36, std::max(1, contentBottom - contentTop - 12)};
   const auto& books = READING_STATS.getBooks();
