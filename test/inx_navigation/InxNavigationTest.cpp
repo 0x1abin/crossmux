@@ -27,8 +27,8 @@ using DrawButtonMenuMethod = void (BaseTheme::*)(GfxRenderer&, Rect, int, int, c
 static_assert(std::is_same_v<decltype(&BaseTheme::drawList), DrawListMethod>);
 static_assert(std::is_same_v<decltype(&BaseTheme::drawButtonMenu), DrawButtonMenuMethod>);
 static_assert(!BaseMetrics::values.homeShowRecentBookTitle);
-static_assert(RoundedRaffMetrics::values.homeShowRecentBookTitle);
-static_assert(RoundedRaffMetrics::values.topPadding == 0);
+static_assert(!InxMetrics::values.homeShowRecentBookTitle);
+static_assert(RoundedRaffMetrics::values.topPadding == 13);
 
 constexpr uint32_t iconHash(const InxAppIcons::Icon& icon) {
   uint32_t hash = 2166136261u;

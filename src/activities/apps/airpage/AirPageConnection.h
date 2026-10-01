@@ -41,6 +41,8 @@ class AirPageConnection final {
   Event handleWifiFailure();
   void prepareRefresh();
 
+  // Connection queries remain part of the instance-facing connection API.
+  // cppcheck-suppress functionStatic
   bool wifiConnected() const { return WiFi.status() == WL_CONNECTED; }
   bool realtime() const { return realtime_; }
   bool preventsAutoSleep() const;

@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <JpegToBmpConverter.h>
+#include <SdCardFont.h>
 
 #include <array>
 #include <cassert>
@@ -29,6 +30,8 @@ void ImageBlock::clearSessionRenderFailures() {}
 bool ImageBlock::render(GfxRenderer&, int, int, PixelCachePolicy) { return false; }
 
 bool FontCacheManager::isScanning() const { return false; }
+void FontCacheManager::clearCache() {}
+void SdCardFont::clearCache() {}
 ESPMock ESP;
 namespace {
 std::array<uint8_t, HalDisplay::BUFFER_SIZE> bw;
@@ -67,10 +70,16 @@ void HalDisplay::cancelGrayscale16() {
 bool HalDisplay::isInverted() const { return false; }
 void HalDisplay::displayBuffer(RefreshMode, bool) {}
 void HalDisplay::displayGrayscaleBase(RefreshMode, bool) {}
+bool HalDisplay::displayGrayscaleBase(GrayscaleMode, RefreshMode mode, bool off) {
+  displayGrayscaleBase(mode, off);
+  return true;
+}
 void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t*) {}
 void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t*) {}
 void HalDisplay::displayGrayBuffer(bool, const unsigned char*, bool) {}
 void HalDisplay::cleanupGrayscaleBuffers(const uint8_t*) {}
+HalDisplay::Controller HalDisplay::getController() const { return Controller::LgfxEpd; }
+HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode) const { return {}; }
 HalDisplay display;
 
 namespace {

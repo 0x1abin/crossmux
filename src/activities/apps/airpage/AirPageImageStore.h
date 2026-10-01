@@ -62,24 +62,24 @@ class AirPageImageStore final {
  private:
   static constexpr size_t kPathBufferSize = SelectedImage::kPathCapacity;
 
-  const char* imagePathForFormat(ImageFormat format) const;
-  const char* backupPathForFormat(ImageFormat format) const;
+  static const char* imagePathForFormat(ImageFormat format);
+  static const char* backupPathForFormat(ImageFormat format);
   const char* currentImagePath() const;
-  bool isValidPixelCache(const char* path) const;
+  static bool isValidPixelCache(const char* path);
   bool filesEqual(const char* lhsPath, const char* rhsPath) const;
   bool installDownloadedImage(const ImageInfo& downloaded, uint64_t archiveDateKey);
   bool recoverCachedImage(uint64_t archiveDateKey);
   bool rollbackPendingImage();
-  void discardPendingBackups();
+  static void discardPendingBackups();
 
   void scanHistory();
   void setCurrentHistoryEntry();
   void removeCurrentHistoryEntry();
   void insertHistoryEntry(const HistoryEntry& entry);
   void removeHistoryEntry(uint64_t archiveId, ImageFormat format);
-  bool parseHistoryId(const char* name, uint64_t& archiveId) const;
-  bool parseHistoryName(const char* name, HistoryEntry& entry) const;
-  bool formatHistoryPath(uint64_t archiveId, ImageFormat format, char* path, size_t pathSize) const;
+  static bool parseHistoryId(const char* name, uint64_t& archiveId);
+  static bool parseHistoryName(const char* name, HistoryEntry& entry);
+  static bool formatHistoryPath(uint64_t archiveId, ImageFormat format, char* path, size_t pathSize);
   bool historyContains(uint64_t archiveId, ImageFormat format) const;
   uint64_t nextHistoryId(uint64_t archiveDateKey) const;
   bool archivePendingBackup(uint64_t archiveDateKey, HistoryEntry* archived);

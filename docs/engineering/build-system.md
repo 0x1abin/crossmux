@@ -25,6 +25,27 @@
 * `platformio.local.ini`: Local overrides (gitignored, create if needed)
 * `partitions.csv`: ESP32 flash partition layout
 
+## Tool initialization
+
+Use pioarduino 6.2.0 with the pinned ESP32 platform. Before building with a new
+PlatformIO tool directory, run from the repository root:
+
+```bash
+python -m pip install pioarduino==6.2.0
+python scripts/patch_pioarduino_cache.py --prepare-platform
+```
+
+The platform's IDF installer otherwise replaces the Core's running SCons
+package, causing missing Python modules during a clean build. Preparation
+removes SCons from that installer's tool list; Core still supplies it. It does
+not change compiler optimization flags. CI performs the same preparation.
+On Ubuntu, the bundled cppcheck executable also requires `libpcre3`.
+
+The custom SDK bootstrap uses non-LTO objects; the final application retains
+its existing LTO configuration. Keep the verified C3 optimization options and
+partition layout unchanged; sufficient Flash headroom is not a reason to tune
+additional compiler options.
+
 ## Build Environment
 * **Standard**: C++20 (`-std=c++2a`). No Exceptions, No RTTI.
 * **Logging**: ALWAYS use `LOG_INF`, `LOG_DBG`, or `LOG_ERR` from `Logging.h`. Raw Serial output is deprecated.
@@ -44,6 +65,7 @@
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
+  * `simulator_readpico`: Native 1216x684 Read Pico simulator, 684x1216 in portrait
 
 The seven S3 environments are separate hardware binaries, but each is a unified
 language firmware. `bin/ci-check` builds the default C3 target and six S3 release
@@ -51,7 +73,7 @@ targets; X4 Classic is build-only and covered separately by Hardware CI.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
-CI workflow builds all four simulators and all seven S3 environments when
+CI workflow builds all five simulators and the configured S3 environments when
 hardware-sensitive files change, and can also be started manually.
 
 Bluetooth Page Turner Beta is compiled into every hardware environment,
@@ -117,6 +139,7 @@ pio run -e simulator -t run_simulator
 pio run -e simulator_x3 -t run_simulator
 pio run -e simulator_eego_a4 -t run_simulator
 pio run -e simulator_murphy_m4 -t run_simulator
+pio run -e simulator_readpico -t run_simulator
 ```
 
 The simulator implementation and launcher come from the pinned
@@ -131,6 +154,14 @@ Power wakes it.
 This product-level simulator covers UI, input, RTC state, M4 frontlight state,
 and sleep/wake flows. It does not emulate EPD waveforms or ghosting, bus timing,
 SDMMC contention, PSRAM, or power consumption.
+
+Read Pico uses its 103,968-byte B/W framebuffer, sixteen-level image transactions,
+and the same 12/12/14 pt SD UI font selection as the hardware. The window fits the
+usable desktop area without upscaling; screenshots retain the logical panel size
+and current rotation, independent of the window's scale or HiDPI density. Existing
+device window and screenshot behavior is retained. Read Pico has no frontlight or
+Home key; Up/Escape/Down represent its capacitive strip, `P` is Power, and only
+Power wakes it. See [the device guide](read-pico.md#desktop-simulator).
 
 ## Critical Build Flags
 These flags in `platformio.ini` fundamentally affect firmware behavior:

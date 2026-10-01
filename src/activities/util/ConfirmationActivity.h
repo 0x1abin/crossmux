@@ -5,7 +5,6 @@
 
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
-#include "fontIds.h"
 
 class ConfirmationActivity : public Activity {
  public:

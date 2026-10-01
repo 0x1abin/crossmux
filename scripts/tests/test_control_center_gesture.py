@@ -17,6 +17,7 @@ class ControlCenterGestureTest(unittest.TestCase):
         dispatch = source[start:end] + "}\n"
         harness = r'''
 #include <atomic>
+#include "HeaderBackTapTarget.h"
 #include <cassert>
 #include <memory>
 #include <string>
@@ -38,7 +39,7 @@ struct Input {
   bool consumeSuppressedRelease() { return suppressed; }
   bool wasHomeGesture() { return false; }
   bool hasTouch() { return true; }
-  bool wasScreenTapped(int&, int& y) { y = 10; return tap; }
+  bool wasScreenTapped(int& x, int& y) { x = 200; y = 10; return tap; }
   bool wasLightPanelGesture() { return light && topSwipe; }
   bool wasMenuGesture() { return topSwipe; }
 };
@@ -101,7 +102,7 @@ int main() {
             exe = Path(directory) / "check"
             cpp.write_text(harness + dispatch + cases)
             subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
-                "-std=c++20", str(cpp), "-o", str(exe)], check=True)
+                "-std=c++20", "-I" + str(ROOT / "src/components"), str(cpp), "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
 

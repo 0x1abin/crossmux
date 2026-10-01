@@ -5,6 +5,7 @@
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
@@ -47,6 +48,13 @@ namespace {
 // Folders/files to hide from the web interface file browser
 // Note: Items starting with "." are automatically hidden
 constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
+
+// Formats the library index tracks (LibraryIndex isBookName): an upload of any
+// of these must mark the index dirty so the next Library entry rebuilds it.
+bool isLibraryBookFile(const String& filename) {
+  return FsHelpers::checkFileExtension(filename, ".epub") || FsHelpers::checkFileExtension(filename, ".txt") ||
+         FsHelpers::checkFileExtension(filename, ".md") || FsHelpers::checkFileExtension(filename, ".xtc");
+}
 constexpr uint16_t UDP_PORTS[] = {54982, 48123, 39001, 44044, 59678};
 constexpr uint16_t LOCAL_UDP_PORT = 8134;
 constexpr size_t FILE_LIST_BATCH_CAPACITY = 1400;
@@ -109,6 +117,7 @@ bool isProtectedItemName(const String& name) {
   }
   return false;
 }
+
 }  // namespace
 
 // File listing page template - now using generated headers:
@@ -221,8 +230,10 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
   // Collect WebDAV headers and register handler
-  const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout"};
-  server->collectHeaders(davHeaders, 6);
+  // If-None-Match is collected so the static-page handlers can answer conditional GETs with 304
+  const char* collectedHeaders[] = {"Depth",      "Destination", "Overwrite",    "If",
+                                    "Lock-Token", "Timeout",     "If-None-Match"};
+  server->collectHeaders(collectedHeaders, 7);
   server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
   LOG_DBG("WEB", "WebDAV handler initialized");
 
@@ -594,15 +605,7 @@ void CrossPointWebServer::handleFileListData() const {
   // Get current path from query string (default to root)
   String currentPath = "/";
   if (server->hasArg("path")) {
-    currentPath = server->arg("path");
-    // Ensure path starts with /
-    if (!currentPath.startsWith("/")) {
-      currentPath = "/" + currentPath;
-    }
-    // Remove trailing slash unless it's root
-    if (currentPath.length() > 1 && currentPath.endsWith("/")) {
-      currentPath = currentPath.substring(0, currentPath.length() - 1);
-    }
+    currentPath = normalizeWebPath(server->arg("path"));
   }
 
   if (!fileListBatch) {
@@ -705,13 +708,10 @@ void CrossPointWebServer::handleDownload() const {
     return;
   }
 
-  String itemPath = server->arg("path");
+  String itemPath = normalizeWebPath(server->arg("path"));
   if (itemPath.isEmpty() || itemPath == "/") {
     server->send(400, "text/plain", "Invalid path");
     return;
-  }
-  if (!itemPath.startsWith("/")) {
-    itemPath = "/" + itemPath;
   }
 
   const String itemName = itemPath.substring(itemPath.lastIndexOf('/') + 1);
@@ -837,19 +837,17 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       return;
     }
 
+    if (!FsHelpers::isSafePathComponent(state.fileName)) {
+      state.error = "Invalid file name";
+      LOG_DBG("WEB", "[UPLOAD] Rejected unsafe filename: %s", state.fileName.c_str());
+      return;
+    }
+
     // Get upload path from query parameter (defaults to root if not specified)
     // Note: We use query parameter instead of form data because multipart form
     // fields aren't available until after file upload completes
     if (server->hasArg("path")) {
-      state.path = server->arg("path");
-      // Ensure path starts with /
-      if (!state.path.startsWith("/")) {
-        state.path = "/" + state.path;
-      }
-      // Remove trailing slash unless it's root
-      if (state.path.length() > 1 && state.path.endsWith("/")) {
-        state.path = state.path.substring(0, state.path.length() - 1);
-      }
+      state.path = normalizeWebPath(server->arg("path"));
     } else {
       state.path = "/";
     }
@@ -939,6 +937,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         if (!filePath.endsWith("/")) filePath += "/";
         filePath += state.fileName;
         clearBookCache(filePath.c_str());
+        if (isLibraryBookFile(state.fileName)) library::markLibraryIndexDirty();
       }
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
@@ -979,17 +978,21 @@ void CrossPointWebServer::handleCreateFolder() const {
     server->send(400, "text/plain", "Folder name cannot be empty");
     return;
   }
+  if (!FsHelpers::isSafePathComponent(folderName)) {
+    LOG_DBG("WEB", "Rejected unsafe folder name: %s", folderName.c_str());
+    server->send(400, "text/plain", "Invalid folder name");
+    return;
+  }
+  if (isProtectedItemName(folderName)) {
+    LOG_DBG("WEB", "Rejected protected folder name: %s", folderName.c_str());
+    server->send(403, "text/plain", "Cannot create protected item");
+    return;
+  }
 
   // Get parent path
   String parentPath = "/";
   if (server->hasArg("path")) {
-    parentPath = server->arg("path");
-    if (!parentPath.startsWith("/")) {
-      parentPath = "/" + parentPath;
-    }
-    if (parentPath.length() > 1 && parentPath.endsWith("/")) {
-      parentPath = parentPath.substring(0, parentPath.length() - 1);
-    }
+    parentPath = normalizeWebPath(server->arg("path"));
   }
 
   // Build full folder path
@@ -1232,18 +1235,13 @@ void CrossPointWebServer::handleDelete() const {
   String failedItems;
 
   for (const auto& p : paths) {
-    auto itemPath = p.as<String>();
+    auto itemPath = normalizeWebPath(p.as<String>());
 
     // Validate path
     if (itemPath.isEmpty() || itemPath == "/") {
       failedItems += itemPath + " (cannot delete root); ";
       allSuccess = false;
       continue;
-    }
-
-    // Ensure path starts with /
-    if (!itemPath.startsWith("/")) {
-      itemPath = "/" + itemPath;
     }
 
     // Security check: prevent deletion of protected items
@@ -1359,7 +1357,7 @@ void CrossPointWebServer::handleGetSettings() const {
             options.add(opt);
           }
         } else {
-          for (const auto& opt : s.enumValues) {
+          for (const auto& opt : s.enumLabels()) {
             options.add(I18N.get(opt));
           }
         }
@@ -1442,7 +1440,7 @@ void CrossPointWebServer::handlePostSettings() {
       }
       case SettingType::ENUM: {
         const int val = doc[s.key].as<int>();
-        const int maxVal = s.enumStringValues.empty() ? static_cast<int>(s.enumValues.size())
+        const int maxVal = s.enumStringValues.empty() ? static_cast<int>(s.enumLabels().size())
                                                       : static_cast<int>(s.enumStringValues.size());
         if (val >= 0 && val < maxVal) {
           if (s.valuePtr) {
@@ -1800,6 +1798,11 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 
         if (firstColon > 0 && secondColon > 0) {
           wsUploadFileName = msg.substring(6, firstColon);
+          if (!FsHelpers::isSafePathComponent(wsUploadFileName)) {
+            LOG_DBG("WS", "START rejected: invalid filename '%s'", wsUploadFileName.c_str());
+            wsServer->sendTXT(num, "ERROR:Invalid file name");
+            return;
+          }
           String sizeToken = msg.substring(firstColon + 1, secondColon);
           bool sizeValid = sizeToken.length() > 0;
           int digitStart = (sizeValid && sizeToken[0] == '+') ? 1 : 0;
@@ -1813,16 +1816,10 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
             return;
           }
           wsUploadSize = sizeToken.toInt();
-          wsUploadPath = msg.substring(secondColon + 1);
+          wsUploadPath = normalizeWebPath(msg.substring(secondColon + 1));
           wsUploadReceived = 0;
           wsLastProgressSent = 0;
           wsUploadStartTime = millis();
-
-          // Ensure path is valid
-          if (!wsUploadPath.startsWith("/")) wsUploadPath = "/" + wsUploadPath;
-          if (wsUploadPath.length() > 1 && wsUploadPath.endsWith("/")) {
-            wsUploadPath = wsUploadPath.substring(0, wsUploadPath.length() - 1);
-          }
 
           String filePath = wsUploadPath;
           if (!filePath.endsWith("/")) filePath += "/";
@@ -1857,6 +1854,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
             wsLastCompleteAt = millis();
             LOG_DBG("WS", "Zero-byte upload complete: %s", filePath.c_str());
             clearBookCache(filePath.c_str());
+            if (isLibraryBookFile(wsUploadFileName)) library::markLibraryIndexDirty();
             wsServer->sendTXT(num, "DONE");
             wsLastProgressSent = 0;
             break;
@@ -1926,6 +1924,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
         if (!filePath.endsWith("/")) filePath += "/";
         filePath += wsUploadFileName;
         clearBookCache(filePath.c_str());
+        if (isLibraryBookFile(wsUploadFileName)) library::markLibraryIndexDirty();
 
         wsServer->sendTXT(num, "DONE");
         wsLastProgressSent = 0;

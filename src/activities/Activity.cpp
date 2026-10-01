@@ -49,8 +49,12 @@ void Activity::requestUpdate(bool immediate) { activityManager.requestUpdate(imm
 
 void Activity::requestUpdateAndWait() { activityManager.requestUpdateAndWait(); }
 
+// Retain the instance-facing Activity transition API.
+// cppcheck-suppress functionStatic
 void Activity::onGoHome(HomeMenuItem item) { activityManager.goHome(item); }
 
+// Retain the instance-facing Activity transition API.
+// cppcheck-suppress functionStatic
 void Activity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
 
 void Activity::startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) {

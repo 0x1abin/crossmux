@@ -64,6 +64,10 @@ class DateTimeSettingsActivity final : public Activity, private UiAppHost {
   void cancelManualEdit();
   void confirmManualEdit();
 
+  freeink::ui::ListNav menuNav_;
+  std::string menuValue(int index) const;
+  void buildMenuScreen(UiScreen& screen);
+  static constexpr freeink::ui::ActionId ACTION_MENU = 4;
   static constexpr freeink::ui::ActionId ACTION_STEP = 1;
   static constexpr freeink::ui::ActionId ACTION_CANCEL = 2;
   static constexpr freeink::ui::ActionId ACTION_OK = 3;

@@ -561,7 +561,8 @@ static void convertScanlineToOpacity(const PngDecodeContext& ctx, uint8_t* opaci
 }
 
 bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpOut, int targetWidth, int targetHeight,
-                                                   bool oneBit, bool crop, bool preserveTransparency) {
+                                                   bool oneBit, bool crop, bool preserveTransparency,
+                                                   bool originalThresholds) {
   LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)",
           preserveTransparency ? "transparent 4-bit" : (oneBit ? "1-bit" : "2-bit"), targetWidth, targetHeight);
 
@@ -844,27 +845,39 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
 
   if (oneBit) {
     atkinson1BitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
-    if (!atkinson1BitDitherer || !atkinson1BitDitherer->valid()) return false;
+    if (!atkinson1BitDitherer || !atkinson1BitDitherer->isValid()) {
+      LOG_ERR("PNG", "OOM: Atkinson1BitDitherer or row buffers");
+
+      return false;
+    }
   } else if (!USE_8BIT_OUTPUT) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = makeUniqueNoThrow<AtkinsonDitherer>(outWidth);
-      if (!atkinsonDitherer || !atkinsonDitherer->valid()) return false;
+      atkinsonDitherer = makeUniqueNoThrow<AtkinsonDitherer>(outWidth, originalThresholds);
+      if (!atkinsonDitherer || !atkinsonDitherer->isValid()) {
+        LOG_ERR("PNG", "OOM: AtkinsonDitherer or row buffers");
+
+        return false;
+      }
     } else if (USE_FLOYD_STEINBERG) {
-      fsDitherer = makeUniqueNoThrow<FloydSteinbergDitherer>(outWidth);
-      if (!fsDitherer || !fsDitherer->valid()) return false;
+      fsDitherer = makeUniqueNoThrow<FloydSteinbergDitherer>(outWidth, originalThresholds);
+      if (!fsDitherer || !fsDitherer->isValid()) {
+        LOG_ERR("PNG", "OOM: FloydSteinbergDitherer or row buffers");
+
+        return false;
+      }
     }
   }
 
   // Scaling accumulators
   std::unique_ptr<uint32_t[]> rowAccum;
-  std::unique_ptr<uint16_t[]> rowCount;
+  std::unique_ptr<uint32_t[]> rowCount;
   std::unique_ptr<uint32_t[]> rowOpaqueCount;
   int currentOutY = 0;
   uint32_t nextOutY_srcStart = 0;
 
   if (needsScaling) {
     rowAccum = makeUniqueNoThrow<uint32_t[]>(outWidth);
-    rowCount = makeUniqueNoThrow<uint16_t[]>(outWidth);
+    rowCount = makeUniqueNoThrow<uint32_t[]>(outWidth);
     if (preserveTransparency) rowOpaqueCount = makeUniqueNoThrow<uint32_t[]>(outWidth);
     if (!rowAccum || !rowCount || (preserveTransparency && !rowOpaqueCount)) return false;
     nextOutY_srcStart = scaleY_fp;
@@ -1037,7 +1050,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
         }
         // Moving to next source row - reset accumulators
         memset(rowAccum.get(), 0, outWidth * sizeof(uint32_t));
-        memset(rowCount.get(), 0, outWidth * sizeof(uint16_t));
+        memset(rowCount.get(), 0, outWidth * sizeof(uint32_t));
         if (preserveTransparency) memset(rowOpaqueCount.get(), 0, outWidth * sizeof(uint32_t));
       }
     }
@@ -1054,11 +1067,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(HalFile& pngFile, Print& bmpO
   return success;
 }
 
-bool PngToBmpConverter::pngFileToBmpStream(HalFile& pngFile, Print& bmpOut, bool crop) {
+bool PngToBmpConverter::pngFileToBmpStream(HalFile& pngFile, Print& bmpOut, bool crop, bool originalThresholds) {
   // Use runtime display dimensions (swapped for portrait cover sizing)
   const int targetWidth = display.getDisplayHeight();
   const int targetHeight = display.getDisplayWidth();
-  return pngFileToBmpStreamInternal(pngFile, bmpOut, targetWidth, targetHeight, false, crop);
+  return pngFileToBmpStreamInternal(pngFile, bmpOut, targetWidth, targetHeight, false, crop, originalThresholds);
 }
 
 bool PngToBmpConverter::pngFileToBmpFileInternal(const char* pngPath, const char* bmpPath, const bool crop,

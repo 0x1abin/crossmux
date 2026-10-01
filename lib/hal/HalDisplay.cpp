@@ -15,6 +15,8 @@ HalDisplay::HalDisplay() : einkDisplay(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_R
 
 HalDisplay::~HalDisplay() {}
 
+HalDisplay::Controller HalDisplay::getController() const { return BoardConfig::ACTIVE.displayController; }
+
 void HalDisplay::begin(bool seamless) {
   // Set X3-specific panel mode before initializing.
   if (gpio.deviceIsX3()) {
@@ -129,6 +131,12 @@ void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
 
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
 
+HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode mode) const {
+  return einkDisplay.grayscaleCapabilities(mode);
+}
+
+bool HalDisplay::supportsAsyncGrayscaleBase() const { return grayscaleCapabilities().asyncBase; }
+
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
@@ -150,6 +158,11 @@ uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(
 uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) { return einkDisplay.lendBuildStorage(sizeOut); }
 
 void HalDisplay::returnFrameBufferStorage() { einkDisplay.returnBuildStorage(); }
+
+bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool turnOffScreen) {
+  if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync();
+  return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
+}
 
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
@@ -189,9 +202,9 @@ void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, ui
                                        yStart, numRows);
 }
 
-bool HalDisplay::supportsStripGrayscale() const { return einkDisplay.supportsStripGrayscale(); }
+bool HalDisplay::supportsStripGrayscale() const { return grayscaleCapabilities().stripUploads; }
 
-bool HalDisplay::combinesGrayscaleBase() const { return einkDisplay.combinesGrayscaleBase(); }
+bool HalDisplay::combinesGrayscaleBase() const { return grayscaleCapabilities().base == GrayscaleBase::Combined; }
 
 bool HalDisplay::supportsTextOnlyCombinedBase() const { return einkDisplay.supportsTextOnlyCombinedBase(); }
 bool HalDisplay::supportsReaderTransitions() const { return einkDisplay.supportsReaderTransitions(); }

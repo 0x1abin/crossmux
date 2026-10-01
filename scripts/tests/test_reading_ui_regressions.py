@@ -41,8 +41,10 @@ class ReadingUiRegressionTest(unittest.TestCase):
         # Run the production layout preambles; unrelated data/row rendering stays
         # covered by the existing style and FreeInkUI list checks.
         file_layout = method(files, 'void FileBrowserActivity::buildScreen(').split('  // Full path band', 1)[0] + '}'
-        settings_layout = method(settings, 'void SettingsActivity::buildScreen(').split('  if (usesAccordion())', 1)[0].replace(
-            '  const bool boldChineseCategories = I18N.getLanguage() == Language::ZH_CN;\n', '') + '}'
+        settings_preamble = method(settings, 'void SettingsActivity::buildScreen(').split('  if (usesAccordion())', 1)[0]
+        settings_layout = 'void SettingsActivity::buildScreen(UiScreen& screen) {\n' + settings_preamble[
+            settings_preamble.index('  const auto& metrics'):].replace(
+            '  const bool boldChineseCategories = usesAccordion() && I18N.getLanguage() == Language::ZH_CN;\n', '') + '}'
         stats_layout = method(stats, 'void ReadingStatsActivity::renderInx(').split('  const auto& books', 1)[0] + ' recorded=content; }'
         program = r'''
 #include <cassert>
@@ -481,7 +483,7 @@ struct GfxRenderer {
 };
 struct InxTheme {
   void drawBatteryRight(const GfxRenderer&, Rect, bool) const {}
-  void drawHeader(const GfxRenderer&, Rect, const char*, const char*) const;
+  void drawHeader(const GfxRenderer&, Rect, const char*, const char*, bool = true) const;
 };
 ''' + code + r'''
 int main() {

@@ -40,11 +40,13 @@ AirPageImageStore::InitializationResult AirPageImageStore::initialize(const uint
   return hadCanonicalImage ? InitializationResult::Invalid : InitializationResult::Empty;
 }
 
+// Keep the existing instance API for the store operation.
+// cppcheck-suppress functionStatic
 bool AirPageImageStore::ensureDirectories() const {
   return Storage.ensureDirectoryExists(kCacheDir) && Storage.ensureDirectoryExists(kHistoryDir);
 }
 
-const char* AirPageImageStore::imagePathForFormat(const ImageFormat format) const {
+const char* AirPageImageStore::imagePathForFormat(const ImageFormat format) {
   switch (format) {
     case ImageFormat::None:
       return nullptr;
@@ -56,7 +58,7 @@ const char* AirPageImageStore::imagePathForFormat(const ImageFormat format) cons
   return nullptr;
 }
 
-const char* AirPageImageStore::backupPathForFormat(const ImageFormat format) const {
+const char* AirPageImageStore::backupPathForFormat(const ImageFormat format) {
   switch (format) {
     case ImageFormat::None:
       return nullptr;
@@ -136,7 +138,7 @@ bool AirPageImageStore::inspectImage(const char* path, ImageInfo& info) {
   return true;
 }
 
-bool AirPageImageStore::isValidPixelCache(const char* path) const {
+bool AirPageImageStore::isValidPixelCache(const char* path) {
   HalFile file;
   if (!path || !Storage.openFileForRead("AIRP", path, file)) return false;
 
@@ -380,7 +382,7 @@ bool AirPageImageStore::recoverCachedImage(const uint64_t archiveDateKey) {
 }
 
 bool AirPageImageStore::formatHistoryPath(const uint64_t archiveId, const ImageFormat format, char* path,
-                                          const size_t pathSize) const {
+                                          const size_t pathSize) {
   const char* extension = nullptr;
   switch (format) {
     case ImageFormat::None:
@@ -430,7 +432,7 @@ bool AirPageImageStore::formatPixelCachePath(const char* imagePath, char* path, 
   return true;
 }
 
-bool AirPageImageStore::parseHistoryId(const char* name, uint64_t& archiveId) const {
+bool AirPageImageStore::parseHistoryId(const char* name, uint64_t& archiveId) {
   archiveId = 0;
   if (!name) return false;
   const char* base = strrchr(name, '/');
@@ -479,7 +481,7 @@ bool AirPageImageStore::parseHistoryId(const char* name, uint64_t& archiveId) co
   return true;
 }
 
-bool AirPageImageStore::parseHistoryName(const char* name, HistoryEntry& entry) const {
+bool AirPageImageStore::parseHistoryName(const char* name, HistoryEntry& entry) {
   entry = {};
   uint64_t archiveId = 0;
   if (!parseHistoryId(name, archiveId)) return false;
@@ -545,12 +547,9 @@ void AirPageImageStore::removeHistoryEntry(const uint64_t archiveId, const Image
 }
 
 bool AirPageImageStore::historyContains(const uint64_t archiveId, const ImageFormat format) const {
-  for (size_t i = 0; i < historyCount_; ++i) {
-    if (!history_[i].isCurrent() && history_[i].archiveId == archiveId && history_[i].image.format == format) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(history_.begin(), history_.begin() + historyCount_, [&](const HistoryEntry& entry) {
+    return !entry.isCurrent() && entry.archiveId == archiveId && entry.image.format == format;
+  });
 }
 
 void AirPageImageStore::scanHistory() {

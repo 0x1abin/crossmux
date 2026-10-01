@@ -60,6 +60,7 @@ enum class BmpReaderError : uint8_t {
   BufferTooSmall,
   OomRowBuffer,
   ShortReadRow,
+  OomDitherer,
 };
 
 class Bitmap {
@@ -72,7 +73,8 @@ class Bitmap {
 
   static const char* errorToString(BmpReaderError err);
 
-  explicit Bitmap(HalFile& file, bool dithering = false) : file(&file), dithering(dithering) {}
+  explicit Bitmap(HalFile& file, bool dithering = false, bool originalThresholds = false)
+      : file(&file), dithering(dithering), originalThresholds(originalThresholds) {}
 #if defined(BOARD_HAS_PSRAM) || defined(CROSSPOINT_EMULATED)
   // Non-owning memory source. The caller must keep `data` alive for the
   // Bitmap's lifetime; sequential rows are copied into the existing internal
@@ -115,6 +117,7 @@ class Bitmap {
   mutable size_t memoryPosition = 0;
 #endif
   bool dithering = false;
+  bool originalThresholds = false;
   int width = 0;
   int height = 0;
   bool topDown = false;

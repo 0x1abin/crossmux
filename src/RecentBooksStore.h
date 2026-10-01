@@ -15,6 +15,7 @@ struct RecentBook {
 };
 
 class RecentBooksStore : public PersistableStore<RecentBooksStore> {
+ public:
  private:
   std::vector<RecentBook> recentBooks;
 

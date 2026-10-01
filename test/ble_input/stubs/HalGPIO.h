@@ -36,6 +36,7 @@ struct HalGPIO {
   bool wasTouchReleased() const { return false; }
   bool wasSwipe(float&, float&, float&, float&) const { return false; }
   bool hasHomeKey() const { return false; }
+  bool wasHomeKeyPressed() const { return false; }
   bool wasHomeKeyTapped() const { return false; }
   bool wasHomeKeyLongPressed() const { return false; }
 };

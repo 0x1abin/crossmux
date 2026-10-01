@@ -1,6 +1,7 @@
 #include "FontDownloadActivity.h"
 
 #include <ArduinoJson.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -354,6 +355,12 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   baseUrl_.clear();
   downloadingFamilyIndex_ = -1;
 
+  if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
+  if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
+      ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {
+    errorMessage_ = tr(STR_MEMORY_ERROR);
+    return false;
+  }
   char manifestUrl[160];
   const int manifestUrlLength =
       snprintf(manifestUrl, sizeof(manifestUrl), CrossMuxEndpoints::FONT_MANIFEST_FORMAT, CrossMuxEndpoints::host(),
@@ -1130,7 +1137,7 @@ void FontDownloadActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the status and the row edge
-  syncListViewport(screen, props, /*hasSubtitle=*/state_ == FAMILY_LIST);
+  syncListViewport(screen, props, /*hasSubtitle=*/UITheme::getInstance().hasMainTabs() && state_ == FAMILY_LIST);
   screen.list(props);
 }
 
@@ -1309,6 +1316,84 @@ const char* FontDownloadActivity::automaticErrorText() const {
 }
 
 void FontDownloadActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs() && purpose_ != Purpose::ReaderAutoInstall) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    renderer.clearScreen();
+
+    const char* headerSubtitle = nullptr;
+    if (state_ == FAMILY_LIST && hasGroupScreen()) {
+      const int scriptGroupIndex = groupNav_.selected - 1;
+      headerSubtitle = scriptGroupIndex >= 0 && scriptGroupIndex < static_cast<int>(scriptGroupLabels_.size())
+                           ? scriptGroupLabels_[scriptGroupIndex].c_str()
+                           : tr(STR_ALL_FONTS);
+    }
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FONT_BROWSER),
+                   headerSubtitle);
+
+    const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const auto centerY = (pageHeight - lineHeight) / 2;
+
+    if (state_ == LOADING_MANIFEST) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_LOADING_FONT_LIST));
+    } else if (state_ == GROUP_LIST) {
+      renderUi();
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == FAMILY_LIST) {
+      renderUi();
+
+      const bool hasVisibleFamilies = !filteredIndices_.empty();
+      const char* confirmLabel = !hasVisibleFamilies            ? ""
+                                 : isSelectedFamilyDeletable()  ? tr(STR_DELETE)
+                                 : isUpdateAllRow(nav.selected) ? tr(STR_UPDATE)
+                                                                : tr(STR_DOWNLOAD);
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, hasVisibleFamilies ? tr(STR_DIR_UP) : "",
+                                                hasVisibleFamilies ? tr(STR_DIR_DOWN) : "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == DOWNLOADING) {
+      const auto& family = families_[downloadingFamilyIndex_];
+
+      std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + family.name + " (" +
+                               std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, statusText.c_str());
+
+      float progress = 0;
+      if (downloadTotal_ > 0) {
+        progress = static_cast<float>(downloadProgress_) / static_cast<float>(downloadTotal_);
+      }
+
+      int barY = centerY + metrics.verticalSpacing;
+      GUI.drawProgressBar(
+          renderer,
+          Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+          static_cast<int>(progress * 100), 100);
+
+      const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == COMPLETE) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == ERROR) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
+                                EpdFontFamily::BOLD);
+      if (!errorMessage_.empty()) {
+        renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, errorMessage_.c_str());
+      }
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    }
+
+    if (state_ == DOWNLOADING || state_ == COMPLETE || state_ == ERROR) renderUi();
+    renderer.displayBuffer();
+
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();

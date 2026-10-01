@@ -47,10 +47,11 @@ namespace {
 //             reserved to stay clear of the concurrent 66/67 layout change
 //   70 / 71 - paragraph spacing stores levels 0..5 as a byte, not a boolean
 //   72 / 73 - missing glyphs reserve space for a visible outline placeholder
+//   74 / 75 - character and word spacing in the render spec and cached text
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 73;
+constexpr uint8_t SECTION_FILE_VERSION = 75;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 72;
+constexpr uint8_t SECTION_FILE_VERSION = 74;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -72,7 +73,7 @@ constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFE - (SECTION_FILE_VERSION - 
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
                                  sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) +
                                  sizeof(bool) + sizeof(bool) + sizeof(uint8_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint32_t) * 5;
+                                 sizeof(uint32_t) * 5 + sizeof(int8_t) + sizeof(uint8_t);
 // Called only between layout/render operations; no borrowed glyph pointer is live.
 void reclaimLayoutCaches(GfxRenderer& renderer, const char* stage) {
 #ifndef BOARD_HAS_PSRAM
@@ -137,7 +138,7 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.embeddedStyle) + sizeof(spec.imageRendering) +
                                    sizeof(spec.focusReadingEnabled) + sizeof(spec.collectTouchLinks) +
                                    sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t),
+                                   sizeof(uint32_t) + sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -154,6 +155,8 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   serialization::writePod(file, spec.imageRendering);
   serialization::writePod(file, spec.focusReadingEnabled);
   serialization::writePod(file, spec.collectTouchLinks);
+  serialization::writePod(file, spec.characterSpacing);
+  serialization::writePod(file, spec.wordSpacingPercent);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -196,20 +199,24 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     uint8_t fileImageRendering = 0;
     bool fileFocusReadingEnabled = false;
     bool fileCollectTouchLinks = false;
+    int8_t fileCharacterSpacing = 0;
+    uint8_t fileWordSpacingPercent = 100;
     const bool headerValid =
         serialization::readPod(file, fileFontId) && serialization::readPod(file, fileLineCompression) &&
         serialization::readPod(file, fileExtraParagraphSpacing) && serialization::readPod(file, fileFirstLineIndent) &&
         serialization::readPod(file, fileParagraphAlignment) && serialization::readPod(file, fileViewportWidth) &&
         serialization::readPod(file, fileViewportHeight) && serialization::readPod(file, fileHyphenationEnabled) &&
         serialization::readPod(file, fileEmbeddedStyle) && serialization::readPod(file, fileImageRendering) &&
-        serialization::readPod(file, fileFocusReadingEnabled) && serialization::readPod(file, fileCollectTouchLinks);
+        serialization::readPod(file, fileFocusReadingEnabled) && serialization::readPod(file, fileCollectTouchLinks) &&
+        serialization::readPod(file, fileCharacterSpacing) && serialization::readPod(file, fileWordSpacingPercent);
 
     if (!headerValid || spec.fontId != fileFontId || spec.lineCompression != fileLineCompression ||
         spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.firstLineIndent != fileFirstLineIndent ||
         spec.paragraphAlignment != fileParagraphAlignment || spec.viewportWidth != fileViewportWidth ||
         spec.viewportHeight != fileViewportHeight || spec.hyphenationEnabled != fileHyphenationEnabled ||
         spec.embeddedStyle != fileEmbeddedStyle || spec.imageRendering != fileImageRendering ||
-        spec.focusReadingEnabled != fileFocusReadingEnabled || spec.collectTouchLinks != fileCollectTouchLinks) {
+        spec.focusReadingEnabled != fileFocusReadingEnabled || spec.collectTouchLinks != fileCollectTouchLinks ||
+        spec.characterSpacing != fileCharacterSpacing || spec.wordSpacingPercent != fileWordSpacingPercent) {
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();
@@ -482,6 +489,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
     return false;
   }
 
+  ctx->parser->setTextSpacing(spec.characterSpacing, spec.wordSpacingPercent);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 
   if (!build_->parser->beginParse()) {

@@ -86,6 +86,38 @@ void KOReaderAuthActivity::onExit() {
 }
 
 void KOReaderAuthActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs()) {
+    renderer.clearScreen();
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
+                   mode == Mode::SIGN_UP ? tr(STR_SIGN_UP) : tr(STR_KOREADER_AUTH));
+    const auto height = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto top = (pageHeight - height) / 2;
+
+    if (state == AUTHENTICATING) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, statusMessage.c_str());
+    } else if (state == SUCCESS) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top,
+                                mode == Mode::SIGN_UP ? tr(STR_ACCOUNT_CREATED) : tr(STR_AUTH_SUCCESS), true,
+                                EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_10_FONT_ID, top + height + 10, tr(STR_SYNC_READY));
+    } else if (state == FAILED) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, mode == Mode::SIGN_UP ? tr(STR_SIGNUP_FAILED) : tr(STR_AUTH_FAILED),
+                                true, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_10_FONT_ID, top + height + 10, errorMessage.c_str());
+    }
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+
+    return;
+  }
+
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();

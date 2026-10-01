@@ -18,6 +18,7 @@ class WeReadDownloadUiTest(unittest.TestCase):
         progress = source.split("constexpr uint8_t kDownloadStageCount", 1)[1].split(
             "constexpr int disclaimerActionGap", 1)[0]
         title = source.split("void drawTruncatedProgressTitle", 1)[1].split("void drawProgressStatus", 1)[0]
+        progress_render = source.split("void drawProgressStatus", 1)[1].split("struct Utf8Glyph", 1)[0]
         render = source.split("void WeReadActivity::render(RenderLock&&)", 1)[1]
         download = render.split("    case State::Downloading: {", 1)[1].split("    case State::Error:", 1)[0]
         waits = "\n".join(re.findall(r"constexpr StrId kPostProcess\w+Lines\[\] = \{.*?\};", source, re.S))
@@ -45,30 +46,40 @@ enum class State { Downloading, Error };
 struct Rect { int x, y, width, height; };
 namespace WeReadStore { struct ShelfRecord { char title[192]{}; }; }
 namespace EpdFontFamily { enum Style { BOLD }; }
-constexpr int UI_12_FONT_ID = 12;
+constexpr int UI_12_FONT_ID = 12, UI_10_FONT_ID = 10;
+int extraReads = 0;
 std::string shownTitle, shownStage, shownStatus;
 uint32_t shownTotal;
 int shownLineCount;
 const StrId* shownLines;
 struct GfxRenderer {
+  int getLineHeight(int) const { return 12; }
   int getTextWidth(int, const char* text, EpdFontFamily::Style) {
     int width = 0;
     for (; *text; ++text) if ((static_cast<unsigned char>(*text) & 0xc0) != 0x80) width += 8;
     return width;
   }
 };
+struct Metrics { int progressBarHeight = 8, contentSidePadding = 10; };
+struct Theme {
+  Metrics metrics;
+  const Metrics& getMetrics() const { return metrics; }
+  int measureProgressBarHeight(GfxRenderer&, int height) const { return height; }
+  int drawProgressBar(GfxRenderer&, const Rect& bounds, uint32_t, uint32_t) const { return bounds.y + bounds.height; }
+} theme;
+#define GUI theme
+namespace SubpageLayout {
+int relatedGap(const Metrics&) { return 4; }
+int sectionGap(const Metrics&) { return 8; }
+}
 namespace UITheme {
-void drawCenteredText(GfxRenderer&, const Rect&, int, int, const char* text, bool, EpdFontFamily::Style) {
+Theme& getInstance() { return theme; }
+void drawCenteredText(GfxRenderer&, const Rect&, int, int, const char* text, bool = false, EpdFontFamily::Style = EpdFontFamily::BOLD) {
   shownTitle = text;
 }
 }
-struct { const char* get(StrId) { return "label"; } } I18N;
+struct { const char* get(StrId) { ++extraReads; return "label"; } } I18N;
 #define tr(key) "Stage %u/%u: %s"
-void drawProgressStatus(GfxRenderer&, const Rect&, const char*, const char* stage, const char* status,
-                        uint32_t, uint32_t total, const StrId* lines, int lineCount) {
-  shownStage = stage; shownStatus = status ? status : ""; shownTotal = total;
-  shownLines = lines; shownLineCount = lineCount;
-}
 GfxRenderer renderer;
 Rect content{0, 0, 480, 700};
 WeReadStore::ShelfRecord pendingBook_;
@@ -76,8 +87,25 @@ std::atomic<Stage> progressStage_{Stage::Chapters};
 std::atomic<uint32_t> progressCompleted_{1}, progressTotal_{10};
 std::atomic<PostProcessNotice> postProcessNotice_{PostProcessNotice::None};
 '''
+        wrapper = r'''
+void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* title, const char* stage, const char* status,
+                        uint32_t completed, uint32_t total, const StrId* lines, int lineCount) {
+  drawProgressStatusBody(renderer, content, title, stage, status, completed, total, lines, lineCount);
+  shownStage = stage; shownStatus = status ? status : ""; shownTotal = total;
+  shownLines = lines; shownLineCount = lineCount;
+}
+'''
         checks = r'''
 int main() {
+  const StrId extra[] = {StrId::STR_WEREAD_POST_PROCESS_WAIT_LINE_2};
+  drawProgressStatusBody(renderer, content, "title", nullptr, nullptr, 0, 0);
+  assert(extraReads == 0);
+  drawProgressStatusBody(renderer, content, "title", nullptr, nullptr, 0, 0, nullptr, 2);
+  assert(extraReads == 0);
+  drawProgressStatusBody(renderer, content, "title", nullptr, nullptr, 0, 0, extra, -1);
+  assert(extraReads == 0);
+  drawProgressStatusBody(renderer, content, "title", nullptr, nullptr, 0, 0, extra, 1);
+  assert(extraReads == 1);
   assert(progressBucket(0, 0, 20) == 0);
   assert(progressBucket(UINT32_MAX, UINT32_MAX, 20) == 20);
   assert(progressBucket(UINT32_MAX, 1, 20) == 20);
@@ -120,6 +148,7 @@ int main() {
 '''
         program = (harness + waits + "\nconstexpr uint8_t kDownloadStageCount" + progress
                    + "\nvoid drawTruncatedProgressTitle" + title
+                   + "\nvoid drawProgressStatusBody" + progress_render + wrapper
                    + "\nvoid renderDownload() { switch (State::Downloading) { case State::Downloading: {"
                    + download + "case State::Error: break; } }\n" + checks)
         with tempfile.TemporaryDirectory() as directory:

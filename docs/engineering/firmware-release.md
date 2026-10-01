@@ -58,11 +58,19 @@ and `partitions.bin` assets, alongside the neutral binaries, compatibility manif
 and checksum files for every Stable target.
 
 At steady state, GitHub and COS retain the current build and the build or builds
-referenced by the previous index. A scheduled successful Nightly therefore
-keeps roughly 24 hours of rollback data. Failed builds do not publish or clean
-up anything. The first complete run can temporarily retain more than two build
-names when the preceding index contains target-level fallbacks; the next
+referenced by the previous index. Normally this means two immutable builds; the
+rollback window depends on release frequency. Failed builds do not publish or
+clean up anything. The first complete run can temporarily retain more than two
+build names when the preceding index contains target-level fallbacks; the next
 complete run converges to exactly the current and previous build.
+
+Cleanup validates a nonempty historical target map and every target's identity,
+compatibility variants, and regional manifest URL. Historical targets need not
+match today's canonical target table: adding or retiring a device must still
+protect every build referenced by the previous index. New published indexes
+continue to require the complete canonical target set. A cleanup failure after
+verified publication leaves the new firmware available and retains extra old
+builds until a subsequent successful cleanup.
 
 COS publishing runs only on the H2O self-hosted runner and does not fall back to
 a GitHub-hosted runner. It uses a version-pinned, SHA-256-verified COSCLI binary

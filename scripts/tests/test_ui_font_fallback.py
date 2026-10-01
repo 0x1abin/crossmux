@@ -58,7 +58,7 @@ int main() {
         header = (ROOT / 'lib/GfxRenderer/GfxRenderer.h').read_text()
         system = (ROOT / 'src/SdCardFontSystem.cpp').read_text()
         manager = (ROOT / 'lib/EpdFont/SdCardFontManager.cpp').read_text()
-        table = system[system.index('#if !defined(ENABLE_CHINESE_VERSION)'):system.index('}  // namespace')]
+        table = system[system.index('struct UiFontSize'):system.index('}  // namespace', system.index('struct UiFontSize'))]
         program = r'''
 #include <algorithm>
 #include <array>
@@ -70,6 +70,10 @@ int main() {
 #include <vector>
 #include "Utf8.h"
 #include "MissingGlyph.h"
+constexpr int trackingBetween(const uint32_t leftCp, const uint32_t rightCp, const int8_t tracking) {
+  const auto isSpace = [](const uint32_t cp) { return cp == ' ' || cp == 0xA0 || cp == 0x3000; };
+  return leftCp == 0 || isSpace(leftCp) || isSpace(rightCp) ? 0 : tracking;
+}
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
 inline constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
@@ -133,7 +137,7 @@ struct GfxRenderer {
   int getTextWidth(int,const char*,EpdFontFamily::Style=EpdFontFamily::REGULAR,
                    BidiUtils::BidiBaseDir=BidiUtils::BidiBaseDir::AUTO) const;
   void drawText(int,int,int,const char*,bool=true,EpdFontFamily::Style=EpdFontFamily::REGULAR,
-                BidiUtils::BidiBaseDir=BidiUtils::BidiBaseDir::AUTO) const;
+                BidiUtils::BidiBaseDir=BidiUtils::BidiBaseDir::AUTO,int8_t=0) const;
   void prewarmFallbackText(int,const char*,EpdFontFamily::Style=EpdFontFamily::REGULAR) const;
   std::map<int, EpdFontFamily> fontMap;
   std::map<int, std::array<int, 2>> fallbackFontMap_;
@@ -232,7 +236,11 @@ int main() {
     assert(s.manager_.loaded_.capacity()==capacity);
     constexpr bool enabled = EXPECT_ENABLED;
     if constexpr (EXPECT_READPICO) {
+#ifdef SIMULATOR
+      const bool active=true;
+#else
       const bool active=memory::healthy;
+#endif
       const int extraSizes=scenario==7 ? 4 : (scenario==1 || scenario==2) ? 2 : 3;
       assert(s.manager_.loads==(active ? 1+extraSizes : 1));
       assert(s.manager_.readerCacheLoads==1); // footer faces have no PSRAM glyph arena
@@ -367,13 +375,29 @@ int main() {
   }
 }
 '''
+        main = (ROOT / 'src/main.cpp').read_text()
+        registration = next(line.strip() for line in main.splitlines()
+                            if 'setFallbackFont(NOTOSANS_18_FONT_ID,' in line)
+        program = program.replace('constexpr int SMALL_FONT_ID=1,',
+                                  'constexpr int NOTOSANS_18_FONT_ID=9;\nconstexpr int SMALL_FONT_ID=1,')
+        program = program.replace('    SdCardFontSystem s;', '''
+    r.fontMap[NOTOSANS_18_FONT_ID]={{'A'}};
+    ''' + registration.replace('renderer.', 'r.') + '''
+    assert(r.resolveTextFontId(NOTOSANS_18_FONT_ID,"A")==NOTOSANS_18_FONT_ID);
+    assert(r.resolveTextFontId(NOTOSANS_18_FONT_ID,"一")==CJK_UI_12_FONT_ID);
+    measured=drawn=nullptr;
+    r.getTextWidth(NOTOSANS_18_FONT_ID,"一");
+    r.drawText(NOTOSANS_18_FONT_ID,0,0,"一");
+    assert(measured==&r.fontMap.at(CJK_UI_12_FONT_ID) && drawn==measured);
+    SdCardFontSystem s;''')
         configurations = (
             ('readpico', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'FREEINK_DEVICE_READPICO=1'], True),
+            ('readpico_simulator', ['SIMULATOR', 'CROSSPOINT_EMULATED=1', 'FREEINK_DEVICE_READPICO=1'], True),
             ('s3', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM'], True),
             ('c3', ['CONFIG_IDF_TARGET_ESP32C3=1'], False),
             ('s3_no_psram', ['CONFIG_IDF_TARGET_ESP32S3=1'], False),
-            ('simulator', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'SIMULATOR'], False),
-            ('emulated', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'CROSSPOINT_EMULATED'], False),
+            ('simulator', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'SIMULATOR'], True),
+            ('emulated', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'CROSSPOINT_EMULATED'], True),
         )
         with tempfile.TemporaryDirectory(prefix='ui-fallback-') as directory:
             cpp = Path(directory) / 'check.cpp'
@@ -383,7 +407,7 @@ int main() {
                 with self.subTest(target=name):
                     subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                     '-DENABLE_CHINESE_VERSION=1', f'-DEXPECT_ENABLED={int(enabled)}',
-                                    f'-DEXPECT_READPICO={int(name == "readpico")}',
+                                    f'-DEXPECT_READPICO={int(name.startswith("readpico"))}',
                                     *[f'-D{value}' for value in defines],
                                     '-I', str(ROOT / 'lib/Utf8'), '-I', str(ROOT / 'lib/EpdFont'),
                                     '-I', str(ROOT / 'lib/MiniBidi'), str(cpp),

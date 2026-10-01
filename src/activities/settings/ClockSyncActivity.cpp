@@ -109,6 +109,53 @@ void ClockSyncActivity::loop() {
 }
 
 void ClockSyncActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    renderer.clearScreen();
+
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_CLOCK_SYNC));
+
+    const int midY = pageHeight / 2;
+
+    switch (state) {
+      case State::Syncing:
+        renderer.drawCenteredText(UI_12_FONT_ID, midY, tr(STR_CLOCK_SYNCING));
+        break;
+      case State::Success: {
+        renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_OK), true, EpdFontFamily::BOLD);
+        if (syncedTime[0] != '\0') {
+          // Sized for the label in any language: STR_CURRENT_TIME is 26 bytes in
+          // Russian (UTF-8 Cyrillic is 2 bytes per letter) versus 13 in English,
+          // plus a separator and up to "08:56 PM".
+          char line[64];
+          snprintf(line, sizeof(line), "%s %s", tr(STR_CURRENT_TIME), syncedTime);
+          renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, line);
+        }
+        break;
+      }
+      case State::NoWifi:
+        renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_NO_WIFI), true, EpdFontFamily::BOLD);
+        renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, tr(STR_CLOCK_SYNC_NO_WIFI_HINT));
+        break;
+      case State::Failed:
+        renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_FAIL), true, EpdFontFamily::BOLD);
+        renderer.drawCenteredText(UI_10_FONT_ID, midY + 10, tr(STR_CHECK_SERIAL_OUTPUT));
+        break;
+    }
+
+    if (state != State::Syncing) {
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    }
+
+    renderer.displayBuffer();
+
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
 

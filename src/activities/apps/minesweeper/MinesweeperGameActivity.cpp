@@ -590,8 +590,8 @@ void MinesweeperGameActivity::drawNumber(int cellX, int cellY, int size, uint8_t
 }
 
 void MinesweeperGameActivity::drawFooter() {
-  const char* backLabel = "";
-  const char* confirmLabel = "";
+  const char* backLabel;
+  const char* confirmLabel;
   const char* leftLabel = "";
   const char* rightLabel = "";
 

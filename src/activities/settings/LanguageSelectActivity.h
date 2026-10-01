@@ -31,7 +31,8 @@ class LanguageSelectActivity final : public UiListActivity {
   void drawFooter() override;
   bool isOnboarding() const { return mode_ != Mode::Settings; }
 
-  constexpr static uint8_t totalItems = getLanguageCount();
+  // Only the languages compiled into this build (custom_i18n_builtin_langs), not the whole enum.
+  constexpr static uint8_t totalItems = sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]);
 
   // Row storage: totalItems is a compile-time constant, so a fixed-capacity
   // array avoids any heap allocation for the row list. Built once in
