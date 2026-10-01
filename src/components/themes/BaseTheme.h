@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "activities/MainTab.h"
+#include "components/Rect.h"
 #include "fontIds.h"
 
 class Bitmap;
@@ -20,15 +21,6 @@ struct BitmapRef;
 struct ListItem;
 }  // namespace ui
 }  // namespace freeink
-
-struct Rect {
-  int x;
-  int y;
-  int width;
-  int height;
-
-  explicit Rect(int x = 0, int y = 0, int width = 0, int height = 0) : x(x), y(y), width(width), height(height) {}
-};
 
 struct TabInfo {
   const char* label;
@@ -330,6 +322,7 @@ class BaseTheme {
                         const std::function<bool(int index)>& rowDimmed = nullptr, bool showSelection = true,
                         const std::function<bool(int index)>& rowHeading = nullptr) const;
   virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
+  virtual void drawMainTabStatusBar(const GfxRenderer& renderer, Rect rect) const;
   // Also draws the wall clock opposite the battery when the user enabled
   // SETTINGS.clockShowInHeader and an RTC is present. On touch boards a
   // tappable back button leads the band (see HeaderBackTapTarget); root

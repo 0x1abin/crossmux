@@ -257,6 +257,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     INX = 5,
     COVER_GRID = 6
   };
+  enum INX_TAB_POSITION { INX_TAB_TOP = 0, INX_TAB_BOTTOM = 1, INX_TAB_POSITION_COUNT };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -435,6 +436,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t inxRecentLayout = static_cast<uint8_t>(InxRecentLayout::Flow);
   uint8_t inxLibraryLayout = static_cast<uint8_t>(InxItemLayout::Icons);
   uint8_t inxAppsLayout = static_cast<uint8_t>(InxItemLayout::Icons);
+  uint8_t inxTabPosition = BoardConfig::hasTouch() ? INX_TAB_BOTTOM : INX_TAB_TOP;
   // Show and enable the Standby shortcut on the home screen.
   uint8_t standbyShortcutEnabled = 1;
   // Sunlight fading compensation

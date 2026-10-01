@@ -24,10 +24,6 @@ namespace {
 constexpr int kGap = 8;
 constexpr int kPagePadding = 18;
 constexpr int kProgressHeight = 6;
-Rect contentRect(const GfxRenderer& renderer) {
-  auto& theme = UITheme::getInstance();
-  return InxRecentGeometry::contentRect(theme.getScreenSafeArea(renderer, false, false), theme.getMetrics());
-}
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
 
@@ -102,6 +98,18 @@ void InxRecentActivity::selectMainTabContentEdge(const MainTabContentEdge edge) 
 InxRecentLayout InxRecentActivity::layout() const {
   const auto value = static_cast<InxRecentLayout>(SETTINGS.inxRecentLayout);
   return value < InxRecentLayout::Count ? value : InxRecentLayout::Flow;
+}
+
+Rect InxRecentActivity::contentRect() const {
+  Rect content = pageContentRect();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int topInset = mainTabsAtBottom() && !hasMainTabStatusBar() ? metrics.batteryBarHeight : 0;
+  content.y += topInset + metrics.verticalSpacing;
+  content.height -= topInset + metrics.verticalSpacing * 2;
+  if (!mainTabsAtBottom()) {
+    content.height -= std::max(0, InxRecentGeometry::footerReservedHeight - metrics.buttonHintsHeight);
+  }
+  return content;
 }
 
 const ReadingBookStats* InxRecentActivity::statsAt(const int index) const {
@@ -336,8 +344,8 @@ bool InxRecentActivity::prepareNextMissingCover() {
 }
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
-  return InxRecentGeometry::indexFromPoint(contentRect(renderer), x, y, selected,
-                                           books ? static_cast<int>(books->size()) : 0, layout());
+  return InxRecentGeometry::indexFromPoint(contentRect(), x, y, selected, books ? static_cast<int>(books->size()) : 0,
+                                           layout());
 }
 
 void InxRecentActivity::loop() {
@@ -525,11 +533,11 @@ void InxRecentActivity::drawCover(const Rect& content) {
 
 void InxRecentActivity::render(RenderLock&&) {
   renderer.clearScreen();
-  auto& theme = UITheme::getInstance();
-  const auto& metrics = theme.getMetrics();
-  const Rect safeArea = theme.getScreenSafeArea(renderer, false, false);
-  drawPageHeader(SubpageLayout::headerRect(safeArea, metrics), tr(STR_MENU_RECENT_BOOKS));
-  const Rect content = InxRecentGeometry::contentRect(safeArea, metrics);
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int width = renderer.getScreenWidth();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, false, false);
+  drawPageHeader(Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
+  const Rect content = contentRect();
 
   if (content.width > 0 && content.height > 0) {
     const GfxRenderer::ClipScope clip(renderer, content.x, content.y, content.width, content.height);
@@ -561,8 +569,18 @@ void InxRecentActivity::render(RenderLock&&) {
   const auto labels = mainTabButtonLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN),
                                           books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawBatteryRight(renderer, InxRecentGeometry::batteryRect(safeArea),
-                       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
+  if (usesMainTabBar() && mappedInput.hasTouch() && !mainTabsAtBottom()) {
+    int top, right, bottom, left;
+    renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+    const int footerTop = renderer.getScreenHeight() - InxRecentGeometry::footerReservedHeight;
+    GUI.drawMainTabStatusBar(renderer, Rect{left, footerTop, std::max(0, width - left - right),
+                                            std::max(0, renderer.getScreenHeight() - bottom - footerTop)});
+  } else if (!hasMainTabStatusBar()) {
+    Rect battery = InxRecentGeometry::batteryRect(safeArea);
+    if (mainTabsAtBottom()) battery.y = safeArea.y + metrics.topPadding + 5;
+    GUI.drawBatteryRight(renderer, battery,
+                         SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
+  }
   if (prepareNextMissingCover()) return;
   renderer.displayBuffer();
 }

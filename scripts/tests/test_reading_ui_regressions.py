@@ -44,7 +44,7 @@ class ReadingUiRegressionTest(unittest.TestCase):
         settings_preamble = method(settings, 'void SettingsActivity::buildScreen(').split('  if (usesAccordion())', 1)[0]
         settings_layout = 'void SettingsActivity::buildScreen(UiScreen& screen) {\n' + settings_preamble[
             settings_preamble.index('  const auto& metrics'):].replace(
-            '  const bool boldChineseCategories = usesAccordion() && I18N.getLanguage() == Language::ZH_CN;\n', '') + '}'
+            '  const bool boldChineseCategories = usesAccordion() && I18N.getLanguage() == Language::ZH_CN;\n', '').replace('  const auto& metrics = UITheme::getInstance().getMetrics();\n', '') + '}'
         stats_layout = method(stats, 'void ReadingStatsActivity::renderInx(').split('  const auto& books', 1)[0] + ' recorded=content; }'
         program = r'''
 #include <cassert>
@@ -85,6 +85,13 @@ struct UiScreen {
 struct Page {
   GfxRenderer renderer;
   bool usesMainTabBar() const { return UITheme::getInstance().tabs; }
+  Rect pageContentRect() const {
+    auto& theme=UITheme::getInstance();
+    const int top=theme.metrics.topPadding+theme.metrics.headerHeight;
+    const Rect safe=theme.safe;
+    return usesMainTabBar() ? Rect{safe.x,safe.y+top,safe.width,safe.height-top}
+                           : Rect{0,top,renderer.width,renderer.height-top-theme.metrics.buttonHintsHeight};
+  }
 };
 struct FileBrowserActivity : Page { void buildScreen(UiScreen&); };
 struct SettingsActivity : Page { void buildScreen(UiScreen&); };
@@ -106,10 +113,11 @@ struct AppsMenuActivity : Page {
   bool showMainTabContentSelection() const { return false; }
   void drawIconGrid(Rect rect,int,bool) { recorded=rect; }
   void syncListViewport(UiScreen&,fui::ListProps&) {}
+  Rect appContentRect() const;
   int iconIndexFromPoint(int,int) const;
   void buildScreen(UiScreen&);
 };
-''' + method(apps, 'Rect contentRect(') + file_layout + settings_layout + stats_layout + method(apps, 'int AppsMenuActivity::iconIndexFromPoint(') + method(apps, 'void AppsMenuActivity::buildScreen(') + r'''
+''' + method(apps, 'Rect AppsMenuActivity::appContentRect(') + file_layout + settings_layout + stats_layout + method(apps, 'int AppsMenuActivity::iconIndexFromPoint(') + method(apps, 'void AppsMenuActivity::buildScreen(') + r'''
 int main() {
   auto& theme=UITheme::getInstance();
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
@@ -127,18 +135,21 @@ int main() {
       UiScreen settingsScreen; settings.buildScreen(settingsScreen);
       assert(settingsScreen.absolute && settingsScreen.top==bottom);
       ReadingStatsActivity stats; stats.renderer=files.renderer; stats.renderInx();
-      assert(stats.recorded.y==bottom+6 && stats.recorded.y+stats.recorded.height==height-theme.metrics.buttonHintsHeight-6);
+      assert(stats.recorded.y==bottom+6 && stats.recorded.y+stats.recorded.height==(tabs ? safe.y+safe.height : height-theme.metrics.buttonHintsHeight)-6);
       AppsMenuActivity apps; apps.renderer=files.renderer;
       UiScreen screen; apps.buildScreen(screen);
       assert(apps.recorded.y==bottom+theme.metrics.verticalSpacing);
-      assert(apps.recorded.y+apps.recorded.height==height-theme.metrics.buttonHintsHeight-theme.metrics.verticalSpacing);
+      assert(apps.recorded.y+apps.recorded.height==(tabs ? safe.y+safe.height : height-theme.metrics.buttonHintsHeight)-theme.metrics.verticalSpacing);
       const Rect grid=apps.recorded;
-      for (int row=0;row<4;++row) for (int col=0;col<3;++col)
-        assert(apps.iconIndexFromPoint(grid.x+col*(grid.width/3),grid.y+row*(grid.height/4))==row*3+col);
+      for (int slot=0;slot<InxGridGeometry::itemsPerPage;++slot) {
+        const Rect cell=InxGridGeometry::cellBounds(slot,grid.width,grid.height);
+        assert(apps.iconIndexFromPoint(grid.x+cell.x,grid.y+cell.y)==slot);
+        assert(apps.iconIndexFromPoint(grid.x+cell.x-1,grid.y+cell.y)==-1);
+      }
       assert(apps.iconIndexFromPoint(grid.x,grid.y-1)==-1);
       assert(apps.iconIndexFromPoint(grid.x,grid.y+grid.height)==-1);
       apps.icons=false; apps.buildScreen(screen);
-      assert(screen.top+(tabs ? safe.y : 0)==bottom+theme.metrics.verticalSpacing && !screen.absolute);
+      assert(screen.top==bottom+theme.metrics.verticalSpacing && screen.absolute);
       apps.count=0; apps.buildScreen(screen);
       assert(theme.empty.y==grid.y && theme.empty.height==grid.height);
     }
@@ -155,7 +166,12 @@ int main() {
 #include <utility>
 #include "components/SubpageLayout.h"
 #include "components/themes/inx/InxTheme.h"
-class GfxRenderer {};
+class GfxRenderer {
+ public:
+  int getScreenWidth() const { return 1300; }
+  int getScreenHeight() const { return 1300; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=*r=*b=*l=0; }
+};
 struct UITheme {
   bool tabs=true;
   Rect safe{}, drawn{};
@@ -166,7 +182,8 @@ struct UITheme {
   bool hasMainTabs() const { return tabs; }
   UITheme& getTheme() { return *this; }
   const ThemeMetrics& getMetrics() const { return metrics; }
-  Rect getScreenSafeArea(const GfxRenderer&,bool front,bool side) { assert(!front && !side); return safe; }
+  Rect getScreenSafeArea(const GfxRenderer&,bool,bool=false) { return safe; }
+  void drawMainTabStatusBar(const GfxRenderer&,Rect) {}
   void drawMainTabBar(const GfxRenderer&,Rect rect,MainTab tab) { drawn=rect; selected=tab; }
   void drawHeader(const GfxRenderer&,Rect rect,const char*,const char*) { drawn=rect; ++headers; }
 };
@@ -174,7 +191,12 @@ struct UITheme {
 struct Activity {
   GfxRenderer renderer;
   MainTab tab=MainTab::Recent;
+  bool bottom=false;
+  struct { bool hasTouch() const { return true; } } mappedInput;
   bool usesMainTabBar() const;
+  bool mainTabsAtBottom() const { return bottom; }
+  bool hasMainTabStatusBar() const { return usesMainTabBar() && bottom; }
+  MainTabLayout mainTabLayout() const;
   MainTab mainTab() const { return tab; }
   bool mainTabBackReturnsToTabs() const { return false; }
   void selectMainTabContentEdge(MainTabContentEdge) {}
@@ -205,14 +227,14 @@ struct ActivityManager {
   void goToStandby() { assert(false); }
   bool handleMainTabInput();
 };
-''' + method(activity, 'bool Activity::usesMainTabBar(') + method(activity, 'void Activity::drawPageHeader(') + method(manager, 'bool ActivityManager::handleMainTabInput(') + r'''
+''' + method(activity, 'bool Activity::usesMainTabBar(') + method(activity, 'MainTabLayout Activity::mainTabLayout(') + method(activity, 'void Activity::drawPageHeader(') + method(manager, 'bool ActivityManager::handleMainTabInput(') + r'''
 int main() {
   auto& theme=UITheme::getInstance();
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
     theme.safe=safe;
-    const Rect expected=SubpageLayout::headerRect(safe,theme.metrics);
-    for (MainTab current : MainTabs::values) {
-      Activity page; page.tab=current;
+    for (bool bottom : {false,true}) for (MainTab current : MainTabs::values) {
+      Activity page; page.tab=current; page.bottom=bottom;
+      const Rect expected=page.mainTabLayout().tabBar;
       page.drawPageHeader(Rect{0,0,999,66},"title");
       assert(theme.drawn.x==expected.x && theme.drawn.y==expected.y);
       assert(theme.drawn.width==expected.width && theme.drawn.height==expected.height && theme.selected==current);
@@ -222,7 +244,9 @@ int main() {
           ActivityManager m; m.currentActivity=&page;
           m.mappedInput.x=x; m.mappedInput.y=expected.y;
           assert(m.handleMainTabInput());
-          assert(current==MainTabs::values[i] ? m.updates==1 && m.destination==MainTab::None : m.destination==MainTabs::values[i]);
+          const MainTab target=MainTabs::fromX(x-expected.x,expected.width);
+          assert(target==MainTab::None ? m.updates==0 && m.destination==MainTab::None
+                 : current==target ? m.updates==1 && m.destination==MainTab::None : m.destination==target);
         }
       }
       for (auto point : {std::pair{expected.x-1,expected.y},std::pair{expected.x+expected.width,expected.y},
@@ -264,11 +288,15 @@ int main() {
 #include "components/themes/inx/InxTheme.h"
 #define tr(key) #key
 constexpr int kGap=8, kPagePadding=18, kProgressHeight=6;
+Rect screenSafe;
 class GfxRenderer {
  public:
   mutable Rect clip{};
   mutable bool clipped=false;
   bool flow=false;
+  int getScreenWidth() const { return screenSafe.x+screenSafe.width+5; }
+  int getScreenHeight() const { return screenSafe.y+screenSafe.height+8; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=screenSafe.y; *r=5; *b=8; *l=screenSafe.x; }
   mutable int textCalls=0, metricCalls=0;
   struct ClipScope {
     const GfxRenderer& r;
@@ -325,6 +353,7 @@ struct UITheme {
   static void drawCenteredWrappedText(const GfxRenderer& r,Rect bounds,int,const char*,int) {
     assert(r.clipped && bounds.x==r.clip.x && bounds.y==r.clip.y); ++getInstance().emptyCalls;
   }
+  void drawMainTabStatusBar(const GfxRenderer&,Rect) { assert(false); }
   void drawButtonHints(const GfxRenderer& r,const char*,const char*,const char*,const char*) { assert(!r.clipped); }
   void drawBatteryRight(const GfxRenderer& r,Rect rect,bool) {
     assert(!r.clipped && rect.x+rect.width==safe.x+safe.width-12 && rect.y==safe.y+safe.height-(FREEINK_DEVICE_READPICO ? 24 : 30));
@@ -339,14 +368,23 @@ struct InxRecentActivity {
   std::vector<RecentBook>* books=nullptr;
   int selected=1, coverCalls=0;
   InxRecentLayout chosen=InxRecentLayout::Flow;
+  struct { bool hasTouch() const { return false; } } mappedInput;
+  bool usesMainTabBar() const { return true; }
+  bool mainTabsAtBottom() const { return false; }
+  bool hasMainTabStatusBar() const { return false; }
+  Rect pageContentRect() const {
+    auto& theme=UITheme::getInstance();
+    const int top=theme.metrics.topPadding+theme.metrics.headerHeight;
+    return Rect{theme.safe.x,theme.safe.y+top,theme.safe.width,theme.safe.height-top};
+  }
+  Rect contentRect() const;
   const ReadingBookStats* statsAt(int) const { return nullptr; }
   bool showMainTabContentSelection() const { return true; }
   InxRecentLayout layout() const { return chosen; }
   void setThumbnailHeight(int height) { assert(height>0); }
   void drawBookCover(int,Rect) { assert(renderer.clipped); ++coverCalls; }
   void drawPageHeader(Rect rect,const char*) {
-    const Rect expected=SubpageLayout::headerRect(UITheme::getInstance().safe,UITheme::getInstance().metrics);
-    assert(!renderer.clipped && rect.x==expected.x && rect.y==expected.y && rect.width==expected.width);
+    assert(!renderer.clipped && rect.x==0 && rect.y==UITheme::getInstance().metrics.topPadding && rect.width==renderer.getScreenWidth());
   }
   struct Labels { const char *btn1="", *btn2="", *btn3="", *btn4=""; };
   Labels mainTabButtonLabels(const char*,const char*,bool,bool) { return {}; }
@@ -358,14 +396,14 @@ struct InxRecentActivity {
   void drawFlow(const Rect&);
   void render(RenderLock&&);
 };
-''' + method(source, 'Rect fitCoverRect(') + '\n'.join(
+''' + method(source, 'Rect InxRecentActivity::contentRect(') + method(source, 'Rect fitCoverRect(') + '\n'.join(
             method(source, 'void InxRecentActivity::draw'+layout+'(')
             for layout in ('Flow', 'Grid', 'List', 'Icons', 'Cover')) +
                 method(source, 'void InxRecentActivity::render(') + r'''
 int main() {
   auto& theme=UITheme::getInstance(); theme.metrics.buttonHintsHeight=0;
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
-    theme.safe=safe;
+    theme.safe=screenSafe=safe;
     InxRecentActivity page;
     std::vector<RecentBook> books{{"中文长书名测试"},{"另一本书"},{"More books"}};
     page.books=&books;
@@ -801,6 +839,159 @@ int main() {
     assert(readPodChecked(reopened,loadedEncoding));assert(readPodChecked(reopened,loadedPages));
     assert(spacing==(level!=0) && loadedComplete==1 && loadedEncoding==1 && loadedPages==7);
     assert(reopened.position==reopened.bytes.size());
+  }
+}
+''')
+
+
+    def test_inx_corner_status_and_touch_home_footer(self):
+        theme = (ROOT / 'src/components/themes/inx/InxTheme.cpp').read_text()
+        home = (ROOT / 'src/activities/home/InxRecentActivity.cpp').read_text()
+        status = method(theme, 'void InxTheme::drawMainTabStatusBar(')
+        render = method(home, 'void InxRecentActivity::render(')
+        footer = render[render.index('  if (usesMainTabBar()'):render.index('  if (prepareNextMissingCover()')]
+        run_cpp(r'''
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <initializer_list>
+struct Rect { int x, y, width, height; };
+constexpr int STATUS_NUMERIC_FONT_ID = 1;
+struct CrossPointSettings {
+  enum { INX_TAB_TOP, INX_TAB_BOTTOM };
+  enum class HIDE_BATTERY_PERCENTAGE { SHOW, HIDE_ALWAYS };
+};
+struct {
+  int inxTabPosition = CrossPointSettings::INX_TAB_BOTTOM, clockFormat = 0;
+  CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{};
+} SETTINGS;
+struct Metrics { int batteryWidth=16, batteryHeight=12, topPadding=0; };
+struct UITheme {
+  static UITheme& getInstance() { static UITheme ui; return ui; }
+  const Metrics& getMetrics() const { static Metrics m; return m; }
+};
+namespace TimeUtils {
+bool valid=true, formatted12=false;
+int calls=0;
+bool formatCurrentTime(char* out, size_t size, bool hour12) {
+  assert(size == 9); ++calls; formatted12=hour12;
+  if (!valid) return false;
+  std::strcpy(out, hour12 ? "12:59 PM" : "23:59"); return true;
+}
+}
+struct GfxRenderer {
+  int width=480, height=800, top=9, right=3, bottom=3, left=3;
+  mutable int clocks=0, clockX=0, clockY=0;
+  mutable char clock[9]{};
+  mutable Rect clip{};
+  mutable bool clipped=false;
+  struct ClipScope {
+    const GfxRenderer& r;
+    ClipScope(const GfxRenderer& r, int x, int y, int w, int h):r(r) {
+      r.clip={x,y,w,h}; r.clipped=true;
+    }
+    ~ClipScope() { r.clipped=false; }
+  };
+  int getScreenWidth() const { return width; }
+  int getScreenHeight() const { return height; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=top; *r=right; *b=bottom; *l=left; }
+  void drawText(int font, int x, int y, const char* text) const {
+    assert(font == STATUS_NUMERIC_FONT_ID && clipped);
+    ++clocks; clockX=x; clockY=y; std::strcpy(clock,text);
+  }
+};
+struct InxTheme {
+  mutable Rect battery{};
+  mutable bool percentage=false;
+  void drawBatteryRight(const GfxRenderer& r, Rect rect, bool show) const {
+    assert(r.clipped); battery=rect; percentage=show;
+  }
+  void drawMainTabStatusBar(const GfxRenderer&, Rect) const;
+};
+''' + status + r'''
+namespace InxRecentGeometry {
+constexpr int footerReservedHeight=40;
+Rect batteryRect(Rect safe) { return {safe.x+safe.width-27,safe.y+safe.height-30,15,12}; }
+}
+constexpr int kHomeBatteryRightMargin=12, kHomeBatteryWidth=15, kHomeBatteryHeight=12;
+struct Input { bool touch=true; bool hasTouch() const { return touch; } };
+struct Gui {
+  int statusCalls=0, legacyCalls=0;
+  Rect footer{};
+  InxTheme theme;
+  void drawMainTabStatusBar(const GfxRenderer& r, Rect rect) {
+    ++statusCalls; footer=rect; theme.drawMainTabStatusBar(r,rect);
+  }
+  void drawBatteryRight(const GfxRenderer&, Rect, bool) { ++legacyCalls; }
+} GUI;
+struct InxRecentActivity {
+  GfxRenderer renderer;
+  Input mappedInput;
+  bool inx=true;
+  bool usesMainTabBar() const { return inx; }
+  bool mainTabsAtBottom() const { return SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM; }
+  bool hasMainTabStatusBar() const { return inx && mappedInput.touch && mainTabsAtBottom(); }
+  void drawFooter() {
+    const int width=renderer.getScreenWidth();
+    const auto& metrics=UITheme::getInstance().getMetrics();
+    const Rect safeArea{renderer.left,renderer.top,width-renderer.left-renderer.right,renderer.height-renderer.top-renderer.bottom};
+''' + footer + r'''
+  }
+};
+int main() {
+  for (bool landscape : {false,true}) for (bool largeInsets : {false,true})
+    for (bool hour12 : {false,true}) for (bool valid : {false,true}) for (bool hide : {false,true}) {
+      GfxRenderer r;
+      if (landscape) { r.width=800; r.height=480; }
+      if (largeInsets) { r.top=20; r.left=18; r.right=21; r.bottom=18; }
+      SETTINGS.clockFormat=hour12;
+      SETTINGS.hideBatteryPercentage=hide ? CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS
+                                         : CrossPointSettings::HIDE_BATTERY_PERCENTAGE::SHOW;
+      TimeUtils::valid=valid;
+      for (bool bottom : {false,true}) {
+        SETTINGS.inxTabPosition=bottom ? CrossPointSettings::INX_TAB_BOTTOM : CrossPointSettings::INX_TAB_TOP;
+        const Rect rect=bottom ? Rect{r.left,r.top,r.width-r.left-r.right,28}
+                               : Rect{r.left,r.height-40,r.width-r.left-r.right,40-r.bottom};
+        InxTheme theme;
+        const int clocks=r.clocks, formats=TimeUtils::calls;
+        theme.drawMainTabStatusBar(r,rect);
+        assert(!r.clipped && theme.percentage == !hide);
+        assert(r.clocks-clocks == bottom && TimeUtils::calls-formats == bottom);
+        assert(r.width-theme.battery.x-theme.battery.width == std::max(12,r.right+1));
+        assert(theme.battery.x+theme.battery.width < rect.x+rect.width);
+        const int iconY=theme.battery.y+6;
+        if (bottom) assert(iconY == std::max(12,r.top));
+        else {
+          assert(r.height-iconY-theme.battery.height == std::max(12,r.bottom+1));
+          assert(theme.battery.y+6+theme.battery.height < rect.y+rect.height);
+        }
+        assert(iconY >= rect.y && iconY+theme.battery.height <= rect.y+rect.height);
+        if (bottom) {
+          assert(r.clockX == std::max(12,r.left) && theme.battery.y == r.clockY);
+          assert(r.clockX+8*8+6 < theme.battery.x-4*8);
+          assert(TimeUtils::formatted12 == hour12);
+          assert(std::strcmp(r.clock, !valid ? "--:--" : hour12 ? "12:59 PM" : "23:59") == 0);
+        }
+      }
+      const int clocks=r.clocks;
+      InxTheme{}.drawMainTabStatusBar(r,{0,0,0,28});
+      InxTheme{}.drawMainTabStatusBar(r,{0,0,480,0});
+      assert(r.clocks == clocks);
+    }
+  for (bool inx : {false,true}) for (bool touch : {false,true}) for (bool bottom : {false,true}) {
+    GUI.statusCalls=GUI.legacyCalls=0;
+    SETTINGS.inxTabPosition=bottom ? CrossPointSettings::INX_TAB_BOTTOM : CrossPointSettings::INX_TAB_TOP;
+    InxRecentActivity home; home.inx=inx; home.mappedInput.touch=touch;
+    const int formats=TimeUtils::calls;
+    home.drawFooter();
+    assert(home.renderer.clocks == 0 && TimeUtils::calls == formats);
+    const bool footer=inx && touch && !bottom;
+    assert(GUI.statusCalls == footer);
+    assert(GUI.legacyCalls == (!footer && !home.hasMainTabStatusBar()));
+    if (footer) {
+      assert(GUI.footer.y == 760 && GUI.footer.height == 37);
+      assert(GUI.theme.battery.y == 770 && GUI.theme.battery.x == 452);
+    }
   }
 }
 ''')

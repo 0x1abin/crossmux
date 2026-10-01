@@ -15,6 +15,7 @@
 #include "components/icons/inx_apps.h"
 #include "components/icons/inx_tabs.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
 
 namespace {
 constexpr int kIconSize = 38;
@@ -394,19 +395,46 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
 
 void InxTheme::drawMainTabBar(const GfxRenderer& renderer, const Rect rect, const MainTab selected) const {
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
-  const int tabCount = static_cast<int>(MainTabs::values.size());
-  const int iconY = rect.y + std::max(0, (rect.height - kIconSize) / 2);
+  constexpr int bottomIconInset = 6;
+  const bool tabsAtBottom = SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM;
+  const int iconY =
+      rect.y + std::max(0, tabsAtBottom ? rect.height - kIconSize - bottomIconInset : (rect.height - kIconSize) / 2);
+  const int indicatorY = tabsAtBottom ? rect.y : rect.y + rect.height - kUnderlineHeight;
 
   for (size_t i = 0; i < MainTabs::values.size(); ++i) {
     const MainTab tab = MainTabs::values[i];
-    const int left = rect.x + rect.width * static_cast<int>(i) / tabCount;
-    const int right = rect.x + rect.width * (static_cast<int>(i) + 1) / tabCount;
+    const auto bounds = MainTabs::tabBounds(static_cast<int>(i), rect.width);
+    const int left = rect.x + bounds.left;
+    const int right = rect.x + bounds.right;
     const int iconX = left + (right - left - kIconSize) / 2;
     if (const uint8_t* icon = iconForTab(tab)) drawInxIcon(renderer, icon, iconX, iconY);
     if (tab == selected) {
-      renderer.fillRect(iconX, rect.y + rect.height - kUnderlineHeight, kIconSize, kUnderlineHeight);
+      renderer.fillRect(iconX, indicatorY, kIconSize, kUnderlineHeight);
     }
   }
 
-  renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
+  if (!tabsAtBottom) {
+    renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
+  }
+}
+
+void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect) const {
+  if (rect.width <= 0 || rect.height <= 0) return;
+  constexpr int edgeInset = 12;
+  constexpr int batteryTextOffset = 6;  // drawBatteryRight offsets the icon below the text origin.
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const bool tabsAtBottom = SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM;
+  // The battery cap and numeric glyphs include the positioning edge pixel.
+  const int right = std::min(rect.x + rect.width - 1, renderer.getScreenWidth() - edgeInset);
+  const int textY = tabsAtBottom ? std::max(rect.y, edgeInset) - batteryTextOffset
+                                 : std::min(rect.y + rect.height - 1, renderer.getScreenHeight() - edgeInset) -
+                                       metrics.batteryHeight - batteryTextOffset;
+  const GfxRenderer::ClipScope clip(renderer, rect.x, rect.y, rect.width, rect.height);
+  if (tabsAtBottom) {
+    char time[9] = "--:--";
+    TimeUtils::formatCurrentTime(time, sizeof(time), SETTINGS.clockFormat == 1);
+    renderer.drawText(STATUS_NUMERIC_FONT_ID, std::max(rect.x, edgeInset), textY, time);
+  }
+  drawBatteryRight(renderer, Rect{right - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
+                   SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
 }

@@ -752,12 +752,10 @@ std::string getFileExtension(const std::string& filename) {
 
 void FileBrowserActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  // Content below the GUI.drawHeader band, above the button hints.
-  const Rect header = usesMainTabBar() ? SubpageLayout::headerRect(
-                                             UITheme::getInstance().getScreenSafeArea(renderer, false, false), metrics)
-                                       : Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight};
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(header.y + header.height), 0,
-                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  const Rect content = pageContentRect();
+  screen.setContentMarginFromScreen(fui::Insets{
+      static_cast<int16_t>(content.y), static_cast<int16_t>(renderer.getScreenWidth() - content.x - content.width),
+      static_cast<int16_t>(renderer.getScreenHeight() - content.y - content.height), static_cast<int16_t>(content.x)});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   // Full path band at the bottom: separator on top, left-truncated so the

@@ -145,13 +145,18 @@ void ActivityManager::loop() {
 
     // Touch users can also open the global control center from the status bar.
     bool statusBarTap = false;
-    if (mappedInput.hasTouch() &&
-        (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
-         currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection")) {
+    if (mappedInput.hasTouch()) {
       int tx = 0;
       int ty = 0;
-      // The header back button shares this band; its taps stay Back.
-      statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty < 44 && !HeaderBackTapTarget::contains(tx, ty);
+      if (currentActivity->usesMainTabBar()) {
+        const Rect status = currentActivity->mainTabLayout().statusBar;
+        statusBarTap = mappedInput.wasScreenTapped(tx, ty) && tx >= status.x && tx < status.x + status.width &&
+                       ty >= status.y && ty < status.y + status.height;
+      } else if (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
+                 currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection") {
+        statusBarTap =
+            mappedInput.wasScreenTapped(tx, ty) && ty >= 0 && ty < 44 && !HeaderBackTapTarget::contains(tx, ty);
+      }
     }
     if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
       auto panel = makeUniqueNoThrow<FrontlightPanelActivity>(renderer, mappedInput);
@@ -270,18 +275,16 @@ bool ActivityManager::handleMainTabInput() {
   if (!currentActivity || !currentActivity->usesMainTabBar()) return false;
 
   const MainTab currentTab = currentActivity->mainTab();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect tabRect =
-      SubpageLayout::headerRect(UITheme::getInstance().getScreenSafeArea(renderer, false, false), metrics);
-  const auto insideTabs = [&](const int x, const int y) {
-    return x >= tabRect.x && x < tabRect.x + tabRect.width && y >= tabRect.y && y < tabRect.y + tabRect.height;
+  const Rect tabBar = currentActivity->mainTabLayout().tabBar;
+  const auto insideTabs = [&tabBar](const int x, const int y) {
+    return x >= tabBar.x && x < tabBar.x + tabBar.width && y >= tabBar.y && y < tabBar.y + tabBar.height;
   };
 
   int x = 0;
   int y = 0;
   if (mappedInput.wasScreenTapped(x, y)) {
     if (insideTabs(x, y)) {
-      const MainTab target = MainTabs::fromX(x - tabRect.x, tabRect.width);
+      const MainTab target = MainTabs::fromX(x - tabBar.x, tabBar.width);
       if (target != MainTab::None) {
         mainTabFocus = MainTabFocus::Content;
         if (target != currentTab)
