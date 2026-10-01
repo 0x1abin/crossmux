@@ -26,7 +26,7 @@ python3 scripts/tests/test_ui_font_fallback.py
 
 The `simulator_readpico` native environment runs the reader with a 1216×684 scan
 framebuffer and 684×1216 portrait UI, native sixteen-level image output, the
-current `{9,3,24,3}` portrait insets and Read Pico's 12/12/14 pt SD UI fonts.
+SDK-aligned `{5,5,8,5}` portrait insets and Read Pico's 12/12/14 pt SD UI fonts.
 Missing fonts and sizes fall back to the embedded faces. Mouse tap, hold and swipe
 follow orientation; Up/Escape/Down stand in for the three capacitive keys. `P`
 represents the PMU power key and is the only sleep wake input. `S` requests sleep.
@@ -44,7 +44,7 @@ uses the current AirPage and custom sleep-image paths. Closing the EPUB toolbar
 restores the firmware's B/W page snapshot, including its image geometry.
 
 The PlatformIO and host-test dependencies pin simulator commit
-[`4bad3f81`](https://github.com/0x1abin/crosspoint-simulator/commit/4bad3f813af59b2827eba66f1a216c332a292dbf).
+[`33e585ff`](https://github.com/0x1abin/crosspoint-simulator/commit/33e585ff6452ea03f6a164f51e379f065e8c2e54).
 A normal checkout needs no local dependency override.
 
 Build/run with `pio run -e simulator_readpico -t run_simulator`. Keep test SD data
