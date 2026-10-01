@@ -3,6 +3,8 @@
 
 Optional argument: reference SDK root. This prints baseline hashes for review;
 normal CTest runs compare the current SDK with the checked-in baseline.
+Legacy keyboard scenes check SDK backward compatibility only; the active keyboard
+is covered by test_unified_keyboard.py. Do not regenerate the historical baseline.
 """
 import hashlib
 import json
@@ -15,7 +17,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-SDK = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / 'freeink-sdk'
+SDK = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 UI = SDK / 'libs/ui/FreeInkUI'
 with tempfile.TemporaryDirectory(prefix='inx-style-', dir=os.environ.get('TMPDIR')) as tmp:
     binary = Path(tmp) / 'test'

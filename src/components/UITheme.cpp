@@ -1,16 +1,25 @@
 #include "UITheme.h"
 
+#include <EpdFont.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HalMemory.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <builtinFonts/notosans_18_bold.h>
+#include <builtinFonts/notosans_18_regular.h>
+#include <builtinFonts/ubuntu_10_bold.h>
+#include <builtinFonts/ubuntu_10_regular.h>
+#include <builtinFonts/ubuntu_12_bold.h>
+#include <builtinFonts/ubuntu_12_regular.h>
 
 #include <algorithm>
 #include <memory>
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "components/CoverGridHomeUi.h"
 #include "components/SelectionCursorPolicy.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
@@ -18,6 +27,20 @@
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
+// The registered families keep these stable addresses across theme changes.
+EpdFont ui10RegularFont(&ubuntu_10_regular);
+EpdFont ui10BoldFont(&ubuntu_10_bold);
+EpdFont ui12RegularFont(&ubuntu_12_regular);
+EpdFont ui12BoldFont(&ubuntu_12_bold);
+
+extern EpdFont offlineReaderFont;
+EpdFont ui18RegularFont(&notosans_18_regular);
+EpdFont ui18BoldFont(&notosans_18_bold);
+
+// Fixed control faces share the existing bitmap data; theme reload never mutates them.
+static EpdFont control18RegularFont(&notosans_18_regular);
+static EpdFont control18BoldFont(&notosans_18_bold);
+EpdFontFamily control18FontFamily(&control18RegularFont, &control18BoldFont);
 
 UITheme UITheme::instance;
 
@@ -27,18 +50,30 @@ UITheme::UITheme() {
 }
 
 void UITheme::reload() {
+  const bool inx = SETTINGS.uiTheme == CrossPointSettings::INX;
+  ui18RegularFont.data = inx ? offlineReaderFont.data : &notosans_18_regular;
+  ui18BoldFont.data = inx ? offlineReaderFont.data : &notosans_18_bold;
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
 }
 
+bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes > 0; }
+
+bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
+
+void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
+
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   std::unique_ptr<BaseTheme> nextTheme;
   const ThemeMetrics* nextMetrics = &BaseMetrics::values;
+  if (type == CrossPointSettings::COVER_GRID && !supportsCoverGrid()) type = CrossPointSettings::LYRA;
+
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
       LOG_DBG("UI", "Using Classic theme");
       nextTheme = makeUniqueNoThrow<BaseTheme>();
       break;
+    case CrossPointSettings::UI_THEME::COVER_GRID:
     case CrossPointSettings::UI_THEME::LYRA:
       LOG_DBG("UI", "Using Lyra theme");
       nextTheme = makeUniqueNoThrow<LyraTheme>();

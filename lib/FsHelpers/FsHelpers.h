@@ -82,6 +82,14 @@ bool isSameOrDescendantPath(std::string_view path, std::string_view root);
 
 // Replace oldRoot with newRoot when path is oldRoot or one of its descendants.
 std::string rebasePath(std::string_view path, std::string_view oldRoot, std::string_view newRoot);
+// Rejects an empty component, one containing '/' or '\', or the exact components
+// "." and "..", so a single filename/folder-name argument can never be used to
+// escape the directory it is placed into. Names like "volume..2.epub" or
+// "notes...txt" that merely contain ".." are accepted.
+bool isSafePathComponent(std::string_view name);
+inline bool isSafePathComponent(const String& name) {
+  return isSafePathComponent(std::string_view{name.c_str(), name.length()});
+}
 
 /**
  * Sanitize a filename/path component for FAT32 in a caller-provided buffer.

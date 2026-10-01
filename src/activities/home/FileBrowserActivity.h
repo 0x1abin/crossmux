@@ -12,7 +12,7 @@ class FileBrowserActivity final : public UiListActivity {
   enum class Mode { Books, PickFirmware, PickPng };
 
  private:
-  enum class EditAction : uint8_t { Rename, Move, Delete };
+  enum class EditAction : uint8_t { Rename, Move, Delete, Open };
   enum class BrowserState : uint8_t { Browsing, ChoosingMoveDestination };
 
   // Deletion
@@ -60,6 +60,26 @@ class FileBrowserActivity final : public UiListActivity {
   // paused underneath (e.g. a Settings screen reached via a picker flow)
   // invalidates the cached rows on return instead of rendering stale ones.
   bool rowsUseFileIcons = false;
+
+  // Pull-based rows: the SDK list resolves each drawn row on demand through
+  // provideRow() (fui::ListProps::rowProvider), so the only per-file
+  // residency is `files` itself — no full-length rowNames/rowExtensions/
+  // rowItems arrays (a 1000-file folder used to pin ~100KB of vectors plus a
+  // heap copy of every display name, which aborted under -fno-exceptions
+  // when the contiguous blocks no longer fit). The label/value strings for
+  // the row being laid out live in these scratch buffers; the provider
+  // contract only needs them valid until the next provideRow() call.
+  static constexpr size_t ROW_NAME_BUF_SIZE = 512;  // NAME_BUFFER_SIZE + "[]" + terminator slack
+  char rowNameBuf[ROW_NAME_BUF_SIZE]{};
+  char rowExtBuf[16]{};
+  static void provideRow(void* ctx, uint16_t index, freeink::ui::ListItem& item);
+
+  // CJK fallback glyphs are prewarmed for a bounded window of rows around the
+  // viewport (one SD pass per list page, like the reader TOC) instead of the
+  // whole folder. -1 = nothing prewarmed; reset by loadFiles().
+  static constexpr int PREWARM_WINDOW = 24;
+  int prewarmedStart = -1;
+  void prewarmRowGlyphs(int start);
 
   void rebuildRowItems();
   bool usesIconLayout() const;

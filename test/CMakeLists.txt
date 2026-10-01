@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG dacbbbcdc133a052f9122347429fdcb8cddf80af
+  GIT_TAG f78f233f9acb9daa26832b0ff39ba096a6378349
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -51,6 +51,10 @@ add_subdirectory(hyphenation_eval)
 add_subdirectory(utf8_compose)
 add_subdirectory(opds_filename)
 add_subdirectory(html_to_plain_text)
+add_subdirectory(library_text)
+add_subdirectory(library_format)
+add_subdirectory(library_index_file)
+add_subdirectory(library_builder)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(combining_marks)
 add_subdirectory(time_utils)
@@ -88,9 +92,12 @@ add_subdirectory(murphy_m4_batch)
 add_subdirectory(murphy_m4_input)
 add_subdirectory(system_settings_reset)
 add_subdirectory(user_guide)
+add_subdirectory(koreader_xpath_resolver)
+add_subdirectory(progress_comparison)
 add_subdirectory(font_cache_manager)
 add_subdirectory(css_parser)
 add_subdirectory(chapter_html_slim_parser)
+add_subdirectory(korean_line_breaking)
 add_subdirectory(ligature_guard)
 add_subdirectory(page_link)
 add_subdirectory(ble_key_mapping)
@@ -128,3 +135,23 @@ add_test(NAME InxRecentThumbnails
 
 add_test(NAME UiFontFallback
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)
+add_subdirectory(content_opf_parser)
+add_subdirectory(chapter_position)
+add_subdirectory(home_button)
+
+add_subdirectory(inflate_stream)
+add_subdirectory(fs_helpers)
+
+add_subdirectory(absolute_grayscale)
+
+add_subdirectory(sd_card_font)
+add_subdirectory(glyph_bitmap)
+
+add_test(NAME UnifiedKeyboard COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_unified_keyboard.py)
+add_test(NAME ThemeMenus COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_theme_menus.py)
+
+add_test(NAME CoverGridCompatibility COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_cover_grid.py)
+add_test(NAME ThemeCheckboxRows COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_checkbox_rows.py)
+add_test(NAME LegacyThemeListGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_legacy_list_adapter.py)
+
+add_test(NAME InxSettingControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_setting_controls.py)

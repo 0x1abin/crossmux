@@ -370,6 +370,82 @@ void OtaUpdateActivity::onInstallUpdate(const fui::ActionEvent&, void* user) {
 }
 
 void OtaUpdateActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs() && state != State::Ready && state != State::UpdateAvailable &&
+      state != State::ConfirmingUpdate) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    renderer.clearScreen();
+
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_UPDATE));
+    const auto height = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto top = (pageHeight - height) / 2;
+
+    float updaterProgress = 0;
+    if (state == State::UpdateInProgress) {
+      LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
+      updaterProgress = static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize());
+      // Only update every 2% at the most
+      if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) {
+        return;
+      }
+      lastUpdaterPercentage = static_cast<int>(updaterProgress * 100);
+    }
+
+    if (state == State::CheckingForUpdate) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_CHECKING_UPDATE));
+    } else if (state == State::ConfirmingUpdate) {
+      // Version info sits in the upper part of the screen so the centered
+      // Cancel/Update popup doesn't cover it (same layout as ConfirmationActivity).
+      const int infoTop = pageHeight / 6;
+      renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, infoTop,
+                        (std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION).c_str());
+      renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, infoTop + height + metrics.verticalSpacing,
+                        (std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion()).c_str());
+
+      if (updateConfirmation.processRender(renderer, mappedInput)) return;
+    } else if (state == State::UpdateInProgress) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING));
+
+      int y = top + height + metrics.verticalSpacing;
+      GUI.drawProgressBar(
+          renderer,
+          Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+          static_cast<int>(updaterProgress * 100), 100);
+
+      y += metrics.progressBarHeight + metrics.verticalSpacing;
+      // Percent label is drawn by BaseTheme::drawProgressBar; this slot is left intentionally empty
+      // so the bytes line below stays at the same Y it was at when the activity drew its own percent.
+      y += height + metrics.verticalSpacing;
+      renderer.drawCenteredText(
+          UI_10_FONT_ID, y,
+          (std::to_string(updater.getProcessedSize()) + " / " + std::to_string(updater.getTotalSize())).c_str());
+    } else if (state == State::NoUpdate) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_UPDATE), true, EpdFontFamily::BOLD);
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state == State::Failed) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+      if (failedDetail != nullptr) {
+        renderer.drawCenteredText(UI_10_FONT_ID, top + height + metrics.verticalSpacing, failedDetail);
+      }
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state == State::Finished) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_COMPLETE), true, EpdFontFamily::BOLD);
+      const int hintY = top + height + metrics.verticalSpacing;
+      const Rect hintBounds{metrics.contentSidePadding, hintY, pageWidth - metrics.contentSidePadding * 2,
+                            pageHeight - hintY};
+      UITheme::drawCenteredWrappedText(renderer, hintBounds, UI_10_FONT_ID, tr(STR_AUTO_RESTART_HINT), 3, true,
+                                       EpdFontFamily::REGULAR, UITheme::TextVerticalAlignment::TOP);
+    }
+
+    renderer.displayBuffer();
+
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   const Rect content = SubpageLayout::contentRect(safeArea, metrics);

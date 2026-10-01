@@ -22,6 +22,8 @@ struct ReaderRenderSpec {
   // paragraphs keep their indent even when extra paragraph spacing is
   // enabled.
   uint8_t firstLineIndent = FirstLineIndent::Auto;
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 100;
   uint8_t paragraphAlignment = 0;
   uint16_t viewportWidth = 0;
   uint16_t viewportHeight = 0;

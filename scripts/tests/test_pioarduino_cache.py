@@ -20,6 +20,7 @@ class PioarduinoCacheTest(unittest.TestCase):
         self.builder = self.root / "builder/frameworks/arduino.py"
         self.builder.parent.mkdir(parents=True)
         self.builder.write_text(ORIGINAL_CHECK)
+        self.builder.with_name("component_manager.py").write_text("# Legacy platform without memory fingerprint\n")
         self.chip = self.root / "esp32s3"
         self.chip.mkdir()
         self.config = self.chip / "sdkconfig"

@@ -34,10 +34,12 @@ inline void applyUiTextAlignment(freeink::ui::GfxRendererTarget& target) {
 inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarget& target) {
   namespace fui = freeink::ui;
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  const bool inxTheme = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX;
 
   fui::ThemeTokens tokens = fui::themeTokensForLineHeight(target.lineHeight(fui::GfxRendererTarget::FONT_BODY));
+  if (!inxTheme && !BoardConfig::hasTouch()) tokens.listMinRowHeight = static_cast<int16_t>(metrics.listRowHeight);
 #ifdef FREEINK_UI_THEME_LAYOUT_POLICY
-  if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+  if (inxTheme) {
     tokens.listLayoutPolicy = fui::ListLayoutPolicy::ThemeRow;
   }
 #endif
@@ -58,11 +60,8 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   // inward past the covered side. Bezel truth is per-board data
   // (BoardConfig::ViewableInsets); lists render in the portrait UI frame, so
   // the panel-native portrait insets apply directly.
-  tokens.listScrollInset = ui_theme_detail::scrollInset(BoardConfig::ACTIVE, metrics.listScrollSide);
+  tokens.listScrollInset = inxTheme ? ui_theme_detail::scrollInset(BoardConfig::ACTIVE, metrics.listScrollSide) : 0;
 #endif
-  tokens.listSeparator = static_cast<fui::SeparatorStyle>(metrics.listSeparatorStyle);
-  tokens.listValueMaxWidth = static_cast<int16_t>(metrics.listValueMaxWidth);
-  tokens.listSelectionCoversScrollReservation = metrics.listSelectionCoversScrollReservation;
   // Screen::header()/status() band height. Without this the SDK's
   // line-height-derived default applies and fui-drawn headers (OPDS) come out
   // a different height than every GUI.drawHeader band.
@@ -76,9 +75,14 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   tokens.sheetRadius = static_cast<uint8_t>(metrics.sheetRadius);
   tokens.capsuleRadius = static_cast<uint8_t>(metrics.capsuleRadius);
   tokens.bodyText.bold = metrics.listTitleBold;
-  tokens.listEmphasizedText = tokens.titleText;
-  tokens.listEmphasizedText.bold = true;
-  tokens.listValueText = tokens.bodyText;
+  if (inxTheme) {
+    tokens.listSeparator = static_cast<fui::SeparatorStyle>(metrics.listSeparatorStyle);
+    tokens.listValueMaxWidth = static_cast<int16_t>(metrics.listValueMaxWidth);
+    tokens.listSelectionCoversScrollReservation = metrics.listSelectionCoversScrollReservation;
+    tokens.listEmphasizedText = tokens.titleText;
+    tokens.listEmphasizedText.bold = true;
+    tokens.listValueText = tokens.bodyText;
+  }
   if (!UITheme::getInstance().showSelectionCursor()) SelectionCursorPolicy::hideFreeInkListFocus(tokens);
   return tokens;
 }

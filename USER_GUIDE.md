@@ -239,6 +239,11 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
   - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
   - "RoundedRaff" - A rounded theme with additional visual styling
+  - "Lyra Carousel" - A carousel cover home with Lyra settings and menus
+  - "Inx" - The Recent/Library/Apps/Settings/Statistics layout described above
+  - "Cover Grid" - A grid of library covers on devices with PSRAM; other pages use Lyra
+
+  Non-Inx themes retain upstream page styling, with an additional Apps entry and shared CrossMux settings. Boolean settings use checkboxes; multi-value settings retain their selectors. All themes share the same keyboard keys.
   - "Inx" - A five-tab e-ink interface with a Recent home screen, icon/list Library and Apps layouts, and expandable Settings categories
 
 - **Inx Home Layout**: Choose Flow, Grid, List, Icons, or Cover for the Inx home screen. The default is Flow.
@@ -749,3 +754,5 @@ Press **Ctrl-C** or close the graph window to exit.
 If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
 
 There can be issues with broken cache or config. In this case, delete the `.crosspoint` directory on your SD card (or consider deleting only `settings.json`, `state.json`, or `epub_*` cache directories in the `.crosspoint/` folder).
+
+Inx retains its menu layout while boolean settings use checkboxes and slider adjustments use the common controls.

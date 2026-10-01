@@ -88,6 +88,44 @@ class DependencyStateTest(unittest.TestCase):
         )
 
 
+class LocalRehearsalTest(unittest.TestCase):
+    def test_requires_reviewed_index_and_exports_only_staged_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "sdk"
+            init_repo(candidate)
+            commit_file(candidate, "source.cpp", "base\n", "base")
+            (candidate / "source.cpp").write_text("resolved\n")
+            command(candidate, "git", "add", "source.cpp")
+            (candidate / "debug.cpp").write_text("not reviewed\n")
+            state = {"component": "sdk", "conflict_paths": [], "overlap_paths": [],
+                     "review_items": ["source.cpp"], "upstream_pins": {},
+                     "base_sha": "a" * 40, "upstream_sha": "b" * 40}
+            sync_upstream.write_state(candidate, state)
+            with self.assertRaisesRegex(RuntimeError, "needs review"):
+                sync_upstream.reviewed_local_dependency(candidate, {})
+            args = argparse.Namespace(review_note=["Approved resolution"])
+            sync_upstream.finish_local_rehearsal(candidate, state, args, {})
+            record = sync_upstream.reviewed_local_dependency(candidate, {})
+            export = Path(record["source"])
+            self.assertEqual((export / "source.cpp").read_text(), "resolved\n")
+            self.assertFalse((export / "debug.cpp").exists())
+            (export / "source.cpp").write_text("tampered export\n")
+            with self.assertRaisesRegex(RuntimeError, "source export changed"):
+                sync_upstream.reviewed_local_dependency(candidate, {})
+            (export / "source.cpp").write_text("resolved\n")
+            (candidate / "source.cpp").write_text("changed after review\n")
+            command(candidate, "git", "add", "source.cpp")
+            with self.assertRaisesRegex(RuntimeError, "needs review"):
+                sync_upstream.reviewed_local_dependency(candidate, {})
+
+    def test_publish_rejects_rehearsal_before_any_mutation(self):
+        with patch.object(sync_upstream, "read_state", return_value={"local_rehearsal": True}), \
+             patch.object(sync_upstream, "commit_candidate") as commit:
+            with self.assertRaisesRegex(RuntimeError, "cannot be published"):
+                sync_upstream.cmd_publish(argparse.Namespace(candidate="/tmp/rehearsal"))
+            commit.assert_not_called()
+
+
 class PinUpdateTest(unittest.TestCase):
     def test_updates_both_simulator_pins_to_one_revision(self):
         sha = "c" * 40

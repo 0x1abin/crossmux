@@ -161,7 +161,7 @@ bool writeNormalizedXhtml(const std::string& html, HalFile& file) {
       const bool closing = html[i + 1] == '/';
       const size_t nameStart = i + (closing ? 2 : 1);
       size_t nameEnd = nameStart;
-      char nameBuf[16];
+      char nameBuf[16] = {};
       size_t nameLen = 0;
       while (nameEnd < j && std::isalnum(static_cast<unsigned char>(html[nameEnd]))) {
         if (nameLen < sizeof(nameBuf) - 1) {
@@ -275,6 +275,7 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
     if (!parser) {
       LOG_ERR("DHTML", "OOM: ChapterHtmlSlimParser");
     } else {
+      parser->setTextSpacing(SETTINGS.getCharacterSpacing(), SETTINGS.wordSpacing);
       ok = parser->parseAndBuildPages();  // closes the file on both outcomes
     }
   }
