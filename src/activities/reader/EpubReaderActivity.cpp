@@ -2125,10 +2125,32 @@ bool EpubReaderActivity::preparePageCache() {
     fcm->resetStats();
   }
 
+  // Same body as renderContents()'s drawGuideLines lambda: the guide lines are a
+  // property of the page's line boxes, and the cached image must contain them or
+  // the turn would show a page without its guide lines.
+  const auto drawGuideLinesFor = [&](const Page& pg) {
+    if (!SETTINGS.readingGuideLineEnabled) return;
+    const int x1 = mLeft;
+    const int x2 = renderer.getScreenWidth() - mRight - 1;
+    const int contentBottom = renderer.getScreenHeight() - mBottom;
+    const int baseLineHeight = renderer.getLineHeight(fontId, SETTINGS.getReaderLineCompression());
+    const int ascender = renderer.getFontAscenderSize(fontId);
+    for (const auto& element : pg.elements) {
+      if (element->getTag() != TAG_PageLine) continue;
+      const auto& line = static_cast<const PageLine&>(*element);
+      if (line.getBlock()->isEmpty()) continue;
+      const int lineHeight = baseLineHeight + line.getBlock()->getRubyShift(ascender);
+      const int guideY = mTop + line.yPos + lineHeight + SETTINGS.readingGuideLineOffset;
+      if (readingGuideLine::fitsVertically(SETTINGS.readingGuideLineStyle, guideY, mTop, contentBottom)) {
+        readingGuideLine::draw(renderer, x1, guideY, x2, SETTINGS.readingGuideLineStyle);
+      }
+    }
+  };
+
   const auto renderPageIntoLive = [&] {
     GfxRenderer::SyntheticBoldScope syntheticBold(renderer, SETTINGS.fakeBold);
     p->render(renderer, fontId, mLeft, mTop);
-    drawReadingGuideLines(*p, mTop, mRight, mBottom, mLeft);
+    drawGuideLinesFor(*p);
   };
 
   // The scan pass leaves rules and images behind, so every pass starts clean.
@@ -2329,13 +2351,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
   if (SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) renderer.clearScreen();
   unsigned long cacheBaseMs = 0;
+#if FREEINK_DEVICE_READPICO
   if (pageCacheHit) {
     const auto tBase = millis();
     // The cache is the finished page, cleared margins and all, so no clearScreen
     // is needed on this path.
     memcpy(renderer.getFrameBuffer(), pageCacheBase_, renderer.getBufferSize());
     cacheBaseMs = millis() - tBase;
-  } else {
+  } else
+#endif
+  {
     renderPageWithGuideLines();
   }
 #ifdef ENABLE_CHINESE_VERSION
