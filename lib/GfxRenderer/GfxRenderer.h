@@ -78,6 +78,7 @@ class GfxRenderer {
   static constexpr uint8_t MAX_SYNTHETIC_BOLD_PIXELS = 3;
 
   HalDisplay& display;
+  mutable uint8_t* grayscale16Buffer = nullptr;
   RenderMode renderMode;
   Orientation orientation;
   bool fadingFix;
@@ -163,7 +164,10 @@ class GfxRenderer {
  public:
   explicit GfxRenderer(HalDisplay& halDisplay)
       : display(halDisplay), renderMode(BW), orientation(Portrait), fadingFix(false) {}
-  ~GfxRenderer() { freeBwBufferChunks(); }
+  ~GfxRenderer() {
+    cancelGrayscale16();
+    freeBwBufferChunks();
+  }
   GfxRenderer(const GfxRenderer&) = delete;
   GfxRenderer& operator=(const GfxRenderer&) = delete;
   GfxRenderer(GfxRenderer&&) = delete;
@@ -504,6 +508,14 @@ class GfxRenderer {
   size_t getBufferSize() const;
   uint16_t getDisplayWidth() const { return panelWidth; }
   uint16_t getDisplayHeight() const { return panelHeight; }
+  uint8_t getGrayscaleLevels() const;
+  bool beginGrayscale16();
+  bool commitGrayscale16() const;
+  void cancelGrayscale16() const;
+  bool isGrayscale16Active() const { return grayscale16Buffer != nullptr; }
+  void drawGrayscale16Pixel(int x, int y, uint8_t gray) const;
+  bool drawBitmapGrayscale16(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
+                             float cropY = 0) const;
   uint16_t getDisplayWidthBytes() const { return panelWidthBytes; }
 
   // Region cache: take a logical (orientation-aware) rect, hit the framebuffer

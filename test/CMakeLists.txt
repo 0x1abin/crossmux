@@ -28,6 +28,16 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest crosspoint_simulator)
 
+# Reuse the firmware's JPEGDEC pin; its CMake target requires ESP-IDF.
+FetchContent_Declare(jpegdec
+  GIT_REPOSITORY https://github.com/bitbank2/JPEGDEC.git
+  GIT_TAG 86282979224c8a32fd51e091ed5a35b0c699a52b
+)
+FetchContent_GetProperties(jpegdec)
+if(NOT jpegdec_POPULATED)
+  FetchContent_Populate(jpegdec)
+endif()
+
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_library(crosspoint_test_common INTERFACE)
@@ -132,3 +142,8 @@ add_test(NAME UiFontFallback
 
 add_test(NAME HalTiltGestures
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
+
+add_test(NAME NativeGrayscale
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_native_grayscale.py
+    ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)
+set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)

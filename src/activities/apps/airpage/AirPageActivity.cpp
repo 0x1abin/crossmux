@@ -116,8 +116,9 @@ void AirPageActivity::onEnter() {
   uploadUrl_ += "/?id=";
   uploadUrl_ += deviceId;
   char displayParams[48];
-  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray4",
-           static_cast<unsigned>(renderer.getDisplayHeight()), static_cast<unsigned>(renderer.getDisplayWidth()));
+  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray%u",
+           static_cast<unsigned>(renderer.getDisplayHeight()), static_cast<unsigned>(renderer.getDisplayWidth()),
+           static_cast<unsigned>(renderer.getGrayscaleLevels()));
   uploadUrl_ += displayParams;
 
   downloadUrl_.reserve(64 + deviceId.size());

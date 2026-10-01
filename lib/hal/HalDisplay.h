@@ -140,6 +140,10 @@ class HalDisplay {
   // driver reports its real geometry.
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;
+  uint8_t getGrayscaleLevels() const;
+  uint8_t* beginGrayscale16();
+  bool commitGrayscale16();
+  void cancelGrayscale16();
   uint16_t getDisplayWidthBytes() const;
   uint32_t getBufferSize() const;
 
