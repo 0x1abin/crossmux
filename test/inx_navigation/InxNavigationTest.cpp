@@ -297,7 +297,11 @@ TEST(InxNavigation, MatchesMainTabDrawingAtEveryRoundedBoundary) {
     for (int i = 0; i < count; ++i) {
       const int left = width * i / count;
       const int right = width * (i + 1) / count;
-      for (int x = left; x < right; ++x) EXPECT_EQ(MainTabs::fromX(x, width), MainTabs::values[i]);
+      const auto bounds = MainTabs::tabBounds(i, width);
+      for (int x = left; x < right; ++x) {
+        EXPECT_EQ(MainTabs::fromX(x, width),
+                  x >= bounds.left && x < bounds.right ? MainTabs::values[i] : MainTab::None);
+      }
     }
     EXPECT_EQ(MainTabs::fromX(-1, width), MainTab::None);
     EXPECT_EQ(MainTabs::fromX(width, width), MainTab::None);
@@ -388,14 +392,13 @@ TEST(InxNavigation, ValidatesItemLayoutsAndGridBounds) {
 
 TEST(InxNavigation, MatchesAppGridCellsAtRoundedBoundaries) {
   for (const Rect content : {Rect{0, 71, 684, 1145}, Rect{0, 71, 1216, 613}, Rect{0, 74, 684, 1142}}) {
-    const int cellWidth = content.width / InxGridGeometry::columns;
-    const int cellHeight = content.height / InxGridGeometry::rows;
-    for (int row = 0; row < InxGridGeometry::rows; ++row) {
-      for (int col = 0; col < InxGridGeometry::columns; ++col) {
-        EXPECT_EQ(
-            InxGridGeometry::indexFromPoint(col * cellWidth, row * cellHeight, content.width, content.height, 0, 12),
-            row * InxGridGeometry::columns + col);
-      }
+    for (int slot = 0; slot < InxGridGeometry::itemsPerPage; ++slot) {
+      const Rect cell = InxGridGeometry::cellBounds(slot, content.width, content.height);
+      EXPECT_EQ(InxGridGeometry::indexFromPoint(cell.x, cell.y, content.width, content.height, 0, 12), slot);
+      EXPECT_EQ(InxGridGeometry::indexFromPoint(cell.x + cell.width - 1, cell.y + cell.height - 1, content.width,
+                                                content.height, 0, 12),
+                slot);
+      EXPECT_EQ(InxGridGeometry::indexFromPoint(cell.x - 1, cell.y, content.width, content.height, 0, 12), -1);
     }
   }
 }
