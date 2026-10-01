@@ -495,19 +495,77 @@ class NightlyRetentionTest(unittest.TestCase):
             [obsolete],
         )
 
+    def test_keeps_historical_builds_when_targets_change(self):
+        current = f'nightly-build-{"a" * 40}-10-1'
+        previous = f'nightly-build-{"b" * 40}-9-1'
+        previous_fallback = f'nightly-build-{"c" * 40}-8-1'
+        obsolete = f'nightly-build-{"d" * 40}-7-1'
+        for storage in ('github', 'cos'):
+            candidates = '\n'.join((current, previous, previous_fallback, obsolete, 'stable', 'nightly'))
+            for change in ('added', 'retired'):
+                with self.subTest(storage=storage, change=change):
+                    index = self.previous_index(storage, previous, previous_fallback)
+                    if change == 'added':
+                        del index['targets']['readpico']
+                    else:
+                        target = index['targets'].pop('xteink_x4')
+                        target['targetId'] = 'retired_device'
+                        index['targets']['retired_device'] = target
+                    self.assertEqual(
+                        nightly_retention.obsolete_builds(storage, current, index, candidates),
+                        [obsolete],
+                    )
+
+    def test_rejects_malformed_historical_indexes(self):
+        current = f'nightly-build-{"a" * 40}-10-1'
+        previous = f'nightly-build-{"b" * 40}-9-1'
+        cases = (
+            (('schemaVersion',), 2),
+            (('channel',), 'stable'),
+            (('targets',), None),
+            (('targets',), []),
+            (('targets',), {}),
+            (('targets', 'sticky', 'targetId'), 'wrong_target'),
+            (('targets', 'sticky', 'variants'), {'global': {}}),
+            (('targets', 'sticky', 'variants', 'global'), {}),
+            (('targets', 'sticky', 'variants', 'global', 'manifestUrl'), 'https://example.com/firmware.bin'),
+        )
+        for storage in ('github', 'cos'):
+            for path, value in cases:
+                with self.subTest(storage=storage, path=path, value=value):
+                    index = self.previous_index(storage, previous, previous)
+                    entry = index
+                    for key in path[:-1]:
+                        entry = entry[key]
+                    entry[path[-1]] = value
+                    with self.assertRaises(ValueError):
+                        nightly_retention.obsolete_builds(storage, current, index, current)
+
+    def test_rejects_empty_target_identity(self):
+        current = f'nightly-build-{"a" * 40}-10-1'
+        previous = f'nightly-build-{"b" * 40}-9-1'
+        for storage in ('github', 'cos'):
+            index = self.previous_index(storage, previous, previous)
+            index['targets'][''] = index['targets'].pop('sticky')
+            index['targets']['']['targetId'] = ''
+            with self.subTest(storage=storage), self.assertRaisesRegex(ValueError, 'variant set'):
+                nightly_retention.obsolete_builds(storage, current, index, current)
+
     def test_rejects_unexpected_previous_url_and_incomplete_listing(self):
         current = f'nightly-build-{"a" * 40}-10-1'
         previous = f'nightly-build-{"b" * 40}-9-1'
-        index = self.previous_index('github', previous, previous)
-        index['targets']['sticky']['variants']['global']['manifestUrl'] = (
-            'https://example.com/firmware.bin'
-        )
-        with self.assertRaisesRegex(ValueError, 'unexpected previous sticky/global'):
-            nightly_retention.obsolete_builds('github', current, index, current)
-        with self.assertRaisesRegex(ValueError, 'missing from the candidate list'):
-            nightly_retention.obsolete_builds(
-                'github', current, self.previous_index('github', previous, previous), previous
-            )
+        for storage in ('github', 'cos'):
+            with self.subTest(storage=storage):
+                index = self.previous_index(storage, previous, previous)
+                index['targets']['sticky']['variants']['global']['manifestUrl'] = (
+                    'https://example.com/firmware.bin'
+                )
+                with self.assertRaisesRegex(ValueError, 'unexpected previous sticky/global'):
+                    nightly_retention.obsolete_builds(storage, current, index, current)
+                with self.assertRaisesRegex(ValueError, 'missing from the candidate list'):
+                    nightly_retention.obsolete_builds(
+                        storage, current, self.previous_index(storage, previous, previous), previous
+                    )
 
 
 class PublishedNightlyTest(unittest.TestCase):
