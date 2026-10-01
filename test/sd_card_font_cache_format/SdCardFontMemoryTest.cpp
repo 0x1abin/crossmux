@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <EpdFont.h>
 #include <EpdFontData.h>
+#include <MissingGlyph.h>
 #include <SdCardFontCache.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -103,7 +104,7 @@ TEST_F(SdCardFontMemoryTest, LowBudgetSkipsAllPrewarmAllocationsAndKeepsMetrics)
 }
 
 TEST_F(SdCardFontMemoryTest, MiniGrowthFailurePreservesOldGlyphsAndBitmap) {
-  ASSERT_EQ(font.prewarm("A", 1, false, false), 1);  // fixture has no replacement glyph
+  ASSERT_EQ(font.prewarm("A", 1, false, false), 0);
   const auto* data = font.styles_[0].epdFont.data;
   const auto* bitmap = data->bitmap;
   const auto* glyph = data->glyph;
@@ -118,19 +119,19 @@ TEST_F(SdCardFontMemoryTest, MiniGrowthFailurePreservesOldGlyphsAndBitmap) {
 }
 
 TEST_F(SdCardFontMemoryTest, EveryReplacementAllocationFailureKeepsPublishedCache) {
-  ASSERT_EQ(font.prewarm("A", 1, false, false), 1);
+  ASSERT_EQ(font.prewarm("A", 1, false, false), 0);
   auto& style = font.styles_[0];
   const auto* data = style.epdFont.data;
   const auto* intervals = data->intervals;
   const auto* glyphs = data->glyph;
   const auto* bitmap = data->bitmap;
   const uint32_t cps[] = {'A', 'B'};
-  // Union first, then replacement intervals, glyphs, bitmap and mappings.
-  for (size_t allocation = 2; allocation <= 5; ++allocation) {
+  // Replacement intervals, glyphs, bitmap and mappings; accumulate=false needs no union.
+  for (size_t allocation = 1; allocation <= 4; ++allocation) {
     SCOPED_TRACE(allocation);
     arrayAllocations = 0;
     failArrayAt = allocation;
-    EXPECT_LT(font.prewarmStyle(0, cps, 2, false, false), 0);
+    EXPECT_LT(font.prewarmStyle(0, cps, 2, false, false, false), 0);
     EXPECT_EQ(arrayAllocations, allocation);  // No later allocations after failure.
     EXPECT_EQ(style.epdFont.data, data);
     EXPECT_EQ(data->intervals, intervals);
@@ -140,11 +141,11 @@ TEST_F(SdCardFontMemoryTest, EveryReplacementAllocationFailureKeepsPublishedCach
     EXPECT_EQ(data->glyph[0].advanceX, 9);
   }
   failArrayAt = 0;
-  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), 0);
+  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false, false), 0);
   EXPECT_EQ(style.miniGlyphCount, 2U);
   EXPECT_EQ(style.miniGlyphs[1].advanceX, 13);
   arrayAllocations = 0;
-  for (int batch = 0; batch < 3; ++batch) EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), 0);
+  for (int batch = 0; batch < 3; ++batch) EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false, false), 0);
   EXPECT_EQ(arrayAllocations, 0U);
 }
 
@@ -160,13 +161,13 @@ TEST_F(SdCardFontMemoryTest, AdvanceGrowthFailurePreservesOldTable) {
 }
 
 TEST_F(SdCardFontMemoryTest, PeakBudgetRejectsMiniGrowthBeforeAllocatingAndKeepsOldCache) {
-  ASSERT_EQ(font.prewarm("A", 1, false, false), 1);  // fixture has no replacement glyph
+  ASSERT_EQ(font.prewarm("A", 1, false, false), 0);
   const uint32_t cps[] = {'A', 'B'};
   auto* bitmap = font.styles_[0].miniBitmap;
   ESP.freeHeap = 16 * 1024 + 16;
   ESP.maxAlloc = 8 * 1024 + 16;
   arrayAllocations = 0;
-  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), SdCardFont::PREWARM_SKIPPED);
+  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false, false), SdCardFont::PREWARM_SKIPPED);
   EXPECT_EQ(font.styles_[0].miniBitmap, bitmap);
   // The optional union can fit; the larger combined replacement peak cannot.
   EXPECT_LE(arrayAllocations, 1U);
@@ -242,7 +243,7 @@ TEST_F(SdCardFontMemoryTest, PagedIndexMatchesFullLookupIncludingNonBmpAndPartia
   ASSERT_NE(glyph, nullptr);
   EXPECT_EQ(glyph->advanceX, 10);
   const uint32_t cps[] = {0x10000, 0x10001, 0x10080, 0x13e80};
-  EXPECT_EQ(font.prewarmStyle(0, cps, 4, true, false), 0);
+  EXPECT_EQ(font.prewarmStyle(0, cps, 4, true, false, false), 0);
   EXPECT_EQ(font.styles_[0].miniGlyphCount, 4U);
   font.releaseResidentCaches();
   EXPECT_TRUE(style.hasCoverageIndex());
@@ -257,9 +258,15 @@ TEST_F(SdCardFontMemoryTest, PagedIndexShortReadIsRetryableAndNotMissingCoverage
   EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x10000), -2);
   EXPECT_EQ(font.styles_[0].cachedIntervalPage, -1);
   const uint32_t cp = 0x10000;
-  EXPECT_EQ(font.prewarmStyle(0, &cp, 1, true, false), -1);
+  EXPECT_EQ(font.prewarmStyle(0, &cp, 1, true, false, false), -1);
+  EXPECT_EQ(font.getAdvanceOrLoad(cp, 0), 0);
+  std::string text;
+  utf8AppendCodepoint(cp, text);
+  EXPECT_LT(font.buildAdvanceTable(text.c_str(), 1), 0);
+  EXPECT_FALSE(font.advanceTableLookup(0, cp, nullptr));
   writeFontBytes(path, bytes);
   EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], cp), 0);
+  EXPECT_EQ(font.getAdvanceOrLoad(cp, 0), 9);
 }
 
 TEST_F(SdCardFontMemoryTest, PagedIndexFallsBackFromFlashToSd) {
@@ -297,3 +304,41 @@ TEST_F(SdCardFontMemoryTest, SmallBmpTableRetainsCompactResidentPath) {
   EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x4e81), 65);
 }
 #endif
+
+TEST_F(SdCardFontMemoryTest, MissingAdvancesMatchWithAndWithoutPrewarm) {
+  font.styles_[0].header.ascender = 24;
+  EXPECT_EQ(font.getAdvanceOrLoad('Z', 0), 20 * 16);
+  EXPECT_EQ(font.getAdvanceOrLoad(0x1F600, 0), 20 * 16);
+  EXPECT_EQ(font.buildAdvanceTable("AZ", 1), 1);
+  EXPECT_EQ(font.getAdvance('Z', 0), 20 * 16);
+  EXPECT_EQ(font.getAdvanceOrLoad('Z', 0), 20 * 16);
+  EXPECT_EQ(font.getAdvance('A', 0), 9);
+  EXPECT_EQ(font.getAdvanceOrLoad(0x200D, 0), 0);
+  EXPECT_EQ(font.getAdvanceOrLoad(0x301, 0), 0);
+  EXPECT_EQ(font.getAdvanceOrLoad(0x64E, 0), 0);
+}
+
+TEST_F(SdCardFontMemoryTest, MissingAdvanceIgnoresFontReplacementGlyph) {
+  auto& style = font.styles_[0];
+  delete[] style.fullIntervals;
+  style.fullIntervals = new EpdUnicodeInterval[2]{{'A', 'A', 0}, {0xFFFD, 0xFFFD, 1}};
+  style.header.intervalCount = 2;
+  style.header.ascender = 24;
+  EXPECT_EQ(font.buildAdvanceTable("AZ", 1), 1);
+  EXPECT_EQ(font.getAdvanceOrLoad('Z', 0), 20 * 16);
+  EXPECT_EQ(font.getAdvanceOrLoad(0xFFFD, 0), 13);
+}
+
+TEST_F(SdCardFontMemoryTest, FailedMetadataReadIsRetriedInsteadOfCachingMissingAdvance) {
+  std::filesystem::remove(path);
+  EXPECT_EQ(font.getAdvanceOrLoad('A', 0), 0);
+  font.buildAdvanceTable("A", 1);
+  EXPECT_FALSE(font.advanceTableLookup(0, 'A', nullptr));
+  EpdGlyph glyph{};
+  glyph.advanceX = 9;
+  {
+    std::ofstream file(path, std::ios::binary);
+    file.write(reinterpret_cast<const char*>(&glyph), sizeof(glyph));
+  }
+  EXPECT_EQ(font.getAdvanceOrLoad('A', 0), 9);
+}

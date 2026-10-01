@@ -224,8 +224,8 @@ typedef struct {
 
   /// On-demand glyph loading for fonts that don't keep all glyphs in RAM (e.g. SD card fonts).
   /// Called by getGlyph() when a codepoint is not found in the interval table.
-  /// Returns a valid EpdGlyph* with correct metadata, or nullptr to fall back to the
-  /// replacement glyph.  The returned pointer is valid until the next glyphMissHandler
+  /// Returns a valid EpdGlyph* with correct metadata, or nullptr for the renderer's
+  /// outline placeholder. The returned pointer is valid until the next glyphMissHandler
   /// call that causes a ring-buffer eviction — callers must consume it (measure or draw)
   /// before requesting another missed glyph.
   const EpdGlyph* (*glyphMissHandler)(void* ctx, uint32_t codepoint);
@@ -240,4 +240,19 @@ typedef struct {
   /// coverage index may read storage, but never substitutes a glyph. Shares glyphMissCtx.
   /// nullptr for fonts whose interval table is already complete (built-ins).
   bool (*coverageHandler)(void* ctx, uint32_t codepoint);
+
+  /// Vector-font bitmap accessor (FreeInkFont / TtfEpdFont). When non-null,
+  /// GfxRenderer::getGlyphBitmap() returns vectorBitmapHandler(glyphMissCtx, glyph)
+  /// instead of indexing ->bitmap or going through the SdCardFont overflow path.
+  /// This lets a runtime-rasterized TTF fault + cache glyphs on ANY draw path
+  /// (via glyphMissHandler) without pre-warming. nullptr for every other font,
+  /// so the SD/built-in bitmap paths are unaffected (all fonts zero-init this).
+  const uint8_t* (*vectorBitmapHandler)(void* ctx, const EpdGlyph* glyph);
+
+  /// Dynamic kerning for handler-backed fonts (TTF via FreeInkFont): returns
+  /// the 4.4 fixed-point pixel adjustment for the pair, 0 when none. Checked
+  /// by getKerning() before the static class tables (handler fonts carry
+  /// none). Shares glyphMissCtx. nullptr for built-in and SD fonts, whose
+  /// kerning is baked into the tables above (all fonts zero-init this).
+  int8_t (*kernHandler)(void* ctx, uint32_t leftCp, uint32_t rightCp);
 } EpdFontData;

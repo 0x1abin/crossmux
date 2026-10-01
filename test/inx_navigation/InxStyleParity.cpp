@@ -10,10 +10,16 @@ using namespace freeink::ui;
 class TraceTarget : public DrawTarget {
  public:
   int16_t lineH = 24;
-  Size measureText(FontId, const char* s, TextStyle) const override {
-    return {static_cast<int16_t>(std::strlen(s) * (lineH / 2)), lineH};
+  bool scaledFonts = false;
+  static constexpr FontId FONT_BODY = 1;
+  Size measureText(FontId font, const char* s, TextStyle) const override {
+    const int16_t height = lineHeight(font);
+    return {static_cast<int16_t>(std::strlen(s) * (height / 2)), height};
   }
-  int16_t lineHeight(FontId) const override { return lineH; }
+  int16_t lineHeight(FontId font) const override { return lineH + (scaledFonts && (font == 1 || font == 2) ? 4 : 0); }
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  void setTextCentering(TextCentering) {}
+#endif
   void fill(Rect r, Paint p, uint8_t radius, uint8_t corners) override {
     if (p.kind != PaintKind::None)
       std::printf("fill %d %d %d %d %d %d %d %d\n", r.x, r.y, r.width, r.height, int(p.kind), int(p.color), radius,
@@ -35,7 +41,7 @@ class TraceTarget : public DrawTarget {
     int x = r.x;
     if (t.align == TextAlign::Center) x = std::max<int>(r.x, r.x + (r.width - width) / 2);
     if (t.align == TextAlign::Right) x = std::max<int>(r.x, r.right() - width);
-    const int y = r.y + std::max<int>(0, (r.height - lineH) / 2);
+    const int y = r.y + std::max<int>(0, (r.height - lineHeight(t.font)) / 2);
     std::printf("text %d %d %d %d %d %d %s\n", x, y, t.font, t.bold, int(t.color), int(t.rotation), s);
   }
   void bitmap(Rect r, BitmapRef b, BitmapMode mode, Paint p, Rotation rotation) override {
@@ -50,22 +56,45 @@ class TraceTarget : public DrawTarget {
   }
 };
 
-int main() {
+#ifdef UPSTREAM_THEME_PARITY
+#include "UIScale.h"
+#include "UIThemeTokens.h"
+#endif
+
+void traceScenes() {
+  constexpr int sceneCount =
+#ifdef UPSTREAM_THEME_PARITY
+      156;
+#else
+      155;
+#endif
   for (bool landscape : {false, true})
     for (bool touch : {false, true})
       for (int16_t lineH : {20, 24, 32}) {
-        for (int scene = 0; scene < 155; ++scene) {
+        for (int scene = 0; scene < sceneCount; ++scene) {
           std::printf("SCENE %d %d %d %d\n", landscape, touch, lineH, scene);
           TraceTarget target;
           target.lineH = lineH;
+#ifdef UPSTREAM_THEME_PARITY
+          BoardConfig::touch = touch;
+          const auto fonts = uiScaleSpec();
+          target.scaledFonts = fonts.bodyFontId != fonts.smallFontId;
+          std::printf("fonts %d %d %d\n", fonts.smallFontId, fonts.bodyFontId, fonts.titleFontId);
+#endif
           DeviceContext device;
           device.width = landscape ? 800 : 480;
           device.height = landscape ? 480 : 800;
           device.hasTouch = touch;
+#ifdef UPSTREAM_THEME_PARITY
+          device.safeArea = {11, 7, 13, 9};
+#endif
           InteractionBuffer<64> hits;
           InputSnapshot input;
           Frame<64> frame(target, device, input, hits);
           ThemeTokens theme = themeTokensForLineHeight(lineH);
+#ifdef UPSTREAM_THEME_PARITY
+          theme = uiThemeTokens(target);
+#else
           theme.listRowGap = 0;
           theme.listSidePadding = 20;
           theme.listRowRadius = 0;
@@ -76,6 +105,7 @@ int main() {
           theme.listSelectionCoversScrollReservation = true;
 #ifdef FREEINK_UI_THEME_LAYOUT_POLICY
           theme.listLayoutPolicy = ListLayoutPolicy::ThemeRow;
+#endif
 #endif
           Screen<64> screen(frame, theme);
           if (scene <= 3 || scene >= 151) {
@@ -90,7 +120,9 @@ int main() {
             props.count = scene == 151 ? 1 : (scene == 0 ? 3 : 9);
             props.action = 1;
             props.selectedIndex = scene == 151 ? 0 : 1;
+#ifndef UPSTREAM_THEME_PARITY
             if (!touch) props.rowHeight = 66;
+#endif
             if (scene == 2) {
               props.topIndex = 3;
               props.selectedIndex = 4;
@@ -109,6 +141,7 @@ int main() {
               items[1].value = "Enabled";
               items[2].enabled = false;
             }
+            if (scene == 155) items[1].state = StateDisabled;
             screen.list(props);
           } else if (scene == 4) {
             OptionDialogProps props;
@@ -134,7 +167,7 @@ int main() {
             KeyboardProps props;
             props.layout = &builtinKeyboardLayout(layout, variant & 1, variant & 2, scene == 5 || (variant & 4),
                                                   scene == 5 || (variant & 8)
-#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+#if defined(FREEINK_UI_THEME_LAYOUT_POLICY) && !defined(UPSTREAM_THEME_PARITY)
                                                       ,
                                                   KeyboardGeometry::Classic
 #endif
@@ -145,7 +178,7 @@ int main() {
             props.gap = 3;
             props.selectedIndex = scene == 151 ? 0 : 1;
             props.keyAction = 5;
-#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+#if defined(FREEINK_UI_THEME_LAYOUT_POLICY) && !defined(UPSTREAM_THEME_PARITY)
             props.geometry = KeyboardGeometry::Classic;
             props.rowGap = props.gap;
             props.keyRadius = 0;
@@ -158,7 +191,11 @@ int main() {
             button(frame, Rect{10, 20, 150, 64}, buttonProps);
             HeaderProps headerProps;
             headerProps.title = "Library";
+#ifdef UPSTREAM_THEME_PARITY
+            screen.header(headerProps);
+#else
             header(frame, Rect{0, 100, device.width, 66}, headerProps);
+#endif
             BookCardProps card;
             card.title = "Book";
             card.author = "Author";
@@ -172,4 +209,15 @@ int main() {
           }
         }
       }
+}
+
+int main() {
+#ifdef UPSTREAM_THEME_PARITY
+  for (const auto& metrics : parityMetrics) {
+    UITheme::getInstance().metrics = &metrics;
+    traceScenes();
+  }
+#else
+  traceScenes();
+#endif
 }

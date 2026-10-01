@@ -1,10 +1,21 @@
 #pragma once
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <DisplayRefreshContext.h>
 #include <EInkDisplay.h>
 
 class HalDisplay {
  public:
+  using Controller = BoardConfig::DisplayController;
+  Controller getController() const;
+
+  using GrayscaleMode = freeink::GrayscaleMode;
+  using GrayscaleCapabilities = freeink::GrayscaleCapabilities;
+  using GrayscaleBase = freeink::GrayscaleBase;
+  using GrayscaleEncoding = freeink::GrayscaleEncoding;
+
+  GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const;
+
   // Constructor with pin configuration
   HalDisplay();
 
@@ -26,9 +37,28 @@ class HalDisplay {
   // (~770ms each on X3).
   void begin(bool seamless = false);
 
-  // Display dimensions
+  // Compile-time geometry, in the panel's NATIVE scan frame (source columns x
+  // gate lines) — the same frame the SDK facade reports at runtime, before any
+  // orientation rotation. These are the initializers GfxRenderer's members start
+  // from; GfxRenderer::begin() replaces them with the live values from
+  // display.getDisplayWidth()/getDisplayHeight()/getDisplayWidthBytes()/
+  // getBufferSize() (GfxRenderer.cpp:134-137), which is the single source of
+  // truth for layout. Nothing in CrossMux may hardcode 800/480 instead of asking
+  // the renderer (golden rule #8).
+  //
+  // Every target except Read Pico keeps the SDK's 800x480 / 48,000-byte default
+  // verbatim, including the X3 whose 792x528 panel is a runtime override on top
+  // of it. Read Pico's panel is 1216x684 with a 103,968-byte 1-bpp framebuffer
+  // (read-pico.md 1.2), so it cannot ride the 800x480 default: a compile-time
+  // consumer sized from it would be 2.2x too small. The device term comes from
+  // the frozen profile, not from a repeated literal.
+#if FREEINK_DEVICE_READPICO
+  static constexpr uint16_t DISPLAY_WIDTH = BoardConfig::READ_PICO.displayWidth;
+  static constexpr uint16_t DISPLAY_HEIGHT = BoardConfig::READ_PICO.displayHeight;
+#else
   static constexpr uint16_t DISPLAY_WIDTH = EInkDisplay::DISPLAY_WIDTH;
   static constexpr uint16_t DISPLAY_HEIGHT = EInkDisplay::DISPLAY_HEIGHT;
+#endif
   static constexpr uint16_t DISPLAY_WIDTH_BYTES = DISPLAY_WIDTH / 8;
   static constexpr uint32_t BUFFER_SIZE = DISPLAY_WIDTH_BYTES * DISPLAY_HEIGHT;
 
@@ -53,6 +83,9 @@ class HalDisplay {
   // True when displayBufferAsync() genuinely overlaps (panel driver defers);
   // false where it falls back to a blocking refresh.
   bool supportsAsyncRefresh() const;
+  // True when an ordinary deferred B/W refresh is suitable as the base for a
+  // grayscale pass. X3 needs its controller-specific grayscale base waveform.
+  bool supportsAsyncGrayscaleBase() const;
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
 
   // Output polarity. The framebuffer remains in normal polarity; inversion is
@@ -88,6 +121,7 @@ class HalDisplay {
   // ("AA-pre-BW(mid)"). Other panels display normally with `fallback` mode.
   void displayGrayscaleBase(RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false,
                             DisplayRefreshContext context = DisplayRefreshContext::Normal);
+  bool displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false);
 
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
@@ -114,9 +148,16 @@ class HalDisplay {
   bool canUseTextTransition() const;
   void cancelGrayscale();
 
-  // Runtime geometry passthrough
+  // Runtime geometry passthrough — the authoritative source for every layout
+  // decision (GfxRenderer reads exactly these in its begin()). Prefer them over
+  // the compile-time constants above, which only describe the panel before the
+  // driver reports its real geometry.
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;
+  uint8_t getGrayscaleLevels() const;
+  uint8_t* beginGrayscale16();
+  bool commitGrayscale16();
+  void cancelGrayscale16();
   uint16_t getDisplayWidthBytes() const;
   uint32_t getBufferSize() const;
 

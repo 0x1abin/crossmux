@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <Logging.h>
 #include <WiFi.h>
 
 #if !defined(SIMULATOR)
@@ -53,11 +54,14 @@ MemorySnapshot readMemorySnapshot() {
 namespace NetworkStartup {
 
 void prepare(GfxRenderer& renderer) {
-  if (!shouldReleaseRenderMemory(readMemorySnapshot())) return;
+  const MemorySnapshot before = readMemorySnapshot();
+  if (!shouldReleaseRenderMemory(before)) return;
 
-  RenderLock lock;
-  sdFontSystem.releaseLoadedFont(renderer);
-  if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
+  {
+    RenderLock lock;
+    sdFontSystem.releaseLoadedFont(renderer);
+    if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
+  }
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {

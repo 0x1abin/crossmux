@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "Epub/blocks/ImageBlock.h"
+#include "Epub/converters/JpegToFramebufferConverter.h"
 #include "components/themes/BaseTheme.h"
 
 namespace airpage {
@@ -71,10 +72,44 @@ bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, c
   struct RenderCleanup {
     GfxRenderer& renderer;
     ~RenderCleanup() {
+      renderer.cancelGrayscale16();
       renderer.setRenderMode(GfxRenderer::BW);
       ImageBlock::releaseRenderCache();
     }
   } cleanup{renderer};
+
+  if (renderer.getGrayscaleLevels() == 16) {
+    if (!renderer.beginGrayscale16()) return false;
+    bool decoded = false;
+    switch (selected.image.format) {
+      case ImageFormat::None:
+        return false;
+      case ImageFormat::Bmp: {
+        HalFile file;
+        if (!Storage.openFileForRead("AIRP", selected.path, file)) return false;
+        Bitmap bitmap(file, false);
+        if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() != selected.image.width ||
+            bitmap.getHeight() != selected.image.height)
+          return false;
+        decoded = renderer.drawBitmapGrayscale16(bitmap, bounds.x, bounds.y, bounds.width, bounds.height);
+        break;
+      }
+      case ImageFormat::Jpeg: {
+        RenderConfig config;
+        config.x = bounds.x;
+        config.y = bounds.y;
+        config.maxWidth = bounds.width;
+        config.maxHeight = bounds.height;
+        config.useExactDimensions = true;
+        config.useDithering = false;
+        config.output = DecodeOutput::NativeGrayscale16;
+        JpegToFramebufferConverter converter;
+        decoded = converter.decodeToFramebuffer(selected.path, renderer, config);
+        break;
+      }
+    }
+    return decoded && renderer.commitGrayscale16();
+  }
 
   std::optional<ImageBlock> jpegBlock;
   if (selected.image.format == ImageFormat::Jpeg) {

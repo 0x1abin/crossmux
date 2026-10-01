@@ -20,6 +20,8 @@ struct PreviewKey {
   uint8_t alignment = 0xFF;
   uint8_t extraParagraphSpacing = 0;  // 0=off, 1..5=0.5x/0.75x/1x/1.25x/1.5x
   uint8_t firstLineIndent = 0;
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 100;
   bool focusReading = false;
   bool hyphenation = false;
   bool operator==(const PreviewKey&) const = default;

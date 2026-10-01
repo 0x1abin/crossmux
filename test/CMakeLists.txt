@@ -20,13 +20,23 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG dacbbbcdc133a052f9122347429fdcb8cddf80af
+  GIT_TAG 4bad3f813af59b2827eba66f1a216c332a292dbf
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest crosspoint_simulator)
+
+# Reuse the firmware's JPEGDEC pin; its CMake target requires ESP-IDF.
+FetchContent_Declare(jpegdec
+  GIT_REPOSITORY https://github.com/bitbank2/JPEGDEC.git
+  GIT_TAG 86282979224c8a32fd51e091ed5a35b0c699a52b
+)
+FetchContent_GetProperties(jpegdec)
+if(NOT jpegdec_POPULATED)
+  FetchContent_Populate(jpegdec)
+endif()
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
@@ -51,6 +61,10 @@ add_subdirectory(hyphenation_eval)
 add_subdirectory(utf8_compose)
 add_subdirectory(opds_filename)
 add_subdirectory(html_to_plain_text)
+add_subdirectory(library_text)
+add_subdirectory(library_format)
+add_subdirectory(library_index_file)
+add_subdirectory(library_builder)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(combining_marks)
 add_subdirectory(time_utils)
@@ -77,6 +91,7 @@ add_subdirectory(gfx_two_bit_mapping)
 add_subdirectory(dictionary_resource)
 add_subdirectory(reading_guide_line)
 add_subdirectory(png_conversion)
+add_subdirectory(sample_row_clamp)
 add_subdirectory(reading_background)
 add_subdirectory(file_edit)
 add_subdirectory(memory_safety)
@@ -88,9 +103,12 @@ add_subdirectory(murphy_m4_batch)
 add_subdirectory(murphy_m4_input)
 add_subdirectory(system_settings_reset)
 add_subdirectory(user_guide)
+add_subdirectory(koreader_xpath_resolver)
+add_subdirectory(progress_comparison)
 add_subdirectory(font_cache_manager)
 add_subdirectory(css_parser)
 add_subdirectory(chapter_html_slim_parser)
+add_subdirectory(korean_line_breaking)
 add_subdirectory(ligature_guard)
 add_subdirectory(page_link)
 add_subdirectory(ble_key_mapping)
@@ -98,7 +116,19 @@ add_subdirectory(ble_input)
 add_subdirectory(reader_build_failure)
 add_subdirectory(reader_font_preview)
 
+# Font fallback reuses the existing Unicode mark classification.
+foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest)
+  target_sources(${font_test} PRIVATE
+    ${REPO_ROOT}/lib/MiniBidi/minibidi.c
+    ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp)
+  target_include_directories(${font_test} PRIVATE
+    ${REPO_ROOT}/lib/MiniBidi
+    ${REPO_ROOT}/test/minibidi_arabic/stubs)
+endforeach()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME WeReadLogout
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_weread_logout.py)
 add_test(NAME BuiltinFontShrink
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_builtin_font_shrink.py)
 add_test(NAME PioarduinoCache
@@ -111,6 +141,38 @@ add_test(NAME DownloadMemoryLifecycle
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_download_memory_lifecycle.py)
 add_test(NAME InxStyleCompatibility
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_style_compat.py)
+add_test(NAME InxRecentThumbnails
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/check_recent_thumbnails.py ${CMAKE_CXX_COMPILER})
 
 add_test(NAME UiFontFallback
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)
+add_subdirectory(content_opf_parser)
+add_subdirectory(chapter_position)
+add_subdirectory(home_button)
+
+add_subdirectory(inflate_stream)
+add_subdirectory(fs_helpers)
+
+add_subdirectory(absolute_grayscale)
+
+add_subdirectory(sd_card_font)
+add_subdirectory(glyph_bitmap)
+
+add_test(NAME UnifiedKeyboard COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_unified_keyboard.py)
+add_test(NAME ThemeMenus COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_theme_menus.py)
+
+add_test(NAME CoverGridCompatibility COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_cover_grid.py)
+add_test(NAME ThemeCheckboxRows COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_checkbox_rows.py)
+add_test(NAME LegacyThemeListGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_legacy_list_adapter.py)
+
+add_test(NAME InxSettingControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_setting_controls.py)
+
+add_test(NAME HalTiltGestures
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
+
+add_test(NAME NativeGrayscale
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_native_grayscale.py
+    ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)
+set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
+
+add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)

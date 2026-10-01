@@ -16,6 +16,7 @@ class EpubReaderMenuActivity final : public UiListActivity {
     SELECT_CHAPTER,
     FOOTNOTES,
     TEXT_SETTINGS,
+    IMAGE_SCALING,
     NIGHT_MODE,
     FRONTLIGHT,
     GO_TO_PERCENT,
@@ -50,15 +51,18 @@ class EpubReaderMenuActivity final : public UiListActivity {
 #endif
 
  private:
-  // Row storage: menuItems is at most MAX_MENU_ITEMS, so a
-  // fixed-capacity array avoids any heap allocation for the row list. Labels
-  // are set once in the constructor (buildMenuRowItems()); buildScreen()
-  // only refreshes rows whose values reflect live state.
-  static constexpr size_t MAX_MENU_ITEMS = 16;
+  // Row storage: buildMenuItems() must not exceed this, so a fixed-capacity
+  // array avoids any heap allocation for the row list. Labels are set once in
+  // the constructor (buildMenuRowItems()); buildScreen() only refreshes rows
+  // whose values reflect live state. Everything that counts rows goes through
+  // rowCount() so the array, the value loop and props.count can never disagree.
+  static constexpr size_t MAX_MENU_ITEMS = 20;
   freeink::ui::ListItem menuRowItems[MAX_MENU_ITEMS]{};
   void buildMenuRowItems();
 
-  int listCount() const override { return static_cast<int>(menuItems.size()); }
+  size_t rowCount() const { return menuItems.size() < MAX_MENU_ITEMS ? menuItems.size() : MAX_MENU_ITEMS; }
+
+  int listCount() const override { return static_cast<int>(rowCount()); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   // Popup input runs before any button or touch handling.
@@ -81,6 +85,7 @@ class EpubReaderMenuActivity final : public UiListActivity {
   uint8_t customPageTurnRate = 15;
   const std::vector<StrId> orientationLabels = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                                 StrId::STR_LANDSCAPE_CCW};
+  const std::vector<StrId> imageScalingLabels = {StrId::STR_IMAGE_SCALING_NEAREST, StrId::STR_IMAGE_SCALING_BILINEAR};
   const std::array<const char*, 5> pageTurnLabels = {I18N.get(StrId::STR_STATE_OFF), "3", "6", "12",
                                                      I18N.get(StrId::STR_CUSTOM)};
   int currentPage = 0;

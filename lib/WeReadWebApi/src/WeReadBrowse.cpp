@@ -252,8 +252,9 @@ void abortCache(const char* bookId, const uint8_t slot) {
 }
 
 bool clearAllCaches() {
-  if (!Storage.exists(kCacheRoot)) return true;
-  return Storage.removeDir(kCacheRoot);
+  if (!Storage.exists(kCacheRoot) || Storage.removeDir(kCacheRoot)) return true;
+  LOG_ERR("WR", "Failed to remove browse cache: %s", kCacheRoot);
+  return false;
 }
 
 bool clearLegacyWorkspace() {

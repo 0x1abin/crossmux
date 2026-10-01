@@ -24,9 +24,24 @@ ImageBlock::ImageBlock(const std::string& imagePath, const std::string& srcPath,
 void* ImageBlock::extractCtx = nullptr;
 ImageBlock::ExtractFn ImageBlock::extractFn = nullptr;
 
+// Reader-scoped image resampling choice. The library must not reach into the
+// application's settings, so the reader pushes this in (same pattern as
+// setExtractor()) and the decode path reads it here.
+bool ImageBlock::bilinearScaling = false;
+
 void ImageBlock::setExtractor(void* ctx, ExtractFn fn) {
   extractCtx = ctx;
   extractFn = fn;
+}
+
+void ImageBlock::setBilinearScaling(const bool enabled) {
+  if (bilinearScaling == enabled) return;
+  bilinearScaling = enabled;
+  // Logged on every transition: the filter also changes the pixel-cache name, so
+  // this line is what proves the reader actually re-decoded with the new setting
+  // rather than serving the other variant's cache.
+  LOG_INF("IMG", "Image resampling filter -> %s (cache suffix %s)", enabled ? "bilinear" : "nearest",
+          enabled ? ".b.pxc" : ".pxc");
 }
 
 bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
@@ -34,12 +49,15 @@ bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str());
 namespace {
 
 std::string getCachePath(const std::string& imagePath) {
-  // Replace extension with .pxc (pixel cache)
-  size_t dotPos = imagePath.rfind('.');
+  // Replace extension with .pxc (pixel cache). The resampling filter is part of
+  // the cache identity: the cached file holds already-scaled pixels, so a
+  // nearest-decoded cache must not be served after switching to bilinear.
+  const char* suffix = ImageBlock::bilinearScalingEnabled() ? ".b.pxc" : ".pxc";
+  const size_t dotPos = imagePath.rfind('.');
   if (dotPos != std::string::npos) {
-    return imagePath.substr(0, dotPos) + ".pxc";
+    return imagePath.substr(0, dotPos) + suffix;
   }
-  return imagePath + ".pxc";
+  return imagePath + suffix;
 }
 
 bool readValidCacheHeader(HalFile& cacheFile, const int expectedWidth, const int expectedHeight, uint16_t& cachedWidth,
@@ -59,13 +77,10 @@ bool readValidCacheHeader(HalFile& cacheFile, const int expectedWidth, const int
   return cacheFile.size() >= expectedSize;
 }
 
-// Pages are deserialized afresh on each visit. Keep a bounded, allocation-free
-// record so an image that failed renders its placeholder directly for the rest
-// of the reader session instead of paying another placeholder refresh and
-// decode. The reader clears this on entry so transient memory/storage failures
-// are retried.
-constexpr size_t MAX_SESSION_IMAGE_FAILURES = 16;
-uint64_t failedImageHashes[MAX_SESSION_IMAGE_FAILURES];
+// Suppress repeated failures across the BW/grayscale passes of one page render.
+// Clear before the next page render so transient memory/storage failures retry.
+constexpr size_t MAX_RENDER_IMAGE_FAILURES = 16;
+uint64_t failedImageHashes[MAX_RENDER_IMAGE_FAILURES];
 size_t failedImageCount = 0;
 
 uint64_t imagePathHash(const std::string& path) {
@@ -77,7 +92,7 @@ uint64_t imagePathHash(const std::string& path) {
   return hash;
 }
 
-bool imageFailedThisSession(const std::string& path) {
+bool imageFailedThisRender(const std::string& path) {
   const uint64_t hash = imagePathHash(path);
   for (size_t i = 0; i < failedImageCount; i++) {
     if (failedImageHashes[i] == hash) return true;
@@ -86,7 +101,7 @@ bool imageFailedThisSession(const std::string& path) {
 }
 
 void rememberImageFailure(const std::string& path) {
-  if (failedImageCount == MAX_SESSION_IMAGE_FAILURES || imageFailedThisSession(path)) return;
+  if (failedImageCount == MAX_RENDER_IMAGE_FAILURES || imageFailedThisRender(path)) return;
   failedImageHashes[failedImageCount++] = imagePathHash(path);
 }
 
@@ -324,7 +339,7 @@ bool ImageBlock::hasValidCache() const {
   return readValidCacheHeader(cacheFile, width, height, cachedWidth, cachedHeight);
 }
 
-bool ImageBlock::needsDecode() const { return !imageFailedThisSession(imagePath) && !hasValidCache(); }
+bool ImageBlock::needsDecode() const { return !imageFailedThisRender(imagePath) && !hasValidCache(); }
 
 bool ImageBlock::ensureExtracted() {
   if (Storage.exists(imagePath.c_str())) return true;
@@ -398,7 +413,7 @@ bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y,
     return true;
   }
 
-  if (imageFailedThisSession(imagePath)) {
+  if (imageFailedThisRender(imagePath)) {
     if (renderToFramebuffer) renderPlaceholder(renderer, x, y);
     return false;
   }
@@ -453,6 +468,7 @@ bool ImageBlock::renderInternal(GfxRenderer& renderer, const int x, const int y,
   config.useExactDimensions = true;  // Use pre-calculated dimensions to avoid rounding mismatches
   config.cachePath = cachePath;      // Enable caching during decode
   config.output = output;
+  config.bilinearScaling = bilinearScalingEnabled();
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {

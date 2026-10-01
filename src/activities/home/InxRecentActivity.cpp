@@ -12,6 +12,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "components/themes/inx/InxTheme.h"
@@ -23,9 +24,6 @@ namespace {
 constexpr int kGap = 8;
 constexpr int kPagePadding = 18;
 constexpr int kProgressHeight = 6;
-constexpr int kHomeBatteryWidth = 15;
-constexpr int kHomeBatteryHeight = 12;
-constexpr int kHomeBatteryRightMargin = 12;
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
 
@@ -109,7 +107,7 @@ Rect InxRecentActivity::contentRect() const {
   content.y += topInset + metrics.verticalSpacing;
   content.height -= topInset + metrics.verticalSpacing * 2;
   if (!mainTabsAtBottom()) {
-    content.height = InxRecentGeometry::contentHeight(renderer.getScreenHeight(), content.y, metrics.buttonHintsHeight);
+    content.height -= std::max(0, InxRecentGeometry::footerReservedHeight - metrics.buttonHintsHeight);
   }
   return content;
 }
@@ -154,7 +152,12 @@ void InxRecentActivity::openSelected() {
   onSelectBook((*books)[selected].path);
 }
 
-void InxRecentActivity::setThumbnailHeight(const int height) {
+void InxRecentActivity::setThumbnailHeight(const int displayHeight) {
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  const int height = std::max(0, displayHeight);
+#else
+  const int height = InxCoverGeometry::thumbnailHeightForCropFill(displayHeight);
+#endif
   if (thumbnailHeight == height) return;
   thumbnailHeight = height;
   targetCoverStates.fill(CoverCacheState::Unchecked);
@@ -341,37 +344,8 @@ bool InxRecentActivity::prepareNextMissingCover() {
 }
 
 int InxRecentActivity::indexFromPoint(const int x, const int y) const {
-  if (!books || books->empty()) return -1;
-  const Rect content = contentRect();
-  if (x < content.x || x >= content.x + content.width || y < content.y || y >= content.y + content.height) return -1;
-
-  const InxRecentLayout currentLayout = layout();
-  const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), currentLayout);
-  int columns = 1;
-  int rows = 1;
-  switch (currentLayout) {
-    case InxRecentLayout::Grid:
-      columns = 2;
-      rows = 2;
-      break;
-    case InxRecentLayout::List:
-      rows = 5;
-      break;
-    case InxRecentLayout::Icons:
-      columns = 3;
-      rows = 3;
-      break;
-    case InxRecentLayout::Flow:
-    case InxRecentLayout::Cover:
-      return selected;
-    case InxRecentLayout::Count:
-      return -1;
-  }
-
-  const int column = std::min(columns - 1, (x - content.x) * columns / std::max(1, content.width));
-  const int row = std::min(rows - 1, (y - content.y) * rows / std::max(1, content.height));
-  const int index = start + row * columns + column;
-  return index < static_cast<int>(books->size()) ? index : -1;
+  return InxRecentGeometry::indexFromPoint(contentRect(), x, y, selected, books ? static_cast<int>(books->size()) : 0,
+                                           layout());
 }
 
 void InxRecentActivity::loop() {
@@ -428,35 +402,34 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   const auto centerSize = InxCoverGeometry::fit(carousel.width, std::max(1, carousel.height * 94 / 100));
   const Rect center{carousel.x + (carousel.width - centerSize.width) / 2,
                     carousel.y + (carousel.height - centerSize.height) / 2, centerSize.width, centerSize.height};
-  setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(center.height));
+  setThumbnailHeight(center.height);
   const auto sideSize = InxCoverGeometry::fit(carousel.width, std::max(1, center.height * 90 / 100));
   const int sideTop = center.y + (center.height - sideSize.height) / 2;
   const int sideGap = std::max(kGap, content.width * 4 / 100);
-  {
-    const GfxRenderer::ClipScope clip(renderer, carousel.x, carousel.y, carousel.width, carousel.height);
-    if (selected > 0) {
-      drawBookCover(selected - 1, Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height});
-    }
-    if (selected + 1 < count) {
-      drawBookCover(selected + 1, Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height});
-    }
-    drawBookCover(selected, center);
-    if (showSelection) drawThickFrame(renderer, center);
+  // The render scope clips side covers and all following text to the content area.
+  if (selected > 0) {
+    drawBookCover(selected - 1, Rect{center.x - sideSize.width - sideGap, sideTop, sideSize.width, sideSize.height});
   }
+  if (selected + 1 < count) {
+    drawBookCover(selected + 1, Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height});
+  }
+  drawBookCover(selected, center);
+  if (showSelection) drawThickFrame(renderer, center);
 
   const int dividerY = carousel.y + carousel.height + 10;
   renderer.drawLine(content.x, dividerY, content.x + content.width - 1, dividerY, true);
   const int textY = dividerY + 15;
-  drawBookText(renderer, book, kPagePadding, textY, content.width - kPagePadding * 2, true);
+  const int textX = content.x + kPagePadding;
+  drawBookText(renderer, book, textX, textY, content.width - kPagePadding * 2, true);
 
   const ReadingBookStats* stats = statsAt(selected);
   const uint8_t progress = progressOf(stats);
   const int progressY = textY + 58;
   const int progressWidth = std::max(24, (content.width - kPagePadding * 2) / 2);
-  drawMiniProgress(renderer, Rect{kPagePadding, progressY, progressWidth, kProgressHeight}, progress);
+  drawMiniProgress(renderer, Rect{textX, progressY, progressWidth, kProgressHeight}, progress);
   char percent[8];
   snprintf(percent, sizeof(percent), "%u%%", static_cast<unsigned>(progress));
-  renderer.drawText(SMALL_FONT_ID, kPagePadding + progressWidth + 12,
+  renderer.drawText(SMALL_FONT_ID, textX + progressWidth + 12,
                     progressY - (renderer.getLineHeight(SMALL_FONT_ID) - kProgressHeight) / 2, percent);
 
   const int metricsTop = progressY + 34;
@@ -468,10 +441,10 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   char chapter[8];
   snprintf(sessions, sizeof(sessions), "%u", stats ? static_cast<unsigned>(stats->sessions) : 0U);
   snprintf(chapter, sizeof(chapter), "%u%%", stats ? static_cast<unsigned>(stats->chapterProgressPercent) : 0U);
-  drawMetric(renderer, kPagePadding, metricsTop, total.c_str(), tr(STR_TOTAL_TIME), metricWidth);
-  drawMetric(renderer, kPagePadding + metricWidth + kGap, metricsTop, sessions, tr(STR_SESSIONS), metricWidth);
-  drawMetric(renderer, kPagePadding, metricsTop + metricHeight, last.c_str(), tr(STR_LAST_SESSION), metricWidth);
-  drawMetric(renderer, kPagePadding + metricWidth + kGap, metricsTop + metricHeight, chapter, tr(STR_CHAPTER_PROGRESS),
+  drawMetric(renderer, textX, metricsTop, total.c_str(), tr(STR_TOTAL_TIME), metricWidth);
+  drawMetric(renderer, textX + metricWidth + kGap, metricsTop, sessions, tr(STR_SESSIONS), metricWidth);
+  drawMetric(renderer, textX, metricsTop + metricHeight, last.c_str(), tr(STR_LAST_SESSION), metricWidth);
+  drawMetric(renderer, textX + metricWidth + kGap, metricsTop + metricHeight, chapter, tr(STR_CHAPTER_PROGRESS),
              metricWidth);
 }
 
@@ -488,7 +461,7 @@ void InxRecentActivity::drawGrid(const Rect& content) {
                     cellWidth - kGap, cellHeight - kGap};
     if (showSelection && index == selected) drawSparseInk(renderer, cell);
     const Rect cover = fitCoverRect(Rect{cell.x + kGap, cell.y + kGap, cell.width - kGap * 2, cell.height - kGap * 2});
-    if (slot == 0) setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+    if (slot == 0) setThumbnailHeight(cover.height);
     drawBookCover(index, cover);
     if (showSelection && index == selected) drawThickFrame(renderer, cover);
     const int barWidth = std::max(24, cover.width - 30);
@@ -508,7 +481,7 @@ void InxRecentActivity::drawList(const Rect& content) {
     const Rect row{content.x, content.y + slot * rowHeight, content.width, rowHeight};
     if (showSelection && index == selected) drawSparseInk(renderer, row);
     const Rect cover = fitCoverRect(Rect{row.x + kPagePadding, row.y + 5, 88, row.height - 10});
-    if (slot == 0) setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+    if (slot == 0) setThumbnailHeight(cover.height);
     drawBookCover(index, cover);
     const int textX = cover.x + cover.width + 14;
     const int textWidth = row.x + row.width - kPagePadding - textX;
@@ -534,7 +507,7 @@ void InxRecentActivity::drawIcons(const Rect& content) {
     const Rect cell{content.x + column * cellWidth + 5, content.y + row * cellHeight + 5, cellWidth - 10,
                     cellHeight - 10};
     const Rect cover = fitCoverRect(Rect{cell.x + 4, cell.y + 4, cell.width - 8, cell.height - 8});
-    if (slot == 0) setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+    if (slot == 0) setThumbnailHeight(cover.height);
     drawBookCover(index, cover);
     drawProgressBadge(renderer, cover, progressOf(statsAt(index)));
     if (showSelection && index == selected)
@@ -549,7 +522,7 @@ void InxRecentActivity::drawCover(const Rect& content) {
   const int targetWidth = std::max(1, content.width * 78 / 100);
   const Rect cover = fitCoverRect(Rect{content.x + (content.width - targetWidth) / 2, content.y + 6, targetWidth,
                                        std::max(1, content.height - progressBlockHeight - 12)});
-  setThumbnailHeight(InxCoverGeometry::thumbnailHeightForCropFill(cover.height));
+  setThumbnailHeight(cover.height);
   drawBookCover(selected, cover);
   if (showSelection) drawThickFrame(renderer, cover);
   const int barWidth = std::max(24, cover.width * 80 / 100);
@@ -562,30 +535,34 @@ void InxRecentActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, false, false);
   drawPageHeader(Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
   const Rect content = contentRect();
 
-  if (!books || books->empty()) {
-    UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_RECENT_BOOKS), 2);
-  } else {
-    switch (layout()) {
-      case InxRecentLayout::Flow:
-        drawFlow(content);
-        break;
-      case InxRecentLayout::Grid:
-        drawGrid(content);
-        break;
-      case InxRecentLayout::List:
-        drawList(content);
-        break;
-      case InxRecentLayout::Icons:
-        drawIcons(content);
-        break;
-      case InxRecentLayout::Cover:
-        drawCover(content);
-        break;
-      case InxRecentLayout::Count:
-        break;
+  if (content.width > 0 && content.height > 0) {
+    const GfxRenderer::ClipScope clip(renderer, content.x, content.y, content.width, content.height);
+    if (!books || books->empty()) {
+      UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_RECENT_BOOKS), 2);
+    } else {
+      switch (layout()) {
+        case InxRecentLayout::Flow:
+          drawFlow(content);
+          break;
+        case InxRecentLayout::Grid:
+          drawGrid(content);
+          break;
+        case InxRecentLayout::List:
+          drawList(content);
+          break;
+        case InxRecentLayout::Icons:
+          drawIcons(content);
+          break;
+        case InxRecentLayout::Cover:
+          drawCover(content);
+          break;
+        case InxRecentLayout::Count:
+          break;
+      }
     }
   }
 
@@ -599,10 +576,9 @@ void InxRecentActivity::render(RenderLock&&) {
     GUI.drawMainTabStatusBar(renderer, Rect{left, footerTop, std::max(0, width - left - right),
                                             std::max(0, renderer.getScreenHeight() - bottom - footerTop)});
   } else if (!hasMainTabStatusBar()) {
-    const int batteryY = mainTabsAtBottom() ? metrics.topPadding + 5 : renderer.getScreenHeight() - 30;
-    GUI.drawBatteryRight(renderer,
-                         Rect{renderer.getScreenWidth() - kHomeBatteryRightMargin - kHomeBatteryWidth, batteryY,
-                              kHomeBatteryWidth, kHomeBatteryHeight},
+    Rect battery = InxRecentGeometry::batteryRect(safeArea);
+    if (mainTabsAtBottom()) battery.y = safeArea.y + metrics.topPadding + 5;
+    GUI.drawBatteryRight(renderer, battery,
                          SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   }
   if (prepareNextMissingCover()) return;

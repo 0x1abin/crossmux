@@ -35,8 +35,9 @@ namespace {
 // Tab labels for Font | Size | Layout | Style.
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
-constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING, StrId::STR_EXTRA_SPACING,
-                                         StrId::STR_FIRST_LINE_INDENT, StrId::STR_ALIGNMENT, StrId::STR_SCREEN_MARGIN};
+constexpr StrId LAYOUT_ROW_NAME_IDS[] = {
+    StrId::STR_LINE_SPACING,      StrId::STR_WORD_SPACING, StrId::STR_CHARACTER_SPACING, StrId::STR_EXTRA_SPACING,
+    StrId::STR_FIRST_LINE_INDENT, StrId::STR_ALIGNMENT,    StrId::STR_SCREEN_MARGIN};
 constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_READING_GUIDE_LINE,
                                         StrId::STR_READING_GUIDE_LINE_STYLE,
@@ -56,6 +57,27 @@ constexpr StrId EXTRA_SPACING_IDS[] = {StrId::STR_EXTRA_SPACING_OFF,  StrId::STR
 constexpr StrId SYNTHETIC_BOLD_IDS[] = {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_LIGHT, StrId::STR_FAKE_BOLD_STANDARD,
                                         StrId::STR_FAKE_BOLD_HEAVY};
 static_assert(std::size(SYNTHETIC_BOLD_IDS) == CrossPointSettings::SYNTHETIC_BOLD_COUNT);
+int findCurrentFontIndex(const SdCardFontRegistry* registry, const char* sdFontFamilyName, uint8_t fontFamily) {
+  if (sdFontFamilyName[0] != '\0' && registry) {
+    const auto& families = registry->getFamilies();
+    const auto family = std::find_if(families.begin(), families.end(), [sdFontFamilyName](const auto& candidate) {
+      return candidate.name == sdFontFamilyName;
+    });
+    if (family != families.end()) {
+      return CrossPointSettings::BUILTIN_FONT_COUNT + static_cast<int>(family - families.begin());
+    }
+  }
+
+  return fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? fontFamily : 0;
+}
+
+constexpr StrId WORD_SPACING_IDS[] = {StrId::STR_SPACING_50_PERCENT,  StrId::STR_SPACING_75_PERCENT,
+                                      StrId::STR_SPACING_100_PERCENT, StrId::STR_SPACING_125_PERCENT,
+                                      StrId::STR_SPACING_150_PERCENT, StrId::STR_SPACING_175_PERCENT,
+                                      StrId::STR_SPACING_200_PERCENT};
+constexpr StrId CHARACTER_SPACING_IDS[] = {StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1,
+                                           StrId::STR_SPACING_ZERO, StrId::STR_SPACING_PLUS_1,
+                                           StrId::STR_SPACING_PLUS_2};
 constexpr StrId ALIGNMENT_IDS[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                    StrId::STR_BOOK_S_STYLE};
 constexpr StrId GUIDE_LINE_STYLE_IDS[] = {StrId::STR_SOLID_LINE, StrId::STR_SHORT_DASH,  StrId::STR_MEDIUM_DASH,
@@ -64,6 +86,10 @@ constexpr int MARGIN_MIN = CrossPointSettings::SCREEN_MARGIN_MIN;
 constexpr int MARGIN_MAX = CrossPointSettings::SCREEN_MARGIN_MAX;
 constexpr int MARGIN_STEP = CrossPointSettings::SCREEN_MARGIN_STEP;
 constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
+constexpr int WORD_SPACING_MIN = CrossPointSettings::WORD_SPACING_MIN;
+constexpr int WORD_SPACING_MAX = CrossPointSettings::WORD_SPACING_MAX;
+constexpr int WORD_SPACING_STEP = CrossPointSettings::WORD_SPACING_STEP;
+static_assert(std::size(WORD_SPACING_IDS) == (WORD_SPACING_MAX - WORD_SPACING_MIN) / WORD_SPACING_STEP + 1);
 }  // namespace
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -279,6 +305,28 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         break;
     }
     rowItems_[i].value = rowValues_[i].empty() ? nullptr : rowValues_[i].c_str();
+    rowItems_[i].toggle = false;
+    if (tab_ == Tab::Style) {
+      switch (styleRowAt(i)) {
+        case StyleRow::FocusReading:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.focusReadingEnabled);
+          break;
+        case StyleRow::ReadingGuideLine:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.readingGuideLineEnabled);
+          break;
+        case StyleRow::Hyphenation:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.hyphenationEnabled);
+          break;
+        case StyleRow::EmbeddedStyle:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.embeddedStyle);
+          break;
+        case StyleRow::AntiAliasing:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.textAntiAliasing);
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   fui::ListProps props;
@@ -288,7 +336,7 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
   // Keep titles and values at the same list font size; long labels may wrap.
-  props.labelText = screen.theme().bodyText;
+  props.labelText = UITheme::getInstance().hasMainTabs() ? screen.theme().bodyText : screen.theme().smallText;
   props.labelText.maxLines = 2;
   syncTabListViewport(screen, props);
   screen.list(props);
@@ -316,19 +364,7 @@ const char* TextSettingsActivity::confirmLabelText() const {
   }
 }
 
-void TextSettingsActivity::render(RenderLock&&) {
-  const FontLoadState fontLoadState = fontLoadState_.load();
-  if (fontLoadState != FontLoadState::Idle) {
-    fontpreload::draw(renderer, preloadFamilyName_, preloadPointSize_, preloadCompleted_.load(), preloadTotal_.load(),
-                      fontLoadState == FontLoadState::Ready ? fontpreload::State::Ready : fontpreload::State::Progress);
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    return;
-  }
-
-  if (optionPopup_.processRender(renderer, mappedInput)) return;  // picker draws over everything
-
-  renderer.clearScreen();
-
+void TextSettingsActivity::drawChrome() {
   const auto pageWidth = renderer.getScreenWidth();
 
   GUI.drawHeader(renderer, Rect{0, metrics_.topPadding, pageWidth, metrics_.headerHeight}, tr(STR_TEXT_SETTINGS));
@@ -341,10 +377,9 @@ void TextSettingsActivity::render(RenderLock&&) {
                              : "";
   textsettings::renderPreview(renderer, previewLayout_, metrics_.previewPadding, metrics_.verticalSpacing, afterHeader,
                               previewHeight, familyName, sizeName);
+}
 
-  // Tab bar + active tab's list draw inside the screen builder.
-  renderUi();
-
+void TextSettingsActivity::drawFooter() {
   if (focusedRowHasNoPreview()) {
     const int captionHeight = renderer.getTextHeight(UI_10_FONT_ID) + metrics_.verticalSpacing;
     const int capY = afterHeader + usableHeight - captionHeight + metrics_.verticalSpacing;
@@ -353,8 +388,19 @@ void TextSettingsActivity::render(RenderLock&&) {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabelText(), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
 
-  renderer.displayBuffer();
+void TextSettingsActivity::render(RenderLock&& lock) {
+  const FontLoadState fontLoadState = fontLoadState_.load();
+  if (fontLoadState != FontLoadState::Idle) {
+    fontpreload::draw(renderer, preloadFamilyName_, preloadPointSize_, preloadCompleted_.load(), preloadTotal_.load(),
+                      fontLoadState == FontLoadState::Ready ? fontpreload::State::Ready : fontpreload::State::Progress);
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
+
+  if (optionPopup_.processRender(renderer, mappedInput)) return;  // picker draws over everything
+  UiListActivity::render(std::move(lock));
 }
 
 // Font switching runs on the main task from loop(), which deliberately holds no
@@ -441,6 +487,234 @@ void TextSettingsActivity::applySize(int listIndex) {
   SETTINGS.fontPointSize = sizes_[listIndex].pointSize;
   if (SETTINGS.sdFontFamilyName[0] != '\0') SETTINGS.sdFontFlashPreload = 0;
   sdFontSystem.ensureLoaded(renderer);
+}
+
+void TextSettingsActivity::confirmLayoutRow(int row) {
+  switch (static_cast<LayoutRow>(row)) {
+    case LayoutRow::ParaSpacing:
+      optionPopup_.show(StrId::STR_EXTRA_SPACING, EXTRA_SPACING_IDS, static_cast<int>(std::size(EXTRA_SPACING_IDS)),
+                        SETTINGS.extraParagraphSpacing, [](int idx) {
+                          SETTINGS.extraParagraphSpacing = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      break;
+    case LayoutRow::FirstLineIndent:
+      optionPopup_.show(StrId::STR_FIRST_LINE_INDENT, FIRST_LINE_INDENT_IDS,
+                        static_cast<int>(std::size(FIRST_LINE_INDENT_IDS)), SETTINGS.firstLineIndent, [](int idx) {
+                          SETTINGS.firstLineIndent = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      break;
+    case LayoutRow::LineSpacing:
+      optionPopup_.show(StrId::STR_LINE_SPACING, LINE_SPACING_IDS, static_cast<int>(std::size(LINE_SPACING_IDS)),
+                        SETTINGS.lineSpacing, [](int idx) {
+                          SETTINGS.lineSpacing = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      break;
+    case LayoutRow::Alignment:
+      optionPopup_.show(StrId::STR_ALIGNMENT, ALIGNMENT_IDS, static_cast<int>(std::size(ALIGNMENT_IDS)),
+                        SETTINGS.paragraphAlignment, [](int idx) {
+                          SETTINGS.paragraphAlignment = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      break;
+    case LayoutRow::WordSpacing: {
+      const int cur = (std::clamp<int>(SETTINGS.wordSpacing, WORD_SPACING_MIN, WORD_SPACING_MAX) - WORD_SPACING_MIN) /
+                      WORD_SPACING_STEP;
+      optionPopup_.show(StrId::STR_WORD_SPACING, WORD_SPACING_IDS, static_cast<int>(std::size(WORD_SPACING_IDS)), cur,
+                        [](int idx) {
+                          SETTINGS.wordSpacing = static_cast<uint8_t>(WORD_SPACING_MIN + idx * WORD_SPACING_STEP);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      break;
+    }
+    case LayoutRow::CharacterSpacing:
+      optionPopup_.show(StrId::STR_CHARACTER_SPACING, CHARACTER_SPACING_IDS,
+                        static_cast<int>(std::size(CHARACTER_SPACING_IDS)), SETTINGS.characterSpacing, [](int idx) {
+                          SETTINGS.characterSpacing = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      break;
+    case LayoutRow::ScreenMargin: {
+      std::vector<std::string> options;
+      options.reserve((MARGIN_MAX - MARGIN_MIN) / MARGIN_STEP + 1);
+      for (int m = MARGIN_MIN; m <= MARGIN_MAX; m += MARGIN_STEP) options.push_back(std::to_string(m));
+      const int cur = (std::clamp<int>(SETTINGS.screenMargin, MARGIN_MIN, MARGIN_MAX) - MARGIN_MIN) / MARGIN_STEP;
+      optionPopup_.show(StrId::STR_SCREEN_MARGIN, options, cur, [](int idx) {
+        SETTINGS.screenMargin = static_cast<uint8_t>(MARGIN_MIN + idx * MARGIN_STEP);
+        SETTINGS.saveToFile();
+      });
+      requestUpdate();
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
+std::string TextSettingsActivity::layoutValueText(int row) const {
+  switch (static_cast<LayoutRow>(row)) {
+    case LayoutRow::LineSpacing: {
+      const uint8_t v = SETTINGS.lineSpacing;
+      return v < std::size(LINE_SPACING_IDS) ? I18N.get(LINE_SPACING_IDS[v]) : I18N.get(StrId::STR_NORMAL);
+    }
+    case LayoutRow::ParaSpacing: {
+      const uint8_t v = SETTINGS.extraParagraphSpacing;
+      return v < std::size(EXTRA_SPACING_IDS) ? I18N.get(EXTRA_SPACING_IDS[v]) : I18N.get(StrId::STR_EXTRA_SPACING_OFF);
+    }
+    case LayoutRow::FirstLineIndent: {
+      const uint8_t v = SETTINGS.firstLineIndent;
+      return v < std::size(FIRST_LINE_INDENT_IDS) ? I18N.get(FIRST_LINE_INDENT_IDS[v])
+                                                  : I18N.get(StrId::STR_FIRST_LINE_INDENT_AUTO);
+    }
+    case LayoutRow::Alignment: {
+      const uint8_t v = SETTINGS.paragraphAlignment;
+      return v < std::size(ALIGNMENT_IDS) ? I18N.get(ALIGNMENT_IDS[v]) : I18N.get(StrId::STR_JUSTIFY);
+    }
+    case LayoutRow::WordSpacing:
+      return std::to_string(SETTINGS.wordSpacing) + "%";
+    case LayoutRow::CharacterSpacing: {
+      const uint8_t v = SETTINGS.characterSpacing;
+      return v < std::size(CHARACTER_SPACING_IDS) ? I18N.get(CHARACTER_SPACING_IDS[v])
+                                                  : I18N.get(StrId::STR_SPACING_ZERO);
+    }
+    case LayoutRow::ScreenMargin:
+      return std::to_string(SETTINGS.screenMargin);
+
+    default:
+      return "";
+  }
+}
+
+void TextSettingsActivity::confirmStyleRow(int row) {
+  switch (styleRowAt(row)) {
+    case StyleRow::FocusReading:
+      SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
+      break;
+    case StyleRow::ReadingGuideLine:
+      SETTINGS.readingGuideLineEnabled = !SETTINGS.readingGuideLineEnabled;
+      rebuildRowItems();
+      activeNav().selected = std::min<int>(activeNav().selected, listCount());
+      break;
+    case StyleRow::ReadingGuideLineStyle:
+      optionPopup_.show(StrId::STR_READING_GUIDE_LINE_STYLE, GUIDE_LINE_STYLE_IDS,
+                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle, [](int idx) {
+                          SETTINGS.readingGuideLineStyle = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      return;
+    case StyleRow::ReadingGuideLineOffset:
+      startActivityForResultWith<IntervalSelectionActivity>(
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              const int value = std::get<IntervalResult>(result.data).value;
+              SETTINGS.readingGuideLineOffset = static_cast<int8_t>(
+                  std::clamp(value, static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN),
+                             static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX)));
+              SETTINGS.saveToFile();
+            }
+            requestUpdate();
+          },
+          "ReadingGuideLineOffset", StrId::STR_READING_GUIDE_LINE_OFFSET, SETTINGS.readingGuideLineOffset,
+          CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN, CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX, 1, 5,
+          StrId::STR_NONE_OPT, false);
+      return;
+    case StyleRow::Hyphenation:
+      SETTINGS.hyphenationEnabled = !SETTINGS.hyphenationEnabled;
+      break;
+    case StyleRow::EmbeddedStyle:
+      SETTINGS.embeddedStyle = !SETTINGS.embeddedStyle;
+      break;
+    case StyleRow::FakeBold:
+      optionPopup_.show(StrId::STR_FAKE_BOLD, SYNTHETIC_BOLD_IDS, static_cast<int>(std::size(SYNTHETIC_BOLD_IDS)),
+                        SETTINGS.fakeBold, [](int idx) {
+                          SETTINGS.fakeBold = static_cast<uint8_t>(idx);
+                          SETTINGS.saveToFile();
+                        });
+      requestUpdate();
+      return;
+    case StyleRow::AntiAliasing:
+      SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
+      break;
+
+    default:
+      return;
+  }
+  SETTINGS.saveToFile();
+  requestUpdate();
+}
+
+std::string TextSettingsActivity::styleValueText(int row) const {
+  switch (styleRowAt(row)) {
+    case StyleRow::FocusReading:
+      return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ReadingGuideLine:
+      return SETTINGS.readingGuideLineEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ReadingGuideLineStyle: {
+      const uint8_t style = SETTINGS.readingGuideLineStyle;
+      return style < std::size(GUIDE_LINE_STYLE_IDS) ? I18N.get(GUIDE_LINE_STYLE_IDS[style])
+                                                     : I18N.get(StrId::STR_SHORT_DASH);
+    }
+    case StyleRow::ReadingGuideLineOffset:
+      return std::to_string(SETTINGS.readingGuideLineOffset);
+    case StyleRow::Hyphenation:
+      return SETTINGS.hyphenationEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::EmbeddedStyle:
+      return SETTINGS.embeddedStyle ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::FakeBold: {
+      const uint8_t value = SETTINGS.fakeBold;
+      return value < std::size(SYNTHETIC_BOLD_IDS) ? I18N.get(SYNTHETIC_BOLD_IDS[value]) : tr(STR_STATE_OFF);
+    }
+    case StyleRow::AntiAliasing:
+      return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+
+    default:
+      return "";
+  }
+}
+
+// Only Focus Reading shows in the preview (bold prefixes); the other Style rows
+// have no distinct preview.
+bool TextSettingsActivity::focusedRowHasNoPreview() const {
+  if (ringPos() == 0 || tab_ != Tab::Style) return false;
+  const StyleRow row = styleRowAt(ringPos() - 1);
+  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
+}
+
+void TextSettingsActivity::switchTab(const int direction) {
+  const bool onTabBar = ringPos() == 0;
+  constexpr int count = static_cast<int>(Tab::Count);
+  tab_ = static_cast<Tab>((static_cast<int>(tab_) + direction + count) % count);
+  rebuildRowItems();
+  auto& n = activeNav();
+  if (onTabBar) n.selected = 0;
+  n.followOnBuild = true;  // pull the new tab's viewport to its remembered selection
+  requestUpdate();
+}
+
+int TextSettingsActivity::listCount() const {
+  switch (tab_) {
+    case Tab::Family:
+      return static_cast<int>(fonts_.size());
+    case Tab::Size:
+      return static_cast<int>(sizes_.size());
+    case Tab::Layout:
+      return static_cast<int>(LayoutRow::Count);
+    case Tab::Style:
+      return styleRowCount();
+
+    default:
+      return 0;
+  }
 }
 
 const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(const int listIndex, const uint8_t pointSize) const {
@@ -579,7 +853,6 @@ bool TextSettingsActivity::handleHomeGesture() {
   return true;
 }
 
-#ifdef ENABLE_CHINESE_VERSION
 void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   if (FontDownloadActivity::wasChineseFontPromptShownThisBoot() || SETTINGS.sdFontFamilyName[0] != '\0' ||
       SETTINGS.fontPointSize < 14) {
@@ -597,180 +870,6 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   }
   startActivityForResult(std::move(downloader), [this](const ActivityResult&) { requestUpdate(); });
 }
-#endif
-
-void TextSettingsActivity::confirmLayoutRow(int row) {
-  switch (static_cast<LayoutRow>(row)) {
-    case LayoutRow::ParaSpacing:
-      optionPopup_.show(StrId::STR_EXTRA_SPACING, EXTRA_SPACING_IDS, static_cast<int>(std::size(EXTRA_SPACING_IDS)),
-                        SETTINGS.extraParagraphSpacing, [](int idx) {
-                          SETTINGS.extraParagraphSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
-                        });
-      requestUpdate();
-      break;
-    case LayoutRow::FirstLineIndent:
-      optionPopup_.show(StrId::STR_FIRST_LINE_INDENT, FIRST_LINE_INDENT_IDS,
-                        static_cast<int>(std::size(FIRST_LINE_INDENT_IDS)), SETTINGS.firstLineIndent, [](int idx) {
-                          SETTINGS.firstLineIndent = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
-                        });
-      requestUpdate();
-      break;
-    case LayoutRow::LineSpacing:
-      optionPopup_.show(StrId::STR_LINE_SPACING, LINE_SPACING_IDS, static_cast<int>(std::size(LINE_SPACING_IDS)),
-                        SETTINGS.lineSpacing, [](int idx) {
-                          SETTINGS.lineSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
-                        });
-      requestUpdate();
-      break;
-    case LayoutRow::Alignment:
-      optionPopup_.show(StrId::STR_ALIGNMENT, ALIGNMENT_IDS, static_cast<int>(std::size(ALIGNMENT_IDS)),
-                        SETTINGS.paragraphAlignment, [](int idx) {
-                          SETTINGS.paragraphAlignment = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
-                        });
-      requestUpdate();
-      break;
-    case LayoutRow::ScreenMargin: {
-      std::vector<std::string> options;
-      options.reserve((MARGIN_MAX - MARGIN_MIN) / MARGIN_STEP + 1);
-      for (int m = MARGIN_MIN; m <= MARGIN_MAX; m += MARGIN_STEP) options.push_back(std::to_string(m));
-      const int cur = (std::clamp<int>(SETTINGS.screenMargin, MARGIN_MIN, MARGIN_MAX) - MARGIN_MIN) / MARGIN_STEP;
-      optionPopup_.show(StrId::STR_SCREEN_MARGIN, options, cur, [](int idx) {
-        SETTINGS.screenMargin = static_cast<uint8_t>(MARGIN_MIN + idx * MARGIN_STEP);
-        SETTINGS.saveToFile();
-      });
-      requestUpdate();
-      break;
-    }
-
-    default:
-      break;
-  }
-}
-
-std::string TextSettingsActivity::layoutValueText(int row) const {
-  switch (static_cast<LayoutRow>(row)) {
-    case LayoutRow::LineSpacing: {
-      const uint8_t v = SETTINGS.lineSpacing;
-      return v < std::size(LINE_SPACING_IDS) ? I18N.get(LINE_SPACING_IDS[v]) : I18N.get(StrId::STR_NORMAL);
-    }
-    case LayoutRow::ParaSpacing: {
-      const uint8_t v = SETTINGS.extraParagraphSpacing;
-      return v < std::size(EXTRA_SPACING_IDS) ? I18N.get(EXTRA_SPACING_IDS[v]) : I18N.get(StrId::STR_EXTRA_SPACING_OFF);
-    }
-    case LayoutRow::FirstLineIndent: {
-      const uint8_t v = SETTINGS.firstLineIndent;
-      return v < std::size(FIRST_LINE_INDENT_IDS) ? I18N.get(FIRST_LINE_INDENT_IDS[v])
-                                                  : I18N.get(StrId::STR_FIRST_LINE_INDENT_AUTO);
-    }
-    case LayoutRow::Alignment: {
-      const uint8_t v = SETTINGS.paragraphAlignment;
-      return v < std::size(ALIGNMENT_IDS) ? I18N.get(ALIGNMENT_IDS[v]) : I18N.get(StrId::STR_JUSTIFY);
-    }
-    case LayoutRow::ScreenMargin:
-      return std::to_string(SETTINGS.screenMargin);
-
-    default:
-      return "";
-  }
-}
-
-void TextSettingsActivity::confirmStyleRow(int row) {
-  switch (styleRowAt(row)) {
-    case StyleRow::FocusReading:
-      SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
-      break;
-    case StyleRow::ReadingGuideLine:
-      SETTINGS.readingGuideLineEnabled = !SETTINGS.readingGuideLineEnabled;
-      rebuildRowItems();
-      activeNav().selected = std::min<int>(activeNav().selected, listCount());
-      break;
-    case StyleRow::ReadingGuideLineStyle:
-      optionPopup_.show(StrId::STR_READING_GUIDE_LINE_STYLE, GUIDE_LINE_STYLE_IDS,
-                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle, [](int idx) {
-                          SETTINGS.readingGuideLineStyle = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
-                        });
-      requestUpdate();
-      return;
-    case StyleRow::ReadingGuideLineOffset:
-      startActivityForResultWith<IntervalSelectionActivity>(
-          [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              const int value = std::get<IntervalResult>(result.data).value;
-              SETTINGS.readingGuideLineOffset = static_cast<int8_t>(
-                  std::clamp(value, static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN),
-                             static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX)));
-              SETTINGS.saveToFile();
-            }
-            requestUpdate();
-          },
-          "ReadingGuideLineOffset", StrId::STR_READING_GUIDE_LINE_OFFSET, SETTINGS.readingGuideLineOffset,
-          CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN, CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX, 1, 5,
-          StrId::STR_NONE_OPT, false);
-      return;
-    case StyleRow::Hyphenation:
-      SETTINGS.hyphenationEnabled = !SETTINGS.hyphenationEnabled;
-      break;
-    case StyleRow::EmbeddedStyle:
-      SETTINGS.embeddedStyle = !SETTINGS.embeddedStyle;
-      break;
-    case StyleRow::FakeBold:
-      optionPopup_.show(StrId::STR_FAKE_BOLD, SYNTHETIC_BOLD_IDS, static_cast<int>(std::size(SYNTHETIC_BOLD_IDS)),
-                        SETTINGS.fakeBold, [](int idx) {
-                          SETTINGS.fakeBold = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
-                        });
-      requestUpdate();
-      return;
-    case StyleRow::AntiAliasing:
-      SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
-      break;
-
-    default:
-      return;
-  }
-  SETTINGS.saveToFile();
-  requestUpdate();
-}
-
-std::string TextSettingsActivity::styleValueText(int row) const {
-  switch (styleRowAt(row)) {
-    case StyleRow::FocusReading:
-      return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-    case StyleRow::ReadingGuideLine:
-      return SETTINGS.readingGuideLineEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-    case StyleRow::ReadingGuideLineStyle: {
-      const uint8_t style = SETTINGS.readingGuideLineStyle;
-      return style < std::size(GUIDE_LINE_STYLE_IDS) ? I18N.get(GUIDE_LINE_STYLE_IDS[style])
-                                                     : I18N.get(StrId::STR_SHORT_DASH);
-    }
-    case StyleRow::ReadingGuideLineOffset:
-      return std::to_string(SETTINGS.readingGuideLineOffset);
-    case StyleRow::Hyphenation:
-      return SETTINGS.hyphenationEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-    case StyleRow::EmbeddedStyle:
-      return SETTINGS.embeddedStyle ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-    case StyleRow::FakeBold: {
-      const uint8_t value = SETTINGS.fakeBold;
-      return value < std::size(SYNTHETIC_BOLD_IDS) ? I18N.get(SYNTHETIC_BOLD_IDS[value]) : tr(STR_STATE_OFF);
-    }
-    case StyleRow::AntiAliasing:
-      return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-
-    default:
-      return "";
-  }
-}
-
-bool TextSettingsActivity::focusedRowHasNoPreview() const {
-  if (ringPos() == 0 || tab_ != Tab::Style) return false;
-  const StyleRow row = styleRowAt(ringPos() - 1);
-  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
-}
 
 TextSettingsActivity::StyleRow TextSettingsActivity::styleRowAt(int visibleIndex) const {
   if (visibleIndex < 0 || visibleIndex >= styleRowCount()) return StyleRow::Count;
@@ -782,31 +881,4 @@ TextSettingsActivity::StyleRow TextSettingsActivity::styleRowAt(int visibleIndex
 
 int TextSettingsActivity::styleRowCount() const {
   return static_cast<int>(StyleRow::Count) - (SETTINGS.readingGuideLineEnabled ? 0 : HIDDEN_GUIDE_ROW_COUNT);
-}
-
-void TextSettingsActivity::switchTab(const int direction) {
-  const bool onTabBar = ringPos() == 0;
-  constexpr int count = static_cast<int>(Tab::Count);
-  tab_ = static_cast<Tab>((static_cast<int>(tab_) + direction + count) % count);
-  rebuildRowItems();
-  auto& n = activeNav();
-  if (onTabBar) n.selected = 0;
-  n.followOnBuild = true;  // pull the new tab's viewport to its remembered selection
-  requestUpdate();
-}
-
-int TextSettingsActivity::listCount() const {
-  switch (tab_) {
-    case Tab::Family:
-      return static_cast<int>(fonts_.size());
-    case Tab::Size:
-      return static_cast<int>(sizes_.size());
-    case Tab::Layout:
-      return static_cast<int>(LayoutRow::Count);
-    case Tab::Style:
-      return styleRowCount();
-
-    default:
-      return 0;
-  }
 }

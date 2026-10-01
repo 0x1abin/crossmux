@@ -81,7 +81,8 @@ void drawDottedSeparator(const GfxRenderer& renderer, const int x, const int y, 
 }
 }  // namespace
 
-void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const char* title, const char* subtitle) const {
+void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const char* title, const char* subtitle,
+                          bool) const {
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
 
   const bool showBatteryPercentage =

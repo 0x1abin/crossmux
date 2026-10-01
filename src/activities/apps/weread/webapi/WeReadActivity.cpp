@@ -162,7 +162,7 @@ static_assert(canIncrementShelfFrame(3, 9, 4, 9));
 static_assert(!canIncrementShelfFrame(8, 9, 9, 9));
 static_assert(!canIncrementShelfFrame(3, 9, 4, 10));
 
-WeReadShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content, const int sidePadding,
+WeReadShelfGridLayout shelfGridLayout(const GfxRenderer& renderer, const Rect& content, const int sidePadding,
                                       const int spacing) {
   WeReadShelfGridLayout layout;
   const int titleHeight = renderer.getLineHeight(SMALL_FONT_ID);
@@ -189,7 +189,7 @@ WeReadShelfGridLayout shelfGridLayout(GfxRenderer& renderer, const Rect& content
   return layout;
 }
 
-bool drawCachedCover(GfxRenderer& renderer, const std::string& bookDir, const Rect& bounds) {
+bool drawCachedCover(const GfxRenderer& renderer, const std::string& bookDir, const Rect& bounds) {
   const std::string path = WeReadStore::coverPath(bookDir);
   if (!Storage.exists(path.c_str())) return false;
 
@@ -228,7 +228,8 @@ void drawTruncatedProgressTitle(GfxRenderer& renderer, const Rect& content, cons
 
 void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* title, const char* stageText,
                         const char* status, const uint32_t completed, const uint32_t total,
-                        const StrId* extraLines = nullptr, const int extraLineCount = 0) {
+                        const StrId* extraLines = nullptr, int extraLineCount = 0) {
+  if (!extraLines) extraLineCount = 0;
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
@@ -261,6 +262,7 @@ void drawProgressStatus(GfxRenderer& renderer, const Rect& content, const char* 
                                  metrics.progressBarHeight},
                             completed, total);
   }
+  if (!extraLines) return;
   if (extraLineCount > 0) y += sectionGap;
   for (int i = 0; i < extraLineCount; ++i) {
     UITheme::drawCenteredText(renderer, content, UI_10_FONT_ID, y, I18N.get(extraLines[i]));
@@ -1505,21 +1507,23 @@ void WeReadActivity::performClearCache() {
 void WeReadActivity::performLogout() {
   operation_.reset();
   if (shelfFile_.isOpen()) shelfFile_.close();
-  const bool sessionCleared = WeReadStore::clearSession();
+  if (!WeReadStore::clearSession()) {
+    refreshShelf();
+    state_.store(State::LogoutError);
+    requestUpdate();
+    return;
+  }
   const bool shelfCleared = WeReadStore::clearShelf();
   const bool browseCacheCleared = WeReadBrowse::clearAllCaches();
   shelfCount_ = 0;
   shelfSelected_.store(0);
   shelfFrameInvalidated_.store(true);
-  if (!sessionCleared || !shelfCleared || !browseCacheCleared) {
-    LOG_ERR("WR", "Failed to clear local login state");
-    state_.store(State::LogoutError);
+  if (!shelfCleared || !browseCacheCleared) {
+    state_.store(State::LogoutCacheWarning);
     requestUpdate();
     return;
   }
-  mainTab_.store(MainTab::Shelf);
-  mainFocus_.store(MainFocus::Content);
-  syncShelf();
+  activityManager.goToApps();
 }
 
 void WeReadActivity::selectMainTab(const MainTab tab) {
@@ -1906,6 +1910,15 @@ void WeReadActivity::loop() {
     case State::LogoutError:
       handleLogoutErrorInput();
       return;
+    case State::LogoutCacheWarning: {
+      int x = 0;
+      int y = 0;
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+          mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasScreenTapped(x, y)) {
+        activityManager.goToApps();
+      }
+      return;
+    }
     case State::CacheCleared: {
       int x = 0;
       int y = 0;
@@ -2088,8 +2101,8 @@ void WeReadActivity::drawDisclaimer(const Rect& content) {
       textWidth,
       std::max(0, actions.y - actionGap - content.y),
   };
-  int y = textBounds.y;
   {
+    int y = textBounds.y;
     GfxRenderer::ClipScope clip(renderer, textBounds.x, textBounds.y, textBounds.width, textBounds.height);
     for (int i = 0; i < kDisclaimerParagraphCount; ++i) {
       const char* paragraph = I18N.get(kDisclaimerParagraphs[i]);
@@ -2350,7 +2363,6 @@ void WeReadActivity::render(RenderLock&&) {
   stageRenderPending_.store(false);
   if (optionPopup_.processRender(renderer, mappedInput)) return;
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int width = renderer.getScreenWidth();
   const State state = state_.load();
   const MainTab mainTab = mainTab_.load();
   const MainFocus mainFocus = mainFocus_.load();
@@ -2390,6 +2402,7 @@ void WeReadActivity::render(RenderLock&&) {
     case State::OpenBook:
     case State::Error:
     case State::LogoutError:
+    case State::LogoutCacheWarning:
     case State::ClearingCache:
     case State::CacheCleared:
     case State::CacheClearError:
@@ -2561,6 +2574,10 @@ void WeReadActivity::render(RenderLock&&) {
     case State::LogoutError:
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGOUT_FAILED));
       break;
+    case State::LogoutCacheWarning:
+      drawProgressStatus(renderer, content, tr(STR_WEREAD_LOGGED_OUT), nullptr, tr(STR_WEREAD_LOGOUT_CACHE_WARNING), 0,
+                         0);
+      break;
     case State::ClearingCache:
       GUI.drawPopup(renderer, tr(STR_CLEARING_CACHE));
       break;
@@ -2640,6 +2657,10 @@ void WeReadActivity::render(RenderLock&&) {
       break;
     case State::CacheCleared:
       back = tr(STR_BACK);
+      break;
+    case State::LogoutCacheWarning:
+      back = tr(STR_BACK);
+      confirm = tr(STR_CONFIRM);
       break;
     case State::CacheClearError:
       back = tr(STR_BACK);

@@ -152,6 +152,7 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
     }
     rowItems_[i].value = rowValues_[i].empty() ? nullptr : rowValues_[i].c_str();
   }
+  GUI.setCheckboxRow(rowItems_[4], KOREADER_STORE.getSendMetadata());
 
   fui::ListProps props;
   props.items = rowItems_;
@@ -159,6 +160,10 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
+  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
+    props.labelText = screen.theme().smallText;
+    props.labelText.maxLines = 2;
+  }
   syncListViewport(screen, props);
   screen.list(props);
 }

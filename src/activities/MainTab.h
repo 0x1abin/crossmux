@@ -25,10 +25,8 @@ inline constexpr std::array<MainTab, 5> values = {MainTab::Recent, MainTab::Libr
                                                   MainTab::Statistics};
 
 constexpr int indexOf(const MainTab tab) {
-  for (size_t i = 0; i < values.size(); ++i) {
-    if (values[i] == tab) return static_cast<int>(i);
-  }
-  return -1;
+  const auto found = std::find(values.begin(), values.end(), tab);
+  return found == values.end() ? -1 : static_cast<int>(found - values.begin());
 }
 
 constexpr MainTab adjacent(const MainTab tab, const int direction) {

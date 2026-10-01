@@ -17,6 +17,7 @@ class ControlCenterGestureTest(unittest.TestCase):
         dispatch = source[start:end] + "}\n"
         harness = r'''
 #include <atomic>
+#include "HeaderBackTapTarget.h"
 #include <cassert>
 #include <memory>
 #include <string>
@@ -121,7 +122,7 @@ int main() {
             exe = Path(directory) / "check"
             cpp.write_text(harness + dispatch + cases)
             subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
-                "-std=c++20", "-I" + str(ROOT / "src"), str(cpp), "-o", str(exe)], check=True)
+                "-std=c++20", "-I" + str(ROOT / "src"), "-I" + str(ROOT / "src/components"), str(cpp), "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
 

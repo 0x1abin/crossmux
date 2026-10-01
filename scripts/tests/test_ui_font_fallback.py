@@ -10,12 +10,55 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class UiFontFallbackTest(unittest.TestCase):
+    def test_missing_outline_geometry(self):
+        renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
+        program = r'''
+#include <cassert>
+#include "MissingGlyph.h"
+namespace BidiUtils { bool isTransparentMark(uint32_t) { return false; } }
+enum class TextRotation { None, Rotated90CW };
+struct GfxRenderer {
+  mutable int calls=0, x=0, y=0, w=0, h=0;
+  mutable bool black=false;
+  bool visible=true;
+  bool glyphIntersectsStrip(int,int,int,int) const { return visible; }
+  void drawRect(int px,int py,int pw,int ph,bool state) const {
+    ++calls; x=px; y=py; w=pw; h=ph; black=state;
+  }
+};
+template <TextRotation rotation = TextRotation::None>
+''' + method(renderer, 'static void renderMissingGlyph(') + r'''
+int main() {
+  EpdFontData font{}; font.ascender=12;
+  GfxRenderer r;
+  renderMissingGlyph(r,font,0x1F9EA,20,30,true);
+  assert(r.calls==1 && r.x==21 && r.y==21 && r.w==9 && r.h==9 && r.black);
+  renderMissingGlyph(r,font,0x1F9EA,20,30,false,true);
+  assert(r.calls==2 && r.x==20 && r.y==26 && r.w==5 && r.h==5 && !r.black);
+  renderMissingGlyph<TextRotation::Rotated90CW>(r,font,0x1F9EA,20,30,true);
+  assert(r.calls==3 && r.x==23 && r.y==21 && r.w==9 && r.h==9);
+  for (uint32_t cp : {0x20,0xA0,0x200D,0xFE0F,0x301}) renderMissingGlyph(r,font,cp,20,30,true);
+  assert(r.calls==3);
+  r.visible=false;
+  renderMissingGlyph(r,font,0x1F9EA,20,30,true);
+  assert(r.calls==3);
+}
+'''
+        with tempfile.TemporaryDirectory(prefix='missing-outline-') as directory:
+            cpp = Path(directory) / 'check.cpp'
+            exe = Path(directory) / 'check'
+            cpp.write_text(program)
+            subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+                            '-I', str(ROOT / 'lib/EpdFont'), '-I', str(ROOT / 'lib/Utf8'),
+                            '-I', str(ROOT / 'lib/MiniBidi'), str(cpp), '-o', str(exe)], check=True)
+            subprocess.run([str(exe)], check=True)
+
     def test_fallback_lifecycle(self):
         renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
         header = (ROOT / 'lib/GfxRenderer/GfxRenderer.h').read_text()
         system = (ROOT / 'src/SdCardFontSystem.cpp').read_text()
         manager = (ROOT / 'lib/EpdFont/SdCardFontManager.cpp').read_text()
-        table = system[system.index('#if !defined(ENABLE_CHINESE_VERSION)'):system.index('}  // namespace')]
+        table = system[system.index('struct UiFontSize'):system.index('}  // namespace', system.index('struct UiFontSize'))]
         program = r'''
 #include <algorithm>
 #include <array>
@@ -26,10 +69,16 @@ class UiFontFallbackTest(unittest.TestCase):
 #include <string>
 #include <vector>
 #include "Utf8.h"
+#include "MissingGlyph.h"
+constexpr int trackingBetween(const uint32_t leftCp, const uint32_t rightCp, const int8_t tracking) {
+  const auto isSpace = [](const uint32_t cp) { return cp == ' ' || cp == 0xA0 || cp == 0x3000; };
+  return leftCp == 0 || isSpace(leftCp) || isSpace(rightCp) ? 0 : tracking;
+}
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
-constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
-constexpr int CJK_UI_8_FONT_ID=4, CJK_UI_10_FONT_ID=5, CJK_UI_12_FONT_ID=6;
+inline constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
+inline constexpr int CJK_UI_8_FONT_ID=4, CJK_UI_10_FONT_ID=5, CJK_UI_12_FONT_ID=6;
+constexpr int READER_STATUS_FONT_ID=7, READER_ESTIMATE_FONT_ID=8;
 namespace memory {
 bool healthy = true;
 bool psramHasHeadroom(size_t, size_t, size_t) { return healthy; }
@@ -39,31 +88,29 @@ enum class BidiBaseDir { AUTO };
 bool isTransparentMark(uint32_t) { return false; }
 }
 const char* resolveVisualText(const char* text, std::string&, BidiUtils::BidiBaseDir) { return text; }
-namespace combiningMark {
-int anchorFor(uint32_t) { return 0; }
-int raiseAboveBase(int,int,int,int) { return 0; }
-int anchorOver(int,int,int,int,int,int) { return 0; }
-}
-namespace fp4 { int toPixel(int value) { return value/16; } }
-struct EpdGlyph { int top=0, height=8, left=0, width=8, advanceX=128; };
 const void* measured=nullptr;
 const void* drawn=nullptr;
+std::vector<int> drawnXs;
 struct EpdFontFamily {
   enum Style { REGULAR=0, BOLD=1, SUP=16, SUB=32 };
   std::set<uint32_t> coverage;
+  const EpdFontData* getData(Style) const { static EpdFontData data{}; data.ascender=12; return &data; }
   bool hasCodepoint(uint32_t cp, Style = REGULAR) const { return coverage.contains(cp); }
   void getTextDimensions(const char*, int* w, int* h, Style) const { measured=this; *w=8; *h=8; }
-  const EpdGlyph* getGlyph(uint32_t, Style, bool* replaced=nullptr) const {
-    static EpdGlyph glyph; if (replaced) *replaced=false; return &glyph;
+  const EpdGlyph* getGlyph(uint32_t cp, Style style, bool* replaced=nullptr) const {
+    static EpdGlyph glyph{8,8,128,0,8,0,0};
+    const bool found=hasCodepoint(cp,style);
+    if (replaced) *replaced=!found;
+    return found ? &glyph : nullptr;
   }
   uint32_t applyLigatures(uint32_t cp, const char*&, Style) const { return cp; }
   int getKerning(uint32_t,uint32_t,Style) const { return 0; }
 };
 enum class TextRotation { None };
 template<TextRotation> void renderCharImpl(const auto&, int, const EpdFontFamily& font, uint32_t,
-                                         int,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; }
+                                         int x,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; drawnXs.push_back(x); }
 void renderCharScaled(const auto&, int, const EpdFontFamily& font, uint32_t,
-                      int,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; }
+                      int x,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; drawnXs.push_back(x); }
 struct FontCacheManager {
   bool isScanning() const { return false; }
   void recordText(const char*,int,EpdFontFamily::Style) {}
@@ -90,23 +137,27 @@ struct GfxRenderer {
   int getTextWidth(int,const char*,EpdFontFamily::Style=EpdFontFamily::REGULAR,
                    BidiUtils::BidiBaseDir=BidiUtils::BidiBaseDir::AUTO) const;
   void drawText(int,int,int,const char*,bool=true,EpdFontFamily::Style=EpdFontFamily::REGULAR,
-                BidiUtils::BidiBaseDir=BidiUtils::BidiBaseDir::AUTO) const;
+                BidiUtils::BidiBaseDir=BidiUtils::BidiBaseDir::AUTO,int8_t=0) const;
   void prewarmFallbackText(int,const char*,EpdFontFamily::Style=EpdFontFamily::REGULAR) const;
   std::map<int, EpdFontFamily> fontMap;
   std::map<int, std::array<int, 2>> fallbackFontMap_;
+  std::map<int, int> preferredFontMap_;
   using TextGetter = const char* (*)(const void*, uint32_t);
   void prewarmFallbackText(int,TextGetter,const void*,uint32_t,EpdFontFamily::Style=EpdFontFamily::REGULAR) const;
   std::map<int, SdCardFont*> sdCardFonts_;
   std::map<int, int> sdCardFontScales_;
   const auto& getFontMap() const { return fontMap; }
   int resolveTextFontId(int, const char*, EpdFontFamily::Style = EpdFontFamily::REGULAR) const;
+  int resolveFontFamilyId(int) const;
+  void clearPreferredFonts() { preferredFontMap_.clear(); }
+  void setPreferredFont(int id,int preferred) { preferredFontMap_[id]=preferred; }
   void clearSdCardFonts() { sdCardFonts_.clear(); sdCardFontScales_.clear(); }
 ''' + method(header, 'void setFallbackFont(') + '\n' + method(header, 'void removeFont(') + r'''
 };
 struct SdCardFontFileInfo { uint8_t pointSize; };
 struct SdCardFontFamilyInfo {
   std::string name="test";
-  std::map<uint8_t, SdCardFontFileInfo> files{{8,{8}},{10,{10}},{12,{12}},{14,{14}}};
+  std::map<uint8_t, SdCardFontFileInfo> files{{8,{8}},{10,{10}},{12,{12}},{14,{14}},{20,{20}}};
   const SdCardFontFileInfo* findFile(uint8_t size) const {
     auto it=files.find(size); return it == files.end() ? nullptr : &it->second;
   }
@@ -123,6 +174,7 @@ struct SdCardFontManager {
   int getFontId(const std::string&) const;
   int loadFile(const SdCardFontFileInfo& file, const char*, GfxRenderer& r, bool flash, bool cache) {
     if (file.pointSize==failSize) return 0;
+    assert(loaded_.size()<loaded_.capacity()); // every face fits the preallocated slots
     ++loads;
     readerCacheLoads += cache;
     assert(!flash);
@@ -148,7 +200,8 @@ struct SdCardFontSystem {
   SdCardFontManager manager_;
   void setupUiFallbacks(GfxRenderer&);
 };
-''' + table + '\n' + method(renderer, 'int GfxRenderer::resolveTextFontId(') + '\n'
+''' + table + '\n' + method(renderer, 'int GfxRenderer::resolveFontFamilyId(') + '\n'
+        program += method(renderer, 'int GfxRenderer::resolveTextFontId(') + '\n'
         for name in ('bool SdCardFontManager::loadFamily(', 'int SdCardFontManager::loadFamilyExtraSize(',
                      'void SdCardFontManager::unloadAll(', 'int SdCardFontManager::getFontId('):
             program += method(manager, name) + '\n'
@@ -158,25 +211,100 @@ struct SdCardFontSystem {
             program += method(renderer, name) + '\n'
         program += method(system, 'void SdCardFontSystem::setupUiFallbacks(') + r'''
 int main() {
-  for (int scenario=0; scenario<7; ++scenario) {
+  for (int scenario=0; scenario<8; ++scenario) {
     GfxRenderer r;
     for (int id=1; id<=3; ++id) {
       r.fontMap[id]={{'A'}};
       r.fontMap[id+3]={{'A',0x4E00}};
       r.setFallbackFont(id,id+3);
     }
+    r.fontMap[READER_STATUS_FONT_ID]=r.fontMap[SMALL_FONT_ID];
+    r.fontMap[READER_ESTIMATE_FONT_ID]=r.fontMap[UI_10_FONT_ID];
+    r.setFallbackFont(READER_STATUS_FONT_ID,CJK_UI_8_FONT_ID);
+    r.setFallbackFont(READER_ESTIMATE_FONT_ID,CJK_UI_10_FONT_ID);
     SdCardFontSystem s;
     if (scenario==1) s.registry_.family.files.erase(10);
     if (scenario==2) s.manager_.failSize=8;
     if (scenario==3) s.manager_.coverage={'A'};
     if (scenario==6) s.manager_.coverage={'A',0x03B1};
     memory::healthy = scenario!=4;
-    const int readerSize = scenario==5 ? 12 : 14;
+    const int readerSize = scenario==7 ? 20 : scenario==5 ? 12 : 14;
     assert(s.manager_.loadFamily(s.registry_.family, r, readerSize));
+    const auto capacity=s.manager_.loaded_.capacity();
+    assert(capacity==(EXPECT_READPICO ? 5 : 4));
     s.setupUiFallbacks(r);
+    assert(s.manager_.loaded_.capacity()==capacity);
     constexpr bool enabled = EXPECT_ENABLED;
+    if constexpr (EXPECT_READPICO) {
+#ifdef SIMULATOR
+      const bool active=true;
+#else
+      const bool active=memory::healthy;
+#endif
+      const int extraSizes=scenario==7 ? 4 : (scenario==1 || scenario==2) ? 2 : 3;
+      assert(s.manager_.loads==(active ? 1+extraSizes : 1));
+      assert(s.manager_.readerCacheLoads==1); // footer faces have no PSRAM glyph arena
+      for (int id=1; id<=3; ++id) {
+        const int chosen=active ? (id==3 ? 114 : 112) : id;
+        assert(r.resolveFontFamilyId(id)==chosen);
+        measured=drawn=nullptr;
+        r.getTextWidth(id,"A");
+        r.drawText(id,0,0,"A");
+        assert(measured==&r.fontMap.at(chosen) && drawn==measured);
+      }
+      const int loads=s.manager_.loads;
+      s.setupUiFallbacks(r);
+      assert(s.manager_.loads==loads); // already-resident 8/10 pt faces are reused
+      for (int id : {READER_STATUS_FONT_ID,READER_ESTIMATE_FONT_ID}) {
+        const int pt=id==READER_STATUS_FONT_ID ? 8 : 10;
+        const int fallback=id==READER_STATUS_FONT_ID ? CJK_UI_8_FONT_ID : CJK_UI_10_FONT_ID;
+        const bool loaded=active && !(scenario==1 && pt==10) && !(scenario==2 && pt==8);
+        const int chosen=loaded ? 100+pt : id;
+        assert(r.resolveFontFamilyId(id)==chosen);
+        for (const char* text : {"A","一"}) {
+          const int resolved=r.resolveTextFontId(id,text);
+          const int expected=std::string(text)=="一" && (!loaded || scenario==3 || scenario==6) ? fallback : chosen;
+          assert(resolved==expected);
+          measured=drawn=nullptr;
+          r.getTextWidth(id,text);
+          r.drawText(id,0,0,text);
+          assert(measured==&r.fontMap.at(expected) && drawn==measured);
+        }
+        if (loaded) {
+          r.fontMap.at(chosen).coverage.erase('A');
+          assert(r.resolveTextFontId(id,"A")==id);
+        }
+      }
+      if (active) {
+        r.fontMap.at(112).coverage.erase('A');
+        assert(r.resolveTextFontId(2,"A")==2); // SD faces may omit ASCII too
+      }
+      s.manager_.unloadAll(r);
+      assert(r.preferredFontMap_.empty());
+      for (int id=1; id<=3; ++id) assert(r.resolveFontFamilyId(id)==id);
+      assert(r.resolveFontFamilyId(READER_STATUS_FONT_ID)==READER_STATUS_FONT_ID);
+      assert(r.resolveTextFontId(READER_STATUS_FONT_ID,"一")==CJK_UI_8_FONT_ID);
+      assert(r.resolveFontFamilyId(READER_ESTIMATE_FONT_ID)==READER_ESTIMATE_FONT_ID);
+      memory::healthy=true;
+      s.registry_.family.files.erase(12);
+      assert(s.manager_.loadFamily(s.registry_.family,r,14));
+      s.setupUiFallbacks(r);
+      assert(r.resolveFontFamilyId(1)==1 && r.resolveFontFamilyId(2)==2);
+      assert(r.resolveFontFamilyId(3)==114);
+      assert(r.resolveFontFamilyId(READER_STATUS_FONT_ID)==(scenario==2 ? READER_STATUS_FONT_ID : 108));
+      assert(r.resolveFontFamilyId(READER_ESTIMATE_FONT_ID)==(scenario==1 ? READER_ESTIMATE_FONT_ID : 110));
+      s.manager_.unloadAll(r);
+      s.registry_.family.name="other";
+      s.registry_.family.files.erase(8);
+      assert(s.manager_.loadFamily(s.registry_.family,r,14));
+      s.setupUiFallbacks(r);
+      assert(r.resolveFontFamilyId(READER_STATUS_FONT_ID)==READER_STATUS_FONT_ID);
+      assert(r.resolveTextFontId(READER_STATUS_FONT_ID,"一")==CJK_UI_8_FONT_ID);
+      s.manager_.unloadAll(r);
+      continue;
+    }
     const bool active = enabled && scenario!=3 && scenario!=4;
-    assert(s.manager_.loads == (active ? (scenario==0 || scenario==6 ? 4 : 3) : 1));
+    assert(s.manager_.loads == (active ? (scenario==0 || scenario==6 || scenario==7 ? 4 : 3) : 1));
     assert(s.manager_.readerCacheLoads==1);
     assert(r.resolveTextFontId(1,"A")==1);
     assert(r.resolveTextFontId(1,"")==1);
@@ -212,6 +340,12 @@ int main() {
         assert(r.resolveTextFontId(id,"一")==id+3);
       }
     }
+    drawnXs.clear();
+    r.drawText(1,0,0,"A龘龘A");
+    assert((drawnXs==std::vector<int>{0,8,19,30}));
+    drawnXs.clear();
+    r.drawText(1,0,0,"A龘龘A",true,EpdFontFamily::SUP);
+    assert((drawnXs==std::vector<int>{0,4,10,16}));
     s.manager_.unloadAll(r);
     assert(r.sdCardFonts_.empty());
     for (int id=1; id<=3; ++id) assert(r.resolveTextFontId(id,"一")==id+3);
@@ -241,12 +375,29 @@ int main() {
   }
 }
 '''
+        main = (ROOT / 'src/main.cpp').read_text()
+        registration = next(line.strip() for line in main.splitlines()
+                            if 'setFallbackFont(NOTOSANS_18_FONT_ID,' in line)
+        program = program.replace('constexpr int SMALL_FONT_ID=1,',
+                                  'constexpr int NOTOSANS_18_FONT_ID=9;\nconstexpr int SMALL_FONT_ID=1,')
+        program = program.replace('    SdCardFontSystem s;', '''
+    r.fontMap[NOTOSANS_18_FONT_ID]={{'A'}};
+    ''' + registration.replace('renderer.', 'r.') + '''
+    assert(r.resolveTextFontId(NOTOSANS_18_FONT_ID,"A")==NOTOSANS_18_FONT_ID);
+    assert(r.resolveTextFontId(NOTOSANS_18_FONT_ID,"一")==CJK_UI_12_FONT_ID);
+    measured=drawn=nullptr;
+    r.getTextWidth(NOTOSANS_18_FONT_ID,"一");
+    r.drawText(NOTOSANS_18_FONT_ID,0,0,"一");
+    assert(measured==&r.fontMap.at(CJK_UI_12_FONT_ID) && drawn==measured);
+    SdCardFontSystem s;''')
         configurations = (
+            ('readpico', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'FREEINK_DEVICE_READPICO=1'], True),
+            ('readpico_simulator', ['SIMULATOR', 'CROSSPOINT_EMULATED=1', 'FREEINK_DEVICE_READPICO=1'], True),
             ('s3', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM'], True),
             ('c3', ['CONFIG_IDF_TARGET_ESP32C3=1'], False),
             ('s3_no_psram', ['CONFIG_IDF_TARGET_ESP32S3=1'], False),
-            ('simulator', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'SIMULATOR'], False),
-            ('emulated', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'CROSSPOINT_EMULATED'], False),
+            ('simulator', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'SIMULATOR'], True),
+            ('emulated', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'CROSSPOINT_EMULATED'], True),
         )
         with tempfile.TemporaryDirectory(prefix='ui-fallback-') as directory:
             cpp = Path(directory) / 'check.cpp'
@@ -256,8 +407,10 @@ int main() {
                 with self.subTest(target=name):
                     subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                     '-DENABLE_CHINESE_VERSION=1', f'-DEXPECT_ENABLED={int(enabled)}',
+                                    f'-DEXPECT_READPICO={int(name.startswith("readpico"))}',
                                     *[f'-D{value}' for value in defines],
-                                    '-I', str(ROOT / 'lib/Utf8'), str(cpp),
+                                    '-I', str(ROOT / 'lib/Utf8'), '-I', str(ROOT / 'lib/EpdFont'),
+                                    '-I', str(ROOT / 'lib/MiniBidi'), str(cpp),
                                     str(ROOT / 'lib/Utf8/Utf8.cpp'), '-o', str(exe)], check=True)
                     subprocess.run([str(exe)], check=True)
 

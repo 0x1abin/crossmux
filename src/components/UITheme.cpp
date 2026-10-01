@@ -1,16 +1,25 @@
 #include "UITheme.h"
 
+#include <EpdFont.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HalMemory.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <builtinFonts/notosans_18_bold.h>
+#include <builtinFonts/notosans_18_regular.h>
+#include <builtinFonts/ubuntu_10_bold.h>
+#include <builtinFonts/ubuntu_10_regular.h>
+#include <builtinFonts/ubuntu_12_bold.h>
+#include <builtinFonts/ubuntu_12_regular.h>
 
 #include <algorithm>
 #include <memory>
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "components/CoverGridHomeUi.h"
 #include "components/SelectionCursorPolicy.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
@@ -18,6 +27,20 @@
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
+// The registered families keep these stable addresses across theme changes.
+EpdFont ui10RegularFont(&ubuntu_10_regular);
+EpdFont ui10BoldFont(&ubuntu_10_bold);
+EpdFont ui12RegularFont(&ubuntu_12_regular);
+EpdFont ui12BoldFont(&ubuntu_12_bold);
+
+extern EpdFont offlineReaderFont;
+EpdFont ui18RegularFont(&notosans_18_regular);
+EpdFont ui18BoldFont(&notosans_18_bold);
+
+// Fixed control faces share the existing bitmap data; theme reload never mutates them.
+static EpdFont control18RegularFont(&notosans_18_regular);
+static EpdFont control18BoldFont(&notosans_18_bold);
+EpdFontFamily control18FontFamily(&control18RegularFont, &control18BoldFont);
 
 UITheme UITheme::instance;
 
@@ -27,18 +50,30 @@ UITheme::UITheme() {
 }
 
 void UITheme::reload() {
+  const bool inx = SETTINGS.uiTheme == CrossPointSettings::INX;
+  ui18RegularFont.data = inx ? offlineReaderFont.data : &notosans_18_regular;
+  ui18BoldFont.data = inx ? offlineReaderFont.data : &notosans_18_bold;
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
 }
 
+bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes > 0; }
+
+bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
+
+void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
+
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   std::unique_ptr<BaseTheme> nextTheme;
   const ThemeMetrics* nextMetrics = &BaseMetrics::values;
+  if (type == CrossPointSettings::COVER_GRID && !supportsCoverGrid()) type = CrossPointSettings::LYRA;
+
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
       LOG_DBG("UI", "Using Classic theme");
       nextTheme = makeUniqueNoThrow<BaseTheme>();
       break;
+    case CrossPointSettings::UI_THEME::COVER_GRID:
     case CrossPointSettings::UI_THEME::LYRA:
       LOG_DBG("UI", "Using Lyra theme");
       nextTheme = makeUniqueNoThrow<LyraTheme>();
@@ -125,16 +160,22 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
       orientation != GfxRenderer::Orientation::LandscapeCounterClockwise) {
     reservedHeight += metrics.verticalSpacing + metrics.buttonHintsHeight;
   }
-  const int availableHeight = renderer.getScreenHeight() - reservedHeight - extraReservedHeight;
+  const int availableHeight =
+      UITheme::getInstance().getScreenSafeArea(renderer).height - reservedHeight - extraReservedHeight;
   return UITheme::getInstance().getTheme().getListPageItems(availableHeight, hasSubtitle);
 }
 
-// Screen area excluding the button hints
+// Screen area excluding the bezel and button hints.
 Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints) {
   auto orientation = renderer.getOrientation();
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
   Rect safeArea = Rect{0, 0, screenWidth, screenHeight};
+#if FREEINK_DEVICE_READPICO
+  int top, right, bottom, left;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  safeArea = Rect{left, top, screenWidth - left - right, screenHeight - top - bottom};
+#endif
   const ThemeMetrics metrics = getMetrics();
   switch (orientation) {
     case GfxRenderer::Orientation::Portrait:

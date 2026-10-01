@@ -5,6 +5,7 @@
 #include "ActivityManager.h"
 #include "CrossPointSettings.h"
 #include "I18n.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "util/ButtonNavigator.h"
 
@@ -46,9 +47,8 @@ MainTabLayout Activity::mainTabLayout() const {
   const auto& metrics = theme.getMetrics();
   const bool tabsAtBottom = mainTabsAtBottom();
   const bool showStatus = hasMainTabStatusBar();
-  Rect safe{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight() - metrics.buttonHintsHeight};
+  Rect safe = theme.getScreenSafeArea(renderer, true);
   if (showStatus) {
-    safe = theme.getScreenSafeArea(renderer, true);
     int top, right, bottom, left;
     renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
     const int safeRight = std::min(safe.x + safe.width, renderer.getScreenWidth() - right);
@@ -83,8 +83,12 @@ void Activity::requestUpdate(bool immediate) { activityManager.requestUpdate(imm
 
 void Activity::requestUpdateAndWait() { activityManager.requestUpdateAndWait(); }
 
+// Retain the instance-facing Activity transition API.
+// cppcheck-suppress functionStatic
 void Activity::onGoHome(HomeMenuItem item) { activityManager.goHome(item); }
 
+// Retain the instance-facing Activity transition API.
+// cppcheck-suppress functionStatic
 void Activity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
 
 void Activity::startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) {

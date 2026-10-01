@@ -53,7 +53,7 @@ class InxRecentActivity final : public Activity {
   const ReadingBookStats* statsAt(int index) const;
   int indexFromPoint(int x, int y) const;
   void openSelected();
-  void setThumbnailHeight(int height);
+  void setThumbnailHeight(int displayHeight);
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
   void clearCoverCaches();
   CoverCacheLoadResult tryLoadCoverCache(HalFile& file, CoverRamCache& cache);

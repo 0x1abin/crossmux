@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "FirstLineIndent.h"
+#include "WordStore.h"
 #include "blocks/BlockStyle.h"
 #include "blocks/TextBlock.h"
 
@@ -20,10 +21,20 @@ class ParsedText {
     size_t breakIndex;
   };
 
-  // Long CJK paragraphs can exceed 512 short tokens. A vector<string> growth
-  // from 512 to 1024 needs one 24 KB contiguous block while retaining the old
-  // 12 KB block; deque keeps the same indexed interface without that peak.
-  std::deque<std::string> words;
+  // Word text lives in wordStore (chunked bump arena, NUL-terminated entries);
+  // words holds 8-byte handles into it. This replaces the former
+  // std::deque<std::string>: per-word string objects, their SSO spills, and
+  // every hyphenation/NFC temporary were the layout path's dominant
+  // small-allocation churn, and any failed implicit allocation abort()s under
+  // -fno-exceptions. Handles stay in a std::deque for the #2814 reason: no
+  // large contiguous reallocation at CJK token counts (deque grows in fixed
+  // ~512 B nodes). On arena OOM the word is dropped and hadDroppedWords()
+  // latches so the section build can fail readably instead of aborting.
+  // rubyTexts stays a deque of strings: ruby is rare and per-block small.
+  // The per-token parallel arrays below stay vectors: 1 byte / 1 bit each,
+  // they never approach the contiguous-block ceiling.
+  WordStore wordStore;
+  std::deque<WordStore::StoredWord> words;
   std::vector<EpdFontFamily::Style> wordStyles;
   // Boundary flags use all four combinations:
   //   continues=false, noSpace=false: ordinary breakable word gap
@@ -57,11 +68,13 @@ class ParsedText {
   uint8_t extraParagraphSpacing;  // 0=off, 1..5=0.5x/0.75x/1x/1.25x/1.5x line height
   uint8_t firstLineIndent;
   bool collectTouchLinks;
+  uint8_t wordSpacingPercent = 100;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
   bool firstLinePending;
   bool isNaturalAlign;
   bool hasRtlWord;
+  bool droppedWords = false;
   std::vector<std::string> reorderedWordsScratch;
   std::vector<EpdFontFamily::Style> reorderedStylesScratch;
   std::vector<uint16_t> reorderedWidthsScratch;
@@ -70,6 +83,8 @@ class ParsedText {
   std::vector<uint8_t> reorderedFocusBoundaryScratch;
   std::vector<uint16_t> visualOrderScratch;
 
+  std::string_view wordAt(const size_t i) const { return wordStore.view(words[i]); }
+  bool storeWord(std::string_view text, WordStore::StoredWord& out);
   uint32_t visibleOffsetBaseAt(size_t wordIndex) const;
   uint32_t visibleOffsetAt(size_t wordIndex) const;
   void pushVisibleOffset(uint32_t offset);
@@ -124,7 +139,9 @@ class ParsedText {
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
+  bool hadDroppedWords() const { return droppedWords; }
   bool layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<bool(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
-                             bool includeLastLine = true);
+                             bool includeLastLine = true, int8_t characterSpacing = 0,
+                             uint8_t wordSpacingPercent = 100);
 };

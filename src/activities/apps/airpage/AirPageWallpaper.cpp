@@ -1,5 +1,6 @@
 #include "AirPageWallpaper.h"
 
+#include <HalDisplay.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -17,6 +18,14 @@ constexpr char kSleepImagePath[] = "/sleep.bmp";
 constexpr char kSleepImagePartPath[] = "/sleep.bmp.part";
 constexpr char kSleepImageBackupPath[] = "/sleep.bmp.bak";
 constexpr size_t kCopyBufferSize = 128;
+
+template <typename Display>
+JpegToBmpConverter::Output wallpaperOutput(const Display& panel) {
+  if constexpr (requires { panel.getGrayscaleLevels(); }) {
+    if (panel.getGrayscaleLevels() == 16) return JpegToBmpConverter::Output::Gray8;
+  }
+  return JpegToBmpConverter::Output::Gray2;  // Legacy simulator HAL has four levels.
+}
 
 }  // namespace
 
@@ -57,7 +66,8 @@ bool AirPageWallpaper::writePart(const SelectedImage& selected) {
           !Storage.openFileForWrite("AIRP", kSleepImagePartPath, output)) {
         return false;
       }
-      const bool converted = JpegToBmpConverter::jpegFileToBmpStream(input, output, /*crop=*/false);
+      const auto format = wallpaperOutput(display);
+      const bool converted = JpegToBmpConverter::jpegFileToBmpStream(input, output, /*crop=*/false, format);
       output.flush();
       return converted;
     }

@@ -32,6 +32,7 @@
 | Murphy M4 | ESP32-S3 | Nightly |
 | Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Nightly |
+| [Read Pico (小纸 Pico)](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
 This table describes configured release targets, not a claim that every feature has passed hardware acceptance. Each S3 target needs its own image. X4 Classic has a build-only target and is absent from public release/OTA indexes. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
 
@@ -92,6 +93,18 @@ CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nigh
 
 The development application is `.pio/build/metalio_eink4/firmware.bin`; first installation also requires the matching bootloader and partition layout described in the [Metalio guide](./docs/engineering/metalio-eink4.md).
 
+For Read Pico (小纸 Pico):
+
+Until FreeInk SDK PR #35 is merged, first follow the temporary SDK checkout in the [Read Pico guide](./docs/engineering/read-pico.md#current-implementation--2026-09-30).
+
+```bash
+pio run -e readpico
+```
+
+On Windows, set `PYTHONIOENCODING=utf-8` before running `pio`, otherwise the build can stall when PlatformIO prints the Arabic i18n language row.
+
+The application is `.pio/build/readpico/firmware.bin`. First installation is a **full-table flash** — `bootloader@0x0`, `partitions@0x8000`, `boot_app0@0xe000`, `app@0x10000` — after a verified full-chip (16 MiB) backup, because the repository partition table and the board's factory `partitions_16M.csv` disagree at `0xE000` and use different app-slot sizes. This target is **build-only in this round**: it is absent from the Nightly/OTA/Web release mappings, and no hardware acceptance has been recorded yet. See the [Read Pico guide](./docs/engineering/read-pico.md) for the pin map, the frozen build flags, and the pending acceptance checklist.
+
 ### Desktop simulator
 
 Install SDL2 and curl (plus OpenSSL development headers on Linux), place EPUBs in `fs_/books/`, then run:
@@ -101,9 +114,12 @@ pio run -e simulator -t run_simulator           # X4
 pio run -e simulator_x3 -t run_simulator        # X3
 pio run -e simulator_eego_a4 -t run_simulator   # eego A4
 pio run -e simulator_murphy_m4 -t run_simulator # Murphy M4
+pio run -e simulator_readpico -t run_simulator  # Read Pico, 684x1216 portrait
 ```
 
 The [CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator) is pinned in `platformio.ini`. It previews UI and input flows; it does not validate display waveforms, power consumption, or physical hardware timing.
+
+Read Pico fits its window to the desktop while retaining full-resolution BMP screenshots. Mouse input supports tap, hold and swipe; Up/Escape/Down represent the three capacitive keys, and only Power (`P`) wakes from sleep. Native sixteen-level images and SD UI fonts follow the Read Pico paths. See the [device guide](./docs/engineering/read-pico.md#desktop-simulator) for validation details.
 
 ### Checks and debugging
 

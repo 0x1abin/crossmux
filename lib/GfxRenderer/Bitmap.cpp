@@ -160,6 +160,8 @@ const char* Bitmap::errorToString(BmpReaderError err) {
 
     case BmpReaderError::OomRowBuffer:
       return "OomRowBuffer";
+    case BmpReaderError::OomDitherer:
+      return "OomDitherer";
     case BmpReaderError::ShortReadRow:
       return "ShortReadRow";
   }
@@ -257,11 +259,21 @@ BmpReaderError Bitmap::parseHeaders() {
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
-      if (!atkinsonDitherer || !atkinsonDitherer->valid()) return BmpReaderError::OomRowBuffer;
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width, originalThresholds);
+      if (!atkinsonDitherer || !atkinsonDitherer->isValid()) {
+        delete atkinsonDitherer;
+        atkinsonDitherer = nullptr;
+        LOG_ERR("BMP", "OOM: Atkinson ditherer or row buffers");
+        return BmpReaderError::OomDitherer;
+      }
     } else {
-      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
-      if (!fsDitherer || !fsDitherer->valid()) return BmpReaderError::OomRowBuffer;
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width, originalThresholds);
+      if (!fsDitherer || !fsDitherer->isValid()) {
+        delete fsDitherer;
+        fsDitherer = nullptr;
+        LOG_ERR("BMP", "OOM: Floyd-Steinberg ditherer or row buffers");
+        return BmpReaderError::OomDitherer;
+      }
     }
   }
 
@@ -269,7 +281,7 @@ BmpReaderError Bitmap::parseHeaders() {
 }
 
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
-BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow) const {
+BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow, RowOutput output) const {
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
   if (sourceRead(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
 
@@ -282,6 +294,12 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* o
 
   // Helper lambda to pack 2bpp color into the output stream
   auto packPixel = [&](const uint8_t lum, const bool opaque = true) {
+    if (output == RowOutput::Gray8) {
+      data[currentX] = lum;
+      if (opacityRow) opacityRow[currentX] = opaque;
+      ++currentX;
+      return;
+    }
     uint8_t color;
     if (atkinsonDitherer) {
       color = atkinsonDitherer->processPixel(adjustPixel(lum), currentX);
@@ -364,9 +382,9 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* o
       return BmpReaderError::UnsupportedBpp;
   }
 
-  if (atkinsonDitherer)
+  if (output == RowOutput::PackedGray2 && atkinsonDitherer)
     atkinsonDitherer->nextRow();
-  else if (fsDitherer)
+  else if (output == RowOutput::PackedGray2 && fsDitherer)
     fsDitherer->nextRow();
 
   // Flush remaining bits if width is not a multiple of 4

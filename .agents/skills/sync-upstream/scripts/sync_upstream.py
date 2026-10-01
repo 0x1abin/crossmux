@@ -502,6 +502,7 @@ def clone_crossmux_candidate(
     candidate: Path,
     behavior_overlaps: Sequence[str],
     upstream_sha: str,
+    local_rehearsal: bool = False,
 ) -> dict[str, object]:
     candidate.parent.mkdir(parents=True, exist_ok=True)
     run(["git", "clone", str(ctx.root), str(candidate)], cwd=ctx.root)
@@ -511,7 +512,7 @@ def clone_crossmux_candidate(
     git(candidate, "remote", "add", "upstream", upstream_url)
     fetch_branch(candidate, "origin", ctx.base_branch)
     fetch_branch(candidate, "upstream", ctx.upstream_branch)
-    base_ref = f"refs/remotes/origin/{ctx.base_branch}"
+    base_ref = full_sha(ctx.root, "HEAD") if local_rehearsal else f"refs/remotes/origin/{ctx.base_branch}"
     base_sha = full_sha(candidate, base_ref)
     branch = branch_name("crossmux", upstream_sha)
     git(candidate, "switch", "-C", branch, base_ref)
@@ -523,7 +524,7 @@ def clone_crossmux_candidate(
         upstream_sha,
         f"chore: sync upstream {ctx.upstream_branch} into {ctx.base_branch} ({upstream_sha[:8]})",
     )
-    if not conflicts:
+    if not conflicts and not local_rehearsal:
         update_crossmux_dependency_pins(
             candidate, statuses["sdk"].fork_sha, statuses["simulator"].fork_sha
         )
@@ -611,6 +612,8 @@ def refresh_candidate(candidate: Path, state: dict[str, object]) -> dict[str, ob
     )
     state["conflict_paths"] = conflicts
     state["review_items"] = sorted(set(prior_items) | set(conflicts))
+    if state["review_items"] != prior_items:
+        state.pop("reviewed_tree", None)
     write_state(candidate, state)
     return state
 
@@ -955,12 +958,59 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def reviewed_local_dependency(candidate: Path, pins: dict[str, str]) -> dict[str, object]:
+    state = refresh_candidate(candidate, read_state(candidate))
+    if state.get("upstream_pins") != pins:
+        raise RuntimeError(f"Dependency pins changed: {candidate}")
+    validate_index(candidate)
+    tree = full_sha(candidate, "HEAD^{tree}") if not staged_paths(candidate) else git_output(candidate, "write-tree")
+    if state.get("reviewed_tree") != tree:
+        raise RuntimeError(f"Dependency index needs review: {candidate}; rerun start with --review-note per item.")
+    export = candidate.parent / "rehearsal-sources" / f"{state['component']}-{tree}"
+    if not export.exists():
+        export.mkdir(parents=True)
+        git(candidate, "checkout-index", "--all", f"--prefix={export}/")
+    if git_output(candidate, f"--work-tree={export}", "diff", "--name-only", "--") or \
+            git_output(candidate, f"--work-tree={export}", "ls-files", "--others", "--exclude-standard"):
+        raise RuntimeError(f"Reviewed source export changed: {export}")
+    return {
+        "candidate": str(candidate), "source": str(export), "source_tree": tree,
+        "base_sha": state["base_sha"], "upstream_sha": state["upstream_sha"],
+    }
+
+
+def finish_local_rehearsal(candidate: Path, state: dict[str, object], args: argparse.Namespace,
+                           dependencies: dict[str, object]) -> None:
+    state["local_rehearsal"] = True
+    state["local_dependencies"] = dependencies
+    notes = getattr(args, "review_note", [])
+    if notes:
+        if len(notes) != len(state["review_items"]):
+            raise RuntimeError("Pass one approved --review-note per review item, in printed order.")
+        validate_index(candidate)
+        state["review_notes"] = notes
+        state["reviewed_tree"] = git_output(candidate, "write-tree")
+    elif not state["review_items"]:
+        validate_index(candidate)
+        state["reviewed_tree"] = git_output(candidate, "write-tree")
+    # Keep build-time dependencies separate from publishable Git pins.
+    write_state(candidate, state)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     ctx = build_context(args)
     pins = upstream_pins(args)
     statuses = inspect_dependencies(ctx.root, upstream_pins=pins)
+    rehearsal = getattr(args, "local_rehearsal", False)
+    dependencies = {}
+    if rehearsal:
+        for name in ("sdk", "simulator", "crossmux"):
+            if name == args.component:
+                break
+            dependency = candidate_path(name, statuses[name].parent_sha, args.candidate_root).resolve()
+            dependencies[name] = reviewed_local_dependency(dependency, pins)
     expected = next_component(statuses)
-    if args.component != expected:
+    if not rehearsal and args.component != expected:
         raise RuntimeError(
             f"Next component is {expected!r}; refusing to start {args.component!r}."
         )
@@ -971,16 +1021,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         upstream_sha = str(crossmux_status["upstream_sha"])
     else:
         status = statuses[args.component]
-        if status.action != "sync-required":
+        if not rehearsal and status.action != "sync-required":
             raise RuntimeError(
                 f"{args.component} action is {status.action}; no candidate can be started."
             )
         upstream_sha = status.parent_sha
-    candidate = candidate_path(args.component, upstream_sha, args.candidate_root)
+    candidate = candidate_path(args.component, upstream_sha, args.candidate_root).resolve()
     if candidate.exists():
         state = read_state(candidate)
         if cast(dict[str, str], state.get("upstream_pins", {})) != pins:
             raise RuntimeError("Candidate upstream pins do not match this command.")
+        if state.get("local_rehearsal") and not rehearsal:
+            raise RuntimeError("Local rehearsal cannot become a publishable candidate; use a fresh candidate root.")
         state = refresh_candidate(candidate, state)
         recorded_overlaps = cast(list[str], state["overlap_paths"])
         state["overlap_paths"] = sorted(
@@ -988,18 +1040,23 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
         recorded_items = cast(list[str], state["review_items"])
         state["review_items"] = sorted(set(recorded_items) | set(args.behavior_overlap))
-        if args.component == "crossmux" and not state["conflict_paths"]:
+        if state["review_items"] != recorded_items:
+            state.pop("reviewed_tree", None)
+        if args.component == "crossmux" and not rehearsal and not state["conflict_paths"]:
             update_crossmux_dependency_pins(
                 candidate, statuses["sdk"].fork_sha, statuses["simulator"].fork_sha
             )
             state["sdk_sha"] = statuses["sdk"].fork_sha
             state["simulator_sha"] = statuses["simulator"].fork_sha
+        if rehearsal:
+            finish_local_rehearsal(candidate, state, args, dependencies)
         write_state(candidate, state)
         summarize_state(candidate, state)
         return 0
     if args.component == "crossmux":
         state = clone_crossmux_candidate(
-            ctx, statuses, candidate, args.behavior_overlap, upstream_sha
+            ctx, statuses, candidate, args.behavior_overlap, upstream_sha,
+            **({"local_rehearsal": True} if rehearsal else {}),
         )
     else:
         state = clone_dependency_candidate(
@@ -1010,6 +1067,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             args.behavior_overlap,
         )
     state["upstream_pins"] = pins
+    if rehearsal:
+        finish_local_rehearsal(candidate, state, args, dependencies)
     write_state(candidate, state)
     summarize_state(candidate, state)
     return 0
@@ -1018,6 +1077,8 @@ def cmd_start(args: argparse.Namespace) -> int:
 def cmd_publish(args: argparse.Namespace) -> int:
     candidate = Path(args.candidate).resolve()
     state = read_state(candidate)
+    if state.get("local_rehearsal"):
+        raise RuntimeError("Local rehearsal cannot be published; recreate against real dependency commits and revalidate.")
     pins = upstream_pins(args)
     if cast(dict[str, str], state.get("upstream_pins", {})) != pins:
         raise RuntimeError("Candidate upstream pins do not match this command.")
@@ -1145,6 +1206,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         help="record a manually discovered cross-file or cross-symbol overlap; repeatable",
     )
+    start_parser.add_argument("--local-rehearsal", action="store_true",
+                              help="use reviewed local dependency indexes; candidate cannot be published")
+    start_parser.add_argument("--review-note", action="append", default=[],
+                              help="approve one resolved rehearsal review item; repeat in printed order")
     start_parser.set_defaults(func=cmd_start)
 
     publish_parser = subparsers.add_parser(

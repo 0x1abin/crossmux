@@ -10,6 +10,10 @@
 
 #include <cassert>
 
+#if FREEINK_DEVICE_READPICO
+#include <BoardReadPico.h>
+#endif
+
 #define SDCard SDCardManager::getInstance()
 
 namespace {
@@ -27,9 +31,36 @@ HalStorage::HalStorage() {
 
 // begin() and ready() are only called from setup, no need to acquire mutex for them
 
-bool HalStorage::begin() { return SDCard.begin(); }
+bool HalStorage::begin() {
+  const bool mounted = SDCard.begin();
+#if FREEINK_DEVICE_READPICO
+  if (!mounted) {
+    // Read Pico's slot is 1-bit SDMMC (CLK38/CMD42/D0) with no ESP-side detect
+    // pin: card detect lives on the FCA9555 (P0.6, active-low) and the mount is
+    // by attempt — the SDK already re-runs the whole mount after a 200 ms settle,
+    // which is the vendor's first-clock-negotiation workaround
+    // (SdmmcBlockDevice.cpp; read_pico_sd.c). The CD line is a hint for this
+    // message only, read AFTER the mount so a card that came up fine is never
+    // rejected by it. Unreadable-card handling belongs to the caller (src/main.cpp
+    // shows the SD error screen and returns); nothing here aborts.
+    const bool cardDetect = cardDetectAsserted();
+    LOG_ERR("STORAGE", "SD mount failed; card detect %s",
+            cardDetect ? "asserted (card present but unreadable)" : "released or unreadable");
+  }
+#endif
+  return mounted;
+}
 
 bool HalStorage::ready() const { return SDCard.ready(); }
+
+bool HalStorage::cardDetectAsserted() const {
+#if FREEINK_DEVICE_READPICO
+  // P0.6, active-low; false on any I2C failure (see the header contract).
+  return BoardReadPico::sdCardPresent();
+#else
+  return false;
+#endif
+}
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
@@ -81,6 +112,15 @@ bool HalStorage::disconnectUsbDriveHost() {
 #if FREEINK_CAP_USB_MSC
   StorageLock lock;
   return usbMassStorage.disconnectHost();
+#else
+  return false;
+#endif
+}
+
+bool HalStorage::usbDriveHostSuspended() const {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  return usbMassStorage.hostSuspended();
 #else
   return false;
 #endif
@@ -255,6 +295,13 @@ size_t HalFile::getName(char* name, size_t len) { HAL_FILE_WRAPPED_CALL(getName,
 size_t HalFile::size() { HAL_FILE_FORWARD_CALL(size, ); }              // already thread-safe, no need to wrap
 size_t HalFile::fileSize() { HAL_FILE_FORWARD_CALL(fileSize, ); }      // already thread-safe, no need to wrap
 uint64_t HalFile::fileSize64() { HAL_FILE_FORWARD_CALL(fileSize, ); }  // already thread-safe, no need to wrap
+uint32_t HalFile::modificationTime() {
+  HalStorage::StorageLock lock;
+  uint16_t date = 0;
+  uint16_t time = 0;
+  if (!impl || !impl->file.getModifyDateTime(&date, &time) || date == 0) return 0;
+  return (static_cast<uint32_t>(date) << 16) | time;
+}
 bool HalFile::seek(size_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
 bool HalFile::seek64(uint64_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
 bool HalFile::seekCur(int64_t offset) { HAL_FILE_WRAPPED_CALL(seekCur, offset); }

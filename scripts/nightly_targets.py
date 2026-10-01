@@ -82,6 +82,16 @@ TARGETS = {
         'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
+    'readpico': {
+        'deviceSlug': 'readpico',
+        'models': ['readpico', 'read_pico'],
+        'boardTag': 'readpico',
+        'chip': 'ESP32-S3',
+        'chipId': 0x0009,
+        'environments': {'nightly': 'readpico_nightly'},
+        'supportedChannels': ['nightly'],
+        'fullInstall': True,
+    },
 }
 
 FLAVOR_TOKENS = {'global': 'global', 'zh-CN': 'cn'}

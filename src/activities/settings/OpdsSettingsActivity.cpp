@@ -189,6 +189,10 @@ void OpdsSettingsActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
+  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
+    props.labelText = screen.theme().smallText;
+    props.labelText.maxLines = 2;
+  }
   syncListViewport(screen, props);
   screen.list(props);
 }

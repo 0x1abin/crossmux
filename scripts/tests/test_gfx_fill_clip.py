@@ -26,8 +26,8 @@ struct GfxRenderer {
   uint16_t panelWidth = 16, panelHeight = 24, panelWidthBytes = 2;
   std::array<uint8_t, 48> bytes;
   FontCacheManager* fontCacheManager_ = nullptr;
-  bool clipActive = false, strip = false;
-  int clipX0 = 0, clipY0 = 0, clipX1 = 0, clipY1 = 0;
+  bool strip = false;
+  int clipLeft_=0, clipTop_=0, clipRight_=0, clipBottom_=0;
   int getScreenWidth() const { return orientation == Portrait || orientation == PortraitInverted ? panelHeight : panelWidth; }
   int getScreenHeight() const { return orientation == Portrait || orientation == PortraitInverted ? panelWidth : panelHeight; }
   uint8_t* getWriteTarget() const { return const_cast<uint8_t*>(bytes.data()); }
@@ -47,10 +47,11 @@ template<Color C> void check() {
                           Rect{1,2,7,2}, Rect{30,30,4,4}, Rect{1,1,0,5}, Rect{1,1,5,-1}}) {
           GfxRenderer r;
           r.orientation = orientation;
-          r.clipActive = clipped;
           r.strip = strip;
-          r.clipX0 = clip.x; r.clipY0 = clip.y;
-          r.clipX1 = clip.x + clip.w; r.clipY1 = clip.y + clip.h;
+          r.clipLeft_ = clipped ? std::max(0,clip.x) : 0;
+          r.clipTop_ = clipped ? std::max(0,clip.y) : 0;
+          r.clipRight_ = clipped ? std::min(r.getScreenWidth(),clip.x+clip.w) : r.getScreenWidth();
+          r.clipBottom_ = clipped ? std::min(r.getScreenHeight(),clip.y+clip.h) : r.getScreenHeight();
           r.bytes.fill(0xa5);
           auto expected = r.bytes;
           for (int y = 0; y < r.getScreenHeight(); ++y)

@@ -60,6 +60,7 @@ enum class BmpReaderError : uint8_t {
   BufferTooSmall,
   OomRowBuffer,
   ShortReadRow,
+  OomDitherer,
 };
 
 class Bitmap {
@@ -72,7 +73,8 @@ class Bitmap {
 
   static const char* errorToString(BmpReaderError err);
 
-  explicit Bitmap(HalFile& file, bool dithering = false) : file(&file), dithering(dithering) {}
+  explicit Bitmap(HalFile& file, bool dithering = false, bool originalThresholds = false)
+      : file(&file), dithering(dithering), originalThresholds(originalThresholds) {}
 #if defined(BOARD_HAS_PSRAM) || defined(CROSSPOINT_EMULATED)
   // Non-owning memory source. The caller must keep `data` alive for the
   // Bitmap's lifetime; sequential rows are copied into the existing internal
@@ -86,7 +88,9 @@ class Bitmap {
   Bitmap(Bitmap&&) = delete;
   Bitmap& operator=(Bitmap&&) = delete;
   BmpReaderError parseHeaders();
-  BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr) const;
+  enum class RowOutput { PackedGray2, Gray8 };
+  BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr,
+                             RowOutput output = RowOutput::PackedGray2) const;
   BmpReaderError rewindToData() const;
   int getWidth() const { return width; }
   int getHeight() const { return height; }
@@ -113,6 +117,7 @@ class Bitmap {
   mutable size_t memoryPosition = 0;
 #endif
   bool dithering = false;
+  bool originalThresholds = false;
   int width = 0;
   int height = 0;
   bool topDown = false;

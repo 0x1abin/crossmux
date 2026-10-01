@@ -99,6 +99,9 @@ jobs:
     needs: select_runner
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
+      - name: Isolate PlatformIO toolchains
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
+
       - name: Use runner temporary directory
         # Avoid the self-hosted runner's shared /tmp tmpfs.
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
@@ -115,7 +118,7 @@ jobs:
         if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev libssl-dev
+          sudo apt-get install -y libsdl2-dev libssl-dev xvfb
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -124,13 +127,16 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U pioarduino==6.1.19
+        run: uv pip install --system -U pioarduino==6.2.0
+
+      - name: Prepare platform tools
+        run: python scripts/patch_pioarduino_cache.py --prepare-platform
 
       - name: Cache PlatformIO packages
         if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
-          path: ~/.platformio/.cache
+          path: ${{ env.PLATFORMIO_CORE_DIR }}/.cache
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
@@ -143,6 +149,7 @@ jobs:
             -e simulator_x3 \
             -e simulator_eego_a4 \
             -e simulator_murphy_m4 \
+            -e simulator_readpico \
             -e sticky_nightly \
             -e x4pro_nightly \
             -e x4c_nightly \
@@ -150,7 +157,11 @@ jobs:
             -e eego_a4_nightly \
             -e murphy_m4_nightly \
             -e waveshare_epaper_397_nightly \
-            -e metalio_eink4_nightly | tee pio.log
+            -e metalio_eink4_nightly \
+            -e readpico_nightly | tee pio.log
+
+      - name: Check ReadPico display and input
+        run: xvfb-run -a bash .pio/libdeps/simulator_readpico/simulator/tests/run_readpico_self_test.sh "$PWD"
 
       - name: Record firmware stats
         run: |
@@ -164,7 +175,7 @@ jobs:
       - name: Verify hardware packages
         run: |
           set -euo pipefail
-          for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397 metalio_eink4; do
+          for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397 metalio_eink4 readpico; do
             python3 scripts/package_nightly_target.py "$target" --channel nightly
             (cd "dist/nightly/$target" && sha256sum --check *-SHA256SUMS)
           done

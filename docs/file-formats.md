@@ -100,9 +100,18 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 70 / 71
+### Versions 74 / 75
 
-> Unified firmware uses the CJK-capable cache version **71**. Version 70 is the
+These versions integrate upstream character spacing, word spacing, list layout
+and Hangul wrapping. The section header adds signed `characterSpacing` and
+unsigned `wordSpacingPercent` after `collectTouchLinks`. TextBlock's BlockStyle
+adds `characterSpacing` after `directionDefined`. Existing caches rebuild;
+CrossMux paragraph spacing levels, first-line indentation and touch-link flags
+remain in the header.
+
+### Versions 72 / 73
+
+> Unified firmware uses the CJK-capable cache version **73**. Version 72 is the
 > Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
@@ -137,13 +146,18 @@ if (parsedSize != fileSize) {
 > stale cache.
 > `lib/Epub/Epub/Section.cpp` is the source of truth.
 
+Versions 72/73 keep the binary layout unchanged but invalidate complete and partial
+pagination caches because missing glyphs now reserve a visible outline placeholder.
+The outline is sized from the active font ascender and replaces implicit U+FFFD
+fallback. Existing source-offset progress, metadata and chapter indexes are retained.
+
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
 
 Versions 62/63 add `collectTouchLinks` to the header cache key. Devices without
 touch input neither construct nor hydrate link geometry; button footnotes and
-anchors remain available. Partial-cache sentinels change in lockstep to 212/211 for versions 70/71.
+anchors remain available. Partial-cache sentinels change in lockstep to 210/209 for versions 72/73.
 Versions 64/65 also invalidate pagination produced before bounded no-PSRAM
 soft flushing; disabling embedded styles no longer enlarges the token window.
 On devices without PSRAM, a low-memory styled build is discarded and retried
@@ -216,8 +230,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 70
-#define CHINESE_VERSION 71
+#define LATIN_VERSION 74
+#define CHINESE_VERSION 75
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -274,6 +288,7 @@ struct BlockStyle {
     bool textIndentDefined;
     bool isRtl;
     bool directionDefined;
+    s8 characterSpacing;
 };
 
 struct TextBlock {
@@ -392,6 +407,8 @@ struct SectionBin {
     u8 imageRendering;
     bool focusReadingEnabled;
     bool collectTouchLinks;
+    s8 characterSpacing;
+    u8 wordSpacingPercent;
 
     u16 pageCount;
     u32 pageLutOffset;
@@ -439,9 +456,9 @@ if (parsedSize != fileSize) {
 
 TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
 
-`index.bin` version 7 is a little-endian page-offset checkpoint. Its fixed
+`index.bin` version 8 is a little-endian page-offset checkpoint. Its fixed
 header contains, in order: `uint32 magic` (`TXTI`, `0x54585449`), `uint8
-version` (`7`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
+version` (`8`), `uint32 fileSize`, `int32 viewportWidth`, `int32 linesPerPage`,
 `int32 fontId`, `int32 screenMargin`, `uint8 paragraphAlignment`, `uint8
 extraParagraphSpacing`, `uint8 complete`, `uint8 encoding` (`0` unknown/ASCII,
 `1` UTF-8, `2` GBK), and `uint32 knownPageCount`. It is followed by `knownPageCount`
@@ -451,12 +468,10 @@ marked complete.
 
 An incomplete index contains only pages discovered while reading. It is
 checkpointed every 32 known page starts and when the reader exits; the final
-page marks it complete and makes `knownPageCount` exact. Version 4 indexes omit
-`complete`; versions 4 and 5 omit `encoding`. These legacy indexes are reused
-only when the file prefix is confirmed UTF-8, because offsets produced before
-GBK decoding are not valid GBK page boundaries. Versions 4 through 6 omit
-`extraParagraphSpacing`; they remain reusable only while paragraph spacing is
-enabled, which preserves their pagination behavior. A wrong magic, unsupported
+page marks it complete and makes `knownPageCount` exact. Version 8 retains the
+version-7 byte layout but rejects all earlier page indexes: missing-glyph outline
+advances change page boundaries. Both complete and partial indexes are rebuilt.
+A wrong magic, unsupported
 version, truncated payload, changed file size, changed layout setting,
 non-monotonic offset, or out-of-range offset invalidates the index. Writers
 flush `index.bin.tmp` before replacing the prior checkpoint.
@@ -601,7 +616,10 @@ location is not migrated or read.
   atomically replaces the manifest and the old slot is removed. Interrupted,
   cancelled, or failed refreshes leave the prior manifest and slot readable.
   The manifest is accepted only for the current session's `wr_vid`; logout or
-  an account change removes the entire browse-cache root. The old disposable
+  an account change attempts to remove the entire browse-cache root. Once the
+  session is deleted, a logout cache-cleanup failure is reported separately and
+  cannot return to the old shelf. Account-change cleanup must succeed before
+  the new session is saved. The old disposable
   `/.crosspoint/weread/browse/` directory is deleted as legacy data and is not
   migrated. These files do not change any book or EPUB cache version.
 - A successfully converted, aspect-preserving 2-bit cover of at most 112×164 is stored as
@@ -726,3 +744,101 @@ initialized the display and physically rendered its startup verification page.
 Only after confirmation cancels rollback may the old firmware slot be erased
 and rebuilt as a font cache. If that copy is interrupted or fails, the
 uncommitted header remains invalid and the selected font loads from SD.
+## CLX1 — library index (`.crosspoint/library.idx`)
+
+Written by `lib/LibraryIndex/LibraryBuilder.cpp`, read by `LibraryIndexFile`. One
+file describing every book on the card, so the shelf can sort and search
+thousands of titles without opening any of them.
+
+Format version 2. An index written by another version fails validation on open
+and is rebuilt; that is the entire migration mechanism.
+
+### Layout
+
+| Section | Offset | Contents |
+|---|---|---|
+| Header | 0 | 64 bytes, `ClixHeader` |
+| Folders | `folderStart` | length-prefixed paths, one per folder |
+| Records | `recordStart` | `bookCount` × 128-byte `ClixRecord` |
+| Permutations | `permStart` | `bookCount` u16 author order, then `bookCount` u16 arrival order |
+| Name blob | `nameStart` | per record: path hash, name, canonical author, title, source author (see below) |
+
+The arrival permutation runs oldest first, keyed by the record's FAT
+modification time (when the file landed on the card); `firstSeen` — the
+build-assigned discovery counter — breaks ties and carries books whose
+filesystem reports no time. Fold version 3 introduced the timestamp key; a
+fold bump rebuilds ranks while preserving `firstSeen`.
+Fold version 4 preserves leading articles in title sort and search keys.
+
+Sections are 512-byte aligned so each starts on an SD block boundary.
+
+### Records are exactly 128 bytes
+
+A fixed stride is what lets the reader seek straight to record *n* without an
+offset table, and read a screenful in one 4 KB block. `static_assert` enforces it.
+
+Each record carries `fold[96]`, the title normalised for search and sorting —
+accents stripped, case dropped, leading articles preserved — and `authorKey[12]`,
+the author's words folded and sorted so that "Victor Hugo" and "Hugo Victor" group as
+one person. `authorKey` is a GROUPING key, not an ordering one: the shelf orders by
+surname, derived separately from the display name.
+
+The byte before the folded title records metadata extraction status: not
+attempted, extracted, or failed. The final four bytes contain the packed FAT
+modification date and time returned by SdFat. A zero timestamp is not trusted.
+These fields occupy the alignment and reserved bytes from version 1, so the
+record remains exactly 128 bytes.
+
+The header records whether EPUB metadata extraction was enabled for the build.
+This prevents a metadata-disabled rebuild from making filename fallbacks look
+fresh to a later metadata-enabled build.
+
+### The name blob
+
+Per record, at `nameStart + nameOff`:
+
+```text
+[u64 pathHash]    FNV-1a fingerprint of the complete path
+[nameLen bytes]  filename, without the directory
+[u8][author]     display author, one spelling chosen per authorKey across the library
+[u8][title]      the book's own title, or length 0 if it never gave one
+[u8][source]     cleaned author spelling before the library-wide spelling vote
+```
+
+The filename must stay the first textual field and stay the filename: `readPath`
+rebuilds a book's path from it, so writing the display title there makes the book
+impossible to open. That was a real defect, and it is why title has its own field.
+
+The source author is separate from the displayed canonical author so a later
+rebuild can repeat the spelling vote after books are added or removed. Existing
+display reads still stop at the author or title fields and retain their offsets.
+
+### Freshness and unchanged rebuilds
+
+Reconciliation treats the persisted 64-bit complete-path fingerprint as the
+book identity. Metadata is reused only when the fingerprint, size, nonzero FAT
+timestamp, fold version, metadata mode, and expected extraction status agree.
+EPUBs with a zero timestamp or a previous extraction failure are parsed again.
+
+If every current record reuses metadata, the old and new counts agree, and no
+unreadable entry was seen, the staging files are discarded and the live index is
+left byte-for-byte unchanged. A normal rebuild action is therefore a freshness
+check, not a forced metadata reread.
+
+### Header flags
+
+`RANKS_DEGRADED` says one or more orders fell back to walk order because a
+checked sort allocation failed. Title and author each use a phase-local
+`SortKey[bookCount]` allocation (14 bytes per book, 57,344 bytes at the 4,096-book
+format ceiling); the first array is released before the second is requested.
+Sorting is therefore best effort through the full format limit rather than
+being disabled at an arbitrary library size.
+
+`DEDUP_DEGRADED` says a directory exceeded the fixed 1024-entry duplicate-key
+buffer, or that its fallible 8 KiB allocation failed. The walk still indexes
+every enumerated book; it only stops remembering additional identities for
+duplicate-dirent detection, so a damaged FAT may expose duplicates but cannot
+make a real book disappear.
+
+`selfSize` is the expected file size. Comparing it against the real one is a free
+truncation guard: a build cut short by a power failure cannot pass.

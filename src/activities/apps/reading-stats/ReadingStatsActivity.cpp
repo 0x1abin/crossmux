@@ -20,6 +20,7 @@
 #include "ReadingStatsExtendedActivity.h"
 #include "ReadingStatsStore.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
