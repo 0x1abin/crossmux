@@ -22,6 +22,55 @@ python3 freeink-sdk/libs/display/EpdiyLcd/test/host/test_transactions.py
 python3 scripts/tests/test_ui_font_fallback.py
 ```
 
+### Desktop simulator
+
+The `simulator_readpico` native environment runs the reader with a 1216×684 scan
+framebuffer and 684×1216 portrait UI, native sixteen-level image output, the
+current `{9,3,24,3}` portrait insets and Read Pico's 12/12/14 pt SD UI fonts.
+Missing fonts and sizes fall back to the embedded faces. Mouse tap, hold and swipe
+follow orientation; Up/Escape/Down stand in for the three capacitive keys. `P`
+represents the PMU power key and is the only sleep wake input. `S` requests sleep.
+The existing host battery and clock implementations are retained; PMU transport,
+accelerometer behavior and physical key-strip coordinates are not simulated.
+
+The window fits the usable desktop area without upscaling. Scheduled screenshots
+are captured from the unscaled display pixels: 684×1216 in either portrait
+orientation, 1216×684 in landscape. The 415,872-byte native image staging buffer
+is static host-only storage; screenshots use one fallible, temporary ARGB buffer.
+No hardware framebuffer or firmware allocation is added.
+
+The existing EPUB image/AA renderer is retained. Native sixteen-level output
+uses the current AirPage and custom sleep-image paths. Closing the EPUB toolbar
+restores the firmware's B/W page snapshot, including its image geometry.
+
+The PlatformIO and host-test dependencies pin simulator commit
+[`4bad3f81`](https://github.com/0x1abin/crosspoint-simulator/commit/4bad3f813af59b2827eba66f1a216c332a292dbf).
+A normal checkout needs no local dependency override.
+
+Build/run with `pio run -e simulator_readpico -t run_simulator`. Keep test SD data
+isolated with `CROSSPOINT_SIM_SD=/absolute/path/to/test-sd`; use the existing
+`CROSSPOINT_SIM_INPUT_SCRIPT` and `CROSSPOINT_SIM_SCREENSHOTS` schedules. The fork's
+`tests/run_readpico_self_test.sh <crossmux-root>` compiles the production host HAL
+and checks large image offsets, gray transactions, native screenshots, scaled
+touch and power-only wake/relaunch in all four orientations. On Linux without a
+desktop, run it through `xvfb-run`.
+
+Software validation completed on 2026-10-02: all five simulator builds, eight
+host compatibility profiles, the four-orientation display/input self-check and
+full `./bin/ci-check` (eight hardware builds, 807 host tests and SDK
+transactions) passed with PlatformIO Core 6.2.0. The font/native-image tests
+also passed against the independently fetched host-test dependency.
+
+An isolated test SD covered English image pages, Chinese/mixed-script EPUB,
+missing SD fonts/sizes, toolbar image restoration, four oriented screenshot
+sizes, saved progress and a complete power-wake cycle. The current reader footer
+can clip in landscape with the tested 12 pt SD UI face; the simulator reproduces
+this existing layout. These checks do not accept that footer or the provisional
+bottom clearance.
+
+Simulator acceptance cannot close the physical bottom-clearance, waveform,
+ghosting, power or sleep/wake acceptance items below.
+
 ### Nightly and Web release integration — 2026-10-01
 
 Read Pico is included in the Nightly target table as `readpico`, using the

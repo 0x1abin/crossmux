@@ -114,9 +114,12 @@ pio run -e simulator -t run_simulator           # X4
 pio run -e simulator_x3 -t run_simulator        # X3
 pio run -e simulator_eego_a4 -t run_simulator   # eego A4
 pio run -e simulator_murphy_m4 -t run_simulator # Murphy M4
+pio run -e simulator_readpico -t run_simulator  # Read Pico, 684x1216 portrait
 ```
 
 The [CrossMux simulator fork](https://github.com/0x1abin/crosspoint-simulator) is pinned in `platformio.ini`. It previews UI and input flows; it does not validate display waveforms, power consumption, or physical hardware timing.
+
+Read Pico fits its window to the desktop while retaining full-resolution BMP screenshots. Mouse input supports tap, hold and swipe; Up/Escape/Down represent the three capacitive keys, and only Power (`P`) wakes from sleep. Native sixteen-level images and SD UI fonts follow the Read Pico paths. See the [device guide](./docs/engineering/read-pico.md#desktop-simulator) for validation details.
 
 ### Checks and debugging
 
