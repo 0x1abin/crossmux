@@ -667,6 +667,7 @@ void TxtReaderActivity::renderBook() {
 
   renderer.clearScreen();
   renderPage();
+  markPageRendered();
   if (!firstPageLogged) {
     firstPageLogged = true;
     LOG_DBG("TRS", "First page displayed: open_total=%lums", millis() - openStartMs);

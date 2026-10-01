@@ -51,7 +51,8 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   for (const char* p = text;; p++) {
     if (*p == ' ' || *p == '\0') {
       if (!word.empty()) {
-        parsed.addWord(word, firstWord ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+        parsed.addWord(word, firstWord && SETTINGS.uiTheme == CrossPointSettings::INX ? EpdFontFamily::BOLD
+                                                                                      : EpdFontFamily::REGULAR);
         firstWord = false;
         word.clear();
       }
@@ -61,11 +62,13 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
     }
   }
 
-  if (!parsed.layoutAndExtractLines(renderer, fontId, static_cast<uint16_t>(textWidth),
-                                    [&layout, maxLines](std::unique_ptr<TextBlock> line, uint32_t) {
-                                      if (layout.lines.size() < maxLines) layout.lines.push_back(std::move(line));
-                                      return true;
-                                    })) {
+  if (!parsed.layoutAndExtractLines(
+          renderer, fontId, static_cast<uint16_t>(textWidth),
+          [&layout, maxLines](std::unique_ptr<TextBlock> line, uint32_t) {
+            if (layout.lines.size() < maxLines) layout.lines.push_back(std::move(line));
+            return true;
+          },
+          true, SETTINGS.getCharacterSpacing(), SETTINGS.wordSpacing)) {
     layout.lines.clear();
   }
 }
@@ -124,11 +127,14 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .alignment = SETTINGS.paragraphAlignment,
                        .extraParagraphSpacing = SETTINGS.extraParagraphSpacing,
                        .firstLineIndent = SETTINGS.firstLineIndent,
+                       .characterSpacing = SETTINGS.getCharacterSpacing(),
+                       .wordSpacingPercent = SETTINGS.wordSpacing,
                        .focusReading = SETTINGS.focusReadingEnabled != 0,
                        .hyphenation = SETTINGS.hyphenationEnabled != 0};
   if (key != layout.key) {
     if (auto* fcm = renderer.getFontCacheManager()) {
-      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT), 0x03);
+      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT),
+                        SETTINGS.uiTheme == CrossPointSettings::INX || SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
     }
     relayout(layout, renderer, fontId, textWidth, static_cast<size_t>(maxLines));
     layout.key = key;

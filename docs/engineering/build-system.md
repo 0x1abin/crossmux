@@ -25,6 +25,27 @@
 * `platformio.local.ini`: Local overrides (gitignored, create if needed)
 * `partitions.csv`: ESP32 flash partition layout
 
+## Tool initialization
+
+Use pioarduino 6.2.0 with the pinned ESP32 platform. Before building with a new
+PlatformIO tool directory, run from the repository root:
+
+```bash
+python -m pip install pioarduino==6.2.0
+python scripts/patch_pioarduino_cache.py --prepare-platform
+```
+
+The platform's IDF installer otherwise replaces the Core's running SCons
+package, causing missing Python modules during a clean build. Preparation
+removes SCons from that installer's tool list; Core still supplies it. It does
+not change compiler optimization flags. CI performs the same preparation.
+On Ubuntu, the bundled cppcheck executable also requires `libpcre3`.
+
+The custom SDK bootstrap uses non-LTO objects; the final application retains
+its existing LTO configuration. Keep the verified C3 optimization options and
+partition layout unchanged; sufficient Flash headroom is not a reason to tune
+additional compiler options.
+
 ## Build Environment
 * **Standard**: C++20 (`-std=c++2a`). No Exceptions, No RTTI.
 * **Logging**: ALWAYS use `LOG_INF`, `LOG_DBG`, or `LOG_ERR` from `Logging.h`. Raw Serial output is deprecated.

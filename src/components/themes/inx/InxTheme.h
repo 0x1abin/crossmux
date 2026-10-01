@@ -4,7 +4,87 @@
 
 namespace InxMetrics {
 constexpr ThemeMetrics makeValues() {
-  ThemeMetrics metrics = LyraMetrics::values;
+  ThemeMetrics metrics = {.batteryWidth = 16,
+                          .batteryHeight = 12,
+                          .topPadding = 5,
+                          .batteryBarHeight = 40,
+                          .headerHeight = 84,
+                          .verticalSpacing = 16,
+                          .previewPadding = 12,
+                          .previewHeightPercent = 30,
+                          .contentSidePadding = 20,
+                          .listRowHeight = 40,
+                          .listWithSubtitleRowHeight = 60,
+                          .listRowGap = 0,
+                          .listRowRadius = 6,
+                          .listInset = 20,
+                          .listSidePadding = 8,
+                          .listSelectionStyle = 1,
+                          .listScrollWidth = 4,
+                          .listScrollSide = 0,
+                          .listTitleBold = false,
+                          .headerSidePadding = 18,
+                          .headerUnderlineSize = 3,
+                          .headerTitleAlign = 0,
+                          .headerBatterySide = 0,
+                          .menuRowHeight = 64,
+                          .menuSpacing = 8,
+                          .tabSpacing = 8,
+                          .tabBarHeight = 40,
+                          .scrollBarWidth = 4,
+                          .scrollBarRightOffset = 5,
+                          .homeTopPadding = 56,
+                          .homeCoverHeight = 226,
+                          .homeCoverTileHeight = 242,
+                          .homeRecentBooksCount = 1,
+                          .homeShowRecentBookTitle = false,
+                          .homeContinueReadingInMenu = false,
+                          .homeMenuTopOffset = 16,
+                          .buttonHintsHeight = 40,
+                          .sideButtonHintsWidth = 30,
+                          .progressBarHeight = 16,
+                          .progressBarMarginTop = 1,
+                          .statusBarHorizontalMargin = 5,
+                          .statusBarVerticalMargin = 19,
+                          .keyboardKeyHeight = 48,
+                          .keyboardKeySpacing = 0,
+                          .keyboardCenteredText = false,
+                          .keyboardVerticalOffset = -7,
+                          .keyboardTextFieldWidthPercent = 85,
+                          .keyboardWidthPercent = 94,
+                          .popupTopOffsetRatio = 0.165f,
+                          .popupMarginX = 16,
+                          .popupMarginY = 12,
+                          .popupFrameThickness = 2,
+                          .popupCornerRadius = 6,
+                          .popupTextBold = false,
+                          .popupTextInverted = false,
+                          .popupTextBaselineOffsetY = -2,
+                          .popupProgressBarHeight = 4,
+                          .popupProgressDrawOutline = false,
+                          .popupProgressClampPercent = false,
+                          .popupProgressFillInverted = false,
+                          .popupProgressOutlineInverted = false,
+                          .optionPopupItemSpacing = 8,
+                          .optionPopupInnerPadding = 20,
+                          .optionPopupSelectionHPadding = 16,
+                          .optionPopupSelectionVPadding = 12,
+                          .optionPopupTitleGap = 16,
+                          .optionPopupUseSmallFont = true,
+                          .optionPopupOptionFontBold = false,
+                          .optionPopupSelectionRadius = 6,
+                          .optionPopupSelectionLight = true,
+                          .optionPopupDrawAllRows = false,
+                          .optionPopupDialogSideMargin = 20,
+                          .optionPopupTitleSeparator = true,
+                          .textFieldHorizontalPadding = 6,
+                          .textFieldNormalThickness = 1,
+                          .textFieldCursorThickness = 3,
+                          .textFieldLineEndOffset = 0,
+                          .controlRadius = 6,
+                          .sheetRadius = 6,
+                          .capsuleRadius = 6,
+                          .headerBatteryDetached = true};
   metrics.topPadding = 0;
   metrics.batteryBarHeight = 24;
   metrics.headerHeight = 66;
@@ -23,6 +103,7 @@ constexpr ThemeMetrics makeValues() {
   metrics.listSeparatorStyle = 2;
   metrics.listValueMaxWidth = 200;
   metrics.listSelectionCoversScrollReservation = true;
+  metrics.tabBarHeight = 40;
   metrics.menuRowHeight = 66;
   metrics.menuSpacing = 0;
   metrics.scrollBarWidth = 6;
@@ -34,8 +115,8 @@ inline constexpr ThemeMetrics values = makeValues();
 
 class InxTheme final : public LyraTheme {
  public:
-  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
-                  const char* subtitle = nullptr) const override;
+  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
+                  bool backButton = true) const override;
   void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                      const char* rightLabel = nullptr) const override;
   void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,

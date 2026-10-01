@@ -533,9 +533,27 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 72);
-  // This test uses a layout stub: only the version byte changes. Normalize it
-  // to prove the pre-existing layout/text/footnote digest is unchanged.
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 74);
+  // Normalize the two new spacing bytes and their absolute file offsets back
+  // to the historical v70 layout; keep its verified digest unchanged.
+  constexpr size_t spacingOffset = 21;
+  ASSERT_EQ(static_cast<uint8_t>(bytes[spacingOffset]), 0);
+  ASSERT_EQ(static_cast<uint8_t>(bytes[spacingOffset + 1]), 100);
+  bytes.erase(spacingOffset, 2);
+  const auto readOffset = [&bytes](size_t position) {
+    uint32_t value;
+    std::memcpy(&value, bytes.data() + position, sizeof(value));
+    return value;
+  };
+  const auto adjustOffset = [&bytes, &readOffset](size_t position) {
+    const uint32_t value = readOffset(position) - 2;
+    std::memcpy(bytes.data() + position, &value, sizeof(value));
+  };
+  // pageCount follows spacing; the next five fields address tables in the file.
+  for (size_t position = spacingOffset + 2; position < spacingOffset + 22; position += 4) adjustOffset(position);
+  const uint32_t pageLut = readOffset(spacingOffset + 2);
+  const uint32_t anchorMap = readOffset(spacingOffset + 6);
+  for (size_t position = pageLut; position < anchorMap; position += 4) adjustOffset(position);
   bytes.front() = 70;
   append(bytes);
   for (const auto& word : laidOutWords) append(word);

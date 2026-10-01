@@ -51,7 +51,8 @@ def main():
         (work / 'QrParams.h').write_text('std::string qrParams(GfxRenderer& renderer) {\n' + qr +
                                        '  return displayParams;\n}\n')
         sleep = (ROOT / 'src/activities/boot_sleep/SleepActivity.cpp').read_text()
-        placement = sleep[sleep.index('struct BitmapPlacement {'):sleep.index('struct OverlayBmpInfo {')]
+        placement = sleep[sleep.index('HalDisplay::GrayscaleMode sleepGrayscaleMode('):sleep.index('// Kept separate')]
+        placement += sleep[sleep.index('struct BitmapPlacement {'):sleep.index('struct OverlayBmpInfo {')]
         placement += sleep[sleep.index('BitmapPlacement calculateBitmapPlacement('):sleep.index('bool parseOverlayBmpHeader(')]
         custom = sleep[sleep.index('void SleepActivity::renderCustomSleepScreen()'):sleep.index('// Sleep screens paint')]
         bitmap_sleep = sleep[sleep.index('void SleepActivity::renderBitmapSleepScreen('):sleep.index('bool SleepActivity::renderSleepOverlayFile(')]

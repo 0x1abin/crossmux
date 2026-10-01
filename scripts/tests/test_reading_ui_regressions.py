@@ -68,7 +68,7 @@ struct GfxRenderer {
 };
 struct InxTheme {
   void drawBatteryRight(const GfxRenderer&, Rect, bool) const {}
-  void drawHeader(const GfxRenderer&, Rect, const char*, const char*) const;
+  void drawHeader(const GfxRenderer&, Rect, const char*, const char*, bool = true) const;
 };
 ''' + code + r'''
 int main() {

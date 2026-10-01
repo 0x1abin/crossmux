@@ -32,47 +32,14 @@ constexpr StrId DAILY_GOAL_NAMES[DAILY_GOAL_ITEMS] = {
 }  // namespace
 
 void ReadingStatsSettingsActivity::onEnter() {
-  Activity::onEnter();
+  UiListActivity::onEnter();
   selectedIndex = 0;
   requestUpdate();
 }
 
 void ReadingStatsSettingsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
-
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight =
-      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-
-  switch (handleListTouch(selectedIndex, MENU_ITEMS, contentTop, contentHeight, false)) {
-    case ListTouchResult::Activated:
-      handleSelection();
-      return;
-    case ListTouchResult::Consumed:
-      return;
-    case ListTouchResult::None:
-      break;
-  }
-
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    finish();
-    return;
-  }
-
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    handleSelection();
-    return;
-  }
-
-  buttonNavigator.onNext([this] {
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, MENU_ITEMS);
-    requestUpdate();
-  });
-  buttonNavigator.onPrevious([this] {
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, MENU_ITEMS);
-    requestUpdate();
-  });
+  UiListActivity::loop();
 }
 
 void ReadingStatsSettingsActivity::handleSelection() {
@@ -104,43 +71,66 @@ void ReadingStatsSettingsActivity::handleSelection() {
   requestUpdate();
 }
 
-void ReadingStatsSettingsActivity::render(RenderLock&&) {
+void ReadingStatsSettingsActivity::render(RenderLock&& lock) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
+  UiListActivity::render(std::move(lock));
+}
 
-  renderer.clearScreen();
-
+int ReadingStatsSettingsActivity::listCount() const { return MENU_ITEMS; }
+const char* ReadingStatsSettingsActivity::headerTitle() const { return tr(STR_READING_STATS); }
+void ReadingStatsSettingsActivity::activateIndex(int index) {
+  selectedIndex = index;
+  app.clearTapFlash();
+  handleSelection();
+}
+void ReadingStatsSettingsActivity::buildScreen(UiScreen& screen) {
+  namespace fui = freeink::ui;
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
-
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS));
-
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-  GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, MENU_ITEMS, selectedIndex,
-      [](int index) { return std::string(I18N.get(MENU_NAMES[index])); }, nullptr, nullptr,
-      [](int index) -> std::string {
-        switch (static_cast<MenuItem>(index)) {
-          case MenuItem::DailyGoal: {
-            const uint8_t goal = SETTINGS.dailyGoalTarget < DAILY_GOAL_ITEMS ? SETTINGS.dailyGoalTarget
-                                                                             : CrossPointSettings::DAILY_GOAL_30_MIN;
-            return I18N.get(DAILY_GOAL_NAMES[goal]);
-          }
-          case MenuItem::Achievements:
-            return SETTINGS.achievementsEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-          case MenuItem::AchievementPopups:
-            return SETTINGS.achievementPopups ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-          case MenuItem::Count:
-            return {};
-        }
-        return {};
-      },
-      true);
-
-  const char* confirmLabel = selectedIndex == static_cast<int>(MenuItem::DailyGoal) ? tr(STR_SELECT) : tr(STR_TOGGLE);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-
-  renderer.displayBuffer();
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  screen.spacer(metrics.verticalSpacing);
+  static fui::ListProps props;
+  props = {};
+  props.count = MENU_ITEMS;
+  props.action = ACTION_ROW;
+  props.inputMask = fui::InputTouch;
+  props.valueInset = 8;
+  props.labelText = SETTINGS.uiTheme == CrossPointSettings::INX ? screen.theme().bodyText : screen.theme().smallText;
+  props.labelText.maxLines = 2;
+  if (SETTINGS.uiTheme == CrossPointSettings::INX) {
+    props.rowHeight = GUI.getListRowStep(false);
+    props.scrollIndicator = props.count > screen.contentRect().height / props.rowHeight;
+    props.labelText.maxLines = 1;
+    props.valueInset = 0;
+    props.valueText = screen.theme().bodyText;
+  }
+  props.rowProvider = [](void*, uint16_t index, fui::ListItem& item) {
+    item.label = I18N.get(MENU_NAMES[index]);
+    switch (static_cast<MenuItem>(index)) {
+      case MenuItem::DailyGoal: {
+        const uint8_t goal = SETTINGS.dailyGoalTarget < DAILY_GOAL_ITEMS ? SETTINGS.dailyGoalTarget
+                                                                         : CrossPointSettings::DAILY_GOAL_30_MIN;
+        item.value = I18N.get(DAILY_GOAL_NAMES[goal]);
+        break;
+      }
+      case MenuItem::Achievements:
+        GUI.setCheckboxRow(item, SETTINGS.achievementsEnabled);
+        break;
+      case MenuItem::AchievementPopups:
+        GUI.setCheckboxRow(item, SETTINGS.achievementPopups);
+        break;
+      case MenuItem::Count:
+        break;
+    }
+  };
+  syncListViewport(screen, props);
+  if (SETTINGS.uiTheme == CrossPointSettings::INX) {
+    // Preserve the legacy full-width INX rows; only the boolean control changes.
+    auto rect = screen.contentRect();
+    rect.x = 0;
+    rect.width = renderer.getScreenWidth();
+    fui::list(screen.frame(), rect, screen.resolveListProps(props));
+  } else {
+    screen.list(props);
+  }
 }

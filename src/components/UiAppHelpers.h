@@ -64,13 +64,16 @@ inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& t
 // Bind the uiScale fonts before FreeInkApp's constructor derives its theme
 // metrics from the body font's line height.
 inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) {
-  freeink::ui::GfxRendererTarget target(renderer);
+  freeink::ui::GfxRendererTarget target(renderer, BoardConfig::hasTouch());
   applyUiTextAlignment(target);
   const auto spec = uiScaleSpec();
   target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL,
                  UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, spec.bodyFontId);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_TITLE, spec.titleFontId);
+  // Status chrome (header battery percent, clock) stays at the fixed small
+  // font; the uiScale FONT_SMALL is for list subtitles.
+  target.setFont(freeink::ui::GfxRendererTarget::FONT_LABEL, SMALL_FONT_ID);
   return target;
 }
 
@@ -104,6 +107,8 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
         return freeink::ui::bitmapFromIcon(icon_usb_32);
       case UIIcon::Bookmark:
         return freeink::ui::bitmapFromIcon(icon_bookmark_32);
+      case UIIcon::Blocks:
+        return freeink::ui::bitmapFromIcon(icon_blocks_32);
       default:
         // App-specific icons (Transfer, AirPage, ...) have no Lucide asset;
         // reuse the Inx grid artwork instead. It is the same 32x32 MSB-first
@@ -136,6 +141,8 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
       return freeink::ui::bitmapFromIcon(icon_usb_24);
     case UIIcon::Bookmark:
       return freeink::ui::bitmapFromIcon(icon_bookmark_24);
+    case UIIcon::Blocks:
+      return freeink::ui::bitmapFromIcon(icon_blocks_24);
     default:
       return {};
   }

@@ -5,8 +5,6 @@
 #include <Memory.h>
 #include <Serialization.h>
 
-#include <new>
-
 namespace {
 
 template <typename Predicate>
@@ -111,9 +109,15 @@ std::unique_ptr<PageImage> PageImage::deserialize(HalFile& file) {
   if (!serialization::readPod(file, xPos) || !serialization::readPod(file, yPos)) return nullptr;
 
   auto ib = ImageBlock::deserialize(file);
-  if (!ib) return nullptr;
+  if (!ib) {
+    LOG_ERR("PGE", "Deserialization failed: null ImageBlock");
+    return nullptr;
+  }
   auto image = makeUniqueNoThrow<PageImage>(std::move(ib), xPos, yPos);
-  if (!image) LOG_ERR("PGE", "Deserialization failed: could not allocate PageImage");
+  if (!image) {
+    LOG_ERR("PGE", "Deserialization failed: could not allocate PageImage");
+    return nullptr;
+  }
   return image;
 }
 

@@ -36,7 +36,16 @@ class TextSettingsActivity final : public UiTabListActivity {
  private:
   // Row indices per tab. enum class (not plain enum) so a LayoutRow can't be
   // silently confused with a StyleRow of equal value.
-  enum class LayoutRow { LineSpacing, ParaSpacing, FirstLineIndent, Alignment, ScreenMargin, Count };
+  enum class LayoutRow {
+    LineSpacing,
+    WordSpacing,
+    CharacterSpacing,
+    ParaSpacing,
+    FirstLineIndent,
+    Alignment,
+    ScreenMargin,
+    Count
+  };
   enum class StyleRow {
     FocusReading,
     ReadingGuideLine,
@@ -62,6 +71,8 @@ class TextSettingsActivity final : public UiTabListActivity {
   void activateIndex(int index) override;
   void onTabAction(int index) override;
   void stepTab(int direction) override { switchTab(direction); }
+  void drawChrome() override;
+  void drawFooter() override;
   bool handleButtons() override;
   bool handleCustomInput() override;
 

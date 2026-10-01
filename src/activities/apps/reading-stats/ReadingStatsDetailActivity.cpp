@@ -374,7 +374,7 @@ void ReadingStatsDetailActivity::onExit() {
 }
 
 bool ReadingStatsDetailActivity::storeBaseScreenBuffer() {
-  uint8_t* frameBuffer = renderer.getFrameBuffer();
+  const uint8_t* frameBuffer = renderer.getFrameBuffer();
   if (!frameBuffer) {
     return false;
   }

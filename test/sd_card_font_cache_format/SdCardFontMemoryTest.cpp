@@ -126,12 +126,12 @@ TEST_F(SdCardFontMemoryTest, EveryReplacementAllocationFailureKeepsPublishedCach
   const auto* glyphs = data->glyph;
   const auto* bitmap = data->bitmap;
   const uint32_t cps[] = {'A', 'B'};
-  // Union first, then replacement intervals, glyphs, bitmap and mappings.
-  for (size_t allocation = 2; allocation <= 5; ++allocation) {
+  // Replacement intervals, glyphs, bitmap and mappings; accumulate=false needs no union.
+  for (size_t allocation = 1; allocation <= 4; ++allocation) {
     SCOPED_TRACE(allocation);
     arrayAllocations = 0;
     failArrayAt = allocation;
-    EXPECT_LT(font.prewarmStyle(0, cps, 2, false, false), 0);
+    EXPECT_LT(font.prewarmStyle(0, cps, 2, false, false, false), 0);
     EXPECT_EQ(arrayAllocations, allocation);  // No later allocations after failure.
     EXPECT_EQ(style.epdFont.data, data);
     EXPECT_EQ(data->intervals, intervals);
@@ -141,11 +141,11 @@ TEST_F(SdCardFontMemoryTest, EveryReplacementAllocationFailureKeepsPublishedCach
     EXPECT_EQ(data->glyph[0].advanceX, 9);
   }
   failArrayAt = 0;
-  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), 0);
+  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false, false), 0);
   EXPECT_EQ(style.miniGlyphCount, 2U);
   EXPECT_EQ(style.miniGlyphs[1].advanceX, 13);
   arrayAllocations = 0;
-  for (int batch = 0; batch < 3; ++batch) EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), 0);
+  for (int batch = 0; batch < 3; ++batch) EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false, false), 0);
   EXPECT_EQ(arrayAllocations, 0U);
 }
 
@@ -167,7 +167,7 @@ TEST_F(SdCardFontMemoryTest, PeakBudgetRejectsMiniGrowthBeforeAllocatingAndKeeps
   ESP.freeHeap = 16 * 1024 + 16;
   ESP.maxAlloc = 8 * 1024 + 16;
   arrayAllocations = 0;
-  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false), SdCardFont::PREWARM_SKIPPED);
+  EXPECT_EQ(font.prewarmStyle(0, cps, 2, false, false, false), SdCardFont::PREWARM_SKIPPED);
   EXPECT_EQ(font.styles_[0].miniBitmap, bitmap);
   // The optional union can fit; the larger combined replacement peak cannot.
   EXPECT_LE(arrayAllocations, 1U);
@@ -243,7 +243,7 @@ TEST_F(SdCardFontMemoryTest, PagedIndexMatchesFullLookupIncludingNonBmpAndPartia
   ASSERT_NE(glyph, nullptr);
   EXPECT_EQ(glyph->advanceX, 10);
   const uint32_t cps[] = {0x10000, 0x10001, 0x10080, 0x13e80};
-  EXPECT_EQ(font.prewarmStyle(0, cps, 4, true, false), 0);
+  EXPECT_EQ(font.prewarmStyle(0, cps, 4, true, false, false), 0);
   EXPECT_EQ(font.styles_[0].miniGlyphCount, 4U);
   font.releaseResidentCaches();
   EXPECT_TRUE(style.hasCoverageIndex());
@@ -258,7 +258,7 @@ TEST_F(SdCardFontMemoryTest, PagedIndexShortReadIsRetryableAndNotMissingCoverage
   EXPECT_EQ(font.findGlobalGlyphIndex(font.styles_[0], 0x10000), -2);
   EXPECT_EQ(font.styles_[0].cachedIntervalPage, -1);
   const uint32_t cp = 0x10000;
-  EXPECT_EQ(font.prewarmStyle(0, &cp, 1, true, false), -1);
+  EXPECT_EQ(font.prewarmStyle(0, &cp, 1, true, false, false), -1);
   EXPECT_EQ(font.getAdvanceOrLoad(cp, 0), 0);
   std::string text;
   utf8AppendCodepoint(cp, text);

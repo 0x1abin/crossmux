@@ -1,10 +1,12 @@
 #include "OpdsBookBrowserActivity.h"
 
 #include <Arduino.h>
+#include <FontCacheManager.h>
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <OpdsStream.h>
 #include <WiFi.h>
@@ -16,6 +18,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
+#include "components/icons/headerIcons.h"
 #include "components/icons/search32.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
@@ -30,6 +33,7 @@ namespace {
 constexpr fui::ActionId ACTION_ROW = 1;
 constexpr fui::ActionId ACTION_SEARCH = 2;
 constexpr fui::ActionId ACTION_CANCEL = 3;
+constexpr fui::ActionId ACTION_BACK = 4;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
 
@@ -59,6 +63,7 @@ void OpdsBookBrowserActivity::onEnter() {
   app.on(ACTION_ROW, &OpdsBookBrowserActivity::onRowEvent, this);
   app.on(ACTION_SEARCH, &OpdsBookBrowserActivity::onSearchEvent, this);
   app.on(ACTION_CANCEL, &OpdsBookBrowserActivity::onCancelEvent, this);
+  app.on(ACTION_BACK, &OpdsBookBrowserActivity::onBackEvent, this);
   app.setScreen(&OpdsBookBrowserActivity::rootScreen, this);
   requestUpdate();
 
@@ -99,6 +104,13 @@ void OpdsBookBrowserActivity::onSearchEvent(const fui::ActionEvent&, void* user)
   if (self->state != BrowserState::BROWSING) return;
   self->app.clearTapFlash();
   self->launchSearch();
+}
+
+void OpdsBookBrowserActivity::onBackEvent(const fui::ActionEvent&, void* user) {
+  auto* self = static_cast<OpdsBookBrowserActivity*>(user);
+  if (self->state != BrowserState::BROWSING) return;
+  self->app.clearTapFlash();
+  self->navigateBack();
 }
 
 void OpdsBookBrowserActivity::onCancelEvent(const fui::ActionEvent&, void* user) {
@@ -192,6 +204,21 @@ void OpdsBookBrowserActivity::loop() {
   }
 }
 
+bool OpdsBookBrowserActivity::preventAutoSleep() {
+  switch (state) {
+    case BrowserState::CHECK_WIFI:
+    case BrowserState::WIFI_SELECTION:
+    case BrowserState::LOADING:
+    case BrowserState::DOWNLOADING:
+    case BrowserState::SEARCH_INPUT:
+      return true;
+    case BrowserState::BROWSING:
+    case BrowserState::ERROR:
+      return false;
+  }
+  return false;
+}
+
 void OpdsBookBrowserActivity::rootScreen(UiScreen& screen, void* user) {
   auto* self = static_cast<OpdsBookBrowserActivity*>(user);
   switch (self->state) {
@@ -230,21 +257,43 @@ void OpdsBookBrowserActivity::screenHeader(UiScreen& screen, const bool withSear
     screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
     return;
   }
+  const auto& theme = screen.theme();
   fui::HeaderProps header;
   header.title = server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str();
   header.borderEdges = fui::EdgeBottom;
+  // Same battery/clock band as every GUI.drawHeader screen; the header
+  // heights are unified across themes, so the buttons derive from the band.
+  GUI.applyHeaderStatus(renderer, header);
+  // Only the browsing state routes header taps (and only there does back mean
+  // anything); the loading/downloading/status headers stay passive.
+  if (state == BrowserState::BROWSING && mappedInput.hasTouch()) {
+    header.leadingIcon = fui::bitmapFromIcon(icon_header_back_32);
+    header.leadingAction = ACTION_BACK;
+  }
   if (withSearch && !searchTemplate.empty()) {
     header.trailingIcon = fui::bitmapFromIcon(icon_search_32);
     header.trailingAction = ACTION_SEARCH;
-    // Optically align the icon with the title glyphs: text hangs low in its
-    // line cell by the font's internal leading; drop the button to match.
-    const int titleFontId = uiScaleSpec().titleFontId;
-    header.actionOffsetY =
-        static_cast<int16_t>((renderer.getLineHeight(titleFontId) - renderer.getTextHeight(titleFontId)) / 2);
+    // Vertical placement comes from applyHeaderStatus: buttons center on the
+    // unified band.
   }
-  screen.header(header);
-  // Same breathing room between header and content as the legacy screens.
-  screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
+  header.titleText = theme.titleText;
+  header.titleText.align = theme.headerTitleAlign;
+  header.styles = theme.popup;
+  if (header.styles.normal.border.kind == fui::PaintKind::None && theme.headerUnderline > 0) {
+    header.styles.normal.border = fui::Paint::solid(fui::Color::Black);
+    header.styles.normal.borderWidth = theme.headerUnderline;
+  }
+  header.trailingStyles = fui::plainStyles(fui::Paint::solid(fui::Color::Black));
+  header.sidePadding = theme.headerSidePadding;
+  header.minTouchSize = theme.minTouchSize;
+  const auto frameRect = screen.frame().screen();
+  fui::header(screen.frame(),
+              fui::Rect{frameRect.x, static_cast<int16_t>(metrics.topPadding), frameRect.width,
+                        static_cast<int16_t>(metrics.headerHeight)},
+              header);
+  screen.setContentMarginFromScreen(
+      fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing), 0,
+                  static_cast<int16_t>(metrics.buttonHintsHeight), 0});
 }
 
 void OpdsBookBrowserActivity::buildBrowsingScreen(UiScreen& screen) {
@@ -266,16 +315,8 @@ void OpdsBookBrowserActivity::buildBrowsingScreen(UiScreen& screen) {
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the nav chevron and the row edge
   listNav.selected = selectorIndex;
-  int16_t rowHeight = screen.theme().rowHeight;
-  if (!mappedInput.hasTouch()) {
-    // Non-touch hardware (X3/X4) keeps the original, denser row height
-    // instead of FreeInkUI's touch-target-sized default (see
-    // UiListActivity::syncListViewport; this screen predates that base and
-    // syncs its own viewport directly). Book rows carry an author subtitle.
-    rowHeight = static_cast<int16_t>(UITheme::getInstance().getMetrics().listWithSubtitleRowHeight);
-    props.rowHeight = rowHeight;
-  }
-  listNav.syncToProps(screen.body(), rowHeight, screen.theme().listRowGap, static_cast<int>(entries.size()), props);
+  props.partialTrailingRow = true;
+  screen.syncListViewport(listNav, props, static_cast<int>(entries.size()));
   screen.list(props);
 }
 
@@ -441,7 +482,7 @@ void OpdsBookBrowserActivity::releaseEntries() {
   // entries; stop routing touches against it until the next render.
   closeRouting();
   std::vector<OpdsEntry>().swap(entries);
-  rebuildRowItems();
+  std::vector<fui::ListItem>().swap(rowItems);
 }
 
 void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
@@ -506,6 +547,28 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   filename += opdsBookFilename(book.author, book.title, static_cast<OpdsFilenameFormat>(SETTINGS.opdsFilenameFormat));
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
 
+  // The selected book data is now copied into the download URL, filename, and
+  // status line. Reclaim the catalog while TLS owns its record buffers; reload
+  // the current feed when the transfer finishes.
+  releaseEntries();
+
+  // Rebuildable SD-font caches can hold tens of KB the TLS session needs for
+  // a multi-MB book; release them up front (they repopulate on demand) and
+  // refuse to start below the floor — a doomed transfer otherwise dies
+  // mid-stream with MEMORY_E, or abort()s on an interior allocation.
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->releaseSdFontCaches();
+  }
+  LOG_DBG("OPDS", "Download heap: %u free, %u max block", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
+      ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {
+    LOG_ERR("OPDS", "Low heap for download (%u free, %u max block)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_DOWNLOAD_FAILED);
+    requestUpdate();
+    return;
+  }
+
   int lastRenderedPercent = -1;
   unsigned long lastProgressUpdateMs = 0;
   const auto result = HttpDownloader::downloadToFile(
@@ -515,11 +578,10 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
         downloadTotal = total;
         // The activity loop is blocked for the whole download; pump input here
         // so the Cancel button or a Back press can abort mid-transfer.
-        mappedInput.update();
+        mappedInput.update(true);
         if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
-        // This update() consumes the one-shot home event before the central
-        // ActivityManager dispatch can see it, so honor it here: abort the
-        // download, then exit to home once the abort unwinds.
+        // Home cancels immediately; other configured actions are deferred to
+        // the next main-loop pass by the transfer input pump.
         if (mappedInput.wasHomeGesture()) {
           cancelDownload = true;
           goHomeAfterCancel = true;
@@ -539,16 +601,23 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   if (result == HttpDownloader::OK) {
     clearBookCache(filename);
-    state = BrowserState::BROWSING;
+    library::markLibraryIndexDirty();
+    state = BrowserState::LOADING;
+    statusMessage = tr(STR_LOADING);
+    fetchFeed(currentPath);
+    return;
   } else if (result == HttpDownloader::ABORTED) {
-    // User cancelled; the partial file is already removed. Back to the list,
-    // or straight home when the abort came from the home gesture.
+    // The partial file is already removed. Reload the released catalog unless
+    // the cancel came from the home gesture.
     LOG_INF("OPDS", "Download cancelled");
     if (goHomeAfterCancel) {
       onGoHome();
       return;
     }
-    state = BrowserState::BROWSING;
+    state = BrowserState::LOADING;
+    statusMessage = tr(STR_LOADING);
+    fetchFeed(currentPath);
+    return;
   } else {
     LOG_ERR("OPDS", "Download failed: %d", static_cast<int>(result));
     state = BrowserState::ERROR;
