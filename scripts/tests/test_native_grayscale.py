@@ -22,11 +22,12 @@ def main():
         # renderer compiles; only the native transaction/geometry seams are replaced.
         hal = (SIM / 'src/HalDisplay.h').read_text().replace('EInkDisplay einkDisplay;', '')
         hal = hal.replace('EInkDisplay::DISPLAY_WIDTH', '128').replace('EInkDisplay::DISPLAY_HEIGHT', '32')
-        hal = hal.replace('  void begin();', '''  uint8_t getGrayscaleLevels() const;
-      uint8_t* beginGrayscale16();
-      bool commitGrayscale16();
-      void cancelGrayscale16();
-      void begin();''')
+        if 'getGrayscaleLevels()' not in hal:
+            hal = hal.replace('  void begin();', '''  uint8_t getGrayscaleLevels() const;
+          uint8_t* beginGrayscale16();
+          bool commitGrayscale16();
+          void cancelGrayscale16();
+          void begin();''')
         (work / 'HalDisplay.h').write_text(hal)
         (work / 'Logging.h').write_text('#pragma once\n#define LOG_DBG(...) ((void)0)\n#define LOG_ERR(...) ((void)0)\n#define LOG_INF(...) ((void)0)\n')
         settings = """#pragma once

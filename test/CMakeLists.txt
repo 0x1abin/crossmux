@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG 89c882bae0056b545a81434cd7e39af9893ba9a2
+  GIT_TAG 4bad3f813af59b2827eba66f1a216c332a292dbf
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)

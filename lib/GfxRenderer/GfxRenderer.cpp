@@ -47,7 +47,7 @@ bool supportsTextOnlyCombinedBase(const Display& display) {
 template <typename Display>
 uint8_t grayscaleLevels(const Display& display) {
   if constexpr (requires { display.getGrayscaleLevels(); }) return display.getGrayscaleLevels();
-  return 4;  // Simulator HAL has no native image path.
+  return 4;  // Compatibility with HALs that expose only four-level images.
 }
 template <typename Display>
 uint8_t* beginNativeGray(Display& display) {

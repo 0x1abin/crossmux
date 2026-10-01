@@ -227,7 +227,11 @@ int main() {
     s.setupUiFallbacks(r);
     constexpr bool enabled = EXPECT_ENABLED;
     if constexpr (EXPECT_READPICO) {
+#ifdef SIMULATOR
+      const bool active=true;
+#else
       const bool active=memory::healthy;
+#endif
       assert(s.manager_.loads==(active ? 2 : 1)); // shared 12 pt + title 14 pt
       for (int id=1; id<=3; ++id) {
         const int chosen=active ? (id==3 ? 114 : 112) : id;
@@ -342,6 +346,7 @@ int main() {
     SdCardFontSystem s;''')
         configurations = (
             ('readpico', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM', 'FREEINK_DEVICE_READPICO=1'], True),
+            ('readpico_simulator', ['SIMULATOR', 'CROSSPOINT_EMULATED=1', 'FREEINK_DEVICE_READPICO=1'], True),
             ('s3', ['CONFIG_IDF_TARGET_ESP32S3=1', 'BOARD_HAS_PSRAM'], True),
             ('c3', ['CONFIG_IDF_TARGET_ESP32C3=1'], False),
             ('s3_no_psram', ['CONFIG_IDF_TARGET_ESP32S3=1'], False),
@@ -356,7 +361,7 @@ int main() {
                 with self.subTest(target=name):
                     subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                                     '-DENABLE_CHINESE_VERSION=1', f'-DEXPECT_ENABLED={int(enabled)}',
-                                    f'-DEXPECT_READPICO={int(name == "readpico")}',
+                                    f'-DEXPECT_READPICO={int(name.startswith("readpico"))}',
                                     *[f'-D{value}' for value in defines],
                                     '-I', str(ROOT / 'lib/Utf8'), '-I', str(ROOT / 'lib/EpdFont'),
                                     '-I', str(ROOT / 'lib/MiniBidi'), str(cpp),

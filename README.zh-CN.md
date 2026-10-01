@@ -114,9 +114,12 @@ pio run -e simulator -t run_simulator           # X4
 pio run -e simulator_x3 -t run_simulator        # X3
 pio run -e simulator_eego_a4 -t run_simulator   # eego A4
 pio run -e simulator_murphy_m4 -t run_simulator # Murphy M4
+pio run -e simulator_readpico -t run_simulator  # Read Pico，竖屏 684x1216
 ```
 
 [CrossMux 模拟器 fork](https://github.com/0x1abin/crosspoint-simulator) 的版本固定在 `platformio.ini` 中。它用于预览 UI 和输入流程，不能验证显示波形、耗电或实际硬件时序。
+
+Read Pico 窗口自动适应桌面大小，BMP 截图保留原始分辨率。鼠标支持点按、长按和滑动；上箭头/Escape/下箭头对应三个电容键，睡眠后仅电源键 `P` 可以唤醒。原生十六级灰阶图片和 SD 界面字体使用 Read Pico 的处理路径。验证详情见[设备指南](./docs/engineering/read-pico.md#desktop-simulator)。
 
 ### 检查与调试
 

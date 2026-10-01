@@ -237,7 +237,7 @@ bool SdCardFontSystem::adoptCompleteChineseNotoSans() {
 }
 
 void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
-#if defined(ENABLE_CHINESE_VERSION) && !(defined(BOARD_HAS_PSRAM))
+#if defined(ENABLE_CHINESE_VERSION) && !(defined(SIMULATOR) && FREEINK_DEVICE_READPICO) && !defined(BOARD_HAS_PSRAM)
   // No-PSRAM firmware keeps only the reader size resident.
   (void)renderer;
   return;
