@@ -62,6 +62,26 @@ void prepare(GfxRenderer& renderer) {
     sdFontSystem.releaseLoadedFont(renderer);
     if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
   }
+
+  // Releasing only helps the radio if it actually grows one of the three quantities the
+  // gate above tests. Free bytes alone are not what WiFi needs, and on a target whose SD
+  // family lives in PSRAM the release can leave every one of them where it was. Read Pico
+  // sits at a 31,732-byte largest internal block against this 32,768 threshold, so it
+  // trips the gate on every network start while the release moves nothing -- and the UI
+  // then spends the rest of the session without the glyph fallback it draws CJK with.
+  //
+  // Put the family back when the release bought nothing. Callers where it does help keep
+  // the old behaviour, because the comparison fails there.
+  const MemorySnapshot after = readMemorySnapshot();
+  LOG_DBG("NET", "Released render memory for the network: psram %u->%u internal %u->%u largest %u->%u",
+          static_cast<unsigned>(before.freePsram), static_cast<unsigned>(after.freePsram),
+          static_cast<unsigned>(before.freeInternal), static_cast<unsigned>(after.freeInternal),
+          static_cast<unsigned>(before.largestInternalBlock), static_cast<unsigned>(after.largestInternalBlock));
+  if (after.freePsram <= before.freePsram && after.freeInternal <= before.freeInternal &&
+      after.largestInternalBlock <= before.largestInternalBlock) {
+    RenderLock lock;
+    sdFontSystem.ensureLoaded(renderer);
+  }
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
