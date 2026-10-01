@@ -36,6 +36,8 @@ bool Activity::showMainTabContentSelection() const {
          (!usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content);
 }
 
+// Retain the instance-facing Activity layout API.
+// cppcheck-suppress functionStatic
 bool Activity::mainTabsAtBottom() const { return SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM; }
 
 bool Activity::hasMainTabStatusBar() const {

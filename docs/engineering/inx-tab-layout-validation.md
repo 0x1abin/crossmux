@@ -2,9 +2,10 @@
 
 ## Current behavior
 
-The source is based on main `03a9c7ce4daa28fbac81c62b4d9b82d5a792b60e`,
-with pinned FreeInk SDK `34d36ecc37b192f0082cb889a8bb53c887b8d096`
-and simulator `dacbbbcdc133a052f9122347429fdcb8cddf80af`.
+The 2026-10-02 integration includes current main and PR #357, with FreeInk SDK
+`6c2f82245ff6c5e3ac5df582c70ca674a84e1f1e` and simulator
+`33e585ff6452ea03f6a164f51e379f065e8c2e54`. ReadPico's portrait safe insets are
+`{5,5,8,5}` in both the SDK and simulator.
 
 The Tab-position setting appears only for Inx, in the device UI and
 English/Chinese web settings. Touch devices default to Bottom; button-only
