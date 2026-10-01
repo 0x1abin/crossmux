@@ -32,6 +32,14 @@ constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 constexpr char LANG_FILE_BIN[] = "/.crosspoint/language.bin";
 constexpr char LANG_FILE_BAK[] = "/.crosspoint/language.bin.bak";
 constexpr uint8_t FAKE_BOLD_VERSION = 1;
+// Touch reader gesture config schema version: v2 folded the single
+// touchReaderControls selector into the per-direction gesture pair, removed
+// the Inverted Tap gesture (folded to Tap Only) and added the 3x3 tap zones; v3
+// preserves the legacy Inverted Tap side swap by exchanging the default zones
+// for saves that never had custom ones.
+constexpr uint8_t TOUCH_CONTROLS_VERSION = 3;
+// Legacy PAGE_TURN_GESTURE value of the removed Inverted Tap mode.
+constexpr uint8_t LEGACY_GESTURE_INVERTED_TAP = 3;
 constexpr std::array<uint8_t, 3> LEGACY_FAKE_BOLD_MIGRATION = {
     CrossPointSettings::SYNTHETIC_BOLD_OFF,
     CrossPointSettings::SYNTHETIC_BOLD_STANDARD,
@@ -245,6 +253,18 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["hiddenAppsMask"] = hiddenAppsMask;
   doc["appsCatalogVersion"] = appsCatalogVersion;
   doc["buddyClaimed"] = buddyClaimed;
+  JsonArray tapZonesArray = doc["tapZones"].to<JsonArray>();
+  for (const uint8_t zone : tapZones) {
+    tapZonesArray.add(zone);
+  }
+  JsonArray tapZonesLongArray = doc["tapZonesLong"].to<JsonArray>();
+  for (const uint8_t action : tapZonesLong) {
+    tapZonesLongArray.add(action);
+  }
+  JsonArray miniZonesArray = doc["miniZones"].to<JsonArray>();
+  for (const uint8_t action : miniZones) {
+    miniZonesArray.add(action);
+  }
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
   doc["fontFamily"] = fontFamily;
@@ -373,6 +393,51 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
 
+  // Touch reader gestures: the single touchReaderControls selector (Off / Tap /
+  // Swipe / Inverted Tap) folded into the per-direction gesture pair. The
+  // SettingsList loop above already collapsed the old value to Off/On; read the
+  // raw document here to recover which legacy mode to preserve. v1 saves may
+  // also hold the now-removed Inverted Tap gesture (legacy value 3), which
+  // folds to Tap Only. Saves from the gesture-pair era have no
+  // touchReaderControls key at all and are left untouched (the key check keeps
+  // a version bump from re-running the migration against them).
+  if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
+      !doc["touchReaderControls"].isNull()) {
+    const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
+    if (legacyTouch == TOUCH_READER_SWIPE) {
+      pageTurnGesture = SWIPE_ONLY;
+      previousPageGesture = SWIPE_ONLY;
+    } else if (legacyTouch == TOUCH_READER_INVERTED_TAP) {
+      pageTurnGesture = TAP_ONLY;
+      previousPageGesture = TAP_ONLY;
+      // Legacy Inverted Tap swapped the page-turn sides (right edge = previous,
+      // left edge = next). Keep that behaviour for saves that never had custom
+      // zones; a save with its own tapZones is preserved untouched.
+      if (doc["tapZones"].isNull()) {
+        for (uint8_t i = 0; i < 9; ++i) {
+          if (tapZones[i] == TAP_ZONE_PREV) {
+            tapZones[i] = TAP_ZONE_NEXT;
+          } else if (tapZones[i] == TAP_ZONE_NEXT) {
+            tapZones[i] = TAP_ZONE_PREV;
+          }
+        }
+      }
+    } else if (legacyTouch != TOUCH_READER_OFF) {
+      // Legacy Tap mode: taps only, same zones on both directions.
+      pageTurnGesture = TAP_ONLY;
+      previousPageGesture = TAP_ONLY;
+    }
+    if (pageTurnGesture == LEGACY_GESTURE_INVERTED_TAP) pageTurnGesture = TAP_ONLY;
+    if (previousPageGesture == LEGACY_GESTURE_INVERTED_TAP) previousPageGesture = TAP_ONLY;
+    needsResave = true;
+  }
+  // Older saves from the gesture-pair era wrote only pageTurnGesture; give the
+  // previous direction the same mode instead of silently defaulting it.
+  if (doc["previousPageGesture"].isNull()) {
+    previousPageGesture = pageTurnGesture;
+    needsResave = true;
+  }
+
   if (doc["sleepTimeoutMinutes"].isNull() && !doc["sleepTimeout"].isNull()) {
     const uint8_t legacyValue =
         clamp(doc["sleepTimeout"] | (uint8_t)SLEEP_10_MIN, SLEEP_TIMEOUT_COUNT, (uint8_t)SLEEP_10_MIN);
@@ -407,6 +472,53 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
   appsCatalogVersion = APPS_CATALOG_VERSION;
   buddyClaimed = clamp(doc["buddyClaimed"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
+
+  // Reader tap zones: keep the struct defaults for saves that predate the
+  // 3x3 grid, validate any stored values, and resave so the field catches up.
+  const JsonArrayConst storedTapZones = doc["tapZones"];
+  if (!storedTapZones.isNull()) {
+    for (uint8_t i = 0; i < 9 && i < storedTapZones.size(); ++i) {
+      const uint8_t zone = storedTapZones[i] | TAP_ZONE_NONE;
+      tapZones[i] = zone < TAP_ZONE_ACTION_COUNT ? zone : TAP_ZONE_NONE;
+    }
+    if (static_cast<uint8_t>(storedTapZones.size()) != 9) needsResave = true;
+  } else {
+    needsResave = true;
+  }
+
+  // Long-press actions for the 9 main zones. Saves from the 3x3-grid era
+  // predate long-press zones: migrate so a BOOKMARK/DICTIONARY zone keeps its
+  // original long-press behaviour, then resave once so the field catches up.
+  const JsonArrayConst storedTapZonesLong = doc["tapZonesLong"];
+  if (!storedTapZonesLong.isNull()) {
+    for (uint8_t i = 0; i < 9 && i < storedTapZonesLong.size(); ++i) {
+      const uint8_t action = storedTapZonesLong[i] | TAP_ZONE_LONG_NONE;
+      tapZonesLong[i] = action < TAP_ZONE_LONG_ACTION_COUNT ? action : TAP_ZONE_LONG_NONE;
+    }
+    if (static_cast<uint8_t>(storedTapZonesLong.size()) != 9) needsResave = true;
+  } else {
+    for (uint8_t i = 0; i < 9; ++i) {
+      if (tapZones[i] == TAP_ZONE_BOOKMARK) {
+        tapZonesLong[i] = TAP_ZONE_LONG_BOOKMARK;
+      } else if (tapZones[i] == TAP_ZONE_DICTIONARY) {
+        tapZonesLong[i] = TAP_ZONE_LONG_DICTIONARY;
+      }
+    }
+    needsResave = true;
+  }
+
+  // Extra small corner/edge zones (new field: absent in older saves, keep the
+  // struct defaults). Mini zones are tap-only; they have no long-press field.
+  const JsonArrayConst storedMiniZones = doc["miniZones"];
+  if (!storedMiniZones.isNull()) {
+    for (uint8_t i = 0; i < 6 && i < storedMiniZones.size(); ++i) {
+      const uint8_t action = storedMiniZones[i] | TAP_ZONE_NONE;
+      miniZones[i] = action < TAP_ZONE_ACTION_COUNT ? action : TAP_ZONE_NONE;
+    }
+    if (static_cast<uint8_t>(storedMiniZones.size()) != 6) needsResave = true;
+  } else {
+    needsResave = true;
+  }
 
   // Reader font size — an actual point size since 1.5. Files written by 1.4 and
   // earlier hold the old SMALL/MEDIUM/LARGE/EXTRA_LARGE slot in 0..3; no font is

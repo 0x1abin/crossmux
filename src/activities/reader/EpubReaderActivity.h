@@ -87,6 +87,12 @@ class EpubReaderActivity final : public ReaderActivity {
   // use), for enum rows: font size / line spacing / alignment / orientation /
   // auto page turn. Toggle rows stay one-tap toggles, as in Settings.
   OptionPopup overlayPopup;
+  // Touch-suppression window after a tap zone opens the popup: the opening
+  // contact's release edge can linger in the SDK snapshot for a loop pass or
+  // two, and OptionPopup would otherwise dismiss the fresh dialog as an
+  // outside tap. No touch input is routed until this timestamp passes; the
+  // window only outlives the residual release, buttons keep working.
+  uint32_t popupTouchIgnoreUntilMs_ = 0;
   ReaderFontPreview fontPreview;
   enum class FontPromptState { Idle, Asking, Accepted };
   FontPromptState fontPromptState = FontPromptState::Idle;
@@ -99,7 +105,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // does NOT re-render the page: the overlay page snapshot was decoded with the
   // old filter, so it is dropped on close and the page re-decodes once there.
   bool imageScalingDirty = false;
-  int autoTurnOption = 0;  // current auto page-turn rate index (More panel)
+  int autoTurnOption = 0;                // auto page-turn option: 0=off, 1..3=rates[1..3], 4=custom
+  uint8_t customAutoPageTurnRate_ = 15;  // custom rate used when autoTurnOption == 4
   std::vector<EpubReaderMenuActivity::MenuItem> moreItems;
 
   // Footnote support
@@ -153,6 +160,10 @@ class EpubReaderActivity final : public ReaderActivity {
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   bool jumpToFraction(float fraction);
   void jumpToPercent(int percent);
+  bool handleZoneShortAction(const uint8_t action) override;
+  bool handleZoneLongAction(const uint8_t action) override;
+  void openChapterSelector();
+  void showAutoPageTurnPopup();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void openReaderMenu();
   // Toolbar reader menu (see Overlay above).
