@@ -185,12 +185,26 @@ enum class BootResume : uint8_t {
 static bool deepSleepInProgress = false;
 
 #if FREEINK_CAP_TOUCH
+#if FREEINK_DEVICE_READPICO
+// Raised when a network session ends, consumed at the top of loop().
+//
+// Read Pico cannot skip the eviction: NetworkStartup drops the SD family precisely because
+// on this board that release is what carries the largest internal block past its gate (it
+// sits a few bytes short before the release and clears it after), so the radio needs it and
+// the family has to come back afterwards. What is left is *when*: this function runs on the
+// activity teardown path, where reading the card back is not safe, so it only raises a flag.
+static bool sdFontReloadPending = false;
+#endif
+
 static bool finishWifiSessionWithoutRestart() {
   if (!BoardConfig::hasTouch()) return false;
   if (esp_sntp_enabled()) esp_sntp_stop();
   WiFi.mode(WIFI_OFF);
   delay(100);
   LOG_DBG("MAIN", "WiFi stopped without restart on touch device");
+#if FREEINK_DEVICE_READPICO
+  sdFontReloadPending = true;
+#endif
   return true;
 }
 #endif
@@ -859,6 +873,25 @@ void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
+
+#if FREEINK_CAP_TOUCH && FREEINK_DEVICE_READPICO
+  // A network session evicted the SD family. This is the earliest safe point to read it
+  // back -- the teardown path that raised the flag cannot do it -- and doing it here means
+  // the family returns on the frame after the user leaves the WiFi screen instead of only
+  // when they happen to open one of the few screens that reload it themselves.
+  //
+  // Deliberately NOT wrapped in RenderLock: SdCardFontSystem takes no lock of its own, the
+  // top of loop() runs before any activity render, and holding the lock across the card
+  // read is what the two earlier attempts at this fix did before the device stopped
+  // responding. Keep this call lock-free.
+  if (sdFontReloadPending) {
+    sdFontReloadPending = false;
+    const unsigned long reloadStart = millis();
+    LOG_DBG("MAIN", "Reloading SD font family after the network session");
+    sdFontSystem.ensureLoaded(renderer);
+    LOG_DBG("MAIN", "SD font reload after network took %lu ms", millis() - reloadStart);
+  }
+#endif
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
