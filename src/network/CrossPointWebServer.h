@@ -1,6 +1,7 @@
 #pragma once
 
 #include <HalStorage.h>
+#include <Memory.h>
 #include <NetworkUdp.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
@@ -42,7 +43,7 @@ class CrossPointWebServer {
     // 4KB is a good balance: large enough to reduce syscall overhead, small enough
     // to keep individual write times short and avoid watchdog issues
     static constexpr size_t UPLOAD_BUFFER_SIZE = 4096;  // 4KB buffer
-    std::unique_ptr<uint8_t[]> buffer;
+    memory::ByteBuffer buffer;
     size_t bufferPos = 0;
   } upload;
 
@@ -50,7 +51,7 @@ class CrossPointWebServer {
   ~CrossPointWebServer();
 
   // Start the web server (call after WiFi is connected)
-  void begin();
+  bool begin();
 
   // Stop the web server
   void stop();
@@ -69,7 +70,7 @@ class CrossPointWebServer {
  private:
   std::unique_ptr<WebServer> server = nullptr;
   std::unique_ptr<WebSocketsServer> wsServer = nullptr;
-  std::unique_ptr<char[]> fileListBatch = nullptr;
+  memory::ByteBuffer fileListBatch;
   bool running = false;
   bool apMode = false;  // true when running in AP mode, false for STA mode
   uint16_t port = 80;
@@ -123,7 +124,7 @@ class CrossPointWebServer {
     bool magicChecked = false;
     size_t bytesWritten = 0;
     static constexpr size_t BUFFER_SIZE = 4096;
-    std::unique_ptr<uint8_t[]> buffer;
+    memory::ByteBuffer buffer;
     size_t bufferPos = 0;
   } fontUpload;
 

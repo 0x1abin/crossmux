@@ -87,9 +87,10 @@ enabled. `System Volume Information` and `XTCache` are always hidden/protected.
 
 The response schema is unchanged for large directories. Entries are scanned
 once and streamed as a chunked response in bounded batches, so the complete
-listing is never retained in RAM. If the server could not reserve its 1400-byte
-batch buffer when network mode started, this endpoint returns HTTP `503` with
-`{"error":"Insufficient memory"}` instead of starting a partial JSON response.
+listing is never retained in RAM. The server reserves its 1400-byte batch
+buffer during startup; allocation failure now fails startup and releases the
+services already created. The endpoint retains a defensive HTTP `503` response
+if the buffer is unavailable.
 
 ### `GET /download`
 
@@ -539,3 +540,23 @@ The final field is the WebSocket upload port.
 
 Calibre Wireless starts the same web server in STA mode and displays setup
 instructions plus WebSocket upload progress on the device screen.
+
+## Startup failure handling
+
+`CrossPointWebServer::begin()` returns false when the application-level server,
+upload, WebDAV, WebSocket or file-list allocations fail, or UDP discovery cannot
+start. It releases partially started services and buffers before returning;
+callers display the service screen only on success. `stop()` also releases the
+UDP TX buffer retained by a failed socket creation, and a stopped object can be
+started again. AP mode initialization failure returns before starting services.
+
+Read Pico enables WiFi/LwIP PSRAM allocation while retaining the 32 KiB internal
+reserve and 4096-byte ordinary-allocation threshold. The two 4096-byte upload
+buffers and 1400-byte listing buffer prefer PSRAM, with internal fallback on
+failure or devices without PSRAM. This does not make third-party constructors,
+route registration, mDNS, or void-returning listener startup fully OOM-safe.
+
+Run `python3 scripts/tests/test_webserver_startup_failure.py` for injected
+allocation/socket failures, cleanup, repeated stop, retry, and AP startup guards.
+Physical acceptance additionally requires AP and STA transfers; host stubs do
+not exercise the actual WiFi driver or prove that every listener is reachable.

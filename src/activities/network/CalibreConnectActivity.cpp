@@ -101,12 +101,11 @@ void CalibreConnectActivity::startWebServer() {
     requestUpdate();
     return;
   }
-  webServer->begin();
-
-  if (webServer->isRunning()) {
+  if (webServer->begin()) {
     state = CalibreConnectState::SERVER_RUNNING;
     requestUpdate();
   } else {
+    webServer.reset();
     state = CalibreConnectState::ERROR;
     requestUpdate();
   }
