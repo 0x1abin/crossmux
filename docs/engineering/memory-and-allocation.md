@@ -156,9 +156,11 @@ is not evidence that hotspot startup or transfer is reliable.
 
 The combined waveform/network candidate started AP services, but left only
 5,639 internal bytes (largest 3,316) and 2,183 internal-DMA bytes (largest 32);
-the phone could not join. ReadPico therefore also enables
-`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`, using the SDK's existing linker
-rules for network/Bluetooth BSS. Verify `.ext_ram.bss` and symbol placement in
-the final ELF, not just sdkconfig. This requires AP/STA and BLE device acceptance;
-it does not relocate application display buffers or task stacks. The ordinary
-malloc threshold, mDNS allocation policy and NVS cache policy remain unchanged.
+the phone could not join. A ReadPico network/Bluetooth BSS relocation candidate
+moved 15,088 bytes to PSRAM, but failed during boot with repeated panic handling;
+that option was removed. Keep its image and log as failed-candidate evidence.
+
+The next candidate moves only mDNS packet/service allocations to PSRAM using
+`CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y`, retaining its internal task stack and the
+existing BSS placement. The ordinary malloc threshold and NVS cache policy
+remain unchanged. AP connection and transfer acceptance is still required.
