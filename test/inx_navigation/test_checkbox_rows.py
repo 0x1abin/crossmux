@@ -82,6 +82,7 @@ struct UITheme {
 struct UiListActivity {
  fui::ListNav nav;
  struct {bool touch=false;bool hasTouch()const{return touch;}} mappedInput;
+ bool usesUpstreamStyle()const{return false;}
  auto& activeNav(){return nav;}
  int listCount()const{return 1;}
  void syncListViewport(UiScreen&,fui::ListProps&,int=0);
@@ -172,6 +173,11 @@ paths = ['reader/EpubReaderMenuActivity.cpp', 'settings/LanguageSelectActivity.c
          'settings/KOReaderSettingsActivity.cpp', 'settings/OpdsSettingsActivity.cpp']
 for path in paths:
     text = (ROOT / 'src/activities' / path).read_text()
+    if path == 'reader/EpubReaderMenuActivity.cpp':
+        assert 'props.labelText = screen.theme().smallText;' in text
+        assert 'props.labelText.maxLines = 2;' in text
+        assert 'SETTINGS.uiTheme != CrossPointSettings::INX' not in text
+        continue
     start = text.index('  if (SETTINGS.uiTheme != CrossPointSettings::INX)', text.index('  fui::ListProps props;', text.index('void ' + Path(path).stem + '::buildScreen')))
     guard = text[start:text.index('  syncListViewport(screen, props);', start)]
     code = r'''

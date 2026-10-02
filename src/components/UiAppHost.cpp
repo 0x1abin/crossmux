@@ -4,18 +4,20 @@
 
 namespace fui = freeink::ui;
 
-UiAppHost::UiAppHost(const GfxRenderer& renderer)
-    : uiTarget(makeUiTarget(renderer)), app(uiTarget, uiTarget.deviceContext()) {}
+UiAppHost::UiAppHost(const GfxRenderer& renderer, const bool upstreamStyle)
+    : uiTarget(makeUiTarget(renderer, upstreamStyle)),
+      app(uiTarget, uiTarget.deviceContext()),
+      upstreamStyle(upstreamStyle) {}
 
 void UiAppHost::resetUi() {
   uiReady = false;
-  applySharedUiTheme(app, uiTarget);
+  applySharedUiTheme(app, uiTarget, upstreamStyle);
 }
 
 void UiAppHost::renderUi() {
-  applyUiTextAlignment(uiTarget);
+  applyUiTextAlignment(uiTarget, upstreamStyle);
   app.setDevice(uiTarget.deviceContext());
-  refreshSharedUiThemeTokens(uiTarget);
+  refreshSharedUiThemeTokens(uiTarget, upstreamStyle);
   app.render();
   uiReady = true;
 }

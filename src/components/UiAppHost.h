@@ -29,7 +29,7 @@ class UiAppHost {
   using UiApp = freeink::ui::FreeInkApp<24, 6>;
   using UiScreen = UiApp::ScreenType;
 
-  explicit UiAppHost(const GfxRenderer& renderer);
+  explicit UiAppHost(const GfxRenderer& renderer, bool upstreamStyle = false);
 
   // Screen-entry reset: close the routing gate and rebind the shared theme
   // tokens (refreshed for the active UITheme + this target's fonts). Call from
@@ -67,6 +67,7 @@ class UiAppHost {
   // interaction table indexes is released mid-state. Reopens on renderUi().
   void closeRouting() { uiReady = false; }
   bool routingReady() const { return uiReady.load(); }
+  bool usesUpstreamStyle() const { return upstreamStyle; }
 
   freeink::ui::GfxRendererTarget uiTarget;  // must precede `app`: the app holds a reference to it
   UiApp app;
@@ -75,4 +76,5 @@ class UiAppHost {
   // Opened by the render task after publication and closed on lifecycle/state
   // resets; read by the loop task (route*).
   std::atomic<bool> uiReady{false};
+  const bool upstreamStyle;
 };

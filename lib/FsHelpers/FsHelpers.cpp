@@ -176,6 +176,10 @@ bool hasTxtExtension(std::string_view fileName) { return checkFileExtension(file
 
 bool hasMarkdownExtension(std::string_view fileName) { return checkFileExtension(fileName, ".md"); }
 
+bool hasReflowableBookExtension(std::string_view fileName) {
+  return hasEpubExtension(fileName) || hasTxtExtension(fileName) || hasMarkdownExtension(fileName);
+}
+
 bool hasCssExtension(std::string_view fileName) { return checkFileExtension(fileName, ".css"); }
 
 std::string extractFolderPath(const std::string& filePath) {
@@ -216,6 +220,16 @@ std::string rebasePath(const std::string_view path, const std::string_view oldRo
   std::string result(newRoot);
   result.append(path.substr(oldRoot.size()));
   return result;
+}
+
+std::string getFileNameWithoutExtension(std::string_view filePath) {
+  const auto lastSlash = filePath.find_last_of("/\\");
+  std::string_view filename = (lastSlash != std::string_view::npos) ? filePath.substr(lastSlash + 1) : filePath;
+  const auto lastDot = filename.find_last_of('.');
+  if (lastDot != std::string_view::npos && lastDot > 0) {
+    filename = filename.substr(0, lastDot);
+  }
+  return std::string(filename);
 }
 
 bool isSafePathComponent(std::string_view name) {

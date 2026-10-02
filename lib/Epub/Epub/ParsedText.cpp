@@ -717,7 +717,7 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   //  - Auto: keep the book's own CSS text-indent (or none when the book does
   //    not set one), the stock behaviour.
   //  - Indent: every paragraph gets the reader's own two-CJK-character /
-  //    three-space indent.
+  //    configured Western-space indent.
   //  - NoIndent: no first-line indent at all, overriding the book's CSS
   //    text-indent whether embedded styles are on or off.
   // Extra paragraph spacing never affects the indent, so turning it on no
@@ -728,7 +728,8 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   if (firstLineIndent == FirstLineIndent::Auto) {
     return blockStyle.textIndentDefined ? blockStyle.textIndent : 0;
   }
-  const int spaceIndent = renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR) * 3;
+  const int spaceIndent =
+      scaleSpace(renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR), wordSpacingPercent) * paragraphIndentSpaces;
   const bool hasCjkText = std::any_of(words.begin(), words.end(), [this](const auto& word) {
     return containsCjkBreakableCodepoint(wordStore.view(word));
   });
@@ -1224,14 +1225,12 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
       if (availableWidth > 0 &&
           hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths, allowFallbackBreaks)) {
         // Prefix now fits; append it to this line and move to next line
-        lineWidth += spacing + wordWidths[currentIndex];
         ++currentIndex;
         break;
       }
 
       // Could not split: force at least one word per line to avoid infinite loop
       if (currentIndex == lineStart) {
-        lineWidth += candidateWidth;
         ++currentIndex;
       }
       break;

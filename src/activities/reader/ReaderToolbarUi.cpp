@@ -11,6 +11,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "components/icons/readerToolbarIcons.h"
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
 #include "components/icons/readerToolbarIcons48.h"
@@ -47,7 +48,7 @@ constexpr int kPanelHeightMaxPercent = 72;
 constexpr int kLandscapePanelHeightPercent = 88;
 }  // namespace
 
-ReaderToolbarUi::ReaderToolbarUi(GfxRenderer& renderer) : UiAppHost(renderer) {}
+ReaderToolbarUi::ReaderToolbarUi(GfxRenderer& renderer) : UiAppHost(renderer, true) {}
 
 void ReaderToolbarUi::begin() {
   resetUi();
@@ -250,8 +251,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   // the target share, grows one row when that still fits the cap, and shrinks
   // to the item count when the list is shorter than the space.
   const int16_t titleH = screen.target().lineHeight(tokens.titleText.font);
-  const int16_t rowH =
-      model_.denseRows ? static_cast<int16_t>(UITheme::getInstance().getMetrics().listRowHeight) : tokens.rowHeight;
+  const int16_t rowH = model_.denseRows ? static_cast<int16_t>(uiThemeMetrics(true).listRowHeight) : tokens.rowHeight;
   const int16_t rowGap = model_.denseRows ? tokens.listRowGap : std::max(tokens.listRowGap, tokens.listTouchRowGap);
   const int16_t rowStride = static_cast<int16_t>(rowH + rowGap);
   const int16_t grabberBand =
@@ -293,11 +293,9 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   listProps_.inputMask = fui::InputTouch;  // physical buttons stay with the reader
   listProps_.rowHeight = rowH;
   listProps_.rowGap = rowGap;
-  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
-    listProps_.toggleCheckbox = true;
-    listProps_.toggleWidth = 28;
-    listProps_.toggleHeight = 28;
-  }
+  listProps_.toggleCheckbox = true;
+  listProps_.toggleWidth = UiHighDpiProfile::enabled ? 48 : 28;
+  listProps_.toggleHeight = UiHighDpiProfile::enabled ? 48 : 28;
   // The label column starts flush with the panel title (no list-side padding
   // on top of the sheet's own inset). Body-size text: small reads condensed
   // and the taller row doubles as the tap target.

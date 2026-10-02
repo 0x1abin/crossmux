@@ -630,3 +630,22 @@ TEST(InxNavigation, KeepsSubpageContentInsideChrome) {
   EXPECT_EQ(spacedBody.y, 82);
   EXPECT_EQ(spacedBody.height, 662);
 }
+
+TEST(InxOptions, ViewportFitsAndHitRowsRemainSeparated) {
+  for (const Rect safe : {Rect{0, 0, 480, 750}, Rect{8, 5, 950, 600}, Rect{0, 0, 800, 340}}) {
+    for (int selected : {0, 4, 11}) {
+      const auto view = InxOptionGeometry::layout(safe, 12, selected);
+      EXPECT_GE(view.panel.x, safe.x);
+      EXPECT_GE(view.panel.y, safe.y);
+      EXPECT_LE(view.panel.x + view.panel.width, safe.x + safe.width);
+      EXPECT_LE(view.panel.y + view.panel.height, safe.y + safe.height);
+      EXPECT_GE(selected, view.first);
+      EXPECT_LT(selected, view.first + view.rows);
+      for (int row = 1; row < view.rows; ++row) {
+        const auto previous = view.optionRect(row - 1);
+        const auto next = view.optionRect(row);
+        EXPECT_EQ(next.y - previous.y - previous.height, 6);
+      }
+    }
+  }
+}

@@ -170,5 +170,38 @@ int main() {
                     subprocess.run([str(executable)], check=True)
 
 
+class CatalogMemoryBudgetTest(unittest.TestCase):
+    def test_actual_catalog_preflight_rejects_size_heap_and_fragmentation_limits(self):
+        source = (ROOT / "src/activities/plugins/PluginCatalogActivity.cpp").read_text()
+        function = method(source, "bool catalogHasSpace(")
+        constants = source[source.index("constexpr size_t MAX_CATALOG_BYTES"):source.index("bool catalogHasSpace(")]
+        harness = """#include <cassert>
+#include <Memory.h>
+struct { size_t freeBytes = 128 * 1024, block = 96 * 1024;
+size_t getFreeHeap() const { return freeBytes; }
+size_t getMaxAllocHeap() const { return block; } } ESP;
+""" + constants + function + """
+int main() {
+ assert(catalogHasSpace(4096));
+ assert(catalogHasSpace(MAX_CATALOG_BYTES));
+ assert(!catalogHasSpace(MAX_CATALOG_BYTES + 1));
+ ESP.freeBytes = CATALOG_HEAP_RESERVE + 4095;
+ assert(!catalogHasSpace(4096));
+ ESP.freeBytes = 128 * 1024; ESP.block = 8191;
+ assert(!catalogHasSpace(4096));
+ ESP.block = 8192; assert(catalogHasSpace(4096));
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            cpp = Path(directory) / "budget.cpp"
+            cpp.write_text(harness)
+            binary = Path(directory) / "budget"
+            subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
+                "-std=c++20", "-Wall", "-Wextra", "-Werror", "-DSIMULATOR",
+                "-I" + str(ROOT / "lib/Memory"), str(cpp), "-o", str(binary)
+            ], env=dict(os.environ, CCACHE_DISABLE="1"), check=True)
+            subprocess.run([str(binary)], check=True)
+
+
 if __name__ == "__main__":
     unittest.main()

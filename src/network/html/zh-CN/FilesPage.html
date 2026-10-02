@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>文件管理 - CrossMux</title>
-  <script src="/js/jszip.min.js"></script>
+  <script src="/js/jszip.min.js"><!--#include file="../shared/PluginHost.js.inc" -->
+  window.addEventListener('load', () => loadPlugins('files'));
+</script>
   <style>
     :root {
       color-scheme: light;
@@ -1799,6 +1801,7 @@
   </div>
 </div>
 
+<div id="plugin-container"></div>
 <script>
   // get current path from query parameter
   const currentPath = decodeURIComponent(new URLSearchParams(window.location.search).get('path') || '/');

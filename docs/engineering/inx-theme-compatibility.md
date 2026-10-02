@@ -24,9 +24,12 @@ SDK ThemeRow-specific selected/dimmed styling must not affect Content layouts.
 Lyra Carousel retains its fork-only cover home and inherits Lyra's shared page
 rendering, including list styling; only its home metrics differ from Lyra.
 
-The reviewed non-INX reference is Reader
-`93e98bb78702e29868a16a13b80c40e6b36ccdff` with SDK
-`5deb923c33d97f918227b2ad983fda4d5a63c6ae`. Existing upstream menu entries retain
+The current local integration reference (2026-10-02) is Reader
+`38280863a50988683c2c63ccd7096e872a48c411`, SDK
+`98b4e427459bc588fdcdcb25e1454f0806cd806b`, and Simulator
+`20e738038605ff4ead6c9fcfe932443d1e143691`, on CrossMux `593c8dbc`.
+The SDK integration retains all six ReadPico commits through `e3550ec`;
+rehearsal source-tree fingerprints describe staged resolutions separately from commits. Existing upstream menu entries retain
 their category, relative order and visibility conditions. Shared CrossMux settings
 remain visible in every theme at the same category and relative insertion point,
 with their existing action/value binding. This is a structural position, not an
@@ -107,16 +110,15 @@ extension rows separately from upstream rows and confirm their hit regions.
 A passing component trace or build is not whole-page acceptance. Preserve all
 historical INX baselines and record physical verification independently.
 
-### Fixed-snapshot checkbox increment
+### Historical fixed-snapshot checkbox increment
 
-This rehearsal stays on CrossMux `9d02f498`, Reader `93e98bb`, SDK `5deb923c`
+The previous rehearsal used CrossMux `9d02f498`, Reader `93e98bb`, SDK `5deb923c`
 and Simulator `8699595`. The approved Reader `d1509d0` and SDK `e41f683e`
 checkbox increments are applied separately. Non-INX boolean controls use their
 upstream checkbox rendering and hit geometry, including reader overlays; INX
 retains historical reader-menu text states; settings controls follow the explicit exception below. Multi-valued paragraph spacing, synthetic bold
 and reading-guide options remain selectors. Reference captures use the same
-fixed snapshots plus these increments. Latest main/upstream updates are a
-separate task; no historical INX baseline is rewritten.
+fixed snapshots plus these increments. Current integration pins are recorded above; no historical INX baseline is rewritten.
 
 The shared large UI font (`NOTOSANS_18_FONT_ID`, including slider readouts) uses
 upstream Noto Sans 18 regular/bold outside INX; INX keeps its historical offline
@@ -141,7 +143,8 @@ themes retain the shared 28px SDK checkboxes. Multi-select lists such as keyboar
 layouts retain checkboxes in every theme; their locked default row keeps its
 existing text state. Slider adjustment dialogs use Lyra control geometry and
 fixed upstream 10/12/18pt font bindings. Keep INX category layout,
-row cadence, page chrome, ordinary option pickers and reader menu/toolbar text.
+row cadence, page chrome and ordinary option pickers. Reader menus and the
+control center follow the explicit upstream exception below.
 Historical baselines remain immutable: old setting-control scenes demonstrate
 legacy SDK compatibility; current entrypoints are checked separately for the
 theme-specific boolean controls and uniform sliders. Do not interpret this as
@@ -152,3 +155,39 @@ for boolean state, switch/checkbox drawing and hit geometry checks, and
 The three control font families share existing bitmap data; registration adds
 three persistent font-map entries at startup, avoiding per-dialog allocations
 or mutation of the INX page fonts.
+
+## Touch and high-density integration
+
+Only ReadPico hardware, Nightly and its simulator opt into `UiHighDpiProfile`.
+Resolution alone never enables it. Existing font bindings and fallback chains stay
+in place. Keyboard drawing and input use the same panel geometry: 96px keys and
+12px gaps are preferred; ReadPico landscape retains one cursor-visible input line
+and may reduce gaps to 6px so primary and alternate labels fit. Portrait keeps two
+input lines. Regular INX keyboard geometry follows Lyra while its page chrome stays INX.
+
+INX option pickers share `InxOptionGeometry::layout` for drawing and hit regions.
+The safe area determines the visible rows; vertical swipes move by that actual row
+count, clamp at either end, and consume their release without selecting an option.
+Touch-down does not move the viewport under the finger. WiFi scan, connection,
+failure and list states publish Cancel/Retry/Show networks controls through the
+existing FreeInkUI frame, with at least 6px between buttons and bounded wrapped
+status text. Simulator checks and screenshots are separate from physical touch,
+refresh and sustained reading acceptance.
+
+### Reader menu and control center exception
+
+For the fixed Reader `38280863a50988683c2c63ccd7096e872a48c411`, every
+theme uses the upstream reader menu assembly, toolbar, lists, checkboxes,
+option dialogs and quick actions. INX uses the Lyra counterpart for these
+surfaces and their chapter/bookmark/percent/footnote entrypoints only, including
+font bindings and text alignment; its ordinary settings
+pickers and other pages retain their own geometry. The Text panel replaces
+Focus Reading with First Line Indent (Auto / Indent / No indent), retaining
+the existing setting and default. A selection persists and reflows the page
+under the panel. Image scaling remains available in the regular settings.
+
+The top-edge down swipe opens the same control center on touch boards with or
+without a frontlight. ReadPico therefore shows the upstream night-mode, refresh,
+orientation and touch-control tiles, while capability checks omit unavailable
+light sliders. These surfaces keep the explicit high-density control sizes and
+board safe area. Historical INX traces are not rewritten for this exception.

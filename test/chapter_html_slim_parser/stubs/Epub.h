@@ -9,6 +9,8 @@ class CssParser;
 
 class Epub {
  public:
+  std::string sourcePath = "test.epub";
+  const std::string& getPath() const { return sourcePath; }
   std::string cachePath;
   CssParser* css = nullptr;
   struct Item {

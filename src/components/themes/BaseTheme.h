@@ -155,6 +155,7 @@ enum UIIcon {
   Settings,
   Transfer,
   Library,
+  Plugins,
   Wifi,
   Hotspot,
   Bookmark,
@@ -198,6 +199,8 @@ constexpr void apply(ThemeMetrics& metrics) {
     metrics.contentSidePadding = contentPadding;
     metrics.headerSidePadding = contentPadding;
     metrics.verticalSpacing = controlGap;
+    metrics.keyboardKeyHeight = buttonHeight;
+    metrics.keyboardKeySpacing = controlGap;
     metrics.listRowHeight = rowHeight;
     metrics.listWithSubtitleRowHeight = subtitleRowHeight;
     metrics.listSidePadding = contentPadding;
@@ -256,7 +259,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .progressBarMarginTop = 1,
                                  .statusBarHorizontalMargin = 5,
                                  .statusBarVerticalMargin = 19,
-                                 .keyboardKeyHeight = 48,
+                                 .keyboardKeyHeight = 56,
                                  .keyboardKeySpacing = 0,
                                  .keyboardCenteredText = false,
                                  .keyboardVerticalOffset = -13,
@@ -320,6 +323,8 @@ class BaseTheme {
   void drawBatteryRight(const GfxRenderer& renderer, Rect rect, bool showPercentage = true,
                         int numericFontId = STATUS_NUMERIC_FONT_ID) const;
   virtual void fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const;
+  void drawButtonHintsWithStyle(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                                const char* btn4, bool upstreamStyle) const;
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
   bool buttonHintsVisible() const;
@@ -353,16 +358,19 @@ class BaseTheme {
   // screens that own their stack bottom pass backButton = false.
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
                           bool backButton = true) const;
+  static void drawHeaderWithStyle(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                                  bool backButton, bool upstreamStyle);
   // Fill the battery/clock status chrome (settings + theme metrics) into
   // header props, so FUI-native screens drawing their own interactive header
   // carry the same band as drawHeader. Status text is styled with the
   // FONT_LABEL slot (bound to the fixed small font by makeUiTarget and
   // drawHeader). The label strings point at internal static buffers refreshed
   // per call (headers draw on the single render task).
-  static void applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::HeaderProps& props);
+  static void applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::HeaderProps& props,
+                                bool upstreamStyle = false);
   // Edge inset drawHeader uses for the clock/battery status line (detached
   // layouts hug the corner with a legacy 12px inset instead of the padding).
-  static int headerStatusInset();
+  static int headerStatusInset(bool upstreamStyle = false);
   virtual void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,

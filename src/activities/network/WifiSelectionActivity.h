@@ -113,7 +113,12 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   static void listScreen(UiScreen& screen, void* user);
   static void onRowEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onScanEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onCancelEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onReturnEvent(const freeink::ui::ActionEvent& event, void* user);
+  void addTouchControls(UiScreen& screen, const char* label, freeink::ui::ActionId action);
+  void returnFromFailure();
   static void onPromptEvent(const freeink::ui::ActionEvent& event, void* user);
+  int subtitleHeight() const;
   void buildListScreen(UiScreen& screen);
   void buildPromptDialog(UiScreen& screen);
 

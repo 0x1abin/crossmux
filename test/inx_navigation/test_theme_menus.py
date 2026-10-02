@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync review check: production menus/tabs with fixed host metrics, not full pages.
 
-Requires the reviewed Reader 93e98bb and pre-sync 9d02f498 Git objects fetched by
+Requires the reviewed Reader 38280863 and pre-sync 593c8dbc Git objects fetched by
 the sync workflow; CI fetches full history for these fixed references.
 FREEINK_SDK_ROOT selects the reviewed candidate; defaults to the pinned SDK.
 """
@@ -15,7 +15,7 @@ from test_upstream_theme_compat import compare, source
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-REF = '93e98bb78702e29868a16a13b80c40e6b36ccdff'
+REF = '38280863a50988683c2c63ccd7096e872a48c411'
 SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 
 
@@ -259,10 +259,7 @@ int main(){
   inx=isInx; Frontlight.light=flags&1; EpubReaderMenuActivity a;
   std::vector<MenuItem> actual,expected;
   a.buildMenuItems(actual,flags&2,flags&4);
-  if(inx) a.historical(expected,flags&2,flags&4); else a.reference(expected,flags&2,flags&4);
-  // main added one shared image-filter row; retain every pre-sync row's order.
-  auto night=std::find_if(expected.begin(),expected.end(),[](const MenuItem& row){return row.action==MenuAction::NIGHT_MODE;});
-  expected.insert(night,{MenuAction::IMAGE_SCALING,StrId::STR_IMAGE_SCALING});
+  a.reference(expected,flags&2,flags&4);
   assert(actual==expected);
  }
  for(bool isInx:{false,true}) {
