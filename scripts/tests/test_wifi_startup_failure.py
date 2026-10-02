@@ -27,7 +27,7 @@ unsigned long millis() { return 0; }
 void delay(int) {}
 bool readStationMac(uint8_t (&)[6]) { return false; }
 namespace fui { struct ActionEvent {}; }
-enum class WifiSelectionState { SCANNING, NETWORK_ERROR, NETWORK_LIST, AUTO_CONNECTING, CONNECTING };
+enum class WifiSelectionState { SCANNING, NETWORK_ERROR, NETWORK_LIST, AUTO_CONNECTING, CONNECTING, CONNECTION_FAILED };
 namespace NetworkStartup {
 int starts = 0;
 bool success = false;
@@ -53,6 +53,8 @@ class WifiSelectionActivity {
  struct { void reset() {} } listNav;
  struct { void clearTapFlash() {} } app;
  WifiSelectionState state = WifiSelectionState::NETWORK_LIST;
+ void closeRouting() { ++routingCloses; }
+ int routingCloses = 0;
  void requestUpdate() {}
  void showNetworkError();
  void startWifiScan(bool autoScan = false);
@@ -64,6 +66,7 @@ int main() {
  WifiSelectionActivity activity;
  activity.startWifiScan(true);
  assert(activity.state == WifiSelectionState::NETWORK_ERROR && !activity.autoConnecting);
+ assert(activity.routingCloses >= 2);
  assert(NetworkStartup::starts == 1 && WiFi.disconnects == 0 && WiFi.scans == 0);
  activity.attemptConnection();
  assert(activity.state == WifiSelectionState::NETWORK_ERROR);

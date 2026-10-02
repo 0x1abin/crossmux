@@ -69,6 +69,7 @@ class ParsedText {
   uint8_t firstLineIndent;
   bool collectTouchLinks;
   uint8_t wordSpacingPercent = 100;
+  uint8_t paragraphIndentSpaces;
   bool hyphenationEnabled;
   bool focusReadingEnabled;
   bool firstLinePending;
@@ -112,10 +113,12 @@ class ParsedText {
  public:
   explicit ParsedText(const uint8_t extraParagraphSpacing, const uint8_t firstLineIndent,
                       const bool hyphenationEnabled = false, const bool focusReadingEnabled = false,
-                      const BlockStyle& blockStyle = BlockStyle(), const bool collectTouchLinks = false)
+                      const BlockStyle& blockStyle = BlockStyle(), const bool collectTouchLinks = false,
+                      const uint8_t paragraphIndentSpaces = 3)
       : blockStyle(blockStyle),
         extraParagraphSpacing(extraParagraphSpacing),
         firstLineIndent(firstLineIndent),
+        paragraphIndentSpaces(paragraphIndentSpaces),
         collectTouchLinks(collectTouchLinks),
         hyphenationEnabled(hyphenationEnabled),
         focusReadingEnabled(focusReadingEnabled),

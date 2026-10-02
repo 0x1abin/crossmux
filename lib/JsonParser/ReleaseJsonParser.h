@@ -1,11 +1,11 @@
 #pragma once
 
+#include <StreamingJsonParser.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
-
-#include "StreamingJsonParser.h"
 
 class ReleaseJsonParser {
  public:

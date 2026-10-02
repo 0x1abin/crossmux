@@ -43,6 +43,7 @@ class TextSettingsActivity final : public UiTabListActivity {
     CharacterSpacing,
     ParaSpacing,
     FirstLineIndent,
+    ParaIndentation,
     Alignment,
     ScreenMargin,
     Count

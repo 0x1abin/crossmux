@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 
@@ -17,6 +18,7 @@ constexpr unsigned long WORD_REPEAT_INTERVAL_MS = 500;
 void EpubReaderFootnoteSelectActivity::onEnter() {
   Activity::onEnter();
   snapshot = makeUniqueNoThrow<uint8_t[]>(SNAPSHOT_CAPACITY);
+  if (!snapshot) LOG_ERR("FootnoteSelect", "OOM: highlight snapshot; using page redraw");
   buildFootnoteLinks();
   requestUpdate();
 }
@@ -48,7 +50,7 @@ void EpubReaderFootnoteSelectActivity::performJump() {
 void EpubReaderFootnoteSelectActivity::drawHints() const {
   const auto labels = mappedInput.mapDirectionalLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
                                                        tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHintsWithStyle(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
 }
 
 void EpubReaderFootnoteSelectActivity::loop() {
@@ -60,7 +62,9 @@ void EpubReaderFootnoteSelectActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !footnoteLinks.empty()) {
+  if ((mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+       mappedInput.wasReleased(MappedInputManager::Button::Power)) &&
+      !footnoteLinks.empty()) {
     performJump();
     return;
   }

@@ -9,16 +9,19 @@
 #include "MappedInputManager.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 
 namespace fui = freeink::ui;
 
 EpubReaderChapterSelectionActivity::EpubReaderChapterSelectionActivity(GfxRenderer& renderer,
                                                                        MappedInputManager& mappedInput,
                                                                        const std::shared_ptr<Epub>& epub,
-                                                                       const int currentSpineIndex)
-    : UiListActivity("EpubReaderChapterSelection", renderer, mappedInput),
+                                                                       const int currentSpineIndex,
+                                                                       const int currentTocIndex)
+    : UiListActivity("EpubReaderChapterSelection", renderer, mappedInput, false, true),
       epub(epub),
-      currentSpineIndex(currentSpineIndex) {}
+      currentSpineIndex(currentSpineIndex),
+      currentTocIndex(currentTocIndex) {}
 
 void EpubReaderChapterSelectionActivity::onEnter() {
   UiListActivity::onEnter();
@@ -40,7 +43,9 @@ void EpubReaderChapterSelectionActivity::onEnter() {
   // Start with the current chapter at the top of the viewport; the first
   // screen build pulls the viewport to it (ListNav follow-on-build) and
   // materializes the row window there (refreshTocWindow in buildScreen).
-  int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
+  int tocIndex = currentTocIndex >= 0 && currentTocIndex < listCount()
+                     ? currentTocIndex
+                     : epub->getTocIndexForSpineIndex(currentSpineIndex);
   if (tocIndex == -1) {
     tocIndex = 0;
   }
@@ -76,7 +81,7 @@ void EpubReaderChapterSelectionActivity::refreshTocWindow(const int start) {
     int count;
   } prewarmCtx{windowLabels, windowCount};
   renderer.prewarmFallbackText(
-      uiScaleSpec().bodyFontId,
+      uiScaleSpec(true).bodyFontId,
       [](const void* ctx, uint32_t i) -> const char* {
         const auto* c = static_cast<const PrewarmCtx*>(ctx);
         return i < static_cast<uint32_t>(c->count) ? c->labels[i].c_str() : nullptr;
@@ -126,7 +131,7 @@ bool EpubReaderChapterSelectionActivity::handleButtons() {
 }
 
 void EpubReaderChapterSelectionActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& metrics = uiThemeMetrics(true);
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   // Content: the safe area minus the header band drawChrome paints the title in.
   screen.setContentMarginFromScreen(fui::Insets{
@@ -158,8 +163,8 @@ void EpubReaderChapterSelectionActivity::buildScreen(UiScreen& screen) {
 }
 
 void EpubReaderChapterSelectionActivity::drawChrome() {
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& metrics = uiThemeMetrics(true);
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight},
-                 tr(STR_SELECT_CHAPTER));
+  GUI.drawHeaderWithStyle(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight},
+                          tr(STR_SELECT_CHAPTER), nullptr, true, true);
 }

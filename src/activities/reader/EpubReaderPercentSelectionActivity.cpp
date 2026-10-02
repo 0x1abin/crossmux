@@ -26,7 +26,9 @@ constexpr int kLargeStep = 10;
 EpubReaderPercentSelectionActivity::EpubReaderPercentSelectionActivity(GfxRenderer& renderer,
                                                                        MappedInputManager& mappedInput,
                                                                        const int initialPercent)
-    : Activity("EpubReaderPercentSelection", renderer, mappedInput), UiAppHost(renderer), percent(initialPercent) {}
+    : Activity("EpubReaderPercentSelection", renderer, mappedInput),
+      UiAppHost(renderer, true),
+      percent(initialPercent) {}
 
 void EpubReaderPercentSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -172,7 +174,7 @@ void EpubReaderPercentSelectionActivity::buildPercentScreen(UiScreen& screen) {
   spec.chromeAction = ACTION_CHROME;
   spec.hintLine1 = hint1;
   spec.hintLine2 = hint2;
-  buildSliderDialogScreen(screen, uiTarget, mappedInput, spec);
+  buildSliderDialogScreen(screen, uiTarget, mappedInput, spec, true);
 }
 
 void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
@@ -183,7 +185,7 @@ void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
 
   // Button hints follow the current front button layout.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHintsWithStyle(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
 
   renderer.displayBuffer();
 }

@@ -24,7 +24,7 @@ class EpubReaderBookmarksActivity final : public UiListActivity {
   std::vector<freeink::ui::ListItem> bookmarkRowItems;
   void rebuildBookmarkRowItems();
   bool confirmingDelete = false;
-  OptionPopup confirmPopup;
+  OptionPopup confirmPopup{true};
 
  public:
   explicit EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

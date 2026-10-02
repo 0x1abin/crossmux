@@ -7,6 +7,7 @@
 #include "HttpDownloader.h"
 #include <HalSystem.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <ReleaseJsonParser.h>
 #include <esp_ota_ops.h>
 #include <esp_wifi.h>
@@ -78,9 +79,14 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
   // on top of the TLS session's heap during the fetch; with -fno-exceptions an
   // OOM there aborts. fetchUrl handles the configured secure GET transport,
   // redirects, and User-Agent (see HttpDownloader).
-  ReleaseJsonParser releaseParser(releaseNotes);
+  // The shared SAX token is 2 KiB; keep it off the network task stack.
+  auto releaseParser = makeUniqueNoThrow<ReleaseJsonParser>(releaseNotes);
+  if (!releaseParser) {
+    LOG_ERR("OTA", "OOM: release parser (%zu bytes)", sizeof(ReleaseJsonParser));
+    return INTERNAL_UPDATE_ERROR;
+  }
   const bool ok = HttpDownloader::fetchUrl(releaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
-    releaseParser.feed(reinterpret_cast<const char*>(data), len);
+    releaseParser->feed(reinterpret_cast<const char*>(data), len);
     return true;
   });
   if (!ok) {
@@ -88,30 +94,30 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const Channel requestedCh
     return HTTP_ERROR;
   }
 
-  LOG_DBG("OTA", "Parser results: tag=%s firmware=%s", releaseParser.foundTag() ? "yes" : "no",
-          releaseParser.foundFirmware() ? "yes" : "no");
+  LOG_DBG("OTA", "Parser results: tag=%s firmware=%s", releaseParser->foundTag() ? "yes" : "no",
+          releaseParser->foundFirmware() ? "yes" : "no");
 
-  if (releaseParser.foundUnsupportedChannel()) {
+  if (releaseParser->foundUnsupportedChannel()) {
     LOG_INF("OTA", "Selected update channel is not supported by this device");
     return UNSUPPORTED_CHANNEL;
   }
 
-  if (!releaseParser.foundTag()) {
+  if (!releaseParser->foundTag()) {
     LOG_ERR("OTA", "No tag_name in release JSON");
     return JSON_PARSE_ERROR;
   }
 
-  if (!releaseParser.foundFirmware()) {
+  if (!releaseParser->foundFirmware()) {
     LOG_ERR("OTA", "No firmware.bin asset found");
     return NO_UPDATE;
   }
 
-  latestVersion = releaseParser.getTagName();
-  otaUrl = releaseParser.getFirmwareUrl();
-  otaSize = releaseParser.getFirmwareSize();
+  latestVersion = releaseParser->getTagName();
+  otaUrl = releaseParser->getFirmwareUrl();
+  otaSize = releaseParser->getFirmwareSize();
   totalSize = otaSize;
   updateAvailable = true;
-  releaseNoteCount = releaseParser.getReleaseNoteCount();
+  releaseNoteCount = releaseParser->getReleaseNoteCount();
 
   LOG_DBG("OTA", "Found update: tag=%s size=%zu notes=%zu", latestVersion.c_str(), otaSize, releaseNoteCount);
   LOG_DBG("OTA", "Firmware URL: %s", otaUrl.c_str());
@@ -192,9 +198,6 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
     LOG_ERR("OTA", "esp_ota_begin failed: %s", esp_err_to_name(esp_err));
     return INTERNAL_UPDATE_ERROR;
   }
-
-  /* For better timing and connectivity, we disable power saving for WiFi */
-  esp_wifi_set_ps(WIFI_PS_NONE);
 
   processedSize = 0;
   int lastReportedPct = -1;

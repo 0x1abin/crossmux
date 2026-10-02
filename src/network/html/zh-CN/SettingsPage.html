@@ -294,6 +294,7 @@
 
   <div id="wifi-container"></div>
   <div id="opds-container"></div>
+  <div id="plugin-container"></div>
 
 <script>
   let allSettings = [];
@@ -821,7 +822,9 @@
     await loadSettings();
     await loadWifiNetworks();
     await loadOpdsServers();
+    await loadPlugins('settings');
   })();
+<!--#include file="../shared/PluginHost.js.inc" -->
 </script>
 </body>
 </html>

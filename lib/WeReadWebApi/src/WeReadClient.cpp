@@ -2262,8 +2262,13 @@ bool Operation::preparePaths() {
 
 Error Operation::fetchLoginUid() {
   SimpleJsonContext context;
-  StreamingJsonParser parser(simpleCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(simpleCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
   const Error error =
       requestOnce("GET", "/api/auth/getLoginUid", nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_,
@@ -2278,8 +2283,13 @@ Error Operation::fetchLoginUid() {
 
 Error Operation::pollLogin() {
   SimpleJsonContext context;
-  StreamingJsonParser parser(simpleCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(simpleCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
   char path[256];
   const int len = snprintf(path, sizeof(path), "/api/auth/getLoginInfo?uid=%s&otp=", loginUid_);
@@ -2315,8 +2325,13 @@ Error Operation::pollLogin() {
 Error Operation::renewSession() {
   if (!session_.rt[0]) return Error::SessionExpired;
   SimpleJsonContext context;
-  StreamingJsonParser parser(simpleCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(simpleCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
   static constexpr char kRenewBody[] = "{\"rq\":\"%2Fweb%2Fbook%2Fread\",\"ql\":false}";
   const Error error = requestOnce("POST", "/web/login/renewal", reinterpret_cast<const uint8_t*>(kRenewBody),
@@ -2334,8 +2349,13 @@ Error Operation::renewSession() {
 Error Operation::syncShelfOnce() {
   const uint32_t startedAt = millis();
   ShelfJsonContext context;
-  StreamingJsonParser parser(shelfCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(shelfCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetShelf, feedShelf, noOpFinish, Error::Protocol};
   const Error error =
       requestOnce("GET", "/web/shelf/sync", nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
@@ -2348,7 +2368,7 @@ Error Operation::syncShelfOnce() {
     context.writer.abort();
     return Error::SessionExpired;
   }
-  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser.hasError() ||
+  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser->hasError() ||
       context.writeFailed) {
     context.writer.abort();
     return Error::Protocol;
@@ -2637,8 +2657,13 @@ Error Operation::fetchDetailOnce() {
   context.bookDir = &bookDir_;
   WeReadProtocol::JsonStringDecoder decoder(writeDetailIntro, &context);
   context.introDecoder = &decoder;
-  StreamingJsonParser parser(detailCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(detailCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetDetail, feedDetail, finishDetail, Error::SdCard};
 
   char encodedBookId[192];
@@ -2656,7 +2681,7 @@ Error Operation::fetchDetailOnce() {
     context.writer.abort();
     return Error::SessionExpired;
   }
-  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser.hasError() ||
+  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser->hasError() ||
       context.writeFailed || !context.header.title[0]) {
     context.writer.abort();
     return Error::Protocol;
@@ -2683,10 +2708,14 @@ Error Operation::fetchBrowseOnce() {
           ? browseReviewRequestCount(browseManifest_.recordCounts[WeReadBrowse::kindIndex(browseKind_)])
           : WeReadBrowse::kMaxRecords;
   if (recordLimit == 0) return Error::Protocol;
-  WeReadBrowse::ResponseParser parser(book_.bookId, browseManifest_.activeSlot, browseKind_, browseCursor_.page,
-                                      recordLimit);
+  auto parser = makeUniqueNoThrow<WeReadBrowse::ResponseParser>(book_.bookId, browseManifest_.activeSlot, browseKind_,
+                                                                browseCursor_.page, recordLimit);
+  if (!parser) {
+    LOG_ERR("WR", "OOM: browse parser (%zu bytes)", sizeof(WeReadBrowse::ResponseParser));
+    return Error::OutOfMemory;
+  }
   ResponseSink sink{
-      &parser,
+      parser.get(),
       [](void* raw) { return static_cast<WeReadBrowse::ResponseParser*>(raw)->reset(); },
       [](void* raw, const uint8_t* data, const size_t len) {
         return static_cast<WeReadBrowse::ResponseParser*>(raw)->feed(data, len);
@@ -2718,21 +2747,21 @@ Error Operation::fetchBrowseOnce() {
   Error error =
       requestOnce("GET", path, nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_, sizeof(cookie_),
                   url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_) - kUrlSize, &bookSession_);
-  if (error != Error::Ok && parser.storageFailed()) error = Error::SdCard;
+  if (error != Error::Ok && parser->storageFailed()) error = Error::SdCard;
   if (error != Error::Ok) {
     LOG_ERR("WR", "browse request failed: kind=%u page=%u status=%d error=%u", static_cast<unsigned>(browseKind_),
             static_cast<unsigned>(browseCursor_.page), responseStatus_, static_cast<unsigned>(error));
     return error;
   }
-  if (parser.errorCode() == -2012 || responseStatus_ == 401 || responseStatus_ == 403) {
+  if (parser->errorCode() == -2012 || responseStatus_ == 401 || responseStatus_ == 403) {
     return Error::SessionExpired;
   }
-  if (responseStatus_ != 200 || parser.errorCode() != 0) return Error::Protocol;
+  if (responseStatus_ != 200 || parser->errorCode() != 0) return Error::Protocol;
   if (!WeReadStore::saveSession(session_)) return Error::SdCard;
 
   const size_t kind = WeReadBrowse::kindIndex(browseKind_);
-  if (browseManifest_.recordCounts[kind] > UINT32_MAX - parser.count()) return Error::Protocol;
-  browseManifest_.recordCounts[kind] += parser.count();
+  if (browseManifest_.recordCounts[kind] > UINT32_MAX - parser->count()) return Error::Protocol;
+  browseManifest_.recordCounts[kind] += parser->count();
   browseManifest_.pageCounts[kind] = browseCursor_.page + 1;
 
   switch (browseKind_) {
@@ -2749,13 +2778,13 @@ Error Operation::fetchBrowseOnce() {
   }
 
   const uint32_t reviewCount = browseManifest_.recordCounts[WeReadBrowse::kindIndex(browseKind_)];
-  if (parser.hasMore()) {
+  if (parser->hasMore()) {
     const WeReadBrowse::Cursor nextCursor{
         browseCursor_.page + 1,
-        parser.nextMaxIdx(),
-        parser.nextSyncKey(),
+        parser->nextMaxIdx(),
+        parser->nextSyncKey(),
     };
-    if (!browseReviewCursorAdvances(browseCursor_, browseFirstReviewCursor_, nextCursor, parser.count())) {
+    if (!browseReviewCursorAdvances(browseCursor_, browseFirstReviewCursor_, nextCursor, parser->count())) {
       return Error::Protocol;
     }
     if (browseCursor_.page == 0) {
@@ -2766,7 +2795,7 @@ Error Operation::fetchBrowseOnce() {
       return Error::Ok;
     }
   }
-  if (reviewCount == WeReadBrowse::kMaxCachedReviews && (parser.hasMore() || parser.responseTruncated())) {
+  if (reviewCount == WeReadBrowse::kMaxCachedReviews && (parser->hasMore() || parser->responseTruncated())) {
     browseManifest_.flags |= WeReadBrowse::kCacheReviewsLimited;
   }
   if (!WeReadBrowse::commitCache(book_.bookId, browseManifest_)) return Error::SdCard;
@@ -2781,8 +2810,13 @@ Error Operation::fetchBrowseOnce() {
 Error Operation::fetchTocOnce() {
   TocJsonContext context;
   context.path = tocPath_;
-  StreamingJsonParser parser(tocCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(tocCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetToc, feedToc, noOpFinish, Error::Protocol};
   const int bodySize =
       snprintf(reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_), "{\"bookIds\":[\"%s\"]}", book_.bookId);
@@ -2798,7 +2832,7 @@ Error Operation::fetchTocOnce() {
     context.writer.abort();
     return Error::SessionExpired;
   }
-  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser.hasError() ||
+  if (responseStatus_ != 200 || context.errorCode != 0 || !context.rootClosed || parser->hasError() ||
       context.writeFailed || context.writer.count() == 0) {
     context.writer.abort();
     return Error::Protocol;
@@ -2807,8 +2841,13 @@ Error Operation::fetchTocOnce() {
 }
 
 Error Operation::fetchProgressOnce(const bool bypassCache) {
-  WeReadProtocol::RemoteProgressParser parser(book_.bookId);
-  ResponseSink sink{&parser, resetRemoteProgress, feedRemoteProgress, noOpFinish, Error::Protocol};
+  // SDK SAX uses a 2 KiB token; a checked, one-shot allocation avoids stack overflow.
+  auto parser = makeUniqueNoThrow<WeReadProtocol::RemoteProgressParser>(book_.bookId);
+  if (!parser) {
+    LOG_ERR("WR", "OOM: progress parser (%zu bytes)", sizeof(WeReadProtocol::RemoteProgressParser));
+    return Error::OutOfMemory;
+  }
+  ResponseSink sink{parser.get(), resetRemoteProgress, feedRemoteProgress, noOpFinish, Error::Protocol};
   if (!WeReadProtocol::urlEncode(book_.bookId, url_, sizeof(url_))) return Error::Protocol;
   referer_ = "/web/book/getProgress?bookId=";
   referer_ += url_;
@@ -2823,13 +2862,13 @@ Error Operation::fetchProgressOnce(const bool bypassCache) {
       requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
                   sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
   if (error != Error::Ok) return error;
-  if (responseStatus_ == 401 || responseStatus_ == 403 || parser.errorCode() == -2012) {
+  if (responseStatus_ == 401 || responseStatus_ == 403 || parser->errorCode() == -2012) {
     return Error::SessionExpired;
   }
-  if (responseStatus_ != 200 || parser.errorCode() != 0 || !parser.complete()) {
+  if (responseStatus_ != 200 || parser->errorCode() != 0 || !parser->complete()) {
     return Error::Protocol;
   }
-  progressSyncResult_.remote = parser.progress();
+  progressSyncResult_.remote = parser->progress();
   return WeReadStore::saveSession(session_) ? Error::Ok : Error::SdCard;
 }
 
@@ -2948,8 +2987,13 @@ Error Operation::sendProgressOnce(const bool report) {
     return Error::Clock;
   }
   SimpleJsonContext context;
-  StreamingJsonParser parser(simpleCallbacks(&context));
-  context.parser = &parser;
+  // The SDK token buffer is 2 KiB; keep it off the shared network task stack.
+  auto parser = makeUniqueNoThrow<StreamingJsonParser>(simpleCallbacks(&context));
+  if (!parser) {
+    LOG_ERR("WR", "OOM: SAX parser (%zu bytes)", sizeof(StreamingJsonParser));
+    return Error::OutOfMemory;
+  }
+  context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
   const Error error =
       requestOnce("POST", "/web/book/read", ioBuffer_, bodySize, &session_, referer_.c_str(), sink, responseStatus_,
@@ -2959,7 +3003,7 @@ Error Operation::sendProgressOnce(const bool report) {
     return Error::SessionExpired;
   }
   const bool emptyBody = context.bytesReceived == 0;
-  if (responseStatus_ != 200 || context.errorCode != 0 || parser.hasError() ||
+  if (responseStatus_ != 200 || context.errorCode != 0 || parser->hasError() ||
       (!emptyBody && (!context.rootClosed || (!context.succeed && !context.hasSyncKey)))) {
     return Error::Protocol;
   }

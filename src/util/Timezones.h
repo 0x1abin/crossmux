@@ -21,8 +21,6 @@ namespace timezones {
 
 const TimezoneInfo* table();
 size_t count();
-
-// Index of plain UTC, the default zone.
 uint8_t utcIndex();
 
 // SETTINGS.clockTimezone when valid; otherwise the legacy clockUtcOffsetQ

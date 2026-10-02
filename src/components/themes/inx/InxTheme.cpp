@@ -389,15 +389,15 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
 
   const int optionCount = static_cast<int>(options.size());
   const int selected = std::clamp(selectedIndex, 0, optionCount - 1);
-  const int visibleRows = InxOptionGeometry::visibleRows(optionCount);
+  const auto layout =
+      InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false), optionCount, selected);
+  const int visibleRows = layout.rows;
   const int maxStart = optionCount - visibleRows;
-  const int start = InxOptionGeometry::start(selected, optionCount);
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
-  const int panelWidth = std::max(1, std::min(screenWidth - 24, UiHighDpiProfile::enabled ? 608 : 360));
-  const int panelHeight = InxOptionGeometry::headerHeight + visibleRows * InxOptionGeometry::rowHeight;
-  const int panelX = (screenWidth - panelWidth) / 2;
-  const int panelY = std::max(0, (screenHeight - panelHeight) / 2);
+  const int start = layout.first;
+  const int panelWidth = layout.panel.width;
+  const int panelHeight = layout.panel.height;
+  const int panelX = layout.panel.x;
+  const int panelY = layout.panel.y;
   const bool selectionVisible = UITheme::getInstance().showSelectionCursor();
 
   renderer.fillRect(panelX, panelY, panelWidth, panelHeight, false);
@@ -411,7 +411,10 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
     const int optionIndex = start + slot;
     const int rowY = panelY + InxOptionGeometry::headerHeight + slot * InxOptionGeometry::rowHeight;
     const bool isSelected = selectionVisible && optionIndex == selected;
-    if (isSelected) renderer.fillRect(panelX + 2, rowY, panelWidth - 4, InxOptionGeometry::rowHeight, true);
+    if (isSelected) {
+      const Rect row = layout.optionRect(slot);
+      renderer.fillRect(row.x, row.y, row.width, row.height, true);
+    }
     const std::string option = renderer.truncatedText(UI_10_FONT_ID, options[optionIndex].c_str(), panelWidth - 44);
     const int textY = rowY + (InxOptionGeometry::rowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
     renderer.drawText(UI_10_FONT_ID, panelX + 18, textY, option.c_str(), !isSelected,

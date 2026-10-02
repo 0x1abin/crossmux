@@ -40,13 +40,19 @@ package, causing missing Python modules during a clean build. Preparation
 removes SCons from that installer's tool list; Core still supplies it. It does
 not change compiler optimization flags. CI performs the same preparation.
 Nightly and CI use a separate `PLATFORMIO_CORE_DIR` per build job so concurrent
-runner jobs cannot change each other's installed toolchains.
+runner jobs cannot change each other's installed toolchains. The directory name
+includes `.platformio`: pioarduino's framework-restoration path check requires
+that component when switching from a custom SDK back to prebuilt TinyUSB.
 On Ubuntu, the bundled cppcheck executable also requires `libpcre3`.
 
 The custom SDK bootstrap uses non-LTO objects; the final application retains
 its existing LTO configuration. Keep the verified C3 optimization options and
 partition layout unchanged; sufficient Flash headroom is not a reason to tune
 additional compiler options.
+
+X4 Pro, X4 Classic, Murphy M4, Waveshare 3.97 and PaperMono use application LTO (`-flto=auto`, removing the packaged `-fno-lto`)
+to keep the complete reader inside the existing 6.25 MiB OTA partitions. Their
+prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
 
 ## Build Environment
 * **Standard**: C++20 (`-std=c++2a`). No Exceptions, No RTTI.
@@ -243,3 +249,28 @@ build_flags =
 - Use `${base.build_flags}` to extend (not replace) base flags
 
 See also: [getting-started](../contributing/getting-started.md) for first-time toolchain setup, [testing-and-debugging.md](testing-and-debugging.md) for build/monitor commands.
+
+### Fixed local integration builds (2026-10-02)
+
+The SDK/Simulator/Reader pins are `98b4e427`, `20e73803`, and `38280863`.
+Use the real source exports recorded by `sync-upstream start --local-rehearsal`;
+record their complete Git tree fingerprints with validation artifacts. The SDK
+fork includes all six ReadPico fixes through `e3550ec`. Production dependency
+commits remain unchanged during rehearsal; the ignored local PlatformIO config
+selects reviewed exports. No commit, push, PR or flashing is part of this stage.
+
+Validate `default`, `gh_release`, `readpico`, `readpico_nightly`, and `metalio_eink4`,
+and all six existing simulator environments. Only the explicit ReadPico profiles
+use high-density metrics. Keep host tests, whole-page visuals, Flash/static RAM,
+and physical-device acceptance as separate results.
+
+The integrated SD catalog retains at most 48KiB of row/container data and checks
+32KiB free-heap plus 4KiB contiguous headroom before growth. Installed discovery
+is bounded to 32 entries, reuses root lookup instead of keeping every seen name,
+and rejects excess picker/history growth with a log. Manifest/title/description
+inputs are bounded; JSON rows accept 768-byte fields, 64 bundle files and 4KiB
+total captured text, with 32 nesting/path segments and 128-byte keys. Browse
+responses remain on SD (up to 1MiB), while API responses retain the upstream
+48KiB cap and fallible Arduino String reserve. TLS is released before downloads
+and on exit. These limits protect C3 shared code; simulator heap numbers are
+synthetic and do not verify hardware runtime headroom.

@@ -160,24 +160,18 @@ void StatusBarSettingsActivity::handleSelection() {
 
 std::string StatusBarSettingsActivity::rowValueText(const int index) {
   switch (index) {
-    case ITEM_CHAPTER_PAGE_COUNT:
-      return SETTINGS.statusBarChapterPageCount ? tr(STR_SHOW) : tr(STR_HIDE);
-    case ITEM_BOOK_PROGRESS_PERCENTAGE:
-      return SETTINGS.statusBarBookProgressPercentage ? tr(STR_SHOW) : tr(STR_HIDE);
     case ITEM_PROGRESS_BAR:
       return I18N.get(progressBarNames[SETTINGS.statusBarProgressBar]);
     case ITEM_PROGRESS_BAR_THICKNESS:
       return I18N.get(progressBarThicknessNames[SETTINGS.statusBarProgressBarThickness]);
     case ITEM_TITLE:
       return I18N.get(titleNames[SETTINGS.statusBarTitle]);
-    case ITEM_BATTERY:
-      return SETTINGS.statusBarBattery ? tr(STR_SHOW) : tr(STR_HIDE);
     case ITEM_XTC_STATUS_BAR:
       return I18N.get(xtcStatusBarNames[SETTINGS.xtcStatusBarMode]);
     case ITEM_CLOCK:
       return I18N.get(statusBarClockNames[SETTINGS.statusBarClock]);
     default:
-      return tr(STR_HIDE);
+      return "";
   }
 }
 
