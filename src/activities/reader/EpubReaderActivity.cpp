@@ -2034,11 +2034,13 @@ ReaderPageCacheKey EpubReaderActivity::pageCacheKey(const int page, const int to
 uint32_t EpubReaderActivity::idleRenderDelayMs() const { return pageCacheFailed_ ? 0 : 400; }
 
 void EpubReaderActivity::freePageCache() {
-  pageCacheBase_.reset();
-  pageCacheLsb_.reset();
-  pageCacheMsb_.reset();
-  pageCacheStash_.reset();
-  pageCache_.state = ReaderPageCache::State::Empty;
+  for (int slot = 0; slot < kPageCacheSlots; ++slot) {
+    pageCacheBase_[slot].reset();
+    pageCacheLsb_[slot].reset();
+    pageCacheMsb_[slot].reset();
+    pageCacheStash_[slot].reset();
+    pageCache_[slot].state = ReaderPageCache::State::Empty;
+  }
 }
 
 void EpubReaderActivity::renderIdle(const uint32_t generation) {
@@ -2076,52 +2078,68 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
     LOG_DBG("ERS", "Page cache: skip, layout moved since the last render");
     return;
   }
-  auto key = layout;
-  ++key.page;
-  if (key.page >= static_cast<int>(section->pageCount)) {
-    LOG_DBG("ERS", "Page cache: skip, page %d is the last one", key.page);
-    return;
+
+  // Slot 0 covers the page a forward turn lands on, slot 1 the page a backward turn
+  // lands on. Both are worth building: a reader turns both ways, and one slot could only
+  // ever cover +1, which made every backward turn a guaranteed miss. A reading pace
+  // leaves room for both (~700 ms each); an unusually fast test pace cuts the second
+  // short, which is what the cancelled() check between them is for.
+  auto forward = layout;
+  ++forward.page;
+  if (forward.page < static_cast<int>(section->pageCount)) buildPageCacheSlot(0, forward, generation);
+  if (cancelled()) return;
+  auto backward = layout;
+  --backward.page;
+  if (backward.page >= 0) buildPageCacheSlot(1, backward, generation);
+}
+
+// Build one page into one slot. Returns true when the slot ends up holding a finished
+// page; every other exit leaves it Skipped and logs why. Runs only from renderIdle(),
+// on the loop task, with no render lock held.
+bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCacheKey& key,
+                                            const uint32_t generation) {
+  const auto cancelled = [&] { return activityManager.idleRenderCancelled(generation); };
+  if (pageCache_[slot].attempted(key)) {
+    LOG_DBG("ERS", "Page cache: slot %d skip, page %d already attempted (state=%d)", slot, key.page,
+            static_cast<int>(pageCache_[slot].state));
+    return false;
   }
-  if (pageCache_.attempted(key)) {
-    LOG_DBG("ERS", "Page cache: skip, page %d already attempted (state=%d)", key.page,
-            static_cast<int>(pageCache_.state));
-    return;
-  }
-  pageCache_.key = key;
-  pageCache_.state = ReaderPageCache::State::Skipped;
+  pageCache_[slot].key = key;
+  pageCache_[slot].state = ReaderPageCache::State::Skipped;
 
   auto page = section->loadPage(key.page);
   if (!page) {
-    LOG_ERR("ERS", "Page cache: page %d failed to load", key.page);
-    return;
+    LOG_ERR("ERS", "Page cache: slot %d, page %d failed to load", slot, key.page);
+    return false;
   }
   if (cancelled()) {
-    LOG_DBG("ERS", "Page cache: page %d cancelled after the load", key.page);
-    return;
+    LOG_DBG("ERS", "Page cache: slot %d, page %d cancelled after the load", slot, key.page);
+    return false;
   }
   if (page->hasImages()) {
-    LOG_DBG("ERS", "Page cache: page %d has images, not cached", key.page);
-    return;
+    LOG_DBG("ERS", "Page cache: slot %d, page %d has images, not cached", slot, key.page);
+    return false;
   }
 
   const size_t bytes = renderer.getBufferSize();
-  if (bytes == 0) return;
-  if (!pageCacheBase_) {
+  if (bytes == 0) return false;
+  if (!pageCacheBase_[slot]) {
     constexpr size_t kContiguousReserve = 16 * 1024;
-    if (memory::psramHasHeadroom(4 * bytes, bytes, kContiguousReserve)) {
-      pageCacheBase_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
-      pageCacheLsb_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
-      pageCacheMsb_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
-      pageCacheStash_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+    // Two slots of four planes, charged against PSRAM headroom as a whole.
+    if (memory::psramHasHeadroom(static_cast<size_t>(kPageCacheSlots) * 4 * bytes, bytes, kContiguousReserve)) {
+      pageCacheBase_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+      pageCacheLsb_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+      pageCacheMsb_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+      pageCacheStash_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
     }
-    if (!pageCacheBase_ || !pageCacheLsb_ || !pageCacheMsb_ || !pageCacheStash_) {
+    if (!pageCacheBase_[slot] || !pageCacheLsb_[slot] || !pageCacheMsb_[slot] || !pageCacheStash_[slot]) {
       freePageCache();
       pageCacheFailed_ = true;
       LOG_ERR("ERS", "Page cache off: PSRAM allocation of %u B failed", static_cast<unsigned>(4 * bytes));
-      return;
+      return false;
     }
   }
-  if (cancelled()) return;
+  if (cancelled()) return false;
 
   uint8_t* const live = renderer.getFrameBuffer();
   auto* fcm = renderer.getFontCacheManager();
@@ -2129,7 +2147,7 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
 #ifdef ENABLE_CHINESE_VERSION
   if (fcm) fcm->consumeMissingChineseCodepoint();
 #endif
-  memcpy(pageCacheStash_.get(), live, bytes);
+  memcpy(pageCacheStash_[slot].get(), live, bytes);
   struct RestoreFrame {
     GfxRenderer& renderer;
     uint8_t* live;
@@ -2141,7 +2159,7 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
       memcpy(live, stash, bytes);
       if (auto* cache = renderer.getFontCacheManager()) cache->clearCache();
     }
-  } restore{renderer, live, pageCacheStash_.get(), bytes, renderer.getRenderMode()};
+  } restore{renderer, live, pageCacheStash_[slot].get(), bytes, renderer.getRenderMode()};
   if (fcm) {
     fcm->clearCache();
     fcm->resetStats();
@@ -2177,15 +2195,16 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
     return !cancelled();
   };
 
-  if (!renderPlane(GfxRenderer::BW, pageCacheBase_.get()) ||
-      !renderPlane(GfxRenderer::GRAYSCALE_LSB, pageCacheLsb_.get()) ||
-      !renderPlane(GfxRenderer::GRAYSCALE_MSB, pageCacheMsb_.get()) || cancelled())
-    return;
+  if (!renderPlane(GfxRenderer::BW, pageCacheBase_[slot].get()) ||
+      !renderPlane(GfxRenderer::GRAYSCALE_LSB, pageCacheLsb_[slot].get()) ||
+      !renderPlane(GfxRenderer::GRAYSCALE_MSB, pageCacheMsb_[slot].get()) || cancelled())
+    return false;
 #ifdef ENABLE_CHINESE_VERSION
   pageCacheMissingCodepoint_ = fcm ? fcm->consumeMissingChineseCodepoint() : 0;
 #endif
-  pageCache_.state = ReaderPageCache::State::Ready;
-  LOG_DBG("ERS", "Page cache: page %d ready in %lums", key.page, millis() - started);
+  pageCache_[slot].state = ReaderPageCache::State::Ready;
+  LOG_DBG("ERS", "Page cache: slot %d, page %d ready in %lums", slot, key.page, millis() - started);
+  return true;
 }
 #endif
 
@@ -2235,7 +2254,19 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 #if FREEINK_DEVICE_READPICO
   const auto key = pageCacheKey(section ? section->currentPage : -1, orientedMarginTop, orientedMarginRight,
                                 orientedMarginBottom, orientedMarginLeft);
-  const bool pageCacheHit = pageCacheEligible() && pageCache_.ready(key);
+  // Either slot may hold this page: slot 0 was built for it as a forward turn, slot 1
+  // as a backward one. Whichever matched is recorded, because the three plane copies
+  // below must read that slot and not assume one of them.
+  bool pageCacheHit = false;
+  if (pageCacheEligible()) {
+    for (int slot = 0; slot < kPageCacheSlots; ++slot) {
+      if (pageCache_[slot].ready(key)) {
+        pageCacheLiveSlot_ = slot;
+        pageCacheHit = true;
+        break;
+      }
+    }
+  }
   ++renderEpoch_;
   renderedPageKey_ = key;
   renderedPageKey_.renderEpoch = renderEpoch_;
@@ -2352,7 +2383,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     const auto tBase = millis();
     // The cache is the finished page, cleared margins and all, so no clearScreen
     // is needed on this path.
-    memcpy(renderer.getFrameBuffer(), pageCacheBase_.get(), renderer.getBufferSize());
+    memcpy(renderer.getFrameBuffer(), pageCacheBase_[pageCacheLiveSlot_].get(), renderer.getBufferSize());
     cacheBaseMs = millis() - tBase;
   } else
 #endif
@@ -2570,7 +2601,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       if (pageCacheHit) {
         // Both planes were rendered at idle; putting them in place is one copy
         // each instead of a full page render each.
-        memcpy(renderer.getFrameBuffer(), pageCacheLsb_.get(), renderer.getBufferSize());
+        memcpy(renderer.getFrameBuffer(), pageCacheLsb_[pageCacheLiveSlot_].get(), renderer.getBufferSize());
         renderer.copyGrayscaleLsbBuffers();
       } else
 #endif
@@ -2595,7 +2626,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
 #if FREEINK_DEVICE_READPICO
       if (pageCacheHit) {
-        memcpy(renderer.getFrameBuffer(), pageCacheMsb_.get(), renderer.getBufferSize());
+        memcpy(renderer.getFrameBuffer(), pageCacheMsb_[pageCacheLiveSlot_].get(), renderer.getBufferSize());
         renderer.copyGrayscaleMsbBuffers();
       } else
 #endif
