@@ -1993,10 +1993,20 @@ void EpubReaderActivity::rememberCurrentContentOffset() {
 
 #if FREEINK_DEVICE_READPICO
 bool EpubReaderActivity::pageCacheEligible() const {
-  return !pageCacheFailed_ && section && !section->isBuilding() && renderer.hasFrameBuffer() &&
-         !activityManager.isSwitchPending() && overlay == Overlay::None && fontPromptState == FontPromptState::Idle &&
-         !renderer.isInverted() && SETTINGS.textAntiAliasing && !SETTINGS.readingBackgroundEnabled &&
-         !renderer.supportsStripGrayscale() && renderer.supportsTextOnlyCombinedBase();
+  // No !section->isBuilding() here, deliberately. The page cache renders ONE page --
+  // the current one or the next -- and Section::loadPage() is written to serve exactly
+  // that while a build is in flight: it reads from the in-RAM build LUT, and returns
+  // null for a page the build has not laid out yet. The caller already treats that null
+  // as a clean skip. Gating the whole feature on the chapter being finished coupled two
+  // independent things, and on this board the chapter build routinely does not finish:
+  // the CSS parse needs 65,536 B and the device has ~48 KB free while reading, so the
+  // build stalls (the log stops at "Page 8 processed" and never reports completion),
+  // isBuilding() stays true for the rest of the session, and the cache then never
+  // engages at all -- every turn is a full render instead of the cached one.
+  return !pageCacheFailed_ && section && renderer.hasFrameBuffer() && !activityManager.isSwitchPending() &&
+         overlay == Overlay::None && fontPromptState == FontPromptState::Idle && !renderer.isInverted() &&
+         SETTINGS.textAntiAliasing && !SETTINGS.readingBackgroundEnabled && !renderer.supportsStripGrayscale() &&
+         renderer.supportsTextOnlyCombinedBase();
 }
 
 ReaderPageCacheKey EpubReaderActivity::pageCacheKey(const int page, const int top, const int right, const int bottom,
@@ -2033,13 +2043,50 @@ void EpubReaderActivity::freePageCache() {
 
 void EpubReaderActivity::renderIdle(const uint32_t generation) {
   const auto cancelled = [&] { return activityManager.idleRenderCancelled(generation); };
-  if (cancelled() || !pageCacheEligible()) return;
+  // Every exit below names the condition it took. Without that, "the cache never hits"
+  // is indistinguishable from "the build was cancelled", "the layout moved since the
+  // last render" and "the next page has images" -- and each of those needs a different
+  // fix. The lines are cheap: this hook runs at most once between two renders.
+  if (cancelled()) {
+    LOG_DBG("ERS", "Page cache: skip, cancelled before start");
+    return;
+  }
+  if (!pageCacheEligible()) {
+    // Name every input to pageCacheEligible(), because "not eligible" is ten conditions
+    // at once and only one of them is the one that fires. The display-capability pair at
+    // the end is the reason this needs saying out loud: on readpico the panel is driven
+    // row by row from an LCD_CAM path, so supportsStripGrayscale() and
+    // supportsTextOnlyCombinedBase() can legitimately differ from the SSD1677 boards the
+    // gate was written against.
+    LOG_DBG("ERS",
+            "Page cache: skip, not eligible (failed=%d section=%d building=%d fb=%d switch=%d ovl=%d prompt=%d "
+            "inv=%d aa=%d bg=%d strip=%d combined=%d)",
+            static_cast<int>(pageCacheFailed_), static_cast<int>(section != nullptr),
+            static_cast<int>(section != nullptr && section->isBuilding()), static_cast<int>(renderer.hasFrameBuffer()),
+            static_cast<int>(activityManager.isSwitchPending()), static_cast<int>(overlay != Overlay::None),
+            static_cast<int>(fontPromptState != FontPromptState::Idle), static_cast<int>(renderer.isInverted()),
+            static_cast<int>(SETTINGS.textAntiAliasing), static_cast<int>(SETTINGS.readingBackgroundEnabled),
+            static_cast<int>(renderer.supportsStripGrayscale()),
+            static_cast<int>(renderer.supportsTextOnlyCombinedBase()));
+    return;
+  }
   const auto& layout = renderedPageKey_;
   // A main-loop reflow/jump may have replaced the section since the last render.
-  if (layout != pageCacheKey(section->currentPage, layout.top, layout.right, layout.bottom, layout.left)) return;
+  if (layout != pageCacheKey(section->currentPage, layout.top, layout.right, layout.bottom, layout.left)) {
+    LOG_DBG("ERS", "Page cache: skip, layout moved since the last render");
+    return;
+  }
   auto key = layout;
   ++key.page;
-  if (key.page >= static_cast<int>(section->pageCount) || pageCache_.attempted(key)) return;
+  if (key.page >= static_cast<int>(section->pageCount)) {
+    LOG_DBG("ERS", "Page cache: skip, page %d is the last one", key.page);
+    return;
+  }
+  if (pageCache_.attempted(key)) {
+    LOG_DBG("ERS", "Page cache: skip, page %d already attempted (state=%d)", key.page,
+            static_cast<int>(pageCache_.state));
+    return;
+  }
   pageCache_.key = key;
   pageCache_.state = ReaderPageCache::State::Skipped;
 
@@ -2048,7 +2095,14 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
     LOG_ERR("ERS", "Page cache: page %d failed to load", key.page);
     return;
   }
-  if (cancelled() || page->hasImages()) return;
+  if (cancelled()) {
+    LOG_DBG("ERS", "Page cache: page %d cancelled after the load", key.page);
+    return;
+  }
+  if (page->hasImages()) {
+    LOG_DBG("ERS", "Page cache: page %d has images, not cached", key.page);
+    return;
+  }
 
   const size_t bytes = renderer.getBufferSize();
   if (bytes == 0) return;
