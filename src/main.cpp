@@ -186,13 +186,7 @@ static bool deepSleepInProgress = false;
 
 #if FREEINK_CAP_TOUCH
 #if FREEINK_DEVICE_READPICO
-// Raised when a network session ends, consumed at the top of loop().
-//
-// Read Pico cannot skip the eviction: NetworkStartup drops the SD family precisely because
-// on this board that release is what carries the largest internal block past its gate (it
-// sits a few bytes short before the release and clears it after), so the radio needs it and
-// the family has to come back afterwards. What is left is *when*: this function runs on the
-// activity teardown path, where reading the card back is not safe, so it only raises a flag.
+// Defer font I/O until after activity teardown releases its render lock.
 static bool sdFontReloadPending = false;
 #endif
 
@@ -875,21 +869,17 @@ void loop() {
   static unsigned long lastMemPrint = 0;
 
 #if FREEINK_CAP_TOUCH && FREEINK_DEVICE_READPICO
-  // A network session evicted the SD family. This is the earliest safe point to read it
-  // back -- the teardown path that raised the flag cannot do it -- and doing it here means
-  // the family returns on the frame after the user leaves the WiFi screen instead of only
-  // when they happen to open one of the few screens that reload it themselves.
-  //
-  // Deliberately NOT wrapped in RenderLock: SdCardFontSystem takes no lock of its own, the
-  // top of loop() runs before any activity render, and holding the lock across the card
-  // read is what the two earlier attempts at this fix did before the device stopped
-  // responding. Keep this call lock-free.
   if (sdFontReloadPending) {
     sdFontReloadPending = false;
     const unsigned long reloadStart = millis();
     LOG_DBG("MAIN", "Reloading SD font family after the network session");
-    sdFontSystem.ensureLoaded(renderer);
+    {
+      // The independent render task shares the font maps and resident font objects.
+      RenderLock lock;
+      sdFontSystem.ensureLoaded(renderer);
+    }
     LOG_DBG("MAIN", "SD font reload after network took %lu ms", millis() - reloadStart);
+    activityManager.requestUpdate();
   }
 #endif
 
