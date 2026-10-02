@@ -56,7 +56,11 @@ namespace NetworkStartup {
 
 void logMemory(const char* stage) {
   const auto internal = HalMemory::getInternalHeap();
+#if defined(SIMULATOR)
+  const HalMemory::HeapStats dma{};  // No hardware DMA heap in the desktop simulator.
+#else
   const auto dma = HalMemory::getInternalDmaHeap();
+#endif
   const auto psram = HalMemory::getPsramHeap();
   LOG_INF("NET", "%s: internal free=%u largest=%u, DMA free=%u largest=%u, PSRAM free=%u", stage,
           static_cast<unsigned>(internal.freeBytes), static_cast<unsigned>(internal.largestBlockBytes),
