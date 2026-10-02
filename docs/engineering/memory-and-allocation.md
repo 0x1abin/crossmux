@@ -153,3 +153,12 @@ Keep the ReadPico 32 KiB internal reserve and 4096-byte malloc preference thresh
 while measuring the combined waveform and WiFi/LwIP PSRAM changes. Additional
 PSRAM settings require independent device validation; a successful build alone
 is not evidence that hotspot startup or transfer is reliable.
+
+The combined waveform/network candidate started AP services, but left only
+5,639 internal bytes (largest 3,316) and 2,183 internal-DMA bytes (largest 32);
+the phone could not join. ReadPico therefore also enables
+`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`, using the SDK's existing linker
+rules for network/Bluetooth BSS. Verify `.ext_ram.bss` and symbol placement in
+the final ELF, not just sdkconfig. This requires AP/STA and BLE device acceptance;
+it does not relocate application display buffers or task stacks. The ordinary
+malloc threshold, mDNS allocation policy and NVS cache policy remain unchanged.
