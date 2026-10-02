@@ -2,7 +2,6 @@
 
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
@@ -26,7 +25,6 @@
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
 #include "CrossPointSettings.h"
-#include "DateTimeSettingsActivity.h"
 #include "DictionaryDownloadActivity.h"
 #include "FontDownloadActivity.h"
 #include "HomeButtonSettingsActivity.h"
@@ -341,17 +339,12 @@ void SettingsActivity::rebuildSettingsLists() {
   controlsSettings.push_back(SettingInfo::Action(StrId::STR_BLUETOOTH, SettingAction::Bluetooth));
 #endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_APP_VISIBILITY, SettingAction::AppVisibility));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::DateTime));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_DATE_AND_TIME, SettingAction::ClockSettings));
   if (BoardConfig::hasHomeKey()) {
     controlsSettings.insert(controlsSettings.begin(),
                             SettingInfo::Action(StrId::STR_HOME_BUTTON, SettingAction::HomeButton));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
-  // Clock configuration only exists where the RTC probe found hardware; on
-  // clockless boards there is nothing to set.
-  if (halClock.isAvailable()) {
-    systemSettings.push_back(SettingInfo::Action(StrId::STR_CLOCK, SettingAction::ClockSettings));
-  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
@@ -845,9 +838,6 @@ void SettingsActivity::toggleCurrentSetting() {
 
         break;
       }
-      case SettingAction::DateTime:
-        startActivityForResultWith<DateTimeSettingsActivity>(resultHandler);
-        break;
       case SettingAction::ClearCache:
         startActivityForResultWith<ClearCacheActivity>(resultHandler);
         break;

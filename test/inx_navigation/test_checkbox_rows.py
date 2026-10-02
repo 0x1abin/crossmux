@@ -64,11 +64,7 @@ print('Production boolean rows: all themes, both states, pointer/getter and mult
 # Compile the real viewport methods, including INX's separate tab-list path.
 shared = (ROOT / 'src/activities/UiListActivity.cpp').read_text()
 tabs = (ROOT / 'src/activities/UiTabListActivity.cpp').read_text()
-date = (ROOT / 'src/activities/settings/DateTimeSettingsActivity.cpp').read_text()
 keyboard = (ROOT / 'src/activities/settings/KeyboardLayoutsActivity.cpp').read_text()
-date_guard = date[date.index('  if (SETTINGS.uiTheme != CrossPointSettings::INX)',
-                           date.index('void DateTimeSettingsActivity::buildMenuScreen')):
-                  date.index('  props.rowProviderCtx = &row;')]
 keyboard_guard = keyboard[keyboard.index('  props.toggleCheckbox = true;'):
                           keyboard.index('  syncListViewport(screen, props);')]
 trace = (ROOT / 'test/inx_navigation/InxStyleParity.cpp').read_text().split('#ifdef UPSTREAM_THEME_PARITY')[0]
@@ -96,7 +92,7 @@ struct UiTabListActivity:UiListActivity {void syncTabListViewport(UiScreen&,fui:
 int main(){
  for(int theme:{0,1,2,3,4,6,5,0,5})for(bool checked:{false,true})
  for(bool selected:{false,true})for(bool touch:{false,true})for(bool landscape:{false,true})
- for(int path:{0,1,2,3,4}){
+ for(int path:{0,1,3,4}){
   std::printf("CONTROL %d %d %d %d %d %d\n",theme,checked,selected,touch,landscape,path);
   SETTINGS.uiTheme=theme;
   TraceTarget target;
@@ -112,7 +108,6 @@ int main(){
   fui::ListProps props;props.items=&item;props.count=1;props.action=7;props.inputMask=fui::InputTouch;
   if(path==0)activity.syncListViewport(screen,props);
   if(path==1){activity.nav.selected=selected?1:0;activity.syncTabListViewport(screen,props);}
-  if(path==2){@DATE@ screen.syncListViewport(activity.nav,props,1);}
   if(path==3){@KEYBOARD@ activity.syncListViewport(screen,props);}
   if(path==4){props.toggleCheckbox=true;props.toggleWidth=32;props.toggleHeight=30;activity.syncListViewport(screen,props);}
   const bool checkbox=theme!=5||path>=3;
@@ -132,8 +127,7 @@ int main(){
  }
 }
 '''.replace('@SHARED@', method(shared, 'UiListActivity::syncListViewport')).replace(
-    '@TABS@', method(tabs, 'UiTabListActivity::syncTabListViewport')).replace(
-    '@DATE@', date_guard).replace('@KEYBOARD@', keyboard_guard)
+    '@TABS@', method(tabs, 'UiTabListActivity::syncTabListViewport')).replace('@KEYBOARD@', keyboard_guard)
 with tempfile.TemporaryDirectory(prefix='boolean-controls-') as directory:
     output = run(controls, Path(directory), sdk=True)
 scenes = output.split('CONTROL ')[1:]

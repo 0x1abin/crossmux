@@ -324,7 +324,7 @@ class BaseTheme {
   virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
   virtual void drawMainTabStatusBar(const GfxRenderer& renderer, Rect rect) const;
   // Also draws the wall clock opposite the battery when the user enabled
-  // SETTINGS.clockShowInHeader and an RTC is present. On touch boards a
+  // SETTINGS.clockShowInHeader and system time is valid. On touch boards a
   // tappable back button leads the band (see HeaderBackTapTarget); root
   // screens that own their stack bottom pass backButton = false.
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,

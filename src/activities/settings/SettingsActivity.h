@@ -24,7 +24,6 @@ enum class SettingAction {
   KOReaderSync,
   OPDSBrowser,
   Network,
-  DateTime,
   ClearCache,
   RestoreSystemSettings,
   CheckForUpdates,
