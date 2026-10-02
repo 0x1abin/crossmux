@@ -66,22 +66,27 @@ void BootActivity::runPostOta() {
       file->path.c_str(),
       [](size_t completed, size_t total, void* context) {
         auto* self = static_cast<BootActivity*>(context);
-        self->completed_.store(completed);
-        self->total_.store(total);
+        bool refresh = false;
+        {
+          RenderLock lock(*self);
+          self->completed_.store(completed);
+          self->total_.store(total);
 
-        const size_t sourceSize = total / 2;
-        const Stage nextStage = completed <= sourceSize ? Stage::Copying : Stage::Verifying;
-        const bool phaseChanged = self->stage_.exchange(nextStage) != nextStage;
-        const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
-        if (phaseChanged || percent == 100 || percent >= self->lastRequestedPercent_ + 10) {
-          self->lastRequestedPercent_ = percent;
-          self->requestUpdate(true);
+          const size_t sourceSize = total / 2;
+          const Stage nextStage = completed <= sourceSize ? Stage::Copying : Stage::Verifying;
+          const bool phaseChanged = self->stage_.exchange(nextStage) != nextStage;
+          const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
+          if (phaseChanged || percent == 100 || percent >= self->lastRequestedPercent_ + 10) {
+            self->lastRequestedPercent_ = percent;
+            refresh = true;
+          }
         }
+        // Finish the panel refresh before the cache writer resumes Flash operations.
+        if (refresh) self->requestUpdateAndWait();
       },
       this);
 
-  // The callback only queues refreshes. Keep the verified 100% state visible
-  // until the panel has physically completed that frame before showing Ready.
+  // Keep the verified 100% frame visible before showing Ready.
   if (result == SdCardFontCache::Result::Ok) requestUpdateAndWait();
 
   const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;

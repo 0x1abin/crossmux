@@ -2209,7 +2209,7 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
   auto forward = layout;
   ++forward.page;
   if (forward.page < static_cast<int>(section->pageCount)) buildPageCacheSlot(0, forward, generation);
-  if (cancelled()) return;
+  if (cancelled() || pageCacheFailed_) return;
   auto backward = layout;
   --backward.page;
   if (backward.page >= 0) buildPageCacheSlot(1, backward, generation);
