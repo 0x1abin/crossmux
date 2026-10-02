@@ -156,11 +156,14 @@ is not evidence that hotspot startup or transfer is reliable.
 
 The combined waveform/network candidate started AP services, but left only
 5,639 internal bytes (largest 3,316) and 2,183 internal-DMA bytes (largest 32);
-the phone could not join. A ReadPico network/Bluetooth BSS relocation candidate
-moved 15,088 bytes to PSRAM, but failed during boot with repeated panic handling;
-that option was removed. Keep its image and log as failed-candidate evidence.
+the phone could not join. ReadPico therefore enables SDK network/Bluetooth BSS
+relocation with `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y`. This must be
+paired with `CONFIG_SPIRAM_BOOT_HW_INIT=y` and `CONFIG_SPIRAM_BOOT_INIT=y`: the
+Arduino defaults defer PSRAM setup, too late for external BSS. Enabling only BSS
+relocation moved 15,088 bytes in the ELF but caused repeated startup panics on
+the device; that failed image/log is retained for comparison.
 
-The next candidate moves only mDNS packet/service allocations to PSRAM using
-`CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y`, retaining its internal task stack and the
-existing BSS placement. The ordinary malloc threshold and NVS cache policy
-remain unchanged. AP connection and transfer acceptance is still required.
+Verify external BSS symbols in the final ELF and require cold boot, AP/STA,
+transfer and BLE acceptance. Display buffers and task stacks keep their existing
+allocation requirements. The ordinary malloc threshold, mDNS allocation policy
+and NVS cache policy remain unchanged while testing this configuration.
