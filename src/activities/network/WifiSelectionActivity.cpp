@@ -67,7 +67,9 @@ void WifiSelectionActivity::onRowEvent(const fui::ActionEvent& event, void* user
 
 void WifiSelectionActivity::onScanEvent(const fui::ActionEvent&, void* user) {
   auto* self = static_cast<WifiSelectionActivity*>(user);
-  if (self->state != WifiSelectionState::NETWORK_LIST && self->state != WifiSelectionState::CONNECTION_FAILED) return;
+  if (self->state != WifiSelectionState::NETWORK_LIST && self->state != WifiSelectionState::CONNECTION_FAILED &&
+      self->state != WifiSelectionState::NETWORK_ERROR)
+    return;
   self->app.clearTapFlash();
   self->closeRouting();
   self->startWifiScan();
@@ -148,6 +150,7 @@ void WifiSelectionActivity::onPromptEvent(const fui::ActionEvent& event, void* u
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
+  NetworkStartup::logMemory("WifiSelectionActivity enter");
   NetworkStartup::prepare(renderer);
 
   // Load saved WiFi credentials - SD card operations need lock as we use SPI
@@ -225,6 +228,7 @@ void WifiSelectionActivity::onEnter() {
 
 void WifiSelectionActivity::onExit() {
   Activity::onExit();
+  NetworkStartup::logMemory("WifiSelectionActivity exit begin");
 
   LOG_DBG("WIFI", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
@@ -237,7 +241,17 @@ void WifiSelectionActivity::onExit() {
   // (CrossPointWebServerActivity) manages WiFi connection state. We just clean
   // up the scan and task.
 
+  NetworkStartup::logMemory("WiFi selection exit end");
   LOG_DBG("WIFI", "Free heap at onExit end: %d bytes", ESP.getFreeHeap());
+}
+
+void WifiSelectionActivity::showNetworkError() {
+  closeRouting();
+  app.clearTapFlash();
+  autoConnecting = false;
+  realNetworkCount = 0;
+  state = WifiSelectionState::NETWORK_ERROR;
+  requestUpdate();
 }
 
 void WifiSelectionActivity::startWifiScan(const bool autoScan) {
@@ -254,12 +268,19 @@ void WifiSelectionActivity::startWifiScan(const bool autoScan) {
   requestUpdate();
 
   // Set WiFi mode to station
-  NetworkStartup::setMode(renderer, WIFI_STA);
+  if (!NetworkStartup::setMode(renderer, WIFI_STA)) {
+    LOG_ERR("WIFI", "Station initialization failed");
+    showNetworkError();
+    return;
+  }
   WiFi.disconnect();
   delay(100);
 
   // Start async scan
-  WiFi.scanNetworks(true);  // true = async scan
+  if (WiFi.scanNetworks(true) == WIFI_SCAN_FAILED) {
+    LOG_ERR("WIFI", "Could not start scan");
+    showNetworkError();
+  }
 }
 
 void WifiSelectionActivity::processWifiScanResults() {
@@ -271,14 +292,9 @@ void WifiSelectionActivity::processWifiScanResults() {
   }
 
   if (scanResult == WIFI_SCAN_FAILED) {
-    networks.clear();
-    realNetworkCount = 0;
-    appendHiddenNetworkEntry();
-    rebuildNetworkRowItems();
-    autoConnecting = false;
-    state = WifiSelectionState::NETWORK_LIST;
-    selectedNetworkIndex = 0;
-    requestUpdate();
+    LOG_ERR("WIFI", "Scan failed");
+    WiFi.scanDelete();
+    showNetworkError();
     return;
   }
 
@@ -525,7 +541,11 @@ void WifiSelectionActivity::attemptConnection() {
   requestUpdate();
 
   WiFi.persistent(false);  // Credentials are managed by WifiCredentialStore; suppress SDK NVS auto-connect
-  NetworkStartup::setMode(renderer, WIFI_STA);
+  if (!NetworkStartup::setMode(renderer, WIFI_STA)) {
+    LOG_ERR("WIFI", "Station initialization failed");
+    showNetworkError();
+    return;
+  }
   WiFi.disconnect(true, true);  // Abort any in-progress SDK auto-connect and clear NVS-saved SSID
   delay(100);
 
@@ -650,6 +670,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
 
 void WifiSelectionActivity::loop() {
   switch (state) {
+    case WifiSelectionState::NETWORK_ERROR:
     case WifiSelectionState::SCANNING:
     case WifiSelectionState::AUTO_CONNECTING:
     case WifiSelectionState::CONNECTING:
@@ -662,6 +683,16 @@ void WifiSelectionActivity::loop() {
     default:
       break;
   }
+  if (state == WifiSelectionState::NETWORK_ERROR) {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      closeRouting();
+      onComplete(false);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      startWifiScan();
+    }
+    return;
+  }
+
   // Check scan progress
   if (state == WifiSelectionState::SCANNING) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
@@ -954,6 +985,12 @@ void WifiSelectionActivity::render(RenderLock&&) {
   }
 
   switch (state) {
+    case WifiSelectionState::NETWORK_ERROR: {
+      renderUi();
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      break;
+    }
     case WifiSelectionState::AUTO_CONNECTING:
       renderConnecting(&screen, &metrics);
       break;
@@ -1030,6 +1067,12 @@ void WifiSelectionActivity::buildListScreen(UiScreen& screen) {
 
   if (state == WifiSelectionState::SAVE_PROMPT || state == WifiSelectionState::FORGET_PROMPT) {
     buildPromptDialog(screen);
+    return;
+  }
+
+  if (state == WifiSelectionState::NETWORK_ERROR) {
+    if (mappedInput.hasTouch()) addTouchControls(screen, tr(STR_RETRY), ACTION_SCAN);
+    screen.centeredText(tr(STR_ERROR_GENERAL_FAILURE), screen.theme().bodyText);
     return;
   }
 
@@ -1113,7 +1156,7 @@ void WifiSelectionActivity::addTouchControls(UiScreen& screen, const char* label
   const fui::Rect band = screen.takeBottom(height, gap);
   const int width = label ? (band.width - gap) / 2 : band.width;
   fui::ButtonProps cancel;
-  cancel.label = tr(STR_CANCEL);
+  cancel.label = state == WifiSelectionState::NETWORK_ERROR ? tr(STR_BACK) : tr(STR_CANCEL);
   cancel.action = ACTION_CANCEL;
   cancel.inputMask = fui::InputTouch;
   cancel.minTouchSize = static_cast<int16_t>(height);

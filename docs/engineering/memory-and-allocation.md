@@ -134,3 +134,36 @@ The selected SD reader font may allocate one 1 MiB uninitialized PSRAM block.
 It clears only its fixed glyph index and appends verified glyph bitmaps into the
 remaining arena. The cache is optional, shared across styles of that one font,
 and released on font unload; UI fallback fonts never allocate another block.
+
+## ReadPico network memory checks
+
+The E0470 waveform trimmer now computes sequence lengths in a first pass and
+writes the trimmed waveform in a second pass, replacing the 17,408-byte static
+workspace with bounded stack scratch. GC16/GL16 output remains byte-identical;
+run the SDK's `libs/display/EpdiyLcd/test/host/test_waveform_trim.py` to check it.
+
+Network entry, BLE shutdown, font reclamation, mode initialization, web-service
+startup and exit log internal and internal-DMA free bytes/largest blocks plus
+PSRAM free bytes through `HalMemory`. DMA memory overlaps internal memory;
+these figures must not be added together. Startup failure returns immediately,
+and WiFi scanning exposes explicit Retry and Back actions instead of reporting
+zero networks or automatically repeating driver initialization.
+
+Keep the ReadPico 32 KiB internal reserve and 4096-byte malloc preference threshold
+while measuring the combined waveform and WiFi/LwIP PSRAM changes. Additional
+PSRAM settings require independent device validation; a successful build alone
+is not evidence that hotspot startup or transfer is reliable.
+
+The combined waveform/network candidate started AP services, but left only
+5,639 internal bytes (largest 3,316) and 2,183 internal-DMA bytes (largest 32);
+the phone could not join. ReadPico therefore enables SDK network/Bluetooth BSS
+relocation with `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y`. This must be
+paired with `CONFIG_SPIRAM_BOOT_HW_INIT=y` and `CONFIG_SPIRAM_BOOT_INIT=y`: the
+Arduino defaults defer PSRAM setup, too late for external BSS. Enabling only BSS
+relocation moved 15,088 bytes in the ELF but caused repeated startup panics on
+the device; that failed image/log is retained for comparison.
+
+Verify external BSS symbols in the final ELF and require cold boot, AP/STA,
+transfer and BLE acceptance. Display buffers and task stacks keep their existing
+allocation requirements. The ordinary malloc threshold, mDNS allocation policy
+and NVS cache policy remain unchanged while testing this configuration.

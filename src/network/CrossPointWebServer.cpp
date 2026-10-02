@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <new>
 #ifndef SIMULATOR
 #include <cerrno>
 #endif
@@ -123,6 +124,15 @@ LocalizedPage localizedPage(const char* chinese, const size_t chineseSize, const
   return useChineseWebUi() ? LocalizedPage{chinese, chineseSize} : LocalizedPage{english, englishSize};
 }
 
+memory::ByteBuffer makeWebBuffer(const size_t size) {
+  // These activity-lifetime, sequential I/O buffers cannot be stack storage.
+  // PSRAM keeps them out of the Read Pico panel's scarce internal SRAM; boards
+  // without PSRAM retain the existing internal-RAM fallback.
+  auto buffer = memory::makePsramByteBufferNoThrow(size);
+  if (buffer) return buffer;
+  return memory::makeInternalByteBufferNoThrow(size);
+}
+
 // Static pointer for WebSocket callback (WebSocketsServer requires C-style callback)
 CrossPointWebServer* wsInstance = nullptr;
 
@@ -180,10 +190,10 @@ CrossPointWebServer::CrossPointWebServer() {}
 
 CrossPointWebServer::~CrossPointWebServer() { stop(); }
 
-void CrossPointWebServer::begin() {
+bool CrossPointWebServer::begin() {
   if (running) {
     LOG_DBG("WEB", "Web server already running");
-    return;
+    return true;
   }
 
   // Check if we have a valid network connection (either STA connected or AP mode)
@@ -193,7 +203,7 @@ void CrossPointWebServer::begin() {
 
   if (!isStaConnected && !isInApMode) {
     LOG_DBG("WEB", "Cannot start webserver - no valid network (mode=%d, status=%d)", wifiMode, WiFi.status());
-    return;
+    return false;
   }
 
   // Store AP mode flag for later use (e.g., in handleStatus)
@@ -206,7 +216,7 @@ void CrossPointWebServer::begin() {
   server = makeUniqueNoThrow<CrossPointHttpServer>(port);
   if (!server) {
     LOG_ERR("WEB", "OOM: WebServer (%u bytes)", static_cast<unsigned>(sizeof(WebServer)));
-    return;
+    return false;
   }
 
   // Disable WiFi sleep to improve responsiveness and prevent 'unreachable' errors.
@@ -221,10 +231,12 @@ void CrossPointWebServer::begin() {
 
   LOG_DBG("WEB", "[MEM] Free heap after WebServer allocation: %d bytes", ESP.getFreeHeap());
 
-  upload.buffer = makeUniqueNoThrow<uint8_t[]>(UploadState::UPLOAD_BUFFER_SIZE);
-  fontUpload.buffer = makeUniqueNoThrow<uint8_t[]>(FontUploadState::BUFFER_SIZE);
+  upload.buffer = makeWebBuffer(UploadState::UPLOAD_BUFFER_SIZE);
+  fontUpload.buffer = makeWebBuffer(FontUploadState::BUFFER_SIZE);
   if (!upload.buffer || !fontUpload.buffer) {
     LOG_ERR("WEB", "OOM: upload buffers (%u bytes each)", static_cast<unsigned>(UploadState::UPLOAD_BUFFER_SIZE));
+    stop();
+    return false;
   }
 
   // Add Access-Control-Allow-* headers to every response so web-based clients
@@ -295,12 +307,20 @@ void CrossPointWebServer::begin() {
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
-  // Collect WebDAV headers and register handler
-  // If-None-Match is collected so the static-page handlers can answer conditional GETs with 304
+  // Collect WebDAV headers and register handler.
+  // If-None-Match is collected so the static-page handlers can answer conditional GETs with 304.
   const char* collectedHeaders[] = {"Depth",      "Destination", "Overwrite",    "If",
                                     "Lock-Token", "Timeout",     "If-None-Match"};
   server->collectHeaders(collectedHeaders, 7);
-  server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
+  // WebServer takes ownership and deletes this handler.  It must be nothrow:
+  // an OOM here previously called abort() on ESP32 builds with exceptions off.
+  auto* webDavHandler = new (std::nothrow) WebDAVHandler();
+  if (!webDavHandler) {
+    LOG_ERR("WEB", "OOM: WebDAVHandler (%u bytes)", static_cast<unsigned>(sizeof(WebDAVHandler)));
+    stop();
+    return false;
+  }
+  server->addHandler(webDavHandler);  // WebServer owns webDavHandler after this call.
   LOG_DBG("WEB", "WebDAV handler initialized");
 
   server->begin();
@@ -308,22 +328,30 @@ void CrossPointWebServer::begin() {
   // Start WebSocket server for fast binary uploads
   LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
   wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
-  if (wsServer) {
-    wsInstance = const_cast<CrossPointWebServer*>(this);
-    wsServer->begin();
-    wsServer->onEvent(wsEventCallback);
-    LOG_DBG("WEB", "WebSocket server started");
-  } else {
+  if (!wsServer) {
     LOG_ERR("WEB", "OOM: WebSocketsServer (%u bytes)", static_cast<unsigned>(sizeof(WebSocketsServer)));
+    stop();
+    return false;
   }
+  wsInstance = this;
+  wsServer->begin();
+  wsServer->onEvent(wsEventCallback);
+  LOG_DBG("WEB", "WebSocket server started");
 
   udpActive = udp.begin(LOCAL_UDP_PORT);
-  LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
+  if (!udpActive) {
+    LOG_ERR("WEB", "Failed to start discovery UDP on port %d", LOCAL_UDP_PORT);
+    stop();
+    return false;
+  }
+  LOG_DBG("WEB", "Discovery UDP enabled on port %d", LOCAL_UDP_PORT);
 
   // Reuse one request buffer for the server lifetime to avoid repeated heap churn.
-  fileListBatch = makeUniqueNoThrow<char[]>(FILE_LIST_BATCH_CAPACITY);
+  fileListBatch = makeWebBuffer(FILE_LIST_BATCH_CAPACITY);
   if (!fileListBatch) {
     LOG_ERR("WEB", "OOM: %zu-byte file list response buffer", FILE_LIST_BATCH_CAPACITY);
+    stop();
+    return false;
   }
 
   running = true;
@@ -334,6 +362,7 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Access at http://%s/", ipAddr.c_str());
   LOG_DBG("WEB", "WebSocket at ws://%s:%d/", ipAddr.c_str(), wsPort);
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
+  return true;
 }
 
 void CrossPointWebServer::suspendTransferServices() {
@@ -389,13 +418,13 @@ void CrossPointWebServer::abortWsUpload(const char* tag) {
 }
 
 void CrossPointWebServer::stop() {
-  if (!running || !server) {
+  if (!server) {
     LOG_DBG("WEB", "stop() called but already stopped (running=%d, server=%p)", running, server.get());
     fileListBatch.reset();
     return;
   }
 
-  LOG_DBG("WEB", "STOP INITIATED - setting running=false first");
+  LOG_DBG("WEB", "STOP INITIATED - setting running=false first (was running=%d)", running);
   running = false;  // Set this FIRST to prevent handleClient from using server
 
   LOG_DBG("WEB", "[MEM] Free heap before stop: %d bytes", ESP.getFreeHeap());
@@ -410,14 +439,14 @@ void CrossPointWebServer::stop() {
     LOG_DBG("WEB", "Stopping WebSocket server...");
     wsServer->close();
     wsServer.reset();
-    wsInstance = nullptr;
     LOG_DBG("WEB", "WebSocket server stopped");
   }
 
-  if (udpActive) {
-    udp.stop();
-    udpActive = false;
-  }
+  if (wsInstance == this) wsInstance = nullptr;
+
+  // begin() can retain its TX buffer when socket creation fails.
+  udp.stop();
+  udpActive = false;
 
   // Brief delay to allow any in-flight handleClient() calls to complete
   delay(20);
@@ -429,6 +458,8 @@ void CrossPointWebServer::stop() {
   delay(10);
 
   server.reset();
+  upload.buffer.reset();
+  fontUpload.buffer.reset();
   fileListBatch.reset();
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
@@ -768,7 +799,7 @@ void CrossPointWebServer::handleFileListData() const {
   server->chunkResponseBegin("application/json");
 #endif
 
-  char* batch = fileListBatch.get();
+  char* batch = reinterpret_cast<char*>(fileListBatch.get());
   size_t batchLen = 0;
   size_t entryCount = 0;
   size_t responseBytes = 0;
@@ -1012,7 +1043,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     }
 
     // The buffer spans upload callbacks; keep it off the task stack and release it at the end.
-    state.buffer = makeUniqueNoThrow<uint8_t[]>(UploadState::UPLOAD_BUFFER_SIZE);
+    state.buffer = makeWebBuffer(UploadState::UPLOAD_BUFFER_SIZE);
     if (!state.buffer) {
       state.error = tr(STR_MEMORY_ERROR);
       LOG_ERR("WEB", "OOM: upload buffer");
@@ -2997,7 +3028,7 @@ void CrossPointWebServer::handleFontUploadData() {
         break;
       }
 
-      fontUpload.buffer = makeUniqueNoThrow<uint8_t[]>(FontUploadState::BUFFER_SIZE);
+      fontUpload.buffer = makeWebBuffer(FontUploadState::BUFFER_SIZE);
       if (!fontUpload.buffer) {
         LOG_ERR("WEB", "OOM: font upload buffer");
         break;

@@ -39,12 +39,20 @@ The platform's IDF installer otherwise replaces the Core's running SCons
 package, causing missing Python modules during a clean build. Preparation
 removes SCons from that installer's tool list; Core still supplies it. It does
 not change compiler optimization flags. CI performs the same preparation.
+Nightly and CI use a separate `PLATFORMIO_CORE_DIR` per build job so concurrent
+runner jobs cannot change each other's installed toolchains. The directory name
+includes `.platformio`: pioarduino's framework-restoration path check requires
+that component when switching from a custom SDK back to prebuilt TinyUSB.
 On Ubuntu, the bundled cppcheck executable also requires `libpcre3`.
 
 The custom SDK bootstrap uses non-LTO objects; the final application retains
 its existing LTO configuration. Keep the verified C3 optimization options and
 partition layout unchanged; sufficient Flash headroom is not a reason to tune
 additional compiler options.
+
+X4 Pro, X4 Classic, Murphy M4, Waveshare 3.97 and PaperMono use application LTO (`-flto=auto`, removing the packaged `-fno-lto`)
+to keep the complete reader inside the existing 6.25 MiB OTA partitions. Their
+prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
 
 ## Build Environment
 * **Standard**: C++20 (`-std=c++2a`). No Exceptions, No RTTI.

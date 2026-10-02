@@ -1009,7 +1009,7 @@ int main(int argc,char** argv) {
         import re
         # Immutable legacy schema fixture; active TXT books now use EPUB sections.
         source = subprocess.check_output(['git', '-C', str(ROOT), 'show',
-            'HEAD:src/activities/reader/TxtReaderActivity.cpp'], text=True)
+            '593c8dbc8feb404d740108a3db281c4eeae3e33e:src/activities/reader/TxtReaderActivity.cpp'], text=True)
         read = method(source, 'bool readPodChecked(')
         write = method(source, 'bool writePodChecked(')
         expression = re.search(

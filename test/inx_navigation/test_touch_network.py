@@ -114,10 +114,11 @@ namespace fui=freeink::ui;
 using UiScreen=fui::Screen<24>;
 struct UITheme {static UITheme& getInstance(){static UITheme t;return t;} struct {int listRowHeight=56;} metrics;const auto& getMetrics()const{return metrics;}};
 namespace UiHighDpiProfile {inline bool enabled=false;constexpr int buttonHeight=96,controlGap=12;}
-enum class StrId {STR_CANCEL};const char* tr(StrId){return "Cancel";}constexpr auto STR_CANCEL=StrId::STR_CANCEL;
+enum class StrId {STR_CANCEL, STR_BACK};const char* translate(StrId id){return id==StrId::STR_BACK?"Back":"Cancel";}
+#define tr(id) translate(StrId::id)
 struct {int deletes=0,disconnects=0;void scanDelete(){++deletes;}void disconnect(){++disconnects;}} WiFi;
 struct WifiSelectionActivity {
- enum class WifiSelectionState {SCANNING,NETWORK_LIST,AUTO_CONNECTING,CONNECTING,CONNECTION_FAILED,FORGET_PROMPT};
+ enum class WifiSelectionState {NETWORK_ERROR,SCANNING,NETWORK_LIST,AUTO_CONNECTING,CONNECTING,CONNECTION_FAILED,FORGET_PROMPT};
  WifiSelectionState state=WifiSelectionState::NETWORK_LIST;
  bool autoConnecting=false,manualNetworkListRequested=false,usedSavedPassword=false,completed=false;
  int forgetPromptSelection=-1,scans=0,updates=0;
@@ -135,18 +136,19 @@ constexpr fui::ActionId ACTION_CANCEL=4;
 @FOOTER@
 int main(){
  using S=WifiSelectionActivity::WifiSelectionState;
- for(S state:{S::SCANNING,S::NETWORK_LIST,S::AUTO_CONNECTING,S::CONNECTING,S::CONNECTION_FAILED}){
+ for(S state:{S::NETWORK_ERROR,S::SCANNING,S::NETWORK_LIST,S::AUTO_CONNECTING,S::CONNECTING,S::CONNECTION_FAILED}){
   WifiSelectionActivity a;a.state=state;WiFi.deletes=WiFi.disconnects=0;
   a.onCancelEvent({},&a);assert(a.completed);
   assert(WiFi.deletes==(state==S::SCANNING));assert(WiFi.disconnects==(state==S::CONNECTING||state==S::AUTO_CONNECTING));
   WifiSelectionActivity b;b.state=state;b.onScanEvent({},&b);
-  assert(b.scans==(state==S::NETWORK_LIST||state==S::CONNECTION_FAILED));
+  assert(b.scans==(state==S::NETWORK_ERROR||state==S::NETWORK_LIST||state==S::CONNECTION_FAILED));
  }
  for(bool saved:{false,true}){WifiSelectionActivity a;a.state=S::CONNECTION_FAILED;a.usedSavedPassword=saved;
   a.onReturnEvent({},&a);assert(a.state==(saved?S::FORGET_PROMPT:S::NETWORK_LIST));}
  WifiSelectionActivity a;a.state=S::SCANNING;a.autoConnecting=true;a.onReturnEvent({},&a);
  assert(a.state==S::SCANNING&&!a.autoConnecting&&a.manualNetworkListRequested);
- for(bool high:{false,true})for(bool landscape:{false,true})for(bool pair:{false,true}){
+ for(S state:{S::NETWORK_LIST,S::NETWORK_ERROR})for(bool high:{false,true})for(bool landscape:{false,true})for(bool pair:{false,true}){
+  a.state=state;
   UiHighDpiProfile::enabled=high;TraceTarget target;fui::DeviceContext device;
   device.width=landscape?1216:684;device.height=landscape?684:1216;device.hasTouch=true;
   device.safeArea=fui::Insets{5,5,8,5};fui::InteractionBuffer<24> hits;fui::InputSnapshot input;

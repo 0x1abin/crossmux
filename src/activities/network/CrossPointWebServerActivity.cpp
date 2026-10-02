@@ -69,6 +69,7 @@ int barsForRssi(int rssi, int currentBars) {
 
 void CrossPointWebServerActivity::onEnter() {
   Activity::onEnter();
+  NetworkStartup::logMemory("CrossPointWebServerActivity enter");
 
   LOG_DBG("WEBACT", "Free heap at onEnter: %d bytes", ESP.getFreeHeap());
 
@@ -112,6 +113,7 @@ void CrossPointWebServerActivity::onEnter() {
 
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
+  NetworkStartup::logMemory("CrossPointWebServerActivity exit begin");
 
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
@@ -132,6 +134,7 @@ void CrossPointWebServerActivity::onExit() {
       WiFi.disconnect(false);
     }
     delay(30);
+    NetworkStartup::logMemory("web exit before restart");
     silentRestart();
   }
 
@@ -238,7 +241,11 @@ void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
 
   // Configure and start the AP
-  NetworkStartup::setMode(renderer, WIFI_AP);
+  if (!NetworkStartup::setMode(renderer, WIFI_AP)) {
+    LOG_ERR("WEBACT", "Failed to initialize WiFi for Access Point");
+    onGoHome();
+    return;
+  }
   delay(100);
 
   // Start soft AP
@@ -321,9 +328,9 @@ void CrossPointWebServerActivity::startWebServer() {
                      mappedInput.wasPressed(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture();
     return leaveRequested;
   });
-  webServer->begin();
-
-  if (webServer->isRunning()) {
+  const bool started = webServer->begin();
+  NetworkStartup::logMemory(started ? "web services ready" : "web services failed");
+  if (started) {
     state = WebServerActivityState::SERVER_RUNNING;
     LOG_DBG("WEBACT", "Web server started successfully");
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);

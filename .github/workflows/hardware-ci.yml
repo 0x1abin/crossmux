@@ -100,7 +100,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
       - name: Isolate PlatformIO toolchains
-        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/.platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
 
       - name: Use runner temporary directory
         # Avoid the self-hosted runner's shared /tmp tmpfs.
