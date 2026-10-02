@@ -107,13 +107,12 @@ void updateBluetoothLifecycle() {
   }
   // Preparation blocks new starts; C3 and PSRAM readers keep existing links
   // through chapter construction and book indexing.
-  if (bleinput::isRunning() || activityManager.deferBluetoothStart() || RenderLock::peek() ||
-      millis() < nextStartAttemptAt)
-    return;
+  if (bleinput::isRunning() || activityManager.deferBluetoothStart() || millis() < nextStartAttemptAt) return;
   // Non-reader pages that keep an existing link alive own their explicit start
   // attempts; only readers use the automatic reader-memory gate and retry loop.
   if (!activityManager.isReaderActivity()) return;
-  RenderLock lock;
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return;
   // Rendering may have started a chapter build while we were acquiring the lock.
   if (!wanted() || activityManager.deferBluetoothStart() || !activityManager.isReaderActivity() ||
       bleinput::isRunning())
@@ -912,6 +911,19 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+#if FREEINK_DEVICE_READPICO
+  // Cancel before any handler can wait for the framebuffer lock. These are
+  // snapshot queries: they do not consume the gesture from its normal owner.
+#if CROSSPOINT_EMULATED
+  const bool physicalPress = gpio.wasAnyPressed();
+#else
+  const bool physicalPress = gpio.physicalPressedMask() != 0;
+#endif
+  if (mappedInputManager.wasAnyPressed() || mappedInputManager.wasAnyReleased() || physicalPress ||
+      gpio.wasTouchActivity()) {
+    activityManager.cancelIdleRender();
+  }
+#endif
 #if FREEINK_CAP_HAPTIC
   gpio.updateHapticFeedback(SETTINGS.hapticFeedbackLevel);
 #endif
@@ -1147,6 +1159,7 @@ void loop() {
   } else if (readerIsActive && (millis() - lastActivityTime) >= READING_STATS_CHECKPOINT_IDLE_MS &&
              !activityManager.skipLoopDelay() && !activityManager.preventAutoSleep() &&
              READING_STATS.shouldSaveCheckpoint()) {
+    activityManager.cancelIdleRender();
     RenderLock lock;
     if (!READING_STATS.saveToFile()) {
       LOG_ERR("RST", "Failed to save idle reading checkpoint");

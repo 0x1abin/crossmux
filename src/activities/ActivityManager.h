@@ -72,6 +72,7 @@ class ActivityManager {
   // Cross-task render request flag. requestUpdate() may set it from any task;
   // loop() consumes and clears it with exchange(false).
   std::atomic<bool> requestedUpdate{false};
+  std::atomic<uint32_t> idleRenderGeneration{0};
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -83,6 +84,11 @@ class ActivityManager {
 
   void begin();
   void loop();
+  void cancelIdleRender() { idleRenderGeneration.fetch_add(1, std::memory_order_relaxed); }
+  bool idleRenderCancelled(uint32_t generation) const {
+    return generation != idleRenderGeneration.load(std::memory_order_relaxed) || isSwitchPending() ||
+           requestedUpdate.load();
+  }
 
   // Will replace currentActivity and drop all activities on stack
   void replaceActivity(std::unique_ptr<Activity>&& newActivity);

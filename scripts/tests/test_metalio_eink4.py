@@ -164,7 +164,8 @@ uint8_t CrossPointSettings::defaultLanguageIndex() { return 0; }
 template<class T,class=void> struct HasHapticSetting : std::false_type {};
 template<class T> struct HasHapticSetting<T,std::void_t<decltype(std::declval<T>().hapticFeedbackLevel)>>
  : std::true_type {};
-struct GfxRenderer {
+class GfxRenderer {
+ public:
  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
  Orientation orientation=Portrait;
  int panelWidth=800, panelHeight=480;

@@ -36,6 +36,10 @@ class Activity {
 
   virtual void render(RenderLock&&) {}
 
+  // One cancellable idle pass after a normal render; zero keeps the task asleep.
+  virtual uint32_t idleRenderDelayMs() const { return 0; }
+  virtual void renderIdle(uint32_t) {}
+
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
   virtual void requestUpdate(bool immediate = false);
