@@ -54,13 +54,24 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long lastRenderCompleteMs = 0;
 
 #if FREEINK_DEVICE_READPICO
-  // Four reusable PSRAM frames (~406 KiB); too large for the render task's
-  // stack. The activity owns them and releases them in onExit().
-  memory::ByteBuffer pageCacheBase_;
-  memory::ByteBuffer pageCacheLsb_;
-  memory::ByteBuffer pageCacheMsb_;
-  memory::ByteBuffer pageCacheStash_;
-  ReaderPageCache pageCache_;
+  // Two slots of four reusable PSRAM frames each (~812 KiB total); too large for
+  // the render task's stack. The activity owns them and releases them in onExit().
+  //
+  // Two slots because the cache only pays off for the page the reader actually turns
+  // to, and a reader turns both ways. With one slot the build could only ever cover
+  // currentPage + 1, so every backward turn was a guaranteed miss -- measured: a
+  // session that alternated directions hit once in eight turns, while one that mostly
+  // advanced hit four in six. Slot 0 is the forward page (+1), slot 1 the backward
+  // one (-1); a human reading pace leaves room to build both (each takes ~700 ms).
+  static constexpr int kPageCacheSlots = 2;
+  memory::ByteBuffer pageCacheBase_[kPageCacheSlots];
+  memory::ByteBuffer pageCacheLsb_[kPageCacheSlots];
+  memory::ByteBuffer pageCacheMsb_[kPageCacheSlots];
+  memory::ByteBuffer pageCacheStash_[kPageCacheSlots];
+  ReaderPageCache pageCache_[kPageCacheSlots];
+  // Which slot the hit test matched, so the three plane copies in renderContents()
+  // read the same slot the test looked at rather than assuming slot 0.
+  int pageCacheLiveSlot_ = 0;
   ReaderPageCacheKey renderedPageKey_;
   uint32_t sectionGeneration_ = 0;
   uint32_t renderEpoch_ = 0;
@@ -73,6 +84,8 @@ class EpubReaderActivity final : public ReaderActivity {
   ReaderPageCacheKey pageCacheKey(int page, int top, int right, int bottom, int left) const;
   uint32_t idleRenderDelayMs() const override;
   void renderIdle(uint32_t generation) override;
+  // Build one page into one cache slot; only called from renderIdle().
+  bool buildPageCacheSlot(int slot, const ReaderPageCacheKey& key, uint32_t generation);
   void freePageCache();
 #endif
 
