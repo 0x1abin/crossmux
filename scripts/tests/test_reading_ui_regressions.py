@@ -1119,7 +1119,6 @@ namespace InxRecentGeometry {
 constexpr int footerReservedHeight=40;
 Rect batteryRect(Rect safe) { return {safe.x+safe.width-27,safe.y+safe.height-30,15,12}; }
 }
-constexpr int kHomeBatteryRightMargin=12, kHomeBatteryWidth=15, kHomeBatteryHeight=12;
 struct Input { bool touch=true; bool hasTouch() const { return touch; } };
 struct Gui {
   int statusCalls=0, legacyCalls=0;
