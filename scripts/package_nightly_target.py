@@ -6,6 +6,7 @@ import configparser
 import csv
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -65,7 +66,8 @@ def verify_partition_csv(root):
 
 
 def find_boot_app0():
-    path = Path.home() / '.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin'
+    core = Path(os.environ.get('PLATFORMIO_CORE_DIR') or Path.home() / '.platformio').expanduser()
+    path = core / 'packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin'
     if not path.is_file():
         raise SystemExit(f'boot_app0.bin not found at {path}; build the environment first')
     return path
