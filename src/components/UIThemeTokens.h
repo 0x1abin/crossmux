@@ -83,6 +83,17 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
     tokens.listEmphasizedText.bold = true;
     tokens.listValueText = tokens.bodyText;
   }
+  if (UiHighDpiProfile::enabled) {
+    tokens.minTouchSize = UiHighDpiProfile::buttonHeight;
+    tokens.rowHeight = UiHighDpiProfile::rowHeight;
+    tokens.listMinRowHeight = UiHighDpiProfile::rowHeight;
+    tokens.listTouchMinRowHeight = UiHighDpiProfile::rowHeight;
+    tokens.listTouchRowPaddingY = 16;
+    tokens.listTouchRowGap = UiHighDpiProfile::controlGap;
+    tokens.spaceSm = 8;
+    tokens.spaceMd = UiHighDpiProfile::controlGap;
+    tokens.spaceLg = 24;
+  }
   if (!UITheme::getInstance().showSelectionCursor()) SelectionCursorPolicy::hideFreeInkListFocus(tokens);
   return tokens;
 }

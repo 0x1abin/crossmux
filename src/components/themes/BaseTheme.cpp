@@ -26,11 +26,45 @@
 #include "components/icons/customListIcons.h"
 #include "components/icons/headerIcons.h"
 #include "components/icons/listIcons.h"
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include "components/icons/uiChromeIcons.h"
+#endif
 #include "fontIds.h"
+#include "images/Logo120.h"
 #include "util/TimeUtils.h"
 
 freeink::ui::BitmapRef BaseTheme::checkboxIcon(const bool checked) {
   return freeink::ui::bitmapFromIcon(checked ? icon_checkbox_on_32 : icon_checkbox_off_32);
+}
+
+void BaseTheme::drawSplash(const GfxRenderer& renderer, const char* status, const char* version) {
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  renderer.clearScreen();
+  if (UiHighDpiProfile::enabled) {
+    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer);
+    const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int statusHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const int logoGap = UiHighDpiProfile::controlGap * 2;
+    const int textGap = UiHighDpiProfile::controlGap;
+    const int blockHeight = 120 + logoGap + titleHeight + textGap + statusHeight;
+    const int logoY = safe.y + (safe.height - blockHeight) / 2;
+    const int titleY = logoY + 120 + logoGap;
+    renderer.drawImage(Logo120, safe.x + (safe.width - 120) / 2, logoY, 120, 120);
+    UITheme::drawCenteredText(renderer, safe, UI_12_FONT_ID, titleY, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
+    UITheme::drawCenteredText(renderer, safe, UI_10_FONT_ID, titleY + titleHeight + textGap, status);
+    if (version) {
+      const int versionY =
+          safe.y + safe.height - UiHighDpiProfile::contentPadding - renderer.getLineHeight(SMALL_FONT_ID);
+      UITheme::drawCenteredText(renderer, safe, SMALL_FONT_ID, versionY, version);
+    }
+    return;
+  }
+
+  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
+  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, status);
+  if (version) renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, version);
 }
 
 void BaseTheme::setCheckboxRow(freeink::ui::ListItem& item, const bool checked) {
@@ -44,14 +78,31 @@ namespace {
 constexpr int homeMenuMargin = 20;
 constexpr int homeMarginTop = 30;
 constexpr int subtitleY = 738;
-constexpr int bookmarkStatusIconWidth = 16;
-constexpr int bookmarkStatusIconHeight = 14;
-constexpr int bookmarkStatusIconGap = 4;
+constexpr int bookmarkStatusIconWidth = UiHighDpiProfile::enabled ? UiHighDpiProfile::readerStatusIconSize : 16;
+constexpr int bookmarkStatusIconHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::readerStatusIconSize : 14;
+constexpr int bookmarkStatusIconGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 4;
 constexpr int bookmarkStatusIconTopCrop = 2;
-constexpr int bluetoothStatusIconWidth = 16;
-constexpr int bluetoothStatusIconHeight = 16;
+constexpr int bluetoothStatusIconWidth = UiHighDpiProfile::enabled ? UiHighDpiProfile::readerStatusIconSize : 16;
+constexpr int bluetoothStatusIconHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::readerStatusIconSize : 16;
+
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+// Plot only ink pixels; the white bits are transparent. No render-time buffers.
+void drawTransparentBitmap(const GfxRenderer& renderer, const freeink::Icon& icon, const int x, const int y,
+                           const bool black) {
+  for (int row = 0; row < icon.h; ++row) {
+    for (int column = 0; column < icon.w; ++column) {
+      if ((icon.bits[row * ((icon.w + 7) / 8) + column / 8] & (0x80U >> (column % 8))) == 0) {
+        renderer.drawPixel(x + column, y + row, black);
+      }
+    }
+  }
+}
+#endif
 
 void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  drawTransparentBitmap(renderer, icon_reader_bookmark_24, x, y, true);
+#else
   constexpr int bytesPerRow = bookmarkStatusIconWidth / 8;
   for (int row = 0; row < bookmarkStatusIconHeight; ++row) {
     for (int col = 0; col < bookmarkStatusIconWidth; ++col) {
@@ -60,9 +111,13 @@ void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int 
       renderer.drawPixel(x + col, y + row, (byte & mask) != 0);
     }
   }
+#endif
 }
 
 void drawBluetoothStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  drawTransparentBitmap(renderer, icon_reader_bluetooth_24, x, y, true);
+#else
   constexpr int bytesPerRow = bluetoothStatusIconWidth / 8;
   for (int row = 0; row < bluetoothStatusIconHeight; ++row) {
     for (int col = 0; col < bluetoothStatusIconWidth; ++col) {
@@ -70,11 +125,18 @@ void drawBluetoothStatusIcon(const GfxRenderer& renderer, const int x, const int
       renderer.drawPixel(x + col, y + row, (byte & (1U << (7 - col % 8))) == 0);
     }
   }
+#endif
 }
 
 }  // namespace
 
 void BaseTheme::drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (battWidth == UiHighDpiProfile::batteryWidth && rectHeight == UiHighDpiProfile::batteryHeight) {
+    drawTransparentBitmap(renderer, icon_battery_32x20, x, y, true);
+    return;
+  }
+#endif
   // Top line
   renderer.drawLine(x + 1, y, x + battWidth - 3, y);
   // Bottom line
@@ -111,6 +173,15 @@ void BaseTheme::drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX,
 
 void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const {
   const bool charging = gpio.isUsbConnected();
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (rect.width == UiHighDpiProfile::batteryWidth && rect.height == UiHighDpiProfile::batteryHeight) {
+    constexpr int cavityWidth = 17;
+    const int filledWidth = std::max(charging ? 14 : 0, std::min<int>(percentage, 100) * cavityWidth / 100);
+    if (filledWidth > 0) renderer.fillRect(rect.x + 5, rect.y + 3, filledWidth, 14);
+    if (charging) drawTransparentBitmap(renderer, icon_battery_charging_32x20, rect.x, rect.y, false);
+    return;
+  }
+#endif
 
   const int maxFillWidth = rect.width - 5;
   const int fillHeight = rect.height - 4;
@@ -139,7 +210,7 @@ void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t
 void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bool showPercentage) const {
   // Left aligned: icon on left, percentage on right (reader mode)
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  const int y = rect.y + 6;
+  const int y = rect.y + (UiHighDpiProfile::enabled ? 8 : 6);
 
   if (showPercentage) {
     const auto percentageText = std::to_string(percentage) + "%";
@@ -181,15 +252,17 @@ bool BaseTheme::drawCoverThumbFill(const GfxRenderer& renderer, const Bitmap& bi
   return drawn;
 }
 
-void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const bool showPercentage) const {
+void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const bool showPercentage,
+                                 const int numericFontId) const {
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  const int y = rect.y + 6;
+  // NotoSans 12 digits and the cropped battery share their visible center at this offset.
+  const int y = rect.y + (UiHighDpiProfile::enabled ? 8 : 6);
+  const int gap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : batteryPercentSpacing;
 
   if (showPercentage) {
     const auto percentageText = std::to_string(percentage) + "%";
-    const int textWidth = renderer.getTextWidth(STATUS_NUMERIC_FONT_ID, percentageText.c_str());
-    renderer.drawText(STATUS_NUMERIC_FONT_ID, rect.x - textWidth - batteryPercentSpacing, rect.y,
-                      percentageText.c_str());
+    const int textWidth = renderer.getTextWidth(numericFontId, percentageText.c_str());
+    renderer.drawText(numericFontId, rect.x - textWidth - gap, rect.y, percentageText.c_str());
   }
 
   const Rect iconRect{rect.x, y, rect.width, rect.height};
@@ -1003,6 +1076,11 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
   auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom;
+  if (UiHighDpiProfile::enabled) {
+    const int lineHeight = std::max(renderer.getLineHeight(textFontId), renderer.getLineHeight(STATUS_NUMERIC_FONT_ID));
+    // Keep the profile's bottom space after the full status line; '~' fits inside that line.
+    textY += std::max(0, metrics.statusBarVerticalMargin - lineHeight - UiHighDpiProfile::readerStatusBottomPadding);
+  }
 #if !FREEINK_DEVICE_READPICO
   textY -= 4;
 #endif
@@ -1156,6 +1234,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       availableTitleSpace = rendererableScreenWidth - titleMarginLeft - titleMarginRight;
       titleMarginLeftAdjusted = titleMarginLeft;
     }
+    if (UiHighDpiProfile::enabled && availableTitleSpace <= 0) return;
     if (titleWidth > availableTitleSpace) {
       title = renderer.truncatedText(textFontId, title.c_str(), availableTitleSpace);
       titleWidth = renderer.getTextWidth(textFontId, title.c_str());

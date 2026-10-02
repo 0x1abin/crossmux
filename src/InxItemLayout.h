@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "components/Rect.h"
+#include "components/UiHighDpiProfile.h"
 
 enum class InxItemLayout : uint8_t { Icons, List, Count };
 
@@ -60,7 +61,7 @@ constexpr int pageStart(const int selected, const int itemCount) {
 }
 
 constexpr Rect cellBounds(const int slot, const int width, const int height) {
-  constexpr int inset = 4;
+  constexpr int inset = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap / 2 : 4;
   const int column = slot % columns;
   const int row = slot / columns;
   const int left = column * width / columns;
@@ -81,7 +82,7 @@ constexpr int indexFromPoint(const int x, const int y, const int width, const in
 }  // namespace InxGridGeometry
 
 namespace InxMenuGeometry {
-inline constexpr int rowHeight = 66;
+inline constexpr int rowHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::rowHeight : 66;
 
 constexpr int pageItems(const int contentHeight) { return contentHeight < rowHeight ? 1 : contentHeight / rowHeight; }
 
@@ -95,8 +96,8 @@ constexpr int pageStart(const int selected, const int itemCount, const int conte
 
 namespace InxOptionGeometry {
 inline constexpr int visibleRowLimit = 5;
-inline constexpr int rowHeight = 62;
-inline constexpr int headerHeight = 62;
+inline constexpr int rowHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 62;
+inline constexpr int headerHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 62;
 
 constexpr int visibleRows(const int optionCount) {
   return optionCount < visibleRowLimit ? (optionCount > 0 ? optionCount : 0) : visibleRowLimit;

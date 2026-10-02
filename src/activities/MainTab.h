@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "components/Rect.h"
+#include "components/UiHighDpiProfile.h"
 
 enum class MainTab : uint8_t { None, Recent, Library, Apps, Settings, Statistics };
 enum class MainTabFocus : uint8_t { Tabs, Content };
@@ -18,9 +19,9 @@ struct MainTabLayout {
 };
 
 namespace MainTabs {
-inline constexpr int controlGap = 6;
-inline constexpr int statusBarHeight = 28;
-inline constexpr int bottomBarHeight = 56;
+inline constexpr int controlGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 6;
+inline constexpr int statusBarHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::statusHeight : 28;
+inline constexpr int bottomBarHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight : 56;
 inline constexpr std::array<MainTab, 5> values = {MainTab::Recent, MainTab::Library, MainTab::Apps, MainTab::Settings,
                                                   MainTab::Statistics};
 

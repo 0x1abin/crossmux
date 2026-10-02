@@ -187,6 +187,28 @@ enum UIIcon {
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
 
+namespace UiHighDpiProfile {
+constexpr void apply(ThemeMetrics& metrics) {
+  if (enabled) {
+    metrics.batteryWidth = batteryWidth;
+    metrics.batteryHeight = batteryHeight;
+    metrics.statusBarVerticalMargin = readerStatusHeight;
+    metrics.statusBarHorizontalMargin = readerStatusHorizontalMargin;
+    metrics.headerHeight = headerHeight;
+    metrics.contentSidePadding = contentPadding;
+    metrics.headerSidePadding = contentPadding;
+    metrics.verticalSpacing = controlGap;
+    metrics.listRowHeight = rowHeight;
+    metrics.listWithSubtitleRowHeight = subtitleRowHeight;
+    metrics.listSidePadding = contentPadding;
+    metrics.listValueMaxWidth = 260;
+    metrics.menuRowHeight = rowHeight;
+    metrics.tabBarHeight = 72;
+    metrics.batteryBarHeight = statusHeight;
+  }
+}
+}  // namespace UiHighDpiProfile
+
 namespace BaseMetrics {
 constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .batteryHeight = 12,
@@ -268,7 +290,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
 
 class BaseTheme {
  public:
-#ifdef ENABLE_CHINESE_VERSION
+#if defined(ENABLE_CHINESE_VERSION) || defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
   static constexpr int STATUS_NUMERIC_FONT_ID = -858375107;
 #else
   static constexpr int STATUS_NUMERIC_FONT_ID = SMALL_FONT_ID;
@@ -295,7 +317,8 @@ class BaseTheme {
   static bool drawCoverThumbFill(const GfxRenderer& renderer, const Bitmap& bitmap, Rect slot, int xOffset = 0);
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect,
                        bool showPercentage = true) const;  // Left aligned (reader mode)
-  void drawBatteryRight(const GfxRenderer& renderer, Rect rect, bool showPercentage = true) const;
+  void drawBatteryRight(const GfxRenderer& renderer, Rect rect, bool showPercentage = true,
+                        int numericFontId = STATUS_NUMERIC_FONT_ID) const;
   virtual void fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const;
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
@@ -323,6 +346,7 @@ class BaseTheme {
                         const std::function<bool(int index)>& rowHeading = nullptr) const;
   virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
   virtual void drawMainTabStatusBar(const GfxRenderer& renderer, Rect rect) const;
+  static void drawSplash(const GfxRenderer& renderer, const char* status, const char* version = nullptr);
   // Also draws the wall clock opposite the battery when the user enabled
   // SETTINGS.clockShowInHeader and system time is valid. On touch boards a
   // tappable back button leads the band (see HeaderBackTapTarget); root

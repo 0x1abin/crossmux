@@ -12,6 +12,9 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/icons/readerToolbarIcons.h"
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include "components/icons/readerToolbarIcons48.h"
+#endif
 
 namespace fui = freeink::ui;
 
@@ -26,12 +29,13 @@ constexpr fui::ActionId ACTION_ROW = 6;      // panel list row, value = row inde
 // Scrub row: two small round-cornered chapter buttons flanking a thin progress
 // track with a round knob -- the reading page's chrome is light, so the
 // controls stay slim rather than control-center sized.
-constexpr int16_t kScrubButton = 36;  // chapter step buttons (square)
-constexpr int16_t kScrubKnob = 16;    // round knob on the 2px progress track
-constexpr int16_t kScrubGap = 12;     // air between the buttons and the track
+constexpr int16_t kScrubButton =
+    UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 36;  // chapter step buttons (square)
+constexpr int16_t kScrubKnob = UiHighDpiProfile::enabled ? 28 : 16;   // round knob on the 2px progress track
+constexpr int16_t kScrubGap = 12;                                     // air between the buttons and the track
 // Tool row: a 24px glyph centred in each slot, the active slot in an outline
 // pill. The whole slot is the tap target; the row height sets its size.
-constexpr int16_t kToolRowH = 80;
+constexpr int16_t kToolRowH = UiHighDpiProfile::enabled ? 112 : 80;
 constexpr int16_t kToolPillInset = 10;
 constexpr int kToolCount = 3;
 // Bottom sheet height for the panels. ListNav fits whole rows in the remaining
@@ -104,9 +108,16 @@ void ReaderToolbarUi::screenFn(UiScreen& screen, void* user) {
 // tiles, no labels -- the glyphs carry the meaning).
 void ReaderToolbarUi::buildToolRow(UiScreen& screen, const fui::LayoutAnchor anchor, const int16_t sideInset) {
   const auto& tokens = screen.theme();
+  constexpr int iconSize = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlIconSize : 24;
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  const fui::BitmapRef icons[kToolCount] = {fui::bitmapFromIcon(icon_reader_contents_48),
+                                            fui::bitmapFromIcon(icon_reader_text_48),
+                                            fui::bitmapFromIcon(icon_reader_more_48)};
+#else
   const fui::BitmapRef icons[kToolCount] = {fui::bitmapFromIcon(icon_reader_contents_24),
                                             fui::bitmapFromIcon(icon_reader_text_24),
                                             fui::bitmapFromIcon(icon_reader_more_24)};
+#endif
   // sideInset absorbs the difference between the two hosts' content bands
   // (the toolbar's is spaceLg-inset, the panel's is full width): the slots
   // must land on the same x either way, or the icons jump when a tap swaps
@@ -122,8 +133,9 @@ void ReaderToolbarUi::buildToolRow(UiScreen& screen, const fui::LayoutAnchor anc
       screen.target().stroke(slot.inset(fui::Insets{4, kToolPillInset, 4, kToolPillInset}),
                              fui::Paint::solid(fui::Color::Black), 2, pillRadius);
     }
-    const fui::Rect iconRect{static_cast<int16_t>(slot.x + (slot.width - 24) / 2),
-                             static_cast<int16_t>(slot.y + (slot.height - 24) / 2), 24, 24};
+    const fui::Rect iconRect{static_cast<int16_t>(slot.x + (slot.width - iconSize) / 2),
+                             static_cast<int16_t>(slot.y + (slot.height - iconSize) / 2),
+                             static_cast<int16_t>(iconSize), static_cast<int16_t>(iconSize)};
     screen.target().bitmap(iconRect, icons[i], fui::BitmapMode::Center);
     screen.frame().hit(slot, ACTION_TOOL, static_cast<int16_t>(i), fui::InputTouch);
   }
@@ -156,7 +168,11 @@ void ReaderToolbarUi::buildToolbar(UiScreen& screen) {
   {
     const fui::Rect band = screen.takeTop(kScrubButton, tokens.spaceLg);
     stepProps_.label = nullptr;
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+    stepProps_.icon = fui::bitmapFromIcon(icon_reader_back_48);
+#else
     stepProps_.icon = fui::bitmapFromIcon(icon_reader_back_24);
+#endif
     stepProps_.action = ACTION_PREV;
     stepProps_.inputMask = fui::InputTouch;
     stepProps_.styles.explicitlySet = true;
@@ -172,7 +188,11 @@ void ReaderToolbarUi::buildToolbar(UiScreen& screen) {
     stepProps_.styles.active.background = fui::Paint::solid(fui::Color::Black);
     stepProps_.styles.active.foreground = fui::Paint::solid(fui::Color::White);
     screen.button(stepProps_, fui::Rect{band.x, band.y, kScrubButton, kScrubButton});
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+    stepProps_.icon = fui::bitmapFromIcon(icon_reader_next_48);
+#else
     stepProps_.icon = fui::bitmapFromIcon(icon_reader_next_24);
+#endif
     stepProps_.action = ACTION_NEXT;
     screen.button(stepProps_,
                   fui::Rect{static_cast<int16_t>(band.right() - kScrubButton), band.y, kScrubButton, kScrubButton});

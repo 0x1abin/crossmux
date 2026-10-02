@@ -22,17 +22,222 @@ def method(source, name):
     return source[start:end]
 
 
-def run_cpp(program, include_dirs=()):
+def run_cpp(program, include_dirs=(), defines=()):
     with tempfile.TemporaryDirectory(prefix='reading-ui-') as directory:
         cpp = Path(directory) / 'check.cpp'
         exe = Path(directory) / 'check'
-        cpp.write_text(program)
+        cpp.write_text(f'#include "{ROOT}/src/components/UiHighDpiProfile.h"\n' + program)
         subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                        *('-I'+str(path) for path in include_dirs), str(cpp), '-o', str(exe)], check=True)
+                        *('-I'+str(path) for path in include_dirs), *('-D'+define for define in defines), str(cpp), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
 
 class ReadingUiRegressionTest(unittest.TestCase):
+    def test_splash_uses_font_heights_and_keeps_version_inside_safe_area(self):
+        source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
+        program = r'''
+#include <cassert>
+#include <cstring>
+#include <initializer_list>
+#include <vector>
+struct Rect { int x,y,width,height; };
+constexpr int UI_12_FONT_ID=1, UI_10_FONT_ID=2, SMALL_FONT_ID=3;
+namespace EpdFontFamily { enum Style { REGULAR, BOLD }; }
+constexpr int STR_CROSSPOINT=0;
+const char* tr(int) {return "CrossMux";}
+const unsigned char Logo120[1]{};
+struct GfxRenderer {
+ Rect safe; int width=684,height=1216,titleHeight=46,statusHeight=40,smallHeight=34;
+ mutable std::vector<Rect> blocks;
+ int getScreenWidth() const {return width;}
+ int getScreenHeight() const {return height;}
+ int getLineHeight(int font) const {return font==1?titleHeight:font==2?statusHeight:smallHeight;}
+ void clearScreen() const {blocks.clear();}
+ void drawImage(const unsigned char*,int x,int y,int w,int h) const {blocks.push_back({x,y,w,h});}
+ void drawCenteredText(int font,int y,const char* text,bool=true,EpdFontFamily::Style=EpdFontFamily::REGULAR) const {
+   int width=std::strlen(text)*14;
+   blocks.push_back({(getScreenWidth()-width)/2,y,width,getLineHeight(font)});
+ }
+};
+struct UITheme {
+ static UITheme& getInstance() {static UITheme instance;return instance;}
+ Rect getScreenSafeArea(const GfxRenderer& r) {return r.safe;}
+ static void drawCenteredText(const GfxRenderer& r,Rect safe,int font,int y,const char* text,bool=true,
+                              EpdFontFamily::Style=EpdFontFamily::REGULAR) {
+   int width=std::strlen(text)*14;
+   r.blocks.push_back({safe.x+(safe.width-width)/2,y,width,r.getLineHeight(font)});
+ }
+};
+struct BaseTheme {static void drawSplash(const GfxRenderer&,const char*,const char*);};
+''' + method(source, 'void BaseTheme::drawSplash(') + r'''
+int main() {
+ for(Rect size : {Rect{0,0,684,1216},Rect{0,0,600,1000}})
+ for(int orientation=0;orientation<4;++orientation)
+ for(int extra : {0,12}) for(const char* status : {"Booting...","Sleeping..."})
+ for(const char* version : std::initializer_list<const char*>{nullptr,"1.6.5-readpico-rc+abcdef123456"}) {
+   GfxRenderer r;
+   r.width=orientation%2?size.height:size.width;
+   r.height=orientation%2?size.width:size.height;
+   int top=orientation==2?8:5,right=orientation==1?8:5,bottom=orientation==0?8:5,left=orientation==3?8:5;
+   Rect safe{left,top,r.width-left-right,r.height-top-bottom};
+   r.safe=safe;
+   r.titleHeight+=extra; r.statusHeight+=extra; r.smallHeight+=extra;
+   BaseTheme{}.drawSplash(r,status,version);
+   assert(r.blocks.size()==(version?4:3));
+   if(UiHighDpiProfile::enabled) {
+     for(auto rect : r.blocks) {
+       assert(rect.x>=safe.x && rect.x+rect.width<=safe.x+safe.width);
+       assert(rect.y>=safe.y && rect.y+rect.height<=safe.y+safe.height);
+     }
+     assert(r.blocks[1].y-r.blocks[0].y-r.blocks[0].height>=24);
+     assert(r.blocks[2].y-r.blocks[1].y-r.blocks[1].height>=12);
+     if(version) {
+       assert(r.blocks[3].y-r.blocks[2].y-r.blocks[2].height>=12);
+       assert(safe.y+safe.height-r.blocks[3].y-r.blocks[3].height==32);
+     }
+   } else {
+     assert(r.blocks[0].y==(r.getScreenHeight()-120)/2);
+     assert(r.blocks[1].y==r.getScreenHeight()/2+70);
+     assert(r.blocks[2].y==r.getScreenHeight()/2+95);
+     if(version) assert(r.blocks[3].y==r.getScreenHeight()-30);
+   }
+ }
+}
+'''
+        for defines in ((), ('CROSSMUX_UI_PROFILE_HIGH_DPI',)):
+            run_cpp(program, defines=defines)
+
+    def test_high_dpi_controls_share_geometry_and_leave_gaps(self):
+        run_cpp(r'''
+#include <cassert>
+#include <initializer_list>
+#include "activities/MainTab.h"
+#include "InxItemLayout.h"
+int main() {
+  for (const Rect safe : {Rect{5,5,674,1203}, Rect{5,8,1203,674},
+                         Rect{5,8,674,1203}, Rect{8,5,1203,674},
+                         Rect{5,5,590,987}, Rect{5,8,987,590},
+                         Rect{5,8,590,987}, Rect{8,5,987,590}}) {
+    for (bool bottom : {false,true}) {
+      auto layout=MainTabs::layout(safe,0,96,bottom,bottom?48:0);
+      assert(layout.tabBar.y>=safe.y && layout.tabBar.y+96<=safe.y+safe.height);
+      assert(layout.content.width==safe.width && layout.content.height>0);
+      if (bottom) {
+        assert(layout.content.y-layout.statusBar.y-layout.statusBar.height>=12);
+        assert(layout.tabBar.y-layout.content.y-layout.content.height>=12);
+      } else assert(layout.content.y>=layout.tabBar.y+layout.tabBar.height);
+      for (int tab=0;tab<5;++tab) {
+        auto bounds=MainTabs::tabBounds(tab,safe.width);
+        assert(bounds.right-bounds.left>=96);
+        assert(MainTabs::fromX((bounds.left+bounds.right)/2,safe.width)==MainTabs::values[tab]);
+        assert(MainTabs::fromX(bounds.right,safe.width)==MainTab::None);
+        if (tab<4) assert(MainTabs::tabBounds(tab+1,safe.width).left-bounds.right>=6);
+      }
+    }
+    for (int slot=0;slot<12;++slot) {
+      auto cell=InxGridGeometry::cellBounds(slot,safe.width,safe.height);
+      assert(InxGridGeometry::indexFromPoint(cell.x+cell.width/2,cell.y+cell.height/2,
+                                           safe.width,safe.height,0,12)==slot);
+      assert(InxGridGeometry::indexFromPoint(cell.x+cell.width,cell.y+cell.height/2,
+                                           safe.width,safe.height,0,12)==-1);
+      if (slot%3<2) {
+        auto next=InxGridGeometry::cellBounds(slot+1,safe.width,safe.height);
+        assert(next.x-cell.x-cell.width>=12);
+      }
+    }
+  }
+}
+''', include_dirs=(ROOT / 'src',), defines=('CROSSMUX_UI_PROFILE_HIGH_DPI',))
+
+    def test_high_dpi_status_text_and_battery_fit_top_tab_footer(self):
+        source = (ROOT / 'src/components/themes/inx/InxTheme.cpp').read_text()
+        run_cpp(r'''
+#include <algorithm>
+#include <cassert>
+#include <initializer_list>
+struct Rect { int x,y,width,height; };
+constexpr int SMALL_FONT_ID=1, STATUS_NUMERIC_FONT_ID=2;
+struct CrossPointSettings {
+  enum { INX_TAB_TOP, INX_TAB_BOTTOM };
+  enum class HIDE_BATTERY_PERCENTAGE { SHOW,HIDE_ALWAYS };
+};
+struct { int inxTabPosition=0, clockFormat=0; CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{}; } SETTINGS;
+struct UITheme {
+  struct Metrics { int batteryWidth=32,batteryHeight=20; };
+  static UITheme& getInstance() { static UITheme theme; return theme; }
+  const Metrics& getMetrics() { static Metrics metrics; return metrics; }
+};
+namespace TimeUtils { void formatCurrentTime(char*,unsigned long,bool) {} }
+struct GfxRenderer {
+  int width=684,height=1216; mutable Rect clip{};
+  struct ClipScope { ClipScope(const GfxRenderer& r,int x,int y,int w,int h) { r.clip={x,y,w,h}; } };
+  int getScreenWidth() const { return width; } int getScreenHeight() const { return height; }
+  int getLineHeight(int) const { return 34; }
+  void drawText(int,int,int,const char*) const {}
+};
+struct InxTheme {
+  void drawMainTabStatusBar(const GfxRenderer&,Rect) const;
+  void drawBatteryRight(const GfxRenderer& r,Rect rect,bool,int font) const {
+    assert(font==SMALL_FONT_ID && rect.y>=r.clip.y);
+    assert(rect.y+34<=r.clip.y+r.clip.height);
+    assert(rect.y+8+rect.height<=r.clip.y+r.clip.height);
+    assert(rect.x>=r.clip.x && rect.x+rect.width<=r.clip.x+r.clip.width);
+  }
+};
+''' + method(source, 'void InxTheme::drawMainTabStatusBar(') + r'''
+int main() {
+  for (auto size : {Rect{0,0,684,1216},Rect{0,0,1216,684},
+                    Rect{0,0,600,1000},Rect{0,0,1000,600}}) {
+    GfxRenderer renderer; renderer.width=size.width; renderer.height=size.height;
+    SETTINGS.inxTabPosition=CrossPointSettings::INX_TAB_TOP;
+    InxTheme{}.drawMainTabStatusBar(renderer,{5,size.height-48,size.width-10,40});
+    SETTINGS.inxTabPosition=CrossPointSettings::INX_TAB_BOTTOM;
+    InxTheme{}.drawMainTabStatusBar(renderer,{5,5,size.width-10,48});
+  }
+}
+''', defines=('CROSSMUX_UI_PROFILE_HIGH_DPI',))
+
+    def test_high_dpi_builtin_font_cache_identity(self):
+        settings = (ROOT / 'src/CrossPointSettings.cpp').read_text()
+        sizes = (ROOT / 'src/ReaderFontSizes.cpp').read_text()
+        program = r'''
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <initializer_list>
+#include "fontIds.h"
+constexpr uint8_t BUILTIN_READER_POINT_SIZES[]={12};
+struct CrossPointSettings {
+  enum { NOTOSANS=1 };
+  char sdFontFamilyName[8]{}; void* sdFontResolverCtx=nullptr;
+  int (*sdFontIdResolver)(void*,const char*,uint8_t)=nullptr;
+  uint8_t fontPointSize=12; int fontFamily=NOTOSANS;
+  int getReaderFontId() const;
+};
+''' + method(sizes, 'uint8_t snapToNearestPointSize(') + method(settings, 'int CrossPointSettings::getReaderFontId(') + r'''
+int main() {
+  CrossPointSettings settings;
+  for (int family : {0,1}) for (uint8_t size : {12,14,18}) {
+    settings.fontFamily=family; settings.fontPointSize=size;
+    int id=settings.getReaderFontId();
+    if (UiHighDpiProfile::enabled) {
+      assert(id==UiHighDpiProfile::reader12FontId);
+      assert(id==0x4738000C);
+      assert(id!=0x4737000C && id!=0x4737000E);
+      assert(id!=NOTOSANS_12_FONT_ID && id!=NOTOSERIF_12_FONT_ID);
+      assert(id!=NOTOSANS_14_FONT_ID && id!=NOTOSERIF_14_FONT_ID);
+    } else assert(id==(family==1?NOTOSANS_12_FONT_ID:NOTOSERIF_12_FONT_ID));
+    assert(settings.fontPointSize==size);
+  }
+  settings.sdFontFamilyName[0]='A';
+  settings.sdFontIdResolver=[](void*,const char*,uint8_t) { return 123456; };
+  assert(settings.getReaderFontId()==123456);
+}
+'''
+        for defines in ((), ('CROSSMUX_UI_PROFILE_HIGH_DPI',)):
+            run_cpp(program, include_dirs=(ROOT / 'src',), defines=defines)
+
     def test_main_tab_content_starts_below_shared_header(self):
         files = (ROOT / 'src/activities/home/FileBrowserActivity.cpp').read_text()
         settings = (ROOT / 'src/activities/settings/SettingsActivity.cpp').read_text()
@@ -493,7 +698,7 @@ int main() {
 #include <cstring>
 #include <initializer_list>
 struct Rect { int x, y, width, height; };
-constexpr int SMALL_FONT_ID = 1, NOTOSERIF_12_FONT_ID = 2, kIconGap = 8, kRowPadding = 20;
+constexpr int SMALL_FONT_ID = 1, STATUS_NUMERIC_FONT_ID = 1, NOTOSERIF_12_FONT_ID = 2, UI_12_FONT_ID = 3, kIconGap = 8, kRowPadding = 20;
 namespace EpdFontFamily { enum Style { REGULAR, BOLD }; }
 struct CrossPointSettings { enum class HIDE_BATTERY_PERCENTAGE { HIDE_ALWAYS }; };
 struct { CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{}; } SETTINGS;
@@ -520,7 +725,7 @@ struct GfxRenderer {
   }
 };
 struct InxTheme {
-  void drawBatteryRight(const GfxRenderer&, Rect, bool) const {}
+  void drawBatteryRight(const GfxRenderer&, Rect, bool, int = 1) const {}
   void drawHeader(const GfxRenderer&, Rect, const char*, const char*, bool = true) const;
 };
 ''' + code + r'''
@@ -856,7 +1061,7 @@ int main() {
 #include <cstring>
 #include <initializer_list>
 struct Rect { int x, y, width, height; };
-constexpr int STATUS_NUMERIC_FONT_ID = 1;
+constexpr int STATUS_NUMERIC_FONT_ID = 1, SMALL_FONT_ID = 1;
 struct CrossPointSettings {
   enum { INX_TAB_TOP, INX_TAB_BOTTOM };
   enum class HIDE_BATTERY_PERCENTAGE { SHOW, HIDE_ALWAYS };
@@ -892,6 +1097,7 @@ struct GfxRenderer {
     }
     ~ClipScope() { r.clipped=false; }
   };
+  int getLineHeight(int) const { return 18; }
   int getScreenWidth() const { return width; }
   int getScreenHeight() const { return height; }
   void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=top; *r=right; *b=bottom; *l=left; }
@@ -903,7 +1109,7 @@ struct GfxRenderer {
 struct InxTheme {
   mutable Rect battery{};
   mutable bool percentage=false;
-  void drawBatteryRight(const GfxRenderer& r, Rect rect, bool show) const {
+  void drawBatteryRight(const GfxRenderer& r, Rect rect, bool show, int = 1) const {
     assert(r.clipped); battery=rect; percentage=show;
   }
   void drawMainTabStatusBar(const GfxRenderer&, Rect) const;

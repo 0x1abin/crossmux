@@ -60,7 +60,10 @@ MainTabLayout Activity::mainTabLayout() const {
     safe.width = std::max(0, safeRight - safe.x);
     safe.height = std::max(0, safeBottom - safe.y);
   }
-  return MainTabs::layout(safe, metrics.topPadding, tabsAtBottom ? MainTabs::bottomBarHeight : metrics.headerHeight,
+  return MainTabs::layout(safe, metrics.topPadding,
+                          tabsAtBottom                ? MainTabs::bottomBarHeight
+                          : UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight
+                                                      : metrics.headerHeight,
                           tabsAtBottom, showStatus ? MainTabs::statusBarHeight : 0);
 }
 

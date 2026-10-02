@@ -141,7 +141,7 @@ class GfxRenderer {
   // or a rebound id is laid out with the built-in face and drawn in the SD one.
   int resolveFontFamilyId(int fontId) const;
 
-  // Return the first fallback that covers a codepoint missing from the primary.
+  // Resolve a missing-glyph fallback; the high-density profile checks whole-run coverage.
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
   void ensureSdGlyphsResident(int fontId, const char* text, EpdFontFamily::Style style, bool metadataOnly) const;
 
