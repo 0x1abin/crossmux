@@ -387,9 +387,9 @@ After regenerating, confirm the character lists and bitmap headers match:
 
 - `cn_common_chars.txt` has 3517 unique CJK glyphs and contains the complete
   3500-char base pool.
-- `cn_i18n_chars.txt` has 747 unique CJK glyphs and contains every glyph
+- `cn_i18n_chars.txt` has 802 unique CJK glyphs and contains every glyph
   scanned from `chinese.yaml` and feature-specific files.
-- 8/10/12pt each contain 4014 glyphs; 14/16/18pt each contain 1244 glyphs.
+- 8/10/12pt each contain 4014 glyphs; 14/16/18pt each contain 1299 glyphs.
 - Every generated header says `mode: 2-bit`.
 
 ```bash
@@ -404,10 +404,10 @@ common = cjk((scripts / 'cn_common_chars.txt').read_text())
 i18n = cjk((scripts / 'cn_i18n_chars.txt').read_text())
 required = cjk((root / 'lib/I18n/translations/chinese.yaml').read_text())
 required |= cjk((scripts / 'cn_almanac_chars.txt').read_text())
-assert (len(pool), len(common), len(i18n)) == (3500, 3517, 747)
+assert (len(pool), len(common), len(i18n)) == (3500, 3517, 802)
 assert common == pool | required and i18n == required
 for size, expected in [(8, 4014), (10, 4014), (12, 4014),
-                       (14, 1244), (16, 1244), (18, 1244)]:
+                       (14, 1299), (16, 1299), (18, 1299)]:
     header = (root / f'lib/EpdFont/builtinFonts/notosans_cjk_{size}.h').read_text()
     index_header = ((root / 'lib/EpdFont/builtinFonts/notosans_cjk_common_intervals.h').read_text()
                     if size <= 12 else header)
