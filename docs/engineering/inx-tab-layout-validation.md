@@ -1,6 +1,19 @@
 # Inx tab layout validation
 
-## Current behavior
+## Current upstream rehearsal
+
+The fixed local rehearsal uses Reader `38280863`, SDK `98b4e427` plus all six
+ReadPico fixes through `e3550ec`, and Simulator `20e73803`, on CrossMux `593c8dbc`.
+The reviewed source-tree fingerprints are recorded with the rehearsal artifacts;
+these are source exports, not replacement production commits. Existing typography,
+fallbacks, explicit high-density opt-in and calibrated safe insets are retained.
+Reader menus and the down-swipe control center use the upstream implementation in
+all themes, including INX and ReadPico; the Text panel replaces Focus Reading with
+First Line Indent. Ordinary INX settings keep their own controls and shared
+swipe/drawing geometry. Historical captures and the preceding deployment record
+below remain unchanged. This rehearsal does not flash hardware.
+
+## Historical current behavior
 
 The 2026-10-02 integration includes current main and PR #357, with FreeInk SDK
 `6c2f82245ff6c5e3ac5df582c70ca674a84e1f1e` and simulator

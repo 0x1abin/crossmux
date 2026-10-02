@@ -33,6 +33,7 @@ enum class SettingAction {
   ManageDictionaries,
   TextSettings,
   About,
+  Plugins,
   KeyboardLayouts,
   HomeButton,
 };

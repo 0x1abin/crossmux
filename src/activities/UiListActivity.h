@@ -26,7 +26,7 @@ class UiListActivity : public Activity, protected UiAppHost {
   static constexpr freeink::ui::ActionId ACTION_USER = 2;
 
   UiListActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
-                 bool wantsTouchLongPress = false);
+                 bool wantsTouchLongPress = false, bool upstreamStyle = false);
 
   // --- subclass contract -----------------------------------------------------
   // Current number of list rows (re-read every loop pass; may change).

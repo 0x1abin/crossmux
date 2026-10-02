@@ -100,7 +100,14 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Versions 74 / 75
+### Versions 76 / 77
+
+Adds `paragraphIndentSpaces` (0–5, default 3) immediately after the retained
+`firstLineIndent` byte. Complete and partial caches rebuild on width changes.
+The partial sentinels are 206/205, derived from the complete versions with
+`0xFE - (completeVersion - 28)` so old partial layouts also rebuild.
+Only forced Western indentation uses this width; Auto follows CSS and Chinese
+retains two characters. Paragraph spacing remains independent.
 
 These versions integrate upstream character spacing, word spacing, list layout
 and Hangul wrapping. The section header adds signed `characterSpacing` and
@@ -230,8 +237,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 74
-#define CHINESE_VERSION 75
+#define LATIN_VERSION 76
+#define CHINESE_VERSION 77
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -399,6 +406,7 @@ struct SectionBin {
     float lineCompression;
     u8 extraParagraphSpacing;
     u8 firstLineIndent;
+    u8 paragraphIndentSpaces; // forced Western indent, 0..5
     u8 paragraphAlignment;
     u16 viewportWidth;
     u16 viewportHeight;
@@ -452,7 +460,7 @@ if (parsedSize != fileSize) {
 }
 ```
 
-## TXT reader cache
+## Legacy TXT reader cache
 
 TXT reader state is stored below `.crosspoint/txt_<path-hash>/`.
 
@@ -501,6 +509,38 @@ Chapter offsets are independent of pagination. Selecting an offset outside the
 known page-index prefix opens it directly and keeps a fixed 32-page local
 navigation history, so jumping does not synchronously paginate the intervening
 text or grow RAM with book length.
+
+## Reflowed TXT/Markdown source map
+
+Reflowed TXT/Markdown metadata and HTML use conversion marker 2 and the EPUB
+book/section formats above. Generated chapter IDs are `txt-<source-byte-offset>`.
+Titles stay disk-backed; each chapter boundary is consumed during parsing without
+retaining the full chapter list. Old source progress is never deleted or rewritten
+by migration. Old page-number progress resolves through version 4–8 legacy indexes.
+Failed conversion, invalid maps or unresolved target pages preserve old progress.
+
+`txt-map.bin` version 1 is little-endian. Its 16-byte header is:
+
+| Offset | Field |
+|---:|---|
+| 0 | `uint32 magic = 0x4D545854` (`TXTM`) |
+| 4 | `uint32 sourceSize` |
+| 8 | `uint32 recordCount` |
+| 12 | `uint16 recordSize = 12` |
+| 14 | `uint8 version = 1` |
+| 15 | `uint8 encoding` (0 unknown/ASCII, 1 UTF-8, 2 GBK) |
+
+Each 12-byte run stores `uint32 sourceOffset`, `uint32 visibleOffset`, `uint8
+sourceCharacterWidth`, `uint8 visibleStep` and `uint16 reserved = 0`.
+A new record begins when source width or visible step changes. The final record
+has source offset equal to `sourceSize` and zero width/step; preceding offsets
+increase. Dropped trailing spaces, CR/LF and the BOM have step 0; HTML entities
+count as their decoded visible Unicode codepoint. Source offsets inside a multibyte
+character resolve to that character. Lookup binary-searches records on disk. The inverse lookup searches visible
+offsets, then resolves the source position through `chapters.bin` for the current
+TOC title and chapter navigation, without retaining chapter tables.
+Maps publish from `.tmp` only after successful conversion and flush. Books at or
+above 4GiB and chapter counts exceeding the existing 16-bit TOC budget fail safely.
 
 ## Electronic Woodfish counter
 

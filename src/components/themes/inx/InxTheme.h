@@ -46,7 +46,7 @@ constexpr ThemeMetrics makeValues() {
                           .progressBarMarginTop = 1,
                           .statusBarHorizontalMargin = 5,
                           .statusBarVerticalMargin = 19,
-                          .keyboardKeyHeight = 48,
+                          .keyboardKeyHeight = 56,
                           .keyboardKeySpacing = 0,
                           .keyboardCenteredText = false,
                           .keyboardVerticalOffset = -7,

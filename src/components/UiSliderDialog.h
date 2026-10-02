@@ -39,10 +39,11 @@ struct UiSliderDialogSpec {
 };
 
 inline void buildSliderDialogScreen(UiAppHost::UiScreen& screen, freeink::ui::GfxRendererTarget& uiTarget,
-                                    const MappedInputManager& mappedInput, const UiSliderDialogSpec& spec) {
+                                    const MappedInputManager& mappedInput, const UiSliderDialogSpec& spec,
+                                    bool upstreamStyle = false) {
   namespace fui = freeink::ui;
-  const bool inx = SETTINGS.uiTheme == CrossPointSettings::INX;
-  const auto& metrics = inx ? LyraMetrics::values : UITheme::getInstance().getMetrics();
+  const bool inx = !upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::INX;
+  const auto& metrics = inx ? LyraMetrics::values : uiThemeMetrics(upstreamStyle);
   if (inx) {
     uiTarget.setFont(fui::GfxRendererTarget::FONT_SMALL, UI_10_FONT_ID);
     uiTarget.setFont(fui::GfxRendererTarget::FONT_BODY, UI_12_FONT_ID);

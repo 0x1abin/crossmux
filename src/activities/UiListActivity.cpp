@@ -8,13 +8,16 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
 
 UiListActivity::UiListActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
-                               const bool wantsTouchLongPress)
-    : Activity(name, renderer, mappedInput), UiAppHost(renderer), wantsTouchLongPress(wantsTouchLongPress) {}
+                               const bool wantsTouchLongPress, const bool upstreamStyle)
+    : Activity(name, renderer, mappedInput),
+      UiAppHost(renderer, upstreamStyle),
+      wantsTouchLongPress(wantsTouchLongPress) {}
 
 void UiListActivity::onEnter() {
   Activity::onEnter();
@@ -96,8 +99,8 @@ void UiListActivity::loop() {
 void UiListActivity::navigateButtons() {
   const int count = listCount();
   auto& n = activeNav();
-  buttonNavigator.onNextRelease([this, count, &n] { moveSelectionTo(ButtonNavigator::nextIndex(n.selected, count)); });
-  buttonNavigator.onPreviousRelease(
+  buttonNavigator.onNextPress([this, count, &n] { moveSelectionTo(ButtonNavigator::nextIndex(n.selected, count)); });
+  buttonNavigator.onPreviousPress(
       [this, count, &n] { moveSelectionTo(ButtonNavigator::previousIndex(n.selected, count)); });
   // Use the rows the last build actually drew: wrapped labels can make the
   // fixed-height visibleRows estimate larger than the rendered page.
@@ -108,7 +111,7 @@ void UiListActivity::navigateButtons() {
 }
 
 void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, const int selectionOffset) {
-  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
+  if (usesUpstreamStyle() || SETTINGS.uiTheme != CrossPointSettings::INX) {
     props.toggleCheckbox = true;
     props.toggleWidth = 28;
     props.toggleHeight = 28;
@@ -137,13 +140,18 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
 void UiListActivity::drawChrome() {
   const char* title = headerTitle();
   if (!title) return;
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, title);
+  const auto& metrics = uiThemeMetrics(usesUpstreamStyle());
+  if (usesUpstreamStyle()) {
+    GUI.drawHeaderWithStyle(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
+                            title, nullptr, true, true);
+  } else {
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, title);
+  }
 }
 
 void UiListActivity::drawFooter() {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHintsWithStyle(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, usesUpstreamStyle());
 }
 
 void UiListActivity::render(RenderLock&&) {

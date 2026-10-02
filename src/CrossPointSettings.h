@@ -359,6 +359,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Resetting to 0 (e.g. via the web UI) forces a re-sync on next WiFi connect.
   uint8_t clockHasBeenSynced = 0;
   // Text rendering settings
+  uint8_t paragraphIndentSpaces = 3;
   static constexpr uint8_t WORD_SPACING_MIN = 50;
   static constexpr uint8_t WORD_SPACING_MAX = 200;
   static constexpr uint8_t WORD_SPACING_STEP = 25;

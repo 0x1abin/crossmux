@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG 33e585ff6452ea03f6a164f51e379f065e8c2e54
+  GIT_TAG 58b6694dab19a626f36486a0c5f1616110deab7f
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -151,9 +151,11 @@ add_test(NAME UiFontFallback
 add_subdirectory(content_opf_parser)
 add_subdirectory(chapter_position)
 add_subdirectory(home_button)
+add_subdirectory(button_press_navigation)
 
 add_subdirectory(inflate_stream)
 add_subdirectory(fs_helpers)
+add_subdirectory(txt_to_html)
 
 add_subdirectory(absolute_grayscale)
 
@@ -161,6 +163,7 @@ add_subdirectory(sd_card_font)
 add_subdirectory(glyph_bitmap)
 
 add_test(NAME UnifiedKeyboard COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_unified_keyboard.py)
+add_test(NAME TouchNetworkControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_touch_network.py)
 add_test(NAME ThemeMenus COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_theme_menus.py)
 
 add_test(NAME CoverGridCompatibility COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_cover_grid.py)
@@ -178,6 +181,12 @@ add_test(NAME NativeGrayscale
 set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
 
 add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)
+add_subdirectory(reader_session)
+add_subdirectory(plugin_manifest_classification)
+add_subdirectory(protected_paths)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME TrustedTimeTimezone COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_trusted_time.py)
 
 add_test(NAME WebServerStartupFailure COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_webserver_startup_failure.py)
 

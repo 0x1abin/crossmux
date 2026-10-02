@@ -64,12 +64,18 @@ inline bool hasTxtExtension(const String& fileName) {
 // Check for .md extension (case-insensitive)
 bool hasMarkdownExtension(std::string_view fileName);
 
+bool hasReflowableBookExtension(std::string_view fileName);
+
 // Check for .css extension (case-insensitive)
 bool hasCssExtension(std::string_view fileName);
 inline bool hasCssExtension(const String& fileName) {
   return hasCssExtension(std::string_view{fileName.c_str(), fileName.length()});
 }
 std::string extractFolderPath(const std::string& filePath);
+std::string getFileNameWithoutExtension(std::string_view filePath);
+inline std::string getFileNameWithoutExtension(const String& filePath) {
+  return getFileNameWithoutExtension(std::string_view{filePath.c_str(), filePath.length()});
+}
 
 // Path-component validation used before destructive SD-card rename/move operations.
 bool isValidPathComponent(std::string_view component);

@@ -10,6 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "src/activities/settings/TextSettingsPreview.h"
+#include "src/util/ParagraphIndentMigration.h"
+
 #define class struct
 #define private public
 #include "Epub/parsers/ChapterHtmlSlimParser.h"
@@ -388,4 +391,147 @@ TEST(KoreanLayout, HangulGluedAcrossInlineStyleIsUnbreakable) {
   // 가나 한국 fits in 36 px, but 어 is glued to 한국, so the whole word moves down.
   const std::vector<std::vector<std::string>> expected{{"가나"}, {"한국", "어"}};
   EXPECT_EQ(lines, expected);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, PassesIndentSettingsToNewTextBlock) {
+  for (bool extraSpacing : {false, true}) {
+    parser.extraParagraphSpacing = extraSpacing;
+    parser.currentTextBlock.reset();
+    parser.setParagraphIndentSpaces(5);
+    parser.startNewTextBlock(BlockStyle());
+    ASSERT_NE(parser.currentTextBlock, nullptr);
+    EXPECT_EQ(parser.currentTextBlock->paragraphIndentSpaces, 5);
+  }
+}
+
+TEST(ParagraphIndentation, PreservesTriStateAndConfiguresOnlyWesternIndent) {
+  GfxRenderer renderer;
+  for (const uint8_t mode : {FirstLineIndent::Auto, FirstLineIndent::Indent, FirstLineIndent::NoIndent}) {
+    for (const uint8_t spaces : {0, 3, 5}) {
+      for (const int cssIndent : {-6, 0, 13}) {
+        for (const bool cjk : {false, true}) {
+          BlockStyle style;
+          style.alignment = CssTextAlign::Left;
+          style.textIndentDefined = true;
+          style.textIndent = cssIndent;
+          ParsedText text(0, mode, false, false, style, false, spaces);
+          text.addWord(cjk ? "中文" : "word", EpdFontFamily::REGULAR);
+          bool sawLine = false;
+          text.layoutAndExtractLines(renderer, 0, 400, [&](std::unique_ptr<TextBlock> line, auto) {
+            const auto inspect = [&] {
+              sawLine = true;
+              const int forced = cjk ? 2 * renderer.getTextAdvanceX(0, "我", EpdFontFamily::REGULAR) : 4 * spaces;
+              const int expected = mode == FirstLineIndent::Auto     ? cssIndent
+                                   : mode == FirstLineIndent::Indent ? forced
+                                                                     : 0;
+              EXPECT_EQ(line->wordXpos(0), expected);
+            };
+            inspect();
+            return true;
+          });
+          EXPECT_TRUE(sawLine);
+        }
+      }
+    }
+  }
+}
+
+TEST(ParagraphIndentation, PreservesAlignmentEligibilityAndScaledSpaceRounding) {
+  GfxRenderer renderer;
+  for (const auto alignment : {CssTextAlign::Left, CssTextAlign::Center}) {
+    for (const uint8_t spaces : {0, 3, 5}) {
+      BlockStyle style;
+      style.alignment = alignment;
+      ParsedText text(0, FirstLineIndent::Indent, false, false, style, false, spaces);
+      text.addWord("word", EpdFontFamily::REGULAR);
+      text.layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) {
+        const auto inspect = [&] { EXPECT_EQ(line->wordXpos(0), alignment == CssTextAlign::Left ? 4 * spaces : 84); };
+        inspect();
+        return true;
+      });
+    }
+  }
+  BlockStyle style;
+  style.alignment = CssTextAlign::Left;
+  ParsedText text(0, FirstLineIndent::Indent, false, false, style, false, 3);
+  text.addWord("word", EpdFontFamily::REGULAR);
+  text.layoutAndExtractLines(
+      renderer, 0, 200,
+      [&](std::unique_ptr<TextBlock> line, auto) {
+        const auto inspect = [&] { EXPECT_EQ(line->wordXpos(0), 9); };
+        inspect();
+        return true;
+      },
+      true, 0, 75);
+}
+
+TEST(ParagraphIndentation, ReducesOnlyFirstLineAvailableWidth) {
+  GfxRenderer renderer;
+  BlockStyle style;
+  style.alignment = CssTextAlign::Left;
+  for (const uint8_t spaces : {0, 3, 5}) {
+    ParsedText text(0, FirstLineIndent::Indent, false, false, style, false, spaces);
+    text.addWord("ab", EpdFontFamily::REGULAR);
+    text.addWord("cd", EpdFontFamily::REGULAR);
+    unsigned lines = 0;
+    text.layoutAndExtractLines(renderer, 0, 40, [&](std::unique_ptr<TextBlock>, auto) {
+      const auto inspect = [&] { ++lines; };
+      inspect();
+      return true;
+    });
+    EXPECT_EQ(lines, spaces == 0 ? 1u : 2u);
+  }
+}
+
+TEST(ParagraphIndentation, PreviewKeyTracksTriStateAndWidth) {
+  textsettings::PreviewKey base;
+  EXPECT_EQ(base.paragraphIndentSpaces, 3);
+  auto changed = base;
+  changed.paragraphIndentSpaces = 0;
+  EXPECT_NE(base, changed);
+  changed = base;
+  changed.paragraphIndentSpaces = 5;
+  EXPECT_NE(base, changed);
+  changed = base;
+  changed.firstLineIndent = FirstLineIndent::Indent;
+  EXPECT_NE(base, changed);
+}
+
+TEST(ParagraphIndentation, MissingWidthDefaultsToThreeAndClampsSavedWidths) {
+  EXPECT_EQ(migrateParagraphIndentSpaces(false, 0), 3);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 0), 0);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 3), 3);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 5), 5);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, -1), 0);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 300), 5);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, TxtChaptersStreamWithoutRetainingTheToc) {
+  constexpr int chapters = 5000;
+  {
+    std::ofstream file(filepath);
+    file << "<html><body>\n";
+    for (int index = 0; index < chapters; ++index)
+      file << "<div id=\"txt-" << index * 16 << "\"></div>C" << index << " text<br/>";
+    file << "</body></html>";
+  }
+  parser.setTxtChapterBoundaries(true);
+  parser.viewportWidth = 800;
+  parser.viewportHeight = 128;
+  int pages = 0;
+  parser.completePageFn = [&](std::unique_ptr<Page> page, auto, auto, auto) {
+    int chapterTitles = 0;
+    for (const auto& element : page->elements) {
+      if (element->getTag() != TAG_PageLine) continue;
+      const auto& text = *static_cast<const PageLine*>(element.get())->getBlock();
+      for (uint16_t index = 0; index < text.wordCount(); ++index)
+        if (text.wordText(index)[0] == 'C') ++chapterTitles;
+    }
+    EXPECT_EQ(chapterTitles, 1);
+    ++pages;
+  };
+  ASSERT_TRUE(parser.parseAndBuildPages());
+  EXPECT_EQ(pages, chapters);
+  EXPECT_TRUE(parser.tocAnchors.empty());
+  EXPECT_TRUE(parser.getAnchors().empty());
 }

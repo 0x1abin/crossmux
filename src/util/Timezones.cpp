@@ -128,6 +128,7 @@ static_assert(TABLE_COUNT < 255, "255 is the 'never chosen' sentinel in clockTim
 
 const TimezoneInfo* table() { return TABLE; }
 size_t count() { return TABLE_COUNT; }
+
 uint8_t utcIndex() { return UTC_INDEX; }
 
 uint8_t activeIndex() {

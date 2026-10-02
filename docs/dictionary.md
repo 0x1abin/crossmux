@@ -14,6 +14,9 @@ A dictionary folder must contain:
 
 Not supported: `.syn` synonym files (ignored), dictionaries with 64-bit index offsets (`idxoffsetbits=64` in the `.ifo` — rare, and rejected with an error), and HTML-formatted definitions render as raw markup rather than styled text.
 
+> [!NOTE]
+> If you use .dict.dz and Crosspoint failed to load your dictionary with error message "Not enough memory", try unzipping it.
+
 ## Setting Up a Dictionary
 
 ### Download over Wi-Fi

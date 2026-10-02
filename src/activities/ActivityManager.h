@@ -108,6 +108,7 @@ class ActivityManager {
 
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer();
+  void goToJoinNetwork();  // File Transfer straight into Join Network (post heap-defrag reboot)
   void goToUsbDrive();
   void goToSettings();
   void goToUglyAvatar();
@@ -119,6 +120,7 @@ class ActivityManager {
   void goToLibrary();
   void goToRecentBooks();
   void goToBrowser();
+  void goToPlugins(bool showOpds);
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
@@ -161,6 +163,7 @@ class ActivityManager {
   bool handleForcedRefresh();
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
+  void prepareForSleep();
 
   // Returns true when a Push/Pop/Replace is waiting for the render lock.
   // The render task can call this to abort a long render early and let the

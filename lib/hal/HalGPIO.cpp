@@ -529,7 +529,8 @@ bool HalGPIO::isUsbConnected() const {
   if (BoardConfig::ACTIVE.usbDetect >= 0) {
     return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
   }
-  // No digital USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
+  // X3 uses GPIO20 for I2C, not USB detection. Boards without a digital
+  // USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
   // divider): infer external power from charging state instead. BatteryMonitor
   // picks the board's best source — charger IC status, gauge Current() sign, or
   // a /STAT pin — and reports false on boards with no battery telemetry at all.

@@ -4,6 +4,19 @@
 
 #include "SelectionCursorPolicy.h"
 #include "UITheme.h"
+#include "themes/lyra/LyraTheme.h"
+
+inline const ThemeMetrics& uiThemeMetrics(bool upstreamStyle = false) {
+  if (upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+    static constexpr ThemeMetrics lyra = [] {
+      auto metrics = LyraMetrics::values;
+      UiHighDpiProfile::apply(metrics);
+      return metrics;
+    }();
+    return lyra;
+  }
+  return UITheme::getInstance().getMetrics();
+}
 
 namespace ui_theme_detail {
 template <typename Profile>
@@ -16,9 +29,9 @@ int16_t scrollInset(const Profile& profile, const uint8_t side) {
 }  // namespace ui_theme_detail
 
 // Keep INX's original advance-based alignment, including one-digit controls.
-inline void applyUiTextAlignment(freeink::ui::GfxRendererTarget& target) {
+inline void applyUiTextAlignment(freeink::ui::GfxRendererTarget& target, bool upstreamStyle = false) {
 #ifdef FREEINK_UI_THEME_LAYOUT_POLICY
-  target.setTextCentering(SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX
+  target.setTextCentering(!upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX
                               ? freeink::ui::TextCentering::Advance
                               : freeink::ui::TextCentering::InkBounds);
 #else
@@ -31,10 +44,11 @@ inline void applyUiTextAlignment(freeink::ui::GfxRendererTarget& target) {
 // theme says what lists look like, the scale says how big they are.
 // Everything read here is plain data from ThemeMetrics — the same values an
 // SD-card theme file will eventually supply.
-inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarget& target) {
+inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarget& target,
+                                              bool upstreamStyle = false) {
   namespace fui = freeink::ui;
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const bool inxTheme = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX;
+  const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
+  const bool inxTheme = !upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX;
 
   fui::ThemeTokens tokens = fui::themeTokensForLineHeight(target.lineHeight(fui::GfxRendererTarget::FONT_BODY));
   if (!inxTheme && !BoardConfig::hasTouch()) tokens.listMinRowHeight = static_cast<int16_t>(metrics.listRowHeight);

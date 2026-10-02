@@ -1127,9 +1127,7 @@ void GfxRenderer::drawArc(const int maxRadius, const int cx, const int cy, const
     const int width = std::abs(x1 - x0) + 1;
     const int py = cy + yDir * dy;
 
-    if (width > 0) {
-      fillRect(left, py, width, 1, state);
-    }
+    fillRect(left, py, width, 1, state);
   }
 };
 
