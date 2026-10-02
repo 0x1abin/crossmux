@@ -83,7 +83,7 @@ int main(){
 }
 '''
 for key, value in {'ENUM':enum,'IDS':','.join(ids),'LABELS':label_method,
- 'FONT_BINDINGS':'\n'.join(re.findall(r'^EpdFont ui(?:10|12)(?:Regular|Bold)Font\([^\n]+', ui, re.M)),
+ 'FONT_BINDINGS':'\n'.join(re.findall(r'^EpdFont ui(?:10|12)(?:Regular|Bold)Font\(&ubuntu_[^\n]+', ui, re.M)),
  'METHODS':'\n'.join(method(ui, name) for name in ['bool UITheme::supportsCoverGrid(', 'bool UITheme::hasCoverGridHome(', 'void UITheme::setTheme(', 'void UITheme::reload('])}.items():
     program=program.replace('@'+key+'@',value)
 with tempfile.TemporaryDirectory(prefix='cover-grid-') as tmp:

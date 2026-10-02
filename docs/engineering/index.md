@@ -32,6 +32,7 @@ that matches your task — don't load everything at once.
 | [upstream-merge-policy.md](upstream-merge-policy.md) | Reconciling upstream guide changes with the canonical `AGENTS.md` layout — how to keep the map thin and route upstream changes into these docs. |
 | [Metalio E-Ink 4](metalio-eink4.md) | Metalio BSP, CST816S bezel keys, SDMMC, power sequencing and acceptance |
 | [read-pico.md](read-pico.md) | Building, first-flashing, or hardware-validating the Read Pico (小纸 Pico, RDP-G01-W) ESP32-S3 target: 16-bit parallel EPD through epdiy LCD_CAM, CST836U touch, CW32L010 PMU, and the frozen interface contract. |
+| [high-dpi-ui-profile.md](high-dpi-ui-profile.md) | High-density UI preset, currently validated on ReadPico and Nightly, fixed fonts, resource budget and validation. |
 
 ## Related docs outside this directory
 

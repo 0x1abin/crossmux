@@ -12,7 +12,6 @@
 #include "components/FontPreloadView.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "images/Logo120.h"
 
 void BootActivity::onEnter() {
   Activity::onEnter();
@@ -26,14 +25,7 @@ void BootActivity::onEnter() {
 }
 
 void BootActivity::renderSplash() {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-
-  renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
+  GUI.drawSplash(renderer, tr(STR_BOOTING), CROSSPOINT_VERSION);
 #if FREEINK_DEVICE_EEGO_A4
   // A4: the panel is being powered on for the first time here, and a FAST
   // refresh on a freshly powered panel doesn't establish the frame (observed:

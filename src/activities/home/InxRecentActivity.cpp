@@ -21,8 +21,8 @@
 #include "util/ReadingStatsAnalytics.h"
 
 namespace {
-constexpr int kGap = 8;
-constexpr int kPagePadding = 18;
+constexpr int kGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 8;
+constexpr int kPagePadding = UiHighDpiProfile::enabled ? UiHighDpiProfile::contentPadding : 18;
 constexpr int kProgressHeight = 6;
 
 const char* titleOf(const RecentBook& book) { return book.title.empty() ? book.path.c_str() : book.title.c_str(); }
@@ -86,7 +86,9 @@ void drawBookText(const GfxRenderer& renderer, const RecentBook& book, const int
   renderer.drawText(UI_10_FONT_ID, x, y, title.c_str(), true, EpdFontFamily::BOLD);
   if (author && !book.author.empty()) {
     const std::string subtitle = renderer.truncatedText(SMALL_FONT_ID, book.author.c_str(), width);
-    renderer.drawText(SMALL_FONT_ID, x, y + 27, subtitle.c_str());
+    renderer.drawText(SMALL_FONT_ID, x,
+                      y + (UiHighDpiProfile::enabled ? renderer.getLineHeight(UI_10_FONT_ID) + 6 : 27),
+                      subtitle.c_str());
   }
 }
 }  // namespace
@@ -424,7 +426,9 @@ void InxRecentActivity::drawFlow(const Rect& content) {
 
   const ReadingBookStats* stats = statsAt(selected);
   const uint8_t progress = progressOf(stats);
-  const int progressY = textY + 58;
+  const int progressY = textY + (UiHighDpiProfile::enabled ? renderer.getLineHeight(UI_10_FONT_ID) +
+                                                                 renderer.getLineHeight(SMALL_FONT_ID) + 24
+                                                           : 58);
   const int progressWidth = std::max(24, (content.width - kPagePadding * 2) / 2);
   drawMiniProgress(renderer, Rect{textX, progressY, progressWidth, kProgressHeight}, progress);
   char percent[8];
@@ -432,7 +436,7 @@ void InxRecentActivity::drawFlow(const Rect& content) {
   renderer.drawText(SMALL_FONT_ID, textX + progressWidth + 12,
                     progressY - (renderer.getLineHeight(SMALL_FONT_ID) - kProgressHeight) / 2, percent);
 
-  const int metricsTop = progressY + 34;
+  const int metricsTop = progressY + (UiHighDpiProfile::enabled ? 48 : 34);
   const int metricWidth = (content.width - kPagePadding * 2 - kGap) / 2;
   const int metricHeight = std::max(1, (content.y + content.height - metricsTop) / 2);
   const std::string total = stats ? ReadingStatsAnalytics::formatDurationHm(stats->totalReadingMs) : "0m";
