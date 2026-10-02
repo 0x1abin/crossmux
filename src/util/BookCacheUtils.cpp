@@ -41,12 +41,12 @@ bool isBookCacheDirectoryName(const char* name) {
 
 bool clearBookCache(const std::string& path) {
   bool cleared = true;
-  if (FsHelpers::hasEpubExtension(path)) {
+  if (FsHelpers::hasReflowableBookExtension(path)) {
     cleared = Epub(path, "/.crosspoint").clearCache();
   } else if (FsHelpers::hasXtcExtension(path)) {
     cleared = Xtc(path, "/.crosspoint").clearCache();
   } else if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
-    cleared = Txt(path, "/.crosspoint").clearCache();
+    cleared = Epub(path, "/.crosspoint").clearCache();
   } else {
     return true;
   }
@@ -56,10 +56,10 @@ bool clearBookCache(const std::string& path) {
 }
 
 std::string bookCachePath(const std::string& path) {
-  if (FsHelpers::hasEpubExtension(path)) return Epub(path, "/.crosspoint").getCachePath();
+  if (FsHelpers::hasReflowableBookExtension(path)) return Epub(path, "/.crosspoint").getCachePath();
   if (FsHelpers::hasXtcExtension(path)) return Xtc(path, "/.crosspoint").getCachePath();
   if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
-    return Txt(path, "/.crosspoint").getCachePath();
+    return Epub(path, "/.crosspoint").getCachePath();
   }
   return {};
 }
@@ -70,6 +70,12 @@ bool relocateBookArtifacts(const std::string& oldPath, const std::string& newPat
   const std::string newCachePath = bookCachePath(newPath);
   if (!oldCachePath.empty() && oldCachePath != newCachePath && Storage.exists(oldCachePath.c_str())) {
     if (Storage.exists(newCachePath.c_str()) || !Storage.rename(oldCachePath.c_str(), newCachePath.c_str())) ok = false;
+  }
+
+  if (FsHelpers::hasTxtExtension(oldPath) || FsHelpers::hasMarkdownExtension(oldPath)) {
+    const std::string oldLegacy = Txt(oldPath, "/.crosspoint").getCachePath();
+    const std::string newLegacy = Txt(newPath, "/.crosspoint").getCachePath();
+    if (!renameIfTargetMissing(oldLegacy, newLegacy)) ok = false;
   }
 
   if (FsHelpers::hasEpubExtension(oldPath)) {

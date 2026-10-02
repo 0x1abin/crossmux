@@ -47,12 +47,13 @@ inline std::atomic<const freeink::ui::ThemeTokens*>& sharedUiThemeCell() {
 // that also want to read it back immediately (e.g. BaseTheme::drawHeader(),
 // which derives the same tokens as a render-path scratch value instead of
 // stack-allocating its own copy).
-inline const freeink::ui::ThemeTokens& refreshSharedUiThemeTokens(const freeink::ui::GfxRendererTarget& target) {
+inline const freeink::ui::ThemeTokens& refreshSharedUiThemeTokens(const freeink::ui::GfxRendererTarget& target,
+                                                                  bool upstreamStyle = false) {
   static freeink::ui::ThemeTokens pool[2];
   auto& cell = sharedUiThemeCell();
   const auto* current = cell.load(std::memory_order_relaxed);
   freeink::ui::ThemeTokens* next = (current == &pool[0]) ? &pool[1] : &pool[0];
-  *next = uiThemeTokens(target);
+  *next = uiThemeTokens(target, upstreamStyle);
   cell.store(next, std::memory_order_release);
   return *next;
 }
@@ -60,19 +61,19 @@ inline const freeink::ui::ThemeTokens& refreshSharedUiThemeTokens(const freeink:
 // Refresh the shared tokens from the active UITheme + this target's fonts and
 // point the app at them. Replaces the old per-app `app.setTheme(...)` copies.
 template <typename App>
-inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& target) {
-  refreshSharedUiThemeTokens(target);
+inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& target, bool upstreamStyle = false) {
+  refreshSharedUiThemeTokens(target, upstreamStyle);
   app.setThemeRef(&sharedUiThemeCell());
 }
 
 // Bind the uiScale fonts before FreeInkApp's constructor derives its theme
 // metrics from the body font's line height.
-inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) {
+inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer, bool upstreamStyle = false) {
   freeink::ui::GfxRendererTarget target(renderer, BoardConfig::hasTouch());
-  applyUiTextAlignment(target);
-  const auto spec = uiScaleSpec();
+  applyUiTextAlignment(target, upstreamStyle);
+  const auto spec = uiScaleSpec(upstreamStyle);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL,
-                 UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
+                 !upstreamStyle && UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, spec.bodyFontId);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_TITLE, spec.titleFontId);
   // Status chrome (header battery percent, clock) stays at the fixed small
@@ -137,6 +138,8 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
         return freeink::ui::bitmapFromIcon(icon_wifi_32);
       case UIIcon::Library:
         return freeink::ui::bitmapFromIcon(icon_library_32);
+      case UIIcon::Plugins:
+        return freeink::ui::bitmapFromIcon(icon_blocks_32);
       case UIIcon::Hotspot:
         return freeink::ui::bitmapFromIcon(icon_radio_tower_32);
       case UIIcon::Usb:
@@ -171,6 +174,8 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
       return freeink::ui::bitmapFromIcon(icon_wifi_24);
     case UIIcon::Library:
       return freeink::ui::bitmapFromIcon(icon_library_24);
+    case UIIcon::Plugins:
+      return freeink::ui::bitmapFromIcon(icon_blocks_24);
     case UIIcon::Hotspot:
       return freeink::ui::bitmapFromIcon(icon_radio_tower_24);
     case UIIcon::Usb:

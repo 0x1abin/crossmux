@@ -32,8 +32,13 @@ def trace(sdk, reader_ref, metrics_ref, directory, inx=False):
     for name in ('UIThemeTokens.h', 'UIScale.h'):
         path = 'src/components/' + name
         text = source(reader_ref, path) if reader_ref else (ROOT / path).read_text()
+        if name == 'UIScale.h' and 'UiHighDpiProfile' in text:
+            text = '#include "UiHighDpiProfile.h"\n' + text
         (directory / name).write_text(text)
     (directory / 'fontIds.h').write_text(source(metrics_ref, 'src/fontIds.h'))
+    (directory / "themes/lyra").mkdir(parents=True)
+    (directory / "themes/lyra/LyraTheme.h").write_text("#pragma once\n")
+    (directory / "UiHighDpiProfile.h").write_text((ROOT / "src/components/UiHighDpiProfile.h").read_text())
     settings = '''#pragma once
 struct CrossPointSettings {
   enum class UI_THEME { CLASSIC, INX };
@@ -65,6 +70,8 @@ inline void hideFreeInkListFocus(freeink::ui::ThemeTokens&) {}
     for field in ('int listSeparatorStyle;', 'int listValueMaxWidth;', 'bool listSelectionCoversScrollReservation;'):
         if field.split()[-1].rstrip(';') not in metrics_type:
             metrics_type = metrics_type.replace('\n};', f'\n  {field}\n}};')
+    profile = '#include "UiHighDpiProfile.h"\n'
+    profile += re.search(r'namespace UiHighDpiProfile \{.*?namespace UiHighDpiProfile', (ROOT/'src/components/themes/BaseTheme.h').read_text(), re.S).group() + '\n'
     metrics = [metric_namespace(metrics_ref, 'src/components/themes/lyra/LyraTheme.h', 'LyraMetrics')]
     if inx:
         metrics.append(metric_namespace(metrics_ref, 'src/components/themes/inx/InxTheme.h', 'InxMetrics'))
@@ -75,7 +82,7 @@ inline void hideFreeInkListFocus(freeink::ui::ThemeTokens&) {}
                     metric_namespace(metrics_ref, 'src/components/themes/lyra/Lyra3CoversTheme.h', 'Lyra3CoversMetrics')]
         # Cover Grid uses Lyra metrics outside its dedicated home renderer.
         names = ['BaseMetrics', 'LyraMetrics', 'RoundedRaffMetrics', 'Lyra3CoversMetrics', 'LyraMetrics']
-    (directory / 'UITheme.h').write_text('#pragma once\n#include "CrossPointSettings.h"\n' + metrics_type + '\n' +
+    (directory / 'UITheme.h').write_text('#pragma once\n#include "CrossPointSettings.h"\n' + metrics_type + '\n' + profile +
         '\n'.join(metrics) + '\ninline constexpr ThemeMetrics parityMetrics[] = {' +
         ', '.join(name + '::values' for name in names) + '''};
 class UITheme {

@@ -52,10 +52,13 @@ int main() {
 ''')
 
     def test_callers_use_shared_guard(self):
-        for name in ('settings/FontDownloadActivity.cpp', 'browser/OpdsBookBrowserActivity.cpp'):
+        for name in ('settings/FontDownloadActivity.cpp', 'CatalogActivity.cpp'):
             source = (ROOT / 'src/activities' / name).read_text()
             self.assertIn('if (!HttpDownloader::hasMemoryForTls())', source)
             self.assertNotIn('HttpDownloader::MIN_TLS_', source)
+        opds = (ROOT / 'src/activities/browser/OpdsBookBrowserActivity.cpp').read_text()
+        self.assertIn('downloadFile(downloadUrl, filename, server.username, server.password)', opds)
+        self.assertNotIn('HttpDownloader::MIN_TLS_', opds)
 
 
 if __name__ == '__main__':

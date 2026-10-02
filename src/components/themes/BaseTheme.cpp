@@ -324,6 +324,16 @@ void BaseTheme::drawHintLabel(const GfxRenderer& renderer, const int fontId, con
   }
 }
 
+void BaseTheme::drawButtonHintsWithStyle(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                                         const char* btn4, const bool upstreamStyle) const {
+  if (upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::INX) {
+    static const LyraTheme theme;
+    theme.drawButtonHints(renderer, btn1, btn2, btn3, btn4);
+    return;
+  }
+  drawButtonHints(renderer, btn1, btn2, btn3, btn4);
+}
+
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
   if (!buttonHintsVisible()) return;
@@ -534,10 +544,10 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 // Slightly inside the side padding: the battery's boxed glyph and the clock
 // digits read wider than text/cover ink on the same line, so flush placement
 // looks like it overhangs the content columns.
-int BaseTheme::headerStatusInset() { return UITheme::getInstance().getMetrics().headerSidePadding + 4; }
+int BaseTheme::headerStatusInset(bool upstreamStyle) { return uiThemeMetrics(upstreamStyle).headerSidePadding + 4; }
 
-void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::HeaderProps& props) {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::HeaderProps& props, bool upstreamStyle) {
+  const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
   auto& status = props.status;
 
   // Status text stays at the fixed small font on every screen: FONT_LABEL is
@@ -560,7 +570,7 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   status.battery.glyphHeight = static_cast<int16_t>(metrics.batteryHeight);
   status.battery.gap = batteryPercentSpacing;
   status.batteryLeft = metrics.headerBatterySide == 1;
-  status.edgeInset = static_cast<int16_t>(headerStatusInset());
+  status.edgeInset = static_cast<int16_t>(headerStatusInset(upstreamStyle));
 
   // Header chrome geometry. Status lives on the theme's thin top strip in
   // fixed corners — battery top-right, a corner clock (headerClockCentered =
@@ -575,7 +585,7 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   constexpr int16_t headerButtonSize = 48;
   const int16_t bandHeight = static_cast<int16_t>(metrics.headerHeight);
   const int16_t strip = static_cast<int16_t>(metrics.batteryBarHeight);
-  const int titleFontId = uiScaleSpec().titleFontId;
+  const int titleFontId = uiScaleSpec(upstreamStyle).titleFontId;
   const int16_t opticalDrop =
       static_cast<int16_t>((renderer.getLineHeight(titleFontId) - renderer.getTextHeight(titleFontId)) / 2);
   props.leadingSize = headerButtonSize;
@@ -599,19 +609,25 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
 
 void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
                            const bool backButton) const {
+  drawHeaderWithStyle(renderer, rect, title, subtitle, backButton, false);
+}
+
+void BaseTheme::drawHeaderWithStyle(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                                    const bool backButton, const bool upstreamStyle) {
   // Every activity header renders through the FreeInkUI header + battery
   // indicator components, styled by the active theme's tokens (padding,
   // centering, underline). Non-interactive frame: no hit rects registered.
   namespace fui = freeink::ui;
-  const auto spec = uiScaleSpec();
+  const auto spec = uiScaleSpec(upstreamStyle);
   fui::GfxRendererFrame<1> ui(renderer, spec.smallFontId, spec.bodyFontId, spec.titleFontId);
+  applyUiTextAlignment(ui.target, upstreamStyle);
   // Refresh the app-wide shared tokens instead of copying ~1.5KB of
   // ThemeTokens onto this render-path stack frame; the values derived here
   // are identical to what every FreeInkApp screen derives. Goes through the
   // same publish-a-fresh-slot path applySharedUiTheme() uses (see
   // UiAppHelpers.h) rather than overwriting the previously-published
   // instance in place, since some other FreeInkApp could be mid-read of it.
-  const fui::ThemeTokens& tokens = refreshSharedUiThemeTokens(ui.target);
+  const fui::ThemeTokens& tokens = refreshSharedUiThemeTokens(ui.target, upstreamStyle);
   // Header status text (battery percent, right label) stays at the fixed
   // small font like the legacy headers; the uiScale small font is for list
   // subtitles.
@@ -625,8 +641,8 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   props.rightLabel = subtitle;  // firmware headers right-align the secondary text
   // Battery + clock chrome and their title reserves live in the FreeInkUI
   // header component; this only fills the values from settings and metrics.
-  applyHeaderStatus(renderer, props);
-  if (rect.height < UITheme::getInstance().getMetrics().headerHeight) {
+  applyHeaderStatus(renderer, props, upstreamStyle);
+  if (rect.height < uiThemeMetrics(upstreamStyle).headerHeight) {
     // Short bands (home) are not split into strip + content row: the title
     // centers on the band, clear of the band's bottom edge.
     props.titleOffsetY = 0;

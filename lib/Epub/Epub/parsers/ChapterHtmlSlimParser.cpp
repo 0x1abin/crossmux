@@ -295,7 +295,7 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
 
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
-  if (std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
+  if (txtChapterBoundaries || std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
     if (currentPage && !currentPage->elements.empty()) {
       completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
       if (hasFailed()) return;
@@ -305,7 +305,8 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
   }
 
   // Record deferred anchor after previous block is flushed (and any TOC page break)
-  anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+  if (!txtChapterBoundaries)
+    anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
   pendingAnchorId.clear();
 }
 
@@ -433,8 +434,9 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // block is flushed so the chapter starts on a fresh page.
   flushPendingAnchor();
   if (hasFailed()) return;
-  currentTextBlock = makeUniqueNoThrow<ParsedText>(extraParagraphSpacing, firstLineIndent, hyphenationEnabled,
-                                                   focusReadingEnabled, blockStyle, collectTouchLinks);
+  currentTextBlock =
+      makeUniqueNoThrow<ParsedText>(extraParagraphSpacing, firstLineIndent, hyphenationEnabled, focusReadingEnabled,
+                                    blockStyle, collectTouchLinks, paragraphIndentSpaces);
   if (!currentTextBlock) {
     LOG_ERR("EHP", "OOM: ParsedText (%u bytes)", static_cast<unsigned>(sizeof(ParsedText)));
     failAllocation("page layout");
@@ -497,7 +499,8 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
   currentPageNextY = static_cast<int16_t>(currentPageNextY + ruleThickness + bottomSpacing);
 
   if (!pendingAnchorId.empty()) {
-    anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+    if (!txtChapterBoundaries)
+      anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
     pendingAnchorId.clear();
   }
 }
@@ -770,6 +773,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         // always recorded regardless of element type, since they drive page breaks.
         const char* idValue = atts[i + 1];
         const bool isTocAnchor =
+            (self->txtChapterBoundaries && strncmp(idValue, "txt-", 4) == 0) ||
             std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idValue) != self->tocAnchors.end();
         if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
           // Flush a displaced anchor before overwriting. Consecutive non-block elements
@@ -932,9 +936,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       tableCellBlockStyle.isRtl = cssStyle.direction == CssTextDirection::Rtl;
     }
 
-    self->currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled,
-                                      self->focusReadingEnabled, tableCellBlockStyle, self->collectTouchLinks);
+    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(
+        self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled, self->focusReadingEnabled,
+        tableCellBlockStyle, self->collectTouchLinks, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: table cell");
       self->failAllocation("table cell");
@@ -1654,9 +1658,9 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   if (!self->currentTextBlock) {
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled,
-                                      self->focusReadingEnabled, flowStyle, self->collectTouchLinks);
+    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(
+        self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled, self->focusReadingEnabled,
+        flowStyle, self->collectTouchLinks, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block for character data");
       self->failAllocation("text block for character data");
@@ -2039,9 +2043,9 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
-    self->currentTextBlock =
-        makeUniqueNoThrow<ParsedText>(self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled,
-                                      self->focusReadingEnabled, flowStyle, self->collectTouchLinks);
+    self->currentTextBlock = makeUniqueNoThrow<ParsedText>(
+        self->extraParagraphSpacing, self->firstLineIndent, self->hyphenationEnabled, self->focusReadingEnabled,
+        flowStyle, self->collectTouchLinks, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
       LOG_ERR("EHP", "OOM: text block after table");
       self->failAllocation("text block after table");
@@ -2302,7 +2306,8 @@ bool ChapterHtmlSlimParser::finishParse() {
       return false;
     }
     if (!pendingAnchorId.empty()) {
-      anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+      if (!txtChapterBoundaries)
+        anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
       pendingAnchorId.clear();
     }
     setCurrentPageVisibleOffset(visibleTextOffset);

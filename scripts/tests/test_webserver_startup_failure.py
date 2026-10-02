@@ -60,6 +60,7 @@ struct WebServer {
  void begin() { ++httpListening; }
  void stop() { httpListening=0; }
 };
+using CrossPointHttpServer = WebServer;
 struct WebSocketsServer {
  explicit WebSocketsServer(int) { ++wsLive; }
  ~WebSocketsServer() { --wsLive; }
@@ -129,8 +130,40 @@ int main() {
  assertStopped(web);
  udpSuccess=true;
  assert(web.begin());
+ // Transfer suspension can destroy the listener before stop; clear its callback owner too.
+ web.wsServer->close();
+ web.wsServer.reset();
  web.stop();
  assertStopped(web);
+}
+''')
+
+    def test_web_buffers_prefer_psram_and_fall_back(self):
+        source = (ROOT / 'src/network/CrossPointWebServer.cpp').read_text()
+        body = method(source, 'memory::ByteBuffer makeWebBuffer(')
+        run_cpp(r'''
+#include <cassert>
+#include <cstddef>
+#include <memory>
+namespace memory {
+using ByteBuffer = std::unique_ptr<unsigned char[]>;
+bool psramAvailable = true, internalAvailable = true;
+int internalCalls = 0;
+ByteBuffer makePsramByteBufferNoThrow(size_t size) {
+ return psramAvailable ? std::make_unique<unsigned char[]>(size) : nullptr;
+}
+ByteBuffer makeInternalByteBufferNoThrow(size_t size) {
+ ++internalCalls;
+ return internalAvailable ? std::make_unique<unsigned char[]>(size) : nullptr;
+}
+}
+''' + body + r'''
+int main() {
+ assert(makeWebBuffer(4096) && memory::internalCalls == 0);
+ memory::psramAvailable = false;
+ assert(makeWebBuffer(4096) && memory::internalCalls == 1);
+ memory::internalAvailable = false;
+ assert(!makeWebBuffer(1400) && memory::internalCalls == 2);
 }
 ''')
 

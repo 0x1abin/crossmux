@@ -34,6 +34,7 @@ const fui::ThemeTokens& refreshSharedUiThemeTokens(const fui::GfxRendererTarget&
 @METRICS@
 namespace LyraMetrics {const Metrics values;}
 struct UITheme {static UITheme&getInstance(){static UITheme t;return t;}const Metrics&getMetrics(){return LyraMetrics::values;}};
+const Metrics& uiThemeMetrics(bool=false){return UITheme::getInstance().getMetrics();}
 struct UiAppHost {using UiScreen=fui::Screen<24>;};
 struct MappedInputManager {bool touch=true;bool hasTouch()const{return touch;}};
 @SPEC@

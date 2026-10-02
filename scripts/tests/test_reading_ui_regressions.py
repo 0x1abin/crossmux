@@ -1007,7 +1007,9 @@ int main(int argc,char** argv) {
 
     def test_txt_spacing_keeps_cache_fields_byte_aligned(self):
         import re
-        source = (ROOT / 'src/activities/reader/TxtReaderActivity.cpp').read_text()
+        # Immutable legacy schema fixture; active TXT books now use EPUB sections.
+        source = subprocess.check_output(['git', '-C', str(ROOT), 'show',
+            '593c8dbc8feb404d740108a3db281c4eeae3e33e:src/activities/reader/TxtReaderActivity.cpp'], text=True)
         read = method(source, 'bool readPodChecked(')
         write = method(source, 'bool writePodChecked(')
         expression = re.search(

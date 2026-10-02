@@ -9,7 +9,20 @@ The profile is enabled in `readpico_hardware`, inherited by `readpico` and
 ReadPico before the PR rebase and passed a 40-second startup/heap smoke test. Visual refresh and
 touch acceptance on the physical panel remain pending.
 
-## Integration baseline
+## Current upstream rehearsal
+
+The fixed local rehearsal uses Reader `38280863`, SDK `98b4e427` plus all six
+ReadPico fixes through `e3550ec`, and Simulator `20e73803`, on CrossMux `593c8dbc`.
+The reviewed source-tree fingerprints are recorded with the rehearsal artifacts;
+these are source exports, not replacement production commits. Existing typography,
+fallbacks, explicit high-density opt-in and calibrated safe insets are retained.
+Reader menus and the down-swipe control center use the upstream implementation in
+all themes, including INX and ReadPico; the Text panel replaces Focus Reading with
+First Line Indent. Ordinary INX settings keep their own controls and shared
+swipe/drawing geometry. Historical captures and the preceding deployment record
+below remain unchanged. This rehearsal does not flash hardware.
+
+## Historical integration baseline
 
 - CrossMux [PR #357](https://github.com/0x1abin/crossmux/pull/357) merged as `1cfb2fb209e2b9c8ca6e50d08f6764dffde40ccf`.
 - CrossMux [PR #291](https://github.com/0x1abin/crossmux/pull/291) merged as `a08147cff0a9a197f83e49b033d960a5ed11a334`.

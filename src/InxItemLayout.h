@@ -111,6 +111,26 @@ constexpr int start(const int selected, const int optionCount) {
   const int maxStart = optionCount - visible;
   return wanted < 0 ? 0 : (wanted > maxStart ? maxStart : wanted);
 }
+struct Layout {
+  Rect panel;
+  int rows;
+  int first;
+
+  Rect optionRect(const int slot) const {
+    return Rect{panel.x + 2, panel.y + headerHeight + slot * rowHeight + 3, panel.width - 4, rowHeight - 6};
+  }
+};
+
+inline Layout layout(const Rect bounds, const int optionCount, const int selected) {
+  const int availableRows = std::max(1, (bounds.height - headerHeight) / rowHeight);
+  const int rows = std::min(visibleRows(optionCount), availableRows);
+  const int width = std::max(1, std::min(bounds.width - 24, UiHighDpiProfile::enabled ? 608 : 360));
+  const int height = headerHeight + rows * rowHeight;
+  const int first = std::clamp(selected - rows / 2, 0, std::max(0, optionCount - rows));
+  return {
+      Rect{bounds.x + (bounds.width - width) / 2, bounds.y + std::max(0, (bounds.height - height) / 2), width, height},
+      rows, first};
+}
 }  // namespace InxOptionGeometry
 
 namespace InxAccordionGeometry {

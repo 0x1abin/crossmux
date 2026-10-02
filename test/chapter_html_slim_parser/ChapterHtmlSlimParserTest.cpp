@@ -533,7 +533,9 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 74);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 76);
+  ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
+  bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
   // Normalize the two new spacing bytes and their absolute file offsets back
   // to the historical v70 layout; keep its verified digest unchanged.
   constexpr size_t spacingOffset = 21;
@@ -546,7 +548,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     return value;
   };
   const auto adjustOffset = [&bytes, &readOffset](size_t position) {
-    const uint32_t value = readOffset(position) - 2;
+    const uint32_t value = readOffset(position) - 3;
     std::memcpy(bytes.data() + position, &value, sizeof(value));
   };
   // pageCount follows spacing; the next five fields address tables in the file.

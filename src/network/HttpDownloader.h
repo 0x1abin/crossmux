@@ -1,8 +1,11 @@
 #pragma once
 #include <HalStorage.h>
 
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Forward-declared: fetchUrl() takes a Stream& by reference. On-device this name
 // arrives transitively via the SdFat/Arduino chain in <HalStorage.h>; declaring
@@ -24,6 +27,7 @@ class HttpDownloader {
     HTTP_ERROR,
     FILE_ERROR,
     ABORTED,
+    UNAUTHORIZED,  // 401/403: callers holding a refreshable credential can retry
   };
 
   // Pre-flight floor for the ordinary allocator used by TLS (including
@@ -35,9 +39,6 @@ class HttpDownloader {
   /**
    * Fetch text content from a URL with optional credentials.
    */
-  static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
-                       const std::string& password = "");
-
   static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
                        const std::string& password = "");
 
@@ -47,15 +48,15 @@ class HttpDownloader {
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
                        const std::string& password = "");
 
+  using Header = std::pair<std::string, std::string>;
+
   /**
-   * Download a file to the SD card with optional credentials.
-   *
-   * downgradeRedirectsToHttp rewrites followed redirect targets from https to
-   * http so the bulk transfer skips a second TLS session (and its ~17KB record
-   * buffer — the OOM site on low-heap C3 boards).
+   * Download a file to the SD card with optional credentials. `headers` are
+   * added to the request (e.g. a Bearer Authorization), alongside any Basic
+   * auth derived from username/password.
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
-                                      ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
+                                      ProgressCallback progress = nullptr, const bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
-                                      bool downgradeRedirectsToHttp = false);
+                                      const std::vector<Header>& headers = {}, bool downgradeRedirectsToHttp = false);
 };

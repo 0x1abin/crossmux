@@ -55,7 +55,7 @@ uint8_t percentFromPermille(const int16_t permille) {
 }  // namespace
 
 FrontlightPanelActivity::FrontlightPanelActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("FrontlightPanel", renderer, mappedInput), UiAppHost(renderer) {}
+    : Activity("FrontlightPanel", renderer, mappedInput), UiAppHost(renderer, true) {}
 
 void FrontlightPanelActivity::onEnter() {
   Activity::onEnter();
@@ -280,8 +280,8 @@ void FrontlightPanelActivity::loop() {
 }
 
 int FrontlightPanelActivity::computePanelBottom() const {
-  const auto tokens = uiThemeTokens(uiTarget);
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto tokens = uiThemeTokens(uiTarget, true);
+  const auto& metrics = uiThemeMetrics(true);
   const int16_t lineHeight = uiTarget.lineHeight(tokens.smallText.font);
   // Slim battery band + the air around it (mirrors buildPanelScreen).
   const int y0 = std::max<int>(metrics.batteryHeight, lineHeight);
@@ -364,14 +364,14 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   // the base implementation directly because RoundedRaff suppresses its
   // untitled Home header.
   {
-    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto& metrics = uiThemeMetrics(true);
     screen.spacer(theme.spaceMd);
     const int16_t bandH = std::max<int16_t>(static_cast<int16_t>(metrics.batteryHeight),
                                             screen.target().lineHeight(theme.smallText.font));
     screen.takeTop(bandH, theme.spaceMd);
-    UITheme::getInstance().getTheme().BaseTheme::drawHeader(
+    GUI.drawHeaderWithStyle(
         renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.homeTopPadding - metrics.topPadding},
-        nullptr);
+        nullptr, nullptr, true, true);
   }
 
   if (Frontlight.present()) {
@@ -394,12 +394,7 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     const char* orientLabel = I18N.get(kOrientNames[SETTINGS.orientation % 4]);
     const bool touchOn = SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF;
 
-    const bool inx = SETTINGS.uiTheme == CrossPointSettings::INX;
-    char touchLabel[48];
-    snprintf(touchLabel, sizeof(touchLabel), "%s %s", tr(STR_TOUCH_TOGGLE),
-             I18N.get(touchOn ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF));
-    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel,
-                                      inx ? touchLabel : tr(STR_TOUCH_TOGGLE)};
+    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel, tr(STR_TOUCH_TOGGLE)};
     const fui::State states[kTileCount] = {SETTINGS.screenInverted ? fui::StateChecked : fui::StateNormal,
                                            fui::StateNormal, fui::StateNormal,
                                            // Filled when touch reader controls are OFF — the non-default,
@@ -410,14 +405,14 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
       gridItems[id].label = labels[id];
       gridItems[id].value = static_cast<int16_t>(id);
       gridItems[id].state = states[id];
-      gridItems[id].icon = !inx && id == 3 ? GUI.checkboxIcon(touchOn) : fui::BitmapRef{};
+      gridItems[id].icon = id == 3 ? GUI.checkboxIcon(touchOn) : fui::BitmapRef{};
     }
     gridProps.items = gridItems;
     gridProps.count = static_cast<uint16_t>(kTileCount);
     gridProps.action = ACTION_TILE;
     gridProps.tileHeight = kTileHeight;
     gridProps.gap = kTileGap;
-    gridProps.iconOnRight = !inx;
+    gridProps.iconOnRight = true;
     screen.tileGrid(gridProps);
   }
 }

@@ -295,7 +295,7 @@ void RemoteProgressParser::onArrayEnd(void* raw) {
   parser.field_ = Field::None;
 }
 
-static_assert(sizeof(RemoteProgressParser) <= 2048, "WeRead progress parser exceeds its fixed stack budget");
+static_assert(sizeof(RemoteProgressParser) <= 4096, "WeRead progress parser exceeds its bounded heap budget");
 
 ChapterResponse classifyChapterResponse(const int status, const bool emptyObject) {
   if (status == 401) return ChapterResponse::AuthenticationRequired;

@@ -105,6 +105,7 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return HotspotIcon;
       case UIIcon::Bookmark:
         return BookmarkIcon;
+      case UIIcon::Plugins:
       case UIIcon::Blocks:
         return BlocksIcon;
       case UIIcon::Apps:

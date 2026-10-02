@@ -4,49 +4,23 @@
 #include <HalFrontlight.h>
 #include <I18n.h>
 
-#include <algorithm>
+#include <array>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
-#include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/lyra/LyraTheme.h"
 
 namespace fui = freeink::ui;
-
-namespace {
-constexpr std::array<uint8_t, 4> PAGE_TURN_RATES = {0, 3, 6, 12};
-constexpr int CUSTOM_PAGE_TURN_OPTION = static_cast<int>(PAGE_TURN_RATES.size());
-constexpr uint8_t DEFAULT_CUSTOM_PAGE_TURN_RATE = 15;
-constexpr uint8_t MIN_CUSTOM_PAGE_TURN_RATE = 1;
-constexpr uint8_t MAX_CUSTOM_PAGE_TURN_RATE = 30;
-
-constexpr uint8_t clampCustomPageTurnRate(const int rate) {
-  if (rate == 0) return DEFAULT_CUSTOM_PAGE_TURN_RATE;
-  return static_cast<uint8_t>(
-      std::clamp(rate, static_cast<int>(MIN_CUSTOM_PAGE_TURN_RATE), static_cast<int>(MAX_CUSTOM_PAGE_TURN_RATE)));
-}
-
-constexpr uint8_t pageTurnRateForOption(const int option, const uint8_t customRate) {
-  if (option == CUSTOM_PAGE_TURN_OPTION) return clampCustomPageTurnRate(customRate);
-  if (option < 0 || option >= static_cast<int>(PAGE_TURN_RATES.size())) return 0;
-  return PAGE_TURN_RATES[option];
-}
-
-static_assert(pageTurnRateForOption(0, 6) == 0);
-static_assert(pageTurnRateForOption(2, 6) == 6);
-static_assert(pageTurnRateForOption(CUSTOM_PAGE_TURN_OPTION, 7) == 7);
-}  // namespace
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                const std::string& title, const int currentPage, const int totalPages,
                                                const int bookProgressPercent, const uint8_t currentOrientation,
-                                               const uint8_t initialPageTurnRate, const bool hasFootnotes,
-                                               const bool hasBookmarks)
-    : UiListActivity("EpubReaderMenu", renderer, mappedInput),
+                                               const bool hasFootnotes, const bool hasBookmarks)
+    : UiListActivity("EpubReaderMenu", renderer, mappedInput, false, true),
       title(title),
       pendingOrientation(currentOrientation),
-      customPageTurnRate(clampCustomPageTurnRate(initialPageTurnRate)),
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent) {
@@ -77,10 +51,6 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
     items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
   }
   items.push_back({MenuAction::TOGGLE_BOOKMARK, StrId::STR_TOGGLE_BOOKMARK});
-  if (UITheme::getInstance().hasMainTabs()) {
-    items.push_back({MenuAction::TEXT_SETTINGS, StrId::STR_TEXT_SETTINGS});
-  }
-  items.push_back({MenuAction::IMAGE_SCALING, StrId::STR_IMAGE_SCALING});
   items.push_back({MenuAction::NIGHT_MODE, StrId::STR_NIGHT_MODE});
   if (Frontlight.present()) {
     items.push_back({MenuAction::FRONTLIGHT, StrId::STR_FRONTLIGHT});
@@ -94,22 +64,16 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
   items.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
   items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
-  if (!UITheme::getInstance().hasMainTabs()) {
-    items.push_back({MenuAction::TEXT_SETTINGS, StrId::STR_TEXT_SETTINGS});
-  }
-  // Row storage is a fixed array, so an over-long list would silently truncate
-  // (and props.count would over-read it). Fail loudly in debug builds instead.
-  if (items.size() > MAX_MENU_ITEMS) {
-    LOG_ERR("ERS", "Reader menu has %u items but only %u row slots", static_cast<unsigned>(items.size()),
-            static_cast<unsigned>(MAX_MENU_ITEMS));
-    items.resize(MAX_MENU_ITEMS);
-  }
+  items.push_back({MenuAction::TEXT_SETTINGS, StrId::STR_TEXT_SETTINGS});
 }
 
 void EpubReaderMenuActivity::closeCancelled() {
   ActivityResult result;
   result.isCancelled = true;
-  result.data = MenuResult{-1, pendingOrientation, pageTurnRateForOption(selectedPageTurnOption, customPageTurnRate)};
+  result.data =
+      MenuResult{-1, pendingOrientation,
+                 static_cast<uint8_t>(
+                     selectedPageTurnOption == 0 ? 0 : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption])};
   setResult(std::move(result));
   finish();
 }
@@ -145,37 +109,9 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
   if (selectedAction == MenuAction::AUTO_PAGE_TURN) {
     optionPopup.show(I18N.get(StrId::STR_AUTO_TURN_PAGES_PER_MIN), pageTurnLabels.data(),
                      static_cast<int>(pageTurnLabels.size()), selectedPageTurnOption, [this](int idx) {
-                       if (idx != CUSTOM_PAGE_TURN_OPTION) {
-                         selectedPageTurnOption = idx;
-                         requestUpdate();
-                         return;
-                       }
-                       startActivityForResultWith<IntervalSelectionActivity>(
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               customPageTurnRate =
-                                   clampCustomPageTurnRate(std::get<IntervalResult>(result.data).value);
-                               selectedPageTurnOption = CUSTOM_PAGE_TURN_OPTION;
-                             }
-                             requestUpdate();
-                           },
-                           "AutoPageTurnRate", StrId::STR_AUTO_TURN_PAGES_PER_MIN, customPageTurnRate,
-                           MIN_CUSTOM_PAGE_TURN_RATE, MAX_CUSTOM_PAGE_TURN_RATE, 1, 5);
+                       selectedPageTurnOption = idx;
                        requestUpdate();
                      });
-    requestUpdate();
-    return;
-  }
-
-  if (selectedAction == MenuAction::IMAGE_SCALING) {
-    // One tap cycles, like the frontlight row -- no picker. Nothing renders the
-    // page while this menu is open, so the reader picks the filter up when the
-    // menu closes, not here.
-    const uint8_t current = SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
-    const uint8_t next = static_cast<uint8_t>((current + 1) % CrossPointSettings::IMAGE_SCALING_COUNT);
-    SETTINGS.imageScaling = next;
-    SETTINGS.saveToFile();
-    LOG_INF("ERS", "Image scaling -> %s", next == CrossPointSettings::IMAGE_SCALING_BILINEAR ? "bilinear" : "nearest");
     requestUpdate();
     return;
   }
@@ -197,7 +133,9 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
   }
 
   setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation,
-                       pageTurnRateForOption(selectedPageTurnOption, customPageTurnRate)});
+                       static_cast<uint8_t>(selectedPageTurnOption == 0
+                                                ? 0
+                                                : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption])});
   finish();
 }
 
@@ -220,7 +158,7 @@ bool EpubReaderMenuActivity::handleButtons() {
 }
 
 void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& metrics = uiThemeMetrics(true);
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   // Content: the safe area minus the header band GUI.drawHeader paints.
   screen.setContentMarginFromScreen(fui::Insets{
@@ -242,60 +180,41 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
 
   // menuRowItems's labels/actionValue were set once in the constructor (see
   // buildMenuRowItems()); only rows with live values need refreshing here.
-  // The bound spells out rowCount() instead of calling it: cppcheck cannot follow
-  // menuItems being filled through buildMenuItems' reference parameter, folds the
-  // helper to 0, and then reports the comparison as dead code. Both sites cap on
-  // MAX_MENU_ITEMS, which is what keeps this loop, the fixed array and
-  // props.count in agreement.
-  for (size_t i = 0; i < menuItems.size() && i < MAX_MENU_ITEMS; i++) {
+  for (size_t i = 0; i < menuItems.size(); i++) {
     const auto action = menuItems[i].action;
     if (action == MenuAction::ROTATE_SCREEN) {
       menuRowItems[i].value = I18N.get(orientationLabels[pendingOrientation]);
     } else if (action == MenuAction::AUTO_PAGE_TURN) {
       menuRowItems[i].value = pageTurnLabels[selectedPageTurnOption];
     } else if (action == MenuAction::NIGHT_MODE) {
-      menuRowItems[i].value = I18N.get(SETTINGS.screenInverted ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
-      if (SETTINGS.uiTheme != CrossPointSettings::INX) GUI.setCheckboxRow(menuRowItems[i], SETTINGS.screenInverted);
-    } else if (action == MenuAction::IMAGE_SCALING) {
-      // Show the filter in use, like the night-mode and frontlight rows do. The
-      // index is clamped so a settings file written by a newer build cannot read
-      // past the label list.
-      const size_t mode = SETTINGS.imageScaling < imageScalingLabels.size() ? SETTINGS.imageScaling : 0;
-      menuRowItems[i].value = I18N.get(imageScalingLabels[mode]);
+      GUI.setCheckboxRow(menuRowItems[i], SETTINGS.screenInverted);
     } else if (action == MenuAction::FRONTLIGHT) {
-      menuRowItems[i].value = I18N.get(Frontlight.isOn() ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
-      if (SETTINGS.uiTheme != CrossPointSettings::INX) GUI.setCheckboxRow(menuRowItems[i], Frontlight.isOn());
+      GUI.setCheckboxRow(menuRowItems[i], Frontlight.isOn());
     }
   }
 
   fui::ListProps props;
   props.items = menuRowItems;
-  props.count = static_cast<uint16_t>(rowCount());
+  props.count = static_cast<uint16_t>(menuItems.size());
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
-  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
-    props.labelText = screen.theme().smallText;
-    props.labelText.maxLines = 2;
-  }
-  // The trailing value slot is NOT one of ListProps' theme-inherit sentinels
-  // (list.h documents rowHeight/rowGap/sidePadding/rowRadius only), so leaving
-  // valueText at its zero default measures and draws nothing: every live row here
-  // — night mode, orientation, page turn, frontlight, image scaling — rendered
-  // with an empty value. Take the theme's body style like the settings list does.
-  props.valueText = screen.theme().bodyText;
+  // Label at the value's font size: both sides of the row read as one unit.
+  // maxLines=2 also marks the style caller-owned (see textStyleUnset).
+  props.labelText = screen.theme().smallText;
+  props.labelText.maxLines = 2;
   syncListViewport(screen, props);
   screen.list(props);
 }
 
 void EpubReaderMenuActivity::drawChrome() {
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& metrics = uiThemeMetrics(true);
   const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
 
   // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
   // indicator; the rest of the screen renders through the app.
-  GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight},
-                 title.c_str());
+  const Rect header{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight};
+  GUI.drawHeaderWithStyle(renderer, header, title.c_str(), nullptr, true, true);
 }
 
 void EpubReaderMenuActivity::render(RenderLock&&) {
@@ -307,10 +226,5 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   renderUi();
 
   drawFooter();
-#if FREEINK_DEVICE_EEGO_A4
-  renderer.displayBuffer(firstRender ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-  firstRender = false;
-#else
   renderer.displayBuffer();
-#endif
 }

@@ -10,6 +10,7 @@
 #include "MappedInputManager.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/BookmarkFile.h"
@@ -22,7 +23,8 @@ constexpr int ENTER_ACTIONS_MODE_MS = 700;
 
 EpubReaderBookmarksActivity::EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                          const std::shared_ptr<Epub>& epub, const std::string& epubPath)
-    : UiListActivity("EpubReaderBookmarks", renderer, mappedInput, /*wantsTouchLongPress=*/true),
+    : UiListActivity("EpubReaderBookmarks", renderer, mappedInput, /*wantsTouchLongPress=*/true,
+                     /*upstreamStyle=*/true),
       epub(epub),
       epubPath(epubPath) {}
 
@@ -240,7 +242,7 @@ void EpubReaderBookmarksActivity::deleteSelectedBookmark() {
 }
 
 void EpubReaderBookmarksActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto& metrics = uiThemeMetrics(true);
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   // Content: the safe area minus the title band render() paints.
   screen.setContentMarginFromScreen(fui::Insets{
@@ -301,7 +303,7 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
 
   const auto confirmLabel = bookmarks.size() > 0 ? tr(STR_SELECT) : "";
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHintsWithStyle(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
 
   renderer.displayBuffer();
 }
