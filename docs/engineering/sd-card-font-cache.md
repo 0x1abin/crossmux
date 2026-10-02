@@ -230,7 +230,11 @@ OTA, copying, or verification.
 
 Internally, copying still occupies total progress 0-50% and read-back
 verification occupies 50-100%. The page uses fast refreshes at the pass
-transition and 10% increments. Both entry points physically complete the
+transition and 10% increments. Each progress callback waits for its requested
+frame to finish before returning to the Flash writer. Progress state is updated under the render lock, which is
+released before waiting. This prevents Flash erase/write from suspending the
+ReadPico display feeder tasks during a progress refresh. Both entry points
+physically complete the
 verified 100% frame and the Ready page. Text Settings reloads the final font
 afterward so a reader that opened the screen can resume rendering immediately;
 post-OTA rebuilds continue to Home without clearing the last-open book or its

@@ -18,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "ReaderFontSizes.h"
 #include "SdCardFontSystem.h"
 #include "TextSettingsPreview.h"
@@ -771,6 +772,7 @@ const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(const int list
 }
 
 SdCardFontCache::Result TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const char* familyName) {
+  NetworkStartup::logMemory("font preload begin");
   {
     RenderLock lock(*this);
     preloadFamilyName_ = familyName;
@@ -788,19 +790,27 @@ SdCardFontCache::Result TextSettingsActivity::preloadFont(const SdCardFontFileIn
       file.path.c_str(),
       [](size_t completed, size_t total, void* context) {
         auto* self = static_cast<TextSettingsActivity*>(context);
-        self->preloadTotal_.store(total);
-        self->preloadCompleted_.store(completed);
-        const bool verifying = completed > total / 2;
-        const bool phaseChanged = self->preloadVerifying_ != verifying;
-        self->preloadVerifying_ = verifying;
-        const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
-        if (phaseChanged || percent == 100 || percent >= self->lastPreloadPercent_ + 10) {
-          self->lastPreloadPercent_ = percent;
-          self->requestUpdate(true);
+        bool refresh = false;
+        {
+          RenderLock lock(*self);
+          self->preloadTotal_.store(total);
+          self->preloadCompleted_.store(completed);
+          const bool verifying = completed > total / 2;
+          const bool phaseChanged = self->preloadVerifying_ != verifying;
+          self->preloadVerifying_ = verifying;
+          const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
+          if (phaseChanged || percent == 100 || percent >= self->lastPreloadPercent_ + 10) {
+            self->lastPreloadPercent_ = percent;
+            refresh = true;
+          }
         }
+        // Finish the panel refresh before the cache writer resumes Flash operations.
+        if (refresh) self->requestUpdateAndWait();
       },
       this);
 
+  LOG_INF("SDFCACHE", "Manual preload: %s", SdCardFontCache::resultName(result));
+  NetworkStartup::logMemory("font preload finished");
   const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
   if (succeeded) {
     requestUpdateAndWait();

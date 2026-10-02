@@ -194,3 +194,6 @@ add_test(NAME WifiStartupFailure COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scri
 
 add_test(NAME FontPreloadFlow
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/reader_font_preview/test_preload_flow.py)
+add_test(NAME TlsMemoryPreflight COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_tls_memory_preflight.py)
+
+add_test(NAME FontPreloadRefresh COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_font_preload_refresh.py)

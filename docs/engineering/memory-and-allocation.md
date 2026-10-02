@@ -167,3 +167,14 @@ Verify external BSS symbols in the final ELF and require cold boot, AP/STA,
 transfer and BLE acceptance. Display buffers and task stacks keep their existing
 allocation requirements. The ordinary malloc threshold, mDNS allocation policy
 and NVS cache policy remain unchanged while testing this configuration.
+
+### TLS preflight and PSRAM
+
+Font manifest and OPDS download preflight use `HttpDownloader::hasMemoryForTls()`.
+Its 40,000-byte free / 20,000-byte largest-block floors are measured through
+`HalMemory::getDefaultHeap()`, matching the ordinary allocator used by wolfSSL.
+Registered PSRAM counts; `ESP.getFreeHeap()` only reports internal RAM and can
+reject a valid ReadPico transfer before it starts. No-PSRAM targets retain the
+same floors. This check is a heuristic, not a reservation or a guarantee that
+later TLS, driver, or parsing allocations will succeed. Failure logs distinguish
+default, internal and PSRAM capacity; font phase logs locate subsequent failures.

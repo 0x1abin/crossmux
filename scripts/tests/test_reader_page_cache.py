@@ -162,6 +162,7 @@ int main() {
     const auto original=r.renderer.frame;
     r.renderIdle(0);
     for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Ready);
+    assert(r.pageCache_[1].key.page==r.section->currentPage-1);
     assert(r.renderer.frame==original && r.renderer.mode==GfxRenderer::BW);
     assert(r.pageCacheMissingCodepoint_==0x4E00);
     assert(memory::live==8 && memory::allocations==8);
