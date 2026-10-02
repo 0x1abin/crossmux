@@ -152,3 +152,41 @@ for boolean state, switch/checkbox drawing and hit geometry checks, and
 The three control font families share existing bitmap data; registration adds
 three persistent font-map entries at startup, avoiding per-dialog allocations
 or mutation of the INX page fonts.
+
+## INX header title font correction
+
+Recorded on 2026-10-02. Status: **implemented; physical acceptance pending**.
+The EPUB List menu sends its book title through `GUI.drawHeader()` in
+[EpubReaderMenuActivity.cpp](../../src/activities/reader/EpubReaderMenuActivity.cpp).
+The original INX header used `NOTOSERIF_12_FONT_ID`, which actually resolves to
+the built-in `notosans_cjk_12` subset. That bypassed UI font selection and
+fallbacks, so an installed SD font could not supply missing title characters.
+The high-density UI increment in `593c8dbc` corrected this for its profile,
+but retained the old font on other profiles.
+
+[InxTheme::drawHeader](../../src/components/themes/inx/InxTheme.cpp) now uses
+`uiScaleSpec().titleFontId` on every profile. Title drawing, clipping height
+and subtitle alignment all use that same ID. It follows the existing policy
+in [UIScale.h](../../src/components/UIScale.h) and
+[SdCardFontSystem.cpp](../../src/SdCardFontSystem.cpp): built-in UI fonts with
+available glyph fallbacks, or the preferred SD UI face where configured.
+Read Pico's title size remains profile-controlled (16pt with high density,
+14pt with the legacy profile when the selected `.cpfont` supplies that size).
+
+This is a focused exception to the historical INX title-font appearance.
+Header position, padding, battery placement, separator and navigation remain
+unchanged. The shared header change applies to its other callers as well as
+the EPUB List menu; it does not change reading fonts or add EPUB embedded-font
+support. Keep the historical INX trace baseline unchanged.
+
+Physical acceptance must compare the same device, book and settings before
+and after the fix:
+
+1. Select INX and the List reader menu, open an EPUB, and tap the screen center.
+   Check ordinary Chinese, mixed Latin/CJK and long book titles, including a
+   character missing from the built-in subset but covered by the SD UI font.
+2. Test with and without an SD font and with the required UI size unavailable.
+   Check subtitle alignment, title clipping and separation from the bottom rule.
+3. Cover both ordinary and high-density profiles, other INX header callers,
+   and another theme to verify its existing behavior is preserved. Host traces
+   and font-fallback tests do not establish physical display acceptance.
