@@ -106,6 +106,10 @@ jobs:
     name: ${{ matrix.targetId }} (${{ needs.prepare.outputs.channel }})
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
+      - name: Isolate PlatformIO toolchains
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio-$GITHUB_RUN_ID-$GITHUB_JOB-${{ matrix.targetId }}" >> "$GITHUB_ENV"
+      - name: Use runner temporary directory
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
         with:
           submodules: recursive
