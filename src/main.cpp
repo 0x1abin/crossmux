@@ -205,12 +205,20 @@ enum class BootResume : uint8_t {
 static bool deepSleepInProgress = false;
 
 #if FREEINK_CAP_TOUCH
+#if FREEINK_DEVICE_READPICO
+// Defer font I/O until after activity teardown releases its render lock.
+static bool sdFontReloadPending = false;
+#endif
+
 static bool finishWifiSessionWithoutRestart() {
   if (!BoardConfig::hasTouch()) return false;
   if (esp_sntp_enabled()) esp_sntp_stop();
   WiFi.mode(WIFI_OFF);
   delay(100);
   LOG_DBG("MAIN", "WiFi stopped without restart on touch device");
+#if FREEINK_DEVICE_READPICO
+  sdFontReloadPending = true;
+#endif
   return true;
 }
 #endif
@@ -908,6 +916,21 @@ void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
+
+#if FREEINK_CAP_TOUCH && FREEINK_DEVICE_READPICO
+  if (sdFontReloadPending) {
+    sdFontReloadPending = false;
+    const unsigned long reloadStart = millis();
+    LOG_DBG("MAIN", "Reloading SD font family after the network session");
+    {
+      // The independent render task shares the font maps and resident font objects.
+      RenderLock lock;
+      sdFontSystem.ensureLoaded(renderer);
+    }
+    LOG_DBG("MAIN", "SD font reload after network took %lu ms", millis() - reloadStart);
+    activityManager.requestUpdate();
+  }
+#endif
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
