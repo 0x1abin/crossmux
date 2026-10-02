@@ -20,6 +20,31 @@ import verify_nightly_release
 
 
 class NightlyTargetTest(unittest.TestCase):
+    def test_boot_app0_uses_the_active_platformio_core(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            home = root / 'home'
+            custom_core = root / 'isolated-core'
+            relative = Path('packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin')
+            default_asset = home / '.platformio' / relative
+            custom_asset = custom_core / relative
+            for asset in (default_asset, custom_asset):
+                asset.parent.mkdir(parents=True)
+                asset.write_bytes(b'boot_app0')
+            with mock.patch.object(Path, 'home', return_value=home):
+                for override, expected in (('', default_asset), (str(custom_core), custom_asset)):
+                    with self.subTest(core_dir=override), mock.patch.dict(
+                        'os.environ', {'PLATFORMIO_CORE_DIR': override}
+                    ):
+                        self.assertEqual(package_nightly_target.find_boot_app0(), expected)
+                with mock.patch.dict('os.environ', {}, clear=True):
+                    self.assertEqual(package_nightly_target.find_boot_app0(), default_asset)
+                custom_asset.unlink()
+                with mock.patch.dict('os.environ', {'PLATFORMIO_CORE_DIR': str(custom_core)}):
+                    with self.assertRaises(SystemExit) as error:
+                        package_nightly_target.find_boot_app0()
+                    self.assertIn(str(custom_asset), str(error.exception))
+
     def test_fetch_retries_incomplete_reads(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.side_effect = [

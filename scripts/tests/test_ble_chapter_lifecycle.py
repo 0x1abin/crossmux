@@ -67,11 +67,19 @@ namespace bleinput {
 struct Cache { int releases=0; void releaseSdFontCaches() { assert(!running || keepBleDuringBuild); ++releases; } };
 struct { Cache cache; Cache* getFontCacheManager() { return &cache; } } renderer;
 struct RenderLock {
+ enum class Mode { Blocking, Try };
+ bool acquired=false;
  static inline bool held=false;
  static inline int depth=0;
  static inline void (*onAcquire)()=nullptr;
- RenderLock() { if(onAcquire) onAcquire(); ++depth; }
- ~RenderLock() { --depth; }
+ explicit RenderLock(Mode mode=Mode::Blocking) {
+   if(onAcquire) onAcquire();
+   assert(mode==Mode::Try || !held); // A blocking acquisition here would stall input.
+   acquired=!held;
+   if(acquired) ++depth;
+ }
+ ~RenderLock() { if(acquired) --depth; }
+ bool ownsLock() const { return acquired; }
  static bool peek() { return held; }
 };
 using ReaderRenderSpec=int;
@@ -146,6 +154,15 @@ int main() {
 #if FREEINK_CAP_BLE_HID_HOST
  assert(running);
  WiFi.mode=1; updateBluetoothLifecycle(); assert(!running); WiFi.mode=0;
+ const int startsBeforeBusy=bleinput::starts;
+ RenderLock::held=true;
+ updateBluetoothLifecycle();
+ assert(bleinput::starts==startsBeforeBusy && RenderLock::depth==0);
+ RenderLock::held=false;
+ RenderLock::onAcquire=[] { RenderLock::held=true; }; // Renderer wins acquisition race.
+ updateBluetoothLifecycle();
+ assert(bleinput::starts==startsBeforeBusy && RenderLock::depth==0);
+ RenderLock::held=false;
  RenderLock::onAcquire=[] { reader.section=nullptr; };
  updateBluetoothLifecycle(); assert(!running); // Preparation began while taking the render lock.
  RenderLock::onAcquire=nullptr; reader.section=&section;
@@ -157,10 +174,16 @@ int main() {
  updateBluetoothLifecycle(); assert(running);
 #endif
  const int stopsBeforeBackground=bleinput::stops;
+ section.currentPage=15; // This page would trigger a partial build if the lock were acquired.
  RenderLock::held=true;
  assert(reader.updateChapterBuild());
- assert(section.begins==0); // Busy rendering must never trigger construction.
+ assert(section.begins==0 && RenderLock::depth==0); // Busy rendering must never trigger construction.
  RenderLock::held=false;
+ RenderLock::onAcquire=[] { RenderLock::held=true; };
+ assert(reader.updateChapterBuild());
+ assert(section.begins==0 && RenderLock::depth==0);
+ RenderLock::held=false;
+ section.currentPage=0;
  // A render that invalidates the section before lock acquisition must not
  // dereference the old section or start a build.
  RenderLock::onAcquire=[] { reader.section=nullptr; };

@@ -16,6 +16,7 @@
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderFontPreview.h"
+#include "ReaderPageCache.h"
 #include "ReaderToolbarUi.h"
 #include "components/OptionPopup.h"
 
@@ -51,6 +52,30 @@ class EpubReaderActivity final : public ReaderActivity {
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
   unsigned long lastRenderCompleteMs = 0;
+
+#if FREEINK_DEVICE_READPICO
+  // Four reusable PSRAM frames (~406 KiB); too large for the render task's
+  // stack. The activity owns them and releases them in onExit().
+  memory::ByteBuffer pageCacheBase_;
+  memory::ByteBuffer pageCacheLsb_;
+  memory::ByteBuffer pageCacheMsb_;
+  memory::ByteBuffer pageCacheStash_;
+  ReaderPageCache pageCache_;
+  ReaderPageCacheKey renderedPageKey_;
+  uint32_t sectionGeneration_ = 0;
+  uint32_t renderEpoch_ = 0;
+  bool pageCacheFailed_ = false;
+#ifdef ENABLE_CHINESE_VERSION
+  uint32_t pageCacheMissingCodepoint_ = 0;
+#endif
+
+  bool pageCacheEligible() const;
+  ReaderPageCacheKey pageCacheKey(int page, int top, int right, int bottom, int left) const;
+  uint32_t idleRenderDelayMs() const override;
+  void renderIdle(uint32_t generation) override;
+  void freePageCache();
+#endif
+
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;

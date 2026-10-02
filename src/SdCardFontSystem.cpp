@@ -60,10 +60,20 @@ struct UiFontSize {
   int builtinFallbackId;
 };
 constexpr UiFontSize kUiFontSizes[] = {
-    {SMALL_FONT_ID, 8, CJK_UI_8_FONT_ID},         {UI_10_FONT_ID, 10, CJK_UI_10_FONT_ID},
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+    {SMALL_FONT_ID, 12, CJK_UI_12_FONT_ID},         {UI_10_FONT_ID, 14, CJK_UI_14_FONT_ID},
+    {UI_12_FONT_ID, 16, CJK_UI_16_FONT_ID},
+#else
+    {SMALL_FONT_ID, 8, CJK_UI_8_FONT_ID},
+    {UI_10_FONT_ID, 10, CJK_UI_10_FONT_ID},
     {UI_12_FONT_ID, 12, CJK_UI_12_FONT_ID},
+#endif
 #if FREEINK_DEVICE_READPICO
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+    {READER_STATUS_FONT_ID, 12, CJK_UI_12_FONT_ID}, {READER_ESTIMATE_FONT_ID, 14, CJK_UI_14_FONT_ID},
+#else
     {READER_STATUS_FONT_ID, 8, CJK_UI_8_FONT_ID}, {READER_ESTIMATE_FONT_ID, 10, CJK_UI_10_FONT_ID},
+#endif
 #endif
 };
 #if FREEINK_DEVICE_READPICO
@@ -73,12 +83,17 @@ constexpr UiFontSize kUiFontSizes[] = {
 // every other target keeps the shared values above.
 //
 // Order matches kUiFontSizes: SMALL, UI_10 (body), UI_12 (title), footer, estimate.
-// Footer sizes stay at 8/10 pt. Extra faces reuse resident sizes and the manager's
+// The high-density profile uses 12/14 pt footers; legacy ReadPico stays at 8/10.
+// Extra faces reuse resident sizes and the manager's
 // bounded, uncached SD loader; no additional PSRAM glyph arena is allocated.
 // Enlarged UI sizes were chosen on the glass
 // -- 16/18 was too large, and the fallback when a family ships no such size is the
 // built-in face at its ORIGINAL size.
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+constexpr uint8_t kReadPicoUiPointSizes[] = {12, 14, 16, 12, 14};
+#else
 constexpr uint8_t kReadPicoUiPointSizes[] = {12, 12, 14, 8, 10};
+#endif
 static_assert(std::size(kReadPicoUiPointSizes) == std::size(kUiFontSizes));
 #endif
 
@@ -162,10 +177,12 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, bool allowFlashCache)
     if (!currentFamily.empty()) {
       manager_.unloadAll(renderer);
     }
+#ifndef CROSSMUX_UI_PROFILE_HIGH_DPI
     // Back on a built-in family, which exists only at BUILTIN_READER_POINT_SIZES:
     // a size inherited from an SD family has to come back into that set.
     snapFontPointSizeTo(snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES),
                                                SETTINGS.fontPointSize));
+#endif
     return;
   }
 
@@ -302,6 +319,13 @@ void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
 #endif
     const int exactId = manager_.loadFamilyExtraSize(*family, renderer, pointSize);
     if (exactId != 0) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+      if (i < 3) {
+        // Keep interface typography; SD supplies names outside the matching CJK subset.
+        renderer.setFallbackFont(ui.fontId, ui.builtinFallbackId, exactId);
+        continue;
+      }
+#endif
 #if FREEINK_DEVICE_READPICO
       // Read Pico renders its whole UI in the selected reading family at the enlarged
       // sizes above, so the SD face has to BE this id, not merely a per-glyph fallback.
@@ -363,7 +387,10 @@ void SdCardFontSystem::unloadTtf(GfxRenderer& renderer) {
   }
   ttfUiIds_.clear();
   ttfUi_.clear();
+#ifndef CROSSMUX_UI_PROFILE_HIGH_DPI
   renderer.clearFallbackFonts();
+#endif
+  // removeFont already removes references to each released TTF face; fixed UI mappings survive.
   if (ttfFontId_ != 0) {
     renderer.unregisterTtfFont(ttfFontId_);
     renderer.removeFont(ttfFontId_);  // drop from the renderer's fontMap
@@ -490,7 +517,19 @@ void SdCardFontSystem::setupTtfUiFallbacks(GfxRenderer& renderer) {
   // internal DRAM, and the build must win: below this floor, skip the
   // fallback (built-in bitmap UI fonts keep covering Latin UI text).
   static constexpr size_t kUiFallbackMinInternalHeap = 160 * 1024;
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  ttfUi_.reserve(std::size(kUiFontSizes));
+  ttfUiIds_.reserve(std::size(kUiFontSizes));
+#endif
   for (const auto& ui : kUiFontSizes) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+    const int id = computeTtfFontId((ttfFamily_ + "\x01ui").c_str(), ui.pointSize);
+    // UI and footer share 12/14pt faces; register and own each size only once.
+    if (renderer.getFontMap().count(id) != 0) {
+      renderer.setFallbackFont(ui.fontId, ui.builtinFallbackId, id);
+      continue;
+    }
+#endif
     if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) == 0) {
       const size_t internalFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
       if (internalFree < kUiFallbackMinInternalHeap) {
@@ -511,10 +550,16 @@ void SdCardFontSystem::setupTtfUiFallbacks(GfxRenderer& renderer) {
     // Distinct id from the reader-size font: a UI size can equal the reader size
     // (e.g. both 12pt), which would collide on computeTtfFontId and be dropped
     // as a duplicate. Salt the UI family name to separate the id spaces.
+#ifndef CROSSMUX_UI_PROFILE_HIGH_DPI
     const int id = computeTtfFontId((ttfFamily_ + "\x01ui").c_str(), ui.pointSize);
+#endif
     renderer.insertFont(id, f->family());
     renderer.registerTtfFont(id, f.get());
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+    renderer.setFallbackFont(ui.fontId, ui.builtinFallbackId, id);
+#else
     renderer.setFallbackFont(ui.fontId, id);
+#endif
     ttfUiIds_.push_back(id);
     ttfUi_.push_back(std::move(f));
   }

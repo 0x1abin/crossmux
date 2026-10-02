@@ -213,8 +213,8 @@ void EpubReaderActivity::prepareChapterBuild() {
 }
 
 bool EpubReaderActivity::updateChapterBuild() {
-  if (RenderLock::peek()) return true;
-  RenderLock lock;
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return true;
   if (!section) return true;
 
   if (needsPartialRebuild() && buildViewportWidth > 0) {
@@ -281,6 +281,10 @@ void EpubReaderActivity::onExit() {
 
   READING_STATS.endSession();
   ACHIEVEMENTS.recordSessionEnded(READING_STATS.getLastSessionSnapshot());
+#if FREEINK_DEVICE_READPICO
+  // Four frames of PSRAM; the reader is the only owner and gives them back here.
+  freePageCache();
+#endif
   showPendingAchievementPopups(renderer);
   ReaderActivity::onExit();
 #if FREEINK_DEVICE_EEGO_A4
@@ -658,6 +662,7 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+#if !FREEINK_DEVICE_READPICO
   constexpr unsigned long IDLE_PREWARM_DEBOUNCE_MS = 400;
   auto* fcm = renderer.getFontCacheManager();
   {
@@ -681,6 +686,8 @@ void EpubReaderActivity::loop() {
       }
     }
   }
+
+#endif
 
   if (!updateChapterBuild()) return;
 
@@ -965,6 +972,7 @@ void EpubReaderActivity::loop() {
   }
 
   if (turnGuardActive) {
+    activityManager.cancelIdleRender();
     pendingManualTurn = prevTriggered ? -1 : 1;
     return;
   }
@@ -1590,6 +1598,9 @@ void EpubReaderActivity::renderBook() {
       return;
     }
 
+#if FREEINK_DEVICE_READPICO
+    ++sectionGeneration_;
+#endif
     const bool cacheLoaded = section->loadSectionFile(renderSpec);
     if (cacheLoaded) {
       cachedChapterTotalPageCount = 0;
@@ -1980,6 +1991,150 @@ void EpubReaderActivity::rememberCurrentContentOffset() {
   }
 }
 
+#if FREEINK_DEVICE_READPICO
+bool EpubReaderActivity::pageCacheEligible() const {
+  return !pageCacheFailed_ && section && !section->isBuilding() && renderer.hasFrameBuffer() &&
+         !activityManager.isSwitchPending() && overlay == Overlay::None && fontPromptState == FontPromptState::Idle &&
+         !renderer.isInverted() && SETTINGS.textAntiAliasing && !SETTINGS.readingBackgroundEnabled &&
+         !renderer.supportsStripGrayscale() && renderer.supportsTextOnlyCombinedBase();
+}
+
+ReaderPageCacheKey EpubReaderActivity::pageCacheKey(const int page, const int top, const int right, const int bottom,
+                                                    const int left) const {
+  return {
+      .spec = effectiveRenderSpec(renderer.getScreenWidth() - left - right, renderer.getScreenHeight() - top - bottom),
+      .sectionGeneration = sectionGeneration_,
+      .renderEpoch = renderEpoch_,
+      .spine = currentSpineIndex,
+      .page = page,
+      .top = top,
+      .right = right,
+      .bottom = bottom,
+      .left = left,
+      .orientation = SETTINGS.orientation,
+      .fakeBold = SETTINGS.fakeBold,
+      .antiAliasing = SETTINGS.textAntiAliasing != 0,
+      .inverted = renderer.isInverted(),
+      .background = SETTINGS.readingBackgroundEnabled != 0,
+      .guideLine = SETTINGS.readingGuideLineEnabled != 0,
+      .guideStyle = SETTINGS.readingGuideLineStyle,
+      .guideOffset = SETTINGS.readingGuideLineOffset};
+}
+
+uint32_t EpubReaderActivity::idleRenderDelayMs() const { return pageCacheFailed_ ? 0 : 400; }
+
+void EpubReaderActivity::freePageCache() {
+  pageCacheBase_.reset();
+  pageCacheLsb_.reset();
+  pageCacheMsb_.reset();
+  pageCacheStash_.reset();
+  pageCache_.state = ReaderPageCache::State::Empty;
+}
+
+void EpubReaderActivity::renderIdle(const uint32_t generation) {
+  const auto cancelled = [&] { return activityManager.idleRenderCancelled(generation); };
+  if (cancelled() || !pageCacheEligible()) return;
+  const auto& layout = renderedPageKey_;
+  // A main-loop reflow/jump may have replaced the section since the last render.
+  if (layout != pageCacheKey(section->currentPage, layout.top, layout.right, layout.bottom, layout.left)) return;
+  auto key = layout;
+  ++key.page;
+  if (key.page >= static_cast<int>(section->pageCount) || pageCache_.attempted(key)) return;
+  pageCache_.key = key;
+  pageCache_.state = ReaderPageCache::State::Skipped;
+
+  auto page = section->loadPage(key.page);
+  if (!page) {
+    LOG_ERR("ERS", "Page cache: page %d failed to load", key.page);
+    return;
+  }
+  if (cancelled() || page->hasImages()) return;
+
+  const size_t bytes = renderer.getBufferSize();
+  if (bytes == 0) return;
+  if (!pageCacheBase_) {
+    constexpr size_t kContiguousReserve = 16 * 1024;
+    if (memory::psramHasHeadroom(4 * bytes, bytes, kContiguousReserve)) {
+      pageCacheBase_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+      pageCacheLsb_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+      pageCacheMsb_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+      pageCacheStash_ = memory::makePsramByteBufferUninitializedNoThrow(bytes);
+    }
+    if (!pageCacheBase_ || !pageCacheLsb_ || !pageCacheMsb_ || !pageCacheStash_) {
+      freePageCache();
+      pageCacheFailed_ = true;
+      LOG_ERR("ERS", "Page cache off: PSRAM allocation of %u B failed", static_cast<unsigned>(4 * bytes));
+      return;
+    }
+  }
+  if (cancelled()) return;
+
+  uint8_t* const live = renderer.getFrameBuffer();
+  auto* fcm = renderer.getFontCacheManager();
+  const auto started = millis();
+#ifdef ENABLE_CHINESE_VERSION
+  if (fcm) fcm->consumeMissingChineseCodepoint();
+#endif
+  memcpy(pageCacheStash_.get(), live, bytes);
+  struct RestoreFrame {
+    GfxRenderer& renderer;
+    uint8_t* live;
+    const uint8_t* stash;
+    size_t bytes;
+    GfxRenderer::RenderMode mode;
+    ~RestoreFrame() {
+      renderer.setRenderMode(mode);
+      memcpy(live, stash, bytes);
+      if (auto* cache = renderer.getFontCacheManager()) cache->clearCache();
+    }
+  } restore{renderer, live, pageCacheStash_.get(), bytes, renderer.getRenderMode()};
+  if (fcm) {
+    fcm->clearCache();
+    fcm->resetStats();
+  }
+
+  // Load glyphs on demand: a whole-page prewarm cannot be interrupted. Check
+  // between elements instead; an individual SD read/glyph render must finish.
+  const auto renderPlane = [&](const GfxRenderer::RenderMode mode, uint8_t* target) {
+    if (cancelled()) return false;
+    renderer.setRenderMode(mode);
+    // clearScreen() reaches the HAL on Read Pico; this is scratch only.
+    memset(live, mode == GfxRenderer::BW ? 0xFF : 0x00, bytes);
+    GfxRenderer::SyntheticBoldScope syntheticBold(renderer, key.fakeBold);
+    for (const auto& element : page->elements) {
+      if (cancelled()) return false;
+      element->render(renderer, key.spec.fontId, key.left, key.top);
+    }
+    // Match foreground ordering: all text first, then the guide lines.
+    for (const auto& element : page->elements) {
+      if (cancelled()) return false;
+      if (!key.guideLine || element->getTag() != TAG_PageLine) continue;
+      const auto& line = static_cast<const PageLine&>(*element);
+      if (line.getBlock()->isEmpty()) continue;
+      const int lineHeight = renderer.getLineHeight(key.spec.fontId, key.spec.lineCompression) +
+                             line.getBlock()->getRubyShift(renderer.getFontAscenderSize(key.spec.fontId));
+      const int guideY = key.top + line.yPos + lineHeight + key.guideOffset;
+      if (readingGuideLine::fitsVertically(key.guideStyle, guideY, key.top, renderer.getScreenHeight() - key.bottom)) {
+        readingGuideLine::draw(renderer, key.left, guideY, renderer.getScreenWidth() - key.right - 1, key.guideStyle);
+      }
+    }
+    if (cancelled()) return false;
+    memcpy(target, live, bytes);
+    return !cancelled();
+  };
+
+  if (!renderPlane(GfxRenderer::BW, pageCacheBase_.get()) ||
+      !renderPlane(GfxRenderer::GRAYSCALE_LSB, pageCacheLsb_.get()) ||
+      !renderPlane(GfxRenderer::GRAYSCALE_MSB, pageCacheMsb_.get()) || cancelled())
+    return;
+#ifdef ENABLE_CHINESE_VERSION
+  pageCacheMissingCodepoint_ = fcm ? fcm->consumeMissingChineseCodepoint() : 0;
+#endif
+  pageCache_.state = ReaderPageCache::State::Ready;
+  LOG_DBG("ERS", "Page cache: page %d ready in %lums", key.page, millis() - started);
+}
+#endif
+
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
@@ -2023,14 +2178,25 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       if (manager) manager->clearCache();
     }
   } rawFontCacheGuard;
+#if FREEINK_DEVICE_READPICO
+  const auto key = pageCacheKey(section ? section->currentPage : -1, orientedMarginTop, orientedMarginRight,
+                                orientedMarginBottom, orientedMarginLeft);
+  const bool pageCacheHit = pageCacheEligible() && pageCache_.ready(key);
+  ++renderEpoch_;
+  renderedPageKey_ = key;
+  renderedPageKey_.renderEpoch = renderEpoch_;
+#else
+  [[maybe_unused]] constexpr bool pageCacheHit = false;
+#endif
   std::optional<FontCacheManager::PrewarmScope> prewarmScope;
-  if (fcm->needsPrewarmScan(fontId)) {
+  // A hit copies finished pixels; it does not need reader glyphs or a scan pass.
+  if (!pageCacheHit && fcm->needsPrewarmScan(fontId)) {
     prewarmScope.emplace(*fcm);
     // Scan pass records the page text only (status bar glyphs are flash-resident
     // UI fonts and would otherwise shadow the reader font in the prewarm).
     renderPage();
     prewarmScope->endScanAndPrewarm();
-  } else {
+  } else if (!pageCacheHit) {
     fcm->clearCache();
     fcm->resetStats();
     rawFontCacheGuard.manager = fcm;
@@ -2126,9 +2292,25 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   };
 
   if (SETTINGS.readingBackgroundEnabled && !readingBackground::load(renderer)) renderer.clearScreen();
-  renderPageWithGuideLines();
+  unsigned long cacheBaseMs = 0;
+#if FREEINK_DEVICE_READPICO
+  if (pageCacheHit) {
+    const auto tBase = millis();
+    // The cache is the finished page, cleared margins and all, so no clearScreen
+    // is needed on this path.
+    memcpy(renderer.getFrameBuffer(), pageCacheBase_.get(), renderer.getBufferSize());
+    cacheBaseMs = millis() - tBase;
+  } else
+#endif
+  {
+    renderPageWithGuideLines();
+  }
 #ifdef ENABLE_CHINESE_VERSION
+#if FREEINK_DEVICE_READPICO
+  const uint32_t missingCodepoint = pageCacheHit ? pageCacheMissingCodepoint_ : fcm->consumeMissingChineseCodepoint();
+#else
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
+#endif
   if (missingCodepoint != 0 && !FontDownloadActivity::wasChineseFontPromptShownThisBoot()) {
     uint32_t expected = 0;
     pendingMissingChineseCodepoint_.compare_exchange_strong(expected, missingCodepoint, std::memory_order_relaxed);
@@ -2330,10 +2512,20 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       }
       const auto tBwStore = millis();
 
-      renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
-      renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-      renderGrayscalePass();
-      renderer.copyGrayscaleLsbBuffers();
+#if FREEINK_DEVICE_READPICO
+      if (pageCacheHit) {
+        // Both planes were rendered at idle; putting them in place is one copy
+        // each instead of a full page render each.
+        memcpy(renderer.getFrameBuffer(), pageCacheLsb_.get(), renderer.getBufferSize());
+        renderer.copyGrayscaleLsbBuffers();
+      } else
+#endif
+      {
+        renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
+        renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+        renderGrayscalePass();
+        renderer.copyGrayscaleLsbBuffers();
+      }
       const auto tGrayLsb = millis();
 
       // Abort early if a push/pop is pending (e.g. user opened menu)
@@ -2347,10 +2539,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         return;
       }
 
-      renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
-      renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-      renderGrayscalePass();
-      renderer.copyGrayscaleMsbBuffers();
+#if FREEINK_DEVICE_READPICO
+      if (pageCacheHit) {
+        memcpy(renderer.getFrameBuffer(), pageCacheMsb_.get(), renderer.getBufferSize());
+        renderer.copyGrayscaleMsbBuffers();
+      } else
+#endif
+      {
+        renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
+        renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+        renderGrayscalePass();
+        renderer.copyGrayscaleMsbBuffers();
+      }
       const auto tGrayMsb = millis();
 
       // Abort before the expensive grayscale display if a push/pop is pending
@@ -2370,6 +2570,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       const auto tBwRestore = millis();
 
       const auto tEnd = millis();
+      if (pageCacheHit) {
+        LOG_DBG("ERS", "Page render: page-cache hit (base_copy=%lums)", cacheBaseMs);
+      }
       LOG_DBG("ERS",
               "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums "
               "gray_lsb=%lums gray_msb=%lums gray_display=%lums bw_restore=%lums total=%lums",

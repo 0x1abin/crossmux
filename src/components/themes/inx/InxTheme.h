@@ -108,6 +108,7 @@ constexpr ThemeMetrics makeValues() {
   metrics.menuSpacing = 0;
   metrics.scrollBarWidth = 6;
   metrics.scrollBarRightOffset = 2;
+  UiHighDpiProfile::apply(metrics);
   return metrics;
 }
 inline constexpr ThemeMetrics values = makeValues();

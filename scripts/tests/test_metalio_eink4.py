@@ -164,7 +164,8 @@ uint8_t CrossPointSettings::defaultLanguageIndex() { return 0; }
 template<class T,class=void> struct HasHapticSetting : std::false_type {};
 template<class T> struct HasHapticSetting<T,std::void_t<decltype(std::declval<T>().hapticFeedbackLevel)>>
  : std::true_type {};
-struct GfxRenderer {
+class GfxRenderer {
+ public:
  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
  Orientation orientation=Portrait;
  int panelWidth=800, panelHeight=480;
@@ -429,7 +430,7 @@ int main() {
 '''.replace("TRANSFORM", transform)
             (tmp / "test.cpp").write_text(source)
             for flags in ([], ["-DFREEINK_CAP_HAPTIC=0"]):
-                subprocess.run(["c++", "-std=c++17", "-pthread", "-Wall", "-Wextra", "-Werror",
+                subprocess.run(["c++", "-std=c++20", "-pthread", "-Wall", "-Wextra", "-Werror",
                                 "-I" + str(tmp), "-I" + str(SDK / "BoardConfig/include"),
                                 "-I" + str(SDK / "InputManager/include"), "-DFREEINK_DEVICE_METALIO_EINK4=1",
                                 "-I" + str(ROOT / "src"), "-I" + str(ROOT / "lib/Epub"),

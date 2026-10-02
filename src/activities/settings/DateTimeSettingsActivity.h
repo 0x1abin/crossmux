@@ -6,31 +6,17 @@
 #include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
 
+// Manual local date/time editor, opened from ClockSettingsActivity.
 class DateTimeSettingsActivity final : public Activity, private UiAppHost {
  public:
   explicit DateTimeSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("DateTimeSettings", renderer, mappedInput), UiAppHost(renderer) {}
 
   void onEnter() override;
-  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 
  private:
-  enum class Mode : uint8_t {
-    Menu,
-    ManualEdit,
-  };
-
-  enum class MenuItem : uint8_t {
-    AutoTime,
-    DateTime,
-    TimeZone,
-    Hour24,
-    SyncNow,
-    Count,
-  };
-
   enum class EditField : uint8_t {
     Year,
     Month,
@@ -40,12 +26,10 @@ class DateTimeSettingsActivity final : public Activity, private UiAppHost {
     Count,
   };
 
-  static constexpr int MENU_ITEM_COUNT = static_cast<int>(MenuItem::Count);
   static constexpr int EDIT_FIELD_COUNT = static_cast<int>(EditField::Count);
 
   ButtonNavigator buttonNavigator;
-  Mode mode = Mode::Menu;
-  int selectedMenuItem = 0;
+  bool waitForConfirmRelease_ = false;
   int selectedEditField = 0;
   int year = 2024;
   unsigned month = 1;
@@ -53,21 +37,12 @@ class DateTimeSettingsActivity final : public Activity, private UiAppHost {
   unsigned hour = 0;
   unsigned minute = 0;
 
-  void loopMenu();
-  void loopManualEdit();
-  void renderMenu();
-  void renderManualEdit();
-  void activateMenuItem();
   void beginManualEdit();
   void adjustEditField(int delta);
   bool applyManualTime();
   void cancelManualEdit();
   void confirmManualEdit();
 
-  freeink::ui::ListNav menuNav_;
-  std::string menuValue(int index) const;
-  void buildMenuScreen(UiScreen& screen);
-  static constexpr freeink::ui::ActionId ACTION_MENU = 4;
   static constexpr freeink::ui::ActionId ACTION_STEP = 1;
   static constexpr freeink::ui::ActionId ACTION_CANCEL = 2;
   static constexpr freeink::ui::ActionId ACTION_OK = 3;

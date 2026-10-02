@@ -22,6 +22,8 @@ class TtfEpdFont;
 inline constexpr int CJK_UI_8_FONT_ID = 0x434A4B08;
 inline constexpr int CJK_UI_10_FONT_ID = 0x434A4B0A;
 inline constexpr int CJK_UI_12_FONT_ID = 0x434A4B0C;
+inline constexpr int CJK_UI_14_FONT_ID = 0x434A4B0E;
+inline constexpr int CJK_UI_16_FONT_ID = 0x434A4B10;
 
 // Reader footer slots keep their original sizes when Read Pico enlarges the UI.
 inline constexpr int READER_STATUS_FONT_ID = 0x52534208;

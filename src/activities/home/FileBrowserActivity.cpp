@@ -179,16 +179,14 @@ bool FileBrowserActivity::usesIconLayout() const {
 
 void FileBrowserActivity::drawIconGrid(UiScreen& screen, const fui::Rect rect) const {
   const int start = InxGridGeometry::pageStart(nav.selected, files.size());
-  const int cellWidth = rect.width / InxGridGeometry::columns;
-  const int cellHeight = rect.height / InxGridGeometry::rows;
   constexpr int iconSize = 72;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const bool showSelection = showMainTabContentSelection();
   for (int slot = 0; slot < InxGridGeometry::itemsPerPage && start + slot < listCount(); ++slot) {
     const int index = start + slot;
-    const int column = slot % InxGridGeometry::columns;
-    const int row = slot / InxGridGeometry::columns;
-    const Rect cell{rect.x + column * cellWidth + 4, rect.y + row * cellHeight + 4, cellWidth - 8, cellHeight - 8};
+    Rect cell = InxGridGeometry::cellBounds(slot, rect.width, rect.height);
+    cell.x += rect.x;
+    cell.y += rect.y;
     const bool selected = showSelection && index == nav.selected;
     if (selected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
     const UIIcon type = UITheme::getFileIcon(files[index]);

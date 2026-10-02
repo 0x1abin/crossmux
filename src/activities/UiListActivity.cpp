@@ -108,9 +108,11 @@ void UiListActivity::navigateButtons() {
 }
 
 void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, const int selectionOffset) {
-  props.toggleCheckbox = true;
-  props.toggleWidth = 28;
-  props.toggleHeight = 28;
+  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
+    props.toggleCheckbox = true;
+    props.toggleWidth = 28;
+    props.toggleHeight = 28;
+  }
   props.partialTrailingRow = true;
   auto& n = activeNav();
   const int prevTop = n.top;

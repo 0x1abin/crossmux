@@ -123,6 +123,28 @@ The main loop updates mapped input once per frame before
 
 **Critical**: Free resources in reverse order. Delete tasks BEFORE activity destruction.
 
+### Read Pico idle page cache
+
+The EPUB reader prepares the next text page on the existing render task, once
+400 ms have elapsed after a foreground render without another render notification.
+Other activities return zero from `idleRenderDelayMs()` and add no idle wakeups.
+Input, foreground render requests and activity switches cancel the idle pass;
+its timeout must not acknowledge a `requestUpdateAndWait()` caller.
+
+The cache uses four reusable PSRAM frames (415,872 bytes on Read Pico), released
+in `onExit()`. A scoped restore protects the live framebuffer and render mode.
+Glyphs load on demand, with cancellation between page elements and planes;
+a single SD read or glyph render is not preemptible. Cache hits compare the
+resolved layout, drawing settings, chapter generation and render epoch. Image
+pages, failed loads and cancelled attempts do not retry until another foreground
+render. Allocation failure disables the cache for the reading session.
+
+Run `python3 -m unittest discover -s scripts/tests -p test_reader_page_cache.py -v`
+for cache identity, cancellation, allocation cleanup and render-task scheduling.
+Device acceptance must still check short taps/swipes/menu entry during cache
+construction, reflow to the old cached page number, image-page idle SD activity,
+framebuffer integrity and PSRAM recovery after leaving/reopening the reader.
+
 ### FreeRTOS Task Guidelines
 
 **Source**: [src/activities/util/KeyboardEntryActivity.cpp:45-50](../../src/activities/util/KeyboardEntryActivity.cpp)

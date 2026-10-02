@@ -210,11 +210,24 @@ back to an available RTC. A failed RTC write is logged but does not invalidate
 the successfully updated system time. The RTC is not polled periodically while
 the device is running.
 
-`clockUtcOffsetQ` remains a fixed display offset used by the status bar and
-Standby faces; it does not change the process-wide timezone. Every device exposes
-automatic sync, manual date/time, fixed offset, 12/24-hour format, and one-shot
-sync under **Settings → System → Date & Time**. First-start Simplified Chinese
-defaults to UTC+8 and other languages to UTC+0; upgrades preserve saved values.
+Every device exposes one **Settings → System → Date & Time** page, including
+devices without an external RTC. It contains automatic sync, current date/time,
+timezone, daylight saving time, 12/24-hour format, header clock visibility, and
+one-shot sync. Manual date/time editing is enabled only when automatic sync is
+off; one-shot sync remains available in either mode.
+
+The upstream city/fixed-offset timezone table and Auto/On/Off DST policy apply
+the process-wide timezone. Headers, standby faces, manual date/time conversion,
+and reading analytics use that same timezone. Manual edits reject invalid dates
+and nonexistent local times during a DST jump; repeated fall-back times use the
+system library's automatic choice. Existing historical analytics are not rewritten.
+
+`clockUtcOffsetQ` is retained for settings compatibility and the upstream
+fixed-offset migration when `clockTimezone` is unset. First-start Simplified
+Chinese defaults to UTC+8 and other languages to UTC+0; upgrades retain saved
+settings. Header clocks and the date/time page show valid system time after
+either manual editing or NTP sync, independently of external RTC availability
+and the legacy `clockHasBeenSynced` flag.
 
 The SPI display pins (`EPD_SCLK=8`, `EPD_MOSI=10`, `EPD_CS=21`, `EPD_DC=4`,
 `EPD_RST=5`, `EPD_BUSY=6`) and the ADC button layout are **identical** on both

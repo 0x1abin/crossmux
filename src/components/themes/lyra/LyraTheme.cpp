@@ -147,6 +147,10 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
 }
 
 void LyraTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const {
+  if (UiHighDpiProfile::enabled) {
+    BaseTheme::fillBatteryIcon(renderer, rect, percentage);
+    return;
+  }
   const bool charging = gpio.isUsbConnected();
 
   if (charging) {

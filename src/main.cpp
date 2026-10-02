@@ -107,13 +107,12 @@ void updateBluetoothLifecycle() {
   }
   // Preparation blocks new starts; C3 and PSRAM readers keep existing links
   // through chapter construction and book indexing.
-  if (bleinput::isRunning() || activityManager.deferBluetoothStart() || RenderLock::peek() ||
-      millis() < nextStartAttemptAt)
-    return;
+  if (bleinput::isRunning() || activityManager.deferBluetoothStart() || millis() < nextStartAttemptAt) return;
   // Non-reader pages that keep an existing link alive own their explicit start
   // attempts; only readers use the automatic reader-memory gate and retry loop.
   if (!activityManager.isReaderActivity()) return;
-  RenderLock lock;
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return;
   // Rendering may have started a chapter build while we were acquiring the lock.
   if (!wanted() || activityManager.deferBluetoothStart() || !activityManager.isReaderActivity() ||
       bleinput::isRunning())
@@ -133,6 +132,11 @@ static bool wakePowerReleasePending = false;
 // Fonts
 // All legacy built-in reader IDs share one 12pt offline fallback. Complete
 // families, other sizes, and style variants come from SD .cpfont files.
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include <builtinFonts/notosans_12_regular.h>
+#include <builtinFonts/notosans_cjk_14.h>
+#include <builtinFonts/notosans_cjk_16.h>
+#endif
 EpdFont offlineReaderFont(&notosans_cjk_12);
 EpdFontFamily offlineReaderFontFamily(&offlineReaderFont);
 
@@ -146,7 +150,11 @@ extern EpdFontFamily control18FontFamily;
 
 // International UI fonts remain primary; CJK subsets are selected only when
 // the primary is missing a Han glyph.
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+EpdFont smallFont(&notosans_12_regular);
+#else
 EpdFont smallFont(&notosans_8_regular);
+#endif
 EpdFontFamily smallFontFamily(&smallFont);
 
 extern EpdFont ui10RegularFont;
@@ -157,10 +165,23 @@ extern EpdFont ui12RegularFont;
 extern EpdFont ui12BoldFont;
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+EpdFontFamily cjk8FontFamily(&offlineReaderFont);
+EpdFont cjk14Font(&notosans_cjk_14);
+EpdFont cjk16Font(&notosans_cjk_16);
+EpdFontFamily cjk10FontFamily(&cjk14Font);
+EpdFontFamily ui14FallbackFamily(&cjk14Font);
+EpdFontFamily ui16FallbackFamily(&cjk16Font);
+static EpdFont rtlRegularFont(&ubuntu_12_regular);
+static EpdFont rtlBoldFont(&ubuntu_12_bold);
+static EpdFontFamily rtlFontFamily(&rtlRegularFont, &rtlBoldFont);
+static constexpr int kRtlFontId = 0x52544C0C;
+#else
 EpdFont cjk8Font(&notosans_cjk_8);
-EpdFontFamily cjk8FontFamily(&cjk8Font);
 EpdFont cjk10Font(&notosans_cjk_10);
+EpdFontFamily cjk8FontFamily(&cjk8Font);
 EpdFontFamily cjk10FontFamily(&cjk10Font);
+#endif
 EpdFont cjk12Font(&notosans_cjk_12);
 EpdFontFamily cjk12FontFamily(&cjk12Font);
 
@@ -206,12 +227,20 @@ enum class BootResume : uint8_t {
 static bool deepSleepInProgress = false;
 
 #if FREEINK_CAP_TOUCH
+#if FREEINK_DEVICE_READPICO
+// Defer font I/O until after activity teardown releases its render lock.
+static bool sdFontReloadPending = false;
+#endif
+
 static bool finishWifiSessionWithoutRestart() {
   if (!BoardConfig::hasTouch()) return false;
   if (esp_sntp_enabled()) esp_sntp_stop();
   WiFi.mode(WIFI_OFF);
   delay(100);
   LOG_DBG("MAIN", "WiFi stopped without restart on touch device");
+#if FREEINK_DEVICE_READPICO
+  sdFontReloadPending = true;
+#endif
   return true;
 }
 #endif
@@ -468,6 +497,23 @@ bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false)
   renderer.insertFont(READER_ESTIMATE_FONT_ID, ui10FontFamily);
   renderer.setFallbackFont(READER_STATUS_FONT_ID, CJK_UI_8_FONT_ID);
   renderer.setFallbackFont(READER_ESTIMATE_FONT_ID, CJK_UI_10_FONT_ID);
+#endif
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  renderer.insertFont(UiHighDpiProfile::reader12FontId, offlineReaderFontFamily);
+  // Same-size Chinese UI first, then common Chinese and Ubuntu script coverage.
+  renderer.insertFont(CJK_UI_14_FONT_ID, ui14FallbackFamily);
+  renderer.insertFont(CJK_UI_16_FONT_ID, ui16FallbackFamily);
+  renderer.setFallbackFont(READER_STATUS_FONT_ID, CJK_UI_12_FONT_ID);
+  renderer.setFallbackFont(READER_ESTIMATE_FONT_ID, CJK_UI_14_FONT_ID);
+  renderer.setFallbackFont(SMALL_FONT_ID, CJK_UI_12_FONT_ID);
+  renderer.setFallbackFont(UI_10_FONT_ID, CJK_UI_14_FONT_ID);
+  renderer.setFallbackFont(UI_12_FONT_ID, CJK_UI_16_FONT_ID);
+  renderer.setFallbackFont(NOTOSANS_18_FONT_ID, CJK_UI_16_FONT_ID);
+  renderer.setFallbackFont(CONTROL_18_FONT_ID, CJK_UI_16_FONT_ID);
+  renderer.insertFont(kRtlFontId, rtlFontFamily);
+  renderer.setFallbackFont(CJK_UI_14_FONT_ID, CJK_UI_12_FONT_ID);
+  renderer.setFallbackFont(CJK_UI_16_FONT_ID, CJK_UI_12_FONT_ID);
+  renderer.setFallbackFont(CJK_UI_12_FONT_ID, kRtlFontId);
 #endif
   renderer.insertFont(CHINESE_CHESS_FONT_ID, chineseChessPieceFontFamily);
 
@@ -910,8 +956,36 @@ void loop() {
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
 
+#if FREEINK_CAP_TOUCH && FREEINK_DEVICE_READPICO
+  if (sdFontReloadPending) {
+    sdFontReloadPending = false;
+    const unsigned long reloadStart = millis();
+    LOG_DBG("MAIN", "Reloading SD font family after the network session");
+    {
+      // The independent render task shares the font maps and resident font objects.
+      RenderLock lock;
+      sdFontSystem.ensureLoaded(renderer);
+    }
+    LOG_DBG("MAIN", "SD font reload after network took %lu ms", millis() - reloadStart);
+    activityManager.requestUpdate();
+  }
+#endif
+
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+#if FREEINK_DEVICE_READPICO
+  // Cancel before any handler can wait for the framebuffer lock. These are
+  // snapshot queries: they do not consume the gesture from its normal owner.
+#if CROSSPOINT_EMULATED
+  const bool physicalPress = gpio.wasAnyPressed();
+#else
+  const bool physicalPress = gpio.physicalPressedMask() != 0;
+#endif
+  if (mappedInputManager.wasAnyPressed() || mappedInputManager.wasAnyReleased() || physicalPress ||
+      gpio.wasTouchActivity()) {
+    activityManager.cancelIdleRender();
+  }
+#endif
 #if FREEINK_CAP_HAPTIC
   gpio.updateHapticFeedback(SETTINGS.hapticFeedbackLevel);
 #endif
@@ -1147,6 +1221,7 @@ void loop() {
   } else if (readerIsActive && (millis() - lastActivityTime) >= READING_STATS_CHECKPOINT_IDLE_MS &&
              !activityManager.skipLoopDelay() && !activityManager.preventAutoSleep() &&
              READING_STATS.shouldSaveCheckpoint()) {
+    activityManager.cancelIdleRender();
     RenderLock lock;
     if (!READING_STATS.saveToFile()) {
       LOG_ERR("RST", "Failed to save idle reading checkpoint");

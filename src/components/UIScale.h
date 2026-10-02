@@ -21,5 +21,10 @@ inline UIScaleSpec uiScaleSpec() {
   // size-matched SD CJK fallback) where the NotoSans reader subsets do not.
   // Same font develop's drawHeader used, so script coverage matches develop.
   spec.titleFontId = UI_12_FONT_ID;
+  if (UiHighDpiProfile::enabled) {
+    spec.smallFontId = SMALL_FONT_ID;
+    spec.bodyFontId = UI_10_FONT_ID;
+    spec.titleFontId = UI_12_FONT_ID;
+  }
   return spec;
 }

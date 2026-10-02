@@ -13,6 +13,10 @@
 #include "components/icons/customListIcons.h"
 #include "components/icons/inx_apps.h"
 #include "components/icons/listIcons.h"
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include "components/icons/listIcons48.h"
+#include "components/icons/uiChromeIcons.h"
+#endif
 
 // Shared glue for activities hosting a FreeInkApp: the font-bound render
 // target and the touch snapshot FreeInkApp routing consumes.
@@ -85,6 +89,38 @@ inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) 
 // the legacy drawIcon assets use a different bit layout). Two crisp sizes:
 // 24 for single-line rows, 32 for label+subtitle rows.
 inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (size >= 48 || UiHighDpiProfile::enabled) {
+    switch (icon) {
+      case UIIcon::Settings:
+        return freeink::ui::bitmapFromIcon(icon_settings_2_48);
+      case UIIcon::Folder:
+        return freeink::ui::bitmapFromIcon(icon_folder_48);
+      case UIIcon::Text:
+        return freeink::ui::bitmapFromIcon(icon_file_text_48);
+      case UIIcon::Image:
+        return freeink::ui::bitmapFromIcon(icon_image_48);
+      case UIIcon::Book:
+        return freeink::ui::bitmapFromIcon(icon_book_48);
+      case UIIcon::File:
+        return freeink::ui::bitmapFromIcon(icon_file_48);
+      case UIIcon::Wifi:
+        return freeink::ui::bitmapFromIcon(icon_wifi_48);
+      case UIIcon::Library:
+        return freeink::ui::bitmapFromIcon(icon_library_48);
+      case UIIcon::Hotspot:
+        return freeink::ui::bitmapFromIcon(icon_radio_tower_48);
+      case UIIcon::Usb:
+        return freeink::ui::bitmapFromIcon(icon_usb_48);
+      case UIIcon::Bookmark:
+        return freeink::ui::bitmapFromIcon(icon_bookmark_48);
+      case UIIcon::Blocks:
+        return freeink::ui::bitmapFromIcon(icon_blocks_48);
+      default:
+        break;
+    }
+  }
+#endif
   if (size >= 32) {
     switch (icon) {
       case UIIcon::Folder:

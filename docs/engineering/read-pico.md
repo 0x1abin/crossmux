@@ -1,5 +1,7 @@
 # Read Pico (小纸 Pico, RDP-G01-W)
 
+The confirmed 4.7-inch UI is documented in [high-dpi-ui-profile.md](high-dpi-ui-profile.md). Its high-density UI profile macro is enabled in the shared ReadPico hardware configuration, including Nightly, and in the native simulator. Physical panel acceptance remains separate from simulator and build validation.
+
 ## Current implementation — 2026-09-30
 
 Read Pico uses the SDK's **epdiy LCD_CAM + GDMA + RMT** backend for the
