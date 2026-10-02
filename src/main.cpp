@@ -914,7 +914,12 @@ void loop() {
 #if FREEINK_DEVICE_READPICO
   // Cancel before any handler can wait for the framebuffer lock. These are
   // snapshot queries: they do not consume the gesture from its normal owner.
-  if (mappedInputManager.wasAnyPressed() || mappedInputManager.wasAnyReleased() || gpio.physicalPressedMask() ||
+#if CROSSPOINT_EMULATED
+  const bool physicalPress = gpio.wasAnyPressed();
+#else
+  const bool physicalPress = gpio.physicalPressedMask() != 0;
+#endif
+  if (mappedInputManager.wasAnyPressed() || mappedInputManager.wasAnyReleased() || physicalPress ||
       gpio.wasTouchActivity()) {
     activityManager.cancelIdleRender();
   }

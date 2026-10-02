@@ -226,6 +226,45 @@ int main() {
 '''
         run_cpp(program, (ROOT / 'src/activities/reader', ROOT / 'lib/Epub'))
 
+    def test_readpico_input_cancellation_on_hardware_and_simulator(self):
+        source = (ROOT / 'src/main.cpp').read_text()
+        begin = source.index('  // Cancel before any handler can wait for the framebuffer lock.')
+        end = source.index('\n#endif', source.index('    activityManager.cancelIdleRender();', begin))
+        production = source[begin:end]
+        program = r'''
+#include <cassert>
+#include <cstdint>
+struct Input {
+  bool press=false, release=false;
+  bool wasAnyPressed() const {return press;}
+  bool wasAnyReleased() const {return release;}
+} mappedInputManager;
+struct GPIO {
+  bool physical=false, touch=false;
+#if CROSSPOINT_EMULATED
+  bool wasAnyPressed() const {return physical;}
+#else
+  uint8_t physicalPressedMask() const {return physical ? 1 : 0;}
+#endif
+  bool wasTouchActivity() const {return touch;}
+} gpio;
+struct Manager {int cancellations=0; void cancelIdleRender() {++cancellations;}} activityManager;
+void poll() {
+''' + production + r'''
+}
+int main() {
+  poll(); assert(activityManager.cancellations==0);
+  bool* events[]={&mappedInputManager.press,&mappedInputManager.release,&gpio.physical,&gpio.touch};
+  for(auto* event:events) {
+    *event=true; poll(); assert(activityManager.cancellations==1 && *event);
+    *event=false; activityManager.cancellations=0;
+  }
+}
+'''
+        for emulated in (0, 1):
+            with self.subTest(emulated=emulated):
+                run_cpp(f'#define CROSSPOINT_EMULATED {emulated}\n' + program)
+
     def test_render_task_priorities_and_waiter(self):
         source = (ROOT / 'src/activities/ActivityManager.cpp').read_text()
         loop = method(source, 'void ActivityManager::renderTaskLoop(')
