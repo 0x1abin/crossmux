@@ -41,4 +41,16 @@ int main() {
   assert(preview.finish("Sans", 16, false) == Decision::Disable);
   preview.begin("Sans", 16, false);
   assert(preview.finish("Sans", 18, false) == Decision::Ask);
+
+  // Layout-only edits preserve an accelerated selection, even without a cache.
+  preview.begin("Sans", 18, true);
+  assert(preview.finish("Sans", 18, false) == Decision::Enable);
+
+  // Vector fonts never enter the .cpfont Flash flow, including legacy preferences.
+  preview.begin("Sans", 18, true);
+  assert(preview.finish("Vector", 18, false, false) == Decision::Disable);
+  preview.begin("Vector", 18, true);
+  assert(preview.finish("Vector", 18, true, false) == Decision::Disable);
+  preview.begin("Vector", 18, false);
+  assert(preview.finish("Sans", 18, false) == Decision::Ask);
 }

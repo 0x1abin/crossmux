@@ -30,3 +30,17 @@ target_include_directories(SdCardFontPagedTest PRIVATE
 target_compile_definitions(SdCardFontPagedTest PRIVATE CONFIG_IDF_TARGET_ESP32C3=1 FREEINK_CAP_BLE_HID_HOST=1)
 target_link_libraries(SdCardFontPagedTest PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(SdCardFontPagedTest TEST_PREFIX "paged.")
+
+add_executable(SdCardFontPreflightTest
+  SdCardFontPreflightTest.cpp
+  ${REPO_ROOT}/lib/EpdFont/SdCardFontCache.cpp
+)
+target_include_directories(SdCardFontPreflightTest PRIVATE
+  stubs
+  ${REPO_ROOT}/lib/EpdFont
+  ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/test/font_cache_manager/stubs
+)
+target_link_libraries(SdCardFontPreflightTest PRIVATE crosspoint_test_common)
+target_compile_options(SdCardFontPreflightTest PRIVATE -UNDEBUG)
+add_test(NAME SdCardFontPreflight COMMAND SdCardFontPreflightTest)

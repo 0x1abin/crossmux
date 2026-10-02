@@ -12,6 +12,36 @@
 
 namespace fontpreload {
 
+void drawTooLargeNotice(const GfxRenderer& renderer) {
+  auto& theme = UITheme::getInstance();
+  const auto& metrics = theme.getMetrics();
+  const Rect bounds = SubpageLayout::insetHorizontal(theme.getScreenSafeArea(renderer), metrics.contentSidePadding);
+  renderer.clearScreen();
+  // Reuse the theme's bounded wrapping so the notice fits narrow/rotated screens.
+  UITheme::drawCenteredWrappedText(renderer, bounds, UI_12_FONT_ID, tr(STR_FONT_PRELOAD_TOO_LARGE), 4);
+}
+
+StrId failureMessage(const SdCardFontCache::Result result) {
+  switch (result) {
+    case SdCardFontCache::Result::TooLarge:
+      return StrId::STR_FONT_PRELOAD_TOO_LARGE;
+    case SdCardFontCache::Result::NotSafe:
+      return StrId::STR_FONT_PRELOAD_UNAVAILABLE;
+    case SdCardFontCache::Result::OpenFailed:
+    case SdCardFontCache::Result::InvalidFont:
+      return StrId::STR_FONT_PRELOAD_INVALID;
+    case SdCardFontCache::Result::Ok:
+    case SdCardFontCache::Result::AlreadyCached:
+    case SdCardFontCache::Result::Oom:
+    case SdCardFontCache::Result::EraseFailed:
+    case SdCardFontCache::Result::ReadFailed:
+    case SdCardFontCache::Result::WriteFailed:
+    case SdCardFontCache::Result::VerifyFailed:
+      return StrId::STR_FONT_PRELOAD_FAILED;
+  }
+  return StrId::STR_FONT_PRELOAD_FAILED;
+}
+
 void draw(const GfxRenderer& renderer, const char* familyName, const uint8_t pointSize, const size_t completed,
           const size_t total, const State state) {
   const auto& metrics = UITheme::getInstance().getMetrics();

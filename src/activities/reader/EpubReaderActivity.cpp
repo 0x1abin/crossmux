@@ -53,6 +53,7 @@
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "components/FontPreloadView.h"
 #include "util/BookCacheUtils.h"
 #include "util/BookmarkFile.h"
 #include "util/ReadingBackground.h"
@@ -1607,9 +1608,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     loadFailurePopup.processRender(renderer, mappedInput);
     return;
   }
+  if (fontPromptState == FontPromptState::TooLarge) {
+    fontpreload::drawTooLargeNotice(renderer);
+    renderer.displayBuffer();
+    return;
+  }
   ReaderActivity::render(std::move(lock));
   // Rebuild the page underneath, including after a global control-center visit.
-  if (fontPromptState != FontPromptState::Idle) overlayPopup.processRender(renderer, mappedInput);
+  if (fontPromptState != FontPromptState::Idle) {
+    overlayPopup.processRender(renderer, mappedInput);
+  }
 }
 
 bool EpubReaderActivity::skipLoopDelay() {
@@ -3476,8 +3484,11 @@ void EpubReaderActivity::applyReaderTextSettings() {
 void EpubReaderActivity::finishFontPreview() {
   const auto* family = sdFontSystem.registry().findFamily(SETTINGS.sdFontFamilyName);
   const auto* file = family ? family->findNearestSize(SETTINGS.fontPointSize) : nullptr;
-  const bool cached = file && SdCardFontCache::isValidFor(file->path.c_str());
-  const auto decision = fontPreview.finish(SETTINGS.sdFontFamilyName, SETTINGS.fontPointSize, cached);
+  const bool supportsPreload = !family || !family->vector;
+  const auto check =
+      file && supportsPreload ? SdCardFontCache::preflight(file->path.c_str()) : SdCardFontCache::Result::InvalidFont;
+  const auto decision = fontPreview.finish(SETTINGS.sdFontFamilyName, SETTINGS.fontPointSize,
+                                           check == SdCardFontCache::Result::AlreadyCached, supportsPreload);
   switch (decision) {
     case ReaderFontPreview::Decision::Keep:
       return;
@@ -3498,21 +3509,50 @@ void EpubReaderActivity::finishFontPreview() {
   SETTINGS.saveToFile();
   if (decision != ReaderFontPreview::Decision::Ask) return;
 
+  if (check == SdCardFontCache::Result::TooLarge) {
+    {
+      RenderLock lock;
+      fontPromptState = FontPromptState::TooLarge;
+    }
+    requestUpdateAndWait();
+    fontNoticeStartedAt = millis();
+    return;
+  }
   {
     RenderLock lock;
-    constexpr StrId options[] = {StrId::STR_FONT_PRELOAD_START, StrId::STR_FONT_PRELOAD_SKIP};
     fontPromptState = FontPromptState::Asking;
     fontPromptWaitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
-    overlayPopup.show(StrId::STR_FONT_PRELOAD_CONFIRM, options, static_cast<int>(std::size(options)), 1,
-                      [this](int index) {
-                        RenderLock lock;
-                        if (index == 0) fontPromptState = FontPromptState::Accepted;
-                      });
+    if (check == SdCardFontCache::Result::Ok) {
+      constexpr StrId options[] = {StrId::STR_FONT_PRELOAD_START, StrId::STR_FONT_PRELOAD_SKIP};
+      overlayPopup.show(StrId::STR_FONT_PRELOAD_CONFIRM, options, static_cast<int>(std::size(options)), 0,
+                        [this](int index) {
+                          RenderLock lock;
+                          if (index == 0) fontPromptState = FontPromptState::Accepted;
+                        });
+    } else {
+      constexpr StrId options[] = {StrId::STR_OK_BUTTON};
+      overlayPopup.show(fontpreload::failureMessage(check), options, static_cast<int>(std::size(options)), 0, {});
+    }
   }
   requestUpdate();
 }
 
 void EpubReaderActivity::handleFontPreloadPrompt() {
+  if (fontPromptState == FontPromptState::TooLarge) {
+    if (millis() - fontNoticeStartedAt >= fontpreload::NOTICE_DURATION_MS) {
+      for (uint8_t button = 0; button < MappedInputManager::kButtonCount; ++button) {
+        if (mappedInput.isPressed(static_cast<MappedInputManager::Button>(button))) return;
+      }
+      int x = 0, y = 0;
+      if (mappedInput.isScreenTouchHeld(x, y)) return;
+      {
+        RenderLock lock;
+        fontPromptState = FontPromptState::Idle;
+      }
+      requestUpdate();
+    }
+    return;
+  }
   if (fontPromptWaitForBackRelease) {
     fontPromptWaitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
     return;  // Consume the inherited release as well as the hold.

@@ -123,7 +123,8 @@ struct EpubReaderActivity {
   GfxRenderer renderer;
   std::unique_ptr<Section> section=std::make_unique<Section>();
   static constexpr int kPageCacheSlots=2;
-  memory::ByteBuffer pageCacheBase_[kPageCacheSlots],pageCacheLsb_[kPageCacheSlots],pageCacheMsb_[kPageCacheSlots],pageCacheStash_[kPageCacheSlots];
+  memory::ByteBuffer pageCacheBase_[kPageCacheSlots],pageCacheLsb_[kPageCacheSlots],
+      pageCacheMsb_[kPageCacheSlots],pageCacheStash_[kPageCacheSlots];
   ReaderPageCache pageCache_[kPageCacheSlots];
   int pageCacheLiveSlot_=0;
   ReaderPageCacheKey renderedPageKey_;
@@ -141,8 +142,9 @@ struct EpubReaderActivity {
   void renderIdle(uint32_t);
   bool buildPageCacheSlot(int,const ReaderPageCacheKey&,uint32_t);
   EpubReaderActivity() {renderedPageKey_=pageCacheKey(section->currentPage,1,1,1,1);}
-  bool consume(int orientedMarginTop=1,int orientedMarginRight=1,int orientedMarginBottom=1,int orientedMarginLeft=1) {
-    ++section->currentPage;
+  bool consume(int orientedMarginTop=1,int orientedMarginRight=1,int orientedMarginBottom=1,int orientedMarginLeft=1,
+               int direction=1) {
+    section->currentPage+=direction;
 ''' + consume + r'''
     return pageCacheHit;
   }
@@ -159,20 +161,21 @@ int main() {
     EpubReaderActivity r;
     const auto original=r.renderer.frame;
     r.renderIdle(0);
-    assert(r.pageCache_[0].state==ReaderPageCache::State::Ready);
-    assert(r.pageCache_[1].state==ReaderPageCache::State::Ready);
+    for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Ready);
     assert(r.pageCache_[1].key.page==r.section->currentPage-1);
     assert(r.renderer.frame==original && r.renderer.mode==GfxRenderer::BW);
     assert(r.pageCacheMissingCodepoint_==0x4E00);
     assert(memory::live==8 && memory::allocations==8);
-    assert(r.pageCacheBase_[0].get()[0]==1 && r.pageCacheLsb_[0].get()[0]==2 && r.pageCacheMsb_[0].get()[0]==3);
+    for(int slot=0;slot<r.kPageCacheSlots;++slot)
+      assert(r.pageCacheBase_[slot].get()[0]==1 && r.pageCacheLsb_[slot].get()[0]==2 && r.pageCacheMsb_[slot].get()[0]==3);
     r.renderIdle(0); assert(r.section->loads==2);
     assert(r.consume() && r.pageCacheLiveSlot_==0);
     r.renderIdle(0); assert(memory::allocations==8);
-    r.freePageCache(); assert(memory::live==0 && r.pageCache_[0].state==ReaderPageCache::State::Empty);
+    r.freePageCache(); assert(memory::live==0);
+    for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Empty);
   }
   reset();
-  {EpubReaderActivity r; r.renderIdle(0); r.section->currentPage-=2; assert(r.consume() && r.pageCacheLiveSlot_==1);}
+  {EpubReaderActivity r; r.renderIdle(0); assert(r.consume(1,1,1,1,-1) && r.pageCacheLiveSlot_==1);}
   // Every key field matters, including every resolved layout setting.
   reset();
   {
@@ -202,19 +205,19 @@ int main() {
     reset(); EpubReaderActivity r; r.section->images=!fail; r.section->fail=fail;
     for(int i=0;i<100;++i) r.renderIdle(0);
     assert(r.section->loads==2 && memory::allocations==0);
-    assert(r.pageCache_[0].state==ReaderPageCache::State::Skipped);
+    for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Skipped);
     r.section->images=false; r.section->fail=false;
     assert(!r.consume()); r.renderIdle(0); assert(r.section->loads==4);
   }
   // Interrupt in each plane and at every element boundary; scratch never leaks.
-  for(int element=1;element<=9;++element) {
+  for(int element=1;element<=18;++element) {
     reset(); EpubReaderActivity r; const auto original=r.renderer.frame;
     r.renderer.mode=GfxRenderer::GRAYSCALE_MSB;
     cancelAt=element; r.renderIdle(0);
-    assert(r.pageCache_[0].state!=ReaderPageCache::State::Ready);
+    assert(r.pageCache_[(element-1)/9].state!=ReaderPageCache::State::Ready);
     assert(r.renderer.frame==original && r.renderer.mode==GfxRenderer::GRAYSCALE_MSB);
     assert(renders==element);
-    assert(r.renderer.fonts.clears==2);
+    assert(r.renderer.fonts.clears==(element<=9 ? 2 : 4));
   }
   reset();
   {EpubReaderActivity r; activityManager.cancelled=true; r.renderIdle(0); assert(r.section->loads==0);}

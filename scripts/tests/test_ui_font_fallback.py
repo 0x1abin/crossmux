@@ -110,7 +110,7 @@ int main() {
 #include <string>
 #include <vector>
 constexpr int SMALL_FONT_ID=1, UI_10_FONT_ID=2, UI_12_FONT_ID=3;
-constexpr int CJK_UI_8_FONT_ID=4, CJK_UI_10_FONT_ID=5, CJK_UI_12_FONT_ID=6;
+constexpr int CJK_UI_12_FONT_ID=6;
 constexpr int READER_STATUS_FONT_ID=7, READER_ESTIMATE_FONT_ID=8;
 constexpr int CJK_UI_14_FONT_ID=14, CJK_UI_16_FONT_ID=16;
 struct GfxRenderer {
@@ -289,6 +289,7 @@ int main() {
         system = (ROOT / 'src/SdCardFontSystem.cpp').read_text()
         manager = (ROOT / 'lib/EpdFont/SdCardFontManager.cpp').read_text()
         table = system[system.index('struct UiFontSize'):system.index('}  // namespace', system.index('struct UiFontSize'))]
+        table = table.replace('constexpr UiFontSize', '[[maybe_unused]] constexpr UiFontSize')
         program = r'''
 #include <algorithm>
 #include <array>
