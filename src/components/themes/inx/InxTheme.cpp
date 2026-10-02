@@ -11,6 +11,7 @@
 #include "CrossPointSettings.h"
 #include "I18n.h"
 #include "InxItemLayout.h"
+#include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "components/icons/inx_apps.h"
@@ -108,7 +109,8 @@ void drawDottedSeparator(const GfxRenderer& renderer, const int x, const int y, 
 
 void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const char* title, const char* subtitle,
                           bool) const {
-  constexpr int titleFont = UiHighDpiProfile::enabled ? UI_12_FONT_ID : NOTOSERIF_12_FONT_ID;
+  // Use UI font resolution on every profile, including SD fonts and glyph fallbacks.
+  const int titleFont = uiScaleSpec().titleFontId;
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
 
   const bool showBatteryPercentage =
