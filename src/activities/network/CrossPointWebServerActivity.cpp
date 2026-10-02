@@ -67,6 +67,7 @@ int barsForRssi(int rssi, int currentBars) {
 
 void CrossPointWebServerActivity::onEnter() {
   Activity::onEnter();
+  NetworkStartup::logMemory("CrossPointWebServerActivity enter");
 
   LOG_DBG("WEBACT", "Free heap at onEnter: %d bytes", ESP.getFreeHeap());
 
@@ -101,6 +102,7 @@ void CrossPointWebServerActivity::onEnter() {
 
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
+  NetworkStartup::logMemory("CrossPointWebServerActivity exit begin");
 
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
@@ -116,6 +118,7 @@ void CrossPointWebServerActivity::onExit() {
       WiFi.disconnect(false);
     }
     delay(30);
+    NetworkStartup::logMemory("web exit before restart");
     silentRestart();
   }
 
@@ -288,7 +291,9 @@ void CrossPointWebServerActivity::startWebServer() {
     onGoHome();
     return;
   }
-  if (webServer->begin()) {
+  const bool started = webServer->begin();
+  NetworkStartup::logMemory(started ? "web services ready" : "web services failed");
+  if (started) {
     state = WebServerActivityState::SERVER_RUNNING;
     LOG_DBG("WEBACT", "Web server started successfully");
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);

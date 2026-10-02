@@ -15,6 +15,10 @@ HalMemory::HeapStats HalMemory::getDefaultHeap() { return readHeapStats(MALLOC_C
 
 HalMemory::HeapStats HalMemory::getInternalHeap() { return readHeapStats(MALLOC_CAP_INTERNAL); }
 
+HalMemory::HeapStats HalMemory::getInternalDmaHeap() {
+  return readHeapStats(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+}
+
 HalMemory::HeapStats HalMemory::getPsramHeap() { return readHeapStats(MALLOC_CAP_SPIRAM); }
 
 void HalMemory::PsramDeleter::operator()(uint8_t* buffer) const { heap_caps_free(buffer); }

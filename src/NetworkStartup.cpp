@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -53,7 +54,18 @@ MemorySnapshot readMemorySnapshot() {
 
 namespace NetworkStartup {
 
+void logMemory(const char* stage) {
+  const auto internal = HalMemory::getInternalHeap();
+  const auto dma = HalMemory::getInternalDmaHeap();
+  const auto psram = HalMemory::getPsramHeap();
+  LOG_INF("NET", "%s: internal free=%u largest=%u, DMA free=%u largest=%u, PSRAM free=%u", stage,
+          static_cast<unsigned>(internal.freeBytes), static_cast<unsigned>(internal.largestBlockBytes),
+          static_cast<unsigned>(dma.freeBytes), static_cast<unsigned>(dma.largestBlockBytes),
+          static_cast<unsigned>(psram.freeBytes));
+}
+
 void prepare(GfxRenderer& renderer) {
+  logMemory("before font reclaim");
   const MemorySnapshot before = readMemorySnapshot();
   if (!shouldReleaseRenderMemory(before)) return;
 
@@ -62,12 +74,16 @@ void prepare(GfxRenderer& renderer) {
     sdFontSystem.releaseLoadedFont(renderer);
     if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
   }
+  logMemory("after font reclaim");
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
   bleinput::stop();
+  logMemory("after BLE stop");
   prepare(renderer);
-  return WiFi.mode(mode);
+  const bool started = WiFi.mode(mode);
+  logMemory(started ? "WiFi mode ready" : "WiFi mode failed");
+  return started;
 }
 
 }  // namespace NetworkStartup
