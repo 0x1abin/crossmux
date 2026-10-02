@@ -440,9 +440,11 @@ void DateTimeSettingsActivity::buildMenuScreen(UiScreen& screen) {
     props.valueInset = 0;
     props.valueText = screen.theme().bodyText;
   }
-  props.toggleCheckbox = true;
-  props.toggleWidth = 28;
-  props.toggleHeight = 28;
+  if (SETTINGS.uiTheme != CrossPointSettings::INX) {
+    props.toggleCheckbox = true;
+    props.toggleWidth = 28;
+    props.toggleHeight = 28;
+  }
   props.rowProviderCtx = &row;
   props.rowProvider = [](void* context, uint16_t index, fui::ListItem& item) {
     auto& row = *static_cast<Row*>(context);

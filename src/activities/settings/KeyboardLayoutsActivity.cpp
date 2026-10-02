@@ -80,6 +80,9 @@ void KeyboardLayoutsActivity::buildScreen(UiScreen& screen) {
   props.count = keyboard_layouts::COUNT;
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
+  props.toggleCheckbox = true;
+  props.toggleWidth = 28;
+  props.toggleHeight = 28;
   syncListViewport(screen, props);
   screen.list(props);
 }
