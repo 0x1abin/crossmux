@@ -32,4 +32,14 @@ struct ReaderRenderSpec {
   uint8_t imageRendering = 0;
   bool focusReadingEnabled = false;
   bool collectTouchLinks = false;
+
+  bool operator==(const ReaderRenderSpec& other) const {
+    return fontId == other.fontId && lineCompression == other.lineCompression &&
+           extraParagraphSpacing == other.extraParagraphSpacing && firstLineIndent == other.firstLineIndent &&
+           characterSpacing == other.characterSpacing && wordSpacingPercent == other.wordSpacingPercent &&
+           paragraphAlignment == other.paragraphAlignment && viewportWidth == other.viewportWidth &&
+           viewportHeight == other.viewportHeight && hyphenationEnabled == other.hyphenationEnabled &&
+           embeddedStyle == other.embeddedStyle && imageRendering == other.imageRendering &&
+           focusReadingEnabled == other.focusReadingEnabled && collectTouchLinks == other.collectTouchLinks;
+  }
 };

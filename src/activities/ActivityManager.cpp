@@ -91,23 +91,31 @@ void ActivityManager::renderTaskTrampoline(void* param) {
 }
 
 void ActivityManager::renderTaskLoop() {
+  TickType_t waitTicks = portMAX_DELAY;
+  uint32_t idleGeneration = 0;
   while (true) {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    // Acquire the lock before reading currentActivity to avoid a TOCTOU race
-    // where the main task deletes the activity between the null-check and render().
+    const bool foreground = ulTaskNotifyTake(pdTRUE, waitTicks) != 0;
+    // ponytail: one idle attempt per render, including cancellations and I/O
+    // failures; re-arm after quiet input only if measured cache hit rate needs it.
+    waitTicks = portMAX_DELAY;
     RenderLock lock;
-    // Skip rendering when a Push/Pop/Replace is pending: the main task is
-    // waiting to acquire this lock to swap currentActivity. Rendering the
-    // old activity here would re-hold the lock for the entire render duration,
-    // starving the main task and freezing the device.
     if (currentActivity && pendingAction.load() == PendingAction::None) {
-      HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
-      // Night mode is a global output polarity applied to every activity.
-      // The sleep screen forces normal polarity itself (SleepActivity).
-      display.setInverted(SETTINGS.screenInverted != 0);
-      currentActivity->render(std::move(lock));
+      HalPowerManager::Lock powerLock;
+      if (foreground) {
+        // Some renderers release the lock, so read activity-owned metadata
+        // before calling them. Input during the render also cancels its idle pass.
+        const auto delayMs = currentActivity->idleRenderDelayMs();
+        idleGeneration = idleRenderGeneration.load(std::memory_order_relaxed);
+        display.setInverted(SETTINGS.screenInverted != 0);
+        currentActivity->render(std::move(lock));
+        if (delayMs != 0) waitTicks = pdMS_TO_TICKS(delayMs);
+      } else if (!idleRenderCancelled(idleGeneration)) {
+        currentActivity->renderIdle(idleGeneration);
+      }
     }
-    // Notify any task blocked in requestUpdateAndWait() that the render is done.
+    // An idle timeout must never acknowledge requestUpdateAndWait(): its
+    // notification may have arrived while the idle callback was cancelling.
+    if (!foreground) continue;
     TaskHandle_t waiter = nullptr;
     taskENTER_CRITICAL(&activityManagerSpinlock);
     waiter = waitingTaskHandle;
@@ -385,6 +393,7 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
 }
 
 void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
+  cancelIdleRender();
   mappedInput.resetHomeButtonInput();
   // Note: no lock here, this is usually called by loop() and we may run into deadlock
   if (currentActivity) {
@@ -560,6 +569,7 @@ void ActivityManager::goToWeRead() { replaceActivityWith<WeReadActivity>(); }
 #endif
 
 void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {
+  cancelIdleRender();
   mappedInput.resetHomeButtonInput();
   if (pendingActivity) {
     // Should never happen in practice
@@ -571,6 +581,7 @@ void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {
 }
 
 void ActivityManager::popActivity() {
+  cancelIdleRender();
   mappedInput.resetHomeButtonInput();
   if (pendingActivity) {
     // Should never happen in practice
@@ -604,7 +615,10 @@ bool ActivityManager::deferBluetoothStart() const {
          (currentActivity && currentActivity->deferBluetoothStart());
 }
 
-bool ActivityManager::handleForcedRefresh() { return currentActivity && currentActivity->handleForcedRefresh(); }
+bool ActivityManager::handleForcedRefresh() {
+  cancelIdleRender();
+  return currentActivity && currentActivity->handleForcedRefresh();
+}
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
 
@@ -616,6 +630,7 @@ ScreenshotInfo ActivityManager::getScreenshotInfo() const {
 }
 
 void ActivityManager::requestUpdate(bool immediate) {
+  cancelIdleRender();
   if (immediate) {
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
@@ -627,6 +642,7 @@ void ActivityManager::requestUpdate(bool immediate) {
   }
 }
 void ActivityManager::requestUpdateAndWait() {
+  cancelIdleRender();
   if (!renderTaskHandle) {
     return;
   }

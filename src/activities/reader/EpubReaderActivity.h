@@ -16,6 +16,7 @@
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderFontPreview.h"
+#include "ReaderPageCache.h"
 #include "ReaderToolbarUi.h"
 #include "components/OptionPopup.h"
 
@@ -53,38 +54,28 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long lastRenderCompleteMs = 0;
 
 #if FREEINK_DEVICE_READPICO
-  // --- Off-path anti-aliased page cache -------------------------------------
-  // An anti-aliased turn needs three full-frame images: the 1bpp B/W base, the
-  // grayscale LSB plane and the MSB plane. Rendering them costs roughly 700 ms
-  // and none of it depends on the user, so it is done at idle for the page the
-  // reader is about to show. The turn then only copies the three images into
-  // place (~12 ms) and pays for the panel push itself (~560 ms), which is what
-  // puts a turn at about 600 ms. Raw pointers rather than memory::ByteBuffer so
-  // this header needs no extra include; heap_caps_malloc takes ownership the
-  // same way, and freePageCache() is the single release point.
-  uint8_t* pageCacheBase_ = nullptr;   // page + reading guide lines, no status bar
-  uint8_t* pageCacheLsb_ = nullptr;    // grayscale LSB plane
-  uint8_t* pageCacheMsb_ = nullptr;    // grayscale MSB plane
-  uint8_t* pageCacheStash_ = nullptr;  // the live page, parked while the cache is built
-  int pageCachePage_ = -1;
-  int pageCacheSpine_ = -1;
-  int pageCacheMarginTop_ = 0;
-  int pageCacheMarginRight_ = 0;
-  int pageCacheMarginBottom_ = 0;
-  int pageCacheMarginLeft_ = 0;
-  unsigned long pageCacheEpoch_ = 0;
-  // Bumped by every renderContents(); a cache built at epoch E is consumed by
-  // exactly the render that still sees E, and retired by everything after it.
-  unsigned long renderEpoch_ = 0;
-  bool pageCacheValid_ = false;
-  bool pageCacheAllocated_ = false;
+  // Four reusable PSRAM frames (~406 KiB); too large for the render task's
+  // stack. The activity owns them and releases them in onExit().
+  memory::ByteBuffer pageCacheBase_;
+  memory::ByteBuffer pageCacheLsb_;
+  memory::ByteBuffer pageCacheMsb_;
+  memory::ByteBuffer pageCacheStash_;
+  ReaderPageCache pageCache_;
+  ReaderPageCacheKey renderedPageKey_;
+  uint32_t sectionGeneration_ = 0;
+  uint32_t renderEpoch_ = 0;
   bool pageCacheFailed_ = false;
+#ifdef ENABLE_CHINESE_VERSION
+  uint32_t pageCacheMissingCodepoint_ = 0;
+#endif
 
-  bool pageCacheEligible();
-  bool pageCacheMatches(int page, int mTop, int mRight, int mBottom, int mLeft) const;
-  bool preparePageCache();
+  bool pageCacheEligible() const;
+  ReaderPageCacheKey pageCacheKey(int page, int top, int right, int bottom, int left) const;
+  uint32_t idleRenderDelayMs() const override;
+  void renderIdle(uint32_t generation) override;
   void freePageCache();
 #endif
+
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;
