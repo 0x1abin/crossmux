@@ -77,7 +77,7 @@ class EpubReaderActivity final : public ReaderActivity {
   uint32_t renderEpoch_ = 0;
   bool pageCacheFailed_ = false;
 #ifdef ENABLE_CHINESE_VERSION
-  uint32_t pageCacheMissingCodepoint_ = 0;
+  uint32_t pageCacheMissingCodepoint_[kPageCacheSlots] = {};
 #endif
 
   bool pageCacheEligible() const;
