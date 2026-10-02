@@ -239,7 +239,6 @@ int main() {
 #include <memory>
 #include <utility>
 #include <vector>
-using TickType_t=unsigned;
 using TaskHandle_t=void*;
 constexpr unsigned portMAX_DELAY=9999;
 #define pdTRUE true

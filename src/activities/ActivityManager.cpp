@@ -91,7 +91,7 @@ void ActivityManager::renderTaskTrampoline(void* param) {
 }
 
 void ActivityManager::renderTaskLoop() {
-  TickType_t waitTicks = portMAX_DELAY;
+  auto waitTicks = portMAX_DELAY;
   uint32_t idleGeneration = 0;
   while (true) {
     const bool foreground = ulTaskNotifyTake(pdTRUE, waitTicks) != 0;
