@@ -213,7 +213,11 @@ void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
 
   // Configure and start the AP
-  NetworkStartup::setMode(renderer, WIFI_AP);
+  if (!NetworkStartup::setMode(renderer, WIFI_AP)) {
+    LOG_ERR("WEBACT", "Failed to initialize WiFi for Access Point");
+    onGoHome();
+    return;
+  }
   delay(100);
 
   // Start soft AP

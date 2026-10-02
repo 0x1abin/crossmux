@@ -183,9 +183,7 @@ bool CrossPointWebServer::begin() {
   fontUpload.buffer = makeWebBuffer(FontUploadState::BUFFER_SIZE);
   if (!upload.buffer || !fontUpload.buffer) {
     LOG_ERR("WEB", "OOM: upload buffers (%u bytes each)", static_cast<unsigned>(UploadState::UPLOAD_BUFFER_SIZE));
-    upload.buffer.reset();
-    fontUpload.buffer.reset();
-    server.reset();
+    stop();
     return false;
   }
 
@@ -253,9 +251,7 @@ bool CrossPointWebServer::begin() {
   auto* webDavHandler = new (std::nothrow) WebDAVHandler();
   if (!webDavHandler) {
     LOG_ERR("WEB", "OOM: WebDAVHandler (%u bytes)", static_cast<unsigned>(sizeof(WebDAVHandler)));
-    upload.buffer.reset();
-    fontUpload.buffer.reset();
-    server.reset();
+    stop();
     return false;
   }
   server->addHandler(webDavHandler);  // WebServer owns webDavHandler after this call.
@@ -266,17 +262,23 @@ bool CrossPointWebServer::begin() {
   // Start WebSocket server for fast binary uploads
   LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
   wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
-  if (wsServer) {
-    wsInstance = const_cast<CrossPointWebServer*>(this);
-    wsServer->begin();
-    wsServer->onEvent(wsEventCallback);
-    LOG_DBG("WEB", "WebSocket server started");
-  } else {
+  if (!wsServer) {
     LOG_ERR("WEB", "OOM: WebSocketsServer (%u bytes)", static_cast<unsigned>(sizeof(WebSocketsServer)));
+    stop();
+    return false;
   }
+  wsInstance = this;
+  wsServer->begin();
+  wsServer->onEvent(wsEventCallback);
+  LOG_DBG("WEB", "WebSocket server started");
 
   udpActive = udp.begin(LOCAL_UDP_PORT);
-  LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
+  if (!udpActive) {
+    LOG_ERR("WEB", "Failed to start discovery UDP on port %d", LOCAL_UDP_PORT);
+    stop();
+    return false;
+  }
+  LOG_DBG("WEB", "Discovery UDP enabled on port %d", LOCAL_UDP_PORT);
 
   // Reuse one request buffer for the server lifetime to avoid repeated heap churn.
   fileListBatch = makeWebBuffer(FILE_LIST_BATCH_CAPACITY);
@@ -339,10 +341,9 @@ void CrossPointWebServer::stop() {
     LOG_DBG("WEB", "WebSocket server stopped");
   }
 
-  if (udpActive) {
-    udp.stop();
-    udpActive = false;
-  }
+  // begin() can retain its TX buffer when socket creation fails.
+  udp.stop();
+  udpActive = false;
 
   // Brief delay to allow any in-flight handleClient() calls to complete
   delay(20);
@@ -354,6 +355,8 @@ void CrossPointWebServer::stop() {
   delay(10);
 
   server.reset();
+  upload.buffer.reset();
+  fontUpload.buffer.reset();
   fileListBatch.reset();
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
