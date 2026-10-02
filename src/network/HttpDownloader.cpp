@@ -1,6 +1,7 @@
 #include "HttpDownloader.h"
 
 #include <Arduino.h>
+#include <HalMemory.h>
 #include <HalSystem.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -268,6 +269,20 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
 #endif
 }
 }  // namespace
+
+bool HttpDownloader::hasMemoryForTls() {
+  const auto available = HalMemory::getDefaultHeap();
+  if (available.freeBytes >= MIN_TLS_FREE_HEAP && available.largestBlockBytes >= MIN_TLS_MAX_ALLOC) return true;
+
+  const auto internal = HalMemory::getInternalHeap();
+  const auto psram = HalMemory::getPsramHeap();
+  LOG_ERR("HTTP",
+          "TLS preflight rejected: default free=%zu largest=%zu, internal free=%zu largest=%zu, "
+          "PSRAM free=%zu largest=%zu",
+          available.freeBytes, available.largestBlockBytes, internal.freeBytes, internal.largestBlockBytes,
+          psram.freeBytes, psram.largestBlockBytes);
+  return false;
+}
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
                               const std::string& password) {

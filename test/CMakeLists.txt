@@ -182,3 +182,5 @@ add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest disc
 add_test(NAME WebServerStartupFailure COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_webserver_startup_failure.py)
 
 add_test(NAME WifiStartupFailure COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_wifi_startup_failure.py)
+
+add_test(NAME TlsMemoryPreflight COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_tls_memory_preflight.py)

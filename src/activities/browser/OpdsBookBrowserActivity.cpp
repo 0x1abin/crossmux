@@ -560,8 +560,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
     fcm->releaseSdFontCaches();
   }
   LOG_DBG("OPDS", "Download heap: %u free, %u max block", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-  if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
-      ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {
+  if (!HttpDownloader::hasMemoryForTls()) {
     LOG_ERR("OPDS", "Low heap for download (%u free, %u max block)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     state = BrowserState::ERROR;
     errorMessage = tr(STR_DOWNLOAD_FAILED);
