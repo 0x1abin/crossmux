@@ -1007,18 +1007,6 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 #if !FREEINK_DEVICE_READPICO
   textY -= 4;
 #endif
-  // The lane is placed from the bottom up, which is only safe while the status bar is
-  // at least as tall as the text it holds. When it is not -- a slim bar against the
-  // small font -- every glyph's descender drops past the safe bottom edge and the
-  // bezel cuts it; on device that reads as "part of the book title is outside the
-  // safe area". Clamp the lane to the safe bottom rather than trusting the bar
-  // height. A bar that is tall enough is unaffected, so this is a no-op everywhere
-  // the geometry already fits.
-  const int statusLaneHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int statusSafeBottom = screenHeight - orientedMarginBottom;
-  if (textY + statusLaneHeight > statusSafeBottom) {
-    textY = statusSafeBottom - statusLaneHeight;
-  }
 
   int leftClusterX = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
   int rightClusterX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight;
