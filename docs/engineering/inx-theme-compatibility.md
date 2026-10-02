@@ -122,8 +122,8 @@ The shared large UI font (`NOTOSANS_18_FONT_ID`, including slider readouts) uses
 upstream Noto Sans 18 regular/bold outside INX; INX keeps its historical offline
 fallback. The existing theme reload updates stable font objects, without adding
 reader font choices or per-page allocations. Date/time and reading-statistics
-boolean extension settings use shared checkboxes in all themes. Legacy extension
-lists route through the SDK list component; their fixed single-line rows publish
+boolean extension settings use INX switches and shared checkboxes in other themes.
+Legacy extension lists route through the SDK list component; their fixed single-line rows publish
 the same cadence consumed by touch and button pagination. Test this bridge with
 `test/inx_navigation/test_legacy_list_adapter.py`, including the last page and gaps.
 
@@ -134,13 +134,20 @@ intentionally different semantics. Keep INX comparisons on their original settin
 
 ### Approved INX setting-control exception
 
-Boolean setting rows now use the shared 28px SDK checkboxes, including the INX
-accordion and settings subpages. Slider adjustment dialogs use Lyra control
-geometry and fixed upstream 10/12/18pt font bindings. Keep INX category layout,
+INX boolean setting rows use the SDK's original 38x18px rectangular switches,
+including the accordion and settings subpages. Off places the square knob on the
+left; on places it on the right, with colors inverted on selected rows. Other
+themes retain the shared 28px SDK checkboxes. Multi-select lists such as keyboard
+layouts retain checkboxes in every theme; their locked default row keeps its
+existing text state. Slider adjustment dialogs use Lyra control geometry and
+fixed upstream 10/12/18pt font bindings. Keep INX category layout,
 row cadence, page chrome, ordinary option pickers and reader menu/toolbar text.
 Historical baselines remain immutable: old setting-control scenes demonstrate
-legacy SDK compatibility; current entrypoints are checked separately against
-the uniform controls. Do not interpret this as approval to restyle whole pages.
+legacy SDK compatibility; current entrypoints are checked separately for the
+theme-specific boolean controls and uniform sliders. Do not interpret this as
+approval to restyle whole pages. Run `test/inx_navigation/test_checkbox_rows.py`
+for boolean state, switch/checkbox drawing and hit geometry checks, and
+`test/inx_navigation/test_inx_setting_controls.py` for sliders.
 
 The three control font families share existing bitmap data; registration adds
 three persistent font-map entries at startup, avoiding per-dialog allocations
