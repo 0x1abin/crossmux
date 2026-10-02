@@ -2096,8 +2096,7 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
 // Build one page into one slot. Returns true when the slot ends up holding a finished
 // page; every other exit leaves it Skipped and logs why. Runs only from renderIdle(),
 // on the loop task, with no render lock held.
-bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCacheKey& key,
-                                            const uint32_t generation) {
+bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCacheKey& key, const uint32_t generation) {
   const auto cancelled = [&] { return activityManager.idleRenderCancelled(generation); };
   if (pageCache_[slot].attempted(key)) {
     LOG_DBG("ERS", "Page cache: slot %d skip, page %d already attempted (state=%d)", slot, key.page,
