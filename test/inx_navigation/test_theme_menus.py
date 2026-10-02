@@ -71,7 +71,7 @@ def menus(directory):
 #define FREEINK_CAP_BLE_HID_HOST 1
 #define FREEINK_DEVICE_MURPHY_M4 0
 #define FREEINK_DEVICE_X4CLASSIC classic
-bool inx=false, touch=false, pro=false, classic=false, dictionary=false;
+bool inx=false, touch=false, pro=false, classic=false, dictionary=false, rtc=false;
 '''
     for enum, values in [('StrId', ids), ('SettingAction', actions)]:
         code += f'enum class {enum} {{' + ','.join(values) + '};\n'
@@ -84,7 +84,7 @@ bool inx=false, touch=false, pro=false, classic=false, dictionary=false;
  bool isX4Classic(){return classic;} bool hasHomeKey(){return false;}
 }
 namespace home_button { bool isSetting(int CrossPointSettings::*) {return false;} }
-struct { bool isAvailable(){return false;} } halClock;
+struct { bool isAvailable(){return rtc;} } halClock;
 struct SettingInfo {
  StrId nameId, category=StrId::STR_NONE_OPT;
  int CrossPointSettings::*valuePtr=nullptr;
@@ -123,14 +123,26 @@ struct SettingsActivity {
     code += methods[0] + '\n' + methods[1].replace('::rebuildSettingsLists', '::reference')
     code += '''
 int main() {
- for (int flags=0; flags<32; ++flags) {
+ for (int flags=0; flags<64; ++flags) {
   touch=flags&1; pro=flags&2; classic=flags&4; dictionary=flags&16;
+  rtc=flags&32;
   SETTINGS.shortPwrBtn=(flags&8)?CrossPointSettings::FOOTNOTES:0;
   for (int theme=0; theme<8; ++theme) {
    inx=theme==5; upstream=theme==7; SettingsActivity s;
    const auto before=SETTINGS;
    if (upstream) s.reference(); else s.rebuildSettingsLists();
    assert(SETTINGS==before);
+   if (!upstream) {
+    int dateTimeEntries=0;
+    for (const auto& row:s.systemSettings) {
+     assert(row.nameId != StrId::STR_CLOCK);
+     if (row.nameId == StrId::STR_DATE_AND_TIME) {
+      ++dateTimeEntries;
+      assert(row.action == SettingAction::ClockSettings);
+     }
+    }
+    assert(dateTimeEntries == 1);
+   }
    int category=0;
    for (auto* rows : {&s.displaySettings,&s.readerSettings,&s.controlsSettings,&s.systemSettings}) {
     std::printf("MENU %d %d %d\\n",flags,theme,category++);
@@ -147,7 +159,7 @@ int main() {
         parsed[tuple(map(int, lines[0].split()))] = lines[1:]
     # Only entries present in both snapshots can be compared before the gated
     # Reader integration (new Home Button/RTC pages are tracked separately).
-    for flags in range(32):
+    for flags in range(64):
         for category in range(4):
             baseline = parsed[flags, 0, category]
             reference = parsed[flags, 7, category]
@@ -162,7 +174,7 @@ int main() {
             # Added entries retain their category, relative order and action binding in INX too.
             extras = set(baseline) - set(reference)
             assert [x for x in baseline if x in extras] == [x for x in inx_rows if x in extras]
-    print('Settings: 32 device/condition combinations × 7 themes; shared entries/actions and retained upstream order pass')
+    print('Settings: 64 device/condition combinations × 7 themes; one Date & Time entry with or without RTC; shared entries/actions and retained upstream order pass')
 
 
 def actions(directory):

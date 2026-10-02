@@ -10,29 +10,33 @@
 
 #include "ClockSyncActivity.h"
 #include "CrossPointSettings.h"
+#include "DateTimeSettingsActivity.h"
 #include "MappedInputManager.h"
 #include "TimezonePickerActivity.h"
 #include "components/UITheme.h"
+#include "util/TimeUtils.h"
 #include "util/Timezones.h"
 
 namespace fui = freeink::ui;
 
 namespace {
 enum MenuItem {
-  ITEM_TIMEZONE = 0,
+  ITEM_AUTO_TIME = 0,
+  ITEM_DATE_TIME,
+  ITEM_TIMEZONE,
   ITEM_DST,
   ITEM_FORMAT,
   ITEM_SHOW_ON_HOME,
   ITEM_SYNC,
 };
 
-const StrId menuNames[ClockSettingsActivity::ITEM_COUNT] = {
-    StrId::STR_TIMEZONE,        StrId::STR_CLOCK_DST,      StrId::STR_CLOCK_FORMAT,
-    StrId::STR_CLOCK_IN_HEADER, StrId::STR_CLOCK_SYNC_NOW,
+constexpr StrId menuNames[ClockSettingsActivity::ITEM_COUNT] = {
+    StrId::STR_AUTO_TIME,    StrId::STR_DATE_AND_TIME,   StrId::STR_TIMEZONE,       StrId::STR_CLOCK_DST,
+    StrId::STR_CLOCK_FORMAT, StrId::STR_CLOCK_IN_HEADER, StrId::STR_CLOCK_SYNC_NOW,
 };
 
-const StrId dstNames[CrossPointSettings::CLOCK_DST_MODE_COUNT] = {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON,
-                                                                  StrId::STR_STATE_OFF};
+constexpr StrId dstNames[CrossPointSettings::CLOCK_DST_MODE_COUNT] = {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON,
+                                                                      StrId::STR_STATE_OFF};
 }  // namespace
 
 ClockSettingsActivity::ClockSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -40,21 +44,53 @@ ClockSettingsActivity::ClockSettingsActivity(GfxRenderer& renderer, MappedInputM
 
 void ClockSettingsActivity::onEnter() {
   UiListActivity::onEnter();
+  if (SETTINGS.clockFormat > 1) SETTINGS.clockFormat = 0;
+  if (SETTINGS.clockAutoSync > 1) SETTINGS.clockAutoSync = 1;
+  halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
+  waitForBackRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back);
+  waitForConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   for (int i = 0; i < ITEM_COUNT; i++) {
     rowItems_[i].label = I18N.get(menuNames[i]);
     rowItems_[i].actionValue = static_cast<int16_t>(i);
   }
 }
 
-const char* ClockSettingsActivity::headerTitle() const { return tr(STR_CLOCK); }
+const char* ClockSettingsActivity::headerTitle() const { return tr(STR_DATE_AND_TIME); }
+
+bool ClockSettingsActivity::handleCustomInput() {
+  if (!waitForBackRelease_ && !waitForConfirmRelease_) return false;
+  waitForBackRelease_ = waitForBackRelease_ && mappedInput.isPressed(MappedInputManager::Button::Back);
+  waitForConfirmRelease_ = waitForConfirmRelease_ && mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  return true;  // Consume the release frame inherited from the child too.
+}
 
 void ClockSettingsActivity::activateIndex(const int index) {
+  if (index < 0 || index >= ITEM_COUNT) return;
   nav.selected = index;
   app.clearTapFlash();
+  const auto onChildResult = [this](const ActivityResult&) {
+    waitForBackRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back);
+    waitForConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+    requestUpdate();
+  };
   switch (index) {
+    case ITEM_AUTO_TIME:
+      SETTINGS.clockAutoSync = SETTINGS.clockAutoSync ? 0 : 1;
+      halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
+      break;
+    case ITEM_DATE_TIME:
+      if (SETTINGS.clockAutoSync) return;
+      // ActivityManager owns the editor across frames; stack lifetime is insufficient.
+      if (auto activity = makeUniqueNoThrow<DateTimeSettingsActivity>(renderer, mappedInput)) {
+        startActivityForResult(std::move(activity), onChildResult);
+      } else {
+        LOG_ERR("CLKSET", "OOM: DateTimeSettingsActivity (%u bytes)",
+                static_cast<unsigned>(sizeof(DateTimeSettingsActivity)));
+      }
+      return;
     case ITEM_TIMEZONE:
       if (auto activity = makeUniqueNoThrow<TimezonePickerActivity>(renderer, mappedInput)) {
-        startActivityForResult(std::move(activity), nullptr);
+        startActivityForResult(std::move(activity), onChildResult);
       } else {
         LOG_ERR("CLKSET", "OOM: TimezonePickerActivity");
       }
@@ -71,7 +107,7 @@ void ClockSettingsActivity::activateIndex(const int index) {
       break;
     case ITEM_SYNC:
       if (auto activity = makeUniqueNoThrow<ClockSyncActivity>(renderer, mappedInput)) {
-        startActivityForResult(std::move(activity), nullptr);
+        startActivityForResult(std::move(activity), onChildResult);
       } else {
         LOG_ERR("CLKSET", "OOM: ClockSyncActivity");
       }
@@ -89,8 +125,14 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
                                                 static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
-  // Every value is a flash/translation string or the member time buffer, so
+  // Every value is a flash/translation string or a member time buffer, so
   // the render pass allocates nothing.
+  rowItems_[ITEM_AUTO_TIME].value = SETTINGS.clockAutoSync ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+  GUI.setCheckboxRow(rowItems_[ITEM_AUTO_TIME], SETTINGS.clockAutoSync);
+  rowItems_[ITEM_DATE_TIME].value =
+      TimeUtils::formatCurrentDateTime(dateTime_, sizeof(dateTime_), SETTINGS.clockFormat == 1) ? dateTime_
+                                                                                                : tr(STR_NOT_SET);
+  rowItems_[ITEM_DATE_TIME].enabled = !SETTINGS.clockAutoSync;
   rowItems_[ITEM_TIMEZONE].value = timezones::table()[timezones::activeIndex()].name;
   const uint8_t dst = SETTINGS.clockDst < CrossPointSettings::CLOCK_DST_MODE_COUNT ? SETTINGS.clockDst : uint8_t{0};
   rowItems_[ITEM_DST].value = I18N.get(dstNames[dst]);
@@ -98,11 +140,10 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
   rowItems_[ITEM_SHOW_ON_HOME].value = SETTINGS.clockShowInHeader ? tr(STR_SHOW) : tr(STR_HIDE);
   GUI.setCheckboxRow(rowItems_[ITEM_SHOW_ON_HOME], SETTINGS.clockShowInHeader);
   // The sync row's value is the current time itself: it confirms the sync,
-  // previews format/zone changes, and reads "Not Set" until the first sync.
-  rowItems_[ITEM_SYNC].value =
-      SETTINGS.clockHasBeenSynced && halClock.formatTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1)
-          ? syncTime_
-          : tr(STR_NOT_SET);
+  // previews format/zone changes, and reads "Not Set" until time is valid.
+  rowItems_[ITEM_SYNC].value = TimeUtils::formatCurrentTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1)
+                                   ? syncTime_
+                                   : tr(STR_NOT_SET);
 
   fui::ListProps props;
   props.items = rowItems_;

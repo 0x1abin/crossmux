@@ -7,12 +7,8 @@
 
 // Time helpers for the Reading Analytics suite.
 //
-// CrossPoint expresses local time as the system clock (set by NTP / the DS3231
-// RTC) plus a fixed quarter-hour offset (CrossPointSettings::clockUtcOffsetQ).
-// This adapter buckets reading time into local "day ordinals" (days since the
-// Unix epoch) using that same offset, so the analytics day boundaries line up
-// with the on-device clock. It deliberately does NOT call setenv("TZ")/tzset(),
-// which would globally change localtime_r() and corrupt the standby clock.
+// Local dates and day ordinals use the system timezone applied by Timezones,
+// so reader analytics, standby faces and headers share the same day boundaries.
 namespace TimeUtils {
 
 // True when `epochSeconds` can represent a supported local time in any offset.
@@ -23,11 +19,12 @@ bool isClockValid(uint32_t epochSeconds);
 uint32_t getCurrentValidTimestamp();
 uint32_t getAuthoritativeTimestamp();
 
-// Convert a UTC epoch to configured fixed-offset local time without changing TZ.
+// Convert a UTC epoch using the configured system timezone.
 bool getLocalDateTime(uint32_t epochSeconds, std::tm& out);
+// Explicit fixed-offset conversion, independent of the system timezone.
 bool getLocalDateTime(uint32_t epochSeconds, uint8_t utcOffsetQuarterHoursBiased, std::tm& out);
 
-// Convert a local civil time in the configured fixed offset back to UTC.
+// Convert local civil time to UTC; reject invalid dates and DST gaps.
 bool localDateTimeToUtcEpoch(int year, unsigned month, unsigned day, unsigned hour, unsigned minute,
                              uint32_t& epochSeconds);
 unsigned getDaysInMonth(int year, unsigned month);

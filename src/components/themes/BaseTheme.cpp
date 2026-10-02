@@ -2,7 +2,6 @@
 
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
-#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -519,8 +518,8 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   // (SETTINGS.clockShowInHeader). Themes whose title layout has no room for
   // the clock's left reserve opt out via headerShowsClock.
   static char clockText[10];
-  if (metrics.headerShowsClock && SETTINGS.clockShowInHeader && halClock.isAvailable() &&
-      halClock.formatTime(clockText, sizeof(clockText), SETTINGS.clockFormat == 1)) {
+  if (metrics.headerShowsClock && SETTINGS.clockShowInHeader &&
+      TimeUtils::formatCurrentTime(clockText, sizeof(clockText), SETTINGS.clockFormat == 1)) {
     status.clockText = clockText;
   }
 }

@@ -5,8 +5,6 @@
 #include <cstdio>
 #include <ctime>
 
-#include "CrossPointSettings.h"
-
 namespace {
 constexpr uint32_t VALID_CLOCK_THRESHOLD = 1704016800UL;  // 2024-01-01 at UTC+14
 constexpr int MIN_MANUAL_YEAR = 2024;
@@ -17,8 +15,6 @@ int32_t localOffsetSeconds(uint8_t encodedOffset) {
   if (offsetQ > 104) offsetQ = 48;
   return (offsetQ - 48) * 15 * 60;
 }
-
-int32_t localOffsetSeconds() { return localOffsetSeconds(SETTINGS.clockUtcOffsetQ); }
 
 // Howard Hinnant's days-from-civil algorithm (proleptic Gregorian, days since 1970-01-01).
 int32_t daysFromCivil(int year, const unsigned month, const unsigned day) {
@@ -45,20 +41,21 @@ void civilFromDays(int z, int& year, unsigned& month, unsigned& day) {
 
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
 
-// Break an epoch into the local civil date using the fixed offset.
-void localCivilDate(const uint32_t epochSeconds, int& year, unsigned& month, unsigned& day) {
-  const int64_t local = static_cast<int64_t>(epochSeconds) + localOffsetSeconds();
-  int32_t dayOrdinal = static_cast<int32_t>(local / 86400);
-  if (local < 0 && (local % 86400) != 0) {
-    --dayOrdinal;  // floor toward negative infinity
-  }
-  civilFromDays(dayOrdinal, year, month, day);
-}
-
 std::string formatIsoDate(const int year, const unsigned month, const unsigned day, const bool appendBang) {
   char buffer[16];
   snprintf(buffer, sizeof(buffer), "%04d-%02u-%02u%s", year, month, day, appendBang ? "!" : "");
   return buffer;
+}
+
+bool formatLocalTime(const std::tm& local, const bool use12Hour, char* buffer, const size_t bufferSize) {
+  if (!buffer || bufferSize < (use12Hour ? 9u : 6u)) return false;
+  if (use12Hour) {
+    const int hour12 = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
+    snprintf(buffer, bufferSize, "%d:%02d %s", hour12, local.tm_min, local.tm_hour >= 12 ? "PM" : "AM");
+  } else {
+    snprintf(buffer, bufferSize, "%02d:%02d", local.tm_hour, local.tm_min);
+  }
+  return true;
 }
 }  // namespace
 
@@ -74,7 +71,8 @@ uint32_t TimeUtils::getCurrentValidTimestamp() {
 uint32_t TimeUtils::getAuthoritativeTimestamp() { return getCurrentValidTimestamp(); }
 
 bool TimeUtils::getLocalDateTime(const uint32_t epochSeconds, std::tm& out) {
-  return getLocalDateTime(epochSeconds, SETTINGS.clockUtcOffsetQ, out);
+  const time_t epoch = static_cast<time_t>(epochSeconds);
+  return static_cast<int64_t>(epoch) == epochSeconds && localtime_r(&epoch, &out);
 }
 
 bool TimeUtils::getLocalDateTime(const uint32_t epochSeconds, const uint8_t encodedOffset, std::tm& out) {
@@ -97,10 +95,15 @@ bool TimeUtils::localDateTimeToUtcEpoch(const int year, const unsigned month, co
     return false;
   }
 
-  const int64_t localSeconds = static_cast<int64_t>(daysFromCivil(year, month, day)) * 86400 +
-                               static_cast<int64_t>(hour) * 3600 + static_cast<int64_t>(minute) * 60;
-  const int64_t utcSeconds = localSeconds - localOffsetSeconds();
-  if (utcSeconds < VALID_CLOCK_THRESHOLD || utcSeconds > UINT32_MAX) return false;
+  std::tm local{};
+  local.tm_year = year - 1900;
+  local.tm_mon = static_cast<int>(month) - 1;
+  local.tm_mday = static_cast<int>(day);
+  local.tm_hour = static_cast<int>(hour);
+  local.tm_min = static_cast<int>(minute);
+  local.tm_isdst = -1;  // Let the configured timezone resolve ambiguous fall-back times.
+  const time_t utcSeconds = mktime(&local);
+  if (utcSeconds < VALID_CLOCK_THRESHOLD || static_cast<uint64_t>(utcSeconds) > UINT32_MAX) return false;
 
   std::tm roundTrip{};
   if (!getLocalDateTime(static_cast<uint32_t>(utcSeconds), roundTrip) || roundTrip.tm_year + 1900 != year ||
@@ -120,18 +123,13 @@ bool TimeUtils::formatTime(const uint32_t epochSeconds, const uint8_t encodedOff
   std::tm local{};
   if (!getLocalDateTime(epochSeconds, encodedOffset, local)) return false;
 
-  if (use12Hour) {
-    const bool pm = local.tm_hour >= 12;
-    const int hour12 = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
-    snprintf(buffer, bufferSize, "%d:%02d %s", hour12, local.tm_min, pm ? "PM" : "AM");
-  } else {
-    snprintf(buffer, bufferSize, "%02d:%02d", local.tm_hour, local.tm_min);
-  }
-  return true;
+  return formatLocalTime(local, use12Hour, buffer, bufferSize);
 }
 
 bool TimeUtils::formatCurrentTime(char* buffer, const size_t bufferSize, const bool use12Hour) {
-  return formatTime(getCurrentValidTimestamp(), SETTINGS.clockUtcOffsetQ, use12Hour, buffer, bufferSize);
+  const uint32_t now = getCurrentValidTimestamp();
+  std::tm local{};
+  return isClockValid(now) && getLocalDateTime(now, local) && formatLocalTime(local, use12Hour, buffer, bufferSize);
 }
 
 bool TimeUtils::formatCurrentDateTime(char* buffer, const size_t bufferSize, const bool use12Hour) {
@@ -140,9 +138,10 @@ bool TimeUtils::formatCurrentDateTime(char* buffer, const size_t bufferSize, con
   if (!buffer || !isClockValid(now) || !getLocalDateTime(now, local)) return false;
 
   char timeBuffer[9];
-  if (!formatTime(now, SETTINGS.clockUtcOffsetQ, use12Hour, timeBuffer, sizeof(timeBuffer))) return false;
-  return snprintf(buffer, bufferSize, "%04d-%02d-%02d %s", local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
-                  timeBuffer) > 0;
+  if (!formatLocalTime(local, use12Hour, timeBuffer, sizeof(timeBuffer))) return false;
+  const int length = snprintf(buffer, bufferSize, "%04d-%02d-%02d %s", local.tm_year + 1900, local.tm_mon + 1,
+                              local.tm_mday, timeBuffer);
+  return length > 0 && static_cast<size_t>(length) < bufferSize;
 }
 
 void TimeUtils::formatUtcOffset(const uint8_t encodedOffset, char* buffer, const size_t bufferSize) {
@@ -156,11 +155,9 @@ uint32_t TimeUtils::getLocalDayOrdinal(const uint32_t epochSeconds) {
   if (!isClockValid(epochSeconds)) {
     return 0;
   }
-  const int64_t local = static_cast<int64_t>(epochSeconds) + localOffsetSeconds();
-  if (local < 0) {
-    return 0;
-  }
-  return static_cast<uint32_t>(local / 86400);
+  std::tm local{};
+  if (!getLocalDateTime(epochSeconds, local)) return 0;
+  return getDayOrdinalForDate(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
 }
 
 uint32_t TimeUtils::getDayOrdinalForDate(const int year, const unsigned month, const unsigned day) {
@@ -176,11 +173,9 @@ std::string TimeUtils::formatDate(const uint32_t epochSeconds, const bool append
   if (!isClockValid(epochSeconds)) {
     return "";
   }
-  int year = 0;
-  unsigned month = 0;
-  unsigned day = 0;
-  localCivilDate(epochSeconds, year, month, day);
-  return formatIsoDate(year, month, day, appendBang);
+  std::tm local{};
+  if (!getLocalDateTime(epochSeconds, local)) return "";
+  return formatIsoDate(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, appendBang);
 }
 
 std::string TimeUtils::formatDateParts(const int year, const unsigned month, const unsigned day,

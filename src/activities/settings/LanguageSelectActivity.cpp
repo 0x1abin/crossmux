@@ -12,6 +12,7 @@
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "util/Timezones.h"
 
 namespace fui = freeink::ui;
 
@@ -91,6 +92,7 @@ void LanguageSelectActivity::activateIndex(const int index) {
     return;
   }
 
+  timezones::applyToClock();
   {
     RenderLock lock(*this);
     I18N.setLanguage(language);
