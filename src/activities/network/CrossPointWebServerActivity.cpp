@@ -284,9 +284,7 @@ void CrossPointWebServerActivity::startWebServer() {
     onGoHome();
     return;
   }
-  webServer->begin();
-
-  if (webServer->isRunning()) {
+  if (webServer->begin()) {
     state = WebServerActivityState::SERVER_RUNNING;
     LOG_DBG("WEBACT", "Web server started successfully");
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);
