@@ -114,8 +114,9 @@ class EpubReaderActivity final : public ReaderActivity {
   // auto page turn. Toggle rows stay one-tap toggles, as in Settings.
   OptionPopup overlayPopup;
   ReaderFontPreview fontPreview;
-  enum class FontPromptState { Idle, Asking, Accepted };
+  enum class FontPromptState { Idle, Asking, Accepted, TooLarge };
   FontPromptState fontPromptState = FontPromptState::Idle;
+  unsigned long fontNoticeStartedAt = 0;
   bool fontPromptWaitForBackRelease = false;
   // True while a clean-page snapshot (renderer.storeBwBuffer) backs the open
   // overlay, letting panel->toolbar steps restore the page without a full

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <SdCardFontCache.h>
 #include <SdCardFontRegistry.h>
 
 #include <atomic>
@@ -21,7 +22,7 @@ class TextSettingsActivity final : public UiTabListActivity {
  public:
   enum class Tab : uint8_t { Family, Size, Layout, Style, Count };
   enum class InitialFontState : uint8_t { Unchanged, Changed };
-  enum class StartMode : uint8_t { Interactive, PreviewOnly, PreloadThenExit };
+  enum class StartMode : uint8_t { Interactive, PreviewOnly, AskThenExit, PreloadThenExit };
 
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
                        Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged,
@@ -61,6 +62,7 @@ class TextSettingsActivity final : public UiTabListActivity {
       static_cast<int>(StyleRow::Hyphenation) - static_cast<int>(StyleRow::ReadingGuideLineStyle);
   enum class FontLoadState : uint8_t { Idle, Preloading, Ready };
   enum class ExitDestination : uint8_t { Previous, Home };
+  enum class ExitPrompt : uint8_t { None, Waiting, Accepted, TooLarge };
 
   // --- UiTabListActivity contract ---
   int listCount() const override;
@@ -78,8 +80,10 @@ class TextSettingsActivity final : public UiTabListActivity {
 
   void applyFamily(int listIndex);
   void applySize(int listIndex);
-  bool preloadFont(const SdCardFontFileInfo& file, const char* familyName);
+  SdCardFontCache::Result preloadFont(const SdCardFontFileInfo& file, const char* familyName);
   void exitAfterFinalFont(ExitDestination destination);
+  void finishFinalFont(bool accepted);
+  void showPreloadFailure(SdCardFontCache::Result result);
   void completeExit();
   const SdCardFontFileInfo* fontFileForFamily(int listIndex, uint8_t pointSize) const;
 #ifdef ENABLE_CHINESE_VERSION
@@ -153,4 +157,7 @@ class TextSettingsActivity final : public UiTabListActivity {
   unsigned lastPreloadPercent_ = 101;
   ExitDestination exitDestination_ = ExitDestination::Previous;
   bool exitInProgress_ = false;
+  ExitPrompt exitPrompt_ = ExitPrompt::None;
+  bool exitPromptWaitForBackRelease_ = false;
+  unsigned long noticeStartedAt_ = 0;
 };
