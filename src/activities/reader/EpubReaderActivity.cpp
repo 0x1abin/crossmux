@@ -2237,9 +2237,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // cache, and bumping right here is what retires it for every later render (a
   // bookmark repaint, a menu close, a settings change, a jump, a re-pagination)
   // without having to enumerate those cases.
-  const bool pageCacheHit =
-      pageCacheMatches(section ? section->currentPage : -1, orientedMarginTop, orientedMarginRight,
-                       orientedMarginBottom, orientedMarginLeft);
+  const bool pageCacheHit = pageCacheMatches(section ? section->currentPage : -1, orientedMarginTop,
+                                             orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
   ++renderEpoch_;
 #else
   [[maybe_unused]] constexpr bool pageCacheHit = false;
