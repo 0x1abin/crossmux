@@ -341,7 +341,19 @@ size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }
 bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, newPath); }
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, ); }  // already thread-safe, no need to wrap
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }
-bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, ); }
+// Closing an unopened handle is a no-op, not misuse. openFileForRead()/openFileForWrite()
+// deliberately hand back a null handle when the open fails (file = HalFile()), and the
+// tree-wide pattern for member files is to close them unconditionally -- so every caller
+// that closes a member whose open failed lands here with impl == nullptr. The failure has
+// already been reported by that open* return value, and asserting on it turns a
+// recoverable error (a book whose container is not a readable ZIP, a full or missing SD
+// card) into a panic. Field report on a Read Pico: assert here while opening a book, with
+// "[ZIP] EOCD signature not found in zip file" immediately before it.
+bool HalFile::close() {
+  HalStorage::StorageLock lock;
+  if (!impl) return true;
+  return impl->file.close();
+}
 HalFile HalFile::openNextFile() {
   HalStorage::StorageLock lock;
   assert(impl != nullptr);
