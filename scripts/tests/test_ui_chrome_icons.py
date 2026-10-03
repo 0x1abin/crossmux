@@ -170,6 +170,7 @@ int main() {
 
     def test_reader_footer_geometry_with_all_status_fields(self):
         source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
+        layout_source = (ROOT / 'src/components/UITheme.cpp').read_text()
         run_cpp(r'''
 #include <algorithm>
 #include <cassert>
@@ -239,6 +240,7 @@ struct UITheme {
  Metrics getMetrics() const {return {};}
  BaseTheme& getTheme() {static BaseTheme theme;return theme;}
  int getStatusBarHeight() const {return 48+10;}
+ static int getStatusBarTextTopPadding(const GfxRenderer&);
 };
 #define GUI UITheme::getInstance().getTheme()
 constexpr int bookmarkStatusIconWidth=24,bookmarkStatusIconGap=12,bluetoothStatusIconWidth=24;
@@ -246,7 +248,8 @@ void drawBookmarkStatusIcon(const GfxRenderer& r,int x,int y) {
  assert(x>=r.left+14 && x+24<=r.width-r.right-14 && y+24<=r.height-r.bottom-5);
 }
 void drawBluetoothStatusIcon(const GfxRenderer& r,int x,int y) {drawBookmarkStatusIcon(r,x,y);}
-''' + method(source, 'void BaseTheme::drawBatteryLeft(')
+''' + method(layout_source, 'int UITheme::getStatusBarTextTopPadding(')
+            + method(source, 'void BaseTheme::drawBatteryLeft(')
             + method(source, 'void BaseTheme::drawStatusBar(') + r'''
 int main() {
  for (auto size : {Rect{0,0,684,1216},Rect{0,0,600,1000}})
@@ -268,6 +271,86 @@ int main() {
  }
 }
 ''', defines=('CROSSMUX_UI_PROFILE_HIGH_DPI','FREEINK_DEVICE_READPICO=1'))
+
+    def test_reader_content_reclaims_footer_padding_without_moving_text(self):
+        layout_source = (ROOT / 'src/components/UITheme.cpp').read_text()
+        reader_source = (ROOT / 'src/activities/reader/EpubReaderActivity.cpp').read_text()
+        render = method(reader_source, 'void EpubReaderActivity::renderBook(')
+        start = render.index('  int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;')
+        end = render.index('#if FREEINK_DEVICE_EEGO_A4', start)
+        program = r'''
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <initializer_list>
+constexpr int READER_STATUS_FONT_ID=1, SMALL_FONT_ID=2;
+struct BaseTheme { static constexpr int STATUS_NUMERIC_FONT_ID=3; };
+struct Metrics { int statusBarVerticalMargin=UiHighDpiProfile::enabled?48:19, progressBarMarginTop=1; };
+using ThemeMetrics=Metrics;
+struct Settings {
+ uint8_t screenMargin=25;
+ struct Spec {
+   bool text=true, progress=false;
+   int progressBarHeightPx=4;
+   bool textLaneVisible() const {return text;}
+   bool showsProgressBar() const {return progress;}
+ } spec;
+ Spec statusBarSpec() const {return spec;}
+} SETTINGS;
+struct GfxRenderer {
+ int width=684,height=1216,top=5,right=5,bottom=8,left=5;
+ int textHeight=34, numericHeight=34;
+ int getLineHeight(int font) const {return font==BaseTheme::STATUS_NUMERIC_FONT_ID?numericHeight:textHeight;}
+ void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const {*t=top;*r=right;*b=bottom;*l=left;}
+};
+struct UITheme {
+ static UITheme& getInstance() {static UITheme theme;return theme;}
+ Metrics getMetrics() const {return {};}
+ static int getStatusBarHeight();
+ static int getProgressBarHeight();
+ static int getStatusBarTextTopPadding(const GfxRenderer&);
+};
+''' + method(layout_source, 'int UITheme::getStatusBarHeight(') + method(layout_source, 'int UITheme::getProgressBarHeight(') + method(layout_source, 'int UITheme::getStatusBarTextTopPadding(') + r'''
+int contentBottom(const GfxRenderer& renderer,bool automaticPageTurnActive) {
+''' + render[start:end] + r'''
+ return renderer.height-orientedMarginBottom;
+}
+int main() {
+ for (int orientation=0;orientation<4;++orientation)
+ for (int textHeight : {26,34,42,48,56}) for (int numericHeight : {34,50})
+ for (bool text : {false,true}) for (bool progress : {false,true})
+ for (bool automatic : {false,true}) for (uint8_t margin : {0,25,100}) {
+   GfxRenderer r;
+   if(orientation%2) {r.width=1216;r.height=684;}
+   if(orientation==1) {r.right=8;r.bottom=5;}
+   if(orientation==2) {r.top=8;r.bottom=5;}
+   if(orientation==3) {r.left=8;r.bottom=5;}
+   r.textHeight=textHeight;r.numericHeight=numericHeight;
+   SETTINGS.screenMargin=margin;SETTINGS.spec.text=text;SETTINGS.spec.progress=progress;
+   const int lane=UITheme::getInstance().getMetrics().statusBarVerticalMargin;
+   const int bar=progress?5:0;
+   const int oldReserve=(text||automatic?lane:0)+bar;
+   const int oldBottom=r.height-r.bottom-std::max<int>(margin,oldReserve);
+   const int bottom=contentBottom(r,automatic);
+   assert(bottom>=oldBottom);
+   assert(bottom<=r.height-r.bottom-margin);
+   if(!UiHighDpiProfile::enabled || !(text||automatic) || margin>=oldReserve)
+     assert(bottom==oldBottom);
+   if(UiHighDpiProfile::enabled && (text||automatic)) {
+     const int offset=UITheme::getStatusBarTextTopPadding(r);
+     const int textY=r.height-r.bottom-oldReserve+offset;
+     assert(textY-bottom>=std::min(6,offset));
+     if(textHeight==34 && numericHeight==34 && margin==25) {
+       assert(bottom-oldBottom==7);
+       assert(textY+34==r.height-r.bottom-bar-1);
+     }
+     if(std::max(textHeight,numericHeight)>=42) assert(bottom==oldBottom);
+   }
+ }
+}
+'''
+        for defines in (('CROSSMUX_UI_PROFILE_HIGH_DPI', 'FREEINK_DEVICE_READPICO=1'), ()):
+            run_cpp(program, defines=defines)
 
 
 if __name__ == '__main__':

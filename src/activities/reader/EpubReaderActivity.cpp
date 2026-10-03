@@ -1678,14 +1678,17 @@ void EpubReaderActivity::renderBook() {
 
   const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
 
+  int bottomReserve = statusBarHeight;
   if (automaticPageTurnActive &&
       (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight())) {
-    orientedMarginBottom +=
-        std::max(SETTINGS.screenMargin,
-                 static_cast<uint8_t>(statusBarHeight + UITheme::getInstance().getMetrics().statusBarVerticalMargin));
-  } else {
-    orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
+    bottomReserve += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
   }
+  if (UiHighDpiProfile::enabled && (SETTINGS.statusBarSpec().textLaneVisible() || automaticPageTurnActive)) {
+    // Reuse the footer's unused top space while keeping a gap above its text.
+    bottomReserve -=
+        std::max(0, UITheme::getStatusBarTextTopPadding(renderer) - UiHighDpiProfile::readerContentStatusGap);
+  }
+  orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), bottomReserve);
 #if FREEINK_DEVICE_EEGO_A4
   // The A4's status bar is lifted 4 px so the bezel does not cover it (see
   // BaseTheme::drawStatusBar); reserve the same space for the content.

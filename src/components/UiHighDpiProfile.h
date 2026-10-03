@@ -25,6 +25,7 @@ inline constexpr int batteryHeight = 20;
 inline constexpr int readerStatusHeight = 48;
 inline constexpr int readerStatusIconSize = 24;
 inline constexpr int readerStatusHorizontalMargin = 14;
+inline constexpr int readerContentStatusGap = 6;
 // NotoSans 12 with centered CJK 12 fallback leaves 5px below the Chinese ink.
 inline constexpr int readerStatusBottomPadding = 1;
 }  // namespace UiHighDpiProfile
