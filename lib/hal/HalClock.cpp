@@ -4,11 +4,13 @@
 #include <WiFi.h>
 #include <esp_netif.h>
 #include <esp_netif_sntp.h>
-#include <esp_sntp.h>
 #include <sys/time.h>
 #include <time.h>
 
-// Use the raw lwIP stop only inside the TCP/IP execution context.
+// Disable legacy translating inlines so raw lwIP APIs can be used in TCP/IP context.
+#define ESP_NETIF_COMPONENT_BUILD
+#include <esp_sntp.h>
+#undef ESP_NETIF_COMPONENT_BUILD
 #undef SNTP_OPMODE_POLL
 #include <lwip/apps/sntp.h>
 
