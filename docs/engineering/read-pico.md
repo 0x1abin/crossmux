@@ -137,6 +137,16 @@ full-screen allocation is introduced. BMP scratch is at most 10,240 bytes;
 JPEG uses the existing fallible decoder and bounded row/MCU workspace. A B/W
 proxy supports modal menus; closing them restores the original native image.
 
+AirPage performs one full-screen white `FULL_REFRESH` before displaying each new
+download and once when the activity exits. This runs before the native gray16
+transaction, so cleanup cannot replace the finished gray image with its B/W
+proxy. FAST maps to differential DU on Read Pico and is insufficient for this
+cleanup; the visible FULL flash is intentional. Legacy four-level output reuses
+its existing white preclear rather than adding a second clear. Identical
+downloads, history opens, popups and retry redraws do not request another FULL
+clear. No additional framebuffer is allocated. The host recording HAL checks
+refresh order/count; verify residual gray tones on the physical panel.
+
 AirPage stores and displays historical originals. Set Cover preserves BMP bytes;
 JPEG uses the existing Gray8 BMP writer selected by an explicit output enum.
 Short writes fail and the `.part/.bak` installation transaction remains in place.

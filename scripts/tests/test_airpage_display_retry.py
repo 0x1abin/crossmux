@@ -131,6 +131,86 @@ int main() {
 }
 ''')
 
+    def test_new_download_cleanup_is_consumed_once_and_exit_cleans_before_next_frame(self):
+        source = (ROOT / 'src/activities/apps/airpage/AirPageActivity.cpp').read_text()
+        start = source.index('      const bool cleanBeforeDisplay = imageNeedsFullClean_;')
+        end = source.index('      if (rendered == ', start)
+        consumption = source[start:end]
+        run_cpp(r'''
+#include <cassert>
+#include <cstdint>
+#include <string>
+#include <vector>
+#define LOG_DBG(...) ((void)0)
+#define LOG_INF(...) ((void)0)
+#define LOG_ERR(...) ((void)0)
+std::vector<char> events;
+struct Activity { void onExit() { events.push_back('E'); } };
+namespace airpage {
+struct AirPageImageStore {
+ enum class StageResult { Failed, Unchanged, PendingDisplay };
+ static constexpr const char* kDownloadPartPath = "latest.part";
+ StageResult result = StageResult::PendingDisplay;
+ bool ensureDirectories() { return true; }
+ StageResult stageDownloadedImage(uint64_t) { return result; }
+ bool selectCurrent(int&) { return true; }
+};
+struct AirPageImageRenderer {
+ static void resetSessionFailures() {}
+ static void releaseSessionResources() { events.push_back('R'); }
+ static void cleanScreen(int&) { events.push_back('F'); }
+ static bool render(int&, int, int, bool clean) { if (clean) events.push_back('F'); return true; }
+};
+}
+struct HttpDownloader {
+ enum DownloadError { OK };
+ static DownloadError downloadToFile(const std::string&, const char*) { return OK; }
+};
+struct AirPageActivity : Activity {
+ enum class Screen { Qr, Image };
+ enum class Notice { None, DownloadFailed };
+ struct Connection {
+   bool wifiConnected() { return true; }
+   int handleWifiFailure() { return 0; }
+   void stop() { events.push_back('S'); }
+ } connection_;
+ airpage::AirPageImageStore imageStore_;
+ int renderer = 0, selectedImage_ = 0, fullScreen = 0;
+ bool imageNeedsDisplay_ = false, imageNeedsFullClean_ = false;
+ Notice notice_ = Notice::None;
+ std::string downloadUrl_, legacyDownloadUrl_;
+ uint64_t currentArchiveDateKey() { return 0; }
+ void applyConnectionEvent(int) {}
+ void setAirPageScreen(Screen) {}
+ void doFetch();
+ void onExit();
+ void display() {
+''' + consumption + r'''
+ (void)rendered;
+ }
+};
+''' + method(source, 'void AirPageActivity::doFetch()') +
+            method(source, 'void AirPageActivity::onExit()') + r'''
+int main() {
+ using Stage = airpage::AirPageImageStore::StageResult;
+ for (auto stage : {Stage::Failed, Stage::Unchanged, Stage::PendingDisplay}) {
+   AirPageActivity a;
+   a.imageStore_.result = stage;
+   a.doFetch();
+   assert(a.imageNeedsFullClean_ == (stage == Stage::PendingDisplay));
+   events.clear();
+   a.display();
+   a.display(); // A retry or popup redraw must not repeat FULL cleanup.
+   assert(events.size() == (stage == Stage::PendingDisplay ? 1 : 0));
+   assert(!a.imageNeedsFullClean_);
+ }
+ AirPageActivity a;
+ events.clear();
+ a.onExit();
+ events.push_back('N'); // ActivityManager renders the next activity after onExit returns.
+ assert((events == std::vector<char>{'S', 'R', 'E', 'F', 'N'}));
+}
+''')
 
 if __name__ == '__main__':
     unittest.main()
