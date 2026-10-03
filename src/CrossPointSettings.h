@@ -493,6 +493,20 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Which gestures turn the page in each direction (PAGE_TURN_GESTURE).
   uint8_t pageTurnGesture = SWIPE_ONLY;
   uint8_t previousPageGesture = SWIPE_ONLY;
+  // 翻页方向：左右对调阅读器的点击区与滑动方向，给左手握持的用户。0 = 正常，
+  // 1 = 对调（点左边翻下一页、往右滑翻下一页）。
+  //
+  // 只作用于阅读器：这是拿着书看时才有的握持问题，设置页和其它 App 不受影响。
+  // 与 rtlBook（日漫竖排那种由右往左读的书）做 XOR，所以两者叠加时互相抵消，
+  // 而不是各转一次变成没转。
+  // / Page-turn direction: mirror the reader's tap zones and swipe directions for
+  // users who hold the device in the other hand. 0 = normal, 1 = mirrored (tapping
+  // the left side advances, swiping right advances).
+  //
+  // Reader-only on purpose: this is a holding-the-book problem, so settings pages
+  // and other apps are untouched. XORed with rtlBook (right-to-left books such as
+  // vertical Japanese), so the two cancel rather than each flipping the result.
+  uint8_t pageTurnDirection = 0;
   // Reader menu open gesture (SHOW_READER_MENU: off / center tap / bottom-edge
   // up-swipe). Only surfaced on home-key boards, where Home is the capacitive
   // key and the bottom edge is free; elsewhere it stays at the Tap default.
