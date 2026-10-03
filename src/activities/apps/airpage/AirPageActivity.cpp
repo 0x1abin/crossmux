@@ -184,23 +184,16 @@ bool AirPageActivity::processImageDisplayResult() {
       return true;
     }
 
+    case ImageDisplayResult::OutOfMemory:
     case ImageDisplayResult::Failure:
+      // A display failure does not establish file corruption. Keep both the
+      // pending download and its backup until display succeeds or a new push arrives.
       airpage::AirPageImageRenderer::resetSessionFailures();
-      switch (imageStore_.rejectDisplayedImage(selectedImage_)) {
-        case airpage::AirPageImageStore::RejectResult::CurrentRestored:
-        case airpage::AirPageImageStore::RejectResult::CurrentInvalid:
-          setAirPageScreen(Screen::Qr);
-          break;
-        case airpage::AirPageImageStore::RejectResult::HistoryInvalid:
-          if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
-            historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
-          }
-          setAirPageScreen(Screen::History);
-          break;
-      }
+      if (selectedImage_.current) historySelection_ = 0;
       rebuildHistoryRows();
-      notice_ = Notice::InvalidImage;
-      imageNeedsDisplay_ = true;
+      setAirPageScreen(Screen::History);
+      notice_ = result == ImageDisplayResult::OutOfMemory ? Notice::ImageOutOfMemory : Notice::ImageDisplayFailed;
+      imageNeedsDisplay_ = false;
       requestUpdate();
       return true;
   }
@@ -248,6 +241,8 @@ void AirPageActivity::clearConnectionNotice() {
     case Notice::None:
     case Notice::NoImage:
     case Notice::InvalidImage:
+    case Notice::ImageOutOfMemory:
+    case Notice::ImageDisplayFailed:
     case Notice::DownloadFailed:
     case Notice::SettingsSaveFailed:
     case Notice::WallpaperFailed:
@@ -343,7 +338,9 @@ void AirPageActivity::loop() {
     }
 
     case Screen::History: {
-      if (mappedInput.wasAnyReleased() && notice_ == Notice::InvalidImage) notice_ = Notice::None;
+      if (mappedInput.wasAnyReleased() && (notice_ == Notice::InvalidImage || notice_ == Notice::ImageOutOfMemory ||
+                                           notice_ == Notice::ImageDisplayFailed))
+        notice_ = Notice::None;
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
         setAirPageScreen(Screen::Qr);
         requestUpdate();
@@ -669,6 +666,8 @@ void AirPageActivity::openSelectedHistoryImage() {
     return;
   }
   wallpaperResult_ = WallpaperResult::None;
+  notice_ = Notice::None;
+  airpage::AirPageImageRenderer::resetSessionFailures();
   setAirPageScreen(Screen::Image);
   imageNeedsDisplay_ = true;
   requestUpdate();
@@ -861,8 +860,8 @@ void AirPageActivity::render(RenderLock&&) {
     const bool screenSizeChanged =
         displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
     if (imageNeedsDisplay_ || screenSizeChanged) {
-      const bool rendered = airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_);
-      if (rendered) {
+      const auto rendered = airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_);
+      if (rendered == airpage::AirPageImageRenderer::Result::Success) {
         imageNeedsDisplay_ = false;
         displayedScreenWidth_ = fullScreen.width;
         displayedScreenHeight_ = fullScreen.height;
@@ -875,7 +874,10 @@ void AirPageActivity::render(RenderLock&&) {
         imageDisplayResult_.store(ImageDisplayResult::Success, std::memory_order_release);
         if (mappedInput.hasTouch()) renderUi();
       } else {
-        imageDisplayResult_.store(ImageDisplayResult::Failure, std::memory_order_release);
+        imageDisplayResult_.store(rendered == airpage::AirPageImageRenderer::Result::OutOfMemory
+                                      ? ImageDisplayResult::OutOfMemory
+                                      : ImageDisplayResult::Failure,
+                                  std::memory_order_release);
       }
       return;
     }
@@ -942,6 +944,9 @@ void AirPageActivity::render(RenderLock&&) {
 
   if (mappedInput.hasTouch() || screen_ == Screen::Settings || screen_ == Screen::History) renderUi();
 
+  if (screen_ == Screen::History && (notice_ == Notice::ImageOutOfMemory || notice_ == Notice::ImageDisplayFailed)) {
+    GUI.drawPopup(renderer, noticeText());
+  }
   renderer.displayBuffer();
   imageNeedsDisplay_ = true;
   displayedScreenWidth_ = 0;
@@ -956,6 +961,10 @@ const char* AirPageActivity::noticeText() const {
       return tr(STR_AIRPAGE_NO_IMAGE);
     case Notice::InvalidImage:
       return tr(STR_AIRPAGE_INVALID_IMAGE);
+    case Notice::ImageOutOfMemory:
+      return tr(STR_AIRPAGE_IMAGE_OUT_OF_MEMORY);
+    case Notice::ImageDisplayFailed:
+      return tr(STR_AIRPAGE_IMAGE_DISPLAY_FAILED);
     case Notice::WifiRequired:
       return tr(STR_AIRPAGE_WIFI_REQUIRED);
     case Notice::WifiFailed:

@@ -3,6 +3,7 @@
 #include <BuildScratch.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <JPEGDEC.h>
 #include <Logging.h>
@@ -104,11 +105,15 @@ constexpr size_t JPEG_DECODER_SIZE = sizeof(JPEGDEC);
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_SIZE + 16 * 1024;
 
 bool hasHeapForJpegDecoder(const char* operation) {
-  const size_t freeHeap = ESP.getFreeHeap();
-  const size_t maxAlloc = ESP.getMaxAllocHeap();
-  if (freeHeap >= MIN_FREE_HEAP_FOR_JPEG && maxAlloc >= JPEG_DECODER_SIZE) return true;
-  LOG_ERR("JPG", "Not enough heap for JPEG %s (free=%u need=%u, maxAlloc=%u need=%u)", operation, freeHeap,
-          MIN_FREE_HEAP_FOR_JPEG, maxAlloc, JPEG_DECODER_SIZE);
+  const auto available = HalMemory::getDefaultHeap();
+  if (available.freeBytes >= MIN_FREE_HEAP_FOR_JPEG && available.largestBlockBytes >= JPEG_DECODER_SIZE) return true;
+  const auto internal = HalMemory::getInternalHeap();
+  const auto psram = HalMemory::getPsramHeap();
+  LOG_ERR("JPG",
+          "Not enough heap for JPEG %s (default free=%zu largest=%zu need=%zu/%zu, "
+          "internal free=%zu largest=%zu, PSRAM free=%zu largest=%zu)",
+          operation, available.freeBytes, available.largestBlockBytes, MIN_FREE_HEAP_FOR_JPEG, JPEG_DECODER_SIZE,
+          internal.freeBytes, internal.largestBlockBytes, psram.freeBytes, psram.largestBlockBytes);
   return false;
 }
 
@@ -366,6 +371,7 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                      const RenderConfig& config) {
+  if (config.error) *config.error = ImageRenderError::Failed;
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
   if (config.output == DecodeOutput::NativeGrayscale16 &&
@@ -378,7 +384,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
 
   uint8_t* decoderScratch = cacheOnly ? buildscratch::claim(JPEG_DECODER_SIZE) : nullptr;
-  if (!decoderScratch && !hasHeapForJpegDecoder("decode")) return false;
+  if (!decoderScratch && !hasHeapForJpegDecoder("decode")) {
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
+    return false;
+  }
 
   std::unique_ptr<JPEGDEC> heapJpeg;
   JPEGDEC* jpeg = nullptr;
@@ -390,6 +399,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jpeg = heapJpeg.get();
   }
   if (!jpeg) {
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
     LOG_ERR("JPG", "Failed to allocate JPEG decoder");
     return false;
   }
@@ -509,9 +519,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
       ctx.cache.abort();
       return false;
     }
-    return ctx.cache.finalize();
-  }
-  if (ctx.caching) ctx.cache.finalize();
+    if (!ctx.cache.finalize()) return false;
+  } else if (ctx.caching)
+    ctx.cache.finalize();
+  if (config.error) *config.error = ImageRenderError::None;
 
   return true;
 }

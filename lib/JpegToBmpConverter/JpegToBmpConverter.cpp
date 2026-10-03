@@ -2,6 +2,7 @@
 
 #include <BuildScratch.h>
 #include <HalDisplay.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <JPEGDEC.h>
 #include <Logging.h>
@@ -556,10 +557,18 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& b
   // 17.9KB decoder after ZIP extraction releases its inflate claim; callers
   // without a loan retain the existing fallible heap path.
   uint8_t* decoderScratch = buildscratch::claim(JPEG_DECODER_SIZE);
-  if (!decoderScratch && (ESP.getFreeHeap() < MIN_FREE_HEAP || ESP.getMaxAllocHeap() < JPEG_DECODER_SIZE)) {
-    LOG_ERR("JPG", "Not enough heap for JPEG decoder (free=%u need=%u, maxAlloc=%u need=%u)", ESP.getFreeHeap(),
-            MIN_FREE_HEAP, ESP.getMaxAllocHeap(), JPEG_DECODER_SIZE);
-    return false;
+  if (!decoderScratch) {
+    const auto available = HalMemory::getDefaultHeap();
+    if (available.freeBytes < MIN_FREE_HEAP || available.largestBlockBytes < JPEG_DECODER_SIZE) {
+      const auto internal = HalMemory::getInternalHeap();
+      const auto psram = HalMemory::getPsramHeap();
+      LOG_ERR("JPG",
+              "Not enough heap for JPEG decoder (default free=%zu largest=%zu need=%zu/%zu, "
+              "internal free=%zu largest=%zu, PSRAM free=%zu largest=%zu)",
+              available.freeBytes, available.largestBlockBytes, MIN_FREE_HEAP, JPEG_DECODER_SIZE, internal.freeBytes,
+              internal.largestBlockBytes, psram.freeBytes, psram.largestBlockBytes);
+      return false;
+    }
   }
 
   s_jpegFile = &jpegFile;

@@ -11,7 +11,8 @@ class AirPageImageRenderer final {
  public:
   static void resetSessionFailures();
   static void releaseSessionResources();
-  static bool render(GfxRenderer& renderer, const Rect& viewport, const SelectedImage& selected);
+  enum class Result : uint8_t { Success, OutOfMemory, Failed };
+  static Result render(GfxRenderer& renderer, const Rect& viewport, const SelectedImage& selected);
 
  private:
   static Rect fittedBounds(const Rect& viewport, const ImageInfo& image);
