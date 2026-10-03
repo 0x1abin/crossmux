@@ -68,6 +68,75 @@ int main() {
 }
 ''')
 
+    def test_history_page_actions_and_image_offsets(self):
+        source = (ROOT / 'src/activities/apps/airpage/AirPageActivity.cpp').read_text()
+        run_cpp(r'''
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+namespace fui { struct ActionEvent { int value; }; }
+namespace airpage { struct AirPageImageRenderer { static void resetSessionFailures() {} }; }
+struct Nav { void reset() {} };
+struct Store {
+ int page = 0, selected = -1;
+ size_t historyCount() const { return 20; }
+ bool hasPreviousHistoryPage() const { return page > 0; }
+ bool hasNextHistoryPage() const { return page < 2; }
+ bool previousHistoryPage() { --page; return true; }
+ bool nextHistoryPage() { ++page; return true; }
+ bool selectHistory(size_t index, int&) { selected = index; return index < 20; }
+};
+struct AirPageActivity {
+ enum class Screen { History, Image };
+ enum class Notice { InvalidImage, None };
+ enum class WallpaperResult { None };
+ struct RenderLock { explicit RenderLock(AirPageActivity&) {} };
+ struct App { void clearTapFlash() {} } app;
+ Screen screen_ = Screen::History;
+ Notice notice_ = Notice::None;
+ WallpaperResult wallpaperResult_ = WallpaperResult::None;
+ Store imageStore_;
+ Nav historyNav_;
+ int historySelection_ = 0, selectedImage_ = 0, updates = 0;
+ bool imageNeedsDisplay_ = false;
+ void rebuildHistoryRows() {}
+ void requestUpdate() { ++updates; }
+ void setAirPageScreen(Screen screen) { screen_ = screen; }
+ void moveHistorySelection(int index) { historySelection_ = index; }
+ size_t historyRowCount() const;
+ void openSelectedHistoryImage();
+ static void onHistoryRow(const fui::ActionEvent&, void*);
+};
+''' + method(source, 'size_t AirPageActivity::historyRowCount()') +
+            method(source, 'void AirPageActivity::openSelectedHistoryImage()') +
+            method(source, 'void AirPageActivity::onHistoryRow(') + r'''
+int main() {
+ AirPageActivity a;
+ assert(a.historyRowCount() == 21);
+ // The same activation method is used by physical Confirm and touch rows.
+ a.historySelection_ = 20;
+ a.openSelectedHistoryImage();
+ assert(a.imageStore_.page == 1 && a.historyRowCount() == 22);
+ assert(a.historySelection_ == 0 && a.screen_ == AirPageActivity::Screen::History);
+ AirPageActivity::onHistoryRow({1}, &a);
+ assert(a.imageStore_.selected == 0 && a.screen_ == AirPageActivity::Screen::Image);
+ a.screen_ = AirPageActivity::Screen::History;
+ AirPageActivity::onHistoryRow({20}, &a);
+ assert(a.imageStore_.selected == 19);
+ a.screen_ = AirPageActivity::Screen::History;
+ AirPageActivity::onHistoryRow({21}, &a);
+ assert(a.imageStore_.page == 2 && a.historyRowCount() == 21);
+ AirPageActivity::onHistoryRow({0}, &a);
+ assert(a.imageStore_.page == 1);
+ AirPageActivity::onHistoryRow({0}, &a);
+ assert(a.imageStore_.page == 0 && a.historyRowCount() == 21);
+ int updates = a.updates;
+ AirPageActivity::onHistoryRow({21}, &a);
+ AirPageActivity::onHistoryRow({-1}, &a);
+ assert(a.updates == updates && a.imageStore_.page == 0);
+}
+''')
+
     def test_image_block_forwards_memory_failure_without_poisoning_retry(self):
         source = (ROOT / 'lib/Epub/Epub/blocks/ImageBlock.cpp').read_text()
         decoder = (ROOT / 'lib/Epub/Epub/converters/ImageToFramebufferDecoder.h').read_text()

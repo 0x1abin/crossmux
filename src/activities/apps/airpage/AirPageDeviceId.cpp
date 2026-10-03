@@ -26,8 +26,7 @@ constexpr int kIdLen = 16;
 constexpr char kIdDir[] = "/.crosspoint";
 constexpr char kIdPath[] = "/.crosspoint/airpage_device_id";
 
-// Live-push mode flag. Shares the AirPage cache dir (created lazily on first
-// image fetch); we ensure it here too so the toggle works before any fetch.
+// Preferences stay in the hidden directory independently of downloaded images.
 constexpr char kModeDir[] = "/.crosspoint/airpage";
 constexpr char kModePath[] = "/.crosspoint/airpage/mode";
 constexpr char kAutoSleepWallpaperPath[] = "/.crosspoint/airpage/auto_sleep_wallpaper";
