@@ -18,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "NetworkStartup.h"
 #include "ReaderFontSizes.h"
 #include "SdCardFontSystem.h"
 #include "TextSettingsPreview.h"
@@ -161,7 +162,9 @@ void TextSettingsActivity::onEnter() {
   tabNavs[static_cast<int>(tab_)].selected = 0;  // screen opens with the tab bar focused, not a list row
 
   rebuildRowItems();
-  if (startMode_ == StartMode::PreloadThenExit) exitAfterFinalFont(ExitDestination::Previous);
+  if (startMode_ == StartMode::AskThenExit || startMode_ == StartMode::PreloadThenExit) {
+    exitAfterFinalFont(ExitDestination::Previous);
+  }
 }
 
 void TextSettingsActivity::onExit() { Activity::onExit(); }
@@ -246,11 +249,35 @@ void TextSettingsActivity::activateIndex(const int index) {
 }
 
 bool TextSettingsActivity::handleCustomInput() {
+  if (exitPrompt_ == ExitPrompt::TooLarge) {
+    if (millis() - noticeStartedAt_ >= fontpreload::NOTICE_DURATION_MS) {
+      // A contact started on the notice must not release into the next screen.
+      for (uint8_t button = 0; button < MappedInputManager::kButtonCount; ++button) {
+        if (mappedInput.isPressed(static_cast<MappedInputManager::Button>(button))) return true;
+      }
+      int x = 0, y = 0;
+      if (mappedInput.isScreenTouchHeld(x, y)) return true;
+      completeExit();
+    }
+    return true;
+  }
+  if (exitPromptWaitForBackRelease_) {
+    exitPromptWaitForBackRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back);
+    return true;  // Consume the inherited hold and release.
+  }
   const bool handled = optionPopup_.handleInput(mappedInput, [this] { requestUpdate(); });
-  // Automatic preloads only show an informational failure popup. Back and
-  // outside taps acknowledge it too, rather than exposing the picker to retry.
-  if (handled && startMode_ == StartMode::PreloadThenExit && !optionPopup_.isActive() && !exitInProgress_) {
-    completeExit();
+  if (exitPrompt_ != ExitPrompt::None && !optionPopup_.isActive()) {
+    const bool accepted = exitPrompt_ == ExitPrompt::Accepted;
+    {
+      RenderLock lock(*this);
+      exitPrompt_ = ExitPrompt::None;
+    }
+    if (accepted) {
+      finishFinalFont(true);
+    } else {
+      completeExit();
+    }
+    return true;
   }
   return handled;
 }
@@ -397,6 +424,11 @@ void TextSettingsActivity::render(RenderLock&& lock) {
     return;
   }
 
+  if (exitPrompt_ == ExitPrompt::TooLarge) {
+    fontpreload::drawTooLargeNotice(renderer);
+    renderer.displayBuffer();
+    return;
+  }
   if (optionPopup_.processRender(renderer, mappedInput)) return;  // picker draws over everything
   UiListActivity::render(std::move(lock));
 }
@@ -739,48 +771,46 @@ const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(const int list
              : nullptr;
 }
 
-bool TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const char* familyName) {
-  size_t cachedPayloadSize = 0;
-  const bool alreadyCached = SdCardFontCache::isValidFor(file.path.c_str(), &cachedPayloadSize);
+SdCardFontCache::Result TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const char* familyName) {
+  NetworkStartup::logMemory("font preload begin");
   {
     RenderLock lock(*this);
     preloadFamilyName_ = familyName;
     preloadPointSize_ = file.pointSize;
     preloadVerifying_ = false;
-    preloadCompleted_.store(alreadyCached ? cachedPayloadSize * 2 : 0);
-    preloadTotal_.store(alreadyCached ? cachedPayloadSize * 2 : 1);
+    preloadCompleted_.store(0);
+    preloadTotal_.store(1);
     lastPreloadPercent_ = 0;
     fontLoadState_.store(FontLoadState::Preloading);
-    if (!alreadyCached) sdFontSystem.releaseLoadedFont(renderer);
+    sdFontSystem.releaseLoadedFont(renderer);
   }
   requestUpdateAndWait();
-
-  if (alreadyCached) {
-    {
-      RenderLock lock(*this);
-      fontLoadState_.store(FontLoadState::Ready);
-    }
-    requestUpdateAndWait();
-    return true;
-  }
 
   const auto result = SdCardFontCache::preload(
       file.path.c_str(),
       [](size_t completed, size_t total, void* context) {
         auto* self = static_cast<TextSettingsActivity*>(context);
-        self->preloadTotal_.store(total);
-        self->preloadCompleted_.store(completed);
-        const bool verifying = completed > total / 2;
-        const bool phaseChanged = self->preloadVerifying_ != verifying;
-        self->preloadVerifying_ = verifying;
-        const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
-        if (phaseChanged || percent == 100 || percent >= self->lastPreloadPercent_ + 10) {
-          self->lastPreloadPercent_ = percent;
-          self->requestUpdate(true);
+        bool refresh = false;
+        {
+          RenderLock lock(*self);
+          self->preloadTotal_.store(total);
+          self->preloadCompleted_.store(completed);
+          const bool verifying = completed > total / 2;
+          const bool phaseChanged = self->preloadVerifying_ != verifying;
+          self->preloadVerifying_ = verifying;
+          const unsigned percent = total > 0 ? static_cast<unsigned>(completed * 100 / total) : 0;
+          if (phaseChanged || percent == 100 || percent >= self->lastPreloadPercent_ + 10) {
+            self->lastPreloadPercent_ = percent;
+            refresh = true;
+          }
         }
+        // Finish the panel refresh before the cache writer resumes Flash operations.
+        if (refresh) self->requestUpdateAndWait();
       },
       this);
 
+  LOG_INF("SDFCACHE", "Manual preload: %s", SdCardFontCache::resultName(result));
+  NetworkStartup::logMemory("font preload finished");
   const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
   if (succeeded) {
     requestUpdateAndWait();
@@ -790,7 +820,7 @@ bool TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const cha
     }
     requestUpdateAndWait();
   }
-  return succeeded;
+  return result;
 }
 
 void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination) {
@@ -809,8 +839,14 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   const bool fontChanged = initialFontState_ == InitialFontState::Changed ||
                            currentFamilyIndex_ != initialFamilyIndex_ || SETTINGS.fontPointSize != initialPointSize_;
   if (!fontChanged) {
+    const bool restoreFlash = initialSdFontFlashPreload_ != 0 && SETTINGS.sdFontFlashPreload == 0;
     SETTINGS.sdFontFlashPreload = initialSdFontFlashPreload_;
     SETTINGS.saveToFile();
+    if (restoreFlash) {
+      RenderLock lock(*this);
+      sdFontSystem.releaseLoadedFont(renderer);
+      sdFontSystem.ensureLoaded(renderer);
+    }
     completeExit();
     return;
   }
@@ -822,31 +858,75 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
     return;
   }
 
-  SETTINGS.sdFontFlashPreload = 1;
+  finishFinalFont(startMode_ == StartMode::PreloadThenExit);
+}
+
+void TextSettingsActivity::finishFinalFont(const bool accepted) {
+  SETTINGS.sdFontFlashPreload = 0;
   SETTINGS.saveToFile();
+  const auto* family = registry_ ? registry_->findFamily(SETTINGS.sdFontFamilyName) : nullptr;
+  if (family && family->vector) {
+    completeExit();
+    return;
+  }
   const auto* file = fontFileForFamily(currentFamilyIndex_, SETTINGS.fontPointSize);
-  const bool succeeded = file && preloadFont(*file, SETTINGS.sdFontFamilyName);
+  const auto check = file ? SdCardFontCache::preflight(file->path.c_str()) : SdCardFontCache::Result::InvalidFont;
+  if (check != SdCardFontCache::Result::Ok && check != SdCardFontCache::Result::AlreadyCached) {
+    showPreloadFailure(check);
+    return;
+  }
+
+  if (check == SdCardFontCache::Result::Ok && !accepted) {
+    {
+      RenderLock lock(*this);
+      constexpr StrId options[] = {StrId::STR_FONT_PRELOAD_START, StrId::STR_FONT_PRELOAD_SKIP};
+      exitPrompt_ = ExitPrompt::Waiting;
+      exitPromptWaitForBackRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back);
+      optionPopup_.show(StrId::STR_FONT_PRELOAD_CONFIRM, options, static_cast<int>(std::size(options)), 0,
+                        [this](int index) {
+                          RenderLock lock(*this);
+                          if (index == 0) exitPrompt_ = ExitPrompt::Accepted;
+                        });
+    }
+    requestUpdate();
+    return;
+  }
+
+  const auto result =
+      check == SdCardFontCache::Result::AlreadyCached ? check : preloadFont(*file, SETTINGS.sdFontFamilyName);
+  const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
+  SETTINGS.sdFontFlashPreload = succeeded ? 1 : 0;
+  SETTINGS.saveToFile();
   {
     RenderLock lock(*this);
     fontLoadState_.store(FontLoadState::Idle);
+    // ensureLoaded's same-family/size fast path otherwise retains the SD source.
+    if (succeeded) sdFontSystem.releaseLoadedFont(renderer);
     sdFontSystem.ensureLoaded(renderer, succeeded);
   }
   if (succeeded) {
     completeExit();
     return;
   }
+  showPreloadFailure(result);
+}
 
-  SETTINGS.sdFontFlashPreload = 0;
-  SETTINGS.saveToFile();
-  exitInProgress_ = false;
-  // Preload failure is informational (the font still loads from SD at runtime);
-  // acknowledging the popup exits exactly like the success path, with a
-  // cancelled result so the caller does not treat it as a font change.
-  ActivityResult result;
-  result.isCancelled = true;
-  setResult(std::move(result));
-  optionPopup_.show(StrId::STR_FONT_PRELOAD_FAILED, OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0,
-                    [this](int) { completeExit(); });
+void TextSettingsActivity::showPreloadFailure(const SdCardFontCache::Result result) {
+  if (result == SdCardFontCache::Result::TooLarge) {
+    {
+      RenderLock lock(*this);
+      exitPrompt_ = ExitPrompt::TooLarge;
+    }
+    requestUpdateAndWait();
+    noticeStartedAt_ = millis();  // Start the dwell after the e-ink frame is visible.
+    return;
+  }
+  {
+    RenderLock lock(*this);
+    exitPrompt_ = ExitPrompt::Waiting;
+    exitPromptWaitForBackRelease_ = mappedInput.isPressed(MappedInputManager::Button::Back);
+    optionPopup_.show(fontpreload::failureMessage(result), OK_OPTION, static_cast<int>(std::size(OK_OPTION)), 0, {});
+  }
   requestUpdate();
 }
 
@@ -860,6 +940,11 @@ void TextSettingsActivity::completeExit() {
 }
 
 bool TextSettingsActivity::handleHomeGesture() {
+  if (exitPrompt_ != ExitPrompt::None) {
+    exitDestination_ = ExitDestination::Home;
+    completeExit();
+    return true;
+  }
   exitAfterFinalFont(ExitDestination::Home);
   return true;
 }

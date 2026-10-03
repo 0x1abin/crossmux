@@ -655,7 +655,7 @@ void continueChineseFontInstall(const uint8_t expectedPointSize) {
 
   auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(
       renderer, mappedInputManager, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
-      TextSettingsActivity::InitialFontState::Changed, TextSettingsActivity::StartMode::PreloadThenExit);
+      TextSettingsActivity::InitialFontState::Changed, TextSettingsActivity::StartMode::AskThenExit);
   if (textSettings) {
     activityManager.pushActivity(std::move(textSettings));
     activityManager.loop();

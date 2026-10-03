@@ -30,12 +30,11 @@ class HttpDownloader {
     UNAUTHORIZED,  // 401/403: callers holding a refreshable credential can retry
   };
 
-  // Pre-flight floor for starting a TLS transfer. Below this the session or
-  // its ~17KB record buffer fails mid-stream (wolfSSL MEMORY_E) -- or an
-  // interior allocation abort()s the device. Callers should check before
-  // downloadToFile() and fail into their error UI instead.
+  // Pre-flight floor for the ordinary allocator used by TLS (including
+  // registered PSRAM). This is a heuristic, not a reservation or OOM guarantee.
   static constexpr uint32_t MIN_TLS_FREE_HEAP = 40000;
   static constexpr uint32_t MIN_TLS_MAX_ALLOC = 20000;
+  static bool hasMemoryForTls();
 
   /**
    * Fetch text content from a URL with optional credentials.

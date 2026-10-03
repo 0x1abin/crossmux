@@ -356,8 +356,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   downloadingFamilyIndex_ = -1;
 
   if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
-  if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
-      ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {
+  if (!HttpDownloader::hasMemoryForTls()) {
     errorMessage_ = tr(STR_MEMORY_ERROR);
     return false;
   }
@@ -370,7 +369,9 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     errorMessage_ = "Failed to fetch font list";
     return false;
   }
+  NetworkStartup::logMemory("font manifest request");
   auto result = HttpDownloader::downloadToFile(manifestUrl, MANIFEST_TMP, nullptr);
+  NetworkStartup::logMemory("font manifest request finished");
   if (result != HttpDownloader::OK) {
     LOG_ERR("FONT", "Failed to fetch manifest from %s", manifestUrl);
     errorMessage_ = "Failed to fetch font list";
@@ -378,6 +379,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     return false;
   }
 
+  NetworkStartup::logMemory("font manifest parse begin");
   JsonDocument doc;
   DeserializationError err;
   bool manifestTooLarge = false;
@@ -406,6 +408,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     return false;
   }
 
+  NetworkStartup::logMemory("font manifest JSON parsed");
   int version = doc["version"] | 0;
   if (version != FONTS_MANIFEST_VERSION) {
     LOG_ERR("FONT", "Unsupported manifest version: %d", version);
@@ -548,6 +551,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   rowLabels_.reserve(rowCapacity);
   rowItems_.reserve(rowCapacity);
 
+  NetworkStartup::logMemory("font manifest ready");
   LOG_DBG("FONT", "Manifest loaded: %zu families, %zu script groups", families_.size(), scriptGroupLabels_.size());
   return true;
 }
@@ -879,6 +883,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
     const auto& file = files_[family.fileOffset + i];
     const auto result = downloadFile(family, file);
     if (result != DownloadResult::Success) {
+      NetworkStartup::logMemory("font family download stopped");
       family.installed = wasInstalled;
       family.hasUpdate = hadUpdate;
       if (result == DownloadResult::Cancelled) operation_ = DownloadOperation::None;
@@ -896,6 +901,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
   fontInstaller_.refreshRegistry();
   family.installed = true;
   family.hasUpdate = false;
+  NetworkStartup::logMemory("font family installed");
   return DownloadResult::Success;
 }
 
@@ -953,7 +959,7 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   startActivityForResult(std::move(textSettings), [this](const ActivityResult& result) {
     RenderLock lock(*this);
     accelerationCompleted_ =
-        startMode_ != StartMode::PreviewOnly && !result.isCancelled && SETTINGS.sdFontFamilyName[0] != '\0';
+        startMode_ != StartMode::PreviewOnly && !result.isCancelled && SETTINGS.sdFontFlashPreload != 0;
     state_ = COMPLETE;
     operation_ = DownloadOperation::None;
     renderer.requestNextFullRefresh();
