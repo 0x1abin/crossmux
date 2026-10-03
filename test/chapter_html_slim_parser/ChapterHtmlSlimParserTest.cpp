@@ -363,6 +363,56 @@ class SectionMemoryTest : public ::testing::Test {
   }
 };
 
+TEST_F(SectionMemoryTest, TallerViewportRebuildsCacheAndPreservesBodyAndOffsets) {
+  std::string html = "<html><body><p>";
+  for (int i = 0; i < 400; ++i) html += "word" + std::to_string(i) + " ";
+  html += "</p></body></html>";
+  writeHtml(html);
+  spec.viewportHeight = 57;
+  uint32_t offset = 0;
+  uint16_t oldPageCount = 0;
+  {
+    Section original(epub, 0, renderer);
+    ASSERT_TRUE(original.createSectionFile(spec));
+    ASSERT_GT(original.pageCount, 1U);
+    oldPageCount = original.pageCount;
+    offset = *original.getVisibleTextOffsetForPage(1);
+  }
+
+  spec.viewportHeight += 7;
+  Section rebuilt(epub, 0, renderer);
+  EXPECT_FALSE(rebuilt.loadSectionFile(spec));
+  laidOutWords.clear();
+  ASSERT_TRUE(rebuilt.createSectionFile(spec));
+  EXPECT_LT(rebuilt.pageCount, oldPageCount);
+  ASSERT_EQ(laidOutWords.size(), 400U);
+  for (int i = 0; i < 400; ++i) EXPECT_EQ(laidOutWords[i], "word" + std::to_string(i));
+  const auto page = rebuilt.getPageForVisibleTextOffset(offset);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_LE(*rebuilt.getVisibleTextOffsetForPage(*page), offset);
+  if (*page + 1 < rebuilt.pageCount) EXPECT_GT(*rebuilt.getVisibleTextOffsetForPage(*page + 1), offset);
+  Section restored(epub, 0, renderer);
+  ASSERT_TRUE(restored.loadSectionFile(spec));
+  EXPECT_EQ(restored.getPageForVisibleTextOffset(offset), page);
+}
+
+TEST_F(SectionMemoryTest, TallerViewportInvalidatesPartialCache) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  {
+    Section original(epub, 0, renderer);
+    ASSERT_TRUE(original.startBuild(spec));
+    ASSERT_TRUE(original.buildSomeMore(1));
+  }
+  Section restored(epub, 0, renderer);
+  ASSERT_TRUE(restored.loadSectionFile(spec));
+  ASSERT_TRUE(restored.isPartial());
+  spec.viewportHeight += 7;
+  EXPECT_FALSE(restored.loadSectionFile(spec));
+}
+
 TEST_F(SectionMemoryTest, OomAbandonsBuildAndBasicRetryPreservesBodyAndOffsets) {
   std::string html = "<html><body><p id='start'>";
   for (int i = 0; i < 400; ++i) html += "word" + std::to_string(i) + " ";

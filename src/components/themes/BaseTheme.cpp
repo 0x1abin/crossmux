@@ -1092,11 +1092,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
   auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom;
-  if (UiHighDpiProfile::enabled) {
-    const int lineHeight = std::max(renderer.getLineHeight(textFontId), renderer.getLineHeight(STATUS_NUMERIC_FONT_ID));
-    // Keep the profile's bottom space after the full status line; '~' fits inside that line.
-    textY += std::max(0, metrics.statusBarVerticalMargin - lineHeight - UiHighDpiProfile::readerStatusBottomPadding);
-  }
+  textY += UITheme::getStatusBarTextTopPadding(renderer);
 #if !FREEINK_DEVICE_READPICO
   textY -= 4;
 #endif

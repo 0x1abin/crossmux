@@ -97,6 +97,28 @@ Latin descenders and SD faces retain their own metrics. The estimate uses only
 the 14pt `~` glyph, which fits inside the footer line. Oriented bezel insets and
 configured progress-bar space remain authoritative.
 
+Reader pagination shares the footer's font-dependent top-padding calculation.
+When the text lane or automatic-page-turn title is present, it reclaims that
+padding above a 6px content-to-footer gap, while retaining the configured screen
+margin and oriented bezel insets. Footer coordinates do not move. A 34px footer
+line reclaims 7px from the 48px reservation; whether this fits another complete
+body line depends on the current font and pagination remainder. Hidden and
+progress-only footers keep their existing reservation unless automatic page
+turning needs a title. EPUB, TXT and Markdown share this layout. A changed
+viewport invalidates complete and partial section caches through the existing
+render spec and restores reading position by visible-text offset; no binary
+format or saved reading setting changes. No allocation is added.
+
+The host regressions execute the production padding and reader-margin paths in
+four orientations, with text/progress visibility, automatic turning, varying
+footer font heights and both profile modes. Section tests cover viewport-driven
+complete/partial cache invalidation and lossless text-offset restoration. Native
+ReadPico captures with built-in 12pt text and 31px margins show 32 to 33 complete
+lines after the viewport grows from 1119 to 1126px. An SD NotoSans 16pt case with
+25px margins grows from 1125 to 1132px and retains 25 lines. The footer battery
+region is pixel-identical in both comparisons; physical-panel acceptance remains
+pending.
+
 The new built-in reader ID `0x4738000C` replaces the earlier 4.7-inch custom-font
 IDs. `Section.cpp` checks that identity and rebuilds old pagination using the
 existing cache format; book progress is retained. The `screen47` font directory,

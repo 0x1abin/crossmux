@@ -19,6 +19,7 @@
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "components/CoverGridHomeUi.h"
 #include "components/SelectionCursorPolicy.h"
 #include "components/themes/BaseTheme.h"
@@ -270,6 +271,19 @@ int UITheme::getProgressBarHeight() {
   const ThemeMetrics metrics = UITheme::getInstance().getMetrics();
   const auto sb = SETTINGS.statusBarSpec();
   return sb.showsProgressBar() ? (sb.progressBarHeightPx + metrics.progressBarMarginTop) : 0;
+}
+
+int UITheme::getStatusBarTextTopPadding(const GfxRenderer& renderer) {
+  if (!UiHighDpiProfile::enabled) return 0;
+#if FREEINK_DEVICE_READPICO
+  constexpr int textFontId = READER_STATUS_FONT_ID;
+#else
+  constexpr int textFontId = SMALL_FONT_ID;
+#endif
+  const int lineHeight =
+      std::max(renderer.getLineHeight(textFontId), renderer.getLineHeight(BaseTheme::STATUS_NUMERIC_FONT_ID));
+  return std::max(0, UITheme::getInstance().getMetrics().statusBarVerticalMargin - lineHeight -
+                         UiHighDpiProfile::readerStatusBottomPadding);
 }
 
 // Centered text implementation that takes the safe area into account
