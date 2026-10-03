@@ -21,6 +21,8 @@ class ReaderPageCacheTest(unittest.TestCase):
         begin = source.index('  const auto key = pageCacheKey(section ?')
         end = source.index('\n#else', begin)
         consume = source[begin:end]
+        begin = source.index('  const uint32_t missingCodepoint =', source.index('  unsigned long cacheBaseMs'))
+        missing_glyph = source[begin:source.index('\n#else', begin)]
         program = r'''
 #include <array>
 #include <cassert>
@@ -47,9 +49,10 @@ struct Settings {
 namespace memory {
 int allocations=0, live=0, failAt=0;
 bool headroom=true;
+size_t chargedBytes=0;
 struct Free { void operator()(uint8_t* p) const {delete[] p; --live;} };
 using ByteBuffer=std::unique_ptr<uint8_t,Free>;
-bool psramHasHeadroom(size_t,size_t,size_t) {return headroom;}
+bool psramHasHeadroom(size_t total,size_t,size_t) {chargedBytes=total; return headroom;}
 ByteBuffer makePsramByteBufferUninitializedNoThrow(size_t n) {
   if (++allocations == failAt) return {};
   ++live; return ByteBuffer(new uint8_t[n]);
@@ -90,11 +93,12 @@ struct Block {bool isEmpty() const {return false;} int getRubyShift(int) const {
 struct PageLine {
   int yPos=0;
   Block block;
+  uint32_t missing=0;
   int getTag() const {return TAG_PageLine;}
   const Block* getBlock() const {return &block;}
   void render(GfxRenderer& renderer,int,int,int) {
     renderer.frame[yPos]=static_cast<uint8_t>(renderer.mode+1);
-    renderer.fonts.missing=0x4E00;
+    renderer.fonts.missing=missing;
     if (++renders == cancelAt) activityManager.cancelled=true;
   }
 };
@@ -112,11 +116,13 @@ struct Section {
   int currentPage=4, pageCount=20, loads=0;
   bool building=false, images=false, fail=false, cancelOnLoad=false;
   bool isBuilding() const {return building;}
-  std::unique_ptr<Page> loadPage(int) {
+  std::unique_ptr<Page> loadPage(int index) {
     ++loads;
     if(cancelOnLoad) activityManager.cancelled=true;
     if(fail) return {};
-    auto p=std::make_unique<Page>(); p->images=images; return p;
+    auto p=std::make_unique<Page>(); p->images=images;
+    for(auto& line:p->elements) line->missing=0x4E00+index;
+    return p;
   }
 };
 struct EpubReaderActivity {
@@ -128,7 +134,7 @@ struct EpubReaderActivity {
   ReaderPageCache pageCache_[kPageCacheSlots];
   int pageCacheLiveSlot_=0;
   ReaderPageCacheKey renderedPageKey_;
-  uint32_t sectionGeneration_=1,renderEpoch_=1,pageCacheMissingCodepoint_=0;
+  uint32_t sectionGeneration_=1,renderEpoch_=1,pageCacheMissingCodepoint_[kPageCacheSlots]={};
   int currentSpineIndex=2;
   bool pageCacheFailed_=false;
   enum class Overlay {None,Menu}; Overlay overlay=Overlay::None;
@@ -142,6 +148,11 @@ struct EpubReaderActivity {
   void renderIdle(uint32_t);
   bool buildPageCacheSlot(int,const ReaderPageCacheKey&,uint32_t);
   EpubReaderActivity() {renderedPageKey_=pageCacheKey(section->currentPage,1,1,1,1);}
+  uint32_t missingGlyph(bool pageCacheHit) {
+    auto* fcm=renderer.getFontCacheManager();
+''' + missing_glyph + r'''
+    return missingCodepoint;
+  }
   bool consume(int orientedMarginTop=1,int orientedMarginRight=1,int orientedMarginBottom=1,int orientedMarginLeft=1,
                int direction=1) {
     section->currentPage+=direction;
@@ -164,13 +175,15 @@ int main() {
     for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Ready);
     assert(r.pageCache_[1].key.page==r.section->currentPage-1);
     assert(r.renderer.frame==original && r.renderer.mode==GfxRenderer::BW);
-    assert(r.pageCacheMissingCodepoint_==0x4E00);
+    assert(r.pageCacheMissingCodepoint_[0]==0x4E05 && r.pageCacheMissingCodepoint_[1]==0x4E03);
     assert(memory::live==8 && memory::allocations==8);
     for(int slot=0;slot<r.kPageCacheSlots;++slot)
       assert(r.pageCacheBase_[slot].get()[0]==1 && r.pageCacheLsb_[slot].get()[0]==2 && r.pageCacheMsb_[slot].get()[0]==3);
     r.renderIdle(0); assert(r.section->loads==2);
-    assert(r.consume() && r.pageCacheLiveSlot_==0);
+    assert(r.consume() && r.pageCacheLiveSlot_==0 && r.missingGlyph(true)==0x4E05);
     r.renderIdle(0); assert(memory::allocations==8);
+    assert(memory::chargedBytes==4*r.renderer.getBufferSize());
+    assert(r.consume(1,1,1,1,-1) && r.pageCacheLiveSlot_==1 && r.missingGlyph(true)==0x4E04);
     r.freePageCache(); assert(memory::live==0);
     for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Empty);
   }
@@ -230,6 +243,15 @@ int main() {
   }
   reset();
   {EpubReaderActivity r; memory::headroom=false; r.renderIdle(0); assert(r.pageCacheFailed_ && memory::live==0);}
+  reset();
+  {EpubReaderActivity r; r.section->building=true; r.renderIdle(0);
+   assert(r.pageCache_[0].state==ReaderPageCache::State::Ready && r.pageCache_[1].state==ReaderPageCache::State::Ready);}
+  reset();
+  {EpubReaderActivity r; r.section->currentPage=0; r.renderedPageKey_=r.pageCacheKey(0,1,1,1,1);
+   r.renderIdle(0); assert(r.section->loads==1 && memory::allocations==4);}
+  reset();
+  {EpubReaderActivity r; r.section->currentPage=19; r.renderedPageKey_=r.pageCacheKey(19,1,1,1,1);
+   r.renderIdle(0); assert(r.section->loads==1 && r.pageCache_[1].key.page==18);}
   reset();
   {EpubReaderActivity r; r.overlay=EpubReaderActivity::Overlay::Menu; r.renderIdle(0); assert(r.section->loads==0);}
   reset();

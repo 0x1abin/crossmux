@@ -2254,8 +2254,8 @@ bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCach
   if (bytes == 0) return false;
   if (!pageCacheBase_[slot]) {
     constexpr size_t kContiguousReserve = 16 * 1024;
-    // Two slots of four planes, charged against PSRAM headroom as a whole.
-    if (memory::psramHasHeadroom(static_cast<size_t>(kPageCacheSlots) * 4 * bytes, bytes, kContiguousReserve)) {
+    // Reserve the slots still to allocate; the forward slot is already charged for slot 1.
+    if (memory::psramHasHeadroom(static_cast<size_t>(kPageCacheSlots - slot) * 4 * bytes, bytes, kContiguousReserve)) {
       pageCacheBase_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
       pageCacheLsb_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
       pageCacheMsb_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
@@ -2329,7 +2329,7 @@ bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCach
       !renderPlane(GfxRenderer::GRAYSCALE_MSB, pageCacheMsb_[slot].get()) || cancelled())
     return false;
 #ifdef ENABLE_CHINESE_VERSION
-  pageCacheMissingCodepoint_ = fcm ? fcm->consumeMissingChineseCodepoint() : 0;
+  pageCacheMissingCodepoint_[slot] = fcm ? fcm->consumeMissingChineseCodepoint() : 0;
 #endif
   pageCache_[slot].state = ReaderPageCache::State::Ready;
   LOG_DBG("ERS", "Page cache: slot %d, page %d ready in %lums", slot, key.page, millis() - started);
@@ -2521,7 +2521,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
 #ifdef ENABLE_CHINESE_VERSION
 #if FREEINK_DEVICE_READPICO
-  const uint32_t missingCodepoint = pageCacheHit ? pageCacheMissingCodepoint_ : fcm->consumeMissingChineseCodepoint();
+  const uint32_t missingCodepoint =
+      pageCacheHit ? pageCacheMissingCodepoint_[pageCacheLiveSlot_] : fcm->consumeMissingChineseCodepoint();
 #else
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
 #endif
