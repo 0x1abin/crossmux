@@ -550,6 +550,47 @@ void SleepActivity::onEnter() {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
   }
 
+  // 全刷"正在进入睡眠"这一帧，然后再让各路径照常用 HALF 画睡眠画面。
+  //
+  // 放在提示之后是必须的：全刷会把提示一起刷掉，所以顺序只能是"先看见提示、再被睡眠图盖住"。
+  // 放在提示之前会把提示擦没 —— 那就只是白闪一下，用户看不到任何反馈。
+  //
+  // 这里是两趟，各做一件事：
+  //   1. HALF 把提示推上去，让用户看见反馈（单趟波形，快）。
+  //   2. clearScreen() 把帧缓冲清成全白，再用 FULL 把它推上去。FULL 走 GC16，是 36 相完整
+  //      波形，把每个像素从它的实际残留态强行驱动到白 —— 不做差分跳过。睡前那一页的文字就
+  //      在这里被洗掉，接着 HALF 画的睡眠图才不会透出上一页的鬼影。
+  //
+  // 只用一趟 FULL 推"旧页+提示"那一帧是不够的：它按差分算，面板上已经积累的残留不在它
+  // 的比较范围里，洗不掉。全白是关键。
+  //
+  // 上面两条保留当前帧的路径（Quick Resume、Transparent）已经早退 —— 它们要的就是原来那
+  // 幅画面，洗掉反而错了，所以到这里的一定是"会重画内容"的睡眠画面。
+  // / Full-refresh the "entering sleep" frame, then let each path draw its sleep screen with
+  // HALF as before.
+  //
+  // It has to come after the popup: the full refresh wipes the popup too, so the order can
+  // only be "notice appears, sleep screen paints over it". Placing it before would erase the
+  // notice, leaving the user with a blank flash and no feedback.
+  //
+  // Two passes, one job each:
+  //   1. HALF pushes the notice so the user sees feedback (single pass, fast).
+  //   2. clearScreen() makes the framebuffer white and FULL pushes that. FULL is GC16, a
+  //      36-phase complete waveform that drives every pixel from wherever it actually sits to
+  //      white without a difference skip. That is where the page from before sleep is washed
+  //      off, so the HALF sleep image that follows cannot show it through.
+  //
+  // One FULL pass over the "old page + notice" frame is not enough: it works from a
+  // difference, and ghosting already on the panel is not part of that comparison. The white
+  // field is the point.
+  //
+  // The two frame-preserving paths above (Quick Resume, Transparent) have already returned --
+  // they exist to keep the current frame, so washing it away would be wrong. Anything that
+  // reaches here is a sleep screen that repaints.
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.clearScreen();
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+
   switch (SETTINGS.sleepScreen) {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::BLANK):
       return renderBlankSleepScreen();
