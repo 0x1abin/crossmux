@@ -43,11 +43,6 @@ class HomeActivity final : public Activity {
   int coverRectH = 0;
   std::vector<RecentBook> recentBooks;
   const HomeMenuItem initialMenuItem;
-  // Only enter Standby when this activity has observed a complete press→release
-  // pair locally. Prevents a release edge that leaks across an activity switch
-  // (e.g. Back pressed in SettingsActivity, released after HomeActivity took over)
-  // from immediately punching the user into Standby.
-  bool sawBackPressInActivity = false;
 
   void onSelectBook(const std::string& path);
   void onFileBrowserOpen();
@@ -57,7 +52,6 @@ class HomeActivity final : public Activity {
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
   void onAppsOpen();
-  void onStandbyOpen();
   void onPluginsOpen();
 
   int getMenuItemCount() const;

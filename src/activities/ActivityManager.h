@@ -47,6 +47,13 @@ class ActivityManager {
   MainTabFocus mainTabFocus = MainTabFocus::Tabs;
   bool mainTabEntryReleasePending = false;
 
+ private:
+  enum class StandbyBackState : uint8_t { Idle, Pressed, WaitingForRelease };
+  StandbyBackState standbyBackState = StandbyBackState::Idle;
+  bool handleHomeStandbyInput();
+  void resetHomeStandbyInput();
+
+ protected:
   void exitActivity(const RenderLock& lock);
   bool handleMainTabInput();
 

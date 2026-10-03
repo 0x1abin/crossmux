@@ -63,6 +63,8 @@ struct ActivityManager {
   Input mappedInput;
   int renderer = 0, renderTaskHandle = 0, pushes = 0;
   bool handleMainTabInput() { return false; }
+  bool handleHomeStandbyInput() { return false; }
+  void resetHomeStandbyInput() {}
   void goHome() { assert(false); }
   void pushActivity(std::unique_ptr<FrontlightPanelActivity>) {
     ++pushes; pendingAction = PendingAction::Push;

@@ -100,3 +100,31 @@ TEST_F(BleOverlayTest, PhysicalLongPressAndDirectionMappingRemainUnchanged) {
   gpio.pressed[HalGPIO::BTN_UP] = true;
   EXPECT_TRUE(input.wasPressed(Button::PageForward));
 }
+
+TEST_F(BleOverlayTest, BackKeepsStripRemappedAndBleEdgesSeparate) {
+  for (const uint8_t hardware : {HalGPIO::BTN_BACK, HalGPIO::BTN_RIGHT}) {
+    gpio = {};
+    SETTINGS.frontButtonBack = hardware;
+    gpio.pressed[hardware] = gpio.held[hardware] = true;
+    input.update();
+    EXPECT_TRUE(input.wasPressed(Button::Back));
+    EXPECT_TRUE(input.isPressed(Button::Back));
+    EXPECT_FALSE(input.wasReleased(Button::Back));
+    gpio = {};
+    gpio.released[hardware] = true;
+    input.update();
+    EXPECT_FALSE(input.wasPressed(Button::Back));
+    EXPECT_TRUE(input.wasReleased(Button::Back));
+  }
+  gpio = {};
+  ASSERT_TRUE(bleinput::assign(SETTINGS.bleKeyMap, 1, 42, bleinput::Action::Back));
+  key();
+  input.update();
+  EXPECT_TRUE(input.wasPressed(Button::Back));
+  EXPECT_TRUE(input.isPressed(Button::Back));
+  EXPECT_FALSE(input.wasReleased(Button::Back));
+  input.update();
+  EXPECT_FALSE(input.wasPressed(Button::Back));
+  EXPECT_FALSE(input.isPressed(Button::Back));
+  EXPECT_TRUE(input.wasReleased(Button::Back));
+}
