@@ -1013,11 +1013,20 @@ bool Epub::extractItemToFile(const std::string& itemHref, const std::string& des
   if (!Storage.openFileForWrite("EBP", destPath, out)) {
     return false;
   }
-  // Large images dominate lazy extraction. Match the section streamer size to
-  // halve SD read/write calls while adding only 8 KB of transient ZIP buffers.
-  const bool ok = readItemContentsToStream(itemHref, out, 8192);
+  // Instrumentation (temporary): lazy extraction of a full-page image accounts for about
+  // 2.7 s of a page render that no other log covers. Measuring it says how much of the
+  // page's time it really is, so the next change targets the right thing rather than a guess.
+  const uint32_t extractStartedUs = micros();
+  // Large images dominate lazy extraction. This board's SD path charges a large fixed cost
+  // per call (measured ~9.7 ms), so the chunk size is what decides how many calls a
+  // full-page image costs: 8 KB meant roughly 160 of them, about 1.5 s of the page render.
+  // 64 KB cuts that to about 20. The buffers live in PSRAM (see allocStreamBuffer), so the
+  // reader's internal RAM is untouched.
+  const bool ok = readItemContentsToStream(itemHref, out, 65536);
   out.flush();
   out.close();
+  LOG_INF("EBP", "extract -> %lums (%s)", static_cast<unsigned long>((micros() - extractStartedUs) / 1000),
+          itemHref.c_str());
   if (!ok) {
     Storage.remove(destPath.c_str());
   }

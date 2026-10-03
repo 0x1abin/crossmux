@@ -7,6 +7,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <PNGdec.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -58,41 +59,125 @@ struct PngContext {
   uint32_t lastYieldMs{0};  // throttle state for yieldDuringDecode()
 };
 
-// File I/O callbacks use pFile->fHandle to access the HalFile*,
-// avoiding the need for global file state.
+// PNGdec streams the compressed data, so on this board every read pays a large fixed
+// cost (measured ~9.7 ms per call, ~300 calls for a 600 KB image, i.e. most of the
+// decode). Reading the whole compressed file into PSRAM once collapses those calls into
+// one. The compressed image is a few hundred KB against megabytes of free PSRAM, and
+// when the allocation fails this falls back to plain streamed reads.
+constexpr uint32_t PNG_SLURP_MAX_BYTES = 2u * 1024u * 1024u;
+
+struct PngFileHandle {
+  HalFile* file = nullptr;
+  uint8_t* data = nullptr;  // whole compressed file in PSRAM; null when not slurped
+  int32_t size = 0;
+  int32_t pos = 0;  // logical position, only meaningful once `data` is set
+};
+
+// Instrumentation (temporary): how long the one-shot read took. ~10 ms means the per-read
+// cost was fixed overhead and slurping wins; seconds means the SD path is throughput-bound
+// and slurping buys nothing. Those two need opposite fixes, so this is measured, not assumed.
+static uint32_t g_pngSlurpUs = 0;
+static uint32_t g_pngSlurpBytes = 0;
+
 void* pngOpenWithHandle(const char* filename, int32_t* size) {
   // PNGdec owns the callback handle until pngCloseWithHandle() deletes it.
-  HalFile* f = new (std::nothrow) HalFile();
-  if (!f) {
+  auto* h = new (std::nothrow) PngFileHandle();
+  if (!h) {
+    LOG_ERR("PNG", "OOM: PNG handle");
+    return nullptr;
+  }
+  h->file = new (std::nothrow) HalFile();
+  if (!h->file) {
     LOG_ERR("PNG", "OOM: PNG file handle (%u bytes)", static_cast<unsigned>(sizeof(HalFile)));
+    delete h;
     return nullptr;
   }
-  if (!Storage.openFileForRead("PNG", std::string(filename), *f)) {
-    delete f;
+  if (!Storage.openFileForRead("PNG", std::string(filename), *h->file)) {
+    delete h->file;
+    delete h;
     return nullptr;
   }
-  *size = f->size();
-  return f;
+  h->size = h->file->size();
+  *size = h->size;
+
+  if (h->size > 0 && static_cast<uint32_t>(h->size) <= PNG_SLURP_MAX_BYTES) {
+    auto* buf = static_cast<uint8_t*>(heap_caps_malloc(static_cast<size_t>(h->size), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (buf != nullptr) {
+      const uint32_t startedUs = micros();
+      const int32_t got = h->file->read(buf, h->size);
+      g_pngSlurpUs = micros() - startedUs;
+      if (got == h->size) {
+        h->data = buf;
+        h->pos = 0;
+        g_pngSlurpBytes = static_cast<uint32_t>(h->size);
+        LOG_INF("PNG", "slurped %ld bytes in %lums", static_cast<long>(h->size),
+                static_cast<unsigned long>(g_pngSlurpUs / 1000));
+      } else {
+        LOG_ERR("PNG", "slurp short read %ld/%ld; streaming instead", static_cast<long>(got),
+                static_cast<long>(h->size));
+        heap_caps_free(buf);
+        h->file->seek(0);
+      }
+    } else {
+      LOG_ERR("PNG", "slurp alloc failed (%ld bytes); streaming instead", static_cast<long>(h->size));
+    }
+  }
+  return h;
 }
 
 void pngCloseWithHandle(void* handle) {
-  HalFile* f = reinterpret_cast<HalFile*>(handle);
-  if (f) {
-    f->close();
-    delete f;
+  auto* h = reinterpret_cast<PngFileHandle*>(handle);
+  if (h) {
+    if (h->data) heap_caps_free(h->data);
+    if (h->file) {
+      h->file->close();
+      delete h->file;
+    }
+    delete h;
   }
 }
 
+// Instrumentation (temporary): PNG is streamed, so PNGdec pulls compressed bytes
+// through this callback as it inflates. Timing it answers whether the decoder is slow
+// itself or is stalling on SD reads -- and the call count says whether the reads are
+// large enough to be worth an SD transaction.
+static uint32_t g_pngReadUs = 0;
+static uint32_t g_pngReadCalls = 0;
+static uint32_t g_pngReadBytes = 0;
+
 int32_t pngReadWithHandle(PNGFILE* pFile, uint8_t* pBuf, int32_t len) {
-  HalFile* f = reinterpret_cast<HalFile*>(pFile->fHandle);
-  if (!f) return 0;
-  return f->read(pBuf, len);
+  auto* h = reinterpret_cast<PngFileHandle*>(pFile->fHandle);
+  if (!h) return 0;
+  ++g_pngReadCalls;
+  if (h->data != nullptr) {
+    // Served from the PSRAM copy: clamp at the end like a file read would.
+    int32_t remaining = h->size - h->pos;
+    if (remaining <= 0) return 0;
+    if (len > remaining) len = remaining;
+    memcpy(pBuf, h->data + h->pos, static_cast<size_t>(len));
+    h->pos += len;
+    g_pngReadBytes += static_cast<uint32_t>(len);
+    return len;
+  }
+  if (!h->file) return 0;
+  const uint32_t startedUs = micros();
+  const int32_t got = h->file->read(pBuf, len);
+  g_pngReadUs += micros() - startedUs;
+  if (got > 0) g_pngReadBytes += static_cast<uint32_t>(got);
+  return got;
 }
 
 int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
-  HalFile* f = reinterpret_cast<HalFile*>(pFile->fHandle);
-  if (!f) return -1;
-  return f->seek(pos);
+  auto* h = reinterpret_cast<PngFileHandle*>(pFile->fHandle);
+  if (!h) return -1;
+  if (h->data != nullptr) {
+    // The PSRAM copy has no file cursor; just move the logical position.
+    if (pos < 0 || pos > h->size) return -1;
+    h->pos = pos;
+    return pos;
+  }
+  if (!h->file) return -1;
+  return h->file->seek(pos);
 }
 
 // The PNG decoder (PNGdec) is ~42 KB due to internal zlib decompression buffers.
@@ -311,7 +396,24 @@ void emitBilinearRow(PngContext& ctx, const int dstY, const uint8_t* rowTop, con
   }
 }
 
+// Instrumentation (temporary): PNGdec inflates and unfilters a row before handing it
+// to the callback, so timing the callback separates our per-pixel conversion from the
+// decoder's own work. The wrapper keeps the callback's name, so the decode call site
+// does not change.
+static uint32_t g_pngCallbackUs = 0;
+static uint32_t g_pngCallbackRows = 0;
+
+static int pngDrawCallbackBody(PNGDRAW* pDraw);
+
 int pngDrawCallback(PNGDRAW* pDraw) {
+  const uint32_t startedUs = micros();
+  const int rc = pngDrawCallbackBody(pDraw);
+  g_pngCallbackUs += micros() - startedUs;
+  ++g_pngCallbackRows;
+  return rc;
+}
+
+static int pngDrawCallbackBody(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
 
@@ -629,8 +731,30 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
 
   unsigned long decodeStart = millis();
   ctx.lastYieldMs = decodeStart;
+  g_pngCallbackUs = 0;
+  g_pngCallbackRows = 0;
+  g_pngReadUs = 0;
+  g_pngReadCalls = 0;
+  g_pngReadBytes = 0;
   rc = png->decode(&ctx, 0);
   unsigned long decodeTime = millis() - decodeStart;
+
+  // Instrumentation (temporary): `total` is the whole decode, `callback` is our own
+  // per-pixel conversion, and `read` is time blocked inside the SD read the decoder
+  // pulls its compressed bytes through. `decoder` is what is left, i.e. inflate and
+  // unfilter proper. Each bucket needs a different fix, so they are kept apart.
+  {
+    const unsigned long callbackMs = g_pngCallbackUs / 1000;
+    const unsigned long readMs = g_pngReadUs / 1000;
+    const unsigned long accounted = callbackMs + readMs;
+    LOG_INF("PNG",
+            "decode split: total=%lums callback=%lums read=%lums(%lu calls, %lu bytes) decoder=%lums rows=%lu "
+            "slurp=%lums/%lu bytes",
+            decodeTime, callbackMs, readMs, static_cast<unsigned long>(g_pngReadCalls),
+            static_cast<unsigned long>(g_pngReadBytes), decodeTime > accounted ? decodeTime - accounted : 0UL,
+            static_cast<unsigned long>(g_pngCallbackRows), static_cast<unsigned long>(g_pngSlurpUs / 1000),
+            static_cast<unsigned long>(g_pngSlurpBytes));
+  }
 
   // Bilinear emits one source interval behind, so the last destination rows are
   // still outstanding: they sit on the final source row and have no row below,

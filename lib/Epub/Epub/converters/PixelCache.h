@@ -128,10 +128,25 @@ struct PixelCache {
     if (newTopRow <= bandStart) return true;
     if (newTopRow > height) newTopRow = height;
 
-    for (int r = bandStart; r < newTopRow; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+    // Rows still inside the band are contiguous in `buffer`, so the whole run goes out in
+    // ONE write. Writing them a row at a time cost ~2.5 ms per 156-byte call on this
+    // board's SD path -- 887 calls for a full-page image, which was most of what remained
+    // of the decode after the compressed data moved into PSRAM.
+    const int bandEndA = bandStart + bandRows;
+    const int runEndA = newTopRow < bandEndA ? newTopRow : bandEndA;
+    const int rowsInBand = runEndA - bandStart;
+    if (rowsInBand > 0) {
+      const size_t span = static_cast<size_t>(rowsInBand) * static_cast<size_t>(bytesPerRow);
+      if (file.write(buffer, span) != span) {
+        LOG_ERR("IMG", "Cache write error at row %d", bandStart);
+        ok = false;
+        return false;
+      }
+    }
+    // Rows past the band are the zero fill, so they are not contiguous with anything and
+    // go out one row at a time. They only appear when the image is clipped by the screen.
+    for (int r = runEndA; r < newTopRow; ++r) {
+      if (file.write(zeroRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         ok = false;
         return false;
@@ -150,10 +165,23 @@ struct PixelCache {
       abort();
       return false;
     }
-    for (int r = flushedRows; r < height; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+    // Same coalescing as advanceTo(): the rows still inside the band form one contiguous
+    // run starting at (flushedRows - bandStart).
+    const int bandEndF = bandStart + bandRows;
+    const int runEndF = height < bandEndF ? height : bandEndF;
+    const int runStartF = flushedRows > bandStart ? flushedRows : bandStart;
+    const int rowsInBandF = runEndF - runStartF;
+    if (rowsInBandF > 0) {
+      const size_t span = static_cast<size_t>(rowsInBandF) * static_cast<size_t>(bytesPerRow);
+      uint8_t* start = buffer + static_cast<size_t>(runStartF - bandStart) * static_cast<size_t>(bytesPerRow);
+      if (file.write(start, span) != span) {
+        LOG_ERR("IMG", "Cache write error at row %d", runStartF);
+        abort();
+        return false;
+      }
+    }
+    for (int r = runEndF; r < height; ++r) {
+      if (file.write(zeroRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         abort();
         return false;

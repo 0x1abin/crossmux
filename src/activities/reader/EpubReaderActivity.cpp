@@ -2248,10 +2248,14 @@ bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCach
     LOG_DBG("ERS", "Page cache: slot %d, page %d cancelled after the load", slot, key.page);
     return false;
   }
-  if (page->hasImages()) {
-    LOG_DBG("ERS", "Page cache: slot %d, page %d has images, not cached", slot, key.page);
-    return false;
-  }
+  // Image pages: warm the image's own cache, do not cache the page. Caching the rendered
+  // planes produced a fast hit that was entirely black (reproduced on device) -- the base
+  // plane does not carry the image. What is worth spending idle time on is the image itself:
+  // extract it from the ZIP and decode it into .pxc, which is the ~4 s the turn would
+  // otherwise pay. The turn then renders through the normal path, so nothing changes
+  // visually while the cost moves off the critical path. This runs below, inside the
+  // frame stash, so the page on screen is untouched.
+  const bool imagePage = page->hasImages();
 
   const size_t bytes = renderer.getBufferSize();
   if (bytes == 0) return false;
@@ -2295,6 +2299,34 @@ bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCach
   if (fcm) {
     fcm->clearCache();
     fcm->resetStats();
+  }
+
+  if (imagePage) {
+    // Everything here runs inside the stash: whatever the preload draws is undone when
+    // `restore` runs, so the page the reader is looking at survives untouched.
+    //
+    // Note the deliberate absence of renderer.clearScreen(). In the on-demand path that
+    // call follows the same preload, but clearScreen() reaches the HAL on this board, and
+    // from idle it would push a blank frame over the page being read. The stash is what
+    // puts the working framebuffer back instead.
+    if (page->hasImagesNeedingDecode()) {
+      if (fcm) {
+        fcm->clearCache();
+        fcm->releaseSdFontCaches();
+      }
+      {
+        // Lend the fixed framebuffer to the image decoder while it streams the cold image
+        // into .pxc, exactly as the on-demand path does.
+        GfxRenderer::FrameBufferLoan loan(renderer);
+        page->extractImagesNeedingDecode();
+        page->cacheImagesNeedingDecode(renderer, key.left, key.top);
+      }
+      ImageBlock::releaseRenderCache();
+      LOG_DBG("ERS", "Page cache: slot %d, page %d image preloaded in idle", slot, key.page);
+    } else {
+      LOG_DBG("ERS", "Page cache: slot %d, page %d image already warm", slot, key.page);
+    }
+    return false;  // the planes are not cached for image pages
   }
 
   // Load glyphs on demand: a whole-page prewarm cannot be interrupted. Check

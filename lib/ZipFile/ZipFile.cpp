@@ -5,6 +5,7 @@
 #include <InflateStream.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <limits>
@@ -460,12 +461,22 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
   return data;
 }
 
+// Streaming buffers here are pure data shuttles, so they belong in PSRAM: this board's SD
+// path charges a large fixed cost per read and per write (measured ~9.7 ms per call), and a
+// bigger chunk is exactly what collapses the number of calls. Internal RAM cannot spare the
+// room -- the reader runs with roughly 30 KB free -- while PSRAM has megabytes idle. Falls
+// back to internal RAM when PSRAM is unavailable, so nothing regresses on boards without it.
+static uint8_t* allocStreamBuffer(size_t bytes) {
+  auto* p = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (p == nullptr) p = static_cast<uint8_t*>(malloc(bytes));
+  return p;
+}
+
 bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop) {
   if (chunkSize == 0) {
     LOG_ERR("ZIP", "Chunk size must be non-zero");
     return false;
-  }
-  const ScopedOpenClose zip{*this};
+  }  const ScopedOpenClose zip{*this};
   if (!zip) return false;
 
   FileStatSlim fileStat = {};
@@ -487,7 +498,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
   if (fileStat.method == ZIP_METHOD_STORED) {
     // no deflation, just read content
-    const auto buffer = static_cast<uint8_t*>(malloc(chunkSize));
+    const auto buffer = static_cast<uint8_t*>(allocStreamBuffer(chunkSize));
     if (!buffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for buffer");
       return false;
@@ -520,13 +531,13 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       return streamDeflatedPrefix(file, out, chunkSize, deflatedDataSize, inflatedDataSize);
     }
 
-    auto* fileReadBuffer = static_cast<uint8_t*>(malloc(chunkSize));
+    auto* fileReadBuffer = static_cast<uint8_t*>(allocStreamBuffer(chunkSize));
     if (!fileReadBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for zip file read buffer");
       return false;
     }
 
-    auto* outputBuffer = static_cast<uint8_t*>(malloc(chunkSize));
+    auto* outputBuffer = static_cast<uint8_t*>(allocStreamBuffer(chunkSize));
     if (!outputBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for output buffer");
       free(fileReadBuffer);
