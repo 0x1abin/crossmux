@@ -682,18 +682,6 @@ void HomeActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     activateSelection();
   }
-
-  if (!SETTINGS.standbyShortcutEnabled) {
-    sawBackPressInActivity = false;
-    return;
-  }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    sawBackPressInActivity = true;
-  }
-  if (sawBackPressInActivity && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    sawBackPressInActivity = false;
-    onStandbyOpen();
-  }
 }
 
 void HomeActivity::render(RenderLock&&) {
@@ -848,5 +836,4 @@ void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 
 void HomeActivity::onAppsOpen() { activityManager.goToApps(); }
 
-void HomeActivity::onStandbyOpen() { activityManager.goToStandby(); }
 void HomeActivity::onPluginsOpen() { activityManager.goToPlugins(hasOpdsServers); }

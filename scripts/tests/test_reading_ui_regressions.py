@@ -480,6 +480,250 @@ int main() {
 '''
         run_cpp(program, include_dirs=(ROOT / 'src', ROOT / 'lib/hal'))
 
+    def test_home_standby_owns_a_complete_back_gesture_across_transitions(self):
+        source = (ROOT / 'src/activities/ActivityManager.cpp').read_text()
+        header = (ROOT / 'src/activities/ActivityManager.h').read_text()
+        state_start = header.index('  enum class StandbyBackState')
+        state_end = header.index(';', header.index('  StandbyBackState standbyBackState', state_start)) + 1
+        program = r'''
+#include <atomic>
+#include <cassert>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+#include "activities/MainTab.h"
+#include "components/HeaderBackTapTarget.h"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#define LOG_ERR(...) ((void)0)
+#define LOG_DBG(...) ((void)0)
+enum { eIncrement };
+void xTaskNotify(int,int,int) {}
+struct { void clearTouchTapEvent() {} } gpio;
+struct RenderLock {
+  static inline bool busy=false;
+  static bool peek() { return busy; }
+  void unlock() {}
+};
+struct ActivityResult {};
+struct MappedInputManager {
+  enum class Button { None,Back,Confirm,Left,Right,Up,Down };
+  bool pressed=false,released=false,held=false,suppressed=false;
+  bool tap=false,down=false,home=false,light=false;
+  int x=0,y=0;
+  Button otherPress=Button::None,otherRelease=Button::None;
+  bool wasPressed(Button b) const { return b==Button::Back ? pressed : b==otherPress; }
+  bool wasReleased(Button b) const { return b==Button::Back ? released : b==otherRelease; }
+  bool isPressed(Button b) const { return b==Button::Back && held; }
+  bool consumeSuppressedRelease() { return std::exchange(suppressed,false); }
+  bool wasScreenTapped(int& tx,int& ty) const { tx=x;ty=y;return tap; }
+  bool wasScreenTouchDown(int& tx,int& ty) const { tx=x;ty=y;return down; }
+  bool wasHomeGesture() const { return home; }
+  bool wasLightPanelGesture() const { return light; }
+  bool hasTouch() const { return true; }
+  void resetHomeButtonInput() {}
+};
+struct Activity {
+  std::string name="Home";
+  bool home=true,tabs=false,exclusive=false;
+  MainTab tab=MainTab::Recent;
+  ActivityResult result;
+  std::function<void(ActivityResult)> resultHandler;
+  std::function<void()> action;
+  int loops=0;
+  virtual ~Activity()=default;
+  void onEnter() {}
+  void onExit() {}
+  void loop() { ++loops; if(action) action(); }
+  bool requiresExclusiveStorageLoop() const { return exclusive; }
+  bool isHomeActivity() const { return home; }
+  bool handleHomeGesture() const { return false; }
+  bool usesMainTabBar() const { return tabs; }
+  MainTab mainTab() const { return tab; }
+  MainTabLayout mainTabLayout() const { return {Rect{0,700,480,56},Rect{0,0,480,28},Rect{0,34,480,650}}; }
+  bool mainTabBackReturnsToTabs() const { return true; }
+  void selectMainTabContentEdge(MainTabContentEdge) {}
+};
+std::unique_ptr<Activity> page(const char* theme) {
+  auto p=std::make_unique<Activity>();
+  p->tabs=std::string(theme)=="INX"; p->home=!p->tabs;
+  p->name=p->tabs?"InxRecent":"Home";
+  return p;
+}
+struct FrontlightPanelActivity : Activity {
+  FrontlightPanelActivity(int,MappedInputManager&) { home=false;name="FrontlightPanel"; }
+};
+template<class T,class... Args> auto makeUniqueNoThrow(Args&&... args) {
+  return std::make_unique<T>(std::forward<Args>(args)...);
+}
+struct { bool standbyShortcutEnabled=true; } SETTINGS;
+struct ActivityManager {
+''' + header[state_start:state_end] + r'''
+  enum class PendingAction { None,Push,Pop,Replace };
+  std::atomic<PendingAction> pendingAction{PendingAction::None};
+  std::atomic<bool> requestedUpdate{false};
+  std::unique_ptr<Activity> currentActivity,pendingActivity;
+  std::vector<std::unique_ptr<Activity>> stackActivities;
+  MappedInputManager mappedInput;
+  MainTabFocus mainTabFocus=MainTabFocus::Tabs;
+  bool mainTabEntryReleasePending=false;
+  int renderer=0,renderTaskHandle=0,standbyCalls=0;
+  const char* theme;
+  explicit ActivityManager(const char* value):theme(value) { replaceActivity(page(theme)); }
+  void requestUpdate() { requestedUpdate=true; }
+  void cancelIdleRender() {}
+  void goHome() { mainTabFocus=MainTabFocus::Tabs;replaceActivity(page(theme)); }
+  void goToMainTab(MainTab tab) {
+    auto p=page("INX");p->tab=tab;replaceActivity(std::move(p));
+  }
+  void goToStandby() {
+    ++standbyCalls;
+    auto p=std::make_unique<Activity>();p->home=false;p->name="Standby";
+    replaceActivity(std::move(p));
+  }
+  void resetHomeStandbyInput();
+  bool handleHomeStandbyInput();
+  bool handleMainTabInput();
+  void replaceActivity(std::unique_ptr<Activity>&&);
+  void pushActivity(std::unique_ptr<Activity>&&);
+  void popActivity();
+  void exitActivity(const RenderLock&);
+  void loop();
+  void tick(MappedInputManager input={}) {
+    mappedInput=input;loop();
+    if(pendingAction.load()!=PendingAction::None && !RenderLock::busy) {
+      mappedInput={.held=input.held};loop();
+    }
+  }
+};
+''' + '\n'.join(method(source, name) for name in (
+            'void ActivityManager::resetHomeStandbyInput(',
+            'bool ActivityManager::handleHomeStandbyInput(',
+            'bool ActivityManager::handleMainTabInput(',
+            'void ActivityManager::replaceActivity(',
+            'void ActivityManager::pushActivity(',
+            'void ActivityManager::popActivity(',
+            'void ActivityManager::exitActivity(',
+            'void ActivityManager::loop(')) + r'''
+void freshBack(ActivityManager& m) {
+  m.tick({.pressed=true,.held=true});assert(m.standbyCalls==0);
+  m.tick({.held=true});assert(m.standbyCalls==0);
+  m.tick({.released=true});assert(m.standbyCalls==1);
+  m.tick();assert(m.standbyCalls==1 && m.currentActivity->name=="Standby");
+}
+int main() {
+  using Button=MappedInputManager::Button;
+  for(const char* theme:{"INX","Classic","Carousel","Cover Grid"}) {
+    ActivityManager stray(theme);
+    stray.tick({.released=true});assert(stray.standbyCalls==0);
+    freshBack(stray);
+
+    // Both the queued request and actual activation cancel the old pair.
+    ActivityManager replace(theme);
+    replace.tick({.pressed=true,.held=true});
+    auto* outgoing=replace.currentActivity.get();
+    replace.replaceActivity(page(theme));
+    RenderLock::busy=true;
+    replace.tick({.held=true});assert(replace.currentActivity.get()==outgoing);
+    RenderLock::busy=false;
+    replace.tick({.pressed=true,.held=true}); // old owner's press edge at activation
+    replace.tick({.released=true});assert(replace.standbyCalls==0);
+    freshBack(replace);
+
+    // Push a panel while armed, then return to the very same parent on press.
+    ActivityManager pop(theme);
+    auto* parent=pop.currentActivity.get();
+    pop.tick({.pressed=true,.held=true});
+    pop.pushActivity(std::make_unique<FrontlightPanelActivity>(0,pop.mappedInput));
+    pop.tick({.held=true});assert(pop.stackActivities.back().get()==parent);
+    pop.popActivity();pop.tick({.pressed=true,.held=true});
+    assert(pop.currentActivity.get()==parent);
+    pop.tick({.released=true});assert(pop.standbyCalls==0);
+    freshBack(pop);
+
+    // Crash report exits on press with an empty activity stack.
+    ActivityManager crash(theme);
+    crash.currentActivity->home=false;crash.currentActivity->tabs=false;
+    crash.currentActivity->name="Crash";
+    crash.currentActivity->action=[&crash] {
+      if(crash.mappedInput.wasPressed(Button::Back)) crash.popActivity();
+    };
+    crash.tick({.pressed=true,.held=true});
+    crash.tick({.released=true});assert(crash.standbyCalls==0);
+    freshBack(crash);
+
+    ActivityManager suppressed(theme);
+    suppressed.tick({.pressed=true,.held=true});
+    suppressed.tick({.released=true,.suppressed=true});
+    suppressed.tick({.released=true});assert(suppressed.standbyCalls==0);
+    freshBack(suppressed);
+
+    ActivityManager disabled(theme);
+    disabled.tick({.pressed=true,.held=true});
+    SETTINGS.standbyShortcutEnabled=false;
+    disabled.tick({.held=true});
+    SETTINGS.standbyShortcutEnabled=true;
+    disabled.tick({.released=true});assert(disabled.standbyCalls==0);
+    SETTINGS.standbyShortcutEnabled=false;
+    disabled.tick({.pressed=true,.released=true});assert(disabled.standbyCalls==0);
+    SETTINGS.standbyShortcutEnabled=true;freshBack(disabled);
+
+    // A completed touch Back remains independent of an inherited button hold.
+    ActivityManager gesture(theme);
+    gesture.mappedInput={.held=true};gesture.resetHomeStandbyInput();
+    gesture.tick({.pressed=true,.released=true,.held=true});assert(gesture.standbyCalls==1);
+
+    // A held-key barrier cannot prevent touch opening a book or control center.
+    for(bool releaseWithTap:{false,true}) {
+      ActivityManager book(theme);
+      book.mappedInput={.held=true};book.resetHomeStandbyInput();
+      book.currentActivity->action=[&book] {
+        if(book.mappedInput.tap) {
+          auto p=std::make_unique<Activity>();p->home=false;p->name="Reader";
+          book.replaceActivity(std::move(p));
+        }
+      };
+      book.tick({.released=releaseWithTap,.held=!releaseWithTap,.tap=true,.x=100,.y=200});
+      assert(book.currentActivity->name=="Reader" && book.standbyCalls==0);
+    }
+    ActivityManager panel(theme);
+    panel.mappedInput={.held=true};panel.resetHomeStandbyInput();
+    panel.tick({.held=true,.tap=true,.x=100,.y=10});
+    assert(panel.currentActivity->name=="FrontlightPanel" && panel.standbyCalls==0);
+    panel.popActivity();panel.tick({.held=true});
+    panel.tick({.released=true});assert(panel.standbyCalls==0);
+    // INX status-bar tap moves focus into content, so another Back returns to tabs.
+    if(panel.mainTabFocus==MainTabFocus::Content) panel.tick({.released=true});
+    freshBack(panel);
+  }
+
+  ActivityManager focus("INX");
+  focus.tick({.pressed=true,.held=true});
+  focus.tick({.held=true,.otherRelease=Button::Confirm});
+  assert(focus.mainTabFocus==MainTabFocus::Content);
+  focus.tick({.released=true});
+  assert(focus.mainTabFocus==MainTabFocus::Tabs && focus.standbyCalls==0);
+  focus.tick({.released=true});assert(focus.standbyCalls==0);
+  freshBack(focus);
+
+  for(MainTab tab:MainTabs::values) {
+    if(tab==MainTab::Recent) continue;
+    ActivityManager tabs("INX");tabs.currentActivity->tab=tab;
+    tabs.tick({.released=true});
+    assert(tabs.currentActivity->tab==MainTab::Recent && tabs.standbyCalls==0);
+    tabs.tick({.released=true});assert(tabs.standbyCalls==0);
+    freshBack(tabs);
+  }
+  ActivityManager touchTab("INX");
+  touchTab.mappedInput={.held=true};touchTab.resetHomeStandbyInput();
+  touchTab.tick({.held=true,.tap=true,.x=144,.y=720});
+  assert(touchTab.currentActivity->tab==MainTab::Library && touchTab.standbyCalls==0);
+}
+'''
+        for defines in ((), ('CROSSMUX_UI_PROFILE_HIGH_DPI', 'FREEINK_DEVICE_READPICO=1')):
+            run_cpp(program, include_dirs=(ROOT / 'src',), defines=defines)
+
     def test_inx_recent_render_and_flow_use_the_safe_content_clip(self):
         source = (ROOT / 'src/activities/home/InxRecentActivity.cpp').read_text()
         program = (r'''
