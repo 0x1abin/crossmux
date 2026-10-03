@@ -97,12 +97,19 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
+  // 翻页方向（左右对调，给左手握持的用户）与 rtlBook 做 XOR：只开一个就转一次，两个都开
+  // 就抵消 —— 一本由右往左读的书在左撇子模式下仍然是"往回翻"的那个方向，不会转两次变成没转。
+  // / The page-turn direction mirrors the reader for the other hand. XOR with rtlBook so
+  // exactly one of them flips the result and both together cancel: a right-to-left book in
+  // mirrored mode still turns the way that book turns.
+  const bool mirrored = rtlBook != (SETTINGS.pageTurnDirection != 0);
+
   // A slow swipe never becomes a long-press chapter skip.
   const auto dir = input.wasSwipe();
   if (dir != MappedInputManager::SwipeDir::None) {
-    result.next = dir == (rtlBook ? MappedInputManager::SwipeDir::Right : MappedInputManager::SwipeDir::Left) &&
+    result.next = dir == (mirrored ? MappedInputManager::SwipeDir::Right : MappedInputManager::SwipeDir::Left) &&
                   gestureAllowsSwipe(SETTINGS.pageTurnGesture);
-    result.prev = dir == (rtlBook ? MappedInputManager::SwipeDir::Left : MappedInputManager::SwipeDir::Right) &&
+    result.prev = dir == (mirrored ? MappedInputManager::SwipeDir::Left : MappedInputManager::SwipeDir::Right) &&
                   gestureAllowsSwipe(SETTINGS.previousPageGesture);
     return result;
   }
@@ -130,9 +137,9 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
 
   // Give the whole page to the sole tap-enabled direction. When both accept
   // taps, split at the left third. RTL books and Inverted Tap each reverse
-  // the shared zones.
+  // the shared zones, and so does the page-turn direction.
   const bool inverted = (SETTINGS.pageTurnGesture == CrossPointSettings::INVERTED_TAP ||
-                         SETTINGS.previousPageGesture == CrossPointSettings::INVERTED_TAP) != rtlBook;
+                         SETTINGS.previousPageGesture == CrossPointSettings::INVERTED_TAP) != mirrored;
   const bool nextZone = inverted ? x < (width * 2) / 3 : x >= width / 3;
   result.next = nextTaps && (!prevTaps || nextZone);
   result.prev = prevTaps && (!nextTaps || !nextZone);
