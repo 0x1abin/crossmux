@@ -346,7 +346,7 @@ void AirPageActivity::loop() {
         requestUpdate();
         return;
       }
-      const size_t historyCount = imageStore_.historyCount();
+      const size_t historyCount = historyRowCount();
       if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
         openSelectedHistoryImage();
         return;
@@ -470,7 +470,7 @@ void AirPageActivity::buildTouchScreen(UiScreen& screen) {
                                           static_cast<int16_t>(renderer.getScreenWidth() - content.x - content.width),
                                           static_cast<int16_t>(renderer.getScreenHeight() - content.y - content.height),
                                           static_cast<int16_t>(content.x)});
-      const int count = static_cast<int>(imageStore_.historyCount());
+      const int count = static_cast<int>(historyRowCount());
       if (count == 0) {
         screen.centeredText(tr(STR_AIRPAGE_NO_IMAGE), screen.theme().bodyText);
         return;
@@ -509,8 +509,7 @@ void AirPageActivity::onSettingsRow(const fui::ActionEvent& event, void* user) {
 
 void AirPageActivity::onHistoryRow(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<AirPageActivity*>(user);
-  if (self->screen_ != Screen::History || event.value < 0 ||
-      event.value >= static_cast<int>(self->imageStore_.historyCount())) {
+  if (self->screen_ != Screen::History || event.value < 0 || event.value >= static_cast<int>(self->historyRowCount())) {
     return;
   }
   self->app.clearTapFlash();
@@ -615,6 +614,10 @@ void AirPageActivity::applySettingsSelection() {
 
 void AirPageActivity::openHistory() {
   if (phase_ != Phase::Idle) return;
+  {
+    RenderLock lock(*this);
+    imageStore_.firstHistoryPage();
+  }
   historyNav_.reset();
   historySelection_ = 0;
   rebuildHistoryRows();
@@ -627,39 +630,70 @@ void AirPageActivity::moveHistorySelection(const int index) {
     RenderLock lock(*this);
     historySelection_ = index;
     historyNav_.selected = index;
-    historyNav_.follow(static_cast<int>(imageStore_.historyCount()));
+    historyNav_.follow(static_cast<int>(historyRowCount()));
   }
   requestUpdate();
 }
 
+size_t AirPageActivity::historyRowCount() const {
+  return imageStore_.historyCount() + (imageStore_.hasPreviousHistoryPage() ? 1u : 0u) +
+         (imageStore_.hasNextHistoryPage() ? 1u : 0u);
+}
+
 void AirPageActivity::rebuildHistoryRows() {
   RenderLock lock(*this);
-  const int count = static_cast<int>(imageStore_.historyCount());
+  const int count = static_cast<int>(historyRowCount());
   historySelection_ = std::min(historySelection_, std::max(0, count - 1));
-  for (int i = 0; i < count; ++i) {
-    const auto& entry = imageStore_.historyEntry(static_cast<size_t>(i));
+  const size_t offset = imageStore_.hasPreviousHistoryPage() ? 1u : 0u;
+  if (offset) {
+    historyRows_[0] = {};
+    historyRows_[0].label = tr(STR_PREV_PAGE);
+  }
+  for (size_t i = 0; i < imageStore_.historyCount(); ++i) {
+    const auto& entry = imageStore_.historyEntry(i);
     if (entry.isCurrent()) {
       snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s", tr(STR_AIRPAGE_CURRENT_IMAGE));
     } else if (!formatArchiveDate(entry.archiveId, historyLabels_[i], sizeof(historyLabels_[i]))) {
-      snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s %d", tr(STR_AIRPAGE_IMAGE_LABEL), i + 1);
+      snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s %llu", tr(STR_AIRPAGE_IMAGE_LABEL),
+               static_cast<unsigned long long>(entry.archiveId));
     }
     const char* format = entry.image.format == airpage::ImageFormat::Jpeg ? "JPEG" : "BMP";
     snprintf(historySubtitles_[i], sizeof(historySubtitles_[i]), "%s · %d×%d", format, entry.image.width,
              entry.image.height);
-    historyRows_[i].label = historyLabels_[i];
-    historyRows_[i].subtitle = historySubtitles_[i];
-    historyRows_[i].actionValue = static_cast<int16_t>(i);
+    historyRows_[i + offset] = {};
+    historyRows_[i + offset].label = historyLabels_[i];
+    historyRows_[i + offset].subtitle = historySubtitles_[i];
   }
+  if (imageStore_.hasNextHistoryPage()) {
+    historyRows_[count - 1] = {};
+    historyRows_[count - 1].label = tr(STR_NEXT_PAGE);
+  }
+  for (int i = 0; i < count; ++i) historyRows_[i].actionValue = static_cast<int16_t>(i);
   historyNav_.selected = historySelection_;
   historyNav_.scrollBy(0, count);
   historyNav_.follow(count);
 }
 
 void AirPageActivity::openSelectedHistoryImage() {
-  if (historySelection_ < 0 || !imageStore_.selectHistory(static_cast<size_t>(historySelection_), selectedImage_)) {
-    if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
-      historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
+  if (historySelection_ < 0 || historySelection_ >= static_cast<int>(historyRowCount())) return;
+  const bool previous = imageStore_.hasPreviousHistoryPage() && historySelection_ == 0;
+  const bool next = imageStore_.hasNextHistoryPage() && historySelection_ == static_cast<int>(historyRowCount() - 1);
+  if (previous || next) {
+    {
+      RenderLock lock(*this);
+      if (previous)
+        imageStore_.previousHistoryPage();
+      else
+        imageStore_.nextHistoryPage();
+      historyNav_.reset();
+      historySelection_ = 0;
     }
+    rebuildHistoryRows();
+    requestUpdate();
+    return;
+  }
+  const size_t index = static_cast<size_t>(historySelection_) - (imageStore_.hasPreviousHistoryPage() ? 1u : 0u);
+  if (!imageStore_.selectHistory(index, selectedImage_)) {
     rebuildHistoryRows();
     notice_ = Notice::InvalidImage;
     requestUpdate();

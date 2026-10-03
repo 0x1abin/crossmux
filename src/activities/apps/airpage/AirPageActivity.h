@@ -74,6 +74,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
   void openImageMenu();
   void applyTouchAction(TouchAction action);
   void rebuildHistoryRows();
+  size_t historyRowCount() const;
   void moveSettingsSelection(int index);
   void moveHistorySelection(int index);
 
@@ -111,9 +112,9 @@ class AirPageActivity final : public Activity, private UiAppHost {
   freeink::ui::ListNav settingsNav_;
   freeink::ui::ListNav historyNav_;
   freeink::ui::ListItem settingsRows_[kSettingsRows]{};
-  freeink::ui::ListItem historyRows_[airpage::AirPageImageStore::kMaxHistoryEntries]{};
-  char historyLabels_[airpage::AirPageImageStore::kMaxHistoryEntries][48]{};
-  char historySubtitles_[airpage::AirPageImageStore::kMaxHistoryEntries][40]{};
+  freeink::ui::ListItem historyRows_[airpage::AirPageImageStore::kHistoryPageSize + 2]{};
+  char historyLabels_[airpage::AirPageImageStore::kHistoryPageSize][48]{};
+  char historySubtitles_[airpage::AirPageImageStore::kHistoryPageSize][40]{};
 
   bool imageNeedsDisplay_ = true;
   bool waitForInputRelease_ = false;

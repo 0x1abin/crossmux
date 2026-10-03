@@ -32,10 +32,10 @@ struct SelectedImage {
 
 class AirPageImageStore final {
  public:
-  static constexpr size_t kMaxHistoryEntries = 20;
-  static constexpr char kCacheDir[] = "/.crosspoint/airpage";
-  static constexpr char kHistoryDir[] = "/.crosspoint/airpage/history";
-  static constexpr char kDownloadPartPath[] = "/.crosspoint/airpage/latest.bmp.part";
+  static constexpr size_t kHistoryPageSize = 20;
+  static constexpr char kCacheDir[] = "/AirPage";
+  static constexpr char kHistoryDir[] = "/AirPage";
+  static constexpr char kDownloadPartPath[] = "/AirPage/latest.bmp.part";
 
   enum class InitializationResult : uint8_t { Empty, Ready, Invalid };
   enum class StageResult : uint8_t { Failed, Unchanged, PendingDisplay };
@@ -53,6 +53,12 @@ class AirPageImageStore final {
   bool hasImage() const { return currentImage_.format != ImageFormat::None; }
   bool hasPendingDownload() const { return pendingDisplayValidation_; }
   const ImageInfo& currentImage() const { return currentImage_; }
+  void firstHistoryPage();
+  bool nextHistoryPage();
+  bool previousHistoryPage();
+  bool hasPreviousHistoryPage() const { return hasPreviousPage_; }
+  bool hasNextHistoryPage() const { return hasNextPage_; }
+  // Count and entries refer only to the loaded page. Files are never capped.
   size_t historyCount() const { return historyCount_; }
   const HistoryEntry& historyEntry(size_t index) const { return history_[index]; }
 
@@ -72,7 +78,9 @@ class AirPageImageStore final {
   bool rollbackPendingImage();
   static void discardPendingBackups();
 
-  void scanHistory();
+  enum class HistoryPage : uint8_t { First, Next, Previous };
+  void scanHistory(HistoryPage page = HistoryPage::First, const HistoryEntry& anchor = {});
+  static bool newerHistoryEntry(const HistoryEntry& lhs, const HistoryEntry& rhs);
   void setCurrentHistoryEntry();
   void removeCurrentHistoryEntry();
   void insertHistoryEntry(const HistoryEntry& entry);
@@ -80,15 +88,15 @@ class AirPageImageStore final {
   static bool parseHistoryId(const char* name, uint64_t& archiveId);
   static bool parseHistoryName(const char* name, HistoryEntry& entry);
   static bool formatHistoryPath(uint64_t archiveId, ImageFormat format, char* path, size_t pathSize);
-  bool historyContains(uint64_t archiveId, ImageFormat format) const;
-  uint64_t nextHistoryId(uint64_t archiveDateKey) const;
-  bool archivePendingBackup(uint64_t archiveDateKey, HistoryEntry* archived);
-  void pruneHistoryFiles();
+  static uint64_t nextHistoryId(uint64_t archiveDateKey);
+  static bool archivePendingBackup(uint64_t archiveDateKey, HistoryEntry* archived);
 
   ImageInfo currentImage_;
-  std::array<HistoryEntry, kMaxHistoryEntries> history_{};
+  std::array<HistoryEntry, kHistoryPageSize> history_{};
   size_t historyCount_ = 0;
   bool historyInitialized_ = false;
+  bool hasPreviousPage_ = false;
+  bool hasNextPage_ = false;
   bool pendingDisplayValidation_ = false;
 };
 
