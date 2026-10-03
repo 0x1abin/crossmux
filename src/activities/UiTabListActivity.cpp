@@ -91,34 +91,45 @@ void UiTabListActivity::syncTabListViewport(UiScreen& screen, fui::ListProps& pr
   if (UITheme::getInstance().hasMainTabs()) {
     const int count = listCount();
     auto& n = activeNav();
-    int16_t rowHeight = screen.theme().rowHeight;
+    // Hand the nav to the list so it reports the viewport it actually drew back to
+    // us: list() ends every build with props.nav->onListRendered(...), and that call is
+    // what publishes ListNav::publishedPageRows_.
+    //
+    // Without it the list is not "nav-managed", and three things break at once. The
+    // one reported from the field is the first: publishedPageRows_ keeps its default of
+    // 1, so UiListActivity's swipe handler reads inputPageRows() == 1 and every swipe
+    // scrolls exactly one row -- on the Text Settings tabs (8 rows in Layout/Style) that
+    // reads as "the page cannot scroll". The other two are in list(): the viewport clamp
+    // uses the fixed-height estimate instead of the measured page size, and the
+    // scroll-indicator strip is not reserved.
+    //
+    // The non-tab counterpart gets all of this implicitly: UiListActivity::
+    // syncListViewport calls screen.syncListViewport(n, props, ...), and that is what
+    // assigns props.nav. This path writes props.topIndex/selectedIndex by hand (it has
+    // to, because ring position 0 is the tab bar, not a row), so it must wire the nav
+    // itself.
+    props.nav = &n;
     if (!mappedInput.hasTouch()) {
       // Non-touch hardware (X3/X4) keeps the original, denser per-theme row
       // height instead of FreeInkUI's touch-target-sized default (see
       // UiListActivity::syncListViewport, the non-tab counterpart of this).
       const auto& metrics = UITheme::getInstance().getMetrics();
-      rowHeight = static_cast<int16_t>(metrics.listRowHeight);
-      // Wrapped (maxLines > 1) labels grow only their own row: list() sizes
-      // wrapped items per-row, so the dense height stays for the rest.
-      props.rowHeight = rowHeight;
+      props.rowHeight = static_cast<int16_t>(metrics.listRowHeight);
     }
-    const uint16_t rows = fui::listVisibleRows(screen.body(), rowHeight, screen.theme().listRowGap);
-    n.visibleRows = rows > 0 ? rows : 1;
-    if (n.followOnBuild) {
-      // Screen entry / tab switch: show the tab's remembered selection, or the
-      // top when the tab bar holds the focus.
-      n.followOnBuild = false;
-      n.top = n.selected > 0 ? static_cast<int>(fui::listTopIndexFor(
-                                   static_cast<int16_t>(n.selected - 1), static_cast<uint16_t>(n.top < 0 ? 0 : n.top),
-                                   static_cast<uint16_t>(n.visibleRows), static_cast<uint16_t>(count)))
-                             : 0;
-    }
-    n.scrollBy(0, count);  // clamp to range
-    // listCount() may shrink between passes (ring: 0 = tab band, 1..count = rows);
-    // keep a stale ring selection from indexing past the new row count.
-    if (n.selected > count) n.selected = count;
-    props.topIndex = static_cast<uint16_t>(n.top);
-    props.selectedIndex = static_cast<int16_t>(n.selected - 1);  // -1 = tab band focused
+    // Delegate the viewport to the SDK's nav-managed sync, exactly as the non-tab path
+    // does via UiListActivity::syncListViewport. selectionOffset = 1 is the ring -> row
+    // translation: ring position 0 is the tab band, so ring N is row N-1 and
+    // props.selectedIndex = -1 keeps the band focused.
+    //
+    // This call is also the only thing in the tree that consumes ListNav::pendingScroll_,
+    // which is what a swipe writes (ListNav::requestScroll). The hand-written
+    // props.topIndex/selectedIndex this replaced never applied it, so on the tabbed pages
+    // (Settings, Text Settings) a swipe was recorded and then silently dropped -- the list
+    // did not move however far you dragged, which is the "cannot scroll" report. It also
+    // measures visibleRows against the real body, keeps the follow-on-build anchoring for a
+    // tab switch (ring 0 -> top), and wires props.nav so list() reports its drawn page size
+    // back through onListRendered.
+    screen.syncListViewport(n, props, count, 1);
     return;
   }
 
