@@ -46,6 +46,15 @@ void AirPageImageRenderer::resetSessionFailures() { ImageBlock::clearSessionRend
 
 void AirPageImageRenderer::releaseSessionResources() { ImageBlock::releaseRenderCache(); }
 
+void AirPageImageRenderer::cleanScreen(GfxRenderer& renderer) {
+  renderer.cancelGrayscale16();
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.clearScreen();
+  // FAST is differential DU on Read Pico; FULL establishes a clean baseline.
+  renderer.requestNextFullRefresh();
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+}
+
 Rect AirPageImageRenderer::fittedBounds(const Rect& viewport, const ImageInfo& image) {
   if (viewport.width <= 0 || viewport.height <= 0 || image.width <= 0 || image.height <= 0) return Rect{};
 
@@ -67,7 +76,8 @@ Rect AirPageImageRenderer::fittedBounds(const Rect& viewport, const ImageInfo& i
 }
 
 AirPageImageRenderer::Result AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport,
-                                                          const SelectedImage& selected) {
+                                                          const SelectedImage& selected,
+                                                          const bool cleanBeforeDisplay) {
   ImageRenderError error = ImageRenderError::Failed;
   const auto failure = [&error] {
     return error == ImageRenderError::OutOfMemory ? Result::OutOfMemory : Result::Failed;
@@ -85,6 +95,7 @@ AirPageImageRenderer::Result AirPageImageRenderer::render(GfxRenderer& renderer,
   } cleanup{renderer};
 
   if (renderer.getGrayscaleLevels() == 16) {
+    if (cleanBeforeDisplay) cleanScreen(renderer);
     if (!renderer.beginGrayscale16()) return failure();
     bool decoded = false;
     switch (selected.image.format) {
@@ -129,8 +140,12 @@ AirPageImageRenderer::Result AirPageImageRenderer::render(GfxRenderer& renderer,
   renderer.clearScreen();
   if (!renderPass(renderer, bounds, selected, jpeg, &error)) return failure();
 
-  renderer.clearScreen();
-  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  if (cleanBeforeDisplay) {
+    cleanScreen(renderer);
+  } else {
+    renderer.clearScreen();
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
 
   renderer.setRenderMode(GfxRenderer::BW);
   if (!renderPass(renderer, bounds, selected, jpeg, &error)) return failure();

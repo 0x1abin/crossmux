@@ -153,12 +153,7 @@ void AirPageActivity::onExit() {
   LOG_DBG("AIRP", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()));
   Activity::onExit();
-#if FREEINK_DEVICE_EEGO_A4
-  // EEGO can render the AirPage image as a grayscale full-screen frame; force
-  // a clean first frame after exit so its pixels do not ghost into the next
-  // activity (same A4-only treatment as the EPUB reader).
-  renderer.requestNextFullRefresh();
-#endif
+  airpage::AirPageImageRenderer::cleanScreen(renderer);
 }
 
 bool AirPageActivity::preventAutoSleep() { return phase_ != Phase::Idle || connection_.preventsAutoSleep(); }
@@ -848,6 +843,7 @@ void AirPageActivity::doFetch() {
       return;
 
     case airpage::AirPageImageStore::StageResult::PendingDisplay:
+      imageNeedsFullClean_ = true;
       airpage::AirPageImageRenderer::resetSessionFailures();
       imageStore_.selectCurrent(selectedImage_);
       imageNeedsDisplay_ = true;
@@ -894,7 +890,10 @@ void AirPageActivity::render(RenderLock&&) {
     const bool screenSizeChanged =
         displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
     if (imageNeedsDisplay_ || screenSizeChanged) {
-      const auto rendered = airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_);
+      const bool cleanBeforeDisplay = imageNeedsFullClean_;
+      imageNeedsFullClean_ = false;
+      const auto rendered =
+          airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_, cleanBeforeDisplay);
       if (rendered == airpage::AirPageImageRenderer::Result::Success) {
         imageNeedsDisplay_ = false;
         displayedScreenWidth_ = fullScreen.width;

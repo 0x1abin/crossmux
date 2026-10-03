@@ -54,6 +54,7 @@ std::array<uint8_t, HalDisplay::DISPLAY_WIDTH * HalDisplay::DISPLAY_HEIGHT / 2> 
 uint8_t levels = 16;
 bool loan = false, failRefresh = false, failAllocation = false;
 int commits = 0, cancels = 0;
+std::vector<char> refreshEvents;
 }  // namespace
 void* operator new[](size_t size, const std::nothrow_t&) noexcept {
   return failAllocation ? nullptr : std::malloc(size);
@@ -70,20 +71,31 @@ uint8_t HalDisplay::getGrayscaleLevels() const { return levels; }
 uint8_t* HalDisplay::beginGrayscale16() {
   if (loan) return nullptr;
   loan = true;
+  refreshEvents.push_back('B');
   native.fill(0xFF);
   return native.data();
 }
 bool HalDisplay::commitGrayscale16() {
   loan = false;
   ++commits;
+  refreshEvents.push_back('C');
   return !failRefresh;
 }
 void HalDisplay::cancelGrayscale16() {
   loan = false;
   ++cancels;
+  refreshEvents.push_back('X');
 }
 bool HalDisplay::isInverted() const { return false; }
-void HalDisplay::displayBuffer(RefreshMode, bool) {}
+void HalDisplay::displayBuffer(RefreshMode mode, bool) {
+  assert(!loan);
+  if (mode == FULL_REFRESH) {
+    for (const auto byte : bw) assert(byte == 0xFF);
+    refreshEvents.push_back('F');
+  } else {
+    refreshEvents.push_back('f');
+  }
+}
 void HalDisplay::displayGrayscaleBase(RefreshMode, bool) {}
 bool HalDisplay::displayGrayscaleBase(GrayscaleMode, RefreshMode mode, bool off) {
   displayGrayscaleBase(mode, off);
@@ -91,7 +103,7 @@ bool HalDisplay::displayGrayscaleBase(GrayscaleMode, RefreshMode mode, bool off)
 }
 void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t*) {}
 void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t*) {}
-void HalDisplay::displayGrayBuffer(bool, const unsigned char*, bool) {}
+void HalDisplay::displayGrayBuffer(bool, const unsigned char*, bool) { refreshEvents.push_back('G'); }
 void HalDisplay::cleanupGrayscaleBuffers(const uint8_t*) {}
 HalDisplay::Controller HalDisplay::getController() const { return Controller::LgfxEpd; }
 HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode) const { return {}; }
@@ -170,6 +182,7 @@ class RecordingPrint : public Print {
 
 int main(int argc, char** argv) {
   assert(argc == 3);
+  refreshEvents.reserve(256);
   setenv("CROSSPOINT_SIM_SD", argv[2], 1);
   GfxRenderer renderer(display);
   renderer.begin();
@@ -260,13 +273,17 @@ int main(int argc, char** argv) {
   selected.image = {airpage::ImageFormat::Jpeg, 128, 16, true};
   const Rect viewport(0, 0, 128, 16);
   const int before = commits;
-  assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected) ==
+  refreshEvents.clear();
+  assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected, true) ==
          airpage::AirPageImageRenderer::Result::Success);
   assert(commits == before + 1 && !loan);
+  assert((refreshEvents == std::vector<char>{'F', 'B', 'C'}));
   // A popup paints the B/W proxy; closing it re-renders the unchanged original.
   renderer.clearScreen();
+  refreshEvents.clear();
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected) ==
          airpage::AirPageImageRenderer::Result::Success);
+  assert((refreshEvents == std::vector<char>{'B', 'C'}));
   for (int i = 0; i < 16; ++i) assert(tone(i * 8 + 4, 8) == i);
   failRefresh = true;
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected) ==
@@ -324,14 +341,41 @@ int main(int argc, char** argv) {
   assert(!jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
   assert(error == ImageRenderError::OutOfMemory);
   renderer.cancelGrayscale16();
-  assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected) ==
+  refreshEvents.clear();
+  assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected, true) ==
          airpage::AirPageImageRenderer::Result::OutOfMemory);
   assert(!loan);
+  assert((refreshEvents == std::vector<char>{'F', 'B', 'X'}));
   failDecoderAllocation = false;
   assert(renderer.beginGrayscale16());
   assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
   assert(error == ImageRenderError::None);
   renderer.cancelGrayscale16();
+  // Exit cleanup cancels an active transaction before clearing the whole panel.
+  refreshEvents.clear();
+  assert(renderer.beginGrayscale16());
+  renderer.drawPixel(1, 1, 0);
+  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+  airpage::AirPageImageRenderer::cleanScreen(renderer);
+  assert(!loan && !renderer.isGrayscale16Active());
+  assert((refreshEvents == std::vector<char>{'B', 'X', 'F'}));
+  // Legacy output replaces its existing preclear with FULL exactly once.
+  auto bmpBytes = ramp(false, false);
+  std::ofstream legacyBmpOut(std::string(argv[2]) + "/legacy-ramp.bmp", std::ios::binary);
+  legacyBmpOut.write(reinterpret_cast<const char*>(bmpBytes.data()), bmpBytes.size());
+  legacyBmpOut.close();
+  airpage::SelectedImage bmpSelected;
+  std::strcpy(bmpSelected.path, "/legacy-ramp.bmp");
+  bmpSelected.image = {airpage::ImageFormat::Bmp, 17, 2, true};
+  levels = 4;
+  refreshEvents.clear();
+  assert(airpage::AirPageImageRenderer::render(renderer, viewport, bmpSelected, true) ==
+         airpage::AirPageImageRenderer::Result::Success);
+  assert((refreshEvents == std::vector<char>{'F', 'f', 'G'}));
+  refreshEvents.clear();
+  assert(airpage::AirPageImageRenderer::render(renderer, viewport, bmpSelected) ==
+         airpage::AirPageImageRenderer::Result::Success);
+  assert((refreshEvents == std::vector<char>{'f', 'f', 'G'}));
   levels = 4;
   legacyError = ImageRenderError::OutOfMemory;
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected) ==
