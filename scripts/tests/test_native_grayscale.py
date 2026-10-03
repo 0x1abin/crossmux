@@ -73,7 +73,7 @@ def main():
     """
         (work / 'SleepProbe.h').write_text(probe + placement +
             (custom + bitmap_sleep).replace('SleepActivity::', 'SleepProbe::'))
-        includes = [work, JPEG, SIM / 'src', ROOT / 'lib/GfxRenderer', ROOT / 'lib/EpdFont',
+        includes = [work, JPEG, SIM / 'src', ROOT / 'lib/hal', ROOT / 'lib/GfxRenderer', ROOT / 'lib/EpdFont',
                     ROOT / 'lib/Epub', ROOT / 'lib/Memory', ROOT / 'lib/Utf8', ROOT / 'lib/MiniBidi',
                     ROOT / 'lib/InflateReader', ROOT / 'lib/ZipFile', ROOT / 'lib/Serialization',
                     ROOT / 'lib/uzlib/src', ROOT / 'lib/FsHelpers', ROOT / 'lib/JpegToBmpConverter', ROOT / 'src', ROOT / 'src/activities/apps/airpage']

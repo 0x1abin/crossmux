@@ -18,6 +18,8 @@ enum class DecodeOutput : uint8_t {
   NativeGrayscale16,  // Gray8 samples directly to a borrowed native frame; no pixel cache.
 };
 
+enum class ImageRenderError : uint8_t { None, OutOfMemory, Failed };
+
 struct RenderConfig {
   int x, y;
   int maxWidth, maxHeight;
@@ -34,6 +36,8 @@ struct RenderConfig {
   bool bilinearScaling = false;
   std::string cachePath;  // If non-empty, decoder will write pixel cache to this path
   DecodeOutput output = DecodeOutput::FrameBufferAndCache;
+  // Optional, caller-owned result for this synchronous decode.
+  ImageRenderError* error = nullptr;
 };
 
 class ImageToFramebufferDecoder {

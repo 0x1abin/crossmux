@@ -276,6 +276,7 @@ bool AirPageImageStore::installDownloadedImage(const ImageInfo& downloaded, cons
   if (Storage.exists(inactivePath)) Storage.remove(inactivePath);
   currentImage_ = downloaded;
   pendingDisplayValidation_ = true;
+  if (historyInitialized_) setCurrentHistoryEntry();
   return true;
 }
 

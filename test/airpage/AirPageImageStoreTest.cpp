@@ -256,3 +256,46 @@ TEST_F(AirPageImageStoreTest, AddsASuffixWhenTwoArchivesShareTheSameSecond) {
 }
 
 }  // namespace
+
+TEST_F(AirPageImageStoreTest, PendingDownloadCanBeRetriedFromHistoryWithoutLosingBackup) {
+  writeBmp("/.crosspoint/airpage/latest.bmp");
+  AirPageImageStore store;
+  ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+
+  // A transient render failure leaves the staged image untouched. Reopening
+  // history must select the JPEG, not the previous BMP's stale list entry.
+  ASSERT_EQ(store.historyCount(), 1U);
+  SelectedImage retry;
+  ASSERT_TRUE(store.selectHistory(0, retry));
+  EXPECT_TRUE(retry.current);
+  EXPECT_EQ(retry.image.format, ImageFormat::Jpeg);
+  EXPECT_TRUE(store.hasPendingDownload());
+  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/latest.jpg"));
+  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/latest.bmp.bak"));
+  store.commitDisplayedDownload(kArchiveDateKey);
+  EXPECT_FALSE(store.hasPendingDownload());
+  ASSERT_EQ(store.historyCount(), 2U);
+  ASSERT_TRUE(store.selectHistory(1, retry));
+  EXPECT_EQ(retry.image.format, ImageFormat::Bmp);
+  EXPECT_TRUE(Storage.exists(retry.path));
+}
+
+TEST_F(AirPageImageStoreTest, LaterPushRecoversBackupAfterAnUnrenderedJpeg) {
+  writeBmp("/.crosspoint/airpage/latest.bmp");
+  AirPageImageStore store;
+  ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath, 4, 5);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  SelectedImage selected;
+  ASSERT_TRUE(store.selectHistory(0, selected));
+  EXPECT_EQ(selected.image.width, 4);
+  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/latest.bmp.bak"));
+  store.commitDisplayedDownload(kArchiveDateKey);
+  ASSERT_EQ(store.historyCount(), 2U);
+  EXPECT_TRUE(store.selectHistory(1, selected));
+  EXPECT_EQ(selected.image.format, ImageFormat::Bmp);
+}

@@ -178,3 +178,23 @@ reject a valid ReadPico transfer before it starts. No-PSRAM targets retain the
 same floors. This check is a heuristic, not a reservation or a guarantee that
 later TLS, driver, or parsing allocations will succeed. Failure logs distinguish
 default, internal and PSRAM capacity; font phase logs locate subsequent failures.
+
+### JPEG preflight and recoverable AirPage display failures
+
+JPEG dimension probing, framebuffer decode and JPEG-to-BMP conversion use
+`HalMemory::getDefaultHeap()` for ordinary `makeUniqueNoThrow<JPEGDEC>()`
+allocations, including registered PSRAM. The unchanged floors are
+`sizeof(JPEGDEC) + 16 KiB` free and `sizeof(JPEGDEC)` contiguous. Framebuffer
+scratch loans still bypass this heap preflight. Actual allocation remains
+fallible; diagnostics distinguish default, internal and PSRAM heaps.
+
+AirPage keeps pending downloads, backups and history images when rendering
+fails. JPEG preflight/allocation failures report insufficient memory; other
+render failures report a retryable display failure, not proven corruption.
+The history list includes a pending current image so it can be selected again
+without downloading. Only successful display commits/archives the pending
+image during the session; subsequent pushes and startup retain the existing
+recovery policy. Header validation retains its existing invalid-file handling.
+No decoder or full-screen buffer is retained between attempts, and internal
+DMA reserves are unchanged. Verify repeated JPEG/BMP pushes, retries and sleep
+wallpaper conversion on Read Pico; host tests cannot establish optical quality.

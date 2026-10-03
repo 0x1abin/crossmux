@@ -31,6 +31,8 @@ class AirPageActivity final : public Activity, private UiAppHost {
     None,
     NoImage,
     InvalidImage,
+    ImageOutOfMemory,
+    ImageDisplayFailed,
     WifiRequired,
     WifiFailed,
     DownloadFailed,
@@ -41,7 +43,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
   };
   enum class SettingRow : uint8_t { Mode, AutoWallpaper, Count };
   enum class WallpaperResult : uint8_t { None, Saved, Failed };
-  enum class ImageDisplayResult : uint8_t { None, Success, Failure };
+  enum class ImageDisplayResult : uint8_t { None, Success, OutOfMemory, Failure };
   enum class TouchAction : int16_t {
     BackToApps,
     ShowQr,

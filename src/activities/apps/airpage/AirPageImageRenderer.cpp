@@ -27,14 +27,15 @@ bool renderBmpPass(const GfxRenderer& renderer, const Rect& bounds, const Select
   return true;
 }
 
-bool renderPass(GfxRenderer& renderer, const Rect& bounds, const SelectedImage& selected, ImageBlock* jpegBlock) {
+bool renderPass(GfxRenderer& renderer, const Rect& bounds, const SelectedImage& selected, ImageBlock* jpegBlock,
+                ImageRenderError* error) {
   switch (selected.image.format) {
     case ImageFormat::None:
       return false;
     case ImageFormat::Bmp:
       return renderBmpPass(renderer, bounds, selected);
     case ImageFormat::Jpeg:
-      return jpegBlock && jpegBlock->render(renderer, bounds.x, bounds.y, ImageBlock::PixelCachePolicy::Stream);
+      return jpegBlock && jpegBlock->render(renderer, bounds.x, bounds.y, ImageBlock::PixelCachePolicy::Stream, error);
   }
   return false;
 }
@@ -65,9 +66,14 @@ Rect AirPageImageRenderer::fittedBounds(const Rect& viewport, const ImageInfo& i
   return Rect{viewport.x + (viewport.width - width) / 2, viewport.y + (viewport.height - height) / 2, width, height};
 }
 
-bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, const SelectedImage& selected) {
+AirPageImageRenderer::Result AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport,
+                                                          const SelectedImage& selected) {
+  ImageRenderError error = ImageRenderError::Failed;
+  const auto failure = [&error] {
+    return error == ImageRenderError::OutOfMemory ? Result::OutOfMemory : Result::Failed;
+  };
   const Rect bounds = fittedBounds(viewport, selected.image);
-  if (bounds.width <= 0 || bounds.height <= 0) return false;
+  if (bounds.width <= 0 || bounds.height <= 0) return failure();
 
   struct RenderCleanup {
     GfxRenderer& renderer;
@@ -79,18 +85,18 @@ bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, c
   } cleanup{renderer};
 
   if (renderer.getGrayscaleLevels() == 16) {
-    if (!renderer.beginGrayscale16()) return false;
+    if (!renderer.beginGrayscale16()) return failure();
     bool decoded = false;
     switch (selected.image.format) {
       case ImageFormat::None:
-        return false;
+        return failure();
       case ImageFormat::Bmp: {
         HalFile file;
-        if (!Storage.openFileForRead("AIRP", selected.path, file)) return false;
+        if (!Storage.openFileForRead("AIRP", selected.path, file)) return failure();
         Bitmap bitmap(file, false);
         if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() != selected.image.width ||
             bitmap.getHeight() != selected.image.height)
-          return false;
+          return failure();
         decoded = renderer.drawBitmapGrayscale16(bitmap, bounds.x, bounds.y, bounds.width, bounds.height);
         break;
       }
@@ -103,12 +109,14 @@ bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, c
         config.useExactDimensions = true;
         config.useDithering = false;
         config.output = DecodeOutput::NativeGrayscale16;
+        config.error = &error;
         JpegToFramebufferConverter converter;
         decoded = converter.decodeToFramebuffer(selected.path, renderer, config);
         break;
       }
     }
-    return decoded && renderer.commitGrayscale16();
+    if (!decoded) return failure();
+    return renderer.commitGrayscale16() ? Result::Success : Result::Failed;
   }
 
   std::optional<ImageBlock> jpegBlock;
@@ -119,16 +127,16 @@ bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, c
 
   renderer.setRenderMode(GfxRenderer::BW);
   renderer.clearScreen();
-  if (!renderPass(renderer, bounds, selected, jpeg)) return false;
+  if (!renderPass(renderer, bounds, selected, jpeg, &error)) return failure();
 
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 
   renderer.setRenderMode(GfxRenderer::BW);
-  if (!renderPass(renderer, bounds, selected, jpeg)) return false;
+  if (!renderPass(renderer, bounds, selected, jpeg, &error)) return failure();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 
-  if (!selected.image.hasGrayscale) return true;
+  if (!selected.image.hasGrayscale) return Result::Success;
 
   const auto abortGrayscale = [&renderer] {
     renderer.setRenderMode(GfxRenderer::BW);
@@ -139,17 +147,17 @@ bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, c
 
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
   renderer.clearScreen(0x00);
-  if (!renderPass(renderer, bounds, selected, jpeg)) {
+  if (!renderPass(renderer, bounds, selected, jpeg, &error)) {
     abortGrayscale();
-    return false;
+    return failure();
   }
   renderer.copyGrayscaleLsbBuffers();
 
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
   renderer.clearScreen(0x00);
-  if (!renderPass(renderer, bounds, selected, jpeg)) {
+  if (!renderPass(renderer, bounds, selected, jpeg, &error)) {
     abortGrayscale();
-    return false;
+    return failure();
   }
   renderer.copyGrayscaleMsbBuffers();
 
@@ -157,12 +165,12 @@ bool AirPageImageRenderer::render(GfxRenderer& renderer, const Rect& viewport, c
   renderer.displayGrayBuffer();
 
   renderer.clearScreen();
-  if (!renderPass(renderer, bounds, selected, jpeg)) {
+  if (!renderPass(renderer, bounds, selected, jpeg, &error)) {
     abortGrayscale();
-    return false;
+    return failure();
   }
   renderer.cleanupGrayscaleWithFrameBuffer();
-  return true;
+  return Result::Success;
 }
 
 }  // namespace airpage
