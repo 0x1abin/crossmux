@@ -352,8 +352,6 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_IMAGE_SCALING, &CrossPointSettings::imageScaling,
                           {StrId::STR_IMAGE_SCALING_NEAREST, StrId::STR_IMAGE_SCALING_BILINEAR}, "imageScaling",
                           StrId::STR_CAT_READER),
-        SettingInfo::Toggle(StrId::STR_NIGHT_MODE, &CrossPointSettings::screenInverted, "screenInverted",
-                            StrId::STR_CAT_READER),
         SettingInfo::Enum(StrId::STR_READER_MENU_STYLE, &CrossPointSettings::readerMenuStyle,
                           {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
                           StrId::STR_CAT_READER),

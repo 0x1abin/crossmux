@@ -172,6 +172,8 @@ add_test(NAME LegacyThemeListGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}
 
 add_test(NAME InxSettingControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_setting_controls.py)
 
+add_test(NAME SettingsApiKeys COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/settings_api/test_settings_api_keys.py)
+
 add_test(NAME HalTiltGestures
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
 
