@@ -1,0 +1,15 @@
+# Patch files are consumed by `git apply` from the PlatformIO build scripts
+# (scripts/patch_sdfat.py, scripts/patch_jpegdec.py). git apply matches context
+# bytes literally, so a patch that reaches the working tree with CRLF endings
+# cannot apply to the LF sources it patches.
+#
+# core.autocrlf=true -- the common Windows default -- rewrites them on checkout,
+# which fails the build for every Windows contributor with:
+#
+#   RuntimeError: SdFat patch does not apply: 0001-invalidate-failed-cache-fill.patch
+#   error: patch failed: src/common/FsCache.cpp:39
+#   error: src/common/FsCache.cpp: patch does not apply
+#
+# Pin the working-tree form to LF on both sides so the patch bytes and the sources
+# they apply to always agree. The files themselves are already LF in the repository.
+*.patch text eol=lf
