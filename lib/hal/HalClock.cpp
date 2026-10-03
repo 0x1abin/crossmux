@@ -2,10 +2,15 @@
 
 #include <Logging.h>
 #include <WiFi.h>
+#include <esp_netif.h>
 #include <esp_netif_sntp.h>
 #include <esp_sntp.h>
 #include <sys/time.h>
 #include <time.h>
+
+// Use the raw lwIP stop only inside the TCP/IP execution context.
+#undef SNTP_OPMODE_POLL
+#include <lwip/apps/sntp.h>
 
 HalClock halClock;
 
@@ -162,22 +167,21 @@ bool HalClock::startSntp() {
   }
 
   if (!_sntpInitialized) {
-    // esp_netif_sntp_init() reaches sntp_setoperatingmode(), and lwIP asserts there
-    // that the SNTP client is not already running (sntp.c:748, "Operating mode must
-    // not be set while SNTP client is running"). _sntpInitialized only tracks what
-    // THIS class started, so SNTP can already be up without us knowing: TrustedTime
-    // reaches the same lwIP client through the legacy configTzTime() (TrustedTime.cpp
-    // configureSntp(), called from syncNow() and from startSync() on every station
-    // join in WifiSelectionActivity), and it keeps its own view of the state. Field
-    // report: entering the WiFi page and connecting panicked here.
-    //
-    // configTzTime() guards its own call the same way -- it stops a running client
-    // first -- so mirror that: stop whatever is up, then initialize ours. The other
-    // owner's sync is not lost, its notification callback has already run and we are
-    // about to sync the system clock ourselves.
-    if (esp_sntp_enabled()) {
-      LOG_DBG("CLK", "SNTP already running outside HalClock; stopping before init");
-      esp_sntp_stop();
+    // TrustedTime can start the shared client without setting _sntpInitialized.
+    // Finish stopping it before init sets the operating mode; esp_sntp_stop()
+    // only queues a stop and can be overtaken by init with TCP/IP core locking.
+    if (esp_netif_tcpip_exec(
+            [](void*) -> esp_err_t {
+              if (sntp_enabled()) {
+                LOG_DBG("CLK", "SNTP already running outside HalClock; stopping before init");
+                sntp_stop();
+              }
+              return ESP_OK;
+            },
+            nullptr) != ESP_OK) {
+      LOG_ERR("CLK", "Failed to stop external SNTP client");
+      _syncState = ClockSyncState::Failed;
+      return false;
     }
     esp_sntp_config_t config =
         ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(2, ESP_SNTP_SERVER_LIST("pool.ntp.org", "time.nist.gov"));
