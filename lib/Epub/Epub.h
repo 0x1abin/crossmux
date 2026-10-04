@@ -1,5 +1,5 @@
 #pragma once
-
+#include <CancelCheck.h>
 #include <ContentProtection.h>
 #include <Print.h>
 
@@ -73,9 +73,9 @@ class Epub {
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize, bool allowEarlyStop = false,
-                                size_t psramChunkSize = 0) const;
+                                size_t psramChunkSize = 0, CancelCheck cancellation = {}) const;
   // Extract an item to a file on SD. On failure the partial file is removed.
-  bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
+  bool extractItemToFile(const std::string& itemHref, const std::string& destPath, CancelCheck cancellation = {}) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;

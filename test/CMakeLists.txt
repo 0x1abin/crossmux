@@ -44,6 +44,7 @@ add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
   ${REPO_ROOT}/lib
+  ${REPO_ROOT}/lib/Memory
 )
 target_compile_options(crosspoint_test_common INTERFACE
   -Wall
@@ -207,3 +208,16 @@ add_test(NAME AirPageDisplayRetry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scr
 add_test(NAME FontPreloadRefresh COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_font_preload_refresh.py)
 
 add_test(NAME ImagePsramIo COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_image_psram_io.py)
+
+# Real device PNGdec callback semantics differ from the simulator shim.
+FetchContent_Declare(pngdec
+  GIT_REPOSITORY https://github.com/bitbank2/PNGdec.git
+  GIT_TAG 1.1.6
+)
+FetchContent_GetProperties(pngdec)
+if(NOT pngdec_POPULATED)
+  FetchContent_Populate(pngdec)
+endif()
+add_test(NAME RealImageDecoderCancellation
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_real_image_decoder_cancel.py
+    --png-source ${pngdec_SOURCE_DIR}/src --jpeg-source ${jpegdec_SOURCE_DIR}/src)

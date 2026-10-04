@@ -26,6 +26,7 @@ class ImagePsramIoTest(unittest.TestCase):
 #include <string>
 #include <vector>
 #include <zlib.h>
+#include "CancelCheck.h"
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
 namespace memory {
@@ -66,7 +67,7 @@ struct Print {
   n=std::min(n,limit);data.insert(data.end(),p,p+n);return n;
  }
 };
-struct ZipInflateCtx {HalFile* file;size_t fileRemaining;uint8_t* readBuf;size_t readBufSize;};
+struct ZipInflateCtx {HalFile* file;size_t fileRemaining;uint8_t* readBuf;size_t readBufSize;CancelCheck cancellation;};
 int zipFillCallback(void*,uint8_t*,int) {return 0;}
 struct InflateStream {
  enum class Status {Ok,Done,Error};
@@ -90,14 +91,14 @@ struct InflateStream {
 };
 constexpr int ZIP_METHOD_STORED=0,ZIP_METHOD_DEFLATED=8;
 int earlyStops=0;
-bool streamDeflatedPrefix(HalFile&,Print&,size_t,size_t,size_t) {++earlyStops;return true;}
+bool streamDeflatedPrefix(HalFile&,Print&,size_t,size_t,size_t,CancelCheck={}) {++earlyStops;return true;}
 namespace zipParsing {bool rangeWithin(size_t offset,size_t count,size_t size) {return offset<=size&&count<=size-offset;}}
 struct ZipFile {
  struct FileStatSlim {int method;size_t compressedSize,uncompressedSize;} stat;
  HalFile file;
  bool loadFileStatSlim(const char*,FileStatSlim* out) {*out=stat;return true;}
  long getDataOffset(const FileStatSlim&) {return 0;}
- bool readFileToStream(const char*,Print&,size_t,bool=false,size_t=0);
+ bool readFileToStream(const char*,Print&,size_t,bool=false,size_t=0,CancelCheck={});
 };
 struct ScopedOpenClose {explicit ScopedOpenClose(ZipFile&){} explicit operator bool() const{return true;}};
 '''+stream+r'''
@@ -133,11 +134,21 @@ int main() {
   zip.stat.compressedSize=zip.file.size()+1;assert(!zip.readFileToStream("x",out,8192,false,65536));
  }
  assert(earlyStops>0);
+ struct Cancellation {int checks=0;int at=2;} state;
+ CancelCheck cancel{&state,[](void* p){auto& c=*static_cast<Cancellation*>(p);return ++c.checks>=c.at;}};
+ Storage.size=100000;Storage.limit=SIZE_MAX;memory::headroom=true;memory::failAt=0;
+ assert(!readPngIntoPsram("x",size,cancel));
+ state.checks=0;state.at=1;ZipFile z;Print sink;
+ assert(!z.readFileToStream("x",sink,8192,false,65536,cancel));
+ state.checks=0;state.at=3;z.stat={0,plain.size(),plain.size()};z.file.data=plain;
+ assert(!z.readFileToStream("x",sink,8192,false,65536,cancel));
+ assert(z.file.largestRead<=16384);
+
 }
 '''
         with tempfile.TemporaryDirectory() as d:
             cpp=Path(d)/'check.cpp';exe=Path(d)/'check';cpp.write_text(program)
-            subprocess.run(['c++','-std=c++20','-Wall','-Wextra','-Werror',str(cpp),'-lz','-o',str(exe)],check=True)
+            subprocess.run(['c++','-std=c++20','-Wall','-Wextra','-Werror','-I'+str(ROOT/'lib/Memory'),str(cpp),'-lz','-o',str(exe)],check=True)
             subprocess.run([str(exe)],check=True)
         dimensions=method(png,'bool PngToFramebufferConverter::getDimensionsStatic(')
         self.assertNotIn('readPngIntoPsram',dimensions)

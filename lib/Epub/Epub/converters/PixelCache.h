@@ -1,5 +1,6 @@
 #pragma once
 
+#include <CancelCheck.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <stdint.h>
@@ -145,12 +146,16 @@ struct PixelCache {
 
   // Flush the final band and zero-fill any rows never covered (image clipped by
   // the screen), then close the file.
-  bool finalize() {
-    if (!ok) {
+  bool finalize(CancelCheck cancellation = {}) {
+    if (!ok || cancellation.isCancelled()) {
       abort();
       return false;
     }
     for (int r = flushedRows; r < height; ++r) {
+      if (cancellation.isCancelled()) {
+        abort();
+        return false;
+      }
       const int idx = r - bandStart;
       const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
       if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
@@ -158,6 +163,10 @@ struct PixelCache {
         abort();
         return false;
       }
+    }
+    if (cancellation.isCancelled()) {
+      abort();
+      return false;
     }
     file.close();
     LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,

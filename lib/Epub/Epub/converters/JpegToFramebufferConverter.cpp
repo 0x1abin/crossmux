@@ -144,6 +144,7 @@ constexpr int32_t FP_MASK = FP_ONE - 1;
 int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
+  if (ctx->config->cancellation.isCancelled()) return 0;
 
   ImageToFramebufferDecoder::yieldDuringDecode(ctx->lastYieldMs);
 
@@ -371,6 +372,10 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                      const RenderConfig& config) {
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    return false;
+  }
   if (config.error) *config.error = ImageRenderError::Failed;
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
@@ -503,6 +508,11 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.lastYieldMs = decodeStart;
   rc = jpeg->decode(0, 0, jpegScaleOption);
   unsigned long decodeTime = millis() - decodeStart;
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    if (ctx.caching || cacheOnly) ctx.cache.abort();
+    return false;
+  }
 
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());
@@ -519,9 +529,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
       ctx.cache.abort();
       return false;
     }
-    if (!ctx.cache.finalize()) return false;
+    if (!ctx.cache.finalize(config.cancellation)) return false;
   } else if (ctx.caching)
-    ctx.cache.finalize();
+    ctx.cache.finalize(config.cancellation);
   if (config.error) *config.error = ImageRenderError::None;
 
   return true;

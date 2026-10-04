@@ -16,6 +16,7 @@ class AirPageDisplayRetryTest(unittest.TestCase):
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include "CancelCheck.h"
 #include <initializer_list>
 struct Selected { bool current = true; };
 namespace airpage {
@@ -66,7 +67,7 @@ int main() {
    assert(activity.imageStore_.commits == (current ? 1 : 0));
  }
 }
-''')
+''', (ROOT / 'lib/Memory',))
 
     def test_history_page_actions_and_image_offsets(self):
         source = (ROOT / 'src/activities/apps/airpage/AirPageActivity.cpp').read_text()
@@ -74,6 +75,7 @@ int main() {
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include "CancelCheck.h"
 namespace fui { struct ActionEvent { int value; }; }
 namespace airpage { struct AirPageImageRenderer { static void resetSessionFailures() {} }; }
 struct Nav { void reset() {} };
@@ -135,7 +137,7 @@ int main() {
  AirPageActivity::onHistoryRow({-1}, &a);
  assert(a.updates == updates && a.imageStore_.page == 0);
 }
-''')
+''', (ROOT / 'lib/Memory',))
 
     def test_image_block_forwards_memory_failure_without_poisoning_retry(self):
         source = (ROOT / 'lib/Epub/Epub/blocks/ImageBlock.cpp').read_text()
@@ -145,6 +147,7 @@ int main() {
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include "CancelCheck.h"
 #include <string>
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
@@ -167,16 +170,17 @@ struct ImageBlock {
  std::string imagePath = "image.jpg", srcPath;
  int width=100, height=100;
  bool hasValidCache() { return false; }
- bool ensureExtracted() { return true; }
+ bool ensureExtracted(CancelCheck) { return true; }
  void renderPlaceholder(GfxRenderer&,int,int) {}
  bool bilinearScalingEnabled() { return false; }
- bool renderInternal(GfxRenderer&,int,int,PixelCachePolicy,DecodeOutput,ImageRenderError*);
+ bool renderInternal(GfxRenderer&,int,int,PixelCachePolicy,DecodeOutput,ImageRenderError*,CancelCheck={});
 };
 bool renderFromCache(GfxRenderer&,const std::string&,int,int,int,int,ImageBlock::PixelCachePolicy) { return false; }
 struct ImageToFramebufferDecoder {
  bool fail = true;
+ ImageRenderError failure=ImageRenderError::OutOfMemory;
  bool decodeToFramebuffer(const std::string&,GfxRenderer&,const RenderConfig& config) {
-   if (config.error) *config.error = fail ? ImageRenderError::OutOfMemory : ImageRenderError::None;
+   if (config.error) *config.error = fail ? failure : ImageRenderError::None;
    return !fail;
  }
 };
@@ -190,15 +194,23 @@ int main() {
  assert(!block.renderInternal(renderer,0,0,ImageBlock::PixelCachePolicy::Stream,
                               DecodeOutput::FrameBufferAndCache,&error));
  assert(error == ImageRenderError::OutOfMemory && !remembered);
+ decoder.failure = ImageRenderError::Failed;
+ assert(!block.renderInternal(renderer,0,0,ImageBlock::PixelCachePolicy::Stream,
+                             DecodeOutput::CacheOnly,&error));
+ assert(!remembered); // Optional cache allocation/I/O failure must permit foreground retry.
  decoder.fail = false;
  assert(block.renderInternal(renderer,0,0,ImageBlock::PixelCachePolicy::Stream,
                              DecodeOutput::FrameBufferAndCache,&error));
  assert(error == ImageRenderError::None);
+ CancelCheck cancelled{nullptr,[](void*){return true;}};
+ assert(!block.renderInternal(renderer,0,0,ImageBlock::PixelCachePolicy::Stream,
+                             DecodeOutput::FrameBufferAndCache,&error,cancelled));
+ assert(error == ImageRenderError::Cancelled && !remembered);
  assert(!block.renderInternal(renderer,-1,0,ImageBlock::PixelCachePolicy::Stream,
                               DecodeOutput::FrameBufferAndCache,&error));
  assert(error == ImageRenderError::Failed);
 }
-''')
+''', (ROOT / 'lib/Memory',))
 
     def test_new_download_cleanup_is_consumed_once_and_exit_cleans_before_next_frame(self):
         source = (ROOT / 'src/activities/apps/airpage/AirPageActivity.cpp').read_text()
@@ -208,6 +220,7 @@ int main() {
         run_cpp(r'''
 #include <cassert>
 #include <cstdint>
+#include "CancelCheck.h"
 #include <string>
 #include <vector>
 #define LOG_DBG(...) ((void)0)
@@ -287,7 +300,7 @@ int main() {
  a.setAirPageScreen(AirPageActivity::Screen::Qr);
  assert(a.screen_ == AirPageActivity::Screen::Qr && events.empty());
 }
-''')
+''', (ROOT / 'lib/Memory',))
 
 if __name__ == '__main__':
     unittest.main()

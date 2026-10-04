@@ -1,4 +1,5 @@
 #pragma once
+#include <CancelCheck.h>
 #include <HalStorage.h>
 
 #include <cstdint>
@@ -18,7 +19,7 @@ enum class DecodeOutput : uint8_t {
   NativeGrayscale16,  // Gray8 samples directly to a borrowed native frame; no pixel cache.
 };
 
-enum class ImageRenderError : uint8_t { None, OutOfMemory, Failed };
+enum class ImageRenderError : uint8_t { None, OutOfMemory, Failed, Cancelled };
 
 struct RenderConfig {
   int x, y;
@@ -38,6 +39,7 @@ struct RenderConfig {
   DecodeOutput output = DecodeOutput::FrameBufferAndCache;
   // Optional, caller-owned result for this synchronous decode.
   ImageRenderError* error = nullptr;
+  CancelCheck cancellation;
 };
 
 class ImageToFramebufferDecoder {

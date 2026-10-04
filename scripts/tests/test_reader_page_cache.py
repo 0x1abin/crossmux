@@ -30,6 +30,10 @@ class ReaderPageCacheTest(unittest.TestCase):
 #include <memory>
 #include <vector>
 #include "ReaderPageCache.h"
+#include "CancelCheck.h"
+template<class F> struct ScopedCleanup {F fn;~ScopedCleanup(){fn();}};
+struct ImageBlock {static void releaseRenderCache() {}};
+int imageWarms=0;bool cancelImage=false;
 #define ENABLE_CHINESE_VERSION 1
 template<class... Args> void log(const char*,const char*,Args...) {}
 #define LOG_ERR(...) log(__VA_ARGS__)
@@ -85,6 +89,7 @@ struct GfxRenderer {
   void setRenderMode(RenderMode m) {mode=m;}
   int getLineHeight(int,float) const {return 1;}
   int getFontAscenderSize(int) const {return 1;}
+  struct FrameBufferLoan {explicit FrameBufferLoan(GfxRenderer&) {}};
   struct SyntheticBoldScope {SyntheticBoldScope(GfxRenderer&,uint8_t) {}};
 };
 constexpr int TAG_PageLine=1;
@@ -111,6 +116,12 @@ struct Page {
   std::vector<std::unique_ptr<PageLine>> elements;
   Page() {for(int i=0;i<3;++i) {auto p=std::make_unique<PageLine>(); p->yPos=i; elements.push_back(std::move(p));}}
   bool hasImages() const {return images;}
+  bool hasImagesNeedingDecode() const {return images;}
+  bool warmImages(GfxRenderer& r,int,int,CancelCheck c) {
+    ++imageWarms;r.frame.fill(0x11);r.mode=GfxRenderer::GRAYSCALE_MSB;
+    if(cancelImage) activityManager.cancelled=true;
+    return !c.isCancelled();
+  }
 };
 struct Section {
   int currentPage=4, pageCount=20, loads=0;
@@ -213,15 +224,27 @@ int main() {
   {EpubReaderActivity r; r.renderIdle(0); ++r.sectionGeneration_; assert(!r.consume());}
   reset();
   {EpubReaderActivity r; r.renderIdle(0); SETTINGS.spec.fontId=99; assert(!r.consume());}
-  // Images and I/O failures are attempted once, and allocate no frame buffers.
+  // Images use one stash, not three unused result planes; failures allocate nothing.
   for(bool fail: {false,true}) {
     reset(); EpubReaderActivity r; r.section->images=!fail; r.section->fail=fail;
     for(int i=0;i<100;++i) r.renderIdle(0);
-    assert(r.section->loads==2 && memory::allocations==0);
+    assert(r.section->loads==2 && memory::allocations==(fail?0:1));
     for(const auto& slot:r.pageCache_) assert(slot.state==ReaderPageCache::State::Skipped);
     r.section->images=false; r.section->fail=false;
     assert(!r.consume()); r.renderIdle(0); assert(r.section->loads==4);
   }
+  reset();
+  {EpubReaderActivity r; r.section->images=true;auto original=r.renderer.frame;
+   imageWarms=0;cancelImage=true;r.renderIdle(0);cancelImage=false;
+   assert(imageWarms==1 && r.renderer.frame==original && r.renderer.mode==GfxRenderer::BW);
+   assert(memory::live==1 && !r.pageCacheFailed_ && !r.pageCacheBase_[0]);
+   r.freePageCache();assert(memory::live==0);}
+  reset();
+  {EpubReaderActivity r;r.section->images=true;memory::headroom=false;r.renderIdle(0);
+   assert(!r.pageCacheFailed_ && memory::live==0);}
+  reset();
+  {EpubReaderActivity r;r.section->images=true;memory::failAt=1;r.renderIdle(0);
+   assert(!r.pageCacheFailed_ && memory::live==0);}
   // Interrupt in each plane and at every element boundary; scratch never leaks.
   for(int element=1;element<=18;++element) {
     reset(); EpubReaderActivity r; const auto original=r.renderer.frame;
@@ -257,7 +280,7 @@ int main() {
   reset();
 }
 '''
-        run_cpp(program, (ROOT / 'src/activities/reader', ROOT / 'lib/Epub'))
+        run_cpp(program, (ROOT / 'src/activities/reader', ROOT / 'lib/Epub', ROOT / 'lib/Memory'))
 
     def test_readpico_input_cancellation_on_hardware_and_simulator(self):
         source = (ROOT / 'src/main.cpp').read_text()
@@ -384,6 +407,101 @@ int main() {
 }
 '''
         run_cpp(program)
+
+
+    def test_image_stage_cancel_cleanup_and_retry(self):
+        page = (ROOT / 'lib/Epub/Epub/Page.cpp').read_text()
+        epub = (ROOT / 'lib/Epub/Epub.cpp').read_text()
+        cache = (ROOT / 'lib/Epub/Epub/converters/PixelCache.h').read_text()
+        program = r"""
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+#include "CancelCheck.h"
+template<class... Args> void log(const char*,const char*,Args...) {}
+#define LOG_DBG(...) log(__VA_ARGS__)
+#define LOG_ERR(...) log(__VA_ARGS__)
+unsigned long millis(){return 0;}
+bool stopped=false;
+CancelCheck cancel{nullptr,[](void*){return stopped;}};
+struct HalFile {
+ bool opened=false;
+ int writes=0,stopAfter=0;
+ std::vector<uint8_t> bytes;
+ size_t write(const void* p,size_t n){
+  const auto* b=static_cast<const uint8_t*>(p);bytes.insert(bytes.end(),b,b+n);
+  if(stopAfter && ++writes==stopAfter) stopped=true;
+  return n;
+ }
+ void close(){opened=false;}
+ void flush(){}
+ bool isOpen()const{return opened;}
+};
+struct Store {
+ bool exists=false;int removes=0;
+ bool openFileForWrite(const char*,const std::string&,HalFile& f){exists=true;f.opened=true;return true;}
+ bool remove(const char*){exists=false;++removes;return true;}
+} Storage;
+""" + method(cache, 'struct PixelCache') + ';' + r"""
+struct Epub {
+ bool stopInStream=false;
+ bool readItemContentsToStream(const std::string&,HalFile& f,size_t n,bool,size_t maximum,CancelCheck c)const{
+  assert(n==8192 && maximum==16384);f.write("partial",7);
+  if(stopInStream) stopped=true;
+  return !c.isCancelled();
+ }
+ bool extractItemToFile(const std::string&,const std::string&,CancelCheck)const;
+};
+""" + method(epub, 'bool Epub::extractItemToFile(') + r"""
+struct GfxRenderer{};
+struct Block {
+ bool stopExtract=false, stopDecode=false, needed=true;
+ int extracts=0,decodes=0;
+ bool needsDecode(){return needed;}
+ bool ensureExtracted(CancelCheck){++extracts;if(stopExtract)stopped=true;return true;}
+ bool cacheDecodedImage(GfxRenderer&,int,int,CancelCheck c){++decodes;if(stopDecode)stopped=true;return !c.isCancelled();}
+};
+constexpr int TAG_PageImage=1;
+struct Element{virtual ~Element()=default;virtual int getTag(){return 0;}};
+struct PageImage:Element{Block block;int xPos=0,yPos=0;int getTag()override{return TAG_PageImage;}Block& getImageBlock(){return block;}};
+struct Page{
+ std::vector<std::unique_ptr<Element>> elements;
+ bool warmImages(GfxRenderer&,int,int,CancelCheck);
+};
+""" + method(page, 'bool Page::warmImages(') + r"""
+int main(){
+ GfxRenderer renderer;Page page;
+ auto a=std::make_unique<PageImage>();auto* first=a.get();page.elements.push_back(std::move(a));
+ auto b=std::make_unique<PageImage>();auto* second=b.get();page.elements.push_back(std::move(b));
+ first->block.stopExtract=true;
+ assert(!page.warmImages(renderer,0,0,cancel));
+ assert(first->block.decodes==0 && second->block.extracts==0);
+ stopped=false;first->block.stopExtract=false;first->block.stopDecode=true;
+ assert(!page.warmImages(renderer,0,0,cancel));assert(second->block.extracts==0);
+ stopped=false;first->block.stopDecode=false;
+ assert(page.warmImages(renderer,0,0,cancel));assert(second->block.decodes==1);
+ Epub epub;epub.stopInStream=true;
+ assert(!epub.extractItemToFile("src","dest",cancel));assert(!Storage.exists);
+ stopped=false;epub.stopInStream=false;
+ assert(epub.extractItemToFile("src","dest",cancel));assert(Storage.exists);
+ {
+  PixelCache cache;assert(cache.begin("test.pxc",8,32,0,0,1));
+  cache.file.stopAfter=3;assert(!cache.finalize(cancel));assert(!Storage.exists && !cache.file.isOpen());
+ }
+ stopped=false;
+ {
+  PixelCache cache;assert(cache.begin("test.pxc",8,32,0,0,1));
+  assert(cache.finalize(cancel));assert(Storage.exists && cache.file.bytes.size()==4+2*32);
+ }
+ assert(Storage.exists); // A complete cache survives destruction and can be retried normally.
+}
+"""
+        run_cpp(program, include_dirs=(ROOT / 'lib/Memory',))
 
 
 if __name__ == '__main__':

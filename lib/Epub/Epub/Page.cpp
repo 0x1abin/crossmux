@@ -200,6 +200,19 @@ void Page::cacheImagesNeedingDecode(GfxRenderer& renderer, const int xOffset, co
   }
 }
 
+bool Page::warmImages(GfxRenderer& renderer, int xOffset, int yOffset, CancelCheck cancellation) {
+  for (auto& element : elements) {
+    if (cancellation.isCancelled()) return false;
+    if (element->getTag() != TAG_PageImage) continue;
+    auto& image = static_cast<PageImage&>(*element);
+    auto& block = image.getImageBlock();
+    if (!block.needsDecode()) continue;
+    if (!block.ensureExtracted(cancellation) || cancellation.isCancelled()) return false;
+    if (!block.cacheDecodedImage(renderer, image.xPos + xOffset, image.yPos + yOffset, cancellation)) return false;
+  }
+  return !cancellation.isCancelled();
+}
+
 bool Page::serialize(HalFile& file) const {
   const uint16_t count = elements.size();
   serialization::writePod(file, count);
