@@ -460,7 +460,38 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
   return data;
 }
 
-bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop) {
+namespace {
+// Two DEFLATE buffers must fit together. A partial PSRAM allocation is released
+// before falling back, so the fallback never charges large buffers to internal RAM.
+struct StreamBuffers {
+  memory::ByteBuffer input;
+  memory::ByteBuffer output;
+  size_t size;
+
+  StreamBuffers(size_t baseSize, size_t psramSize, bool deflated) : size(baseSize) {
+    const size_t count = deflated ? 2 : 1;
+    if (psramSize > baseSize && psramSize <= std::numeric_limits<size_t>::max() / count &&
+        memory::psramHasHeadroom(count * psramSize, psramSize, 16 * 1024)) {
+      input = memory::makePsramByteBufferUninitializedNoThrow(psramSize);
+      if (input && deflated) output = memory::makePsramByteBufferUninitializedNoThrow(psramSize);
+      if (input && (!deflated || output)) {
+        size = psramSize;
+        LOG_DBG("ZIP", "PSRAM stream: %zu x %zu bytes", count, size);
+        return;
+      }
+      input.reset();
+      output.reset();
+    }
+    // These bounded transfer buffers outlive one loop iteration and cannot use the task stack.
+    input.reset(static_cast<uint8_t*>(malloc(baseSize)));
+    if (input && deflated) output.reset(static_cast<uint8_t*>(malloc(baseSize)));
+    LOG_DBG("ZIP", "Stream fallback: %zu x %zu bytes", count, size);
+  }
+};
+}  // namespace
+
+bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop,
+                               const size_t psramChunkSize) {
   if (chunkSize == 0) {
     LOG_ERR("ZIP", "Chunk size must be non-zero");
     return false;
@@ -487,7 +518,9 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
   if (fileStat.method == ZIP_METHOD_STORED) {
     // no deflation, just read content
-    const auto buffer = static_cast<uint8_t*>(malloc(chunkSize));
+    StreamBuffers buffers(chunkSize, allowEarlyStop ? 0 : psramChunkSize, false);
+    const size_t transferSize = buffers.size;
+    auto* buffer = buffers.input.get();
     if (!buffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for buffer");
       return false;
@@ -495,15 +528,13 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     size_t remaining = inflatedDataSize;
     while (remaining > 0) {
-      const size_t dataRead = file.read(buffer, remaining < chunkSize ? remaining : chunkSize);
+      const size_t dataRead = file.read(buffer, remaining < transferSize ? remaining : transferSize);
       if (dataRead == 0) {
         LOG_ERR("ZIP", "Could not read more bytes");
-        free(buffer);
         return false;
       }
 
       if (out.write(buffer, dataRead) != dataRead) {
-        free(buffer);
         if (allowEarlyStop) return true;  // sink has what it needs
         LOG_ERR("ZIP", "Failed to write all output bytes to stream");
         return false;
@@ -511,7 +542,6 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       remaining -= dataRead;
     }
 
-    free(buffer);
     return true;
   }
 
@@ -520,16 +550,16 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       return streamDeflatedPrefix(file, out, chunkSize, deflatedDataSize, inflatedDataSize);
     }
 
-    auto* fileReadBuffer = static_cast<uint8_t*>(malloc(chunkSize));
+    StreamBuffers buffers(chunkSize, psramChunkSize, true);
+    auto* fileReadBuffer = buffers.input.get();
     if (!fileReadBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for zip file read buffer");
       return false;
     }
 
-    auto* outputBuffer = static_cast<uint8_t*>(malloc(chunkSize));
+    auto* outputBuffer = buffers.output.get();
     if (!outputBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for output buffer");
-      free(fileReadBuffer);
       return false;
     }
 
@@ -537,13 +567,11 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     ctx.file = &file;
     ctx.fileRemaining = deflatedDataSize;
     ctx.readBuf = fileReadBuffer;
-    ctx.readBufSize = chunkSize;
+    ctx.readBufSize = buffers.size;
 
     InflateStream inflate;
     if (!inflate.init(true)) {
       LOG_ERR("ZIP", "Failed to init inflate stream for %s", filename);
-      free(outputBuffer);
-      free(fileReadBuffer);
       return false;
     }
     inflate.setFill(zipFillCallback, &ctx);
@@ -553,7 +581,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     while (true) {
       size_t produced;
-      const InflateStream::Status status = inflate.readAtMost(outputBuffer, chunkSize, &produced);
+      const InflateStream::Status status = inflate.readAtMost(outputBuffer, buffers.size, &produced);
 
       totalProduced += produced;
       if (totalProduced > static_cast<size_t>(inflatedDataSize)) {
@@ -587,8 +615,6 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       // InflateStream::Status::Ok: output buffer full, continue
     }
 
-    free(outputBuffer);
-    free(fileReadBuffer);
     return success;  // inflate destructor frees the decompressor state + window
   }
 

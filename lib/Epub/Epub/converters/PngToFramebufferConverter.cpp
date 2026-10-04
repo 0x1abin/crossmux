@@ -58,6 +58,23 @@ struct PngContext {
   uint32_t lastYieldMs{0};  // throttle state for yieldDuringDecode()
 };
 
+// The compressed input is transient and cannot fit on the render-task stack.
+// Leave the shared PSRAM reserve available for fonts and display work.
+constexpr size_t PNG_PSRAM_MAX_BYTES = 2u * 1024u * 1024u;
+[[maybe_unused]] static memory::ByteBuffer readPngIntoPsram(const std::string& path, size_t& size) {
+  HalFile file;
+  if (!Storage.openFileForRead("PNG", path, file)) return {};
+  size = file.size();
+  if (size == 0 || size > PNG_PSRAM_MAX_BYTES || !memory::psramHasHeadroom(size, size, 16 * 1024)) return {};
+  auto data = memory::makePsramByteBufferUninitializedNoThrow(size);
+  if (!data) return {};
+  if (file.read(data.get(), size) != size) {
+    LOG_DBG("PNG", "Short PSRAM read; reopening as a stream");
+    return {};
+  }
+  return data;
+}
+
 // File I/O callbacks use pFile->fHandle to access the HalFile*,
 // avoiding the need for global file state.
 void* pngOpenWithHandle(const char* filename, int32_t* size) {
@@ -507,6 +524,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     png->~PNG();
     buildscratch::release(decoderScratch);
   }};
+  memory::ByteBuffer compressed;
   const ScopedCleanup closePng{[png]() { png->close(); }};
 
   PngContext ctx;
@@ -516,8 +534,20 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   ctx.screenWidth = renderer.getScreenWidth();
   ctx.screenHeight = renderer.getScreenHeight();
 
-  int rc = png->open(imagePath.c_str(), pngOpenWithHandle, pngCloseWithHandle, pngReadWithHandle, pngSeekWithHandle,
-                     pngDrawCallback);
+  int rc;
+#if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
+  size_t compressedSize = 0;
+  compressed = readPngIntoPsram(imagePath, compressedSize);
+  if (compressed) {
+    LOG_DBG("PNG", "PSRAM input: %zu bytes", compressedSize);
+    rc = png->openRAM(compressed.get(), static_cast<int>(compressedSize), pngDrawCallback);
+  } else
+#endif
+  {
+    LOG_DBG("PNG", "Streaming input");
+    rc = png->open(imagePath.c_str(), pngOpenWithHandle, pngCloseWithHandle, pngReadWithHandle, pngSeekWithHandle,
+                   pngDrawCallback);
+  }
   if (rc != PNG_SUCCESS) {
     LOG_ERR("PNG", "Failed to open PNG: %d", rc);
     return false;

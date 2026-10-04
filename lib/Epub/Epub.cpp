@@ -982,7 +982,7 @@ uint8_t* Epub::readItemContentsToBytes(const std::string& itemHref, size_t* size
 }
 
 bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, const size_t chunkSize,
-                                    const bool allowEarlyStop) const {
+                                    const bool allowEarlyStop, const size_t psramChunkSize) const {
   if (itemHref.empty()) {
     LOG_DBG("EBP", "Failed to read item, empty href");
     return false;
@@ -1005,7 +1005,7 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
     return true;
   }
 
-  return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize, allowEarlyStop);
+  return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize, allowEarlyStop, psramChunkSize);
 }
 
 bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
@@ -1013,9 +1013,10 @@ bool Epub::extractItemToFile(const std::string& itemHref, const std::string& des
   if (!Storage.openFileForWrite("EBP", destPath, out)) {
     return false;
   }
-  // Large images dominate lazy extraction. Match the section streamer size to
-  // halve SD read/write calls while adding only 8 KB of transient ZIP buffers.
-  const bool ok = readItemContentsToStream(itemHref, out, 8192);
+  // Large transfers are opt-in and PSRAM-only; ZIP falls back to the original 8 KiB buffers.
+  const auto started = millis();
+  const bool ok = readItemContentsToStream(itemHref, out, 8192, false, 65536);
+  LOG_DBG("EBP", "Image extraction: %lums", millis() - started);
   out.flush();
   out.close();
   if (!ok) {
