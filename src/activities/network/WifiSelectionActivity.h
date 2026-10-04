@@ -105,8 +105,8 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   unsigned long connectionStartTime = 0;
 
   // The UiAppHost app hosts the network list and the save/forget prompts
-  // (themed rows and dialogs, touch routing); every other state keeps its
-  // legacy centered-text rendering.
+  // (themed rows and dialogs, touch routing). Connecting/scanning share the
+  // centered-text renderer; touch screens reserve their controls first.
   // Viewport memory (top/visibleRows) for the network list; `selected` is
   // mirrored from selectedNetworkIndex at build/move time.
   freeink::ui::ListNav listNav;

@@ -5,6 +5,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <TrustedTime.h>
+#include <Utf8.h>
 #include <WiFi.h>
 #if CROSSPOINT_EMULATED == 0
 #include <esp_mac.h>
@@ -1081,23 +1082,10 @@ void WifiSelectionActivity::buildListScreen(UiScreen& screen) {
       case WifiSelectionState::SCANNING:
       case WifiSelectionState::AUTO_CONNECTING:
       case WifiSelectionState::CONNECTING: {
-        const bool scanning = state == WifiSelectionState::SCANNING;
         addTouchControls(screen, autoConnecting ? tr(STR_SHOW_NETWORKS) : nullptr, ACTION_RETURN);
-        auto text = screen.theme().bodyText;
-        text.maxLines = 4;
-        const char* status = scanning ? (autoConnecting ? tr(STR_FINDING_SAVED_WIFI) : tr(STR_SCANNING))
-                                      : (autoConnecting ? tr(STR_CONNECTING_SAVED_WIFI) : tr(STR_CONNECTING));
-        if (!scanning && !selectedSSID.empty()) {
-          fui::TextAreaProps ssid;
-          ssid.text = selectedSSID.c_str();
-          ssid.style = text;
-          ssid.showCaret = false;
-          ssid.style.maxLines = 2;
-          screen.textArea(ssid, screen.target().lineHeight(text.font) * 2);
-        }
-        text.align = fui::TextAlign::Center;
-        text.maxLines = std::max(1, std::min(4, screen.contentRect().height / screen.target().lineHeight(text.font)));
-        screen.target().text(screen.contentRect(), status, text);
+        const auto body = screen.contentRect();
+        const Rect bounds{body.x, body.y, body.width, body.height};
+        renderConnecting(&bounds, &metrics);
         return;
       }
       case WifiSelectionState::CONNECTION_FAILED: {
@@ -1256,30 +1244,32 @@ void WifiSelectionActivity::renderConnecting(const Rect* screen, const ThemeMetr
   const auto top = screen->y + (screen->height - height) / 2;
   const int statusX = screen->x + metrics->contentSidePadding;
   const int statusWidth = screen->width - metrics->contentSidePadding * 2;
+  if (statusWidth <= 0 || screen->height < height) return;
 
   if (state == WifiSelectionState::SCANNING) {
     const char* statusText = autoConnecting ? tr(STR_FINDING_SAVED_WIFI) : tr(STR_SCANNING);
     const Rect statusBounds{statusX, screen->y, statusWidth, screen->height};
     UITheme::drawCenteredWrappedText(renderer, statusBounds, UI_10_FONT_ID, statusText, MAX_STATUS_LINES);
-    if (autoConnecting) {
-      const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_SHOW_NETWORKS), "", "");
-      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    }
   } else {
     const char* statusText = autoConnecting ? tr(STR_CONNECTING_SAVED_WIFI) : tr(STR_CONNECTING);
     const Rect statusBounds{statusX, screen->y, statusWidth, top - metrics->verticalSpacing - screen->y};
     UITheme::drawCenteredWrappedText(renderer, statusBounds, UI_12_FONT_ID, statusText, MAX_STATUS_LINES, true,
                                      EpdFontFamily::BOLD, UITheme::TextVerticalAlignment::BOTTOM);
 
-    std::string ssidInfo = std::string(tr(STR_TO_PREFIX)) + selectedSSID;
-    if (ssidInfo.length() > 25) {
-      ssidInfo.replace(22, ssidInfo.length() - 22, "...");
+    char ssidInfo[26];
+    if (snprintf(ssidInfo, sizeof(ssidInfo), "%s%s", tr(STR_TO_PREFIX), selectedSSID.c_str()) > 25) {
+      const int length = utf8SafeTruncateBuffer(ssidInfo, 22);
+      snprintf(ssidInfo + length, sizeof(ssidInfo) - length, "...");
     }
-    UITheme::drawCenteredText(renderer, *screen, UI_10_FONT_ID, top, ssidInfo.c_str());
-    if (autoConnecting) {
-      const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_SHOW_NETWORKS), "", "");
-      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    const Rect ssidBounds{statusX, top, statusWidth, height};
+    {
+      const GfxRenderer::ClipScope clip(renderer, ssidBounds.x, ssidBounds.y, ssidBounds.width, ssidBounds.height);
+      UITheme::drawCenteredText(renderer, ssidBounds, UI_10_FONT_ID, top, ssidInfo);
     }
+  }
+  if (autoConnecting && !mappedInput.hasTouch()) {
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_SHOW_NETWORKS), "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 }
 

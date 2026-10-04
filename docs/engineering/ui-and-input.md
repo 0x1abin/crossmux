@@ -239,6 +239,17 @@ framebuffer or SD font is needed.
 The default sleep screen is Light. Existing saved sleep-screen selections are
 preserved; the default applies when no selection has been saved.
 
+### WiFi connection status
+
+Touch and button devices share the upstream connection layout: the connection
+status is centered above the SSID, which retains the translated "to" prefix.
+On touch devices the text uses the body below the header/MAC band and above
+the Cancel/Show Networks buttons, rather than placing the SSID in a top-aligned
+text area. Scanning displays only the centered status. Physical button hints
+remain exclusive to button devices. The SSID label uses a bounded stack buffer;
+long names keep the existing ellipsis style at a complete UTF-8 boundary and
+are clipped to the content width.
+
 ## Retained Framebuffer Updates
 
 The firmware has one framebuffer, and its contents remain available after
