@@ -398,12 +398,6 @@ void AirPageActivity::loop() {
 void AirPageActivity::setAirPageScreen(const Screen screen) {
   if (screen_ == screen) return;
   closeRouting();
-#if FREEINK_DEVICE_EEGO_A4
-  // Leaving the full-screen image for a normal UI page (QR/settings/history):
-  // the image may have been driven as a grayscale frame whose residue a plain
-  // FAST diff won't scrub. Force a clean first frame on the A4.
-  if (screen_ == Screen::Image && screen != Screen::Image) renderer.requestNextFullRefresh();
-#endif
   screen_ = screen;
 }
 
@@ -843,7 +837,7 @@ void AirPageActivity::doFetch() {
       return;
 
     case airpage::AirPageImageStore::StageResult::PendingDisplay:
-      imageNeedsFullClean_ = true;
+      imageNeedsClean_ = true;
       airpage::AirPageImageRenderer::resetSessionFailures();
       imageStore_.selectCurrent(selectedImage_);
       imageNeedsDisplay_ = true;
@@ -890,8 +884,8 @@ void AirPageActivity::render(RenderLock&&) {
     const bool screenSizeChanged =
         displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
     if (imageNeedsDisplay_ || screenSizeChanged) {
-      const bool cleanBeforeDisplay = imageNeedsFullClean_;
-      imageNeedsFullClean_ = false;
+      const bool cleanBeforeDisplay = imageNeedsClean_;
+      imageNeedsClean_ = false;
       const auto rendered =
           airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_, cleanBeforeDisplay);
       if (rendered == airpage::AirPageImageRenderer::Result::Success) {

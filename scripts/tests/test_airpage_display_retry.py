@@ -202,7 +202,7 @@ int main() {
 
     def test_new_download_cleanup_is_consumed_once_and_exit_cleans_before_next_frame(self):
         source = (ROOT / 'src/activities/apps/airpage/AirPageActivity.cpp').read_text()
-        start = source.index('      const bool cleanBeforeDisplay = imageNeedsFullClean_;')
+        start = source.index('      const bool cleanBeforeDisplay = imageNeedsClean_;')
         end = source.index('      if (rendered == ', start)
         consumption = source[start:end]
         run_cpp(r'''
@@ -213,6 +213,7 @@ int main() {
 #define LOG_DBG(...) ((void)0)
 #define LOG_INF(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
+#define FREEINK_DEVICE_EEGO_A4 1
 std::vector<char> events;
 struct Activity { void onExit() { events.push_back('E'); } };
 namespace airpage {
@@ -227,8 +228,8 @@ struct AirPageImageStore {
 struct AirPageImageRenderer {
  static void resetSessionFailures() {}
  static void releaseSessionResources() { events.push_back('R'); }
- static void cleanScreen(int&) { events.push_back('F'); }
- static bool render(int&, int, int, bool clean) { if (clean) events.push_back('F'); return true; }
+ static void cleanScreen(int&) { events.push_back('C'); }
+ static bool render(int&, int, int, bool clean) { if (clean) events.push_back('C'); return true; }
 };
 }
 struct HttpDownloader {
@@ -245,12 +246,14 @@ struct AirPageActivity : Activity {
  } connection_;
  airpage::AirPageImageStore imageStore_;
  int renderer = 0, selectedImage_ = 0, fullScreen = 0;
- bool imageNeedsDisplay_ = false, imageNeedsFullClean_ = false;
+ bool imageNeedsDisplay_ = false, imageNeedsClean_ = false;
+ Screen screen_ = Screen::Qr;
  Notice notice_ = Notice::None;
  std::string downloadUrl_, legacyDownloadUrl_;
  uint64_t currentArchiveDateKey() { return 0; }
  void applyConnectionEvent(int) {}
- void setAirPageScreen(Screen) {}
+ void closeRouting() {}
+ void setAirPageScreen(Screen);
  void doFetch();
  void onExit();
  void display() {
@@ -259,6 +262,7 @@ struct AirPageActivity : Activity {
  }
 };
 ''' + method(source, 'void AirPageActivity::doFetch()') +
+            method(source, 'void AirPageActivity::setAirPageScreen(') +
             method(source, 'void AirPageActivity::onExit()') + r'''
 int main() {
  using Stage = airpage::AirPageImageStore::StageResult;
@@ -266,18 +270,22 @@ int main() {
    AirPageActivity a;
    a.imageStore_.result = stage;
    a.doFetch();
-   assert(a.imageNeedsFullClean_ == (stage == Stage::PendingDisplay));
+   assert(a.imageNeedsClean_ == (stage == Stage::PendingDisplay));
    events.clear();
    a.display();
-   a.display(); // A retry or popup redraw must not repeat FULL cleanup.
+   a.display(); // A retry or popup redraw must not repeat the two fast clears.
    assert(events.size() == (stage == Stage::PendingDisplay ? 1 : 0));
-   assert(!a.imageNeedsFullClean_);
+   assert(!a.imageNeedsClean_);
  }
  AirPageActivity a;
  events.clear();
  a.onExit();
  events.push_back('N'); // ActivityManager renders the next activity after onExit returns.
- assert((events == std::vector<char>{'S', 'R', 'E', 'F', 'N'}));
+ assert((events == std::vector<char>{'S', 'R', 'E', 'C', 'N'}));
+ events.clear();
+ a.screen_ = AirPageActivity::Screen::Image;
+ a.setAirPageScreen(AirPageActivity::Screen::Qr);
+ assert(a.screen_ == AirPageActivity::Screen::Qr && events.empty());
 }
 ''')
 
