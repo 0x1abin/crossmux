@@ -137,15 +137,19 @@ full-screen allocation is introduced. BMP scratch is at most 10,240 bytes;
 JPEG uses the existing fallible decoder and bounded row/MCU workspace. A B/W
 proxy supports modal menus; closing them restores the original native image.
 
-AirPage performs one full-screen white `FULL_REFRESH` before displaying each new
-download and once when the activity exits. This runs before the native gray16
-transaction, so cleanup cannot replace the finished gray image with its B/W
-proxy. FAST maps to differential DU on Read Pico and is insufficient for this
-cleanup; the visible FULL flash is intentional. Legacy four-level output reuses
-its existing white preclear rather than adding a second clear. Identical
-downloads, history opens, popups and retry redraws do not request another FULL
-clear. No additional framebuffer is allocated. The host recording HAL checks
-refresh order/count; verify residual gray tones on the physical panel.
+AirPage performs two consecutive full-screen white `FAST_REFRESH` calls before
+displaying each new download and when the activity exits. These calls replace
+the explicit FULL cleanup and consume any pending renderer refresh override.
+They run before the native gray16 transaction, so cleanup cannot replace the
+finished gray image with its B/W proxy. Legacy four-level output replaces its
+existing white preclear with these two calls; the image refresh follows separately.
+Identical downloads, history opens, popups and retry redraws retain their existing
+refresh paths. Returning from the image to QR/settings/history no longer requests
+an A4-only FULL refresh. Native grayscale waveforms and SDK fault recovery remain
+unchanged. No additional framebuffer is allocated. The host recording HAL checks
+refresh order/count and white pixels. FAST maps to differential DU on Read Pico,
+so an unchanged second white frame may be skipped; verify residual gray tones on
+the physical panel rather than assuming the two calls clean as thoroughly as FULL.
 
 AirPage stores and displays historical originals. Set Cover preserves BMP bytes;
 JPEG uses the existing Gray8 BMP writer selected by an explicit output enum.
