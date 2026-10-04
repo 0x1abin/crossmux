@@ -33,5 +33,5 @@ std::unique_ptr<ImageBlock> ImageBlock::deserialize(HalFile&) { return nullptr; 
 
 void Hyphenator::setPreferredLanguage(const std::string&) {}
 
-bool ImageBlock::cacheDecodedImage(GfxRenderer&, int, int) { return false; }
-bool ImageBlock::ensureExtracted() { return false; }
+bool ImageBlock::cacheDecodedImage(GfxRenderer&, int, int, CancelCheck) { return false; }
+bool ImageBlock::ensureExtracted(CancelCheck) { return false; }

@@ -166,3 +166,46 @@ New reflow progress lives in the EPUB cache. Both cache directories relocate wit
 TXT/Markdown when the file is renamed. Explicit paragraph indentation remains
 Auto/Indent/NoIndent; forced Western width uses 0–5 spaces (default 3), Chinese
 remains two characters, and CSS/paragraph spacing retain their independent rules.
+
+## Read Pico idle image warming
+
+Read Pico's existing 400 ms reader idle hook can warm the next image page's
+`.pxc` files under the render lock. It retains the text cache's eligibility
+checks (including display capabilities, anti-aliasing, normal background and
+non-inverted rendering) and its two text-page slots. Image pages use only the
+forward slot's reusable framebuffer stash; they do not allocate result planes.
+The live framebuffer is loaned as decoder scratch and restored together with
+the render mode on every exit. `freePageCache()` releases the stash on exit.
+
+`CancelCheck` is a non-owning function pointer plus context. Its context must
+outlive the synchronous operation; no worker task or concurrent decoder is
+created. The idle generation is checked between images, extraction and decode,
+at ZIP transfer boundaries, each PNG row and each JPEG output block. Prewarm
+transfers are capped at 16 KiB. Decoder return values alone do not indicate a
+successful operation: JPEGDEC may return success after its callback stops it.
+Cancellation suppresses finalization and removes partial extraction/cache files.
+Optional prewarm failures do not poison the foreground image failure list.
+The `.pxc` layout, grayscale, scaling and transparency remain unchanged.
+
+### Physical acceptance (required before enabling beyond this Draft)
+
+Use the same device, SD card, books and reader settings for the baseline,
+PSRAM I/O-only build and prewarm build. Record exact firmware SHAs and book/SD
+identity. For PNG, JPEG, mixed and text-only EPUBs, capture at least 30 page
+turns per build and cache state; report median and P95 input-to-visible latency.
+For cold runs, remove only the selected test book's extracted image/`.pxc`
+caches; do not delete progress. Warm runs retain those caches. Distinguish a
+warm `.pxc` from an idle-prewarmed page, and keep the 400 ms idle interval fixed.
+
+Record minimum internal/PSRAM free bytes and largest blocks, and timestamp idle
+cancellation and render-lock release. Stage 1 needs a measurable cold-image
+improvement without a material text/mixed P95 regression. Stage 2 needs a
+measurable prewarmed-turn improvement and cancellation-to-unlock P95 <=100 ms,
+maximum <=250 ms with a healthy SD card. These are acceptance targets, not
+latency guarantees established by host tests.
+
+Exercise rapid paging, menu/exit during extraction and decoding, night mode and
+reading-background changes. Confirm no hangs, damaged frames, partial `.pxc`
+files, or sustained heap loss, and retry the interrupted image in the foreground.
+Until these measurements pass, keep the follow-up PR Draft; other PSRAM boards
+receive only the I/O optimization.

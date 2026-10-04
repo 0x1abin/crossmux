@@ -37,8 +37,8 @@ void ImageBlock::renderPlaceholder(GfxRenderer&, int, int) const {}
 bool ImageBlock::serialize(HalFile&) { return false; }
 std::unique_ptr<ImageBlock> ImageBlock::deserialize(HalFile&) { return nullptr; }
 bool ImageBlock::needsDecode() const { return false; }
-bool ImageBlock::ensureExtracted() { return false; }
-bool ImageBlock::cacheDecodedImage(GfxRenderer&, int, int) { return false; }
+bool ImageBlock::ensureExtracted(CancelCheck) { return false; }
+bool ImageBlock::cacheDecodedImage(GfxRenderer&, int, int, CancelCheck) { return false; }
 void GfxRenderer::drawLine(int, int, int, int, int, bool) const {}
 
 TEST(FootnoteList, AllocatesOnceAndMovesItsBoundedStorage) {

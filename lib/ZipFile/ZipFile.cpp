@@ -16,6 +16,7 @@ struct ZipInflateCtx {
   size_t fileRemaining = 0;
   uint8_t* readBuf = nullptr;
   size_t readBufSize = 0;
+  CancelCheck cancellation;
 };
 
 struct ZipPrefixInflateCtx {
@@ -24,6 +25,7 @@ struct ZipPrefixInflateCtx {
   size_t fileRemaining = 0;
   uint8_t* readBuf = nullptr;
   size_t readBufSize = 0;
+  CancelCheck cancellation;
 };
 static_assert(offsetof(ZipPrefixInflateCtx, reader) == 0);
 
@@ -58,7 +60,7 @@ class ScopedOpenClose final {
 
 size_t zipFillCallback(void* vctx, const uint8_t** data) {
   auto* ctx = static_cast<ZipInflateCtx*>(vctx);
-  if (ctx->fileRemaining == 0) return 0;
+  if (ctx->cancellation.isCancelled() || ctx->fileRemaining == 0) return 0;
 
   const size_t toRead = ctx->fileRemaining < ctx->readBufSize ? ctx->fileRemaining : ctx->readBufSize;
   const int result = ctx->file->read(ctx->readBuf, toRead);
@@ -79,7 +81,7 @@ size_t zipFillCallback(void* vctx, const uint8_t** data) {
 
 int zipPrefixReadCallback(uzlib_uncomp* uncomp) {
   auto* ctx = reinterpret_cast<ZipPrefixInflateCtx*>(uncomp);
-  if (ctx->fileRemaining == 0) return -1;
+  if (ctx->cancellation.isCancelled() || ctx->fileRemaining == 0) return -1;
 
   const size_t toRead = std::min(ctx->fileRemaining, ctx->readBufSize);
   const int readResult = ctx->file->read(ctx->readBuf, toRead);
@@ -93,7 +95,8 @@ int zipPrefixReadCallback(uzlib_uncomp* uncomp) {
 }
 
 bool streamDeflatedPrefix(HalFile& file, Print& out, const size_t chunkSize, const size_t compressedSize,
-                          const size_t inflatedSize) {
+                          const size_t inflatedSize, CancelCheck cancellation = {}) {
+  if (cancellation.isCancelled()) return false;
   if (inflatedSize == 0) return true;
 
   const size_t prefixSize = std::min(inflatedSize, EARLY_STOP_PREFIX_BYTES);
@@ -115,6 +118,7 @@ bool streamDeflatedPrefix(HalFile& file, Print& out, const size_t chunkSize, con
   ctx.fileRemaining = compressedSize;
   ctx.readBuf = readBuffer.get();
   ctx.readBufSize = chunkSize;
+  ctx.cancellation = cancellation;
   ctx.reader.init(false);  // one-shot output history lives in prefix; no 32KB ring
   ctx.reader.setReadCallback(zipPrefixReadCallback);
 
@@ -125,7 +129,8 @@ bool streamDeflatedPrefix(HalFile& file, Print& out, const size_t chunkSize, con
     return false;
   }
 
-  if (out.write(prefix.get(), produced) != produced) return true;  // sink has what it needs
+  if (cancellation.isCancelled()) return false;
+  if (out.write(prefix.get(), produced) != produced) return !cancellation.isCancelled();  // sink has what it needs
   if (status == InflateStatus::Done) {
     if (produced != inflatedSize) {
       LOG_ERR("ZIP", "Decompressed size mismatch (expected %zu, got %zu)", inflatedSize, produced);
@@ -491,7 +496,10 @@ struct StreamBuffers {
 }  // namespace
 
 bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop,
-                               const size_t psramChunkSize) {
+                               const size_t psramChunkSize, CancelCheck cancellation) {
+  if (cancellation.isCancelled()) return false;
+  const size_t baseSize = cancellation ? std::min(chunkSize, size_t{16384}) : chunkSize;
+  const size_t psramSize = cancellation ? std::min(psramChunkSize, size_t{16384}) : psramChunkSize;
   if (chunkSize == 0) {
     LOG_ERR("ZIP", "Chunk size must be non-zero");
     return false;
@@ -518,7 +526,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
   if (fileStat.method == ZIP_METHOD_STORED) {
     // no deflation, just read content
-    StreamBuffers buffers(chunkSize, allowEarlyStop ? 0 : psramChunkSize, false);
+    StreamBuffers buffers(baseSize, allowEarlyStop ? 0 : psramSize, false);
     const size_t transferSize = buffers.size;
     auto* buffer = buffers.input.get();
     if (!buffer) {
@@ -528,29 +536,31 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     size_t remaining = inflatedDataSize;
     while (remaining > 0) {
+      if (cancellation.isCancelled()) return false;
       const size_t dataRead = file.read(buffer, remaining < transferSize ? remaining : transferSize);
       if (dataRead == 0) {
         LOG_ERR("ZIP", "Could not read more bytes");
         return false;
       }
 
+      if (cancellation.isCancelled()) return false;
       if (out.write(buffer, dataRead) != dataRead) {
-        if (allowEarlyStop) return true;  // sink has what it needs
+        if (allowEarlyStop) return !cancellation.isCancelled();  // sink has what it needs
         LOG_ERR("ZIP", "Failed to write all output bytes to stream");
         return false;
       }
       remaining -= dataRead;
     }
 
-    return true;
+    return !cancellation.isCancelled();
   }
 
   if (fileStat.method == ZIP_METHOD_DEFLATED) {
     if (allowEarlyStop) {
-      return streamDeflatedPrefix(file, out, chunkSize, deflatedDataSize, inflatedDataSize);
+      return streamDeflatedPrefix(file, out, baseSize, deflatedDataSize, inflatedDataSize, cancellation);
     }
 
-    StreamBuffers buffers(chunkSize, psramChunkSize, true);
+    StreamBuffers buffers(baseSize, psramSize, true);
     auto* fileReadBuffer = buffers.input.get();
     if (!fileReadBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for zip file read buffer");
@@ -568,6 +578,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     ctx.fileRemaining = deflatedDataSize;
     ctx.readBuf = fileReadBuffer;
     ctx.readBufSize = buffers.size;
+    ctx.cancellation = cancellation;
 
     InflateStream inflate;
     if (!inflate.init(true)) {
@@ -580,9 +591,11 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     size_t totalProduced = 0;
 
     while (true) {
+      if (cancellation.isCancelled()) return false;
       size_t produced;
       const InflateStream::Status status = inflate.readAtMost(outputBuffer, buffers.size, &produced);
 
+      if (cancellation.isCancelled()) return false;
       totalProduced += produced;
       if (totalProduced > static_cast<size_t>(inflatedDataSize)) {
         LOG_ERR("ZIP", "Decompressed size exceeds expected (%zu > %zu)", totalProduced,
@@ -615,7 +628,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       // InflateStream::Status::Ok: output buffer full, continue
     }
 
-    return success;  // inflate destructor frees the decompressor state + window
+    return success && !cancellation.isCancelled();  // inflate destructor frees the decompressor state + window
   }
 
   LOG_ERR("ZIP", "Unsupported compression method");

@@ -61,16 +61,24 @@ struct PngContext {
 // The compressed input is transient and cannot fit on the render-task stack.
 // Leave the shared PSRAM reserve available for fonts and display work.
 constexpr size_t PNG_PSRAM_MAX_BYTES = 2u * 1024u * 1024u;
-[[maybe_unused]] static memory::ByteBuffer readPngIntoPsram(const std::string& path, size_t& size) {
+[[maybe_unused]] static memory::ByteBuffer readPngIntoPsram(const std::string& path, size_t& size,
+                                                            CancelCheck cancellation = CancelCheck()) {
+  if (cancellation.isCancelled()) return {};
   HalFile file;
   if (!Storage.openFileForRead("PNG", path, file)) return {};
   size = file.size();
   if (size == 0 || size > PNG_PSRAM_MAX_BYTES || !memory::psramHasHeadroom(size, size, 16 * 1024)) return {};
   auto data = memory::makePsramByteBufferUninitializedNoThrow(size);
   if (!data) return {};
-  if (file.read(data.get(), size) != size) {
-    LOG_DBG("PNG", "Short PSRAM read; reopening as a stream");
-    return {};
+  size_t offset = 0;
+  while (offset < size) {
+    if (cancellation.isCancelled()) return {};
+    const size_t chunk = cancellation ? std::min(size - offset, size_t{16384}) : size - offset;
+    if (file.read(data.get() + offset, chunk) != chunk) {
+      LOG_DBG("PNG", "Short PSRAM read; reopening as a stream");
+      return {};
+    }
+    offset += chunk;
   }
   return data;
 }
@@ -331,6 +339,7 @@ void emitBilinearRow(PngContext& ctx, const int dstY, const uint8_t* rowTop, con
 int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
+  if (ctx->config->cancellation.isCancelled()) return 0;
 
   ImageToFramebufferDecoder::yieldDuringDecode(ctx->lastYieldMs);
 
@@ -495,6 +504,10 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                     const RenderConfig& config) {
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    return false;
+  }
   LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
 
   const bool cacheOnly = config.output == DecodeOutput::CacheOnly;
@@ -537,7 +550,11 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   int rc;
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
   size_t compressedSize = 0;
-  compressed = readPngIntoPsram(imagePath, compressedSize);
+  compressed = readPngIntoPsram(imagePath, compressedSize, config.cancellation);
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    return false;
+  }
   if (compressed) {
     LOG_DBG("PNG", "PSRAM input: %zu bytes", compressedSize);
     rc = png->openRAM(compressed.get(), static_cast<int>(compressedSize), pngDrawCallback);
@@ -661,6 +678,11 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   ctx.lastYieldMs = decodeStart;
   rc = png->decode(&ctx, 0);
   unsigned long decodeTime = millis() - decodeStart;
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    if (ctx.caching || cacheOnly) ctx.cache.abort();
+    return false;
+  }
 
   // Bilinear emits one source interval behind, so the last destination rows are
   // still outstanding: they sit on the final source row and have no row below,
@@ -671,6 +693,11 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     DirectPixelWriter pw;
     if (writeFramebuffer) pw.init(renderer);
     for (int dstY = ctx.nextDstY; dstY < ctx.dstHeight; dstY++) {
+      if (config.cancellation.isCancelled()) {
+        if (config.error) *config.error = ImageRenderError::Cancelled;
+        ctx.cache.abort();
+        return false;
+      }
       emitBilinearRow(ctx, dstY, ctx.prevGrayLine, ctx.prevGrayLine, 0, pw, writeFramebuffer);
     }
     ctx.nextDstY = ctx.dstHeight;
@@ -693,9 +720,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
       ctx.cache.abort();
       return false;
     }
-    return ctx.cache.finalize();
+    return ctx.cache.finalize(config.cancellation);
   }
-  if (ctx.caching) ctx.cache.finalize();
+  if (ctx.caching) ctx.cache.finalize(config.cancellation);
 
   return true;
 }

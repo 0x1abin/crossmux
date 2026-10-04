@@ -982,7 +982,9 @@ uint8_t* Epub::readItemContentsToBytes(const std::string& itemHref, size_t* size
 }
 
 bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, const size_t chunkSize,
-                                    const bool allowEarlyStop, const size_t psramChunkSize) const {
+                                    const bool allowEarlyStop, const size_t psramChunkSize,
+                                    CancelCheck cancellation) const {
+  if (cancellation.isCancelled()) return false;
   if (itemHref.empty()) {
     LOG_DBG("EBP", "Failed to read item, empty href");
     return false;
@@ -995,27 +997,41 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
   const std::string path = FsHelpers::normalisePath(itemHref);
 
   if (decryptor && decryptor->isEncrypted(path)) {
+    struct Sink {
+      Print& out;
+      CancelCheck cancellation;
+    } sink{out, cancellation};
     auto append = [](void* context, const uint8_t* data, size_t size) {
-      return static_cast<Print*>(context)->write(data, size) == size;
+      auto& sink = *static_cast<Sink*>(context);
+      while (size) {
+        if (sink.cancellation.isCancelled()) return false;
+        const size_t chunk = std::min(size, size_t{16 * 1024});
+        if (sink.out.write(data, chunk) != chunk) return false;
+        data += chunk;
+        size -= chunk;
+      }
+      return !sink.cancellation.isCancelled();
     };
-    if (!decryptor->decryptToSink(path, append, &out)) {
+    if (!decryptor->decryptToSink(path, append, &sink)) {
       LOG_ERR("EBP", "content read failed for %s", path.c_str());
       return false;
     }
     return true;
   }
 
-  return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize, allowEarlyStop, psramChunkSize);
+  return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize, allowEarlyStop, psramChunkSize, cancellation);
 }
 
-bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
+bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath, CancelCheck cancellation) const {
+  if (cancellation.isCancelled()) return false;
   HalFile out;
   if (!Storage.openFileForWrite("EBP", destPath, out)) {
     return false;
   }
   // Large transfers are opt-in and PSRAM-only; ZIP falls back to the original 8 KiB buffers.
   const auto started = millis();
-  const bool ok = readItemContentsToStream(itemHref, out, 8192, false, 65536);
+  const bool ok = readItemContentsToStream(itemHref, out, 8192, false, cancellation ? 16384 : 65536, cancellation) &&
+                  !cancellation.isCancelled();
   LOG_DBG("EBP", "Image extraction: %lums", millis() - started);
   out.flush();
   out.close();
