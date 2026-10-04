@@ -4,11 +4,11 @@
 #include <Logging.h>
 #include <Preferences.h>
 #include <esp_sntp.h>
+#include <sys/time.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <sys/time.h>
 
 namespace trustedtime {
 
