@@ -111,6 +111,9 @@ Home's Back-to-Standby shortcut is owned by `ActivityManager`, before the home
 Activity's input loop. It applies to all `HomeActivity` themes, including Cover
 Grid, and to INX Recent while focus is on the tabs. All use
 `standbyShortcutEnabled`; selecting Standby directly in Apps remains independent.
+The shortcut defaults to off on first boot, after restoring system settings, or
+when the saved settings omit this key. Existing saved On/Off values are preserved;
+users can enable it in Display settings.
 The manager requires a local logical Back press followed by release, or a
 completed touch Back gesture that publishes both edges in the same frame.
 Push/Pop/Replace cancel the old pair; activation and parent restoration seed a
@@ -121,7 +124,8 @@ the tabs, and other tabs return to Recent; entering Standby requires a new gestu
 This ownership guard does not change the SDK's button debounce interval.
 
 Run `python3 scripts/tests/test_reading_ui_regressions.py` for the production
-dispatch/transition regression cases. On ReadPico, hold the middle strip key to
+dispatch/transition regression cases. Enable the shortcut before testing its
+activation. On ReadPico, hold the middle strip key to
 exit the crash report, then release after Home appears: it must stay on Home.
 A fresh middle-key press/release must enter Standby exactly once. Repeat on INX,
 Classic, carousel, and Cover Grid, including returning from the control center
