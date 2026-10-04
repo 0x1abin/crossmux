@@ -19,11 +19,13 @@ class ImageViewerActivity final : public Activity {
  private:
   void loadSiblingImages();
   bool isPng() const;
+  bool preparePreview();
   void doSetSleepCover(const char* sourcePath, bool transparent);
   void showSleepCoverOptions();
 
   std::string filePath;
   std::vector<std::string> siblingImages;
   int currentImageIndex = -1;
+  bool imageReady = false;
   OptionPopup sleepCoverPopup;
 };

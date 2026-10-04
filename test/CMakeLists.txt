@@ -141,6 +141,8 @@ add_test(NAME DownloadMemoryLifecycle
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_download_memory_lifecycle.py)
 add_test(NAME WifiFontRecovery
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_wifi_font_recovery.py)
+add_test(NAME HalClockSntp
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_hal_clock_sntp.py)
 add_test(NAME InxStyleCompatibility
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_style_compat.py)
 add_test(NAME InxRecentThumbnails
@@ -181,6 +183,9 @@ add_test(NAME NativeGrayscale
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_native_grayscale.py
     ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)
 set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
+
+add_test(NAME FileBrowserImages
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_file_browser_images.py)
 
 add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)
 add_subdirectory(reader_session)

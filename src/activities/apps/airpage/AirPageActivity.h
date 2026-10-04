@@ -117,7 +117,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
   char historySubtitles_[airpage::AirPageImageStore::kHistoryPageSize][40]{};
 
   bool imageNeedsDisplay_ = true;
-  bool imageNeedsFullClean_ = false;
+  bool imageNeedsClean_ = false;
   bool waitForInputRelease_ = false;
   bool autoSleepWallpaper_ = false;
   int displayedScreenWidth_ = 0;

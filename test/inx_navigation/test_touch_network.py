@@ -164,3 +164,168 @@ code=code.replace('@HANDLERS@',handlers).replace('@FOOTER@',method(wifi,'WifiSel
 with tempfile.TemporaryDirectory(prefix='wifi-controls-') as directory:
     run(code,Path(directory),sdk=True)
 print('PASS: production popup contacts/swipes and WiFi actions/footer geometry, regular and high PPI')
+
+# Draw the real screen builder and shared legacy text renderer with recorded glyph bounds.
+ui=(ROOT/'src/components/UITheme.cpp').read_text()
+utf8=(ROOT/'lib/Utf8/Utf8.cpp').read_text()
+text_methods='\n'.join(method(ui,'UITheme::'+name) for name in ('drawCenteredText','drawCenteredWrappedText'))
+code=r'''
+#include <FreeInkApp.h>
+#include <algorithm>
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+#include "@UTF8_HEADER@"
+namespace fui=freeink::ui;
+using UiScreen=fui::Screen<24>;
+struct Rect {int x,y,width,height;};
+namespace EpdFontFamily {enum Style {REGULAR,BOLD};}
+constexpr int UI_10_FONT_ID=1,UI_12_FONT_ID=2,SMALL_FONT_ID=3;
+namespace freeink::ui {struct GfxRendererTarget {static constexpr FontId FONT_BODY=1;};}
+namespace UiHighDpiProfile {inline bool enabled=false;constexpr int buttonHeight=96,controlGap=12;}
+struct Draw {Rect rect;std::string text;int font;EpdFontFamily::Style style;};
+struct GfxRenderer {
+ int width=480,height=800;std::vector<Draw> draws;
+ int getScreenWidth()const{return width;} int getScreenHeight()const{return height;}
+ int getLineHeight(int font)const{return (font==UI_12_FONT_ID?28:24)*(UiHighDpiProfile::enabled?2:1);}
+ int getTextWidth(int font,const char* text,EpdFontFamily::Style=EpdFontFamily::REGULAR)const {
+  return std::strlen(text)*(getLineHeight(font)/3);
+ }
+ void drawText(int font,int x,int y,const char* text,bool=true,EpdFontFamily::Style style=EpdFontFamily::REGULAR) {
+  draws.push_back({{x,y,getTextWidth(font,text,style),getLineHeight(font)},text,font,style});
+ }
+ std::vector<std::string> wrappedText(int font,const char* text,int width,int lines,EpdFontFamily::Style)const {
+  const size_t length=std::max(1,width/(getLineHeight(font)/3));std::string rest=text;
+  std::vector<std::string> result;
+  while(!rest.empty() && static_cast<int>(result.size())<lines) {
+   result.push_back(rest.substr(0,length));rest.erase(0,length);
+  }
+  return result;
+ }
+ struct ClipScope {ClipScope(const GfxRenderer&,int,int,int,int){}};
+};
+struct ThemeMetrics {int topPadding,headerHeight,tabBarHeight,verticalSpacing,contentSidePadding;};
+struct UITheme {
+ enum class TextVerticalAlignment {TOP,CENTER,BOTTOM};
+ ThemeMetrics metrics{10,84,40,16,20};
+ static UITheme& getInstance(){static UITheme theme;return theme;}
+ const ThemeMetrics& getMetrics()const{return metrics;}
+ Rect getScreenSafeArea(const GfxRenderer& r,bool,bool)const{return {5,8,r.width-13,r.height-13};}
+ static void drawCenteredText(GfxRenderer&,Rect,int,int,const char*,bool=true,EpdFontFamily::Style=EpdFontFamily::REGULAR);
+ static void drawCenteredWrappedText(GfxRenderer&,Rect,int,const char*,int,bool=true,EpdFontFamily::Style=EpdFontFamily::REGULAR,
+                                    TextVerticalAlignment=TextVerticalAlignment::CENTER);
+};
+struct Gui {int hints=0;void drawButtonHints(GfxRenderer&,const char*,const char*,const char*,const char*){++hints;}} GUI;
+struct MappedInput {
+ bool touch=true;bool hasTouch()const{return touch;}
+ struct Labels {const char* btn1;const char* btn2;const char* btn3;const char* btn4;};
+ Labels mapLabels(const char* a,const char* b,const char* c,const char* d)const{return {a,b,c,d};}
+};
+constexpr fui::ActionId ACTION_CANCEL=4,ACTION_RETURN=5,ACTION_SCAN=2,ACTION_ROW=1;
+enum class WifiSelectionState {SCANNING,AUTO_CONNECTING,CONNECTING,NETWORK_ERROR,CONNECTION_FAILED,SAVE_PROMPT,FORGET_PROMPT,NETWORK_LIST};
+constexpr int STR_CANCEL=0,STR_BACK=1,STR_SHOW_NETWORKS=2,STR_RETRY=3,STR_ERROR_GENERAL_FAILURE=4,
+ STR_NO_NETWORKS=5,STR_CONNECTION_FAILED=6,STR_FINDING_SAVED_WIFI=7,STR_SCANNING=8,
+ STR_CONNECTING_SAVED_WIFI=9,STR_CONNECTING=10,STR_TO_PREFIX=11;
+bool chinese=false;
+const char* tr(int id) {
+ switch(id) {
+ case STR_CANCEL:return "Cancel";case STR_BACK:return "Back";case STR_SHOW_NETWORKS:return "Show networks";
+ case STR_TO_PREFIX:return chinese?"至 ":"to ";case STR_FINDING_SAVED_WIFI:return "Finding saved WiFi";
+ case STR_SCANNING:return "Scanning";case STR_CONNECTING_SAVED_WIFI:return chinese?"Connecting to a saved wireless network with a translated status message":"Connecting saved WiFi";
+ case STR_CONNECTING:return "Connecting";default:return "Error";
+ }
+}
+struct Target: fui::DrawTarget {
+ int16_t lineHeight(fui::FontId)const override{return 24;}
+ fui::Size measureText(fui::FontId,const char*,fui::TextStyle)const override{return {24,24};}
+ void fill(fui::Rect,fui::Paint,uint8_t,uint8_t)override{}
+ void stroke(fui::Rect,fui::Paint,uint8_t,uint8_t,uint8_t)override{}
+ void line(fui::Point,fui::Point,uint8_t,fui::Paint)override{}
+ void triangle(fui::Point,fui::Point,fui::Point,fui::Paint)override{}
+ void bitmap(fui::Rect,fui::BitmapRef,fui::BitmapMode,fui::Paint,fui::Rotation)override{}
+ void text(fui::Rect,const char*,fui::TextStyle)override{}
+};
+struct WifiSelectionActivity {
+ WifiSelectionState state=WifiSelectionState::CONNECTING;bool autoConnecting=false;
+ GfxRenderer renderer;MappedInput mappedInput;std::string selectedSSID,connectionError;
+ std::vector<int> networks;std::vector<fui::ListItem> networkRowItems;
+ size_t selectedNetworkIndex=0;fui::ListNav listNav;
+ int subtitleHeight()const{return UITheme::getInstance().metrics.tabBarHeight;}
+ void buildPromptDialog(UiScreen&){}
+ void addTouchControls(UiScreen&,const char*,fui::ActionId);
+ void buildListScreen(UiScreen&);
+ void renderConnecting(const Rect*,const ThemeMetrics*)const;
+};
+@UTF8_METHOD@
+@TEXT_METHODS@
+@METHODS@
+int main() {
+ int scenes=0;
+ for(bool high:{false,true})for(int orientation=0;orientation<4;++orientation)
+ for(ThemeMetrics theme:{ThemeMetrics{0,66,40,0,20},ThemeMetrics{10,84,48,16,20},ThemeMetrics{13,84,50,10,20}})
+ for(int phase=0;phase<4;++phase)
+ for(const char* ssid:{"HomeWiFi","12345678901234567890123456789012","中文网络中文网络中文"})
+ for(bool localized:{false,true}) {
+  UiHighDpiProfile::enabled=high;chinese=localized;
+  if(high){theme.headerHeight=112;theme.tabBarHeight=64;theme.verticalSpacing=24;theme.contentSidePadding=32;}
+  UITheme::getInstance().metrics=theme;
+  const auto state=phase==0?WifiSelectionState::CONNECTING:phase==1?WifiSelectionState::AUTO_CONNECTING:WifiSelectionState::SCANNING;
+  WifiSelectionActivity a;a.state=state;a.autoConnecting=phase==1||phase==3;a.selectedSSID=ssid;
+  a.renderer.width=high?684:480;a.renderer.height=high?1216:800;
+  if(orientation%2)std::swap(a.renderer.width,a.renderer.height);
+  fui::DeviceContext device;device.width=a.renderer.width;device.height=a.renderer.height;
+  device.hasTouch=true;device.safeArea={8,8,5,5};
+  fui::InteractionBuffer<24> hits;fui::InputSnapshot input;Target target;
+  fui::Frame<24> frame(target,device,input,hits);auto tokens=fui::themeTokensForLineHeight(24);
+  UiScreen screen(frame,tokens);GUI.hints=0;
+  a.buildListScreen(screen);
+  const auto body=screen.contentRect();
+  assert(GUI.hints==0 && hits.count()==(a.autoConnecting?2:1));
+  assert(!a.renderer.draws.empty());
+  const auto last=a.renderer.draws.back();
+  for(const auto& draw:a.renderer.draws) {
+   assert(std::abs((draw.rect.x*2+draw.rect.width)-(body.x*2+body.width))<=1);
+   assert(draw.rect.y>=body.y && draw.rect.y+draw.rect.height<=body.bottom());
+   assert(draw.rect.x>=body.x+theme.contentSidePadding);
+   assert(draw.rect.x+draw.rect.width<=body.right()-theme.contentSidePadding);
+   for(size_t i=0;i<hits.count();++i)assert(draw.rect.y+draw.rect.height<=hits.data()[i].rect.y);
+  }
+  if(state==WifiSelectionState::SCANNING) {
+   assert(last.text==(a.autoConnecting?"Finding saved WiFi":"Scanning") && last.font==UI_10_FONT_ID);
+  } else {
+   assert(a.renderer.draws.size()>=2);
+   assert(last.text.starts_with(tr(STR_TO_PREFIX)) && last.font==UI_10_FONT_ID);
+   for(size_t i=0;i+1<a.renderer.draws.size();++i) {
+    const auto& title=a.renderer.draws[i];
+    assert(title.font==UI_12_FONT_ID && title.style==EpdFontFamily::BOLD);
+    assert(title.rect.y+title.rect.height+theme.verticalSpacing<=last.rect.y);
+   }
+   if(std::strlen(ssid)+std::strlen(tr(STR_TO_PREFIX))>25)assert(last.text.ends_with("...") && last.text.size()<=25);
+   if(std::string(ssid).starts_with("中文"))assert(last.text==std::string(tr(STR_TO_PREFIX))+"中文网络中文...");
+  }
+  if(hits.count()==2)assert(hits.data()[1].rect.x-hits.data()[0].rect.right()>=6);
+  a.mappedInput.touch=false;a.renderer.draws.clear();GUI.hints=0;
+  const Rect bounds{body.x,body.y,body.width,body.height};a.renderConnecting(&bounds,&theme);
+  assert(GUI.hints==(a.autoConnecting?1:0));
+  assert(!a.renderer.draws.empty());
+  assert(a.renderer.draws.back().text==last.text);
+  ++scenes;
+ }
+ assert(scenes==576);
+}
+'''
+# Const renderer methods in production record draw calls through a mutable test seam.
+code=code.replace('std::vector<Draw> draws;', 'mutable std::vector<Draw> draws;')
+code=code.replace('EpdFontFamily::Style style=EpdFontFamily::REGULAR) {', 'EpdFontFamily::Style style=EpdFontFamily::REGULAR) const {')
+code=code.replace('static void drawCenteredText(GfxRenderer&', 'static void drawCenteredText(const GfxRenderer&')
+code=code.replace('static void drawCenteredWrappedText(GfxRenderer&', 'static void drawCenteredWrappedText(const GfxRenderer&')
+code=code.replace('void drawButtonHints(GfxRenderer&', 'void drawButtonHints(const GfxRenderer&')
+code=code.replace('@UTF8_HEADER@',str(ROOT/'lib/Utf8/Utf8.h'))
+code=code.replace('@UTF8_METHOD@',method(utf8,'utf8CodepointLen')+'\n'+method(utf8,'utf8SafeTruncateBuffer'))
+code=code.replace('@TEXT_METHODS@',text_methods)
+code=code.replace('@METHODS@','\n'.join(method(wifi,'WifiSelectionActivity::'+name) for name in ('addTouchControls','buildListScreen','renderConnecting')))
+with tempfile.TemporaryDirectory(prefix='wifi-status-') as directory:
+    run(code,Path(directory),sdk=True)
+print('PASS: shared WiFi status/SSID centering, UTF-8 ellipsis and touch controls across 576 scenes')

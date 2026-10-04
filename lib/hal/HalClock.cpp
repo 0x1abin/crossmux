@@ -2,10 +2,17 @@
 
 #include <Logging.h>
 #include <WiFi.h>
+#include <esp_netif.h>
 #include <esp_netif_sntp.h>
-#include <esp_sntp.h>
 #include <sys/time.h>
 #include <time.h>
+
+// Disable legacy translating inlines so raw lwIP APIs can be used in TCP/IP context.
+#define ESP_NETIF_COMPONENT_BUILD
+#include <esp_sntp.h>
+#undef ESP_NETIF_COMPONENT_BUILD
+#undef SNTP_OPMODE_POLL
+#include <lwip/apps/sntp.h>
 
 HalClock halClock;
 
@@ -162,6 +169,22 @@ bool HalClock::startSntp() {
   }
 
   if (!_sntpInitialized) {
+    // TrustedTime can start the shared client without setting _sntpInitialized.
+    // Finish stopping it before init sets the operating mode; esp_sntp_stop()
+    // only queues a stop and can be overtaken by init with TCP/IP core locking.
+    if (esp_netif_tcpip_exec(
+            [](void*) -> esp_err_t {
+              if (sntp_enabled()) {
+                LOG_DBG("CLK", "SNTP already running outside HalClock; stopping before init");
+                sntp_stop();
+              }
+              return ESP_OK;
+            },
+            nullptr) != ESP_OK) {
+      LOG_ERR("CLK", "Failed to stop external SNTP client");
+      _syncState = ClockSyncState::Failed;
+      return false;
+    }
     esp_sntp_config_t config =
         ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(2, ESP_SNTP_SERVER_LIST("pool.ntp.org", "time.nist.gov"));
     if (_useChinaServers) {

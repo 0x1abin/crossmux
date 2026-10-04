@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <Preferences.h>
 #include <esp_sntp.h>
+#include <sys/time.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -71,12 +72,17 @@ void init() {
   const int64_t floor = readFloor();
   if (floor < MIN_VALID_EPOCH) return;
   raiseFloor(floor);
-  if (static_cast<int64_t>(time(nullptr)) < floor) {
-    // Cold boot reset the clock; resume from the floor so time keeps moving
-    // forward across power cycles instead of restarting at epoch 0.
+  const int64_t sysNow = static_cast<int64_t>(time(nullptr));
+  if (sysNow < floor) {
+#if defined(ARDUINO_ARCH_ESP32)
+    // Only run on real ESP32 hardware, simulator does NOT have settimeofday
     timeval tv = {static_cast<time_t>(floor), 0};
     settimeofday(&tv, nullptr);
     LOG_DBG("TIME", "Clock restored to persisted floor");
+#else
+    // Simulator: cannot set system time, just log warning
+    LOG_DBG("TIME", "Simulator skip settimeofday, floor=%lld", floor);
+#endif
   }
 }
 

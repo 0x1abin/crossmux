@@ -111,6 +111,9 @@ Home's Back-to-Standby shortcut is owned by `ActivityManager`, before the home
 Activity's input loop. It applies to all `HomeActivity` themes, including Cover
 Grid, and to INX Recent while focus is on the tabs. All use
 `standbyShortcutEnabled`; selecting Standby directly in Apps remains independent.
+The shortcut defaults to off on first boot, after restoring system settings, or
+when the saved settings omit this key. Existing saved On/Off values are preserved;
+users can enable it in Display settings.
 The manager requires a local logical Back press followed by release, or a
 completed touch Back gesture that publishes both edges in the same frame.
 Push/Pop/Replace cancel the old pair; activation and parent restoration seed a
@@ -121,7 +124,8 @@ the tabs, and other tabs return to Recent; entering Standby requires a new gestu
 This ownership guard does not change the SDK's button debounce interval.
 
 Run `python3 scripts/tests/test_reading_ui_regressions.py` for the production
-dispatch/transition regression cases. On ReadPico, hold the middle strip key to
+dispatch/transition regression cases. Enable the shortcut before testing its
+activation. On ReadPico, hold the middle strip key to
 exit the crash report, then release after Home appears: it must stay on Home.
 A fresh middle-key press/release must enter Standby exactly once. Repeat on INX,
 Classic, carousel, and Cover Grid, including returning from the control center
@@ -239,6 +243,17 @@ framebuffer or SD font is needed.
 The default sleep screen is Light. Existing saved sleep-screen selections are
 preserved; the default applies when no selection has been saved.
 
+### WiFi connection status
+
+Touch and button devices share the upstream connection layout: the connection
+status is centered above the SSID, which retains the translated "to" prefix.
+On touch devices the text uses the body below the header/MAC band and above
+the Cancel/Show Networks buttons, rather than placing the SSID in a top-aligned
+text area. Scanning displays only the centered status. Physical button hints
+remain exclusive to button devices. The SSID label uses a bounded stack buffer;
+long names keep the existing ellipsis style at a complete UTF-8 boundary and
+are clipped to the content width.
+
 ## Retained Framebuffer Updates
 
 The firmware has one framebuffer, and its contents remain available after
@@ -262,6 +277,21 @@ when it can identify the exact frame already in that buffer:
 Incremental drawing does not imply a different panel waveform or windowed
 refresh. Those are display-driver decisions and require separate hardware
 measurement.
+
+### File browser images
+
+The file browser lists BMP, JPEG (`.jpg` / `.jpeg`), and PNG files, with
+case-insensitive extensions, in every directory including `/AirPage`. All three
+formats open in the image viewer and participate in its sorted sibling navigation.
+Firmware and PNG-only pickers retain their own filters.
+
+BMPs render directly. JPEG and PNG previews reuse
+`/.crosspoint/image_preview.bmp`; JPEG conversion fits the current oriented screen
+without cropping. Conversion borrows the existing framebuffer and streams through
+the existing converters instead of adding another full-screen buffer. A failed
+conversion cannot display an old preview or save it as a sleep cover. JPEG sleep
+covers use the converted BMP; PNG retains its normal and transparent cover choices.
+The temporary preview is removed on exit, and source images are never replaced.
 
 ### Lyra Carousel home
 

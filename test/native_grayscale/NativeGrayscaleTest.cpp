@@ -9,6 +9,7 @@
 #include <JpegToBmpConverter.h>
 #include <SdCardFont.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdlib>
@@ -89,11 +90,18 @@ void HalDisplay::cancelGrayscale16() {
 bool HalDisplay::isInverted() const { return false; }
 void HalDisplay::displayBuffer(RefreshMode mode, bool) {
   assert(!loan);
-  if (mode == FULL_REFRESH) {
-    for (const auto byte : bw) assert(byte == 0xFF);
-    refreshEvents.push_back('F');
-  } else {
-    refreshEvents.push_back('f');
+  switch (mode) {
+    case FULL_REFRESH:
+      for (const auto byte : bw) assert(byte == 0xFF);
+      refreshEvents.push_back('F');
+      break;
+    case HALF_REFRESH:
+      refreshEvents.push_back('H');
+      break;
+    case FAST_REFRESH:
+      // Record white fast clears separately from the following image refresh.
+      refreshEvents.push_back(std::all_of(bw.begin(), bw.end(), [](uint8_t byte) { return byte == 0xFF; }) ? 'w' : 'f');
+      break;
   }
 }
 void HalDisplay::displayGrayscaleBase(RefreshMode, bool) {}
@@ -268,6 +276,21 @@ int main(int argc, char** argv) {
   assert(JpegToBmpConverter::jpegFileToBmpStream(file, legacy, false));
   Bitmap old(legacy.bytes.data(), legacy.bytes.size());
   assert(old.parseHeaders() == BmpReaderError::Ok && old.getBpp() == 2);
+  // Image previews fit the oriented viewport, while thumbnail callers retain crop by default.
+  for (const auto& target : {std::pair{32, 128}, std::pair{128, 32}}) {
+    assert(file.seek(0));
+    RecordingPrint preview;
+    assert(JpegToBmpConverter::jpegFileToBmpStreamWithSize(file, preview, target.first, target.second, false));
+    Bitmap fitted(preview.bytes.data(), preview.bytes.size());
+    assert(fitted.parseHeaders() == BmpReaderError::Ok && fitted.getBpp() == 2);
+    assert(fitted.getWidth() == target.first && fitted.getHeight() == target.first / 8);
+    assert(fitted.getWidth() <= target.first && fitted.getHeight() <= target.second);
+  }
+  assert(file.seek(0));
+  RecordingPrint thumbnail;
+  assert(JpegToBmpConverter::jpegFileToBmpStreamWithSize(file, thumbnail, 32, 32));
+  Bitmap cropped(thumbnail.bytes.data(), thumbnail.bytes.size());
+  assert(cropped.parseHeaders() == BmpReaderError::Ok && cropped.getWidth() == 256 && cropped.getHeight() == 32);
   airpage::SelectedImage selected;
   std::strcpy(selected.path, "/ramp.jpg");
   selected.image = {airpage::ImageFormat::Jpeg, 128, 16, true};
@@ -277,7 +300,7 @@ int main(int argc, char** argv) {
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected, true) ==
          airpage::AirPageImageRenderer::Result::Success);
   assert(commits == before + 1 && !loan);
-  assert((refreshEvents == std::vector<char>{'F', 'B', 'C'}));
+  assert((refreshEvents == std::vector<char>{'w', 'w', 'B', 'C'}));
   // A popup paints the B/W proxy; closing it re-renders the unchanged original.
   renderer.clearScreen();
   refreshEvents.clear();
@@ -345,21 +368,26 @@ int main(int argc, char** argv) {
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected, true) ==
          airpage::AirPageImageRenderer::Result::OutOfMemory);
   assert(!loan);
-  assert((refreshEvents == std::vector<char>{'F', 'B', 'X'}));
+  assert((refreshEvents == std::vector<char>{'w', 'w', 'B', 'X'}));
   failDecoderAllocation = false;
   assert(renderer.beginGrayscale16());
   assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
   assert(error == ImageRenderError::None);
   renderer.cancelGrayscale16();
-  // Exit cleanup cancels an active transaction before clearing the whole panel.
-  refreshEvents.clear();
-  assert(renderer.beginGrayscale16());
-  renderer.drawPixel(1, 1, 0);
-  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
-  airpage::AirPageImageRenderer::cleanScreen(renderer);
-  assert(!loan && !renderer.isGrayscale16Active());
-  assert((refreshEvents == std::vector<char>{'B', 'X', 'F'}));
-  // Legacy output replaces its existing preclear with FULL exactly once.
+  // Exit cleanup cancels an active transaction and consumes either override.
+  for (const auto overrideMode : {HalDisplay::FULL_REFRESH, HalDisplay::HALF_REFRESH}) {
+    refreshEvents.clear();
+    assert(renderer.beginGrayscale16());
+    renderer.drawPixel(1, 1, 0);
+    renderer.requestNextRefresh(overrideMode);
+    airpage::AirPageImageRenderer::cleanScreen(renderer);
+    assert(!loan && !renderer.isGrayscale16Active());
+    assert((refreshEvents == std::vector<char>{'B', 'X', 'w', 'w'}));
+    // The next activity's frame must not inherit the old override.
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    assert(refreshEvents.back() == 'w');
+  }
+  // Legacy output replaces its existing preclear with two white fast clears.
   auto bmpBytes = ramp(false, false);
   std::ofstream legacyBmpOut(std::string(argv[2]) + "/legacy-ramp.bmp", std::ios::binary);
   legacyBmpOut.write(reinterpret_cast<const char*>(bmpBytes.data()), bmpBytes.size());
@@ -371,11 +399,11 @@ int main(int argc, char** argv) {
   refreshEvents.clear();
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, bmpSelected, true) ==
          airpage::AirPageImageRenderer::Result::Success);
-  assert((refreshEvents == std::vector<char>{'F', 'f', 'G'}));
+  assert((refreshEvents == std::vector<char>{'w', 'w', 'f', 'G'}));
   refreshEvents.clear();
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, bmpSelected) ==
          airpage::AirPageImageRenderer::Result::Success);
-  assert((refreshEvents == std::vector<char>{'f', 'f', 'G'}));
+  assert((refreshEvents == std::vector<char>{'w', 'f', 'G'}));
   levels = 4;
   legacyError = ImageRenderError::OutOfMemory;
   assert(airpage::AirPageImageRenderer::render(renderer, viewport, selected) ==

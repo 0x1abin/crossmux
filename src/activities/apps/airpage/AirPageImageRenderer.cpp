@@ -50,9 +50,9 @@ void AirPageImageRenderer::cleanScreen(GfxRenderer& renderer) {
   renderer.cancelGrayscale16();
   renderer.setRenderMode(GfxRenderer::BW);
   renderer.clearScreen();
-  // FAST is differential DU on Read Pico; FULL establishes a clean baseline.
-  renderer.requestNextFullRefresh();
-  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  renderer.requestNextRefresh(HalDisplay::FAST_REFRESH);
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 
 Rect AirPageImageRenderer::fittedBounds(const Rect& viewport, const ImageInfo& image) {
