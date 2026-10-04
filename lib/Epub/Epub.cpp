@@ -982,7 +982,7 @@ uint8_t* Epub::readItemContentsToBytes(const std::string& itemHref, size_t* size
 }
 
 bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, const size_t chunkSize,
-                                    const bool allowEarlyStop) const {
+                                    const bool allowEarlyStop, const size_t psramChunkSize) const {
   if (itemHref.empty()) {
     LOG_DBG("EBP", "Failed to read item, empty href");
     return false;
@@ -1005,7 +1005,7 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
     return true;
   }
 
-  return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize, allowEarlyStop);
+  return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize, allowEarlyStop, psramChunkSize);
 }
 
 bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
@@ -1013,20 +1013,12 @@ bool Epub::extractItemToFile(const std::string& itemHref, const std::string& des
   if (!Storage.openFileForWrite("EBP", destPath, out)) {
     return false;
   }
-  // Instrumentation (temporary): lazy extraction of a full-page image accounts for about
-  // 2.7 s of a page render that no other log covers. Measuring it says how much of the
-  // page's time it really is, so the next change targets the right thing rather than a guess.
-  const uint32_t extractStartedUs = micros();
-  // Large images dominate lazy extraction. This board's SD path charges a large fixed cost
-  // per call (measured ~9.7 ms), so the chunk size is what decides how many calls a
-  // full-page image costs: 8 KB meant roughly 160 of them, about 1.5 s of the page render.
-  // 64 KB cuts that to about 20. The buffers live in PSRAM (see allocStreamBuffer), so the
-  // reader's internal RAM is untouched.
-  const bool ok = readItemContentsToStream(itemHref, out, 65536);
+  // Large transfers are opt-in and PSRAM-only; ZIP falls back to the original 8 KiB buffers.
+  const auto started = millis();
+  const bool ok = readItemContentsToStream(itemHref, out, 8192, false, 65536);
+  LOG_DBG("EBP", "Image extraction: %lums", millis() - started);
   out.flush();
   out.close();
-  LOG_INF("EBP", "extract -> %lums (%s)", static_cast<unsigned long>((micros() - extractStartedUs) / 1000),
-          itemHref.c_str());
   if (!ok) {
     Storage.remove(destPath.c_str());
   }

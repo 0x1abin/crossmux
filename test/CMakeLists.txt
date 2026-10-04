@@ -200,3 +200,5 @@ add_test(NAME TlsMemoryPreflight COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scri
 add_test(NAME AirPageDisplayRetry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_airpage_display_retry.py)
 
 add_test(NAME FontPreloadRefresh COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_font_preload_refresh.py)
+
+add_test(NAME ImagePsramIo COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_image_psram_io.py)
