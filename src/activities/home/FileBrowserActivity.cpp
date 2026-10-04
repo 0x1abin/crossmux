@@ -97,7 +97,7 @@ void FileBrowserActivity::loadFiles() {
         case Mode::Books:
           if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
               FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-              FsHelpers::hasBmpExtension(filename) || FsHelpers::hasPngExtension(filename)) {
+              FsHelpers::hasImageExtension(filename)) {
             files.emplace_back(filename);
           }
           break;

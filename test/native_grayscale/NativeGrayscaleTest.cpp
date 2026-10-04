@@ -268,6 +268,21 @@ int main(int argc, char** argv) {
   assert(JpegToBmpConverter::jpegFileToBmpStream(file, legacy, false));
   Bitmap old(legacy.bytes.data(), legacy.bytes.size());
   assert(old.parseHeaders() == BmpReaderError::Ok && old.getBpp() == 2);
+  // Image previews fit the oriented viewport, while thumbnail callers retain crop by default.
+  for (const auto& target : {std::pair{32, 128}, std::pair{128, 32}}) {
+    assert(file.seek(0));
+    RecordingPrint preview;
+    assert(JpegToBmpConverter::jpegFileToBmpStreamWithSize(file, preview, target.first, target.second, false));
+    Bitmap fitted(preview.bytes.data(), preview.bytes.size());
+    assert(fitted.parseHeaders() == BmpReaderError::Ok && fitted.getBpp() == 2);
+    assert(fitted.getWidth() == target.first && fitted.getHeight() == target.first / 8);
+    assert(fitted.getWidth() <= target.first && fitted.getHeight() <= target.second);
+  }
+  assert(file.seek(0));
+  RecordingPrint thumbnail;
+  assert(JpegToBmpConverter::jpegFileToBmpStreamWithSize(file, thumbnail, 32, 32));
+  Bitmap cropped(thumbnail.bytes.data(), thumbnail.bytes.size());
+  assert(cropped.parseHeaders() == BmpReaderError::Ok && cropped.getWidth() == 256 && cropped.getHeight() == 32);
   airpage::SelectedImage selected;
   std::strcpy(selected.path, "/ramp.jpg");
   selected.image = {airpage::ImageFormat::Jpeg, 128, 16, true};

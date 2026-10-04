@@ -547,7 +547,7 @@ void ActivityManager::goToReader(std::string path, const bool allowFastInitialRe
     goToFileBrowser("/");
     return;
   }
-  if (FsHelpers::hasBmpExtension(path) || FsHelpers::hasPngExtension(path)) {
+  if (FsHelpers::hasImageExtension(path)) {
     replaceActivityWith<ImageViewerActivity>(std::move(path));
     return;
   }
