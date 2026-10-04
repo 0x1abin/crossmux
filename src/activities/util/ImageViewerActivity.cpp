@@ -6,6 +6,7 @@
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <JpegToBmpConverter.h>
 #include <PngToBmpConverter.h>
 
 #include <algorithm>
@@ -15,7 +16,7 @@
 #include "fontIds.h"
 
 namespace {
-constexpr const char* PNG_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
+constexpr const char* IMAGE_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
 constexpr const char* TRANSPARENT_PREVIEW_PATH = "/.crosspoint/image_preview.transparent.bmp";
 constexpr const char* SLEEP_IMAGE_PATH = "/sleep.bmp";
 constexpr const char* SLEEP_IMAGE_PART_PATH = "/sleep.bmp.part";
@@ -51,7 +52,7 @@ void ImageViewerActivity::loadSiblingImages() {
       file.getName(name, sizeof(name));
       if (name[0] != '.') {
         std::string fname(name);
-        if (FsHelpers::hasBmpExtension(fname) || FsHelpers::hasPngExtension(fname)) {
+        if (FsHelpers::hasImageExtension(fname)) {
           siblingImages.push_back(fname);
         }
       }
@@ -68,8 +69,32 @@ void ImageViewerActivity::loadSiblingImages() {
 
 bool ImageViewerActivity::isPng() const { return FsHelpers::hasPngExtension(filePath); }
 
+bool ImageViewerActivity::preparePreview() {
+  if (!Storage.ensureDirectoryExists("/.crosspoint")) return false;
+  if (Storage.exists(IMAGE_PREVIEW_PATH) && !Storage.remove(IMAGE_PREVIEW_PATH)) return false;
+
+  bool prepared = false;
+  {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    if (isPng()) {
+      prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), IMAGE_PREVIEW_PATH, true);
+    } else {
+      HalFile input, output;
+      if (Storage.openFileForRead("IMAGE", filePath.c_str(), input) &&
+          Storage.openFileForWrite("IMAGE", IMAGE_PREVIEW_PATH, output)) {
+        prepared = JpegToBmpConverter::jpegFileToBmpStreamWithSize(input, output, renderer.getScreenWidth(),
+                                                                   renderer.getScreenHeight(), /*crop=*/false);
+        output.flush();
+      }
+    }
+  }
+  if (!prepared) Storage.remove(IMAGE_PREVIEW_PATH);
+  return prepared;
+}
+
 void ImageViewerActivity::onEnter() {
   Activity::onEnter();
+  imageReady = false;
 
   if (siblingImages.empty() && !filePath.empty()) {
     loadSiblingImages();
@@ -79,13 +104,9 @@ void ImageViewerActivity::onEnter() {
   const auto pageHeight = renderer.getScreenHeight();
   Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
-  const bool png = isPng();
-  bool prepared = !png;
-  if (png && Storage.ensureDirectoryExists("/.crosspoint")) {
-    GfxRenderer::FrameBufferLoan loan(renderer);
-    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), PNG_PREVIEW_PATH, true);
-  }
-  const char* bitmapPath = png ? PNG_PREVIEW_PATH : filePath.c_str();
+  const bool needsPreview = isPng() || FsHelpers::hasJpgExtension(filePath);
+  const bool prepared = !needsPreview || preparePreview();
+  const char* bitmapPath = needsPreview ? IMAGE_PREVIEW_PATH : filePath.c_str();
   HalFile file;
   // 1. Open the file
   if (!prepared) {
@@ -184,9 +205,11 @@ void ImageViewerActivity::onEnter() {
         }
         GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
         renderer.cleanupGrayscaleWithFrameBuffer();
+        imageReady = planesReady;
         if (!planesReady) renderer.displayBuffer(HalDisplay::HALF_REFRESH);
       } else {
         renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+        imageReady = true;
       }
 
     } else {
@@ -210,13 +233,15 @@ void ImageViewerActivity::onEnter() {
 
 void ImageViewerActivity::onExit() {
   Activity::onExit();
-  if (Storage.exists(PNG_PREVIEW_PATH)) Storage.remove(PNG_PREVIEW_PATH);
+  imageReady = false;
+  if (Storage.exists(IMAGE_PREVIEW_PATH)) Storage.remove(IMAGE_PREVIEW_PATH);
   if (Storage.exists(TRANSPARENT_PREVIEW_PATH)) Storage.remove(TRANSPARENT_PREVIEW_PATH);
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
 void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool transparent) {
+  if (!imageReady) return;
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
   const char* preparedPath = sourcePath;
@@ -284,15 +309,16 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool tra
 }
 
 void ImageViewerActivity::showSleepCoverOptions() {
+  if (!imageReady) return;
   if (!isPng()) {
-    doSetSleepCover(filePath.c_str(), false);
+    doSetSleepCover(FsHelpers::hasJpgExtension(filePath) ? IMAGE_PREVIEW_PATH : filePath.c_str(), false);
     return;
   }
 
   static constexpr StrId options[] = {StrId::STR_NORMAL, StrId::STR_TRANSPARENT};
   static constexpr int optionCount = sizeof(options) / sizeof(options[0]);
   sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER, options, optionCount, 0, [this](const int index) {
-    doSetSleepCover(index == 1 ? filePath.c_str() : PNG_PREVIEW_PATH, index == 1);
+    doSetSleepCover(index == 1 ? filePath.c_str() : IMAGE_PREVIEW_PATH, index == 1);
   });
   requestUpdate();
 }

@@ -184,6 +184,9 @@ add_test(NAME NativeGrayscale
     ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)
 set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
 
+add_test(NAME FileBrowserImages
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_file_browser_images.py)
+
 add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)
 add_subdirectory(reader_session)
 add_subdirectory(plugin_manifest_classification)

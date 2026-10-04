@@ -274,6 +274,21 @@ Incremental drawing does not imply a different panel waveform or windowed
 refresh. Those are display-driver decisions and require separate hardware
 measurement.
 
+### File browser images
+
+The file browser lists BMP, JPEG (`.jpg` / `.jpeg`), and PNG files, with
+case-insensitive extensions, in every directory including `/AirPage`. All three
+formats open in the image viewer and participate in its sorted sibling navigation.
+Firmware and PNG-only pickers retain their own filters.
+
+BMPs render directly. JPEG and PNG previews reuse
+`/.crosspoint/image_preview.bmp`; JPEG conversion fits the current oriented screen
+without cropping. Conversion borrows the existing framebuffer and streams through
+the existing converters instead of adding another full-screen buffer. A failed
+conversion cannot display an old preview or save it as a sleep cover. JPEG sleep
+covers use the converted BMP; PNG retains its normal and transparent cover choices.
+The temporary preview is removed on exit, and source images are never replaced.
+
 ### Lyra Carousel home
 
 Lyra Carousel displays one centered recent-book cover in a `380x540` frame.
