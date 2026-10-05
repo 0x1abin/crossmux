@@ -51,15 +51,11 @@ FontCacheManager::FontCacheManager(const std::map<int, EpdFontFamily>& fontMap,
 void FontCacheManager::setFontDecompressor(FontDecompressor* d) { fontDecompressor_ = d; }
 
 void FontCacheManager::clearCache() {
+  // Preserve bounded TTF glyph caches across renders; memory pressure uses releaseResidentCaches().
   if (fontDecompressor_) fontDecompressor_->clearCache();
   for (auto& [id, font] : sdCardFonts_) {
     font->clearCache();
   }
-#if CROSSPOINT_VECTOR_FONTS
-  for (auto& [id, font] : ttfFonts_) {
-    if (font) font->clearCache();
-  }
-#endif
 }
 
 void FontCacheManager::releaseSdFontCaches() {
