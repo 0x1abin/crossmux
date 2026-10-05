@@ -550,46 +550,44 @@ void SleepActivity::onEnter() {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
   }
 
-  // 全刷"正在进入睡眠"这一帧，然后再让各路径照常用 HALF 画睡眠画面。
+  // 睡前先把面板洗白，再让各路径照常用 HALF 画睡眠画面 —— 仅 Read Pico。
   //
-  // 放在提示之后是必须的：全刷会把提示一起刷掉，所以顺序只能是"先看见提示、再被睡眠图盖住"。
-  // 放在提示之前会把提示擦没 —— 那就只是白闪一下，用户看不到任何反馈。
+  // HALF 是单趟波形，擦不掉已经存在的墨，而睡眠画面全部用 HALF 画，所以阅读器留下的残影
+  // 会透到睡眠图上。这里清空帧缓冲再用一趟 FULL（GC16，36 相完整波形）把它推上去：每个
+  // 像素从它的实际残留态被强行驱动到白，不做差分跳过。全白是关键 —— 只推"旧页"那一帧的话，
+  // 面板上已积累的残留不在差分的比较范围里，洗不掉。
   //
-  // 这里是两趟，各做一件事：
-  //   1. HALF 把提示推上去，让用户看见反馈（单趟波形，快）。
-  //   2. clearScreen() 把帧缓冲清成全白，再用 FULL 把它推上去。FULL 走 GC16，是 36 相完整
-  //      波形，把每个像素从它的实际残留态强行驱动到白 —— 不做差分跳过。睡前那一页的文字就
-  //      在这里被洗掉，接着 HALF 画的睡眠图才不会透出上一页的鬼影。
+  // 顺序必须在提示之后：全刷会把提示一起刷掉。但上面 drawPopup() 自己已经 displayBuffer()
+  // 过一次，所以这里不再推提示 —— 早先那版多推了一趟 HALF，是对同一个提示的重复刷新，
+  // 白白多一次闪烁和等待。
   //
-  // 只用一趟 FULL 推"旧页+提示"那一帧是不够的：它按差分算，面板上已经积累的残留不在它
-  // 的比较范围里，洗不掉。全白是关键。
+  // 两条保留当前帧的路径（Quick Resume、Transparent）在上面已早退：它们要的就是原来那幅
+  // 画面，洗掉反而错了。到这里的一定是"会重画内容"的睡眠画面。
   //
-  // 上面两条保留当前帧的路径（Quick Resume、Transparent）已经早退 —— 它们要的就是原来那
-  // 幅画面，洗掉反而错了，所以到这里的一定是"会重画内容"的睡眠画面。
-  // / Full-refresh the "entering sleep" frame, then let each path draw its sleep screen with
-  // HALF as before.
+  // 先只开在 Read Pico：目前只有这块面板做过实机验证（普通睡眠画面、Quick Resume、
+  // Transparent、夜间模式），其它面板等验收后再扩大范围。
+  // / Wash the panel white before the sleep screens paint -- Read Pico only.
   //
-  // It has to come after the popup: the full refresh wipes the popup too, so the order can
-  // only be "notice appears, sleep screen paints over it". Placing it before would erase the
-  // notice, leaving the user with a blank flash and no feedback.
+  // HALF is a single-pass waveform and cannot erase ink that is already there, and every sleep
+  // screen paints with HALF, so whatever the reader left behind shows through. Clearing the
+  // framebuffer and pushing it with FULL (GC16, a 36-phase complete waveform) drives every
+  // pixel from wherever it actually sits to white with no difference skip. The white field is
+  // the point: pushing the old page alone is not enough, because ghosting already on the panel
+  // is not part of that comparison.
   //
-  // Two passes, one job each:
-  //   1. HALF pushes the notice so the user sees feedback (single pass, fast).
-  //   2. clearScreen() makes the framebuffer white and FULL pushes that. FULL is GC16, a
-  //      36-phase complete waveform that drives every pixel from wherever it actually sits to
-  //      white without a difference skip. That is where the page from before sleep is washed
-  //      off, so the HALF sleep image that follows cannot show it through.
-  //
-  // One FULL pass over the "old page + notice" frame is not enough: it works from a
-  // difference, and ghosting already on the panel is not part of that comparison. The white
-  // field is the point.
+  // It has to come after the popup, since the wash takes the popup with it -- and drawPopup()
+  // has already pushed it through displayBuffer(), so no extra popup pass belongs here. An
+  // earlier revision pushed one more HALF, which was a second refresh of the same notice.
   //
   // The two frame-preserving paths above (Quick Resume, Transparent) have already returned --
-  // they exist to keep the current frame, so washing it away would be wrong. Anything that
-  // reaches here is a sleep screen that repaints.
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  // they exist to keep the current frame, so washing it away would be wrong.
+  //
+  // Read Pico only: it is the one panel where this has been checked on hardware (normal sleep
+  // screen, Quick Resume, Transparent, night mode). Other panels can follow once validated.
+#if FREEINK_DEVICE_READPICO
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+#endif
 
   switch (SETTINGS.sleepScreen) {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::BLANK):
