@@ -45,8 +45,20 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
     const auto& families = registry->getFamilies();
     s.enumStringValues.reserve(builtinOptionCount + families.size());
     for (const StrId value : enumValues) s.enumStringValues.push_back(I18N.get(value));
+    // 矢量字体（.ttf/.otf/.ttc）是运行时光栅化的，任意字号都能显示；其余是预烤好的
+    // .cpfont 字集。给矢量家族加个标记，让字体选择器一眼看出哪个是哪种。
+    //
+    // 这只影响显示：持久化的是选项下标，而且下面 valueGetter 是按 families[i].name
+    // 匹配的，不是按这个字符串 —— 所以追加标记不可能改变存进去的值。
+    // / Vector families (.ttf/.otf/.ttc) are rasterized at runtime and can be shown at any
+    // size; the rest are pre-rasterized .cpfont sets. Tag the vector ones so the picker says
+    // which is which. Display only -- what gets persisted is the option index, and
+    // valueGetter below matches on families[i].name rather than on this string, so
+    // appending a marker cannot change the stored value.
     std::transform(families.begin(), families.end(), std::back_inserter(s.enumStringValues),
-                   [](const SdCardFontFamilyInfo& f) { return f.name; });
+                   [](const SdCardFontFamilyInfo& f) {
+                     return f.vector ? f.name + "  " + I18N.get(StrId::STR_VECTOR_FONT_TAG) : f.name;
+                   });
   } else {
     s.enumValues = std::move(enumValues);
   }
@@ -354,19 +366,6 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           StrId::STR_CAT_READER),
         SettingInfo::Enum(StrId::STR_READER_MENU_STYLE, &CrossPointSettings::readerMenuStyle,
                           {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
-                          StrId::STR_CAT_READER),
-        // 翻页方向（左右对调）。枚举而不是开关：两个选项各自有名字，"从左到右 / 从右到左"
-        // 比"开 / 关"更能说明对调后是什么样子 —— 同样按 imageScaling 的写法。
-        // 放在阅读分类而不是控制分类：它是"这本书怎么翻"的阅读行为，和它旁边的阅读菜单样式
-        // 同类；控制分类里那些是手势类型本身。
-        // / Page-turn direction (mirrored). An enum rather than a toggle because the two
-        // options name themselves -- "left to right / right to left" says what the mirror
-        // does, where on/off does not -- the same shape as imageScaling.
-        // Sits in the reader category rather than controls because it is a reading behaviour
-        // (how this book turns), like the reader-menu style next to it. The controls entries
-        // are gesture types themselves.
-        SettingInfo::Enum(StrId::STR_PAGE_TURN_DIRECTION, &CrossPointSettings::pageTurnDirection,
-                          {StrId::STR_PAGE_TURN_LTR, StrId::STR_PAGE_TURN_RTL}, "pageTurnDirection",
                           StrId::STR_CAT_READER),
         // --- Controls ---
         SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
