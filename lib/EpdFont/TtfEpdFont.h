@@ -65,7 +65,18 @@ class TtfEpdFont {
 
   // Build the family at the given reader point size from the configured sources.
   // Returns false if the regular source is missing or unparseable.
-  bool load(uint16_t pointSize, bool twoBit = true, size_t glyphCacheBytes = 32 * 1024, uint16_t maxGlyphs = 768);
+  //
+  // fourBit 打开 4 位覆盖度（16 级）：FreeType 本来就算 8 位，压成 2 位就是把抗锯齿的
+  // 层次丢掉。只在走 16 级灰度通路时才该开 —— 那条路用 drawGrayscale16Pixel() 把覆盖度
+  // 直接写进 4bpp 缓冲；2 位通路（LSB/MSB 选择平面）只认 2 位，喂它 4 位会读错。
+  // 缓存占用翻倍（每像素 4 位而非 2 位），PSRAM 可以承担。
+  // / fourBit enables 4-bit coverage (16 levels): FreeType already computes 8 bits, and
+  // packing to 2 discards the anti-aliasing depth. Enable it only for the 16-level
+  // grayscale path, which writes coverage straight into the 4bpp buffer via
+  // drawGrayscale16Pixel(); the 2-bit path (LSB/MSB selector planes) cannot read it.
+  // Cache cost doubles, which PSRAM absorbs.
+  bool load(uint16_t pointSize, bool twoBit = true, size_t glyphCacheBytes = 32 * 1024, uint16_t maxGlyphs = 768,
+            bool fourBit = false);
 
   EpdFontFamily family() const;
 
@@ -108,6 +119,7 @@ class TtfEpdFont {
     size_t cap = 0;
     uint16_t maxGlyphs = 0;
     bool twoBit = true;
+    bool fourBit = false;  // 4-bit coverage for the 16-level grayscale path
     uint16_t sizePx = 0;
     uint8_t srcIndex = 0;     // which Source this face initializes from
     int weight = 400;         // design weight requested (wght axis / faux bold)

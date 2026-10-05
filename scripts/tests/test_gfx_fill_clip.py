@@ -33,6 +33,13 @@ struct GfxRenderer {
   uint8_t* getWriteTarget() const { return const_cast<uint8_t*>(bytes.data()); }
   int getWriteOriginY() const { return strip ? 7 : 0; }
   int getWriteRows() const { return strip ? 8 : panelHeight; }
+  // Present so the extracted fillRectImpl compiles. On the 16-level text path the
+  // production function mirrors 1-bit fills into that buffer -- its fast path writes
+  // framebuffer bytes directly and would otherwise miss it -- and the mirror walk
+  // needs drawPixel. Both stay at their defaults here, so that branch is never taken
+  // and the expectations below still describe the byte-level fill.
+  const uint8_t* grayscale16Buffer = nullptr;
+  void drawPixel(int, int, bool) const {}
   template<Color C> void fillRectImpl(int, int, int, int) const;
 };
 ''' + rotate + "\ntemplate<Color C>\n" + fill + r'''

@@ -59,6 +59,18 @@ class SdCardFontSystem {
   /// adoptCompleteChineseNotoSans() can probe the reader size cheaply.
   int resolveFontId(const char* familyName, uint8_t pointSize) const;
 
+  /// 正文当前用的矢量字面是否按 4 位覆盖度加载（16 级文字抗锯齿的前提）。
+  /// 预烤的 .cpfont 位图只有 2 位，所以那种情况下恒为 false。
+  /// / Whether the reader's live vector face carries 4-bit coverage, which is what the
+  /// 16-level text path needs. Always false for pre-rasterised .cpfont bitmaps.
+  bool readerFaceIsFourBit() const {
+#if CROSSPOINT_VECTOR_FONTS
+    return ttf_ != nullptr && ttfFourBit_;
+#else
+    return false;
+#endif
+  }
+
   /// Access the registry (e.g. for settings UI to enumerate available fonts).
   const SdCardFontRegistry& registry() const { return registry_; }
 
@@ -138,6 +150,12 @@ class SdCardFontSystem {
   std::string ttfFamily_;     // loaded vector family name ("" = none)
   int ttfFontId_ = 0;         // renderer font id for ttf_ (0 = none)
   uint8_t ttfPointSize_ = 0;  // size ttf_ was built at
+  // 正文那个矢量字面是否按 4 位覆盖度加载 —— 16 级文字通路的开关，在 loadTtfFamily()
+  // 里按面板能力决定。见 EpubReaderActivity 的 use16LevelText。
+  // / Whether the reader's vector face was loaded with 4-bit coverage: the switch for the
+  // 16-level text path, decided in loadTtfFamily() from the panel's capability. Used by
+  // EpubReaderActivity's use16LevelText.
+  bool ttfFourBit_ = false;
   // UI-size TTF fallbacks (share ttfSources_); parallel to their renderer font ids.
   std::vector<std::unique_ptr<TtfEpdFont>> ttfUi_;
   std::vector<int> ttfUiIds_;

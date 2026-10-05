@@ -2442,6 +2442,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // Night mode renders crisp B/W; the SDK disables every grayscale display path.
   const bool grayscaleEnabled = !renderer.isInverted();
   const bool needsTextGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
+  // Images write the BW buffer directly; keep them, backgrounds and faux bold on the existing path.
+  const bool use16LevelText = needsTextGrayscale && !pageHasImages && renderer.getGrayscaleLevels() == 16 &&
+                              sdFontSystem.readerFaceIsFourBit() && !SETTINGS.readingBackgroundEnabled &&
+                              SETTINGS.fakeBold == 0;
 #if FREEINK_DEVICE_EEGO_A4
   // A4 single-refresh design: displayGrayBuffer() replaces the B/W base on the
   // panel, so whatever the gray pass draws IS the final frame. With text AA
@@ -2562,6 +2566,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     }
     LOG_DBG("ERS", "UC8279 image page: absolute quality waveform");
     pagesUntilFullRefresh = 1;
+  } else if (use16LevelText) {
+    // 16 级文字：下面那一趟 commitGrayscale16() 自己把整帧推给面板，所以这里**不**推底图。
+    // 多推一次会变成两次面板驱动（更闪、更慢），而 16 级用的本身就是整屏波形，残影照清。
+    // / 16-level text: the single commitGrayscale16() below drives the panel with the whole
+    // frame, so the base is deliberately NOT pushed here. Pushing it would drive the panel
+    // twice (more flash, more time), and the 16-level waveform is a full-screen one anyway,
+    // so ghosting is still cleared.
   } else if (combinedGrayscaleBase) {
     ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh, manualRefreshPending);
   } else if (pageHasImages) {
@@ -2590,7 +2601,34 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tDisplay = millis();
 
-  if (tiledGrayscale) {
+  if (use16LevelText) {
+    // Native begin clears the frame, so render the complete page again.
+    if (renderer.beginGrayscale16()) {
+      renderPageWithGuideLines();
+      renderStatusBar();
+      if (activityManager.isSwitchPending()) {
+        renderer.cancelGrayscale16();
+        return;
+      }
+      if (renderer.commitGrayscale16()) {
+        const auto tEnd = millis();
+        LOG_DBG("ERS", "Page render: 16-level text total=%lums", tEnd - t0);
+        pagesUntilFullRefresh = 1;
+        return;
+      }
+      LOG_ERR("ERS", "16-level text commit failed; displaying B/W");
+    } else {
+      LOG_ERR("ERS", "Could not start the 16-level text pass; displaying B/W");
+    }
+    renderer.cancelGrayscale16();
+    renderer.setRenderMode(GfxRenderer::BW);
+    renderer.clearScreen();
+    renderPageWithGuideLines();
+    renderStatusBar();
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    pagesUntilFullRefresh = 1;
+    return;
+  } else if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
