@@ -547,6 +547,28 @@ static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::R
   renderer.drawPixel(x, y, renderMode == GfxRenderer::BW ? pixelState : pixel.state);
 }
 
+// 4 位覆盖度：两个像素一字节，高半字节在前（与 .cpfont converter 的 4 位布局一致）。
+static uint8_t get4BitCoverage(const uint8_t* bitmap, const int pixelPosition) {
+  const uint8_t byte = bitmap[pixelPosition >> 1];
+  return (byte >> ((1 - (pixelPosition & 1)) * 4)) & 0xF;
+}
+
+// 把 4 位覆盖度写进 16 级灰度缓冲。drawGrayscale16Pixel() 的 gray 是 0 = 黑、255 = 白，
+// 而覆盖度是 0 = 全透明、15 = 满墨，所以要取反。
+//
+// 覆盖度 0 必须**跳过**而不是画成白：那些像素不属于字形，画上去会把底图涂掉 —— 16 级
+// 缓冲是整帧一次推出去的，不像 LSB/MSB 平面那样只表达"这个平面要不要点亮"。
+// / Write 4-bit coverage into the 16-level buffer. drawGrayscale16Pixel() takes 0 = black
+// and 255 = white while coverage runs 0 = transparent to 15 = full ink, hence the
+// inversion. Coverage 0 must be SKIPPED rather than painted white: those pixels are not
+// part of the glyph, and the 16-level buffer is pushed as a whole frame, unlike the
+// LSB/MSB planes, where a zero bit only means "not this plane".
+static void draw4BitGlyphPixel(const GfxRenderer& renderer, const int x, const int y, const uint8_t coverage) {
+  if (coverage == 0) return;
+  const uint8_t gray = static_cast<uint8_t>((15u - coverage) * 17u);
+  renderer.drawGrayscale16Pixel(x, y, gray);
+}
+
 // Outline fallback has no font bitmap and uses the same metrics as layout.
 template <TextRotation rotation = TextRotation::None>
 static void renderMissingGlyph(const GfxRenderer& renderer, const EpdFontData& fontData, const uint32_t cp,
@@ -667,6 +689,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 
   const bool is2Bit = fontData->is2Bit;
+  const bool is4Bit = fontData->is4Bit;
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
   const int left = glyph->left;
@@ -704,7 +727,30 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
       innerBase = cursorX + left;  // screenX = innerBase + glyphX
     }
 
-    if (is2Bit) {
+    if (is4Bit && renderer.isGrayscale16Active()) {
+      // 16 级通路：覆盖度直接写进 4bpp 缓冲。
+      //
+      // 这里不做合成粗体的膨胀 —— 那套 dilate2BitCoverage() 是在 2 位覆盖度上取"左侧最暗
+      // 邻居"，对这个深度没有意义，硬套会把 16 级又压回几档。
+      // / 16-level path: coverage goes straight into the 4bpp buffer. Faux-bold dilation
+      // is deliberately not applied here -- dilate2BitCoverage() takes the darkest of the
+      // preceding 2-bit neighbours, which is meaningless at this depth and would collapse
+      // the extra levels again.
+      for (int glyphY = 0; glyphY < height; glyphY++) {
+        const int outerCoord = outerBase + glyphY;
+        for (int glyphX = 0; glyphX < width; glyphX++) {
+          int screenX, screenY;
+          if constexpr (rotation == TextRotation::Rotated90CW) {
+            screenX = outerCoord;
+            screenY = innerBase - glyphX;
+          } else {
+            screenX = innerBase + glyphX;
+            screenY = outerCoord;
+          }
+          draw4BitGlyphPixel(renderer, screenX, screenY, get4BitCoverage(bitmap, glyphY * width + glyphX));
+        }
+      }
+    } else if (is2Bit) {
       for (int glyphY = 0; glyphY < height; glyphY++) {
         const int outerCoord = outerBase + glyphY;
         if (syntheticBoldPixels == 0) {
@@ -842,6 +888,34 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     target[byteIndex] &= ~(1 << bitPosition);  // Clear bit
   } else {
     target[byteIndex] |= 1 << bitPosition;  // Set bit
+  }
+
+  // 16 级通路下，把每一个 1 位写入也镜像进 4bpp 缓冲。
+  //
+  // 为什么必须：那一趟推到面板的是 4bpp 缓冲，只有字形通过 drawGrayscale16Pixel() 主动
+  // 写进去过。状态栏、图标、参考线这些走普通 1 位绘制的东西就只会落在帧缓冲里 —— 推出的
+  // 画面里它们直接消失（实测：状态栏整条不见了）。
+  //
+  // 灰度优先：drawGrayscale16Pixel() 先调这里（镜像成 0/15），随后再把精确灰度写回去，
+  // 所以字形的中间调不会被这一步抹平成纯黑或纯白。
+  //
+  // 代价只有一次分支判断，且只在 16 级缓冲活跃时成立 —— 其它所有渲染路径不受影响。
+  // / Mirror every 1-bit write into the 4bpp buffer while the 16-level path is active.
+  //
+  // Required because that pass pushes the 4bpp buffer, and only glyphs write into it by
+  // themselves (via drawGrayscale16Pixel). The status bar, icons and guide lines draw with
+  // plain 1-bit primitives and would otherwise exist only in the framebuffer -- they vanish
+  // from the pushed frame, which is exactly how the status bar went missing on device.
+  //
+  // Greyscale wins: drawGrayscale16Pixel() calls this first (mirroring 0/15) and writes the
+  // precise level afterwards, so glyph mid-tones are not flattened to black or white.
+  //
+  // One extra branch on the hot path, taken only when that buffer is active.
+  if (grayscale16Buffer != nullptr) {
+    const size_t grayIndex = static_cast<size_t>(phyY) * (panelWidth / 2) + (phyX / 2);
+    const unsigned grayShift = (phyX & 1) * 4;
+    const uint8_t level = eff ? 0u : 15u;
+    grayscale16Buffer[grayIndex] = (grayscale16Buffer[grayIndex] & ~(0x0Fu << grayShift)) | (level << grayShift);
   }
 }
 
@@ -1258,6 +1332,31 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   const int lx1 = std::min({screenW, x + width, clipRight_});
   const int ly1 = std::min({screenH, y + height, clipBottom_});
   if (lx0 >= lx1 || ly0 >= ly1) return;
+
+  // 16 级通路：矩形填充也要进 4bpp 缓冲。
+  //
+  // 下面那套字节级填充为了速度**直接写帧缓冲**，绕开 drawPixel()，因此不会被镜像 ——
+  // 实测表现就是状态栏的文字回来了（字形走 drawPixel），而进度条整条不见（它是一块
+  // 填充矩形）。这里在 16 级缓冲活跃时改走逐像素，让 drawPixel() 的镜像生效。
+  //
+  // 只有这一条路会变慢，而且只在 16 级那一趟；别的渲染路径仍然走下面的字节级填充。
+  // / 16-level path: rectangle fills have to reach the 4bpp buffer too.
+  //
+  // The byte-level fill below writes the framebuffer DIRECTLY for speed and therefore
+  // bypasses drawPixel(), so it is not mirrored -- on device that showed up as the status
+  // bar text coming back (glyphs go through drawPixel) while the progress bar vanished
+  // entirely (it is a filled rect). With that buffer active this walks pixel by pixel so
+  // the mirroring applies. Only this path slows down, and only during the 16-level pass;
+  // every other render path keeps the byte-level fill below.
+  if (grayscale16Buffer != nullptr) {
+    const bool black = (C == Color::Black);
+    for (int py = ly0; py < ly1; ++py) {
+      for (int px = lx0; px < lx1; ++px) {
+        drawPixel(px, py, black);
+      }
+    }
+    return;
+  }
 
   // Rotate the two opposing logical corners into physical-framebuffer space.
   // The bounding rect in physical space is the rect we need to fill — rotation
@@ -1714,8 +1813,13 @@ void GfxRenderer::drawGrayscale16Pixel(const int x, const int y, const uint8_t g
   const size_t index = static_cast<size_t>(py) * (panelWidth / 2) + px / 2;
   const uint8_t level = (static_cast<unsigned>(gray) + 8) / 17;
   const unsigned shift = (px & 1) * 4;
-  grayscale16Buffer[index] = (grayscale16Buffer[index] & ~(0x0Fu << shift)) | (level << shift);
+  // 顺序很重要：drawPixel() 现在也会镜像进这个缓冲（把普通 1 位绘制带进来），所以先把
+  // B/W 代理写掉，再把精确灰度覆盖上去 —— 反过来会把字形的中间调冲成纯黑或纯白。
+  // / Order matters: drawPixel() now mirrors into this buffer too (that is what carries
+  // plain 1-bit drawing such as the status bar), so write the B/W proxy first and overlay
+  // the precise level after it; the other order would flatten mid-tones.
   drawPixel(x, y, level < 8);
+  grayscale16Buffer[index] = (grayscale16Buffer[index] & ~(0x0Fu << shift)) | (level << shift);
 }
 
 bool GfxRenderer::drawBitmapGrayscale16(const Bitmap& bitmap, const int x, const int y, const int maxWidth,

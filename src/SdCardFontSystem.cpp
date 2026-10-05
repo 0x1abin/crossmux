@@ -591,15 +591,24 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
   // sources and the size-independent UI fallbacks don't need rebuilding — just
   // re-drive the reader face at the new size, reusing the already-open files
   // instead of reopening all four and rebuilding every UI fallback.
+  // 面板支持 16 级时，正文矢量字面按 4 位覆盖度加载：FreeType 本来就算 8 位，压成 2 位等于
+  // 把抗锯齿的层次丢掉。4 位只对 16 级通路有意义（那条路用 drawGrayscale16Pixel 直接把
+  // 覆盖度写进 4bpp 缓冲），所以按面板能力决定，别的目标仍然是 2 位。
+  // / When the panel does 16 levels, load the reader's vector face with 4-bit coverage:
+  // FreeType already computes 8 bits, and packing to 2 discards the anti-aliasing depth.
+  // 4-bit only means anything on the 16-level path, which writes coverage straight into the
+  // 4bpp buffer, so it is gated on the panel's capability and every other target stays 2-bit.
+  const bool fourBit = renderer.getGrayscaleLevels() == 16;
   if (!registryWasDirty && ttf_ && ttfFamily_ == family.name) {
     renderer.unregisterTtfFont(ttfFontId_);
     renderer.removeFont(ttfFontId_);
-    if (ttf_->load(size, /*twoBit=*/true, cacheBytes, maxGlyphs)) {
+    if (ttf_->load(size, /*twoBit=*/true, cacheBytes, maxGlyphs, fourBit)) {
       ttf_->build(" ");
       ttfFontId_ = computeTtfFontId(family.name.c_str(), size);
       renderer.insertFont(ttfFontId_, ttf_->family());
       renderer.registerTtfFont(ttfFontId_, ttf_.get());
       ttfPointSize_ = size;
+      ttfFourBit_ = fourBit;
       return;
     }
     // Resize failed: fall through to a clean full reload.
@@ -639,7 +648,7 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
     return;
   }
   addTtfSources(*ttf_);
-  const bool ok = ttf_->load(size, /*twoBit=*/true, cacheBytes, maxGlyphs);
+  const bool ok = ttf_->load(size, /*twoBit=*/true, cacheBytes, maxGlyphs, fourBit);
   if (!ok) {
     // init failure is ambiguous (corrupt font vs. transient OOM inside
     // FreeType): keep the selection and retry next ensureLoaded() rather than
@@ -652,6 +661,7 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
   }
   // Seed the regular face's glyph cache; other styles + glyphs fault on demand.
   ttf_->build(" ");
+  ttfFourBit_ = fourBit;
 
   ttfFontId_ = computeTtfFontId(family.name.c_str(), size);
   renderer.insertFont(ttfFontId_, ttf_->family());

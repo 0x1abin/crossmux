@@ -103,7 +103,7 @@ void TtfEpdFont::resolveFaces() {
 }
 
 bool TtfEpdFont::load(const uint16_t pointSize, const bool twoBit, const size_t glyphCacheBytes,
-                      const uint16_t maxGlyphs) {
+                      const uint16_t maxGlyphs, const bool fourBit) {
   loaded_ = false;
   if (!sources_[Regular].present) return false;
   // CrossPoint speaks point-size-at-150-DPI (matching the .cpfont converter's
@@ -119,6 +119,7 @@ bool TtfEpdFont::load(const uint16_t pointSize, const bool twoBit, const size_t 
     Face& f = faces_[i];
     f.owner = this;
     f.twoBit = twoBit;
+    f.fourBit = fourBit;
     f.sizePx = sizePx;
     f.cap = glyphCacheBytes;
     f.maxGlyphs = maxGlyphs;
@@ -227,6 +228,7 @@ void TtfEpdFont::setupFace(Face& f) {
   f.data.ascender = ascent;
   f.data.descender = lineHeight - ascent > 0 ? lineHeight - ascent : 0;
   f.data.is2Bit = f.twoBit;
+  f.data.is4Bit = f.fourBit;
   f.data.glyphMissHandler = &TtfEpdFont::missThunk;
   f.data.glyphMissCtx = &f;
   f.data.coverageHandler = &TtfEpdFont::coverageThunk;
@@ -306,7 +308,7 @@ const EpdGlyph* TtfEpdFont::faultGlyph(Face& f, const uint32_t cp) {
   const bool haveMetrics = f.ft.metricsGlyph26_6(gid, size26_6, gm);
   const freeink::font::GlyphBitmap* g = f.ft.rasterizeGlyph26_6(gid, size26_6);
   uint32_t px = (g && g->pixels) ? static_cast<uint32_t>(g->width) * g->height : 0;
-  size_t bytes = px ? (f.twoBit ? (px + 3) / 4 : (px + 7) / 8) : 0;
+  size_t bytes = px ? (f.fourBit ? (px + 1) / 2 : (f.twoBit ? (px + 3) / 4 : (px + 7) / 8)) : 0;
   if (bytes > f.cap) {
     bytes = 0;
     px = 0;
@@ -352,17 +354,66 @@ const EpdGlyph* TtfEpdFont::faultGlyph(Face& f, const uint32_t cp) {
     if (f.bmp.size() < f.used + bytes) f.bmp.resize(f.used + bytes, 0);
     uint8_t* dst = f.bmp.data() + f.used;
     for (size_t i = 0; i < bytes; ++i) dst[i] = 0;
+    const uint32_t glyphWidth = g->width ? g->width : 1;
     for (uint32_t i = 0; i < px; ++i) {
       const uint8_t a = g->pixels[i];
-      if (f.twoBit) {
-        // Same 25/50/75% level thresholds as the .cpfont converter
-        // (fontconvert_sdcard.py's 4-bit >=4/8/12 downsample), so a TTF face
-        // prints at the same stroke weight as its .cpfont rendition. The BW
-        // page-turn pass inks ANY nonzero level, so the 25% start is what
-        // gives CJK strokes their full weight; starting at 50% rendered
-        // visibly thinner than cpfont.
-        const uint8_t v = a < 64 ? 0 : a < 128 ? 1 : a < 192 ? 2 : 3;
-        dst[i >> 2] |= static_cast<uint8_t>(v << ((3 - (i & 3)) * 2));
+      if (f.fourBit) {
+        // 16 级通路：把 FreeType 的 8 位覆盖度线性映射到 0..15，两个像素一字节、高半字节
+        // 在前（与 .cpfont converter 的 4 位布局一致）。
+        //
+        // 这里**不**抖动：面板本来就有 16 个落点，直接映射用满它的分辨率；再抖等于把
+        // 16 级又拉回网点噪声。抖动只对 2 位通路有意义（那里 4 个落点，源头的 8 位精度
+        // 只能靠空间分摊找回来）。
+        // / 16-level path: map FreeType's 8-bit coverage linearly onto 0..15, two pixels
+        // per byte, high nibble first (same layout as the .cpfont converter's 4-bit form).
+        //
+        // Deliberately NOT dithered: the panel has 16 landing points, so the direct map
+        // already uses its full resolution, and dithering on top would only add halftone
+        // noise. Dithering earns its place on the 2-bit path, where four landing points
+        // have to stand in for 8-bit source data.
+        const uint8_t v = static_cast<uint8_t>((static_cast<uint32_t>(a) * 15u + 127u) / 255u);
+        dst[i >> 1] |= static_cast<uint8_t>(v << ((1 - (i & 1)) * 4));
+      } else if (f.twoBit) {
+        // 用有序抖动把 FreeType 的 8 位覆盖度降到 4 级，而不是硬阈值四舍五入。
+        //
+        // 为什么值得：面板只有 4 个落点，硬阈值让一条斜边在整条边上做同一个取舍，
+        // 相邻像素要么全 1 要么全 2，台阶因此是完整一级 —— 那就是锯齿。抖动把这一级的
+        // 取舍按 Bayer 图案摊到相邻像素上，一小片区域的平均值就逼近原来的 8 位覆盖度，
+        // 表观层次从 4 级变成十几级，斜边是渐变而不是台阶。
+        //
+        // 字重不变：阈值中心仍是 25/50/75%（.cpfont converter 同一套），抖动只是在
+        // 中心两侧分摊，平均值与硬阈值一致，所以 BW 那一趟的墨量不会像"从 50% 起算"
+        // 那样变细。
+        //
+        // 代价：边缘略有一点网点感（本来是有序抖动的特征）。这是拿空间分辨率换层次，
+        // 对小字号不利、对阅读字号有利；如果实测觉得噪，把 kBayer4x4 的权重调小即可。
+        // / Ordered dither instead of a hard 2-bit threshold: the panel has four
+        // landing points, and a hard threshold makes a whole diagonal take the same
+        // side of a step, so the stair is a full level -- that is the jaggedness.
+        // The dither spreads that choice across neighbouring pixels per a Bayer
+        // pattern, so a small area averages back to the original 8-bit coverage and
+        // apparent levels go from 4 to a dozen or so.
+        //
+        // Weight is preserved: the threshold centres are still 25/50/75% (the same
+        // set the .cpfont converter uses), so the mean is unchanged and the B/W pass
+        // does not thin out the way starting at 50% did.
+        //
+        // Cost: a faint halftone texture along edges, which is what ordered dither
+        // looks like. It trades spatial resolution for depth; if that reads as noise
+        // on the device, scale kBayer4x4 down rather than removing it.
+        static constexpr uint8_t kBayer4x4[4][4] = {
+            {0, 8, 2, 10},
+            {12, 4, 14, 6},
+            {3, 11, 1, 9},
+            {15, 7, 13, 5},
+        };
+        const uint32_t x = i % glyphWidth;
+        const uint32_t y = i / glyphWidth;
+        // 0..240，正好铺满一级（255/4 ≈ 64）的取舍区间。
+        const uint32_t bias = static_cast<uint32_t>(kBayer4x4[y & 3][x & 3]) * 16u;
+        uint32_t v = (static_cast<uint32_t>(a) * 3u + bias) / 255u;
+        if (v > 3u) v = 3u;
+        dst[i >> 2] |= static_cast<uint8_t>(static_cast<uint8_t>(v) << ((3 - (i & 3)) * 2));
       } else if (a >= 128) {
         dst[i >> 3] |= static_cast<uint8_t>(1u << (7 - (i & 7)));
       }
