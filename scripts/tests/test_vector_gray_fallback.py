@@ -79,7 +79,29 @@ int main(){
 }
 ''')
 
-    def test_reader_start_commit_failure_submits_complete_bw_and_gates_background_bold(self):
+    def test_four_bit_packing_preserves_all_legacy_two_bit_thresholds(self):
+        ttf = (ROOT / 'lib/EpdFont/TtfEpdFont.cpp').read_text()
+        renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
+        packing = method(ttf, 'if (f.fourBit)')
+        helpers = ''.join(method(renderer, name) for name in (
+            'static uint8_t get4BitCoverage(', 'static uint8_t get2BitCoverage('))
+        run_cpp(r'''
+#include <cassert>
+#include <cstdint>
+''' + helpers + r'''
+int main(){
+ uint8_t dst[128]{};
+ struct {bool fourBit=true;} f;
+ for(int i=0;i<256;++i){
+  const uint8_t a=static_cast<uint8_t>(i);
+''' + packing + r'''
+  const uint8_t legacy=a<64?0:a<128?1:a<192?2:3;
+  assert(get2BitCoverage(dst,i,true)==legacy);
+ }
+}
+''')
+
+    def test_reader_start_commit_failure_submits_complete_bw_and_gates_images_background_bold_aa(self):
         source = (ROOT / 'src/activities/reader/EpubReaderActivity.cpp').read_text()
         a = source.index('  const bool use16LevelText =')
         eligibility = source[a:source.index(';', a)+1]
@@ -109,7 +131,7 @@ struct {bool readingBackgroundEnabled=false;int fakeBold=0;} SETTINGS;
 struct {bool four=true;bool readerFaceIsFourBit(){return four;}} sdFontSystem;
 struct {bool switching=false;bool isSwitchPending(){return switching;}} activityManager;
 struct Probe {
- GfxRenderer renderer;bool needsTextGrayscale=true;int pagesUntilFullRefresh=5;
+ GfxRenderer renderer;bool needsTextGrayscale=true,pageHasImages=false;int pagesUntilFullRefresh=5;
  bool eligible(){''' + eligibility + r''' return use16LevelText;}
  void render(){const bool use16LevelText=eligible();const unsigned t0=0;
   const auto renderPageWithGuideLines=[&]{renderer.page=true;};
@@ -124,9 +146,11 @@ int main(){
   assert(p.renderer.bwFrames==int(!start||!commit));
   assert(p.renderer.nativeFrames==int(start));
  }
- for(bool background:{false,true})for(int bold:{0,1,2,3}){
+ for(bool images:{false,true})for(bool background:{false,true})
+ for(bool aa:{false,true})for(int bold:{0,1,2,3}){
   SETTINGS.readingBackgroundEnabled=background;SETTINGS.fakeBold=bold;
-  Probe p;assert(p.eligible()==(!background&&bold==0));
+  Probe p;p.pageHasImages=images;p.needsTextGrayscale=aa;
+  assert(p.eligible()==(!images&&!background&&aa&&bold==0));
  }
  SETTINGS.readingBackgroundEnabled=false;SETTINGS.fakeBold=0;
  Probe p;p.needsTextGrayscale=false;assert(!p.eligible());

@@ -357,8 +357,8 @@ const EpdGlyph* TtfEpdFont::faultGlyph(Face& f, const uint32_t cp) {
     for (uint32_t i = 0; i < px; ++i) {
       const uint8_t a = g->pixels[i];
       if (f.fourBit) {
-        // Pack linear coverage, high nibble first.
-        const uint8_t v = static_cast<uint8_t>((static_cast<uint32_t>(a) * 15u + 127u) / 255u);
+        // High nibble first; truncation preserves the original two-bit thresholds on fallback.
+        const uint8_t v = a >> 4;
         dst[i >> 1] |= static_cast<uint8_t>(v << ((1 - (i & 1)) * 4));
       } else if (f.twoBit) {
         const uint8_t v = a < 64 ? 0 : (a < 128 ? 1 : (a < 192 ? 2 : 3));

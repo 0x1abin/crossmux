@@ -2442,8 +2442,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // Night mode renders crisp B/W; the SDK disables every grayscale display path.
   const bool grayscaleEnabled = !renderer.isInverted();
   const bool needsTextGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
-  // Backgrounds and faux bold retain the existing two-bit rendering path.
-  const bool use16LevelText = needsTextGrayscale && renderer.getGrayscaleLevels() == 16 &&
+  // Images write the BW buffer directly; keep them, backgrounds and faux bold on the existing path.
+  const bool use16LevelText = needsTextGrayscale && !pageHasImages && renderer.getGrayscaleLevels() == 16 &&
                               sdFontSystem.readerFaceIsFourBit() && !SETTINGS.readingBackgroundEnabled &&
                               SETTINGS.fakeBold == 0;
 #if FREEINK_DEVICE_EEGO_A4
