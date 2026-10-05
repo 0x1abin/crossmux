@@ -18,6 +18,8 @@ class Bitmap {
 
   int getWidth() const { return valid ? 1 : 0; }
   int getHeight() const { return valid ? 1 : 0; }
+  // 1x1 1bpp rows are padded to 4 bytes, matching cover_stub::writeBmp (66 bytes).
+  int getRowBytes() const { return valid ? 4 : 0; }
 
  private:
   HalFile& file;
