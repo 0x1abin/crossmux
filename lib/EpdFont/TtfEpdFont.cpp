@@ -6,16 +6,10 @@
 #include <MemoryManager.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
-#include <esp_timer.h>
 
 #include <algorithm>
 
 namespace {
-
-// TEMPORARY INSTRUMENTATION (see CacheProbe in the header): aggregated across
-// every face and instance, since the measurement only cares about totals inside
-// one page turn.
-TtfEpdFont::CacheProbe s_cacheProbe;
 
 // Cache growth policy: PsramAlloc ABORTS when fiFontMalloc fails, and vector
 // doubling transiently needs old+new blocks, so every cache expansion must be
@@ -40,12 +34,6 @@ bool reserveChecked(V& v, const size_t need, const size_t step, const size_t cei
   return true;
 }
 }  // namespace
-
-TtfEpdFont::CacheProbe TtfEpdFont::takeCacheProbe() {
-  const CacheProbe snapshot = s_cacheProbe;
-  s_cacheProbe = CacheProbe{};
-  return snapshot;
-}
 
 void TtfEpdFont::addResidentSource(const uint8_t style, const uint8_t* data, const uint32_t len) {
   if (style >= 4 || data == nullptr || len == 0) return;
@@ -153,9 +141,6 @@ bool TtfEpdFont::load(const uint16_t pointSize, const bool twoBit, const size_t 
 
 void TtfEpdFont::initFace(Face& f) {
   if (f.inited) return;
-  // TEMPORARY INSTRUMENTATION: a (re)init means the FreeType face was torn down
-  // and has to re-parse the font tables.
-  s_cacheProbe.faceInits++;
   f.inited = true;
   const Source& s = sources_[f.srcIndex];
   if (!s.present) {
@@ -255,9 +240,6 @@ void TtfEpdFont::setupFace(Face& f) {
 }
 
 void TtfEpdFont::flushFace(Face& f) {
-  // TEMPORARY INSTRUMENTATION: how many already-rasterized glyphs this discards.
-  s_cacheProbe.flushes++;
-  s_cacheProbe.flushGlyphs += static_cast<uint32_t>(f.glyphs.size());
   f.glyphs.clear();
   f.cps.clear();
   f.slot.clear();
@@ -308,16 +290,6 @@ const EpdGlyph* TtfEpdFont::faultGlyph(Face& f, const uint32_t cp) {
     const auto it = std::lower_bound(f.cps.begin(), f.cps.end(), cp);
     if (it != f.cps.end() && *it == cp) return &f.glyphs[f.slot[static_cast<size_t>(it - f.cps.begin())]];
   }
-
-  // TEMPORARY INSTRUMENTATION: everything below is a cache miss, so this scope
-  // costs one rasterization per exit path.
-  struct MissProbe {
-    const int64_t startUs = esp_timer_get_time();
-    ~MissProbe() {
-      s_cacheProbe.faults++;
-      s_cacheProbe.faultUs += static_cast<uint32_t>(esp_timer_get_time() - startUs);
-    }
-  } missProbe;
 
   // Resolve to a glyph ID: cmap first, then the GSUB result for the ligature
   // presentation codepoints (whose glyphs commonly have no cmap entry at all).

@@ -69,16 +69,11 @@ class TtfEpdFont {
 
   EpdFontFamily family() const;
 
-  // Drop every face's cached page glyphs but KEEP the allocations (byte arena +
-  // vector capacity), so a later re-fault lands in buffers already sized to the
-  // book and stops touching the allocator once converged.
-  //
-  // NOT wired to FontCacheManager::clearCache(): that is a per-render reset for
-  // the caches that are recycled by design, and this one is not one of them. The
-  // glyph set only changes when the family or the point size changes, both of
-  // which go through load() (which flushes) or destroy the object outright, and
-  // the cache is hard-bounded by its own byte/glyph cap. Use this for an explicit
-  // invalidation; use releaseResidentCaches() to answer memory pressure.
+  // Per-scope reset (mirrors SdCardFont::clearCache): drop every face's cached
+  // page glyphs but KEEP the allocations (byte arena + vector capacity), so a
+  // page turn re-faults into buffers already sized to the book and stops touching
+  // the allocator once converged. Driven by FontCacheManager::clearCache() /
+  // PrewarmScope, symmetrically with the SD fonts.
   void clearCache();
 
   // Heap-critical teardown (mirrors SdCardFont::releaseResidentCaches): free
@@ -92,19 +87,6 @@ class TtfEpdFont {
   // Optional batch pre-warm of the REGULAR face (other styles fault lazily).
   bool build(const char* utf8);
   bool addCoverage(const char* utf8);
-
-  // TEMPORARY INSTRUMENTATION — measuring how much TTF rasterization a single
-  // page turn costs, and how much of it is thrown away by clearCache(). Delete
-  // this block (and its uses in EpubReaderActivity) once the fix is settled.
-  struct CacheProbe {
-    uint32_t faults = 0;       // glyph rasterizations (cache misses), all faces
-    uint32_t faultUs = 0;      // microseconds spent inside faultGlyph
-    uint32_t flushes = 0;      // flushFace() calls
-    uint32_t flushGlyphs = 0;  // cached glyphs discarded by those flushes
-    uint32_t faceInits = 0;    // FreeType face (re)initializations
-  };
-  // Returns the counters accumulated since the last call and resets them.
-  static CacheProbe takeCacheProbe();
 
  private:
   // A borrowed source file (one per style role that the caller supplies).

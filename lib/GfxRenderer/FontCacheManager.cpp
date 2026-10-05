@@ -50,34 +50,8 @@ FontCacheManager::FontCacheManager(const std::map<int, EpdFontFamily>& fontMap,
 
 void FontCacheManager::setFontDecompressor(FontDecompressor* d) { fontDecompressor_ = d; }
 
-FontCacheManager::CacheCallProbe FontCacheManager::takeCacheCallProbe() {
-  const CacheCallProbe snapshot{clearCalls_, releaseCalls_};
-  clearCalls_ = 0;
-  releaseCalls_ = 0;
-  return snapshot;
-}
-
 void FontCacheManager::clearCache() {
-  // TEMPORARY INSTRUMENTATION (see CacheCallProbe).
-  clearCalls_++;
-  // Per-render reset of the glyph caches that are recycled by design:
-  //   * the compressed-font decompressor,
-  //   * SD (.cpfont) mini arenas, which are small and deliberately rebuilt per
-  //     render (SdCardFont::clearCache -> resetStyleMiniData()).
-  //
-  // TTF (vector) faces are deliberately NOT cleared here. Their glyph cache is
-  // not a per-render scratch pad: it converges on the book's working set and is
-  // hard-bounded by its own byte/glyph cap (faultGlyph flushes when it fills), so
-  // dropping it per render only forces the whole page to be re-rasterized through
-  // FreeType's streamed SD reads. Nothing in a page turn can invalidate it either
-  // — the glyph set changes only when the family or the point size changes, and
-  // both of those go through TtfEpdFont::load(), which flushes every face itself
-  // (see its line-139 comment), while a family change destroys the TtfEpdFont and
-  // takes the cache with it.
-  //
-  // Memory pressure is handled by the manager's own sinks instead:
-  // "gfx.renderGlyphCache" for the caches above, and "gfx.ttfGlyphArenas", which
-  // routes TTF through releaseResidentCaches() to actually free the arenas.
+  // Preserve bounded TTF glyph caches across renders; memory pressure uses releaseResidentCaches().
   if (fontDecompressor_) fontDecompressor_->clearCache();
   for (auto& [id, font] : sdCardFonts_) {
     font->clearCache();
@@ -85,8 +59,6 @@ void FontCacheManager::clearCache() {
 }
 
 void FontCacheManager::releaseSdFontCaches() {
-  // TEMPORARY INSTRUMENTATION (see CacheCallProbe).
-  releaseCalls_++;
   if (fontDecompressor_) fontDecompressor_->clearCache();
   for (auto& [id, font] : sdCardFonts_) {
     font->releaseResidentCaches();
