@@ -584,15 +584,6 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
   // each), so the flush-everything ceiling is never hit and warm page turns
   // are pure cache hits. Without PSRAM keep the internal-DRAM-safe default.
   //
-  // The budget is in BYTES, so 4-bit coverage halves how many glyphs fit: the
-  // same 1 MB now holds ~2048 instead of ~4096, the arena fills in a normal
-  // session, faultGlyph starts flushing, and every page turn re-rasterizes again
-  // -- which shows up first as a slow book open, when the first pages fault in
-  // their whole working set. Doubling it for the 4-bit face keeps the same glyph
-  // count for twice the bytes; the arena is PSRAM and this board has megabytes
-  // spare, so it is the cheaper side of that trade.
-  // / The budget is in bytes, so 4-bit coverage halves the glyph count it holds.
-  // Double it for the 4-bit face to keep the same working set; the arena is PSRAM.
   const bool havePsram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) > 0;
   // 面板支持 16 级时，正文矢量字面按 4 位覆盖度加载：FreeType 本来就算 8 位，压成 2 位等于
   // 把抗锯齿的层次丢掉。4 位只对 16 级通路有意义（那条路用 drawGrayscale16Pixel 直接把
@@ -600,7 +591,7 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
   // / When the panel does 16 levels, load the reader's vector face with 4-bit coverage:
   // FreeType already computes 8 bits, and packing to 2 discards the anti-aliasing depth.
   const bool fourBit = renderer.getGrayscaleLevels() == 16;
-  const size_t cacheBytes = havePsram ? (fourBit ? 2 * 1024 * 1024 : 1024 * 1024) : 32 * 1024;
+  const size_t cacheBytes = havePsram ? 1024 * 1024 : 32 * 1024;
   const uint16_t maxGlyphs = havePsram ? 4096 : 768;
 
   // Same family, only the reader size changed (size preview): the open style

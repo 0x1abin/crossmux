@@ -2451,18 +2451,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // Night mode renders crisp B/W; the SDK disables every grayscale display path.
   const bool grayscaleEnabled = !renderer.isInverted();
   const bool needsTextGrayscale = grayscaleEnabled && SETTINGS.textAntiAliasing;
-  // 16 级文字抗锯齿：矢量字体（.ttf/.otf）在加载时保留 FreeType 的 4 位覆盖度，而
-  // drawGrayscale16Pixel() 能把它直接写进面板的 4bpp 缓冲。这条路让文字拿到真正的
-  // 16 级过渡，而不是 2 位选择平面给的 4 级；顺带把三趟（BW + LSB + MSB）压成一趟。
-  //
-  // 三个前提缺一不可：面板支持 16 级、本次渲染允许灰度、当前正文确实是矢量字体。
-  // 预烤的 .cpfont 位图只有 2 位，走不了这条路（readerFaceIsFourBit() 会返回 false）。
-  // / 16-level text anti-aliasing: a vector face keeps FreeType's 4-bit coverage, and
-  // drawGrayscale16Pixel() writes it straight into the panel's 4bpp buffer. That gives
-  // text genuine 16-level transitions instead of the four levels the 2-bit selector
-  // planes can express, and collapses three passes (BW + LSB + MSB) into one.
-  const bool use16LevelText =
-      needsTextGrayscale && renderer.getGrayscaleLevels() == 16 && sdFontSystem.readerFaceIsFourBit();
+  // Backgrounds and faux bold retain the existing two-bit rendering path.
+  const bool use16LevelText = needsTextGrayscale && renderer.getGrayscaleLevels() == 16 &&
+                              sdFontSystem.readerFaceIsFourBit() && !SETTINGS.readingBackgroundEnabled &&
+                              SETTINGS.fakeBold == 0;
 #if FREEINK_DEVICE_EEGO_A4
   // A4 single-refresh design: displayGrayBuffer() replaces the B/W base on the
   // panel, so whatever the gray pass draws IS the final frame. With text AA
@@ -2619,24 +2611,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto tDisplay = millis();
 
   if (use16LevelText) {
-    // 单趟 16 级文字渲染。
-    //
-    // beginGrayscale16() 会 clearScreen()（把帧缓冲清白，同时留作 B/W 代理），所以这一趟
-    // 必须重画整页 —— 上面那趟 BW 渲染的结果在这里被取代，这也是为什么底图没有单独推。
-    //
-    // drawGrayscale16Pixel() 每画一个像素都会同步 drawPixel(level < 8)，所以这一趟结束后
-    // 帧缓冲本身就是这一页的 B/W 代理：页缓存与差分基准因此自然保持一致，不需要额外重建。
-    //
-    // 失败一律退回 B/W：宁可这一页没有 16 级，也不能把面板留在半推状态。
-    // / One-pass 16-level text render.
-    //
-    // beginGrayscale16() calls clearScreen() (framebuffer to white, kept as the B/W proxy),
-    // so this pass has to repaint the page; that is also why the base was not pushed above.
-    // drawGrayscale16Pixel() mirrors each pixel through drawPixel(level < 8), so when the
-    // pass ends the framebuffer already holds this page's B/W proxy, which keeps the page
-    // cache and the differential base consistent without extra work.
-    //
-    // Any failure falls back to B/W: better a page without 16 levels than a half-pushed one.
+    // Native begin clears the frame, so render the complete page again.
     if (renderer.beginGrayscale16()) {
       renderPageWithGuideLines();
       renderStatusBar();
@@ -2650,11 +2625,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         pagesUntilFullRefresh = 1;
         return;
       }
-      LOG_ERR("ERS", "16-level text commit failed; leaving the B/W page");
-      renderer.cancelGrayscale16();
+      LOG_ERR("ERS", "16-level text commit failed; displaying B/W");
     } else {
-      LOG_ERR("ERS", "Could not start the 16-level text pass; leaving the B/W page");
+      LOG_ERR("ERS", "Could not start the 16-level text pass; displaying B/W");
     }
+    renderer.cancelGrayscale16();
+    renderer.setRenderMode(GfxRenderer::BW);
+    renderer.clearScreen();
+    renderPageWithGuideLines();
+    renderStatusBar();
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    pagesUntilFullRefresh = 1;
+    return;
   } else if (tiledGrayscale) {
     constexpr int STRIP_ROWS = 80;
     const int gh = renderer.getDisplayHeight();

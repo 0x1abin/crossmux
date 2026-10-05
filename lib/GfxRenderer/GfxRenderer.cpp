@@ -535,11 +535,6 @@ static_assert(dilate2BitCoverage(0, 0, 3, 0, 2) == 3);  // Standard extends two 
 static_assert(dilate2BitCoverage(0, 0, 0, 3, 3) == 3);  // Heavy extends three pixels.
 static_assert(dilate2BitCoverage(0, 3, 3, 3, 0) == 0);  // Off preserves the original coverage.
 
-static uint8_t get2BitCoverage(const uint8_t* bitmap, const int pixelPosition) {
-  const uint8_t byte = bitmap[pixelPosition >> 2];
-  return (byte >> ((3 - (pixelPosition & 3)) * 2)) & 0x3;
-}
-
 static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::RenderMode renderMode, const int x,
                                const int y, const bool pixelState, const uint8_t coverage) {
   const auto pixel = GfxRenderer::mapTwoBitGlyphCoverage(renderMode, coverage);
@@ -551,6 +546,12 @@ static void draw2BitGlyphPixel(const GfxRenderer& renderer, const GfxRenderer::R
 static uint8_t get4BitCoverage(const uint8_t* bitmap, const int pixelPosition) {
   const uint8_t byte = bitmap[pixelPosition >> 1];
   return (byte >> ((1 - (pixelPosition & 1)) * 4)) & 0xF;
+}
+
+static uint8_t get2BitCoverage(const uint8_t* bitmap, const int pixelPosition, const bool fourBit = false) {
+  if (fourBit) return get4BitCoverage(bitmap, pixelPosition) >> 2;
+  const uint8_t byte = bitmap[pixelPosition >> 2];
+  return (byte >> ((3 - (pixelPosition & 3)) * 2)) & 0x3;
 }
 
 // 把 4 位覆盖度写进 16 级灰度缓冲。drawGrayscale16Pixel() 的 gray 是 0 = 黑、255 = 白，
@@ -627,7 +628,7 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   const int baseX = cursorX + glyph->left / 2;
   const int baseY = cursorY - glyph->top / 2;
 
-  if (fontData->is2Bit) {
+  if (fontData->is2Bit || fontData->is4Bit) {
     // 2-bit packed format: 4 pixels per byte, MSB first, 2 bits per pixel.
     // raw value: 0=white, 1=light-gray, 2=dark-gray, 3=black.
     for (int dstY = 0; dstY < dstH; dstY++) {
@@ -639,8 +640,7 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
         for (int sampleY = 0; sampleY < 2 && srcY + sampleY < srcH; sampleY++) {
           for (int sampleX = 0; sampleX < 2 && srcX + sampleX < srcW; sampleX++) {
             const int pos = (srcY + sampleY) * srcW + srcX + sampleX;
-            const uint8_t byte = bitmap[pos >> 2];
-            const uint8_t raw = (byte >> ((3 - (pos & 3)) * 2)) & 0x3;
+            const uint8_t raw = get2BitCoverage(bitmap, pos, fontData->is4Bit);
             coverage += raw;
             if (raw > maxRaw) maxRaw = raw;
           }
@@ -727,15 +727,8 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
       innerBase = cursorX + left;  // screenX = innerBase + glyphX
     }
 
-    if (is4Bit && renderer.isGrayscale16Active()) {
-      // 16 级通路：覆盖度直接写进 4bpp 缓冲。
-      //
-      // 这里不做合成粗体的膨胀 —— 那套 dilate2BitCoverage() 是在 2 位覆盖度上取"左侧最暗
-      // 邻居"，对这个深度没有意义，硬套会把 16 级又压回几档。
-      // / 16-level path: coverage goes straight into the 4bpp buffer. Faux-bold dilation
-      // is deliberately not applied here -- dilate2BitCoverage() takes the darkest of the
-      // preceding 2-bit neighbours, which is meaningless at this depth and would collapse
-      // the extra levels again.
+    if (is4Bit && renderer.isGrayscale16Active() && pixelState && syntheticBoldPixels == 0) {
+      // Native coverage is used only for unmodified black glyphs.
       for (int glyphY = 0; glyphY < height; glyphY++) {
         const int outerCoord = outerBase + glyphY;
         for (int glyphX = 0; glyphX < width; glyphX++) {
@@ -750,7 +743,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
           draw4BitGlyphPixel(renderer, screenX, screenY, get4BitCoverage(bitmap, glyphY * width + glyphX));
         }
       }
-    } else if (is2Bit) {
+    } else if (is2Bit || is4Bit) {
       for (int glyphY = 0; glyphY < height; glyphY++) {
         const int outerCoord = outerBase + glyphY;
         if (syntheticBoldPixels == 0) {
@@ -764,7 +757,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
               screenY = outerCoord;
             }
             draw2BitGlyphPixel(renderer, renderMode, screenX, screenY, pixelState,
-                               get2BitCoverage(bitmap, glyphY * width + glyphX));
+                               get2BitCoverage(bitmap, glyphY * width + glyphX, is4Bit));
           }
           continue;
         }
@@ -783,8 +776,8 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             screenY = outerCoord;
           }
 
-          const uint8_t current =
-              glyphX < width ? get2BitCoverage(bitmap, glyphY * width + glyphX) : 0;  // White tail extends the edge.
+          const uint8_t current = glyphX < width ? get2BitCoverage(bitmap, glyphY * width + glyphX, is4Bit)
+                                                 : 0;  // White tail extends the edge.
           const uint8_t coverage = dilate2BitCoverage(current, previous1, previous2, previous3, syntheticBoldPixels);
           draw2BitGlyphPixel(renderer, renderMode, screenX, screenY, pixelState, coverage);
           previous3 = previous2;
@@ -1797,8 +1790,10 @@ bool GfxRenderer::beginGrayscale16() {
 
 bool GfxRenderer::commitGrayscale16() const {
   if (!grayscale16Buffer) return false;
+  const bool committed = commitNativeGray(display);
+  if (!committed) cancelNativeGray(display);
   grayscale16Buffer = nullptr;
-  return commitNativeGray(display);
+  return committed;
 }
 
 void GfxRenderer::cancelGrayscale16() const {

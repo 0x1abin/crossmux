@@ -221,3 +221,6 @@ endif()
 add_test(NAME RealImageDecoderCancellation
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_real_image_decoder_cancel.py
     --png-source ${pngdec_SOURCE_DIR}/src --jpeg-source ${jpegdec_SOURCE_DIR}/src)
+
+add_test(NAME VectorGrayFallback
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_vector_gray_fallback.py)
