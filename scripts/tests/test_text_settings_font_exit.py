@@ -63,6 +63,50 @@ int main(){
 }
 ''')
 
+    def test_parent_settings_and_reader_reload_the_selected_font_after_exit(self):
+        reader = (ROOT / 'src/activities/reader/EpubReaderActivity.cpp').read_text()
+        settings = (ROOT / 'src/activities/settings/SettingsActivity.cpp').read_text()
+        menu = reader[reader.index('case EpubReaderMenuActivity::MenuAction::TEXT_SETTINGS:'):]
+        setting = settings[settings.index('case SettingAction::TextSettings:'):]
+        reader_callback = method(menu, '[this](const ActivityResult&)')
+        settings_callback = method(setting, '[this](const ActivityResult&)')
+        run_cpp(r'''
+#include <cassert>
+#include <memory>
+static bool locked=false;
+struct RenderLock {
+ RenderLock(){assert(!locked);locked=true;}
+ template<typename T> explicit RenderLock(T&):RenderLock(){}
+ ~RenderLock(){locked=false;}
+};
+struct ActivityResult{};
+struct {void saveToFile(){}} SETTINGS;
+struct {void resumeSession(){}} READING_STATS;
+struct {bool loaded=false;void ensureLoaded(int){assert(locked);loaded=true;}} sdFontSystem;
+struct Section {int pageCount=8,currentPage=3;};
+struct EpubReaderActivity {
+ int renderer=0,cachedSpineIndex=0,currentSpineIndex=2,cachedChapterTotalPageCount=0,nextPageNumber=0;
+ std::unique_ptr<Section> section=std::make_unique<Section>();
+ void rememberCurrentContentOffset(){}
+ void openReaderMenu(){assert(sdFontSystem.loaded&&!locked);}
+ void applyReaderTextSettings();
+ void returned(){auto callback=''' + reader_callback + r''';callback(ActivityResult{});}
+};
+struct SettingsActivity {
+ int renderer=0;
+ void rebuildSettingsLists(){assert(sdFontSystem.loaded&&!locked);}
+ void requestUpdate(){assert(sdFontSystem.loaded&&!locked);}
+ void returned(){auto callback=''' + settings_callback + r''';callback(ActivityResult{});}
+};
+''' + method(reader, 'void EpubReaderActivity::applyReaderTextSettings(') + r'''
+int main(){
+ EpubReaderActivity reader;reader.returned();
+ assert(sdFontSystem.loaded&&!reader.section&&reader.nextPageNumber==3&&!locked);
+ sdFontSystem.loaded=false;SettingsActivity settings;settings.returned();
+ assert(sdFontSystem.loaded&&!locked);
+}
+''')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1181,16 +1181,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResultWith<TextSettingsActivity>(
           [this](const ActivityResult&) {
             READING_STATS.resumeSession();
-            {
-              RenderLock lock;
-              if (section) {
-                rememberCurrentContentOffset();
-                cachedSpineIndex = currentSpineIndex;
-                cachedChapterTotalPageCount = section->pageCount;
-                nextPageNumber = section->currentPage;
-              }
-              section.reset();
-            }
+            applyReaderTextSettings();
             openReaderMenu();
           },
           &sdFontSystem.registry(), TextSettingsActivity::Tab::Family);
