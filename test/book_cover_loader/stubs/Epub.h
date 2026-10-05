@@ -25,6 +25,8 @@ class Epub {
   bool generateThumbBmp(int height) const {
     ++cover_stub::epubThumbnailGenerations;
     const std::string output = getThumbBmpPath(height);
+    if (path.find("convert-fail") != std::string::npos) return false;
+    if (path.find("header-only") != std::string::npos) return cover_stub::writeHeaderOnly(output);
     if (path.find("coverless") == std::string::npos) return cover_stub::writeBmp(output);
     if (hasCoverOverride()) {
       ++cover_stub::overrideConversions;
@@ -34,6 +36,7 @@ class Epub {
   }
   bool generateCoverBmp(bool = false) const {
     ++cover_stub::fullCoverGenerations;
+    if (path.find("convert-fail") != std::string::npos) return false;
     if (path.find("coverless") != std::string::npos) {
       if (!hasCoverOverride()) return false;
       ++cover_stub::overrideConversions;

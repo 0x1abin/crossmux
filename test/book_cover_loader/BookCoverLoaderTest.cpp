@@ -1,3 +1,4 @@
+#include <Bitmap.h>
 #include <HalStorage.h>
 #include <gtest/gtest.h>
 
@@ -22,6 +23,7 @@ class BookCoverLoaderTest : public ::testing::Test {
     ASSERT_EQ(setenv("CROSSPOINT_SIM_SD", root.c_str(), 1), 0);
     ASSERT_TRUE(Storage.begin());
     cover_stub::epubThumbnailGenerations = 0;
+    cover_stub::xtcThumbnailGenerations = 0;
     cover_stub::fullCoverGenerations = 0;
     cover_stub::overrideConversions = 0;
   }
@@ -102,15 +104,40 @@ TEST_F(BookCoverLoaderTest, RegeneratesHeaderOnlyThumbnail) {
   Storage.mkdir("/.crosspoint/epub");
   {
     std::ofstream output(hostPath("/.crosspoint/epub/thumb_226.bmp"), std::ios::binary | std::ios::trunc);
-    output << "BM" << std::string(60, '\0');
+    output << "BM" << std::string(sizeof(BmpHeader) - 2, '\0');
   }
-  ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 62U);
+  ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), sizeof(BmpHeader));
 
   bool generated = false;
   EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
   EXPECT_TRUE(generated);
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
-  EXPECT_GT(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 62U);
+  EXPECT_GT(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), sizeof(BmpHeader));
+}
+
+TEST_F(BookCoverLoaderTest, StopsWhenGeneratedThumbStaysHeaderOnly) {
+  writeBook("/header-only.epub");
+  bool generated = true;
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/header-only.epub", 226, &generated).empty());
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 0U);
+
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/header-only.epub", 226, &generated).empty());
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, StopsAfterFailedThumbnailConvert) {
+  writeBook("/convert-fail.epub");
+  writeOverride({0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0});
+  bool generated = true;
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/convert-fail.epub", 226, &generated).empty());
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 0U);
+
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/convert-fail.epub", 226, &generated).empty());
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
 }
 
 TEST_F(BookCoverLoaderTest, KeepsLayoutThumbnailSizesIndependent) {
@@ -167,16 +194,41 @@ TEST_F(BookCoverLoaderTest, PrefersInternalEpubCoverOverOverride) {
   EXPECT_EQ(cover_stub::overrideConversions, 0);
 }
 
-TEST_F(BookCoverLoaderTest, RetriesEmptyMarkerWhenOverrideAppears) {
+TEST_F(BookCoverLoaderTest, KeepsEmptyThumbTerminalAfterOverrideAppears) {
   writeBook("/coverless.epub");
   bool generated = true;
   EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated).empty());
   writeOverride({0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0});
 
-  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
-  EXPECT_TRUE(generated);
-  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 2);
-  EXPECT_EQ(cover_stub::overrideConversions, 1);
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/coverless.epub", 226, &generated).empty());
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(cover_stub::overrideConversions, 0);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 0U);
+}
+
+TEST_F(BookCoverLoaderTest, StopsAfterFailedXtcThumbnail) {
+  writeBook("/convert-fail.xtc");
+  bool generated = true;
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/convert-fail.xtc", 226, &generated).empty());
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::xtcThumbnailGenerations, 1);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/xtc/thumb_226.bmp")), 0U);
+
+  EXPECT_TRUE(BookCoverLoader::ensureThumbnail("/convert-fail.xtc", 226, &generated).empty());
+  EXPECT_EQ(cover_stub::xtcThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, StopsAfterFailedFullCover) {
+  writeBook("/convert-fail.txt");
+  bool generated = true;
+  EXPECT_TRUE(BookCoverLoader::ensureFullCover("/convert-fail.txt", nullptr, nullptr, &generated).empty());
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::fullCoverGenerations, 1);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/txt/cover.bmp")), 0U);
+
+  EXPECT_TRUE(BookCoverLoader::ensureFullCover("/convert-fail.txt").empty());
+  EXPECT_EQ(cover_stub::fullCoverGenerations, 1);
 }
 
 TEST_F(BookCoverLoaderTest, IgnoresInvalidOverrideAfterEmptyMarker) {

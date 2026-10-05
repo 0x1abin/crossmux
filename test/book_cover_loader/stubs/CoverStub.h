@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Bitmap.h>
 #include <HalStorage.h>
 
 #include <array>
@@ -7,6 +8,7 @@
 
 namespace cover_stub {
 inline int epubThumbnailGenerations = 0;
+inline int xtcThumbnailGenerations = 0;
 inline int fullCoverGenerations = 0;
 inline int overrideConversions = 0;
 
@@ -26,6 +28,14 @@ inline bool writeBmp(const std::string& path) {
   bytes[58] = 0xFF;
   bytes[59] = 0xFF;
   bytes[60] = 0xFF;
+  HalFile file;
+  return Storage.openFileForWrite("TEST", path, file) && file.write(bytes.data(), bytes.size()) == bytes.size();
+}
+
+inline bool writeHeaderOnly(const std::string& path) {
+  std::array<uint8_t, sizeof(BmpHeader)> bytes{};
+  bytes[0] = 'B';
+  bytes[1] = 'M';
   HalFile file;
   return Storage.openFileForWrite("TEST", path, file) && file.write(bytes.data(), bytes.size()) == bytes.size();
 }
