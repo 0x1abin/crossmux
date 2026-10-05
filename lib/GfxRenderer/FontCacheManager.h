@@ -26,6 +26,15 @@ class FontCacheManager {
   // web-server + WiFi startup, image decode, dictionary, sleep).
   void releaseSdFontCaches();
   void prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F, bool accumulate = true);
+
+  // TEMPORARY INSTRUMENTATION — how often the reader tears the glyph caches
+  // down inside a single page turn. Delete with the TtfEpdFont probe.
+  struct CacheCallProbe {
+    uint32_t clearCalls = 0;
+    uint32_t releaseCalls = 0;
+  };
+  // Returns the counters accumulated since the last call and resets them.
+  CacheCallProbe takeCacheCallProbe();
   void logStats(const char* label = "render");
   void resetStats();
   bool canIdlePrewarm(int fontId) const;
@@ -65,6 +74,10 @@ class FontCacheManager {
   // Read only when CROSSPOINT_VECTOR_FONTS is on (PSRAM boards).
   [[maybe_unused]] const std::map<int, TtfEpdFont*>& ttfFonts_;
   FontDecompressor* fontDecompressor_ = nullptr;
+
+  // TEMPORARY INSTRUMENTATION counters (see CacheCallProbe).
+  uint32_t clearCalls_ = 0;
+  uint32_t releaseCalls_ = 0;
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
