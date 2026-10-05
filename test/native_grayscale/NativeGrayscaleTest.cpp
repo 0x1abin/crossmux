@@ -202,6 +202,15 @@ int main(int argc, char** argv) {
   for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::PortraitInverted, GfxRenderer::LandscapeClockwise,
                                  GfxRenderer::LandscapeCounterClockwise}) {
     renderer.setOrientation(orientation);
+    assert(renderer.beginGrayscale16());
+    renderer.fillRect(0, 0, 3, 2);
+    for (int y = 0; y < renderer.getScreenHeight(); ++y) {
+      for (int x = 0; x < renderer.getScreenWidth(); ++x) {
+        const auto [px, py] = physical(orientation, x, y);
+        assert(tone(px, py) == (x < 3 && y < 2 ? 0 : 15));
+      }
+    }
+    renderer.cancelGrayscale16();
     for (const bool topDown : {false, true})
       for (const bool reversed : {false, true}) {
         auto bytes = ramp(topDown, reversed);
@@ -253,7 +262,9 @@ int main(int argc, char** argv) {
   assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
   for (int i = 0; i < 16; ++i) assert(tone(i * 8 + 4, 8) == i);
   failRefresh = true;
+  const int cancelsBeforeFailedCommit = cancels;
   assert(!renderer.commitGrayscale16() && !renderer.isGrayscale16Active());
+  assert(cancels == cancelsBeforeFailedCommit + 1);
   failRefresh = false;
   HalFile file;
   assert(Storage.openFileForRead("TEST", "/ramp.jpg", file));
