@@ -34,6 +34,7 @@ enum ReadyRow {
 };
 
 constexpr uint8_t RELEASE_NOTE_MAX_LINES = 4;
+constexpr unsigned int PROGRESS_REFRESH_STEP_PERCENT = 10;
 
 fui::TextStyle releaseNoteStyle() {
   fui::TextStyle style;
@@ -382,17 +383,6 @@ void OtaUpdateActivity::render(RenderLock&&) {
     const auto height = renderer.getLineHeight(UI_10_FONT_ID);
     const auto top = (pageHeight - height) / 2;
 
-    float updaterProgress = 0;
-    if (state == State::UpdateInProgress) {
-      LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
-      updaterProgress = static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize());
-      // Only update every 2% at the most
-      if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) {
-        return;
-      }
-      lastUpdaterPercentage = static_cast<int>(updaterProgress * 100);
-    }
-
     if (state == State::CheckingForUpdate) {
       renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_CHECKING_UPDATE));
     } else if (state == State::ConfirmingUpdate) {
@@ -412,15 +402,15 @@ void OtaUpdateActivity::render(RenderLock&&) {
       GUI.drawProgressBar(
           renderer,
           Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-          static_cast<int>(updaterProgress * 100), 100);
+          std::min(progressBytes, progressTotalBytes), std::max<size_t>(progressTotalBytes, 1));
 
       y += metrics.progressBarHeight + metrics.verticalSpacing;
       // Percent label is drawn by BaseTheme::drawProgressBar; this slot is left intentionally empty
       // so the bytes line below stays at the same Y it was at when the activity drew its own percent.
       y += height + metrics.verticalSpacing;
-      renderer.drawCenteredText(
-          UI_10_FONT_ID, y,
-          (std::to_string(updater.getProcessedSize()) + " / " + std::to_string(updater.getTotalSize())).c_str());
+      char progressText[48];
+      snprintf(progressText, sizeof(progressText), "%zu / %zu", progressBytes, progressTotalBytes);
+      renderer.drawCenteredText(UI_10_FONT_ID, y, progressText);
     } else if (state == State::NoUpdate) {
       renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_UPDATE), true, EpdFontFamily::BOLD);
       const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
@@ -454,16 +444,6 @@ void OtaUpdateActivity::render(RenderLock&&) {
   const int height = renderer.getLineHeight(UI_10_FONT_ID);
   const int relatedGap = SubpageLayout::relatedGap(metrics);
   const int sectionGap = SubpageLayout::sectionGap(metrics);
-
-  float updaterProgress = 0;
-  if (state == State::UpdateInProgress) {
-    LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
-    updaterProgress = updater.getTotalSize() > 0
-                          ? static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize())
-                          : 0;
-    if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) return;
-    lastUpdaterPercentage = static_cast<int>(updaterProgress * 100);
-  }
 
   renderer.clearScreen();
 
@@ -521,10 +501,10 @@ void OtaUpdateActivity::render(RenderLock&&) {
       UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, y, tr(STR_UPDATING), true, EpdFontFamily::BOLD);
       y += titleHeight + sectionGap;
       y = GUI.drawProgressBar(renderer, Rect{textBounds.x, y, textBounds.width, metrics.progressBarHeight},
-                              static_cast<int>(updaterProgress * 100), 100) +
+                              std::min(progressBytes, progressTotalBytes), std::max<size_t>(progressTotalBytes, 1)) +
           relatedGap;
       char progressText[48];
-      snprintf(progressText, sizeof(progressText), "%zu / %zu", updater.getProcessedSize(), updater.getTotalSize());
+      snprintf(progressText, sizeof(progressText), "%zu / %zu", progressBytes, progressTotalBytes);
       UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, y, progressText);
       break;
     }
@@ -574,6 +554,9 @@ void OtaUpdateActivity::runUpdateInstall() {
   LOG_DBG("OTA", "New update available, starting download...");
   {
     RenderLock lock(*this);
+    progressBytes = 0;
+    progressTotalBytes = updater.getTotalSize();
+    lastProgressRefreshPercent = 0;
     state = State::UpdateInProgress;
   }
   requestUpdateAndWait();
@@ -585,10 +568,26 @@ void OtaUpdateActivity::runUpdateInstall() {
 #endif
   const auto res = updater.installUpdate(
       [](void* ctx) {
-        // immediate=true notifies the render task directly. The default deferred path only
-        // sets a flag consumed at the end of ActivityManager::loop(), which never runs while
-        // installUpdate() blocks this task.
-        static_cast<OtaUpdateActivity*>(ctx)->requestUpdate(true);
+        auto* self = static_cast<OtaUpdateActivity*>(ctx);
+        bool refresh = false;
+        {
+          RenderLock lock(*self);
+          self->progressBytes = self->updater.getProcessedSize();
+          self->progressTotalBytes = self->updater.getTotalSize();
+          const unsigned int percent =
+              self->progressTotalBytes > 0
+                  ? static_cast<unsigned int>(
+                        static_cast<uint64_t>(std::min(self->progressBytes, self->progressTotalBytes)) * 100 /
+                        self->progressTotalBytes)
+                  : 0;
+          if (percent >= self->lastProgressRefreshPercent + PROGRESS_REFRESH_STEP_PERCENT ||
+              (percent == 100 && self->lastProgressRefreshPercent != 100)) {
+            self->lastProgressRefreshPercent = percent;
+            refresh = true;
+          }
+        }
+        // Flash writes suspend Read Pico's display feeder tasks; finish the frame before resuming the writer.
+        if (refresh) self->requestUpdateAndWait();
       },
       this);
 
