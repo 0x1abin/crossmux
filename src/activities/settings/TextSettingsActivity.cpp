@@ -133,7 +133,16 @@ void TextSettingsActivity::onEnter() {
   if (registry_) {
     const auto& families = registry_->getFamilies();
     for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      fonts_.push_back({families[i].name, false, static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
+      FontEntry entry;
+      entry.name = families[i].name;
+      entry.isBuiltin = false;
+      entry.settingIndex = static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
+      // 矢量字体（.ttf/.otf/.ttc）是运行时光栅化的，任意字号都能显示；其余是预烤好的
+      // .cpfont 字集。标记只进 label，不进 name —— 见 FontEntry::label 的说明。
+      // / Vector families are rasterized at runtime and work at any size; the rest are
+      // pre-rasterized .cpfont sets. The marker goes into `label`, never into `name`.
+      if (families[i].vector) entry.label = entry.name + "  " + I18N.get(StrId::STR_VECTOR_FONT_TAG);
+      fonts_.push_back(std::move(entry));
     }
   }
 
@@ -167,7 +176,13 @@ void TextSettingsActivity::onEnter() {
   }
 }
 
-void TextSettingsActivity::onExit() { Activity::onExit(); }
+void TextSettingsActivity::onExit() {
+  // Release .cpfont preview faces; the vector-font cache has a separate lifetime.
+  if (renderer.hasFrameBuffer()) {
+    sdFontSystem.releaseLoadedFont(renderer);
+  }
+  Activity::onExit();
+}
 
 // Rebuilds rowItems_ (label + actionValue) for the active tab. Structural —
 // call only when tab_ or its backing data (fonts_/sizes_) changes, never from
@@ -181,7 +196,7 @@ void TextSettingsActivity::rebuildRowItems() {
     fui::ListItem item;
     switch (tab_) {
       case Tab::Family:
-        item.label = fonts_[i].name.c_str();
+        item.label = fonts_[i].label.empty() ? fonts_[i].name.c_str() : fonts_[i].label.c_str();
         break;
       case Tab::Size:
         item.label = sizes_[i].name.c_str();
