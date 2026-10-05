@@ -168,13 +168,7 @@ void TextSettingsActivity::onEnter() {
 }
 
 void TextSettingsActivity::onExit() {
-  // 退出时把预览/预加载的字体还回去。onEnter 里已经 releaseLoadedFont() 过一次，但那是
-  // 为了给新字体腾地方；本界面自己 preloadFont() 加载的那份没人管 —— 实测进出一次留下
-  // 约 236 KB PSRAM 不回收，反复进出就会耗尽。
-  // / Give the preview/preloaded face back on the way out. onEnter() already calls
-  // releaseLoadedFont(), but that is to make room for the next load; the face this screen
-  // preloads itself was never released -- measured ~236 KB of PSRAM not returned per visit,
-  // which accumulates across visits.
+  // Release .cpfont preview faces; the vector-font cache has a separate lifetime.
   if (renderer.hasFrameBuffer()) {
     sdFontSystem.releaseLoadedFont(renderer);
   }
