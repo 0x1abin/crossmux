@@ -2461,8 +2461,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // drawGrayscale16Pixel() writes it straight into the panel's 4bpp buffer. That gives
   // text genuine 16-level transitions instead of the four levels the 2-bit selector
   // planes can express, and collapses three passes (BW + LSB + MSB) into one.
-  const bool use16LevelText = needsTextGrayscale && renderer.getGrayscaleLevels() == 16 &&
-                              sdFontSystem.readerFaceIsFourBit();
+  const bool use16LevelText =
+      needsTextGrayscale && renderer.getGrayscaleLevels() == 16 && sdFontSystem.readerFaceIsFourBit();
 #if FREEINK_DEVICE_EEGO_A4
   // A4 single-refresh design: displayGrayBuffer() replaces the B/W base on the
   // panel, so whatever the gray pass draws IS the final frame. With text AA
