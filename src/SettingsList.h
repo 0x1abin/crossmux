@@ -45,8 +45,20 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
     const auto& families = registry->getFamilies();
     s.enumStringValues.reserve(builtinOptionCount + families.size());
     for (const StrId value : enumValues) s.enumStringValues.push_back(I18N.get(value));
+    // 矢量字体（.ttf/.otf/.ttc）是运行时光栅化的，任意字号都能显示；其余是预烤好的
+    // .cpfont 字集。给矢量家族加个标记，让字体选择器一眼看出哪个是哪种。
+    //
+    // 这只影响显示：持久化的是选项下标，而且下面 valueGetter 是按 families[i].name
+    // 匹配的，不是按这个字符串 —— 所以追加标记不可能改变存进去的值。
+    // / Vector families (.ttf/.otf/.ttc) are rasterized at runtime and can be shown at any
+    // size; the rest are pre-rasterized .cpfont sets. Tag the vector ones so the picker says
+    // which is which. Display only -- what gets persisted is the option index, and
+    // valueGetter below matches on families[i].name rather than on this string, so
+    // appending a marker cannot change the stored value.
     std::transform(families.begin(), families.end(), std::back_inserter(s.enumStringValues),
-                   [](const SdCardFontFamilyInfo& f) { return f.name; });
+                   [](const SdCardFontFamilyInfo& f) {
+                     return f.vector ? f.name + "  " + I18N.get(StrId::STR_VECTOR_FONT_TAG) : f.name;
+                   });
   } else {
     s.enumValues = std::move(enumValues);
   }

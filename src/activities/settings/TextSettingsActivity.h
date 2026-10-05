@@ -122,6 +122,16 @@ class TextSettingsActivity final : public UiTabListActivity {
     std::string name;
     bool isBuiltin;
     uint8_t settingIndex;
+    // 显示用标签（可为空 = 直接用 name）。和 name 分开是必须的：name 要留给
+    // SETTINGS.sdFontFamilyName 的匹配，往里塞标记会让选中项匹配不上，还可能把标记
+    // 一起存进设置，下次开机就加载不到那个字体了。放在最后是为了让既有的
+    // {name, isBuiltin, settingIndex} 聚合初始化继续有效。
+    // / Display-only label (empty = use `name`). Keeping it separate is required: `name`
+    // is matched against SETTINGS.sdFontFamilyName, so a marker in it would break the
+    // current-selection match and could be persisted, making the font unloadable on the
+    // next boot. Last member so the existing {name, isBuiltin, settingIndex} aggregate
+    // initialisers keep working.
+    std::string label;
   };
 
   struct SizeEntry {
