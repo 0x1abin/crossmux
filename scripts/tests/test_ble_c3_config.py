@@ -205,7 +205,18 @@ int main() {
                     self.assertNotIn("configure_c3_ble_controller.py", scripts)
                     self.assertFalse(resolve(section, "custom_nimble_config"))
                     if "FREEINK_CAP_USB_MSC=1" in flags:
-                        self.assertFalse(resolve(section, "custom_sdkconfig"))
+                        # USB Drive needs TinyUSB's MSC class compiled into the core, and
+                        # there are two ways to get there: use the prebuilt Arduino
+                        # variant (which is what having no custom_sdkconfig means, and
+                        # what the X4 Pro and Paper Mono profiles do), or rebuild the core
+                        # from a custom_sdkconfig that switches MSC on explicitly.
+                        #
+                        # Read Pico takes the second route because it cannot give up
+                        # firmware_tuned's heap reclamation, so assert the requirement
+                        # itself rather than the absence of a rebuild.
+                        usb_sdkconfig = resolve(section, "custom_sdkconfig")
+                        if usb_sdkconfig:
+                            self.assertIn("CONFIG_TINYUSB_MSC_ENABLED=y", usb_sdkconfig)
                         self.assertEqual(resolve(section, "board_build.arduino.memory_type"), "dio_opi")
                     else:
                         self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", resolve(section, "custom_sdkconfig"))
