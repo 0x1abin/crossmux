@@ -1218,3 +1218,6 @@ STR_NO_RECENT_BOOKS: "No recent books"
 STR_NO_FOOTNOTES: "No footnotes on this page"
 
 STR_TXT_PROGRESS_MIGRATION_FAILED: "Could not restore text-book progress. The original progress is kept. Check the SD card and retry."
+STR_PAGE_TURN_DIRECTION: "Page Turn Direction"
+STR_PAGE_TURN_LTR: "Left to Right"
+STR_PAGE_TURN_RTL: "Right to Left"

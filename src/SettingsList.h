@@ -367,6 +367,19 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_READER_MENU_STYLE, &CrossPointSettings::readerMenuStyle,
                           {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
                           StrId::STR_CAT_READER),
+        // 翻页方向（左右对调）。枚举而不是开关：两个选项各自有名字，"从左到右 / 从右到左"
+        // 比"开 / 关"更能说明对调后是什么样子 —— 同样按 imageScaling 的写法。
+        // 放在阅读分类而不是控制分类：它是"这本书怎么翻"的阅读行为，和它旁边的阅读菜单样式
+        // 同类；控制分类里那些是手势类型本身。
+        // / Page-turn direction (mirrored). An enum rather than a toggle because the two
+        // options name themselves -- "left to right / right to left" says what the mirror
+        // does, where on/off does not -- the same shape as imageScaling.
+        // Sits in the reader category rather than controls because it is a reading behaviour
+        // (how this book turns), like the reader-menu style next to it. The controls entries
+        // are gesture types themselves.
+        SettingInfo::Enum(StrId::STR_PAGE_TURN_DIRECTION, &CrossPointSettings::pageTurnDirection,
+                          {StrId::STR_PAGE_TURN_LTR, StrId::STR_PAGE_TURN_RTL}, "pageTurnDirection",
+                          StrId::STR_CAT_READER),
         // --- Controls ---
         SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
                           {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV, StrId::STR_DISABLED, StrId::STR_NEXT_NEXT,
