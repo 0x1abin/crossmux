@@ -167,7 +167,13 @@ void TextSettingsActivity::onEnter() {
   }
 }
 
-void TextSettingsActivity::onExit() { Activity::onExit(); }
+void TextSettingsActivity::onExit() {
+  // Release .cpfont preview faces; the vector-font cache has a separate lifetime.
+  if (renderer.hasFrameBuffer()) {
+    sdFontSystem.releaseLoadedFont(renderer);
+  }
+  Activity::onExit();
+}
 
 // Rebuilds rowItems_ (label + actionValue) for the active tab. Structural —
 // call only when tab_ or its backing data (fonts_/sizes_) changes, never from

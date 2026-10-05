@@ -870,6 +870,10 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResultWith<TextSettingsActivity>(
             [this](const ActivityResult&) {
               // TextSettingsActivity saves on each change; no save needed here.
+              {
+                RenderLock lock(*this);
+                sdFontSystem.ensureLoaded(renderer);
+              }
               rebuildSettingsLists();
               requestUpdate();
             },
