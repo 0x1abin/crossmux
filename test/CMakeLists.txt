@@ -165,6 +165,10 @@ add_subdirectory(absolute_grayscale)
 add_subdirectory(sd_card_font)
 add_subdirectory(glyph_bitmap)
 
+add_test(NAME VectorGrayFallback
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_vector_gray_fallback.py)
+
+
 add_test(NAME UnifiedKeyboard COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_unified_keyboard.py)
 add_test(NAME TouchNetworkControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_touch_network.py)
 add_test(NAME ThemeMenus COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_theme_menus.py)
@@ -221,6 +225,3 @@ endif()
 add_test(NAME RealImageDecoderCancellation
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_real_image_decoder_cancel.py
     --png-source ${pngdec_SOURCE_DIR}/src --jpeg-source ${jpegdec_SOURCE_DIR}/src)
-
-add_test(NAME VectorGrayFallback
-  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_vector_gray_fallback.py)

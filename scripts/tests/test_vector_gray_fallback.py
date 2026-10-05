@@ -44,8 +44,8 @@ struct GfxRenderer {
 enum class TextRotation {None,Rotated90CW};
 template<TextRotation R=TextRotation::None,typename... Args>
 void renderMissingGlyph(Args...){assert(false);}
-''' + helpers + '\n#if defined(__clang__)\n#pragma clang diagnostic ignored \"-Wunused-but-set-parameter\"\n#endif\n'
-            + method(source, 'static void renderCharScaled(')
+''' + helpers + '\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wunused-but-set-parameter\"\n'
+            + method(source, 'static void renderCharScaled(') + '\n#pragma GCC diagnostic pop\n'
             + '\ntemplate<TextRotation rotation=TextRotation::None>\n'
             + method(source, 'static void renderCharImpl(') + r'''
 int main(){
