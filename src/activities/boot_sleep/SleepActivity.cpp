@@ -550,6 +550,45 @@ void SleepActivity::onEnter() {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
   }
 
+  // 睡前先把面板洗白，再让各路径照常用 HALF 画睡眠画面 —— 仅 Read Pico。
+  //
+  // HALF 是单趟波形，擦不掉已经存在的墨，而睡眠画面全部用 HALF 画，所以阅读器留下的残影
+  // 会透到睡眠图上。这里清空帧缓冲再用一趟 FULL（GC16，36 相完整波形）把它推上去：每个
+  // 像素从它的实际残留态被强行驱动到白，不做差分跳过。全白是关键 —— 只推"旧页"那一帧的话，
+  // 面板上已积累的残留不在差分的比较范围里，洗不掉。
+  //
+  // 顺序必须在提示之后：全刷会把提示一起刷掉。但上面 drawPopup() 自己已经 displayBuffer()
+  // 过一次，所以这里不再推提示 —— 早先那版多推了一趟 HALF，是对同一个提示的重复刷新，
+  // 白白多一次闪烁和等待。
+  //
+  // 两条保留当前帧的路径（Quick Resume、Transparent）在上面已早退：它们要的就是原来那幅
+  // 画面，洗掉反而错了。到这里的一定是"会重画内容"的睡眠画面。
+  //
+  // 先只开在 Read Pico：目前只有这块面板做过实机验证（普通睡眠画面、Quick Resume、
+  // Transparent、夜间模式），其它面板等验收后再扩大范围。
+  // / Wash the panel white before the sleep screens paint -- Read Pico only.
+  //
+  // HALF is a single-pass waveform and cannot erase ink that is already there, and every sleep
+  // screen paints with HALF, so whatever the reader left behind shows through. Clearing the
+  // framebuffer and pushing it with FULL (GC16, a 36-phase complete waveform) drives every
+  // pixel from wherever it actually sits to white with no difference skip. The white field is
+  // the point: pushing the old page alone is not enough, because ghosting already on the panel
+  // is not part of that comparison.
+  //
+  // It has to come after the popup, since the wash takes the popup with it -- and drawPopup()
+  // has already pushed it through displayBuffer(), so no extra popup pass belongs here. An
+  // earlier revision pushed one more HALF, which was a second refresh of the same notice.
+  //
+  // The two frame-preserving paths above (Quick Resume, Transparent) have already returned --
+  // they exist to keep the current frame, so washing it away would be wrong.
+  //
+  // Read Pico only: it is the one panel where this has been checked on hardware (normal sleep
+  // screen, Quick Resume, Transparent, night mode). Other panels can follow once validated.
+#if FREEINK_DEVICE_READPICO
+  renderer.clearScreen();
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+#endif
+
   switch (SETTINGS.sleepScreen) {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::BLANK):
       return renderBlankSleepScreen();
