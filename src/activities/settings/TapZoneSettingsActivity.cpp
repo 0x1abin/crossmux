@@ -35,8 +35,8 @@ int buildShortOptions(uint8_t* out, const int max) {
   // PREV/NEXT lead because they are the only options with no long-press twin;
   // everything after matches the long-press section's family order exactly, so
   // the two lists line up row for row.
-  if (n < max && allowsTap(SETTINGS.previousPageGesture)) out[n++] = CrossPointSettings::TAP_ZONE_PREV;
-  if (n < max && allowsTap(SETTINGS.pageTurnGesture)) out[n++] = CrossPointSettings::TAP_ZONE_NEXT;
+  if (n < max && ReaderUtils::allowsTap(SETTINGS.previousPageGesture)) out[n++] = CrossPointSettings::TAP_ZONE_PREV;
+  if (n < max && ReaderUtils::allowsTap(SETTINGS.pageTurnGesture)) out[n++] = CrossPointSettings::TAP_ZONE_NEXT;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_BOOKMARK;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_DICTIONARY;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_CHAPTER;
