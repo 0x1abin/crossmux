@@ -368,8 +368,9 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
       }
     } else if (tab_ == Tab::Layout) {
       // Boolean layout rows render as a checkbox, matching the Style tab's
-      // toggle rows (checked box when on, empty box when off).
-      switch (layoutRowAt(i)) {
+      // toggle rows (checked box when on, empty box when off). The visible row
+      // index maps 1:1 onto LayoutRow (same ordering as LAYOUT_ROW_NAME_IDS).
+      switch (static_cast<LayoutRow>(i)) {
         case LayoutRow::VerticalBottomAlign:
           GUI.setCheckboxRow(rowItems_[i], SETTINGS.verticalBottomAlign);
           break;
