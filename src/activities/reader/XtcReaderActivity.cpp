@@ -76,32 +76,15 @@ bool XtcReaderActivity::handleFormatInput() {
   return false;
 }
 
-void XtcReaderActivity::showZoneNotice(const char* text) {
-  zoneNotice_ = text;
-  zoneNoticeUntilMs_ = millis() + ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS;
-}
-
 bool XtcReaderActivity::handleZoneShortAction(const uint8_t action) {
   // XTC comics have no bookmark / dictionary / KOReader sync / percent jump:
   // only the base actions (orientation, frontlight, home) and the chapter jump
-  // apply to short taps. The EPUB-only actions are consumed here with a
-  // visible one-shot notice so a globally configured zone never dead-ends
-  // silently on this reader type.
+  // apply to short taps.
   if (action == CrossPointSettings::TAP_ZONE_CHAPTER || action == CrossPointSettings::TAP_ZONE_MENU) {
     openChapterSelection();
     return true;
   }
-  switch (action) {
-    case CrossPointSettings::TAP_ZONE_BOOKMARK:
-    case CrossPointSettings::TAP_ZONE_DICTIONARY:
-    case CrossPointSettings::TAP_ZONE_KOREADER:
-    case CrossPointSettings::TAP_ZONE_AUTO_TURN:
-    case CrossPointSettings::TAP_ZONE_JUMP_PERCENT:
-      showZoneNotice(tr(STR_TAP_ZONE_EPUB_ONLY));
-      return true;
-    default:
-      return ReaderActivity::handleZoneShortAction(action);
-  }
+  return ReaderActivity::handleZoneShortAction(action);
 }
 
 bool XtcReaderActivity::handleZoneLongAction(const uint8_t action) {
@@ -110,13 +93,6 @@ bool XtcReaderActivity::handleZoneLongAction(const uint8_t action) {
     case CrossPointSettings::TAP_ZONE_LONG_MENU:
       // XTC has no reader menu: the chapter selector doubles as its menu.
       openChapterSelection();
-      return true;
-    case CrossPointSettings::TAP_ZONE_LONG_BOOKMARK:
-    case CrossPointSettings::TAP_ZONE_LONG_DICTIONARY:
-    case CrossPointSettings::TAP_ZONE_LONG_KOREADER:
-    case CrossPointSettings::TAP_ZONE_LONG_AUTO_TURN:
-    case CrossPointSettings::TAP_ZONE_LONG_JUMP_PERCENT:
-      showZoneNotice(tr(STR_TAP_ZONE_EPUB_ONLY));
       return true;
     default:
       return ReaderActivity::handleZoneLongAction(action);
@@ -131,11 +107,6 @@ void XtcReaderActivity::renderBook() {
   }
 
   renderPage();
-  if (!zoneNotice_.empty() && millis() < zoneNoticeUntilMs_) {
-    UITheme::getInstance().getTheme().drawPopup(renderer, zoneNotice_.c_str());
-  } else {
-    zoneNotice_.clear();
-  }
   saveProgress();
 }
 
