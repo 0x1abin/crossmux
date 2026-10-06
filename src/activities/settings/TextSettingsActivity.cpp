@@ -366,6 +366,9 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         case StyleRow::AntiAliasing:
           GUI.setCheckboxRow(rowItems_[i], SETTINGS.textAntiAliasing);
           break;
+        case StyleRow::BookStyleMemory:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.bookStyleMemory);
+          break;
         default:
           break;
       }
