@@ -35,6 +35,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                false,
                                FirstLineIndent::Auto,
                                0,
+                               false,  // verticalBottomAlign
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
                                false,

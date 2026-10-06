@@ -36,10 +36,10 @@ namespace {
 // Tab labels for Font | Size | Layout | Style.
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
-constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING,      StrId::STR_WORD_SPACING,
-                                         StrId::STR_CHARACTER_SPACING, StrId::STR_EXTRA_SPACING,
-                                         StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
-                                         StrId::STR_ALIGNMENT,         StrId::STR_SCREEN_MARGIN};
+constexpr StrId LAYOUT_ROW_NAME_IDS[] = {
+    StrId::STR_LINE_SPACING,  StrId::STR_WORD_SPACING,      StrId::STR_CHARACTER_SPACING,
+    StrId::STR_EXTRA_SPACING, StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
+    StrId::STR_ALIGNMENT,     StrId::STR_SCREEN_MARGIN,     StrId::STR_VERTICAL_BOTTOM_ALIGN};
 constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_READING_GUIDE_LINE,
                                         StrId::STR_READING_GUIDE_LINE_STYLE,
@@ -366,6 +366,17 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         default:
           break;
       }
+    } else if (tab_ == Tab::Layout) {
+      // Boolean layout rows render as a checkbox, matching the Style tab's
+      // toggle rows (checked box when on, empty box when off). The visible row
+      // index maps 1:1 onto LayoutRow (same ordering as LAYOUT_ROW_NAME_IDS).
+      switch (static_cast<LayoutRow>(i)) {
+        case LayoutRow::VerticalBottomAlign:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.verticalBottomAlign);
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -610,6 +621,12 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       requestUpdate();
       break;
     }
+    case LayoutRow::VerticalBottomAlign:
+      // Plain on/off toggle, like the Style tab's boolean rows.
+      SETTINGS.verticalBottomAlign = !SETTINGS.verticalBottomAlign;
+      SETTINGS.saveToFile();
+      requestUpdate();
+      break;
 
     default:
       break;
@@ -646,6 +663,9 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
     }
     case LayoutRow::ScreenMargin:
       return std::to_string(SETTINGS.screenMargin);
+    case LayoutRow::VerticalBottomAlign:
+      // Rendered as a checkbox row; no trailing value text.
+      return "";
 
     default:
       return "";
