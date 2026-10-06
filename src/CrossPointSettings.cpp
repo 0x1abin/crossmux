@@ -41,6 +41,9 @@ constexpr uint8_t FAKE_BOLD_VERSION = 1;
 constexpr uint8_t TOUCH_CONTROLS_VERSION = 3;
 // Legacy PAGE_TURN_GESTURE value of the removed Inverted Tap mode.
 constexpr uint8_t LEGACY_GESTURE_INVERTED_TAP = 3;
+// Legacy single-select touch mode values from before the per-direction pair.
+constexpr uint8_t LEGACY_TOUCH_SWIPE = 2;
+constexpr uint8_t LEGACY_TOUCH_INVERTED_TAP = 3;
 constexpr std::array<uint8_t, 3> LEGACY_FAKE_BOLD_MIGRATION = {
     CrossPointSettings::SYNTHETIC_BOLD_OFF,
     CrossPointSettings::SYNTHETIC_BOLD_STANDARD,
@@ -428,10 +431,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
       !doc["touchReaderControls"].isNull()) {
     const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
-    if (legacyTouch == TOUCH_READER_SWIPE) {
+    if (legacyTouch == LEGACY_TOUCH_SWIPE) {
       pageTurnGesture = SWIPE_ONLY;
       previousPageGesture = SWIPE_ONLY;
-    } else if (legacyTouch == TOUCH_READER_INVERTED_TAP) {
+    } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP) {
       pageTurnGesture = TAP_ONLY;
       previousPageGesture = TAP_ONLY;
       // Legacy Inverted Tap swapped the page-turn sides (right edge = previous,
