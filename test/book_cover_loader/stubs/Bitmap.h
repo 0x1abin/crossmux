@@ -4,8 +4,8 @@
 
 #include <cstdint>
 
-// Packed 1bpp header. Must match lib/GfxRenderer/Bitmap.h so sizeof(BmpHeader)
-// in BookCoverLoader is 62 bytes under the host test include path.
+// Packed 1bpp header. Must match lib/GfxRenderer/Bitmap.h. The host test
+// shadows that header, so sizeof(BmpHeader) in BookCoverLoader uses this copy.
 #pragma pack(push, 1)
 struct BmpHeader {
   struct {

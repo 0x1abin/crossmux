@@ -13,7 +13,6 @@ class Txt {
   std::string getCoverBmpPath() const { return "/.crosspoint/txt/cover.bmp"; }
   bool generateCoverBmp() const {
     ++cover_stub::fullCoverGenerations;
-    if (path.find("convert-fail") != std::string::npos) return false;
     return cover_stub::writeBmp(getCoverBmpPath());
   }
   std::string getTitle() const { return "Text title"; }

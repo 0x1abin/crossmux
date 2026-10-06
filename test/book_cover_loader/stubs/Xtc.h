@@ -12,14 +12,9 @@ class Xtc {
   void setupCacheDir() const { Storage.mkdir("/.crosspoint/xtc"); }
   std::string getThumbBmpPath(int height) const { return "/.crosspoint/xtc/thumb_" + std::to_string(height) + ".bmp"; }
   std::string getCoverBmpPath() const { return "/.crosspoint/xtc/cover.bmp"; }
-  bool generateThumbBmp(int height) const {
-    ++cover_stub::xtcThumbnailGenerations;
-    if (path.find("convert-fail") != std::string::npos) return false;
-    return cover_stub::writeBmp(getThumbBmpPath(height));
-  }
+  bool generateThumbBmp(int height) const { return cover_stub::writeBmp(getThumbBmpPath(height)); }
   bool generateCoverBmp() const {
     ++cover_stub::fullCoverGenerations;
-    if (path.find("convert-fail") != std::string::npos) return false;
     return cover_stub::writeBmp(getCoverBmpPath());
   }
   std::string getTitle() const { return "XTC title"; }
