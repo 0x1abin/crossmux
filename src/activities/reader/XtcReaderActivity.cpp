@@ -80,7 +80,7 @@ bool XtcReaderActivity::handleZoneShortAction(const uint8_t action) {
   // XTC comics have no bookmark / dictionary / KOReader sync / percent jump:
   // only the base actions (orientation, frontlight, home) and the chapter jump
   // apply to short taps.
-  if (action == CrossPointSettings::TAP_ZONE_CHAPTER) {
+  if (action == CrossPointSettings::TAP_ZONE_CHAPTER || action == CrossPointSettings::TAP_ZONE_MENU) {
     openChapterSelection();
     return true;
   }

@@ -355,7 +355,11 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
       if (allowsTap(SETTINGS.pageTurnGesture)) result.next = true;
       break;
     case CrossPointSettings::TAP_ZONE_MENU:
-      // Consumed by isTouchMenuGesture (center-tap mode); never a page turn.
+      // Handed to the reader activity: the short-press path opens the reader
+      // menu (gated on showReaderMenu == READER_MENU_TAP). The center-third
+      // isTouchMenuTap fallback below only opens the menu on zones with no
+      // action of their own, so a MENU zone reaches this action exactly once.
+      result.action = action;
       break;
     case CrossPointSettings::TAP_ZONE_NONE:
       break;
@@ -377,6 +381,15 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) return false;
+  // A tap-zone with its own action owns this tap: page-turn zones must page,
+  // and a MENU zone goes through the zone short-press path (which also gates
+  // on tap-menu mode). The center-third fallback below then only covers zones
+  // with no action, preserving the original center-tap behaviour on untouched
+  // grids while freeing center cells for real assignments.
+  if (SETTINGS.touchReaderControls) {
+    const int zone = tapZoneAt(renderer, x, y);
+    if (zone >= 0 && zoneShortAction(zone) != CrossPointSettings::TAP_ZONE_NONE) return false;
+  }
   const int width = renderer.getScreenWidth();
   const int height = renderer.getScreenHeight();
   const int zoneWidth = width / 3;
