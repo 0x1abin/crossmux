@@ -366,6 +366,16 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         default:
           break;
       }
+    } else if (tab_ == Tab::Layout) {
+      // Boolean layout rows render as a checkbox, matching the Style tab's
+      // toggle rows (checked box when on, empty box when off).
+      switch (layoutRowAt(i)) {
+        case LayoutRow::VerticalBottomAlign:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.verticalBottomAlign);
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -653,7 +663,8 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
     case LayoutRow::ScreenMargin:
       return std::to_string(SETTINGS.screenMargin);
     case LayoutRow::VerticalBottomAlign:
-      return SETTINGS.verticalBottomAlign ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      // Rendered as a checkbox row; no trailing value text.
+      return "";
 
     default:
       return "";
