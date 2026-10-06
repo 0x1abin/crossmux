@@ -11,6 +11,14 @@ class XtcReaderActivity final : public ReaderActivity {
   std::shared_ptr<Xtc> xtc;
   uint32_t currentPage = 0;
 
+  // One-shot notice for tap-zone actions that this reader type does not
+  // support (bookmark / dictionary / KOReader / auto turn / percent jump are
+  // EPUB-only). Shown briefly over the page instead of silently swallowing
+  // the user's configured action.
+  std::string zoneNotice_;
+  unsigned long zoneNoticeUntilMs_ = 0;
+  void showZoneNotice(const char* text);
+
   enum class StatusBarOverlayPosition { Bottom, Top };
   struct StatusBarInfo {
     int currentPage;
