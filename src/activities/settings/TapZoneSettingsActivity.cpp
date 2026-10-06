@@ -14,11 +14,6 @@
 #include "fontIds.h"
 
 namespace {
-
-bool allowsTap(const uint8_t gesture) {
-  return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
-}
-
 // Byte length of one UTF-8 sequence starting at c (1..4), used for the
 // vertical mini-zone labels and their glyph counting.
 static int utf8SeqLen(const char* c) {
