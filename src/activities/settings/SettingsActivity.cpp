@@ -41,6 +41,7 @@
 #include "SettingsList.h"
 #include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
+#include "TapZoneSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -903,6 +904,9 @@ void SettingsActivity::toggleCurrentSetting() {
         } else {
           LOG_ERR("SETTINGS", "OOM: KeyboardLayoutsActivity");
         }
+        break;
+      case SettingAction::TapZones:
+        startActivityForResultWith<TapZoneSettingsActivity>(resultHandler);
         break;
       case SettingAction::None:
         // Do nothing

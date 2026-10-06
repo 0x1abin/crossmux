@@ -284,6 +284,51 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     PAGE_TURN_GESTURE_COUNT
   };
 
+  // Action of a single reader tap zone. The screen is split into a 3x3 grid
+  // (tapZones below, row-major). PREV/NEXT act on a tap (gated by the matching
+  // direction's gesture: a SWIPE_ONLY direction contributes no tap zones).
+  // MENU opens the reader menu on a tap in center-tap mode. BOOKMARK,
+  // DICTIONARY and CHAPTER also fire on a tap; the long-press list keeps its
+  // own variants so a zone can pair tap bookmarking with hold dictionary
+  // lookup without losing either action.
+  enum TAP_ZONE_ACTION {
+    TAP_ZONE_NONE = 0,
+    TAP_ZONE_PREV = 1,
+    TAP_ZONE_NEXT = 2,
+    TAP_ZONE_MENU = 3,
+    TAP_ZONE_BOOKMARK = 4,
+    TAP_ZONE_DICTIONARY = 5,
+    TAP_ZONE_ROTATE_CW = 6,      // rotate to the next orientation (right-side zones)
+    TAP_ZONE_ROTATE_CCW = 7,     // rotate to the previous orientation (left-side zones)
+    TAP_ZONE_FRONTLIGHT = 8,     // toggle the frontlight on/off
+    TAP_ZONE_KOREADER = 9,       // push progress to KOReader (EPUB readers)
+    TAP_ZONE_AUTO_TURN = 10,     // toggle automatic page turning (EPUB readers)
+    TAP_ZONE_JUMP_PERCENT = 11,  // jump-to-percent picker (EPUB readers)
+    TAP_ZONE_GO_HOME = 12,       // leave the reader for the home screen
+    TAP_ZONE_CHAPTER = 13,       // jump to a chapter (EPUB / TXT / XTC readers)
+    TAP_ZONE_ACTION_COUNT
+  };
+
+  // Long-press actions for tap zones (fires on release after BOOKMARK_HOLD_MS).
+  // A dedicated enum keeps the per-zone option list short: the reader menu
+  // exists only as a long-press action, and PREV/NEXT keep their plain tap
+  // behavior regardless of hold duration.
+  enum TAP_ZONE_LONG_ACTION {
+    TAP_ZONE_LONG_NONE = 0,
+    TAP_ZONE_LONG_BOOKMARK = 1,    // add a bookmark (EPUB readers)
+    TAP_ZONE_LONG_DICTIONARY = 2,  // open the dictionary word picker (EPUB readers)
+    TAP_ZONE_LONG_CHAPTER = 3,     // jump to a chapter (EPUB / TXT / XTC readers)
+    TAP_ZONE_LONG_MENU = 4,        // open the reader menu / chapter list (tap menu mode)
+    TAP_ZONE_LONG_ROTATE_CW = 5,
+    TAP_ZONE_LONG_ROTATE_CCW = 6,
+    TAP_ZONE_LONG_FRONTLIGHT = 7,
+    TAP_ZONE_LONG_KOREADER = 8,
+    TAP_ZONE_LONG_AUTO_TURN = 9,
+    TAP_ZONE_LONG_JUMP_PERCENT = 10,
+    TAP_ZONE_LONG_GO_HOME = 11,
+    TAP_ZONE_LONG_ACTION_COUNT
+  };
+
   // How the reader menu opens on touch boards. Persisted under the legacy
   // "tapForReaderMenu" key: 0/1 keep their old Off/Tap meaning.
   enum SHOW_READER_MENU { READER_MENU_OFF = 0, READER_MENU_TAP = 1, READER_MENU_SWIPE_UP = 2, SHOW_READER_MENU_COUNT };
@@ -491,8 +536,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Master reader-touch toggle on boards with a touch controller.
   uint8_t touchReaderControls = TOUCH_READER_ON;
   // Which gestures turn the page in each direction (PAGE_TURN_GESTURE).
-  uint8_t pageTurnGesture = SWIPE_ONLY;
-  uint8_t previousPageGesture = SWIPE_ONLY;
+  // The 9-zone reader feature keeps the legacy TAP_AND_SWIPE default so the
+  // configured tap zones remain usable out of the box.
+  uint8_t pageTurnGesture = TAP_AND_SWIPE;
+  uint8_t previousPageGesture = TAP_AND_SWIPE;
   // 翻页方向：左右对调阅读器的点击区与滑动方向，给左手握持的用户。0 = 正常，
   // 1 = 对调（点左边翻下一页、往右滑翻下一页）。
   //
@@ -507,6 +554,35 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // and other apps are untouched. XORed with rtlBook (right-to-left books such as
   // vertical Japanese), so the two cancel rather than each flipping the result.
   uint8_t pageTurnDirection = 0;
+  // Reader tap zones: the screen splits into a 3x3 grid (row-major, top-left
+  // first). Each zone holds a TAP_ZONE_ACTION; MENU is only meaningful while
+  // showReaderMenu is READER_MENU_TAP, where the reader menu opens on a tap in
+  // any MENU-marked zone. A direction whose gesture is SWIPE_ONLY (or
+  // disabled) contributes no tap zone: its zones fall through. The default
+  // mirrors the stock outer-thirds behavior: the left/right columns turn pages
+  // over the full height and only the middle cell of the center column opens
+  // the menu, while the center column above/below it does nothing.
+  uint8_t tapZones[9] = {
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // top row
+      TAP_ZONE_PREV, TAP_ZONE_MENU, TAP_ZONE_NEXT,  // middle row
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // bottom row
+  };
+  // Long-press action of each of the 9 main zones (TAP_ZONE_LONG_ACTION,
+  // row-major, same layout as tapZones). Defaults to NONE; a settings file from
+  // an older firmware is migrated so BOOKMARK/DICTIONARY zones keep their
+  // long-press behaviour.
+  uint8_t tapZonesLong[9] = {
+      TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE,  // top row
+      TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE,  // middle row
+      TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE,  // bottom row
+  };
+  // Extra small tap zones in the four corners plus the top/bottom edge middle.
+  // Each holds a TAP_ZONE_ACTION; mini zones are tap-only (no long press).
+  // Layout: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right,
+  // 4=top-middle, 5=bottom-middle. All default to NONE.
+  uint8_t miniZones[6] = {
+      TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE,
+  };
   // Reader menu open gesture (SHOW_READER_MENU: off / center tap / bottom-edge
   // up-swipe). Only surfaced on home-key boards, where Home is the capacitive
   // key and the bottom edge is free; elsewhere it stays at the Tap default.

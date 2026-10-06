@@ -8,6 +8,9 @@
 
 #include <cctype>
 #include <string_view>
+#include <components/bars/tap-zones.h>
+#include <components/themes/BaseTheme.h>
+
 
 #include "MappedInputManager.h"
 #include "ReaderRefresh.h"
@@ -85,14 +88,198 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
 }
 
 struct TouchPageTurn {
-  bool prev;
-  bool next;
-  unsigned long heldMs;
+  bool prev = false;
+  bool next = false;
+  bool bookmark = false;
+  bool dictionary = false;
+  bool longPress = false;  // the contact was held past BOOKMARK_HOLD_MS
+  uint8_t action = 0;      // short-press zone action (TAP_ZONE_ACTION, PREV/NEXT/MENU handled here)
+  uint8_t longAction = 0;  // long-press zone action (TAP_ZONE_LONG_ACTION)
+  unsigned long heldMs = 0;
 };
+
+// Shared tap-zone grid geometry: the 3x3 main grid plus six small
+// corner/edge zones. The reader hit-tests with the exact rectangles the zone
+// editor paints — same safe margin, visible gaps and cell sizes — so a tap in
+// the reader lands on the zone the editor showed, and a tap in a gap or at the
+// display edge is ignored instead of snapping to a neighbouring cell at
+// non-divisible sizes.
+struct TapZoneGrid {
+  static constexpr int kSafeMargin = 6;  // inset from the grid area edges
+  static constexpr int kGap = 6;         // visible gap between cells
+  static constexpr int kMiniCount = 6;   // corner + edge-middle small zones
+
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+  int cellWidth = 0;
+  int cellHeight = 0;
+  int miniWidth = 0;
+  int miniHeight = 0;
+  int miniMidWidth = 0;  // top/bottom edge-middle zones: wide strips
+  int miniMidHeight = 0;
+
+  explicit TapZoneGrid(const int gridW, const int gridH) {
+    x = kSafeMargin;
+    y = kSafeMargin;
+    width = gridW - kSafeMargin * 2;
+    height = gridH - kSafeMargin * 2;
+    // Two internal gaps per axis; the remainder (if the size is not exactly
+    // divisible) widens the outer gaps, never the visible cells.
+    cellWidth = (width - kGap * 2) / 3;
+    cellHeight = (height - kGap * 2) / 3;
+    // Corner zones: one third of a main cell wide, one quarter tall (area stays
+    // below 1/9 of a main cell), floored to a minimum touch target.
+    miniWidth = cellWidth / 3;
+    miniHeight = cellHeight / 4;
+    if (miniWidth < 40) miniWidth = 40;
+    if (miniHeight < 44) miniHeight = 44;
+    // Top/bottom edge-middle zones: a wide horizontal strip instead of a tall
+    // sliver — easier to hit and less likely to be brushed accidentally —
+    // keeping the same area budget as the corner zones (below 1/9 of a cell).
+    miniMidWidth = (cellWidth * 2) / 3;
+    miniMidHeight = miniHeight / 2;
+    if (miniMidHeight < 40) miniMidHeight = 40;
+  }
+
+  Rect cell(const int row, const int col) const {
+    return Rect{static_cast<int16_t>(x + col * (cellWidth + kGap)), static_cast<int16_t>(y + row * (cellHeight + kGap)),
+                static_cast<int16_t>(cellWidth), static_cast<int16_t>(cellHeight)};
+  }
+
+  // One of the six small zones, index 0..5:
+  //   0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right,
+  //   4 top-middle, 5 bottom-middle.
+  // All are placed inside the safe margin, so they never touch the display
+  // edge and never overlap the gap between main cells.
+  Rect miniCell(const int index) const {
+    int cx = 0;
+    int cy = 0;
+    switch (index) {
+      case 1:
+        cx = x + width - miniWidth;
+        cy = y;
+        break;
+      case 2:
+        cx = x;
+        cy = y + height - miniHeight;
+        break;
+      case 3:
+        cx = x + width - miniWidth;
+        cy = y + height - miniHeight;
+        break;
+      case 4:
+        cx = x + (width - miniMidWidth) / 2;
+        cy = y;
+        break;
+      case 5:
+        cx = x + (width - miniMidWidth) / 2;
+        cy = y + height - miniMidHeight;
+        break;
+      case 0:
+      default:
+        cx = x;
+        cy = y;
+        break;
+    }
+    const bool mid = index == 4 || index == 5;
+    return Rect{static_cast<int16_t>(cx), static_cast<int16_t>(cy),
+                static_cast<int16_t>(mid ? miniMidWidth : miniWidth),
+                static_cast<int16_t>(mid ? miniMidHeight : miniHeight)};
+  }
+
+  // Zone index for a point, or -1 when it lands in a gap or outside the grid.
+  // The small zones win over the main grid where they overlap (they are nested
+  // inside the corner/edge main cells), giving them priority as hot spots.
+  int zoneAt(const int px, const int py) const {
+    for (int i = 0; i < kMiniCount; ++i) {
+      const Rect r = miniCell(i);
+      if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) {
+        return 9 + i;
+      }
+    }
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 3; ++col) {
+        const Rect r = cell(row, col);
+        if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) {
+          return row * 3 + col;
+        }
+      }
+    }
+    return -1;
+  }
+};
+
+inline int tapZoneAt(const GfxRenderer& renderer, const int x, const int y) {
+  const int16_t width = static_cast<int16_t>(renderer.getScreenWidth());
+  const int16_t height = static_cast<int16_t>(renderer.getScreenHeight());
+  if (width <= 0 || height <= 0) return -1;
+  return TapZoneGrid(width, height).zoneAt(x, y);
+}
+
+// The main-grid zone a mini zone inherits from when its own action is NONE:
+// each corner / edge-middle small zone maps to the main cell it sits in.
+inline int miniFallbackZone(const int zone) {
+  switch (zone - 9) {
+    case 0:
+      return 0;  // top-left     -> top-left main cell
+    case 1:
+      return 2;  // top-right    -> top-right main cell
+    case 2:
+      return 6;  // bottom-left  -> bottom-left main cell
+    case 3:
+      return 8;  // bottom-right -> bottom-right main cell
+    case 4:
+      return 1;  // top-middle   -> top-middle main cell
+    case 5:
+      return 7;  // bottom-middle-> bottom-middle main cell
+    default:
+      return -1;
+  }
+}
+
+// Raw configured short-press action of a zone (0..14), without the mini-zone
+// fallback: what the user picked in the zone editor. A mini zone set to NONE
+// reads back as NONE here even though taps still fall back to the main cell.
+inline uint8_t zoneRawShortAction(const int zone) {
+  if (zone < 0) return CrossPointSettings::TAP_ZONE_NONE;
+  return zone < 9 ? SETTINGS.tapZones[zone] : SETTINGS.miniZones[zone - 9];
+}
+
+// Short-press action of a zone (0..14). Zones 0..8 are the main grid, 9..14
+// are the small corner/edge zones. A mini zone with no action of its own
+// reuses the action of the main cell it sits in, so a small zone never
+// dead-ends unless the main cell is unset too.
+inline uint8_t zoneShortAction(const int zone) {
+  if (zone < 0) return CrossPointSettings::TAP_ZONE_NONE;
+  if (zone < 9) return SETTINGS.tapZones[zone];
+  const uint8_t own = SETTINGS.miniZones[zone - 9];
+  if (own != CrossPointSettings::TAP_ZONE_NONE) return own;
+  const int fallback = miniFallbackZone(zone);
+  return fallback >= 0 ? SETTINGS.tapZones[fallback] : CrossPointSettings::TAP_ZONE_NONE;
+}
+
+// Long-press action of a zone (0..14), or TAP_ZONE_LONG_NONE.
+inline uint8_t zoneLongAction(const int zone) {
+  // Mini zones are tap-only: long-press actions exist for the main 3x3 grid.
+  if (zone < 0 || zone >= 9) return CrossPointSettings::TAP_ZONE_LONG_NONE;
+  return SETTINGS.tapZonesLong[zone];
+}
+
+// Action of the reader tap zone at the given screen point. The screen is
+// split into the same full-screen grid the zone editor paints: inset by the
+// safe margin, separated by visible gaps. A tap in a gap or in the safe
+// margin falls through to TAP_ZONE_NONE instead of snapping to a neighbouring
+// cell. The reading surface has no bottom button-hint row, so the grid covers
+// the full display exactly like the original outer-thirds zones did.
+inline uint8_t tapZoneAction(const GfxRenderer& renderer, const int x, const int y) {
+  return zoneShortAction(tapZoneAt(renderer, x, y));
+}
 
 inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input,
                                          const bool rtlBook = false) {
-  TouchPageTurn result{false, false, 0};
+  TouchPageTurn result;
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
   }
@@ -117,6 +304,7 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
   const bool nextTaps = gestureAllowsTap(SETTINGS.pageTurnGesture);
   const bool prevTaps = gestureAllowsTap(SETTINGS.previousPageGesture);
   if (!nextTaps && !prevTaps) {
+
     return result;
   }
 
@@ -126,24 +314,57 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
-  // The centered reader-menu tap target (isTouchMenuTap below) keeps priority
-  // over the page-turn zones.
-  if (SETTINGS.showReaderMenu == CrossPointSettings::READER_MENU_TAP && x >= width / 3 && x < width - width / 3 &&
-      y >= height / 3 && y < height - height / 3) {
-    return result;
+  // Tap-zone lookup, evaluated on release (the SDK latches the contact
+  // duration at release). A long press (held past BOOKMARK_HOLD_MS) runs the
+  // zone's long-press action; a zone without one keeps its short action. A
+  // zone marked for a direction only acts when that direction's gesture
+  // accepts taps; MENU zones are consumed by isTouchMenuGesture and never
+  // turn pages here.
+  const int zone = tapZoneAt(renderer, x, y);
+  if (zone < 0) return result;
+
+  result.heldMs = gpio.lastTouchHeldMs();
+
+  // Long-press actions only exist on the main 3x3 grid; a held tap on a
+  // mini zone behaves exactly like its short press.
+  if (zone < 9 && result.heldMs >= BOOKMARK_HOLD_MS) {
+    const uint8_t longAction = zoneLongAction(zone);
+    if (longAction != CrossPointSettings::TAP_ZONE_LONG_NONE) {
+      result.longPress = true;
+      result.longAction = longAction;
+      result.bookmark = longAction == CrossPointSettings::TAP_ZONE_LONG_BOOKMARK;
+      result.dictionary = longAction == CrossPointSettings::TAP_ZONE_LONG_DICTIONARY;
+      return result;
+    }
+    // No long-press action configured: a BOOKMARK/DICTIONARY short zone keeps
+    // its original long-press behaviour, everything else falls through to the
+    // short action below (PREV/NEXT long-press still turns pages).
+    const uint8_t shortAction = zoneShortAction(zone);
+    if (shortAction == CrossPointSettings::TAP_ZONE_BOOKMARK ||
+        shortAction == CrossPointSettings::TAP_ZONE_DICTIONARY) {
+      result.bookmark = shortAction == CrossPointSettings::TAP_ZONE_BOOKMARK;
+      result.dictionary = shortAction == CrossPointSettings::TAP_ZONE_DICTIONARY;
+      return result;
+    }
   }
 
-  // Give the whole page to the sole tap-enabled direction. When both accept
-  // taps, split at the left third. RTL books and Inverted Tap each reverse
-  // the shared zones, and so does the page-turn direction.
-  const bool inverted = (SETTINGS.pageTurnGesture == CrossPointSettings::INVERTED_TAP ||
-                         SETTINGS.previousPageGesture == CrossPointSettings::INVERTED_TAP) != mirrored;
-  const bool nextZone = inverted ? x < (width * 2) / 3 : x >= width / 3;
-  result.next = nextTaps && (!prevTaps || nextZone);
-  result.prev = prevTaps && (!nextTaps || !nextZone);
-  result.heldMs = gpio.lastTouchHeldMs();
+  const uint8_t action = zoneShortAction(zone);
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_PREV:
+      if (allowsTap(SETTINGS.previousPageGesture)) result.prev = true;
+      break;
+    case CrossPointSettings::TAP_ZONE_NEXT:
+      if (allowsTap(SETTINGS.pageTurnGesture)) result.next = true;
+      break;
+    case CrossPointSettings::TAP_ZONE_MENU:
+      // Consumed by isTouchMenuGesture (center-tap mode); never a page turn.
+      break;
+    case CrossPointSettings::TAP_ZONE_NONE:
+      break;
+    default:
+      result.action = action;  // handed to the reader activity for dispatch
+      break;
+  }
   return result;
 }
 
