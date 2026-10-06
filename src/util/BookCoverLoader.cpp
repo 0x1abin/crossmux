@@ -23,7 +23,7 @@ CachedCoverState inspectCachedCover(const std::string& path, const bool emptyIsT
 
     Bitmap bitmap(file);
     if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-      // Header-only stubs parse cleanly but have no pixels.
+      // Require a full pixel payload, not just a valid header.
       const size_t fileBytes = file.fileSize();
       const size_t pixelBytes = static_cast<size_t>(bitmap.getRowBytes()) * static_cast<size_t>(bitmap.getHeight());
       if (fileBytes >= sizeof(BmpHeader) + pixelBytes) {

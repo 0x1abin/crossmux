@@ -646,10 +646,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(HalFile& jpegFile, Print& b
   // of allocating 32 KB just to produce a 112x164 shelf cover.
   const int scaleOption =
       progressiveDecode ? JPEG_SCALE_EIGHTH : chooseJpegScale(srcWidth, srcHeight, outWidth, outHeight);
-  // JPEG_SCALE_* are decode() option flags, not divisors. Size the callback
-  // grid by 2/4/8 (full stays 1). Passing the flag through only matches while
-  // those flags stay 2/4/8; a mismatch never sees the last MCU column, so
-  // decode still succeeds and the BMP is left as a header with no pixels.
+  // JPEG_SCALE_* are decode flags; map to the actual divisor.
   const int scaleDenominator = scaleOption == JPEG_SCALE_EIGHTH    ? 8
                                : scaleOption == JPEG_SCALE_QUARTER ? 4
                                : scaleOption == JPEG_SCALE_HALF    ? 2
