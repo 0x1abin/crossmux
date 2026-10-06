@@ -1,3 +1,4 @@
+#include <Bitmap.h>
 #include <HalStorage.h>
 #include <gtest/gtest.h>
 
@@ -95,6 +96,22 @@ TEST_F(BookCoverLoaderTest, ReplacesCorruptThumbnail) {
   EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
   EXPECT_TRUE(generated);
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, RegeneratesHeaderOnlyThumbnail) {
+  writeBook("/book.epub");
+  Storage.mkdir("/.crosspoint/epub");
+  {
+    std::ofstream output(hostPath("/.crosspoint/epub/thumb_226.bmp"), std::ios::binary | std::ios::trunc);
+    output << "BM" << std::string(sizeof(BmpHeader) - 2, '\0');
+  }
+  ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), sizeof(BmpHeader));
+
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_GT(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), sizeof(BmpHeader));
 }
 
 TEST_F(BookCoverLoaderTest, KeepsLayoutThumbnailSizesIndependent) {
