@@ -324,7 +324,6 @@ void TapZoneSettingsActivity::openPopup(const uint8_t zone) {
   popupRowCount = 0;
   int n = 0;
   const uint8_t shortAction = ReaderUtils::zoneRawShortAction(zone);
-  const uint8_t longAction = ReaderUtils::zoneLongAction(zone);
 
   popupRows[n] = {tr(STR_TAP_ZONE_SHORT), 0, true};
   n++;
@@ -534,7 +533,7 @@ void TapZoneSettingsActivity::drawDashedRect(const int x, const int y, const int
 
 // Rounded-rect drawing helpers (E-Ink friendly: straight edges plus small
 // 1px arc fills in the corners). state=true paints black, false paints white.
-static void fillRoundRect(const int x, const int y, const int w, const int h, const int r, GfxRenderer& renderer) {
+static void fillRoundRect(const int x, const int y, const int w, const int h, const int r, const GfxRenderer& renderer) {
   renderer.fillRect(x, y + r, w, h - 2 * r, false);
   renderer.fillRect(x + r, y, w - 2 * r, h, false);
   for (int i = 0; i < r; ++i) {
@@ -547,7 +546,7 @@ static void fillRoundRect(const int x, const int y, const int w, const int h, co
 }
 
 static void drawRoundRectBorder(const int x, const int y, const int w, const int h, const int r,
-                                GfxRenderer& renderer) {
+                                const GfxRenderer& renderer) {
   renderer.drawLine(x + r, y, x + w - r, y, 1, true);
   renderer.drawLine(x + r, y + h - 1, x + w - r, y + h - 1, 1, true);
   renderer.drawLine(x, y + r, x, y + h - r, 1, true);
