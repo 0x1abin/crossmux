@@ -1076,6 +1076,18 @@ void EpubReaderActivity::loop() {
 
 bool EpubReaderActivity::handleZoneShortAction(const uint8_t action) {
   switch (action) {
+    case CrossPointSettings::TAP_ZONE_MENU:
+      // The zone menu action mirrors the long-press path: it only works while
+      // "Show reader menu" is set to tap. When the menu is bound to a swipe or
+      // disabled, zone taps must fall through so the page turn logic stays
+      // untouched (the picker also hides the menu option in that mode).
+      if (SETTINGS.showReaderMenu != CrossPointSettings::READER_MENU_TAP) return false;
+      if (usesToolbarMenu() && section) {
+        openOverlay(Overlay::Toolbar);
+      } else {
+        openReaderMenu();
+      }
+      return true;
     case CrossPointSettings::TAP_ZONE_CHAPTER:
       // Jump straight to the next chapter, matching the toolbar's NextChapter
       // control (the chapter picker stays reachable via the reader menu).
