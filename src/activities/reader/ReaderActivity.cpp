@@ -284,6 +284,14 @@ bool ReaderActivity::handleZoneShortAction(const uint8_t action) {
     case CrossPointSettings::TAP_ZONE_GO_HOME:
       onGoHome();
       return true;
+    case CrossPointSettings::TAP_ZONE_FOOTNOTE:
+      // Readers without footnotes (TXT / PDF / XTC) swallow the action so it
+      // never falls through to page turning; EpubReaderActivity overrides it.
+      return true;
+    case CrossPointSettings::TAP_ZONE_REFRESH:
+      renderer.promoteNextRefresh(HalDisplay::FULL_REFRESH);
+      requestUpdate();
+      return true;
     default:
       return false;
   }
@@ -302,6 +310,12 @@ bool ReaderActivity::handleZoneLongAction(const uint8_t action) {
       return true;
     case CrossPointSettings::TAP_ZONE_LONG_GO_HOME:
       onGoHome();
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_FOOTNOTE:
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_REFRESH:
+      renderer.promoteNextRefresh(HalDisplay::FULL_REFRESH);
+      requestUpdate();
       return true;
     default:
       return false;

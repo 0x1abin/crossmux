@@ -1111,6 +1111,9 @@ bool EpubReaderActivity::handleZoneShortAction(const uint8_t action) {
     case CrossPointSettings::TAP_ZONE_DICTIONARY:
       openDictionaryWordSelect();
       return true;
+    case CrossPointSettings::TAP_ZONE_FOOTNOTE:
+      openFootnoteSelect(false);
+      return true;
     case CrossPointSettings::TAP_ZONE_KOREADER:
       return launchKOReaderSync();
     case CrossPointSettings::TAP_ZONE_AUTO_TURN:
@@ -1147,6 +1150,9 @@ bool EpubReaderActivity::handleZoneLongAction(const uint8_t action) {
       return false;
     case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
       return handleZoneShortAction(CrossPointSettings::TAP_ZONE_CHAPTER);
+    case CrossPointSettings::TAP_ZONE_LONG_FOOTNOTE:
+      openFootnoteSelect(false);
+      return true;
     case CrossPointSettings::TAP_ZONE_LONG_MENU:
       if (SETTINGS.showReaderMenu != CrossPointSettings::READER_MENU_TAP) return false;
       if (usesToolbarMenu() && section) {

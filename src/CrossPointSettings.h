@@ -306,6 +306,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     TAP_ZONE_JUMP_PERCENT = 11,  // jump-to-percent picker (EPUB readers)
     TAP_ZONE_GO_HOME = 12,       // leave the reader for the home screen
     TAP_ZONE_CHAPTER = 13,       // jump to a chapter (EPUB / TXT / XTC readers)
+    TAP_ZONE_FOOTNOTE = 14,      // open the footnote list (EPUB readers)
+    TAP_ZONE_REFRESH = 15,       // force a ghost-cleaning full refresh
     TAP_ZONE_ACTION_COUNT
   };
 
@@ -326,6 +328,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     TAP_ZONE_LONG_AUTO_TURN = 9,
     TAP_ZONE_LONG_JUMP_PERCENT = 10,
     TAP_ZONE_LONG_GO_HOME = 11,
+    TAP_ZONE_LONG_FOOTNOTE = 12,  // open the footnote list (EPUB readers)
+    TAP_ZONE_LONG_REFRESH = 13,   // force a ghost-cleaning full refresh
     TAP_ZONE_LONG_ACTION_COUNT
   };
 

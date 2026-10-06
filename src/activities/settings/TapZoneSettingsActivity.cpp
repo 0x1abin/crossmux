@@ -40,6 +40,7 @@ int buildShortOptions(uint8_t* out, const int max) {
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_BOOKMARK;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_DICTIONARY;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_CHAPTER;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_FOOTNOTE;
   if (n < max && SETTINGS.showReaderMenu == CrossPointSettings::READER_MENU_TAP) {
     out[n++] = CrossPointSettings::TAP_ZONE_MENU;
   }
@@ -50,6 +51,7 @@ int buildShortOptions(uint8_t* out, const int max) {
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_AUTO_TURN;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_JUMP_PERCENT;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_GO_HOME;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_REFRESH;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_NONE;
   return n;
 }
@@ -63,6 +65,7 @@ int buildLongOptions(uint8_t* out, const int max) {
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_BOOKMARK;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_DICTIONARY;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_CHAPTER;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_FOOTNOTE;
   if (n < max && SETTINGS.showReaderMenu == CrossPointSettings::READER_MENU_TAP) {
     out[n++] = CrossPointSettings::TAP_ZONE_LONG_MENU;
   }
@@ -73,6 +76,7 @@ int buildLongOptions(uint8_t* out, const int max) {
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_AUTO_TURN;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_JUMP_PERCENT;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_GO_HOME;
+  if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_REFRESH;
   if (n < max) out[n++] = CrossPointSettings::TAP_ZONE_LONG_NONE;
   return n;
 }
@@ -322,8 +326,8 @@ void TapZoneSettingsActivity::openPopup(const uint8_t zone) {
 
   popupRows[n] = {tr(STR_TAP_ZONE_SHORT), 0, true};
   n++;
-  uint8_t shortOptions[15];
-  const int shortCount = buildShortOptions(shortOptions, 15);
+  uint8_t shortOptions[17];
+  const int shortCount = buildShortOptions(shortOptions, 17);
   for (int i = 0; i < shortCount && n < 32; ++i) {
     popupRows[n] = {zoneLabel(shortOptions[i]), shortOptions[i], false};
     n++;
@@ -335,8 +339,8 @@ void TapZoneSettingsActivity::openPopup(const uint8_t zone) {
   if (zone < 9) {
     popupRows[n] = {tr(STR_TAP_ZONE_LONG), 0, true};
     n++;
-    uint8_t longOptions[13];
-    const int longCount = buildLongOptions(longOptions, 13);
+    uint8_t longOptions[15];
+    const int longCount = buildLongOptions(longOptions, 15);
     for (int i = 0; i < longCount && n < 32; ++i) {
       popupRows[n] = {zoneLongLabel(longOptions[i]), longOptions[i], false};
       n++;
@@ -406,6 +410,10 @@ const char* TapZoneSettingsActivity::zoneLabel(const uint8_t action) const {
       return tr(STR_TAP_ZONE_GO_HOME);
     case CrossPointSettings::TAP_ZONE_CHAPTER:
       return tr(STR_TAP_ZONE_CHAPTER);
+    case CrossPointSettings::TAP_ZONE_FOOTNOTE:
+      return tr(STR_TAP_ZONE_FOOTNOTE);
+    case CrossPointSettings::TAP_ZONE_REFRESH:
+      return tr(STR_TAP_ZONE_REFRESH);
     default:
       return tr(STR_TAP_ZONE_NONE);
   }
@@ -419,6 +427,8 @@ const char* TapZoneSettingsActivity::zoneLongLabel(const uint8_t action) const {
       return tr(STR_TAP_ZONE_DICTIONARY);
     case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
       return tr(STR_TAP_ZONE_CHAPTER);
+    case CrossPointSettings::TAP_ZONE_LONG_FOOTNOTE:
+      return tr(STR_TAP_ZONE_FOOTNOTE);
     case CrossPointSettings::TAP_ZONE_LONG_MENU:
       return tr(STR_TAP_ZONE_MENU);
     case CrossPointSettings::TAP_ZONE_LONG_ROTATE_CW:
@@ -435,6 +445,8 @@ const char* TapZoneSettingsActivity::zoneLongLabel(const uint8_t action) const {
       return tr(STR_TAP_ZONE_JUMP_PERCENT);
     case CrossPointSettings::TAP_ZONE_LONG_GO_HOME:
       return tr(STR_TAP_ZONE_GO_HOME);
+    case CrossPointSettings::TAP_ZONE_LONG_REFRESH:
+      return tr(STR_TAP_ZONE_REFRESH);
     default:
       return tr(STR_TAP_ZONE_NONE);
   }
@@ -468,6 +480,10 @@ const char* TapZoneSettingsActivity::zoneShortName(const uint8_t action) const {
       return tr(STR_TAP_ZONE_S_GO_HOME);
     case CrossPointSettings::TAP_ZONE_CHAPTER:
       return tr(STR_TAP_ZONE_S_CHAPTER);
+    case CrossPointSettings::TAP_ZONE_FOOTNOTE:
+      return tr(STR_TAP_ZONE_S_FOOTNOTE);
+    case CrossPointSettings::TAP_ZONE_REFRESH:
+      return tr(STR_TAP_ZONE_S_REFRESH);
     default:
       return tr(STR_TAP_ZONE_S_NONE);
   }
