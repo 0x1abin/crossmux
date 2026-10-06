@@ -369,6 +369,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   int8_t getCharacterSpacing() const { return static_cast<int8_t>(characterSpacing - CHARACTER_SPACING_OFFSET); }
   uint8_t textAntiAliasing = 1;
   uint8_t fakeBold = SYNTHETIC_BOLD_STANDARD;
+  // Per-book typography style memory (BookStyleStore). 1 = remember each
+  // book's typography settings and restore them on reopen; 0 = stock
+  // behaviour (every book opens with the global settings).
+  uint8_t bookStyleMemory = 1;
   uint8_t readingBackgroundEnabled = 0;
   uint8_t readingGuideLineEnabled = 0;
   uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
