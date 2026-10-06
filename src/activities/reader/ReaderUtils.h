@@ -346,11 +346,6 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     }
   }
 
-  // A page-turn gesture that still accepts tap input (Tap Only or Tap & Swipe).
-  inline bool allowsTap(const uint8_t gesture) {
-    return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
-  }
-
   const uint8_t action = zoneShortAction(zone);
   switch (action) {
     case CrossPointSettings::TAP_ZONE_PREV:
@@ -373,6 +368,11 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
       break;
   }
   return result;
+}
+
+// A page-turn gesture that still accepts tap input (Tap Only or Tap & Swipe).
+inline bool allowsTap(const uint8_t gesture) {
+  return gesture == CrossPointSettings::TAP_AND_SWIPE || gesture == CrossPointSettings::TAP_ONLY;
 }
 
 // Tap in the center third of the screen: the tap path into the reader menu on
