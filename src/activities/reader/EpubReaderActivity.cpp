@@ -2896,8 +2896,10 @@ void EpubReaderActivity::renderStatusBar() const {
 // ---------------------------------------------------------------------------
 
 namespace {
-constexpr StrId kTextRowNames[] = {StrId::STR_FONT, StrId::STR_FONT_SIZE, StrId::STR_LINE_SPACING,
-                                   StrId::STR_PARA_ALIGNMENT, StrId::STR_FIRST_LINE_INDENT};
+constexpr StrId kTextRowNames[] = {StrId::STR_FONT,             StrId::STR_FONT_SIZE,
+                                   StrId::STR_LINE_SPACING,     StrId::STR_PARA_ALIGNMENT,
+                                   StrId::STR_FIRST_LINE_INDENT, StrId::STR_FOCUS_READING,
+                                   StrId::STR_VERTICAL_BOTTOM_ALIGN};
 constexpr StrId kSpacingIds[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE};
 constexpr StrId kAlignIds[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                StrId::STR_BOOK_S_STYLE};
@@ -2947,6 +2949,10 @@ std::string EpubReaderActivity::textRowValue(int row) const {
       return I18N.get(kAlignIds[SETTINGS.paragraphAlignment % CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT]);
     case 4:
       return I18N.get(kIndentIds[SETTINGS.firstLineIndent < std::size(kIndentIds) ? SETTINGS.firstLineIndent : 0]);
+    case 5:
+      return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case 6:
+      return SETTINGS.verticalBottomAlign ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     default:
       return "";
   }
@@ -3371,8 +3377,8 @@ void EpubReaderActivity::handleOverlayInput() {
           if (toolbarUi) toolbarUi->begin();  // the picker drew its own FUI screen
           requestUpdate();                    // re-render page + Text panel
         });
+
       } else {
-        // Enum rows open the Settings-style option picker.
         showTextRowPopup(panelIndex);
       }
     } else if (overlay == Overlay::Contents) {

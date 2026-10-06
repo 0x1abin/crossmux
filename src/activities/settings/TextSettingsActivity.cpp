@@ -39,7 +39,8 @@ constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_L
 constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING,      StrId::STR_WORD_SPACING,
                                          StrId::STR_CHARACTER_SPACING, StrId::STR_EXTRA_SPACING,
                                          StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
-                                         StrId::STR_ALIGNMENT,         StrId::STR_SCREEN_MARGIN};
+                                         StrId::STR_ALIGNMENT,         StrId::STR_SCREEN_MARGIN,
+                                         StrId::STR_VERTICAL_BOTTOM_ALIGN};
 constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_READING_GUIDE_LINE,
                                         StrId::STR_READING_GUIDE_LINE_STYLE,
@@ -610,6 +611,12 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       requestUpdate();
       break;
     }
+    case LayoutRow::VerticalBottomAlign:
+      // Plain on/off toggle, like the Style tab's boolean rows.
+      SETTINGS.verticalBottomAlign = !SETTINGS.verticalBottomAlign;
+      SETTINGS.saveToFile();
+      requestUpdate();
+      break;
 
     default:
       break;
@@ -646,6 +653,8 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
     }
     case LayoutRow::ScreenMargin:
       return std::to_string(SETTINGS.screenMargin);
+    case LayoutRow::VerticalBottomAlign:
+      return SETTINGS.verticalBottomAlign ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
 
     default:
       return "";
