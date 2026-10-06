@@ -138,13 +138,12 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   static_assert(HEADER_SIZE == sizeof(SECTION_FILE_VERSION) + sizeof(spec.fontId) + sizeof(spec.lineCompression) +
                                    sizeof(spec.extraParagraphSpacing) + sizeof(spec.firstLineIndent) +
                                    sizeof(spec.paragraphIndentSpaces) + sizeof(spec.paragraphAlignment) +
-                                   sizeof(spec.verticalBottomAlign) +
-                                   sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
-                                   sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
-                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) +
-                                   sizeof(spec.collectTouchLinks) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent),
+                                   sizeof(spec.verticalBottomAlign) + sizeof(spec.viewportWidth) +
+                                   sizeof(spec.viewportHeight) + sizeof(pageCount) + sizeof(spec.hyphenationEnabled) +
+                                   sizeof(spec.embeddedStyle) + sizeof(spec.imageRendering) +
+                                   sizeof(spec.focusReadingEnabled) + sizeof(spec.collectTouchLinks) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                   sizeof(uint32_t) + sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.

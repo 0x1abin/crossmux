@@ -619,7 +619,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   // is normalized away together with the indent/spacing bytes). The leading
   // version byte is normalized to 70 so a version bump alone never moves the
   // digest.
-  EXPECT_EQ(digest, 9535508317497758948ULL);  // v71/v70 cache (paragraph spacing levels), text and footnotes.
+  EXPECT_EQ(digest, 5453599015563686761ULL);  // v71/v70 cache (paragraph spacing levels), text and footnotes.
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {

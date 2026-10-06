@@ -2896,9 +2896,12 @@ void EpubReaderActivity::renderStatusBar() const {
 // ---------------------------------------------------------------------------
 
 namespace {
-constexpr StrId kTextRowNames[] = {StrId::STR_FONT,             StrId::STR_FONT_SIZE,
-                                   StrId::STR_LINE_SPACING,     StrId::STR_PARA_ALIGNMENT,
-                                   StrId::STR_FIRST_LINE_INDENT, StrId::STR_FOCUS_READING,
+constexpr StrId kTextRowNames[] = {StrId::STR_FONT,
+                                   StrId::STR_FONT_SIZE,
+                                   StrId::STR_LINE_SPACING,
+                                   StrId::STR_PARA_ALIGNMENT,
+                                   StrId::STR_FIRST_LINE_INDENT,
+                                   StrId::STR_FOCUS_READING,
                                    StrId::STR_VERTICAL_BOTTOM_ALIGN};
 constexpr StrId kSpacingIds[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE};
 constexpr StrId kAlignIds[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,

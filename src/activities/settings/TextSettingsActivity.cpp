@@ -36,11 +36,10 @@ namespace {
 // Tab labels for Font | Size | Layout | Style.
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
-constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING,      StrId::STR_WORD_SPACING,
-                                         StrId::STR_CHARACTER_SPACING, StrId::STR_EXTRA_SPACING,
-                                         StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
-                                         StrId::STR_ALIGNMENT,         StrId::STR_SCREEN_MARGIN,
-                                         StrId::STR_VERTICAL_BOTTOM_ALIGN};
+constexpr StrId LAYOUT_ROW_NAME_IDS[] = {
+    StrId::STR_LINE_SPACING,  StrId::STR_WORD_SPACING,      StrId::STR_CHARACTER_SPACING,
+    StrId::STR_EXTRA_SPACING, StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
+    StrId::STR_ALIGNMENT,     StrId::STR_SCREEN_MARGIN,     StrId::STR_VERTICAL_BOTTOM_ALIGN};
 constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_READING_GUIDE_LINE,
                                         StrId::STR_READING_GUIDE_LINE_STYLE,
