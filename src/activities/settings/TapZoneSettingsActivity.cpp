@@ -533,7 +533,8 @@ void TapZoneSettingsActivity::drawDashedRect(const int x, const int y, const int
 
 // Rounded-rect drawing helpers (E-Ink friendly: straight edges plus small
 // 1px arc fills in the corners). state=true paints black, false paints white.
-static void fillRoundRect(const int x, const int y, const int w, const int h, const int r, const GfxRenderer& renderer) {
+static void fillRoundRect(const int x, const int y, const int w, const int h, const int r,
+                          const GfxRenderer& renderer) {
   renderer.fillRect(x, y + r, w, h - 2 * r, false);
   renderer.fillRect(x + r, y, w - 2 * r, h, false);
   for (int i = 0; i < r; ++i) {
