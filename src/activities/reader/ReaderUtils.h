@@ -5,12 +5,11 @@
 #include <HalGPIO.h>
 #include <HalTiltSensor.h>
 #include <Logging.h>
-
-#include <cctype>
-#include <string_view>
 #include <components/bars/tap-zones.h>
 #include <components/themes/BaseTheme.h>
 
+#include <cctype>
+#include <string_view>
 
 #include "MappedInputManager.h"
 #include "ReaderRefresh.h"
@@ -304,7 +303,6 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
   const bool nextTaps = gestureAllowsTap(SETTINGS.pageTurnGesture);
   const bool prevTaps = gestureAllowsTap(SETTINGS.previousPageGesture);
   if (!nextTaps && !prevTaps) {
-
     return result;
   }
 
