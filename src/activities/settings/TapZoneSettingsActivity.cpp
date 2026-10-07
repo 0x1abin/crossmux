@@ -425,7 +425,7 @@ const char* TapZoneSettingsActivity::zoneLabel(const uint8_t action) const {
     case CrossPointSettings::TAP_ZONE_AUTO_TURN:
       return tr(STR_TAP_ZONE_AUTO_TURN);
     case CrossPointSettings::TAP_ZONE_JUMP_PERCENT:
-      return tr(STR_TAP_ZONE_JUMP_PERCENT);
+      return tr(STR_GO_TO_PERCENT);  // same wording as the reading-menu jump-to-%
     case CrossPointSettings::TAP_ZONE_GO_HOME:
       return tr(STR_TAP_ZONE_GO_HOME);
     case CrossPointSettings::TAP_ZONE_CHAPTER:
@@ -462,7 +462,7 @@ const char* TapZoneSettingsActivity::zoneLongLabel(const uint8_t action) const {
     case CrossPointSettings::TAP_ZONE_LONG_AUTO_TURN:
       return tr(STR_TAP_ZONE_AUTO_TURN);
     case CrossPointSettings::TAP_ZONE_LONG_JUMP_PERCENT:
-      return tr(STR_TAP_ZONE_JUMP_PERCENT);
+      return tr(STR_GO_TO_PERCENT);  // same wording as the reading-menu jump-to-%
     case CrossPointSettings::TAP_ZONE_LONG_GO_HOME:
       return tr(STR_TAP_ZONE_GO_HOME);
     case CrossPointSettings::TAP_ZONE_LONG_REFRESH:
@@ -562,33 +562,11 @@ void TapZoneSettingsActivity::drawDashedRect(const int x, const int y, const int
   }
 }
 
-// Rounded-rect drawing helpers (E-Ink friendly: straight edges plus small
-// 1px arc fills in the corners). state=true paints black, false paints white.
-static void fillRoundRect(const int x, const int y, const int w, const int h, const int r,
-                          const GfxRenderer& renderer) {
-  renderer.fillRect(x, y + r, w, h - 2 * r, false);
-  renderer.fillRect(x + r, y, w - 2 * r, h, false);
-  for (int i = 0; i < r; ++i) {
-    const int len = static_cast<int>(sqrt(static_cast<double>(r * r - i * i)));
-    renderer.fillRect(x + i, y, 1, len, false);
-    renderer.fillRect(x + w - 1 - i, y, 1, len, false);
-    renderer.fillRect(x + i, y + h - len, 1, len, false);
-    renderer.fillRect(x + w - 1 - i, y + h - len, 1, len, false);
-  }
-}
-
-static void drawRoundRectBorder(const int x, const int y, const int w, const int h, const int r,
-                                const GfxRenderer& renderer) {
-  renderer.drawLine(x + r, y, x + w - r, y, 1, true);
-  renderer.drawLine(x + r, y + h - 1, x + w - r, y + h - 1, 1, true);
-  renderer.drawLine(x, y + r, x, y + h - r, 1, true);
-  renderer.drawLine(x + w - 1, y + r, x + w - 1, y + h - r, 1, true);
-  for (int i = 0; i < r; ++i) {
-    const int len = static_cast<int>(sqrt(static_cast<double>(r * r - i * i)));
-    renderer.fillRect(x + i, y + (r - len), 1, 1, true);
-    renderer.fillRect(x + w - 1 - i, y + (r - len), 1, 1, true);
-    renderer.fillRect(x + i, y + h - 1 - (r - len), 1, 1, true);
-    renderer.fillRect(x + w - 1 - i, y + h - 1 - (r - len), 1, 1, true);
+// Dotted horizontal rule used between dialog rows, matching the standard INX
+// option dialog's row separators.
+static void drawDottedHRule(const GfxRenderer& renderer, const int x, const int y, const int w) {
+  for (int i = 0; i < w; i += 4) {
+    renderer.drawLine(x + i, y, (x + i + 1) < x + w - 1 ? x + i + 1 : x + w - 1, y, 1, true);
   }
 }
 
@@ -602,21 +580,19 @@ void TapZoneSettingsActivity::renderPopup() {
   const int px = (screenW - panelW) / 2;
   const int py = (screenH - panelH) / 2;
 
-  // Rounded white panel with a rounded black outline.
-  const int kRadius = 6;
-  fillRoundRect(px, py, panelW, panelH, kRadius, renderer);
-  drawRoundRectBorder(px, py, panelW, panelH, kRadius, renderer);
+  // Flat white panel with a double black outline, exactly like the standard
+  // INX option dialog (no rounded corners, no decorative bands).
+  renderer.fillRect(px, py, panelW, panelH, false);
+  renderer.drawRect(px, py, panelW, panelH, true);
+  renderer.drawRect(px + 1, py + 1, panelW - 2, panelH - 2, true);
 
-  // Title: white header area with centered black text and a thin underline
-  // separating the title from the options below.
+  // Title: bold, left-aligned, under a full-width rule.
   char title[24];
   snprintf(title, sizeof(title), "Zone %d · %s", popupZone,
            popupPhase == 0 ? tr(STR_TAP_ZONE_SHORT) : tr(STR_TAP_ZONE_LONG));
-  // Title styling matches the standard INX option dialog: bold, left-aligned
-  // under a thin rule separating it from the options.
   renderer.drawText(UI_10_FONT_ID, px + 16, py + (kPopupTitleH - renderer.getLineHeight(UI_10_FONT_ID)) / 2, title,
                     true, EpdFontFamily::BOLD);
-  renderer.drawLine(px + 1, py + kPopupTitleH - 1, px + panelW - 2, py + kPopupTitleH - 1, 1, true);
+  renderer.drawLine(px, py + kPopupTitleH - 1, px + panelW - 1, py + kPopupTitleH - 1, 1, true);
 
   const uint8_t shortAction = ReaderUtils::zoneRawShortAction(popupZone);
   const uint8_t longAction = ReaderUtils::zoneLongAction(popupZone);
@@ -631,23 +607,24 @@ void TapZoneSettingsActivity::renderPopup() {
     const bool isCursor = i == popupCursor;
 
     if (popupRows[i].isHeader) {
-      // Section header: a full-width light-gray band with centered text
-      // separating the header from the option rows below.
-      renderer.fillRectDither(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, Color::LightGray);
-      const int hw = renderer.getTextWidth(UI_10_FONT_ID, popupRows[i].label);
-      renderer.drawText(UI_10_FONT_ID, px + (panelW - hw) / 2, ry + (kPopupRowH - textH) / 2, popupRows[i].label, true);
+      // Section header: plain bold text, no background band.
+      renderer.drawText(UI_10_FONT_ID, px + 18, ry + (kPopupRowH - textH) / 2, popupRows[i].label, true,
+                        EpdFontFamily::BOLD);
     } else if (isCursor || isCurrent) {
-      // Selected/cursor row: full-row invert (black band, white bold text),
-      // matching the standard INX option dialog.
+      // Selected/cursor row: full-row invert with white bold text, matching
+      // the standard INX dialog. A cursor row that is not the current value
+      // keeps a black focus ring around the invert band.
       renderer.fillRect(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, true);
       renderer.drawText(UI_10_FONT_ID, px + 18, ry + (kPopupRowH - textH) / 2, popupRows[i].label, false,
                         EpdFontFamily::BOLD);
       if (isCursor && !isCurrent) {
-        // Keyboard focus ring on a row that is not the current value.
         renderer.drawRect(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, true);
       }
     } else {
       renderer.drawText(UI_10_FONT_ID, px + 18, ry + (kPopupRowH - textH) / 2, popupRows[i].label, true);
+    }
+    if (i + 1 < popupRowCount) {
+      drawDottedHRule(renderer, px + 2, ry + kPopupRowH - 1, panelW - 4);
     }
   }
 }
