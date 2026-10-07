@@ -32,14 +32,15 @@ class TapZoneSettingsActivity final : public Activity {
   // D-pad cursor: main zones only (0..8); the small zones are set by touch.
   uint8_t selectedZone = 4;
   bool popupOpen = false;
-  uint8_t popupZone = 0;   // zone (0..14) being edited
-  int popupCursor = 0;     // linear index into popupRows (action rows only)
-  int popupRowCount = 0;   // rows currently populated
-  int popupShortRows = 0;  // rows up to the long-press section header
+  uint8_t popupZone = 0;  // zone (0..14) being edited
+  int popupCursor = 0;    // linear index into popupRows (action rows only)
+  int popupRowCount = 0;  // rows currently populated
+  int popupPhase = 0;     // 0 = short-press section, 1 = long-press section (two-step picker)
   PopupRow popupRows[32];
 
   void moveSelection(int deltaX, int deltaY);
   void openPopup(uint8_t zone);
+  void rebuildPopupRows();
   void closePopup();
   void setPopupAction(int row);
   int stepOverHeaders(int index, int delta) const;

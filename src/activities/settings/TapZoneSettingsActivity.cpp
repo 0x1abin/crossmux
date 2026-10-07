@@ -110,11 +110,11 @@ void TapZoneSettingsActivity::loop() {
       if (popupHitRow(tapX, tapY, &row)) {
         if (row >= 0 && row < popupRowCount && !popupRows[row].isHeader) {
           setPopupAction(row);
+          requestUpdate();
+          return;
         }
-        closePopup();
-      } else {
-        closePopup();  // tap outside the popup cancels
       }
+      closePopup();  // tap outside the popup cancels
       requestUpdate();
       return;
     }
@@ -130,7 +130,6 @@ void TapZoneSettingsActivity::loop() {
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       setPopupAction(popupCursor);
-      closePopup();
       requestUpdate();
       return;
     }
@@ -320,23 +319,39 @@ int TapZoneSettingsActivity::stepOverHeaders(int index, const int delta) const {
 
 void TapZoneSettingsActivity::openPopup(const uint8_t zone) {
   popupZone = zone;
+  popupPhase = 0;
+  rebuildPopupRows();
+  popupOpen = true;
+}
+
+// Two-step picker: the popup first shows the short-press section; selecting an
+// action advances to the long-press section (main 3x3 grid only), then closes.
+// Mini zones are tap-only and close right after the short-press pick.
+void TapZoneSettingsActivity::rebuildPopupRows() {
   popupRowCount = 0;
   int n = 0;
-  const uint8_t shortAction = ReaderUtils::zoneRawShortAction(zone);
-
-  popupRows[n] = {tr(STR_TAP_ZONE_SHORT), 0, true};
-  n++;
-  uint8_t shortOptions[17];
-  const int shortCount = buildShortOptions(shortOptions, 17);
-  for (int i = 0; i < shortCount && n < 32; ++i) {
-    popupRows[n] = {zoneLabel(shortOptions[i]), shortOptions[i], false};
+  if (popupPhase == 0) {
+    const uint8_t shortAction = ReaderUtils::zoneRawShortAction(popupZone);
+    popupRows[n] = {tr(STR_TAP_ZONE_SHORT), 0, true};
     n++;
-  }
-  popupShortRows = n;  // rows up to (not including) the long-press header
-
-  // Mini zones are tap-only: the long-press section is built for the main
-  // 3x3 grid only.
-  if (zone < 9) {
+    uint8_t shortOptions[17];
+    const int shortCount = buildShortOptions(shortOptions, 17);
+    for (int i = 0; i < shortCount && n < 32; ++i) {
+      popupRows[n] = {zoneLabel(shortOptions[i]), shortOptions[i], false};
+      n++;
+    }
+    popupRowCount = n;
+    // Cursor starts on the row matching the current short action.
+    popupCursor = 1;
+    for (int i = 1; i < n; ++i) {
+      if (popupRows[i].isHeader) continue;
+      if (popupRows[i].value == shortAction) {
+        popupCursor = i;
+        break;
+      }
+    }
+  } else {
+    const uint8_t longAction = ReaderUtils::zoneLongAction(popupZone);
     popupRows[n] = {tr(STR_TAP_ZONE_LONG), 0, true};
     n++;
     uint8_t longOptions[15];
@@ -345,20 +360,17 @@ void TapZoneSettingsActivity::openPopup(const uint8_t zone) {
       popupRows[n] = {zoneLongLabel(longOptions[i]), longOptions[i], false};
       n++;
     }
-  }
-  popupRowCount = n;
-
-  // Cursor starts on the row matching the current short action, else the first
-  // action row after the short header.
-  popupCursor = 1;
-  for (int i = 1; i < n; ++i) {
-    if (popupRows[i].isHeader) continue;
-    if (i < popupShortRows && popupRows[i].value == shortAction) {
-      popupCursor = i;
-      break;
+    popupRowCount = n;
+    // Cursor starts on the row matching the current long action.
+    popupCursor = 1;
+    for (int i = 1; i < n; ++i) {
+      if (popupRows[i].isHeader) continue;
+      if (popupRows[i].value == longAction) {
+        popupCursor = i;
+        break;
+      }
     }
   }
-  popupOpen = true;
 }
 
 void TapZoneSettingsActivity::closePopup() {
@@ -369,7 +381,7 @@ void TapZoneSettingsActivity::closePopup() {
 void TapZoneSettingsActivity::setPopupAction(const int row) {
   if (row < 0 || row >= popupRowCount || popupRows[row].isHeader) return;
   const uint8_t value = popupRows[row].value;
-  const bool isShort = row < popupShortRows;
+  const bool isShort = popupPhase == 0;
   if (popupZone < 9) {
     if (isShort) {
       SETTINGS.tapZones[popupZone] = value;
@@ -377,8 +389,16 @@ void TapZoneSettingsActivity::setPopupAction(const int row) {
       SETTINGS.tapZonesLong[popupZone] = value;
     }
   } else {
-    // Mini zones are tap-only; a long-press section is never built for them.
+    // Mini zones are tap-only; only the short-press section is ever shown.
     if (isShort) SETTINGS.miniZones[popupZone - 9] = value;
+  }
+  // Two-step flow: after the short-press pick on the main grid advance to the
+  // long-press section; otherwise the pick is done and the popup closes.
+  if (isShort && popupZone < 9) {
+    popupPhase = 1;
+    rebuildPopupRows();
+  } else {
+    closePopup();
   }
 }
 
@@ -590,10 +610,12 @@ void TapZoneSettingsActivity::renderPopup() {
   // Title: white header area with centered black text and a thin underline
   // separating the title from the options below.
   char title[24];
-  snprintf(title, sizeof(title), "Zone %d", popupZone);
-  const int titleW = renderer.getTextWidth(UI_10_FONT_ID, title);
-  renderer.drawText(UI_10_FONT_ID, px + (panelW - titleW) / 2,
-                    py + (kPopupTitleH - renderer.getLineHeight(UI_10_FONT_ID)) / 2, title, true);
+  snprintf(title, sizeof(title), "Zone %d · %s", popupZone,
+           popupPhase == 0 ? tr(STR_TAP_ZONE_SHORT) : tr(STR_TAP_ZONE_LONG));
+  // Title styling matches the standard INX option dialog: bold, left-aligned
+  // under a thin rule separating it from the options.
+  renderer.drawText(UI_10_FONT_ID, px + 16, py + (kPopupTitleH - renderer.getLineHeight(UI_10_FONT_ID)) / 2, title,
+                    true, EpdFontFamily::BOLD);
   renderer.drawLine(px + 1, py + kPopupTitleH - 1, px + panelW - 2, py + kPopupTitleH - 1, 1, true);
 
   const uint8_t shortAction = ReaderUtils::zoneRawShortAction(popupZone);
@@ -603,32 +625,29 @@ void TapZoneSettingsActivity::renderPopup() {
 
   for (int i = 0; i < popupRowCount; ++i) {
     const int ry = rowY + i * kPopupRowH;
-    const bool isShort = i < popupShortRows;
+    const bool isShort = popupPhase == 0;
     const bool isCurrent =
         !popupRows[i].isHeader && (isShort ? popupRows[i].value == shortAction : popupRows[i].value == longAction);
     const bool isCursor = i == popupCursor;
 
     if (popupRows[i].isHeader) {
-      // Section header: a full-width light-gray band with centered text. The
-      // band visually separates the short-press section from the long-press
-      // section and sets the header apart from the plain option rows below.
+      // Section header: a full-width light-gray band with centered text
+      // separating the header from the option rows below.
       renderer.fillRectDither(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, Color::LightGray);
       const int hw = renderer.getTextWidth(UI_10_FONT_ID, popupRows[i].label);
       renderer.drawText(UI_10_FONT_ID, px + (panelW - hw) / 2, ry + (kPopupRowH - textH) / 2, popupRows[i].label, true);
+    } else if (isCursor || isCurrent) {
+      // Selected/cursor row: full-row invert (black band, white bold text),
+      // matching the standard INX option dialog.
+      renderer.fillRect(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, true);
+      renderer.drawText(UI_10_FONT_ID, px + 18, ry + (kPopupRowH - textH) / 2, popupRows[i].label, false,
+                        EpdFontFamily::BOLD);
+      if (isCursor && !isCurrent) {
+        // Keyboard focus ring on a row that is not the current value.
+        renderer.drawRect(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, true);
+      }
     } else {
-      // Current value: a light-gray band in both sections (identical look for
-      // short and long press). The cursor row is a dark-gray band on top; the
-      // square marker flips to white there so it stays visible.
-      if (isCursor) {
-        renderer.fillRectDither(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, Color::DarkGray);
-      } else if (isCurrent) {
-        renderer.fillRectDither(px + 1, ry + 1, panelW - 2, kPopupRowH - 2, Color::LightGray);
-      }
-      const int tx = px + (isCurrent ? 18 : 12);
-      if (isCurrent) {
-        renderer.fillRect(px + 8, ry + (kPopupRowH - 6) / 2, 6, 6, !isCursor);
-      }
-      renderer.drawText(UI_10_FONT_ID, tx, ry + (kPopupRowH - textH) / 2, popupRows[i].label, true);
+      renderer.drawText(UI_10_FONT_ID, px + 18, ry + (kPopupRowH - textH) / 2, popupRows[i].label, true);
     }
   }
 }
