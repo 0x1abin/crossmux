@@ -82,10 +82,11 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   style.textAntiAliasing = boundedInteger<uint8_t>(obj, "textAntiAliasing", 1, 0, 1);
   style.wordSpacing = boundedInteger<uint8_t>(obj, "wordSpacing", 100, CrossPointSettings::WORD_SPACING_MIN,
                                               CrossPointSettings::WORD_SPACING_MAX);
-  style.characterSpacing = boundedInteger<uint8_t>(obj, "characterSpacing", CrossPointSettings::CHARACTER_SPACING_OFFSET,
-                                                   0, 4);
-  style.screenMargin = boundedInteger<uint8_t>(obj, "screenMargin", CrossPointSettings::SCREEN_MARGIN_MIN,
-                                               CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX);
+  style.characterSpacing =
+      boundedInteger<uint8_t>(obj, "characterSpacing", CrossPointSettings::CHARACTER_SPACING_OFFSET, 0, 4);
+  style.screenMargin =
+      boundedInteger<uint8_t>(obj, "screenMargin", CrossPointSettings::SCREEN_MARGIN_MIN,
+                              CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX);
   style.embeddedStyle = boundedInteger<uint8_t>(obj, "embeddedStyle", 1, 0, 1);
   style.focusReadingEnabled = boundedInteger<uint8_t>(obj, "focusReadingEnabled", 0, 0, 1);
   style.verticalBottomAlign = boundedInteger<uint8_t>(obj, "verticalBottomAlign", 0, 0, 1);
