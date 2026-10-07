@@ -305,11 +305,11 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  const bool nextTaps = gestureAllowsTap(SETTINGS.pageTurnGesture);
-  const bool prevTaps = gestureAllowsTap(SETTINGS.previousPageGesture);
-  if (!nextTaps && !prevTaps) {
-    return result;
-  }
+  // Tap zones always run: page-turn actions (PREV/NEXT) are gated below by the
+  // per-direction gesture, while non-page-turn actions (menu, bookmark,
+  // dictionary, chapter skip, long-press actions) stay usable even when a
+  // direction is set to Swipe Only. The old early return here disabled every
+  // zone when both directions were Swipe Only.
 
   // Long-press zones fire WHILE the finger is still down, once a stationary
   // contact has been held BOOKMARK_HOLD_MS: the action runs on the timer, not

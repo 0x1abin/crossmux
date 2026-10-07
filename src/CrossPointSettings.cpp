@@ -427,9 +427,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // also hold the now-removed Inverted Tap gesture (legacy value 3), which
   // folds to Tap Only. Saves from the gesture-pair era have no
   // touchReaderControls key at all and are left untouched (the key check keeps
-  // a version bump from re-running the migration against them).
+  // a version bump from re-running the migration against them). Saves that
+  // already carry the per-direction gesture keys are also left untouched, so a
+  // user-configured gesture survives reloads (the version key is never written,
+  // otherwise every boot would re-enter this migration and fold the gestures
+  // back to Tap Only).
   if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
-      !doc["touchReaderControls"].isNull()) {
+      !doc["touchReaderControls"].isNull() && doc["pageTurnGesture"].isNull()) {
     const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
     if (legacyTouch == LEGACY_TOUCH_SWIPE) {
       pageTurnGesture = SWIPE_ONLY;
@@ -801,6 +805,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.characterSpacing = getCharacterSpacing();
   spec.wordSpacingPercent = wordSpacing;
   spec.paragraphAlignment = paragraphAlignment;
+  spec.verticalBottomAlign = verticalBottomAlign != 0;
   spec.viewportWidth = viewportWidth;
   spec.viewportHeight = viewportHeight;
   spec.hyphenationEnabled = hyphenationEnabled != 0;
