@@ -22,8 +22,16 @@ struct BookStyle {
   uint8_t paragraphAlignment = CrossPointSettings::JUSTIFIED;
   uint8_t extraParagraphSpacing = 0;
   uint8_t firstLineIndent = FirstLineIndent::Auto;
+  uint8_t paragraphIndentSpaces = 3;
   uint8_t fakeBold = CrossPointSettings::SYNTHETIC_BOLD_STANDARD;
   uint8_t textAntiAliasing = 1;
+  uint8_t wordSpacing = 100;
+  uint8_t characterSpacing = CrossPointSettings::CHARACTER_SPACING_OFFSET;
+  uint8_t screenMargin = CrossPointSettings::SCREEN_MARGIN_MIN;
+  uint8_t embeddedStyle = 1;
+  uint8_t focusReadingEnabled = 0;
+  uint8_t verticalBottomAlign = 0;
+  uint8_t hyphenationEnabled = 0;
   uint8_t readingGuideLineEnabled = 0;
   uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
   int8_t readingGuideLineOffset = CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT;
@@ -46,7 +54,7 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
   friend class PersistableStore<BookStyleStore>;
 
  public:
-  static constexpr size_t MAX_STYLED_BOOKS = 64;
+  static constexpr size_t MAX_STYLED_BOOKS = 128;
   static constexpr int kFormatVersion = 1;
 
   static const char* getFilePath() { return "/.crosspoint/book_styles.json"; }

@@ -39,8 +39,16 @@ void styleToJson(JsonObject obj, const BookStyle& style) {
   obj["paragraphAlignment"] = style.paragraphAlignment;
   obj["extraParagraphSpacing"] = style.extraParagraphSpacing;
   obj["firstLineIndent"] = style.firstLineIndent;
+  obj["paragraphIndentSpaces"] = style.paragraphIndentSpaces;
   obj["fakeBold"] = style.fakeBold;
   obj["textAntiAliasing"] = style.textAntiAliasing;
+  obj["wordSpacing"] = style.wordSpacing;
+  obj["characterSpacing"] = style.characterSpacing;
+  obj["screenMargin"] = style.screenMargin;
+  obj["embeddedStyle"] = style.embeddedStyle;
+  obj["focusReadingEnabled"] = style.focusReadingEnabled;
+  obj["verticalBottomAlign"] = style.verticalBottomAlign;
+  obj["hyphenationEnabled"] = style.hyphenationEnabled;
   obj["readingGuideLineEnabled"] = style.readingGuideLineEnabled;
   obj["readingGuideLineStyle"] = style.readingGuideLineStyle;
   obj["readingGuideLineOffset"] = style.readingGuideLineOffset;
@@ -68,9 +76,20 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   style.extraParagraphSpacing = boundedInteger<uint8_t>(obj, "extraParagraphSpacing", 0, 0, kMaxExtraParagraphSpacing);
   style.firstLineIndent = boundedInteger<uint8_t>(obj, "firstLineIndent", FirstLineIndent::Auto, FirstLineIndent::Auto,
                                                   FirstLineIndent::NoIndent);
+  style.paragraphIndentSpaces = boundedInteger<uint8_t>(obj, "paragraphIndentSpaces", 3, 0, 5);
   style.fakeBold = boundedInteger<uint8_t>(obj, "fakeBold", CrossPointSettings::SYNTHETIC_BOLD_STANDARD, 0,
                                            CrossPointSettings::SYNTHETIC_BOLD_COUNT - 1);
   style.textAntiAliasing = boundedInteger<uint8_t>(obj, "textAntiAliasing", 1, 0, 1);
+  style.wordSpacing = boundedInteger<uint8_t>(obj, "wordSpacing", 100, CrossPointSettings::WORD_SPACING_MIN,
+                                              CrossPointSettings::WORD_SPACING_MAX);
+  style.characterSpacing = boundedInteger<uint8_t>(obj, "characterSpacing", CrossPointSettings::CHARACTER_SPACING_OFFSET,
+                                                   0, 4);
+  style.screenMargin = boundedInteger<uint8_t>(obj, "screenMargin", CrossPointSettings::SCREEN_MARGIN_MIN,
+                                               CrossPointSettings::SCREEN_MARGIN_MIN, CrossPointSettings::SCREEN_MARGIN_MAX);
+  style.embeddedStyle = boundedInteger<uint8_t>(obj, "embeddedStyle", 1, 0, 1);
+  style.focusReadingEnabled = boundedInteger<uint8_t>(obj, "focusReadingEnabled", 0, 0, 1);
+  style.verticalBottomAlign = boundedInteger<uint8_t>(obj, "verticalBottomAlign", 0, 0, 1);
+  style.hyphenationEnabled = boundedInteger<uint8_t>(obj, "hyphenationEnabled", 0, 0, 1);
   style.readingGuideLineEnabled = boundedInteger<uint8_t>(obj, "readingGuideLineEnabled", 0, 0, 1);
   style.readingGuideLineStyle =
       boundedInteger<uint8_t>(obj, "readingGuideLineStyle", static_cast<uint8_t>(readingGuideLine::Style::ShortDash), 0,
