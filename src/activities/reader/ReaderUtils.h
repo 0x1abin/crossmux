@@ -311,6 +311,39 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
+  // Long-press zones fire WHILE the finger is still down, once a stationary
+  // contact has been held BOOKMARK_HOLD_MS: the action runs on the timer, not
+  // on the eventual release. The contact must still be a tap candidate
+  // (stationary within tap slop, not yet consumed elsewhere), so a swipe, a
+  // suppressed contact or a multi-touch sequence never fires here. A long
+  // action suppresses the rest of the contact so the lift cannot also tap.
+  float lxN = 0.0f;
+  float lyN = 0.0f;
+  unsigned long heldMs = 0;
+  if (gpio.isTouchTapCandidate(lxN, lyN, heldMs)) {
+    result.heldMs = heldMs;
+    if (heldMs >= BOOKMARK_HOLD_MS) {
+      int lx = 0;
+      int ly = 0;
+      renderer.tapToLogical(lxN, lyN, lx, ly);
+      const int longZone = tapZoneAt(renderer, lx, ly);
+      if (longZone >= 0 && longZone < 9) {
+        const uint8_t longAction = zoneLongAction(longZone);
+        if (longAction != CrossPointSettings::TAP_ZONE_LONG_NONE) {
+          gpio.suppressTouchContact();
+          result.longPress = true;
+          result.longAction = longAction;
+          result.bookmark = longAction == CrossPointSettings::TAP_ZONE_LONG_BOOKMARK;
+          result.dictionary = longAction == CrossPointSettings::TAP_ZONE_LONG_DICTIONARY;
+          return result;
+        }
+      }
+    }
+    // Still holding: no tap action before the release edge (short taps keep
+    // their release semantics), and no long-press without a long action.
+    return result;
+  }
+
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) {
