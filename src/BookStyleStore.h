@@ -54,7 +54,18 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
   friend class PersistableStore<BookStyleStore>;
 
  public:
+  // Per-target cap so the store stays lean on the one non-PSRAM build.
+  // Every product target (X4/X4Pro/X4C/sticky/eego_a4/...) is an ESP32-S3 with
+  // 8MB PSRAM; the C3 host build ([env:default], esp32-c3-devkitm-1) has no
+  // PSRAM and a ~400KB heap, so it keeps 64 entries (the same figure the
+  // upstream review asked to validate on C3). At ~250B/record on disk the S3
+  // cap stays far below the SD write buffer, and the resident vector plus the
+  // JSON parse peak stays within a few tens of KB on either target.
+#if CONFIG_IDF_TARGET_ESP32C3
+  static constexpr size_t MAX_STYLED_BOOKS = 64;
+#else
   static constexpr size_t MAX_STYLED_BOOKS = 128;
+#endif
   static constexpr int kFormatVersion = 1;
 
   static const char* getFilePath() { return "/.crosspoint/book_styles.json"; }
