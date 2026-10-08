@@ -369,6 +369,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   int8_t getCharacterSpacing() const { return static_cast<int8_t>(characterSpacing - CHARACTER_SPACING_OFFSET); }
   uint8_t textAntiAliasing = 1;
   uint8_t fakeBold = SYNTHETIC_BOLD_STANDARD;
+  // Per-book typography style memory (BookStyleStore). 1 = remember each
+  // book's typography settings and restore them on reopen; 0 = stock
+  // behaviour (every book opens with the global settings).
+  uint8_t bookStyleMemory = 1;
   uint8_t readingBackgroundEnabled = 0;
   uint8_t readingGuideLineEnabled = 0;
   uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
@@ -405,6 +409,16 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t fontPointSize = DEFAULT_FONT_POINT_SIZE;
   uint8_t lineSpacing = NORMAL;
   uint8_t paragraphAlignment = JUSTIFIED;
+  // Vertical bottom-alignment (文字底部对齐). When on, every non-final page's
+  // text lines are redistributed so the first line stays at the top and the
+  // last line reaches the content bottom, with the leftover vertical space
+  // spread evenly between lines. The chapter's final page is left top-aligned
+  // so the book still reads naturally.
+  // NOTE: this field is provided by PR #348 (page bottom-align); it is
+  // referenced by the per-book style snapshot. The setting UI and its JSON
+  // serialization live in #348, so until that PR merges this field stays at
+  // its default value.
+  uint8_t verticalBottomAlign = 0;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
   // E-ink refresh frequency (default 15 pages)

@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
+#include "BookStyleStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
@@ -47,6 +49,98 @@ std::unique_ptr<ReaderActivity> ReaderActivity::create(GfxRenderer& renderer, Ma
 
 void ReaderActivity::applyInitialOrientation() { ReaderUtils::applyOrientation(renderer, SETTINGS.orientation); }
 
+namespace {
+
+BookStyle snapshotStyleFromSettings() {
+  BookStyle style;
+  style.fontFamily = SETTINGS.fontFamily;
+  memcpy(style.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(style.sdFontFamilyName));
+  style.fontPointSize = SETTINGS.fontPointSize;
+  style.lineSpacing = SETTINGS.lineSpacing;
+  style.paragraphAlignment = SETTINGS.paragraphAlignment;
+  style.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  style.firstLineIndent = SETTINGS.firstLineIndent;
+  style.paragraphIndentSpaces = SETTINGS.paragraphIndentSpaces;
+  style.fakeBold = SETTINGS.fakeBold;
+  style.textAntiAliasing = SETTINGS.textAntiAliasing;
+  style.wordSpacing = SETTINGS.wordSpacing;
+  style.characterSpacing = SETTINGS.characterSpacing;
+  style.screenMargin = SETTINGS.screenMargin;
+  style.embeddedStyle = SETTINGS.embeddedStyle;
+  style.focusReadingEnabled = SETTINGS.focusReadingEnabled;
+  style.verticalBottomAlign = SETTINGS.verticalBottomAlign;
+  style.hyphenationEnabled = SETTINGS.hyphenationEnabled;
+  style.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
+  style.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
+  style.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
+  return style;
+}
+
+void applyStyleToSettings(const BookStyle& style) {
+  SETTINGS.fontFamily = style.fontFamily;
+  memcpy(SETTINGS.sdFontFamilyName, style.sdFontFamilyName, sizeof(SETTINGS.sdFontFamilyName));
+  SETTINGS.fontPointSize = style.fontPointSize;
+  SETTINGS.lineSpacing = style.lineSpacing;
+  SETTINGS.paragraphAlignment = style.paragraphAlignment;
+  SETTINGS.extraParagraphSpacing = style.extraParagraphSpacing;
+  SETTINGS.firstLineIndent = style.firstLineIndent;
+  SETTINGS.paragraphIndentSpaces = style.paragraphIndentSpaces;
+  SETTINGS.fakeBold = style.fakeBold;
+  SETTINGS.textAntiAliasing = style.textAntiAliasing;
+  SETTINGS.wordSpacing = style.wordSpacing;
+  SETTINGS.characterSpacing = style.characterSpacing;
+  SETTINGS.screenMargin = style.screenMargin;
+  SETTINGS.embeddedStyle = style.embeddedStyle;
+  SETTINGS.focusReadingEnabled = style.focusReadingEnabled;
+  SETTINGS.verticalBottomAlign = style.verticalBottomAlign;
+  SETTINGS.hyphenationEnabled = style.hyphenationEnabled;
+  SETTINGS.readingGuideLineEnabled = style.readingGuideLineEnabled;
+  SETTINGS.readingGuideLineStyle = style.readingGuideLineStyle;
+  SETTINGS.readingGuideLineOffset = style.readingGuideLineOffset;
+}
+
+}  // namespace
+
+void ReaderActivity::applyBookStyle() {
+  // The per-book memory can be turned off from the text settings; then every
+  // book opens with the global settings, exactly like the stock firmware.
+  // When it was off before this book opened, take no snapshot either, so
+  // ordinary typography edits keep the stock behaviour and persist as-is
+  // (memory disabled throughout must not roll edits back on exit).
+  if (!SETTINGS.bookStyleMemory) return;
+  // Snapshot the global settings once on enter, for every styled book, so any
+  // style changes made while reading stay with this book and the global values
+  // are restored on exit — even when per-book memory is turned off mid-session.
+  if (!globalSettingsSnapshotted_) {
+    globalSettingsSnapshot_ = snapshotStyleFromSettings();
+    globalSettingsSnapshotted_ = true;
+  }
+  BookStyle style;
+  // Books without their own entry keep the global settings from the settings
+  // screen.
+  if (!BOOK_STYLES.findStyle(bookPath, style)) return;
+  applyStyleToSettings(style);
+}
+
+void ReaderActivity::saveBookStyle() {
+  // Update the book record only while per-book memory is enabled and the book
+  // was actually opened (a failed load must not write a stale entry under this
+  // path); disabling memory from the text settings stops remembering too.
+  if (SETTINGS.bookStyleMemory && bookOpened_) {
+    BOOK_STYLES.updateStyle(bookPath, snapshotStyleFromSettings());
+  }
+  // Always restore an existing global snapshot on exit. The reader's style
+  // menus persist their changes to the settings file, so also write the
+  // restored values back to disk to undo that — otherwise a session that
+  // disabled memory would still leak this book's style into the global
+  // settings for every later book.
+  if (globalSettingsSnapshotted_) {
+    applyStyleToSettings(globalSettingsSnapshot_);
+    SETTINGS.saveToFile();
+    globalSettingsSnapshotted_ = false;
+  }
+}
+
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
 void ReaderActivity::notePageTurn(const bool forward, const bool succeeded) {
@@ -67,6 +161,11 @@ void ReaderActivity::onEnter() {
     return;
   }
 
+  // Restore this book's own remembered style before the font system and the
+  // render spec are built, so the book opens exactly as it was left. Books
+  // without a remembered style simply keep the global settings.
+  applyBookStyle();
+
   // Clear remembered book after opening it
   if (!APP_STATE.openEpubPath.empty()) {
     APP_STATE.openEpubPath.clear();
@@ -80,6 +179,7 @@ void ReaderActivity::onEnter() {
     if (!handleLoadFailure()) finish();
     return;
   }
+  bookOpened_ = true;
 
   requestUpdate();
 }
@@ -95,6 +195,15 @@ void ReaderActivity::rememberBookOnceRendered() {
 }
 
 void ReaderActivity::onExit() {
+  // Remember the typography this book ended with, both as its own entry and as
+  // the default style for books that have no entry yet.
+  saveBookStyle();
+  // saveBookStyle() restored the global settings (incl. font family). Re-sync
+  // the loaded font cache with the restored values so an SD-card font applied
+  // by this book's style (which also registers UI fallbacks) is unloaded again;
+  // otherwise the UI would keep rendering with the book's font after exit.
+  sdFontSystem.ensureLoaded(renderer);
+
   Activity::onExit();
 
   // Keep rebuildable font buffers from pinning the heap between reading sessions.
