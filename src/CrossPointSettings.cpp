@@ -260,6 +260,13 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     doc["dictionaryName"] = dictionaryName;
   }
   doc["otaNightlyEnabled"] = otaNightlyEnabled;
+  // Home-button gestures are added dynamically to getSettingsList() (not the
+  // base list), so they must be persisted manually here.
+  if (BoardConfig::hasHomeKey()) {
+    doc["homeButtonTapAction"] = homeButtonTapAction;
+    doc["homeButtonDoubleTapAction"] = homeButtonDoubleTapAction;
+    doc["homeButtonLongPressAction"] = homeButtonLongPressAction;
+  }
 
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
@@ -446,6 +453,18 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Font family — uses dynamic getter/setter in SettingsList so the generic loop skips it.
   const uint8_t storedFontFamily = doc["fontFamily"] | (uint8_t)0;
   fontFamily = clamp(storedFontFamily, BUILTIN_FONT_COUNT, 0);
+  // Home-button gestures are persisted manually (see toJson), not via the
+  // base settings list loop.
+  if (BoardConfig::hasHomeKey()) {
+    homeButtonTapAction = clamp(static_cast<uint8_t>(doc["homeButtonTapAction"] | homeButtonTapAction),
+                                static_cast<uint8_t>(HomeButtonAction::Count), homeButtonTapAction);
+    homeButtonDoubleTapAction =
+        clamp(static_cast<uint8_t>(doc["homeButtonDoubleTapAction"] | homeButtonDoubleTapAction),
+              static_cast<uint8_t>(HomeButtonAction::Count), homeButtonDoubleTapAction);
+    homeButtonLongPressAction =
+        clamp(static_cast<uint8_t>(doc["homeButtonLongPressAction"] | homeButtonLongPressAction),
+              static_cast<uint8_t>(HomeButtonAction::Count), homeButtonLongPressAction);
+  }
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
     static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync, HomeButtonAction::Ignore,
