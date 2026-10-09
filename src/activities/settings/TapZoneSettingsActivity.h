@@ -19,6 +19,7 @@ class TapZoneSettingsActivity final : public Activity {
       : Activity("TapZones", renderer, mappedInput) {}
 
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 

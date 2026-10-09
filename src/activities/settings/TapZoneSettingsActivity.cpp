@@ -96,6 +96,13 @@ void TapZoneSettingsActivity::onEnter() {
   requestUpdate();
 }
 
+void TapZoneSettingsActivity::onExit() {
+  // Persist zones regardless of how the activity was closed (Back key, swipe,
+  // or system gesture), so a power cycle / wake never loses the user's pick.
+  SETTINGS.saveToFile();
+  Activity::onExit();
+}
+
 void TapZoneSettingsActivity::loop() {
   const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
   const int screenH = renderer.getScreenHeight();
