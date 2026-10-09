@@ -76,6 +76,29 @@ bool XtcReaderActivity::handleFormatInput() {
   return false;
 }
 
+bool XtcReaderActivity::handleZoneShortAction(const uint8_t action) {
+  // XTC comics have no bookmark / dictionary / KOReader sync / percent jump:
+  // only the base actions (orientation, frontlight, home) and the chapter jump
+  // apply to short taps.
+  if (action == CrossPointSettings::TAP_ZONE_CHAPTER || action == CrossPointSettings::TAP_ZONE_MENU) {
+    openChapterSelection();
+    return true;
+  }
+  return ReaderActivity::handleZoneShortAction(action);
+}
+
+bool XtcReaderActivity::handleZoneLongAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
+    case CrossPointSettings::TAP_ZONE_LONG_MENU:
+      // XTC has no reader menu: the chapter selector doubles as its menu.
+      openChapterSelection();
+      return true;
+    default:
+      return ReaderActivity::handleZoneLongAction(action);
+  }
+}
+
 void XtcReaderActivity::applyInitialOrientation() { renderer.setOrientation(GfxRenderer::Orientation::Portrait); }
 
 void XtcReaderActivity::renderBook() {

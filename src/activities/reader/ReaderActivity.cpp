@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
+#include <HalFrontlight.h>
 #include <HalStorage.h>
 #include <KOReaderDocumentId.h>
 #include <Memory.h>
@@ -223,6 +224,21 @@ void ReaderActivity::loop() {
   if (handleBackNavigation()) return;
 
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
+  // Zone actions dispatch on the release frame. A long-press action wins over
+  // the short action; an unhandled action (not supported by this reader type)
+  // is swallowed so it never falls through to a page turn. Bookmark/dictionary
+  // are EPUB-only: the base class leaves those unhandled and the
+  // touch.bookmark/touch.dictionary check below keeps the original swallow.
+  if (touch.longPress && touch.longAction != CrossPointSettings::TAP_ZONE_LONG_NONE &&
+      handleZoneLongAction(touch.longAction)) {
+    requestUpdate();
+    return;
+  }
+  if (!touch.longPress && touch.action != CrossPointSettings::TAP_ZONE_NONE && handleZoneShortAction(touch.action)) {
+    requestUpdate();
+    return;
+  }
+  if (touch.bookmark || touch.dictionary) return;
   auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
@@ -252,6 +268,75 @@ void ReaderActivity::loop() {
     }
   }
   requestUpdate();
+}
+
+bool ReaderActivity::handleZoneShortAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_ROTATE_CW:
+      rotateOrientation(1);
+      return true;
+    case CrossPointSettings::TAP_ZONE_ROTATE_CCW:
+      rotateOrientation(-1);
+      return true;
+    case CrossPointSettings::TAP_ZONE_FRONTLIGHT:
+      toggleFrontlight();
+      return true;
+    case CrossPointSettings::TAP_ZONE_GO_HOME:
+      onGoHome();
+      return true;
+    case CrossPointSettings::TAP_ZONE_FOOTNOTE:
+      // Readers without footnotes (TXT / PDF / XTC) swallow the action so it
+      // never falls through to page turning; EpubReaderActivity overrides it.
+      return true;
+    case CrossPointSettings::TAP_ZONE_REFRESH:
+      renderer.promoteNextRefresh(HalDisplay::FULL_REFRESH);
+      requestUpdate();
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool ReaderActivity::handleZoneLongAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_LONG_ROTATE_CW:
+      rotateOrientation(1);
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_ROTATE_CCW:
+      rotateOrientation(-1);
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_FRONTLIGHT:
+      toggleFrontlight();
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_GO_HOME:
+      onGoHome();
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_FOOTNOTE:
+      return true;
+    case CrossPointSettings::TAP_ZONE_LONG_REFRESH:
+      renderer.promoteNextRefresh(HalDisplay::FULL_REFRESH);
+      requestUpdate();
+      return true;
+    default:
+      return false;
+  }
+}
+
+void ReaderActivity::rotateOrientation(const int delta) {
+  const uint8_t next = static_cast<uint8_t>((SETTINGS.orientation + delta + CrossPointSettings::ORIENTATION_COUNT) %
+                                            CrossPointSettings::ORIENTATION_COUNT);
+  if (next == SETTINGS.orientation) return;
+  SETTINGS.orientation = next;
+  SETTINGS.saveToFile();
+  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+}
+
+void ReaderActivity::toggleFrontlight() {
+  if (!Frontlight.present()) return;
+  const bool on = !Frontlight.isOn();
+  Frontlight.setOn(on);
+  SETTINGS.frontlightOn = on ? 1 : 0;
+  SETTINGS.saveToFile();
 }
 
 void ReaderActivity::render(RenderLock&&) {
