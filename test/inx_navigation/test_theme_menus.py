@@ -41,8 +41,8 @@ def run(code, directory, sdk=False):
 def settings_metadata(text):
     # Read labels, categories, field bindings and subpage flags from the shared
     # declaration. Hardware/font services are stubbed; no parallel menu model.
-    start = text.index('std::vector<SettingInfo> v = {')
-    entries = text[start:].split('\n    };', 1)[0]
+    start = text.index('baseList = [] {')
+    entries = text[start:].split('return v;', 1)[0]
     result = []
     for entry in re.split(r'SettingInfo::\w+\(', entries)[1:]:
         ids = re.findall(r'StrId::(STR_\w+)', entry)
