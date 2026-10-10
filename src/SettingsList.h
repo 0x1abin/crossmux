@@ -228,7 +228,25 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_RIGHT] = StrId::STR_DIR_RIGHT;
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
 
-    std::vector<SettingInfo> v = {
+    std::vector<SettingInfo> v;
+    constexpr size_t entryCount = 85
+#if FREEINK_CAP_FRONTLIGHT
+                                  + 1
+#endif
+#if CROSSPOINT_CAP_SOUND_FEEDBACK
+                                  + 1
+#endif
+#if FREEINK_CAP_HAPTIC
+                                  + 1
+#endif
+#if FREEINK_CAP_WARMLIGHT
+                                  + 1
+#endif
+        ;
+    // ponytail: Four-entry batches bound C3 stack use; recheck ELF frames when SettingInfo grows.
+    v.reserve(entryCount);
+    // clang-format off
+    v.insert(v.end(), {
         // --- Display ---
         SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen, std::move(sleepScreenValues),
                           "sleepScreen", StrId::STR_CAT_DISPLAY),
@@ -240,6 +258,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_QUICK_RESUME_TIMEOUT, &CrossPointSettings::quickResumeSleepScreen,
                           {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, "quickResumeSleepScreen",
                           StrId::STR_CAT_DISPLAY),
+    });
+    v.insert(v.end(), {
         SettingInfo::Toggle(StrId::STR_STANDBY_TITLE, &CrossPointSettings::standbyShortcutEnabled,
                             "standbyShortcutEnabled", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
@@ -251,6 +271,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           "refreshFrequency", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, homeThemeValues(), "uiTheme",
                           StrId::STR_CAT_DISPLAY),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_INX_RECENT_LAYOUT, &CrossPointSettings::inxRecentLayout,
                           {StrId::STR_LAYOUT_FLOW, StrId::STR_LAYOUT_GRID, StrId::STR_LAYOUT_LIST,
                            StrId::STR_LAYOUT_ICONS, StrId::STR_COVER},
@@ -262,6 +284,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           {StrId::STR_LAYOUT_ICONS, StrId::STR_LAYOUT_LIST}, "inxAppsLayout", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_INX_TAB_POSITION, &CrossPointSettings::inxTabPosition,
                           {StrId::STR_TOP, StrId::STR_BOTTOM}, "inxTabPosition", StrId::STR_CAT_DISPLAY),
+    });
+    v.insert(v.end(), {
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                             StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SHOW_BUTTON_HINTS, &CrossPointSettings::showButtonHints, "showButtonHints",
@@ -274,7 +298,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         // applies it to every activity), so it lives in the Display category.
         SettingInfo::Toggle(StrId::STR_NIGHT_MODE, &CrossPointSettings::screenInverted, "screenInverted",
                             StrId::STR_CAT_DISPLAY),
-
+    });
+    v.insert(v.end(), {
         // --- Reader ---
         // Built-in font-family entry. Replaced per-call with a registry-aware
         // version when SD fonts are installed.
@@ -294,6 +319,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                             CrossPointSettings::WORD_SPACING_STEP},
                            "wordSpacing", StrId::STR_CAT_READER)
             .withTextSettings(),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_CHARACTER_SPACING, &CrossPointSettings::characterSpacing,
                           {StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1, StrId::STR_SPACING_ZERO,
                            StrId::STR_SPACING_PLUS_1, StrId::STR_SPACING_PLUS_2},
@@ -312,6 +339,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                             StrId::STR_CAT_READER)
             .withTextSettings(),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_FAKE_BOLD, &CrossPointSettings::fakeBold,
                           {StrId::STR_STATE_OFF, StrId::STR_FAKE_BOLD_LIGHT, StrId::STR_FAKE_BOLD_STANDARD,
                            StrId::STR_FAKE_BOLD_HEAVY},
@@ -325,6 +354,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Toggle(StrId::STR_READING_GUIDE_LINE, &CrossPointSettings::readingGuideLineEnabled,
                             "readingGuideLineEnabled", StrId::STR_CAT_READER)
             .withTextSettings(),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_READING_GUIDE_LINE_STYLE, &CrossPointSettings::readingGuideLineStyle,
                           {StrId::STR_SOLID_LINE, StrId::STR_SHORT_DASH, StrId::STR_MEDIUM_DASH, StrId::STR_LONG_DASH,
                            StrId::STR_DOTTED_LINE, StrId::STR_WAVY_LINE},
@@ -342,6 +373,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
             StrId::STR_ORIENTATION, &CrossPointSettings::orientation,
             {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_ORIENTATION_INVERTED, StrId::STR_LANDSCAPE_CCW},
             "orientation", StrId::STR_CAT_READER),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                           {StrId::STR_EXTRA_SPACING_OFF, StrId::STR_EXTRA_SPACING_0_5, StrId::STR_EXTRA_SPACING_0_75,
                            StrId::STR_EXTRA_SPACING_1, StrId::STR_EXTRA_SPACING_1_25, StrId::STR_EXTRA_SPACING_1_5},
@@ -358,6 +391,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                             StrId::STR_CAT_READER)
             .withTextSettings(),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                           {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                           "imageRendering", StrId::STR_CAT_READER),
@@ -380,6 +415,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_PAGE_TURN_DIRECTION, &CrossPointSettings::pageTurnDirection,
                           {StrId::STR_PAGE_TURN_LTR, StrId::STR_PAGE_TURN_RTL}, "pageTurnDirection",
                           StrId::STR_CAT_READER),
+    });
+    v.insert(v.end(), {
         // --- Controls ---
         SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
                           {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV, StrId::STR_DISABLED, StrId::STR_NEXT_NEXT,
@@ -395,6 +432,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           {StrId::STR_TAP_AND_SWIPE, StrId::STR_TAP_ONLY, StrId::STR_SWIPE_ONLY,
                            StrId::STR_INVERTED_TAP, StrId::STR_DISABLED},
                           "previousPageGesture", StrId::STR_CAT_CONTROLS),
+    });
+    v.insert(v.end(), {
         // Persisted under the legacy "tapForReaderMenu" key: old saves map
         // 0 = Off, 1 = Tap.
         SettingInfo::Enum(StrId::STR_SHOW_READER_MENU, &CrossPointSettings::showReaderMenu,
@@ -408,6 +447,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           "longPressButtonBehavior", StrId::STR_CAT_CONTROLS),
         SettingInfo::Enum(StrId::STR_LONG_PRESS_MENU, &CrossPointSettings::longPressMenuFunction,
                           buildLongPressMenuValues(), "longPressMenuFunction", StrId::STR_CAT_CONTROLS),
+    });
+    v.insert(v.end(), {
         // Erased below unless the board is an X4 Pro.
         SettingInfo::Toggle(StrId::STR_DBL_CLICK_PWR_LIGHT, &CrossPointSettings::doubleClickPwrLight,
                             "doubleClickPwrLight", StrId::STR_CAT_CONTROLS),
@@ -428,9 +469,12 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           StrId::STR_CAT_CONTROLS),
         SettingInfo::Toggle(StrId::STR_PWR_BTN_FOOTNOTE_BACK, &CrossPointSettings::pwrBtnFootnoteBack,
                             "pwrBtnFootnoteBack", StrId::STR_CAT_CONTROLS),
+    });
+    v.insert(v.end(), {
         SettingInfo::Toggle(StrId::STR_BACK_SHORT_TO_FILE_BROWSER, &CrossPointSettings::backShortToFileBrowser,
                             "backShortToFileBrowser", StrId::STR_CAT_CONTROLS),
-
+    });
+    v.insert(v.end(), {
         // --- System ---
         SettingInfo::Value(
             StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeoutMinutes,
@@ -450,6 +494,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                            StrId::STR_SOUND_FEEDBACK_HIGH},
                           "hapticFeedbackLevel", StrId::STR_CAT_SYSTEM),
 #endif
+    });
+    v.insert(v.end(), {
         SettingInfo::Toggle(StrId::STR_LIBRARY_USE_METADATA, &CrossPointSettings::libraryUseMetadata,
                             "libraryUseMetadata", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_REMOVE_READ_FROM_RECENTS, &CrossPointSettings::removeReadBooksFromRecents,
@@ -461,6 +507,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           {StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_45, StrId::STR_MIN_60},
                           "dailyGoalTarget", StrId::STR_CAT_READER)
             .withReadingStatsSettings(),
+    });
+    v.insert(v.end(), {
         SettingInfo::Toggle(StrId::STR_ENABLE_ACHIEVEMENTS, &CrossPointSettings::achievementsEnabled,
                             "achievementsEnabled", StrId::STR_CAT_READER)
             .withReadingStatsSettings(),
@@ -477,7 +525,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_OPDS_FILENAME_FORMAT, &CrossPointSettings::opdsFilenameFormat,
                           {StrId::STR_FMT_AUTHOR_TITLE, StrId::STR_FMT_TITLE_AUTHOR, StrId::STR_FMT_TITLE},
                           "opdsFilenameFormat"),
-
+    });
+    v.insert(v.end(), {
         // Frontlight quick-panel state is persisted and web-exposed, but the
         // panel owns its on-device editing UI.
         SettingInfo::Value(StrId::STR_BRIGHTNESS, &CrossPointSettings::frontlightBrightness, {0, 100, 5},
@@ -486,7 +535,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Value(StrId::STR_WARMTH, &CrossPointSettings::frontlightWarmth, {0, 100, 5}, "frontlightWarmth"),
 #endif
         SettingInfo::Toggle(StrId::STR_FRONTLIGHT, &CrossPointSettings::frontlightOn, "frontlightOn"),
-
+    });
+    v.insert(v.end(), {
         // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
         SettingInfo::DynamicString(
             StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },
@@ -518,6 +568,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
               KOREADER_STORE.saveToFile();
             },
             "koMatchMethod", StrId::STR_KOREADER_SYNC),
+    });
+    v.insert(v.end(), {
         SettingInfo::DynamicEnum(
             StrId::STR_SEND_METADATA, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
             [] { return static_cast<uint8_t>(KOREADER_STORE.getSendMetadata()); },
@@ -534,6 +586,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
               KOREADER_STORE.saveToFile();
             },
             "koSyncBehavior", StrId::STR_KOREADER_SYNC),
+    });
+    v.insert(v.end(), {
         // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
         SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
                             "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),
@@ -545,6 +599,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarProgressBarThickness,
                           {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
                           "statusBarProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_TITLE, &CrossPointSettings::statusBarTitle,
                           {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarTitle",
                           StrId::STR_CUSTOMISE_STATUS_BAR),
@@ -557,6 +613,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
         SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, std::move(statusBarClockValues),
                           "statusBarClock", StrId::STR_CUSTOMISE_STATUS_BAR),
+    });
+    v.insert(v.end(), {
         SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
                            "clockUtcOffsetQ", StrId::STR_CAT_SYSTEM),
         SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
@@ -567,6 +625,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         // Index into the append-only table in src/util/Timezones.cpp; 255 = unset.
         SettingInfo::Value(StrId::STR_TIMEZONE, &CrossPointSettings::clockTimezone, {0, 255, 1}, "clockTimezone",
                            StrId::STR_CUSTOMISE_STATUS_BAR),
+    });
+    v.insert(v.end(), {
         SettingInfo::Enum(StrId::STR_CLOCK_DST, &CrossPointSettings::clockDst,
                           {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, "clockDst",
                           StrId::STR_CUSTOMISE_STATUS_BAR),
@@ -576,7 +636,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         // on next WiFi connect, which is useful when crossing time zones.
         SettingInfo::Toggle(StrId::STR_CLOCK_SYNCED, &CrossPointSettings::clockHasBeenSynced, "clockHasBeenSynced",
                             StrId::STR_CUSTOMISE_STATUS_BAR),
-    };
+    });
+    // clang-format on
     // Erasing keeps the list at its initial allocation; inserting into a full
     // vector would reallocate it at double capacity for the process lifetime.
     const auto eraseEntry = [&v](const StrId nameId) {
