@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Keep the Web Settings API's base-list keys unique."""
+"""Keep base settings keys unique and reserved capacity equal to the entry count."""
 
 from collections import Counter
 from itertools import product
 from pathlib import Path
+import re
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,7 +69,7 @@ def split_arguments(arguments):
 
 
 def base_list_source(source):
-    marker = "std::vector<SettingInfo> v = {"
+    marker = "baseList = [] {"
     start = source.index(marker) + len(marker) - 1
     end = matching_delimiter(source, start, "{", "}")
     return source[start + 1 : end]
@@ -130,6 +132,7 @@ def setting_keys(source, capabilities):
 
 def main():
     source = SETTINGS_LIST.read_text()
+    capacity_checks = ["#include <cstddef>"]
     capability_names = (
         "FREEINK_CAP_FRONTLIGHT",
         "FREEINK_CAP_TOUCH",
@@ -144,7 +147,27 @@ def main():
         assert not duplicates, (
             f"duplicate Web Settings API keys for {capabilities}: {', '.join(duplicates)}"
         )
+        entries = preprocess_capability_guards(base_list_source(source), capabilities)
+        entry_count = len(re.findall(r"SettingInfo::\w+\(", entries))
+        batch_sizes = []
+        for batch in re.finditer(r"v\.insert\(v\.end\(\), \{", entries):
+            opening = batch.end() - 1
+            closing = matching_delimiter(entries, opening, "{", "}")
+            batch_sizes.append(len(re.findall(r"SettingInfo::\w+\(", entries[opening:closing])))
+        assert sum(batch_sizes) == entry_count, f"settings outside insert batches for {capabilities}"
+        assert batch_sizes and max(batch_sizes) <= 4, f"oversized settings batch for {capabilities}: {batch_sizes}"
+        declaration = re.search(r"constexpr size_t entryCount = [^;]+;", entries).group()
+        capacity_checks.append(
+            f"namespace combination_{len(capacity_checks)} {{ {declaration} "
+            f"static_assert(entryCount == {entry_count}); }}"
+        )
+    subprocess.run(
+        ["c++", "-std=c++20", "-x", "c++", "-fsyntax-only", "-"],
+        input="\n".join(capacity_checks), text=True, check=True,
+    )
     print(f"Web Settings API keys are unique across {2 ** len(capability_names)} capability combinations")
+    print("Base settings capacity matches every capability combination without vector growth")
+    print("Every settings initializer batch has at most four entries")
 
 
 if __name__ == "__main__":
