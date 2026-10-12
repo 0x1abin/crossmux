@@ -46,6 +46,7 @@ class TextSettingsActivity final : public UiTabListActivity {
     ParaIndentation,
     Alignment,
     ScreenMargin,
+    VerticalBottomAlign,
     Count
   };
   enum class StyleRow {
