@@ -29,6 +29,9 @@ class XtcReaderActivity final : public ReaderActivity {
   std::string getBookTitle() const override { return xtc ? xtc->getTitle() : ""; }
   std::string getBookAuthor() const override { return xtc ? xtc->getAuthor() : ""; }
   std::string getBookThumbBmpPath() const override { return xtc ? xtc->getThumbBmpPath() : ""; }
+
+  bool handleZoneShortAction(uint8_t action) override;
+  bool handleZoneLongAction(uint8_t action) override;
   bool handleFormatInput() override;
   void renderBook() override;
   void applyInitialOrientation() override;
