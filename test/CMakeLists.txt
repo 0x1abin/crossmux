@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG 58b6694dab19a626f36486a0c5f1616110deab7f
+  GIT_TAG ad24d4068af3d89c22ebf37b9488af9cba6d7065
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -61,6 +61,7 @@ add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
 add_subdirectory(utf8_compose)
 add_subdirectory(opds_filename)
+add_subdirectory(opds_feed_error)
 add_subdirectory(html_to_plain_text)
 add_subdirectory(library_text)
 add_subdirectory(library_format)
@@ -107,6 +108,7 @@ add_subdirectory(user_guide)
 add_subdirectory(koreader_xpath_resolver)
 add_subdirectory(progress_comparison)
 add_subdirectory(font_cache_manager)
+add_subdirectory(font_decompressor)
 add_subdirectory(css_parser)
 add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(korean_line_breaking)
@@ -128,6 +130,9 @@ foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest 
 endforeach()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME ClippingHighlightPlanes COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_clipping_highlight_planes.py)
+add_test(NAME ClippingSelectionText COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_clipping_selection_text.py)
+add_test(NAME SelectionButtons COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_selection_buttons.py)
 add_test(NAME WeReadLogout
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_weread_logout.py)
 add_test(NAME BuiltinFontShrink
@@ -163,6 +168,7 @@ add_subdirectory(txt_to_html)
 add_subdirectory(absolute_grayscale)
 
 add_subdirectory(sd_card_font)
+add_subdirectory(clipping_preview)
 add_subdirectory(glyph_bitmap)
 
 add_test(NAME VectorGrayFallback
@@ -193,6 +199,7 @@ add_test(NAME FileBrowserImages
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_file_browser_images.py)
 
 add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)
+add_subdirectory(clipping_store)
 add_subdirectory(reader_session)
 add_subdirectory(plugin_manifest_classification)
 add_subdirectory(protected_paths)
@@ -229,3 +236,6 @@ add_test(NAME RealImageDecoderCancellation
 
 add_test(NAME TextSettingsFontExit
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_text_settings_font_exit.py)
+
+add_test(NAME CjkGenerationTransaction COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_cjk_generation_transaction.py)
+add_test(NAME PowerConfirmRelease COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_power_confirm_release.py ${crosspoint_simulator_SOURCE_DIR})

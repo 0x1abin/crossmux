@@ -65,6 +65,7 @@ void HalTiltSensor::begin() {
 #else
   _accelOnly = false;
 #endif
+  _available = _sdkImu.hasGyroscope() || _accelOnly;
 
   _initMs = millis();
   _lastPollMs = millis();

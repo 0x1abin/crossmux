@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync review check: production menus/tabs with fixed host metrics, not full pages.
 
-Requires the reviewed Reader 38280863 and pre-sync 593c8dbc Git objects fetched by
+Requires the reviewed Reader ba39565c and historical INX Git objects fetched by
 the sync workflow; CI fetches full history for these fixed references.
 FREEINK_SDK_ROOT selects the reviewed candidate; defaults to the pinned SDK.
 """
@@ -15,7 +15,7 @@ from test_upstream_theme_compat import compare, source
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-REF = '38280863a50988683c2c63ccd7096e872a48c411'
+REF = os.environ.get('FREEINK_UPSTREAM_READER_REF', 'ba39565ce7b3a8aab14ca86da4fa4c3ca140f007')
 SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 
 
@@ -62,7 +62,7 @@ def menus(directory):
                  {x for rows in data for row in rows for x in row[:2]})
     actions = sorted(set(re.findall(r'SettingAction::(\w+)', '\n'.join(methods))) | {'None'})
     fields = sorted(set(re.findall(r'&CrossPointSettings::(\w+)', '\n'.join(methods))) |
-                    {row[2] for rows in data for row in rows if row[2]})
+                    {row[2] for rows in data for row in rows if row[2]} | {'shortPwrBtn'})
     code = '''#include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -208,8 +208,8 @@ struct { bool light=false; bool present(){return light;} } Frontlight;
     code += '''struct MenuItem {MenuAction action; StrId labelId; bool operator==(const MenuItem&) const = default;};
 struct EpubReaderMenuActivity {
  static constexpr int MAX_MENU_ITEMS=32;
- void buildMenuItems(std::vector<MenuItem>&,bool,bool);
- void reference(std::vector<MenuItem>&,bool,bool);
+ void buildMenuItems(std::vector<MenuItem>&,bool,bool,bool=false);
+ void reference(std::vector<MenuItem>&,bool,bool,bool=false);
  void historical(std::vector<MenuItem>&,bool,bool);
 };
 '''
@@ -255,11 +255,11 @@ struct FileBrowserActivity {
     code += '\n'.join(methods)
     code += '''
 int main(){
- for(int flags=0;flags<8;++flags) for(bool isInx:{false,true}) {
+ for(int flags=0;flags<16;++flags) for(bool isInx:{false,true}) {
   inx=isInx; Frontlight.light=flags&1; EpubReaderMenuActivity a;
   std::vector<MenuItem> actual,expected;
-  a.buildMenuItems(actual,flags&2,flags&4);
-  a.reference(expected,flags&2,flags&4);
+  a.buildMenuItems(actual,flags&2,flags&4,flags&8);
+  a.reference(expected,flags&2,flags&4,flags&8);
   assert(actual==expected);
  }
  for(bool isInx:{false,true}) {
@@ -288,7 +288,7 @@ int main(){
 }
 '''
     run(code,directory)
-    print('Reader menu: 8 visibility combinations; library menu: file/folder actions, protected paths and long-press Open pass')
+    print('Reader menu: 16 visibility combinations with clippings; library menu: file/folder actions, protected paths and long-press Open pass')
 
 
 def tabs(directory, ref, inx):

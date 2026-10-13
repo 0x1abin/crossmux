@@ -334,6 +334,7 @@ struct EpdFontFamily {
     if (replaced) *replaced=!found;
     return found ? &glyph : nullptr;
   }
+  const EpdGlyph* getGlyphMetrics(uint32_t cp, EpdGlyph&, Style style) const { return getGlyph(cp,style); }
   uint32_t applyLigatures(uint32_t cp, const char*&, Style) const { return cp; }
   int getKerning(uint32_t,uint32_t,Style) const { return 0; }
 };

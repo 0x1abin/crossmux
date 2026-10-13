@@ -148,7 +148,7 @@ struct DirectPixelWriter {
   // Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
-    auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue);
+    auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue, absolute);
     if (mode == GfxRenderer::BW && writeWhiteInBw && pixelValue >= 3) pixel = {true, false};
     if (!pixel.draw) return;
 
@@ -171,7 +171,7 @@ struct DirectPixelWriter {
     const uint32_t byteIndex = static_cast<uint32_t>(sy * displayWidthBytes + (phyX >> 3));
     const uint8_t bitMask = 1 << (7 - (phyX & 7));
 
-    if (GfxRenderer::framebufferState(mode, pixel.state)) {
+    if (pixel.state) {
       fb[byteIndex] &= ~bitMask;  // Clear bit (draw black)
     } else {
       fb[byteIndex] |= bitMask;  // Set bit (draw white)

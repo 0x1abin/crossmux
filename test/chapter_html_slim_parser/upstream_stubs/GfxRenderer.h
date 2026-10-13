@@ -13,6 +13,9 @@ enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
 
 class GfxRenderer {
  public:
+  struct FrameBufferLoan {
+    explicit FrameBufferLoan(GfxRenderer&) {}
+  };
   FontCacheManager fontCache;
   FontCacheManager* getFontCacheManager() { return &fontCache; }
   enum class TextMeasureMode { Layout, Rendered };

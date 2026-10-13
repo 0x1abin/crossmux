@@ -20,7 +20,7 @@ snprintf(buf, sizeof(buf), "%.*s", (int)myView.size(), myView.data());
 ```
 
 ## `IRAM_ATTR` and Flash Cache Safety
-All code runs from flash via the instruction cache. During SPI flash operations (OTA write, SPIFFS commit, NVS update) the cache is briefly suspended. Any code that can execute during this window — ISRs in particular — must reside in IRAM or it will crash silently.
+OTA/NVS flash operations can suspend the instruction cache. For interrupts registered with `ESP_INTR_FLAG_IRAM`, the entire call chain must be in IRAM/ROM and every accessed datum in internal RAM; flash and PSRAM may be unavailable. An entry-point attribute alone is insufficient. Non-IRAM-safe handlers are deferred while the cache is unavailable; choose registration from required latency.
 
 ```cpp
 // ISR handler: must be in IRAM
@@ -31,7 +31,7 @@ static DRAM_ATTR uint32_t isrEventFlags = 0;
 ```
 
 **Rules**:
-- All ISR handlers: `IRAM_ATTR`
+- IRAM-safe handlers: verify the whole call chain, not just `IRAM_ATTR` on the entry point
 - Data read by `IRAM_ATTR` code: `DRAM_ATTR` (a flash-resident `static const` will fault)
 - Normal task code does **not** need `IRAM_ATTR`
 
@@ -60,13 +60,13 @@ memcpy(&val, buf, sizeof(val));
 This applies to all cache deserialization code and any raw buffer-to-struct casting. `__attribute__((packed))` structs have the same hazard when accessed via member reference.
 
 ## Template and `std::function` Bloat
-Each template instantiation generates a separate binary copy. `std::function<void()>` adds ~2–4 KB per unique signature and heap-allocates its closure. Avoid both in library code and any path called from the render loop:
+Template and `std::function` footprint depends on instantiations, callable size and toolchain settings; some callables fit inline storage. Reuse existing callback APIs, function pointers or context/function pairs on hot paths. Check the map and allocation behavior before making a size claim:
 
 ```cpp
-// Avoid — heap-allocating, large binary footprint:
+// Check callable storage and generated code before choosing this:
 std::function<void()> callback;
 
-// Prefer — zero overhead:
+// Simple non-owning callback:
 void (*callback)() = nullptr;
 
 // For member function + context (common activity callback pattern):

@@ -25,8 +25,6 @@ class FileBrowserActivity final : public UiListActivity {
   void beginMove();
   void cancelMove();
   void completeMove();
-  bool relocateDirectoryData(const std::string& oldPath, const std::string& newPath);
-  bool relocatePathData(const std::string& oldPath, const std::string& newPath, bool isDirectory);
   void finishEdit(const std::string& returnPath, int fallbackIndex, const std::string& selectedEntry = "");
   void showNotice(StrId message);
   std::string selectedPath() const;
@@ -89,6 +87,10 @@ class FileBrowserActivity final : public UiListActivity {
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   void onRowLongPress(int index) override;
+#if FREEINK_CAP_TOUCH
+  bool canSwipeDelete(int index) const override;
+  void swipeDelete(int index) override;
+#endif
   // Long-press BACK goes to root; short Back goes up a directory (home/cancel at
   // root), and Confirm activates on RELEASE (a hold is "delete").
   bool handleCustomInput() override;

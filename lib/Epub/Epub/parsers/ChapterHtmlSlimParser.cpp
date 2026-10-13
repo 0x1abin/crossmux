@@ -1055,6 +1055,14 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
             {
               if (!gotDimensions) {
+                // Retry with framebuffer scratch when the heap cannot fit the inflate window.
+                GfxRenderer::FrameBufferLoan probeLoan(self->renderer);
+                ImageDimsProbe retryProbe;
+                self->epub->readItemContentsToStream(resolvedPath, retryProbe, 1024, /*allowEarlyStop=*/true);
+                gotDimensions = retryProbe.getDimensions(dims);
+              }
+
+              if (!gotDimensions) {
                 // No header within the stream (rare) — fall back to extracting the
                 // whole image and probing the file. That can take seconds, so
                 // surface the indexing popup first (single-shot per parser).
@@ -1854,16 +1862,7 @@ void ChapterHtmlSlimParser::softFlushTextBlock() {
   const size_t wordCount = currentTextBlock->size();
   if (wordCount <= threshold) return;
   LOG_DBG("EHP", "Text block soft flush (%u words)", static_cast<unsigned>(wordCount));
-  const int inset = currentTextBlock->getBlockStyle().totalHorizontalInset();
-  const uint16_t width = inset < viewportWidth ? static_cast<uint16_t>(viewportWidth - inset) : viewportWidth;
-  if (!currentTextBlock->layoutAndExtractLines(
-          renderer, fontId, width,
-          [this](std::unique_ptr<TextBlock> line, const uint32_t offset) {
-            return addLineToPage(std::move(line), offset);
-          },
-          false, characterSpacing, wordSpacingPercent)) {
-    failAllocation("page layout");
-  }
+  makePages(/*includeLastLine=*/false);
 }
 
 void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const XML_Char* s, const int len) {
@@ -2387,7 +2386,7 @@ bool ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
   return true;
 }
 
-void ChapterHtmlSlimParser::makePages() {
+void ChapterHtmlSlimParser::makePages(const bool includeLastLine) {
   if (hasFailed()) return;
   if (!currentTextBlock) {
     LOG_ERR("EHP", "!! No text block to make pages for !!");
@@ -2407,14 +2406,7 @@ void ChapterHtmlSlimParser::makePages() {
 
   const int lineHeight = renderer.getLineHeight(fontId, lineCompression);
 
-  // Apply top spacing before the paragraph (stored in pixels)
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
-  if (blockStyle.marginTop > 0) {
-    currentPageNextY += blockStyle.marginTop;
-  }
-  if (blockStyle.paddingTop > 0) {
-    currentPageNextY += blockStyle.paddingTop;
-  }
 
   // Calculate effective width accounting for horizontal margins/padding
   const int horizontalInset = blockStyle.totalHorizontalInset();
@@ -2424,9 +2416,14 @@ void ChapterHtmlSlimParser::makePages() {
   if (!currentTextBlock->layoutAndExtractLines(
           renderer, fontId, effectiveWidth,
           [this](std::unique_ptr<TextBlock> textBlock, const uint32_t offset) {
+            if (wordsExtractedInBlock == 0) {
+              const auto& style = currentTextBlock->getBlockStyle();
+              if (style.marginTop > 0) currentPageNextY += style.marginTop;
+              if (style.paddingTop > 0) currentPageNextY += style.paddingTop;
+            }
             return addLineToPage(std::move(textBlock), offset);
           },
-          true, characterSpacing, wordSpacingPercent)) {
+          includeLastLine, characterSpacing, wordSpacingPercent)) {
     failAllocation("page layout");
     return;
   }
@@ -2438,30 +2435,33 @@ void ChapterHtmlSlimParser::makePages() {
     layoutOom = true;
   }
 
-  // Fallback: transfer any remaining pending footnotes to current page.
-  // Normally addLineToPage handles this via word-index tracking, but this catches
-  // edge cases where a footnote's word index equals the exact block size.
-  if (!pendingFootnotes.empty() && currentPage) {
-    for (const auto& [idx, fn] : pendingFootnotes) {
-      currentPage->addFootnote(fn.number, fn.href);
+  // Trailing spacing and footnotes only apply when the block is finalized
+  if (includeLastLine) {
+    // Fallback: transfer any remaining pending footnotes to current page.
+    // Normally addLineToPage handles this via word-index tracking, but this catches
+    // edge cases where a footnote's word index equals the exact block size.
+    if (!pendingFootnotes.empty() && currentPage) {
+      for (const auto& [idx, fn] : pendingFootnotes) {
+        currentPage->addFootnote(fn.number, fn.href);
+      }
+      pendingFootnotes.clear();
     }
-    pendingFootnotes.clear();
-  }
 
-  // Apply bottom spacing after the paragraph (stored in pixels)
-  if (blockStyle.marginBottom > 0) {
-    currentPageNextY += blockStyle.marginBottom;
-  }
-  if (blockStyle.paddingBottom > 0) {
-    currentPageNextY += blockStyle.paddingBottom;
-  }
+    // Apply bottom spacing after the paragraph (stored in pixels)
+    if (blockStyle.marginBottom > 0) {
+      currentPageNextY += blockStyle.marginBottom;
+    }
+    if (blockStyle.paddingBottom > 0) {
+      currentPageNextY += blockStyle.paddingBottom;
+    }
 
-  // Extra paragraph spacing: 0=off, else 0.5x/0.75x/1x/1.25x/1.5x line height.
-  if (extraParagraphSpacing > 0) {
-    constexpr float EXTRA_PARAGRAPH_SPACING_FACTORS[] = {0.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f};
-    const float factor = extraParagraphSpacing < std::size(EXTRA_PARAGRAPH_SPACING_FACTORS)
-                             ? EXTRA_PARAGRAPH_SPACING_FACTORS[extraParagraphSpacing]
-                             : 1.5f;
-    currentPageNextY += static_cast<int16_t>(lineHeight * factor);
+    // Extra paragraph spacing: 0=off, else 0.5x/0.75x/1x/1.25x/1.5x line height.
+    if (extraParagraphSpacing > 0) {
+      constexpr float EXTRA_PARAGRAPH_SPACING_FACTORS[] = {0.0f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f};
+      const float factor = extraParagraphSpacing < std::size(EXTRA_PARAGRAPH_SPACING_FACTORS)
+                               ? EXTRA_PARAGRAPH_SPACING_FACTORS[extraParagraphSpacing]
+                               : 1.5f;
+      currentPageNextY += static_cast<int16_t>(lineHeight * factor);
+    }
   }
 }

@@ -149,6 +149,14 @@ Medium/Bold asset set or duplicate slider registrations for these sizes. INX's
 large-text fallback and Chinese fallback behavior remain unchanged. Preserve the
 historical visual baseline and record actual page differences for this exception.
 
+Explicitly approved compact reading-font exception (2026-10-13): retain
+CrossMux's offline CJK12 aliases for legacy built-in reader IDs and its compact
+font-choice list. SD `.cpfont` families/styles remain the full-font path. Keep
+shared UI font contracts unchanged. Preserve default-body and historical
+captures, document font-induced spacing/page-count differences, and additionally
+compare actual pages using the same SD font on both programs. Never substitute
+upstream metrics or fonts to hide a remaining text-layout difference.
+
 For every other theme, use the reviewed upstream snapshot as the visual source
 of truth: keep its implementation style, layout, font bindings and font sizes.
 CrossMux-only screens use that theme's existing components and styling. Honor

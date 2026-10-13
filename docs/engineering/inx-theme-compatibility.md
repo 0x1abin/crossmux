@@ -24,7 +24,7 @@ SDK ThemeRow-specific selected/dimmed styling must not affect Content layouts.
 Lyra Carousel retains its fork-only cover home and inherits Lyra's shared page
 rendering, including list styling; only its home metrics differ from Lyra.
 
-The current local integration reference (2026-10-02) is Reader
+The historical local integration reference (2026-10-02) is Reader
 `38280863a50988683c2c63ccd7096e872a48c411`, SDK
 `98b4e427459bc588fdcdcb25e1454f0806cd806b`, and Simulator
 `20e738038605ff4ead6c9fcfe932443d1e143691`, on CrossMux `593c8dbc`.
@@ -35,6 +35,35 @@ remain visible in every theme at the same category and relative insertion point,
 with their existing action/value binding. This is a structural position, not an
 absolute screen coordinate. Keep one shared settings source, persistent fields,
 Web API, CrossMux update service and device capability checks.
+
+
+The current local rehearsal (2026-10-13) uses Reader
+`ba39565ce7b3a8aab14ca86da4fa4c3ca140f007`, SDK
+`7fcd3b34c108f28c086ade3b433924022dbc0998`, and Simulator
+`1915ee0a15564c3f49d74fa2334f773f282c5364`, on CrossMux
+`83b0f810c8628701456e028c2d8566a9be149755`. Record reviewed index
+fingerprints separately; these candidates contain no new commits.
+
+The user approved retaining the compact offline reading-font aliases in
+`src/main.cpp`: the legacy Noto Sans/Serif reader IDs share the local CJK12
+fallback, and complete families/styles remain available through SD `.cpfont`
+files. This is a reading-body and font-choice exception in every theme;
+shared menu fonts and geometry still follow their existing contracts. On the
+fixed English comparison book, Normal spacing yields 34 px / 8 pages locally
+and 32 px / 7 pages with upstream's default Latin Noto Sans 12. Preserve both
+captures and the historical baseline. Also compare both programs with the same
+actual SD font, settings, content, language, orientation and scale; record any
+remaining text-layout difference and its source instead of substituting fonts
+or claiming that default reading pages match upstream.
+
+
+Same-SD-font captures also retain the local per-glyph advance rounding in
+`GfxRenderer::getTextAdvanceX`; upstream rounds the accumulated fixed-point
+word advance once. This can change a boundary wrap even with an identical font
+file and page count. The 2026-10-13 portrait and landscape SD-font captures
+match the actual CrossMux `83b0f810` reading pages pixel for pixel. Record the
+font file hash and production paths with each comparison; do not replace this
+retained reading behavior solely to obtain an upstream pixel match.
 
 Home adds APP to the upstream entries; Carousel's home remains the approved
 exception. Only INX shows the recent, library and apps layout settings. All

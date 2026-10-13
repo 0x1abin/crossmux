@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include "ClippingStore.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
 
@@ -324,12 +325,29 @@ void WebDAVHandler::handleGet(WebServer& s) {
   }
 
   String contentType = getMimeType(path);
-  s.setContentLength(file.size());
+  const size_t fileSize = file.size();
+  file.close();
+
+  s.setContentLength(fileSize);
   s.send(200, contentType.c_str(), "");
 
+  // **This used to be `client.write(file)`, and it sent exactly one byte.**
+  //
+  // It worked while `Storage.open()` returned an SdFat `FsFile`, which derives
+  // from `Stream`: the call matched `NetworkClient::write(Stream&)` and streamed
+  // the file. `HalFile` derives from `Print`, not `Stream` (lib/hal/HalStorage.h),
+  // so that overload stopped matching, the compiler took `HalFile::operator bool()`
+  // instead, promoted the `true` to `uint8_t`, and wrote a single `0x01`. **The
+  // call site never changed; its meaning did**, and nothing warned because every
+  // step is a legal conversion.
+  //
+  // The reply still carried the real Content-Length, so a client waited for a
+  // body that never arrived and reported a truncated transfer rather than an
+  // error, which is why this reads as a flaky network rather than a server bug.
   NetworkClient client = s.client();
-  client.write(file);
-  file.close();
+  if (!Storage.readFileToStream(path.c_str(), client)) {
+    LOG_ERR("DAV", "GET %s: failed to stream file", path.c_str());
+  }
 }
 
 // ── HEAD ─────────────────────────────────────────────────────────────────────
@@ -434,8 +452,7 @@ void WebDAVHandler::handleDelete(WebServer& s) {
     }
   } else {
     file.close();
-    clearBookCache(path.c_str());
-    if (Storage.remove(path.c_str())) {
+    if (removeBookFile(path.c_str())) {
       s.send(204);
     } else {
       s.send(500, "text/plain", "Failed to delete file");
@@ -533,24 +550,18 @@ void WebDAVHandler::handleMove(WebServer& s) {
     return;
   }
 
-  if (dstExists) {
-    Storage.remove(dstPath.c_str());
-  }
-
-  HalFile file = Storage.open(srcPath.c_str());
-  if (!file) {
-    s.send(500, "text/plain", "Failed to open source");
-    return;
-  }
-
-  clearBookCache(srcPath.c_str());
-  bool success = file.rename(dstPath.c_str());
-  file.close();
-
-  if (success) {
-    s.send(dstExists ? 204 : 201);
-  } else {
-    s.send(500, "text/plain", "Move failed");
+  const auto moved = moveBookFile(srcPath.c_str(), dstPath.c_str(), overwrite);
+  switch (moved) {
+    case BookMoveResult::NotMoved:
+      s.send(500, "text/plain", "Move failed; original data or recovery backup retained");
+      break;
+    case BookMoveResult::MovedDataIncomplete:
+      LOG_ERR("DAV", "Move committed; book data migration incomplete");
+      s.sendHeader("Warning", "199 CrossMux \"Book data migration incomplete\"");
+      [[fallthrough]];
+    case BookMoveResult::Complete:
+      s.send(dstExists ? 204 : 201);
+      break;
   }
 }
 

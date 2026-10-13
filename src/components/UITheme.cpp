@@ -7,12 +7,7 @@
 #include <HalMemory.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <builtinFonts/notosans_18_bold.h>
-#include <builtinFonts/notosans_18_regular.h>
-#include <builtinFonts/ubuntu_10_bold.h>
-#include <builtinFonts/ubuntu_10_regular.h>
-#include <builtinFonts/ubuntu_12_bold.h>
-#include <builtinFonts/ubuntu_12_regular.h>
+#include <builtinFonts/all.h>
 
 #include <algorithm>
 #include <memory>
@@ -28,12 +23,6 @@
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
-#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-#include <builtinFonts/notosans_14_bold.h>
-#include <builtinFonts/notosans_14_regular.h>
-#include <builtinFonts/notosans_16_bold.h>
-#include <builtinFonts/notosans_16_regular.h>
-#endif
 
 // The registered families keep these stable addresses across theme changes.
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
@@ -194,16 +183,24 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
   return UITheme::getInstance().getTheme().getListPageItems(availableHeight, hasSubtitle);
 }
 
-// Screen area excluding the bezel and button hints.
+// Full drawable content area: screen minus the board's viewable insets (bezel /
+// rounded-corner clearance), oriented to the current rotation. The single place
+// the inset math lives; every screen derives its content bounds from here (or
+// from getScreenSafeArea, which builds on it).
+Rect UITheme::getContentArea(const GfxRenderer& renderer) {
+  int viTop = 0, viRight = 0, viBottom = 0, viLeft = 0;
+  renderer.getOrientedViewableTRBL(&viTop, &viRight, &viBottom, &viLeft);
+  return Rect{viLeft, viTop, renderer.getScreenWidth() - viLeft - viRight,
+              renderer.getScreenHeight() - viTop - viBottom};
+}
+
+// Content area excluding the button hints.
 Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints) {
   auto orientation = renderer.getOrientation();
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
-  Rect safeArea = Rect{0, 0, screenWidth, screenHeight};
-#if FREEINK_DEVICE_READPICO
-  int top, right, bottom, left;
-  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
-  safeArea = Rect{left, top, screenWidth - left - right, screenHeight - top - bottom};
+  Rect safeArea = getContentArea(renderer);
+#if !FREEINK_DEVICE_READPICO
+  if (currentType == CrossPointSettings::UI_THEME::INX)
+    safeArea = Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
 #endif
   const ThemeMetrics metrics = getMetrics();
   switch (orientation) {

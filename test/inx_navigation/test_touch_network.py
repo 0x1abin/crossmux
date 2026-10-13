@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Exercise production popup contacts, WiFi actions and footer hit geometry."""
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 from test_theme_menus import method, run
 
 ROOT = Path(__file__).resolve().parents[2]
+SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 popup = (ROOT / 'src/components/OptionPopup.h').read_text()
 a = popup.index('  bool handleInput(')
 a_body = popup.index('{', a)
@@ -15,6 +17,19 @@ while depth:
     depth += (popup[end] == '{') - (popup[end] == '}')
     end += 1
 handler = popup[a:end]
+a = popup.index("  bool handleButtons(")
+end = popup.index("\n  bool processRender(", a)
+handler += popup[a:end]
+for name in ("activate", "finishShow"):
+    start = popup.index("  void " + name + "(")
+    brace = popup.index("{", start)
+    end = brace + 1
+    depth = 1
+    while depth:
+        depth += (popup[end] == "{") - (popup[end] == "}")
+        end += 1
+    handler += popup[start:end]
+
 code = r'''
 #include <cassert>
 #include <cstdio>
@@ -26,6 +41,7 @@ code = r'''
 #include "FreeInkUICore.h"
 #include "InxItemLayout.h"
 namespace fui=freeink::ui;
+namespace haptic_feedback {inline void touchAction(bool=false){}}
 struct UITheme {static UITheme& getInstance(){static UITheme t;return t;} bool hasMainTabs()const{return true;}};
 struct MappedInputManager {
  enum class Button {NavPrevious,NavNext,Confirm,Back};
@@ -40,7 +56,7 @@ struct MappedInputManager {
 fui::InputSnapshot touchSnapshotFrom(const MappedInputManager& i){return i.snap;}
 struct OptionPopup {
  bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false,uiReady=true;
- int selectedIndex=0;std::atomic<int> visibleOptionRows{1};
+ int selectedIndex=0;std::atomic<int> visibleOptionRows{1};std::string message;
  static constexpr int MAX_OPTIONS=24;
  static constexpr fui::ActionId ACTION_OPTION=1,ACTION_CHROME=2;
  std::vector<std::string> ownedStrings=std::vector<std::string>(12,"option");
@@ -59,6 +75,8 @@ struct OptionPopup {
  }
 };
 int main(){
+ OptionPopup empty;empty.ownedStrings.clear();empty.activate(0,[](int){});assert(!empty.active);
+ empty.active=true;empty.finishShow(0,[](int){});assert(!empty.active);
  int scenes=0;
  for(Rect safe:{Rect{0,0,480,750},Rect{5,8,684-10,1216-13},Rect{8,5,1216-13,684-10},Rect{0,0,800,340}}){
   OptionPopup p;int calls=0,chosen=-1,updates=0;
@@ -100,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='touch-network-') as directory:
     for high in (False,True):
         source=directory/'popup.cpp';source.write_text(code)
         binary=directory/'popup'
-        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(ROOT/'freeink-sdk/libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
+        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(SDK/'libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
         if high:command.insert(2,'-DCROSSMUX_UI_PROFILE_HIGH_DPI=1')
         subprocess.run(command,check=True);subprocess.run([str(binary)],check=True)
 

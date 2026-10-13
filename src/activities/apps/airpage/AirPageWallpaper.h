@@ -6,7 +6,6 @@ namespace airpage {
 
 class AirPageWallpaper final {
  public:
-  static void recoverInterruptedTransaction();
   static bool install(const SelectedImage& selected);
 
  private:

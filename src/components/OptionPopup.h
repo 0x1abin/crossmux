@@ -79,7 +79,6 @@ class OptionPopup {
     if (!active) return false;
 
     const int total = static_cast<int>(ownedStrings.size());
-    const int count = !upstreamStyle && UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
     const freeink::ui::InputSnapshot snap = touchSnapshotFrom(input);
     if (ignoreInitialTouchContact) {
       if (snap.touchPressed || snap.touchHeld || snap.touchReleased) {
@@ -115,6 +114,7 @@ class OptionPopup {
           selectedIndex = event.value;
           active = false;
           if (onSelectCallback) onSelectCallback(selectedIndex);
+          haptic_feedback::touchAction();
           requestUpdate();
           return true;
         }
@@ -126,6 +126,7 @@ class OptionPopup {
           // Tap released outside the dialog: dismiss without firing. Swipe-end
           // releases arrive with -1,-1 coords and fall through (no dismiss).
           active = false;
+          haptic_feedback::touchAction();
           requestUpdate();
           return true;
         }
@@ -145,32 +146,41 @@ class OptionPopup {
       return true;
     }
 
-    if (input.wasPressed(MappedInputManager::Button::NavPrevious)) {
-      selectedIndex = (selectedIndex - 1 + count) % count;
-      requestUpdate();
-      return true;
-    } else if (input.wasPressed(MappedInputManager::Button::NavNext)) {
-      selectedIndex = (selectedIndex + 1) % count;
-      requestUpdate();
-      return true;
-    }
-
     const auto confirm = MappedInputManager::Button::Confirm;
-    const bool confirmReleased = input.wasReleased(confirm);
     if (ignoreInitialConfirmRelease) {
-      if (confirmReleased) {
+      if (input.wasReleased(confirm)) {
         ignoreInitialConfirmRelease = false;
         return true;
       }
       if (!input.isPressed(confirm)) ignoreInitialConfirmRelease = false;
     }
 
-    if (confirmReleased) {
+    return handleButtons(input.wasPressed(MappedInputManager::Button::NavPrevious),
+                         input.wasPressed(MappedInputManager::Button::NavNext),
+                         input.wasReleased(MappedInputManager::Button::Confirm),
+                         input.wasReleased(MappedInputManager::Button::Back), requestUpdate);
+  }
+
+  bool handleButtons(const bool previous, const bool next, const bool confirm, const bool back,
+                     const std::function<void()>& requestUpdate) {
+    if (!active) return false;
+    const int total = static_cast<int>(ownedStrings.size());
+    const int count = !upstreamStyle && UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
+    if (count <= 0) return true;
+    if (previous) {
+      selectedIndex = (selectedIndex - 1 + count) % count;
+      requestUpdate();
+      return true;
+    } else if (next) {
+      selectedIndex = (selectedIndex + 1) % count;
+      requestUpdate();
+      return true;
+    } else if (confirm) {
       active = false;
       if (onSelectCallback) onSelectCallback(selectedIndex);
       requestUpdate();
       return true;
-    } else if (input.wasReleased(MappedInputManager::Button::Back)) {
+    } else if (back) {
       active = false;
       requestUpdate();
       return true;
@@ -345,7 +355,13 @@ class OptionPopup {
   static constexpr freeink::ui::ActionId ACTION_CHROME = 2;
 
   void activate(int currentIndex, std::function<void(int)> onSelect) {
-    const int count = std::min<int>(ownedStrings.size(), MAX_OPTIONS);
+    const int total = static_cast<int>(ownedStrings.size());
+    const int count = !upstreamStyle && UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
+    if (count <= 0) {
+      active = false;
+      onSelectCallback = nullptr;
+      return;
+    }
     selectedIndex = currentIndex >= 0 && currentIndex < count ? currentIndex : 0;
     onSelectCallback = std::move(onSelect);
     message.clear();

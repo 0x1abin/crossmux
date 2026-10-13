@@ -1,5 +1,6 @@
 #include <Epub/Page.h>
 #include <GfxRenderer.h>
+#include <HardwareSerial.h>
 #include <Serialization.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -10,6 +11,9 @@
 #include <filesystem>
 #include <new>
 #include <utility>
+
+// Standalone host targets do not link the simulator main, which owns this endpoint.
+HardwareSerial Serial;
 
 namespace {
 

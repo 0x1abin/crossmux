@@ -47,7 +47,7 @@ Larger drawn covers still cannot recover detail absent from the source image.
 Legacy TXT `index.bin` version 8 stores a partial or complete lazy page index, the
 detected source encoding, and the paragraph-spacing mode. It is invalidated by
 file-size, viewport, font, margin, alignment, or paragraph-spacing changes; see
-[file-formats.md](../file-formats.md#txt-reader-cache) for its byte layout and
+[file-formats.md](../file-formats.md#legacy-txt-reader-cache) for its byte layout and
 legacy-version invalidation behavior.
 
 Historical EPUB section versions 72/73 and TXT index version 8 invalidated older complete and
@@ -63,7 +63,9 @@ TXT `progress.bin` stores the current source offset so a chapter jump can be
 restored without extending the page index through all intervening text. Legacy
 four-byte page-number records remain readable.
 
-**Hash**: `std::hash<std::string>{}(filepath)` → Moving/renaming file = new hash = lost progress
+**Hash**: `std::hash<std::string>{}(filepath)` identifies a path, not content.
+Rename/move flows relocate the cache and progress to the new key. Replacing
+contents at the same path does not change the hash; preserve freshness checks.
 
 ## Cache Invalidation Rules
 
@@ -80,7 +82,8 @@ four-byte page-number records remain readable.
    - Screen orientation change
    - Display resolution change
 4. **Book file modified**:
-   - Moved, renamed, or content changed (new hash)
+   - Content changes require the existing freshness comparison; a rename/move
+     uses the relocation flow to preserve state
 
 Malformed caches are treated as misses. Readers validate every POD/string read,
 length and lookup-table boundary before publishing parsed state. A truncated or
@@ -90,13 +93,7 @@ does not alter the version-11 binary layout.
 
 **Manual Cache Clear** (safe operations):
 ```bash
-# Delete ALL caches (forces full regeneration)
-rm -rf /path/to/sd/.crosspoint/
-
-# Delete specific book cache
-rm -rf /path/to/sd/.crosspoint/epub_<hash>/
-
-# Keep progress, delete only rendered sections
+# Back up progress/state first; rebuild only the affected book's rendered sections
 rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 ```
 
@@ -115,11 +112,12 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
 - `book.bin`: **Version 11** (metadata structure) — includes NFC-composed titles and ignores ambiguous EPUB guide text references while remaining above every version shipped by either lineage.
-- `section.bin`: **Version 76/77**, complete; partial versions are **206/205**,
+- `section.bin`: **Version 78/79**, complete; partial versions are **204/203**,
   derived as `0xFE - (completeVersion - 28)`.
-  Unified Chinese firmware uses 77. The added `paragraphIndentSpaces` byte
-  follows `firstLineIndent`, participates in cache validity and preserves the
-  fork version sequence above the incoming upstream version.
+  Unified Chinese firmware uses 79. TextBlocks add chapter-codepoint ranges and
+  `paragraphStartWord`, with discretionary-hyphen style metadata. NFC/redaction
+  width and clipping changes invalidate both complete and partial pagination.
+  Local paragraph indentation, ruby and header/style ordering remain intact.
 
 **Version Increment Rules**:
 1. **ALWAYS increment version** BEFORE changing binary structure
@@ -209,3 +207,54 @@ reading-background changes. Confirm no hangs, damaged frames, partial `.pxc`
 files, or sustained heap loss, and retry the interrupted image in the foreground.
 Until these measurements pass, keep the follow-up PR Draft; other PSRAM boards
 receive only the I/O optimization.
+
+## Independent persistent formats
+
+Preserve the partial-build version relation, incomplete-write sentinel, saved
+page data and resume cursor when changing section layout. Verify both completed
+and suspended caches. CLX1 `library.idx` has independent format/fold/freshness
+rules in [file formats](../file-formats.md). Plugin manifests, outboxes, sidecars
+and local 16-byte `BookKey` AES-128 payloads follow [plugin contracts](../sd-plugins.md) and
+[event delivery](../plugin-events.md); do not recursively clear unrelated state.
+Clipping store version 4 and its deletion/recovery sidecars are documented in
+[file formats](../file-formats.md).
+
+## Book path transactions
+
+`src/util/BookCacheUtils.cpp` owns file and directory moves, overwrites and
+removal. Callers must not delete an overwrite destination or relocate its data
+separately. `BookMoveResult` distinguishes an untouched source, a completed
+move, and a committed move with incomplete ancillary migration. UI callers keep
+the new path and use the existing migration warning; Web/DAV return success
+with a `Warning` header after the backing path commits.
+
+Preflight checks destination state before moving protected `.key`/`.rights`
+files (including temporary files), bookmark files, clipping stores/journals and
+path-keyed cache directories. Cache directories containing progress, saved links
+or cover overrides are required data: their migration failure rolls back the
+move. A cache containing only rebuildable data can remain at its old key after
+a rename failure; every reference repair still runs. Folder moves carry adjacent
+sidecars with the folder rename, and migrate external child-book data using one
+checked work stack of 32 frames and one 1024-byte name buffer. Paths are capped
+at 1024 bytes. Path strings and artifact lists are operation-local; no workspace
+is retained across activities or put on the reader/render task stack.
+
+Overwrite first retires the destination bundle to a private sibling named
+`.crossmux-move-<path-hash><extension>`. Failure restores it; success transfers
+the source's saved data and identities to the destination. A failed rollback or
+cleanup preserves the backup and logs its actual path. Deletion similarly
+retires the bundle under `.crossmux-delete-<path-hash><extension>` before cleanup;
+a cleanup failure cannot strand keys at the reusable original path. Historical
+reading statistics are retained when deleting a book. ClippingStore owns only
+clipping data and updates its loaded store path after successful relocation.
+
+## Sleep-cover recovery
+
+ImageViewer and AirPage prepare their existing BMP variants, then share
+`src/util/SleepCover.cpp` for validation, commit and recovery. Writers recover
+before preparing `/sleep.bmp.part`; SleepActivity recovers before choosing the
+sleep mode. `/sleep.bmp.bak` remains until the installed BMP validates and the
+settings save succeeds. The versioned three-byte `/sleep.bmp.txn` record
+identifies an unfinished transaction even when old and new sleep modes match.
+Failed recovery leaves its marker/backup intact and reports the failure.
+See [the private marker format](../file-formats.md#sleep-cover-transaction).

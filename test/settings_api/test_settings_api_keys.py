@@ -72,7 +72,16 @@ def base_list_source(source):
     marker = "baseList = [] {"
     start = source.index(marker) + len(marker) - 1
     end = matching_delimiter(source, start, "{", "}")
-    return source[start + 1 : end]
+    entries = source[start + 1 : end]
+    # Inline the two board-dependent selector factories for metadata/capacity
+    # checks. They still contribute one entry each to the production base list.
+    for factory in ("buildLongPressMenuSetting", "buildShortPowerButtonSetting"):
+        body_start = source.index("{", source.index("inline SettingInfo " + factory + "("))
+        body_end = matching_delimiter(source, body_start, "{", "}")
+        body = source[body_start + 1 : body_end].strip()
+        assert body.startswith("return ") and body.endswith(";")
+        entries = entries.replace(factory + "()", body[len("return ") : -1])
+    return entries
 
 
 def preprocess_capability_guards(source, capabilities):

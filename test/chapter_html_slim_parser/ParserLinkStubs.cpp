@@ -32,7 +32,7 @@ bool invalidateNextTextBlock = false;
 TextBlock::TextBlock(const std::vector<std::string>& words, const std::vector<int16_t>&,
                      const std::vector<EpdFontFamily::Style>&, const std::vector<uint8_t>&,
                      const std::vector<uint16_t>&, const BlockStyle& blockStyle, std::vector<std::string> rubyTexts,
-                     std::vector<LinkSpan> linkSpans)
+                     std::vector<LinkSpan> linkSpans, const std::vector<SourceRange>&, const uint16_t)
     : blockStyle(blockStyle), rubyTexts(std::move(rubyTexts)), linkSpans(std::move(linkSpans)) {
   numWords = words.size();
   isValid = !std::exchange(invalidateNextTextBlock, false);

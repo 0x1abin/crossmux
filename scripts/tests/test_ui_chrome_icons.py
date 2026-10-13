@@ -277,7 +277,7 @@ int main() {
         reader_source = (ROOT / 'src/activities/reader/EpubReaderActivity.cpp').read_text()
         render = method(reader_source, 'void EpubReaderActivity::renderBook(')
         start = render.index('  int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;')
-        end = render.index('#if FREEINK_DEVICE_EEGO_A4', start)
+        end = render.index('  const uint16_t viewportWidth =', start)
         program = r'''
 #include <algorithm>
 #include <cassert>

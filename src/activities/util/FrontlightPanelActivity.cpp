@@ -67,12 +67,6 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
-#if FREEINK_DEVICE_EEGO_A4
-  // The first frame draws over the reader's gray AA page; a HALF refresh keeps
-  // the overlay clean instead of ghosting. Other boards keep the standard
-  // FAST_REFRESH first frame (X4 Pro reference behavior).
-  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
-#endif
 
   // Seed the touch tile's restore mode from the live setting, so toggling off
   // and back on within this session returns to the mode the user had.
@@ -110,11 +104,6 @@ void FrontlightPanelActivity::persistLightSettings() {
 void FrontlightPanelActivity::onExit() {
   persistLightSettings();
   Activity::onExit();
-#if FREEINK_DEVICE_EEGO_A4
-  // The overlay pops back to the reader's gray AA page; force a clean first
-  // frame so the panel's white region does not ghost over the text.
-  renderer.requestNextFullRefresh();
-#endif
 }
 
 void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, void* user) {
@@ -260,7 +249,11 @@ void FrontlightPanelActivity::loop() {
     }
   }
   if (draggingSlider) {
-    if (!touch.snap.touchHeld) draggingSlider = false;
+    if (!touch.snap.touchHeld) {
+      draggingSlider = false;
+      cleanRefreshPending = true;
+      requestUpdate();
+    }
     return;
   }
 
@@ -392,9 +385,14 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     // The orientation tile is labelled with just the current mode ("Portrait"):
     // the mode names say what the tile is about on their own.
     const char* orientLabel = I18N.get(kOrientNames[SETTINGS.orientation % 4]);
+    // "Touch On" / "Touch Off", from the existing state strings: the label
+    // names the current state of the touch-reader-controls setting.
     const bool touchOn = SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF;
+    char touchLabel[48];
+    snprintf(touchLabel, sizeof(touchLabel), "%s %s", tr(STR_TOUCH_TOGGLE),
+             I18N.get(touchOn ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF));
 
-    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel, tr(STR_TOUCH_TOGGLE)};
+    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel, touchLabel};
     const fui::State states[kTileCount] = {SETTINGS.screenInverted ? fui::StateChecked : fui::StateNormal,
                                            fui::StateNormal, fui::StateNormal,
                                            // Filled when touch reader controls are OFF — the non-default,
@@ -405,14 +403,12 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
       gridItems[id].label = labels[id];
       gridItems[id].value = static_cast<int16_t>(id);
       gridItems[id].state = states[id];
-      gridItems[id].icon = id == 3 ? GUI.checkboxIcon(touchOn) : fui::BitmapRef{};
     }
     gridProps.items = gridItems;
     gridProps.count = static_cast<uint16_t>(kTileCount);
     gridProps.action = ACTION_TILE;
     gridProps.tileHeight = kTileHeight;
     gridProps.gap = kTileGap;
-    gridProps.iconOnRight = true;
     screen.tileGrid(gridProps);
   }
 }
@@ -429,10 +425,6 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   // flip the whole frame's polarity without the FULL waveform's blackout
   // flash. Any faint residue clears with the panel's dedicated refresh tile
   // or the next scheduled clean refresh.
-#if FREEINK_DEVICE_EEGO_A4
-  renderer.displayBuffer(cleanRefreshPending ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
-#else
   renderer.displayBuffer(cleanRefreshPending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-#endif
   cleanRefreshPending = false;
 }
