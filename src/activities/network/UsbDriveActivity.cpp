@@ -10,6 +10,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
+#include "fontIds.h"
 
 namespace fui = freeink::ui;
 
@@ -153,38 +154,55 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
     }
   }
 
+  // Draw the status text through the GfxRenderer with the built-in CJK
+  // NotoSans subset instead of the FreeInkUI text component. The UI fonts
+  // (Ubuntu UI / Noto Sans 8px) only cover Latin and Hebrew; CJK glyphs are
+  // served at runtime from a TTF on the SD card (see UIScale.h), and
+  // beginUsbDrive() detaches the SD filesystem for the USB host, so that
+  // fallback is unavailable here and FreeInkUI text renders as empty boxes.
+  // The built-in CJK font lives in flash and needs no SD access.
   const auto& metrics = UITheme::getInstance().getMetrics();
-  screen.setContentMarginFromScreen(fui::Insets{
-      static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), static_cast<int16_t>(metrics.contentSidePadding),
-      static_cast<int16_t>(metrics.buttonHintsHeight), static_cast<int16_t>(metrics.contentSidePadding)});
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const Rect body{metrics.contentSidePadding, metrics.topPadding + metrics.headerHeight,
+                  pageWidth - 2 * metrics.contentSidePadding,
+                  pageHeight - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
 
-  auto messageStyle = SETTINGS.uiTheme == CrossPointSettings::INX ? screen.theme().titleText : screen.theme().smallText;
-  messageStyle.align = fui::TextAlign::Center;
-  messageStyle.bold = true;
-  messageStyle.maxLines = 2;
-  auto detailStyle = SETTINGS.uiTheme == CrossPointSettings::INX ? screen.theme().bodyText : screen.theme().smallText;
-  detailStyle.align = fui::TextAlign::Center;
-  detailStyle.maxLines = 3;
+  // notosans_cjk_* ship in flash without a bold variant, so the message line
+  // is drawn in REGULAR here; the original bold flag was applied through the
+  // SD-card CJK fallback that is unavailable while the USB host owns the card.
+  constexpr int fontId = NOTOSANS_12_FONT_ID;
+  constexpr EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+  const int lineHeight = renderer.getLineHeight(fontId);
+  constexpr int gap = UiHighDpiProfile::controlGap;  // equals FreeInkUI spaceMd (UIThemeTokens.h)
 
-  const fui::Rect body = screen.body();
-  const int16_t messageHeight = fui::measureWrappedText(screen.target(), message, messageStyle, body.width).height;
-  const int16_t detailHeight =
-      detail ? fui::measureWrappedText(screen.target(), detail, detailStyle, body.width).height : 0;
-  const int16_t secondaryDetailHeight =
-      secondaryDetail ? fui::measureWrappedText(screen.target(), secondaryDetail, detailStyle, body.width).height : 0;
-  const int16_t gap = detail ? screen.theme().spaceMd : 0;
-  const int16_t secondaryGap = secondaryDetail ? screen.theme().spaceMd : 0;
-  const int16_t totalHeight =
-      static_cast<int16_t>(messageHeight + gap + detailHeight + secondaryGap + secondaryDetailHeight);
-  if (body.height > totalHeight) screen.spacer(static_cast<int16_t>((body.height - totalHeight) / 2));
+  const auto lines = [&](const char* text, const int maxLines) {
+    if (!text) return std::vector<std::string>{};
+    return renderer.wrappedText(fontId, text, body.width, maxLines, style);
+  };
+  const auto messageLines = lines(message, 2);
+  const auto detailLines = lines(detail, 3);
+  const auto secondaryLines = lines(secondaryDetail, 3);
+  const int messageHeight = static_cast<int>(messageLines.size()) * lineHeight;
+  const int detailHeight = static_cast<int>(detailLines.size()) * lineHeight;
+  const int secondaryHeight = static_cast<int>(secondaryLines.size()) * lineHeight;
+  const int totalHeight =
+      messageHeight + (detail ? gap : 0) + detailHeight + (secondaryDetail ? gap : 0) + secondaryHeight;
 
-  screen.target().text(screen.takeTop(messageHeight, gap), message, messageStyle);
-  if (detail) {
-    screen.target().text(screen.takeTop(detailHeight, secondaryGap), detail, detailStyle);
-  }
-  if (secondaryDetail) {
-    screen.target().text(screen.takeTop(secondaryDetailHeight), secondaryDetail, detailStyle);
-  }
+  // Center vertically only when the content fits; otherwise start at the body
+  // top (mirrors the original spacer guard) so lines never draw above the header.
+  int y = body.y + (body.height > totalHeight ? (body.height - totalHeight) / 2 : 0);
+  const auto drawLines = [&](const std::vector<std::string>& textLines) {
+    for (const auto& line : textLines) {
+      UITheme::drawCenteredText(renderer, body, fontId, y, line.c_str(), true, style);
+      y += lineHeight;
+    }
+  };
+  drawLines(messageLines);
+  y += detail ? gap : 0;
+  drawLines(detailLines);
+  y += secondaryDetail ? gap : 0;
+  drawLines(secondaryLines);
 }
 
 void UsbDriveActivity::restartToHome() {
