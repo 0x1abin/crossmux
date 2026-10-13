@@ -316,6 +316,43 @@ void silentRestartToJoinNetwork() {
   ESP.restart();
 }
 
+// The USB MSC session detaches the SD filesystem, leaving the UI fonts' SD
+// fallback (the user's selected face) with stale handles until reboot. drawPopup
+// resolves through that chain, so its CJK prompt would render as empty boxes
+// right after the handoff. Mirror drawPopup's full layout (frame, margins,
+// rounded corners, text style) with the flash-resident CJK face instead; the
+// popup geometry stays identical to every other loading popup in the UI.
+static Rect drawStorageHandoffPopup(const GfxRenderer& renderer, const char* message) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int marginX = metrics.popupMarginX;
+  const int marginY = metrics.popupMarginY;
+  const int frameThickness = metrics.popupFrameThickness;
+  const EpdFontFamily::Style popupFontFamily = metrics.popupTextBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+  // Scale y position proportionally to screen height
+  const int y = static_cast<int>(renderer.getScreenHeight() * metrics.popupTopOffsetRatio);
+  const int textWidth = renderer.getTextWidth(NOTOSANS_12_FONT_ID, message, popupFontFamily);
+  const int textHeight = renderer.getLineHeight(NOTOSANS_12_FONT_ID);
+  const int w = textWidth + marginX * 2;
+  const int h = textHeight + marginY * 2;
+  const int x = (renderer.getScreenWidth() - w) / 2;
+
+  const bool useRoundedPopup = metrics.popupCornerRadius > 0;
+  if (useRoundedPopup) {
+    renderer.fillRoundedRect(x - frameThickness, y - frameThickness, w + frameThickness * 2, h + frameThickness * 2,
+                             metrics.popupCornerRadius + frameThickness, Color::White);
+    renderer.fillRoundedRect(x, y, w, h, metrics.popupCornerRadius, Color::Black);
+  } else {
+    renderer.fillRect(x - frameThickness, y - frameThickness, w + frameThickness * 2, h + frameThickness * 2, true);
+    renderer.fillRect(x, y, w, h, false);
+  }
+
+  const int textX = x + (w - textWidth) / 2;
+  const int textY = y + marginY + metrics.popupTextBaselineOffsetY;
+  renderer.drawText(NOTOSANS_12_FONT_ID, textX, textY, message, metrics.popupTextInverted, popupFontFamily);
+  renderer.displayBuffer();
+  return Rect{x, y, w, h};
+}
+
 void restartToHomeAfterStorageHandoff() {
   if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
   silentRebootTarget = static_cast<uint32_t>(SilentRebootTarget::Home);
@@ -323,7 +360,7 @@ void restartToHomeAfterStorageHandoff() {
   silentRebootPayload = Frontlight.isOn() ? SILENT_REBOOT_LIGHT_ON : 0;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Restart after storage handoff (target=home)");
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  drawStorageHandoffPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   handoffUsbOtgToSerialJtag();
   ESP.restart();
