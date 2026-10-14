@@ -257,12 +257,14 @@ void ReaderActivity::onExit() {
   // the loaded font cache with the restored values so an SD-card font applied
   // by this book's style (which also registers UI fallbacks) is unloaded again;
   // otherwise the UI would keep rendering with the book's font after exit.
-  // ensureLoaded() frees and replaces the resident SD font, so it must hold
-  // the render lock like every other call site does.
-  {
-    RenderLock lock;
-    sdFontSystem.ensureLoaded(renderer);
-  }
+  // Note: onExit() is always invoked by ActivityManager while it already holds
+  // the rendering mutex (exitActivity()'s contract: "lock must be held by the
+  // caller"). Taking RenderLock again here would self-deadlock on the
+  // non-recursive mutex — the stock firmware's onExit() has no lock for the
+  // same reason. ensureLoaded() is safe lock-free here: it runs on the UI
+  // thread with the render task quiesced behind the held mutex, matching the
+  // lock-free ensureLoaded() in onEnter().
+  sdFontSystem.ensureLoaded(renderer);
 
   Activity::onExit();
 
