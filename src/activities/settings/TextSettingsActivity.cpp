@@ -99,12 +99,15 @@ static_assert(std::size(WORD_SPACING_IDS) == (WORD_SPACING_MAX - WORD_SPACING_MI
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const SdCardFontRegistry* registry, Tab initialTab,
-                                           const InitialFontState initialFontState, const StartMode startMode)
+                                           const InitialFontState initialFontState, const StartMode startMode,
+                                           const std::string* bookPath, const BookStyle* globalSnapshot)
     : UiTabListActivity("TextSettings", renderer, mappedInput),
       registry_(registry),
       tab_(initialTab),
       initialFontState_(initialFontState),
-      startMode_(startMode) {}
+      startMode_(startMode),
+      bookPath_(bookPath),
+      globalSnapshot_(globalSnapshot) {}
 
 const char* TextSettingsActivity::tabLabel(const int index) const { return I18N.get(TAB_NAME_IDS[index]); }
 
@@ -207,9 +210,13 @@ void TextSettingsActivity::rebuildRowItems() {
       case Tab::Layout:
         item.label = I18N.get(LAYOUT_ROW_NAME_IDS[i]);
         break;
-      case Tab::Style:
-        item.label = I18N.get(STYLE_ROW_NAME_IDS[static_cast<int>(styleRowAt(i))]);
+      case Tab::Style: {
+        const StyleRow row = styleRowAt(i);
+        item.label = I18N.get(row == StyleRow::ClearBookStyles && bookOverrideMode()
+                                  ? StrId::STR_CLEAR_BOOK_OVERRIDES
+                                  : STYLE_ROW_NAME_IDS[static_cast<int>(row)]);
         break;
+      }
       default:
         break;
     }
@@ -713,12 +720,27 @@ void TextSettingsActivity::confirmStyleRow(int row) {
       SETTINGS.bookStyleMemory = !SETTINGS.bookStyleMemory;
       break;
     case StyleRow::ClearBookStyles: {
-      // Two-step confirm: forgetting every book's style is not recoverable.
+      // Two-step confirm: forgetting a book's overrides is not recoverable.
       constexpr StrId CONFIRM_OPTIONS[] = {StrId::STR_CANCEL, StrId::STR_OK_BUTTON};
-      optionPopup_.show(StrId::STR_CLEAR_BOOK_STYLES_CONFIRM, CONFIRM_OPTIONS,
-                        static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [](int idx) {
-                          if (idx == 1) BOOK_STYLES.clear();
-                        });
+      if (bookOverrideMode()) {
+        optionPopup_.show(StrId::STR_CLEAR_BOOK_OVERRIDES_CONFIRM, CONFIRM_OPTIONS,
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
+                            if (idx == 1) {
+                              BOOK_STYLES.removeByPath(*bookPath_);
+                              // The book opened with these overrides applied to
+                              // the in-memory settings; restore the global
+                              // snapshot so the session (and the exit capture)
+                              // sees the global values again.
+                              applyStyleToSettings(*globalSnapshot_);
+                              SETTINGS.saveToFile();
+                            }
+                          });
+      } else {
+        optionPopup_.show(StrId::STR_CLEAR_BOOK_STYLES_CONFIRM, CONFIRM_OPTIONS,
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [](int idx) {
+                            if (idx == 1) BOOK_STYLES.clear();
+                          });
+      }
       requestUpdate();
       return;
     }
