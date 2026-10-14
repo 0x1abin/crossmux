@@ -54,6 +54,22 @@ HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
              : HalDisplay::GrayscaleMode::Absolute;
 }
 
+// Original (0/85/170/255) dither thresholds match the native 4-level ramp of
+// the X4/X4 Pro 800x480 glass, whether it carries an SSD1677, UC8179 or UC8279
+// controller. X3 (792x528) and other panels retain the legacy tuning.
+bool useOriginalGrayscaleThresholds(const GfxRenderer&) {
+  switch (display.getController()) {
+    case HalDisplay::Controller::SSD1677:
+      return true;
+    case HalDisplay::Controller::UC8279:
+    case HalDisplay::Controller::UC8179:
+      // Physical panel geometry — logical size rotates with orientation.
+      return display.getDisplayWidth() == 800 && display.getDisplayHeight() == 480;
+    default:
+      return false;
+  }
+}
+
 // Kept separate from /sleep.bmp and /.sleep so alpha-overlay art does not mix with full-screen wallpapers.
 constexpr char TRANSPARENT_SLEEP_ROOT_BMP[] = "/sleep-overlay.bmp";
 constexpr char TRANSPARENT_SLEEP_ROOT_PNG[] = "/sleep-overlay.png";
@@ -640,7 +656,7 @@ void SleepActivity::renderCustomSleepScreen() const {
   if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
     Bitmap bitmap(file, !native,
                   renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                      display.getController() == HalDisplay::Controller::SSD1677 &&
+                      useOriginalGrayscaleThresholds(renderer) &&
                       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading: /sleep.bmp");
@@ -663,7 +679,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       delay(100);
       Bitmap bitmap(randFile, !native,
                     renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                        display.getController() == HalDisplay::Controller::SSD1677 &&
+                        useOriginalGrayscaleThresholds(renderer) &&
                         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
         renderBitmapSleepScreen(bitmap, false, native);
@@ -890,9 +906,12 @@ void SleepActivity::renderCoverSleepScreen() const {
   }
 
   // SSD absolute images use the new thresholds; other panels retain legacy tuning.
+  // X4/X4 Pro ship the same 800x480 glass under SSD1677, UC8179 or UC8279
+  // controllers, all exposing the native 0/85/170/255 4-level ramp — keep the
+  // original thresholds for those batches too. X3 (792x528) stays on legacy.
   const bool originalThresholds =
       renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-      display.getController() == HalDisplay::Controller::SSD1677 &&
+      useOriginalGrayscaleThresholds(renderer) &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
   std::string coverBmpPath;
   bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
