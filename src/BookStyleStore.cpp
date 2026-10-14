@@ -32,6 +32,7 @@ T boundedInteger(JsonObjectConst obj, const char* key, T fallback, int64_t minVa
 }
 
 void styleToJson(JsonObject obj, const BookStyle& style) {
+  obj["overrideMask"] = style.overrideMask;
   obj["fontFamily"] = style.fontFamily;
   obj["sdFontFamilyName"] = style.sdFontFamilyName;
   obj["fontPointSize"] = style.fontPointSize;
@@ -57,6 +58,7 @@ void styleToJson(JsonObject obj, const BookStyle& style) {
 // back to the defaults so a hand-edited or forward-versioned file cannot push
 // the reader into an invalid state.
 bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
+  style.overrideMask = boundedInteger<uint32_t>(obj, "overrideMask", 0, 0, (1u << 19) - 1);
   style.fontFamily = boundedInteger<uint8_t>(obj, "fontFamily", CrossPointSettings::NOTOSANS, 0,
                                              CrossPointSettings::FONT_FAMILY_COUNT - 1);
   const char* sdFamily = obj["sdFontFamilyName"] | "";
@@ -113,6 +115,10 @@ void BookStyleStore::toJson(JsonDocument& doc) const {
 
 bool BookStyleStore::fromJson(JsonVariantConst doc) {
   const int version = doc["formatVersion"] | kFormatVersion;
+  // Only the current format is loaded. The per-book style store was
+  // introduced by this PR (there are no older on-device files to migrate);
+  // a mismatch ignores the whole file so a corrupt or foreign file cannot
+  // push the reader into an invalid state.
   if (version != kFormatVersion) {
     LOG_ERR("BST", "Unsupported book-style format version %d (expected %d); ignoring file", version, kFormatVersion);
     return false;
@@ -167,6 +173,18 @@ bool BookStyleStore::updateStyle(const std::string& bookPath, const BookStyle& s
     // change will not survive a reboot. The low-level writer already logged
     // the specific SD failure; surface the store-level consequence too.
     LOG_ERR("BST", "Failed to persist book style for %s; change lost on reboot", bookPath.c_str());
+  }
+  return saved;
+}
+
+bool BookStyleStore::removeByPath(const std::string& bookPath) {
+  const auto it =
+      std::find_if(styles.begin(), styles.end(), [&](const BookStyleEntry& entry) { return entry.path == bookPath; });
+  if (it == styles.end()) return true;  // nothing to forget
+  styles.erase(it);
+  const bool saved = saveToFile();
+  if (!saved) {
+    LOG_ERR("BST", "Failed to persist removal of book style for %s", bookPath.c_str());
   }
   return saved;
 }

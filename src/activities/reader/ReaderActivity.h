@@ -60,20 +60,22 @@ class ReaderActivity : public Activity {
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}
 
-  // Per-book style restore/save (see BookStyleStore). applyBookStyle() runs
-  // before loadBook(); saveBookStyle() runs on exit. The book's own style is
+  // Per-book style restore (see BookStyleStore). applyBookStyle() runs
+  // before loadBook(); saveBookStyle() runs on exit. A book's overrides are
   // applied to the in-memory settings only; the values from the settings
   // screen are snapshotted first and restored on exit, so the global settings
-  // (and their persisted file) are never overwritten by a book's style.
+  // (and their persisted file) are never overwritten by a book's overrides.
   void applyBookStyle();
   void saveBookStyle();
+  // Builds the effective override set from the difference between the current
+  // in-memory settings and the entered global snapshot. The text settings
+  // result handler uses this to capture a session's edits as this book's
+  // overrides; a field reverted to the global value clears its bit ("follow
+  // global").
+  BookStyle captureStyleDiff(const BookStyle& globalSnapshot) const;
 
   BookStyle globalSettingsSnapshot_;
   bool globalSettingsSnapshotted_ = false;
-  // Set once loadBook() succeeded; saveBookStyle() only records the book's
-  // style when the book was actually opened, so a failed load (missing file,
-  // corrupt book) cannot write a stale entry under this path.
-  bool bookOpened_ = false;
 
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
