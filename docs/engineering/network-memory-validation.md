@@ -42,6 +42,33 @@ statistics release.
 No new heap buffers, tasks, dependency, persistent setting or SDK API are added.
 There is one boolean per download activity (object padding may absorb it).
 
+### Reclaim vector capacity with firmware exception flags
+
+The ESP32 toolchain's libstdc++ implements vector `shrink_to_fit()` as a no-op
+with `-fno-exceptions`. Clearing statistics therefore destroyed their elements
+but retained the book, day and session arrays throughout Wi-Fi/TLS. Network
+release now swaps each vector with an empty vector, after successful persistence.
+This allocates no replacement buffers and releases the old capacity immediately;
+save failure still retains the in-memory data for retry.
+
+The regression test compiles the actual release method and statistics types
+with both normal host flags and `-fno-exceptions`. It checks capacity, retained
+data after save failure and repeated release. The old method passes with host
+exceptions enabled but fails the capacity check with firmware flags. Run:
+
+```sh
+python3 scripts/tests/test_reading_stats_network_memory.py
+```
+
+On the connected X3, the original OTA run had 38,672 free / 28,660 largest bytes
+after font reclaim and failed TLS with `PEER_KEY_ERROR` (-342). With capacity
+release fixed, the font manifest run had 47,464 free / 36,852 largest bytes,
+completed TLS 1.3 and downloaded the 2,157-byte manifest. The user also confirmed
+OTA checking and font networking worked. These are different activity snapshots,
+not a matched allocation-time benchmark or full-download/endurance acceptance.
+The rejected font-registry compaction experiment is absent from production;
+font assets, stack sizes, TLS thresholds and Wi-Fi configuration are unchanged.
+
 ## Review of the diagnostic iterations
 
 The temporary C experiment mixed behavior into `NetMem::start/finish`: it freed
