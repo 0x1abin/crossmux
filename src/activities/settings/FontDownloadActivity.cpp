@@ -1143,7 +1143,11 @@ void FontDownloadActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the status and the row edge
-  syncListViewport(screen, props, /*hasSubtitle=*/UITheme::getInstance().hasMainTabs() && state_ == FAMILY_LIST);
+  // No tab bar sits above this list: passing a non-zero selectionOffset would
+  // shift the drawn highlight one row below nav.selected (selectedIndex is
+  // offset while activation uses the absolute index), so button navigation
+  // would activate the next family for the highlighted one.
+  syncListViewport(screen, props, /*selectionOffset=*/0);
   screen.list(props);
 }
 
