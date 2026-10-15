@@ -425,6 +425,12 @@ void SettingsActivity::onEnter() {
 }
 
 void SettingsActivity::selectCategory(const int categoryIndex) {
+  // buildScreen() runs on the render task and indexes the row caches with the
+  // count of the category it found when it started. Repointing currentSettings
+  // and rebuilding those vectors underneath it walks off the end -- reachable
+  // by holding Up or Down on the tab bar, where the categories differ in
+  // length and a press lands inside a refresh that takes hundreds of ms.
+  RenderLock lock;
   selectedCategoryIndex = categoryIndex;
   switch (selectedCategoryIndex) {
     case 0:
