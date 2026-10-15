@@ -102,11 +102,18 @@ void ReaderActivity::saveBookStyle() {
   // which persists the store itself; exiting a book no longer snapshots the
   // current settings into the book. Only restore the global snapshot so the
   // in-memory overrides never leak into the next book.
-  if (globalSettingsSnapshotted_) {
+  if (!globalSettingsSnapshotted_) return;
+  if (SETTINGS.bookStyleMemory) {
+    // Memory is still on: roll back to the entered global snapshot so a
+    // book's overrides never leak into the next book or the settings file.
     applyStyleToSettings(globalSettingsSnapshot_);
-    SETTINGS.saveToFile();
-    globalSettingsSnapshotted_ = false;
   }
+  // Memory was switched off mid-session: the switch-off handler already
+  // restored the snapshot, so the currently displayed values are the user's
+  // new global baseline — keep them and persist instead of rolling back
+  // edits made after the switch was turned off.
+  SETTINGS.saveToFile();
+  globalSettingsSnapshotted_ = false;
 }
 
 BookStyle ReaderActivity::captureStyleDiff(const BookStyle& globalSnapshot) const {
