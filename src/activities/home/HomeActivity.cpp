@@ -656,18 +656,28 @@ void HomeActivity::loop() {
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size();
   int menuRow = -1;
   MappedInputManager::RowTouch menuTouch;
+  BaseTheme::MenuRowGeometry menuGeo{};
   if (isCarousel) {
     const int menuBottom = renderer.getScreenHeight();
     const int columnWidth = renderer.getScreenWidth() / renderedMenuCount;
     menuTouch = mappedInput.colTouch(menuRow, 0, columnWidth, renderedMenuCount, menuBottom - metrics.menuRowHeight,
                                      menuBottom, columnWidth);
   } else {
-    menuTouch = mappedInput.rowTouch(menuRow, menuTop, metrics.menuRowHeight + metrics.menuSpacing, renderedMenuCount,
-                                     content.x, content.x + content.width, metrics.menuRowHeight);
+    // Hit-test from the theme's drawn menu geometry, never from a fixed metrics
+    // table: RoundedRaff/Inx derive the row height from the font and page the
+    // rows, Lyra draws rows without the Base vertical offset (see BaseTheme.h).
+    const Rect menuRect{content.x, menuTop, content.width,
+                        renderer.getScreenHeight() - (metrics.headerHeight + metrics.homeTopPadding +
+                                                      metrics.verticalSpacing + metrics.homeMenuTopOffset +
+                                                      metrics.buttonHintsHeight)};
+    menuGeo = GUI.getMenuRowGeometry(renderer, menuRect, renderedMenuSelection, renderedMenuCount);
+    menuTouch = mappedInput.rowTouch(menuRow, menuGeo.firstRowY, menuGeo.rowStep, menuGeo.pageCount, menuGeo.xStart,
+                                     menuGeo.xEnd, menuGeo.rowHeight);
   }
   if (menuTouch != MappedInputManager::RowTouch::None) {
     const int touchedIndex =
-        metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size());
+        menuGeo.pageStart +
+        (metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size()));
     if (menuTouch == MappedInputManager::RowTouch::Down) {
       if (selectorIndex != touchedIndex) {
         selectorIndex = touchedIndex;
