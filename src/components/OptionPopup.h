@@ -27,7 +27,11 @@
 // publication so a release cannot be dropped during a highlight repaint.
 class OptionPopup {
  public:
-  explicit OptionPopup(bool upstreamStyle = false) : upstreamStyle(upstreamStyle) {}
+  // legacyScrollWindow opts the legacy (non-INX) dialog path into a scroll
+  // window for long option lists; other popups keep the shared dialog's
+  // original draw-all behavior.
+  explicit OptionPopup(bool upstreamStyle = false, bool legacyScrollWindow = false)
+      : upstreamStyle(upstreamStyle), legacyScrollWindow_(legacyScrollWindow) {}
 
   void show(StrId titleId, const StrId* optionIds, int optionCount, int currentIndex,
             std::function<void(int)> onSelect) {
@@ -90,14 +94,17 @@ class OptionPopup {
       }
       ignoreInitialTouchContact = false;
     }
-    if (!upstreamStyle && UITheme::getInstance().hasMainTabs()) {
+    if (!upstreamStyle && (UITheme::getInstance().hasMainTabs() || legacyScrollWindow_)) {
       const auto swipe = input.wasSwipe();
       if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
         freeink::ui::InputSnapshot release{};
         release.touchReleased = true;
         release.touchX = release.touchY = -1;
         interactions.routePublished(release);
-        const int step = std::max(1, visibleOptionRows.load());
+        // INX reports the rendered row count; the tap-zone legacy scroll window
+        // steps one visible window at a time.
+        const int step =
+            std::max(1, legacyScrollWindow_ ? std::min(total, fuiMaxVisibleRows) : visibleOptionRows.load());
         selectedIndex =
             std::clamp(selectedIndex + (swipe == MappedInputManager::SwipeDir::Up ? step : -step), 0, total - 1);
         requestUpdate();
@@ -246,13 +253,14 @@ class OptionPopup {
     const int totalOptions = static_cast<int>(ownedStrings.size());
     const uint8_t count = static_cast<uint8_t>(totalOptions > MAX_OPTIONS ? MAX_OPTIONS : totalOptions);
 
-    // Scroll window on the legacy dialog path (non-INX themes): the dialog
-    // sizes to fuiMaxVisibleRows and rows past the window are reached with
-    // Up/Down or touch; the window follows the selection every frame, so no
-    // shared scroll state exists between the loop and render tasks.
-    const int visible = std::min<int>(count, fuiMaxVisibleRows);
-    const int start = std::clamp(selectedIndex - visible / 2, 0, std::max(0, count - visible));
-    const uint8_t visibleCount = static_cast<uint8_t>(visible);
+    // Scroll window on the legacy dialog path: only callers that opt in
+    // (legacyScrollWindow_, currently the tap-zone picker) get a 6-row window
+    // with a scrollbar. Every other popup keeps the shared dialog's original
+    // behavior — all options drawn at once, no scrollbar.
+    const uint8_t visibleCount =
+        legacyScrollWindow_ ? static_cast<uint8_t>(std::min<int>(count, fuiMaxVisibleRows)) : count;
+    const int start =
+        legacyScrollWindow_ ? std::clamp(selectedIndex - visibleCount / 2, 0, std::max(0, count - visibleCount)) : 0;
 
     fui::DialogOption options[MAX_OPTIONS];
     for (uint8_t i = 0; i < visibleCount; ++i) {
@@ -321,13 +329,13 @@ class OptionPopup {
     // option buttons win inside the dialog and the guard absorbs the rest.
     frame.hit(dialogRect, ACTION_CHROME, 0, fui::InputTouch);
     fui::optionDialog(frame, dialogRect, props);
-    if (count > visible) {
+    if (legacyScrollWindow_ && count > visibleCount) {
       // Scrollbar, drawn in the same style as the INX option dialog.
       const int trackX = dialogRect.x + dialogRect.width - 10;
       const int trackY = dialogRect.y + innerPadding;
       const int trackHeight = dialogRect.height - innerPadding * 2;
-      const int thumbHeight = std::max(8, trackHeight * visible / count);
-      const int maxStart = count - visible;
+      const int thumbHeight = std::max(8, trackHeight * visibleCount / count);
+      const int maxStart = count - visibleCount;
       const int thumbY = trackY + start * (trackHeight - thumbHeight) / maxStart;
       renderer.fillRect(trackX, trackY, 2, trackHeight, true);
       renderer.fillRect(trackX - 2, thumbY, 6, thumbHeight, true);
@@ -349,6 +357,7 @@ class OptionPopup {
 
  private:
   const bool upstreamStyle;
+  const bool legacyScrollWindow_;
   void finishShow(const int currentIndex, std::function<void(int)> onSelect) {
     message.clear();
     const int count = static_cast<int>(ownedStrings.size());

@@ -31,8 +31,9 @@ class TapZoneSettingsActivity final : public Activity {
   uint8_t popupZone = 0;  // zone (0..14) being edited
   int popupPhase = 0;     // 0 = short-press section, 1 = long-press section (two-step picker)
   // The shared option dialog reused by every other settings picker; the
-  // short-press → long-press flow is two consecutive show() calls.
-  OptionPopup popup_;
+  // short-press → long-press flow is two consecutive show() calls. The tap-zone
+  // list is the only one that opts into the legacy scroll window.
+  OptionPopup popup_{false, true};
   // Actions offered by the currently shown section, indexed by the dialog row.
   uint8_t popupOptions_[17];
   int popupOptionCount_ = 0;
