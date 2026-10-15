@@ -212,7 +212,7 @@ void TextSettingsActivity::rebuildRowItems() {
         break;
       case Tab::Style: {
         const StyleRow row = styleRowAt(i);
-        item.label = I18N.get(row == StyleRow::ClearBookStyles && bookOverrideMode()
+        item.label = I18N.get(row == StyleRow::ClearBookStyles && bookPath_ != nullptr
                                   ? StrId::STR_CLEAR_BOOK_OVERRIDES
                                   : STYLE_ROW_NAME_IDS[static_cast<int>(row)]);
         break;
@@ -736,23 +736,38 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     case StyleRow::AntiAliasing:
       SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
       break;
-    case StyleRow::BookStyleMemory:
-      SETTINGS.bookStyleMemory = !SETTINGS.bookStyleMemory;
+    case StyleRow::BookStyleMemory: {
+      const bool wasOn = SETTINGS.bookStyleMemory;
+      SETTINGS.bookStyleMemory = !wasOn;
+      if (wasOn && bookOverrideMode()) {
+        // Turning per-book memory off mid-session: drop the overrides already
+        // applied to the in-memory settings and persist the global baseline,
+        // so the book follows the global settings immediately and later global
+        // edits are not rolled back on exit. The stored entry is kept;
+        // re-enabling memory reapplies it.
+        applyStyleToSettings(*globalSnapshot_);
+        SETTINGS.saveToFile();
+      }
       break;
+    }
     case StyleRow::ClearBookStyles: {
       // Two-step confirm: forgetting a book's overrides is not recoverable.
       constexpr StrId CONFIRM_OPTIONS[] = {StrId::STR_CANCEL, StrId::STR_OK_BUTTON};
-      if (bookOverrideMode()) {
+      if (bookPath_ != nullptr) {
         optionPopup_.show(StrId::STR_CLEAR_BOOK_OVERRIDES_CONFIRM, CONFIRM_OPTIONS,
                           static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
                             if (idx == 1) {
                               BOOK_STYLES.removeByPath(*bookPath_);
                               // The book opened with these overrides applied to
                               // the in-memory settings; restore the global
-                              // snapshot so the session (and the exit capture)
-                              // sees the global values again.
-                              applyStyleToSettings(*globalSnapshot_);
-                              SETTINGS.saveToFile();
+                              // snapshot (when one was taken) so the session
+                              // (and the exit capture) sees the global values
+                              // again. With memory off no snapshot exists and
+                              // the in-memory values are already global.
+                              if (globalSnapshot_) {
+                                applyStyleToSettings(*globalSnapshot_);
+                                SETTINGS.saveToFile();
+                              }
                             }
                           });
       } else {

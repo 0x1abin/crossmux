@@ -1362,7 +1362,6 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::TEXT_SETTINGS: {
-      const bool bookOverrideMode = SETTINGS.bookStyleMemory && globalSettingsSnapshotted_;
       startActivityForResultWith<TextSettingsActivity>(
           [this](const ActivityResult&) {
             READING_STATS.resumeSession();
@@ -1407,7 +1406,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           },
           &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
           TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::Interactive,
-          bookOverrideMode ? &bookPath : nullptr, bookOverrideMode ? &globalSettingsSnapshot_ : nullptr);
+          &bookPath, globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::NIGHT_MODE:
