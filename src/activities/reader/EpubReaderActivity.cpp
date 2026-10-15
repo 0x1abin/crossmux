@@ -1405,8 +1405,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             openReaderMenu();
           },
           &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
-          TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::Interactive,
-          &bookPath, globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
+          TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::Interactive, &bookPath,
+          globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::NIGHT_MODE:
