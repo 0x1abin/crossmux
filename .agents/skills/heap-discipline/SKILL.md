@@ -48,6 +48,24 @@ Bare `new` / `new[]` is never correct here: under `-fno-exceptions` it calls
   setup). Banned on hot/render paths. Build text with a stack `char[]` +
   `snprintf`; if a `std::string` is unavoidable, `reserve` it first.
 
+## Releasing capacity at phase boundaries
+
+`clear()` destroys vector elements but retains capacity. `shrink_to_fit()` is
+non-binding; the current ESP32 libstdc++ 14.2.0 does not reclaim vector storage
+with `-fno-exceptions`. When an owned, default-allocator vector must return its
+storage, use the existing empty-vector swap pattern after successful persistence.
+Keep capacity for reuse on hot paths rather than repeatedly freeing it.
+
+Test the real release method with normal host flags and `-fno-exceptions`, plus
+the affected device branches. Check capacity, not just `empty()`, and cover save
+failure retaining data, repeated release, cancellation and exit recovery.
+
+Foreground network owners must save dirty data before unloading it, refuse
+launch on save failure, and preserve their existing restore/return routes. Do
+not move that opt-in policy into shared networking used by live/background apps.
+Reuse the tests and acceptance procedure in
+[download memory](../../../docs/engineering/network-memory-validation.md).
+
 ## Justify every allocation
 
 Per AGENTS.md's evidence rule: when you add a heap allocation, state in one line

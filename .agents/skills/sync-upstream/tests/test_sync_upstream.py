@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
+from unittest.mock import DEFAULT, Mock, PropertyMock, call, patch
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "sync_upstream.py"
 SPEC = importlib.util.spec_from_file_location("sync_upstream", SCRIPT)
@@ -365,6 +365,115 @@ class BuildValidationTest(unittest.TestCase):
                 ["pio", "run", "-e", "extra"],
             ],
         )
+
+
+class CrossmuxMemoryGateTest(unittest.TestCase):
+    scripts = (
+        "scripts/tests/test_reading_stats_network_memory.py",
+        "scripts/tests/test_download_memory_lifecycle.py",
+    )
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.candidate = Path(directory.name).resolve()
+        (self.candidate / "test").mkdir()
+        (self.candidate / "platformio.ini").touch()
+        (self.candidate / "test/CMakeLists.txt").touch()
+        (self.candidate / "scripts/tests").mkdir(parents=True)
+        self.state = {
+            "component": "crossmux", "conflict_paths": [], "review_items": [],
+            "base_sha": "a" * 40, "upstream_sha": "c" * 40,
+            "sdk_sha": "b" * 40, "simulator_sha": "b" * 40,
+        }
+        self.args = argparse.Namespace(
+            candidate=str(self.candidate), component="crossmux", review_note=[],
+            skip_builds=False, extra_build_env=[],
+        )
+        original_run = sync_upstream.run
+        original_builds = sync_upstream.run_crossmux_builds
+        patches = patch.multiple(
+            sync_upstream, read_state=DEFAULT, refresh_candidate=DEFAULT,
+            validate_index=DEFAULT, repo_root=DEFAULT, build_context=DEFAULT,
+            inspect_dependencies=DEFAULT, inspect_crossmux=DEFAULT,
+            indexed_gitlink_sha=DEFAULT, simulator_pins=DEFAULT, run=DEFAULT,
+            run_crossmux_builds=DEFAULT, commit_candidate=DEFAULT,
+            push_and_create_pr=DEFAULT,
+        )
+        self.mocks = patches.start()
+        self.addCleanup(patches.stop)
+        self.mocks["read_state"].return_value = self.state
+        self.mocks["refresh_candidate"].return_value = self.state
+        self.mocks["repo_root"].return_value = self.candidate
+        self.mocks["inspect_dependencies"].return_value = {
+            name: status(name, "up-to-date") for name in ("sdk", "simulator")
+        }
+        self.mocks["inspect_crossmux"].return_value = self.state
+        self.mocks["indexed_gitlink_sha"].return_value = self.state["sdk_sha"]
+        self.mocks["simulator_pins"].return_value = (self.state["simulator_sha"],) * 2
+        self.mocks["run_crossmux_builds"].side_effect = original_builds
+
+        def run_command(cmd, **kwargs):
+            if cmd[0] == sys.executable:
+                return original_run(cmd, **kwargs, log=False)
+            self.assertEqual(cmd[0], "pio")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        self.mocks["run"].side_effect = run_command
+        self.calls = Mock()
+        for name in ("indexed_gitlink_sha", "simulator_pins", "run",
+                     "run_crossmux_builds", "commit_candidate", "push_and_create_pr"):
+            self.calls.attach_mock(self.mocks[name], name)
+
+    def test_regressions_follow_pin_checks_even_when_builds_are_skipped(self):
+        for skipped in (False, True):
+            with self.subTest(skip_builds=skipped):
+                self.calls.reset_mock()
+                self.args.skip_builds = skipped
+                for script in self.scripts:
+                    (self.candidate / script).write_text("pass\n")
+                self.assertEqual(sync_upstream.cmd_publish(self.args), 0)
+                expected = [
+                    call.indexed_gitlink_sha(self.candidate),
+                    call.simulator_pins("\n"),
+                    *[call.run([sys.executable, script], cwd=self.candidate, capture=False)
+                      for script in self.scripts],
+                    call.run_crossmux_builds(self.candidate, skipped, []),
+                ]
+                if not skipped:
+                    expected += [
+                        call.run(["pio", "run"], cwd=self.candidate, capture=False),
+                        call.run(["pio", "run", "-e", "gh_release"],
+                                 cwd=self.candidate, capture=False),
+                    ]
+                expected += [
+                    call.commit_candidate(self.candidate, self.state),
+                    call.push_and_create_pr(self.candidate, self.state, [], skipped),
+                ]
+                self.assertEqual(self.calls.mock_calls, expected)
+
+    def test_failed_or_missing_regression_blocks_build_commit_and_publish(self):
+        for index, script in enumerate(self.scripts):
+            for missing in (False, True):
+                with self.subTest(script=script, missing=missing):
+                    self.calls.reset_mock()
+                    self.args.skip_builds = True
+                    for fixture in self.scripts:
+                        (self.candidate / fixture).write_text("pass\n")
+                    if missing:
+                        (self.candidate / script).unlink()
+                    else:
+                        (self.candidate / script).write_text("raise SystemExit(1)\n")
+                    with self.assertRaises(sync_upstream.CommandError):
+                        sync_upstream.cmd_publish(self.args)
+                    self.assertEqual(
+                        self.mocks["run"].call_args_list,
+                        [call([sys.executable, fixture], cwd=self.candidate, capture=False)
+                         for fixture in self.scripts[:index + 1]],
+                    )
+                    for operation in ("run_crossmux_builds", "commit_candidate",
+                                      "push_and_create_pr"):
+                        self.mocks[operation].assert_not_called()
 
 
 class ReviewGateTest(unittest.TestCase):

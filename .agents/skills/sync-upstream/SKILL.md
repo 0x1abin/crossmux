@@ -232,17 +232,56 @@ states remain unchanged. Multi-valued settings keep their existing selection typ
 Compare with the fixed reference plus those exact increments; historical INX
 baselines remain immutable. A later latest-main/upstream sync is a separate task.
 
+## C3 memory compatibility
+
+Review C3 memory behavior even in clean merges. Trace resident caches, fonts,
+effective task-stack sizes, suspended parent Activities and BLE allocations
+through Wi-Fi startup, TLS and response parsing. Preserve the foreground
+owner's save/release/recovery contract; use
+[heap discipline](../heap-discipline/SKILL.md) when reviewing container release
+and firmware exception flags.
+
+Compare the accepted baseline and candidate with the same workload and at the
+same phases. Record source/binary fingerprints, effective build configuration,
+free internal heap, largest free block and minimum free heap. Flash/static-RAM
+fit and simulator success do not establish runtime headroom; a TLS error code
+alone does not prove OOM. Do not turn one snapshot into a universal heap floor
+or weaken TLS/BLE guards, blindly shrink stacks or irreversibly release BLE
+controller memory to hide a regression.
+
+Follow the existing [download-memory acceptance procedure](../../../docs/engineering/network-memory-validation.md#verification).
+Report manifest retrieval, complete font transfer, OTA checking, installation
+and repeated warm-BLE workflows separately. Without the corresponding physical
+checks, leave runtime acceptance pending rather than inferring it from builds.
+
 ## Validation
 
-After document verification, `publish` still performs component-specific checks
-unless `--skip-builds` was explicitly authorized:
+After document verification, `publish` always runs the component's lightweight
+host checks. An explicitly authorized `--skip-builds` skips PlatformIO builds
+and build-dependent CMake/CTest validation:
 
 - SDK: its four existing host test scripts, then the CrossMux PlatformIO
   validation and any repeatable `--extra-build-env` values.
 - Simulator: its host compatibility self-test, all four CrossMux simulator
   environments, and the CrossMux CMake/CTest host suite.
-- CrossMux: index/conflict-marker checks, `git diff --check`, `pio run`,
-  `pio run -e gh_release`, and extra build environments.
+- CrossMux: index/conflict-marker checks, `git diff --check`, the two C3 memory
+  regressions below, then `pio run`, `pio run -e gh_release`, and extra build
+  environments.
+
+The CrossMux publication gate runs these existing tests in the final candidate
+after dependency-pin validation, before builds, commits or remote writes, even
+with `--skip-builds`. A missing or failing test stops publication:
+
+```bash
+python3 scripts/tests/test_reading_stats_network_memory.py
+python3 scripts/tests/test_download_memory_lifecycle.py
+```
+
+They require a native C++20 compiler (`CXX`, default `c++`), not an ESP32
+cross-compiler. The statistics test checks actual capacity release with and
+without `-fno-exceptions`; lifecycle coverage retains C3/S3 behavior and failure
+recovery. For local rehearsals, run the same commands manually after the final
+CrossMux resolutions; `start` does not run publication validation.
 
 SDK integration builds export the reviewed Git index into a real directory.
 This includes staged, uncommitted resolutions while excluding Git metadata and

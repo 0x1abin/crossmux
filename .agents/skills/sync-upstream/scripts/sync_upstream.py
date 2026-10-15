@@ -1159,6 +1159,11 @@ def cmd_publish(args: argparse.Namespace) -> int:
             raise RuntimeError(
                 "CrossMux candidate does not pin one reviewed simulator revision; rerun start."
             )
+        for script in (
+            "scripts/tests/test_reading_stats_network_memory.py",
+            "scripts/tests/test_download_memory_lifecycle.py",
+        ):
+            run([sys.executable, script], cwd=candidate, capture=False)
         run_crossmux_builds(candidate, args.skip_builds, args.extra_build_env)
     commit_candidate(candidate, state)
     push_and_create_pr(candidate, state, args.review_note, args.skip_builds)
