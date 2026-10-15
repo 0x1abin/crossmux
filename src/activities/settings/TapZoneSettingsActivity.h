@@ -34,7 +34,7 @@ class TapZoneSettingsActivity final : public Activity {
   // short-press → long-press flow is two consecutive show() calls.
   OptionPopup popup_;
   // Actions offered by the currently shown section, indexed by the dialog row.
-  uint8_t popupOptions_[17];
+  uint8_t popupOptions_[17] = {};
   int popupOptionCount_ = 0;
 
   void moveSelection(int deltaX, int deltaY);
