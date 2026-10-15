@@ -35,7 +35,7 @@ class TapZoneSettingsActivity final : public Activity {
   // list is the only one that opts into the legacy scroll window.
   OptionPopup popup_{false, true};
   // Actions offered by the currently shown section, indexed by the dialog row.
-  uint8_t popupOptions_[17];
+  uint8_t popupOptions_[17] = {};
   int popupOptionCount_ = 0;
 
   void moveSelection(int deltaX, int deltaY);
