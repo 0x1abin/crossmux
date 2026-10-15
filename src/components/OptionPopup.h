@@ -246,12 +246,21 @@ class OptionPopup {
     const int totalOptions = static_cast<int>(ownedStrings.size());
     const uint8_t count = static_cast<uint8_t>(totalOptions > MAX_OPTIONS ? MAX_OPTIONS : totalOptions);
 
+    // Scroll window on the legacy dialog path (non-INX themes): the dialog
+    // sizes to fuiMaxVisibleRows and rows past the window are reached with
+    // Up/Down or touch; the window follows the selection every frame, so no
+    // shared scroll state exists between the loop and render tasks.
+    const int visible = std::min<int>(count, fuiMaxVisibleRows);
+    const int start = std::clamp(selectedIndex - visible / 2, 0, std::max(0, count - visible));
+    const uint8_t visibleCount = static_cast<uint8_t>(visible);
+
     fui::DialogOption options[MAX_OPTIONS];
-    for (uint8_t i = 0; i < count; ++i) {
-      options[i].label = ownedStrings[i].c_str();
+    for (uint8_t i = 0; i < visibleCount; ++i) {
+      const int optionIndex = start + i;
+      options[i].label = ownedStrings[optionIndex].c_str();
       options[i].action = ACTION_OPTION;
-      options[i].value = static_cast<int16_t>(i);
-      options[i].state = (i == selectedIndex) ? fui::StateFocused : fui::StateNormal;
+      options[i].value = static_cast<int16_t>(optionIndex);
+      options[i].state = (optionIndex == selectedIndex) ? fui::StateFocused : fui::StateNormal;
     }
 
     fui::OptionDialogProps props;
@@ -264,7 +273,7 @@ class OptionPopup {
       props.messageText.maxLines = 6;
     }
     props.options = options;
-    props.optionCount = count;
+    props.optionCount = visibleCount;
     props.verticalOptions = true;
     // Touch only: physical buttons stay on the legacy wrap/confirm path above,
     // so the buffer never competes with it for focus/confirm dispatch.
@@ -312,6 +321,17 @@ class OptionPopup {
     // option buttons win inside the dialog and the guard absorbs the rest.
     frame.hit(dialogRect, ACTION_CHROME, 0, fui::InputTouch);
     fui::optionDialog(frame, dialogRect, props);
+    if (count > visible) {
+      // Scrollbar, drawn in the same style as the INX option dialog.
+      const int trackX = dialogRect.x + dialogRect.width - 10;
+      const int trackY = dialogRect.y + innerPadding;
+      const int trackHeight = dialogRect.height - innerPadding * 2;
+      const int thumbHeight = std::max(8, trackHeight * visible / count);
+      const int maxStart = count - visible;
+      const int thumbY = trackY + start * (trackHeight - thumbHeight) / maxStart;
+      renderer.fillRect(trackX, trackY, 2, trackHeight, true);
+      renderer.fillRect(trackX - 2, thumbY, 6, thumbHeight, true);
+    }
     // Atomically make this generation the one handleInput() reads, now that
     // every hit() call for this frame is done.
     interactions.publish();
@@ -350,6 +370,9 @@ class OptionPopup {
   // screen anyway; a fixed cap keeps the DialogOption array on the stack and
   // the interaction table small. +1 slot for the chrome guard rect.
   static constexpr int MAX_OPTIONS = 16;
+  // Rows shown at once on the legacy dialog path (non-INX themes); longer
+  // lists scroll (see render()). The INX path sizes its own window.
+  static constexpr int fuiMaxVisibleRows = 6;
   static constexpr size_t INTERACTION_CAPACITY = MAX_OPTIONS + 1;
   static constexpr freeink::ui::ActionId ACTION_OPTION = 1;
   static constexpr freeink::ui::ActionId ACTION_CHROME = 2;
