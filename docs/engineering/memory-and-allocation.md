@@ -214,3 +214,21 @@ files and orphan caches are left untouched. Sequence allocation scans disk rathe
 than the current page to avoid overwriting older archives. Test more than 20
 images, paging in both directions, restart, failed display/retry and full-SD
 archive failure; a successful build does not verify touch or optical behavior.
+
+## Placement and peak coexistence
+
+Use `HalMemory` capability-specific statistics for internal RAM, internal DMA
+and PSRAM; DMA is a subset of internal RAM, so do not add these figures together.
+`HalMemory::allocatePsram()` deliberately has no internal fallback. Optional
+PSRAM buffers must be null-checked and retain the existing business fallback.
+Account for old and new blocks during growth, pushed parent Activities, font
+caches, network state and display scratch at the same time. Static/constexpr
+qualification enables constant evaluation; verify actual Flash/DRAM placement
+rather than promising zero runtime storage.
+
+B/W backups reuse the chunked renderer path. Pair a successful `storeBwBuffer()`
+with restoration or discard if the page changed; `restoreBwBuffer(false)` avoids
+restoring a stale differential baseline after the panel displayed an overlay.
+A framebuffer loan forbids drawing/display until exclusive `BuildScratch` claims
+are released and the original frame is restored. See
+[framebuffer ownership](architecture-and-patterns.md#framebuffer-and-storage-ownership).

@@ -199,6 +199,8 @@ Two browse formats:
     "username": "{cfg.user}",              // optional HTTP Basic creds for the file GET
     "password": "{cfg.pass}",             // omit for token/header auth
     "dest_dir": "/ServiceName",             // created if missing; falls back to SD root
+                                            // a "dest_dir" in the config file overrides it,
+                                            // so the plugin's web card can offer the setting
     "filename": "{title}.epub",             // rendered filename is sanitized to 100 bytes;
                                             // a conventional extension is preserved
     "sidecar": {                            // optional per-book metadata file

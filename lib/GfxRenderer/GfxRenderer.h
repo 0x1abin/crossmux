@@ -44,29 +44,15 @@ class GfxRenderer {
 
   // Map 0=black, 1=dark gray, 2=light gray, 3=white into the active
   // framebuffer plane. Keep every 2-bit renderer on this single table.
-  static constexpr TwoBitPixel mapTwoBitPixel(const RenderMode mode, const uint8_t value) {
+  static constexpr TwoBitPixel mapTwoBitPixel(const RenderMode mode, const uint8_t value, const bool absolute = false) {
     if (mode == BW) return {value < 3, true};
-#if FREEINK_DEVICE_EEGO_A4
-    if (mode == GRAYSCALE_MSB) return {value == 0 || value == 1, true};
-    return {value == 0 || value == 2, true};
-#else
-    if (mode == GRAYSCALE_MSB) return {value == 1 || value == 2, false};
-    return {value == 1, false};
-#endif
+    const auto pixel = grayPlanePixel(value, mode == GRAYSCALE_MSB, absolute);
+    return {pixel.write, pixel.black};
   }
 
-  static constexpr TwoBitPixel mapTwoBitGlyphCoverage(const RenderMode mode, const uint8_t coverage) {
-    // Font coverage is 0=white..3=black; bitmap pixels use 0=black..3=white.
-    return mapTwoBitPixel(mode, 3 - coverage);
-  }
-
-  static constexpr bool framebufferState(const RenderMode mode, const bool state) {
-#if FREEINK_DEVICE_EEGO_A4
-    return mode == BW ? state : !state;
-#else
-    (void)mode;
-    return state;
-#endif
+  static constexpr TwoBitPixel mapTwoBitGlyphCoverage(const RenderMode mode, const uint8_t coverage,
+                                                      const bool absolute = false) {
+    return mapTwoBitPixel(mode, 3 - coverage, absolute);
   }
 
   // Logical screen orientation from the perspective of callers
@@ -89,6 +75,7 @@ class GfxRenderer {
   bool fadingFix;
   mutable uint8_t syntheticBoldPixels = 0;
   uint8_t* frameBuffer = nullptr;
+  uint32_t frameBufferLoans = 0;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
   uint16_t panelWidthBytes = HalDisplay::DISPLAY_WIDTH_BYTES;
@@ -484,12 +471,14 @@ class GfxRenderer {
   // numRows)), bypassing the framebuffer. supportsStripGrayscale() gates use.
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const;
   bool supportsStripGrayscale() const;
+  bool grayscaleReplacesFrame() const;
   bool combinesGrayscaleBase() const;
   bool supportsTextOnlyCombinedBase() const;
   bool supportsReaderTransitions() const;
   bool supportsContinuousImageReading() const;
   bool canUseTextTransition() const;
   void cancelGrayscale() const;
+  bool displayCommitted() const;
   bool storeBwBuffer();  // Returns true if buffer was stored successfully
   // Restore and free the stored buffer. resyncPanelBaseline rewrites the
   // controller's differential baseline to the restored frame — correct after
@@ -516,6 +505,9 @@ class GfxRenderer {
   void releaseFrameBufferForBuild();
   bool restoreFrameBufferAfterBuild();
   bool hasFrameBuffer() const { return frameBuffer != nullptr; }
+  // Bumped by every loan. A loan returns the buffer white, so a caller that ran code which may lend
+  // (e.g. a background chapter-build step) compares this to know the page it drew is gone.
+  uint32_t frameBufferLoanCount() const { return frameBufferLoans; }
 
   // RAII form of the loan above, for blocking build regions with early-return
   // error paths: restores on scope exit (or explicitly via end()). Display the
@@ -562,18 +554,9 @@ class GfxRenderer {
                           size_t bufSize) const;
 };
 
-#if FREEINK_DEVICE_EEGO_A4
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 0).draw);
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 1).draw);
-static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 2).draw);
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 0).draw);
-static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 1).draw);
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 2).draw);
-#else
 static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 0).draw);
 static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 1).draw);
 static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 2).draw);
 static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 0).draw);
 static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 1).draw);
 static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 2).draw);
-#endif

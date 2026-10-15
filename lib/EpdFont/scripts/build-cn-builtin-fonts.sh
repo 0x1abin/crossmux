@@ -12,12 +12,10 @@
 #
 # Pipeline:
 #   1. pyftsubset trims NotoSansSC-Regular.otf to the requested character set
-#   2. fontconvert.py emits a 2-bit raw bitmap header for each point size
+#   2. fontconvert.py emits the unchanged 2-bit glyphs and metrics
+#   3. common 8/10/12pt bitmaps are losslessly packed into <=4 KB groups
 #
-# Raw bitmaps (no --compress): with 6 simultaneously-loaded CJK fonts each
-# group would need ~50 KB scratch, fragmenting the heap on boot and crashing
-# FontDecompressor with std::bad_alloc. Latin fonts ship compressed because
-# their groups are tiny (~5 KB).
+# Small groups and bounded page caches avoid the former large CJK scratch allocations.
 #
 # Set PYTHON env var to override the interpreter (e.g. a virtualenv with
 # freetype-py and fonttools installed):
@@ -30,6 +28,9 @@ cd "$(dirname "$0")"
 # Project requires fontTools + freetype-py — both Python 3 only. Default to
 # python3 (override with PYTHON=/path/to/venv/bin/python if a venv is needed).
 PYTHON="${PYTHON:-python3}"
+STAGING_DIR=$(mktemp -d "../builtinFonts/.cjk-stage.XXXXXX")
+trap 'rm -rf "$STAGING_DIR"' EXIT
+cp cn_common_chars.txt cn_i18n_chars.txt "$STAGING_DIR/"
 
 SOURCE_OTF="../builtinFonts/source/NotoSansSC/NotoSansSC-Regular.otf"
 # Frequency-ranked subset produced by build_cn_charset.py. Defaults to the
@@ -74,8 +75,11 @@ if [ -z "${SKIP_CHARSET:-}" ]; then
     require_args+=(--require-from "$f")
   done
   echo "Refreshing $CHARSET_FILE (require-from: ${REQUIRE_FROM[*]})..."
-  "$PYTHON" build_cn_charset.py "${require_args[@]}"
+  "$PYTHON" build_cn_charset.py --output-dir "$STAGING_DIR" "${require_args[@]}"
 fi
+
+CHARSET_FILE="$STAGING_DIR/cn_common_chars.txt"
+I18N_CHARSET_FILE="$STAGING_DIR/cn_i18n_chars.txt"
 
 if [ ! -f "$CHARSET_FILE" ]; then
   echo "Error: $CHARSET_FILE not found in $(pwd)." >&2
@@ -124,14 +128,14 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)...
   --drop-tables+=DSIG,GSUB,GPOS
 
 # Step 2: emit one 2-bit raw bitmap header per requested point size.
-# (See file header for the rationale behind skipping --compress.)
+# Compression is a lossless post-process, independent of rasterization.
 # fontconvert.py auto-skips code points missing from the source OTF, so passing
 # the broad CJK interval is fine — the i18n OTF only emits required CJK glyphs.
 emit_size() {
   local size="$1"
   local otf="$2"
   local font_name="notosans_cjk_${size}"
-  local output_path="../builtinFonts/${font_name}.h"
+  local output_path="$STAGING_DIR/${font_name}.h"
   # Write to a temp file first, then atomically mv on success. Otherwise a
   # crash in fontconvert.py leaves the target as a zero-byte file (the shell
   # truncates the redirect target *before* the python process runs), which
@@ -160,7 +164,9 @@ for size in "${CN_FONT_SIZES_I18N[@]}"; do
   emit_size "$size" "$I18N_OTF"
 done
 
-"$PYTHON" share-cn-font-intervals.py
+"$PYTHON" share-cn-font-intervals.py "$STAGING_DIR"
+"$PYTHON" compress-cn-builtin-fonts.py "$STAGING_DIR"
+"$PYTHON" publish-cn-builtin-fonts.py "$STAGING_DIR" ../builtinFonts
 
 echo ""
 echo "Done. Generated $((${#CN_FONT_SIZES_SMALL[@]} + ${#CN_FONT_SIZES_I18N[@]})) CJK font headers in ../builtinFonts/"

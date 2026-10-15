@@ -8,6 +8,7 @@
 #include <FsHelpers.h>
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <LibraryBuilder.h>
@@ -37,6 +38,7 @@
 #include <cstring>
 #include <string_view>
 
+#include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
@@ -59,12 +61,18 @@ namespace web_en {
 }  // namespace web_en
 #include "WifiPowerSaveGuard.h"
 #include "html/RunnerPageHtml.generated.h"
+#include "html/assets/crosspoint_iconSvg.generated.h"
+#include "html/assets/iconsSvg.generated.h"
+#include "html/assets/webCss.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/DictionaryRegistry.h"
 #include "util/PluginHttp.h"
 #include "util/PluginLocations.h"
 #include "util/TaskWatchdog.h"
+
+static void sendStaticContent(WebServer* server, const char* data, size_t len, const char* etag,
+                              const char* contentType);
 
 namespace {
 // Arduino's WebServer retains parsed request arguments until the next request.
@@ -249,6 +257,15 @@ bool CrossPointWebServer::begin() {
   server->on("/", HTTP_GET, [this] { handleRoot(); });
   server->on("/files", HTTP_GET, [this] { handleFileList(); });
   server->on("/js/jszip.min.js", HTTP_GET, [this] { handleJszip(); });
+
+  server->on("/assets/web.css", HTTP_GET,
+             [this] { sendStaticContent(server.get(), webCss, sizeof(webCss), webCssETag, "text/css"); });
+  server->on("/assets/icons.svg", HTTP_GET,
+             [this] { sendStaticContent(server.get(), iconsSvg, sizeof(iconsSvg), iconsSvgETag, "image/svg+xml"); });
+  server->on("/assets/crosspoint-icon.svg", HTTP_GET, [this] {
+    sendStaticContent(server.get(), crosspoint_iconSvg, sizeof(crosspoint_iconSvg), crosspoint_iconSvgETag,
+                      "image/svg+xml");
+  });
 
   server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
   server->on("/api/files", HTTP_GET, [this] { handleFileListData(); });
@@ -593,6 +610,17 @@ static bool sendCompressedContent(WebServer* server, const char* contentType, co
   }
   return true;
 #endif
+}
+
+static void sendStaticContent(WebServer* server, const char* data, size_t len, const char* etag,
+                              const char* contentType) {
+  server->sendHeader("ETag", etag);
+  server->sendHeader("Cache-Control", "no-cache");
+  if (server->header("If-None-Match") == etag) {
+    server->send(304);
+    return;
+  }
+  sendCompressedContent(server, contentType, data, len);
 }
 
 void CrossPointWebServer::handleRoot() const {
@@ -1279,13 +1307,16 @@ void CrossPointWebServer::handleRename() const {
     return;
   }
 
-  clearBookCache(itemPath.c_str());
-  const bool success = file.rename(newPath.c_str());
   file.close();
+  const auto moved = moveBookFile(itemPath.c_str(), newPath.c_str());
 
-  if (success) {
+  if (moved != BookMoveResult::NotMoved) {
+    if (moved == BookMoveResult::MovedDataIncomplete)
+      server->sendHeader("Warning", "199 CrossMux \"Book data migration incomplete\"");
     LOG_DBG("WEB", "Renamed file: %s -> %s", itemPath.c_str(), newPath.c_str());
-    server->send(200, "text/plain", "Renamed successfully");
+    server->send(
+        200, "text/plain",
+        moved == BookMoveResult::Complete ? "Renamed successfully" : "Renamed; book data migration incomplete");
   } else {
     LOG_ERR("WEB", "Failed to rename file: %s -> %s", itemPath.c_str(), newPath.c_str());
     server->send(500, "text/plain", "Failed to rename file");
@@ -1377,13 +1408,15 @@ void CrossPointWebServer::handleMove() const {
     return;
   }
 
-  clearBookCache(itemPath.c_str());
-  const bool success = file.rename(newPath.c_str());
   file.close();
+  const auto moved = moveBookFile(itemPath.c_str(), newPath.c_str());
 
-  if (success) {
+  if (moved != BookMoveResult::NotMoved) {
+    if (moved == BookMoveResult::MovedDataIncomplete)
+      server->sendHeader("Warning", "199 CrossMux \"Book data migration incomplete\"");
     LOG_DBG("WEB", "Moved file: %s -> %s", itemPath.c_str(), newPath.c_str());
-    server->send(200, "text/plain", "Moved successfully");
+    server->send(200, "text/plain",
+                 moved == BookMoveResult::Complete ? "Moved successfully" : "Moved; book data migration incomplete");
   } else {
     LOG_ERR("WEB", "Failed to move file: %s -> %s", itemPath.c_str(), newPath.c_str());
     server->send(500, "text/plain", "Failed to move file");
@@ -1490,8 +1523,7 @@ void CrossPointWebServer::handleDelete() const {
     } else {
       // It's a file (or couldn't open as dir) — remove file
       if (f) f.close();
-      success = Storage.remove(itemPath.c_str());
-      clearBookCache(itemPath.c_str());
+      success = removeBookFile(itemPath.c_str());
     }
 
     if (!success) {
@@ -1542,12 +1574,16 @@ void CrossPointWebServer::handleGetSettings() const {
         break;
       }
       case SettingType::ENUM: {
-        doc["type"] = "enum";
+        const auto labels = s.enumLabels();
+        const bool toggle = s.enumStringValues.empty() && labels.size() == 2 && labels[0] == StrId::STR_STATE_OFF &&
+                            labels[1] == StrId::STR_STATE_ON;
+        doc["type"] = toggle ? "toggle" : "enum";
         if (s.valuePtr) {
           doc["value"] = static_cast<int>(SETTINGS.*(s.valuePtr));
         } else if (s.valueGetter) {
           doc["value"] = static_cast<int>(s.valueGetter());
         }
+        if (toggle) break;
         JsonArray options = doc["options"].to<JsonArray>();
         if (!s.enumStringValues.empty()) {
           for (const auto& opt : s.enumStringValues) {
@@ -1608,6 +1644,25 @@ void CrossPointWebServer::handleGetSettings() const {
     resetTaskWatchdogIfSubscribed();  // Reset watchdog: each sendContent() is a blocking network write
   });
 
+#if FREEINK_CAP_HAPTIC
+  // Keep old API clients working; current pages hide deprecated aliases.
+  doc.clear();
+  doc["key"] = "hapticFeedbackLevel";
+  doc["name"] = I18N.get(StrId::STR_VIBRATION);
+  doc["category"] = I18N.get(StrId::STR_CAT_CONTROLS);
+  doc["type"] = "enum";
+  doc["deprecated"] = true;
+  doc["value"] = SETTINGS.vibration == CrossPointSettings::VIBRATION_OFF ? 0 : SETTINGS.hapticIntensity + 1;
+  JsonArray options = doc["options"].to<JsonArray>();
+  for (const auto label :
+       {StrId::STR_STATE_OFF, StrId::STR_HAPTIC_LOW, StrId::STR_HAPTIC_MEDIUM, StrId::STR_HAPTIC_HIGH}) {
+    options.add(I18N.get(label));
+  }
+  if (serializeJson(doc, output, outputSize) < outputSize) {
+    if (seenFirst) server->sendContent(",");
+    server->sendContent(output);
+  }
+#endif
   server->sendContent("]");
   server->sendContent("");
   LOG_DBG("WEB", "Served settings API");
@@ -1628,6 +1683,17 @@ void CrossPointWebServer::handlePostSettings() {
   }
 
   int applied = 0;
+#if FREEINK_CAP_HAPTIC
+  if (!doc["vibration"].is<JsonVariant>() && !doc["hapticIntensity"].is<JsonVariant>() &&
+      doc["hapticFeedbackLevel"].is<int>()) {
+    const int level = doc["hapticFeedbackLevel"].as<int>();
+    if (level >= 0 && level < CrossPointSettings::HAPTIC_FEEDBACK_LEVEL_COUNT) {
+      SETTINGS.vibration = level == 0 ? CrossPointSettings::VIBRATION_OFF : CrossPointSettings::VIBRATION_TOUCH_PAGE;
+      if (level != 0) SETTINGS.hapticIntensity = static_cast<uint8_t>(level - 1);
+      ++applied;
+    }
+  }
+#endif
 
   forEachSettingsListEntry(&sdFontSystem.registry(), [&doc, &applied](const SettingInfo& s) {
     if (!s.key) return;
@@ -2951,6 +3017,9 @@ void CrossPointWebServer::handleFontList() const {
   JsonDocument doc;
   JsonArray arr = doc["families"].to<JsonArray>();
   doc["maxFamilies"] = SdCardFontRegistry::MAX_SD_FAMILIES;
+  // Vector (.ttf/.otf) fonts need PSRAM to stay resident; DRAM-only boards
+  // only take pre-rendered .cpfont uploads.
+  doc["vectorFonts"] = HalMemory::getPsramHeap().totalBytes > 0;
 
   for (const auto& family : families) {
     JsonObject fObj = arr.add<JsonObject>();
@@ -2994,6 +3063,7 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.filePath.clear();
       fontUpload.valid = false;
       fontUpload.magicChecked = false;
+      fontUpload.isVector = false;
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
       fontUpload.buffer.reset();
@@ -3011,10 +3081,14 @@ void CrossPointWebServer::handleFontUploadData() {
       String filename = upload.filename;
       filename.replace(' ', '_');
       // Validate filename: rejects path traversal (../, /, \) and enforces
-      // a .cpfont basename of alphanumeric + hyphen + underscore. Without
-      // this an attacker could supply "../../.crosspoint/settings.json" as
-      // a "filename" and have it written outside the fonts directory.
-      if (!FontInstaller::isValidCpfontFilename(filename.c_str())) {
+      // a .cpfont/.ttf/.otf basename of alphanumeric + hyphen + underscore.
+      // Without this an attacker could supply
+      // "../../.crosspoint/settings.json" as a "filename" and have it written
+      // outside the fonts directory. Vector fonts need PSRAM to stay
+      // resident, so DRAM-only boards only accept .cpfont.
+      const bool psramCapable = HalMemory::getPsramHeap().totalBytes > 0;
+      fontUpload.isVector = psramCapable && FontInstaller::isValidVectorFontFilename(filename.c_str());
+      if (!fontUpload.isVector && !FontInstaller::isValidCpfontFilename(filename.c_str())) {
         LOG_ERR("WEB", "Invalid font filename: %s", filename.c_str());
         break;
       }
@@ -3055,8 +3129,17 @@ void CrossPointWebServer::handleFontUploadData() {
 
       // Validate magic bytes on first chunk only
       if (!fontUpload.magicChecked && upload.currentSize >= 8) {
-        if (memcmp(upload.buf, "CPFONT\0\0", 8) != 0) {
-          LOG_ERR("WEB", "Invalid .cpfont magic bytes");
+        bool magicOk;
+        if (fontUpload.isVector) {
+          // sfnt versions: 0x00010000 (TrueType), "OTTO" (CFF), "true" (Apple)
+          static constexpr uint8_t kTtfMagic[4] = {0x00, 0x01, 0x00, 0x00};
+          magicOk = memcmp(upload.buf, kTtfMagic, 4) == 0 || memcmp(upload.buf, "OTTO", 4) == 0 ||
+                    memcmp(upload.buf, "true", 4) == 0;
+        } else {
+          magicOk = memcmp(upload.buf, "CPFONT\0\0", 8) == 0;
+        }
+        if (!magicOk) {
+          LOG_ERR("WEB", "Invalid font magic bytes");
           fontUpload.valid = false;
           break;
         }
@@ -3134,7 +3217,7 @@ void CrossPointWebServer::handleFontUpload() {
     server->send(200, "application/json", "{\"ok\":true}");
     LOG_DBG("WEB", "Font upload complete: %s", fontUpload.filePath.c_str());
   } else {
-    server->send(400, "application/json", "{\"error\":\"Invalid .cpfont file\"}");
+    server->send(400, "application/json", "{\"error\":\"Invalid font file\"}");
   }
 }
 

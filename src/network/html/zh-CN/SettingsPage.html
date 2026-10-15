@@ -5,115 +5,45 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>设置 - CrossMux</title>
   <style>
-    :root {
-      color-scheme: light;
-      --font-color: #292524;
-      --bg: #f7f4ef;
-      --title-color: #292524;
-      --card-bg: #fffdf9;
-      --label-color: #78716c;
-      --border-color: #e7e1d8;
-      --accent-color: #a8502f;
-      --accent-hover-color: #883f27;
-      --toggle-bg: #c9c1b8;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        color-scheme: dark;
-        --font-color: #fafaf9;
-        --bg: #1c1917;
-        --title-color: #fafaf9;
-        --card-bg: #292524;
-        --label-color: #d6d3d1;
-        --border-color: #44403c;
-        --accent-color: #d59475;
-        --accent-hover-color: #e6bba4;
-        --toggle-bg: #57534e;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      max-width: 960px;
-      min-height: 100vh;
-      margin: 0 auto;
-      padding: 0 12px 24px;
-      overflow-x: hidden;
-      background: var(--bg);
-      color: var(--font-color);
-      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-    }
-    h2 {
-      margin-top: 0;
-      color: var(--title-color);
-      font-family: "Songti SC", STSong, "Noto Serif CJK SC", serif;
-      font-size: 1.15rem;
-    }
-    .card {
-      margin: 10px 0;
-      padding: 14px;
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      background: var(--card-bg);
-    }
-    .nav-links {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 4px;
-      margin: 0 -12px 12px;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg);
-    }
-    .nav-links a {
-      min-width: 0;
-      min-height: 44px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 4px;
-      border-radius: 8px;
-      color: var(--font-color);
-      font-size: 0.92rem;
-      font-weight: 650;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .nav-links a.active { background: var(--accent-color); color: #fff; }
-    .nav-links a:not(.active):hover { background: var(--accent-hover-color); color: #fff; }
     .setting-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 8px;
-      padding: 12px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
       border-bottom: 1px solid var(--border-color);
     }
-    .setting-row:last-child { border-bottom: none; }
+    .setting-row:last-child {
+      border-bottom: none;
+    }
     .setting-name {
-      min-width: 0;
-      color: var(--label-color);
       font-weight: 500;
+      color: var(--label-color);
+      flex: 1;
+      min-width: 0;
+      padding-right: 12px;
     }
     .setting-control {
-      width: 100%;
-      display: flex;
-      justify-content: flex-start;
+      flex-shrink: 0;
     }
     .setting-control select,
     .setting-control input[type="number"],
     .setting-control input[type="text"],
     .setting-control input[type="password"] {
-      width: 100%;
-      min-width: 0;
-      min-height: 40px;
       padding: 6px 10px;
       border: 1px solid var(--border-color);
       border-radius: 4px;
-      background: var(--card-bg);
-      color: var(--font-color);
       font-size: 0.95em;
+      background: var(--card-bg);
+    }
+    .setting-control select {
+      min-width: 160px;
+    }
+    .setting-control input[type="text"],
+    .setting-control input[type="password"] {
+      width: 220px;
+    }
+    .setting-control input[type="number"] {
+      width: 80px;
     }
     /* Toggle switch */
     .toggle-switch {
@@ -142,7 +72,7 @@
       width: 20px;
       left: 3px;
       bottom: 3px;
-      background-color: white;
+      background-color: var(--button-text);
       border-radius: 50%;
       transition: 0.3s;
     }
@@ -153,43 +83,26 @@
       transform: translateX(22px);
     }
     .save-container {
-      text-align: center;
       margin: 20px 0;
     }
     .save-btn {
-      width: 100%;
-      min-height: 44px;
-      background: var(--accent-color);
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
       padding: 12px 40px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1.1em;
       font-weight: 600;
     }
-    .save-btn:hover { background: var(--accent-hover-color); }
+    .save-btn:hover {
+      background-color: var(--accent-hover-color);
+    }
     .save-btn:disabled {
-      background-color: #95a5a6;
+      background-color: var(--label-color);
       cursor: not-allowed;
     }
-    .message {
-      padding: 12px;
-      border-radius: 4px;
-      margin: 15px 0;
-      text-align: center;
-      display: none;
-    }
-    .message.success {
-      background-color: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-    }
-    .message.error {
-      background-color: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-    }
+
     .loader-container {
       display: flex;
       justify-content: center;
@@ -199,7 +112,7 @@
     .loader {
       width: 48px;
       height: 48px;
-      border: 5px solid #AAA;
+      border: 5px solid var(--border-color);
       border-bottom-color: transparent;
       border-radius: 50%;
       display: inline-block;
@@ -220,67 +133,74 @@
       border-bottom: none;
     }
     .opds-actions {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      display: flex;
       gap: 8px;
       margin-top: 8px;
     }
     .btn-small {
-      width: 100%;
-      min-height: 44px;
       padding: 6px 14px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 0.9em;
     }
     .btn-add {
       background-color: var(--accent-color);
-      color: white;
+      color: var(--button-text);
     }
     .btn-add:hover {
       background-color: var(--accent-hover-color);
     }
     .btn-delete {
-      background-color: #e74c3c;
-      color: white;
+      background-color: var(--danger-color);
+      color: var(--button-text);
     }
     .btn-delete:hover {
-      background-color: #c0392b;
+      background-color: var(--danger-hover);
     }
     .btn-save-server {
-      background-color: #27ae60;
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
     }
     .btn-save-server:hover {
-      background-color: #219a52;
+      background-color: var(--accent-hover-color);
     }
-    @media (min-width: 700px) {
-      body { padding: 0 20px 32px; }
-      .nav-links { margin: 0 -20px 20px; padding: 10px 20px; }
-      .card { margin: 15px 0; padding: 20px; border-radius: 14px; }
-      .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
-      .setting-name { padding-right: 12px; }
-      .setting-control { width: auto; flex-shrink: 0; justify-content: flex-end; }
-      .setting-control select { width: auto; min-width: 160px; }
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+        font-size: 14px;
+      }
+      .card {
+        padding: 12px;
+        margin: 10px 0;
+      }
+      h1 {
+        font-size: 1.3em;
+      }
+      .nav-links a {
+        padding: 8px 12px;
+        font-size: 0.9em;
+      }
+      .setting-row {
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .setting-control select,
       .setting-control input[type="text"],
-      .setting-control input[type="password"] { width: 220px; }
-      .setting-control input[type="number"] { width: 80px; }
-      .save-btn { width: auto; }
-      .opds-actions { display: flex; }
-      .btn-small { width: auto; }
+      .setting-control input[type="password"] {
+        min-width: 0;
+        width: unset;
+      }
     }
   </style>
+  <link rel="stylesheet" href="/assets/web.css" />
+  <link rel="icon" type="image/svg+xml" href="/assets/crosspoint-icon.svg" />
 </head>
-<body>
-  <nav class="nav-links" aria-label="主导航">
-    <a href="/">主页</a>
-    <a href="/files">文件</a>
-    <a href="/settings" class="active" aria-current="page">设置</a>
-    <a href="/fonts">字体</a>
-  </nav>
+<body class="web-ui">
+  <!--#include file="../shared/Header.zh-CN.html.inc" -->
+<main class="page-content">
 
-  <div id="message" class="message"></div>
+  <div id="message" class="toast"></div>
 
   <div id="settings-container">
     <div class="loader-container">
@@ -296,6 +216,8 @@
   <div id="opds-container"></div>
   <div id="plugin-container"></div>
 
+</main>
+<!--#include file="../shared/Footer.zh-CN.html.inc" -->
 <script>
   let allSettings = [];
   let originalValues = {};
@@ -497,7 +419,7 @@
       if (!response.ok) {
         throw new Error('读取设置失败：' + response.status);
       }
-      allSettings = await response.json();
+      allSettings = (await response.json()).filter(setting => !setting.deprecated);
 
       // Store original values
       originalValues = {};

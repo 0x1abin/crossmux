@@ -285,13 +285,20 @@ case-insensitive extensions, in every directory including `/AirPage`. All three
 formats open in the image viewer and participate in its sorted sibling navigation.
 Firmware and PNG-only pickers retain their own filters.
 
-BMPs render directly. JPEG and PNG previews reuse
-`/.crosspoint/image_preview.bmp`; JPEG conversion fits the current oriented screen
-without cropping. Conversion borrows the existing framebuffer and streams through
-the existing converters instead of adding another full-screen buffer. A failed
-conversion cannot display an old preview or save it as a sleep cover. JPEG sleep
-covers use the converted BMP; PNG retains its normal and transparent cover choices.
-The temporary preview is removed on exit, and source images are never replaced.
+BMPs render directly. JPEG decoding targets the renderer and fits the current
+oriented screen without cropping. It attempts native 16-level grayscale when
+available, then falls back to the four-level path, decoding again for each gray
+plane. PNG previews reuse `/.crosspoint/image_preview.bmp`; conversion borrows
+the existing framebuffer and streams through the existing converter. A failed
+preview cannot display an old image or save it as a sleep cover.
+
+JPEG sleep covers honor the fit/crop setting and stream a two-bit palette,
+top-down BMP into `/sleep.bmp.part`, reusing one row buffer. Publishing retains
+the previous cover in `/sleep.bmp.bak` until the new file and settings succeed;
+failure restores the previous cover and setting. PNG retains its normal and
+transparent cover choices. Temporary previews are removed on exit, and source
+images are never replaced. See
+[`ImageViewerActivity.cpp`](../../src/activities/util/ImageViewerActivity.cpp).
 
 ### Lyra Carousel home
 
@@ -311,7 +318,8 @@ INX SDK layout compatibility and regression coverage: [INX theme compatibility](
 ### Missing glyphs
 
 After the existing font selection/fallback and SD on-demand lookup, unsupported
-visible characters render as hollow squares. `missingGlyph::metrics` is shared
+visible characters render as hollow squares, except missing U+2588/U+25A0
+redaction symbols, which use font-sized solid rectangles. `missingGlyph::metrics` is shared
 by text bounds, advances, SD advance prewarm and rendering: the side is three
 quarters of the font ascender (clamped to 4–255 px), with one pixel of spacing
 on each side and the bottom aligned to the baseline. The outline is procedural;
@@ -320,3 +328,27 @@ text uses the same orientation mapping as real glyphs. Missing glyphs do not
 participate in kerning. Missing whitespace, controls, zero-width formatters and
 combining marks produce no square. Real U+FFFD text is still rendered when the
 font contains it; missing characters no longer borrow its glyph or width.
+
+## Shared UI and input owners
+
+Use `UiListActivity` for lists, `UiTabListActivity` for tabbed lists and
+`UiAppHost` for custom FreeInkUI layouts. Keep interaction-table publication and
+the `uiReady` handshake in the host. `fui::ListNav` separates selection from
+viewport scrolling: swipes scroll; buttons select and bring the row into view.
+Tabbed navigation reserves ring position zero for the tab bar while row indices
+stay zero-based. Large lists use `rowProvider` and reusable scratch storage;
+bounded lists keep activity-owned reserved/fixed rows. Do not allocate on each
+repaint or retain FUI props past the lifetime of their backing rows.
+
+`ButtonNavigator` owns navigation press/hold callbacks; Confirm/Back retain
+release and long-press semantics. Global Home/Back/control-center gestures and
+header Back taps have shared routing. Reader overlays and end-of-book menus
+consume input before page turns. Touch/shared actions can synthesize both edges
+in one frame; trace the owner before treating them as a physical hold.
+`wasLongPressed()` suppresses its release through the manager. Preserve existing
+release barriers, navigation-repeat cadence and independent touch input.
+
+PSRAM-only grid/vector-font features keep capability gates; no-PSRAM boards retain
+supported list themes and `.cpfont`. Review each selected theme and the
+[INX compatibility contract](inx-theme-compatibility.md), including draw/hit
+geometry, remapping and all four orientations.

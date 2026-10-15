@@ -106,6 +106,20 @@ TEST(FontCacheManagerTest, PrewarmScopeMergesBuiltInStylesThatShareFontData) {
   EXPECT_STREQ("B", boldCall->text);
 }
 
+TEST(FontCacheManagerTest, DirectPrewarmDeduplicatesBuiltinStyleAliases) {
+  EpdFontData data{reinterpret_cast<const void*>(1)};
+  const EpdFontFamily family(&data, &data, &data, &data);
+  const std::map<int, EpdFontFamily> builtinFonts{{5, family}};
+  const std::map<int, SdCardFont*> noSdFonts;
+  FontDecompressor decoder;
+  FontCacheManager manager(builtinFonts, noSdFonts, kNoTtfFonts);
+  manager.setFontDecompressor(&decoder);
+  manager.prewarmCache(5, "abc", 0x0f);
+  ASSERT_EQ(decoder.prewarmCallCount, 1);
+  EXPECT_EQ(decoder.prewarmCalls[0].fontData, &data);
+  EXPECT_STREQ(decoder.prewarmCalls[0].text, "abc");
+}
+
 TEST(FontCacheManagerTest, PrewarmScopePreservesUniqueMultibyteCodepoints) {
   SdCardFont font;
   const std::map<int, EpdFontFamily> noBuiltinFonts;

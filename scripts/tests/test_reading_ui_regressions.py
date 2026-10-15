@@ -500,6 +500,7 @@ int main() {
 #define LOG_DBG(...) ((void)0)
 enum { eIncrement };
 void xTaskNotify(int,int,int) {}
+namespace haptic_feedback { inline void touchAction(bool=false) {} }
 struct { void clearTouchTapEvent() {} } gpio;
 struct RenderLock {
   static inline bool busy=false;
@@ -906,10 +907,12 @@ struct Rect { int x,y,width,height; };
 struct ThemeMetrics { int buttonHintsHeight=0; };
 struct UITheme {
   ThemeMetrics getMetrics() const { return {}; }
+  static Rect getContentArea(const GfxRenderer&);
   Rect getScreenSafeArea(const GfxRenderer&,bool,bool);
 };
 '''.replace('INSETS', ','.join(map(str, insets))) +
                 method(renderer, 'void GfxRenderer::getOrientedViewableTRBL(') +
+                method(theme, 'Rect UITheme::getContentArea(') +
                 method(theme, 'Rect UITheme::getScreenSafeArea(').replace(
                     'bool hasSideButtonHints', '[[maybe_unused]] bool hasSideButtonHints') + r'''
 int main() {

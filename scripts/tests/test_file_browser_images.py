@@ -19,6 +19,11 @@ class FileBrowserImagesTest(unittest.TestCase):
             'bool hasXtcExtension(', 'bool hasTxtExtension(', 'bool hasMarkdownExtension(',
             'bool naturalLess(', 'void sortFileList(', 'std::string extractFolderPath(',
             'bool isProtectedPathComponent(', 'bool isSameOrDescendantPath('))
+        cover_source = (ROOT / 'src/util/SleepCover.cpp').read_text()
+        cover = cover_source[cover_source.index('namespace sleepCover {'):]
+        cover = cover.replace(method(cover, 'bool validImage('), 'bool validImage(const char* path) { return Storage.exists(path); }')
+        cover = ('namespace sleepCover { constexpr char imagePath[]="/sleep.bmp"; '
+                 'constexpr char partPath[]="/sleep.bmp.part"; constexpr char backupPath[]="/sleep.bmp.bak"; }\n') + cover
         methods = '\n'.join((
             method(browser, 'void FileBrowserActivity::loadFiles()'),
             method(manager, 'void ActivityManager::goToReader('),
@@ -64,14 +69,14 @@ struct HalFile {
    HalFile f; f.valid = true; f.directory = e.directory; f.name = e.name; return f;
  }
  void getName(char* out, size_t size) { std::strncpy(out, name.c_str(), size); }
- void close() { valid = false; }
+ bool close() { valid = false; return true; }
  void flush() {}
  uint64_t fileSize64() const { return bytes->size(); }
- int read(char* out, size_t size) {
+ int read(void* out, size_t size) {
    size = std::min(size, bytes->size() - position);
    std::memcpy(out, bytes->data() + position, size); position += size; return size;
  }
- int write(const char* in, size_t size) { bytes->append(in, size); return size; }
+ int write(const void* in, size_t size) { bytes->append(static_cast<const char*>(in), size); return size; }
 };
 struct StorageMock {
  std::map<std::string, std::string> data;
@@ -94,7 +99,7 @@ struct StorageMock {
  }
 } Storage;
 struct CrossPointSettings {
- enum SLEEP_SCREEN_MODE { CUSTOM, TRANSPARENT };
+ enum SLEEP_SCREEN_MODE { CUSTOM, TRANSPARENT, SLEEP_SCREEN_MODE_COUNT };
  bool showHiddenFiles = false; uint8_t sleepScreen = CUSTOM;
  bool saveToFile() { return true; }
 } SETTINGS;
@@ -113,8 +118,8 @@ struct JpegToBmpConverter {
  }
 };
 struct PngToBmpConverter {
- static bool pngFileToBmpFile(const char*, const char* out, bool) {
-   ++pngConversions; Storage.data[out] = "PNG-BMP"; return !conversionFails;
+ static bool pngFileToBmpFile(const char* input, const char* out, bool) {
+   ++pngConversions; Storage.data[out] = "PNG-BMP"; return !conversionFails && !Storage.writeFails && Storage.exists(input);
  }
  static bool pngFileToTransparentBmpFile(const char*, const char* out, bool) {
    Storage.data[out] = "ALPHA-BMP"; return !conversionFails;
@@ -135,6 +140,11 @@ struct ImageViewerActivity {
  bool imageReady = false; Popup sleepCoverPopup;
  void requestUpdate() {}
  void loadSiblingImages(); bool isPng() const; bool preparePreview();
+ bool prepareJpegSleepCover() {
+   if (conversionFails || !Storage.exists(filePath.c_str())) return false;
+   jpegWidth=renderer.getScreenWidth(); jpegHeight=renderer.getScreenHeight();
+   Storage.data[SLEEP_IMAGE_PART_PATH]="JPEG-2BIT"; return true;
+ }
  void showSleepCoverOptions(); void doSetSleepCover(const char*, bool);
 };
 std::string joinPath(const std::string& parent, const std::string& name) { return parent + "/" + name; }
@@ -158,7 +168,7 @@ struct ActivityManager {
 };
 enum UIIcon { Folder, Book, Text, Image, File };
 struct UITheme { static UIIcon getFileIcon(const std::string&); };
-''' + methods + r'''
+''' + cover + methods + r'''
 int main() {
  for (const char* extension : {"bmp", "BMP", "jpg", "JPG", "jpeg", "JpEg", "png", "PnG"}) {
    std::string path = std::string("/AirPage/picture.") + extension;
@@ -186,15 +196,14 @@ int main() {
  ImageViewerActivity viewer; viewer.filePath = "/AirPage/4.jpg";
  Storage.data[viewer.filePath] = "original-jpeg";
  Storage.data[SLEEP_IMAGE_PATH] = "existing-cover";
+ viewer.imageReady = true;
  for (bool landscape : {false, true}) {
    viewer.renderer.width = landscape ? 800 : 480; viewer.renderer.height = landscape ? 480 : 800;
-   Storage.data[IMAGE_PREVIEW_PATH] = "stale-preview";
-   assert(viewer.preparePreview());
+   viewer.showSleepCoverOptions();
    assert(jpegWidth == viewer.renderer.width && jpegHeight == viewer.renderer.height);
-   assert(Storage.data[IMAGE_PREVIEW_PATH] == "JPEG-BMP");
+   assert(Storage.data[SLEEP_IMAGE_PATH] == "JPEG-2BIT");
+   assert(!Storage.exists(SLEEP_IMAGE_PART_PATH));
  }
- viewer.imageReady = true; viewer.showSleepCoverOptions();
- assert(Storage.data[SLEEP_IMAGE_PATH] == "JPEG-BMP");
  assert(Storage.data[viewer.filePath] == "original-jpeg");
  viewer.filePath = "/AirPage/3.PNG"; Storage.data[viewer.filePath] = "original-png";
  assert(viewer.preparePreview()); assert(pngConversions == 1);
@@ -205,17 +214,22 @@ int main() {
  viewer.showSleepCoverOptions(); assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
  for (const char* path : {"/AirPage/4.jpg", "/AirPage/3.PNG"}) {
    viewer.filePath = path; conversionFails = true;
-   Storage.data[IMAGE_PREVIEW_PATH] = "stale-preview";
-   assert(!viewer.preparePreview()); assert(!Storage.exists(IMAGE_PREVIEW_PATH));
+   if (viewer.isPng()) {
+     Storage.data[IMAGE_PREVIEW_PATH] = "stale-preview";
+     assert(!viewer.preparePreview()); assert(!Storage.exists(IMAGE_PREVIEW_PATH));
+   } else {
+     viewer.imageReady=true; viewer.showSleepCoverOptions();
+     assert(Storage.data[SLEEP_IMAGE_PATH]=="original-bmp");
+   }
    viewer.imageReady = false; viewer.showSleepCoverOptions();
    viewer.doSetSleepCover(viewer.filePath.c_str(), false);
    assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
  }
- conversionFails = false; viewer.filePath = "/AirPage/missing.jpeg";
+ conversionFails = false; viewer.filePath = "/AirPage/missing.PNG";
  assert(!viewer.preparePreview()); assert(!Storage.exists(IMAGE_PREVIEW_PATH));
  Storage.data[IMAGE_PREVIEW_PATH] = "stale-preview"; Storage.removeFails = true;
  assert(!viewer.preparePreview()); assert(Storage.data[IMAGE_PREVIEW_PATH] == "stale-preview");
- Storage.removeFails = false; Storage.writeFails = true; viewer.filePath = "/AirPage/4.jpg";
+ Storage.removeFails = false; Storage.writeFails = true; viewer.filePath = "/AirPage/3.PNG";
  assert(!viewer.preparePreview()); assert(!Storage.exists(IMAGE_PREVIEW_PATH));
 }
 ''')

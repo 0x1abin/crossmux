@@ -1,3 +1,4 @@
+#include <HardwareSerial.h>
 #include <ObfuscationUtils.h>
 #include <expat.h>
 #include <gtest/gtest.h>
@@ -17,6 +18,9 @@
 #include "WeReadBrowse.h"
 #include "WeReadStore.h"
 #include "WeReadXhtmlCodec.h"
+
+// Standalone host targets do not link the simulator main, which owns this endpoint.
+HardwareSerial Serial;
 
 namespace obfuscation {
 

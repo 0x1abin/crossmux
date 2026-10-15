@@ -8,6 +8,7 @@
 #include <HalDisplay.h>
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
+#include <HalHaptics.h>
 #include <HalMemory.h>
 #include <HalOtaSlot.h>
 #include <HalPowerManager.h>
@@ -135,11 +136,6 @@ static bool wakePowerReleasePending = false;
 // Fonts
 // All legacy built-in reader IDs share one 12pt offline fallback. Complete
 // families, other sizes, and style variants come from SD .cpfont files.
-#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-#include <builtinFonts/notosans_12_regular.h>
-#include <builtinFonts/notosans_cjk_14.h>
-#include <builtinFonts/notosans_cjk_16.h>
-#endif
 EpdFont offlineReaderFont(&notosans_cjk_12);
 EpdFontFamily offlineReaderFontFamily(&offlineReaderFont);
 
@@ -498,7 +494,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   }
 
 #if FREEINK_CAP_HAPTIC
-  gpio.stopHapticFeedback();
+  HalHaptics::feedback(false, false, 0);
 #endif
   halTiltSensor.deepSleep();
   Frontlight.setOn(false);
@@ -506,9 +502,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   SoundFeedback::shutdown();
 #endif
   display.deepSleep();
-#if !FREEINK_DEVICE_EEGO_A4
   Storage.prepareForDeepSleep();
-#endif
   LOG_DBG("MAIN", "Entering deep sleep");
 
   powerManager.startDeepSleep(gpio);
@@ -766,9 +760,8 @@ void setup() {
   // boot — but defer the sleep-or-boot decision until SETTINGS is loaded below:
   // click-to-wake is a setting, and an X4 battery power-off cuts all power, so
   // only SD state survives to the next boot.
-#if !FREEINK_DEVICE_EEGO_A4
-  const bool wakeHoldVerified = wakeupReason != HalGPIO::WakeupReason::PowerButton || gpio.verifyPowerButtonWakeup();
-#endif
+  const bool wakeHoldVerified = wakeupReason != HalGPIO::WakeupReason::PowerButton || BoardConfig::isMetalioEInk4() ||
+                                gpio.verifyPowerButtonWakeup();
 
   // IMU bring-up on every target. Read Pico's SC7A20H is an accelerometer with no
   // gyroscope, so HalTiltSensor differentiates the gravity component for the tilt
@@ -863,13 +856,6 @@ void setup() {
 
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
-#if FREEINK_DEVICE_EEGO_A4
-      LOG_DBG("MAIN", "Verifying power button press duration");
-      if (!gpio.verifyPowerButtonWakeup(SETTINGS.getPowerButtonDuration(),
-                                        SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP)) {
-        powerManager.startDeepSleep(gpio);
-      }
-#else
       // With Short Power Button Press = Sleep, a single click wakes on any
       // device; otherwise the button must still be held (ghost-wake debounce).
       if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
@@ -877,17 +863,18 @@ void setup() {
         Storage.prepareForDeepSleep();
         powerManager.startDeepSleep(gpio);
       }
-#endif
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
-    FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_READPICO
+    FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_READPICO ||         \
+    FREEINK_DEVICE_LILYGO
       // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
       // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
-      // (its button is behind the PMIC). EEGO A4's post-flash reset reads as
+      // (its button is behind the PMIC). Metalio also needs native USB available
+      // after a USB-powered boot. EEGO A4's post-flash reset reads as
       // POWERON (native-USB), so a flash would otherwise be misclassified as a
       // USB-power cold boot and sleep. Waveshare 3.97 hits both: its side key is
       // behind the AXP2101 (input.power == PIN_UNASSIGNED) and it is a native-USB
@@ -1076,9 +1063,6 @@ void loop() {
     activityManager.cancelIdleRender();
   }
 #endif
-#if FREEINK_CAP_HAPTIC
-  gpio.updateHapticFeedback(SETTINGS.hapticFeedbackLevel);
-#endif
   updateBluetoothLifecycle();
 
   static bool bluetoothWasConnected = false;
@@ -1111,6 +1095,13 @@ void loop() {
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
   halClock.update();
+
+  // Under the render lock, so a step never overlaps the themes' gauge reads.
+  static bool gaugeCapacityPending = true;
+  if (gaugeCapacityPending) {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) gaugeCapacityPending = BatteryMonitor::loadDesignCapacity();
+  }
 
   renderer.setFadingFix(SETTINGS.fadingFix);
 

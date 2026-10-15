@@ -9,6 +9,7 @@
 #include <cctype>
 #include <string_view>
 
+#include "HapticFeedback.h"
 #include "MappedInputManager.h"
 #include "ReaderRefresh.h"
 #include "activities/ActivityManager.h"
@@ -178,58 +179,6 @@ inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputMan
     return true;
   }
   return isTouchMenuTap(renderer, input);
-}
-
-// Grayscale anti-aliasing pass. Renders content twice (LSB + MSB) to build
-// the grayscale buffer. Only the content callback is re-rendered — status bars
-// and other overlays should be drawn before calling this.
-// Kept as a template to avoid std::function overhead; instantiated once per reader type.
-template <typename RenderFn>
-void renderAntiAliased(GfxRenderer& renderer, ActivityManager& activityManager, RenderFn&& renderFn) {
-  if (activityManager.isSwitchPending()) {
-    renderer.cancelGrayscale();
-    return;
-  }
-  if (!renderer.storeBwBuffer()) {
-    LOG_ERR("READER", "Failed to store BW buffer for anti-aliasing");
-    // A combined-base panel may still hold a deferred B/W activation; flush it
-    // so the page reaches the panel even without its grays.
-    if (renderer.combinesGrayscaleBase()) {
-      if (activityManager.isSwitchPending()) {
-        renderer.cancelGrayscale();
-      } else {
-        renderer.cleanupGrayscaleWithFrameBuffer();
-      }
-    }
-    return;
-  }
-
-  const auto cancelled = [&] {
-    if (!activityManager.isSwitchPending()) return false;
-    renderer.setRenderMode(GfxRenderer::BW);
-    const bool combinedBase = renderer.combinesGrayscaleBase();
-    if (combinedBase) renderer.cancelGrayscale();
-    renderer.restoreBwBuffer(!combinedBase);
-    return true;
-  };
-  if (cancelled()) return;
-  renderer.clearScreen(0x00);
-  renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-  renderFn();
-  if (cancelled()) return;
-  renderer.copyGrayscaleLsbBuffers();
-
-  renderer.clearScreen(0x00);
-  renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-  renderFn();
-  if (cancelled()) return;
-  renderer.copyGrayscaleMsbBuffers();
-
-  if (cancelled()) return;
-  renderer.displayGrayBuffer();
-  renderer.setRenderMode(GfxRenderer::BW);
-
-  renderer.restoreBwBuffer();
 }
 
 struct BackNavCallback {

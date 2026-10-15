@@ -24,8 +24,11 @@
 #include "Epub/blocks/ImageBlock.h"
 #include "Epub/converters/JpegToFramebufferConverter.h"
 #include "QrParams.h"
+#include "ReaderGrayProbe.h"
 #include "SleepProbe.h"
+#include "ViewerProbe.h"
 #include "components/themes/BaseTheme.h"
+#include "util/SleepCover.h"
 
 // Native rendering bypasses ImageBlock; the four-level seam checks error forwarding.
 ImageBlock::ImageBlock(const std::string&, const std::string&, int16_t, int16_t) : width(0), height(0) {}
@@ -49,6 +52,7 @@ bool FontCacheManager::isScanning() const { return false; }
 void FontCacheManager::clearCache() {}
 void SdCardFont::clearCache() {}
 ESPMock ESP;
+HWCDC Serial;
 namespace {
 std::array<uint8_t, HalDisplay::BUFFER_SIZE> bw;
 std::array<uint8_t, HalDisplay::DISPLAY_WIDTH * HalDisplay::DISPLAY_HEIGHT / 2> native;
@@ -68,6 +72,18 @@ uint16_t HalDisplay::getDisplayHeight() const { return DISPLAY_HEIGHT; }
 uint16_t HalDisplay::getDisplayWidthBytes() const { return DISPLAY_WIDTH_BYTES; }
 uint32_t HalDisplay::getBufferSize() const { return BUFFER_SIZE; }
 void HalDisplay::clearScreen(uint8_t value) const { bw.fill(value); }
+static bool buildLoan = false;
+uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) {
+  if (loan || buildLoan) return nullptr;
+  buildLoan = true;
+  *sizeOut = bw.size();
+  return bw.data();
+}
+void HalDisplay::returnFrameBufferStorage() {
+  assert(buildLoan);
+  buildLoan = false;
+  bw.fill(0xFF);
+}
 uint8_t HalDisplay::getGrayscaleLevels() const { return levels; }
 uint8_t* HalDisplay::beginGrayscale16() {
   if (loan) return nullptr;
@@ -89,6 +105,10 @@ void HalDisplay::cancelGrayscale16() {
 }
 bool HalDisplay::isInverted() const { return false; }
 void HalDisplay::displayBuffer(RefreshMode mode, bool) {
+  if (readerDriverActive) {
+    readerDriver().display(readerBus, bw.data(), nullptr, static_cast<freeink::RefreshMode>(mode), false);
+    return;
+  }
   assert(!loan);
   switch (mode) {
     case FULL_REFRESH:
@@ -104,15 +124,40 @@ void HalDisplay::displayBuffer(RefreshMode mode, bool) {
       break;
   }
 }
-void HalDisplay::displayGrayscaleBase(RefreshMode, bool) {}
+void HalDisplay::displayGrayscaleBase(RefreshMode mode, bool) {
+  if (readerDriverActive)
+    readerDriver().displayGrayscaleBaseWithContext(readerBus, bw.data(), static_cast<freeink::RefreshMode>(mode), false,
+                                                   freeink::RefreshContext::Normal);
+}
 bool HalDisplay::displayGrayscaleBase(GrayscaleMode, RefreshMode mode, bool off) {
   displayGrayscaleBase(mode, off);
   return true;
 }
-void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t*) {}
-void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t*) {}
-void HalDisplay::displayGrayBuffer(bool, const unsigned char*, bool) { refreshEvents.push_back('G'); }
-void HalDisplay::cleanupGrayscaleBuffers(const uint8_t*) {}
+void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t* plane) {
+  if (readerDriverActive) readerDriver().copyGrayscaleLsb(readerBus, plane);
+}
+void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t* plane) {
+  if (readerDriverActive) readerDriver().copyGrayscaleMsb(readerBus, plane);
+}
+void HalDisplay::displayGrayBuffer(bool, const unsigned char*, bool) {
+  if (readerDriverActive) {
+    readerDriver().displayGray(readerBus, bw.data(), false, nullptr, false);
+    return;
+  }
+  refreshEvents.push_back('G');
+}
+void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* base) {
+  if (readerDriverActive) readerDriver().cleanupGrayscaleBuffers(readerBus, base);
+}
+bool HalDisplay::displayCommitted() const {
+  return readerDriverActive ? readerDriver().displayCommitted() : !failRefresh;
+}
+void HalDisplay::cancelGrayscale() {
+  if (readerDriverActive) {
+    readerDriver().requestResync(0);
+    readerDriver().cleanupGrayscaleBuffers(readerBus, nullptr);
+  }
+}
 HalDisplay::Controller HalDisplay::getController() const { return Controller::LgfxEpd; }
 HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode) const { return {}; }
 HalDisplay display;
@@ -186,6 +231,43 @@ class RecordingPrint : public Print {
     return count;
   }
 };
+
+void testFourLevelBitmapPaths(GfxRenderer& renderer) {
+  auto bytes = ramp(true, false);
+  for (unsigned index = 0; index < 16; ++index) {
+    for (unsigned channel = 0; channel < 3; ++channel) bytes[54 + index * 4 + channel] = (index / 4) * 85;
+  }
+  for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::PortraitInverted, GfxRenderer::LandscapeClockwise,
+                                 GfxRenderer::LandscapeCounterClockwise}) {
+    renderer.setOrientation(orientation);
+    for (const bool absolute : {false, true}) {
+      for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+        for (const bool crop : {false, true}) {
+          renderer.setRenderMode(GfxRenderer::BW);
+          assert(renderer.displayGrayscaleBase(absolute ? HalDisplay::GrayscaleMode::Absolute
+                                                        : HalDisplay::GrayscaleMode::Overlay));
+          renderer.setRenderMode(mode);
+          renderer.clearScreen(0);
+          Bitmap bitmap(bytes.data(), bytes.size());
+          assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+          assert(crop ? renderer.drawBitmapCropToFill(bitmap, 2, 3, 17, 2) : renderer.drawBitmap(bitmap, 2, 3, 17, 2));
+          for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 17; ++x) {
+              const uint8_t value = ((x + y) % 16) / 4;
+              const bool msb = mode == GfxRenderer::GRAYSCALE_MSB;
+              const bool expected =
+                  absolute ? ((value >> (msb ? 1 : 0)) & 1) : (msb ? value == 1 || value == 2 : value == 1);
+              const auto [px, py] = physical(orientation, x + 2, y + 3);
+              assert(bool(bw[py * HalDisplay::DISPLAY_WIDTH_BYTES + px / 8] & (0x80 >> (px % 8))) == expected);
+            }
+          }
+        }
+      }
+    }
+  }
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.setOrientation(GfxRenderer::Portrait);
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -194,6 +276,7 @@ int main(int argc, char** argv) {
   setenv("CROSSPOINT_SIM_SD", argv[2], 1);
   GfxRenderer renderer(display);
   renderer.begin();
+  testFourLevelBitmapPaths(renderer);
   levels = 4;
   assert(renderer.getGrayscaleLevels() == 4 && !renderer.beginGrayscale16());
   assert(qrParams(renderer) == "&w=32&h=128&mode=gray4");
@@ -211,6 +294,18 @@ int main(int argc, char** argv) {
       }
     }
     renderer.cancelGrayscale16();
+    for (const auto [color, expected] : {std::pair{Color::Black, 0}, std::pair{Color::LightGray, 11},
+                                         std::pair{Color::DarkGray, 8}, std::pair{Color::White, 15}}) {
+      assert(renderer.beginGrayscale16());
+      renderer.fillRectDither(-1, -1, 4, 3, color);
+      for (int y = 0; y < renderer.getScreenHeight(); ++y) {
+        for (int x = 0; x < renderer.getScreenWidth(); ++x) {
+          const auto [px, py] = physical(orientation, x, y);
+          assert(tone(px, py) == (x < 3 && y < 2 ? expected : 15));
+        }
+      }
+      renderer.cancelGrayscale16();
+    }
     for (const bool topDown : {false, true})
       for (const bool reversed : {false, true}) {
         auto bytes = ramp(topDown, reversed);
@@ -266,6 +361,57 @@ int main(int argc, char** argv) {
   assert(!renderer.commitGrayscale16() && !renderer.isGrayscale16Active());
   assert(cancels == cancelsBeforeFailedCommit + 1);
   failRefresh = false;
+  assert(renderer.beginGrayscale16());
+  assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, config));
+  std::array<uint8_t, 128 * 16> uncropped{};
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < 128; ++x) uncropped[y * 128 + x] = tone(x, y);
+  renderer.cancelGrayscale16();
+  auto cropConfig = config;
+  cropConfig.useExactDimensions = true;
+  cropConfig.maxWidth = 64;
+  cropConfig.sourceCropX = 0.5f;
+  assert(renderer.beginGrayscale16());
+  bool cacheWritten = true;
+  assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, cropConfig, cacheWritten));
+  assert(!cacheWritten);
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < 64; ++x) assert(tone(x, y) == uncropped[y * 128 + x + 32]);
+  renderer.cancelGrayscale16();
+  cropConfig.output = DecodeOutput::CacheOnly;
+  cropConfig.cachePath = "/jpeg-crop.pxc";
+  assert(jpeg.decodeToFramebuffer("/ramp.jpg", renderer, cropConfig, cacheWritten) && cacheWritten);
+  {
+    HalFile cache;
+    assert(Storage.openFileForRead("TEST", "/jpeg-crop.pxc", cache));
+    uint16_t width = 0, height = 0;
+    assert(cache.read(&width, 2) == 2 && cache.read(&height, 2) == 2);
+    assert(width == 64 && height == 16 && cache.size() == 4 + 16 * 16);
+  }
+  ImageViewerProbe viewer(renderer);
+  const int actionsBefore = viewerGui.actions;
+  assert(viewer.renderJpeg());
+  assert(viewerGui.actions > actionsBefore && !renderer.isGrayscale16Active());
+  viewer.doSetSleepCover("/ramp.jpg", false);
+  {
+    HalFile cover;
+    assert(Storage.openFileForRead("TEST", "/sleep.bmp", cover));
+    Bitmap bitmap(cover);
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getBpp() == 2);
+    assert(bitmap.getWidth() == 128 && bitmap.getHeight() == 16);
+  }
+  assert(!Storage.exists("/sleep.bmp.part") && !Storage.exists("/sleep.bmp.bak") &&
+         !Storage.exists("/sleep.bmp.pxc.tmp"));
+  SETTINGS.failedSaves = 1;
+  viewer.doSetSleepCover("/ramp.jpg", false);
+  {
+    HalFile cover;
+    assert(Storage.openFileForRead("TEST", "/sleep.bmp", cover));
+    Bitmap bitmap(cover);
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getBpp() == 2);
+  }
+  assert(!Storage.exists("/sleep.bmp.part") && !Storage.exists("/sleep.bmp.bak") &&
+         !Storage.exists("/sleep.bmp.pxc.tmp"));
   HalFile file;
   assert(Storage.openFileForRead("TEST", "/ramp.jpg", file));
   RecordingPrint out;
@@ -457,4 +603,56 @@ int main(int argc, char** argv) {
   assert(commits == beforeFiltered);  // Existing filters must not enter native output.
   SETTINGS.sleepScreenCoverFilter = CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
   assert(commits > 0 && cancels > 0);
+
+  const auto writeSleep = [&](const char* path, const std::vector<uint8_t>& bytes) {
+    std::ofstream file(std::string(argv[2]) + path, std::ios::binary | std::ios::trunc);
+    file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    file.close();
+    assert(file.good());
+  };
+  const auto sleepWidth = [&] {
+    HalFile file;
+    assert(Storage.openFileForRead("TEST", "/sleep.bmp", file));
+    Bitmap bitmap(file);
+    assert(bitmap.parseHeaders() == BmpReaderError::Ok);
+    return bitmap.getWidth();
+  };
+  const auto originalCover = ramp(false, true);
+  auto incomingCover = originalCover;
+  const int32_t incomingWidth = 8;
+  memcpy(incomingCover.data() + 18, &incomingWidth, sizeof(incomingWidth));
+  SETTINGS.sleepScreen = CrossPointSettings::CUSTOM;
+  writeSleep("/sleep.bmp.bak", originalCover);
+  Storage.remove("/sleep.bmp");
+  writeSleep("/sleep.bmp.part", {1, 2});
+  assert(sleepCover::recover() && sleepWidth() == 17 && !Storage.exists("/sleep.bmp.part"));
+  for (uint8_t oldMode : {uint8_t(CrossPointSettings::CUSTOM), uint8_t(CrossPointSettings::TRANSPARENT)}) {
+    writeSleep("/sleep.bmp.bak", originalCover);
+    writeSleep("/sleep.bmp", incomingCover);
+    writeSleep("/sleep.bmp.txn", {1, oldMode, 1});
+    SETTINGS.sleepScreen = CrossPointSettings::CUSTOM;
+    assert(sleepCover::recover() && sleepWidth() == 17 && SETTINGS.sleepScreen == oldMode);
+    assert(!Storage.exists("/sleep.bmp.bak") && !Storage.exists("/sleep.bmp.txn"));
+  }
+  writeSleep("/sleep.bmp.bak", originalCover);
+  writeSleep("/sleep.bmp", incomingCover);
+  writeSleep("/sleep.bmp.txn", {1, uint8_t(CrossPointSettings::CUSTOM), 1});
+  SETTINGS.failedSaves = 1;
+  assert(!sleepCover::recover() && Storage.exists("/sleep.bmp.txn") && sleepWidth() == 17);
+  assert(sleepCover::recover() && !Storage.exists("/sleep.bmp.txn") && sleepWidth() == 17);
+  writeSleep("/sleep.bmp.bak", originalCover);
+  writeSleep("/sleep.bmp.txn", {9, 0, 1});
+  assert(!sleepCover::recover() && Storage.exists("/sleep.bmp.bak") && Storage.exists("/sleep.bmp"));
+  Storage.remove("/sleep.bmp.txn");
+  assert(sleepCover::recover());
+  writeSleep("/sleep.bmp.part", incomingCover);
+  SETTINGS.failedSaves = 1;
+  assert(!sleepCover::commit(CrossPointSettings::CUSTOM) && sleepWidth() == 17);
+  assert(!Storage.exists("/sleep.bmp.bak") && !Storage.exists("/sleep.bmp.txn"));
+  writeSleep("/sleep.bmp.part", {1, 2, 3});
+  assert(!sleepCover::commit(CrossPointSettings::CUSTOM) && sleepWidth() == 17);
+  assert(sleepCover::recover());
+  printf(
+      "Shared sleep-cover legacy/marked recovery, same-mode rollback, mode restoration, retry and validation passed\n");
+  testReaderGrayContract(renderer);
 }

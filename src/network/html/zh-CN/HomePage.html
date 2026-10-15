@@ -118,15 +118,12 @@
         .note { padding-left: 20px; padding-right: 20px; }
       }
     </style>
-  </head>
-  <body>
-    <nav class="nav-links" aria-label="主导航">
-      <a href="/" class="active" aria-current="page">主页</a>
-      <a href="/files">文件</a>
-      <a href="/settings">设置</a>
-      <a href="/fonts">字体</a>
-    </nav>
-    <main>
+    <link rel="stylesheet" href="/assets/web.css" />
+  <link rel="icon" type="image/svg+xml" href="/assets/crosspoint-icon.svg" />
+</head>
+  <body class="web-ui">
+    <!--#include file="../shared/Header.zh-CN.html.inc" -->
+    <main class="page-content">
       <div class="page-title">
         <h1>设备概览</h1>
         <p>CrossMux 设备状态与网络信息</p>
@@ -145,6 +142,7 @@
         <p class="note" id="status-note">状态信息来自当前设备</p>
       </section>
     </main>
+<!--#include file="../shared/Footer.zh-CN.html.inc" -->
     <script>
       async function fetchStatus() {
         const fallback = '不可用';

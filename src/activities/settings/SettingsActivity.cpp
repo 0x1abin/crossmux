@@ -709,21 +709,16 @@ void SettingsActivity::toggleCurrentSetting() {
     const auto enumLabels = setting.enumLabels();
     if (enumLabels.size() > 2) {
       const auto valuePtr = setting.valuePtr;
-      optionPopup.show(
-          setting.nameId, enumLabels.data(), static_cast<int>(enumLabels.size()), currentValue,
-          [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
-            SETTINGS.*valuePtr = idx;
-#if FREEINK_CAP_HAPTIC && !defined(SIMULATOR)
-            if (valuePtr == &CrossPointSettings::hapticFeedbackLevel && idx == CrossPointSettings::HAPTIC_FEEDBACK_OFF)
-              gpio.stopHapticFeedback();
-#endif
-            syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
-            SETTINGS.saveToFile();
-            if (valuePtr == &CrossPointSettings::uiTheme)
-              applyUiSettingChange(valuePtr);
-            else
-              rebuildSettingsLists();
-          });
+      optionPopup.show(setting.nameId, enumLabels.data(), static_cast<int>(enumLabels.size()), currentValue,
+                       [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+                         SETTINGS.*valuePtr = idx;
+                         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+                         SETTINGS.saveToFile();
+                         if (valuePtr == &CrossPointSettings::uiTheme)
+                           applyUiSettingChange(valuePtr);
+                         else
+                           rebuildSettingsLists();
+                       });
       requestUpdate();
       return;
     }

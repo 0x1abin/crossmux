@@ -253,86 +253,7 @@ void FileBrowserActivity::selectMainTabContentEdge(const MainTabContentEdge edge
   moveSelectionTo(MainTabs::contentEdgeIndex(edge, listCount()));
 }
 
-// To avoid traversing directories twice (once for cache clearing, once for deletion),
-// we do both in one pass here, instead of using Storage.removeDir
-bool FileBrowserActivity::removeDirFile(const std::string& fullPath) {
-  auto file = Storage.open(fullPath.c_str());
-  if (!file) {
-    LOG_ERR("FileBrowser", "Failed to open for metadata clearing: %s", fullPath.c_str());
-    return false;
-  }
-
-  if (!file.isDirectory()) {
-    file.close();
-    clearBookCache(fullPath);
-    return Storage.remove(fullPath.c_str());
-  }
-  file.close();
-
-  if (!fileNameBuffer) {
-    LOG_ERR("FileBrowser", "fileNameBuffer not allocated");
-    return false;
-  }
-
-  // Stack of (dirPath, postOrder): postOrder=true means rmdir this path after children are processed.
-  std::vector<std::pair<std::string, bool>> stack;
-  stack.reserve(16);
-  stack.push_back({fullPath, false});
-
-  while (!stack.empty()) {
-    auto [currentPath, postOrder] = std::move(stack.back());
-    stack.pop_back();
-
-    if (postOrder) {
-      if (!Storage.rmdir(currentPath.c_str())) {
-        LOG_ERR("FileBrowser", "Failed to rmdir: %s", currentPath.c_str());
-        return false;
-      }
-      continue;
-    }
-
-    auto dir = Storage.open(currentPath.c_str());
-    if (!dir) {
-      LOG_ERR("FileBrowser", "Failed to open dir: %s", currentPath.c_str());
-      return false;
-    }
-    if (!dir.isDirectory()) {
-      LOG_ERR("FileBrowser", "Not a directory: %s", currentPath.c_str());
-      return false;
-    }
-
-    // Push this dir for post-order rmdir (after all children are processed).
-    stack.push_back({currentPath, true});
-
-    dir.rewindDirectory();
-    for (auto entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
-      entry.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
-      if (strcmp(fileNameBuffer.get(), ".") == 0 || strcmp(fileNameBuffer.get(), "..") == 0) {
-        continue;
-      }
-      std::string entryPath = currentPath;
-      if (entryPath.back() != '/') {
-        entryPath += "/";
-      }
-      entryPath += fileNameBuffer.get();
-
-      const bool isDir = entry.isDirectory();
-      entry.close();
-
-      if (isDir) {
-        stack.push_back({std::move(entryPath), false});
-      } else {
-        clearBookCache(entryPath);
-        if (!Storage.remove(entryPath.c_str())) {
-          LOG_ERR("FileBrowser", "Failed to remove file: %s", entryPath.c_str());
-          return false;
-        }
-      }
-    }
-  }
-
-  return true;
-}
+bool FileBrowserActivity::removeDirFile(const std::string& fullPath) { return removeBookFile(fullPath); }
 
 std::string FileBrowserActivity::selectedPath() const {
   if (files.empty() || nav.selected < 0 || nav.selected >= listCount()) return {};
@@ -416,13 +337,14 @@ void FileBrowserActivity::promptRename() {
       showNotice(StrId::STR_TARGET_EXISTS);
       return;
     }
-    if (!Storage.rename(oldPath.c_str(), newPath.c_str())) {
+    const auto moved = moveBookFile(oldPath, newPath);
+    if (moved == BookMoveResult::NotMoved) {
       LOG_ERR("FileBrowser", "Failed to rename %s to %s", oldPath.c_str(), newPath.c_str());
       showNotice(StrId::STR_FILE_OPERATION_FAILED);
       return;
     }
 
-    const bool dataOk = relocatePathData(oldPath, newPath, isDirectory);
+    const bool dataOk = moved == BookMoveResult::Complete;
     finishEdit(returnPath, returnIndex, newEntry + (isDirectory ? "/" : ""));
     if (!dataOk) showNotice(StrId::STR_FILE_DATA_MIGRATION_FAILED);
   };
@@ -479,13 +401,14 @@ void FileBrowserActivity::completeMove() {
       showNotice(StrId::STR_TARGET_EXISTS);
       return;
   }
-  if (!Storage.rename(moveSourcePath.c_str(), newPath.c_str())) {
+  const auto moved = moveBookFile(moveSourcePath, newPath);
+  if (moved == BookMoveResult::NotMoved) {
     LOG_ERR("FileBrowser", "Failed to move %s to %s", moveSourcePath.c_str(), newPath.c_str());
     showNotice(StrId::STR_FILE_OPERATION_FAILED);
     return;
   }
 
-  const bool dataOk = relocatePathData(moveSourcePath, newPath, moveSourceIsDirectory);
+  const bool dataOk = moved == BookMoveResult::Complete;
   const std::string returnPath = moveReturnPath;
   const int returnIndex = moveReturnIndex;
   browserState = BrowserState::Browsing;
@@ -494,52 +417,6 @@ void FileBrowserActivity::completeMove() {
   moveSourceEntry.clear();
   moveReturnPath.clear();
   if (!dataOk) showNotice(StrId::STR_FILE_DATA_MIGRATION_FAILED);
-}
-
-bool FileBrowserActivity::relocateDirectoryData(const std::string& oldPath, const std::string& newPath) {
-  if (!fileNameBuffer) return false;
-
-  bool ok = true;
-  std::vector<std::string> directories;
-  directories.reserve(16);
-  directories.push_back(newPath);
-  while (!directories.empty()) {
-    std::string directoryPath = std::move(directories.back());
-    directories.pop_back();
-    auto directory = Storage.open(directoryPath.c_str());
-    if (!directory || !directory.isDirectory()) {
-      LOG_ERR("FileBrowser", "Failed to scan moved directory: %s", directoryPath.c_str());
-      ok = false;
-      continue;
-    }
-
-    directory.rewindDirectory();
-    for (auto entry = directory.openNextFile(); entry; entry = directory.openNextFile()) {
-      entry.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
-      if (strcmp(fileNameBuffer.get(), ".") == 0 || strcmp(fileNameBuffer.get(), "..") == 0) continue;
-      const std::string entryPath = joinPath(directoryPath, fileNameBuffer.get());
-      if (entry.isDirectory()) {
-        directories.push_back(entryPath);
-        continue;
-      }
-      const std::string oldEntryPath = FsHelpers::rebasePath(entryPath, newPath, oldPath);
-      if (!relocateBookArtifacts(oldEntryPath, entryPath)) ok = false;
-    }
-  }
-
-  if (!RECENT_BOOKS.updatePathPrefix(oldPath, newPath)) ok = false;
-  if (!READING_STATS.updateBookPathPrefix(oldPath, newPath)) ok = false;
-  if (FsHelpers::isSameOrDescendantPath(APP_STATE.openEpubPath, oldPath)) {
-    APP_STATE.openEpubPath = FsHelpers::rebasePath(APP_STATE.openEpubPath, oldPath, newPath);
-    if (!APP_STATE.saveToFile()) ok = false;
-  }
-  return ok;
-}
-
-bool FileBrowserActivity::relocatePathData(const std::string& oldPath, const std::string& newPath,
-                                           const bool isDirectory) {
-  if (isDirectory) return relocateDirectoryData(oldPath, newPath);
-  return relocateBookArtifacts(oldPath, newPath) && relocateBookReferences(oldPath, newPath);
 }
 
 void FileBrowserActivity::finishEdit(const std::string& returnPath, const int fallbackIndex,
@@ -594,6 +471,19 @@ void FileBrowserActivity::onRowLongPress(const int index) {
     showEditMenu();
   }
 }
+
+#if FREEINK_CAP_TOUCH
+bool FileBrowserActivity::canSwipeDelete(const int index) const {
+  return mode == Mode::Books && browserState == BrowserState::Browsing && index >= 0 && index < listCount() &&
+         !FsHelpers::isProtectedPathComponent(cleanEntryName(files[index]));
+}
+
+void FileBrowserActivity::swipeDelete(const int index) {
+  if (!canSwipeDelete(index)) return;
+  nav.selected = index;
+  promptDelete(selectedPath(), files[index]);
+}
+#endif
 
 void FileBrowserActivity::activateSelected() {
   if (files.empty()) return;
@@ -829,6 +719,9 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   props.partialTrailingRow = UITheme::getInstance().hasMainTabs();
   syncListViewport(screen, props);
   prewarmRowGlyphs(nav.top);
+#if FREEINK_CAP_TOUCH
+  if (mode == Mode::Books) configureSwipeDelete(screen, props);
+#endif
   screen.list(props);
 }
 

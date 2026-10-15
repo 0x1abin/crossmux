@@ -115,9 +115,20 @@ Flash; calling them while cache was disabled caused an early-boot Cache Error.
 Do not re-enable LTO without checking the final ELF and map for the affected
 IRAM mappings.
 
-The active size strategy is to embed only 8/10/12pt CJK subsets and externalize
-large reading faces to `.cpfont`. This removes flash data without introducing a
-decompression buffer or a new long-lived heap allocation.
+The active size strategy embeds the existing 8/10/12pt CJK coverage as lossless
+raw-DEFLATE groups of at most 4096 decoded bytes. Large reading faces remain
+external `.cpfont` assets. No glyph pixels, metrics, IDs or paging formats change.
+On devices without actual PSRAM, CJK page buffers plus their lookup tables share
+a 16 KiB budget; excess text uses the reusable hot group. CJK prewarm uses that
+same hot-group buffer, avoiding a second temporary group allocation. The existing
+single-glyph buffer is reused and every allocation retains its OOM check.
+
+`builtinFonts/all.h` selects `standard.h` or `high_dpi.h` with the existing
+`CROSSMUX_UI_PROFILE_HIGH_DPI` macro, alongside `common.h`. Only ReadPico hardware,
+nightly and simulator profiles enable the high-DPI pack. The normal Noto18 UI
+faces are still needed outside that profile and are not ReadPico-only assets.
+Common CJK12, chess glyphs and Ubuntu12 Regular/Bold are shared; high-DPI Latin12,
+Noto14/16 and CJK14/16 are excluded from ordinary targets.
 
 ## WeRead transport
 
@@ -387,10 +398,16 @@ After regenerating, confirm the character lists and bitmap headers match:
 
 - `cn_common_chars.txt` has 3517 unique CJK glyphs and contains the complete
   3500-char base pool.
-- `cn_i18n_chars.txt` has 802 unique CJK glyphs and contains every glyph
+- `cn_i18n_chars.txt` has 807 unique CJK glyphs and contains every glyph
   scanned from `chinese.yaml` and feature-specific files.
-- 8/10/12pt each contain 4014 glyphs; 14/16/18pt each contain 1299 glyphs.
+- 8/10/12pt each contain 4014 glyphs; 14/16/18pt each contain 1304 glyphs.
 - Every generated header says `mode: 2-bit`.
+
+The 2026-10-13 upstream sync regenerates the i18n tier for `限强类导` from
+the translation/feature sources. All existing glyph metrics and bitmap bytes
+remain identical, as do the 8/10/12pt headers and shared common intervals.
+The three larger sizes add 2,891 raw bitmap bytes in total; this counts bitmap
+arrays, not the final linked firmware size or runtime memory headroom.
 
 ```bash
 python3 -c "

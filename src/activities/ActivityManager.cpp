@@ -12,6 +12,7 @@
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "HapticFeedback.h"
 #include "OpdsServerStore.h"
 #include "apps/2048/Game2048Activity.h"
 #include "apps/AppsMenuActivity.h"
@@ -66,7 +67,7 @@ void ActivityManager::begin() {
 #else
   constexpr BaseType_t renderTaskCore = 0;
 #endif
-#if CROSSPOINT_VECTOR_FONTS || FREEINK_DEVICE_EEGO_A4
+#if CROSSPOINT_VECTOR_FONTS
   // FreeType rasterization runs on this task, and the deepest observed chain
   // is a glyph fault DURING LAYOUT: expat + parser + line-layout frames
   // (~3.5KB on Xtensa) with the scan converter's FT_RENDER_POOL_SIZE (4KB)
@@ -175,6 +176,7 @@ void ActivityManager::loop() {
       }
     }
     if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
+      haptic_feedback::touchAction();
       resetHomeStandbyInput();
       auto panel = makeUniqueNoThrow<FrontlightPanelActivity>(renderer, mappedInput);
       if (!panel) {
@@ -587,7 +589,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "Library") {
       initialMenuItem = HomeMenuItem::LIBRARY;
-    } else if (activityName == "OpdsBookBrowser") {
+    } else if (activityName == "OpdsBookBrowser" || activityName == "PluginCatalog") {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;

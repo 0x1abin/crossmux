@@ -134,6 +134,7 @@ class CrossPointWebServer {
     std::string filePath;
     bool valid = false;
     bool magicChecked = false;
+    bool isVector = false;  // .ttf/.otf upload (PSRAM boards only) vs .cpfont
     size_t bytesWritten = 0;
     static constexpr size_t BUFFER_SIZE = 4096;
     memory::ByteBuffer buffer;

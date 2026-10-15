@@ -23,6 +23,7 @@ class ControlCenterGestureTest(unittest.TestCase):
 #include <string>
 #include "activities/MainTab.h"
 #define LOG_ERR(...) ((void)0)
+namespace haptic_feedback { void touchAction() {} }
 enum { eIncrement };
 void xTaskNotify(int, int, int) {}
 struct Activity {

@@ -10,6 +10,8 @@ class VectorGrayFallbackTest(unittest.TestCase):
     def test_four_bit_glyphs_in_native_bw_selector_rotated_and_scaled_paths(self):
         source = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
         header = (ROOT / 'lib/GfxRenderer/GfxRenderer.h').read_text()
+        plane_mapping = method((ROOT / 'lib/GfxRenderer/BitmapHelpers.h').read_text(),
+                               'constexpr GrayPlanePixel grayPlanePixel(')
         helpers = ''.join(method(source, name) for name in (
             'static void drawGlyphPixel(', 'constexpr uint8_t dilate2BitCoverage(',
             'static uint8_t get4BitCoverage(', 'static uint8_t get2BitCoverage(',
@@ -21,10 +23,15 @@ class VectorGrayFallbackTest(unittest.TestCase):
 struct EpdGlyph {uint8_t width=16,height=1; int left=0,top=0;};
 struct EpdFontData {bool is2Bit=true,is4Bit=true; int ascender=0;};
 struct EpdFontFamily {
- enum Style {REGULAR}; EpdGlyph glyph; EpdFontData data;
+ enum Style {REGULAR}; EpdGlyph glyph; EpdFontData data; bool solid=false;
  const EpdGlyph* getGlyph(uint32_t,Style)const{return &glyph;}
+ const EpdGlyph* getGlyphMetrics(uint32_t cp,EpdGlyph& fallback,Style style)const{
+  if(solid){fallback=glyph;return &fallback;} return getGlyph(cp,style);
+ }
  const EpdFontData* getData(Style)const{return &data;}
 };
+struct GrayPlanePixel {bool write,black;};
+''' + plane_mapping + r'''
 struct GfxRenderer {
  enum RenderMode {BW,GRAYSCALE_LSB,GRAYSCALE_MSB};
  struct TwoBitPixel {bool draw,state;};
@@ -33,11 +40,14 @@ struct GfxRenderer {
  bool native=false;
  std::array<uint8_t,8> packed{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
  mutable std::array<int,32> pixels,grays;
+ mutable std::array<int,5> rectangle{-1,-1,-1,-1,-1};
+ mutable int bitmapReads=0;
  GfxRenderer(){pixels.fill(-1);grays.fill(-1);}
  bool grayPlanesAreAbsolute()const{return false;}
  bool glyphIntersectsStrip(int,int,int,int)const{return true;}
  bool isGrayscale16Active()const{return native;}
- const uint8_t* getGlyphBitmap(const EpdFontData*,const EpdGlyph*)const{return packed.data();}
+ const uint8_t* getGlyphBitmap(const EpdFontData*,const EpdGlyph*)const{++bitmapReads;return packed.data();}
+ void fillRect(int x,int y,int w,int h,bool state)const{rectangle={x,y,w,h,int(state)};}
  void drawPixel(int x,int y,bool state)const{assert(x==0||y==0);pixels[x+y]=state;}
  void drawGrayscale16Pixel(int x,int y,uint8_t gray)const{grays[x+y]=gray;}
 };
@@ -76,6 +86,22 @@ int main(){
  GfxRenderer scaled;scaled.packed={0xf0,0xf0};
  renderCharScaled(scaled,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR,0);
  assert(scaled.pixels[0]==1&&scaled.pixels[1]==1);
+ // Synthetic solid metrics draw rectangles and never request bitmap storage.
+ font.solid=true; font.glyph={5,7,3,9}; font.data.ascender=14;
+ for(bool ink:{false,true}){
+  GfxRenderer solid;
+  renderCharImpl(solid,GfxRenderer::BW,font,0x2588,20,30,ink,EpdFontFamily::REGULAR);
+  assert((solid.rectangle==std::array<int,5>{23,21,5,7,int(ink)}));
+  assert(solid.bitmapReads==0);
+  GfxRenderer rotatedSolid;
+  renderCharImpl<TextRotation::Rotated90CW>(rotatedSolid,GfxRenderer::BW,font,0x2588,20,30,ink,EpdFontFamily::REGULAR);
+  assert((rotatedSolid.rectangle==std::array<int,5>{25,23,7,5,int(ink)}));
+  assert(rotatedSolid.bitmapReads==0);
+  GfxRenderer scaledSolid;
+  renderCharScaled(scaledSolid,GfxRenderer::BW,font,0x25A0,20,30,ink,EpdFontFamily::REGULAR,0);
+  assert((scaledSolid.rectangle==std::array<int,5>{21,26,3,4,int(ink)}));
+  assert(scaledSolid.bitmapReads==0);
+ }
 }
 ''')
 
@@ -133,15 +159,17 @@ struct {bool switching=false;bool isSwitchPending(){return switching;}} activity
 struct Probe {
  GfxRenderer renderer;bool needsTextGrayscale=true,pageHasImages=false;int pagesUntilFullRefresh=5;
  bool eligible(){''' + eligibility + r''' return use16LevelText;}
- void render(){const bool use16LevelText=eligible();const unsigned t0=0;
+ bool render(){const bool use16LevelText=eligible();const unsigned t0=0;
+  const auto finish=[&]{return renderer.bwFrames>0 || (renderer.nativeFrames>0 && renderer.commit);};
   const auto renderPageWithGuideLines=[&]{renderer.page=true;};
   const auto renderStatusBar=[&]{renderer.status=true;};
 ''' + branch + r'''
+  return false;
  }
 };
 int main(){
  for(bool start:{false,true})for(bool commit:{false,true}){
-  Probe p;p.renderer.start=start;p.renderer.commit=commit;p.render();
+  Probe p;p.renderer.start=start;p.renderer.commit=commit;assert(p.render());
   assert(!p.renderer.active&&p.pagesUntilFullRefresh==1);
   assert(p.renderer.bwFrames==int(!start||!commit));
   assert(p.renderer.nativeFrames==int(start));

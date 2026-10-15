@@ -1,4 +1,5 @@
 #include <GfxRenderer.h>
+#include <HalHaptics.h>
 #include <gtest/gtest.h>
 
 #include "BleInput.h"
@@ -14,6 +15,7 @@ class BleOverlayTest : public testing::Test {
   void SetUp() override {
     BleHid = {};
     SETTINGS = {};
+    HalHaptics::reset();
     ASSERT_TRUE(bleinput::assign(SETTINGS.bleKeyMap, 1, 42, bleinput::Action::PageForward));
   }
   void key() { BleHid.events.push_back({freeink::SpecialKey::None, 42}); }
@@ -127,4 +129,76 @@ TEST_F(BleOverlayTest, BackKeepsStripRemappedAndBleEdgesSeparate) {
   EXPECT_FALSE(input.wasPressed(Button::Back));
   EXPECT_FALSE(input.isPressed(Button::Back));
   EXPECT_TRUE(input.wasReleased(Button::Back));
+}
+
+TEST_F(BleOverlayTest, CapacitiveFeedbackKeepsLongPressOwnershipUnderRemapping) {
+  struct Case {
+    int layout;
+    GfxRenderer::Orientation orientation;
+    uint8_t hardware;
+  };
+  constexpr Case cases[] = {{CrossPointSettings::PREV_NEXT, GfxRenderer::Portrait, HalGPIO::BTN_DOWN},
+                            {CrossPointSettings::NEXT_PREV, GfxRenderer::Portrait, HalGPIO::BTN_UP},
+                            {CrossPointSettings::PREV_NEXT, GfxRenderer::PortraitInverted, HalGPIO::BTN_UP},
+                            {CrossPointSettings::NEXT_PREV, GfxRenderer::PortraitInverted, HalGPIO::BTN_DOWN}};
+  for (const auto& item : cases) {
+    gpio = {};
+    HalHaptics::reset();
+    renderer.orientation = item.orientation;
+    SETTINGS.sideButtonLayout = item.layout;
+    SETTINGS.vibration = CrossPointSettings::VIBRATION_TOUCH_PAGE;
+    SETTINGS.hapticIntensity = CrossPointSettings::HAPTIC_MEDIUM;
+    gpio.capacitivePageMask = 1u << item.hardware;
+    gpio.pressed[item.hardware] = gpio.held[item.hardware] = true;
+    gpio.heldTime = 900;
+    input.update();
+    EXPECT_EQ(HalHaptics::pulses, 1);
+    EXPECT_TRUE(input.wasLongPressed(Button::PageForward, 700));
+    EXPECT_FALSE(input.wasLongPressed(Button::PageForward, 700));
+    EXPECT_EQ(HalHaptics::longPresses, 1);
+    EXPECT_EQ(HalHaptics::lastIntensity, CrossPointSettings::HAPTIC_MEDIUM);
+    gpio.pressed.fill(false);
+    gpio.held.fill(false);
+    gpio.released[item.hardware] = true;
+    input.update();
+    EXPECT_TRUE(input.consumeSuppressedRelease());
+    EXPECT_FALSE(input.consumeSuppressedRelease());
+    EXPECT_EQ(HalHaptics::pulses, 1);
+    EXPECT_EQ(HalHaptics::longPresses, 1);
+  }
+}
+
+TEST_F(BleOverlayTest, TouchOnlyAndOffKeepCapacitivePageFeedbackDisabled) {
+  for (const auto mode : {CrossPointSettings::VIBRATION_TOUCH, CrossPointSettings::VIBRATION_TOUCH_PAGE,
+                          CrossPointSettings::VIBRATION_OFF}) {
+    gpio = {};
+    HalHaptics::reset();
+    SETTINGS.vibration = mode;
+    gpio.capacitivePageMask = 1u << HalGPIO::BTN_DOWN;
+    gpio.pressed[HalGPIO::BTN_DOWN] = true;
+    input.update();
+    EXPECT_EQ(HalHaptics::pulses, mode == CrossPointSettings::VIBRATION_TOUCH_PAGE ? 1 : 0);
+  }
+}
+
+TEST_F(BleOverlayTest, BlePageEventsDoNotBecomeCapacitiveMotorFeedback) {
+  SETTINGS.vibration = CrossPointSettings::VIBRATION_TOUCH_PAGE;
+  key();
+  input.update();
+  EXPECT_TRUE(input.wasPressed(Button::PageForward));
+  input.update();
+  EXPECT_TRUE(input.wasReleased(Button::PageForward));
+  EXPECT_EQ(HalHaptics::pulses, 0);
+  EXPECT_EQ(HalHaptics::longPresses, 0);
+}
+
+TEST_F(BleOverlayTest, DragPressEdgeDoesNotReplaceDelayedRowSelection) {
+  gpio.touchDown = true;
+  int x = 0, y = 0;
+  EXPECT_TRUE(input.wasScreenTouchPressed(x, y));
+  EXPECT_EQ(x, 240);
+  EXPECT_EQ(y, 400);
+  EXPECT_FALSE(input.wasScreenTouchDown(x, y));
+  gpio.touchDown = false;
+  EXPECT_FALSE(input.wasScreenTouchPressed(x, y));
 }

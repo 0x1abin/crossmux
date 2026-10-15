@@ -195,6 +195,14 @@ int main() {
                     self.assertNotIn("configure_c3_ble_controller.py", scripts)
                     continue
                 hardware_count += 1
+                if "FREEINK_DEVICE_EEGO_A4=1" in flags:
+                    self.assertNotIn("FREEINK_CAP_BLE_HID_HOST=1", flags)
+                    self.assertNotIn("NimBLE-Arduino", libraries)
+                    self.assertNotIn("patch_ble_keyboard_host.py", scripts)
+                    self.assertIn("-DFREEINK_CAP_USB_MSC=1", flags)
+                    self.assertFalse(resolve(section, "custom_sdkconfig"))
+                    self.assertEqual(resolve(section, "board_build.arduino.memory_type"), "dio_opi")
+                    continue
                 self.assertIn("-DFREEINK_CAP_BLE_HID_HOST=1", flags)
                 self.assertIn("h2zero/NimBLE-Arduino @ 2.3.8", libraries)
                 self.assertIn("patch_ble_keyboard_host.py", scripts)
@@ -204,7 +212,7 @@ int main() {
                     self.assertIn("--wrap=xTaskCreatePinnedToCore", flags)
                     self.assertNotIn("configure_c3_ble_controller.py", scripts)
                     self.assertFalse(resolve(section, "custom_nimble_config"))
-                    if "FREEINK_CAP_USB_MSC=1" in flags:
+                    if "FREEINK_CAP_USB_MSC=1" in flags or "FREEINK_DEVICE_LILYGO=1" in flags:
                         self.assertFalse(resolve(section, "custom_sdkconfig"))
                         self.assertEqual(resolve(section, "board_build.arduino.memory_type"), "dio_opi")
                     else:
