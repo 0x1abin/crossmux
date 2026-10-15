@@ -294,8 +294,7 @@ void TapZoneSettingsActivity::showPopupSection() {
   }
 
   // Cursor starts on the row matching the current action.
-  const uint8_t current =
-      isShort ? ReaderUtils::zoneRawShortAction(popupZone) : ReaderUtils::zoneLongAction(popupZone);
+  const uint8_t current = isShort ? ReaderUtils::zoneRawShortAction(popupZone) : ReaderUtils::zoneLongAction(popupZone);
   int currentIndex = 0;
   for (int i = 0; i < popupOptionCount_; ++i) {
     if (popupOptions_[i] == current) {
@@ -305,8 +304,7 @@ void TapZoneSettingsActivity::showPopupSection() {
   }
 
   char title[24];
-  snprintf(title, sizeof(title), "Zone %d · %s", popupZone,
-           isShort ? tr(STR_TAP_ZONE_SHORT) : tr(STR_TAP_ZONE_LONG));
+  snprintf(title, sizeof(title), "Zone %d · %s", popupZone, isShort ? tr(STR_TAP_ZONE_SHORT) : tr(STR_TAP_ZONE_LONG));
   popup_.show(title, labels, popupOptionCount_, currentIndex, [this](int index) { onPopupPicked(index); });
 }
 
@@ -492,5 +490,3 @@ void TapZoneSettingsActivity::drawDashedRect(const int x, const int y, const int
     renderer.drawLine(x + w - 1, py, x + w - 1, (py + kDash - 1) < y + h - 1 ? py + kDash - 1 : y + h - 1, 1, true);
   }
 }
-
-
