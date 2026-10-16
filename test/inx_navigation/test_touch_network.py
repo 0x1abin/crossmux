@@ -56,8 +56,10 @@ struct MappedInputManager {
 fui::InputSnapshot touchSnapshotFrom(const MappedInputManager& i){return i.snap;}
 struct OptionPopup {
  bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false,uiReady=true;
+ bool legacyScrollWindow_=false;
  int selectedIndex=0;std::atomic<int> visibleOptionRows{1};std::string message;
  static constexpr int MAX_OPTIONS=24;
+ static constexpr int fuiMaxVisibleRows=6;
  static constexpr fui::ActionId ACTION_OPTION=1,ACTION_CHROME=2;
  std::vector<std::string> ownedStrings=std::vector<std::string>(12,"option");
  fui::InteractionBuffer<24> interactions;
