@@ -507,6 +507,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     });
     v.insert(v.end(), {
         SettingInfo::Action(StrId::STR_TAP_ZONES, SettingAction::TapZones, StrId::STR_CAT_CONTROLS),
+    });
+    v.insert(v.end(), {
         // Persisted under the legacy "tapForReaderMenu" key: old saves map
         // 0 = Off, 1 = Tap.
         SettingInfo::Enum(StrId::STR_SHOW_READER_MENU, &CrossPointSettings::showReaderMenu,
