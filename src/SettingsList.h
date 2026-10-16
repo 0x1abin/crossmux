@@ -288,7 +288,7 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
 
     std::vector<SettingInfo> v;
-    constexpr size_t entryCount = 87
+    constexpr size_t entryCount = 88
 #if FREEINK_CAP_FRONTLIGHT
                                   + 1
 #endif
@@ -502,6 +502,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     });
     v.insert(v.end(), {
         SettingInfo::Action(StrId::STR_TAP_ZONES, SettingAction::TapZones, StrId::STR_CAT_CONTROLS),
+    });
+    v.insert(v.end(), {
         // Persisted under the legacy "tapForReaderMenu" key: old saves map
         // 0 = Off, 1 = Tap.
         SettingInfo::Enum(StrId::STR_SHOW_READER_MENU, &CrossPointSettings::showReaderMenu,
