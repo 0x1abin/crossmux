@@ -288,7 +288,7 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
 
     std::vector<SettingInfo> v;
-    constexpr size_t entryCount = 87
+    constexpr size_t entryCount = 88
 #if FREEINK_CAP_FRONTLIGHT
                                   + 1
 #endif
