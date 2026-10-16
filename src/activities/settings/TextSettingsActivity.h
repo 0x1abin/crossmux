@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "BookStyleStore.h"
 #include "TextSettingsPreview.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
@@ -26,7 +27,8 @@ class TextSettingsActivity final : public UiTabListActivity {
 
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
                        Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged,
-                       StartMode startMode = StartMode::Interactive);
+                       StartMode startMode = StartMode::Interactive, const std::string* bookPath = nullptr,
+                       const BookStyle* globalSnapshot = nullptr);
 
   void onEnter() override;
   void onExit() override;
@@ -57,6 +59,8 @@ class TextSettingsActivity final : public UiTabListActivity {
     EmbeddedStyle,
     FakeBold,
     AntiAliasing,
+    BookStyleMemory,
+    ClearBookStyles,
     Count
   };
   static constexpr int HIDDEN_GUIDE_ROW_COUNT =
@@ -144,6 +148,15 @@ class TextSettingsActivity final : public UiTabListActivity {
   std::vector<FontEntry> fonts_;
   std::vector<SizeEntry> sizes_;
   textsettings::PreviewLayout previewLayout_;  // cached preview line layout; relaid only on setting/geometry change
+
+  // Book override mode: when the text settings were opened from the reader for
+  // a book (and per-book memory was on), edits captured on exit become that
+  // book's overrides instead of the global values. `bookPath_`/`globalSnapshot_`
+  // are owned by the reader and stay valid while this activity lives; the
+  // clear-overrides row restores the snapshot the same way the reader does.
+  const std::string* bookPath_ = nullptr;
+  const BookStyle* globalSnapshot_ = nullptr;
+  bool bookOverrideMode() const { return bookPath_ != nullptr && globalSnapshot_ != nullptr; }
 
   Tab tab_;
   int currentFamilyIndex_ = 0;

@@ -1365,10 +1365,48 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResultWith<TextSettingsActivity>(
           [this](const ActivityResult&) {
             READING_STATS.resumeSession();
-            applyReaderTextSettings();
+            if (SETTINGS.bookStyleMemory && globalSettingsSnapshotted_) {
+              // Book override mode: the text settings edited this book's
+              // values in-memory (and wrote the settings file on the way).
+              // Capture the difference against the entered global snapshot as
+              // this book's overrides, restore the settings file to that
+              // snapshot so the edits never leak into the global settings,
+              // then re-apply the overrides so the current session renders
+              // with the edited values immediately.
+              const BookStyle overrides = captureStyleDiff(globalSettingsSnapshot_);
+              if (overrides.overrideMask != 0) {
+                BOOK_STYLES.updateStyle(bookPath, overrides);
+              } else {
+                // Everything was reverted to the global values: forget the
+                // entry so the book follows the global settings again.
+                BOOK_STYLES.removeByPath(bookPath);
+              }
+              applyStyleToSettings(globalSettingsSnapshot_);
+              SETTINGS.saveToFile();
+              if (overrides.overrideMask != 0) applyStyleOverrides(overrides);
+              // Reflow with the overrides without persisting them to the
+              // global settings file: per-book overrides live in the book-style
+              // store only. ensureLoaded() frees and replaces the resident SD
+              // font, so it must hold the render lock like
+              // applyReaderTextSettings() does.
+              RenderLock lock;
+              sdFontSystem.ensureLoaded(renderer);
+              if (section) {
+                rememberCurrentContentOffset();
+                cachedSpineIndex = currentSpineIndex;
+                cachedChapterTotalPageCount = section->pageCount;
+                nextPageNumber = section->currentPage;
+              }
+              section.reset();
+            } else {
+              // Per-book memory off: the edits are global and persist as-is.
+              applyReaderTextSettings();
+            }
             openReaderMenu();
           },
-          &sdFontSystem.registry(), TextSettingsActivity::Tab::Family);
+          &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
+          TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::Interactive, &bookPath,
+          globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::NIGHT_MODE:

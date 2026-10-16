@@ -72,7 +72,9 @@ int main(){
         settings_callback = method(setting, '[this](const ActivityResult&)')
         run_cpp(r'''
 #include <cassert>
+#include <cstdint>
 #include <memory>
+#include <string>
 static bool locked=false;
 struct RenderLock {
  RenderLock(){assert(!locked);locked=true;}
@@ -80,12 +82,20 @@ struct RenderLock {
  ~RenderLock(){locked=false;}
 };
 struct ActivityResult{};
-struct {void saveToFile(){}} SETTINGS;
+struct BookStyle { uint32_t overrideMask=0; };
+void applyStyleToSettings(const BookStyle&) {}
+void applyStyleOverrides(const BookStyle&) {}
+struct {bool bookStyleMemory=false; void saveToFile(){}} SETTINGS;
 struct {void resumeSession(){}} READING_STATS;
+struct {void updateStyle(const std::string&, const BookStyle&){} void removeByPath(const std::string&){} } BOOK_STYLES;
 struct {bool loaded=false;void ensureLoaded(int){assert(locked);loaded=true;}} sdFontSystem;
 struct Section {int pageCount=8,currentPage=3;};
 struct EpubReaderActivity {
  int renderer=0,cachedSpineIndex=0,currentSpineIndex=2,cachedChapterTotalPageCount=0,nextPageNumber=0;
+ bool globalSettingsSnapshotted_=false;
+ BookStyle globalSettingsSnapshot_;
+ std::string bookPath="book.epub";
+ BookStyle captureStyleDiff(const BookStyle&) const {return {};}
  std::unique_ptr<Section> section=std::make_unique<Section>();
  void rememberCurrentContentOffset(){}
  void openReaderMenu(){assert(sdFontSystem.loaded&&!locked);}

@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "BookStyleStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
@@ -47,7 +48,9 @@ constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_HYPHENATION,
                                         StrId::STR_EMBEDDED_STYLE,
                                         StrId::STR_FAKE_BOLD,
-                                        StrId::STR_TEXT_AA};
+                                        StrId::STR_TEXT_AA,
+                                        StrId::STR_BOOK_STYLE_MEMORY,
+                                        StrId::STR_CLEAR_BOOK_STYLES};
 
 constexpr StrId LINE_SPACING_IDS[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE};
 constexpr StrId FIRST_LINE_INDENT_IDS[] = {StrId::STR_FIRST_LINE_INDENT_AUTO, StrId::STR_FIRST_LINE_INDENT_INDENT,
@@ -96,12 +99,15 @@ static_assert(std::size(WORD_SPACING_IDS) == (WORD_SPACING_MAX - WORD_SPACING_MI
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const SdCardFontRegistry* registry, Tab initialTab,
-                                           const InitialFontState initialFontState, const StartMode startMode)
+                                           const InitialFontState initialFontState, const StartMode startMode,
+                                           const std::string* bookPath, const BookStyle* globalSnapshot)
     : UiTabListActivity("TextSettings", renderer, mappedInput),
       registry_(registry),
       tab_(initialTab),
       initialFontState_(initialFontState),
-      startMode_(startMode) {}
+      startMode_(startMode),
+      bookPath_(bookPath),
+      globalSnapshot_(globalSnapshot) {}
 
 const char* TextSettingsActivity::tabLabel(const int index) const { return I18N.get(TAB_NAME_IDS[index]); }
 
@@ -204,9 +210,13 @@ void TextSettingsActivity::rebuildRowItems() {
       case Tab::Layout:
         item.label = I18N.get(LAYOUT_ROW_NAME_IDS[i]);
         break;
-      case Tab::Style:
-        item.label = I18N.get(STYLE_ROW_NAME_IDS[static_cast<int>(styleRowAt(i))]);
+      case Tab::Style: {
+        const StyleRow row = styleRowAt(i);
+        item.label = I18N.get(row == StyleRow::ClearBookStyles && bookPath_ != nullptr
+                                  ? StrId::STR_CLEAR_BOOK_OVERRIDES
+                                  : STYLE_ROW_NAME_IDS[static_cast<int>(row)]);
         break;
+      }
       default:
         break;
     }
@@ -363,6 +373,9 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         case StyleRow::AntiAliasing:
           GUI.setCheckboxRow(rowItems_[i], SETTINGS.textAntiAliasing);
           break;
+        case StyleRow::BookStyleMemory:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.bookStyleMemory);
+          break;
         default:
           break;
       }
@@ -394,7 +407,7 @@ const char* TextSettingsActivity::confirmLabelText() const {
       if (ringPos() > 0) {
         const StyleRow row = styleRowAt(ringPos() - 1);
         if (row == StyleRow::ReadingGuideLineStyle || row == StyleRow::ReadingGuideLineOffset ||
-            row == StyleRow::FakeBold) {
+            row == StyleRow::FakeBold || row == StyleRow::ClearBookStyles) {
           return tr(STR_SELECT);
         }
       }
@@ -703,6 +716,49 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     case StyleRow::AntiAliasing:
       SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
       break;
+    case StyleRow::BookStyleMemory: {
+      const bool wasOn = SETTINGS.bookStyleMemory;
+      SETTINGS.bookStyleMemory = !wasOn;
+      if (wasOn && bookOverrideMode()) {
+        // Turning per-book memory off mid-session: drop the overrides already
+        // applied to the in-memory settings and persist the global baseline,
+        // so the book follows the global settings immediately and later global
+        // edits are not rolled back on exit. The stored entry is kept;
+        // re-enabling memory reapplies it.
+        applyStyleToSettings(*globalSnapshot_);
+        SETTINGS.saveToFile();
+      }
+      break;
+    }
+    case StyleRow::ClearBookStyles: {
+      // Two-step confirm: forgetting a book's overrides is not recoverable.
+      constexpr StrId CONFIRM_OPTIONS[] = {StrId::STR_CANCEL, StrId::STR_OK_BUTTON};
+      if (bookPath_ != nullptr) {
+        optionPopup_.show(StrId::STR_CLEAR_BOOK_OVERRIDES_CONFIRM, CONFIRM_OPTIONS,
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
+                            if (idx == 1) {
+                              BOOK_STYLES.removeByPath(*bookPath_);
+                              // The book opened with these overrides applied to
+                              // the in-memory settings; restore the global
+                              // snapshot (when one was taken) so the session
+                              // (and the exit capture) sees the global values
+                              // again. With memory off no snapshot exists and
+                              // the in-memory values are already global.
+                              if (globalSnapshot_) {
+                                applyStyleToSettings(*globalSnapshot_);
+                                SETTINGS.saveToFile();
+                              }
+                            }
+                          });
+      } else {
+        optionPopup_.show(StrId::STR_CLEAR_BOOK_STYLES_CONFIRM, CONFIRM_OPTIONS,
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [](int idx) {
+                            if (idx == 1) BOOK_STYLES.clear();
+                          });
+      }
+      requestUpdate();
+      return;
+    }
 
     default:
       return;
@@ -734,6 +790,10 @@ std::string TextSettingsActivity::styleValueText(int row) const {
     }
     case StyleRow::AntiAliasing:
       return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::BookStyleMemory:
+      return SETTINGS.bookStyleMemory ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ClearBookStyles:
+      return "";
 
     default:
       return "";
@@ -745,7 +805,8 @@ std::string TextSettingsActivity::styleValueText(int row) const {
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
   if (ringPos() == 0 || tab_ != Tab::Style) return false;
   const StyleRow row = styleRowAt(ringPos() - 1);
-  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
+  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing ||
+         row == StyleRow::BookStyleMemory || row == StyleRow::ClearBookStyles;
 }
 
 void TextSettingsActivity::switchTab(const int direction) {
