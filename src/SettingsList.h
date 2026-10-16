@@ -288,7 +288,7 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
 
     std::vector<SettingInfo> v;
-    constexpr size_t entryCount = 87
+    constexpr size_t entryCount = 88
 #if FREEINK_CAP_FRONTLIGHT
                                   + 1
 #endif
@@ -412,6 +412,11 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                             "readingBackgroundEnabled", StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_READING_GUIDE_LINE, &CrossPointSettings::readingGuideLineEnabled,
                             "readingGuideLineEnabled", StrId::STR_CAT_READER)
+            .withTextSettings(),
+    });
+    v.insert(v.end(), {
+        SettingInfo::Toggle(StrId::STR_VERTICAL_BOTTOM_ALIGN, &CrossPointSettings::verticalBottomAlign,
+                            "verticalBottomAlign", StrId::STR_CAT_READER)
             .withTextSettings(),
     });
     v.insert(v.end(), {
