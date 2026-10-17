@@ -135,6 +135,8 @@ add_test(NAME ClippingSelectionText COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/t
 add_test(NAME SelectionButtons COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_selection_buttons.py)
 add_test(NAME WeReadLogout
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_weread_logout.py)
+add_test(NAME WeReadConnection
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_weread_connection.py)
 add_test(NAME BuiltinFontShrink
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_builtin_font_shrink.py)
 add_test(NAME PioarduinoCache
