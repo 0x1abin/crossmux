@@ -55,12 +55,12 @@ FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManag
       basepath(initialPath.empty() ? "/" : std::move(initialPath)) {}
 
 void FileBrowserActivity::loadFiles() {
+  clearContentSelection();
   prewarmedStart = -1;
   files.clear();
 
   auto root = Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
-    rebuildRowItems();  // files is empty; also drops any now-stale cached rows
     return;
   }
 
@@ -69,7 +69,6 @@ void FileBrowserActivity::loadFiles() {
   if (!fileNameBuffer) {
     LOG_ERR("FileBrowser", "fileNameBuffer not allocated");
     root.close();
-    rebuildRowItems();
     return;
   }
 
@@ -113,63 +112,6 @@ void FileBrowserActivity::loadFiles() {
   root.close();
   FsHelpers::sortFileList(files);
   if (browserState == BrowserState::ChoosingMoveDestination) files.insert(files.begin(), MOVE_HERE_ENTRY);
-  rebuildRowItems();
-}
-
-// Derives rowNames/rowExtensions/rowItems from `files`. Called whenever
-// `files` changes (end of loadFiles()) so buildScreen() can reuse the cached
-// rows on every repaint instead of re-deriving a name/extension string (and a
-// ListItem) per file each time it's called.
-void FileBrowserActivity::rebuildRowItems() {
-  rowsUseFileIcons = UITheme::getInstance().getTheme().showsFileIcons();
-  if (!UITheme::getInstance().hasMainTabs()) {
-    rowNames.clear();
-    rowExtensions.clear();
-    rowItems.clear();
-    gridLabels.clear();
-    return;
-  }
-  rowNames.resize(files.size());
-  rowExtensions.resize(files.size());
-  rowItems.clear();
-  rowItems.reserve(files.size());
-  gridLabels.clear();
-  if (usesIconLayout()) {
-    gridLabels.resize(files.size());
-    const int labelWidth = std::max(1, renderer.getScreenWidth() / InxGridGeometry::columns - 16);
-    for (size_t i = 0; i < files.size(); ++i) {
-      gridLabels[i] = renderer.truncatedText(UI_10_FONT_ID, getFileName(files[i]).c_str(), labelWidth);
-    }
-  }
-  for (size_t i = 0; i < files.size(); i++) {
-    rowNames[i] = files[i] == MOVE_HERE_ENTRY ? tr(STR_MOVE_HERE) : getFileName(files[i]);
-    rowExtensions[i] = files[i] == MOVE_HERE_ENTRY ? "" : getFileExtension(files[i]);
-    fui::ListItem item;
-    item.label = rowNames[i].c_str();
-    if (!rowExtensions[i].empty()) item.value = rowExtensions[i].c_str();
-    if (files[i] != MOVE_HERE_ENTRY) item.icon = listIconFor(UITheme::getFileIcon(files[i]));
-    item.actionValue = static_cast<int16_t>(i);
-    rowItems.push_back(item);
-  }
-
-  // One SD pass for every CJK filename in the folder; repaints then hit the
-  // resident tables instead of re-reading per-string. Getter form: no
-  // concatenated copy (a bare-new string append aborts under heap pressure).
-  // The last index covers the bottom path band: basepath (possibly a CJK
-  // folder name) draws in the same small font, so it must live in the same
-  // batch or it would evict the rows' glyphs when the heap gate disables
-  // union merging. (prewarmFallbackText appends the truncation ellipsis.)
-  struct PrewarmCtx {
-    const std::vector<std::string>* names;
-    const std::string* path;
-  } prewarmCtx{&rowNames, &basepath};
-  renderer.prewarmFallbackText(
-      uiScaleSpec().smallFontId,
-      [](const void* ctx, uint32_t i) -> const char* {
-        const auto* c = static_cast<const PrewarmCtx*>(ctx);
-        return i < c->names->size() ? (*c->names)[i].c_str() : c->path->c_str();
-      },
-      &prewarmCtx, static_cast<uint32_t>(rowNames.size()) + 1);
 }
 
 bool FileBrowserActivity::usesIconLayout() const {
@@ -177,8 +119,8 @@ bool FileBrowserActivity::usesIconLayout() const {
          InxGridGeometry::layoutFrom(SETTINGS.inxLibraryLayout) == InxItemLayout::Icons;
 }
 
-void FileBrowserActivity::drawIconGrid(UiScreen& screen, const fui::Rect rect) const {
-  const int start = InxGridGeometry::pageStart(nav.selected, files.size());
+void FileBrowserActivity::drawIconGrid(UiScreen& screen, const fui::Rect rect) {
+  const int start = nav.top;
   constexpr int iconSize = 72;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const bool showSelection = showMainTabContentSelection();
@@ -197,10 +139,15 @@ void FileBrowserActivity::drawIconGrid(UiScreen& screen, const fui::Rect rect) c
       renderer.drawIconInverted(icon, iconX, iconY, iconSize);
     else
       renderer.drawIcon(icon, iconX, iconY, iconSize);
-    const char* label =
-        index < static_cast<int>(gridLabels.size()) ? gridLabels[index].c_str() : rowNames[index].c_str();
-    const int labelX = cell.x + (cell.width - renderer.getTextWidth(UI_10_FONT_ID, label)) / 2;
-    renderer.drawText(UI_10_FONT_ID, labelX, iconY + iconSize + 6, label, !selected);
+    freeink::ui::ListItem item;
+    provideRow(this, static_cast<uint16_t>(index), item);
+    auto text = screen.theme().bodyText;
+    text.align = fui::TextAlign::Center;
+    text.bold = false;
+    text.color = selected ? fui::Color::White : fui::Color::Black;
+    screen.target().text(fui::Rect{static_cast<int16_t>(cell.x + 4), static_cast<int16_t>(iconY + iconSize + 6),
+                                   static_cast<int16_t>(std::max(1, cell.width - 8)), static_cast<int16_t>(lineHeight)},
+                         item.label, text);
     screen.frame().hit(fui::Rect{static_cast<int16_t>(cell.x), static_cast<int16_t>(cell.y),
                                  static_cast<int16_t>(cell.width), static_cast<int16_t>(cell.height)},
                        ACTION_ROW, static_cast<int16_t>(index), fui::InputTouch | fui::InputLongPress);
@@ -239,10 +186,6 @@ void FileBrowserActivity::onEnter() {
 void FileBrowserActivity::onExit() {
   Activity::onExit();
   files.clear();
-  rowNames.clear();
-  rowExtensions.clear();
-  gridLabels.clear();
-  rowItems.clear();
   fileNameBuffer.reset();
   moveSourcePath.clear();
   moveSourceEntry.clear();
@@ -276,17 +219,11 @@ void FileBrowserActivity::showEditMenu() {
   const std::string entry = cleanEntryName(files[nav.selected]);
   if (FsHelpers::isProtectedPathComponent(entry)) return;
 
-  if (UITheme::getInstance().hasMainTabs()) {
-    const char* actions[] = {tr(STR_RENAME), tr(STR_MOVE), tr(STR_DELETE)};
-    editPopup.show(entry.c_str(), actions, static_cast<int>(std::size(actions)), 0,
-                   [this](const int index) { executeEditAction(static_cast<EditAction>(index)); });
-  } else {
-    constexpr StrId actions[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME, StrId::STR_MOVE};
-    static constexpr EditAction order[] = {EditAction::Open, EditAction::Delete, EditAction::Rename, EditAction::Move};
-    editPopup.show(StrId::STR_FILENAME, actions, static_cast<int>(std::size(actions)), 0, [this](const int index) {
-      if (index >= 0 && index < static_cast<int>(std::size(order))) executeEditAction(order[index]);
-    });
-  }
+  constexpr StrId actions[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME, StrId::STR_MOVE};
+  static constexpr EditAction order[] = {EditAction::Open, EditAction::Delete, EditAction::Rename, EditAction::Move};
+  editPopup.show(StrId::STR_FILENAME, actions, static_cast<int>(std::size(actions)), 0, [this](const int index) {
+    if (index >= 0 && index < static_cast<int>(std::size(order))) executeEditAction(order[index]);
+  });
   requestUpdate();
 }
 
@@ -426,6 +363,7 @@ void FileBrowserActivity::finishEdit(const std::string& returnPath, const int fa
   loadFiles();
   if (!selectedEntry.empty()) {
     nav.selected = static_cast<int>(findEntry(selectedEntry));
+    if (!files.empty() && files[nav.selected] == selectedEntry) establishContentSelection(nav.selected);
   } else if (files.empty()) {
     nav.selected = 0;
   } else {
@@ -465,7 +403,7 @@ void FileBrowserActivity::activateIndex(const int index) {
 void FileBrowserActivity::onRowLongPress(const int index) {
   (void)index;  // base already synced nav.selected to the pressed row
   app.clearTapFlash();
-  if (mode != Mode::Books && !UITheme::getInstance().hasMainTabs()) {
+  if (mode != Mode::Books) {
     activateSelected();
   } else {
     showEditMenu();
@@ -508,12 +446,6 @@ void FileBrowserActivity::activateSelected() {
     return;
   }
 
-  if (UITheme::getInstance().hasMainTabs() && mode == Mode::Books && browserState == BrowserState::Browsing &&
-      mappedInput.getHeldTime() >= GO_HOME_MS) {
-    showEditMenu();
-    return;
-  }
-
   RenderLock lock(*this);
   if (basepath.back() != '/') basepath += "/";
   if (isDirectory) {
@@ -533,18 +465,6 @@ void FileBrowserActivity::activateSelected() {
 bool FileBrowserActivity::handleCustomInput() {
   if (editPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
 
-  if (usesIconLayout()) {
-    const auto swipe = mappedInput.wasSwipe();
-    if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
-      const int next =
-          swipe == MappedInputManager::SwipeDir::Up
-              ? ButtonNavigator::nextPageIndex(nav.selected, listCount(), InxGridGeometry::itemsPerPage)
-              : ButtonNavigator::previousPageIndex(nav.selected, listCount(), InxGridGeometry::itemsPerPage);
-      moveSelectionTo(next);
-      return true;
-    }
-  }
-
   // Long press BACK (1s+) goes to root folder (Books mode only).
   // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
   if (mode == Mode::Books && browserState == BrowserState::Browsing &&
@@ -552,7 +472,7 @@ bool FileBrowserActivity::handleCustomInput() {
       basepath != "/") {
     {
       // buildScreen() runs on the render task and reads basepath plus the
-      // row caches rebuildRowItems() frees; mutate only under the render lock.
+      // file list; mutate only under the render lock.
       RenderLock lock(*this);
       basepath = "/";
       loadFiles();
@@ -567,7 +487,7 @@ bool FileBrowserActivity::handleCustomInput() {
 }
 
 bool FileBrowserActivity::handleButtons() {
-  if (!UITheme::getInstance().hasMainTabs() && mode == Mode::Books && browserState == BrowserState::Browsing &&
+  if (mode == Mode::Books && browserState == BrowserState::Browsing &&
       mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, GO_HOME_MS)) {
     app.clearTapFlash();
     showEditMenu();
@@ -587,7 +507,7 @@ bool FileBrowserActivity::handleButtons() {
 
         {
           // buildScreen() runs on the render task and reads basepath plus the
-          // row caches rebuildRowItems() frees; mutate only under the render lock.
+          // file list; mutate only under the render lock.
           RenderLock lock(*this);
           basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
           if (basepath.empty()) basepath = "/";
@@ -596,6 +516,7 @@ bool FileBrowserActivity::handleButtons() {
           const auto pos = oldPath.find_last_of('/');
           const std::string dirName = oldPath.substr(pos + 1) + "/";
           nav.selected = static_cast<int>(findEntry(dirName));
+          if (!files.empty() && files[nav.selected] == dirName) establishContentSelection(nav.selected);
           nav.top = 0;
           nav.follow(listCount());
         }
@@ -681,18 +602,9 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
     return;
   }
 
-  // rowNames/rowExtensions/rowItems are built once per loadFiles() call (see
-  // rebuildRowItems()) and reused here. getFileName()'s folder-bracket format
-  // depends on the theme, so a theme change picked up while this activity was
-  // paused underneath another screen invalidates the cache before it's read.
-  if (rowsUseFileIcons != UITheme::getInstance().getTheme().showsFileIcons()) {
-    rebuildRowItems();
-  }
-
   if (usesIconLayout()) {
-    nav.visibleRows = InxGridGeometry::itemsPerPage;
-    nav.drawnRows = InxGridGeometry::itemsPerPage;
-    nav.top = InxGridGeometry::pageStart(nav.selected, listCount());
+    syncPagedViewport(InxGridGeometry::itemsPerPage);
+    prewarmRowGlyphs(nav.top);
     drawIconGrid(screen, screen.body());
     return;
   }

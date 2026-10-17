@@ -275,6 +275,7 @@ constexpr const uint8_t* get(const UIIcon icon) {
   switch (icon) {
     case UIIcon::Transfer:
       return Transfer.data();
+    case UIIcon::Library:
     case UIIcon::Opds:
       return Opds.data();
     case UIIcon::ReadingStats:

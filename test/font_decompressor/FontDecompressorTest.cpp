@@ -2,6 +2,8 @@
 #include <FontDecompressor.h>
 #include <builtinFonts/notosans_cjk_10.h>
 #include <builtinFonts/notosans_cjk_12.h>
+#include <builtinFonts/notosans_cjk_14.h>
+#include <builtinFonts/notosans_cjk_16.h>
 #include <builtinFonts/notosans_cjk_8.h>
 #include <gtest/gtest.h>
 
@@ -192,4 +194,37 @@ TEST_F(FontDecompressorTest, HotGroupAndGlyphAllocationFailureDoNotPublishStaleP
   }
   failAllocation = -1;
   ASSERT_NE(decoder.getBitmap(&data, &data.glyph[index], index), nullptr);
+}
+
+TEST_F(FontDecompressorTest, UiSizesPrewarmTheSamePixelsWithAndWithoutPsram) {
+  for (bool psram : {false, true}) {
+    testHasPsram = psram;
+    for (const auto* data : {&notosans_cjk_8, &notosans_cjk_10, &notosans_cjk_12, &notosans_cjk_14, &notosans_cjk_16}) {
+      FontDecompressor decoder;
+      std::string text;
+      std::vector<uint32_t> indices;
+      std::vector<std::vector<uint8_t>> pixels;
+      for (uint16_t g = 0; g < std::min<uint16_t>(data->groupCount, 8); ++g) {
+        const auto i = data->groups[g].firstGlyphIndex;
+        const auto& glyph = data->glyph[i];
+        if (!glyph.dataLength) continue;
+        const auto* bitmap = decoder.getBitmap(data, &glyph, i);
+        ASSERT_NE(bitmap, nullptr);
+        pixels.emplace_back(bitmap, bitmap + glyph.dataLength);
+        indices.push_back(i);
+        appendUtf8(text, codepointFor(*data, i));
+      }
+      decoder.clearCache();
+      ASSERT_EQ(0, decoder.prewarmCache(data, text.c_str()));
+      decoder.resetStats();
+      for (size_t j = 0; j < indices.size(); ++j) {
+        const auto i = indices[j];
+        const auto* bitmap = decoder.getBitmap(data, &data->glyph[i], i);
+        ASSERT_NE(bitmap, nullptr);
+        EXPECT_EQ(0, std::memcmp(bitmap, pixels[j].data(), pixels[j].size()));
+      }
+      EXPECT_EQ(0u, decoder.getStats().cacheMisses);
+      EXPECT_EQ(indices.size(), decoder.getStats().cacheHits);
+    }
+  }
 }

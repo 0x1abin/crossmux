@@ -145,7 +145,7 @@ bool FontCacheManager::needsPrewarmScan(const int fontId) const {
   return false;
 }
 
-bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanning; }
+bool FontCacheManager::isScanning() const { return scanMode_ != ScanMode::None; }
 
 uint8_t FontCacheManager::resolveScanStyle(int fontId, EpdFontFamily::Style style) const {
   const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
@@ -166,19 +166,29 @@ uint8_t FontCacheManager::resolveScanStyle(int fontId, EpdFontFamily::Style styl
 void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
   if (!text || *text == '\0') return;
 
+  const bool uiCjk = scanMode_ == ScanMode::UiCjk;
+  const EpdFontData* data = nullptr;
+  if (uiCjk) {
+    if (sdCardFonts_.count(fontId) || ttfFonts_.count(fontId)) return;
+    const auto font = fontMap_.find(fontId);
+    if (font == fontMap_.end()) return;
+    data = font->second.getData(style);
+    if (!data || !data->groups || !font->second.hasCodepoint(0x4E00, style)) return;
+  }
   uint8_t fontSlot = scanFontCount_;
   for (uint8_t i = 0; i < scanFontCount_; i++) {
-    if (scanFontIds_[i] == fontId) {
+    if (uiCjk ? scanFontData_[i] == data : scanFontIds_[i] == fontId) {
       fontSlot = i;
       break;
     }
   }
   if (fontSlot == scanFontCount_) {
     if (scanFontCount_ >= MAX_SCAN_FONTS) return;
+    scanFontData_[scanFontCount_] = data;
     scanFontIds_[scanFontCount_++] = fontId;
   }
 
-  const uint8_t resolvedStyle = resolveScanStyle(fontId, style);
+  const uint8_t resolvedStyle = uiCjk ? 0 : resolveScanStyle(fontId, style);
   const uint8_t group = fontSlot * 4 + resolvedStyle;
   const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text);
   while (*cursor) {
@@ -227,10 +237,17 @@ uint32_t FontCacheManager::consumeMissingChineseCodepoint() {
 
 // --- PrewarmScope implementation ---
 
-FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manager_(&manager) {
-  manager_->scanMode_ = ScanMode::Scanning;
-  manager_->clearCache();
-  manager_->resetStats();
+FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : PrewarmScope(manager, ScanMode::AllFonts) {}
+
+FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager, const ScanMode mode)
+    : manager_(&manager), mode_(mode) {
+  manager_->scanMode_ = mode;
+  if (mode == ScanMode::UiCjk) {
+    if (manager_->fontDecompressor_) manager_->fontDecompressor_->clearCache();
+  } else {
+    manager_->clearCache();
+    manager_->resetStats();
+  }
   manager_->scanCodepointCount_ = 0;
   manager_->scanFontCount_ = 0;
   manager_->scanOverflowWarned_ = false;
@@ -241,6 +258,7 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
 }
 
 void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
+  if (!manager_ || manager_->scanMode_ == ScanMode::None) return;
   manager_->scanMode_ = ScanMode::None;
   if (manager_->scanCodepointCount_ == 0) return;
 
@@ -270,7 +288,12 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
     const uint8_t fontSlot = static_cast<uint8_t>(group) / 4;
     const uint8_t style = static_cast<uint8_t>(group) & 0x03;
     // This group is the complete glyph set for one font/style in this render.
-    manager_->prewarmCache(manager_->scanFontIds_[fontSlot], utf8Text, 1 << style, /*accumulate=*/false);
+    if (mode_ == ScanMode::UiCjk) {
+      if (manager_->fontDecompressor_)
+        manager_->fontDecompressor_->prewarmCache(manager_->scanFontData_[fontSlot], utf8Text);
+    } else {
+      manager_->prewarmCache(manager_->scanFontIds_[fontSlot], utf8Text, 1 << style, /*accumulate=*/false);
+    }
   }
 
   manager_->scanCodepointCount_ = 0;
@@ -279,15 +302,22 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
 }
 
 FontCacheManager::PrewarmScope::~PrewarmScope() {
-  if (active_) {
-    endScanAndPrewarm();  // no-op if already called
+  if (!manager_) return;
+  endScanAndPrewarm();
+  if (mode_ == ScanMode::UiCjk) {
+    if (manager_->fontDecompressor_) manager_->fontDecompressor_->clearCache();
+  } else {
     manager_->clearCache();
   }
 }
 
 FontCacheManager::PrewarmScope::PrewarmScope(PrewarmScope&& other) noexcept
-    : manager_(other.manager_), active_(other.active_) {
-  other.active_ = false;
+    : manager_(other.manager_), mode_(other.mode_) {
+  other.manager_ = nullptr;
 }
 
 FontCacheManager::PrewarmScope FontCacheManager::createPrewarmScope() { return PrewarmScope(*this); }
+
+FontCacheManager::PrewarmScope FontCacheManager::createUiCjkPrewarmScope() {
+  return PrewarmScope(*this, ScanMode::UiCjk);
+}

@@ -15,6 +15,10 @@ void Activity::onExit() { LOG_DBG("ACT", "Exiting activity: %s", name.c_str()); 
 
 bool Activity::usesMainTabBar() const { return UITheme::getInstance().hasMainTabs() && mainTab() != MainTab::None; }
 
+bool Activity::defersContentSelection() const {
+  return mappedInput.hasTouch() && SETTINGS.uiTheme == CrossPointSettings::INX && usesMainTabBar();
+}
+
 MappedInputManager::Labels Activity::mainTabButtonLabels(const char* back, const char* confirm, const bool canMove,
                                                          const bool showTabDirections) const {
   if (!usesMainTabBar()) {
@@ -32,8 +36,7 @@ MappedInputManager::Labels Activity::mainTabButtonLabels(const char* back, const
 }
 
 bool Activity::showMainTabContentSelection() const {
-  return UITheme::getInstance().showSelectionCursor() &&
-         (!usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content);
+  return !usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content;
 }
 
 // Retain the instance-facing Activity layout API.

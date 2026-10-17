@@ -90,7 +90,7 @@ class OptionPopup {
       }
       ignoreInitialTouchContact = false;
     }
-    if (!upstreamStyle && UITheme::getInstance().hasMainTabs()) {
+    {
       const auto swipe = input.wasSwipe();
       if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
         freeink::ui::InputSnapshot release{};
@@ -130,7 +130,7 @@ class OptionPopup {
           requestUpdate();
           return true;
         }
-        if (snap.touchPressed && (upstreamStyle || !UITheme::getInstance().hasMainTabs())) {
+        if (snap.touchPressed) {
           // Touch-down on an option moves the highlight (route() latched the
           // hit as the active interaction; read it back, no re-hit-testing).
           const int16_t idx = interactions.activeIndex();
@@ -164,23 +164,25 @@ class OptionPopup {
   bool handleButtons(const bool previous, const bool next, const bool confirm, const bool back,
                      const std::function<void()>& requestUpdate) {
     if (!active) return false;
-    const int total = static_cast<int>(ownedStrings.size());
-    const int count = !upstreamStyle && UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
+    const int count = static_cast<int>(ownedStrings.size());
     if (count <= 0) return true;
     if (previous) {
       selectedIndex = (selectedIndex - 1 + count) % count;
       requestUpdate();
       return true;
-    } else if (next) {
+    }
+    if (next) {
       selectedIndex = (selectedIndex + 1) % count;
       requestUpdate();
       return true;
-    } else if (confirm) {
+    }
+    if (confirm) {
       active = false;
       if (onSelectCallback) onSelectCallback(selectedIndex);
       requestUpdate();
       return true;
-    } else if (back) {
+    }
+    if (back) {
       active = false;
       requestUpdate();
       return true;
@@ -221,10 +223,11 @@ class OptionPopup {
     interactions.beginPublishCycle();
     fui::Frame<INTERACTION_CAPACITY> frame(target, device, noInput, interactions);
 
-    if (!upstreamStyle && UITheme::getInstance().hasMainTabs()) {
+    if (!upstreamStyle && UITheme::getInstance().hasMainTabs() && headline.empty() && message.empty()) {
       const int optionCount = static_cast<int>(ownedStrings.size());
-      const auto layout = InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false),
-                                                    optionCount, selectedIndex);
+      auto layout = InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false),
+                                              optionCount, selectedIndex);
+      layout.first = windowStart(layout.rows);
       visibleOptionRows = layout.rows;
       const auto& panel = layout.panel;
       frame.hit(fui::Rect{static_cast<int16_t>(panel.x), static_cast<int16_t>(panel.y),
@@ -236,7 +239,7 @@ class OptionPopup {
                             static_cast<int16_t>(row.height)},
                   ACTION_OPTION, static_cast<int16_t>(layout.first + slot), fui::InputTouch);
       }
-      GUI.drawOptionPopup(renderer, title.c_str(), ownedStrings, selectedIndex);
+      GUI.drawOptionPopup(renderer, title.c_str(), ownedStrings, selectedIndex, layout.first);
       interactions.publish();
       uiReady = true;
       return;
@@ -244,15 +247,7 @@ class OptionPopup {
 
     const auto& metrics = uiThemeMetrics(upstreamStyle);
     const int totalOptions = static_cast<int>(ownedStrings.size());
-    const uint8_t count = static_cast<uint8_t>(totalOptions > MAX_OPTIONS ? MAX_OPTIONS : totalOptions);
-
     fui::DialogOption options[MAX_OPTIONS];
-    for (uint8_t i = 0; i < count; ++i) {
-      options[i].label = ownedStrings[i].c_str();
-      options[i].action = ACTION_OPTION;
-      options[i].value = static_cast<int16_t>(i);
-      options[i].state = (i == selectedIndex) ? fui::StateFocused : fui::StateNormal;
-    }
 
     fui::OptionDialogProps props;
     props.title = title.empty() ? nullptr : title.c_str();
@@ -264,7 +259,7 @@ class OptionPopup {
       props.messageText.maxLines = 6;
     }
     props.options = options;
-    props.optionCount = count;
+    props.optionCount = 0;
     props.verticalOptions = true;
     // Touch only: physical buttons stay on the legacy wrap/confirm path above,
     // so the buffer never competes with it for focus/confirm dispatch.
@@ -305,8 +300,22 @@ class OptionPopup {
     const fui::Rect screen = device.screen();
     const int16_t width =
         fui::clampI16(std::min<int>(screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2));
-    const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, screen.height);
-    const fui::Rect dialogRect = fui::centeredRect(screen, fui::Size{width, height});
+    const auto safe = device.safeRect();
+    const int textHeight = fui::optionDialogHeight(target, props, width);
+    const int availableHeight = std::max(0, static_cast<int>(safe.height) - textHeight - props.gap);
+    const int count = std::min(
+        {totalOptions, MAX_OPTIONS, std::max(1, (availableHeight + props.gap) / (props.buttonHeight + props.gap))});
+    const int first = windowStart(count);
+    visibleOptionRows = count;
+    for (int i = 0; i < count; ++i) {
+      options[i].label = ownedStrings[first + i].c_str();
+      options[i].action = ACTION_OPTION;
+      options[i].value = static_cast<int16_t>(first + i);
+      options[i].state = first + i == selectedIndex ? fui::StateFocused : fui::StateNormal;
+    }
+    props.optionCount = static_cast<uint8_t>(count);
+    const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, safe.height);
+    const fui::Rect dialogRect = fui::centeredRect(safe, fui::Size{width, height});
 
     // Chrome guard first, options after: route() scans newest-first, so the
     // option buttons win inside the dialog and the guard absorbs the rest.
@@ -339,6 +348,7 @@ class OptionPopup {
       return;
     }
     selectedIndex = std::clamp(currentIndex, 0, count - 1);
+    firstOption = -1;
     onSelectCallback = std::move(onSelect);
     ignoreInitialConfirmRelease = true;
     ignoreInitialTouchContact = true;
@@ -346,27 +356,22 @@ class OptionPopup {
     active = true;
   }
 
-  // The dialog has no scrolling, so options past MAX_OPTIONS would render off
-  // screen anyway; a fixed cap keeps the DialogOption array on the stack and
-  // the interaction table small. +1 slot for the chrome guard rect.
+  // Bound one render's buttons and hit table, while keeping all options reachable.
   static constexpr int MAX_OPTIONS = 16;
   static constexpr size_t INTERACTION_CAPACITY = MAX_OPTIONS + 1;
   static constexpr freeink::ui::ActionId ACTION_OPTION = 1;
   static constexpr freeink::ui::ActionId ACTION_CHROME = 2;
 
-  void activate(int currentIndex, std::function<void(int)> onSelect) {
-    const int total = static_cast<int>(ownedStrings.size());
-    const int count = !upstreamStyle && UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
-    if (count <= 0) {
-      active = false;
-      onSelectCallback = nullptr;
-      return;
+  int windowStart(const int rows) const {
+    const int maximum = std::max(0, static_cast<int>(ownedStrings.size()) - rows);
+    int first = firstOption.load();
+    if (first < 0 || selectedIndex < first || selectedIndex >= first + rows) {
+      first = std::clamp(selectedIndex - rows / 2, 0, maximum);
+    } else {
+      first = std::clamp(first, 0, maximum);
     }
-    selectedIndex = currentIndex >= 0 && currentIndex < count ? currentIndex : 0;
-    onSelectCallback = std::move(onSelect);
-    message.clear();
-    uiReady = false;
-    active = count > 0;
+    firstOption = first;
+    return first;
   }
 
   bool active = false;
@@ -381,6 +386,7 @@ class OptionPopup {
   // Written by the render task (frame registration), routed by the loop task;
   // uiReady closes the rebuild window exactly like UiListActivity::uiReady.
   mutable freeink::ui::InteractionBuffer<INTERACTION_CAPACITY> interactions;
+  mutable std::atomic<int> firstOption{-1};
   mutable std::atomic<int> visibleOptionRows{1};
   mutable std::atomic<bool> uiReady{false};
 };

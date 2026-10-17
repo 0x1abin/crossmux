@@ -217,7 +217,7 @@ class SettingsActivity final : public UiTabListActivity {
 
   bool preserveQuickResumeTimeoutOn = false;
   bool quickResumeTimeoutAutoEnabled = false;
-  bool dictionariesLoaded = false;
+  bool resourcesDirty = true;
 
   OptionPopup optionPopup;
 
@@ -256,7 +256,8 @@ class SettingsActivity final : public UiTabListActivity {
   void selectCategory(int categoryIndex);
   void applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr);
 
-  void toggleCurrentSetting();
+  void toggleSetting(const SettingInfo& setting);
+  void refreshAfterSettingChange(uint8_t CrossPointSettings::* valuePtr);
   void toggleAccordionSetting(int categoryIndex, int settingIndex);
   void toggleAccordionCategory(int categoryIndex);
   bool usesAccordion() const;

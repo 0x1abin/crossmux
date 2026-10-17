@@ -1,10 +1,8 @@
 #include "SettingsActivity.h"
 
 #include <BoardConfig.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
-#include <HalDisplay.h>
-#include <HalStorage.h>
-#include <HalSystem.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
 #if (FREEINK_DEVICE_MURPHY_M4 || FREEINK_CAP_HAPTIC) && !defined(SIMULATOR)
@@ -14,7 +12,6 @@
 #include <WiFi.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -47,7 +44,6 @@
 #include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
-#include "components/SubpageLayout.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
@@ -60,212 +56,6 @@ namespace fui = freeink::ui;
 
 namespace {
 constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
-constexpr uint64_t BYTES_PER_TENTH_GB = 100000000ULL;
-
-enum class AboutRow : uint8_t {
-  FirmwareName,
-  FirmwareVersion,
-  DeviceModel,
-  ChipModel,
-  ChipTemperature,
-  WifiMacAddress,
-  Uptime,
-  HeapFreeTotal,
-  LargestHeapBlock,
-  PsramHeapFreeTotal,
-  SdUsedTotal,
-  Count,
-};
-
-enum class StorageLoadState : uint8_t { Loading, Available, Unavailable };
-
-class InxAboutActivity final : public Activity {
- public:
-  InxAboutActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("About", renderer, mappedInput) {}
-
-  void onEnter() override {
-    Activity::onEnter();
-    heapInfo = HalSystem::getHeapInfo();
-    deviceName = BoardConfig::ACTIVE.name;
-#ifdef SIMULATOR
-    chipModel = "Simulator";
-    wifiMacAvailable = HalSystem::getDeviceId(wifiMac);
-    uptimeSeconds = millis() / 1000;
-#else
-    chipModel = HalSystem::getChipModel();
-    wifiMacAvailable = HalSystem::getWifiStationMac(wifiMac);
-    float temperature = 0.0f;
-    temperatureAvailable = HalSystem::getChipTemperatureCelsius(temperature);
-    if (temperatureAvailable) chipTemperatureCelsius = static_cast<int>(std::lround(temperature));
-    uptimeSeconds = HalSystem::getUptimeSeconds();
-#endif
-    storageLoadState = StorageLoadState::Loading;
-    requestUpdateAndWait();
-    storageLoadState =
-        Storage.getSpace(sdTotalBytes, sdFreeBytes) ? StorageLoadState::Available : StorageLoadState::Unavailable;
-    requestUpdate();
-  }
-
-  void loop() override {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      finish();
-      return;
-    }
-
-    const int pageItems = GUI.getListPageItems(contentRect().height, false);
-    if (pageItems <= 0 || rowCount() <= pageItems) return;
-    int nextPageStart = pageStart;
-    const auto swipe = mappedInput.wasSwipe();
-    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) || swipe == MappedInputManager::SwipeDir::Up) {
-      nextPageStart = ButtonNavigator::nextPageIndex(pageStart, rowCount(), pageItems);
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) ||
-               swipe == MappedInputManager::SwipeDir::Down) {
-      nextPageStart = ButtonNavigator::previousPageIndex(pageStart, rowCount(), pageItems);
-    }
-    if (nextPageStart == pageStart) return;
-    pageStart = nextPageStart;
-    requestUpdate();
-  }
-
-  void render(RenderLock&&) override {
-    renderer.clearScreen();
-    const auto& metrics = UITheme::getInstance().getMetrics();
-    const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-    GUI.drawHeader(renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, metrics.headerHeight},
-                   tr(STR_ABOUT));
-    const Rect content = contentRect();
-    GUI.drawList(
-        renderer, content, rowCount(), pageStart,
-        [this](const int index) {
-          static constexpr StrId LABELS[] = {
-              StrId::STR_ABOUT_FIRMWARE_NAME,
-              StrId::STR_ABOUT_FIRMWARE_VERSION,
-              StrId::STR_ABOUT_DEVICE_MODEL,
-              StrId::STR_ABOUT_CHIP_MODEL,
-              StrId::STR_ABOUT_CHIP_TEMPERATURE,
-              StrId::STR_ABOUT_WIFI_MAC_ADDRESS,
-              StrId::STR_ABOUT_UPTIME,
-              StrId::STR_ABOUT_HEAP_FREE_TOTAL,
-              StrId::STR_ABOUT_LARGEST_HEAP_BLOCK,
-              StrId::STR_ABOUT_PSRAM_HEAP_FREE_TOTAL,
-              StrId::STR_ABOUT_SD_USED_TOTAL,
-          };
-          static_assert(sizeof(LABELS) / sizeof(*LABELS) == static_cast<size_t>(AboutRow::Count));
-          return std::string(I18N.get(LABELS[static_cast<size_t>(rowAt(index))]));
-        },
-        nullptr, nullptr, [this](const int index) { return rowValue(rowAt(index)); }, false, nullptr, false);
-    const bool canPage = rowCount() > GUI.getListPageItems(content.height, false);
-    const auto labels =
-        mappedInput.mapLabels(tr(STR_BACK), "", canPage ? tr(STR_DIR_UP) : "", canPage ? tr(STR_DIR_DOWN) : "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
-  }
-
- private:
-  Rect contentRect() const {
-    const auto& metrics = UITheme::getInstance().getMetrics();
-    const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-    return Rect{safeArea.x, safeArea.y + metrics.topPadding + metrics.headerHeight, safeArea.width,
-                safeArea.height - metrics.topPadding - metrics.headerHeight};
-  }
-
-  bool hasPsram() const {
-#ifdef SIMULATOR
-    return false;
-#else
-    return heapInfo.totalPsramBytes > 0;
-#endif
-  }
-
-  int rowCount() const {
-    constexpr int psramRows = 1;
-    return static_cast<int>(AboutRow::Count) - (hasPsram() ? 0 : psramRows);
-  }
-
-  AboutRow rowAt(const int index) const {
-    if (!hasPsram() && index >= static_cast<int>(AboutRow::PsramHeapFreeTotal)) {
-      return static_cast<AboutRow>(index + 1);
-    }
-    return static_cast<AboutRow>(index);
-  }
-
-  std::string rowValue(const AboutRow row) const {
-    char value[48];
-    switch (row) {
-      case AboutRow::FirmwareName:
-        return tr(STR_CROSSPOINT);
-      case AboutRow::FirmwareVersion:
-        return CROSSPOINT_VERSION;
-      case AboutRow::DeviceModel:
-        return deviceName ? deviceName : tr(STR_NOT_AVAILABLE);
-      case AboutRow::ChipModel:
-        return chipModel ? chipModel : tr(STR_NOT_AVAILABLE);
-      case AboutRow::WifiMacAddress:
-        if (!wifiMacAvailable) return tr(STR_NOT_AVAILABLE);
-        snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X", wifiMac[0], wifiMac[1], wifiMac[2], wifiMac[3],
-                 wifiMac[4], wifiMac[5]);
-        return value;
-      case AboutRow::ChipTemperature:
-        if (!temperatureAvailable) return tr(STR_NOT_AVAILABLE);
-        snprintf(value, sizeof(value), "%d", chipTemperatureCelsius);
-        return value;
-      case AboutRow::Uptime: {
-        const uint64_t totalMinutes = uptimeSeconds / 60;
-        snprintf(value, sizeof(value), "%llu:%02llu:%02llu", static_cast<unsigned long long>(totalMinutes / (24 * 60)),
-                 static_cast<unsigned long long>(totalMinutes / 60 % 24),
-                 static_cast<unsigned long long>(totalMinutes % 60));
-        return value;
-      }
-      case AboutRow::HeapFreeTotal:
-        snprintf(value, sizeof(value), "%lu / %lu", static_cast<unsigned long>(heapInfo.freeBytes / 1024),
-                 static_cast<unsigned long>(heapInfo.totalBytes / 1024));
-        return value;
-      case AboutRow::LargestHeapBlock:
-        snprintf(value, sizeof(value), "%lu", static_cast<unsigned long>(heapInfo.largestFreeBlockBytes / 1024));
-        return value;
-      case AboutRow::PsramHeapFreeTotal:
-#ifdef SIMULATOR
-        return tr(STR_NOT_AVAILABLE);
-#else
-        snprintf(value, sizeof(value), "%lu / %lu", static_cast<unsigned long>(heapInfo.freePsramBytes / 1024),
-                 static_cast<unsigned long>(heapInfo.totalPsramBytes / 1024));
-        return value;
-#endif
-      case AboutRow::SdUsedTotal: {
-        switch (storageLoadState) {
-          case StorageLoadState::Loading:
-            return tr(STR_LOADING);
-          case StorageLoadState::Unavailable:
-            return tr(STR_NOT_AVAILABLE);
-          case StorageLoadState::Available:
-            break;
-        }
-        const uint64_t usedTenths = (sdTotalBytes - sdFreeBytes + BYTES_PER_TENTH_GB / 2) / BYTES_PER_TENTH_GB;
-        const uint64_t totalTenths = (sdTotalBytes + BYTES_PER_TENTH_GB / 2) / BYTES_PER_TENTH_GB;
-        snprintf(value, sizeof(value), "%llu.%llu / %llu.%llu", static_cast<unsigned long long>(usedTenths / 10),
-                 static_cast<unsigned long long>(usedTenths % 10), static_cast<unsigned long long>(totalTenths / 10),
-                 static_cast<unsigned long long>(totalTenths % 10));
-        return value;
-      }
-      case AboutRow::Count:
-        return {};
-    }
-    return {};
-  }
-
-  HalSystem::HeapInfo heapInfo{};
-  HalSystem::DeviceId wifiMac{};
-  const char* deviceName = nullptr;
-  const char* chipModel = nullptr;
-  uint64_t uptimeSeconds = 0;
-  uint64_t sdTotalBytes = 0;
-  uint64_t sdFreeBytes = 0;
-  int chipTemperatureCelsius = 0;
-  bool wifiMacAvailable = false;
-  bool temperatureAvailable = false;
-  StorageLoadState storageLoadState = StorageLoadState::Loading;
-  int pageStart = 0;
-};
 }  // namespace
 
 SettingsActivity::SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -280,6 +70,20 @@ void SettingsActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
 }
 
 void SettingsActivity::rebuildSettingsLists() {
+  RenderLock lock(*this);
+  closeRouting();
+  SettingInfo dictionarySetting;
+  bool hasDictionary = false;
+  if (!resourcesDirty) {
+    const auto dictionary = std::find_if(readerSettings.begin(), readerSettings.end(), [](const SettingInfo& setting) {
+      return setting.nameId == StrId::STR_DICTIONARY;
+    });
+    if (dictionary != readerSettings.end()) {
+      dictionarySetting = std::move(*dictionary);
+      if (!dictionarySetting.enumStringValues.empty()) dictionarySetting.enumStringValues[0] = tr(STR_NONE_OPT);
+      hasDictionary = true;
+    }
+  }
   displaySettings.clear();
   readerSettings.clear();
   controlsSettings.clear();
@@ -287,10 +91,10 @@ void SettingsActivity::rebuildSettingsLists() {
 
   // Pick up any fonts uploaded/deleted over the web server since the last
   // reader activity ran — otherwise the font-family picker shows stale list.
-  sdFontSystem.refreshIfDirty();
+  if (resourcesDirty) sdFontSystem.refreshIfDirty();
 
   std::vector<DictionaryEntry> dictionaries;
-  if (!usesAccordion() || dictionariesLoaded) DictionaryRegistry::discover(dictionaries);
+  if (resourcesDirty) DictionaryRegistry::discover(dictionaries);
 
   for (auto& setting : getSettingsList(&sdFontSystem.registry(), &dictionaries)) {
     if (setting.category == StrId::STR_NONE_OPT || home_button::isSetting(setting.valuePtr)) continue;
@@ -330,6 +134,9 @@ void SettingsActivity::rebuildSettingsLists() {
       systemSettings.push_back(setting);
     }
   }
+
+  if (hasDictionary) readerSettings.push_back(std::move(dictionarySetting));
+  resourcesDirty = false;
 
   // Append device-only ACTION items
   if (!BoardConfig::hasTouch()) {
@@ -415,7 +222,7 @@ void SettingsActivity::onEnter() {
   // from the base's per-tab nav reset)
   selectedCategoryIndex = 0;
   expandedCategories = 0;
-  dictionariesLoaded = !usesAccordion();
+  resourcesDirty = true;
   preserveQuickResumeTimeoutOn =
       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
   quickResumeTimeoutAutoEnabled = false;
@@ -425,6 +232,8 @@ void SettingsActivity::onEnter() {
 }
 
 void SettingsActivity::selectCategory(const int categoryIndex) {
+  RenderLock lock(*this);
+  closeRouting();
   selectedCategoryIndex = categoryIndex;
   switch (selectedCategoryIndex) {
     case 0:
@@ -513,11 +322,10 @@ void SettingsActivity::activateIndex(const int index) {
     app.clearTapFlash();
     return;
   }
-  (void)index;  // toggleCurrentSetting reads the ring position
   // Most rows repaint a different surface (popup, sub-activity, new value);
   // a lingering tap flash would gray an unrelated element.
   app.clearTapFlash();
-  toggleCurrentSetting();
+  toggleSetting((*currentSettings)[index]);
   // Tap-first: a tapped row is not a cursor position. Leaving it focused
   // (inverted) after the tap meant the row stayed black once its sub-screen or
   // popup closed, and Back then had to clear that focus before a second Back
@@ -548,14 +356,15 @@ void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valueP
   if (valuePtr != &CrossPointSettings::uiTheme) {
     return;
   }
-  RenderLock lock(*this);
-  UITheme::getInstance().reload();
-  expandedCategories = 0;
-  nav.reset();
+  {
+    RenderLock lock(*this);
+    UITheme::getInstance().reload();
+    expandedCategories = 0;
+    clearContentSelection();
+    nav.reset();
+    resetUi();
+  }
   rebuildSettingsLists();
-  // Re-derive the shared tokens for the new look; the gate stays closed until
-  // the repaint that rebuilds the interaction table in the new layout.
-  resetUi();
 }
 
 bool SettingsActivity::handleCustomInput() {
@@ -589,6 +398,8 @@ bool SettingsActivity::handleButtons() {
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       if (expandedCategories != 0) {
+        RenderLock lock(*this);
+        closeRouting();
         const auto row = InxAccordionGeometry::rowAt(accordionSettingCounts(), expandedCategories, nav.selected);
         const uint8_t mask = row.category >= 0 ? static_cast<uint8_t>(uint8_t{1} << row.category) : 0;
         expandedCategories =
@@ -606,7 +417,7 @@ bool SettingsActivity::handleButtons() {
     if (ringPos() == 0) {
       stepTab(1);
     } else {
-      toggleCurrentSetting();
+      activateIndex(ringPos() - 1);
       requestUpdate();
     }
     return true;
@@ -648,44 +459,31 @@ std::array<int, SettingsActivity::categoryCount> SettingsActivity::accordionSett
 }
 
 void SettingsActivity::toggleAccordionCategory(const int categoryIndex) {
+  const auto started = millis();
   if (categoryIndex < 0 || categoryIndex >= categoryCount) return;
   const uint8_t mask = static_cast<uint8_t>(uint8_t{1} << categoryIndex);
-  if (categoryIndex == 1 && !dictionariesLoaded && (expandedCategories & mask) == 0) {
-    dictionariesLoaded = true;
-    rebuildSettingsLists();
-  }
+  RenderLock lock(*this);
+  const auto locked = millis();
+  closeRouting();
   expandedCategories ^= mask;
   rebuildAccordionRows();
   nav.selected = InxAccordionGeometry::categoryRow(accordionSettingCounts(), expandedCategories, categoryIndex);
   nav.follow(listCount());
   requestUpdate();
+  LOG_DBG("SET", "Category %d expanded=%u rows=%d handler=%lu lockWait=%lu ms", categoryIndex,
+          static_cast<unsigned>(expandedCategories), listCount(), millis() - started, locked - started);
 }
 
 void SettingsActivity::toggleAccordionSetting(const int categoryIndex, const int settingIndex) {
   if (categoryIndex < 0 || categoryIndex >= categoryCount) return;
   const auto& settings = settingsForCategory(categoryIndex);
   if (settingIndex < 0 || settingIndex >= static_cast<int>(settings.size())) return;
-  selectedCategoryIndex = categoryIndex;
-  currentSettings = &settings;
-  settingsCount = static_cast<int>(settings.size());
-  tabNavs[static_cast<size_t>(categoryIndex)].selected = settingIndex + 1;
-  toggleCurrentSetting();
-  if (!usesAccordion()) return;
-  rebuildAccordionRows();
-  nav.selected =
-      InxAccordionGeometry::categoryRow(accordionSettingCounts(), expandedCategories, categoryIndex) + 1 + settingIndex;
-  nav.follow(listCount());
+  toggleSetting(settings[settingIndex]);
   requestUpdate();
 }
 
-void SettingsActivity::toggleCurrentSetting() {
+void SettingsActivity::toggleSetting(const SettingInfo& setting) {
   mappedInput.resetHomeButtonInput();
-  int selectedSetting = ringPos() - 1;
-  if (selectedSetting < 0 || selectedSetting >= settingsCount) {
-    return;
-  }
-
-  const auto& setting = (*currentSettings)[selectedSetting];
   const auto changedValuePtr = setting.valuePtr;
   const bool sleepScreenChanged = setting.valuePtr == &CrossPointSettings::sleepScreen;
   const bool quickResumeTimeoutChanged = setting.valuePtr == &CrossPointSettings::quickResumeSleepScreen;
@@ -714,10 +512,7 @@ void SettingsActivity::toggleCurrentSetting() {
                          SETTINGS.*valuePtr = idx;
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
                          SETTINGS.saveToFile();
-                         if (valuePtr == &CrossPointSettings::uiTheme)
-                           applyUiSettingChange(valuePtr);
-                         else
-                           rebuildSettingsLists();
+                         refreshAfterSettingChange(valuePtr);
                        });
       requestUpdate();
       return;
@@ -738,7 +533,7 @@ void SettingsActivity::toggleCurrentSetting() {
         if (managedPicker) return;
         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
         SETTINGS.saveToFile();
-        rebuildSettingsLists();
+        requestUpdate();
       };
       if (!setting.enumStringValues.empty()) {
         optionPopup.show(setting.nameId, setting.enumStringValues, cur, std::move(onSelect));
@@ -856,6 +651,7 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::ManageDictionaries:
         startActivityForResultWith<DictionaryDownloadActivity>([this](const ActivityResult&) {
+          resourcesDirty = true;
           SETTINGS.saveToFile();
           rebuildSettingsLists();
           requestUpdate();
@@ -884,10 +680,7 @@ void SettingsActivity::toggleCurrentSetting() {
         });
         break;
       case SettingAction::About:
-        if (usesAccordion())
-          startActivityForResultWith<InxAboutActivity>(resultHandler);
-        else
-          startActivityForResultWith<AboutActivity>(resultHandler);
+        startActivityForResultWith<AboutActivity>(resultHandler);
         break;
       case SettingAction::Plugins:
         startActivityForResultWith<PluginCatalogActivity>(resultHandler);
@@ -910,12 +703,18 @@ void SettingsActivity::toggleCurrentSetting() {
 
   syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
   SETTINGS.saveToFile();
-  if (changedValuePtr == &CrossPointSettings::uiTheme) {
-    applyUiSettingChange(changedValuePtr);
-  } else {
+  refreshAfterSettingChange(changedValuePtr);
+}
+
+void SettingsActivity::refreshAfterSettingChange(uint8_t CrossPointSettings::* valuePtr) {
+  if (valuePtr == &CrossPointSettings::uiTheme) {
+    applyUiSettingChange(valuePtr);
+  } else if (valuePtr == &CrossPointSettings::shortPwrBtn) {
     rebuildSettingsLists();
-    activeNav().selected = std::min(ringPos(), settingsCount);
+    activeNav().selected = std::min(activeNav().selected.load(), std::max(0, listCount() - (usesAccordion() ? 1 : 0)));
+    activeNav().follow(listCount());
   }
+  requestUpdate();
 }
 
 void SettingsActivity::confirmRestoreSystemSettings() {
@@ -969,6 +768,7 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
 }
 
 void SettingsActivity::releaseListsForMemoryHungryChild() {
+  resourcesDirty = true;
   RenderLock lock(*this);
   closeRouting();
   // clear() keeps vector capacity; swap it out so a stacked Settings activity
@@ -1210,5 +1010,13 @@ void SettingsActivity::drawFooter() {
 
 void SettingsActivity::render(RenderLock&& lock) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
+#if LOG_LEVEL >= 2
+  const auto started = millis();
+  if (auto* fonts = renderer.getFontCacheManager()) fonts->resetStats();
+#endif
   UiListActivity::render(std::move(lock));
+#if LOG_LEVEL >= 2
+  LOG_DBG("SET", "Settings render including display: %lu ms", millis() - started);
+  if (auto* fonts = renderer.getFontCacheManager()) fonts->logStats("settings");
+#endif
 }
