@@ -1,10 +1,12 @@
 #include "UiListActivity.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
 
 #include <algorithm>
+#include <optional>
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -225,6 +227,8 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
   const int drawn = n.drawnRows;
 
   screen.syncListViewport(n, props, listCount(), selectionOffset);
+  // Tab focus hides the row selection; it cannot satisfy a follow repaint.
+  if (!showMainTabContentSelection()) n.followPending = false;
 
   // When the selection is already visible in the current viewport (based on
   // the measured drawnRows rather than the unweighted visibleRows estimate),
@@ -257,6 +261,21 @@ void UiListActivity::drawFooter() {
 }
 
 void UiListActivity::render(RenderLock&&) {
+  const auto started = millis();
+  std::optional<FontCacheManager::PrewarmScope> prewarm;
+  if (auto* fonts = renderer.getFontCacheManager(); fonts && !fonts->isScanning()) {
+    prewarm.emplace(fonts->createUiCjkPrewarmScope());
+    drawChrome();
+    scanUi();
+    for (int pass = 0; activeNav().consumeRebuildNeeded() && pass < 8; ++pass) {
+      drawChrome();
+      scanUi();
+    }
+    drawFooter();
+    prewarm->endScanAndPrewarm();
+  }
+  const auto scanned = millis();
+  // Bitmap targets can write pixels during scanning; discard that temporary paint.
   renderer.clearScreen();
   drawChrome();
   renderUi();
@@ -271,5 +290,8 @@ void UiListActivity::render(RenderLock&&) {
     renderUi();
   }
   drawFooter();
+  const auto painted = millis();
   renderer.displayBuffer();
+  LOG_DBG("LIST", "%s scan=%lu paint=%lu display=%lu ms", name.c_str(), scanned - started, painted - scanned,
+          millis() - painted);
 }
