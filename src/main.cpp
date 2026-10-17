@@ -1278,12 +1278,6 @@ void loop() {
   if (gpio.wasUsbStateChanged() && !activityManager.isReaderActivity()) {
     activityManager.requestUpdate();
   }
-#ifndef CROSSPOINT_EMULATED
-  if (gpio.wasInputModalityChanged() && gpio.hasTouch() && UITheme::getInstance().hasMainTabs() &&
-      !activityManager.isReaderActivity()) {
-    activityManager.requestUpdate();
-  }
-#endif
 
   const unsigned long activityStartTime = millis();
   const bool readerWasActive = activityManager.isReaderActivity();

@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "MappedInputManager.h"
+#include "activities/ActivityManager.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #if FREEINK_CAP_TOUCH
@@ -26,6 +27,7 @@ UiListActivity::UiListActivity(const char* name, GfxRenderer& renderer, MappedIn
 
 void UiListActivity::onEnter() {
   Activity::onEnter();
+  contentSelection.reset(mappedInput, defersContentSelection());
   activeNav().reset();
   resetUi();
   app.on(ACTION_ROW, &UiListActivity::rowActionTrampoline, this);
@@ -51,6 +53,7 @@ void UiListActivity::rowActionTrampoline(const fui::ActionEvent& event, void* us
     return;
   }
 #endif
+  self->establishContentSelection(event.value);
   self->onRowAction(event);
 }
 
@@ -60,6 +63,7 @@ void UiListActivity::swipeDeleteTrampoline(const fui::ActionEvent& event, void* 
   if (event.value != self->revealedIndex.load() || !self->canSwipeDelete(event.value)) return;
   self->closeSwipeDelete();
   self->app.clearTapFlash();
+  self->establishContentSelection(event.value);
   self->swipeDelete(event.value);
 }
 
@@ -153,8 +157,13 @@ bool UiListActivity::handleButtons() {
 }
 
 bool UiListActivity::routeListTouch() {
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasScreenTouchPressed(touchX, touchY))
+    LOG_DBG("LIST", "%s touch down x=%d y=%d", name.c_str(), touchX, touchY);
   // Touch goes through the FreeInkApp: render() registered the row hit rects;
   // route the snapshot and let the action trampoline dispatch.
+  if (mappedInput.wasScreenTouchReleased()) LOG_DBG("LIST", "%s touch release", name.c_str());
   const auto route = UiAppHost::routeTouch(mappedInput, wantsTouchLongPress);
   // No pressed-state repaint: the render it triggers would drop a slow tap's
   // release inside the uiReady window (tap-to-activate needed two taps), and
@@ -164,34 +173,83 @@ bool UiListActivity::routeListTouch() {
 }
 
 void UiListActivity::moveSelectionTo(const int index) {
+  if (!hasContentSelection()) contentSelection.guardHeld(mappedInput);
 #if FREEINK_CAP_TOUCH
   closeSwipeDelete();
 #endif
   activeNav().requestSelection(index);
+  establishContentSelection(index);
   requestUpdate();
+}
+
+bool UiListActivity::hasContentSelection() const {
+  return !defersContentSelection() || (contentSelection.hasSelection() && listCount() > 0);
+}
+
+void UiListActivity::clearContentSelection() { contentSelection.clear(); }
+
+void UiListActivity::establishContentSelection(const int index) {
+  if (!defersContentSelection() || index < 0 || index >= listCount()) return;
+  activeNav().selected = index;
+  activityManager.focusMainTabContent();
+  contentSelection.establish();
+}
+
+bool UiListActivity::showMainTabContentSelection() const {
+  return defersContentSelection() ? contentSelectionVisibleForFrame : Activity::showMainTabContentSelection();
+}
+
+bool UiListActivity::consumeSelectionEntryInput() {
+  const auto entry = contentSelection.consumeEntry(mappedInput, defersContentSelection(), hasContentSelection());
+  using Entry = UiContentSelection::Entry;
+  switch (entry) {
+    case Entry::None:
+      return false;
+    case Entry::Consumed:
+      return true;
+    case Entry::Confirm:
+      if (listCount() > 0) moveSelectionTo(initialConfirmIndex());
+      return true;
+    case Entry::First:
+      if (listCount() > 0) moveSelectionTo(0);
+      return true;
+    case Entry::Last:
+      if (listCount() > 0) moveSelectionTo(listCount() - 1);
+      return true;
+  }
+  return false;
 }
 
 void UiListActivity::loop() {
   if (handleCustomInput()) return;
+  const bool selectionEntryConsumed = consumeSelectionEntryInput();
 #if FREEINK_CAP_TOUCH
   if (handleSwipeDeleteInput()) return;
 #endif
-  if (handleButtons()) return;
+  if (!selectionEntryConsumed && handleButtons()) return;
   if (routeListTouch()) return;
 
   // Swipes scroll the viewport; the selection stays put (it may scroll
   // off-screen) and button navigation pulls the view back to it.
-  const auto swipe = mappedInput.wasSwipe();
+  int startX = 0;
+  int startY = 0;
+  const auto swipe = mappedInput.wasSwipe(&startX, &startY);
+  if (handleListSwipe(swipe, startX, startY)) return;
+
+  if (!selectionEntryConsumed) navigateButtons();
+}
+
+bool UiListActivity::handleListSwipe(const MappedInputManager::SwipeDir swipe, const int, const int) {
   if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+    if (defersContentSelection()) activityManager.focusMainTabContent();
     auto& n = activeNav();
     const int delta = swipe == MappedInputManager::SwipeDir::Up ? n.inputPageRows() : -n.inputPageRows();
     LOG_DBG("LIST", "%s swipe delta=%d count=%d", name.c_str(), delta, listCount());
     n.requestScroll(delta);
     requestUpdate();
-    return;
+    return true;
   }
-
-  navigateButtons();
+  return false;
 }
 
 void UiListActivity::navigateButtons() {
@@ -227,7 +285,8 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
   const int drawn = n.drawnRows;
 
   screen.syncListViewport(n, props, listCount(), selectionOffset);
-  // Tab focus hides the row selection; it cannot satisfy a follow repaint.
+  if (defersContentSelection() && !showMainTabContentSelection()) props.selectedIndex = -1;
+  // Tab focus intentionally hides the row selection; it cannot satisfy a follow repaint.
   if (!showMainTabContentSelection()) n.followPending = false;
 
   // When the selection is already visible in the current viewport (based on
@@ -241,6 +300,16 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
       props.topIndex = static_cast<uint16_t>(prevTop);
     }
   }
+}
+
+void UiListActivity::syncPagedViewport(const int pageItems) {
+  auto& n = activeNav();
+  fui::ListProps props;
+  const int rows = std::max(1, pageItems);
+  n.syncToProps(fui::Rect{0, 0, 1, static_cast<int16_t>(rows)}, 1, 0, listCount(), props);
+  n.drawnCount = listCount();
+  n.onListRendered(props.topIndex, std::min(rows, std::max(0, listCount() - n.top)),
+                   props.selectedIndex >= n.top && props.selectedIndex < n.top + rows);
 }
 
 void UiListActivity::drawChrome() {
@@ -262,6 +331,7 @@ void UiListActivity::drawFooter() {
 
 void UiListActivity::render(RenderLock&&) {
   const auto started = millis();
+  contentSelectionVisibleForFrame = Activity::showMainTabContentSelection() && UiListActivity::hasContentSelection();
   std::optional<FontCacheManager::PrewarmScope> prewarm;
   if (auto* fonts = renderer.getFontCacheManager(); fonts && !fonts->isScanning()) {
     prewarm.emplace(fonts->createUiCjkPrewarmScope());

@@ -274,14 +274,91 @@ bool drawCover(const GfxRenderer& renderer, const ReadingBookStats& book, const 
 }  // namespace
 
 void ReadingStatsActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
-  selectedIndex = MainTabs::contentEdgeIndex(edge, static_cast<int>(READING_STATS.getBooks().size()) + 1);
+  moveSelectionTo(MainTabs::contentEdgeIndex(edge, static_cast<int>(READING_STATS.getBooks().size()) + 1));
+}
+
+int ReadingStatsActivity::displayedIndex() const {
+  return defersContentSelection() ? viewIndex.load() : selectedIndex.load();
+}
+
+bool ReadingStatsActivity::hasContentSelection() const {
+  if (!defersContentSelection()) return true;
+  const int index = selectedIndex.load();
+  return contentSelection.hasSelection() && index >= 0 && index <= static_cast<int>(READING_STATS.getBooks().size()) &&
+         index == renderedCoverView.load();
+}
+
+void ReadingStatsActivity::establishContentSelection(const int index) {
+  if (index < 0 || index > static_cast<int>(READING_STATS.getBooks().size())) return;
+  selectedIndex = index;
+  if (!defersContentSelection()) return;
+  viewIndex = index;
+  activityManager.focusMainTabContent();
+  contentSelection.establish();
+}
+
+void ReadingStatsActivity::moveSelectionTo(const int index) {
+  if (defersContentSelection() && !hasContentSelection()) contentSelection.guardHeld(mappedInput);
+  establishContentSelection(std::clamp(index, 0, static_cast<int>(READING_STATS.getBooks().size())));
+  requestUpdate();
+}
+
+bool ReadingStatsActivity::consumeSelectionEntryInput() {
+  const auto entry = contentSelection.consumeEntry(mappedInput, defersContentSelection(), hasContentSelection());
+  using Entry = UiContentSelection::Entry;
+  switch (entry) {
+    case Entry::None:
+      return false;
+    case Entry::Consumed:
+      return true;
+    case Entry::Confirm: {
+      const int visible = renderedCoverView.load();
+      moveSelectionTo(visible < 0 ? displayedIndex() : visible);
+      return true;
+    }
+    case Entry::First:
+      moveSelectionTo(0);
+      return true;
+    case Entry::Last:
+      moveSelectionTo(static_cast<int>(READING_STATS.getBooks().size()));
+      return true;
+  }
+  return false;
 }
 
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
-  if (!usesInxLayout()) renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
-  selectedIndex = usesInxLayout() ? 0 : (READING_STATS.getBooks().empty() ? 0 : 1);
-  waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
+  selectedIndex = READING_STATS.getBooks().empty() ? 0 : 1;
+  viewIndex = selectedIndex.load();
+  contentSelection.reset(mappedInput, defersContentSelection());
+  resetUi();
+  app.setScreen(
+      [](UiScreen& screen, void* user) {
+        const auto* self = static_cast<ReadingStatsActivity*>(user);
+        for (int i = 0; i < self->touchTargetCount; ++i) {
+          const auto& target = self->touchTargets[i];
+          screen.frame().hit(
+              freeink::ui::Rect{static_cast<int16_t>(target.bounds.x), static_cast<int16_t>(target.bounds.y),
+                                static_cast<int16_t>(target.bounds.width), static_cast<int16_t>(target.bounds.height)},
+              ACTION_ENTRY, static_cast<int16_t>(target.entry), freeink::ui::InputTouch | freeink::ui::InputLongPress);
+        }
+      },
+      this);
+  app.on(
+      ACTION_ENTRY,
+      [](const freeink::ui::ActionEvent& event, void* user) {
+        auto* self = static_cast<ReadingStatsActivity*>(user);
+        if (event.value < 0 || event.value > static_cast<int>(READING_STATS.getBooks().size())) return;
+        self->establishContentSelection(event.value);
+        self->app.clearTapFlash();
+        if (event.longPress && event.value > 0)
+          self->confirmRemoveSelectedBook();
+        else
+          self->openSelectedEntry();
+      },
+      this);
+  waitForConfirmRelease = !defersContentSelection() && mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForBackRelease = false;
   waitingForCoverRender = false;
   renderedCoverMissing = false;
@@ -299,85 +376,86 @@ void ReadingStatsActivity::onExit() {
   Activity::onExit();
 }
 
-void ReadingStatsActivity::loop() {
-  const int bookCount = static_cast<int>(READING_STATS.getBooks().size());
-  const int selectableCount = bookCount + 1;
-  const int pageItems = BOOKS_PER_PAGE;
+ReadingStatsActivity::InputFlow ReadingStatsActivity::handleButtons() {
+  InputFlow flow = InputFlow::All;
 
   if (waitForBackRelease) {
     if (!mappedInput.isPressed(MappedInputManager::Button::Back) &&
         !mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       waitForBackRelease = false;
     }
-    return;
+    if (!defersContentSelection()) return InputFlow::Stop;
+    flow = InputFlow::TouchOnly;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+  if (flow == InputFlow::All && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
-    return;
+    return InputFlow::Stop;
   }
 
   if (waitForConfirmRelease) {
     if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
       waitForConfirmRelease = false;
     }
-    return;
+    if (!defersContentSelection()) return InputFlow::Stop;
+    flow = InputFlow::TouchOnly;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  if (consumeSelectionEntryInput()) flow = InputFlow::TouchOnly;
+  if (flow == InputFlow::All && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (selectedIndex > 0 && mappedInput.getHeldTime() >= BOOK_LONG_PRESS_MS) {
       confirmRemoveSelectedBook();
-      return;
+      return InputFlow::Stop;
     }
 
     openSelectedEntry();
-    return;
+    return InputFlow::Stop;
   }
 
-  if (usesInxLayout()) {
-    const auto moveSelection = [this, bookCount](const int delta) {
-      selectedIndex = InxStatisticsGeometry::adjacentView(selectedIndex, bookCount, delta);
-      requestUpdate();
-    };
+  return flow;
+}
 
-    int touchX = 0;
-    int touchY = 0;
-    if (mappedInput.wasScreenTapped(touchX, touchY)) {
-      if (selectedIndex > 0 && mappedInput.getHeldTime() >= BOOK_LONG_PRESS_MS) {
-        confirmRemoveSelectedBook();
-      } else {
-        openSelectedEntry();
-      }
+void ReadingStatsActivity::loop() {
+  const auto flow = handleButtons();
+  switch (flow) {
+    case InputFlow::Stop:
       return;
+    case InputFlow::TouchOnly:
+    case InputFlow::All:
+      break;
+  }
+  const int selectableCount = static_cast<int>(READING_STATS.getBooks().size()) + 1;
+  const int pageItems = usesInxLayout() ? 1 : BOOKS_PER_PAGE;
+  const auto routed = routeTouch(mappedInput, true);
+  if (routed.routed && app.invalidated()) requestUpdate();
+  if (routed) return;
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe != MappedInputManager::SwipeDir::None) {
+    const int before = displayedIndex();
+    int next;
+    if (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Up) {
+      next = ButtonNavigator::nextPageIndex(before, selectableCount, pageItems);
+    } else {
+      next = ButtonNavigator::previousPageIndex(before, selectableCount, pageItems);
     }
-
-    const auto swipe = mappedInput.wasSwipe();
-    if (swipe == MappedInputManager::SwipeDir::Left) {
-      moveSelection(1);
-      return;
+    if (defersContentSelection()) {
+      viewIndex = next;
+      activityManager.focusMainTabContent();
+    } else {
+      selectedIndex = next;
     }
-    if (swipe == MappedInputManager::SwipeDir::Right) {
-      moveSelection(-1);
-      return;
-    }
-
-    buttonNavigator.onNextRelease([moveSelection] { moveSelection(1); });
-    buttonNavigator.onPreviousRelease([moveSelection] { moveSelection(-1); });
-    buttonNavigator.onNextContinuous([moveSelection] { moveSelection(1); });
-    buttonNavigator.onPreviousContinuous([moveSelection] { moveSelection(-1); });
-    if (showMainTabContentSelection()) prepareVisibleCover();
+    LOG_DBG("INX", "Statistics swipe=%d from=%d to=%d", static_cast<int>(swipe), before, next);
+    requestUpdate();
     return;
   }
+  if (defersContentSelection() || showMainTabContentSelection()) prepareVisibleCover();
+  if (flow == InputFlow::TouchOnly) return;
 
-  buttonNavigator.onNextRelease([this, selectableCount] {
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, selectableCount);
-    requestUpdate();
-  });
+  buttonNavigator.onNextRelease(
+      [this, selectableCount] { moveSelectionTo(ButtonNavigator::nextIndex(selectedIndex, selectableCount)); });
 
-  buttonNavigator.onPreviousRelease([this, selectableCount] {
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, selectableCount);
-    requestUpdate();
-  });
+  buttonNavigator.onPreviousRelease(
+      [this, selectableCount] { moveSelectionTo(ButtonNavigator::previousIndex(selectedIndex, selectableCount)); });
 
   buttonNavigator.onNextContinuous([this, selectableCount, pageItems] {
     if (selectableCount <= 1) {
@@ -390,6 +468,7 @@ void ReadingStatsActivity::loop() {
       const int bookIndex = selectedIndex - 1;
       selectedIndex = ButtonNavigator::nextPageIndex(bookIndex, selectableCount - 1, pageItems) + 1;
     }
+    establishContentSelection(selectedIndex);
     requestUpdate();
   });
 
@@ -404,6 +483,7 @@ void ReadingStatsActivity::loop() {
       const int bookIndex = selectedIndex - 1;
       selectedIndex = ButtonNavigator::previousPageIndex(bookIndex, selectableCount - 1, pageItems) + 1;
     }
+    establishContentSelection(selectedIndex);
     requestUpdate();
   });
 }
@@ -444,6 +524,11 @@ void ReadingStatsActivity::confirmRemoveSelectedBook() {
         if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
           const int bookCount = static_cast<int>(READING_STATS.getBooks().size());
           selectedIndex = InxStatisticsGeometry::clampView(currentSelection, bookCount);
+          if (defersContentSelection()) {
+            closeRouting();
+            contentSelection.clear();
+            viewIndex = InxStatisticsGeometry::clampView(viewIndex.load(), bookCount);
+          }
         }
 
         guardBackReturn();
@@ -458,16 +543,15 @@ void ReadingStatsActivity::guardBackReturn() {
 }
 
 void ReadingStatsActivity::prepareVisibleCover() {
-  if (waitingForCoverRender || !renderedCoverMissing || renderedCoverView != selectedIndex ||
-      attemptedCoverView == selectedIndex)
-    return;
+  const int view = displayedIndex();
+  if (waitingForCoverRender || !renderedCoverMissing || renderedCoverView != view || attemptedCoverView == view) return;
 
   const auto& books = READING_STATS.getBooks();
   if (books.empty()) return;
-  const int bookIndex = selectedIndex == 0 ? 0 : selectedIndex - 1;
+  const int bookIndex = view == 0 ? 0 : view - 1;
   if (bookIndex < 0 || bookIndex >= static_cast<int>(books.size())) return;
 
-  attemptedCoverView = selectedIndex;
+  attemptedCoverView = view;
   waitingForCoverRender = true;
   requestUpdate();
 }
@@ -475,9 +559,14 @@ void ReadingStatsActivity::prepareVisibleCover() {
 bool ReadingStatsActivity::usesInxLayout() const { return UITheme::getInstance().hasMainTabs(); }
 
 void ReadingStatsActivity::render(RenderLock&&) {
+  const int view =
+      InxStatisticsGeometry::clampView(displayedIndex(), static_cast<int>(READING_STATS.getBooks().size()));
+  contentSelectionVisibleForFrame = defersContentSelection() && Activity::showMainTabContentSelection() &&
+                                    contentSelection.hasSelection() && selectedIndex == view;
+  touchTargetCount = 0;
   if (waitingForCoverRender) {
     const auto& books = READING_STATS.getBooks();
-    const int bookIndex = selectedIndex == 0 ? 0 : selectedIndex - 1;
+    const int bookIndex = view == 0 ? 0 : view - 1;
     if (bookIndex >= 0 && bookIndex < static_cast<int>(books.size())) {
       const std::string bookPath = books[bookIndex].path;
       std::string title;
@@ -494,8 +583,10 @@ void ReadingStatsActivity::render(RenderLock&&) {
   }
 
   if (usesInxLayout()) {
-    renderInx();
-    renderedCoverView = selectedIndex;
+    renderInx(view);
+    renderedCoverView = view;
+    LOG_DBG("INX", "Statistics view=%d selected=%d highlight=%d", view, selectedIndex.load(),
+            contentSelectionVisibleForFrame);
     waitingForCoverRender = false;
     return;
   }
@@ -539,6 +630,8 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
   drawMoreDetailsButton(renderer, Rect{sidePadding, detailsTop, pageWidth - sidePadding * 2, DETAILS_BUTTON_HEIGHT},
                         selectedIndex == 0);
+  touchTargets[touchTargetCount++] = {Rect{sidePadding, detailsTop, pageWidth - sidePadding * 2, DETAILS_BUTTON_HEIGHT},
+                                      0};
 
   const int listHeaderTop = detailsTop + DETAILS_BUTTON_HEIGHT + metrics.verticalSpacing;
   const auto& books = READING_STATS.getBooks();
@@ -563,16 +656,19 @@ void ReadingStatsActivity::render(RenderLock&&) {
       const int rowY = contentTop + rowIndex * (BOOK_ROW_HEIGHT + BOOK_ROW_GAP);
       drawBookRow(renderer, Rect{sidePadding, rowY, pageWidth - sidePadding * 2, BOOK_ROW_HEIGHT}, books[index],
                   selectedIndex == index + 1);
+      touchTargets[touchTargetCount++] = {Rect{sidePadding, rowY, pageWidth - sidePadding * 2, BOOK_ROW_HEIGHT},
+                                          index + 1};
     }
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  renderUi();
   renderer.displayBuffer();
 }
 
-void ReadingStatsActivity::renderInx() {
+void ReadingStatsActivity::renderInx(const int view) {
   renderer.clearScreen();
   renderedCoverMissing = false;
 
@@ -589,7 +685,7 @@ void ReadingStatsActivity::renderInx() {
   const int bodyHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int cellHeight = statsCellHeight(renderer);
 
-  if (selectedIndex == 0 || books.empty()) {
+  if (view == 0 || books.empty()) {
     int top = content.y;
     if (usesMainTabBar()) {
       drawCenteredClippedText(renderer, NOTOSERIF_14_FONT_ID, Rect{content.x, top + 4, content.width, pageTitleHeight},
@@ -607,6 +703,10 @@ void ReadingStatsActivity::renderInx() {
     const Rect grid{content.x, recent.y + recent.height, content.width, gridHeight};
     const Rect donut{content.x, grid.y + grid.height, content.width, donutHeight};
     const Rect footer{content.x, donut.y + donut.height, content.width, footerHeight};
+    if (!books.empty()) touchTargets[touchTargetCount++] = {recent, 1};
+    touchTargets[touchTargetCount++] = {grid, 0};
+    touchTargets[touchTargetCount++] = {donut, 0};
+    touchTargets[touchTargetCount++] = {footer, 0};
 
     if (books.empty()) {
       const int emptyHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -660,6 +760,7 @@ void ReadingStatsActivity::renderInx() {
     const char* values[] = {totalTime, averageSession, sessionCount, streak};
     const char* labels[] = {tr(STR_TOTAL_TIME), tr(STR_AVG_SESSION), tr(STR_SESSIONS), tr(STR_READ_STREAK)};
     drawStatsGrid(renderer, grid, 2, values, labels);
+    if (contentSelectionVisibleForFrame) GUI.drawSelectionFrame(renderer, grid);
 
     const int started = static_cast<int>(READING_STATS.getBooksStartedCount());
     const int finished = static_cast<int>(READING_STATS.getBooksFinishedCount());
@@ -677,8 +778,7 @@ void ReadingStatsActivity::renderInx() {
     const char* footerLabels[] = {tr(STR_BOOKS_FINISHED), tr(STR_BOOKS_STARTED)};
     drawStatsGrid(renderer, footer, 1, footerValues, footerLabels);
   } else {
-    selectedIndex = InxStatisticsGeometry::clampView(selectedIndex, static_cast<int>(books.size()));
-    const ReadingBookStats& book = books[selectedIndex - 1];
+    const ReadingBookStats& book = books[view - 1];
     const int footerHeight = bodyHeight + 8;
     const int screenTitleHeight = usesMainTabBar() ? pageTitleHeight + 8 : 0;
     const int metadataHeight = bookTitleHeight + (book.author.empty() ? 0 : bodyHeight + INX_TEXT_GAP) + 8;
@@ -689,6 +789,10 @@ void ReadingStatsActivity::renderInx() {
     const Rect metadata{content.x, hero.y + hero.height, content.width, metadataHeight};
     const Rect grid{content.x, metadata.y + metadata.height, content.width, gridHeight};
     const Rect footer{content.x, grid.y + grid.height, content.width, footerHeight};
+    touchTargets[touchTargetCount++] = {hero, view};
+    touchTargets[touchTargetCount++] = {metadata, view};
+    touchTargets[touchTargetCount++] = {grid, view};
+    touchTargets[touchTargetCount++] = {footer, view};
 
     if (usesMainTabBar()) {
       drawClippedText(renderer, NOTOSERIF_14_FONT_ID,
@@ -697,10 +801,10 @@ void ReadingStatsActivity::renderInx() {
     }
 
     const auto coverSize = InxCoverGeometry::fit(hero.width * 34 / 100, hero.height - 20);
-    renderedCoverMissing =
-        !drawCover(renderer, book,
-                   Rect{hero.x + hero.width / 4 - coverSize.width / 2, hero.y + (hero.height - coverSize.height) / 2,
-                        coverSize.width, coverSize.height});
+    const Rect cover{hero.x + hero.width / 4 - coverSize.width / 2, hero.y + (hero.height - coverSize.height) / 2,
+                     coverSize.width, coverSize.height};
+    renderedCoverMissing = !drawCover(renderer, book, cover);
+    if (contentSelectionVisibleForFrame) GUI.drawSelectionFrame(renderer, cover);
     const int donutBounds = std::min(hero.width / 2, hero.height);
     const int donutRadius = std::min(std::max(18, donutBounds * 31 / 100), std::max(18, donutBounds / 2 - 4));
     drawDonut(renderer, hero.x + hero.width * 3 / 4, hero.y + hero.height / 2, donutRadius, book.lastProgressPercent);
@@ -732,12 +836,13 @@ void ReadingStatsActivity::renderInx() {
     drawStatsGrid(renderer, grid, 3, values, labels);
 
     char position[24];
-    snprintf(position, sizeof(position), "%d/%u", selectedIndex, static_cast<unsigned>(books.size()));
+    snprintf(position, sizeof(position), "%d/%u", view, static_cast<unsigned>(books.size()));
     drawCenteredClippedText(renderer, UI_10_FONT_ID, Rect{footer.x, footer.y + 4, footer.width, bodyHeight}, position,
                             EpdFontFamily::BOLD);
   }
 
   const auto labels = mainTabButtonLabels(tr(STR_BACK), tr(STR_SELECT), !books.empty());
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderUi();
   renderer.displayBuffer();
 }

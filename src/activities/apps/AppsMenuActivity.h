@@ -31,16 +31,14 @@ class AppsMenuActivity final : public UiListActivity {
   int listCount() const override { return getVisibleAppCount(); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
-  bool handleCustomInput() override;
   void onBackButton() override;
   void drawChrome() override;
   void drawFooter() override;
   bool usesIconLayout() const;
   Rect appContentRect() const;
-  int iconIndexFromPoint(int x, int y) const;
   void rebuildRowItems();
   void openSelected();
-  void drawIconGrid(const Rect& rect, int visibleCount, bool showSelection) const;
+  void drawIconGrid(UiScreen& screen, const Rect& rect, int visibleCount, bool showSelection) const;
 
   // Allocated once on entry and reused for every repaint. The app catalog is
   // bounded to 32 entries; dynamic storage avoids pinning the maximum in every

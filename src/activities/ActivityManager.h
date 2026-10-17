@@ -44,8 +44,9 @@ class ActivityManager {
   MappedInputManager& mappedInput;
   std::vector<std::unique_ptr<Activity>> stackActivities;
   std::unique_ptr<Activity> currentActivity;
-  MainTabFocus mainTabFocus = MainTabFocus::Tabs;
+  std::atomic<MainTabFocus> mainTabFocus{MainTabFocus::Tabs};
   bool mainTabEntryReleasePending = false;
+  bool mainTabTouchFocusPending = false;
 
  private:
   enum class StandbyBackState : uint8_t { Idle, Pressed, WaitingForRelease };
@@ -154,6 +155,7 @@ class ActivityManager {
 #endif
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
   MainTabFocus getMainTabFocus() const { return mainTabFocus; }
+  void focusMainTabContent() { mainTabFocus = MainTabFocus::Content; }
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);

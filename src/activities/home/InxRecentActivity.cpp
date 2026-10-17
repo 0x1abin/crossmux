@@ -53,12 +53,6 @@ Rect fitCoverRect(const Rect bounds) {
               size.height};
 }
 
-void drawThickFrame(const GfxRenderer& renderer, const Rect rect, const int thickness = 3) {
-  for (int inset = 0; inset < thickness; ++inset) {
-    renderer.drawRect(rect.x - inset, rect.y - inset, rect.width + inset * 2, rect.height + inset * 2, true);
-  }
-}
-
 void drawProgressBadge(const GfxRenderer& renderer, const Rect cover, const uint8_t progress) {
   char label[8];
   snprintf(label, sizeof(label), "%u%%", static_cast<unsigned>(progress));
@@ -94,7 +88,39 @@ void drawBookText(const GfxRenderer& renderer, const RecentBook& book, const int
 }  // namespace
 
 void InxRecentActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
-  selected = MainTabs::contentEdgeIndex(edge, books ? static_cast<int>(books->size()) : 0);
+  moveSelectionTo(MainTabs::contentEdgeIndex(edge, books ? static_cast<int>(books->size()) : 0));
+}
+
+bool InxRecentActivity::hasContentSelection() const {
+  if (!defersContentSelection()) return true;
+  const int start = visibleStart.load();
+  const int index = nav.selected.load();
+  return UiListActivity::hasContentSelection() && index >= start && index < start + visibleCount.load();
+}
+
+int InxRecentActivity::initialConfirmIndex() const {
+  return std::clamp(visibleStart.load(), 0, std::max(0, listCount() - 1));
+}
+
+bool InxRecentActivity::handleListSwipe(const MappedInputManager::SwipeDir swipe, const int startX, const int startY) {
+  using Swipe = MappedInputManager::SwipeDir;
+  const bool flowSwipe = layout() == InxRecentLayout::Flow && (swipe == Swipe::Left || swipe == Swipe::Right);
+  if (!flowSwipe) {
+    return UiListActivity::handleListSwipe(swipe, startX, startY);
+  }
+  const Rect carousel = InxRecentGeometry::flowCarouselRect(contentRect());
+  if (startX < carousel.x || startX >= carousel.x + carousel.width || startY < carousel.y ||
+      startY >= carousel.y + carousel.height)
+    return false;
+  const int delta = swipe == Swipe::Left ? 1 : -1;
+  LOG_DBG("INX", "Recent swipe=%d from=%d delta=%d count=%d", static_cast<int>(swipe), visibleStart.load(), delta,
+          listCount());
+  if (listCount() > 1) {
+    activityManager.focusMainTabContent();
+    nav.requestScroll(delta);
+    requestUpdate();
+  }
+  return true;
 }
 
 InxRecentLayout InxRecentActivity::layout() const {
@@ -118,10 +144,9 @@ const ReadingBookStats* InxRecentActivity::statsAt(const int index) const {
   return index >= 0 && index < static_cast<int>(bookStats.size()) ? bookStats[index] : nullptr;
 }
 
-void InxRecentActivity::onEnter() {
-  Activity::onEnter();
-  if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
-  books = &RECENT_BOOKS.getBooks();
+void InxRecentActivity::onBooksChanged() {
+  clearContentSelection();
+  books = &recentBooks;
   bookStats.fill(nullptr);
   for (size_t i = 0; i < std::min(books->size(), bookStats.size()); ++i) {
     const RecentBook& book = (*books)[i];
@@ -146,12 +171,7 @@ void InxRecentActivity::onExit() {
   clearCoverCaches();
 #endif
   thumbnailHeight = 0;
-  Activity::onExit();
-}
-
-void InxRecentActivity::openSelected() {
-  if (!books || selected < 0 || selected >= static_cast<int>(books->size())) return;
-  onSelectBook((*books)[selected].path);
+  RecentBooksActivity::onExit();
 }
 
 void InxRecentActivity::setThumbnailHeight(const int displayHeight) {
@@ -332,7 +352,6 @@ bool InxRecentActivity::prepareNextMissingCover() {
         break;
     }
 
-    renderer.displayBuffer();
     {
       GfxRenderer::FrameBufferLoan loan(renderer);
       state = BookCoverLoader::ensureThumbnail((*books)[index].path, thumbnailHeight).empty()
@@ -345,60 +364,11 @@ bool InxRecentActivity::prepareNextMissingCover() {
   return false;
 }
 
-int InxRecentActivity::indexFromPoint(const int x, const int y) const {
-  return InxRecentGeometry::indexFromPoint(contentRect(), x, y, selected, books ? static_cast<int>(books->size()) : 0,
-                                           layout());
-}
-
-void InxRecentActivity::loop() {
-  if (!books || books->empty()) return;
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    openSelected();
-    return;
-  }
-
-  int x = 0;
-  int y = 0;
-  if (mappedInput.wasScreenTouchDown(x, y)) {
-    const int touched = indexFromPoint(x, y);
-    if (touched >= 0 && touched != selected) {
-      selected = touched;
-      requestUpdate();
-    }
-    return;
-  }
-  if (mappedInput.wasScreenTapped(x, y)) {
-    const int touched = indexFromPoint(x, y);
-    if (touched >= 0) {
-      selected = touched;
-      openSelected();
-    }
-    return;
-  }
-
-  const int count = static_cast<int>(books->size());
-  const auto swipe = mappedInput.wasSwipe();
-  if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) || swipe == MappedInputManager::SwipeDir::Up ||
-      swipe == MappedInputManager::SwipeDir::Left) {
-    selected = (selected + 1) % count;
-    requestUpdate();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) || swipe == MappedInputManager::SwipeDir::Down ||
-      swipe == MappedInputManager::SwipeDir::Right) {
-    selected = (selected + count - 1) % count;
-    requestUpdate();
-    return;
-  }
-}
-
-void InxRecentActivity::drawFlow(const Rect& content) {
+void InxRecentActivity::drawFlow(UiScreen& screen, const Rect& content) {
   const bool showSelection = showMainTabContentSelection();
   const int count = static_cast<int>(books->size());
   const RecentBook& book = (*books)[selected];
-  const int carouselHeight = std::max(1, content.height * 50 / 100);
-  const Rect carousel{content.x, content.y + 5, content.width, carouselHeight};
+  const Rect carousel = InxRecentGeometry::flowCarouselRect(content);
   drawSparseInk(renderer, carousel);
 
   const auto centerSize = InxCoverGeometry::fit(carousel.width, std::max(1, carousel.height * 94 / 100));
@@ -416,7 +386,10 @@ void InxRecentActivity::drawFlow(const Rect& content) {
     drawBookCover(selected + 1, Rect{center.x + center.width + sideGap, sideTop, sideSize.width, sideSize.height});
   }
   drawBookCover(selected, center);
-  if (showSelection) drawThickFrame(renderer, center);
+  screen.frame().hit(freeink::ui::Rect{static_cast<int16_t>(center.x), static_cast<int16_t>(center.y),
+                                       static_cast<int16_t>(center.width), static_cast<int16_t>(center.height)},
+                     ACTION_ROW, static_cast<int16_t>(selected), freeink::ui::InputTouch | freeink::ui::InputLongPress);
+  if (showSelection && selected == nav.selected) GUI.drawSelectionFrame(renderer, center);
 
   const int dividerY = carousel.y + carousel.height + 10;
   renderer.drawLine(content.x, dividerY, content.x + content.width - 1, dividerY, true);
@@ -452,9 +425,9 @@ void InxRecentActivity::drawFlow(const Rect& content) {
              metricWidth);
 }
 
-void InxRecentActivity::drawGrid(const Rect& content) {
+void InxRecentActivity::drawGrid(UiScreen& screen, const Rect& content) {
   const bool showSelection = showMainTabContentSelection();
-  const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), layout());
+  const int start = nav.top;
   const int cellWidth = content.width / 2;
   const int cellHeight = content.height / 2;
   for (int slot = 0; slot < 4 && start + slot < static_cast<int>(books->size()); ++slot) {
@@ -463,11 +436,14 @@ void InxRecentActivity::drawGrid(const Rect& content) {
     const int row = slot / 2;
     const Rect cell{content.x + column * cellWidth + kGap / 2, content.y + row * cellHeight + kGap / 2,
                     cellWidth - kGap, cellHeight - kGap};
-    if (showSelection && index == selected) drawSparseInk(renderer, cell);
+    if (showSelection && index == nav.selected) drawSparseInk(renderer, cell);
     const Rect cover = fitCoverRect(Rect{cell.x + kGap, cell.y + kGap, cell.width - kGap * 2, cell.height - kGap * 2});
     if (slot == 0) setThumbnailHeight(cover.height);
     drawBookCover(index, cover);
-    if (showSelection && index == selected) drawThickFrame(renderer, cover);
+    screen.frame().hit(freeink::ui::Rect{static_cast<int16_t>(cell.x), static_cast<int16_t>(cell.y),
+                                         static_cast<int16_t>(cell.width), static_cast<int16_t>(cell.height)},
+                       ACTION_ROW, static_cast<int16_t>(index), freeink::ui::InputTouch | freeink::ui::InputLongPress);
+    if (showSelection && index == nav.selected) GUI.drawSelectionFrame(renderer, cover);
     const int barWidth = std::max(24, cover.width - 30);
     const int barX = cover.x + (cover.width - barWidth) / 2;
     const int barY = cover.y + cover.height - 18;
@@ -476,14 +452,17 @@ void InxRecentActivity::drawGrid(const Rect& content) {
   }
 }
 
-void InxRecentActivity::drawList(const Rect& content) {
+void InxRecentActivity::drawList(UiScreen& screen, const Rect& content) {
   const bool showSelection = showMainTabContentSelection();
-  const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), layout());
+  const int start = nav.top;
   const int rowHeight = content.height / 5;
   for (int slot = 0; slot < 5 && start + slot < static_cast<int>(books->size()); ++slot) {
     const int index = start + slot;
     const Rect row{content.x, content.y + slot * rowHeight, content.width, rowHeight};
-    if (showSelection && index == selected) drawSparseInk(renderer, row);
+    screen.frame().hit(freeink::ui::Rect{static_cast<int16_t>(row.x), static_cast<int16_t>(row.y),
+                                         static_cast<int16_t>(row.width), static_cast<int16_t>(row.height)},
+                       ACTION_ROW, static_cast<int16_t>(index), freeink::ui::InputTouch | freeink::ui::InputLongPress);
+    if (showSelection && index == nav.selected) drawSparseInk(renderer, row);
     const Rect cover = fitCoverRect(Rect{row.x + kPagePadding, row.y + 5, 88, row.height - 10});
     if (slot == 0) setThumbnailHeight(cover.height);
     drawBookCover(index, cover);
@@ -499,9 +478,9 @@ void InxRecentActivity::drawList(const Rect& content) {
   }
 }
 
-void InxRecentActivity::drawIcons(const Rect& content) {
+void InxRecentActivity::drawIcons(UiScreen& screen, const Rect& content) {
   const bool showSelection = showMainTabContentSelection();
-  const int start = InxRecentGeometry::pageStart(selected, static_cast<int>(books->size()), layout());
+  const int start = nav.top;
   const int cellWidth = content.width / 3;
   const int cellHeight = content.height / 3;
   for (int slot = 0; slot < 9 && start + slot < static_cast<int>(books->size()); ++slot) {
@@ -513,13 +492,16 @@ void InxRecentActivity::drawIcons(const Rect& content) {
     const Rect cover = fitCoverRect(Rect{cell.x + 4, cell.y + 4, cell.width - 8, cell.height - 8});
     if (slot == 0) setThumbnailHeight(cover.height);
     drawBookCover(index, cover);
+    screen.frame().hit(freeink::ui::Rect{static_cast<int16_t>(cell.x), static_cast<int16_t>(cell.y),
+                                         static_cast<int16_t>(cell.width), static_cast<int16_t>(cell.height)},
+                       ACTION_ROW, static_cast<int16_t>(index), freeink::ui::InputTouch | freeink::ui::InputLongPress);
     drawProgressBadge(renderer, cover, progressOf(statsAt(index)));
-    if (showSelection && index == selected)
-      drawThickFrame(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, cover.height + 4});
+    if (showSelection && index == nav.selected)
+      GUI.drawSelectionFrame(renderer, Rect{cover.x - 2, cover.y - 2, cover.width + 4, cover.height + 4});
   }
 }
 
-void InxRecentActivity::drawCover(const Rect& content) {
+void InxRecentActivity::drawCover(UiScreen& screen, const Rect& content) {
   const bool showSelection = showMainTabContentSelection();
   constexpr int progressGap = 10;
   const int progressBlockHeight = progressGap + 8;
@@ -528,19 +510,25 @@ void InxRecentActivity::drawCover(const Rect& content) {
                                        std::max(1, content.height - progressBlockHeight - 12)});
   setThumbnailHeight(cover.height);
   drawBookCover(selected, cover);
-  if (showSelection) drawThickFrame(renderer, cover);
+  screen.frame().hit(freeink::ui::Rect{static_cast<int16_t>(cover.x), static_cast<int16_t>(cover.y),
+                                       static_cast<int16_t>(cover.width), static_cast<int16_t>(cover.height)},
+                     ACTION_ROW, static_cast<int16_t>(selected), freeink::ui::InputTouch | freeink::ui::InputLongPress);
+  if (showSelection && selected == nav.selected) GUI.drawSelectionFrame(renderer, cover);
   const int barWidth = std::max(24, cover.width * 80 / 100);
   drawMiniProgress(renderer,
                    Rect{cover.x + (cover.width - barWidth) / 2, cover.y + cover.height + progressGap, barWidth, 8},
                    progressOf(statsAt(selected)));
 }
 
-void InxRecentActivity::render(RenderLock&&) {
-  renderer.clearScreen();
+void InxRecentActivity::drawChrome() {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int width = renderer.getScreenWidth();
-  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, false, false);
-  drawPageHeader(Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
+  drawPageHeader(Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
+                 tr(STR_MENU_RECENT_BOOKS));
+}
+
+void InxRecentActivity::buildScreen(UiScreen& screen) {
+  syncPagedViewport(InxRecentGeometry::itemsPerPage(layout()));
+  selected = nav.top;
   const Rect content = contentRect();
 
   if (content.width > 0 && content.height > 0) {
@@ -550,26 +538,31 @@ void InxRecentActivity::render(RenderLock&&) {
     } else {
       switch (layout()) {
         case InxRecentLayout::Flow:
-          drawFlow(content);
+          drawFlow(screen, content);
           break;
         case InxRecentLayout::Grid:
-          drawGrid(content);
+          drawGrid(screen, content);
           break;
         case InxRecentLayout::List:
-          drawList(content);
+          drawList(screen, content);
           break;
         case InxRecentLayout::Icons:
-          drawIcons(content);
+          drawIcons(screen, content);
           break;
         case InxRecentLayout::Cover:
-          drawCover(content);
+          drawCover(screen, content);
           break;
         case InxRecentLayout::Count:
           break;
       }
     }
   }
+}
 
+void InxRecentActivity::drawFooter() {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int width = renderer.getScreenWidth();
+  const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, false, false);
   const auto labels = mainTabButtonLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "", tr(STR_OPEN),
                                           books && books->size() > 1, false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -585,6 +578,13 @@ void InxRecentActivity::render(RenderLock&&) {
     GUI.drawBatteryRight(renderer, battery,
                          SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   }
-  if (prepareNextMissingCover()) return;
-  renderer.displayBuffer();
+}
+
+void InxRecentActivity::render(RenderLock&& lock) {
+  UiListActivity::render(std::move(lock));
+  visibleStart.store(nav.top);
+  visibleCount.store(std::min(InxRecentGeometry::itemsPerPage(layout()), std::max(0, listCount() - nav.top)));
+  LOG_DBG("INX", "Recent view=%d rows=%d layout=%d", visibleStart.load(), visibleCount.load(),
+          static_cast<int>(layout()));
+  prepareNextMissingCover();
 }
