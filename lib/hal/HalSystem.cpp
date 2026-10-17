@@ -111,15 +111,24 @@ void begin() {
 
 void checkPanic() {
   if (isRebootFromPanic()) {
+    // Consume the marker before the attempt, not after it succeeds. This is the
+    // only work a boot does *because* the last one panicked, and it writes to a
+    // card the panic may well have left mid-write. A boot that dies in here
+    // comes back to the same attempt every time, and the loop ends only when
+    // the rail drops and clears RTC memory by force -- on a device whose power
+    // key is a PMIC PEK, that means holding it for the hardware cut-off.
+    //
+    // The routing snapshot taken earlier in setup() and CrashActivity's own
+    // read of panicMessage are unaffected: the marker gates writing the file,
+    // nothing else.
+    panicCaptureMarker = 0;
+
     auto panicInfo = getPanicInfo(true);
     auto file = Storage.open("/crash_report.txt", O_WRITE | O_CREAT | O_TRUNC);
     if (file) {
       const size_t written = file.write(panicInfo.c_str(), panicInfo.size());
       file.close();
       if (written == panicInfo.size()) {
-        // Keep the crash data for CrashActivity, but mark it consumed so a
-        // later watchdog reset cannot be mistaken for this panic.
-        panicCaptureMarker = 0;
         LOG_INF("SYS", "Dumped panic info to SD card");
       } else {
         LOG_ERR("SYS", "Failed to write complete crash report (%zu of %zu bytes)", written, panicInfo.size());
