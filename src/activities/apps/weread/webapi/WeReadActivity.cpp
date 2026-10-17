@@ -21,6 +21,7 @@
 
 #include "CrossPointState.h"
 #include "NetworkStartup.h"
+#include "ReadingStatsStore.h"
 #include "SilentRestart.h"
 #include "WeReadBrowseActivity.h"
 #include "activities/apps/weread/WeReadTouchGeometry.h"
@@ -507,6 +508,8 @@ void WeReadActivity::onEnter() {
   optionPopupClosing_ = false;
   wifiSessionActive_ = false;
   wifiReleasePending_ = false;
+  readingStatsReleased_ = false;
+  lastCancelPollAt_ = 0;
   syncShelfCoverScope_ = WeReadClient::Operation::ShelfCoverScope::None;
   LOG_DBG("WR", "onEnter activity=%u free=%u largest=%u", static_cast<unsigned>(sizeof(*this)),
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
@@ -544,6 +547,11 @@ void WeReadActivity::onExit() {
     WiFi.mode(WIFI_OFF);
     esp_wifi_deinit();
   }
+  if (readingStatsReleased_) {
+    // Rebuilding statistics can abort inside vector growth on a fragmented C3 heap.
+    LOG_INF("WR", "Restore reading statistics through silent Home restart");
+    silentRestart();
+  }
   LOG_DBG("WR", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()));
   Activity::onExit();
@@ -567,6 +575,7 @@ bool WeReadActivity::refreshShelf() {
 }
 
 bool WeReadActivity::readShelf(const int index, WeReadStore::ShelfRecord& record) const {
+  HalStorage::StorageLock lock;
   return index >= 0 && static_cast<uint32_t>(index) < shelfCount_ &&
          WeReadStore::readShelfRecord(shelfFile_, static_cast<uint32_t>(index), record);
 }
@@ -676,6 +685,9 @@ bool isPostProcessStage(const WeReadClient::Operation::ProgressStage stage) {
 void WeReadActivity::connectThen(const Job job, const WeReadStore::ShelfRecord* book) {
   retryJob_ = job;
   if (book) pendingBook_ = *book;
+  // Non-C3 targets skip reclamation; C3 must stop if saving statistics fails.
+  // cppcheck-suppress knownConditionTrueFalse
+  if (!prepareNetworkMemory()) return;
   auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, true);
   if (!wifi) {
     LOG_ERR("WR", "OOM: Wi-Fi activity");
@@ -705,6 +717,9 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
   if (job == Job::Sync && shelfFile_.isOpen()) shelfFile_.close();
   if (job != Job::Sync && book) pendingBook_ = *book;
   retryJob_ = job;
+  // Non-C3 targets skip reclamation; C3 must stop if saving statistics fails.
+  // cppcheck-suppress knownConditionTrueFalse
+  if (!prepareNetworkMemory()) return;
   error_ = WeReadClient::Error::Ok;
   progressStage_.store(WeReadClient::Operation::ProgressStage::Chapters);
   progressCompleted_.store(0);
@@ -737,7 +752,7 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
     requestJobUpdate();
   } else {
     const State nextState = job == Job::Detail && detailLoaded_ ? State::DetailCoverLoading : stateForJob(job);
-    state_.store(job == Job::Sync ? State::Connecting : nextState);
+    state_.store(operation_.authenticating() ? State::Connecting : nextState);
     if (job == Job::Sync) {
       requestUpdateAndWait();
     } else if (job == Job::Download) {
@@ -765,7 +780,32 @@ WeReadClient::Operation::Event WeReadActivity::stepOperation() {
         auto* work = static_cast<WorkContext*>(rawContext);
         work->activity->maybeShowLongWait(*work->renderBarrier);
       },
-      &context);
+      &context, [](void* rawContext) { return static_cast<WeReadActivity*>(rawContext)->pollNetworkCancel(); }, this);
+}
+
+bool WeReadActivity::prepareNetworkMemory() {
+#if defined(CONFIG_IDF_TARGET_ESP32C3)
+  if (!readingStatsReleased_) {
+    RenderLock lock(*this);
+    if (!READING_STATS.releaseMemoryForNetwork()) {
+      error_ = WeReadClient::Error::SdCard;
+      state_.store(State::Error);
+      requestJobUpdate();
+      return false;
+    }
+    readingStatsReleased_ = true;
+  }
+#endif
+  return true;
+}
+
+bool WeReadActivity::pollNetworkCancel() {
+  const uint32_t now = millis();
+  if (now - lastCancelPollAt_ < 10) return false;
+  lastCancelPollAt_ = now;
+  // The synchronous request owns input while the main loop is blocked.
+  mappedInput.update(true);
+  return mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture();
 }
 
 void WeReadActivity::updatePostProcessNotice(const WeReadClient::Operation::ProgressStage previous,
@@ -793,6 +833,9 @@ void WeReadActivity::maybeShowLongWait(RenderLock& renderBarrier) {
 
 void WeReadActivity::advanceShelfCovers() {
   if (shelfCoverStopped_ || shelfCount_ == 0 || WiFi.status() != WL_CONNECTED) return;
+  // Non-C3 targets skip reclamation; C3 must stop if saving statistics fails.
+  // cppcheck-suppress knownConditionTrueFalse
+  if (!prepareNetworkMemory()) return;
   const int itemsPerPage = shelfItemsPerPage();
   const int pageStart = shelfSelected_.load() / itemsPerPage * itemsPerPage;
   if (pageStart != shelfCoverPageStart_) {
@@ -811,12 +854,17 @@ void WeReadActivity::advanceShelfCovers() {
         shelfFrameInvalidated_.store(true);
         requestUpdate();
         break;
+      case WeReadClient::Operation::Event::Failed:
+        LOG_ERR("WR", "Shelf cover failed: index=%d error=%u", shelfCoverCursor_,
+                static_cast<unsigned>(operation_.error()));
+        operation_.reset();
+        ++shelfCoverCursor_;
+        break;
       case WeReadClient::Operation::Event::QrReady:
       case WeReadClient::Operation::Event::Authenticated:
       case WeReadClient::Operation::Event::ChapterRangeReady:
       case WeReadClient::Operation::Event::ChapterComplete:
       case WeReadClient::Operation::Event::Cancelled:
-      case WeReadClient::Operation::Event::Failed:
         operation_.reset();
         shelfCoverStopped_ = true;
         return;
@@ -835,7 +883,7 @@ void WeReadActivity::advanceShelfCovers() {
       ++shelfCoverCursor_;
       continue;
     }
-    if (!operation_.begin(WeReadClient::Operation::Kind::Detail, &book)) {
+    if (!operation_.beginCover(book)) {
       operation_.reset();
       shelfCoverStopped_ = true;
     }
@@ -844,6 +892,7 @@ void WeReadActivity::advanceShelfCovers() {
 }
 
 void WeReadActivity::updateJobProgress() {
+  if (operation_.authenticating()) return;
   switch (retryJob_) {
     case Job::Detail:
       return;
@@ -903,6 +952,10 @@ void WeReadActivity::updateJobProgress() {
 
 void WeReadActivity::advanceJob() {
   const auto event = stepOperation();
+  if (operation_.authenticating() && (state_.load() != State::Qr || !operation_.qrUrl()[0])) {
+    qrUrl_[0] = '\0';
+    if (state_.exchange(State::Connecting) != State::Connecting) requestJobUpdate();
+  }
   updateJobProgress();
 
   switch (event) {
@@ -2591,11 +2644,7 @@ void WeReadActivity::render(RenderLock&&) {
       GUI.drawPopup(renderer, tr(STR_WEREAD_LOGIN_CONFIRMED));
       break;
     case State::Connecting:
-      if (retryJob_ == Job::Sync) {
-        GUI.drawPopup(renderer, tr(STR_WEREAD_SYNCING_SHELF));
-      } else {
-        GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));
-      }
+      GUI.drawPopup(renderer, tr(STR_WEREAD_LOADING));
       break;
     case State::Cancelling:
     case State::OpenBook:
