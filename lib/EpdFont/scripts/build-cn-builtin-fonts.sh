@@ -107,7 +107,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$SUBSET_OTF") (common
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$SUBSET_OTF" \
   --text-file="$CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
+  --unicodes="U+0020-007E,U+00A0-00FF,U+0400-04FF,U+2010-2026,U+2116,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
   --layout-features='*' \
   --notdef-outline \
   --recommended-glyphs \
@@ -120,7 +120,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)...
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$I18N_OTF" \
   --text-file="$I18N_CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
+  --unicodes="U+0020-007E,U+00A0-00FF,U+0400-04FF,U+2010-2026,U+2116,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
   --layout-features='*' \
   --notdef-outline \
   --recommended-glyphs \
