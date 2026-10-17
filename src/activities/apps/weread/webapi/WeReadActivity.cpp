@@ -685,6 +685,8 @@ bool isPostProcessStage(const WeReadClient::Operation::ProgressStage stage) {
 void WeReadActivity::connectThen(const Job job, const WeReadStore::ShelfRecord* book) {
   retryJob_ = job;
   if (book) pendingBook_ = *book;
+  // Non-C3 targets skip reclamation; C3 must stop if saving statistics fails.
+  // cppcheck-suppress knownConditionTrueFalse
   if (!prepareNetworkMemory()) return;
   auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput, true);
   if (!wifi) {
@@ -715,6 +717,8 @@ void WeReadActivity::startJob(const Job job, const WeReadStore::ShelfRecord* boo
   if (job == Job::Sync && shelfFile_.isOpen()) shelfFile_.close();
   if (job != Job::Sync && book) pendingBook_ = *book;
   retryJob_ = job;
+  // Non-C3 targets skip reclamation; C3 must stop if saving statistics fails.
+  // cppcheck-suppress knownConditionTrueFalse
   if (!prepareNetworkMemory()) return;
   error_ = WeReadClient::Error::Ok;
   progressStage_.store(WeReadClient::Operation::ProgressStage::Chapters);
@@ -829,6 +833,8 @@ void WeReadActivity::maybeShowLongWait(RenderLock& renderBarrier) {
 
 void WeReadActivity::advanceShelfCovers() {
   if (shelfCoverStopped_ || shelfCount_ == 0 || WiFi.status() != WL_CONNECTED) return;
+  // Non-C3 targets skip reclamation; C3 must stop if saving statistics fails.
+  // cppcheck-suppress knownConditionTrueFalse
   if (!prepareNetworkMemory()) return;
   const int itemsPerPage = shelfItemsPerPage();
   const int pageStart = shelfSelected_.load() / itemsPerPage * itemsPerPage;
