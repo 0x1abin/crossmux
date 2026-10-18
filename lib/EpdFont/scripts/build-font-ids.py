@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate font IDs and sentinel guards from font header contents."""
+import argparse
 import hashlib
 from pathlib import Path
 
@@ -18,10 +19,18 @@ FONT_FILES.update({
 })
 
 
-def font_ids(directory):
-    return {name: sum(int.from_bytes(hashlib.sha256((directory / filename).read_bytes()).digest(), 'big')
-                      for filename in filenames) % (2 ** 32) - (2 ** 31)
-            for name, filenames in FONT_FILES.items()}
+def font_ids(directory, cjk_directory=None):
+    cjk_directory = directory if cjk_directory is None else cjk_directory
+    ids = {}
+    for name, filenames in FONT_FILES.items():
+        paths = [directory / filename for filename in filenames]
+        # Reader aliases use this CJK face directly or as their fallback.
+        if name.startswith(('NOTOSERIF_', 'NOTOSANS_')):
+            paths += [cjk_directory / filename for filename in
+                      ('notosans_cjk_12.h', 'notosans_cjk_common_intervals.h')]
+        ids[name] = sum(int.from_bytes(hashlib.sha256(path.read_bytes()).digest(), 'big')
+                        for path in paths) % (2 ** 32) - (2 ** 31)
+    return ids
 
 
 def render_header(ids):
@@ -35,4 +44,7 @@ def render_header(ids):
 
 
 if __name__ == '__main__':
-    print(render_header(font_ids(Path(__file__).resolve().parent.parent / 'builtinFonts')), end='')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--cjk-dir', type=Path, help='CJK staging directory before publication')
+    args = parser.parse_args()
+    print(render_header(font_ids(Path(__file__).resolve().parent.parent / 'builtinFonts', args.cjk_dir)), end='')

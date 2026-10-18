@@ -8,7 +8,7 @@
 #   14/16/18pt (I18N, reader MEDIUM/LARGE/EXTRA_LARGE) : UI-only chars
 #                                                          (cn_i18n_chars.txt)
 #
-# Every tier also ships ASCII + Latin-1 + CJK punctuation + full-width forms.
+# Every tier also ships ASCII + Latin-1 + source-supported Cyrillic + № + CJK punctuation + full-width forms.
 #
 # Pipeline:
 #   1. pyftsubset trims NotoSansSC-Regular.otf to the requested character set
@@ -144,6 +144,7 @@ emit_size() {
   echo "Generating ${output_path} from $(basename "$otf")..."
   "$PYTHON" fontconvert.py "$font_name" "$size" "$otf" \
     --2bit \
+    --additional-intervals 0x2116,0x2116 \
     --additional-intervals 0x4E00,0x9FFF \
     --additional-intervals 0x3000,0x303F \
     --additional-intervals 0xFF00,0xFFEF \
@@ -166,7 +167,8 @@ done
 
 "$PYTHON" share-cn-font-intervals.py "$STAGING_DIR"
 "$PYTHON" compress-cn-builtin-fonts.py "$STAGING_DIR"
-"$PYTHON" publish-cn-builtin-fonts.py "$STAGING_DIR" ../builtinFonts
+"$PYTHON" build-font-ids.py --cjk-dir "$STAGING_DIR" > "$STAGING_DIR/fontIds.h"
+"$PYTHON" publish-cn-builtin-fonts.py "$STAGING_DIR" ../builtinFonts --font-ids ../../../src/fontIds.h
 
 echo ""
 echo "Done. Generated $((${#CN_FONT_SIZES_SMALL[@]} + ${#CN_FONT_SIZES_I18N[@]})) CJK font headers in ../builtinFonts/"
