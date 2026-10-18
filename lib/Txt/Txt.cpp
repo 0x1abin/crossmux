@@ -180,6 +180,8 @@ bool Txt::generateCoverBmp() const {
     // on the read itself, and check the write so a full card cannot leave a
     // truncated cover that exists() then treats as valid for good.
     uint8_t buffer[1024];
+    const uint64_t sourceSize = src.fileSize64();
+    uint64_t copiedBytes = 0;
     bool ok = true;
     int bytesRead = 0;
     while ((bytesRead = src.read(buffer, sizeof(buffer))) > 0) {
@@ -187,8 +189,9 @@ bool Txt::generateCoverBmp() const {
         ok = false;
         break;
       }
+      copiedBytes += static_cast<uint64_t>(bytesRead);
     }
-    if (bytesRead < 0) ok = false;
+    if (bytesRead < 0 || copiedBytes != sourceSize) ok = false;
     dst.flush();
     dst.close();
     src.close();

@@ -241,5 +241,8 @@ add_test(NAME RealImageDecoderCancellation
 add_test(NAME TextSettingsFontExit
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_text_settings_font_exit.py)
 
+add_test(NAME TxtCoverCopy
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_txt_cover_copy.py)
+
 add_test(NAME CjkGenerationTransaction COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_cjk_generation_transaction.py)
 add_test(NAME PowerConfirmRelease COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_power_confirm_release.py ${crosspoint_simulator_SOURCE_DIR})
