@@ -1787,10 +1787,10 @@ void WeReadActivity::handleShelfInput() {
         return;
       }
 
-      shelfNavigationGesture_ =
-          previous ? ShelfNavigationGesture::PreviousPageHandled : ShelfNavigationGesture::NextPageHandled;
-      shelfLastPageTurnAt_ = now;
       if (count > itemsPerPage) {
+        shelfNavigationGesture_ =
+            previous ? ShelfNavigationGesture::PreviousPageHandled : ShelfNavigationGesture::NextPageHandled;
+        shelfLastPageTurnAt_ = now;
         const int selected = shelfSelected_.load();
         const int target = previous ? ButtonNavigator::previousPageIndex(selected, count, itemsPerPage)
                                     : ButtonNavigator::nextPageIndex(selected, count, itemsPerPage);
