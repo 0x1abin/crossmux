@@ -149,6 +149,24 @@ TEST_F(BookCoverLoaderTest, RegeneratesPalettedThumbnailWithoutPixels) {
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
 }
 
+TEST_F(BookCoverLoaderTest, RegeneratesThumbnailWithPixelsPointingIntoPalette) {
+  writeBook("/book.epub");
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 16, 16, 8, 256, 0);
+  {
+    std::fstream file(hostPath("/.crosspoint/epub/thumb_226.bmp"), std::ios::binary | std::ios::in | std::ios::out);
+    ASSERT_TRUE(file.good());
+    const char offset[] = {54, 0, 0, 0};
+    file.seekp(10);
+    file.write(offset, sizeof(offset));
+    ASSERT_TRUE(file.good());
+  }
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 66U);
+}
+
 TEST_F(BookCoverLoaderTest, KeepsCompleteThumbnail) {
   writeBook("/book.epub");
   // A complete 24bpp thumbnail is reused.

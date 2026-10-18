@@ -222,6 +222,14 @@ BmpReaderError Bitmap::parseHeaders() {
   // Pre-calculate Row Bytes to avoid doing this every row
   rowBytes = (width * bpp + 31) / 32 * 4;
 
+  uint64_t paletteOffset = 14ull + biSize;
+  // BITMAPINFOHEADER stores its three BI_BITFIELDS masks after the DIB.
+  if (comp == 3 && biSize == 40) paletteOffset += 3 * sizeof(uint32_t);
+  if (bfOffBits < paletteOffset + static_cast<uint64_t>(colorsUsed) * 4) {
+    return BmpReaderError::SeekPixelDataFailed;
+  }
+  if (!sourceSeek(static_cast<size_t>(paletteOffset))) return BmpReaderError::DIBTooSmall;
+
   for (int i = 0; i < 256; i++) paletteLum[i] = static_cast<uint8_t>(i);
   if (colorsUsed > 0) {
     for (uint32_t i = 0; i < colorsUsed; i++) {

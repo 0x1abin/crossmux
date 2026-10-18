@@ -186,12 +186,13 @@ void HomeActivity::resolveGridCoverPaths() {
 }
 
 void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect) {
+  const bool isEpub = FsHelpers::hasReflowableBookExtension(book.path);
   if (!book.coverBmpPath.empty() &&
-      BookCoverLoader::checkCachedCover(UITheme::getCoverThumbPath(book.coverBmpPath, height), true) !=
+      BookCoverLoader::checkCachedCover(UITheme::getCoverThumbPath(book.coverBmpPath, height), isEpub) !=
           BookCoverLoader::CachedCoverState::Missing)
     return;
   // Only one parser lives at a time; EPUB/XTC objects exceed the stack budget.
-  if (FsHelpers::hasReflowableBookExtension(book.path)) {
+  if (isEpub) {
     auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
     if (!epub) {
       LOG_ERR("HOME", "OOM: cover EPUB");
@@ -216,7 +217,7 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = xtc->getThumbBmpPath();
-    if (BookCoverLoader::checkCachedCover(xtc->getThumbBmpPath(height), true) !=
+    if (BookCoverLoader::checkCachedCover(xtc->getThumbBmpPath(height), false) !=
         BookCoverLoader::CachedCoverState::Missing)
       return;
     if (!showingLoading) {

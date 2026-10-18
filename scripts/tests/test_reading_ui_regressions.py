@@ -33,6 +33,68 @@ def run_cpp(program, include_dirs=(), defines=()):
 
 
 class ReadingUiRegressionTest(unittest.TestCase):
+    def test_home_grid_repairs_empty_xtc_and_preserves_epub_markers(self):
+        home = (ROOT / 'src/activities/home/HomeActivity.cpp').read_text()
+        ui = (ROOT / 'src/components/UITheme.cpp').read_text()
+        program = r'''
+#include <cassert>
+#include <memory>
+#include <string>
+#include <utility>
+bool cacheExists=true, cacheEmpty=true;
+int generations=0;
+namespace FsHelpers {
+bool hasReflowableBookExtension(const std::string& path) {return path.ends_with(".epub");}
+bool hasXtcExtension(const std::string& path) {return path.ends_with(".xtc");}
+}
+namespace BookCoverLoader {
+enum class CachedCoverState {Missing, Ready, Terminal};
+CachedCoverState checkCachedCover(const std::string&, bool emptyIsTerminal) {
+ if(!cacheExists) return CachedCoverState::Missing;
+ if(!cacheEmpty) return CachedCoverState::Ready;
+ if(emptyIsTerminal) return CachedCoverState::Terminal;
+ cacheExists=false;
+ return CachedCoverState::Missing;
+}
+}
+bool generate() {++generations; cacheExists=true; cacheEmpty=false; return true;}
+struct Epub {
+ Epub(const std::string&,const char*) {}
+ std::string getThumbBmpPath(int height=-1) {return "/epub_"+(height<0?std::string("[HEIGHT]"):std::to_string(height))+".bmp";}
+ bool generateThumbBmpFromSource(int) {return generate();}
+};
+struct Xtc {
+ Xtc(const std::string&,const char*) {}
+ std::string getThumbBmpPath(int height=-1) {return "/xtc_"+(height<0?std::string("[HEIGHT]"):std::to_string(height))+".bmp";}
+ bool load() {return true;}
+ bool generateThumbBmp(int) {return generate();}
+};
+template<class T, class... Args> auto makeUniqueNoThrow(Args&&... args) {
+ return std::make_unique<T>(std::forward<Args>(args)...);
+}
+struct Rect {};
+struct RecentBook {std::string path,coverBmpPath;};
+struct UITheme {static std::string getCoverThumbPath(std::string,int);};
+struct HomeActivity {int renderer=0;void loadGridCover(RecentBook&,int,bool&,Rect&);};
+struct {Rect drawPopup(int,const char*) {return {};};void fillPopupProgress(int,Rect&,int) {}} GUI;
+constexpr int STR_LOADING_POPUP=0;
+const char* tr(int) {return "Loading";}
+#define LOG_ERR(...) ((void)0)
+''' + method(ui, 'std::string UITheme::getCoverThumbPath(') + method(home, 'void HomeActivity::loadGridCover(') + r'''
+int main() {
+ for(bool xtc:{false,true}) for(bool knownPath:{false,true}) for(bool empty:{false,true}) {
+  cacheExists=true; cacheEmpty=empty; generations=0;
+  RecentBook book{xtc?"/book.xtc":"/book.epub",knownPath?"/thumb_[HEIGHT].bmp":""};
+  HomeActivity home; bool showing=false; Rect popup;
+  home.loadGridCover(book,226,showing,popup);
+  assert(cacheExists);
+  assert(generations==(xtc&&empty?1:0));
+  assert(cacheEmpty==(empty&&!xtc));
+ }
+}
+'''
+        run_cpp(program)
+
     def test_splash_uses_font_heights_and_keeps_version_inside_safe_area(self):
         source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
         program = r'''
