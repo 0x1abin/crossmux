@@ -295,4 +295,56 @@ TEST_F(BookCoverLoaderTest, GeneratesFullCoverAndMetadata) {
   EXPECT_FALSE(generated);
   EXPECT_EQ(cover_stub::fullCoverGenerations, 1);
 }
+// Home calls checkCachedCover(path, isEpub && !useFullCover) before generating; grid Home passes true.
+TEST_F(BookCoverLoaderTest, HomeShortcutRegeneratesHeaderOnlyThumbnail) {
+  writeBook("/book.epub");
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 135, 226, 1, 2, 0);
+  ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 62U);
+
+  EXPECT_EQ(BookCoverLoader::checkCachedCover("/.crosspoint/epub/thumb_226.bmp", true),
+            BookCoverLoader::CachedCoverState::Missing);
+  EXPECT_FALSE(std::filesystem::exists(hostPath("/.crosspoint/epub/thumb_226.bmp")));
+
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, HomeShortcutRegeneratesTruncatedThumbnail) {
+  writeBook("/book.epub");
+  // 135x226 1bpp needs 20-byte rows; keep only 100 of 226 rows.
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 135, 226, 1, 2, 20 * 100);
+
+  EXPECT_EQ(BookCoverLoader::checkCachedCover("/.crosspoint/epub/thumb_226.bmp", true),
+            BookCoverLoader::CachedCoverState::Missing);
+  EXPECT_FALSE(std::filesystem::exists(hostPath("/.crosspoint/epub/thumb_226.bmp")));
+}
+
+TEST_F(BookCoverLoaderTest, HomeShortcutKeepsCompleteThumbnail) {
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 135, 226, 1, 2, 20 * 226);
+
+  EXPECT_EQ(BookCoverLoader::checkCachedCover("/.crosspoint/epub/thumb_226.bmp", true),
+            BookCoverLoader::CachedCoverState::Ready);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 62U + 20 * 226);
+}
+
+TEST_F(BookCoverLoaderTest, HomeShortcutKeepsEmptyNoCoverMarker) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub"));
+  ASSERT_TRUE(cover_stub::writeEmpty("/.crosspoint/epub/thumb_226.bmp"));
+
+  EXPECT_EQ(BookCoverLoader::checkCachedCover("/.crosspoint/epub/thumb_226.bmp", true),
+            BookCoverLoader::CachedCoverState::Terminal);
+  ASSERT_TRUE(std::filesystem::exists(hostPath("/.crosspoint/epub/thumb_226.bmp")));
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 0U);
+}
+
+TEST_F(BookCoverLoaderTest, HomeShortcutRemovesEmptyFullCover) {
+  ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub"));
+  ASSERT_TRUE(cover_stub::writeEmpty("/.crosspoint/epub/cover.bmp"));
+
+  EXPECT_EQ(BookCoverLoader::checkCachedCover("/.crosspoint/epub/cover.bmp", false),
+            BookCoverLoader::CachedCoverState::Missing);
+  EXPECT_FALSE(std::filesystem::exists(hostPath("/.crosspoint/epub/cover.bmp")));
+}
 }  // namespace
