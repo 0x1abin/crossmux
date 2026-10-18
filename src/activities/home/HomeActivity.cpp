@@ -1,6 +1,5 @@
 #include "HomeActivity.h"
 
-#include <Bitmap.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -187,7 +186,9 @@ void HomeActivity::resolveGridCoverPaths() {
 }
 
 void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect) {
-  if (!book.coverBmpPath.empty() && Storage.exists(UITheme::getCoverThumbPath(book.coverBmpPath, height).c_str()))
+  if (!book.coverBmpPath.empty() &&
+      BookCoverLoader::checkCachedCover(UITheme::getCoverThumbPath(book.coverBmpPath, height), true) !=
+          BookCoverLoader::CachedCoverState::Missing)
     return;
   // Only one parser lives at a time; EPUB/XTC objects exceed the stack budget.
   if (FsHelpers::hasReflowableBookExtension(book.path)) {
@@ -197,7 +198,9 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = epub->getThumbBmpPath();
-    if (Storage.exists(epub->getThumbBmpPath(height).c_str())) return;
+    if (BookCoverLoader::checkCachedCover(epub->getThumbBmpPath(height), true) !=
+        BookCoverLoader::CachedCoverState::Missing)
+      return;
     if (!showingLoading) {
       showingLoading = true;
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
@@ -213,7 +216,9 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = xtc->getThumbBmpPath();
-    if (Storage.exists(xtc->getThumbBmpPath(height).c_str())) return;
+    if (BookCoverLoader::checkCachedCover(xtc->getThumbBmpPath(height), true) !=
+        BookCoverLoader::CachedCoverState::Missing)
+      return;
     if (!showingLoading) {
       showingLoading = true;
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
@@ -279,31 +284,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     if (book.coverBmpPath.empty()) continue;
 
     const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
-    if (Storage.exists(coverPath.c_str())) {
-      bool invalidCache = false;
-      {
-        HalFile cachedCover;
-        if (!Storage.openFileForRead("HOME", coverPath, cachedCover)) {
-          LOG_ERR("HOME", "Failed to open cached cover: %s", coverPath.c_str());
-          continue;
-        }
-        if (cachedCover.fileSize() == 0) {
-          // EPUB uses an empty thumbnail as a persistent "no supported cover" marker.
-          if (isEpub && !useFullCover) continue;
-          invalidCache = true;
-        } else {
-          Bitmap bitmap(cachedCover);
-          invalidCache =
-              bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0;
-        }
-      }
-      if (!invalidCache) continue;
-      LOG_ERR("HOME", "Removing invalid cached cover: %s", coverPath.c_str());
-      if (!Storage.remove(coverPath.c_str())) {
-        LOG_ERR("HOME", "Failed to remove invalid cached cover: %s", coverPath.c_str());
-        continue;
-      }
-    }
+    // EPUB thumbnails keep an empty file as the persistent "no supported cover" marker.
+    if (BookCoverLoader::checkCachedCover(coverPath, isEpub && !useFullCover) !=
+        BookCoverLoader::CachedCoverState::Missing)
+      continue;
 
     if (!showingLoading) {
       showingLoading = true;
