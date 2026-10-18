@@ -97,6 +97,7 @@ class Bitmap {
   bool isTopDown() const { return topDown; }
   bool hasGreyscale() const { return bpp > 1; }
   int getRowBytes() const { return rowBytes; }
+  uint32_t getPixelDataOffset() const { return bfOffBits; }
   bool is1Bit() const { return bpp == 1; }
   uint16_t getBpp() const { return bpp; }
   bool hasTransparency() const { return transparentOverlay; }

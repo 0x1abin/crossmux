@@ -8,6 +8,8 @@
 #include <Txt.h>
 #include <Xtc.h>
 
+#include <cstdint>
+
 namespace BookCoverLoader {
 namespace {
 
@@ -23,10 +25,10 @@ CachedCoverState inspectCachedCover(const std::string& path, const bool emptyIsT
 
     Bitmap bitmap(file);
     if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-      // Require a full pixel payload, not just a valid header.
-      const size_t fileBytes = file.fileSize();
-      const size_t pixelBytes = static_cast<size_t>(bitmap.getRowBytes()) * static_cast<size_t>(bitmap.getHeight());
-      if (fileBytes >= sizeof(BmpHeader) + pixelBytes) {
+      // Ready only when every pixel row fits between the data offset and end of file.
+      const uint64_t pixelBytes =
+          static_cast<uint64_t>(bitmap.getRowBytes()) * static_cast<uint64_t>(bitmap.getHeight());
+      if (bitmap.getPixelDataOffset() + pixelBytes <= file.fileSize()) {
         return CachedCoverState::Ready;
       }
     }

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "BookCoverLoader.h"
 #include "CoverStub.h"
@@ -47,6 +48,34 @@ class BookCoverLoaderTest : public ::testing::Test {
   }
 
   std::filesystem::path hostPath(const char* path) const { return root / (path + 1); }
+
+  // Writes a BI_RGB BMP with the given palette size and number of pixel bytes after the header.
+  void writeThumb(const char* path, const int width, const int height, const uint16_t bpp,
+                  const uint32_t paletteEntries, const size_t pixelBytes) {
+    const uint32_t offset = 54 + paletteEntries * 4;
+    std::vector<uint8_t> bytes(offset + pixelBytes, 0);
+    const auto put16 = [&](const size_t at, const uint16_t value) {
+      bytes[at] = value & 0xFF;
+      bytes[at + 1] = value >> 8;
+    };
+    const auto put32 = [&](const size_t at, const uint32_t value) {
+      for (int i = 0; i < 4; ++i) bytes[at + i] = (value >> (8 * i)) & 0xFF;
+    };
+    bytes[0] = 'B';
+    bytes[1] = 'M';
+    put32(2, static_cast<uint32_t>(bytes.size()));
+    put32(10, offset);
+    put32(14, 40);
+    put32(18, static_cast<uint32_t>(width));
+    put32(22, static_cast<uint32_t>(height));
+    put16(26, 1);
+    put16(28, bpp);
+    put32(46, paletteEntries);
+    ASSERT_TRUE(Storage.ensureDirectoryExists("/.crosspoint/epub"));
+    std::ofstream output(hostPath(path), std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(output.good());
+    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  }
 
   std::filesystem::path root;
 };
@@ -100,11 +129,7 @@ TEST_F(BookCoverLoaderTest, ReplacesCorruptThumbnail) {
 
 TEST_F(BookCoverLoaderTest, RegeneratesHeaderOnlyThumbnail) {
   writeBook("/book.epub");
-  Storage.mkdir("/.crosspoint/epub");
-  {
-    std::ofstream output(hostPath("/.crosspoint/epub/thumb_226.bmp"), std::ios::binary | std::ios::trunc);
-    output << "BM" << std::string(sizeof(BmpHeader) - 2, '\0');
-  }
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 1, 1, 1, 2, 0);
   ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), sizeof(BmpHeader));
 
   bool generated = false;
@@ -112,6 +137,51 @@ TEST_F(BookCoverLoaderTest, RegeneratesHeaderOnlyThumbnail) {
   EXPECT_TRUE(generated);
   EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
   EXPECT_GT(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), sizeof(BmpHeader));
+}
+
+TEST_F(BookCoverLoaderTest, RegeneratesTruncatedThumbnail) {
+  writeBook("/book.epub");
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 8, 4, 2, 4, 3 * 4);
+
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, KeepsComplete24BitThumbnail) {
+  writeBook("/book.epub");
+  // 2x1 24bpp: 54-byte header plus one 8-byte padded row.
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 2, 1, 24, 0, 8);
+  ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 62U);
+
+  bool generated = true;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 0);
+  EXPECT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 62U);
+}
+
+TEST_F(BookCoverLoaderTest, RegeneratesPalettedThumbnailWithoutPixels) {
+  writeBook("/book.epub");
+  // 16x16 8bpp: 1078-byte header and palette, no pixel rows.
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 16, 16, 8, 256, 0);
+  ASSERT_EQ(std::filesystem::file_size(hostPath("/.crosspoint/epub/thumb_226.bmp")), 1078U);
+
+  bool generated = false;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_TRUE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 1);
+}
+
+TEST_F(BookCoverLoaderTest, KeepsCompletePalettedThumbnail) {
+  writeBook("/book.epub");
+  writeThumb("/.crosspoint/epub/thumb_226.bmp", 16, 16, 8, 256, 16 * 16);
+
+  bool generated = true;
+  EXPECT_EQ(BookCoverLoader::ensureThumbnail("/book.epub", 226, &generated), "/.crosspoint/epub/thumb_226.bmp");
+  EXPECT_FALSE(generated);
+  EXPECT_EQ(cover_stub::epubThumbnailGenerations, 0);
 }
 
 TEST_F(BookCoverLoaderTest, KeepsLayoutThumbnailSizesIndependent) {
