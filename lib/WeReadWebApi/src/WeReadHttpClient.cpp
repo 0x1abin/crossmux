@@ -19,6 +19,10 @@ namespace {
 
 bool containsNewline(const char* value) { return value && (strchr(value, '\r') || strchr(value, '\n')); }
 
+bool isAborted(const WeReadHttpClient::RequestOptions& options) {
+  return options.shouldAbort && options.shouldAbort(options.abortContext);
+}
+
 bool copyHttpsUrlParts(const char* url, char* host, const size_t hostSize, const char*& path) {
   WeReadHttpClient::HttpsUrlView view;
   if (!host || hostSize < 2 || !WeReadHttpClient::parseHttpsUrl(url, view) || view.hostLength >= hostSize) return false;
@@ -104,9 +108,11 @@ bool parseHexSize(const char* value, size_t& result) {
   return sawDigit;
 }
 
-bool writeAll(freeink::SecureClient& client, const uint8_t* data, const size_t length) {
+bool writeAll(freeink::SecureClient& client, const uint8_t* data, const size_t length,
+              const WeReadHttpClient::RequestOptions& options) {
   size_t written = 0;
   while (written < length) {
+    if (isAborted(options)) return false;
     const size_t count = client.write(data + written, length - written);
     if (count == 0) return false;
     written += count;
@@ -114,16 +120,17 @@ bool writeAll(freeink::SecureClient& client, const uint8_t* data, const size_t l
   return true;
 }
 
-bool writeText(freeink::SecureClient& client, const char* text) {
-  return text && writeAll(client, reinterpret_cast<const uint8_t*>(text), strlen(text));
+bool writeText(freeink::SecureClient& client, const char* text, const WeReadHttpClient::RequestOptions& options) {
+  return text && writeAll(client, reinterpret_cast<const uint8_t*>(text), strlen(text), options);
 }
 
-bool readLine(freeink::SecureClient& client, uint8_t* buffer, const size_t capacity, const int timeoutMs,
-              size_t& length) {
+bool readLine(freeink::SecureClient& client, uint8_t* buffer, const size_t capacity,
+              const WeReadHttpClient::RequestOptions& options, size_t& length) {
   if (!buffer || capacity < 2) return false;
   length = 0;
-  const unsigned long deadline = millis() + static_cast<unsigned long>(timeoutMs);
+  const unsigned long deadline = millis() + static_cast<unsigned long>(options.timeoutMs);
   while (static_cast<int32_t>(millis() - deadline) < 0) {
+    if (isAborted(options)) return false;
     const int value = client.read();
     if (value >= 0) {
       if (value == '\n') {
@@ -145,17 +152,19 @@ bool readLine(freeink::SecureClient& client, uint8_t* buffer, const size_t capac
 }
 
 TransferResult readFixedBody(freeink::SecureClient& client, uint8_t* buffer, const size_t bufferSize,
-                             const size_t length, const int timeoutMs, const WeReadHttpClient::DataCallback& onData) {
+                             const size_t length, const WeReadHttpClient::RequestOptions& options,
+                             const WeReadHttpClient::DataCallback& onData) {
   size_t remaining = length;
-  unsigned long deadline = millis() + static_cast<unsigned long>(timeoutMs);
+  unsigned long deadline = millis() + static_cast<unsigned long>(options.timeoutMs);
   while (remaining > 0) {
+    if (isAborted(options)) return TransferResult::Aborted;
     const size_t wanted = remaining < bufferSize ? remaining : bufferSize;
     const int count = client.read(buffer, wanted);
     if (count > 0) {
       const size_t received = static_cast<size_t>(count);
       if (onData && !onData(buffer, received)) return TransferResult::Aborted;
       remaining -= received;
-      deadline = millis() + static_cast<unsigned long>(timeoutMs);
+      deadline = millis() + static_cast<unsigned long>(options.timeoutMs);
       continue;
     }
     if (count < 0 || (!client.connected() && client.available() == 0) ||
@@ -168,13 +177,15 @@ TransferResult readFixedBody(freeink::SecureClient& client, uint8_t* buffer, con
 }
 
 TransferResult readCloseDelimitedBody(freeink::SecureClient& client, uint8_t* buffer, const size_t bufferSize,
-                                      const int timeoutMs, const WeReadHttpClient::DataCallback& onData) {
-  unsigned long deadline = millis() + static_cast<unsigned long>(timeoutMs);
+                                      const WeReadHttpClient::RequestOptions& options,
+                                      const WeReadHttpClient::DataCallback& onData) {
+  unsigned long deadline = millis() + static_cast<unsigned long>(options.timeoutMs);
   while (true) {
+    if (isAborted(options)) return TransferResult::Aborted;
     const int count = client.read(buffer, bufferSize);
     if (count > 0) {
       if (onData && !onData(buffer, static_cast<size_t>(count))) return TransferResult::Aborted;
-      deadline = millis() + static_cast<unsigned long>(timeoutMs);
+      deadline = millis() + static_cast<unsigned long>(options.timeoutMs);
       continue;
     }
     if (!client.connected() && client.available() == 0) return TransferResult::Ok;
@@ -184,16 +195,17 @@ TransferResult readCloseDelimitedBody(freeink::SecureClient& client, uint8_t* bu
 }
 
 TransferResult readChunkedBody(freeink::SecureClient& client, uint8_t* buffer, const size_t bufferSize,
-                               const int timeoutMs, const WeReadHttpClient::DataCallback& onData,
+                               const WeReadHttpClient::RequestOptions& options,
+                               const WeReadHttpClient::DataCallback& onData,
                                const WeReadHttpClient::HeaderCallback& onHeader) {
   while (true) {
     size_t lineLength = 0;
-    if (!readLine(client, buffer, bufferSize, timeoutMs, lineLength)) return TransferResult::Error;
+    if (!readLine(client, buffer, bufferSize, options, lineLength)) return TransferResult::Error;
     size_t chunkSize = 0;
     if (!parseHexSize(reinterpret_cast<const char*>(buffer), chunkSize)) return TransferResult::Error;
     if (chunkSize == 0) {
       while (true) {
-        if (!readLine(client, buffer, bufferSize, timeoutMs, lineLength)) return TransferResult::Error;
+        if (!readLine(client, buffer, bufferSize, options, lineLength)) return TransferResult::Error;
         if (lineLength == 0) return TransferResult::Ok;
         char* line = reinterpret_cast<char*>(buffer);
         char* colon = strchr(line, ':');
@@ -205,9 +217,9 @@ TransferResult readChunkedBody(freeink::SecureClient& client, uint8_t* buffer, c
       }
     }
 
-    const TransferResult result = readFixedBody(client, buffer, bufferSize, chunkSize, timeoutMs, onData);
+    const TransferResult result = readFixedBody(client, buffer, bufferSize, chunkSize, options, onData);
     if (result != TransferResult::Ok) return result;
-    if (!readLine(client, buffer, bufferSize, timeoutMs, lineLength) || lineLength != 0) {
+    if (!readLine(client, buffer, bufferSize, options, lineLength) || lineLength != 0) {
       return TransferResult::Error;
     }
   }
@@ -244,6 +256,12 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()),
           static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
+  struct AbortScope {
+    freeink::SecureClient& client;
+    ~AbortScope() { client.setAbortCallback(nullptr); }
+  } abortScope{client};
+  client.setAbortCallback([&options] { return isAborted(options); });
+  if (isAborted(options)) return WeReadHttpClient::Result::Cancelled;
   client.setInsecure();
   client.setTimeout(static_cast<unsigned long>(options.timeoutMs));
   if (!reused && !client.connect(host, HTTPS_PORT)) {
@@ -258,28 +276,27 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   }
   memcpy(sessionHost, host, strlen(host) + 1);
 
+  const auto write = [&client, &options](const char* text) { return writeText(client, text, options); };
   bool hasUserAgent = false;
   char contentLength[32];
   const int contentLengthSize =
       snprintf(contentLength, sizeof(contentLength), "Content-Length: %u\r\n", static_cast<unsigned>(options.bodySize));
-  bool requestWritten = writeText(client, options.method) && writeText(client, " ") && writeText(client, path) &&
-                        writeText(client, " HTTP/1.1\r\nHost: ") && writeText(client, host) &&
-                        writeText(client, "\r\nConnection: keep-alive\r\n");
+  bool requestWritten = write(options.method) && write(" ") && write(path) && write(" HTTP/1.1\r\nHost: ") &&
+                        write(host) && write("\r\nConnection: keep-alive\r\n");
   for (size_t i = 0; i < options.headerCount; ++i) {
     const auto& header = options.headers[i];
     hasUserAgent |= strcasecmp(header.name, "User-Agent") == 0;
-    requestWritten = requestWritten && writeText(client, header.name) && writeText(client, ": ") &&
-                     writeText(client, header.value) && writeText(client, "\r\n");
+    requestWritten = requestWritten && write(header.name) && write(": ") && write(header.value) && write("\r\n");
   }
   if (!hasUserAgent) {
-    requestWritten = requestWritten && writeText(client, "User-Agent: CrossPoint-ESP32-" CROSSPOINT_VERSION "\r\n");
+    requestWritten = requestWritten && write("User-Agent: CrossPoint-ESP32-" CROSSPOINT_VERSION "\r\n");
   }
   if (strcmp(options.method, "POST") == 0) {
     requestWritten = requestWritten && contentLengthSize > 0 &&
-                     static_cast<size_t>(contentLengthSize) < sizeof(contentLength) && writeText(client, contentLength);
+                     static_cast<size_t>(contentLengthSize) < sizeof(contentLength) && write(contentLength);
   }
-  requestWritten = requestWritten && writeText(client, "\r\n") &&
-                   (options.bodySize == 0 || writeAll(client, options.body, options.bodySize));
+  requestWritten = requestWritten && write("\r\n") &&
+                   (options.bodySize == 0 || writeAll(client, options.body, options.bodySize, options));
   if (!requestWritten) {
     LOG_ERR("HTTP", "wolfSSL request write failed");
     cleanupClient(client);
@@ -287,7 +304,7 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   }
 
   size_t lineLength = 0;
-  if (!readLine(client, options.readBuffer, options.readBufferSize, options.timeoutMs, lineLength)) {
+  if (!readLine(client, options.readBuffer, options.readBufferSize, options, lineLength)) {
     LOG_ERR("HTTP", "wolfSSL status read failed");
     cleanupClient(client);
     return WeReadHttpClient::Result::NetworkError;
@@ -301,6 +318,10 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
     return WeReadHttpClient::Result::NetworkError;
   }
   status = (statusLine[9] - '0') * 100 + (statusLine[10] - '0') * 10 + statusLine[11] - '0';
+  if (options.acceptStatus && !options.acceptStatus(status)) {
+    cleanupClient(client);
+    return WeReadHttpClient::Result::Aborted;
+  }
   bool keepAlive = statusLine[7] != '0';
   bool hasContentLength = false;
   bool hasTransferEncoding = false;
@@ -309,7 +330,7 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
   size_t responseLength = 0;
 
   while (true) {
-    if (!readLine(client, options.readBuffer, options.readBufferSize, options.timeoutMs, lineLength)) {
+    if (!readLine(client, options.readBuffer, options.readBufferSize, options, lineLength)) {
       LOG_ERR("HTTP", "wolfSSL header read failed");
       cleanupClient(client);
       return WeReadHttpClient::Result::NetworkError;
@@ -369,16 +390,14 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
     case BodyFraming::None:
       break;
     case BodyFraming::ContentLength:
-      transfer =
-          readFixedBody(client, options.readBuffer, options.readBufferSize, responseLength, options.timeoutMs, onData);
+      transfer = readFixedBody(client, options.readBuffer, options.readBufferSize, responseLength, options, onData);
       break;
     case BodyFraming::Chunked:
-      transfer =
-          readChunkedBody(client, options.readBuffer, options.readBufferSize, options.timeoutMs, onData, onHeader);
+      transfer = readChunkedBody(client, options.readBuffer, options.readBufferSize, options, onData, onHeader);
       break;
     case BodyFraming::CloseDelimited:
       keepAlive = false;
-      transfer = readCloseDelimitedBody(client, options.readBuffer, options.readBufferSize, options.timeoutMs, onData);
+      transfer = readCloseDelimitedBody(client, options.readBuffer, options.readBufferSize, options, onData);
       break;
   }
 
@@ -445,6 +464,8 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
     return WeReadHttpClient::Result::NetworkError;
   }
 
+  if (isAborted(options)) return WeReadHttpClient::Result::Cancelled;
+
   if (client && strcmp(sessionHost, host) != 0) {
     LOG_INF("WR", "TLS host switch: %s -> %s", sessionHost, host);
     cleanupClient(client);
@@ -509,6 +530,10 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
 
   size_t sent = 0;
   while (sent < options.bodySize) {
+    if (isAborted(options)) {
+      cleanupClient(client);
+      return WeReadHttpClient::Result::Cancelled;
+    }
     const int written = esp_http_client_write(client, reinterpret_cast<const char*>(options.body + sent),
                                               static_cast<int>(options.bodySize - sent));
     if (written <= 0) {
@@ -525,8 +550,16 @@ WeReadHttpClient::Result runRequest(const char* url, const WeReadHttpClient::Req
     return WeReadHttpClient::Result::NetworkError;
   }
   status = esp_http_client_get_status_code(client);
+  if (options.acceptStatus && !options.acceptStatus(status)) {
+    cleanupClient(client);
+    return WeReadHttpClient::Result::Aborted;
+  }
 
   while (true) {
+    if (isAborted(options)) {
+      cleanupClient(client);
+      return WeReadHttpClient::Result::Cancelled;
+    }
     const int got = esp_http_client_read(client, reinterpret_cast<char*>(options.readBuffer),
                                          static_cast<int>(options.readBufferSize));
     if (got < 0) {
@@ -638,8 +671,26 @@ Result request(Session& session, const char* url, const RequestOptions& options,
     return Result::NetworkError;
   }
   LOG_DBG("HTTP", "%s %s", options.method ? options.method : "?", url ? url : "?");
-  return runRequest(url, options, onData, onHeader, status, session.client_, session.host_, sizeof(session.host_),
-                    session.newConnections_, session.reusedRequests_);
+  struct AbortState {
+    const RequestOptions& options;
+    bool cancelled = false;
+  } abort{options};
+  RequestOptions requestOptions = options;
+  if (options.shouldAbort) {
+    requestOptions.shouldAbort = [](void* context) {
+      auto& state = *static_cast<AbortState*>(context);
+      state.cancelled = state.cancelled || isAborted(state.options);
+      return state.cancelled;
+    };
+    requestOptions.abortContext = &abort;
+  }
+  const Result result = runRequest(url, requestOptions, onData, onHeader, status, session.client_, session.host_,
+                                   sizeof(session.host_), session.newConnections_, session.reusedRequests_);
+  if (isAborted(requestOptions)) {
+    session.reset();
+    return Result::Cancelled;
+  }
+  return result;
 }
 
 }  // namespace WeReadHttpClient

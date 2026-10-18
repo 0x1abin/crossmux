@@ -3,7 +3,6 @@
 #include <EpdFont.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
-#include <HalGPIO.h>
 #include <HalMemory.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -16,7 +15,6 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "components/CoverGridHomeUi.h"
-#include "components/SelectionCursorPolicy.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
@@ -152,15 +150,6 @@ const ThemeMetrics& UITheme::getMetrics() const {
     metricsValid = true;
   }
   return adjustedMetrics;
-}
-
-bool UITheme::showSelectionCursor() const {
-#ifdef CROSSPOINT_EMULATED
-  return true;
-#else
-  return SelectionCursorPolicy::visible(currentType == CrossPointSettings::UI_THEME::INX, gpio.hasTouch(),
-                                        gpio.lastInputModality());
-#endif
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,

@@ -4,6 +4,7 @@
 
 struct EpdFontData {
   const void* groups = nullptr;
+  bool cjk = false;
 };
 
 class EpdFontFamily {
@@ -21,6 +22,11 @@ class EpdFontFamily {
     if ((requested & BOLD) && styleData[BOLD]) return styleData[BOLD];
     if ((requested & ITALIC) && styleData[ITALIC]) return styleData[ITALIC];
     return styleData[REGULAR];
+  }
+
+  bool hasCodepoint(uint32_t cp, Style style = REGULAR) const {
+    const auto* data = getData(style);
+    return cp == 0x4E00 && data && data->cjk;
   }
 
  private:

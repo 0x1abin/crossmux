@@ -10,6 +10,8 @@ class SdCardFont;
 class TtfEpdFont;
 
 class FontCacheManager {
+  enum class ScanMode : uint8_t { None, AllFonts, UiCjk };
+
  public:
   FontCacheManager(const std::map<int, EpdFontFamily>& fontMap, const std::map<int, SdCardFont*>& sdCardFonts,
                    const std::map<int, TtfEpdFont*>& ttfFonts);
@@ -54,10 +56,14 @@ class FontCacheManager {
     PrewarmScope& operator=(const PrewarmScope&) = delete;
 
    private:
+    friend class FontCacheManager;
+    PrewarmScope(FontCacheManager& manager, ScanMode mode);
     FontCacheManager* manager_;
-    bool active_ = true;
+    ScanMode mode_;
   };
   PrewarmScope createPrewarmScope();
+  // UI scans must not invalidate resident SD/TTF preview glyphs.
+  PrewarmScope createUiCjkPrewarmScope();
 
  private:
   const std::map<int, EpdFontFamily>& fontMap_;
@@ -66,7 +72,6 @@ class FontCacheManager {
   [[maybe_unused]] const std::map<int, TtfEpdFont*>& ttfFonts_;
   FontDecompressor* fontDecompressor_ = nullptr;
 
-  enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
 
   // A render pass touches at most a handful of font ids. Codepoints are packed
@@ -80,6 +85,7 @@ class FontCacheManager {
 
   uint8_t resolveScanStyle(int fontId, EpdFontFamily::Style style) const;
   int scanFontIds_[MAX_SCAN_FONTS] = {};
+  const EpdFontData* scanFontData_[MAX_SCAN_FONTS] = {};
   uint32_t scanCodepoints_[MAX_SCAN_CODEPOINTS + 1] = {};
   uint16_t scanGroupCounts_[SCAN_GROUP_COUNT] = {};
   uint16_t scanCodepointCount_ = 0;

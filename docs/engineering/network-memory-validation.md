@@ -19,24 +19,32 @@ The production fix has two parts:
 - Settings releases its rebuildable lists before launching the font downloader,
   using the existing helper already used by OTA and Bluetooth settings. Child
   allocation failure and normal return rebuild those lists.
-- On C3, OTA and font activities call the existing
+- On C3, OTA, font and WeRead activities call the existing
   `ReadingStatsStore::releaseMemoryForNetwork()` under `RenderLock` before
   allocating Wi-Fi selection. It ends the active session and saves dirty data
   **before** releasing the vectors. Save failure prevents network launch and
   leaves statistics resident. Each activity records successful release once.
 
-The owning activity's existing exit path reloads statistics through reboot,
+OTA and font activities' existing exit paths reload statistics through reboot,
 including cancellation or allocation failure before Wi-Fi starts. Font exits
 retain their destination: Home, Reader, Reader with the prompt suppressed, or
 Reader with Chinese font preload. Successful OTA installation keeps its normal
 restart into the new image. The existing deep-sleep guard suppresses an exit
 restart when sleep is already underway; wake loads statistics normally.
 
+WeRead releases statistics once before its first network operation, including
+when Wi-Fi is already connected. On C3, exit closes TLS and Wi-Fi, then uses the
+existing silent Home restart to restore statistics during startup. Do not reload
+statistics on the fragmented network heap: vector growth can call `abort()` with
+exceptions disabled before `reloadAfterNetwork()` can return a failure. Successful
+book caching keeps its existing reader restart. The independent reader
+progress-sync activity does not unload statistics.
+
 S3 and simulator builds do not unload statistics. In particular, touch devices
 can stop Wi-Fi without rebooting and must retain their live statistics. This is
 not a global Wi-Fi policy: background/live network applications may continue
 using reading data. The existing font-cache preparation and BLE teardown remain
-shared in `NetworkStartup`; only these two foreground download owners opt into
+shared in `NetworkStartup`; only these foreground network owners opt into
 statistics release.
 
 No new heap buffers, tasks, dependency, persistent setting or SDK API are added.

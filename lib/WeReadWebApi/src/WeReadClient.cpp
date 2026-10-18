@@ -302,10 +302,17 @@ bool absorbSetCookie(WeReadStore::Session* session, const char* headerName, cons
   return true;
 }
 
+bool acceptAuthenticatedStatus(const int status) { return status != 401 && status != 403; }
+
+// A reader/chapter 403 can mean purchase restrictions rather than an expired session.
+bool acceptChapterStatus(const int status) { return status != 401; }
+
 Error requestOnce(const char* method, const char* path, const uint8_t* body, const size_t bodySize,
                   WeReadStore::Session* session, const char* referer, ResponseSink& sink, int& status, char* cookie,
                   const size_t cookieSize, char* url, const size_t urlSize, uint8_t* readBuffer,
-                  const size_t readBufferSize, WeReadHttpClient::Session* reusableSession = nullptr) {
+                  const size_t readBufferSize, WeReadHttpClient::Session* reusableSession = nullptr,
+                  WeReadHttpClient::AbortCallback shouldAbort = nullptr, void* abortContext = nullptr,
+                  bool (*acceptStatus)(int) = acceptAuthenticatedStatus) {
   if (!method || !path || !cookie || cookieSize == 0 || !url || urlSize == 0 || !readBuffer || readBufferSize == 0) {
     return Error::Protocol;
   }
@@ -328,6 +335,9 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
   options.timeoutMs = kRequestTimeoutMs;
   options.readBuffer = readBuffer;
   options.readBufferSize = readBufferSize;
+  options.acceptStatus = acceptStatus;
+  options.shouldAbort = shouldAbort;
+  options.abortContext = abortContext;
 
   if (!sink.reset(sink.ctx)) return Error::SdCard;
   const int urlLength = snprintf(url, urlSize, "%s%s", kHost, path);
@@ -340,6 +350,8 @@ Error requestOnce(const char* method, const char* path, const uint8_t* body, con
   const auto result = reusableSession
                           ? WeReadHttpClient::request(*reusableSession, url, options, onData, onHeader, status)
                           : WeReadHttpClient::request(url, options, onData, onHeader, status);
+  if (result == WeReadHttpClient::Result::Cancelled) return Error::Cancelled;
+  if (!acceptStatus(status)) return Error::SessionExpired;
   if (result == WeReadHttpClient::Result::Ok) {
     if (!sink.finish(sink.ctx)) return sink.writeError;
     return cookiesOk ? Error::Ok : Error::Protocol;
@@ -1858,6 +1870,7 @@ bool Operation::active() const {
     case Phase::OrganizeShelf:
     case Phase::ShelfCovers:
     case Phase::Renew:
+    case Phase::PrepareCover:
     case Phase::PrepareDetail:
     case Phase::FetchDetail:
     case Phase::PrepareBrowseCache:
@@ -1943,6 +1956,8 @@ void Operation::reset() {
   coverRedirects_ = 0;
   coverState_ = WeReadStore::ImageWorkState::Pending;
   cancelRequested_ = false;
+  shouldCancel_ = nullptr;
+  cancelContext_ = nullptr;
   renewalAttempted_ = false;
   loginRecoveryAttempted_ = false;
   loginConfirmed_ = false;
@@ -2051,6 +2066,16 @@ bool Operation::begin(const Kind kind, const WeReadStore::ShelfRecord* book, con
   return true;
 }
 
+bool Operation::beginCover(const WeReadStore::ShelfRecord& book) {
+  if (!begin(Kind::Detail, &book)) return false;
+  if (authenticating()) {
+    resumePhase_ = Phase::PrepareCover;
+  } else {
+    phase_ = Phase::PrepareCover;
+  }
+  return true;
+}
+
 bool Operation::beginBrowseCache(const WeReadStore::BookRecord& book) {
   reset();
   if (!isSafeProtocolToken(book.bookId)) {
@@ -2117,6 +2142,18 @@ void Operation::cancel() {
   if (active()) cancelRequested_ = true;
 }
 
+bool Operation::authenticating() const {
+  return phase_ == Phase::LoginUid || phase_ == Phase::LoginPollWait || phase_ == Phase::LoginPoll;
+}
+
+bool Operation::checkCancellation(void* context) {
+  auto& operation = *static_cast<Operation*>(context);
+  if (!operation.cancelRequested_ && operation.shouldCancel_) {
+    operation.cancelRequested_ = operation.shouldCancel_(operation.cancelContext_);
+  }
+  return operation.cancelRequested_;
+}
+
 Operation::Event Operation::cancelNow() {
   bookSession_.reset();
   abortBrowseCache();
@@ -2133,7 +2170,7 @@ Operation::Event Operation::cancelNow() {
 }
 
 void Operation::startLogin(const Phase resume) {
-  memcpy(previousVid_, session_.vid, sizeof(previousVid_));
+  if (session_.vid[0]) memcpy(previousVid_, session_.vid, sizeof(previousVid_));
   previousVid_[sizeof(previousVid_) - 1] = '\0';
   session_.clear();
   loginUid_[0] = '\0';
@@ -2151,13 +2188,18 @@ void Operation::requestAuthentication(const Phase resume) {
   bookSession_.reset();
   resumePhase_ = resume;
   requestAttempt_ = 0;
-  if (session_.rt[0] && !renewalAttempted_) {
+  if (kind_ == Kind::ProgressSync && session_.rt[0] && !renewalAttempted_) {
     renewalAttempted_ = true;
     phase_ = Phase::Renew;
     return;
   }
   if (kind_ == Kind::ProgressSync) {
     error_ = Error::SessionExpired;
+    phase_ = Phase::Failed;
+    return;
+  }
+  if (!WeReadStore::clearSession()) {
+    error_ = Error::SdCard;
     phase_ = Phase::Failed;
     return;
   }
@@ -2171,6 +2213,7 @@ void Operation::requestAuthentication(const Phase resume) {
 }
 
 Operation::Event Operation::fail(const Error error) {
+  if (error == Error::Cancelled) return cancelNow();
   const Phase failedPhase = phase_;
   bookSession_.reset();
   abortBrowseCache();
@@ -2193,6 +2236,29 @@ Operation::Event Operation::fail(const Error error) {
 }
 
 Operation::Event Operation::handleRequestError(const Error error, const Phase retryPhase) {
+  if (error == Error::SessionExpired) {
+    switch (retryPhase) {
+      case Phase::FetchReader:
+      case Phase::FetchPrimary:
+      case Phase::FetchText0:
+      case Phase::FetchText1:
+      case Phase::FetchEpub1:
+      case Phase::FetchEpub3:
+        return reauthenticateChapter();
+      case Phase::LoginUid:
+      case Phase::LoginPoll:
+        requestAuthentication(resumePhase_);
+        break;
+      case Phase::SendProgressEnter:
+      case Phase::SendProgressReport:
+        requestAuthentication(Phase::FetchProgressReader);
+        break;
+      default:  // Other requests resume the interrupted phase after authentication.
+        requestAuthentication(retryPhase);
+        break;
+    }
+    return phase_ == Phase::Failed ? fail(error_) : Event::None;
+  }
   if (error == Error::Network && !WeReadHttpClient::networkReady()) return fail(error);
   if (error == Error::Network && requestAttempt_ < kMaxRequestAttempts - 1) {
     ++requestAttempt_;
@@ -2229,10 +2295,6 @@ Operation::Event Operation::reauthenticateChapter() {
 void Operation::requestSucceeded() {
   requestAttempt_ = 0;
   nextActionAt_ = 0;
-  if (kind_ != Kind::ProgressSync) {
-    renewalAttempted_ = false;
-    loginRecoveryAttempted_ = false;
-  }
 }
 
 void Operation::guardBookSession(const char* phase) {
@@ -2270,10 +2332,11 @@ Error Operation::fetchLoginUid() {
   }
   context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
-  const Error error =
-      requestOnce("GET", "/api/auth/getLoginUid", nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_,
-                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_));
+  const Error error = requestOnce("GET", "/api/auth/getLoginUid", nullptr, 0, &session_, kDefaultReferer, sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), nullptr, checkCancellation, this);
   if (error != Error::Ok) return error;
+  if (context.errorCode == -2012) return Error::SessionExpired;
   if (responseStatus_ != 200 || !context.rootClosed || !context.uid[0]) return Error::LoginFailed;
   memcpy(loginUid_, context.uid, sizeof(loginUid_));
   loginUid_[sizeof(loginUid_) - 1] = '\0';
@@ -2294,9 +2357,11 @@ Error Operation::pollLogin() {
   char path[256];
   const int len = snprintf(path, sizeof(path), "/api/auth/getLoginInfo?uid=%s&otp=", loginUid_);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(path)) return Error::Protocol;
-  const Error error = requestOnce("GET", path, nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
-                                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_));
+  const Error error =
+      requestOnce("GET", path, nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_, sizeof(cookie_),
+                  url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), nullptr, checkCancellation, this);
   if (error != Error::Ok) return error;
+  if (context.errorCode == -2012) return Error::SessionExpired;
   if (responseStatus_ != 200 || !context.rootClosed) return Error::Network;
   if (!context.succeed) {
     if (context.logicCode[0] && strcmp(context.logicCode, "LOGIN_TIMEOUT") != 0) return Error::LoginFailed;
@@ -2334,9 +2399,10 @@ Error Operation::renewSession() {
   context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
   static constexpr char kRenewBody[] = "{\"rq\":\"%2Fweb%2Fbook%2Fread\",\"ql\":false}";
-  const Error error = requestOnce("POST", "/web/login/renewal", reinterpret_cast<const uint8_t*>(kRenewBody),
-                                  sizeof(kRenewBody) - 1, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
-                                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_));
+  const Error error =
+      requestOnce("POST", "/web/login/renewal", reinterpret_cast<const uint8_t*>(kRenewBody), sizeof(kRenewBody) - 1,
+                  &session_, kDefaultReferer, sink, responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_),
+                  ioBuffer_, sizeof(ioBuffer_), nullptr, checkCancellation, this);
   if (error != Error::Ok) return error;
   if (responseStatus_ != 200 || !context.rootClosed || context.errorCode != 0 || !context.succeed ||
       !session_.valid()) {
@@ -2359,7 +2425,7 @@ Error Operation::syncShelfOnce() {
   ResponseSink sink{&context, resetShelf, feedShelf, noOpFinish, Error::Protocol};
   const Error error =
       requestOnce("GET", "/web/shelf/sync", nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
-                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_));
+                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), nullptr, checkCancellation, this);
   if (error != Error::Ok) {
     context.writer.abort();
     return error;
@@ -2527,8 +2593,7 @@ Operation::Event Operation::stepShelfCovers() {
           advanceShelfCoverItem();
           return Event::None;
         case Error::SessionExpired:
-          requestAuthentication(shelfCoverResumePhase());
-          return phase_ == Phase::Failed ? fail(error_) : Event::None;
+          return handleRequestError(error, shelfCoverResumePhase());
         case Error::Network:
           if (requestAttempt_ < kMaxRequestAttempts - 1) {
             ++requestAttempt_;
@@ -2670,9 +2735,9 @@ Error Operation::fetchDetailOnce() {
   if (!WeReadProtocol::urlEncode(book_.bookId, encodedBookId, sizeof(encodedBookId))) return Error::Protocol;
   referer_ = "/web/book/info?bookId=";
   referer_ += encodedBookId;
-  const Error error =
-      requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
-                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const Error error = requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), &bookSession_, checkCancellation, this);
   if (error != Error::Ok) {
     context.writer.abort();
     return error;
@@ -2746,14 +2811,14 @@ Error Operation::fetchBrowseOnce() {
 
   Error error =
       requestOnce("GET", path, nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_, sizeof(cookie_),
-                  url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_) - kUrlSize, &bookSession_);
+                  url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_) - kUrlSize, &bookSession_, checkCancellation, this);
   if (error != Error::Ok && parser->storageFailed()) error = Error::SdCard;
   if (error != Error::Ok) {
     LOG_ERR("WR", "browse request failed: kind=%u page=%u status=%d error=%u", static_cast<unsigned>(browseKind_),
             static_cast<unsigned>(browseCursor_.page), responseStatus_, static_cast<unsigned>(error));
     return error;
   }
-  if (parser->errorCode() == -2012 || responseStatus_ == 401 || responseStatus_ == 403) {
+  if (parser->errorCode() == -2012) {
     return Error::SessionExpired;
   }
   if (responseStatus_ != 200 || parser->errorCode() != 0) return Error::Protocol;
@@ -2823,7 +2888,7 @@ Error Operation::fetchTocOnce() {
   if (bodySize <= 0 || static_cast<size_t>(bodySize) >= sizeof(ioBuffer_)) return Error::Protocol;
   const Error error = requestOnce("POST", "/web/book/chapterInfos", ioBuffer_, static_cast<size_t>(bodySize), &session_,
                                   kDefaultReferer, sink, responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_),
-                                  ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+                                  ioBuffer_, sizeof(ioBuffer_), &bookSession_, checkCancellation, this);
   if (error != Error::Ok) {
     context.writer.abort();
     return error;
@@ -2858,11 +2923,11 @@ Error Operation::fetchProgressOnce(const bool bypassCache) {
     if (length <= 0 || static_cast<size_t>(length) >= sizeof(suffix)) return Error::Protocol;
     referer_ += suffix;
   }
-  const Error error =
-      requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink, responseStatus_, cookie_,
-                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const Error error = requestOnce("GET", referer_.c_str(), nullptr, 0, &session_, kDefaultReferer, sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), &bookSession_, checkCancellation, this);
   if (error != Error::Ok) return error;
-  if (responseStatus_ == 401 || responseStatus_ == 403 || parser->errorCode() == -2012) {
+  if (parser->errorCode() == -2012) {
     return Error::SessionExpired;
   }
   if (responseStatus_ != 200 || parser->errorCode() != 0 || !parser->complete()) {
@@ -2968,11 +3033,10 @@ Error Operation::fetchProgressReaderOnce() {
   // Image downloads and login are inactive here; reuse their fixed scratch buffers.
   ReaderContextSink context(psvts_, sizeof(psvts_), imageHost_, sizeof(imageHost_), previousVid_, sizeof(previousVid_));
   ResponseSink sink{&context, resetReaderContext, extractReaderContext, noOpFinish, Error::Protocol};
-  const Error error =
-      requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink, responseStatus_,
-                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const Error error = requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), &bookSession_, checkCancellation, this);
   if (error != Error::Ok) return error;
-  if (responseStatus_ == 401 || responseStatus_ == 403) return Error::SessionExpired;
   if (responseStatus_ != 200 || !context.psvts.complete() || !isSafeProtocolToken(psvts_)) return Error::Protocol;
   if (imageHost_[0] && !isSafeProtocolToken(imageHost_)) imageHost_[0] = '\0';
   if (previousVid_[0] && !isSafeProtocolToken(previousVid_)) previousVid_[0] = '\0';
@@ -2995,11 +3059,11 @@ Error Operation::sendProgressOnce(const bool report) {
   }
   context.parser = parser.get();
   ResponseSink sink{&context, resetSimple, feedSimple, noOpFinish, Error::Protocol};
-  const Error error =
-      requestOnce("POST", "/web/book/read", ioBuffer_, bodySize, &session_, referer_.c_str(), sink, responseStatus_,
-                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const Error error = requestOnce("POST", "/web/book/read", ioBuffer_, bodySize, &session_, referer_.c_str(), sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), &bookSession_, checkCancellation, this);
   if (error != Error::Ok) return error;
-  if (responseStatus_ == 401 || responseStatus_ == 403 || context.errorCode == -2012) {
+  if (context.errorCode == -2012) {
     return Error::SessionExpired;
   }
   const bool emptyBody = context.bytesReceived == 0;
@@ -3016,12 +3080,11 @@ Error Operation::fetchReaderOnce() {
   WeReadProtocol::PsvtsExtractor context(psvts_, sizeof(psvts_));
   ResponseSink sink{&context, resetPsvts, extractPsvts, noOpFinish, Error::Protocol};
   const unsigned long startedAt = millis();
-  const Error error =
-      requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink, responseStatus_,
-                  cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const Error error = requestOnce("GET", referer_.c_str() + hostLength, nullptr, 0, &session_, referer_.c_str(), sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), &bookSession_, checkCancellation, this, acceptChapterStatus);
   chapterTransferMs_ += millis() - startedAt;
   if (error != Error::Ok) return error;
-  if (responseStatus_ == 401) return Error::SessionExpired;
   if (responseStatus_ == 403 || (responseStatus_ == 200 && !context.complete())) return Error::Unavailable;
   if (responseStatus_ != 200 || !isSafeProtocolToken(psvts_)) return Error::Protocol;
   return Error::Ok;
@@ -3037,9 +3100,9 @@ Error Operation::fetchShardOnce(const char* endpoint, const std::string& destina
   context.path = &destination;
   ResponseSink sink{&context, resetFile, writeFile, finishFile, Error::SdCard};
   const unsigned long startedAt = millis();
-  const Error error =
-      requestOnce("POST", endpoint, ioBuffer_, bodySize, &session_, referer_.c_str(), sink, responseStatus_, cookie_,
-                  sizeof(cookie_), url_, sizeof(url_), ioBuffer_, sizeof(ioBuffer_), &bookSession_);
+  const Error error = requestOnce("POST", endpoint, ioBuffer_, bodySize, &session_, referer_.c_str(), sink,
+                                  responseStatus_, cookie_, sizeof(cookie_), url_, sizeof(url_), ioBuffer_,
+                                  sizeof(ioBuffer_), &bookSession_, checkCancellation, this, acceptChapterStatus);
   chapterTransferMs_ += millis() - startedAt;
   shardBytes_ += context.size;
   return error;
@@ -3251,6 +3314,8 @@ Error Operation::requestImage(WeReadStore::ImageRecord& image, WeReadStore::Imag
   options.timeoutMs = kRequestTimeoutMs;
   options.readBuffer = ioBuffer_;
   options.readBufferSize = sizeof(ioBuffer_);
+  options.shouldAbort = checkCancellation;
+  options.abortContext = this;
 
   bool hasLocation = false;
   bool locationValid = true;
@@ -3288,7 +3353,7 @@ Error Operation::requestImage(WeReadStore::ImageRecord& image, WeReadStore::Imag
     magicType = WeReadProtocol::ImageType::Jpeg;
   }
 
-  if (file.failure == FileSink::Failure::Cancelled) {
+  if (result == WeReadHttpClient::Result::Cancelled || file.failure == FileSink::Failure::Cancelled) {
     if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
     return Error::Cancelled;
   }
@@ -3626,7 +3691,17 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
   return Event::None;
 }
 
-Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void* const callbackContext) {
+Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void* const callbackContext,
+                                 const WeReadHttpClient::AbortCallback shouldCancel, void* const cancelContext) {
+  shouldCancel_ = shouldCancel;
+  cancelContext_ = cancelContext;
+  struct CancelScope {
+    Operation& operation;
+    ~CancelScope() {
+      operation.shouldCancel_ = nullptr;
+      operation.cancelContext_ = nullptr;
+    }
+  } cancelScope{*this};
   if (!active()) return Event::None;
   if (cancelRequested_) return cancelNow();
   if ((requestAttempt_ > 0 || chapterResponseAttempts_ > 0 || phase_ == Phase::VerifyProgress) && nextActionAt_ != 0 &&
@@ -3660,6 +3735,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::LoginPoll: {
       const Error error = pollLogin();
+      if (error == Error::SessionExpired) return handleRequestError(error, Phase::LoginPoll);
       if (error != Error::Ok) {
         if (error != Error::Network) return fail(error);
         nextActionAt_ = millis() + kLoginPollMs;
@@ -3684,22 +3760,15 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
         phase_ = resumePhase_;
         return Event::None;
       }
-      if (error == Error::Network) return handleRequestError(error, Phase::Renew);
-      if (error == Error::SdCard) return fail(error);
+      if (error == Error::Network || error == Error::SdCard || error == Error::Cancelled) {
+        return handleRequestError(error, Phase::Renew);
+      }
       WeReadStore::clearSession();
-      if (kind_ == Kind::ProgressSync) return fail(Error::SessionExpired);
-      if (loginRecoveryAttempted_) return fail(Error::SessionExpired);
-      loginRecoveryAttempted_ = true;
-      startLogin(resumePhase_);
-      return Event::None;
+      return fail(Error::SessionExpired);
     }
 
     case Phase::SyncShelf: {
       const Error error = syncShelfOnce();
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::SyncShelf);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::SyncShelf);
       requestSucceeded();
       phase_ = Phase::OrganizeShelf;
@@ -3724,6 +3793,22 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::ShelfCovers:
       return stepShelfCovers();
+
+    case Phase::PrepareCover: {
+      bookDir_ = WeReadStore::bookDirectory(book_.bookId);
+      if (Storage.exists(WeReadStore::coverPath(bookDir_).c_str())) {
+        phase_ = Phase::Complete;
+        return Event::Complete;
+      }
+      coverType_ = findCoverSource(bookDir_, outputPath_);
+      if (coverType_ != WeReadProtocol::ImageType::None) {
+        phase_ = Phase::ConvertCover;
+        return Event::None;
+      }
+      coverType_ = selectCoverUrl("", shelfCoverUrl_ ? shelfCoverUrl_.get() : "", url_, sizeof(url_));
+      phase_ = url_[0] ? Phase::FetchCover : Phase::PrepareDetail;
+      return Event::None;
+    }
 
     case Phase::PrepareDetail: {
       bookDir_ = WeReadStore::bookDirectory(book_.bookId);
@@ -3763,10 +3848,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::FetchDetail: {
       const Error error = fetchDetailOnce();
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchDetail);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchDetail);
       requestSucceeded();
       if (!url_[0] || coverType_ == WeReadProtocol::ImageType::None) {
@@ -3789,10 +3870,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::FetchBrowse: {
       const Error error = fetchBrowseOnce();
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchBrowse);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchBrowse);
       requestSucceeded();
       if (phase_ != Phase::Complete) return Event::None;
@@ -3840,10 +3917,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::FetchToc: {
       const Error error = fetchTocOnce();
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchToc);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchToc);
       requestSucceeded();
       phase_ = (kind_ == Kind::ProgressSync || (kind_ == Kind::Download && strncmp(book_.bookId, "MP_WXS_", 7) != 0))
@@ -3864,6 +3937,9 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::FetchProgress: {
       const Error error = fetchProgressOnce(kind_ == Kind::ProgressSync);
+      if (error == Error::SessionExpired || error == Error::Cancelled) {
+        return handleRequestError(error, Phase::FetchProgress);
+      }
       if (kind_ == Kind::Download) {
         if (error == Error::Ok) {
           initialProgressFraction_ = normalizedRemoteProgress();
@@ -3875,10 +3951,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
         }
         phase_ = Phase::OpenToc;
         return Event::None;
-      }
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchProgress);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
       }
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchProgress);
       requestSucceeded();
@@ -3901,10 +3973,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::FetchProgressReader: {
       const Error error = fetchProgressReaderOnce();
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchProgressReader);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchProgressReader);
       requestSucceeded();
       phase_ = Phase::SendProgressEnter;
@@ -3913,10 +3981,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::SendProgressEnter: {
       const Error error = sendProgressOnce(false);
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchProgressReader);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::SendProgressEnter);
       requestSucceeded();
       phase_ = Phase::SendProgressReport;
@@ -3925,10 +3989,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::SendProgressReport: {
       const Error error = sendProgressOnce(true);
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::FetchProgressReader);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::SendProgressReport);
       requestSucceeded();
       progressVerifyAttempts_ = 0;
@@ -3939,10 +3999,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::VerifyProgress: {
       const Error error = fetchProgressOnce(true);
-      if (error == Error::SessionExpired) {
-        requestAuthentication(Phase::VerifyProgress);
-        return phase_ == Phase::Failed ? fail(error_) : Event::None;
-      }
       if (error != Error::Ok) return handleRequestError(error, Phase::VerifyProgress);
       requestSucceeded();
       ++progressVerifyAttempts_;
@@ -4055,7 +4111,6 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
 
     case Phase::FetchReader: {
       const Error error = fetchReaderOnce();
-      if (error == Error::SessionExpired) return reauthenticateChapter();
       if (error == Error::Unavailable) return retryChapterResponse();
       if (error != Error::Ok) return handleRequestError(error, Phase::FetchReader);
       requestSucceeded();

@@ -10,6 +10,10 @@ enum class InxRecentLayout : uint8_t { Flow, Grid, List, Icons, Cover, Count };
 namespace InxRecentGeometry {
 inline constexpr int footerReservedHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::statusHeight : 40;
 
+constexpr Rect flowCarouselRect(const Rect content) {
+  return Rect{content.x, content.y + 5, content.width, std::max(1, content.height * 50 / 100)};
+}
+
 constexpr int contentHeight(const int screenHeight, const int top, const int buttonHintsHeight) {
   return std::max(0, screenHeight - top - std::max(buttonHintsHeight, footerReservedHeight));
 }

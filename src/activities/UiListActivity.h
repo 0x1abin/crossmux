@@ -6,6 +6,7 @@
 
 #include "activities/Activity.h"
 #include "components/UiAppHost.h"
+#include "components/UiContentSelection.h"
 #include "util/ButtonNavigator.h"
 
 // Base for activities hosting a single FreeInkUI list screen. UiAppHost owns
@@ -23,6 +24,7 @@ class UiListActivity : public Activity, protected UiAppHost {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool hasContentSelection() const override;
 
  protected:
   // Base-owned row action; subclass-registered actions start at ACTION_USER.
@@ -66,6 +68,8 @@ class UiListActivity : public Activity, protected UiAppHost {
   // First hook in loop(); return true when the pass is consumed (popups, extra
   // buttons, gestures). Runs before the base button handling.
   virtual bool handleCustomInput() { return false; }
+  virtual bool handleListSwipe(MappedInputManager::SwipeDir swipe, int startX, int startY);
+  virtual int initialConfirmIndex() const { return 0; }
   // Back/Confirm handling; override wholesale for press/release or hold
   // variants. Return true when a button consumed the pass.
   virtual bool handleButtons();
@@ -86,6 +90,11 @@ class UiListActivity : public Activity, protected UiAppHost {
   void syncListViewport(UiScreen& screen, freeink::ui::ListProps& props, int selectionOffset = 0);
   // Move the selection to index and pull the viewport to it.
   void moveSelectionTo(int index);
+  // Custom grids publish their slot capacity through the same viewport owner.
+  void syncPagedViewport(int pageItems);
+  void clearContentSelection();
+  void establishContentSelection(int index);
+  bool showMainTabContentSelection() const override;
 
   // --- shared state ----------------------------------------------------------
   // Selection + viewport (selected/top/visibleRows/followOnBuild). Access via
@@ -99,6 +108,9 @@ class UiListActivity : public Activity, protected UiAppHost {
   // Named apart from UiAppHost::routeTouch so the host overload stays visible
   // (not name-hidden) to subclasses with extra touch surfaces.
   bool routeListTouch();
+  bool consumeSelectionEntryInput();
+  UiContentSelection contentSelection;
+  bool contentSelectionVisibleForFrame = true;
 #if FREEINK_CAP_TOUCH
   static void swipeDeleteTrampoline(const freeink::ui::ActionEvent& event, void* user);
   bool handleSwipeDeleteInput();

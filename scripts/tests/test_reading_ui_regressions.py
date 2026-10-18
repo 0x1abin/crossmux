@@ -33,6 +33,226 @@ def run_cpp(program, include_dirs=(), defines=()):
 
 
 class ReadingUiRegressionTest(unittest.TestCase):
+    def test_inx_initial_selection_requires_a_real_item_or_key_action(self):
+        source = (ROOT / 'src/activities/UiListActivity.cpp').read_text()
+        activity = (ROOT / 'src/activities/Activity.cpp').read_text()
+        selection = (ROOT / 'src/components/UiContentSelection.cpp').read_text()
+        program = r'''
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+#include "activities/MainTab.h"
+#include "components/UiContentSelection.h"
+#define FREEINK_CAP_TOUCH 0
+template<class... Args> void logDebug(Args&&...) {}
+#define LOG_DBG(...) logDebug(__VA_ARGS__)
+unsigned long millis() { static unsigned long value=0;return ++value; }
+struct CrossPointSettings { enum { INX,CLASSIC,LYRA };int uiTheme=INX; } SETTINGS;
+struct MappedInputManager {
+ enum class Button { Back,Confirm,NavNext,NavPrevious,Count };
+ enum class SwipeDir { None,Up,Down,Left,Right };
+ bool touch=true; Button pressed=Button::Count,held=Button::Count,extraHeld=Button::Count,released=Button::Count;
+ SwipeDir swipe=SwipeDir::None;
+ bool hasTouch() const { return touch; }
+ bool wasPressed(Button b) const { return pressed==b; }
+ bool wasReleased(Button b) const { return released==b; }
+ bool isPressed(Button b) const { return held==b || extraHeld==b; }
+ SwipeDir wasSwipe(int* x=nullptr,int* y=nullptr) const { if(x)*x=0;if(y)*y=0;return swipe; }
+};
+struct { MainTabFocus focus=MainTabFocus::Content;
+ void focusMainTabContent() {focus=MainTabFocus::Content;}
+} activityManager;
+struct Activity {
+ MainTab tab=MainTab::Settings;MappedInputManager mappedInput;
+ void onEnter() {}
+ bool usesMainTabBar() const {return SETTINGS.uiTheme==CrossPointSettings::INX && tab!=MainTab::None;}
+ bool defersContentSelection() const;
+ bool showMainTabContentSelection() const {return activityManager.focus==MainTabFocus::Content;}
+};
+namespace fui {
+ struct ActionEvent { int value=-1;bool longPress=false; };
+ struct ListProps { int selectedIndex=0,topIndex=0,toggleWidth=0,toggleHeight=0;
+                    bool toggleCheckbox=false,partialTrailingRow=false; };
+}
+struct Nav {
+ std::atomic<int> selected{0};int top=0,drawnRows=0;bool followPending=false;
+ void reset() {selected=0;top=0;followPending=false;}
+ void requestSelection(int i) {selected=i;followPending=true;}
+ void requestScroll(int delta) {top+=delta;followPending=false;}
+ bool consumeRebuildNeeded() {return false;}
+ bool trusts(int) const {return false;}
+ int inputPageRows() const {return 3;}
+};
+struct UiScreen {
+ void syncListViewport(Nav& n,fui::ListProps& p,int,int offset) {
+   p.selectedIndex=n.selected.load()-offset;p.topIndex=n.top;
+ }
+};
+struct FontCacheManager {
+ void(*prewarmCallback)(void*)=nullptr;void* user=nullptr;
+ struct PrewarmScope {FontCacheManager* owner;
+  void endScanAndPrewarm() {if(owner->prewarmCallback)owner->prewarmCallback(owner->user);}
+ };
+ bool isScanning() const {return false;}
+ PrewarmScope createUiCjkPrewarmScope() {return {this};}
+};
+struct GfxRenderer {
+ FontCacheManager fonts;int clears=0,displays=0;
+ FontCacheManager* getFontCacheManager() {return &fonts;}
+ void clearScreen() {++clears;}
+ void displayBuffer() {++displays;}
+};
+struct RenderLock {};
+struct UiListActivity : Activity {
+ std::string name="test-list";
+ using Button=MappedInputManager::Button;
+ static constexpr int ACTION_ROW=1;
+ Nav nav;GfxRenderer renderer;
+ int count=6,updates=0,activations=0,longPresses=0,backs=0,navigations=0;
+ bool popup=false;fui::ActionEvent queued;
+ std::vector<bool> scanSelections,paintSelections;
+ UiContentSelection contentSelection;bool contentSelectionVisibleForFrame=true;
+ struct App {
+  template<class T>void on(int,T,void*) {}
+  template<class T>void setScreen(T,void*) {}
+ } app;
+ MainTab mainTab() const {return tab;}
+ int listCount() const {return count;}
+ bool usesUpstreamStyle() const {return false;}
+ Nav& activeNav() {return nav;}
+ void requestUpdate() {++updates;}
+ void resetUi() {}
+ static void screenTrampoline() {}
+ static void rowActionTrampoline(const fui::ActionEvent&,void*);
+ void onEnter();void loop();void render(RenderLock&&);
+ bool hasContentSelection() const;
+ void clearContentSelection();void establishContentSelection(int);
+ bool showMainTabContentSelection() const;
+ bool consumeSelectionEntryInput();void moveSelectionTo(int);
+ virtual int initialConfirmIndex() const {return 0;}
+ bool handleListSwipe(MappedInputManager::SwipeDir,int,int);
+ void onRowAction(const fui::ActionEvent&);bool handleButtons();
+ void activateIndex(int) {++activations;}
+ void onRowLongPress(int) {++longPresses;}
+ void onBackButton() {++backs;}
+ bool handleCustomInput() {return popup;}
+ bool routeListTouch() {
+  if(queued.value<0)return false;
+  auto event=queued;queued={};rowActionTrampoline(event,this);return true;
+ }
+ void navigateButtons() {++navigations;}
+ void drawChrome() {}void drawFooter() {}
+ void scanUi() {scanSelections.push_back(showMainTabContentSelection());}
+ void renderUi() {paintSelections.push_back(showMainTabContentSelection());}
+ void syncListViewport(UiScreen&,fui::ListProps&,int=0);
+};
+''' + method(activity, 'bool Activity::defersContentSelection(') + '\n'.join(
+            line for line in selection.splitlines() if not line.startswith('#include')) + '\n'.join(method(source, name) for name in (
+            'void UiListActivity::onEnter(',
+            'void UiListActivity::rowActionTrampoline(',
+            'void UiListActivity::onRowAction(',
+            'bool UiListActivity::handleButtons(',
+            'void UiListActivity::moveSelectionTo(',
+            'bool UiListActivity::hasContentSelection(',
+            'void UiListActivity::clearContentSelection(',
+            'void UiListActivity::establishContentSelection(',
+            'bool UiListActivity::showMainTabContentSelection(',
+            'bool UiListActivity::consumeSelectionEntryInput(',
+            'bool UiListActivity::handleListSwipe(',
+            'void UiListActivity::loop(',
+            'void UiListActivity::syncListViewport(',
+            'void UiListActivity::render(')) + r'''
+int main() {
+ using Button=MappedInputManager::Button;
+ for(int theme:{CrossPointSettings::INX,CrossPointSettings::CLASSIC,CrossPointSettings::LYRA})
+ for(bool touch:{false,true}) for(auto tab:MainTabs::values) {
+  SETTINGS.uiTheme=theme;UiListActivity page;page.tab=tab;page.mappedInput.touch=touch;page.onEnter();
+  const bool deferred=theme==CrossPointSettings::INX && touch;
+  assert(page.defersContentSelection()==deferred && page.hasContentSelection()!=deferred);
+  page.render({});assert(page.paintSelections.back()!=deferred);
+  UiScreen screen;fui::ListProps props;page.nav.followPending=true;
+  page.syncListViewport(screen,props);
+  assert(props.selectedIndex==(deferred?-1:0));
+  if(deferred)assert(!page.nav.followPending);
+ }
+ SETTINGS.uiTheme=CrossPointSettings::INX;
+ UiListActivity chord;chord.mappedInput.held=Button::NavNext;chord.mappedInput.extraHeld=Button::Confirm;chord.onEnter();
+ chord.loop();chord.mappedInput.held=Button::Count;chord.mappedInput.released=Button::NavNext;chord.loop();
+ chord.mappedInput.released=Button::Count;chord.loop();assert(!chord.hasContentSelection());
+ chord.mappedInput.extraHeld=Button::Count;chord.mappedInput.released=Button::Confirm;chord.loop();
+ assert(!chord.hasContentSelection() && chord.activations==0);
+ // Main-tab Up/Down edge selection must arm the same full-gesture barrier.
+ UiListActivity edge;edge.onEnter();edge.mappedInput.held=Button::NavNext;edge.moveSelectionTo(0);
+ edge.mappedInput.extraHeld=Button::Confirm;
+ for(int i=0;i<10;++i)edge.loop();
+ edge.mappedInput.held=Button::Count;edge.mappedInput.released=Button::NavNext;edge.loop();
+ edge.mappedInput.extraHeld=Button::Count;edge.mappedInput.released=Button::Confirm;edge.loop();
+ assert(edge.hasContentSelection() && edge.activations==0 && edge.navigations==0);
+ for(Button button:{Button::NavNext,Button::NavPrevious,Button::Confirm}) {
+  UiListActivity inherited;inherited.mappedInput.held=button;inherited.onEnter();
+  for(int i=0;i<10;++i)inherited.loop();
+  assert(!inherited.hasContentSelection() && inherited.activations==0);
+  inherited.mappedInput.held=Button::Count;inherited.mappedInput.released=button;inherited.loop();
+  assert(!inherited.hasContentSelection() && inherited.activations==0);
+  inherited.mappedInput.released=Button::Count;inherited.mappedInput.pressed=inherited.mappedInput.held=button;
+  inherited.loop();assert(inherited.hasContentSelection() && inherited.activations==0);
+ }
+ for(auto tab:MainTabs::values) {
+  for(Button button:{Button::NavNext,Button::NavPrevious,Button::Confirm}) {
+   UiListActivity page;page.tab=tab;page.onEnter();int before=page.updates;
+   page.mappedInput.pressed=page.mappedInput.held=button;page.loop();
+   assert(page.hasContentSelection() && page.nav.selected==(button==Button::NavPrevious?5:0));
+   assert(page.updates==before+1 && page.activations==0 && page.navigations==0);
+   page.mappedInput.pressed=Button::Count;
+   for(int i=0;i<30;++i)page.loop();
+   assert(page.activations==0 && page.navigations==0 && page.updates==before+1);
+   page.mappedInput.held=Button::Count;page.mappedInput.released=button;page.loop();
+   assert(page.activations==0 && page.navigations==0);
+   page.mappedInput.released=Button::Confirm;page.loop();assert(page.activations==1);
+  }
+  UiListActivity page;page.tab=tab;page.onEnter();int initial=page.updates;
+  page.loop();assert(!page.hasContentSelection() && page.updates==initial);
+  activityManager.focus=MainTabFocus::Tabs;
+  page.mappedInput.swipe=MappedInputManager::SwipeDir::Up;page.loop();
+  assert(!page.hasContentSelection() && page.nav.top==3 && page.activations==0);
+  assert(activityManager.focus==MainTabFocus::Content);
+  page.mappedInput.swipe=MappedInputManager::SwipeDir::None;
+  UiListActivity::rowActionTrampoline({99,false},&page);assert(!page.hasContentSelection());
+  const int beforeTap=page.updates;
+  page.queued={3,false};page.loop();assert(page.hasContentSelection() && page.nav.selected==3 && page.activations==1);
+  assert(page.updates==beforeTap); // establishing selection must not repaint the outgoing page
+  page.popup=true;page.mappedInput.released=Button::Confirm;page.loop();assert(page.activations==1);
+  page.popup=false;page.mappedInput.released=Button::Count;
+  page.render({});assert(page.paintSelections.back());
+  page.clearContentSelection();page.render({});assert(!page.paintSelections.back());
+  page.queued={2,true};page.loop();assert(page.hasContentSelection() && page.nav.selected==2);
+  assert(page.activations==1 && page.longPresses==1);
+  page.count=0;assert(!page.hasContentSelection());page.render({});assert(!page.paintSelections.back());
+ }
+ // A touch action remains routable while the initial key's release is gated.
+ UiListActivity mixed;mixed.onEnter();mixed.mappedInput.pressed=mixed.mappedInput.held=Button::Confirm;
+ mixed.loop();mixed.mappedInput.pressed=Button::Count;mixed.queued={4,false};mixed.loop();
+ assert(mixed.activations==1 && mixed.nav.selected==4);
+ mixed.mappedInput.held=Button::Count;mixed.mappedInput.released=Button::Confirm;mixed.loop();assert(mixed.activations==1);
+ // Both scan and paint use the selection snapshot from the start of the frame.
+ UiListActivity frame;frame.onEnter();frame.renderer.fonts.user=&frame;
+ frame.renderer.fonts.prewarmCallback=[](void* p){static_cast<UiListActivity*>(p)->establishContentSelection(2);};
+ frame.render({});assert(!frame.scanSelections.back() && !frame.paintSelections.back());
+ assert(frame.renderer.displays==1 && frame.hasContentSelection());
+ frame.renderer.fonts.prewarmCallback=nullptr;frame.render({});
+ assert(frame.scanSelections.back() && frame.paintSelections.back() && frame.renderer.displays==2);
+ struct VisiblePage : UiListActivity {int initialConfirmIndex() const override {return 3;}} visible;
+ visible.onEnter();visible.mappedInput.held=Button::Confirm;visible.loop();
+ assert(visible.nav.selected==3 && visible.activations==0);
+ UiListActivity picker;picker.tab=MainTab::None;picker.onEnter();assert(!picker.defersContentSelection());
+}
+'''
+        run_cpp(program, include_dirs=(ROOT / 'src',))
+
     def test_splash_uses_font_heights_and_keeps_version_inside_safe_area(self):
         source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
         program = r'''
@@ -250,7 +470,7 @@ int main() {
         settings_layout = 'void SettingsActivity::buildScreen(UiScreen& screen) {\n' + settings_preamble[
             settings_preamble.index('  const auto& metrics'):].replace(
             '  const bool boldChineseCategories = usesAccordion() && I18N.getLanguage() == Language::ZH_CN;\n', '').replace('  const auto& metrics = UITheme::getInstance().getMetrics();\n', '') + '}'
-        stats_layout = method(stats, 'void ReadingStatsActivity::renderInx(').split('  const auto& books', 1)[0] + ' recorded=content; }'
+        stats_layout = method(stats, 'void ReadingStatsActivity::renderInx(').split('  const auto& books', 1)[0] + ' (void)view; recorded=content; }'
         program = r'''
 #include <cassert>
 #include <vector>
@@ -304,7 +524,7 @@ struct ReadingStatsActivity : Page {
   bool renderedCoverMissing=false;
   Rect recorded{};
   void drawPageHeader(Rect,const char*) {}
-  void renderInx();
+  void renderInx(int);
 };
 struct AppsMenuActivity : Page {
   struct { int selected=0; } nav;
@@ -316,13 +536,13 @@ struct AppsMenuActivity : Page {
   int getVisibleAppCount() const { return count; }
   bool usesIconLayout() const { return icons; }
   bool showMainTabContentSelection() const { return false; }
-  void drawIconGrid(Rect rect,int,bool) { recorded=rect; }
+  void drawIconGrid(UiScreen&,Rect rect,int,bool) { recorded=rect; }
+  void syncPagedViewport(int) {}
   void syncListViewport(UiScreen&,fui::ListProps&) {}
   Rect appContentRect() const;
-  int iconIndexFromPoint(int,int) const;
   void buildScreen(UiScreen&);
 };
-''' + method(apps, 'Rect AppsMenuActivity::appContentRect(') + file_layout + settings_layout + stats_layout + method(apps, 'int AppsMenuActivity::iconIndexFromPoint(') + method(apps, 'void AppsMenuActivity::buildScreen(') + r'''
+''' + method(apps, 'Rect AppsMenuActivity::appContentRect(') + file_layout + settings_layout + stats_layout + method(apps, 'void AppsMenuActivity::buildScreen(') + r'''
 int main() {
   auto& theme=UITheme::getInstance();
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
@@ -339,7 +559,7 @@ int main() {
       SettingsActivity settings; settings.renderer=files.renderer;
       UiScreen settingsScreen; settings.buildScreen(settingsScreen);
       assert(settingsScreen.absolute && settingsScreen.top==bottom);
-      ReadingStatsActivity stats; stats.renderer=files.renderer; stats.renderInx();
+      ReadingStatsActivity stats; stats.renderer=files.renderer; stats.renderInx(0);
       assert(stats.recorded.y==bottom+6 && stats.recorded.y+stats.recorded.height==(tabs ? safe.y+safe.height : height-theme.metrics.buttonHintsHeight)-6);
       AppsMenuActivity apps; apps.renderer=files.renderer;
       UiScreen screen; apps.buildScreen(screen);
@@ -348,11 +568,11 @@ int main() {
       const Rect grid=apps.recorded;
       for (int slot=0;slot<InxGridGeometry::itemsPerPage;++slot) {
         const Rect cell=InxGridGeometry::cellBounds(slot,grid.width,grid.height);
-        assert(apps.iconIndexFromPoint(grid.x+cell.x,grid.y+cell.y)==slot);
-        assert(apps.iconIndexFromPoint(grid.x+cell.x-1,grid.y+cell.y)==-1);
+        assert(InxGridGeometry::indexFromPoint(cell.x,cell.y,grid.width,grid.height,0,apps.count)==slot);
+        assert(InxGridGeometry::indexFromPoint(cell.x-1,cell.y,grid.width,grid.height,0,apps.count)==-1);
       }
-      assert(apps.iconIndexFromPoint(grid.x,grid.y-1)==-1);
-      assert(apps.iconIndexFromPoint(grid.x,grid.y+grid.height)==-1);
+      assert(InxGridGeometry::indexFromPoint(0,-1,grid.width,grid.height,0,apps.count)==-1);
+      assert(InxGridGeometry::indexFromPoint(0,grid.height,grid.width,grid.height,0,apps.count)==-1);
       apps.icons=false; apps.buildScreen(screen);
       assert(screen.top==bottom+theme.metrics.verticalSpacing && screen.absolute);
       apps.count=0; apps.buildScreen(screen);
@@ -397,26 +617,32 @@ struct Activity {
   GfxRenderer renderer;
   MainTab tab=MainTab::Recent;
   bool bottom=false;
+  bool deferred=false,chosen=false;
+  int edgeSelections=0;
   struct { bool hasTouch() const { return true; } } mappedInput;
   bool usesMainTabBar() const;
+  bool showMainTabContentSelection() const;
   bool mainTabsAtBottom() const { return bottom; }
   bool hasMainTabStatusBar() const { return usesMainTabBar() && bottom; }
   MainTabLayout mainTabLayout() const;
   MainTab mainTab() const { return tab; }
   bool mainTabBackReturnsToTabs() const { return false; }
-  void selectMainTabContentEdge(MainTabContentEdge) {}
+  bool defersContentSelection() const { return deferred; }
+  bool hasContentSelection() const { return chosen; }
+  void selectMainTabContentEdge(MainTabContentEdge) { chosen=true;++edgeSelections; }
   void drawPageHeader(const Rect&,const char*,const char* =nullptr) const;
 };
 struct MappedInputManager {
   enum class Button { None,Left,Right,Up,Down,Confirm,Back };
-  bool tapped=true,down=false;
+  bool tapped=true,down=false,touchReleased=false;
+  bool wasScreenTouchReleased() const { return touchReleased; }
   int x=0,y=0;
-  Button released=Button::None;
+  Button released=Button::None,pressed=Button::None,held=Button::None;
   bool wasScreenTapped(int& tx,int& ty) { tx=x;ty=y;return tapped; }
   bool wasScreenTouchDown(int& tx,int& ty) { tx=x;ty=y;return down; }
   bool wasReleased(Button b) { return b==released; }
-  bool wasPressed(Button) { return false; }
-  bool isPressed(Button) { return false; }
+  bool wasPressed(Button b) { return pressed==b; }
+  bool isPressed(Button b) { return held==b; }
 };
 struct { bool standbyShortcutEnabled=false; } SETTINGS;
 struct ActivityManager {
@@ -425,20 +651,27 @@ struct ActivityManager {
   MappedInputManager mappedInput;
   MainTabFocus mainTabFocus=MainTabFocus::Content;
   bool mainTabEntryReleasePending=false;
+  bool mainTabTouchFocusPending=false;
   MainTab destination=MainTab::None;
   int updates=0;
   void goToMainTab(MainTab tab) { destination=tab; }
   void requestUpdate() { ++updates; }
   void goToStandby() { assert(false); }
   bool handleMainTabInput();
+  MainTabFocus getMainTabFocus() const { return mainTabFocus; }
 };
-''' + method(activity, 'bool Activity::usesMainTabBar(') + method(activity, 'MainTabLayout Activity::mainTabLayout(') + method(activity, 'void Activity::drawPageHeader(') + method(manager, 'bool ActivityManager::handleMainTabInput(') + r'''
+ActivityManager activityManager;
+''' + method(activity, 'bool Activity::showMainTabContentSelection(') + method(activity, 'bool Activity::usesMainTabBar(') + method(activity, 'MainTabLayout Activity::mainTabLayout(') + method(activity, 'void Activity::drawPageHeader(') + method(manager, 'bool ActivityManager::handleMainTabInput(') + r'''
 int main() {
   auto& theme=UITheme::getInstance();
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
     theme.safe=safe;
     for (bool bottom : {false,true}) for (MainTab current : MainTabs::values) {
       Activity page; page.tab=current; page.bottom=bottom;
+      activityManager.mainTabFocus=MainTabFocus::Tabs;
+      assert(!page.showMainTabContentSelection());
+      activityManager.mainTabFocus=MainTabFocus::Content;
+      assert(page.showMainTabContentSelection());
       const Rect expected=page.mainTabLayout().tabBar;
       page.drawPageHeader(Rect{0,0,999,66},"title");
       assert(theme.drawn.x==expected.x && theme.drawn.y==expected.y);
@@ -460,7 +693,13 @@ int main() {
         m.mappedInput.x=point.first; m.mappedInput.y=point.second;
         assert(!m.handleMainTabInput() && m.destination==MainTab::None && m.mainTabFocus==MainTabFocus::Content);
         m.mainTabFocus=MainTabFocus::Tabs; m.mappedInput.tapped=false; m.mappedInput.down=true;
+        const int before=m.updates;
         assert(!m.handleMainTabInput() && m.mainTabFocus==MainTabFocus::Content);
+        assert(m.updates==before && m.mainTabTouchFocusPending);
+        // A drag-off/cancel release also settles the focus, only once.
+        m.mappedInput.down=false; m.mappedInput.touchReleased=true;
+        assert(!m.handleMainTabInput() && m.updates==before+1 && !m.mainTabTouchFocusPending);
+        assert(!m.handleMainTabInput() && m.updates==before+1);
       }
       for (auto button : {MappedInputManager::Button::Left,MappedInputManager::Button::Right}) {
         ActivityManager m; m.currentActivity=&page; m.mainTabFocus=MainTabFocus::Tabs;
@@ -469,6 +708,26 @@ int main() {
         assert(m.destination==MainTabs::adjacent(current,button==MappedInputManager::Button::Left ? -1 : 1));
       }
     }
+  }
+  for(auto tab:{MainTab::Library,MainTab::Apps,MainTab::Settings}) {
+    Activity page;page.tab=tab;page.deferred=true;
+    ActivityManager m;m.currentActivity=&page;m.mainTabFocus=MainTabFocus::Tabs;
+    auto band=page.mainTabLayout().tabBar;
+    m.mappedInput.x=band.x;m.mappedInput.y=band.y-1;
+    assert(!m.handleMainTabInput() && m.mainTabFocus==MainTabFocus::Tabs && m.updates==0);
+    m.mappedInput.tapped=false;m.mappedInput.down=true;
+    assert(!m.handleMainTabInput() && !m.mainTabTouchFocusPending && m.updates==0);
+    m.mappedInput.down=false;m.mappedInput.touchReleased=true;
+    assert(!m.handleMainTabInput() && !page.chosen && m.updates==0);
+    m.mappedInput.touchReleased=false;m.mappedInput.released=MappedInputManager::Button::Confirm;
+    assert(!m.handleMainTabInput() && !page.chosen && page.edgeSelections==0 && m.updates==0);
+    m.mappedInput.released=MappedInputManager::Button::None;m.mappedInput.held=MappedInputManager::Button::Confirm;
+    assert(!m.handleMainTabInput() && !page.chosen);
+    // The page establishes selection and content focus after a fresh press, not an inherited hold.
+    page.chosen=true;m.mappedInput.held=MappedInputManager::Button::None;
+    m.mappedInput.released=MappedInputManager::Button::Confirm;
+    assert(m.handleMainTabInput());
+    assert(m.mainTabFocus==MainTabFocus::Content && m.updates==1);
   }
   theme.tabs=false;
   Activity page; const Rect legacy{0,9,684,66}; page.drawPageHeader(legacy,"legacy","version");
@@ -520,6 +779,7 @@ struct MappedInputManager {
   bool consumeSuppressedRelease() { return std::exchange(suppressed,false); }
   bool wasScreenTapped(int& tx,int& ty) const { tx=x;ty=y;return tap; }
   bool wasScreenTouchDown(int& tx,int& ty) const { tx=x;ty=y;return down; }
+  bool wasScreenTouchReleased() const { return tap; }
   bool wasHomeGesture() const { return home; }
   bool wasLightPanelGesture() const { return light; }
   bool hasTouch() const { return true; }
@@ -544,6 +804,8 @@ struct Activity {
   MainTab mainTab() const { return tab; }
   MainTabLayout mainTabLayout() const { return {Rect{0,700,480,56},Rect{0,0,480,28},Rect{0,34,480,650}}; }
   bool mainTabBackReturnsToTabs() const { return true; }
+  bool defersContentSelection() const { return false; }
+  bool hasContentSelection() const { return true; }
   void selectMainTabContentEdge(MainTabContentEdge) {}
 };
 std::unique_ptr<Activity> page(const char* theme) {
@@ -569,6 +831,7 @@ struct ActivityManager {
   MappedInputManager mappedInput;
   MainTabFocus mainTabFocus=MainTabFocus::Tabs;
   bool mainTabEntryReleasePending=false;
+  bool mainTabTouchFocusPending=false;
   int renderer=0,renderTaskHandle=0,standbyCalls=0;
   const char* theme;
   explicit ActivityManager(const char* value):theme(value) { replaceActivity(page(theme)); }
@@ -772,7 +1035,6 @@ struct ReadingBookStats { unsigned totalReadingMs=0, lastSessionMs=0, sessions=0
 namespace ReadingStatsAnalytics { std::string formatDurationHm(unsigned) { return "0m"; } }
 unsigned char progressOf(const ReadingBookStats*) { return 50; }
 void drawSparseInk(const GfxRenderer& r,Rect) { assert(r.clipped); }
-void drawThickFrame(const GfxRenderer& r,Rect) { assert(r.clipped); }
 void drawProgressBadge(const GfxRenderer& r,Rect,unsigned char) { assert(r.clipped); }
 void drawDottedSeparator(const GfxRenderer& r,int,int,int) { assert(r.clipped); }
 void drawBookText(const GfxRenderer& r,const RecentBook&,int x,int,int width,bool) {
@@ -795,6 +1057,7 @@ struct UITheme {
   ThemeMetrics metrics=InxMetrics::values;
   int emptyCalls=0, batteryCalls=0;
   static UITheme& getInstance() { static UITheme instance; return instance; }
+  static void drawSelectionFrame(const GfxRenderer& r,Rect) { assert(r.clipped); }
   UITheme& getTheme() { return *this; }
   const ThemeMetrics& getMetrics() const { return metrics; }
   Rect getScreenSafeArea(const GfxRenderer&,bool front,bool side) {
@@ -813,10 +1076,18 @@ struct UITheme {
 };
 #define GUI UITheme::getInstance().getTheme()
 struct RenderLock {};
+namespace freeink::ui { using Rect=::Rect; constexpr int InputTouch=1,InputLongPress=2; }
+struct UiScreen {
+  struct Frame { void hit(Rect,int,int,int) {} } f;
+  Frame& frame(){return f;}
+};
 struct InxRecentActivity {
   GfxRenderer renderer;
   std::vector<RecentBook>* books=nullptr;
   int selected=1, coverCalls=0;
+  struct {int selected=1,top=0;} nav;
+  static constexpr int ACTION_ROW=1;
+  void syncPagedViewport(int rows) {nav.top=books && !books->empty() && rows==1 ? 1 : 0;}
   InxRecentLayout chosen=InxRecentLayout::Flow;
   struct { bool hasTouch() const { return false; } } mappedInput;
   bool usesMainTabBar() const { return true; }
@@ -839,17 +1110,20 @@ struct InxRecentActivity {
   struct Labels { const char *btn1="", *btn2="", *btn3="", *btn4=""; };
   Labels mainTabButtonLabels(const char*,const char*,bool,bool) { return {}; }
   bool prepareNextMissingCover() { return false; }
-  void drawGrid(const Rect&);
-  void drawList(const Rect&);
-  void drawIcons(const Rect&);
-  void drawCover(const Rect&);
-  void drawFlow(const Rect&);
-  void render(RenderLock&&);
+  void drawGrid(UiScreen&,const Rect&);
+  void drawList(UiScreen&,const Rect&);
+  void drawIcons(UiScreen&,const Rect&);
+  void drawCover(UiScreen&,const Rect&);
+  void drawFlow(UiScreen&,const Rect&);
+  void buildScreen(UiScreen&);
+  void drawChrome();
+  void drawFooter();
+  void render(RenderLock&&) { renderer.clearScreen(); drawChrome(); UiScreen screen; buildScreen(screen); drawFooter(); renderer.displayBuffer(); }
 };
 ''' + method(source, 'Rect InxRecentActivity::contentRect(') + method(source, 'Rect fitCoverRect(') + '\n'.join(
             method(source, 'void InxRecentActivity::draw'+layout+'(')
             for layout in ('Flow', 'Grid', 'List', 'Icons', 'Cover')) +
-                method(source, 'void InxRecentActivity::render(') + r'''
+                method(source, 'void InxRecentActivity::buildScreen(') + method(source, 'void InxRecentActivity::drawChrome(') + method(source, 'void InxRecentActivity::drawFooter(') + r'''
 int main() {
   auto& theme=UITheme::getInstance(); theme.metrics.buttonHintsHeight=0;
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
@@ -1302,8 +1576,8 @@ int main() {
         theme = (ROOT / 'src/components/themes/inx/InxTheme.cpp').read_text()
         home = (ROOT / 'src/activities/home/InxRecentActivity.cpp').read_text()
         status = method(theme, 'void InxTheme::drawMainTabStatusBar(')
-        render = method(home, 'void InxRecentActivity::render(')
-        footer = render[render.index('  if (usesMainTabBar()'):render.index('  if (prepareNextMissingCover()')]
+        render = method(home, 'void InxRecentActivity::drawFooter(')
+        footer = render[render.index('  if (usesMainTabBar()'):render.rindex('\n}')]
         run_cpp(r'''
 #include <algorithm>
 #include <cassert>

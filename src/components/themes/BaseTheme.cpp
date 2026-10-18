@@ -471,6 +471,12 @@ void BaseTheme::drawSideScrollBar(const GfxRenderer& renderer, Rect rect, const 
   renderer.fillRect(barX - metrics.scrollBarWidth, barY, metrics.scrollBarWidth, barHeight, true);
 }
 
+void BaseTheme::drawSelectionFrame(const GfxRenderer& renderer, const Rect rect, const int thickness) {
+  for (int inset = 0; inset < thickness; ++inset) {
+    renderer.drawRect(rect.x - inset, rect.y - inset, rect.width + inset * 2, rect.height + inset * 2, true);
+  }
+}
+
 void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,
@@ -1291,7 +1297,7 @@ void BaseTheme::drawActionButton(const GfxRenderer& renderer, const Rect rect, c
 }
 
 void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
-                                int selectedIndex) const {
+                                int selectedIndex, int) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
