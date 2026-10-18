@@ -61,6 +61,7 @@ MIGRATION
     }
 };
 Settings SETTINGS;
+bool saveFailed_ = false;
 namespace timezones {
     int calls = 0;
     uint8_t offset = 48;
