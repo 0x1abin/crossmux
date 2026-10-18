@@ -59,11 +59,6 @@ inline constexpr Profile ACTIVE{{7, 9}};
     (directory / 'FreeInkUIGfxRenderer.h').write_text('''#pragma once
 namespace freeink { namespace ui { using GfxRendererTarget = ::TraceTarget; } }
 ''')
-    (directory / 'SelectionCursorPolicy.h').write_text('''#pragma once
-namespace SelectionCursorPolicy {
-inline void hideFreeInkListFocus(freeink::ui::ThemeTokens&) {}
-}
-''')
     base = source(metrics_ref, 'src/components/themes/BaseTheme.h')
     metrics_type = re.search(r'struct ThemeMetrics \{.*?\n\};', base, re.S).group()
     # The fork adds opt-in INX fields that do not exist in upstream metrics.
@@ -90,7 +85,6 @@ class UITheme {
   const ThemeMetrics* metrics = &parityMetrics[0];
   static UITheme& getInstance() { static UITheme theme; return theme; }
   const ThemeMetrics& getMetrics() const { return *metrics; }
-  bool showSelectionCursor() const { return true; }
 };
 ''')
     ui = sdk / 'libs/ui/FreeInkUI'

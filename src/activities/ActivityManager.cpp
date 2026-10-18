@@ -339,7 +339,14 @@ bool ActivityManager::handleHomeStandbyInput() {
 }
 
 bool ActivityManager::handleMainTabInput() {
-  if (!currentActivity || !currentActivity->usesMainTabBar()) return false;
+  if (!currentActivity || !currentActivity->usesMainTabBar()) {
+    mainTabTouchFocusPending = false;
+    return false;
+  }
+  if (mainTabTouchFocusPending && mappedInput.wasScreenTouchReleased()) {
+    mainTabTouchFocusPending = false;
+    requestUpdate();
+  }
 
   const MainTab currentTab = currentActivity->mainTab();
   const Rect tabBar = currentActivity->mainTabLayout().tabBar;
@@ -361,16 +368,18 @@ bool ActivityManager::handleMainTabInput() {
       }
       return true;
     }
-    if (mainTabFocus == MainTabFocus::Tabs) {
+    if (mainTabFocus == MainTabFocus::Tabs && !currentActivity->defersContentSelection()) {
       mainTabFocus = MainTabFocus::Content;
       requestUpdate();
     }
     return false;
   }
 
-  if (mainTabFocus == MainTabFocus::Tabs && mappedInput.wasScreenTouchDown(x, y) && !insideTabs(x, y)) {
+  if (mainTabFocus == MainTabFocus::Tabs && !currentActivity->defersContentSelection() &&
+      mappedInput.wasScreenTouchDown(x, y) && !insideTabs(x, y)) {
     mainTabFocus = MainTabFocus::Content;
-    requestUpdate();
+    // Fold the focus paint into the release/action frame instead of refreshing the old menu.
+    mainTabTouchFocusPending = true;
     return false;
   }
 
@@ -396,12 +405,16 @@ bool ActivityManager::handleMainTabInput() {
         return true;
       }
 
-      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-        mainTabFocus = MainTabFocus::Content;
-        requestUpdate();
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+          mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+        // Let the page own first-selection and inherited-hold release barriers.
+        if (currentActivity->defersContentSelection() && !currentActivity->hasContentSelection()) return false;
+        if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+          mainTabFocus = MainTabFocus::Content;
+          requestUpdate();
+        }
         return true;
       }
-      if (mappedInput.isPressed(MappedInputManager::Button::Confirm)) return true;
 
       if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
         mainTabFocus = MainTabFocus::Content;

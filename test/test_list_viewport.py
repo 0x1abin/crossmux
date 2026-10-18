@@ -9,12 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 source = (ROOT / "src/activities/UiListActivity.cpp").read_text()
 method = source.split("void UiListActivity::syncListViewport(", 1)[1]
 method = "void UiListActivity::syncListViewport(" + method.split(
-    "\nvoid UiListActivity::drawChrome", 1
+    "\nvoid UiListActivity::", 1
 )[0]
 harness = r"""
 #include <components/lists/list.h>
 #include <cassert>
 namespace fui = freeink::ui;
+struct CrossPointSettings { static constexpr int INX = 5; int uiTheme = 0; } SETTINGS;
 struct UiScreen {
   int16_t height = 80;
   void syncListViewport(fui::ListNav& nav, fui::ListProps& props, int count, int offset) {
@@ -24,6 +25,10 @@ struct UiScreen {
 struct UiListActivity {
   fui::ListNav nav;
   int count = 16;
+  bool selected = true;
+  bool usesUpstreamStyle() const { return false; }
+  bool defersContentSelection() const { return true; }
+  bool showMainTabContentSelection() const { return selected; }
   fui::ListNav& activeNav() { return nav; }
   int listCount() const { return count; }
   void syncListViewport(UiScreen&, fui::ListProps&, int = 0);
@@ -56,6 +61,16 @@ int main() {
     nav.requestSelection(3 + offset);
     activity.syncListViewport(screen, props, offset);
     assert(nav.top == 2 && props.topIndex == 2);
+
+    activity.selected = false;
+    nav.requestSelection(offset);
+    activity.syncListViewport(screen, props, offset);
+    assert(props.selectedIndex == -1 && !nav.followPending);
+    nav.onListRendered(props.topIndex, 3, false);
+    assert(!nav.consumeRebuildNeeded());
+    nav.requestScroll(3);
+    activity.syncListViewport(screen, props, offset);
+    assert(props.selectedIndex == -1 && nav.selected == offset && nav.top > 0);
   }
 }
 """

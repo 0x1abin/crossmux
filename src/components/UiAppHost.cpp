@@ -14,12 +14,25 @@ void UiAppHost::resetUi() {
   applySharedUiTheme(app, uiTarget, upstreamStyle);
 }
 
-void UiAppHost::renderUi() {
+void UiAppHost::prepareUi() {
   applyUiTextAlignment(uiTarget, upstreamStyle);
+  const auto fonts = uiScaleSpec(upstreamStyle);
+  uiTarget.setFont(fui::GfxRendererTarget::FONT_SMALL,
+                   !upstreamStyle && UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : fonts.smallFontId);
+  uiTarget.setFont(fui::GfxRendererTarget::FONT_BODY, fonts.bodyFontId);
   app.setDevice(uiTarget.deviceContext());
   refreshSharedUiThemeTokens(uiTarget, upstreamStyle);
+}
+
+void UiAppHost::renderUi() {
+  prepareUi();
   app.render();
   uiReady = true;
+}
+
+void UiAppHost::scanUi() {
+  prepareUi();
+  app.paintForScan();
 }
 
 UiAppHost::TouchRoute UiAppHost::routeTouch(const MappedInputManager& input, const bool withLongPress,
