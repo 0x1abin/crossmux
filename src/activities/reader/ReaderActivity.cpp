@@ -233,28 +233,15 @@ void ReaderActivity::loop() {
   const bool skip =
       !fromTilt && SETTINGS.longPressButtonBehavior == SETTINGS.CHAPTER_SKIP && heldMs >= ReaderUtils::SKIP_HOLD_MS;
 
-  if (prevTriggered) {
-    if (skip) {
-      const bool succeeded = skipPages(-10);
-      notePageTurn(false, succeeded);
-    } else {
-      const bool succeeded = pageTurn(false);
-      notePageTurn(false, succeeded);
-    }
-  } else {
-    if (skip) {
-      // A skip is navigation, not reading: it never counts toward session dwell.
-      const bool succeeded = skipPages(10);
-      notePageTurn(false, succeeded);
-    } else {
-      const bool succeeded = pageTurn(true);
-      notePageTurn(true, succeeded);
-    }
-  }
+  const bool changed = skip ? skipPages(prevTriggered ? -10 : 10) : pageTurn(!prevTriggered);
+  // A skip is navigation, not reading: it never counts toward session dwell.
+  notePageTurn(!skip && !prevTriggered, changed);
+  if (changed && (touch.prev || touch.next)) haptic_feedback::touchAction(skip);
   requestUpdate();
 }
 
 void ReaderActivity::render(RenderLock&&) {
+  renderCommitted = false;
   if (isAtEndOfBook()) {
     if (!endOfBookOptions) {
       endOfBookOptions = makeUniqueNoThrow<EndOfBookOptions>(renderer);
@@ -269,14 +256,18 @@ void ReaderActivity::render(RenderLock&&) {
       endOfBookOptions->render(renderer, mappedInput);
     }
     renderer.displayBuffer();
-    onEndOfBookRendered();
-    markPageRendered();
-    readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
-    return;
+    if (renderer.displayCommitted()) {
+      onEndOfBookRendered();
+      markPageRendered();
+    }
+  } else {
+    renderBook();
   }
-
-  renderBook();
-  readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+  if (renderCommitted) {
+    readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+  } else if (activityManager.isSwitchPending()) {
+    readerSession.noteTurn(false, false);
+  }
 }
 
 bool ReaderActivity::handleForcedRefresh() {

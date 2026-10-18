@@ -27,8 +27,26 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/MoonIcon.h"
+#include "util/SleepCover.h"
 
 namespace {
+// Metalio: B/W sleep images use the full 0xF7 waveform instead of HALF (two
+// 0xFC partials), matching the clean pass before absolute gray below.
+#if FREEINK_DEVICE_METALIO_EINK4
+constexpr auto kSleepClean = HalDisplay::FULL_REFRESH;
+#else
+constexpr auto kSleepClean = HalDisplay::HALF_REFRESH;
+#endif
+
+// The absolute gray paint has no base pass. On Metalio the prior screen shows
+// through it after the panel sits unpowered, so clean with 0xF7 first.
+void cleanBeforeAbsoluteGray(GfxRenderer& renderer) {
+#if FREEINK_DEVICE_METALIO_EINK4
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+#else
+  (void)renderer;
+#endif
+}
 
 HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
   return renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct).supported()
@@ -351,6 +369,7 @@ AlphaOverlayResult tryRenderTransparentOverlayBmp(HalFile& file, GfxRenderer& re
     return AlphaOverlayResult::Error;
   const bool absolute = renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
   if (absolute) {
+    cleanBeforeAbsoluteGray(renderer);
     if (!renderer.displayGrayscaleBase(sleepGrayscaleMode(renderer))) return AlphaOverlayResult::Error;
   } else {
     renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
@@ -501,6 +520,10 @@ void releaseSdFontCachesForDecode(const GfxRenderer& renderer) {
 
 void SleepActivity::onEnter() {
   Activity::onEnter();
+  if (!sleepCover::recover()) {
+    display.setInverted(false);
+    return renderDefaultSleepScreen();
+  }
 
   const bool renderQuickResume =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
@@ -666,7 +689,7 @@ void SleepActivity::renderDefaultSleepScreen() const {
     renderer.invertScreen();
   }
 
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.displayBuffer(kSleepClean);
 }
 
 void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool preserveBackground,
@@ -701,7 +724,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
   }
 
   if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, preserveBackground)) {
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    renderer.displayBuffer(kSleepClean);
     return;
   }
 
@@ -712,6 +735,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
 
   const bool absolute = hasGreyscale && renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
   if (absolute) {
+    cleanBeforeAbsoluteGray(renderer);
     if (!renderer.displayGrayscaleBase(sleepGrayscaleMode(renderer))) return;
   } else if (hasGreyscale) {
     // OEM grayscale pipeline base. Must stay HALF: the gray nudge LUT is
@@ -720,7 +744,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
     // the differential nudge then lands unevenly (blotchy noise in gray areas).
     renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
   } else {
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    renderer.displayBuffer(kSleepClean);
   }
 
   if (hasGreyscale) {
@@ -935,5 +959,5 @@ void SleepActivity::renderLastScreenSleepScreen() const {
 
 void SleepActivity::renderBlankSleepScreen() const {
   renderer.clearScreen();
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.displayBuffer(kSleepClean);
 }

@@ -1159,14 +1159,11 @@ bool ReadingStatsStore::releaseMemoryForNetwork() {
     return false;
   }
 
-  books.clear();
-  books.shrink_to_fit();
-  legacyReadingDays.clear();
-  legacyReadingDays.shrink_to_fit();
-  readingDays.clear();
-  readingDays.shrink_to_fit();
-  sessionLog.clear();
-  sessionLog.shrink_to_fit();
+  // libstdc++ shrink_to_fit() does not reclaim vector storage with -fno-exceptions.
+  std::vector<ReadingBookStats>().swap(books);
+  std::vector<ReadingDayStats>().swap(legacyReadingDays);
+  std::vector<ReadingDayStats>().swap(readingDays);
+  std::vector<ReadingSessionLogEntry>().swap(sessionLog);
 
   activeSession = {};
   lastSessionSnapshot = {};

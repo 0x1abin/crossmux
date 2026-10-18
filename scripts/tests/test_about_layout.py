@@ -8,9 +8,9 @@ import unittest
 class AboutLayoutTest(unittest.TestCase):
     def test_content_uses_remaining_safe_height(self):
         root = Path(__file__).resolve().parents[2]
-        source = (root / "src/activities/settings/SettingsActivity.cpp").read_text()
-        start = source.index("  Rect contentRect() const {")
-        method = source[start:source.index("\n  }", start) + len("\n  }")]
+        source = (root / "src/activities/settings/AboutActivity.cpp").read_text()
+        start = source.index("Rect AboutActivity::contentRect() const {")
+        method = source[start:source.index("\n}", start) + len("\n}")].replace("AboutActivity::", "")
         program = r"""
 #include <cassert>
 #include <initializer_list>

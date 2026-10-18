@@ -5,116 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>字体管理 - CrossMux</title>
     <style>
-      :root {
-        color-scheme: light;
-        --font-color: #292524;
-        --bg: #f7f4ef;
-        --title-color: #292524;
-        --card-bg: #fffdf9;
-        --label-color: #78716c;
-        --border-color: #e7e1d8;
-        --accent-color: #a8502f;
-        --accent-hover-color: #883f27;
-        --danger-color: #b4483e;
-        --danger-hover: #923a32;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          color-scheme: dark;
-          --font-color: #fafaf9;
-          --bg: #1c1917;
-          --title-color: #fafaf9;
-          --card-bg: #292524;
-          --label-color: #d6d3d1;
-          --border-color: #44403c;
-          --accent-color: #d59475;
-          --accent-hover-color: #e6bba4;
-        }
-      }
-      * { box-sizing: border-box; }
-      body {
-        max-width: 960px;
-        min-height: 100vh;
-        margin: 0 auto;
-        padding: 0 12px 24px;
-        overflow-x: hidden;
-        background: var(--bg);
-        color: var(--font-color);
-        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-      }
-      h2, h3 { font-family: "Songti SC", STSong, "Noto Serif CJK SC", serif; }
-      h2 { margin-top: 0; color: var(--title-color); font-size: 1.15rem; }
-      h3 { margin: 0 0 8px; }
-      .card {
-        margin: 10px 0;
-        padding: 14px;
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        background: var(--card-bg);
-      }
-      .nav-links {
-        position: sticky;
-        top: 0;
-        z-index: 100;
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 4px;
-        margin: 0 -12px 12px;
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border-color);
-        background: var(--bg);
-      }
-      .nav-links a {
-        min-width: 0;
-        min-height: 44px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 4px;
-        border-radius: 8px;
-        color: var(--font-color);
-        font-size: 0.92rem;
-        font-weight: 650;
-        text-decoration: none;
-        white-space: nowrap;
-      }
-      .nav-links a.active { background: var(--accent-color); color: #fff; }
-      .nav-links a:not(.active):hover { background: var(--accent-hover-color); color: #fff; }
+      h3 { margin: 0 0 8px 0; }
       .family {
         border-bottom: 1px solid var(--border-color);
         padding: 12px 0;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 10px;
       }
       .family:last-child { border-bottom: none; }
-      .family-info { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+      .family-info { flex: 1; }
       .family-meta { color: var(--label-color); font-size: 0.9em; }
       .btn {
-        min-height: 44px;
-        padding: 8px 18px;
+        padding: 6px 16px;
         border: none;
-        border-radius: 8px;
+        border-radius: 4px;
         cursor: pointer;
         font-size: 0.9em;
-        font-weight: 650;
       }
       .btn-danger {
         background: var(--danger-color);
-        color: white;
+        color: var(--button-text);
       }
       .btn-danger:hover { background: var(--danger-hover); }
       .btn-primary {
         background: var(--accent-color);
-        color: white;
+        color: var(--button-text);
       }
       .btn-primary:hover { background: var(--accent-hover-color); }
       .upload-form {
         display: flex;
-        flex-direction: column;
         gap: 10px;
-        align-items: stretch;
+        align-items: center;
+        flex-wrap: wrap;
       }
       .upload-form input[type="text"] {
         padding: 6px 10px;
@@ -123,34 +46,23 @@
         background: var(--bg);
         color: var(--font-color);
       }
-      .upload-form input[type="file"] { width: 100%; min-width: 0; min-height: 44px; }
-      .upload-form .btn { width: 100%; }
+      .upload-form input[type="file"] { flex: 1; min-width: 200px; }
       #status {
         margin-top: 10px;
         padding: 8px;
         border-radius: 4px;
         display: none;
       }
-      .status-ok { background: #d4edda; color: #155724; display: block !important; }
-      .status-err { background: #f8d7da; color: #721c24; display: block !important; }
+      .status-ok { background: var(--accent-color-10); color: var(--accent-color); display: block !important; }
+      .status-err { background: var(--danger-bg); color: var(--danger-color); display: block !important; }
       .empty { color: var(--label-color); text-align: center; padding: 20px; }
-      @media (min-width: 700px) {
-        body { padding: 0 20px 32px; }
-        .nav-links { margin: 0 -20px 20px; padding: 10px 20px; }
-        .card { margin: 15px 0; padding: 20px; border-radius: 14px; }
-        .upload-form { flex-direction: row; align-items: center; }
-        .upload-form input[type="file"] { width: auto; min-width: 200px; }
-        .upload-form .btn { width: auto; }
-      }
     </style>
-  </head>
-  <body>
-    <nav class="nav-links" aria-label="主导航">
-      <a href="/">主页</a>
-      <a href="/files">文件</a>
-      <a href="/settings">设置</a>
-      <a href="/fonts" class="active" aria-current="page">字体</a>
-    </nav>
+    <link rel="stylesheet" href="/assets/web.css" />
+  <link rel="icon" type="image/svg+xml" href="/assets/crosspoint-icon.svg" />
+</head>
+  <body class="web-ui">
+    <!--#include file="../shared/Header.zh-CN.html.inc" -->
+<main class="page-content">
 
     <div class="card">
       <h2>已安装字体</h2>
@@ -167,11 +79,24 @@
       <div id="status"></div>
     </div>
 
-  <script>
+  </main>
+<!--#include file="../shared/Footer.zh-CN.html.inc" -->
+<script>
     function formatSize(bytes) {
       if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
       if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
       return bytes + ' B';
+    }
+
+    // PSRAM boards also accept vector (.ttf/.otf) uploads; set from /api/fonts.
+    let allowVector = false;
+
+    function fontExtRe() {
+      return allowVector ? /\.(cpfont|ttf|otf)$/i : /\.cpfont$/i;
+    }
+
+    function supportedExts() {
+      return allowVector ? '.cpfont、.ttf 或 .otf' : '.cpfont';
     }
 
     async function loadFonts() {
@@ -179,6 +104,7 @@
       try {
         const res = await fetch('/api/fonts');
         const data = await res.json();
+        allowVector = !!data.vectorFonts;
         // Build rows with DOM APIs and textContent so on-device family names
         // (which can contain arbitrary characters) cannot break markup or
         // execute script via innerHTML / inline onclick interpolation.
@@ -201,9 +127,10 @@
           info.appendChild(h3);
           const meta = document.createElement('span');
           meta.className = 'family-meta';
-          const sizes = (f.sizes || []).join(', ');
+          const sizes = (f.sizes || []).filter(size => size > 0);
+          const sizeText = sizes.length ? sizes.join(', ') + 'pt' : '可缩放';
           const filesSizes = (f.files || []).map(fi => formatSize(fi.size)).join(' + ');
-          meta.textContent = sizes + 'pt · ' + filesSizes;
+          meta.textContent = sizeText + ' · ' + filesSizes;
           info.appendChild(meta);
 
           const btn = document.createElement('button');
@@ -255,7 +182,7 @@
     // Derive family name from a .cpfont filename: take everything before the
     // last '-' or '_' (that separator precedes the size suffix, e.g. Bookerly_12.cpfont).
     function familyFromFilename(name) {
-      const stem = name.replace(/\.cpfont$/i, '');
+      const stem = name.replace(/\.(cpfont|ttf|otf)$/i, '');
       const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
       return cut > 0 ? stem.slice(0, cut) : stem;
     }
@@ -265,15 +192,15 @@
       return raw.replace(/[^A-Za-z0-9_-]/g, '_');
     }
 
-    function cpfontFilesOnly(fileList) {
-      return Array.from(fileList).filter(f => /\.cpfont$/i.test(f.name));
+    function supportedFontFilesOnly(fileList) {
+      return Array.from(fileList).filter(f => fontExtRe().test(f.name));
     }
 
     document.getElementById('fontFiles').addEventListener('change', function() {
       const info = document.getElementById('pickedInfo');
-      const files = cpfontFilesOnly(this.files);
+      const files = supportedFontFilesOnly(this.files);
       if (files.length === 0) {
-        info.textContent = '所选文件夹中没有 .cpfont 文件。';
+        info.textContent = '所选文件夹中没有 ' + supportedExts() + ' 文件。';
         return;
       }
       const family = sanitizeFamily(familyFromFilename(files[0].name));
@@ -283,7 +210,7 @@
     document.getElementById('uploadForm').addEventListener('submit', async function(e) {
       e.preventDefault();
       const status = document.getElementById('status');
-      const files = cpfontFilesOnly(document.getElementById('fontFiles').files);
+      const files = supportedFontFilesOnly(document.getElementById('fontFiles').files);
       if (files.length === 0) {
         status.className = 'status-err';
         status.style.display = 'block';

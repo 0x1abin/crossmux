@@ -66,6 +66,8 @@ class Activity {
   virtual MainTab mainTab() const { return MainTab::None; }
   virtual bool mainTabBackReturnsToTabs() const { return true; }
   virtual void selectMainTabContentEdge(MainTabContentEdge) {}
+  virtual bool defersContentSelection() const;
+  virtual bool hasContentSelection() const { return true; }
   bool usesMainTabBar() const;
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
@@ -100,7 +102,7 @@ class Activity {
  protected:
   MappedInputManager::Labels mainTabButtonLabels(const char* back, const char* confirm, bool canMove,
                                                  bool showTabDirections = true) const;
-  bool showMainTabContentSelection() const;
+  virtual bool showMainTabContentSelection() const;
   bool mainTabsAtBottom() const;
   bool hasMainTabStatusBar() const;
   MainTabLayout mainTabLayout() const;

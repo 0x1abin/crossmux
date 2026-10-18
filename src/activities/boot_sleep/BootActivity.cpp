@@ -26,12 +26,6 @@ void BootActivity::onEnter() {
 
 void BootActivity::renderSplash() {
   GUI.drawSplash(renderer, tr(STR_BOOTING), CROSSPOINT_VERSION);
-#if FREEINK_DEVICE_EEGO_A4
-  // A4: the panel is being powered on for the first time here, and a FAST
-  // refresh on a freshly powered panel doesn't establish the frame (observed:
-  // splash never appears). Force the first paint to a full waveform.
-  renderer.requestNextFullRefresh();
-#endif
   renderer.displayBuffer();
 }
 

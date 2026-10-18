@@ -1,5 +1,147 @@
 # INX SDK layout compatibility
 
+## Shared behavior across themes
+
+INX retains its fonts, rectangular switches, dotted separators, main tabs,
+accordion and cover layouts. Setting execution, option selection, input ownership,
+persistence and navigation use the same owners as other themes. The Library main
+tab continues to browse directories; the shared Apps catalog also exposes the
+indexed Library through stable app ID 17. Existing app IDs and masks keep their meaning.
+
+On touch hardware, all five INX main tabs (Recent, Library, Apps, Settings, Statistics) start
+without an established item selection, in both list and icon layouts. Valid row
+taps/long presses establish selection and execute immediately; blank/cancelled
+touches and scrolling never create one. Selection feedback joins the action's
+result render, without painting the outgoing page. Existing page instances keep
+selection and scroll after a popup or child activity returns. Reloaded directories
+clear it; a renamed or returning entry is restored only if it still exists. Successful
+Recent/Statistics removal clears the operated selection. Pickers, statistics subpages,
+other themes and button-only devices keep their behavior.
+
+With no selection, the first Next selects the first item and Previous the last.
+The first Confirm selects the first item in Library/Apps/Settings, but the currently
+visible entry in Recent/Statistics, including after an operated entry scrolls away.
+Another Confirm executes. Consume the complete initial gesture, including holds and all held-key
+releases, before normal navigation resumes. Inherited holds cannot establish a
+selection. A fixed-size page flag and one frame snapshot drive both font scanning
+and painting; hidden selections clear unsatisfiable row-follow work. No global
+input-mode tracking, heap allocation or persistent selection history is added.
+Main tabs still highlight the current tab and retain actual Tabs/Content focus.
+Established selection remains visible when using touch. Option
+pickers share press feedback, release activation, cancellation and a bounded visible
+window; options beyond index 15 remain reachable. Headline and message dialogs use
+the shared content renderer in every theme.
+
+Recent Flow accepts horizontal swipes only when they start in the same cover band
+used by drawing. Left advances one book, Right moves back, and both stop at the
+ends; vertical paging remains available. Cancel the old touch press before paging,
+without establishing a new selection or refreshing the outgoing page. Global edge,
+Home and control-center gesture routing still runs first. Statistics keeps its
+initial book/overview display and decorative borders, tracks browsing separately
+from the operated entry, and adds selection emphasis only to the selected cover or
+overview grid. Missing covers load for the visible page even without a selection.
+
+Settings layouts pass the actual SettingInfo to one executor. Ordinary values save
+without reconstructing the lists. Accordion changes only rebuild presentation rows.
+Resource discovery runs on entry and resource-management return; structural rebuilds
+reuse the dictionary setting. Recent skins share the store and removal controller.
+Grids use the list host's viewport and published touch actions. About takes one
+hardware/runtime snapshot and displays SD loading before querying space.
+
+When main tabs own focus, the list host clears pending row-follow work. Hiding a
+row highlight while leaving that work pending makes the SDK report the selection
+as undrawn, which can exhaust the host's eight additional drawing passes without
+advancing the viewport. Content focus and genuine wrapped-row follow still work.
+
+Run the current production behavior checks alongside the historical drawing checks:
+
+```sh
+python3 test/inx_navigation/test_theme_menus.py
+python3 test/inx_navigation/test_touch_network.py
+python3 scripts/tests/test_reading_ui_regressions.py
+python3 scripts/tests/test_about_layout.py
+python3 scripts/tests/test_app_visibility.py
+```
+
+Historical SDK baselines stay unchanged. Current-entrypoint tests cover nonzero option
+highlights, absolute indices beyond 16, shared file/recents commands, statistics hit
+targets and held-entry releases. Compare drawing geometry separately from business actions.
+
+### Refactor validation boundary
+
+The 2026-10-17 cleanup consolidates statistics input into a page-local three-state
+result and prewarm ownership into its scan enum plus nullable owner. It preserves
+the selection snapshots, gesture priority, cache limits and persisted formats.
+SDK scan protocol checks run in `freeink-sdk/libs/ui/FreeInkUI/test/host/run.sh`;
+CrossMux retains page, viewport and font-cache integration checks.
+
+Metalio's completed five-tab, Flow swipe and statistics cancellation acceptance
+predates this cleanup. Its final application SHA-256 is
+`412c04d72d3fc7077d1687094681c64a02fa65e0d61e94ddfeefe142f4d26d0a`.
+Keep that record tied to its image. The cleanup has software/build verification
+only; Metalio, Sticky and X3 require separate physical acceptance of the new image.
+No device is reflashed as part of this refactor.
+
+### Cross-device settings latency acceptance
+
+Use identical language, font files, SD contents and orientation for reference and
+candidate. The development `sticky` environment enables debug logs. Capture each
+category's first expansion and 20 subsequent expand/collapse operations, including
+multiple open categories. Record handler, drawing and panel wait separately:
+
+- `LIST ... touch down` / `touch release` timestamp the shared input snapshot.
+- `SET Category ... handler=... lockWait=... ms` separates render-lock waiting from
+  rebuilding accordion rows; expansion must not discover resources or save settings.
+- `LIST ... scan=... paint=... display=... ms` includes glyph collection/prewarm,
+  the final paint, and synchronous display submission as separate intervals. The
+  scan never publishes a hit table or dispatches a gesture. The actual paint must
+  publish the final table once, after any wrapped-row viewport convergence.
+- `GFX Time = ... from clearScreen to displayBuffer` measures only the final
+  drawing pass after the last clear. Rebuild passes reset that timer; use the
+  complete settings render interval and a separately timed display submission to
+  measure all drawing work. Font statistics labeled `settings` identify repeated
+  decompression and SD reads.
+- `SET Settings render including display` includes synchronous display work; SDK
+  `EPD Wait complete: refresh` logs isolate panel BUSY time. Enable the existing
+  `SSD1677_PROBE_DEBUG` build flag if the actual refresh mode needs confirmation.
+
+Record first-operation time, repeat median/p95, refresh count, font reads/decompressions,
+internal free heap and largest block. Confirm one panel submission per expansion,
+no dropped taps after publication and no decreasing heap across repetitions. Builds
+and host tests do not establish physical latency or waveform quality; complete this
+acceptance record independently for each accessible device before claiming a speed
+improvement. Build all public hardware targets plus X4 Classic and LilyGo T5 S3;
+classify unavailable hardware as build/host-verified, not physically accepted.
+
+The earlier local 2026-10-16 render-only acceptance used five open/close pairs per category plus all
+four categories open together, in isolated reference/candidate images. The probe
+forces runtime INX/content focus and an awake CPU, calls production row activation,
+and waits for each real display submission before the next action. Its display
+interval includes transfer and BUSY waiting; it does not separately measure the
+electrical BUSY signal or capacitive-touch recognition. Logs, image hashes and the
+restoration record are retained in `build/inx-unification/validation.md`.
+
+With the unchanged built-in Chinese UI fonts and no external font/dictionary
+families installed, repeat render medians (four repeats after the first open) were:
+
+| Category | Reference (ms) | Candidate (ms) |
+|---|---:|---:|
+| Display | 4328 | 1119 |
+| Reader | 3649 | 1040 |
+| Controls | 3594.5 | 1056 |
+| System | 3919 | 1034 |
+
+Both used reference HEAD `cfdf9825` and SDK `bb41a568`; the candidate adds the local
+INX unification changes, before the subsequent shared UI CJK prewarm fix.
+Each completed 48 activations. The display interval was
+677 ms in both runs. Removing eight redundant drawing passes reduced render time
+by about 71–74%, without changing font cache budgets. These are render intervals,
+not touch-to-panel latency. The first candidate dispatch also waited 749 ms for a
+queued warm-up frame; candidate timings are paired from the executed category/mask
+log to its unique subsequent render, excluding that earlier frame.
+
+## Historical appearance and integration contract
+
 INX preserves the visual contract of CrossMux 30db80e3 / FreeInk SDK 094976e1.
 The shared bridge in `src/components/UIThemeTokens.h` selects `ThemeRow` list
 layout and advance-based digit alignment when `FREEINK_UI_THEME_LAYOUT_POLICY`
@@ -24,7 +166,7 @@ SDK ThemeRow-specific selected/dimmed styling must not affect Content layouts.
 Lyra Carousel retains its fork-only cover home and inherits Lyra's shared page
 rendering, including list styling; only its home metrics differ from Lyra.
 
-The current local integration reference (2026-10-02) is Reader
+The historical local integration reference (2026-10-02) is Reader
 `38280863a50988683c2c63ccd7096e872a48c411`, SDK
 `98b4e427459bc588fdcdcb25e1454f0806cd806b`, and Simulator
 `20e738038605ff4ead6c9fcfe932443d1e143691`, on CrossMux `593c8dbc`.
@@ -35,6 +177,35 @@ remain visible in every theme at the same category and relative insertion point,
 with their existing action/value binding. This is a structural position, not an
 absolute screen coordinate. Keep one shared settings source, persistent fields,
 Web API, CrossMux update service and device capability checks.
+
+
+The current local rehearsal (2026-10-13) uses Reader
+`ba39565ce7b3a8aab14ca86da4fa4c3ca140f007`, SDK
+`7fcd3b34c108f28c086ade3b433924022dbc0998`, and Simulator
+`1915ee0a15564c3f49d74fa2334f773f282c5364`, on CrossMux
+`83b0f810c8628701456e028c2d8566a9be149755`. Record reviewed index
+fingerprints separately; these candidates contain no new commits.
+
+The user approved retaining the compact offline reading-font aliases in
+`src/main.cpp`: the legacy Noto Sans/Serif reader IDs share the local CJK12
+fallback, and complete families/styles remain available through SD `.cpfont`
+files. This is a reading-body and font-choice exception in every theme;
+shared menu fonts and geometry still follow their existing contracts. On the
+fixed English comparison book, Normal spacing yields 34 px / 8 pages locally
+and 32 px / 7 pages with upstream's default Latin Noto Sans 12. Preserve both
+captures and the historical baseline. Also compare both programs with the same
+actual SD font, settings, content, language, orientation and scale; record any
+remaining text-layout difference and its source instead of substituting fonts
+or claiming that default reading pages match upstream.
+
+
+Same-SD-font captures also retain the local per-glyph advance rounding in
+`GfxRenderer::getTextAdvanceX`; upstream rounds the accumulated fixed-point
+word advance once. This can change a boundary wrap even with an identical font
+file and page count. The 2026-10-13 portrait and landscape SD-font captures
+match the actual CrossMux `83b0f810` reading pages pixel for pixel. Record the
+font file hash and production paths with each comparison; do not replace this
+retained reading behavior solely to obtain an upstream pixel match.
 
 Home adds APP to the upstream entries; Carousel's home remains the approved
 exception. Only INX shows the recent, library and apps layout settings. All

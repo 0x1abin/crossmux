@@ -583,7 +583,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 76);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 78);
   ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
   bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
   // Normalize the two new spacing bytes and their absolute file offsets back
@@ -723,6 +723,7 @@ TEST_F(ChapterHtmlSlimParserTest, ParagraphSpacingLevelsAddToCssMargins) {
   constexpr int gaps[] = {0, 8, 12, 16, 20, 24};
   for (uint8_t level = 0; level < std::size(gaps); ++level) {
     parser.extraParagraphSpacing = level;
+    parser.wordsExtractedInBlock = 0;
     parser.currentPage.reset();
     parser.currentPageNextY = 0;
     BlockStyle style;
@@ -764,3 +765,55 @@ TEST_F(SectionMemoryTest, ParagraphSpacingLevelsRoundTripWithoutCollapsingToBool
 }
 
 }  // namespace
+
+TEST_F(SectionMemoryTest, TocAnchorsTrackSubchaptersDuringBuildAndAfterReload) {
+  epub->tocItems = {{"chapter.xhtml", "", 0}, {"chapter.xhtml", "first", 0}, {"chapter.xhtml", "second", 0}};
+  std::string html = "<html><body><h2 id='first'>First</h2><p>";
+  for (int i = 0; i < 240; ++i) html += "first ";
+  html += "</p><h2 id='second'>Second</h2><p>";
+  for (int i = 0; i < 240; ++i) html += "second ";
+  html += "</p></body></html>";
+  writeHtml(html);
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.startBuild(spec));
+  ASSERT_TRUE(section.buildSomeMore(1));
+  EXPECT_EQ(section.getTocIndexForPage(0), 1);
+  ASSERT_TRUE(section.buildSomeMore(0));
+  const auto first = section.getPageForAnchor("first");
+  const auto second = section.getPageForAnchor("second");
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  ASSERT_GT(*second, *first);
+  EXPECT_EQ(section.getTocIndexForPage(*first), 1);
+  EXPECT_EQ(section.getTocIndexForPage(*second), 2);
+  Section restored(epub, 0, renderer);
+  ASSERT_TRUE(restored.loadSectionFile(spec));
+  EXPECT_EQ(restored.getTocIndexForPage(*first), 1);
+  EXPECT_EQ(restored.getTocIndexForPage(*second), 2);
+  uint32_t mapStart = 0;
+  {
+    HalFile file;
+    uint16_t count = 0;
+    ASSERT_TRUE(restored.openAnchorMap(file, count));
+    ASSERT_EQ(count, 2);
+    mapStart = file.position();
+  }
+  // A truncated anchor must not be mistaken for the second chapter.
+  std::filesystem::resize_file(epub->cachePath + "/sections/0.bin", mapStart + 1);
+  EXPECT_EQ(restored.getTocIndexForPage(*second), 0);
+}
+
+TEST_F(SectionMemoryTest, RejectsOldCompleteAndPartialVersionsBeforeReadingNewBlocks) {
+  writeHtml("<html><body><p>one</p><p>two</p></body></html>");
+  for (const uint8_t legacy : {uint8_t{76}, uint8_t{77}, uint8_t{206}, uint8_t{205}}) {
+    Section section(epub, 0, renderer);
+    ASSERT_TRUE(section.createSectionFile(spec));
+    {
+      HalFile file;
+      ASSERT_TRUE(file.open((epub->cachePath + "/sections/0.bin").c_str(), "rb+"));
+      ASSERT_EQ(file.write(&legacy, sizeof(legacy)), sizeof(legacy));
+    }
+    Section restored(epub, 0, renderer);
+    EXPECT_FALSE(restored.loadSectionFile(spec));
+  }
+}

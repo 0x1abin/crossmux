@@ -260,6 +260,17 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     doc["dictionaryName"] = dictionaryName;
   }
   doc["otaNightlyEnabled"] = otaNightlyEnabled;
+  // Home-button gestures are added dynamically to getSettingsList() (not the
+  // base list), so they must be persisted manually here.
+  if (BoardConfig::hasHomeKey()) {
+    doc["homeButtonTapAction"] = homeButtonTapAction;
+    doc["homeButtonDoubleTapAction"] = homeButtonDoubleTapAction;
+    doc["homeButtonLongPressAction"] = homeButtonLongPressAction;
+  }
+  // The displayed option list varies by board, so this setting uses a dynamic
+  // display-index mapping and is skipped by the generic persistence loop.
+  doc["longPressMenuFunction"] = longPressMenuFunction;
+  doc["shortPwrBtn"] = shortPwrBtn;
 
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
@@ -289,6 +300,14 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
 #endif
+
+  if (doc["vibration"].isNull() && !doc["hapticFeedbackLevel"].isNull()) {
+    const uint8_t legacy =
+        clamp(doc["hapticFeedbackLevel"].as<uint8_t>(), HAPTIC_FEEDBACK_LEVEL_COUNT, HAPTIC_FEEDBACK_MEDIUM);
+    vibration = legacy == HAPTIC_FEEDBACK_OFF ? VIBRATION_OFF : VIBRATION_TOUCH_PAGE;
+    hapticIntensity = legacy == HAPTIC_FEEDBACK_OFF ? HAPTIC_MEDIUM : legacy - HAPTIC_FEEDBACK_LOW;
+    needsResave = true;
+  }
 
   // Legacy migration: the aggregate statusBar field predates the split fields.
   if (doc["statusBarChapterPageCount"].isNull()) {
@@ -446,11 +465,28 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Font family — uses dynamic getter/setter in SettingsList so the generic loop skips it.
   const uint8_t storedFontFamily = doc["fontFamily"] | (uint8_t)0;
   fontFamily = clamp(storedFontFamily, BUILTIN_FONT_COUNT, 0);
+  // Home-button gestures are persisted manually (see toJson), not via the
+  // base settings list loop.
+  if (BoardConfig::hasHomeKey()) {
+    homeButtonTapAction = clamp(static_cast<uint8_t>(doc["homeButtonTapAction"] | homeButtonTapAction),
+                                static_cast<uint8_t>(HomeButtonAction::Count), homeButtonTapAction);
+    homeButtonDoubleTapAction =
+        clamp(static_cast<uint8_t>(doc["homeButtonDoubleTapAction"] | homeButtonDoubleTapAction),
+              static_cast<uint8_t>(HomeButtonAction::Count), homeButtonDoubleTapAction);
+    homeButtonLongPressAction =
+        clamp(static_cast<uint8_t>(doc["homeButtonLongPressAction"] | homeButtonLongPressAction),
+              static_cast<uint8_t>(HomeButtonAction::Count), homeButtonLongPressAction);
+  }
+  // These controls use board-specific display-index mappings and are skipped by
+  // the generic settings loop. Persisted action IDs remain stable across boards.
+  longPressMenuFunction = clamp(doc["longPressMenuFunction"] | (uint8_t)LP_MENU_DISABLED,
+                                (uint8_t)(LP_MENU_CREATE_CLIPPING + 1), (uint8_t)LP_MENU_DISABLED);
+  shortPwrBtn = clamp(doc["shortPwrBtn"] | (uint8_t)IGNORE, (uint8_t)SHORT_PWRBTN_COUNT, (uint8_t)IGNORE);
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
-    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync, HomeButtonAction::Ignore,
-                                                  HomeButtonAction::Bookmark, HomeButtonAction::Dictionary,
-                                                  HomeButtonAction::ReaderMenu};
+    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync,       HomeButtonAction::Ignore,
+                                                  HomeButtonAction::Bookmark,   HomeButtonAction::Dictionary,
+                                                  HomeButtonAction::ReaderMenu, HomeButtonAction::CreateClipping};
     if (s.longPressMenuFunction < sizeof(LEGACY) / sizeof(LEGACY[0])) {
       s.homeButtonLongPressAction = static_cast<uint8_t>(LEGACY[s.longPressMenuFunction]);
       needsResave = true;

@@ -1,7 +1,12 @@
 #pragma once
 
+#include <BoardConfig.h>
+
+#include <atomic>
+
 #include "activities/Activity.h"
 #include "components/UiAppHost.h"
+#include "components/UiContentSelection.h"
 #include "util/ButtonNavigator.h"
 
 // Base for activities hosting a single FreeInkUI list screen. UiAppHost owns
@@ -19,11 +24,13 @@ class UiListActivity : public Activity, protected UiAppHost {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool hasContentSelection() const override;
 
  protected:
   // Base-owned row action; subclass-registered actions start at ACTION_USER.
   static constexpr freeink::ui::ActionId ACTION_ROW = 1;
-  static constexpr freeink::ui::ActionId ACTION_USER = 2;
+  static constexpr freeink::ui::ActionId ACTION_SWIPE_DELETE = 2;
+  static constexpr freeink::ui::ActionId ACTION_USER = 3;
 
   UiListActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                  bool wantsTouchLongPress = false, bool upstreamStyle = false);
@@ -41,6 +48,12 @@ class UiListActivity : public Activity, protected UiAppHost {
   // Touch long-press on a row; only fires when the subclass opted in via the
   // wantsTouchLongPress constructor flag (rows must also carry InputLongPress).
   virtual void onRowLongPress(int index) {}
+#if FREEINK_CAP_TOUCH
+  virtual bool canSwipeDelete(int index) const { return false; }
+  virtual void swipeDelete(int index) {}
+  void configureSwipeDelete(UiScreen& screen, freeink::ui::ListProps& props);
+  void closeSwipeDelete();
+#endif
   // The selection/viewport state the loop, sync, and row dispatch operate on.
   // Default is the single `nav` member; UiTabListActivity redirects it to the
   // active tab's per-tab state.
@@ -55,6 +68,8 @@ class UiListActivity : public Activity, protected UiAppHost {
   // First hook in loop(); return true when the pass is consumed (popups, extra
   // buttons, gestures). Runs before the base button handling.
   virtual bool handleCustomInput() { return false; }
+  virtual bool handleListSwipe(MappedInputManager::SwipeDir swipe, int startX, int startY);
+  virtual int initialConfirmIndex() const { return 0; }
   // Back/Confirm handling; override wholesale for press/release or hold
   // variants. Return true when a button consumed the pass.
   virtual bool handleButtons();
@@ -75,6 +90,11 @@ class UiListActivity : public Activity, protected UiAppHost {
   void syncListViewport(UiScreen& screen, freeink::ui::ListProps& props, int selectionOffset = 0);
   // Move the selection to index and pull the viewport to it.
   void moveSelectionTo(int index);
+  // Custom grids publish their slot capacity through the same viewport owner.
+  void syncPagedViewport(int pageItems);
+  void clearContentSelection();
+  void establishContentSelection(int index);
+  bool showMainTabContentSelection() const override;
 
   // --- shared state ----------------------------------------------------------
   // Selection + viewport (selected/top/visibleRows/followOnBuild). Access via
@@ -88,6 +108,15 @@ class UiListActivity : public Activity, protected UiAppHost {
   // Named apart from UiAppHost::routeTouch so the host overload stays visible
   // (not name-hidden) to subclasses with extra touch surfaces.
   bool routeListTouch();
+  bool consumeSelectionEntryInput();
+  UiContentSelection contentSelection;
+  bool contentSelectionVisibleForFrame = true;
+#if FREEINK_CAP_TOUCH
+  static void swipeDeleteTrampoline(const freeink::ui::ActionEvent& event, void* user);
+  bool handleSwipeDeleteInput();
+  std::atomic<int16_t> revealedIndex{-1};
+  freeink::ui::ListRevealAction swipeReveal{};
+#endif
 
   const bool wantsTouchLongPress;
 };

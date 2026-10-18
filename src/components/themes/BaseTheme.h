@@ -332,7 +332,7 @@ class BaseTheme {
   // Shared by every theme's drawButtonHints(): centres a hint label in its box,
   // wrapping to two lines rather than overflowing when it's too wide to fit.
   static void drawHintLabel(const GfxRenderer& renderer, int fontId, const char* label, int x, int boxWidth, int boxTop,
-                            int boxHeight, int singleLineYOffset);
+                            int boxHeight);
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   // Menu row height as DRAWN by drawButtonMenu. HomeActivity builds its touch
   // grid from this, so hit bands always match the visuals (RoundedRaff derives
@@ -351,6 +351,7 @@ class BaseTheme {
                         const std::function<bool(int index)>& rowHeading = nullptr) const;
   virtual void drawMainTabBar(const GfxRenderer& renderer, Rect rect, MainTab selected) const;
   virtual void drawMainTabStatusBar(const GfxRenderer& renderer, Rect rect) const;
+  static void drawSelectionFrame(const GfxRenderer& renderer, Rect rect, int thickness = 3);
   static void drawSplash(const GfxRenderer& renderer, const char* status, const char* version = nullptr);
   // Also draws the wall clock opposite the battery when the user enabled
   // SETTINGS.clockShowInHeader and system time is valid. On touch boards a
@@ -409,9 +410,11 @@ class BaseTheme {
   virtual void drawHomeMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                             const std::function<std::string(int index)>& buttonLabel,
                             const std::function<UIIcon(int index)>& rowIcon) const;
+  static void drawSelectionHandle(const GfxRenderer& renderer, Rect rect, bool left);
+  static void drawSelectionActions(const GfxRenderer& renderer, Rect rect);
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
   virtual void drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
-                               int selectedIndex) const;
+                               int selectedIndex, int firstVisible = -1) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   static void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,
                             std::string title, const int paddingBottom = 0, const int textYOffset = 0,

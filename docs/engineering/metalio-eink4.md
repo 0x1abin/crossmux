@@ -1,5 +1,57 @@
 # Metalio E-Ink 4
 
+`metalio_eink4` remains a separate ESP32-S3 image with the existing public
+Nightly slug `metalio-eink4`; the registry is unchanged. The fixed 2026-10-13
+rehearsal adopts Reader/SDK upstream device adaptation through the CrossMux HAL.
+It adds no firmware publication or hardware test result.
+
+## Current upstream adapter
+
+The SDK `METALIO_EINK4` board profile owns SSD1677 waveform/configuration,
+TCA9555 power/button routing, CST816S touch, SDMMC, BQ27220 battery and PCF8563
+RTC. CrossMux application code uses its existing HAL services. Shared display
+safety checks, allocation failure handling and local Read Pico/M4/Waveshare
+profiles remain available; historical Metalio calibration is not applied as an
+upstream waveform override.
+
+Expander bring-up starts in SDK `holdPowerRails()` before input, display and
+storage, matching upstream. HAL keeps checked diagnostics and the idempotent
+SDK entrypoint rather than copying board initialization. Shared CrossMux text
+AA/transition extensions remain available under their existing capability
+gates; the local M4/Waveshare backend is not the ordinary Metalio driver.
+
+The upstream Metalio FAST waveform uses its board LUT and `0xCC` activation;
+FULL uses `0xF7`, HALF performs the shared two-phase FAST cleaning, and the
+requested power-down during a FAST refresh is folded into `0xCF`. Explicit
+controller power-off uses its separate analog/clock disable path before
+deep-sleep mode `0x03`. Confirm the active source in
+[`BoardConfig.h`](../../freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h)
+and SDK display configuration before comparing command traces. No additional
+full-screen buffer or UI allocation is introduced; the B/W framebuffer is
+48,000 bytes. Static byte counts do not establish runtime heap headroom.
+
+After display and storage shutdown, upstream
+[`MetalioEInk4Board.h`](../../freeink-sdk/libs/hardware/BoardConfig/include/MetalioEInk4Board.h)
+turns the amplifier off, retains main/screen rails, and pulses the power key at
+100 ms intervals for up to five seconds. If USB keeps power present or the
+sequence returns, the HAL uses GPIO3 deep-sleep wake fallback. This replaces the
+old indefinitely retrying shutdown path documented in the historical record.
+
+Build `pio run -e metalio_eink4` and run affected device/display/power host
+regressions. Physical acceptance must repeat cold boot, SD reads, touch/bezel
+keys in four orientations, Full/Half/Fast/gray cleanup, charging status,
+USB/battery shutdown, wake and repeated heap/stack measurements. Record the
+exact application hash, BUSY/park timing, visible transitions and sleep current.
+A build or old calibration result does not prove the new adapter passed.
+
+## Historical local adaptation and physical evidence
+
+The remaining sections preserve earlier wiring, calibration, binary hashes and
+user observations. They describe their dated local BSP and waveform/shutdown
+implementation. Their successful measurements cannot be transferred to the
+fixed upstream adapter above; commands and API names in these records may be
+historical.
+
 Independent ESP32-S3 firmware target, model/board tag `metalio_eink4`, public
 Nightly slug `metalio-eink4`. Hardware reference: `metalio-hw-test` 2.0.51,
 `main/hal/metalio-e-ink-4/config.h`, `IOExpander.hpp`, and its SSD1677 driver.

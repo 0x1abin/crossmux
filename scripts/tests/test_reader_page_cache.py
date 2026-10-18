@@ -9,6 +9,68 @@ READER = ROOT / 'src/activities/reader/EpubReaderActivity.cpp'
 
 
 class ReaderPageCacheTest(unittest.TestCase):
+    def test_complete_overlay_open_switch_and_stale_frame(self):
+        source = READER.read_text()
+        program = r"""
+#include <algorithm>
+#include <cassert>
+#include <memory>
+#include <Memory.h>
+#define LOG_ERR(...) ((void)0)
+struct RenderLock { ~RenderLock() {} };
+struct Settings {char sdFontFamilyName[32]{};int fontPointSize=12;int sdFontFlashPreload=0;} SETTINGS;
+struct Input {int resets=0;void resetHomeButtonInput(){++resets;}bool hasTouch()const{return false;}};
+struct GfxRenderer {
+  int stores=0,restores=0,cleans=0;
+  bool storeBwBuffer(){++stores;return true;}
+  void restoreBwBuffer(bool resync){assert(!resync);++restores;}
+  void cleanupGrayscaleWithFrameBuffer(){++cleans;}
+};
+struct ReaderToolbarUi {
+  struct Nav {int top=0;void reset(int index=0){top=index;}} value;
+  explicit ReaderToolbarUi(GfxRenderer&) {}
+  int begins=0;void begin(){++begins;}Nav& nav(){return value;}
+};
+struct FontPreview {int begins=0;void begin(const char*,int,bool){++begins;}};
+struct EpubReaderActivity {
+  enum class Overlay {None,Toolbar,Contents,Text,More};
+  Overlay overlay=Overlay::None;
+  Input mappedInput;GfxRenderer renderer;FontPreview fontPreview;
+  std::unique_ptr<ReaderToolbarUi> toolbarUi;
+  int focusedTool=-1,panelIndex=-1,more=0,renders=0,pushes=0,requests=0;
+  bool section=true,pageBufferStale=false,panelCursorShown=false,panelHoldJumped=true,overlayPageStored=false;
+  int currentTocIndex()const{return 3;}
+  void buildMoreActions(){++more;}
+  void settleOverlayRefresh(){}
+  void renderOverlay(){++renders;}
+  void pushOverlayRefresh(){++pushes;}
+  void requestUpdate(){++requests;}
+  void openOverlay(Overlay);
+};
+""" + method(source, 'void EpubReaderActivity::openOverlay(') + r"""
+int main(){
+  EpubReaderActivity reader;
+  reader.openOverlay(EpubReaderActivity::Overlay::Contents);
+  assert(reader.panelIndex==3 && reader.toolbarUi->nav().top==3);
+  reader.openOverlay(EpubReaderActivity::Overlay::Text);
+  assert(reader.panelIndex==0 && reader.fontPreview.begins==1);
+  reader.openOverlay(EpubReaderActivity::Overlay::More);
+  assert(reader.panelIndex==0 && reader.more==1);
+  reader.openOverlay(EpubReaderActivity::Overlay::Toolbar);
+  assert(reader.focusedTool==0 && reader.renders==4 && reader.pushes==4);
+  assert(reader.renderer.stores==4 && reader.renderer.restores==3);
+  assert(reader.toolbarUi->begins==1 && !reader.panelHoldJumped);
+  reader.pageBufferStale=true;
+  reader.openOverlay(EpubReaderActivity::Overlay::Text);
+  assert(reader.requests==1 && reader.renders==4);
+  reader.section=false;
+  reader.openOverlay(EpubReaderActivity::Overlay::More);
+  assert(reader.requests==2 && reader.renders==4 && reader.mappedInput.resets==6);
+}
+"""
+        for a4 in (0, 1):
+            run_cpp(program, include_dirs=(ROOT / 'lib/Memory',), defines=(f'FREEINK_DEVICE_EEGO_A4={a4}',))
+
     def test_cache_identity_cancellation_and_lifetime(self):
         source = READER.read_text()
         functions = '\n'.join(method(source, name) for name in (
@@ -21,8 +83,9 @@ class ReaderPageCacheTest(unittest.TestCase):
         begin = source.index('  const auto key = pageCacheKey(section ?')
         end = source.index('\n#else', begin)
         consume = source[begin:end]
-        begin = source.index('  const uint32_t missingCodepoint =', source.index('  unsigned long cacheBaseMs'))
-        missing_glyph = source[begin:source.index('\n#else', begin)]
+        render = method(source, 'bool EpubReaderActivity::renderContents(')
+        begin = render.index('  const uint32_t missingCodepoint =')
+        missing_glyph = render[begin:render.index('\n#else', begin)]
         program = r'''
 #include <array>
 #include <cassert>
@@ -152,6 +215,9 @@ struct EpubReaderActivity {
   enum class FontPromptState {Idle,Asking}; FontPromptState fontPromptState=FontPromptState::Idle;
   ReaderRenderSpec effectiveRenderSpec(uint16_t w,uint16_t h) const {
     auto spec=SETTINGS.spec; spec.viewportWidth=w; spec.viewportHeight=h; return spec;
+  }
+  void drawClippingHighlights(const Page&, int, int, int, int pageNumber) const {
+    assert(pageNumber >= 0 && pageNumber < static_cast<int>(section->pageCount));
   }
   bool pageCacheEligible() const;
   ReaderPageCacheKey pageCacheKey(int,int,int,int,int) const;
@@ -347,7 +413,7 @@ std::vector<int> wakes;
 std::vector<unsigned> waits;
 struct Settings {int screenInverted=0;} SETTINGS;
 struct Display {void setInverted(bool) {}} display;
-struct RenderLock {};
+struct RenderLock { ~RenderLock() {} };
 struct HalPowerManager {struct Lock {~Lock() {}};};
 struct ActivityManager;
 ActivityManager* manager;
@@ -430,7 +496,7 @@ unsigned long millis(){return 0;}
 bool stopped=false;
 CancelCheck cancel{nullptr,[](void*){return stopped;}};
 struct HalFile {
- bool opened=false;
+ bool opened=false, failClose=false;
  int writes=0,stopAfter=0;
  std::vector<uint8_t> bytes;
  size_t write(const void* p,size_t n){
@@ -438,7 +504,7 @@ struct HalFile {
   if(stopAfter && ++writes==stopAfter) stopped=true;
   return n;
  }
- void close(){opened=false;}
+ bool close(){opened=false;const bool ok=!failClose;failClose=false;return ok;}
  void flush(){}
  bool isOpen()const{return opened;}
 };
@@ -494,6 +560,11 @@ int main(){
   cache.file.stopAfter=3;assert(!cache.finalize(cancel));assert(!Storage.exists && !cache.file.isOpen());
  }
  stopped=false;
+ {
+  PixelCache cache;assert(cache.begin("test.pxc",8,32,0,0,1));
+  cache.file.failClose=true;
+  assert(!cache.finalize(cancel));assert(!Storage.exists && !cache.file.isOpen());
+ }
  {
   PixelCache cache;assert(cache.begin("test.pxc",8,32,0,0,1));
   assert(cache.finalize(cancel));assert(Storage.exists && cache.file.bytes.size()==4+2*32);

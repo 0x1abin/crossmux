@@ -4,6 +4,7 @@
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
 #include <HalFrontlight.h>
+#include <HalHaptics.h>
 
 #include <algorithm>
 
@@ -21,6 +22,9 @@ void MappedInputManager::update(const bool deferHomeButtonAction) const {
   BleHid.poll();
   pollBle();
 #endif
+  const bool pagePressed =
+      SETTINGS.vibration == CrossPointSettings::VIBRATION_TOUCH_PAGE && gpio.wasCapacitivePagePressed();
+  HalHaptics::feedback(SETTINGS.vibration != CrossPointSettings::VIBRATION_OFF, pagePressed, SETTINGS.hapticIntensity);
   homeAction = HomeButtonAction::Ignore;
   if (gpio.hasHomeKey()) {
     homeAction = homeButtonInput.update(millis(), gpio.wasHomeKeyTapped(), gpio.wasHomeKeyLongPressed(),
@@ -28,6 +32,11 @@ void MappedInputManager::update(const bool deferHomeButtonAction) const {
                                         static_cast<HomeButtonAction>(SETTINGS.homeButtonTapAction),
                                         static_cast<HomeButtonAction>(SETTINGS.homeButtonDoubleTapAction),
                                         static_cast<HomeButtonAction>(SETTINGS.homeButtonLongPressAction));
+    if (gpio.wasHomeKeyLongPressed() && homeAction != HomeButtonAction::Ignore) {
+      HalHaptics::longPress(SETTINGS.vibration != CrossPointSettings::VIBRATION_OFF, SETTINGS.hapticIntensity);
+    } else if (homeAction != HomeButtonAction::Ignore) {
+      HalHaptics::feedback(SETTINGS.vibration != CrossPointSettings::VIBRATION_OFF, true, SETTINGS.hapticIntensity);
+    }
   }
   if (deferHomeButtonAction) {
     // Keep the first action observed during a synchronous transfer. Home must
@@ -280,6 +289,14 @@ bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
   return true;
 }
 
+bool MappedInputManager::wasScreenTouchPressed(int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!gpio.wasTouchDown(nx, ny)) return false;
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
 bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
@@ -404,12 +421,14 @@ bool MappedInputManager::decodeSwipe(int& sx, int& sy, int& ex, int& ey) const {
   return true;
 }
 
-MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
+MappedInputManager::SwipeDir MappedInputManager::wasSwipe(int* startX, int* startY) const {
   int sx = 0;
   int sy = 0;
   int ex = 0;
   int ey = 0;
   if (!decodeSwipe(sx, sy, ex, ey)) return SwipeDir::None;
+  if (startX) *startX = sx;
+  if (startY) *startY = sy;
   switch (fui::swipeDirection(sx, sy, ex, ey)) {
     case fui::SwipeDir::Left:
       return SwipeDir::Left;
@@ -460,24 +479,6 @@ bool MappedInputManager::wasBackGesture() const {
   return wasEdgeSwipe(fui::ScreenEdge::Left);
 }
 
-bool MappedInputManager::wasHeaderTapBack() const {
-#if !FREEINK_DEVICE_EEGO_A4
-  return false;
-#else
-  // Tap on the header (title bar) acts as Return on touch-only devices that
-  // lack a dedicated front Back key (eego-a4). The header occupies
-  // [topPadding, topPadding + headerHeight); tapping it pops the activity.
-  if (!gpio.hasTouch()) return false;
-  int x = 0;
-  int y = 0;
-  if (!wasScreenTapped(x, y)) return false;
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int headerBottom = metrics.topPadding + metrics.headerHeight;
-  const bool hit = y >= metrics.topPadding && y < headerBottom;
-  if (hit) rememberTouchHeldTime();
-  return hit;
-#endif
-}
 bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
@@ -509,9 +510,6 @@ bool MappedInputManager::wasPowerConfirmClick() const {
 bool MappedInputManager::wasPressed(const Button button) const {
   if (button == Button::Confirm && homeAction == HomeButtonAction::Confirm) return true;
   if (button == Button::Back && wasBackGesture()) return true;
-#if FREEINK_DEVICE_EEGO_A4
-  if (button == Button::Back && (gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
-#endif
 #if FREEINK_CAP_TOUCH
   if (button == Button::Confirm && wasPowerConfirmClick()) return true;
 #endif
@@ -521,9 +519,6 @@ bool MappedInputManager::wasPressed(const Button button) const {
 bool MappedInputManager::wasReleased(const Button button) const {
   if (button == Button::Confirm && homeAction == HomeButtonAction::Confirm) return true;
   if (button == Button::Back && wasBackGesture()) return true;
-#if FREEINK_DEVICE_EEGO_A4
-  if (button == Button::Back && (gpio.wasHomeKeyTapped() || wasHeaderTapBack())) return true;
-#endif
 #if FREEINK_CAP_TOUCH
   if (button == Button::Confirm && wasPowerConfirmClick()) return true;
 #endif
@@ -536,6 +531,9 @@ bool MappedInputManager::wasLongPressed(const Button button, const unsigned long
   if ((longPressFiredButtons & bit) != 0 || getHeldTime() < thresholdMs) return false;
   longPressFiredButtons |= bit;
   suppressNextRelease(button);
+  if (mapButton(button, &HalGPIO::isCapacitivePagePressed)) {
+    HalHaptics::longPress(SETTINGS.vibration == CrossPointSettings::VIBRATION_TOUCH_PAGE, SETTINGS.hapticIntensity);
+  }
   return true;
 }
 

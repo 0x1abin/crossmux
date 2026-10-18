@@ -100,6 +100,32 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Versions 78 / 79
+
+Unified firmware uses version **79**; the Latin counter is **78**. Partial
+versions are **203 / 204** respectively, derived as
+`0xFE - (completeVersion - 28)`. `book.bin` stays at version **11** and per-book
+[`BookKey`](../lib/Epub/BookKey.h) AES-128 payloads stay **16 bytes**; neither
+unchanged layout needs a new counter.
+
+Each TextBlock writes `numWords` (uint16), `hasFocus` (uint8), `textBytes`
+(uint16), and then the new `paragraphStartWord` (uint16). The latter is the visual
+index of the paragraph's first logical word; `UINT16_MAX` means a continuation
+line. The arena begins with one source range per word: two uint32 chapter-visible
+Unicode-codepoint offsets, `[start, end)`, with `UINT32_MAX` for unavailable
+positions. Ranges follow words through BiDi ordering and wrapping, including
+codepoints absorbed by NFC composition. Existing text-offset/x-position/focus/
+style/text arrays follow. Style bit `0x80` marks a discretionary hyphen and is
+masked before interpreting the glyph style, so clipping removes it independently
+of source length.
+
+These versions incorporate upstream section versions 52–55, including font-sized
+solid rectangles for missing U+2588/U+25A0 redaction symbols. Rebuild complete and
+partial pagination so the new widths, positions, paragraph markers and clipping
+anchors agree. Retain metadata, source-offset progress, ruby fields, and the local
+BlockStyle/header order. The existing hollow placeholder remains for other
+unsupported visible characters.
+
 ### Versions 76 / 77
 
 Adds `paragraphIndentSpaces` (0–5, default 3) immediately after the retained
@@ -237,8 +263,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 76
-#define CHINESE_VERSION 77
+#define LATIN_VERSION 78
+#define CHINESE_VERSION 79
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -298,24 +324,32 @@ struct BlockStyle {
     s8 characterSpacing;
 };
 
+struct SourceRange {
+    u32 start [[comment("Chapter codepoint offset; 0xFFFFFFFF if unknown")]];
+    u32 end [[comment("Exclusive chapter codepoint offset")]];
+};
+
 struct TextBlock {
     u16 wordCount;
     u8 hasFocus;
     u16 textBytes [[comment("Total size of text[], including one NUL per word")]];
+    u16 paragraphStartWord [[comment("Visual paragraph-start index, 0xFFFF for continuation")]];
 
     if (wordCount > 0) {
+        SourceRange sourceRanges[wordCount];
         u16 textOff[wordCount] [[comment("Byte offset of word i's text within text[]")]];
         s16 wordXPos[wordCount];
         if (hasFocus != 0) {
             u16 wordFocusSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
         }
-        WordStyle wordStyle[wordCount];
+        u8 wordStyle[wordCount] [[comment("WordStyle flags; 0x80 marks a discretionary hyphen")]];
         if (hasFocus != 0) {
             u8 wordFocusBoundary[wordCount] [[comment("UTF-8 byte boundary between bold prefix and suffix")]];
         }
         char text[textBytes] [[comment("All words back to back, each NUL-terminated")]];
     }
 
+    String rubyTexts[wordCount] [[comment("One annotation per word, empty when absent")]];
     BlockStyle blockStyle;
 };
 
@@ -882,3 +916,37 @@ make a real book disappear.
 
 `selfSize` is the expected file size. Comparing it against the real one is a free
 truncation guard: a build cut short by a power failure cannot pass.
+
+## Clipping store (`/.crosspoint/clippings/epub_<path-hash>.bin`)
+
+Version 4 retains the version 3 header and page-local range fields. After each
+record's layout signature it stores `startOffset` and `endOffset` (uint32 chapter
+codepoint range, end exclusive; UINT32_MAX means unavailable), `syncRevision`
+(uint64), `pendingUpload` (one byte), and a 65-byte NUL-terminated sync ID. The
+chapter title, text length, and text follow. Versions 1–3 remain readable.
+
+Stable IDs are saved before upload. A sibling `.deleted` file stores fixed
+65-byte IDs awaiting server acknowledgement. Deletions are queued before the
+local record is removed and retried on the next enabled manual sync. A `.bak`
+file is recovered if power interrupted replacement of the main store.
+
+Clipping header strings are limited to 4 KiB on both reads and writes. A failed
+load leaves no usable index and disables writes until a successful load. The
+index is allocated with checked, bounded growth and released on unload.
+
+Book moves rename the store and its `.deleted` journal (plus recovery sidecars)
+together. The stored source path is informational and is refreshed on the next
+save; the current file path selects the store. Local book deletion cleans up all
+of these sidecars but preserves the independent `My Clippings.txt` export.
+
+### Sleep-cover transaction
+
+`/sleep.bmp.txn` is a private version **1**, three-byte record: byte 0 is the
+version (`1`), byte 1 is the previous `SLEEP_SCREEN_MODE`, and byte 2 is `0` or
+`1` indicating whether a previous `/sleep.bmp` existed. It is written and closed
+before renaming the previous BMP to `/sleep.bmp.bak`. Its removal, after BMP
+validation and a successful settings save, commits the replacement. Recovery
+with a valid marker restores the old image/mode before clearing the marker;
+malformed markers and failed rollback preserve recovery files. Legacy `.bak`
+files without a marker remain recoverable. Existing font, book, paging and
+settings binary layouts are unchanged.

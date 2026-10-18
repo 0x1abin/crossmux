@@ -2,7 +2,7 @@
 
 #include <BoardConfig.h>
 #if FREEINK_DEVICE_METALIO_EINK4
-#include <MetalioEink4Board.h>
+#include <MetalioEInk4Board.h>
 #endif
 #if FREEINK_DEVICE_READPICO
 #include <BoardReadPico.h>
@@ -19,6 +19,8 @@
 #if CONFIG_IDF_TARGET_ESP32C3 && FREEINK_CAP_BLE_HID_HOST
 #include <BleKeyboardHost.h>
 #endif
+
+#include <HalFrontlight.h>
 
 #include "HalGPIO.h"
 #include "Waveshare397Power.h"
@@ -217,6 +219,8 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  // Frontlight and touch may share I2C; turn the light off before releasing it.
+  Frontlight.setOn(false);
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   Waveshare397Power::waitForPowerButtonRelease();
 #endif
@@ -278,7 +282,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   gpio.prepareForDeepSleep();
 #if FREEINK_DEVICE_METALIO_EINK4
   // Keep USB diagnostics available if external power prevents the hardware cut.
-  freeink::metalio::shutdown();
+  if (!freeink::metalio::powerOff()) LOG_ERR("PWR", "Metalio shutdown pulse failed; falling back to deep sleep");
+  freeink::PowerManager::deepSleepUntilPowerButton();
 #else
   freeink::PowerManager::powerDownRailsForSleep();
 

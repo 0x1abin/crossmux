@@ -20,7 +20,11 @@ class ReaderActivity : public Activity {
   ReaderSession readerSession;
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
-  void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
+  bool renderCommitted = false;
+  void markPageRendered() {
+    renderCommitted = true;
+    pageRendered.store(true, std::memory_order_release);
+  }
   void rememberBookOnceRendered();
 
   explicit ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,

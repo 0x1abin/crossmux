@@ -9,11 +9,12 @@ bool clearBookCache(const std::string& path);
 // Returns the path-keyed cache directory, or an empty string for non-book files.
 std::string bookCachePath(const std::string& path);
 
-// Move cache/bookmark files after the backing book path changed.
-bool relocateBookArtifacts(const std::string& oldPath, const std::string& newPath);
-
-// Update path-keyed stores after one backing book path changed.
-bool relocateBookReferences(const std::string& oldPath, const std::string& newPath);
+enum class BookMoveResult { NotMoved, Complete, MovedDataIncomplete };
+// Coordinate backing paths, saved data, rebuildable caches and references, including folder overwrite rollback.
+BookMoveResult moveBookFile(const std::string& oldPath, const std::string& newPath, bool overwrite = false);
 
 // Returns true if the directory name matches a book cache entry.
 bool isBookCacheDirectoryName(const char* name);
+
+// Delete a local book and its local clipping state after the file is removed.
+bool removeBookFile(const std::string& path);

@@ -7,7 +7,7 @@ that matches your task — don't load everything at once.
 
 | Doc | Read this when… |
 |---|---|
-| [hardware-constraints.md](hardware-constraints.md) | Touching RAM/flash budgets, allocations, `std::vector`/string usage, SPIFFS writes, or detecting the host platform. The Resource Protocol (9 rules) lives here. |
+| [hardware-constraints.md](hardware-constraints.md) | Touching RAM/flash budgets, allocations, `std::vector`/string usage, SD persistence, or detecting the host platform. The Resource Protocol (9 rules) lives here. |
 | [memory-and-allocation.md](memory-and-allocation.md) | Allocating heap memory, using `new`/`malloc`/`makeUniqueNoThrow`, smart pointers, or RAII cleanup. |
 | [esp32-pitfalls.md](esp32-pitfalls.md) | Writing ISRs, `string_view` at C boundaries, raw buffer casts (RISC-V alignment), templates/`std::function`, or parsing network JSON (ArduinoJson v7). |
 | [build-system.md](build-system.md) | Working with PlatformIO, build environments, the critical build flags (DESTRUCTOR_CLOSES_FILE / SINGLE_BUFFER_MODE), or `platformio.local.ini`. |
@@ -26,6 +26,7 @@ that matches your task — don't load everything at once.
 | [ssd1677-text-aa.md](ssd1677-text-aa.md) | Default S3 SSD1677 text AA, original image routing, PSRAM fallback, calibration and validation. |
 | [sticky-aa-test.md](sticky-aa-test.md) | Historical Sticky test2 firmware and its physical observations. |
 | [eego-a4.md](eego-a4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 eego A4 target. |
+| [lilygo-t5s3.md](lilygo-t5s3.md) | Building and physically validating the build-only LilyGo T5 S3 4.7 PRO/Lite target, SDK BoardT5S3, memory and sleep. |
 | [murphy-m4.md](murphy-m4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 Murphy M4 target. |
 | [waveshare-epaper-397.md](waveshare-epaper-397.md) | Building, flashing, or hardware-validating the experimental Waveshare ESP32-S3 ePaper 3.97 target. |
 | [sdk-upstream-sync.md](sdk-upstream-sync.md) | Reviewing the September 2026 SDK integration, upstream touch-menu behavior, source snapshots, and hardware acceptance limits. |

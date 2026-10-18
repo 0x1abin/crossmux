@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Exercise production popup contacts, WiFi actions and footer hit geometry."""
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 from test_theme_menus import method, run
 
 ROOT = Path(__file__).resolve().parents[2]
+SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 popup = (ROOT / 'src/components/OptionPopup.h').read_text()
 a = popup.index('  bool handleInput(')
 a_body = popup.index('{', a)
@@ -15,6 +17,28 @@ while depth:
     depth += (popup[end] == '{') - (popup[end] == '}')
     end += 1
 handler = popup[a:end]
+a = popup.index("  bool handleButtons(")
+end = popup.index("\n  bool processRender(", a)
+handler += popup[a:end]
+for name in ("finishShow",):
+    start = popup.index("  void " + name + "(")
+    brace = popup.index("{", start)
+    end = brace + 1
+    depth = 1
+    while depth:
+        depth += (popup[end] == "{") - (popup[end] == "}")
+        end += 1
+    handler += popup[start:end]
+
+start = popup.index("  int windowStart(")
+brace = popup.index("{", start)
+end = brace + 1
+depth = 1
+while depth:
+    depth += (popup[end] == "{") - (popup[end] == "}")
+    end += 1
+handler += popup[start:end]
+
 code = r'''
 #include <cassert>
 #include <cstdio>
@@ -26,6 +50,7 @@ code = r'''
 #include "FreeInkUICore.h"
 #include "InxItemLayout.h"
 namespace fui=freeink::ui;
+namespace haptic_feedback {inline void touchAction(bool=false){}}
 struct UITheme {static UITheme& getInstance(){static UITheme t;return t;} bool hasMainTabs()const{return true;}};
 struct MappedInputManager {
  enum class Button {NavPrevious,NavNext,Confirm,Back};
@@ -40,7 +65,7 @@ struct MappedInputManager {
 fui::InputSnapshot touchSnapshotFrom(const MappedInputManager& i){return i.snap;}
 struct OptionPopup {
  bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false,uiReady=true;
- int selectedIndex=0;std::atomic<int> visibleOptionRows{1};
+ int selectedIndex=0;mutable std::atomic<int> firstOption{-1},visibleOptionRows{1};std::string message;
  static constexpr int MAX_OPTIONS=24;
  static constexpr fui::ActionId ACTION_OPTION=1,ACTION_CHROME=2;
  std::vector<std::string> ownedStrings=std::vector<std::string>(12,"option");
@@ -48,7 +73,8 @@ struct OptionPopup {
  std::function<void(int)> onSelectCallback;
  @HANDLER@
  void publish(Rect safe){
-  const auto layout=InxOptionGeometry::layout(safe,12,selectedIndex);
+  auto layout=InxOptionGeometry::layout(safe,int(ownedStrings.size()),selectedIndex);
+  layout.first=windowStart(layout.rows);
   visibleOptionRows=layout.rows;
   interactions.beginPublishCycle();interactions.clear();
   for(int slot=0;slot<layout.rows;++slot){
@@ -59,6 +85,8 @@ struct OptionPopup {
  }
 };
 int main(){
+ OptionPopup empty;empty.ownedStrings.clear();empty.finishShow(0,[](int){});assert(!empty.active);
+ empty.active=true;empty.finishShow(0,[](int){});assert(!empty.active);
  int scenes=0;
  for(Rect safe:{Rect{0,0,480,750},Rect{5,8,684-10,1216-13},Rect{8,5,1216-13,684-10},Rect{0,0,800,340}}){
   OptionPopup p;int calls=0,chosen=-1,updates=0;
@@ -72,9 +100,9 @@ int main(){
   // A swipe clears the pressed interaction and moves by the actual drawn row count.
   auto layout=InxOptionGeometry::layout(safe,12,p.selectedIndex);
   auto row=layout.optionRect(1);input.snap.touchPressed=true;input.snap.touchX=row.x+5;input.snap.touchY=row.y+5;
-  p.handleInput(input,update);assert(p.selectedIndex==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
   input.snap={};input.snap.touchReleased=true;input.snap.touchX=input.snap.touchY=-1;input.swipe=MappedInputManager::SwipeDir::Up;
-  p.handleInput(input,update);assert(p.selectedIndex==layout.rows&&p.active&&calls==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.rows+1&&p.active&&calls==0);
   assert(p.interactions.activeIndex()<0);p.publish(safe);
   input={};input.snap.touchReleased=true;input.snap.touchX=input.snap.touchY=-1;p.handleInput(input,update);
   assert(p.active&&calls==0);
@@ -84,7 +112,7 @@ int main(){
   assert(p.selectedIndex==0&&p.active&&calls==0);
   layout=InxOptionGeometry::layout(safe,12,0);row=layout.optionRect(1);
   input={};input.snap.touchPressed=true;input.snap.touchX=row.x+row.width/2;input.snap.touchY=row.y+row.height/2;
-  p.handleInput(input,update);assert(p.selectedIndex==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
   input.snap.touchPressed=false;input.snap.touchReleased=true;p.handleInput(input,update);
   assert(!p.active&&calls==1&&chosen==layout.first+1);assert(!p.handleInput(input,update));
   // A confirm held across entry must not activate on its inherited release.
@@ -93,6 +121,21 @@ int main(){
   assert(q.active&&calls==1);q.handleInput(input,update);assert(!q.active&&calls==2);
   ++scenes;
  }
+ for(bool upstream:{false,true}) {
+  OptionPopup p;p.upstreamStyle=upstream;p.ownedStrings.resize(40,"option");
+  int selected=-1,calls=0;
+  p.finishShow(27,[&](int i){selected=i;++calls;});
+  p.publish(Rect{0,0,480,750});
+  assert(p.selectedIndex==27 && p.firstOption==25);
+  for(int i=0;i<12;++i) p.handleButtons(false,true,false,false,[]{});
+  p.publish(Rect{0,0,480,750});
+  assert(p.selectedIndex==39 && p.firstOption==35);
+  p.handleButtons(false,false,true,false,[]{});
+  assert(selected==39 && calls==1 && !p.active);
+  p.finishShow(27,[&](int){++calls;});
+  p.handleButtons(false,false,false,true,[]{});
+  assert(calls==1 && !p.active);
+ }
 }
 '''.replace('@HANDLER@', handler)
 with tempfile.TemporaryDirectory(prefix='touch-network-') as directory:
@@ -100,7 +143,7 @@ with tempfile.TemporaryDirectory(prefix='touch-network-') as directory:
     for high in (False,True):
         source=directory/'popup.cpp';source.write_text(code)
         binary=directory/'popup'
-        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(ROOT/'freeink-sdk/libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
+        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(SDK/'libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
         if high:command.insert(2,'-DCROSSMUX_UI_PROFILE_HIGH_DPI=1')
         subprocess.run(command,check=True);subprocess.run([str(binary)],check=True)
 

@@ -83,16 +83,12 @@ void HalStorage::prepareForDeepSleep() {
   SDCard.shutdown();
 }
 
-#if FREEINK_CAP_USB_MSC && !FREEINK_SD_SDMMC
-#error "USB Drive requires an SDMMC-backed storage profile"
-#endif
-
 bool HalStorage::beginUsbDrive() {
 #if FREEINK_CAP_USB_MSC
   StorageLock lock;
   auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
   if (!blockDevice) {
-    LOG_ERR("USB", "USB Drive requires a mounted SDMMC filesystem");
+    LOG_ERR("USB", "USB Drive requires a mounted SD filesystem");
     return false;
   }
 

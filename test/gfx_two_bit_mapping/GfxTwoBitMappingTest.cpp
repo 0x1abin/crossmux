@@ -5,15 +5,14 @@
 
 namespace {
 
-bool mappedBit(const GfxRenderer::RenderMode mode, const GfxRenderer::TwoBitPixel pixel) {
-  return pixel.draw && !GfxRenderer::framebufferState(mode, pixel.state);
-}
+bool mappedBit(const GfxRenderer::TwoBitPixel pixel) { return pixel.draw && !pixel.state; }
 
-bool directBit(const GfxRenderer::RenderMode mode, const uint8_t value) {
+bool directBit(const GfxRenderer::RenderMode mode, const uint8_t value, const bool absolute) {
   uint8_t framebuffer = 0;
   DirectPixelWriter writer{};
   writer.fb = &framebuffer;
   writer.mode = mode;
+  writer.absolute = absolute;
   writer.displayWidthBytes = 1;
   writer.originY = 0;
   writer.clipRows = 1;
@@ -30,14 +29,19 @@ bool directBit(const GfxRenderer::RenderMode mode, const uint8_t value) {
 
 }  // namespace
 
-TEST(GfxTwoBitMapping, A4DirectGlyphAndBitmapProduceTheSameFramebufferBit) {
-  for (const auto mode : {GfxRenderer::GRAYSCALE_MSB, GfxRenderer::GRAYSCALE_LSB}) {
-    for (uint8_t value = 0; value < 4; ++value) {
-      const bool direct = directBit(mode, value);
-      const bool glyph = mappedBit(mode, GfxRenderer::mapTwoBitGlyphCoverage(mode, 3 - value));
-      const bool bitmap = mappedBit(mode, GfxRenderer::mapTwoBitPixel(mode, value));
-      EXPECT_EQ(direct, glyph) << "mode=" << mode << " value=" << static_cast<int>(value);
-      EXPECT_EQ(direct, bitmap) << "mode=" << mode << " value=" << static_cast<int>(value);
+TEST(GfxTwoBitMapping, OverlayAndAbsoluteDirectGlyphAndBitmapAgreeWithPlaneEncoding) {
+  for (const bool absolute : {false, true}) {
+    for (const auto mode : {GfxRenderer::GRAYSCALE_MSB, GfxRenderer::GRAYSCALE_LSB}) {
+      for (uint8_t value = 0; value < 4; ++value) {
+        const bool direct = directBit(mode, value, absolute);
+        const bool glyph = mappedBit(GfxRenderer::mapTwoBitGlyphCoverage(mode, 3 - value, absolute));
+        const bool bitmap = mappedBit(GfxRenderer::mapTwoBitPixel(mode, value, absolute));
+        const bool expected = absolute ? ((value >> (mode == GfxRenderer::GRAYSCALE_MSB ? 1 : 0)) & 1)
+                                       : (mode == GfxRenderer::GRAYSCALE_MSB ? value == 1 || value == 2 : value == 1);
+        EXPECT_EQ(direct, expected) << "mode=" << mode << " value=" << static_cast<int>(value);
+        EXPECT_EQ(glyph, expected);
+        EXPECT_EQ(bitmap, expected);
+      }
     }
   }
 }
@@ -46,6 +50,6 @@ TEST(GfxTwoBitMapping, BwKeepsLogicalPixelState) {
   for (uint8_t value = 0; value < 4; ++value) {
     const auto pixel = GfxRenderer::mapTwoBitPixel(GfxRenderer::BW, value);
     EXPECT_EQ(pixel.draw, value < 3);
-    EXPECT_TRUE(GfxRenderer::framebufferState(GfxRenderer::BW, pixel.state));
+    EXPECT_TRUE(pixel.state);
   }
 }

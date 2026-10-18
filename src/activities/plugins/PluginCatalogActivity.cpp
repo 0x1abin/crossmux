@@ -288,6 +288,18 @@ std::string PluginCatalogActivity::substituted(std::string tpl, const Item* item
   return tpl;
 }
 
+std::string PluginCatalogActivity::downloadDir() const {
+  for (const auto& kv : config) {
+    if (kv.first != "dest_dir" || kv.second.empty()) continue;
+    std::string dir = kv.second.front() == '/' ? kv.second : "/" + kv.second;
+    while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+    if (dir == "/") return "";  // SD root
+    if (protectedpaths::isPluginPath(dir)) return dir;
+    LOG_ERR("PCAT", "config dest_dir rejected: %s", kv.second.c_str());
+  }
+  return manifest.destDir;
+}
+
 PluginCatalogActivity::PluginCatalogActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              const bool showOpds, const bool rootMode)
     : CatalogActivity("PluginCatalog", renderer, mappedInput), showOpds(showOpds), rootMode(rootMode) {}
@@ -762,7 +774,7 @@ HttpDownloader::DownloadError PluginCatalogActivity::downloadBundle(const Item& 
   if (subdir.empty() || subdir.find("..") != std::string::npos || subdir.front() == '/') {
     return HttpDownloader::FILE_ERROR;
   }
-  std::string dir = manifest.destDir;
+  std::string dir = downloadDir();
   if (!dir.empty() && dir.back() == '/') dir.pop_back();
   dir += '/';
   dir += subdir;
@@ -848,7 +860,8 @@ HttpDownloader::DownloadError PluginCatalogActivity::downloadBook(const Item& it
     return HttpDownloader::FILE_ERROR;
   }
 
-  const char* folder = manifest.destDir.c_str();
+  const std::string folderDir = downloadDir();
+  const char* folder = folderDir.c_str();
   bool haveFolder = folder[0] != '\0';
   if (haveFolder && !Storage.exists(folder) && !Storage.mkdir(folder)) {
     LOG_ERR("PCAT", "mkdir failed for %s, using SD root", folder);
@@ -864,7 +877,7 @@ HttpDownloader::DownloadError PluginCatalogActivity::downloadBook(const Item& it
     return HttpDownloader::FILE_ERROR;
   }
   std::string dest;
-  dest.reserve((haveFolder ? manifest.destDir.size() : 0) + 1 + filename.size());
+  dest.reserve((haveFolder ? folderDir.size() : 0) + 1 + filename.size());
   if (haveFolder) dest += folder;
   dest += '/';
   dest += filename;

@@ -4,74 +4,129 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>文件管理 - CrossMux</title>
-  <script src="/js/jszip.min.js"><!--#include file="../shared/PluginHost.js.inc" -->
-  window.addEventListener('load', () => loadPlugins('files'));
-</script>
+  <script src="/js/jszip.min.js"></script>
   <style>
-    :root {
-      color-scheme: light;
-      --font-color: #292524;
-      --bg: #f7f4ef;
-      --title-color: #292524;
-      --card-bg: #fffdf9;
-      --label-color: #78716c;
-      --border-color: #e7e1d8;
-      --accent-color: #a8502f;
-      --accent-color-10: rgba(168, 80, 47, 0.1);
-      --accent-hover-color: #883f27;
+    /* Shared presentation for SD-card plugins mounted in the File Manager.
+       Plugin markup stays portable; the host page owns its visual treatment. */
+    #plugin-container {
+      display: grid;
+      gap: 15px;
+      margin: 15px 0;
+    }
+    #plugin-container .card {
+      margin: 0;
+      border: 1px solid var(--border-color);
+    }
+    #plugin-container p {
+      line-height: 1.5;
+    }
+    #plugin-container .setting-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+      align-items: center;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+    #plugin-container .setting-name {
+      color: var(--label-color);
+      font-weight: 600;
+    }
+    #plugin-container .setting-control {
+      min-width: 0;
+    }
+    #plugin-container input[type="text"],
+    #plugin-container input[type="password"],
+    #plugin-container input[type="number"],
+    #plugin-container select,
+    #plugin-container textarea {
+      width: 100%;
+      min-height: 38px;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background: var(--card-bg);
+      color: var(--font-color);
+      font: inherit;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    }
+    #plugin-container textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+    #plugin-container input:focus-visible,
+    #plugin-container select:focus-visible,
+    #plugin-container textarea:focus-visible {
+      border-color: var(--accent-color);
+      outline: 2px solid var(--accent-color);
+      outline-offset: -1px;
+    }
+    #plugin-container .btn-small {
+      min-height: 36px;
+      padding: 8px 12px;
+      border: 1px solid var(--accent-color);
+      border-radius: 6px;
+      background: var(--accent-color-10);
+      color: var(--accent-color);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.9em;
+      font-weight: 600;
+    }
+    #plugin-container .btn-small:hover:not(:disabled) {
+      background: var(--border-color);
+    }
+    #plugin-container .btn-add {
+      background: var(--accent-color);
+      color: var(--button-text);
+    }
+    #plugin-container .btn-add:hover:not(:disabled) {
+      background: var(--accent-hover-color);
+    }
+    #plugin-container button:focus-visible {
+      outline: 2px solid var(--accent-color);
+      outline-offset: 2px;
+    }
+    #plugin-container button:disabled,
+    #plugin-container input:disabled,
+    #plugin-container select:disabled,
+    #plugin-container textarea:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    #plugin-container hr {
+      margin: 18px 0;
+      border: 0;
+      border-top: 1px solid var(--border-color);
     }
     @media (prefers-color-scheme: dark) {
-      :root {
-        color-scheme: dark;
-        --font-color: #fafaf9;
-        --bg: #1c1917;
-        --title-color: #fafaf9;
-        --card-bg: #292524;
-        --label-color: #d6d3d1;
-        --border-color: #44403c;
-        --accent-color: #d59475;
-        --accent-color-10: rgba(213, 148, 117, 0.12);
-        --accent-hover-color: #e6bba4;
+      #plugin-container .card {
+        box-shadow: none;
       }
-    }
-    * { box-sizing: border-box; }
-    body {
-      max-width: 1080px;
-      min-height: 100vh;
-      margin: 0 auto;
-      padding: 0 12px 24px;
-      overflow-x: hidden;
-      background: var(--bg);
-      color: var(--font-color);
-      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-      font-size: 14px;
-    }
-    h2 {
-      color: var(--title-color);
-      margin: 0;
-    }
-    h2, h3 { font-family: "Songti SC", STSong, "Noto Serif CJK SC", serif; }
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 12px;
-      margin: 10px 0;
-      line-break: anywhere;
     }
     .page-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 10px;
-      margin: 0 0 12px;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .page-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .web-ui .page-header-left h2 {
+      margin: 0;
     }
     .breadcrumb-inline {
-      min-width: 0;
-      overflow-wrap: anywhere;
       color: var(--label-color);
-      font-size: 0.95em;
+      font-size: 1em;
+      font-family: Georgia, serif;
+      font-weight: 400;
     }
     .breadcrumb-inline a {
       color: var(--accent-color);
@@ -86,81 +141,41 @@
     }
     .breadcrumb-inline .current {
       color: var(--title-color);
-      font-weight: 600;
-    }
-    .nav-links {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 4px;
-      margin: 0 -12px 12px;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg);
-    }
-    .nav-links a {
-      min-width: 0;
-      min-height: 44px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 4px;
-      color: var(--font-color);
-      text-decoration: none;
-      border-radius: 8px;
-      font-size: 0.92rem;
-      font-weight: 650;
-      white-space: nowrap;
-    }
-    .nav-links a.active {
-      background-color: var(--accent-color);
-      color: white;
-    }
-    .nav-links a:not(.active):hover {
-      background-color: var(--accent-hover-color);
-      color: white;
     }
     /* Action buttons */
     .action-buttons {
-      width: 100%;
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 6px;
+      display: flex;
+      gap: 10px;
     }
     .action-btn {
-      min-width: 0;
-      min-height: 44px;
-      color: white;
-      padding: 8px 4px;
+      color: var(--button-text);
+      padding: 10px 16px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
-      font-size: 0.82rem;
+      font-size: 0.95em;
       font-weight: 600;
       display: flex;
       align-items: center;
-      justify-content: center;
       gap: 6px;
     }
     .upload-action-btn {
-      background-color: var(--accent-color);
+      background-color: var(--success-color);
     }
     .upload-action-btn:hover {
       background-color: var(--accent-hover-color);
     }
     .folder-action-btn {
-      background-color: #a27132;
+      background-color: var(--warning-color);
     }
     .folder-action-btn:hover {
-      background-color: #d68910;
+      background-color: var(--warning-hover);
     }
     .delete-action-btn {
-      background-color: #e74c3c;
+      background-color: var(--danger-color);
     }
     .delete-action-btn:hover {
-      background-color: #c0392b;
+      background-color: var(--danger-hover);
     }
     /* Upload modal */
     .modal-overlay {
@@ -180,19 +195,22 @@
     }
     .modal {
       background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 14px;
+      border-radius: 8px;
+      padding: 25px;
       max-width: 450px;
-      width: calc(100% - 16px);
-      max-height: calc(100dvh - 16px);
+      width: min(450px, calc(100vw - 24px));
+      box-sizing: border-box;
+      max-height: 90vh;
       overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     }
     .modal.picker-mode {
       max-width: 920px;
+      width: min(920px, calc(100vw - 24px));
     }
     .modal.image-preview-mode {
       max-width: 640px;
+      width: min(640px, calc(100vw - 24px));
     }
     .image-preview-stage {
       display: flex;
@@ -245,7 +263,6 @@
     .modal h3 {
       margin: 0 0 15px 0;
       color: var(--title-color);
-      font-size: 1.1em;
     }
     .modal-close {
       float: right;
@@ -267,54 +284,41 @@
     .modal-close.disabled:hover {
       color: var(--label-color);
     }
-    .file-table, .file-table tbody { width: 100%; display: block; }
-    .file-table { border-collapse: collapse; }
-    .file-table tr {
-      display: grid;
-      grid-template-columns: 28px minmax(0, 1fr) auto;
-      gap: 4px 8px;
-      padding: 10px 0;
+    .file-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .file-table th,
+    .file-table td {
+      padding: 12px;
+      text-align: left;
       border-bottom: 1px solid var(--border-color);
     }
-    .file-table tr:first-child { display: grid; grid-template-columns: 1fr; padding: 4px 0 10px; }
-    .file-table tr:first-child th { display: none; }
-    .file-table tr:first-child th:first-child {
-      width: auto !important;
-      min-height: 44px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 0;
-      border: 0;
-      color: var(--label-color);
+    .file-table th {
       font-weight: 600;
+      color: var(--label-color);
     }
-    .file-table tr:first-child th:first-child::after { content: "全选"; }
-    .file-table td { min-width: 0; padding: 0; border: 0; text-align: left; font-size: 0.9em; }
-    .file-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; align-self: center; }
-    .file-table td:nth-child(2) { grid-column: 2; grid-row: 1; align-self: center; overflow-wrap: anywhere; }
-    .file-table td:nth-child(3) { grid-column: 2; grid-row: 2; align-self: center; color: var(--label-color); }
-    .file-table td:nth-child(4) { grid-column: 2; grid-row: 2; align-self: center; justify-self: end; color: var(--label-color); }
-    .file-table td:nth-child(5) { grid-column: 3; grid-row: 1 / 3; align-self: center; width: auto; }
-    .file-table tr:hover { background: transparent; }
+    .file-table tr:hover {
+      background-color: var(--accent-color-10);
+    }
     .epub-badge {
       display: inline-block;
-      padding: 2px 5px;
-      background-color: #27ae60;
-      color: white;
+      padding: 2px 8px;
+      background-color: var(--success-color);
+      color: var(--button-text);
       border-radius: 10px;
-      font-size: 0.65em;
+      font-size: 0.75em;
     }
     .folder-badge {
       display: inline-block;
-      padding: 2px 5px;
-      background-color: #f39c12;
-      color: white;
+      padding: 2px 8px;
+      background-color: var(--warning-color);
+      color: var(--button-text);
       border-radius: 10px;
-      font-size: 0.65em;
+      font-size: 0.75em;
     }
     .file-icon {
-      margin-right: 4px;
+      margin-right: 8px;
     }
     .folder-link,
     .file-link {
@@ -336,8 +340,8 @@
       width: 100%;
     }
     .upload-form input[type="file"]::file-selector-button {
-      background-color: #27ae60;
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
       border: none;
       padding: 6px 14px;
       border-radius: 4px;
@@ -346,7 +350,7 @@
       margin-right: 8px;
     }
     .upload-form input[type="file"].has-files::file-selector-button {
-      background-color: #95a5a6;
+      background-color: var(--label-color);
     }
     .drop-zone {
       border: 2px dashed var(--border-color);
@@ -370,12 +374,11 @@
       color: var(--accent-color);
     }
     .upload-btn {
-      min-height: 44px;
-      background-color: var(--accent-color);
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1em;
       width: 100%;
@@ -385,13 +388,13 @@
       background-color: var(--accent-hover-color);
     }
     .upload-btn.optimize {
-      background-color: #9b59b6;
+      background-color: var(--accent-color);
     }
     .upload-btn.optimize:hover {
-      background-color: #8e44ad;
+      background-color: var(--accent-hover-color);
     }
     .upload-btn:disabled {
-      background-color: #95a5a6;
+      background-color: var(--label-color);
       cursor: not-allowed;
     }
     /* Convert options */
@@ -420,9 +423,9 @@
     }
     .convert-warning {
       font-size: 0.85em;
-      color: #d68910;
+      color: var(--warning-hover);
       background-color: rgba(214, 137, 16, 0.1);
-      border: 1px solid #d68910;
+      border: 1px solid var(--warning-hover);
       border-radius: 4px;
       padding: 8px 12px;
       margin-top: 8px;
@@ -597,21 +600,21 @@
     .quality-slider-container-inline {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
       flex: 1;
       max-width: 180px;
       min-width: 0;
     }
     .quality-slider-container-inline .quality-slider {
       flex: 1;
-      min-width: 40px;
+      min-width: 50px;
     }
     .quality-slider-container-inline .quality-input-wrapper {
       padding: 2px 4px;
       flex-shrink: 0;
     }
     .quality-slider-container-inline .quality-input {
-      width: 28px;
+      width: 32px;
       font-size: 0.8em;
     }
     /* Quality Presets - Compact Single Row */
@@ -642,7 +645,7 @@
     }
     .quality-preset.active {
       background: var(--accent-color);
-      color: white;
+      color: var(--button-text);
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     /* Toggle Switch */
@@ -722,7 +725,7 @@
     }
     .rotation-btn.active {
       background: var(--accent-color);
-      color: white;
+      color: var(--button-text);
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     .rotation-btn .rot-icon {
@@ -754,7 +757,7 @@
     }
     .overlap-btn.active {
       background: var(--accent-color);
-      color: white;
+      color: var(--button-text);
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     /* Image Picker Grid Styles */
@@ -803,46 +806,46 @@
       border-color: var(--border-color);
     }
     .image-item.state-1 {
-      border-color: #3498db;
+      border-color: var(--info-color);
       background: rgba(52, 152, 219, 0.1);
     }
     .image-item.state-2 {
-      border-color: #e74c3c;
+      border-color: var(--danger-color);
       background: rgba(231, 76, 60, 0.1);
     }
     .image-item.state-3 {
-      border-color: #9b59b6;
+      border-color: var(--secondary-color);
       background: rgba(155, 89, 182, 0.1);
     }
     .image-item.crop-preview {
-      border-color: #16a085;
+      border-color: var(--accent-hover-color);
       background: rgba(22, 160, 133, 0.1);
     }
     .image-item.cover-locked {
-      border-color: #e67e22;
+      border-color: var(--warning-color);
       background: rgba(230, 126, 34, 0.1);
       cursor: default;
       opacity: 0.85;
     }
     .image-item.cover-locked:hover {
       transform: none;
-      border-color: #e67e22;
+      border-color: var(--warning-color);
     }
     .image-item.cover-locked .image-state-badge {
-      background: #e67e22;
+      background: var(--warning-color);
     }
     .image-item.separator-locked {
-      border-color: #1abc9c;
+      border-color: var(--accent-color);
       background: rgba(26, 188, 156, 0.1);
       cursor: default;
       opacity: 0.85;
     }
     .image-item.separator-locked:hover {
       transform: none;
-      border-color: #1abc9c;
+      border-color: var(--accent-color);
     }
     .image-item.separator-locked .image-state-badge {
-      background: #1abc9c;
+      background: var(--accent-color);
     }
     .image-item img {
       width: 100%;
@@ -859,22 +862,22 @@
       border-radius: 4px;
       font-size: 0.65em;
       font-weight: 600;
-      color: white;
+      color: var(--button-text);
     }
     .state-0 .image-state-badge {
       background: var(--label-color);
     }
     .state-1 .image-state-badge {
-      background: #3498db;
+      background: var(--info-color);
     }
     .state-2 .image-state-badge {
-      background: #e74c3c;
+      background: var(--danger-color);
     }
     .state-3 .image-state-badge {
-      background: #9b59b6;
+      background: var(--secondary-color);
     }
     .crop-preview .image-state-badge {
-      background: #16a085;
+      background: var(--accent-hover-color);
     }
     /* Preview Overlay (shown on hover) */
     .image-preview-overlay {
@@ -911,11 +914,11 @@
       border-radius: 2px;
     }
     .split-line.split-h {
-      background: linear-gradient(180deg, #3498db 0%, #2980b9 100%);
+      background: linear-gradient(180deg, var(--info-color) 0%, var(--accent-hover-color) 100%);
       box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px rgba(52, 152, 219, 0.8);
     }
     .split-line.split-v {
-      background: linear-gradient(180deg, #e74c3c 0%, #c0392b 100%);
+      background: linear-gradient(180deg, var(--danger-color) 0%, var(--danger-hover) 100%);
       box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px rgba(231, 76, 60, 0.8);
     }
     /* Rotate image on hover for rotation states */
@@ -968,7 +971,7 @@
       border: 1px solid var(--btn-color);
       border-radius: 4px;
       background: transparent;
-      color: var(--text-color);
+      color: var(--font-color);
       cursor: pointer;
       transition: all 0.15s;
       font-size: inherit;
@@ -976,7 +979,7 @@
     }
     .legend-btn:hover {
       background: var(--btn-color);
-      color: white;
+      color: var(--button-text);
     }
     .legend-btn .legend-color {
       background: var(--btn-color);
@@ -993,10 +996,9 @@
     }
     .no-files {
       text-align: center;
-      color: #95a5a6;
-      padding: 20px;
+      color: var(--label-color);
+      padding: 40px;
       font-style: italic;
-      font-size: 0.9em;
     }
     .message {
       padding: 15px;
@@ -1004,26 +1006,27 @@
       margin: 15px 0;
     }
     .message.success {
-      background-color: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
+      background-color: var(--accent-color-10);
+      color: var(--accent-color);
+      border: 1px solid var(--border-color);
     }
     .message.error {
-      background-color: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
+      background-color: var(--danger-bg);
+      color: var(--danger-color);
+      border: 1px solid var(--danger-border);
     }
     .contents-header {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
-      flex-wrap: wrap;
-      gap: 4px;
-      margin-bottom: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .web-ui .contents-header h2 {
+      margin: 0;
     }
     .summary-inline {
       color: var(--label-color);
-      font-size: 0.8em;
+      font-size: 0.9em;
     }
     #progress-container {
       display: none;
@@ -1032,13 +1035,13 @@
     #progress-bar {
       width: 100%;
       height: 20px;
-      background-color: #e0e0e0;
+      background-color: var(--border-color);
       border-radius: 10px;
       overflow: hidden;
     }
     #progress-fill {
       height: 100%;
-      background-color: #27ae60;
+      background-color: var(--success-color);
       width: 0%;
       transition: width 0.3s;
     }
@@ -1057,62 +1060,59 @@
     .folder-input {
       width: 100%;
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--border-color);
       border-radius: 4px;
       font-size: 1em;
       margin-bottom: 10px;
       box-sizing: border-box;
     }
     .folder-btn {
-      min-height: 44px;
-      background-color: var(--accent-color);
-      color: white;
+      background-color: var(--warning-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1em;
       width: 100%;
     }
     .folder-btn:hover {
-      background-color: var(--accent-hover-color);
+      background-color: var(--warning-hover);
     }
     .folder-btn:disabled {
-      background-color: #bdc3c7;
+      background-color: var(--border-color);
       cursor: not-allowed;
     }
     /* Action button styles */
     .delete-btn,
     .rename-btn,
     .move-btn {
-      width: 44px;
-      height: 44px;
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 1em;
-      padding: 0;
-      border-radius: 8px;
+      font-size: 1.1em;
+      padding: 4px 8px;
+      border-radius: 4px;
       transition: all 0.15s;
     }
     .delete-btn {
-      color: #95a5a6;
+      color: var(--label-color);
     }
     .delete-btn:hover {
-      background-color: #fee;
-      color: #e74c3c;
+      background-color: var(--danger-bg);
+      color: var(--danger-color);
     }
     .rename-btn {
-      color: #2980b9;
+      color: var(--accent-hover-color);
     }
     .rename-btn:hover {
-      background-color: #e8f4fd;
+      background-color: var(--accent-color-10);
     }
     .move-btn {
-      color: #16a085;
+      color: var(--accent-hover-color);
     }
     .move-btn:hover {
-      background-color: #e6f7f4;
+      background-color: var(--accent-color-10);
     }
     .actions-col {
       width: 140px;
@@ -1122,12 +1122,12 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 2px;
+      gap: 6px;
     }
     /* Failed uploads banner */
     .failed-uploads-banner {
-      background-color: #fff3cd;
-      border: 1px solid #ffc107;
+      background-color: var(--warning-bg);
+      border: 1px solid var(--warning-color);
       border-radius: 4px;
       padding: 15px;
       margin-bottom: 15px;
@@ -1144,7 +1144,7 @@
     }
     .failed-uploads-title {
       font-weight: 600;
-      color: #856404;
+      color: var(--warning-text);
       margin: 0;
     }
     .dismiss-btn {
@@ -1152,19 +1152,19 @@
       border: none;
       font-size: 1.2em;
       cursor: pointer;
-      color: #856404;
+      color: var(--warning-text);
       padding: 0;
       line-height: 1;
     }
     .dismiss-btn:hover {
-      color: #533f03;
+      color: var(--warning-text);
     }
     .failed-file-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 8px 0;
-      border-bottom: 1px solid #ffe69c;
+      border-bottom: 1px solid var(--warning-border);
     }
     .failed-file-item:last-child {
       border-bottom: none;
@@ -1174,45 +1174,43 @@
     }
     .failed-file-name {
       font-weight: 500;
-      color: #856404;
+      color: var(--warning-text);
     }
     .failed-file-error {
       font-size: 0.85em;
-      color: #856404;
+      color: var(--warning-text);
       opacity: 0.8;
     }
     .retry-btn {
-      min-height: 44px;
-      background-color: #ffc107;
-      color: #533f03;
+      background-color: var(--warning-color);
+      color: var(--warning-text);
       border: none;
       padding: 6px 12px;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 0.9em;
       font-weight: 600;
     }
     .retry-btn:hover {
-      background-color: #e0a800;
+      background-color: var(--warning-hover);
     }
     .retry-all-btn {
-      min-height: 44px;
-      background-color: #ffc107;
-      color: #533f03;
+      background-color: var(--warning-color);
+      color: var(--warning-text);
       border: none;
       padding: 8px 16px;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 0.95em;
       font-weight: 600;
       margin-top: 10px;
     }
     .retry-all-btn:hover {
-      background-color: #e0a800;
+      background-color: var(--warning-hover);
     }
     /* Delete modal */
     .delete-warning {
-      color: #e74c3c;
+      color: var(--danger-color);
       font-weight: 600;
       margin: 10px 0;
     }
@@ -1222,26 +1220,24 @@
       word-break: break-all;
     }
     .delete-btn-confirm {
-      min-height: 44px;
-      background-color: #e74c3c;
-      color: white;
+      background-color: var(--danger-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1em;
       width: 100%;
     }
     .delete-btn-confirm:hover {
-      background-color: #c0392b;
+      background-color: var(--danger-hover);
     }
     .delete-btn-cancel {
-      min-height: 44px;
-      background-color: #95a5a6;
-      color: white;
+      background-color: var(--label-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1em;
       width: 100%;
@@ -1251,32 +1247,30 @@
       background-color: var(--label-color);
     }
     .rename-btn-confirm {
-      min-height: 44px;
-      background-color: #3498db;
-      color: white;
+      background-color: var(--accent-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1em;
       width: 100%;
     }
     .rename-btn-confirm:hover {
-      background-color: #2e86c1;
+      background-color: var(--accent-hover-color);
     }
     .move-btn-confirm {
-      min-height: 44px;
-      background-color: #16a085;
-      color: white;
+      background-color: var(--accent-hover-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 1em;
       width: 100%;
     }
     .move-btn-confirm:hover {
-      background-color: #138d75;
+      background-color: var(--accent-hover-color);
     }
     .loader-container {
       display: flex;
@@ -1287,7 +1281,7 @@
     .loader {
       width: 48px;
       height: 48px;
-      border: 5px solid #AAA;
+      border: 5px solid var(--border-color);
       border-bottom-color: transparent;
       border-radius: 50%;
       display: inline-block;
@@ -1302,8 +1296,132 @@
         transform: rotate(360deg);
       }
     }
-    .handedness-btn { padding: 6px 10px; }
-    .handedness-buttons { width: 100%; justify-content: center; }
+    /* Mobile responsive styles */
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+        font-size: 14px;
+      }
+      .card {
+        line-break: anywhere;
+        padding: 12px;
+        margin: 10px 0;
+      }
+      #plugin-container {
+        gap: 10px;
+        margin: 10px 0;
+      }
+      #plugin-container .card {
+        margin: 0;
+      }
+      #plugin-container .setting-row {
+        grid-template-columns: 1fr;
+        gap: 7px;
+        padding: 12px 0;
+      }
+      #plugin-container input[type="text"],
+      #plugin-container input[type="password"],
+      #plugin-container input[type="number"],
+      #plugin-container select,
+      #plugin-container textarea {
+        min-height: 44px;
+        font-size: 16px;
+      }
+      #plugin-container .btn-small {
+        min-height: 48px;
+        padding: 10px 12px;
+        font-size: 1em;
+      }
+      .page-header {
+        gap: 10px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+      }
+      .page-header-left {
+        gap: 8px;
+      }
+      h1 {
+        font-size: 1.3em;
+      }
+      .breadcrumb-inline {
+        font-size: 0.95em;
+      }
+      .nav-links a {
+        padding: 8px 12px;
+        margin-right: 6px;
+        font-size: 0.9em;
+      }
+      .action-buttons {
+        gap: 6px;
+      }
+      .action-btn {
+        padding: 8px 10px;
+        font-size: 0.85em;
+      }
+      .file-table th,
+      .file-table td {
+        padding: 8px 6px;
+        font-size: 0.9em;
+      }
+      .file-table th {
+        font-size: 0.85em;
+      }
+      .file-icon {
+        margin-right: 4px;
+      }
+      .epub-badge,
+      .folder-badge {
+        padding: 2px 5px;
+        font-size: 0.65em;
+      }
+      .contents-header {
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .summary-inline {
+        font-size: 0.8em;
+      }
+      .modal {
+        padding: 15px;
+      }
+      .modal h3 {
+        font-size: 1.1em;
+      }
+      .actions-col {
+        width: 120px;
+      }
+      .delete-btn,
+      .rename-btn,
+      .move-btn {
+        font-size: 1em;
+        padding: 2px 4px;
+      }
+      .action-icon-group {
+        gap: 4px;
+      }
+      .no-files {
+        padding: 20px;
+        font-size: 0.9em;
+      }
+      .handedness-btn {
+        padding: 6px 10px;
+      }
+      .handedness-buttons {
+        width: 100%;
+        justify-content: center;
+      }
+      .quality-slider-container-inline {
+        max-width: 215px;
+        gap: 4px;
+      }
+      .quality-slider-container-inline .quality-slider {
+        min-width: 40px;
+      }
+      .quality-slider-container-inline .quality-input {
+        width: 28px;
+      }
+    }
     /* Enhanced Logging System Styles */
     .log-section {
       margin-top: 15px;
@@ -1345,13 +1463,13 @@
       color: var(--accent-color);
     }
     .log-entry.error {
-      color: #e74c3c;
+      color: var(--danger-color);
     }
     .log-entry.warning {
-      color: #f39c12;
+      color: var(--warning-color);
     }
     .log-entry.info {
-      color: #3498db;
+      color: var(--accent-color);
     }
     .log-timestamp {
       color: var(--label-color);
@@ -1374,27 +1492,27 @@
     }
     .log-tag.split {
       background: rgba(243, 156, 18, 0.15);
-      color: #f39c12;
+      color: var(--warning-color);
     }
     .log-tag.fix {
       background: rgba(39, 174, 96, 0.15);
-      color: #27ae60;
+      color: var(--success-color);
     }
     .log-tag.skip {
       background: rgba(127, 140, 141, 0.15);
-      color: #7f8c8d;
+      color: var(--label-color);
     }
     .log-tag.info {
       background: rgba(52, 152, 219, 0.15);
-      color: #3498db;
+      color: var(--accent-color);
     }
     .log-tag.error {
       background: rgba(231, 76, 60, 0.15);
-      color: #e74c3c;
+      color: var(--danger-color);
     }
     .log-tag.done {
       background: rgba(39, 174, 96, 0.15);
-      color: #27ae60;
+      color: var(--success-color);
     }
     .log-message {
       flex: 1;
@@ -1443,56 +1561,31 @@
       color: var(--accent-color);
     }
     .log-summary-table .saved {
-      color: #27ae60;
+      color: var(--success-color);
     }
     .log-summary-table .increased {
-      color: #f39c12;
-    }
-    @media (min-width: 700px) {
-      body { padding: 0 20px 32px; font-size: 16px; }
-      .nav-links { margin: 0 -20px 20px; padding: 10px 20px; }
-      .card { padding: 20px; margin: 15px 0; border-radius: 14px; }
-      .page-header { gap: 15px; margin-bottom: 20px; }
-      .breadcrumb-inline { font-size: 1.1em; }
-      .action-buttons { width: auto; display: flex; gap: 10px; }
-      .action-btn { padding: 10px 16px; font-size: 0.95rem; }
-      .file-table { display: table; border-collapse: collapse; }
-      .file-table tbody { display: table-row-group; }
-      .file-table tr, .file-table tr:first-child { display: table-row; padding: 0; border: 0; }
-      .file-table tr:first-child th, .file-table tr:first-child th:first-child { display: table-cell; padding: 12px; border-bottom: 1px solid var(--border-color); }
-      .file-table tr:first-child th:first-child::after { content: none; }
-      .file-table td { display: table-cell; padding: 12px; border-bottom: 1px solid var(--border-color); font-size: 1em; }
-      .file-table td:nth-child(n) { width: auto; color: inherit; }
-      .file-table tr:hover { background: var(--accent-color-10); }
-      .file-icon { margin-right: 8px; }
-      .epub-badge, .folder-badge { padding: 2px 8px; font-size: 0.75em; }
-      .contents-header { flex-wrap: nowrap; gap: 0; margin-bottom: 12px; }
-      .summary-inline { font-size: 0.9em; }
-      .no-files { padding: 40px; font-size: 1em; }
-      .modal { width: 90%; max-height: 90vh; padding: 25px; }
+      color: var(--warning-color);
     }
   </style>
+  <link rel="stylesheet" href="/assets/web.css" />
+  <link rel="icon" type="image/svg+xml" href="/assets/crosspoint-icon.svg" />
 </head>
-<body>
-<nav class="nav-links" aria-label="主导航">
-  <a href="/">主页</a>
-  <a href="/files" class="active" aria-current="page">文件</a>
-  <a href="/settings">设置</a>
-  <a href="/fonts">字体</a>
-</nav>
+<body class="web-ui">
+<!--#include file="../shared/Header.zh-CN.html.inc" -->
+<main class="page-content">
 
 <div class="page-header">
   <div class="action-buttons">
-    <button class="action-btn upload-action-btn" onclick="openUploadModal()">📤 上传</button>
-    <button class="action-btn folder-action-btn" onclick="openFolderModal()">📁 新建文件夹</button>
-    <button class="action-btn delete-action-btn" onclick="openDeleteSelectedModal()">🗑️ 删除所选</button>
+    <button class="action-btn upload-action-btn" onclick="openUploadModal()"><svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> 上传</button>
+    <button class="action-btn folder-action-btn" onclick="openFolderModal()"><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg> 新建文件夹</button>
+    <button class="action-btn delete-action-btn" onclick="openDeleteSelectedModal()"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg> 删除所选</button>
   </div>
 </div>
 
 <!-- Failed Uploads Banner -->
 <div class="failed-uploads-banner" id="failedUploadsBanner">
   <div class="failed-uploads-header">
-    <h3 class="failed-uploads-title">⚠️ 部分文件上传失败</h3>
+    <h3 class="failed-uploads-title"><svg class="icon"><use href="/assets/icons.svg#warning"></use></svg> 部分文件上传失败</h3>
     <button class="dismiss-btn" onclick="dismissFailedUploads()" title="关闭">&times;</button>
   </div>
   <div id="failedFilesList"></div>
@@ -1512,11 +1605,13 @@
   </div>
 </div>
 
+</main>
+<!--#include file="../shared/Footer.zh-CN.html.inc" -->
 <!-- Upload Modal -->
 <div class="modal-overlay" id="uploadModal">
   <div class="modal">
     <button class="modal-close" id="uploadModalClose" onclick="closeUploadModal()">&times;</button>
-    <h3>📤 上传文件</h3>
+    <h3><svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> 上传文件</h3>
     <div class="upload-form">
       <p class="file-info">选择要上传到 <strong id="uploadPathDisplay"></strong> 的文件</p>
       <div class="drop-zone" id="dropZone">
@@ -1705,7 +1800,7 @@
       </div><!-- end picker-columns -->
       <!-- Sync compatibility warning - outside picker-columns -->
       <div class="convert-warning" id="convertWarning" style="display:none;" role="alert" aria-live="polite">
-        ⚠️ 转换会修改文件，并可能破坏基于哈希的同步。⚠️<br>
+        <svg class="icon"><use href="/assets/icons.svg#warning"></use></svg> 转换会修改文件，并可能破坏基于哈希的同步。<svg class="icon"><use href="/assets/icons.svg#warning"></use></svg><br>
         请先备份文件或关闭同步。
       </div>
       <!-- Optimize & Upload button - shown when picker is visible, replaces Upload -->
@@ -1730,7 +1825,7 @@
 <div class="modal-overlay" id="folderModal">
   <div class="modal">
     <button class="modal-close" onclick="closeFolderModal()">&times;</button>
-    <h3>📁 新建文件夹</h3>
+    <h3><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg> 新建文件夹</h3>
     <div class="folder-form">
       <p class="file-info">在 <strong id="folderPathDisplay"></strong> 中新建文件夹</p>
       <input type="text" id="folderName" class="folder-input" placeholder="文件夹名称…" oninput="document.getElementById('createFolderBtn').disabled = !this.value.trim();">
@@ -1744,9 +1839,9 @@
 <div class="modal-overlay" id="deleteModal">
   <div class="modal">
     <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
-    <h3>🗑️ 删除项目</h3>
+    <h3><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg> 删除项目</h3>
     <div class="folder-form">
-      <p class="delete-warning">⚠️ 此操作无法撤销！</p>
+      <p class="delete-warning"><svg class="icon"><use href="/assets/icons.svg#warning"></use></svg> 此操作无法撤销！</p>
       <p class="file-info">确定删除以下项目吗？</p>
       <div id="deleteItemList" style="max-height:240px; overflow:auto; margin-bottom:10px;"></div>
       <button class="delete-btn-confirm" onclick="confirmDelete()">删除</button>
@@ -1759,7 +1854,7 @@
 <div class="modal-overlay" id="renameModal">
   <div class="modal">
     <button class="modal-close" onclick="closeRenameModal()">&times;</button>
-    <h3>✏️ 重命名文件</h3>
+    <h3><svg class="icon"><use href="/assets/icons.svg#edit"></use></svg> 重命名文件</h3>
     <div class="folder-form">
       <p class="file-info">正在重命名 <strong id="renameItemName"></strong></p>
       <input type="text" id="renameNewName" class="folder-input" placeholder="新文件名…">
@@ -1774,7 +1869,7 @@
 <div class="modal-overlay" id="moveModal">
   <div class="modal">
     <button class="modal-close" onclick="closeMoveModal()">&times;</button>
-    <h3>📂 移动文件</h3>
+    <h3><svg class="icon"><use href="/assets/icons.svg#move"></use></svg> 移动文件</h3>
     <div class="folder-form">
       <p class="file-info">正在移动 <strong id="moveItemName"></strong></p>
       <input type="text" id="moveDestPath" class="folder-input" list="moveFolderOptions" placeholder="/目标/文件夹">
@@ -1905,6 +2000,10 @@
       .replaceAll('timeout', '超时');
   }
 
+  function fileIcon(name) {
+    return `<svg class="icon"><use href="/assets/icons.svg#${name}"></use></svg>`;
+  }
+
   function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -1916,6 +2015,9 @@
   async function hydrate() {
     // Sequential: parallel connections can stall the device's single-client web server.
     await fetchVersion();
+
+    // Load any SD-hosted plugins that mount on the File Manager page.
+    loadPlugins('files');
 
     // Close modals when clicking overlay - call proper cleanup functions
     document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
@@ -1961,9 +2063,9 @@
     };
 
     if (segments.length === 0) {
-      appendCurrent('🏠 根目录');
+      appendCurrent('主页');
     } else {
-      appendLink('🏠 根目录', '/files');
+      appendLink('主页', '/files');
       segments.forEach(function(segment, index) {
         appendSep();
         if (index === segments.length - 1) {
@@ -1996,16 +2098,20 @@
     });
 
     const fileCount = files.length - folderCount;
-    document.getElementById('folder-summary').textContent =
-      `${folderCount} 个文件夹，${fileCount} 个文件，共 ${formatFileSize(totalSize)}`;
+    const folderLabel = folderCount === 1 ? '个文件夹' : '个文件夹';
+    const fileLabel = fileCount === 1 ? '个文件' : '个文件';
+    const summary = [];
+    if (folderCount) summary.push(`${folderCount} ${folderLabel}`);
+    if (fileCount) summary.push(`${fileCount} ${fileLabel}`, formatFileSize(totalSize));
+    document.getElementById('folder-summary').textContent = summary.join(', ');
 
     if (files.length === 0) {
       fileTable.innerHTML = '<div class="no-files">此文件夹为空</div>';
     } else {
-      let fileTableContent = '<table class="file-table">';
+      let fileTableContent = '<table class="file-table"><thead>';
 
 				// Add select-all checkbox column
-      fileTableContent += '<tr><th style="width:40px"><input type="checkbox" id="selectAllCheckbox" aria-label="全选" onchange="toggleSelectAll(this)"></th><th>名称</th><th>类型</th><th>大小</th><th class="actions-col">操作</th></tr>';
+      fileTableContent += '<tr><th style="width:40px"><label><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"><span class="select-all-label"> 全选</span></label></th><th>名称</th><th>类型</th><th>大小</th><th class="actions-col">操作</th></tr></thead><tbody>';
 
 
       const sortedFiles = files.sort((a, b) => {
@@ -2026,10 +2132,10 @@
          // Checkbox cell + folder row
           fileTableContent += `<tr class="folder-row">`;
           fileTableContent += `<td><input type="checkbox" class="select-item" data-path="${encodeURIComponent(folderPath)}" data-name="${escapeHtml(file.name)}" data-type="folder"></td>`;
-          fileTableContent += `<td><span class="file-icon">📁</span><a href="/files?path=${encodeURIComponent(folderPath)}" class="folder-link">${escapeHtml(file.name)}</a></td>`;
-          fileTableContent += '<td><span class="folder-badge">文件夹</span></td>';
+          fileTableContent += `<td><span class="file-icon"><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg></span><a href="/files?path=${encodeURIComponent(folderPath)}" class="folder-link">${escapeHtml(file.name)}</a></td>`;
+          fileTableContent += '<td>文件夹</td>';
           fileTableContent += '<td>-</td>';
-          fileTableContent += `<td class="actions-col"><div class="action-icon-group"><button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${folderPath.replaceAll("'", "\\'")}', true)" title="删除文件夹">🗑️</button></div></td>`;
+          fileTableContent += `<td class="actions-col"><div class="action-icon-group"><button class="delete-btn" data-action="delete" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(folderPath)}" data-folder="true" title="删除文件夹" aria-label="删除文件夹"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg></button></div></td>`;
           fileTableContent += '</tr>';
         } else {
           let filePath = currentPath;
@@ -2040,25 +2146,25 @@
           fileTableContent += `<tr class="${file.isEpub ? 'epub-file' : ''}">`;
           fileTableContent += `<td><input type="checkbox" class="select-item" data-path="${encodeURIComponent(filePath)}" data-name="${escapeHtml(file.name)}" data-type="file"></td>`;
           const fileIsImage = isImageFile(file.name);
-          fileTableContent += `<td><span class="file-icon">${file.isEpub ? '📗' : (fileIsImage ? '🖼️' : '📄')}</span>`;
+          fileTableContent += `<td><span class="file-icon">${fileIcon(file.isEpub ? 'book' : (fileIsImage ? 'image' : 'file'))}</span>`;
           if (fileIsImage) {
             fileTableContent += `<a href="${downloadUrl(filePath)}" class="file-link image-preview-link">${escapeHtml(file.name)}</a>`;
           } else {
             fileTableContent += `<a rel="noopener noreferrer" target="_blank" href="${downloadUrl(filePath)}" class="file-link">${escapeHtml(file.name)}</a>`;
           }
           fileTableContent += '</td>';
-          fileTableContent += file.isEpub ? '<td><span class="epub-badge">EPUB</span></td>' : `<td>${escapeHtml(file.name.split('.').pop().toUpperCase())}</td>`;
+          fileTableContent += file.isEpub ? '<td>EPUB</td>' : `<td>${escapeHtml(file.name.split('.').pop().toUpperCase())}</td>`;
           fileTableContent += `<td>${formatFileSize(file.size)}</td>`;
           fileTableContent += `<td class="actions-col"><div class="action-icon-group">`;
-          fileTableContent += `<button class="move-btn" onclick="openMoveModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="移动文件">📂</button>`;
-          fileTableContent += `<button class="rename-btn" onclick="openRenameModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="重命名文件">✏️</button>`;
-          fileTableContent += `<button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}', false)" title="删除文件">🗑️</button>`;
+          fileTableContent += `<button class="move-btn" data-action="move" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(filePath)}" title="移动文件" aria-label="移动文件"><svg class="icon"><use href="/assets/icons.svg#move"></use></svg></button>`;
+          fileTableContent += `<button class="rename-btn" data-action="rename" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(filePath)}" title="重命名文件" aria-label="重命名文件"><svg class="icon"><use href="/assets/icons.svg#edit"></use></svg></button>`;
+          fileTableContent += `<button class="delete-btn" data-action="delete" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(filePath)}" data-folder="false" title="删除文件" aria-label="删除文件"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg></button>`;
           fileTableContent += `</div></td>`;
           fileTableContent += '</tr>';
         }
       });
 
-      fileTableContent += '</table>';
+      fileTableContent += '</tbody></table>';
       fileTable.innerHTML = fileTableContent;
     }
   }
@@ -2104,7 +2210,7 @@
     const logContainer = document.getElementById('log-container');
     if (logContainer) logContainer.innerHTML = '';
 
-    document.getElementById('uploadPathDisplay').textContent = currentPath === '/' ? '/ 🏠' : currentPath;
+    document.getElementById('uploadPathDisplay').textContent = currentPath;
     document.getElementById('uploadModal').classList.add('open');
   }
 
@@ -2947,12 +3053,32 @@
 
   // Initialize quality settings handlers
   document.addEventListener('DOMContentLoaded', function() {
-    // Delegated so it survives file-table re-renders (avoids inline onclick with untrusted names).
+    document.getElementById('file-table').addEventListener('change', function(event) {
+      if (event.target.matches('.select-item')) {
+        event.target.closest('tr').classList.toggle('selected', event.target.checked);
+      }
+    });
+    // Delegated so it survives file-table re-renders. Names and paths are
+    // user-controlled text, so they travel as data attributes rather than
+    // being interpolated into inline onclick strings.
     document.getElementById('file-table').addEventListener('click', function(e) {
       const link = e.target.closest('.image-preview-link');
-      if (!link) return;
-      e.preventDefault();
-      openImagePreview(link.getAttribute('href'), link.textContent);
+      if (link) {
+        e.preventDefault();
+        openImagePreview(link.getAttribute('href'), link.textContent);
+        return;
+      }
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const name = btn.dataset.name;
+      const path = btn.dataset.path;
+      if (btn.dataset.action === 'move') {
+        openMoveModal(name, path);
+      } else if (btn.dataset.action === 'rename') {
+        openRenameModal(name, path);
+      } else if (btn.dataset.action === 'delete') {
+        openDeleteModal(name, path, btn.dataset.folder === 'true');
+      }
     });
 
     const qualitySlider = document.getElementById('qualitySlider');
@@ -3002,7 +3128,7 @@
   });
 
   function openFolderModal() {
-    document.getElementById('folderPathDisplay').textContent = currentPath === '/' ? '/ 🏠' : currentPath;
+    document.getElementById('folderPathDisplay').textContent = currentPath;
     document.getElementById('folderModal').classList.add('open');
     document.getElementById('folderName').value = '';
     setTimeout(() => document.getElementById('folderName').focus(), 50);
@@ -3018,6 +3144,7 @@
     const checked = master.checked;
     document.querySelectorAll('.select-item').forEach(cb => {
       cb.checked = checked;
+      cb.closest('tr').classList.toggle('selected', checked);
     });
   }
 
@@ -3057,7 +3184,7 @@
     items.forEach(it => {
       const div = document.createElement('div');
       div.style.marginBottom = '6px';
-      div.textContent = (it.isFolder ? '📁 ' : '📄 ') + it.path;
+      div.textContent = it.path;
       listEl.appendChild(div);
     });
     document.getElementById('deleteModal').classList.add('open');
@@ -5842,7 +5969,7 @@ function retryAllFailedUploads() {
 
   // Rename functions
   function openRenameModal(name, path) {
-    document.getElementById('renameItemName').textContent = '📄 ' + name;
+    document.getElementById('renameItemName').textContent = name;
     document.getElementById('renameItemPath').value = path;
     document.getElementById('renameNewName').value = name;
     document.getElementById('renameModal').classList.add('open');
@@ -5957,7 +6084,7 @@ function retryAllFailedUploads() {
   }
 
   function openMoveModal(name, path) {
-    document.getElementById('moveItemName').textContent = '📄 ' + name;
+    document.getElementById('moveItemName').textContent = name;
     document.getElementById('moveItemPath').value = path;
     document.getElementById('moveDestPath').value = currentPath === '/' ? '/' : currentPath;
     document.getElementById('moveModal').classList.add('open');
@@ -6003,6 +6130,7 @@ function retryAllFailedUploads() {
 
     xhr.send(formData);
   }
+<!--#include file="../shared/PluginHost.js.inc" -->
   hydrate();
 </script>
 </body>

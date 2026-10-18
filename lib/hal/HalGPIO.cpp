@@ -1,13 +1,16 @@
 #include <BoardConfig.h>
 #if FREEINK_DEVICE_METALIO_EINK4
-#include <MetalioEink4Board.h>
+#include <MetalioEInk4Board.h>
 #endif
 #if FREEINK_DEVICE_READPICO
 #include <BoardReadPico.h>
 #endif
+#if FREEINK_DEVICE_LILYGO
+#include <BoardT5S3.h>
+#endif
 #include <BatteryMonitor.h>
 #include <HalGPIO.h>
-#include <HapticFeedback.h>
+#include <HapticManager.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <Preferences.h>
@@ -268,32 +271,11 @@ void HalGPIO::begin() {
   inputMgr.setMurphyM4Batch(_murphyM4Batch);
 #endif
 #if FREEINK_DEVICE_METALIO_EINK4
-  if (!freeink::metalio::begin()) {
-    LOG_ERR("HW", "Metalio power/expander initialization failed");
-  } else {
-    constexpr freeink::metalio::ChargerConfig charger{4350, 240, 60, 480, 480};  // 500 mA request -> 480 mA.
-    uint8_t partInfo = 0;
-    switch (freeink::metalio::configureCharger(charger, partInfo)) {
-      case freeink::metalio::ChargerConfigResult::Configured:
-        LOG_INF("PWR", "CX25601N 0x%02X ready: VREG=4350mV ICHG=480mA IINDPM=480mA", partInfo);
-        break;
-      case freeink::metalio::ChargerConfigResult::ProbeFailed:
-        LOG_INF("PWR", "CX25601N not detected at 0x%02X; using hardware defaults", freeink::metalio::CHARGER);
-        break;
-      case freeink::metalio::ChargerConfigResult::BusNotReady:
-        LOG_ERR("PWR", "CX25601N configuration skipped: Metalio I2C bus not ready");
-        break;
-      case freeink::metalio::ChargerConfigResult::InvalidConfig:
-        LOG_ERR("PWR", "CX25601N configuration rejected: invalid charge parameters");
-        break;
-      case freeink::metalio::ChargerConfigResult::IoError:
-        LOG_ERR("PWR", "CX25601N configuration failed at 0x%02X", freeink::metalio::CHARGER);
-        break;
-    }
-  }
+  if (!freeink::metalio::ensureBooted()) LOG_ERR("HW", "Metalio power/expander initialization failed");
 #endif
-#if FREEINK_CAP_HAPTIC
-  if (!freeink::haptic::begin()) LOG_ERR("HW", "Haptic initialization failed; feedback disabled");
+#if FREEINK_DEVICE_LILYGO
+  BoardT5S3::begin();
+  if (!BoardT5S3::pca9535Present()) LOG_ERR("HW", "LilyGo board bring-up failed: expander did not answer");
 #endif
   inputMgr.begin();
   inputBegun = true;
@@ -326,13 +308,9 @@ void HalGPIO::update() {
   beginInput();
 #endif
   inputMgr.update();
-  const bool buttonActivity = inputMgr.wasPressed(BTN_BACK) || inputMgr.wasPressed(BTN_CONFIRM) ||
-                              inputMgr.wasPressed(BTN_LEFT) || inputMgr.wasPressed(BTN_RIGHT) ||
-                              inputMgr.wasPressed(BTN_UP) || inputMgr.wasPressed(BTN_DOWN);
-  const InputModality previous = inputModality.load(std::memory_order_relaxed);
-  const InputModality next = inputModalityAfter(previous, buttonActivity, inputMgr.wasTouchActivity());
-  inputModalityChanged = next != previous;
-  inputModality.store(next, std::memory_order_relaxed);
+  const uint8_t pageButtons = inputMgr.capacitivePageButtonMask();
+  capacitivePagePressed = (pageButtons & ~previousCapacitivePageButtons) != 0;
+  previousCapacitivePageButtons = pageButtons;
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
@@ -345,18 +323,6 @@ bool HalGPIO::isPressed(uint8_t buttonIndex) const { return inputMgr.isPressed(b
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed(buttonIndex); }
 
 uint8_t HalGPIO::physicalPressedMask() const { return inputMgr.physicalPressedMask(); }
-
-#if FREEINK_CAP_HAPTIC
-bool HalGPIO::wasTouchContactPressed() const { return inputMgr.wasTouchContactPressed(); }
-void HalGPIO::updateHapticFeedback(uint8_t level) {
-  const uint16_t duration = freeink::haptic::pulseDuration(level);
-  if (duration == 0)
-    stopHapticFeedback();
-  else if (wasTouchContactPressed())
-    freeink::haptic::pulse(duration);
-}
-void HalGPIO::stopHapticFeedback() { freeink::haptic::stop(); }
-#endif
 
 bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
 
@@ -415,9 +381,9 @@ void HalGPIO::clearTouchTapEvent() { inputMgr.clearTouchTapEvent(); }
 
 void HalGPIO::prepareForDeepSleep() {
 #if FREEINK_CAP_HAPTIC
-  freeink::haptic::prepareForSleep();
+  HapticManager::getInstance().end();
 #endif
-  inputMgr.prepareForDeepSleep();
+  if (!inputMgr.prepareForDeepSleep()) LOG_ERR("GPIO", "Failed to put touch controller to sleep");
 }
 
 bool HalGPIO::restoreTouchAfterDisplayReset() { return inputMgr.reinitializeTouchAfterSharedReset(); }
@@ -457,29 +423,6 @@ bool HalGPIO::verifyPowerButtonWakeup() {
     inputMgr.update();
   }
   return heldAtFirstSample && inputMgr.isPowerButtonPhysicallyPressed();
-}
-
-bool HalGPIO::verifyPowerButtonWakeup(const uint16_t requiredDurationMs, const bool shortPressAllowed) {
-  if (BoardConfig::isX4Pro() || FREEINK_DEVICE_X4CLASSIC || BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() ||
-      BoardConfig::ACTIVE.input.power < 0 || shortPressAllowed) {
-    return true;
-  }
-
-  const unsigned long calibration = millis();
-  const unsigned long calibratedDuration = calibration < requiredDurationMs ? requiredDurationMs - calibration : 1;
-  const unsigned long start = millis();
-  inputMgr.update();
-  while (!inputMgr.isPressed(BTN_POWER) && millis() - start < 1000) {
-    delay(10);
-    inputMgr.update();
-  }
-  if (!inputMgr.isPressed(BTN_POWER)) return false;
-
-  do {
-    delay(10);
-    inputMgr.update();
-  } while (inputMgr.isPressed(BTN_POWER) && inputMgr.getPowerButtonHeldTime() < calibratedDuration);
-  return inputMgr.getPowerButtonHeldTime() >= calibratedDuration;
 }
 
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
@@ -522,8 +465,10 @@ bool HalGPIO::isUsbConnected() const {
   return usbHostSofActive();
 #endif
 #if FREEINK_DEVICE_METALIO_EINK4
-  bool connected = false;
-  if (freeink::metalio::externalPowerConnected(connected)) return connected;
+  static const BatteryMonitor powerSource;
+  bool known = false;
+  const bool connected = powerSource.isExternalPowerPresent(&known);
+  if (known) return connected;
   if (usbHostSofActive()) return true;
 #endif
   if (BoardConfig::ACTIVE.usbDetect >= 0) {
@@ -548,7 +493,8 @@ bool HalGPIO::coldBootImpliesPowerButton() const {
   // post-flash boots as battery button boots, and STAT-only boards like the
   // EEGO A4 misread them the same way once the charger terminates at 100%
   // (STAT inactive reads as "no USB").
-  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky();
+  // The Metalio sleeps powered off and only its button turns it back on.
+  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky() || BoardConfig::isMetalioEInk4();
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {

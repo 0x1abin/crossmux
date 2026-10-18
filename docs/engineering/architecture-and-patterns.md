@@ -84,44 +84,16 @@ use `python3 scripts/tests/test_sd_space.py` for FAT calculation regressions.
 
 ### Activity Lifecycle and Memory Management
 
-**Source**: [src/main.cpp:132-143](../../src/main.cpp)
+`ActivityManager` owns heap-allocated Activities through `std::unique_ptr`.
+Replace/pop calls `onExit()` before destruction; push retains the parent and
+includes it in the peak-memory budget. Create transitions through the manager's
+checked allocation helpers, not raw `new`/`delete`.
 
-**CRITICAL**: Activities are **heap-allocated** and **deleted on exit**.
-
-```cpp
-// main.cpp navigation pattern
-void exitActivity() {
-  if (currentActivity) {
-    currentActivity->onExit();
-    delete currentActivity;  // Activity deleted here!
-    currentActivity = nullptr;
-  }
-}
-
-void enterNewActivity(Activity* activity) {
-  currentActivity = activity;  // Heap-allocated activity
-  currentActivity->onEnter();
-}
-```
-
-**Memory Implications**:
-- Activity navigation = `delete` old activity + `new` create next activity
-- Any memory allocated in `onEnter()` MUST be freed in `onExit()`
-- FreeRTOS tasks MUST be deleted in `onExit()` before activity destruction
-- Member `FsFile` handles MUST be closed in `onExit()` (local `FsFile` variables auto-close via destructor)
-- `ActivityManager` calls `onExit()` while already holding `RenderLock`; never acquire a second render lock there
-
-**Activity Pattern**:
-```cpp
-void onEnter()  { Activity::onEnter(); /* alloc: buffer, tasks */ render(); }
-void loop()     { /* read the mappedInput snapshot; handle input */ }
-void onExit()   { /* free: vTaskDelete, free buffer, close member FsFiles */ Activity::onExit(); }
-```
-
-The main loop updates mapped input once per frame before
-`ActivityManager::loop()`. Normal Activities must not update it again.
-
-**Critical**: Free resources in reverse order. Delete tasks BEFORE activity destruction.
+`onExit()` runs while `RenderLock` is held; `onEnter()` runs after releasing it.
+Never acquire a second render lock or call `requestUpdateAndWait()` while holding
+that lock. Stop/delete workers before destruction, release `onEnter()` resources
+in `onExit()`, and close member `HalFile` handles at their intended release point.
+Normal Activities read the mapped-input snapshot updated once by the main loop.
 
 ### Read Pico idle page cache
 
@@ -147,16 +119,12 @@ framebuffer integrity and PSRAM recovery after leaving/reopening the reader.
 
 ### FreeRTOS Task Guidelines
 
-**Source**: [src/activities/util/KeyboardEntryActivity.cpp:45-50](../../src/activities/util/KeyboardEntryActivity.cpp)
-
-**Pattern**: See Activity Lifecycle above. `xTaskCreate(&taskTrampoline, "Name", stackSize, this, 1, &handle)`
-
-**Stack Sizing** (in BYTES, not words):
-- **2048**: Simple rendering (most activities)
-- **4096**: Network, EPUB parsing
-- Monitor: `uxTaskGetStackHighWaterMark()` if crashes
-
-**Rules**: Always `vTaskDelete()` in `onExit()` before destruction. Use mutex if shared state.
+`ActivityManager::begin()` owns the shared render task; avoid per-screen render
+tasks. ESP-IDF task stack sizes are bytes. Size workers from their call chains
+and measured `uxTaskGetStackHighWaterMark()`, and inspect the active loop/render
+stack rather than copying a generic example. Stop workers in `onExit()` before
+destruction and synchronize shared state. Network flows release WiFi/power locks
+on exit; trace `HalPowerManager` before changing network or sleep lifetime.
 
 ### Global Font Loading
 
@@ -190,3 +158,46 @@ OpenDyslexic and the broad Noto reader families live in the SD font catalog
 renderer.insertFont(FONT_UI_MEDIUM, ui12FontFamily);
 renderer.drawText(FONT_UI_MEDIUM, x, y, "Hello", true);
 ```
+
+## Framebuffer and storage ownership
+
+The C3 baseline owns one runtime-panel-sized framebuffer. Temporary grayscale
+backups are chunked; do not add a second full-screen allocation. Pair successful
+`storeBwBuffer()` with restore or discard when the underlying page changed.
+`restoreBwBuffer(false)` preserves the newer panel differential baseline after
+an overlay. `FrameBufferLoan` forbids drawing/display while loaned; release
+exclusive `BuildScratch` claims before restoration and redraw afterward.
+
+USB Drive transfers exclusive raw SD ownership to the host. Stop filesystem
+users and pending navigation through `UsbDriveActivity` and
+`ActivityManager::loop()`. Exit by the required restart rather than reopening
+filesystem access early.
+
+## Runtime fonts and services
+
+Built-in glyph data is static; decompression/render caches consume runtime RAM.
+`.cpfont` works across targets; direct TTF/OTF/TTC requires the vector-font flag
+and usable PSRAM. Follow [SD-font contracts](../sd-card-fonts.md) for discovery,
+precedence, styles, sizes and whole-string UI fallback. Use
+`FontCacheManager::PrewarmScope` around scan/prewarm/render, keep font/style caches
+distinct, and respect kerning/ligature view lifetimes. `clearCache()` keeps SD
+mini arenas/advances; `releaseSdFontCaches()` releases rebuildable caches at the
+established heap-critical transitions while keeping fonts loaded.
+
+Firmware executes declarative plugin manifests/request templates; `plugin.js`
+runs in the browser. Preserve [plugin isolation and jobs](../sd-plugins.md),
+[event/outbox delivery](../plugin-events.md), and
+[HTTP contracts](../webserver-endpoints.md). Normalize external paths and escape
+filenames through existing helpers. Protected reads follow `Epub` and the pinned
+SDK `ContentProtection`; keep service activation policy in plugins.
+
+Reader grayscale submission uses the HAL's existing SDK `displayCommitted()`
+contract. Whole-plane reading saves B/W pixels before deferring a base; one
+private execution path restores BW mode and releases that snapshot on success,
+failed commit or cancellation. Snapshot OOM falls back to an ordinary B/W
+submission. Refresh cadence, render statistics and saved progress advance only
+for committed pages. Manual sync cannot persist a requested page that has not
+committed; returning from a footnote retains the previously visited origin.
+ReadPico supports Overlay selectors and Native16, without advertising
+Absolute/Direct or strip uploads. Unsupported controllers reject legacy gray
+planes/LUT calls and can display the B/W fallback.

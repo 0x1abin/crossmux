@@ -2,7 +2,7 @@
 
 > Sticky, X4 Pro, X4 Classic, PaperMono, [eego A4](eego-a4.md), [Murphy M4](murphy-m4.md),
 > [Waveshare ePaper 3.97](waveshare-epaper-397.md), [Metalio E-Ink 4](metalio-eink4.md),
-> and [MindReset Read Pico](read-pico.md) are separate ESP32-S3
+> [MindReset Read Pico](read-pico.md), and [LilyGo T5 S3](lilygo-t5s3.md) are separate ESP32-S3
 > compile-time targets. The one-binary rule in this document applies only to
 > the ESP32-C3 X3/X4 pair.
 
@@ -19,11 +19,11 @@ is on at boot and adapts at runtime. To "build for X3", build any normal env and
 flash it — the device identifies itself:
 
 ```bash
-pio run -e gh_release        # all 33 UI languages and both content profiles
+pio run -e gh_release        # all UI languages and both content profiles
 pio run -t upload            # build + flash to whatever is plugged in
 ```
 
-All nine ESP32-S3 devices use separate builds because their boards,
+ESP32-S3 devices use separate builds because their boards,
 displays, input, storage, and power profiles differ from the combined ESP32-C3
 image:
 
@@ -37,18 +37,36 @@ pio run -e murphy_m4
 pio run -e waveshare_epaper_397
 pio run -e metalio_eink4
 pio run -e readpico
+pio run -e lilygo_t5s3
 ```
 
 Eight S3 targets are published by the shared Nightly matrix, including MindReset
 Read Pico (`readpico_nightly`). X4 Classic has the
-same `x4c_nightly` build and Hardware CI coverage, but remains build-only and is
-not added to the public Nightly or OTA indexes. Each published target builds
+same `x4c_nightly` build and Hardware CI coverage, but remains build-only.
+LilyGo T5 S3 adds `lilygo_t5s3` for local development. Neither target joins the
+public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
 
 ## Standby-display light sleep
+
+### Adapter ownership
+
+Matched Reader devices use the fixed upstream BSP through the CrossMux HAL.
+Pin assignments, panel encoding/waveforms, touch backends and power sequencing
+belong to the SDK; HAL owns initialization, storage serialization and sleep
+handoffs. Reader refresh choices use existing grayscale capabilities. The
+renderer centralizes the UC8279C whole-frame gray exception without exposing
+another SDK interface or duplicating A4 conditions in individual activities.
+
+Device macros remain for board selection, firmware tags and code/assets that
+other devices must not link. Optional CrossMux display extensions and the
+M4/Waveshare/ReadPico/LilyGo integrations remain separate from the matched BSP.
+The A4 Home/layout changes and cache rebuilding are recorded in
+[eego-a4.md](eego-a4.md#reader-adapter-convergence). Historical hardware results
+do not establish acceptance for the current adapter.
 
 Standby-display light sleep is enabled for the runtime-selected X3/X3 UC8279 and
 X4 profiles. The HAL arms GPIO3 plus a timer and consumes the released power
@@ -63,18 +81,21 @@ not yet been quantified, so no measured power reduction is claimed. All S3
 targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
 
-Bluetooth Page Turner Beta is compiled into every hardware firmware flavor:
-development, Nightly, release, RC and slim where those profiles exist. The
-runtime setting remains disabled by default; existing saved choices are kept.
-Native simulator builds retain the BLE stub.
+Bluetooth Page Turner Beta is enabled in the C3 hardware flavors and the S3
+profiles using `s3_ble_psram`, including development, Nightly, release, RC and
+slim where those profiles exist. The runtime setting remains disabled by
+default; existing saved choices are kept. EEGO A4 and native simulator builds
+use the SDK BLE stub.
 
 X3/X4 profiles share `c3_hardware`: internal RAM, a Flash controller and paged
 coverage indexes for large SD fonts. The HAL protects the entire C3 BLE host
 lifetime from manual 10 MHz idle downclocking. Sticky, X4 Pro, X4 Classic, Paper
-Mono, EEGO A4, Murphy M4, Waveshare 3.97 and Metalio E-Ink 4 inherit `s3_ble_psram` through their
-hardware profiles, including release/RC flavors. Sticky and EEGO keep their
-tuned controller-only cores; USB-capable boards keep the prebuilt TinyUSB graph.
-C3 never inherits the S3 allocator or IPC wrapper.
+Mono, Murphy M4, Waveshare 3.97, Metalio E-Ink 4, Read Pico and LilyGo T5 S3
+inherit `s3_ble_psram` through their hardware profiles, including release/RC
+flavors where present. Sticky and Read Pico keep their tuned controller-only
+cores. EEGO A4 uses the prebuilt TinyUSB graph with BLE stubs; other USB-capable
+boards also keep the prebuilt graph. C3 never inherits the S3 allocator or IPC
+wrapper.
 
 X4 user tests confirm reading/page-turner operation; quantitative endurance and
 X3/other-board hardware acceptance remain separate. See
@@ -119,15 +140,14 @@ runtime. A compile-time split would:
 - break the "flash any official release to any device" UX (web flasher, OTA),
 - add `#ifdef` branches where today there is one tested code path.
 
-So the codebase uses **100% runtime dispatch** (`if (gpio.deviceIsX3())`,
-~268 call sites), never `#ifdef`. Language and content region are runtime
+The shared C3 image uses runtime dispatch (`if (gpio.deviceIsX3())`) for the
+X3/X4 choice. Language and content region are runtime
 settings; there is no compile-time language SKU — see [chinese-build.md](chinese-build.md).
 
 ## How detection works
 
-`HalGPIO::begin()` calls `detectDeviceTypeWithFingerprint()`
-([lib/hal/HalGPIO.cpp:150-189](../../lib/hal/HalGPIO.cpp), run at
-[:197](../../lib/hal/HalGPIO.cpp)). Three-step resolution:
+[`HalGPIO::begin()`](../../lib/hal/HalGPIO.cpp) calls
+`detectDeviceTypeWithFingerprint()`. Three-step resolution:
 
 1. **Manual override** — NVS key `dev_ovr` (`0=auto, 1=X4, 2=X3`). If set,
    it wins immediately. See the caveat below.
@@ -136,11 +156,12 @@ settings; there is no compile-time language SKU — see [chinese-build.md](chine
 3. **Active I²C fingerprint** — only on first boot (empty cache).
 
 Both NVS keys live in the `Preferences` namespace `cphw`
-([HalGPIO.cpp:118-120](../../lib/hal/HalGPIO.cpp)).
+([HalGPIO.cpp](../../lib/hal/HalGPIO.cpp)).
 
 The probe runs on the X3 I²C bus (`X3_I2C_SDA=20`, `X3_I2C_SCL=0`, 400 kHz;
-[lib/hal/HalGPIO.h:20-23](../../lib/hal/HalGPIO.h)) and looks for three
-**X3-only** chips ([HalGPIO.cpp:63-113](../../lib/hal/HalGPIO.cpp)):
+[lib/hal/HalGPIO.h](../../lib/hal/HalGPIO.h)) and looks for three
+**X3-only** chips through the SDK's canonical fingerprint
+([XteinkDetect.cpp](../../freeink-sdk/libs/hardware/XteinkDetect/src/XteinkDetect.cpp)):
 
 | Chip | Role | I²C addr | Signature check |
 |---|---|---|---|
@@ -154,16 +175,16 @@ Each probe pass scores 0–3. The pass runs **twice**:
 - **score == 0 on both passes ⇒ X4** (cached).
 - **anything in between ⇒ X4 fallback, _not_ cached** — so an inconclusive
   first boot re-probes next time instead of locking in a guess
-  ([HalGPIO.cpp:174-188](../../lib/hal/HalGPIO.cpp)).
+  ([HalGPIO.cpp](../../lib/hal/HalGPIO.cpp)).
 
 `DeviceType` enum and the `deviceIsX3()` / `deviceIsX4()` accessors are at
-[lib/hal/HalGPIO.h:50-60](../../lib/hal/HalGPIO.h).
+[lib/hal/HalGPIO.h](../../lib/hal/HalGPIO.h).
 
 ### The `dev_ovr` manual override — accurate caveat
 
-`dev_ovr` is **read** at boot ([HalGPIO.cpp:153](../../lib/hal/HalGPIO.cpp)) but
+`dev_ovr` is **read** at boot ([HalGPIO.cpp](../../lib/hal/HalGPIO.cpp)) but
 **no firmware code writes it** — only the auto-detect cache `dev_det` is ever
-written ([:178](../../lib/hal/HalGPIO.cpp), [:183](../../lib/hal/HalGPIO.cpp)).
+written on confirmed SDK verdicts.
 There is **no settings screen, button combo, or web endpoint** to force a device
 type. It is a support/recovery escape hatch you set **externally** (e.g. an
 `nvs` partition edit / `esptool`), namespace `cphw`, key `dev_ovr`,
@@ -179,13 +200,13 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 | Panel | 800 × 480, **SSD1677** | 792 × 528, **UC81xx** |
 | Framebuffer | 48000 B | 52272 B |
 | Buffer allocation | `MAX_BUFFER_SIZE = 52272` (static, covers both) — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
-| Geometry switch | default 800×480 | `setDisplayX3()` before `begin()` — [HalDisplay.cpp:39](../../lib/hal/HalDisplay.cpp) |
+| Geometry switch | default 800×480 | `setDisplayX3()` before `begin()` — [HalDisplay.cpp](../../lib/hal/HalDisplay.cpp) |
 | Display SPI clock | **20 MHz** (SSD1677 in-spec maximum) | UC81xx profile default, unchanged |
 | Battery | ADC on GPIO0 | BQ27220 fuel gauge (I²C) — [HalPowerManager.cpp](../../lib/hal/HalPowerManager.cpp) |
-| USB / charge detect | GPIO20 reads HIGH | sign of BQ27220 current — [HalGPIO.cpp:272-287](../../lib/hal/HalGPIO.cpp) |
+| USB / charge detect | GPIO20 reads HIGH | sign of BQ27220 current — [HalGPIO.cpp](../../lib/hal/HalGPIO.cpp) |
 | Clock persistence | ESP system clock; survives deep sleep/reset, not full power loss | ESP system clock plus DS3231 UTC backup — [HalClock.cpp](../../lib/hal/HalClock.cpp) |
-| Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp:55](../../lib/hal/HalTiltSensor.cpp) |
-| Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp:194](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp:399](../../src/components/themes/lyra/LyraTheme.cpp) |
+| Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp](../../lib/hal/HalTiltSensor.cpp) |
+| Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp](../../src/components/themes/lyra/LyraTheme.cpp) |
 | INX front-button hints | four bottom segments aligned to the X4 keys | four bottom segments using the wider X3 spacing; labels remain orientation-aware — [InxTheme.cpp](../../src/components/themes/inx/InxTheme.cpp) |
 | Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
 
@@ -274,12 +295,14 @@ verification.
 
 ## Verifying which device you're on
 
-- **Serial** — boot log line `Hardware detect: X3`
-  ([src/main.cpp:453](../../src/main.cpp)). The line above it prints the probe
-  scores.
-- **Web API** — `device` field uses `BoardConfig::ACTIVE.name`
-  (`"xteink_x3"` / `"xteink_x4"`)
-  ([CrossPointWebServer.cpp:382](../../src/network/CrossPointWebServer.cpp)).
+- **Serial** — boot logs the active board name, such as
+  `Hardware detect: xteink_x3`, `xteink_x3_uc8279` or `xteink_x4`
+  ([src/main.cpp](../../src/main.cpp)). First-boot
+  probing logs its scores and verdict in [HalGPIO.cpp](../../lib/hal/HalGPIO.cpp);
+  cached and manual selections log their source instead.
+- **Web API** — the shared C3 image retains `"X3"` / `"X4"` in the `device`
+  field. Other boards use `BoardConfig::ACTIVE.name`
+  ([CrossPointWebServer.cpp](../../src/network/CrossPointWebServer.cpp)).
 - **UI** — the X3-only Tilt Page Turn item appears only when the QMI8658 is
   detected. Clock and Date & Time settings are available on every device.
 
