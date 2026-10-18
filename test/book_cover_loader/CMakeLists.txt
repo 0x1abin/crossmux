@@ -1,6 +1,8 @@
 add_executable(BookCoverLoaderTest
   BookCoverLoaderTest.cpp
   ${REPO_ROOT}/src/util/BookCoverLoader.cpp
+  ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
+  ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${crosspoint_simulator_SOURCE_DIR}/src/HalStorage.cpp
 )
 
@@ -8,6 +10,7 @@ target_include_directories(BookCoverLoaderTest BEFORE PRIVATE
   ${crosspoint_simulator_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/src/util
+  ${REPO_ROOT}/lib/GfxRenderer
 )
 
 target_compile_definitions(BookCoverLoaderTest PRIVATE

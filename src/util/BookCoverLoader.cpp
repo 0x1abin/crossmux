@@ -8,12 +8,11 @@
 #include <Txt.h>
 #include <Xtc.h>
 
+#include <cstdint>
+
 namespace BookCoverLoader {
-namespace {
 
-enum class CachedCoverState { Missing, Ready, Terminal };
-
-CachedCoverState inspectCachedCover(const std::string& path, const bool emptyIsTerminal) {
+CachedCoverState checkCachedCover(const std::string& path, const bool emptyIsTerminal) {
   if (!Storage.exists(path.c_str())) return CachedCoverState::Missing;
 
   {
@@ -23,10 +22,16 @@ CachedCoverState inspectCachedCover(const std::string& path, const bool emptyIsT
 
     Bitmap bitmap(file);
     if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-      return CachedCoverState::Ready;
+      // Ready only when every pixel row fits between the data offset and end of file.
+      const uint64_t pixelBytes =
+          static_cast<uint64_t>(bitmap.getRowBytes()) * static_cast<uint64_t>(bitmap.getHeight());
+      if (bitmap.getPixelDataOffset() + pixelBytes <= file.fileSize()) {
+        return CachedCoverState::Ready;
+      }
     }
   }
 
+  LOG_ERR("COVER", "Removing invalid cached cover: %s", path.c_str());
   if (!Storage.remove(path.c_str())) {
     LOG_ERR("COVER", "Failed to remove invalid cover: %s", path.c_str());
     return CachedCoverState::Terminal;
@@ -34,14 +39,16 @@ CachedCoverState inspectCachedCover(const std::string& path, const bool emptyIsT
   return CachedCoverState::Missing;
 }
 
+namespace {
+
 template <typename Generate>
 std::string ensureCachedCover(const std::string& path, const bool emptyIsTerminal, bool* generated,
                               Generate&& generate) {
   if (generated) *generated = false;
-  const CachedCoverState state = inspectCachedCover(path, emptyIsTerminal);
+  const CachedCoverState state = checkCachedCover(path, emptyIsTerminal);
   if (state == CachedCoverState::Ready) return path;
   if (state == CachedCoverState::Terminal || !generate()) return "";
-  if (inspectCachedCover(path, emptyIsTerminal) != CachedCoverState::Ready) return "";
+  if (checkCachedCover(path, emptyIsTerminal) != CachedCoverState::Ready) return "";
   if (generated) *generated = true;
   return path;
 }
