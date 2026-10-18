@@ -308,13 +308,6 @@ void HalGPIO::update() {
   beginInput();
 #endif
   inputMgr.update();
-  const bool buttonActivity = inputMgr.wasPressed(BTN_BACK) || inputMgr.wasPressed(BTN_CONFIRM) ||
-                              inputMgr.wasPressed(BTN_LEFT) || inputMgr.wasPressed(BTN_RIGHT) ||
-                              inputMgr.wasPressed(BTN_UP) || inputMgr.wasPressed(BTN_DOWN);
-  const InputModality previous = inputModality.load(std::memory_order_relaxed);
-  const InputModality next = inputModalityAfter(previous, buttonActivity, inputMgr.wasTouchActivity());
-  inputModalityChanged = next != previous;
-  inputModality.store(next, std::memory_order_relaxed);
   const uint8_t pageButtons = inputMgr.capacitivePageButtonMask();
   capacitivePagePressed = (pageButtons & ~previousCapacitivePageButtons) != 0;
   previousCapacitivePageButtons = pageButtons;

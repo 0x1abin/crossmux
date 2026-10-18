@@ -24,8 +24,8 @@ RecentBooksActivity::RecentBooksActivity(GfxRenderer& renderer, MappedInputManag
     : UiListActivity("RecentBooks", renderer, mappedInput, /*wantsTouchLongPress=*/true) {}
 
 void RecentBooksActivity::loadRecentBooks() {
-  recentBooks = RECENT_BOOKS.getBooks();
   rebuildRowItems();
+  onBooksChanged();
 }
 
 // Derives rowItems from recentBooks. Called whenever recentBooks changes
@@ -77,9 +77,8 @@ void RecentBooksActivity::onEnter() {
 
 void RecentBooksActivity::onExit() {
   Activity::onExit();
-  // rowItems' label/subtitle pointers alias recentBooks' strings; drop both.
+  // Drop row aliases; the persistent store continues to own the books.
   rowItems.clear();
-  recentBooks.clear();
 }
 
 void RecentBooksActivity::activateIndex(const int index) {
@@ -126,6 +125,7 @@ void RecentBooksActivity::promptRemoveBook(const std::string& path, const std::s
       LOG_DBG("RBA", "Remove from recents cancelled");
       return;
     }
+    RenderLock lock(*this);
     if (RECENT_BOOKS.removeByPath(path)) {
       LOG_DBG("RBA", "Removed from recents: %s", path.c_str());
       // The interaction table still indexes the pre-removal rows; stop routing
@@ -137,7 +137,7 @@ void RecentBooksActivity::promptRemoveBook(const std::string& path, const std::s
       } else if (nav.selected >= listCount()) {
         nav.selected = listCount() - 1;
       }
-      nav.follow(listCount());
+      nav.requestSelection(nav.selected);
       requestUpdate(true);
     }
   };
@@ -174,7 +174,7 @@ void RecentBooksActivity::buildScreen(UiScreen& screen) {
   fui::TextStyle label = screen.theme().smallText;
   label.bold = true;
   props.labelText = label;
-  syncListViewport(screen, props, /*hasSubtitle=*/true);
+  syncListViewport(screen, props);
   screen.list(props);
 }
 

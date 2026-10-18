@@ -44,21 +44,6 @@ class FileBrowserActivity final : public UiListActivity {
   std::vector<std::string> files;
   std::unique_ptr<char[]> fileNameBuffer;
 
-  // Per-row render buffers, derived from `files` and rebuilt only when it
-  // changes (loadFiles()) rather than on every repaint — buildScreen() used to
-  // rebuild a name/extension string and a ListItem per file on every render
-  // (cursor move, tap flash, ...), which meant a 500-file directory allocated
-  // 500 strings per repaint instead of once per directory load.
-  std::vector<std::string> rowNames;
-  std::vector<std::string> rowExtensions;
-  std::vector<std::string> gridLabels;
-  std::vector<freeink::ui::ListItem> rowItems;
-  // getFileName()'s "[folder]" bracket formatting depends on the active
-  // theme's showsFileIcons(); tracked so a theme change while this activity is
-  // paused underneath (e.g. a Settings screen reached via a picker flow)
-  // invalidates the cached rows on return instead of rendering stale ones.
-  bool rowsUseFileIcons = false;
-
   // Pull-based rows: the SDK list resolves each drawn row on demand through
   // provideRow() (fui::ListProps::rowProvider), so the only per-file
   // residency is `files` itself — no full-length rowNames/rowExtensions/
@@ -79,9 +64,8 @@ class FileBrowserActivity final : public UiListActivity {
   int prewarmedStart = -1;
   void prewarmRowGlyphs(int start);
 
-  void rebuildRowItems();
   bool usesIconLayout() const;
-  void drawIconGrid(UiScreen& screen, freeink::ui::Rect rect) const;
+  void drawIconGrid(UiScreen& screen, freeink::ui::Rect rect);
 
   int listCount() const override { return static_cast<int>(files.size()); }
   void buildScreen(UiScreen& screen) override;

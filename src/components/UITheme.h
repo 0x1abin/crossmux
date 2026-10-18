@@ -24,7 +24,6 @@ class UITheme {
   const BaseTheme& getTheme() const { return *currentTheme; }
   bool usesClassicTabs() const { return currentType == CrossPointSettings::UI_THEME::CLASSIC; }
   bool hasMainTabs() const { return currentType == CrossPointSettings::UI_THEME::INX; }
-  bool showSelectionCursor() const;
   static Rect getContentArea(const GfxRenderer& renderer);
   Rect getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints = false,
                          bool hasSideButtonHints = false);

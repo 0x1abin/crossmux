@@ -186,15 +186,13 @@ through the reader's existing pagination LUT. Older generated books without
 anchors retain the visible-offset approximation, and other EPUBs fall back to
 the whole-book percentage derived from `WRT2` word counts. Different canonical
 positions show the direction selector. A local upload uses an enter/report pair
-and includes the whole seconds recorded by the local reading session that ended
-when manual sync was opened. When the remote position is selected, its exact
-chapter and offset are reported before being applied locally, so reporting time
-cannot move cloud progress backwards. Upload is accepted only after a read-back
-verifies the chapter and offset. A timed report is not automatically repeated
-after an ambiguous network failure; the current sync screen retains it for an
-explicit Retry, but no pending time is persisted after leaving the screen. An
-expired session directs the user back to **Apps → WeRead** to sign in; it does
-not open a QR flow from the reader.
+and is accepted only after a read-back verifies the chapter and offset. Selecting
+the remote position updates local progress without reporting it to the server;
+matching positions complete without an upload. The sync context and request body
+do not include local reading duration. Restoring duration reporting is tracked in
+[#332](https://github.com/0x1abin/crossmux/issues/332). An expired session directs
+the user back to **Apps → WeRead** to sign in; it does not open a QR flow from the
+reader.
 
 For a new standard-book cache, the downloader fetches cloud progress after the
 `WRT2` catalog and before any chapter or image. This request is best effort:

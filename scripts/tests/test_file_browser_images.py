@@ -26,6 +26,8 @@ class FileBrowserImagesTest(unittest.TestCase):
                  'constexpr char partPath[]="/sleep.bmp.part"; constexpr char backupPath[]="/sleep.bmp.bak"; }\n') + cover
         methods = '\n'.join((
             method(browser, 'void FileBrowserActivity::loadFiles()'),
+            method(browser, 'void FileBrowserActivity::finishEdit('),
+            method(browser, 'size_t FileBrowserActivity::findEntry('),
             method(manager, 'void ActivityManager::goToReader('),
             method(theme, 'UIIcon UITheme::getFileIcon('),
             *(method(viewer, name) for name in (
@@ -148,6 +150,10 @@ struct ImageViewerActivity {
  void showSleepCoverOptions(); void doSetSleepCover(const char*, bool);
 };
 std::string joinPath(const std::string& parent, const std::string& name) { return parent + "/" + name; }
+struct RenderLock {
+ template<class T>explicit RenderLock(T&) {}
+ void unlock() {}
+};
 struct FileBrowserActivity {
  enum class Mode { Books, PickFirmware, PickPng };
  enum class BrowserState { Browsing, ChoosingMoveDestination };
@@ -156,6 +162,14 @@ struct FileBrowserActivity {
  std::string basepath = "/", moveSourcePath;
  std::vector<std::string> files;
  std::unique_ptr<char[]> fileNameBuffer = std::make_unique<char[]>(NAME_BUFFER_SIZE);
+ struct { int selected=0;void follow(int) {} } nav;
+ bool selected=false;int updates=0;
+ int listCount() const {return files.size();}
+ void clearContentSelection() {selected=false;}
+ void establishContentSelection(int index) {assert(index>=0 && index<listCount());selected=true;}
+ void requestUpdate(bool) {++updates;}
+ size_t findEntry(const std::string&) const;
+ void finishEdit(const std::string&,int,const std::string& = {});
  void rebuildRowItems() {} void loadFiles();
 };
 struct ReaderActivity { static int create(GfxRenderer&, int&, std::string, bool) { return 1; } };
@@ -193,6 +207,17 @@ int main() {
    assert((viewer.siblingImages == std::vector<std::string>{"2.bmp", "3.PNG", "4.jpg", "10.JPEG"}));
    assert(viewer.currentImageIndex == 2);
  }
+ // Reloads must never highlight a fallback neighbor after deletion or a missing entry.
+ FileBrowserActivity edited;edited.selected=true;edited.nav.selected=4;
+ edited.loadFiles();assert(!edited.selected);
+ edited.finishEdit("/Pictures",4,"3.PNG");
+ assert(edited.selected && edited.files[edited.nav.selected]=="3.PNG" && edited.updates==1);
+ edited.finishEdit("/Pictures",4);
+ assert(!edited.selected && edited.nav.selected==4 && edited.updates==2);
+ edited.finishEdit("/Pictures",4,"removed.PNG");
+ assert(!edited.selected && edited.nav.selected==0 && edited.updates==3);
+ entries.clear();edited.finishEdit("/Pictures",4,"3.PNG");
+ assert(!edited.selected && edited.nav.selected==0 && edited.files.empty());
  ImageViewerActivity viewer; viewer.filePath = "/AirPage/4.jpg";
  Storage.data[viewer.filePath] = "original-jpeg";
  Storage.data[SLEEP_IMAGE_PATH] = "existing-cover";

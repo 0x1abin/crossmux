@@ -265,7 +265,7 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
   const bool hasScrollBar = itemCount > pageItems;
   const int contentRight = rect.x + rect.width - (hasScrollBar ? 10 : 0);
   const int iconSize = rowSubtitle != nullptr ? kMenuIconSize : kListIconSize;
-  const bool selectionVisible = showSelection && UITheme::getInstance().showSelectionCursor();
+  const bool selectionVisible = showSelection;
 
   for (int index = pageStart; index < pageEnd; ++index) {
     const int slot = index - pageStart;
@@ -336,10 +336,9 @@ void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int 
   const int pageItems = InxMenuGeometry::pageItems(rect.height);
   const int pageStart = InxMenuGeometry::pageStart(selectedIndex, buttonCount, rect.height);
   const int pageEnd = std::min(buttonCount, pageStart + pageItems);
-  const bool selectionVisible = UITheme::getInstance().showSelectionCursor();
   for (int index = pageStart; index < pageEnd; ++index) {
     const int rowY = rect.y + (index - pageStart) * kRowHeight;
-    const bool selected = selectionVisible && index == selectedIndex;
+    const bool selected = index == selectedIndex;
     if (selected) renderer.fillRect(rect.x, rowY, rect.width, kRowHeight, true);
 
     int textX = rect.x + kRowPadding;
@@ -384,7 +383,7 @@ InxTheme::MenuRowGeometry InxTheme::getMenuRowGeometry(const GfxRenderer&, const
 }
 
 void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
-                               const int selectedIndex) const {
+                               const int selectedIndex, const int firstVisible) const {
   if (options.empty()) return;
 
   const int optionCount = static_cast<int>(options.size());
@@ -393,12 +392,11 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
       InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false), optionCount, selected);
   const int visibleRows = layout.rows;
   const int maxStart = optionCount - visibleRows;
-  const int start = layout.first;
+  const int start = firstVisible >= 0 ? std::min(firstVisible, maxStart) : layout.first;
   const int panelWidth = layout.panel.width;
   const int panelHeight = layout.panel.height;
   const int panelX = layout.panel.x;
   const int panelY = layout.panel.y;
-  const bool selectionVisible = UITheme::getInstance().showSelectionCursor();
 
   renderer.fillRect(panelX, panelY, panelWidth, panelHeight, false);
   const std::string shownTitle = renderer.truncatedText(UI_10_FONT_ID, title, panelWidth - 32, EpdFontFamily::BOLD);
@@ -410,7 +408,7 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
   for (int slot = 0; slot < visibleRows; ++slot) {
     const int optionIndex = start + slot;
     const int rowY = panelY + InxOptionGeometry::headerHeight + slot * InxOptionGeometry::rowHeight;
-    const bool isSelected = selectionVisible && optionIndex == selected;
+    const bool isSelected = optionIndex == selected;
     if (isSelected) {
       const Rect row = layout.optionRect(slot);
       renderer.fillRect(row.x, row.y, row.width, row.height, true);
