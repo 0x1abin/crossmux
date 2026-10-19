@@ -131,12 +131,6 @@ class EpubReaderActivity final : public ReaderActivity {
   // use), for enum rows: font size / line spacing / alignment / orientation /
   // auto page turn. Toggle rows stay one-tap toggles, as in Settings.
   OptionPopup overlayPopup{true};
-  // Touch-suppression window after a tap zone opens the popup: the opening
-  // contact's release edge can linger in the SDK snapshot for a loop pass or
-  // two, and OptionPopup would otherwise dismiss the fresh dialog as an
-  // outside tap. No touch input is routed until this timestamp passes; the
-  // window only outlives the residual release, buttons keep working.
-  uint32_t popupTouchIgnoreUntilMs_ = 0;
   ReaderFontPreview fontPreview;
   enum class FontPromptState { Idle, Asking, Accepted, TooLarge };
   FontPromptState fontPromptState = FontPromptState::Idle;
@@ -227,6 +221,15 @@ class EpubReaderActivity final : public ReaderActivity {
   void showAutoPageTurnPopup();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   int currentTocIndex() const;
+  // Index of the chapter being read: the TOC index for TXT/MD (whose named
+  // chapters are anchors inside one spine) and the spine index otherwise.
+  int currentChapterIndex() const;
+  // Chapter navigation shared by the toolbar and the tap zones. TXT/MD books
+  // keep every named chapter in one spine, so a spine step would clamp back to
+  // the same offset and do nothing; this routes them through the TOC anchor
+  // instead. Returns whether the chapter actually changed, so a no-op tap can
+  // skip the repaint.
+  bool gotoChapterIndex(int target);
   // Live section position, or the values cached before a child screen
   // released the section.
   ChapterPosition chapterPosition() const;

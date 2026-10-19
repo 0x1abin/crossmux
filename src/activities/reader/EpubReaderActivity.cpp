@@ -914,16 +914,12 @@ void EpubReaderActivity::loop() {
 
   // An option picker opened from a tap zone (e.g. the auto page-turn rate
   // dialog) owns all input while active, exactly like the one over the More
-  // panel (which handleOverlayInput() gates when overlay != None).
+  // panel (which handleOverlayInput() gates when overlay != None). The
+  // inherited contact is OptionPopup's own responsibility
+  // (ignoreInitialTouchContact owns it through release so it cannot select or
+  // dismiss the fresh dialog), so there is no timer here — a second tap right
+  // after opening still has to work.
   if (overlay == Overlay::None && overlayPopup.isActive()) {
-    // The tap zone opened this popup on the same contact's release frame; the
-    // SDK touch snapshot can keep reporting that release for a loop pass or
-    // two, which OptionPopup would read as an outside tap and dismiss the
-    // fresh dialog. Ignore touch input for a short window after opening so
-    // the opening gesture drains completely (buttons still work).
-    if (millis() < popupTouchIgnoreUntilMs_) {
-      return;
-    }
     overlayPopup.handleInput(mappedInput, [this] {
       if (overlayPopup.isActive()) {
         paintOverlayPopup();  // highlight moved
@@ -1266,19 +1262,11 @@ bool EpubReaderActivity::handleZoneShortAction(const uint8_t action) {
       }
       return true;
     case CrossPointSettings::TAP_ZONE_CHAPTER:
-      // Jump straight to the next chapter, matching the toolbar's NextChapter
-      // control (the chapter picker stays reachable via the reader menu).
-      if (epub) {
-        const int target = std::clamp(currentSpineIndex + 1, 0, epub->getSpineItemsCount() - 1);
-        if (target != currentSpineIndex) {
-          RenderLock lock;
-          clearDeferredReposition();
-          nextPageNumber = 0;
-          currentSpineIndex = target;
-          section.reset();
-          requestUpdate();
-        }
-      }
+      // Jump straight to the next chapter through the same navigation the
+      // toolbar uses. TXT/MD store their named chapters as anchors inside a
+      // single spine, so stepping currentSpineIndex would clamp back to the
+      // same chapter and the tap would look dead.
+      if (gotoChapterIndex(currentChapterIndex() + 1)) requestUpdate();
       return true;
     case CrossPointSettings::TAP_ZONE_BOOKMARK:
       addBookmark();
@@ -3320,6 +3308,35 @@ int EpubReaderActivity::currentTocIndex() const {
   return cachedSection.getTocIndexForPage(nextPageNumber);
 }
 
+int EpubReaderActivity::currentChapterIndex() const {
+  if (!epub) return 0;
+  return Txt::isTxtOrMd(epub->getPath()) ? std::max(0, currentTocIndex()) : currentSpineIndex;
+}
+
+bool EpubReaderActivity::gotoChapterIndex(const int target) {
+  if (!epub) return false;
+  const bool textBook = Txt::isTxtOrMd(epub->getPath());
+  const int chapterCount = textBook ? epub->getTocItemsCount() : epub->getSpineItemsCount();
+  // A TXT whose headings were never detected has no TOC at all; clamp() with an
+  // empty range is undefined, so there is nothing to step to.
+  if (chapterCount <= 0) return false;
+  const int chapterIndex = currentChapterIndex();
+  const int clamped = std::clamp(target, 0, chapterCount - 1);
+  if (clamped == chapterIndex) return false;
+  RenderLock lock;
+  clearDeferredReposition();
+  nextPageNumber = 0;
+  if (textBook) {
+    const auto item = epub->getTocItem(clamped);
+    currentSpineIndex = item.spineIndex;
+    pendingAnchor = item.anchor;
+  } else {
+    currentSpineIndex = clamped;
+  }
+  section.reset();
+  return true;
+}
+
 std::string EpubReaderActivity::currentChapterTitle() const {
   if (!epub) return "";
   const int tocIndex = currentTocIndex();
@@ -3651,22 +3668,11 @@ void EpubReaderActivity::handleOverlayInput() {
 
   const bool textBook = Txt::isTxtOrMd(epub->getPath());
   const int chapterCount = textBook ? epub->getTocItemsCount() : epub->getSpineItemsCount();
-  const int chapterIndex = textBook ? std::max(0, currentTocIndex()) : currentSpineIndex;
-  const auto gotoChapter = [this, textBook, chapterCount, chapterIndex](int target) {
-    target = std::clamp(target, 0, chapterCount - 1);
-    if (target != chapterIndex) {
-      RenderLock lock;
-      clearDeferredReposition();
-      nextPageNumber = 0;
-      if (textBook) {
-        const auto item = epub->getTocItem(target);
-        currentSpineIndex = item.spineIndex;
-        pendingAnchor = item.anchor;
-      } else {
-        currentSpineIndex = target;
-      }
-      section.reset();
-    }
+  const int chapterIndex = currentChapterIndex();
+  const auto gotoChapter = [this](const int target) {
+    // Shared with the tap zones (gotoChapterIndex): TXT/MD chapters are anchors
+    // inside one spine, so they cannot be reached by stepping the spine.
+    gotoChapterIndex(target);
     requestUpdate();
   };
   const auto toolOverlay = [](int tool) {
@@ -3948,10 +3954,6 @@ void EpubReaderActivity::showAutoPageTurnPopup() {
     autoTurnOption = idx;
     toggleAutoPageTurn(static_cast<uint8_t>(PAGE_TURN_RATES[idx]));
   });
-  // The opening tap's release edge can linger in the SDK snapshot; suppress
-  // touch input briefly so the fresh dialog is not dismissed as an outside tap
-  // (see the gate in loop()).
-  popupTouchIgnoreUntilMs_ = millis() + 150;
   paintOverlayPopup();
 }
 
