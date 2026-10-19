@@ -589,6 +589,8 @@ count as their decoded visible Unicode codepoint. Source offsets inside a multib
 character resolve to that character. Lookup binary-searches records on disk. The inverse lookup searches visible
 offsets, then resolves the source position through `chapters.bin` for the current
 TOC title and chapter navigation, without retaining chapter tables.
+Chapter lookup treats visible offset 0 (the generated leading body newline) as
+position 1, the first source-mapped visible position, including any dropped BOM.
 Maps publish from `.tmp` only after successful conversion and flush. Books at or
 above 4GiB and chapter counts exceeding the existing 16-bit TOC budget fail safely.
 
