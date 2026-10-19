@@ -398,7 +398,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         // value that means Disabled (4), or a reload rewrites it to the
         // default and the setting silently reverts.
         const uint8_t count = info.valuePtr == &CrossPointSettings::uiTheme ? static_cast<uint8_t>(COVER_GRID + 1)
-                              : info.enumValueCount != 0 ? info.enumValueCount
+                              : info.enumValueCount != 0                    ? info.enumValueCount
                                                          : static_cast<uint8_t>(info.enumLabels().size());
         v = clamp(v, count, fieldDefault);
       } else if (info.type == SettingType::TOGGLE) {

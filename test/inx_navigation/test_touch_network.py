@@ -64,7 +64,8 @@ struct MappedInputManager {
 };
 fui::InputSnapshot touchSnapshotFrom(const MappedInputManager& i){return i.snap;}
 struct OptionPopup {
- bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false,uiReady=true;
+ bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false;
+ bool confirmBarrierPending=false,uiReady=true;
  int selectedIndex=0;mutable std::atomic<int> firstOption{-1},visibleOptionRows{1};std::string message;
  static constexpr int MAX_OPTIONS=24;
  static constexpr fui::ActionId ACTION_OPTION=1,ACTION_CHROME=2;
@@ -82,6 +83,7 @@ struct OptionPopup {
    interactions.addInteraction(fui::Interaction{fui::Rect{int16_t(r.x),int16_t(r.y),int16_t(r.width),int16_t(r.height)},ACTION_OPTION,int16_t(layout.first+slot),fui::InputTouch});
   }
   interactions.publish();
+  uiReady=true;
  }
 };
 int main(){
@@ -119,6 +121,100 @@ int main(){
   OptionPopup q;q.ignoreInitialConfirmRelease=true;q.onSelectCallback=[&](int){++calls;};
   input={};input.released=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
   assert(q.active&&calls==1);q.handleInput(input,update);assert(!q.active&&calls==2);
+
+  // --- popped open by a touch, then a quick fresh Confirm ---------------
+  // The author's reproduction: a touch opens the dialog (the finger lifts
+  // before the popup sees an input pass), then Confirm is pressed ~30 ms later
+  // and released ~80 ms after that. finishShow() cannot know whether Confirm
+  // was inherited, so the first pass decides: a press edge means the press is
+  // for this popup and its release must select, not vanish.
+  {
+    OptionPopup fresh;int picked=-1;int freshCalls=0;
+    fresh.onSelectCallback=[&](int i){++freshCalls;picked=i;};
+    fresh.finishShow(0,fresh.onSelectCallback);
+    assert(fresh.confirmBarrierPending&&!fresh.ignoreInitialConfirmRelease);
+    input={};
+    input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    fresh.handleInput(input,update);
+    assert(!fresh.confirmBarrierPending&&!fresh.ignoreInitialConfirmRelease);
+    assert(fresh.active&&freshCalls==0);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    fresh.handleInput(input,update);
+    assert(!fresh.active&&freshCalls==1&&picked==0);
+  }
+
+  // --- inherited Confirm: held at entry, no press edge -------------------
+  // The gesture that opened the popup is still down. The first pass sees a
+  // hold with no edge, so the popup owns that contact until it lifts.
+  {
+    OptionPopup inherited;int inheritedCalls=0;
+    inherited.onSelectCallback=[&](int){++inheritedCalls;};
+    inherited.finishShow(0,inherited.onSelectCallback);
+    input={};input.held=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(!inherited.confirmBarrierPending&&inherited.ignoreInitialConfirmRelease);
+    assert(inherited.active&&inheritedCalls==0);
+    // The held button keeps reporting as held on later passes: still owned.
+    input={};input.held=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(inherited.active&&inheritedCalls==0);
+    // Its release is consumed, not delivered as a selection.
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(inherited.active&&inheritedCalls==0&&!inherited.ignoreInitialConfirmRelease);
+    // A press after that is fresh and must work.
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(!inherited.active&&inheritedCalls==1);
+  }
+
+  // --- a popup opened with no button down: nothing is pending -----------
+  {
+    OptionPopup idle;int idleCalls=0;
+    idle.onSelectCallback=[&](int){++idleCalls;};
+    idle.finishShow(0,idle.onSelectCallback);
+    input={};
+    idle.handleInput(input,update);
+    assert(!idle.confirmBarrierPending&&!idle.ignoreInitialConfirmRelease);
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    idle.handleInput(input,update);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    idle.handleInput(input,update);
+    assert(!idle.active&&idleCalls==1);
+  }
+
+  // --- a quick fresh touch after a touch-opened popup -------------------
+  // The barrier owns the opening contact only; a second, fresh tap on an
+  // option must select it rather than be swallowed.
+  {
+    OptionPopup retap;int retapCalls=0;int retapPick=-1;
+    retap.onSelectCallback=[&](int i){++retapCalls;retapPick=i;};
+    retap.finishShow(0,retap.onSelectCallback);
+    retap.publish(safe);
+    // Opening contact: down, then lifted, with no idle pass in between.
+    input={};input.snap.touchPressed=true;input.snap.touchX=1;input.snap.touchY=1;
+    retap.handleInput(input,update);
+    assert(retap.active&&retapCalls==0);
+    input={};input.snap.touchReleased=true;input.snap.touchX=1;input.snap.touchY=1;
+    retap.handleInput(input,update);
+    assert(retap.active&&retapCalls==0&&!retap.ignoreInitialTouchContact);
+    // A fresh tap on the second option selects it.
+    const auto freshLayout=InxOptionGeometry::layout(safe,12,0);
+    const auto freshRow=freshLayout.optionRect(1);
+    input={};
+    input.snap.touchPressed=true;input.snap.touchX=freshRow.x+freshRow.width/2;
+    input.snap.touchY=freshRow.y+freshRow.height/2;
+    retap.handleInput(input,update);
+    input={};input.snap.touchReleased=true;input.snap.touchX=freshRow.x+freshRow.width/2;
+    input.snap.touchY=freshRow.y+freshRow.height/2;
+    retap.handleInput(input,update);
+    assert(!retap.active&&retapCalls==1&&retapPick==freshLayout.first+1);
+  }
   ++scenes;
  }
  for(bool upstream:{false,true}) {

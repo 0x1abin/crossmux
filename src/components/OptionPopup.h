@@ -147,6 +147,21 @@ class OptionPopup {
     }
 
     const auto confirm = MappedInputManager::Button::Confirm;
+    if (confirmBarrierPending) {
+      // The popup was just opened and cannot know, by itself, whether Confirm
+      // was already down before it appeared. Decide from the first input pass
+      // that sees the button: a press edge means the user pressed it for this
+      // popup and it must be honoured, while "held without an edge" can only be
+      // a contact inherited from the gesture that opened the popup, which is
+      // owned until it is released. Nothing is pending once this has decided,
+      // so a later press is always fresh.
+      confirmBarrierPending = false;
+      ignoreInitialConfirmRelease = false;
+      if (!input.wasPressed(confirm) && input.isPressed(confirm)) {
+        ignoreInitialConfirmRelease = true;
+        return true;
+      }
+    }
     if (ignoreInitialConfirmRelease) {
       if (input.wasReleased(confirm)) {
         ignoreInitialConfirmRelease = false;
@@ -334,6 +349,9 @@ class OptionPopup {
   void dismiss() {
     active = false;
     onSelectCallback = nullptr;
+    confirmBarrierPending = false;
+    ignoreInitialConfirmRelease = false;
+    ignoreInitialTouchContact = false;
   }
 
  private:
@@ -350,7 +368,11 @@ class OptionPopup {
     selectedIndex = std::clamp(currentIndex, 0, count - 1);
     firstOption = -1;
     onSelectCallback = std::move(onSelect);
-    ignoreInitialConfirmRelease = true;
+    // Deferred, not armed: handleInput() decides from the first input pass
+    // whether Confirm was inherited from the opening gesture or freshly
+    // pressed. See the Confirm branch there.
+    confirmBarrierPending = true;
+    ignoreInitialConfirmRelease = false;
     ignoreInitialTouchContact = true;
     uiReady = false;
     active = true;
@@ -382,6 +404,9 @@ class OptionPopup {
   int selectedIndex = 0;
   std::function<void(int)> onSelectCallback;
   bool ignoreInitialConfirmRelease = false;
+  // Set by finishShow() and cleared by the first input pass that reaches the
+  // Confirm decision; see handleInput().
+  bool confirmBarrierPending = false;
   bool ignoreInitialTouchContact = false;
   // Written by the render task (frame registration), routed by the loop task;
   // uiReady closes the rebuild window exactly like UiListActivity::uiReady.

@@ -49,15 +49,22 @@ struct RenderLock {
   RenderLock() {}
 };
 
-// The TXT chapter resolver: three named chapters at byte offsets 0/1000/2000 of
-// the single spine, which is exactly what the converter produces for a TXT with
-// three headings.
+// The TXT chapter resolver: three named chapters at visible offsets
+// 0/1000/2000 of the single spine, which is what the converter produces for a
+// TXT with three headings. It answers with the *TOC* index, so the first named
+// chapter is 1: the converted TOC starts with the book title at index 0.
+//
+// Page 0 reports visible offset 0 while the converter's map starts at 1, so
+// Txt::tocIndexForPosition() normalizes 0 to 1 before the inverse lookup
+// (upstream #424). The first page therefore resolves to the first named
+// chapter, not to an unmapped offset and not to the book title.
 namespace Txt {
 inline bool isTxtOrMd(const std::string& path) {
   return path.size() > 4 && path.compare(path.size() - 4, 4, ".txt") == 0;
 }
 inline int tocIndexForPosition(const std::string&, const std::string&, uint32_t offset, uint8_t* = nullptr) {
-  return offset >= 2000 ? 2 : (offset >= 1000 ? 1 : 0);
+  const uint32_t mapped = offset == 0 ? 1 : offset;  // #424: page 0 starts at the body newline
+  return mapped >= 2000 ? 3 : (mapped >= 1000 ? 2 : 1);
 }
 }  // namespace Txt
 
@@ -119,13 +126,38 @@ harness += method(activity_cpp, 'bool EpubReaderActivity::gotoChapterIndex')
 
 harness += r'''
 int main() {
-  // --- TXT: three named chapters, one spine -------------------------------
+  // Assert the two Txt conventions this harness models, so a later change to
+  // the injected resolver cannot silently diverge from the production one.
+  assert(Txt::tocIndexForPosition("", "", 0) == 1);    // page 0 normalizes to the body newline
+  assert(Txt::tocIndexForPosition("", "", 1) == 1);    // first named chapter is TOC index 1
+  assert(Txt::tocIndexForPosition("", "", 1000) == 2); // ... and each heading steps one entry
+
+  // --- TXT: the converted TOC, book title first ---------------------------
+  // A real converted TXT has one spine and a TOC of [book title, ch1, ch2, ch3];
+  // the title entry carries the empty anchor.
   {
     EpubReaderActivity reader;
     reader.epub = std::make_shared<Epub>();
-    reader.epub->toc = {{"Chapter One", "ch1", 0}, {"Chapter Two", "ch2", 0}, {"Chapter Three", "ch3", 0}};
+    reader.epub->toc = {{"Book Title", "", 0},
+                        {"Chapter One", "ch1", 0},
+                        {"Chapter Two", "ch2", 0},
+                        {"Chapter Three", "ch3", 0}};
     reader.epub->spines = 1;
-    reader.cachedVisibleTextOffset = 0;  // reading chapter one
+    reader.cachedVisibleTextOffset = 0;  // the very first page
+
+    // The first page reports offset 0 while the converter's map starts at 1;
+    // the resolver normalizes it (upstream #424), so page 0 reads as the first
+    // named chapter. Without that the lookup fails and the spine fallback
+    // answers TOC index 0 (the book title, empty anchor), which made a Chapter
+    // tap re-open the page already on screen: byte-identical frame, unchanged
+    // progress.
+    assert(reader.epub->getTocIndexForSpineIndex(0) == 0);  // what the failed lookup fell back to
+
+    assert(reader.currentChapterIndex() == 1);
+    assert(reader.gotoChapterIndex(reader.currentChapterIndex() + 1));
+    assert(reader.pendingAnchor == "ch2");            // ... and the chapter moved
+    assert(reader.deferrals == 1);
+    assert(reader.section == nullptr);                // forced re-pagination
 
     // The old zone action stepped the spine: clamp(0 + 1, 0, 1 - 1) = 0, i.e.
     // the tap returned "handled" while nothing moved. Pinned here so the
@@ -133,16 +165,9 @@ int main() {
     const int oldTarget = std::clamp(reader.currentSpineIndex + 1, 0, reader.epub->getSpineItemsCount() - 1);
     assert(oldTarget == reader.currentSpineIndex);
 
-    assert(reader.currentChapterIndex() == 0);
-    assert(reader.gotoChapterIndex(reader.currentChapterIndex() + 1));
-    assert(reader.pendingAnchor == "ch2");            // ... but the chapter moved
-    assert(reader.deferrals == 1);
-    assert(reader.section == nullptr);                // forced re-pagination
-
-    // The reader now renders from the anchor, so the visible offset lands in
-    // chapter two; the next tap steps to chapter three.
+    // A page inside chapter two: the offset resolves normally.
     reader.cachedVisibleTextOffset = 1000;
-    assert(reader.currentChapterIndex() == 1);
+    assert(reader.currentChapterIndex() == 2);
     assert(reader.gotoChapterIndex(reader.currentChapterIndex() + 1));
     assert(reader.pendingAnchor == "ch3");
     assert(reader.deferrals == 2);
@@ -150,7 +175,7 @@ int main() {
     // Last chapter: the tap must not move, must not re-paginate and must not
     // report a change (the caller skips the repaint on it).
     reader.cachedVisibleTextOffset = 2000;
-    assert(reader.currentChapterIndex() == 2);
+    assert(reader.currentChapterIndex() == 3);
     assert(!reader.gotoChapterIndex(reader.currentChapterIndex() + 1));
     assert(reader.pendingAnchor == "ch3");
     assert(reader.deferrals == 2);
@@ -163,6 +188,18 @@ int main() {
     assert(!untoc.gotoChapterIndex(1));
     assert(untoc.currentSpineIndex == 0);
     assert(untoc.deferrals == 0);
+  }
+
+  // --- TXT: a TXT with only the title entry has nowhere to step ----------
+  {
+    EpubReaderActivity reader;
+    reader.epub = std::make_shared<Epub>();
+    reader.epub->toc = {{"Book Title", "", 0}};
+    reader.cachedVisibleTextOffset = 0;
+    // Page 0 reads as the first named chapter, and this book has none, so the
+    // step must be a no-op rather than clamping onto the title entry.
+    assert(reader.currentChapterIndex() == 0);
+    assert(!reader.gotoChapterIndex(1));
   }
 
   // --- EPUB: one chapter per spine, no anchor ------------------------------
