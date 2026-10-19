@@ -15,9 +15,8 @@
 
 namespace {
 
-// Atomic JSON write: serialize (streamed) to "<path>.tmp", then rename over the
-// target so a power loss mid-write never corrupts the existing file. Streaming
-// keeps peak heap bounded for large analytics documents.
+// Stream into "<path>.tmp" and reject incomplete output before replacing the target.
+// Streaming avoids a second buffer for large analytics documents.
 bool saveJsonDocumentToFile(const char* moduleName, const char* path, const JsonDocument& doc) {
   if (!path || *path == '\0') {
     LOG_ERR(moduleName, "Missing JSON path for write");
@@ -54,9 +53,9 @@ bool saveJsonDocumentToFile(const char* moduleName, const char* path, const Json
     written = serializeJson(doc, file);
     file.flush();
   }
-  if (written == 0) {
+  if (written == 0 || written != measureJson(doc)) {
     Storage.remove(tempPath.get());
-    LOG_ERR(moduleName, "serializeJson wrote 0 bytes for %s", path);
+    LOG_ERR(moduleName, "Incomplete JSON write for %s", path);
     return false;
   }
 
