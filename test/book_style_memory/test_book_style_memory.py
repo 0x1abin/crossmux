@@ -109,6 +109,25 @@ def case_caller(text, owner, anchor, end_anchor, name):
     return "void TextSettingsActivity::" + name + "() {" + text[brace + 1 : end - 1] + "}"
 
 
+def installer_wiring(text, signature):
+    """Rebuild the reader's font-installer setup as a named method.
+
+    saveFontSelection() only keeps the book's typography out of the settings
+    file when the installer is given the session baseline, so the production
+    lines that hand it over are extracted here instead of being restated: the
+    test fails if the reader stops passing them. The child activity is kept in
+    `installer_` so the probe can then run the installer's own write.
+    """
+    body = method(text, signature)
+    start = body.index("fontInstallLiveStyle_ = captureStyleFromSettings();")
+    end = body.index("startActivityForResult(")
+    return (
+        "bool ReaderActivity::openReaderAutoInstall() {"
+        + body[start:end]
+        + "\n  installer_ = std::move(downloader);\n  return true;\n}"
+    )
+
+
 def anonymous_helpers():
     start = store_cpp.index("constexpr uint8_t kMaxFontPointSize")
     end = store_cpp.index("// Reads an integer key from the JSON object.", start)
@@ -326,11 +345,22 @@ struct ActivityResult {
 };
 
 struct FontDownloadActivity {
+  enum class Purpose { ReaderAutoInstall };
+  enum class StartMode { Normal };
   const BookStyle* sessionGlobal_ = nullptr;
   const BookStyle* sessionLive_ = nullptr;
   bool fontFamilyCommitted_ = false;
+  FontDownloadActivity() = default;
+  // The production constructor: the last two arguments are the session context
+  // the reader hands over (see installer_wiring()).
+  FontDownloadActivity(int, int, Purpose, StartMode, const BookStyle* global, const BookStyle* live)
+      : sessionGlobal_(global), sessionLive_(live) {}
   bool saveFontSelection();
 };
+template <typename T, typename... Args>
+std::unique_ptr<T> makeUniqueNoThrow(Args&&... args) {
+  return std::make_unique<T>(std::forward<Args>(args)...);
+}
 struct ReaderActivity;
 
 // TextSettingsActivity::maybeOfferCompleteChineseFont(): the production body is
@@ -370,6 +400,9 @@ struct ReaderActivity {
   BookStyle fontInstallLiveStyle_;
   int updates = 0;
   bool autoInstallActive = false;
+  int renderer = 0;     // stands in for GfxRenderer& in the extracted wiring
+  int mappedInput = 0;  // stands in for MappedInputManager&
+  std::unique_ptr<FontDownloadActivity> installer_;
 
   void applyBookStyle();
   void saveBookStyle();
@@ -382,7 +415,9 @@ struct ReaderActivity {
   }
   // The reader's own auto-install prompt returns through this handler.
   std::function<void(const ActivityResult&)> handler_;
-  void openReaderAutoInstall();
+  // The reader's own auto-install prompt: the production lines that hand the
+  // installer the session context (extracted below), and its return callback.
+  bool openReaderAutoInstall();
   void requestUpdate() { ++updates; }
   void onReaderAutoInstallReturn(const ActivityResult& result);
 };
@@ -420,6 +455,11 @@ bool BookStyleStore::saveToFile() {
     # that gate is dropped. Their lambdas are turned into named methods because
     # the surrounding activity shells are stubs.
     + installer_caller(epub_cpp, "bool EpubReaderActivity::maybeOfferCompleteChineseFont", "onReaderAutoInstallReturn")
+    + "\n"
+    # The wiring that gives the installer the session baseline, extracted as
+    # written: without it saveFontSelection() falls back to a plain write and
+    # the book's typography lands in the settings file.
+    + installer_wiring(epub_cpp, "bool EpubReaderActivity::maybeOfferCompleteChineseFont")
     + "\n"
     + installer_caller(ts_cpp, "void TextSettingsActivity::maybeOfferCompleteChineseFont",
                        "onFontInstallerReturn")
@@ -1078,6 +1118,44 @@ int main() {
     assert(store.styles.size() == 1);
     std::printf("disk=%d (wanted 12)\n", (unsigned)SETTINGS.persistedFontPointSize);
     SETTINGS.fontPointSize = 12;
+  }
+
+  // 22. Review finding 3: the reader's own auto-install prompt. The installer
+  //     is wired with the production lines (openReaderAutoInstall()) so the
+  //     session baseline it saves through is the real one. This is the
+  //     lineSpacing leak, not the MenuResult::fontFamilyCommitted gate: that
+  //     one decides whether the baseline learns the new family, while this one
+  //     decides whether the book's other fields reach the file at all.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.lineSpacing = 1;                         // global line spacing
+    memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.lineSpacing = 2;                         // this book's line spacing
+    assert(reader.persistBookStyleEdits());
+    assert(store.styles.size() == 1);
+
+    assert(reader.openReaderAutoInstall());
+    assert(reader.installer_->sessionGlobal_ == &reader.globalSettingsSnapshot_);
+    strncpy(SETTINGS.sdFontFamilyName, "DownloadedFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
+    SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+    assert(reader.installer_->saveFontSelection());
+    std::printf("reader auto-install: disk lineSpacing=%u (wanted 1), disk family=%s, live lineSpacing=%u\n",
+                (unsigned)SETTINGS.persistedLineSpacing, SETTINGS.persistedFamily, (unsigned)SETTINGS.lineSpacing);
+    assert(SETTINGS.persistedLineSpacing == 1);       // global retained
+    assert(SETTINGS.lineSpacing == 2);                // session keeps the book's
+
+    reader.onReaderAutoInstallReturn(ActivityResult{MenuResult{-1, 0, 0, false, true}});
+    reader.persistBookStyleEdits();
+    reader.saveBookStyle();                           // the ordinary exit
+    std::printf("reader auto-install then exit: disk lineSpacing=%u (wanted 1), disk family=%s\n",
+                (unsigned)SETTINGS.persistedLineSpacing, SETTINGS.persistedFamily);
+    assert(SETTINGS.persistedLineSpacing == 1);
+    assert(strcmp(SETTINGS.persistedFamily, "DownloadedFamily") == 0);
+    SETTINGS.lineSpacing = 1;
   }
 
   std::puts("book style memory flow passed");
