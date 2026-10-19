@@ -167,7 +167,14 @@ class OptionPopup {
       } else if (input.isPressed(confirm)) {
         ignoreInitialConfirmRelease = true;
       }
-      if (input.isPressed(confirm) || input.wasReleased(confirm)) return true;
+      // Only a release that arrives without a press edge in the same pass is the
+      // inherited contact finishing. MappedInputManager reports a logical Confirm
+      // - one mapped from a home-button action or from a short power press - as
+      // pressed and released at once (MappedInputManager.cpp:510-525), so a fresh
+      // click of that kind carries wasPressed() too. It belongs to this popup and
+      // has to reach handleButtons() below to select, so the release test must
+      // not swallow it.
+      if (input.isPressed(confirm) || (input.wasReleased(confirm) && !input.wasPressed(confirm))) return true;
     }
     if (ignoreInitialConfirmRelease) {
       if (input.wasReleased(confirm)) {

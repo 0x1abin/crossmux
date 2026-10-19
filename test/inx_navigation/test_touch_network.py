@@ -203,6 +203,23 @@ int main(){
     assert(!early.active&&earlyCalls==1);
   }
 
+  // --- fresh logical Confirm: pressed and released in the same pass ------
+  // A Confirm mapped from a home-button action or from a short power press is
+  // reported as pressed and released at once (MappedInputManager.cpp:510-525):
+  // no raw button is left held, so the single click already carries its own
+  // release. It has a fresh press edge, so it belongs to this popup and must
+  // select; only a release with no press edge is the inherited contact ending.
+  {
+    OptionPopup logical;int logicalCalls=0;int logicalPicked=-1;
+    logical.onSelectCallback=[&](int index){++logicalCalls;logicalPicked=index;};
+    logical.finishShow(3,logical.onSelectCallback);
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.released=int(MappedInputManager::Button::Confirm);
+    logical.handleInput(input,update);
+    assert(!logical.confirmBarrierPending&&!logical.ignoreInitialConfirmRelease);
+    assert(!logical.active&&logicalCalls==1&&logicalPicked==3);
+  }
+
   // --- a popup opened with no button down: nothing is pending -----------
   {
     OptionPopup idle;int idleCalls=0;
