@@ -373,6 +373,7 @@ struct BookStyleStore {
   bool saveToFile();
   bool updateStyle(const std::string& bookPath, const BookStyle& style);
   bool removeByPath(const std::string& bookPath);
+  bool clear();
 };
 #define BOOK_STYLES BookStyleStore::getInstance()
 '''
@@ -541,6 +542,8 @@ bool BookStyleStore::saveToFile() {
     + method(store_cpp, "bool BookStyleStore::updateStyle")
     + "\n"
     + method(store_cpp, "bool BookStyleStore::removeByPath")
+    + "\n"
+    + method(store_cpp, "bool BookStyleStore::clear")
     + "\n"
     # The installer's write is the same contract from a child screen.
     + method(font_cpp, "bool FontDownloadActivity::saveFontSelection")
@@ -772,6 +775,55 @@ int main() {
     assert(store.pendingRemoval_.empty());
     RebootedStore rebooted(store.diskContents);
     assert(rebooted.has(kBook));
+  }
+  // 8b. A pending removal is settled by the next write that reaches the file,
+  //     so a later retry cannot report a failure that never happened (the
+  //     clear-style UI surfaces that return value).
+  {
+    store.reset();
+    const std::string other = "/books/two.epub";
+    BookStyle style;
+    style.overrideMask = BookStyle::kFontPointSize;
+    style.fontPointSize = 22;
+    assert(store.updateStyle(kBook, style));
+    assert(store.updateStyle(other, style));
+
+    store.diskOk = false;
+    assert(!store.removeByPath(kBook));       // gone in memory, still on disk
+    assert(store.needsRemovalWrite_);
+    store.diskOk = true;
+    assert(store.updateStyle(other, style));  // this write drops it from disk
+    assert(!store.needsRemovalWrite_);        // so nothing is outstanding
+    assert(store.pendingRemoval_.empty());
+    store.diskOk = false;
+    assert(store.removeByPath(kBook));        // nothing left to write
+    store.diskOk = true;
+
+    // A clear() that reaches the file settles it the same way ...
+    assert(store.removeByPath(other));
+    assert(store.updateStyle(kBook, style));
+    store.diskOk = false;
+    assert(!store.removeByPath(kBook));
+    assert(store.needsRemovalWrite_);
+    store.diskOk = true;
+    assert(store.clear());
+    assert(!store.needsRemovalWrite_);
+    store.diskOk = false;
+    assert(store.removeByPath(kBook));
+    store.diskOk = true;
+
+    // ... and one that fails leaves every entry on disk, so the next removal
+    // has to rewrite the file instead of reporting a silent success.
+    assert(store.updateStyle(kBook, style));
+    assert(store.updateStyle(other, style));
+    store.diskOk = false;
+    assert(!store.clear());
+    store.diskOk = true;
+    assert(store.removeByPath(kBook));
+    RebootedStore after(store.diskContents);
+    assert(!after.has(kBook));
+    assert(!after.has(other));
+    std::printf("pending removal settled: entries after a retried clear=%zu (wanted 0)\n", after.paths.size());
   }
   // 9. Exit: with memory on, exit restores the snapshot into the file and
   //    leaves the session's global baseline in memory. With memory off (no

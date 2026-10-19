@@ -276,9 +276,12 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
   };
 
   std::vector<BookStyleEntry> styles;
-  // A removal whose write failed: the entry is gone from `styles` but the file
-  // still holds it, so a retry must rewrite the file rather than report a
-  // success it never had. Cleared as soon as a write succeeds.
+  // The file may still hold entries this store has already dropped in memory:
+  // a removeByPath() (or a clear(), which drops every entry at once) that
+  // failed to write. A retry must then rewrite the file rather than report a
+  // success it never had. Any write that succeeds rebuilds the file from
+  // `styles`, so it settles the flag. The path names the outstanding removal
+  // for the log; a failed clear() leaves it empty because it drops them all.
   bool needsRemovalWrite_ = false;
   std::string pendingRemoval_;
 
