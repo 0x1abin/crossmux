@@ -770,13 +770,18 @@ void TextSettingsActivity::confirmStyleRow(int row) {
                           static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
                             if (idx == 1) {
                               BOOK_STYLES.removeByPath(*bookPath_);
-                              // The book opened with these overrides applied to
-                              // the in-memory settings; restore the global
-                              // snapshot (when one was taken) so the session
-                              // (and the exit capture) sees the global values
-                              // again. With memory off no snapshot exists and
-                              // the in-memory values are already global.
-                              if (globalSnapshot_) {
+                              // The reader snapshots the global settings on
+                              // enter whether or not memory is on (so that
+                              // switching memory on later has a baseline), so
+                              // a snapshot exists either way. Restoring it is
+                              // only correct while memory is on: SETTINGS then
+                              // carries this book's overrides and the session
+                              // (and the exit capture) must see the global
+                              // values again. With memory off the live values
+                              // ARE the global ones and every edit made here
+                              // is deliberately global, so restoring the
+                              // snapshot would roll those edits back.
+                              if (globalSnapshot_ && SETTINGS.bookStyleMemory) {
                                 applyStyleToSettings(*globalSnapshot_);
                                 saveSettings();
                               }

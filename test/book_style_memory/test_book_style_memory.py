@@ -71,6 +71,24 @@ def installer_caller(text, signature, name):
     return "void " + owner + name + "(const ActivityResult& result) {" + lambda_body + "}"
 
 
+def confirm_caller(text, anchor, name):
+    """Rebuild a popup's confirm callback as a named method.
+
+    Same trick as installer_caller(): the decision lives in a lambda handed to
+    optionPopup_.show(), so take that lambda's body and expose it as a method
+    the shell can call with the chosen option index.
+    """
+    start = text.index(anchor)
+    lambda_start = text.index("[this]", start)
+    brace = text.index("{", lambda_start)
+    depth = 1
+    end = brace + 1
+    while depth:
+        depth += (text[end] == "{") - (text[end] == "}")
+        end += 1
+    return "void TextSettingsActivity::" + name + "(int idx) {" + text[brace + 1 : end - 1] + "}"
+
+
 def anonymous_helpers():
     start = store_cpp.index("constexpr uint8_t kMaxFontPointSize")
     end = store_cpp.index("// Reads an integer key from the JSON object.", start)
@@ -309,6 +327,10 @@ struct TextSettingsActivity {
   }
   void maybeOfferCompleteChineseFont();
   void onFontInstallerReturn(const ActivityResult& result);
+  // The "clear this book's overrides" confirm callback and the screen's own
+  // save path, both production bodies extracted below.
+  void onClearBookStylesConfirm(int idx);
+  void saveSettings();
   std::function<void(const ActivityResult&)> handler_;
   // Simulates the installer's own exit: commit a family (or not) and deliver
   // whatever result that visit produced to this screen.
@@ -394,6 +416,14 @@ void TextSettingsActivity::cancelPrompt() {
   onFontInstallerReturn(result);
 }
 '''
+    # The ClearBookStyles row: its confirm callback decides whether the entered
+    # global snapshot has to be put back, and saveSettings() is the write it
+    # uses. Both are extracted as written so the test fails if the memory guard
+    # is dropped from the callback.
+    + method(ts_cpp, "void TextSettingsActivity::saveSettings")
+    + "\n"
+    + confirm_caller(ts_cpp, "case StyleRow::ClearBookStyles:", "onClearBookStylesConfirm")
+    + "\n"
     + r'''
 // ORDER(5): entry -> snapshot -> persist -> switch-off -> exit/restart -> failure
 int main() {
@@ -851,6 +881,57 @@ int main() {
     FontDownloadActivity installer;
     assert(installer.saveFontSelection());
     assert(SETTINGS.saves == 1);
+  }
+
+  // 18. Clearing this book's overrides with memory OFF must not roll back a
+  //     global edit made in this screen. applyBookStyle() snapshots the global
+  //     settings on enter whether or not memory is on, so "a snapshot exists"
+  //     cannot be the guard: restoring it here would undo the edit and write
+  //     the stale value into the settings file.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 0;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.lineSpacing = 1;
+    ReaderActivity reader;
+    reader.applyBookStyle();                     // snapshot taken anyway
+    assert(reader.globalSettingsSnapshotted_);   // the review's point
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    SETTINGS.fontPointSize = 26;                 // the user's global edit
+    picker.saveSettings();
+    assert(SETTINGS.persistedFontPointSize == 26);
+
+    picker.onClearBookStylesConfirm(1);          // clear this book's overrides
+    assert(SETTINGS.fontPointSize == 26);            // live value untouched
+    assert(SETTINGS.persistedFontPointSize == 26);   // not rolled back to 12
+    std::printf("clear overrides, memory off: disk font=%d (wanted 26)\n",
+                SETTINGS.persistedFontPointSize);
+  }
+
+  // 19. Same row with memory ON: SETTINGS carries this book's overrides, so the
+  //     entered global values do have to come back and reach the file.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.lineSpacing = 1;
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 26;
+    assert(reader.persistBookStyleEdits());      // becomes the book's override
+    BookStyle probe;
+    assert(store.findStyle(kBook, probe));
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    picker.onClearBookStylesConfirm(1);
+    assert(!store.findStyle(kBook, probe));      // the entry is gone
+    assert(SETTINGS.fontPointSize == 12);        // back to the global value
+    assert(SETTINGS.persistedFontPointSize == 12);
+    std::printf("clear overrides, memory on: disk font=%d (wanted 12)\n",
+                SETTINGS.persistedFontPointSize);
   }
 
   std::puts("book style memory flow passed");
