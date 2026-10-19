@@ -173,18 +173,47 @@ bool BookStyleStore::updateStyle(const std::string& bookPath, const BookStyle& s
     // change will not survive a reboot. The low-level writer already logged
     // the specific SD failure; surface the store-level consequence too.
     LOG_ERR("BST", "Failed to persist book style for %s; change lost on reboot", bookPath.c_str());
+  } else if (needsRemovalWrite_ && pendingRemoval_ == bookPath) {
+    // This write put the path back on disk, so a pending removal for it is no
+    // longer outstanding; leaving the flag set would make a later
+    // removeByPath() rewrite the file for nothing.
+    needsRemovalWrite_ = false;
+    pendingRemoval_.clear();
   }
   return saved;
 }
 
 bool BookStyleStore::removeByPath(const std::string& bookPath) {
-  const auto it =
+  auto it =
       std::find_if(styles.begin(), styles.end(), [&](const BookStyleEntry& entry) { return entry.path == bookPath; });
-  if (it == styles.end()) return true;  // nothing to forget
+  if (it == styles.end()) {
+    // No record in memory. That is only success if the file does not hold one
+    // either: a previous call may have dropped the entry in memory and then
+    // failed to write, which leaves the old record on disk. Reporting success
+    // there would make a retry a silent no-op and keep the record forever, so
+    // try again while anything is still stored.
+    if (!needsRemovalWrite_ || pendingRemoval_.empty()) return true;
+    const bool saved = saveToFile();
+    if (saved) {
+      needsRemovalWrite_ = false;
+      pendingRemoval_.clear();
+    } else {
+      LOG_ERR("BST", "Failed to persist removal of book style for %s", pendingRemoval_.c_str());
+    }
+    return saved;
+  }
   styles.erase(it);
   const bool saved = saveToFile();
   if (!saved) {
+    // The in-memory list no longer has the entry, but the file still does. Keep
+    // the fact around so a retry rewrites the file instead of returning a
+    // success that never happened.
+    needsRemovalWrite_ = true;
+    pendingRemoval_ = bookPath;
     LOG_ERR("BST", "Failed to persist removal of book style for %s", bookPath.c_str());
+  } else {
+    needsRemovalWrite_ = false;
+    pendingRemoval_.clear();
   }
   return saved;
 }

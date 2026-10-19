@@ -102,7 +102,14 @@ void ReaderActivity::saveBookStyle() {
   // which persists the store itself; exiting a book no longer snapshots the
   // current settings into the book. Only restore the global snapshot so the
   // in-memory overrides never leak into the next book.
-  if (!globalSettingsSnapshotted_) return;
+  if (!globalSettingsSnapshotted_) {
+    // No snapshot means memory was off when this book opened, so SETTINGS only
+    // ever held the user's global values. Persist them: an in-place edit from a
+    // child screen (night mode, frontlight in the reader menu) may have no
+    // other save point when the device sleeps straight out of that screen.
+    SETTINGS.saveToFile();
+    return;
+  }
   if (SETTINGS.bookStyleMemory) {
     // Memory is still on: roll back to the entered global snapshot so a
     // book's overrides never leak into the next book or the settings file.
@@ -201,6 +208,40 @@ BookStyle ReaderActivity::captureStyleDiff(const BookStyle& globalSnapshot) cons
     overrides.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
   }
   return overrides;
+}
+
+bool ReaderActivity::persistBookStyleEdits() {
+  if (!SETTINGS.bookStyleMemory || !globalSettingsSnapshotted_) return false;
+  const BookStyle overrides = captureStyleDiff(globalSettingsSnapshot_);
+  if (overrides.overrideMask != 0) {
+    BOOK_STYLES.updateStyle(bookPath, overrides);
+  } else {
+    // Everything was reverted to the global values: forget the entry so the
+    // book follows the global settings again.
+    BOOK_STYLES.removeByPath(bookPath);
+  }
+  // Put the entered global values back, persist those, then re-apply the
+  // overrides in memory: the edits live in the book-style store only.
+  applyStyleToSettings(globalSettingsSnapshot_);
+  SETTINGS.saveToFile();
+  if (overrides.overrideMask != 0) applyStyleOverrides(overrides);
+  return true;
+}
+
+void ReaderActivity::saveSettingsKeepingBookStyle() {
+  // Only a live snapshot plus memory on can leave overrides in SETTINGS;
+  // without one, SETTINGS already holds the user's global values.
+  if (!globalSettingsSnapshotted_ || !SETTINGS.bookStyleMemory) {
+    SETTINGS.saveToFile();
+    return;
+  }
+  // The write must carry the entered global typography, but the session must
+  // keep rendering with this book's overrides. Swap the snapshot in for the
+  // write and put the live style back afterwards.
+  const BookStyle liveStyle = snapshotStyleFromSettings();
+  applyStyleToSettings(globalSettingsSnapshot_);
+  SETTINGS.saveToFile();
+  applyStyleToSettings(liveStyle);
 }
 
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }

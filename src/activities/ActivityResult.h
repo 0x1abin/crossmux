@@ -21,6 +21,10 @@ struct MenuResult {
   int action = -1;
   uint8_t orientation = 0;
   uint8_t pageTurnRate = 0;
+  // The menu edits some settings in place (night mode, frontlight) and leaves
+  // persisting them to the reader, which must restore the global typography
+  // snapshot before saving. This tells the reader a save is actually needed.
+  bool settingsDirty = false;
 };
 
 struct ChapterResult {

@@ -79,7 +79,8 @@ void EpubReaderMenuActivity::closeCancelled() {
   result.data =
       MenuResult{-1, pendingOrientation,
                  static_cast<uint8_t>(
-                     selectedPageTurnOption == 0 ? 0 : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption])};
+                     selectedPageTurnOption == 0 ? 0 : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption]),
+                 settingsDirty_};
   setResult(std::move(result));
   finish();
 }
@@ -124,7 +125,11 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
 
   if (selectedAction == MenuAction::NIGHT_MODE) {
     SETTINGS.screenInverted = SETTINGS.screenInverted == 0 ? 1 : 0;
-    SETTINGS.saveToFile();
+    settingsDirty_ = true;
+    // The value applies immediately; the reader persists it on return so the
+    // save can restore the global typography snapshot first (with per-book
+    // memory on, SETTINGS holds this book's overrides, and saving here would
+    // write them into the global settings file).
     requestUpdate();
     return;
   }
@@ -133,7 +138,7 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
     const bool lightOn = !Frontlight.isOn();
     Frontlight.setOn(lightOn);
     SETTINGS.frontlightOn = lightOn ? 1 : 0;
-    SETTINGS.saveToFile();
+    settingsDirty_ = true;
     requestUpdate();
     return;
   }
@@ -141,7 +146,8 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
   setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation,
                        static_cast<uint8_t>(selectedPageTurnOption == 0
                                                 ? 0
-                                                : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption])});
+                                                : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption]),
+                       settingsDirty_});
   finish();
 }
 

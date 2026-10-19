@@ -513,6 +513,13 @@ void EpubReaderActivity::openReaderMenu() {
       [this](const ActivityResult& result) {
         READING_STATS.resumeSession();
         const auto& menu = std::get<MenuResult>(result.data);
+        // The menu leaves night mode / frontlight in SETTINGS unsaved (it edits
+        // them in place). Persist them here, where the global typography
+        // snapshot can be restored first so a book's overrides never reach the
+        // settings file.
+        if (menu.settingsDirty) {
+          saveSettingsKeepingBookStyle();
+        }
         if (SETTINGS.orientation != menu.orientation) {
           applyOrientation(menu.orientation);
         }
@@ -1365,29 +1372,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResultWith<TextSettingsActivity>(
           [this](const ActivityResult&) {
             READING_STATS.resumeSession();
-            if (SETTINGS.bookStyleMemory && globalSettingsSnapshotted_) {
-              // Book override mode: the text settings edited this book's
-              // values in-memory (and wrote the settings file on the way).
-              // Capture the difference against the entered global snapshot as
-              // this book's overrides, restore the settings file to that
-              // snapshot so the edits never leak into the global settings,
-              // then re-apply the overrides so the current session renders
-              // with the edited values immediately.
-              const BookStyle overrides = captureStyleDiff(globalSettingsSnapshot_);
-              if (overrides.overrideMask != 0) {
-                BOOK_STYLES.updateStyle(bookPath, overrides);
-              } else {
-                // Everything was reverted to the global values: forget the
-                // entry so the book follows the global settings again.
-                BOOK_STYLES.removeByPath(bookPath);
-              }
-              applyStyleToSettings(globalSettingsSnapshot_);
-              SETTINGS.saveToFile();
-              if (overrides.overrideMask != 0) applyStyleOverrides(overrides);
-              // Reflow with the overrides without persisting them to the
-              // global settings file: per-book overrides live in the book-style
-              // store only. ensureLoaded() frees and replaces the resident SD
-              // font, so it must hold the render lock like
+            if (persistBookStyleEdits()) {
+              // Book override mode: the edits are now this book's overrides and
+              // the settings file is back on the entered global snapshot.
+              // Reflow with the overrides without persisting them to the global
+              // settings file: per-book overrides live in the book-style store
+              // only. ensureLoaded() frees and replaces the resident SD font,
+              // so it must hold the render lock like
               // applyReaderTextSettings() does.
               RenderLock lock;
               sdFontSystem.ensureLoaded(renderer);
@@ -1645,7 +1636,10 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
 
   if (SETTINGS.orientation != orientation) {
     SETTINGS.orientation = orientation;
-    SETTINGS.saveToFile();
+    // Reflow is a global change, but with per-book memory on SETTINGS also
+    // carries this book's typography overrides; persist the entered global
+    // values so they never reach the settings file.
+    saveSettingsKeepingBookStyle();
   }
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
   appliedOrientation = orientation;
@@ -3242,6 +3236,12 @@ std::string EpubReaderActivity::textRowValue(int row) const {
 // Live apply: persist, re-paginate, and let renderBook() redraw the page with
 // the open panel back on top -- the book itself is the preview.
 void EpubReaderActivity::applyTextSettingLive() {
+  // Capture the edit as this book's override first. persistBookStyleEdits()
+  // puts the global snapshot back into SETTINGS and persists that, then
+  // re-applies the overrides in memory, so the typography the user just picked
+  // is what gets laid out below while the global settings file stays clean.
+  // With per-book memory off it does nothing and the edit persists as global.
+  persistBookStyleEdits();
   applyReaderTextSettings();
   discardOverlayPage();  // the stored page is laid out with the old settings
   requestUpdate();
@@ -3636,13 +3636,19 @@ void EpubReaderActivity::handleOverlayInput() {
         }
         auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(
             renderer, mappedInput, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
-            TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::PreviewOnly);
+            TextSettingsActivity::InitialFontState::Unchanged, TextSettingsActivity::StartMode::PreviewOnly, &bookPath,
+            globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
         if (!textSettings) {
           LOG_ERR("ERS", "OOM allocating text settings");
           overlay = Overlay::Text;
           return;
         }
         startActivityForResult(std::move(textSettings), [this](const ActivityResult&) {
+          // Same contract as the reader menu's text-settings result: with
+          // per-book memory on, the edits become this book's overrides and the
+          // global file keeps the entered snapshot (this also covers the page
+          // where the user turned the switch off).
+          persistBookStyleEdits();
           applyReaderTextSettings();
           overlay = Overlay::Text;  // back to the Text panel
           panelIndex = 0;
@@ -3842,7 +3848,7 @@ void EpubReaderActivity::finishFontPreview() {
       SETTINGS.sdFontFlashPreload = 0;
       break;
   }
-  SETTINGS.saveToFile();
+  saveSettingsKeepingBookStyle();
   if (decision != ReaderFontPreview::Decision::Ask) return;
 
   if (check == SdCardFontCache::Result::TooLarge) {
@@ -3915,7 +3921,7 @@ void EpubReaderActivity::handleFontPreloadPrompt() {
   if (!preload) {
     LOG_ERR("ERS", "OOM allocating font preload activity (%zu bytes)", sizeof(TextSettingsActivity));
     SETTINGS.sdFontFlashPreload = 0;
-    SETTINGS.saveToFile();
+    saveSettingsKeepingBookStyle();
     requestUpdate();
     return;
   }
@@ -4024,7 +4030,7 @@ void EpubReaderActivity::activateMoreRow(int row) {
           SETTINGS.imageScaling < CrossPointSettings::IMAGE_SCALING_COUNT ? SETTINGS.imageScaling : 0;
       const uint8_t next = static_cast<uint8_t>((current + 1) % CrossPointSettings::IMAGE_SCALING_COUNT);
       SETTINGS.imageScaling = next;
-      SETTINGS.saveToFile();
+      saveSettingsKeepingBookStyle();
       imageScalingDirty = true;
       LOG_INF("ERS", "Image scaling -> %s",
               next == CrossPointSettings::IMAGE_SCALING_BILINEAR ? "bilinear" : "nearest");
@@ -4041,7 +4047,11 @@ void EpubReaderActivity::activateMoreRow(int row) {
     }
     case MA::NIGHT_MODE:
       SETTINGS.screenInverted = SETTINGS.screenInverted == 0 ? 1 : 0;
-      SETTINGS.saveToFile();
+      // Night mode is a global setting, but with per-book memory on SETTINGS
+      // currently carries this book's typography overrides: save the entered
+      // global snapshot instead, or the book's font would land in the global
+      // settings file and survive a restart.
+      saveSettingsKeepingBookStyle();
       discardOverlayPage();
       requestUpdate();
       return;
@@ -4049,7 +4059,7 @@ void EpubReaderActivity::activateMoreRow(int row) {
       const bool lightOn = !Frontlight.isOn();
       Frontlight.setOn(lightOn);
       SETTINGS.frontlightOn = lightOn ? 1 : 0;
-      SETTINGS.saveToFile();
+      saveSettingsKeepingBookStyle();
       {
         RenderLock lock;  // the render task shares the framebuffer
         renderOverlay();

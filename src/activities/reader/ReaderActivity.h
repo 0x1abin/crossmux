@@ -74,6 +74,22 @@ class ReaderActivity : public Activity {
   // global").
   BookStyle captureStyleDiff(const BookStyle& globalSnapshot) const;
 
+  // Persists the typography edits of the current session as this book's
+  // overrides, then puts the global snapshot back so they never reach the
+  // global settings file. Every path that edits text settings in the reader
+  // (the reader menu, the reader toolbar and its font page) goes through here,
+  // so both menus behave identically. With memory off, or with no snapshot,
+  // there is nothing book-scoped: the caller persists the edits as global.
+  // Returns true when the edits were turned into book overrides.
+  bool persistBookStyleEdits();
+  // Saves SETTINGS for a change that is NOT a typography edit (night mode,
+  // frontlight, orientation, image scaling, font preload state). With memory
+  // on, SETTINGS holds this book's overrides at that moment; writing them would
+  // put the book's font into the global settings file. This swaps the entered
+  // global snapshot in for the write and puts the book's live style back
+  // afterwards, so the session keeps rendering with the book's typography.
+  void saveSettingsKeepingBookStyle();
+
   BookStyle globalSettingsSnapshot_;
   bool globalSettingsSnapshotted_ = false;
 

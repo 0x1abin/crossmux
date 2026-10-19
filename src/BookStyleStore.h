@@ -130,6 +130,11 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
   };
 
   std::vector<BookStyleEntry> styles;
+  // A removal whose write failed: the entry is gone from `styles` but the file
+  // still holds it, so a retry must rewrite the file rather than report a
+  // success it never had. Cleared as soon as a write succeeds.
+  bool needsRemovalWrite_ = false;
+  std::string pendingRemoval_;
 
   BookStyleStore() = default;
   ~BookStyleStore() = default;
