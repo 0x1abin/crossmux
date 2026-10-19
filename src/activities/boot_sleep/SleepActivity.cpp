@@ -58,13 +58,15 @@ HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
 // the X4/X4 Pro 800x480 glass, whether it carries an SSD1677, UC8179 or UC8279
 // controller. X3 (792x528) and other panels retain the legacy tuning.
 bool useOriginalGrayscaleThresholds() {
+  // Physical panel geometry — logical size rotates with orientation, so accept
+  // the 800x480 glass whichever way round the panel registers its native scan.
+  const bool is800x480 = (display.getDisplayWidth() == 800 && display.getDisplayHeight() == 480) ||
+                         (display.getDisplayWidth() == 480 && display.getDisplayHeight() == 800);
   switch (display.getController()) {
     case HalDisplay::Controller::SSD1677:
-      return true;
     case HalDisplay::Controller::UC8279:
     case HalDisplay::Controller::UC8179:
-      // Physical panel geometry — logical size rotates with orientation.
-      return display.getDisplayWidth() == 800 && display.getDisplayHeight() == 480;
+      return is800x480;
     default:
       return false;
   }

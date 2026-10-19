@@ -61,11 +61,10 @@ HalDisplay display;
 
 def expected(controller, width, height):
     """The thresholds each panel family should get, spelled out independently of the C++."""
-    if controller == "SSD1677":
-        return True  # Every shipping SSD1677 board carries the 800x480 glass.
-    if controller in ("UC8179", "UC8279"):
-        return width == 800 and height == 480
-    return False
+    if controller in ("SSD1677", "UC8179", "UC8279"):
+        # The X4-family 800x480 glass, whichever way round its native scan is registered.
+        return (width, height) in ((800, 480), (480, 800))
+    return False  # UC8253 / UC8279C / ED2208 / IT8951 / LgfxEpd keep the legacy tuning.
 
 
 def method(source, name):
