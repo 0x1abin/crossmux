@@ -288,7 +288,12 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
 
     std::vector<SettingInfo> v;
-    constexpr size_t entryCount = 88
+    // 89 = the upstream 88 plus the bookStyleMemory row this branch adds
+    // outside the capability guards. reserve() is the only thing keeping the C3
+    // build from growing the vector, so a new base entry has to raise this
+    // number in the same commit (SettingsApiKeys checks it for every
+    // capability combination).
+    constexpr size_t entryCount = 89
 #if FREEINK_CAP_FRONTLIGHT
                                   + 1
 #endif
