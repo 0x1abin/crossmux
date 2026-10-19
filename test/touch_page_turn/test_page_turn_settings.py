@@ -10,6 +10,10 @@ covering the stored values, not a re-reading of the switch statements:
     device uses, and come back with the same behaviour;
   * a stored INVERTED_TAP (a save written before the row was folded away) must
     be migrated on load instead of being displayed as "Tap Only" forever;
+  * a mixed gesture pair must survive the migration intact: the side swap
+    follows the legacy INVERTED_TAP in either direction without rewriting the
+    explicitly saved values, so next=3/previous=4 keeps its Disabled previous
+    and next=1/previous=3 still gets the swapped sides;
   * the reader's tap classifier must keep the page-turn direction semantics the
     stock outer-thirds zones had: mirrored reader or right-to-left book swaps
     the sides, the two together cancel, and each direction's own gesture still
@@ -743,6 +747,61 @@ int main() {
       reloadLegacySave(mode.legacy, CrossPointSettings::TAP_ZONE_BOOKMARK);
       expect(SETTINGS.tapZones[0] == CrossPointSettings::TAP_ZONE_BOOKMARK, "legacy mode keeps a custom zone",
              SETTINGS.tapZones[0], CrossPointSettings::TAP_ZONE_BOOKMARK);
+    }
+  }
+
+  // 3c. Mixed pairs from the gesture-pair era, straight from the review: the
+  //     migration must recognise the legacy Inverted Tap (3) in either
+  //     direction -- upstream's classifier swapped the sides when either field
+  //     held it -- while keeping the explicitly saved values untouched. The
+  //     first pair is the review's next=Inverted Tap / previous=Disabled (the
+  //     migration used to rewrite the saved 4 to 3); the second is
+  //     next=Tap Only / previous=Inverted Tap (the entry condition used to
+  //     look at the next direction only, so that save never swapped at all and
+  //     the right edge turned forward instead of back).
+  {
+    const struct {
+      uint8_t page;
+      uint8_t prev;
+      const char* what;
+    } mixedPairs[] = {
+        {CrossPointSettings::INVERTED_TAP, CrossPointSettings::PAGE_TURN_GESTURE_DISABLED, "inverted next, disabled previous"},
+        {CrossPointSettings::TAP_ONLY, CrossPointSettings::INVERTED_TAP, "tap next, inverted previous"},
+    };
+    for (const auto& pair : mixedPairs) {
+      reloadFromDocument(pair.page, pair.prev);
+      expect(SETTINGS.pageTurnGesture == pair.page, "mixed pair keeps the next gesture", SETTINGS.pageTurnGesture,
+             pair.page);
+      expect(SETTINGS.previousPageGesture == pair.prev, "mixed pair keeps the previous gesture",
+             SETTINGS.previousPageGesture, pair.prev);
+      expect(SETTINGS.tapZones[0] == CrossPointSettings::TAP_ZONE_NEXT, "mixed pair swaps the stock zones",
+             SETTINGS.tapZones[0], CrossPointSettings::TAP_ZONE_NEXT);
+      // With the swapped stock grid the right edge goes back and the left edge
+      // forward, each gated by its own direction's gesture.
+      GfxRenderer renderer;
+      const Turn right = tapAt(renderer, 460, 400);
+      const Turn left = tapAt(renderer, 20, 400);
+      const bool rightTurns = pair.prev != CrossPointSettings::PAGE_TURN_GESTURE_DISABLED;
+      const bool leftTurns = pair.page != CrossPointSettings::PAGE_TURN_GESTURE_DISABLED;
+      expect(right.prev == rightTurns, "mixed pair: the right edge follows the previous gesture", right.prev,
+             rightTurns);
+      expect(!right.next, "mixed pair: the right edge is not the forward side", right.next, 0);
+      expect(left.next == leftTurns, "mixed pair: the left edge follows the next gesture", left.next, leftTurns);
+      expect(!left.prev, "mixed pair: the left edge is not the backward side", left.prev, 0);
+      // A resave carries the gesture pair and the version key (toJson() writes
+      // it), so the second load must leave the pair and the swapped zones alone.
+      JsonDocument afterResave;
+      afterResave.set("touchReaderControls", TOUCH_READER_ON);
+      afterResave.set("pageTurnGesture", SETTINGS.pageTurnGesture);
+      afterResave.set("previousPageGesture", SETTINGS.previousPageGesture);
+      afterResave.set("touchControlsVersion", TOUCH_CONTROLS_VERSION);
+      loadSettingsDocument(afterResave);
+      expect(SETTINGS.pageTurnGesture == pair.page, "mixed pair: a resave keeps the next gesture",
+             SETTINGS.pageTurnGesture, pair.page);
+      expect(SETTINGS.previousPageGesture == pair.prev, "mixed pair: a resave keeps the previous gesture",
+             SETTINGS.previousPageGesture, pair.prev);
+      expect(SETTINGS.tapZones[0] == CrossPointSettings::TAP_ZONE_NEXT, "mixed pair: a resave does not swap again",
+             SETTINGS.tapZones[0], CrossPointSettings::TAP_ZONE_NEXT);
     }
   }
 
