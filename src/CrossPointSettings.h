@@ -691,6 +691,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   bool loadFromFile();
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
+  // Touch page-turn gestures: folds the legacy combined touch mode and the
+  // removed Inverted Tap value into the per-direction gesture pair. Split out
+  // of fromJson() so the migration can be exercised on its own.
+  bool loadTouchGestureSettings(JsonVariantConst doc);
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
   static uint8_t sleepTimeoutEnumToMinutes(uint8_t legacyValue);

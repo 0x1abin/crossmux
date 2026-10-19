@@ -49,6 +49,11 @@ struct SettingInfo {
   std::vector<std::string> enumStringValues;  // runtime alternative to StrId enumValues (for SD card fonts etc.)
   SettingAction action = SettingAction::None;
 
+  // Number of stored values an ENUM may hold when that is more than the number
+  // of rows it shows (0 = same as the row count). Used on load to clamp a stored
+  // byte, so a value the UI folds onto one row must still live here.
+  uint8_t enumValueCount = 0;
+
   struct ValueRange {
     int16_t min;
     int16_t max;
@@ -177,13 +182,22 @@ struct SettingInfo {
     return s;
   }
 
+  // field (optional) names the stored byte behind the getter/setter pair. With
+  // it the entry also persists under key like a pointer-bound enum; without it
+  // the entry is UI-only (the KOReader dialog), which is what every pre-existing
+  // caller wants. valueCount (optional) is the number of storable values when
+  // that exceeds the number of rows, e.g. the page-turn rows that are four but
+  // must keep a stored INVERTED_TAP (3) alive next to Disabled (4).
   static SettingInfo DynamicEnum(StrId nameId, std::vector<StrId> values, std::function<uint8_t()> getter,
                                  std::function<void(uint8_t)> setter, const char* key = nullptr,
-                                 StrId category = StrId::STR_NONE_OPT) {
+                                 StrId category = StrId::STR_NONE_OPT, uint8_t CrossPointSettings::* field = nullptr,
+                                 uint8_t valueCount = 0) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::ENUM;
+    s.valuePtr = field;
     s.enumValues = std::move(values);
+    s.enumValueCount = valueCount;
     s.valueGetter = std::move(getter);
     s.valueSetter = std::move(setter);
     s.key = key;

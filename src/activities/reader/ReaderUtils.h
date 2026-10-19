@@ -385,14 +385,28 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     }
   }
 
+  // A zone's action is stored in reader space, i.e. the same space as the
+  // swipe directions above: zone PREV means "the direction the book reads
+  // toward its beginning". mirrored already folds pageTurnDirection and the
+  // right-to-left book together, and it is the only thing that swaps the tap
+  // sides — mapping the zone straight to prev/next would drop both, which is
+  // how the stock outer-thirds grid silently lost RTL and reversed taps.
+  // (mirrored itself is relative to pageTurnDirection, so this must use it
+  // directly.) The per-direction gesture gate follows the destination slot:
+  // a tap that now goes forward obeys the forward gesture.
   const uint8_t action = zoneShortAction(zone);
   switch (action) {
     case CrossPointSettings::TAP_ZONE_PREV:
-      if (gestureAllowsTap(SETTINGS.previousPageGesture)) result.prev = true;
+    case CrossPointSettings::TAP_ZONE_NEXT: {
+      const bool zoneNext = action == CrossPointSettings::TAP_ZONE_NEXT;
+      const bool next = zoneNext != mirrored;
+      if (next) {
+        if (gestureAllowsTap(SETTINGS.pageTurnGesture)) result.next = true;
+      } else if (gestureAllowsTap(SETTINGS.previousPageGesture)) {
+        result.prev = true;
+      }
       break;
-    case CrossPointSettings::TAP_ZONE_NEXT:
-      if (gestureAllowsTap(SETTINGS.pageTurnGesture)) result.next = true;
-      break;
+    }
     case CrossPointSettings::TAP_ZONE_MENU:
       // Handed to the reader activity: the short-press path opens the reader
       // menu (gated on showReaderMenu == READER_MENU_TAP). The center-third

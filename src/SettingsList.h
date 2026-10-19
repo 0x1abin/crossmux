@@ -256,6 +256,52 @@ inline SettingInfo buildShortPowerButtonSetting() {
                                   setShortPowerButtonFromDisplayValue, "shortPwrBtn", StrId::STR_CAT_CONTROLS);
 }
 
+// Per-direction page-turn gestures. The list offers four rows but the stored
+// enum is not the row index: the list dropped Inverted Tap, so DISABLED must
+// keep its stored value 4 while displaying as row 3. Writing the row index
+// directly (the Enum setting's default) stored 3, which is INVERTED_TAP and
+// still passes gestureAllowsTap(), so "Disabled" kept turning pages.
+inline std::vector<StrId> pageTurnGestureValues() {
+  static constexpr StrId VALUES[] = {StrId::STR_TAP_AND_SWIPE, StrId::STR_TAP_ONLY, StrId::STR_SWIPE_ONLY,
+                                     StrId::STR_DISABLED};
+  return {VALUES, VALUES + std::size(VALUES)};
+}
+
+inline uint8_t pageTurnGestureDisplayValue(const uint8_t stored) {
+  switch (stored) {
+    case CrossPointSettings::TAP_AND_SWIPE:
+      return 0;
+    case CrossPointSettings::TAP_ONLY:
+      return 1;
+    case CrossPointSettings::SWIPE_ONLY:
+      return 2;
+    case CrossPointSettings::PAGE_TURN_GESTURE_DISABLED:
+      return 3;
+    default:
+      // Saves from before Inverted Tap was folded away (and any out-of-range
+      // value) act as a tap page turn; show the row that matches the behaviour
+      // so the row the user sees is the row that is in effect.
+      return 1;
+  }
+}
+
+inline void setPageTurnGestureFromDisplayValue(uint8_t& field, const uint8_t displayValue) {
+  switch (displayValue) {
+    case 0:
+      field = CrossPointSettings::TAP_AND_SWIPE;
+      return;
+    case 1:
+      field = CrossPointSettings::TAP_ONLY;
+      return;
+    case 2:
+      field = CrossPointSettings::SWIPE_ONLY;
+      return;
+    default:
+      field = CrossPointSettings::PAGE_TURN_GESTURE_DISABLED;
+      return;
+  }
+}
+
 inline std::vector<StrId> homeThemeValues() {
   static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC,       StrId::STR_THEME_LYRA,
                                      StrId::STR_THEME_LYRA_EXTENDED, StrId::STR_THEME_ROUNDEDRAFF,
@@ -498,12 +544,17 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           "sideButtonLayout", StrId::STR_CAT_CONTROLS),
         SettingInfo::Toggle(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
                             "touchReaderControls", StrId::STR_CAT_CONTROLS),
-        SettingInfo::Enum(StrId::STR_NEXT_PAGE_GESTURE, &CrossPointSettings::pageTurnGesture,
-                          {StrId::STR_TAP_AND_SWIPE, StrId::STR_TAP_ONLY, StrId::STR_SWIPE_ONLY, StrId::STR_DISABLED},
-                          "pageTurnGesture", StrId::STR_CAT_CONTROLS),
-        SettingInfo::Enum(StrId::STR_PREV_PAGE_GESTURE, &CrossPointSettings::previousPageGesture,
-                          {StrId::STR_TAP_AND_SWIPE, StrId::STR_TAP_ONLY, StrId::STR_SWIPE_ONLY, StrId::STR_DISABLED},
-                          "previousPageGesture", StrId::STR_CAT_CONTROLS),
+        SettingInfo::DynamicEnum(
+            StrId::STR_NEXT_PAGE_GESTURE, pageTurnGestureValues(),
+            [] { return pageTurnGestureDisplayValue(SETTINGS.pageTurnGesture); },
+            [](const uint8_t d) { setPageTurnGestureFromDisplayValue(SETTINGS.pageTurnGesture, d); }, "pageTurnGesture",
+            StrId::STR_CAT_CONTROLS, &CrossPointSettings::pageTurnGesture, CrossPointSettings::PAGE_TURN_GESTURE_COUNT),
+        SettingInfo::DynamicEnum(
+            StrId::STR_PREV_PAGE_GESTURE, pageTurnGestureValues(),
+            [] { return pageTurnGestureDisplayValue(SETTINGS.previousPageGesture); },
+            [](const uint8_t d) { setPageTurnGestureFromDisplayValue(SETTINGS.previousPageGesture, d); },
+            "previousPageGesture", StrId::STR_CAT_CONTROLS, &CrossPointSettings::previousPageGesture,
+            CrossPointSettings::PAGE_TURN_GESTURE_COUNT),
     });
     v.insert(v.end(), {
         SettingInfo::Action(StrId::STR_TAP_ZONES, SettingAction::TapZones, StrId::STR_CAT_CONTROLS),

@@ -97,10 +97,6 @@ void TapZoneSettingsActivity::onExit() {
 }
 
 void TapZoneSettingsActivity::loop() {
-  const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  const int screenH = renderer.getScreenHeight();
-  const int screenW = renderer.getScreenWidth();
-
   if (popup_.isActive()) {
     // ---- Picker mode: the shared option dialog owns all input ----
     popup_.handleInput(mappedInput, [this] { requestUpdate(); });
@@ -111,10 +107,7 @@ void TapZoneSettingsActivity::loop() {
   int tapX = 0;
   int tapY = 0;
   if (mappedInput.wasScreenTapped(tapX, tapY)) {
-    // The grid ends above the bottom button-hint row, so hints never overlap a
-    // painted cell and every painted cell is tappable (draw == hit).
-    const ReaderUtils::TapZoneGrid grid(screenW, screenH - hintH);
-    const int zone = grid.zoneAt(tapX, tapY);
+    const int zone = zoneAtPoint(tapX, tapY);
     if (zone >= 0) {
       openPopup(static_cast<uint8_t>(zone));
     }
@@ -179,15 +172,28 @@ static int wrapLabel(const GfxRenderer& renderer, const int font, const char* te
   return count;
 }
 
+// The editor hit-tests the rects it paints, in the same grid the reader uses:
+// both build ReaderUtils::TapZoneGrid from the whole display. On a device that
+// really draws the bottom button-hint row (no touch controller and hints on)
+// the row is carved out, because a tap landing under it is swallowed by the
+// hint bar and cannot select the zone painted there.
+int TapZoneSettingsActivity::zoneAtPoint(const int x, const int y) const {
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+  if (x < 0 || y < 0 || x >= screenW || y >= screenH) return -1;
+  const int hintH = GUI.hintsRowDrawn() ? UITheme::getInstance().getMetrics().buttonHintsHeight : 0;
+  if (hintH > 0 && y >= screenH - hintH) return -1;
+  return ReaderUtils::TapZoneGrid(screenW, screenH).zoneAt(x, y);
+}
+
 void TapZoneSettingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  // 15-zone grid ending above the bottom button-hint row: cells use exactly
-  // the rectangles the hit-test uses here and the reader uses (same
-  // ReaderUtils::TapZoneGrid safe margin, visible gaps and integer sizes), so
-  // painted zones and tap areas agree and hints never cover a cell.
-  const int hintH = UITheme::getInstance().getMetrics().buttonHintsHeight;
-  const ReaderUtils::TapZoneGrid grid(renderer.getScreenWidth(), renderer.getScreenHeight() - hintH);
+  // 15-zone grid on the whole display, exactly the grid the reader hit-tests
+  // (ReaderUtils::tapZoneAt() covers the full screen: the reading surface has
+  // no button-hint row). Painting a shorter grid here would label every zone
+  // below the shortened area with the wrong index.
+  const ReaderUtils::TapZoneGrid grid(renderer.getScreenWidth(), renderer.getScreenHeight());
 
   // Main 3x3 grid, dashed outlines.
   for (int row = 0; row < 3; ++row) {

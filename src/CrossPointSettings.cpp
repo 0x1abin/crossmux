@@ -391,9 +391,15 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       const uint8_t fieldDefault = s.*(info.valuePtr);  // struct-initializer default, read before we overwrite it
       uint8_t v = doc[info.key] | fieldDefault;
       if (info.type == SettingType::ENUM) {
-        const uint8_t count = info.valuePtr == &CrossPointSettings::uiTheme
-                                  ? static_cast<uint8_t>(COVER_GRID + 1)
-                                  : static_cast<uint8_t>(info.enumLabels().size());
+        // Clamp against the stored-value range, not the number of rows the UI
+        // shows: a row can be worth more than one stored value. The page-turn
+        // gestures are the case that matters -- the rows are four, but a save
+        // may also hold INVERTED_TAP (3), and the count must stay below the
+        // value that means Disabled (4), or a reload rewrites it to the
+        // default and the setting silently reverts.
+        const uint8_t count = info.valuePtr == &CrossPointSettings::uiTheme ? static_cast<uint8_t>(COVER_GRID + 1)
+                              : info.enumValueCount != 0 ? info.enumValueCount
+                                                         : static_cast<uint8_t>(info.enumLabels().size());
         v = clamp(v, count, fieldDefault);
       } else if (info.type == SettingType::TOGGLE) {
         v = clamp(v, (uint8_t)2, fieldDefault);
@@ -422,67 +428,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   paragraphIndentSpaces = migrateParagraphIndentSpaces(hasSavedWidth, savedWidth);
   if (!hasSavedWidth || savedWidth < 0 || savedWidth > 5) needsResave = true;
 
-  // Older files stored one combined touch mode under "touchReaderControls":
-  // 0=off, 1=tap, 2=swipe, 3=inverted tap. Split it into the master toggle
-  // plus the per-direction gesture pair (the generic loop above already folded
-  // out-of-range toggle values back to the On default).
-  if (doc["pageTurnGesture"].isNull() && doc["previousPageGesture"].isNull() &&
-      doc["touchReaderControls"].is<uint8_t>()) {
-    const uint8_t mode = doc["touchReaderControls"].as<uint8_t>();
-    if (mode >= 1 && mode <= 3) {
-      touchReaderControls = TOUCH_READER_ON;
-      pageTurnGesture = mode == 1 ? TAP_ONLY : mode == 2 ? SWIPE_ONLY : INVERTED_TAP;
-      previousPageGesture = pageTurnGesture;
-      needsResave = true;
-    }
-  }
-
-  // Touch reader gestures: the single touchReaderControls selector (Off / Tap /
-  // Swipe / Inverted Tap) folded into the per-direction gesture pair. The
-  // SettingsList loop above already collapsed the old value to Off/On; read the
-  // raw document here to recover which legacy mode to preserve. v1 saves may
-  // also hold the now-removed Inverted Tap gesture (legacy value 3), which
-  // folds to Tap Only. Saves from the gesture-pair era have no
-  // touchReaderControls key at all and are left untouched (the key check keeps
-  // a version bump from re-running the migration against them). Saves that
-  // already carry the per-direction gesture keys are also left untouched, so a
-  // user-configured gesture survives reloads (the version key is never written,
-  // otherwise every boot would re-enter this migration and fold the gestures
-  // back to Tap Only).
-  if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
-      !doc["touchReaderControls"].isNull() && doc["pageTurnGesture"].isNull()) {
-    const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
-    if (legacyTouch == LEGACY_TOUCH_SWIPE) {
-      pageTurnGesture = SWIPE_ONLY;
-      previousPageGesture = SWIPE_ONLY;
-    } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP) {
-      pageTurnGesture = TAP_ONLY;
-      previousPageGesture = TAP_ONLY;
-      // Legacy Inverted Tap swapped the page-turn sides (right edge = previous,
-      // left edge = next). Keep that behaviour for saves that never had custom
-      // zones; a save with its own tapZones is preserved untouched.
-      if (doc["tapZones"].isNull()) {
-        for (uint8_t i = 0; i < 9; ++i) {
-          if (tapZones[i] == TAP_ZONE_PREV) {
-            tapZones[i] = TAP_ZONE_NEXT;
-          } else if (tapZones[i] == TAP_ZONE_NEXT) {
-            tapZones[i] = TAP_ZONE_PREV;
-          }
-        }
-      }
-    } else if (legacyTouch != TOUCH_READER_OFF) {
-      // Legacy Tap mode: taps only, same zones on both directions.
-      pageTurnGesture = TAP_ONLY;
-      previousPageGesture = TAP_ONLY;
-    }
-    needsResave = true;
-  }
-  // Older saves from the gesture-pair era wrote only pageTurnGesture; give the
-  // previous direction the same mode instead of silently defaulting it.
-  if (doc["previousPageGesture"].isNull()) {
-    previousPageGesture = pageTurnGesture;
-    needsResave = true;
-  }
+  // Touch gesture pair: legacy combined modes and the folded-away Inverted Tap
+  // value are migrated there, in the same order as the rest of the load.
+  if (loadTouchGestureSettings(doc)) needsResave = true;
 
   if (doc["sleepTimeoutMinutes"].isNull() && !doc["sleepTimeout"].isNull()) {
     const uint8_t legacyValue =
@@ -676,6 +624,82 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   LOG_DBG("CPS", "Settings loaded from file");
 
   return true;
+}
+
+bool CrossPointSettings::loadTouchGestureSettings(JsonVariantConst doc) {
+  CrossPointSettings& s = *this;
+  bool needsResave = false;
+
+  // Older files stored one combined touch mode under "touchReaderControls":
+  // 0=off, 1=tap, 2=swipe, 3=inverted tap. Split it into the master toggle
+  // plus the per-direction gesture pair (the generic loop above already folded
+  // out-of-range toggle values back to the On default).
+  if (doc["pageTurnGesture"].isNull() && doc["previousPageGesture"].isNull() &&
+      doc["touchReaderControls"].is<uint8_t>()) {
+    const uint8_t mode = doc["touchReaderControls"].as<uint8_t>();
+    if (mode >= 1 && mode <= 3) {
+      touchReaderControls = TOUCH_READER_ON;
+      pageTurnGesture = mode == 1 ? TAP_ONLY : mode == 2 ? SWIPE_ONLY : INVERTED_TAP;
+      previousPageGesture = pageTurnGesture;
+      needsResave = true;
+    }
+  }
+
+  // Touch reader gestures: the single touchReaderControls selector (Off / Tap /
+  // Swipe / Inverted Tap) folded into the per-direction gesture pair. The
+  // SettingsList loop above already collapsed the old value to Off/On; read the
+  // raw document here to recover which legacy mode to preserve. v1 saves may
+  // also hold the now-removed Inverted Tap gesture (legacy value 3), which
+  // folds to Tap Only. Saves from the gesture-pair era have no
+  // touchReaderControls key at all and are left untouched (the key check keeps
+  // a version bump from re-running the migration against them). Saves that
+  // already carry the per-direction gesture keys are also left untouched, so a
+  // user-configured gesture survives reloads (the version key is never written,
+  // otherwise every boot would re-enter this migration and fold the gestures
+  // back to Tap Only).
+  if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
+      !doc["touchReaderControls"].isNull() && doc["pageTurnGesture"].isNull()) {
+    const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
+    if (legacyTouch == LEGACY_TOUCH_SWIPE) {
+      pageTurnGesture = SWIPE_ONLY;
+      previousPageGesture = SWIPE_ONLY;
+    } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP) {
+      // Legacy Inverted Tap is tap-only on both directions, and it swapped the
+      // page-turn sides (right edge = previous, left edge = next). Keep the
+      // swapped zones for saves that never had custom ones; a save with its own
+      // tapZones is preserved untouched.
+      pageTurnGesture = INVERTED_TAP;
+      previousPageGesture = INVERTED_TAP;
+      if (doc["tapZones"].isNull()) {
+        for (uint8_t i = 0; i < 9; ++i) {
+          if (tapZones[i] == TAP_ZONE_PREV) {
+            tapZones[i] = TAP_ZONE_NEXT;
+          } else if (tapZones[i] == TAP_ZONE_NEXT) {
+            tapZones[i] = TAP_ZONE_PREV;
+          }
+        }
+      }
+    } else if (legacyTouch != TOUCH_READER_OFF) {
+      // Legacy Tap mode: taps only, same zones on both directions.
+      pageTurnGesture = TAP_ONLY;
+      previousPageGesture = TAP_ONLY;
+    }
+    needsResave = true;
+  }
+  // A save may still hold the removed Inverted Tap gesture (3). Its sides are
+  // part of the legacy touch mode handled above (which also swaps the zones),
+  // so keep it verbatim: it behaves like Tap Only, but folding it to a
+  // different stored value here would make the next save silently drop the
+  // distinction before the user ever touches the setting. The settings row
+  // shows it as Tap Only either way (pageTurnGestureDisplayValue).
+  // Older saves from the gesture-pair era wrote only pageTurnGesture; give the
+  // previous direction the same mode instead of silently defaulting it.
+  if (doc["previousPageGesture"].isNull()) {
+    previousPageGesture = pageTurnGesture;
+    needsResave = true;
+  }
+
+  return needsResave;
 }
 
 bool CrossPointSettings::loadFromFile() {

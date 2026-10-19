@@ -37,6 +37,12 @@ class TapZoneSettingsActivity final : public Activity {
   uint8_t popupOptions_[17] = {};
   int popupOptionCount_ = 0;
 
+  // Zone index at a screen point, or -1. Hit-tests the same grid the reader
+  // uses, but a device whose button-hint row is really drawn (no touch
+  // controller, hints enabled) cannot tap what that row covers, so the row is
+  // excluded there instead of offering zones that never receive a tap.
+  int zoneAtPoint(int x, int y) const;
+
   void moveSelection(int deltaX, int deltaY);
   void openPopup(uint8_t zone);
   void showPopupSection();
