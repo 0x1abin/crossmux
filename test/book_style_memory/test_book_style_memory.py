@@ -89,6 +89,26 @@ def confirm_caller(text, anchor, name):
     return "void TextSettingsActivity::" + name + "(int idx) {" + text[brace + 1 : end - 1] + "}"
 
 
+def case_caller(text, owner, anchor, end_anchor, name):
+    """Rebuild a switch case as a named method.
+
+    The memory row's decision is a `case` in confirmStyleRow(), so - like the
+    lambdas above - its body is taken as written and exposed as a method the
+    shell can call. `owner` pins which function the case belongs to: the row
+    appears in several switches (the row painter and the key handler).
+    """
+    start = text.index(owner)
+    start = text.index(anchor, start)
+    brace = text.index("{", start)
+    depth = 1
+    end = brace + 1
+    while depth:
+        depth += (text[end] == "{") - (text[end] == "}")
+        end += 1
+    assert end_anchor not in text[brace:end], "the extracted case ran past its own body"
+    return "void TextSettingsActivity::" + name + "() {" + text[brace + 1 : end - 1] + "}"
+
+
 def anonymous_helpers():
     start = store_cpp.index("constexpr uint8_t kMaxFontPointSize")
     end = store_cpp.index("// Reads an integer key from the JSON object.", start)
@@ -145,12 +165,14 @@ struct {
   bool saveOk = true;
   int persistedFontPointSize = -1;  // what the last write put in the file
   int persistedLineSpacing = -1;
+  int persistedBookStyleMemory = -1;
   char persistedFamily[32] = "";
   bool saveToFile() {
     ++saves;
     if (!saveOk) return false;
     persistedFontPointSize = fontPointSize;
     persistedLineSpacing = lineSpacing;
+    persistedBookStyleMemory = bookStyleMemory;
     memcpy(persistedFamily, sdFontFamilyName, sizeof(persistedFamily));
     return true;
   }
@@ -330,6 +352,8 @@ struct TextSettingsActivity {
   // The "clear this book's overrides" confirm callback and the screen's own
   // save path, both production bodies extracted below.
   void onClearBookStylesConfirm(int idx);
+  // The "Per-book style memory" row: production body extracted below.
+  void toggleBookStyleMemory();
   void saveSettings();
   std::function<void(const ActivityResult&)> handler_;
   // Simulates the installer's own exit: commit a family (or not) and deliver
@@ -421,6 +445,9 @@ void TextSettingsActivity::cancelPrompt() {
     # uses. Both are extracted as written so the test fails if the memory guard
     # is dropped from the callback.
     + method(ts_cpp, "void TextSettingsActivity::saveSettings")
+    + "\n"
+    + case_caller(ts_cpp, "void TextSettingsActivity::confirmStyleRow", "case StyleRow::BookStyleMemory:",
+                  "case StyleRow::ClearBookStyles:", "toggleBookStyleMemory")
     + "\n"
     + confirm_caller(ts_cpp, "case StyleRow::ClearBookStyles:", "onClearBookStylesConfirm")
     + "\n"
@@ -932,6 +959,29 @@ int main() {
     assert(SETTINGS.persistedFontPointSize == 12);
     std::printf("clear overrides, memory on: disk font=%d (wanted 12)\n",
                 SETTINGS.persistedFontPointSize);
+  }
+
+  // 20. Review finding 1: the memory row toggled from the standalone Text
+  //     Settings. There is no book session behind the screen, so
+  //     bookOverrideMode() is false; the switch is still an ordinary setting and
+  //     must reach the file on its own.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.persistedBookStyleMemory = 1;  // what the file says right now
+    SETTINGS.saves = 0;
+    TextSettingsActivity standalone;        // bookPath_/globalSnapshot_ null
+    assert(!standalone.bookOverrideMode());
+    standalone.toggleBookStyleMemory();     // the production row, as written
+    assert(SETTINGS.bookStyleMemory == 0);
+    assert(SETTINGS.saves == 1);            // wrote, did not skip
+    assert(SETTINGS.persistedBookStyleMemory == 0);  // and the file changed
+    standalone.toggleBookStyleMemory();     // and back on
+    assert(SETTINGS.bookStyleMemory == 1);
+    assert(SETTINGS.saves == 2);
+    assert(SETTINGS.persistedBookStyleMemory == 1);
+    std::printf("standalone toggle: writes=%d (wanted 2), disk bookStyleMemory=%d (wanted back to 1)\n", SETTINGS.saves,
+                SETTINGS.persistedBookStyleMemory);
   }
 
   std::puts("book style memory flow passed");
