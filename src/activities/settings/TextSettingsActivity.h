@@ -98,6 +98,11 @@ class TextSettingsActivity final : public UiTabListActivity {
   // Repopulates sizes_ (and currentSizeIndex_) from the active family's
   // installed point sizes. Call after any family change.
   void rebuildSizeList();
+  // Re-points currentFamilyIndex_/currentSizeIndex_ at whatever SETTINGS holds
+  // now. Every path that swaps the live typography behind the screen's back
+  // (the memory switch, clearing this book's overrides) has to call it, or the
+  // checked rows stop matching and tapping the selected row is a no-op.
+  void syncSelectionFromSettings();
   // Every SETTINGS write in this screen goes through here. With per-book memory
   // on, SETTINGS carries this book's typography and only the entered global
   // values may reach the settings file (BookStyleStore.h contract).

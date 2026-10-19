@@ -164,19 +164,7 @@ void TextSettingsActivity::onEnter() {
     }
   }
 
-  rebuildSizeList();
-
-  currentFamilyIndex_ = 0;
-  for (int i = 0; i < static_cast<int>(fonts_.size()); i++) {
-    const auto& font = fonts_[i];
-    const bool selected = font.isBuiltin
-                              ? SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily
-                              : font.name == SETTINGS.sdFontFamilyName;
-    if (selected) {
-      currentFamilyIndex_ = i;
-      break;
-    }
-  }
+  syncSelectionFromSettings();
   initialFamilyIndex_ = currentFamilyIndex_;
   initialPointSize_ = SETTINGS.fontPointSize;
   initialSdFontFlashPreload_ = SETTINGS.sdFontFlashPreload;
@@ -259,6 +247,26 @@ void TextSettingsActivity::rebuildSizeList() {
     snprintf(label, sizeof(label), "%u pt", pt);
     if (pt == selectedPt) currentSizeIndex_ = static_cast<int>(sizes_.size());
     sizes_.push_back({label, pt});
+  }
+}
+
+// The Family/Size rows mark `currentFamilyIndex_`/`currentSizeIndex_` as the
+// selected ones, and tapping a row that is already "selected" does nothing, so
+// anything that swaps the typography in SETTINGS behind this screen's back has
+// to re-point them instead of leaving the rows at the values the screen was
+// entered with.
+void TextSettingsActivity::syncSelectionFromSettings() {
+  rebuildSizeList();
+  currentFamilyIndex_ = 0;
+  for (int i = 0; i < static_cast<int>(fonts_.size()); i++) {
+    const auto& font = fonts_[i];
+    const bool selected = font.isBuiltin
+                              ? SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily
+                              : font.name == SETTINGS.sdFontFamilyName;
+    if (selected) {
+      currentFamilyIndex_ = i;
+      break;
+    }
   }
 }
 
@@ -757,6 +765,10 @@ void TextSettingsActivity::confirmStyleRow(int row) {
         // refreshes the session baseline and restores the remembered overrides
         // on switch-on (BookStyleStore.h).
         applyBookStyleMemoryToggle(*bookPath_, *globalSnapshot_, wasOn);
+        // The toggle swapped the typography in SETTINGS (global values back on
+        // switch-off, this book's overrides on switch-on), so the rows have to
+        // follow it or they keep marking the values it just replaced.
+        syncSelectionFromSettings();
       }
       // Persisted in both contexts: opened from global Settings there is no book
       // baseline, and the toggle is an ordinary setting that must survive a
@@ -787,6 +799,9 @@ void TextSettingsActivity::confirmStyleRow(int row) {
                               if (globalSnapshot_ && SETTINGS.bookStyleMemory) {
                                 applyStyleToSettings(*globalSnapshot_);
                                 saveSettings();
+                                // The snapshot put the global typography back,
+                                // so the rows have to point at it.
+                                syncSelectionFromSettings();
                               }
                             }
                           });

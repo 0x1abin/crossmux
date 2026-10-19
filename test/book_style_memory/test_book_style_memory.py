@@ -227,6 +227,42 @@ namespace readingGuideLine {
 enum class Style : uint8_t { ShortDash = 0, Count = 3 };
 }
 
+// --- the two font families the text settings screen shows -------------------
+// The builtin family and the SD one ship different point sizes, so a family
+// switch is visible in the Size tab's list and in its selected index.
+struct SdCardFontRegistry {};
+std::vector<uint8_t> readerFontPointSizes(const SdCardFontRegistry*, const char* sdFamilyName) {
+  if (sdFamilyName && sdFamilyName[0] != '\0') return {16, 22};  // "BookFamily"
+  return {12, 18, 26};                                          // the builtin
+}
+// Same tie-breaking as the production snapToNearestPointSize(): strictly-less
+// keeps the smaller of two equally close sizes.
+uint8_t snapToNearestPointSize(const uint8_t* sizes, size_t count, uint8_t pt) {
+  if (count == 0) return pt;
+  uint8_t best = sizes[0];
+  uint8_t bestDelta = best > pt ? best - pt : pt - best;
+  for (size_t i = 1; i < count; i++) {
+    const uint8_t delta = sizes[i] > pt ? sizes[i] - pt : pt - sizes[i];
+    if (delta < bestDelta) {
+      best = sizes[i];
+      bestDelta = delta;
+    }
+  }
+  return best;
+}
+inline uint8_t snapToNearestPointSize(const std::vector<uint8_t>& sizes, const uint8_t pt) {
+  return sizes.empty() ? pt : snapToNearestPointSize(sizes.data(), sizes.size(), pt);
+}
+struct FontEntry {
+  std::string name;
+  bool isBuiltin;
+  uint8_t settingIndex;
+  std::string label;
+};
+struct SizeEntry {
+  std::string name;
+  uint8_t pointSize;
+};
 
 // --- logging ----------------------------------------------------------------
 int loggedErrors = 0;
@@ -375,6 +411,14 @@ struct TextSettingsActivity {
   BookStyle* globalSnapshot_ = nullptr;
   BookStyle fontInstallLiveStyle_;
   int updates = 0;
+  // The Family/Size rows the screen shows, and the two indices that say which
+  // of them is the selected one. The production rebuildSizeList()/
+  // syncSelectionFromSettings() bodies below drive them.
+  const SdCardFontRegistry* registry_ = nullptr;
+  std::vector<FontEntry> fonts_{{"NotoSans", true, 0, ""}, {"BookFamily", false, 8, ""}};
+  std::vector<SizeEntry> sizes_;
+  int currentFamilyIndex_ = 0;
+  int currentSizeIndex_ = 0;
   bool bookOverrideMode() const { return bookPath_ != nullptr && globalSnapshot_ != nullptr; }
   void requestUpdate() { ++updates; }
   template <typename T>
@@ -389,6 +433,9 @@ struct TextSettingsActivity {
   // The "Per-book style memory" row: production body extracted below.
   void toggleBookStyleMemory();
   void saveSettings();
+  // The Family/Size selection upkeep, both production bodies extracted below.
+  void rebuildSizeList();
+  void syncSelectionFromSettings();
   std::function<void(const ActivityResult&)> handler_;
   // Simulates the installer's own exit: commit a family (or not) and deliver
   // whatever result that visit produced to this screen.
@@ -489,6 +536,12 @@ void TextSettingsActivity::cancelPrompt() {
     # uses. Both are extracted as written so the test fails if the memory guard
     # is dropped from the callback.
     + method(ts_cpp, "void TextSettingsActivity::saveSettings")
+    + "\n"
+    # The selection upkeep: the rows have to follow whatever SETTINGS holds
+    # after the memory switch or a clear put different typography in it.
+    + method(ts_cpp, "void TextSettingsActivity::rebuildSizeList")
+    + "\n"
+    + method(ts_cpp, "void TextSettingsActivity::syncSelectionFromSettings")
     + "\n"
     + case_caller(ts_cpp, "void TextSettingsActivity::confirmStyleRow", "case StyleRow::BookStyleMemory:",
                   "case StyleRow::ClearBookStyles:", "toggleBookStyleMemory")
@@ -1189,6 +1242,57 @@ int main() {
     reopened.applyBookStyle();
     assert(SETTINGS.verticalBottomAlign == 1);
     SETTINGS.verticalBottomAlign = 0;
+  }
+
+  // 24. Review finding: the memory switch and the clear-overrides row both put
+  //     different typography in SETTINGS behind the screen's back. The
+  //     Family/Size rows have to follow it: a stale marker also makes a tap on
+  //     the selected row a no-op (activateRow() skips the row it thinks is
+  //     already selected).
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontFamily = 0;
+    SETTINGS.sdFontFamilyName[0] = '\0';
+    SETTINGS.fontPointSize = 18;                     // global: builtin, 18pt
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    strncpy(SETTINGS.sdFontFamilyName, "BookFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
+    SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+    SETTINGS.fontPointSize = 22;                     // this book's overrides
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    picker.syncSelectionFromSettings();              // as onEnter() does
+    assert(picker.currentFamilyIndex_ == 1);         // BookFamily
+    assert(picker.sizes_.size() == 2);               // {16, 22}
+    assert(picker.currentSizeIndex_ == 1);           // 22pt
+
+    picker.toggleBookStyleMemory();                  // off: the global is back
+    assert(SETTINGS.fontPointSize == 18);
+    assert(picker.currentFamilyIndex_ == 0);         // rows follow the builtin
+    assert(picker.sizes_.size() == 3);               // ... and its size list
+    assert(picker.currentSizeIndex_ == 1);           // 18pt
+    std::printf("toggle off, rows: family=%d size=%d (wanted 0/1), sizes=%zu\n", picker.currentFamilyIndex_,
+                picker.currentSizeIndex_, picker.sizes_.size());
+
+    picker.toggleBookStyleMemory();                  // on again: the overrides
+    assert(SETTINGS.fontPointSize == 22);
+    assert(picker.currentFamilyIndex_ == 1);
+    assert(picker.sizes_.size() == 2);
+    assert(picker.currentSizeIndex_ == 1);
+    std::printf("toggle on, rows: family=%d size=%d (wanted 1/1), sizes=%zu\n", picker.currentFamilyIndex_,
+                picker.currentSizeIndex_, picker.sizes_.size());
+
+    picker.onClearBookStylesConfirm(1);              // forget this book's
+    assert(SETTINGS.fontPointSize == 18);
+    assert(picker.currentFamilyIndex_ == 0);
+    assert(picker.sizes_.size() == 3);
+    assert(picker.currentSizeIndex_ == 1);
+    std::printf("clear overrides, rows: family=%d size=%d (wanted 0/1), sizes=%zu\n", picker.currentFamilyIndex_,
+                picker.currentSizeIndex_, picker.sizes_.size());
+    SETTINGS.sdFontFamilyName[0] = '\0';
+    SETTINGS.fontPointSize = 12;
   }
 
   std::puts("book style memory flow passed");
