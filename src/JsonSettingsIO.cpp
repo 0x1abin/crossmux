@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <PersistableStore.h>
 
 #include <cstring>
 #include <string>
@@ -38,6 +39,12 @@ bool saveJsonDocumentToFile(const char* moduleName, const char* path, const Json
   memcpy(tempPath.get(), path, pathLength);
   memcpy(tempPath.get() + pathLength, ".tmp", sizeof(".tmp"));
 
+  HalStorage::StorageLock lock;
+  if (!Storage.exists(path) && Storage.exists(tempPath.get()) && !Storage.rename(tempPath.get(), path)) {
+    LOG_ERR(moduleName, "Cannot recover staged JSON for %s", path);
+    return false;
+  }
+
   if (Storage.exists(tempPath.get())) {
     Storage.remove(tempPath.get());
   }
@@ -60,13 +67,11 @@ bool saveJsonDocumentToFile(const char* moduleName, const char* path, const Json
   }
 
   if (Storage.exists(path) && !Storage.remove(path)) {
-    Storage.remove(tempPath.get());
     LOG_ERR(moduleName, "Could not remove JSON file before replace: %s", path);
     return false;
   }
 
   if (!Storage.rename(tempPath.get(), path)) {
-    Storage.remove(tempPath.get());
     LOG_ERR(moduleName, "Could not rename JSON temp file to final path: %s", path);
     return false;
   }
@@ -77,8 +82,8 @@ bool saveJsonDocumentToFile(const char* moduleName, const char* path, const Json
 }  // namespace
 
 // ---- ReadingStatsStore ----
-// reading_stats.json, format version 6. Written atomically (temp + rename) and
-// parsed via a streamed HalFileStream so large histories don't double peak heap.
+// reading_stats.json, format version 6. Staged writes can be recovered on load;
+// reading currently buffers the JSON text before parsing it.
 
 bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char* path) {
   JsonDocument doc;
@@ -241,10 +246,14 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
 }
 
 bool JsonSettingsIO::loadReadingStatsFromFile(ReadingStatsStore& store, const char* path) {
-  if (!Storage.exists(path)) {
-    return false;
+  String json;
+  {
+    HalStorage::StorageLock lock;
+    if (!PersistableStoreBase::recoverTempFile(path)) {
+      return false;
+    }
+    json = Storage.readFile(path);
   }
-  const String json = Storage.readFile(path);
   if (json.isEmpty()) {
     return false;
   }
@@ -252,7 +261,7 @@ bool JsonSettingsIO::loadReadingStatsFromFile(ReadingStatsStore& store, const ch
 }
 
 // ---- AchievementsStore ----
-// achievements.json, format version 2. Written atomically (temp + rename).
+// achievements.json, format version 2. Staged writes can be recovered on load.
 
 bool JsonSettingsIO::saveAchievements(const AchievementsStore& store, const char* path) {
   JsonDocument doc;
@@ -361,10 +370,14 @@ bool JsonSettingsIO::loadAchievements(AchievementsStore& store, const char* json
 }
 
 bool JsonSettingsIO::loadAchievementsFromFile(AchievementsStore& store, const char* path) {
-  if (!Storage.exists(path)) {
-    return false;
+  String json;
+  {
+    HalStorage::StorageLock lock;
+    if (!PersistableStoreBase::recoverTempFile(path)) {
+      return false;
+    }
+    json = Storage.readFile(path);
   }
-  const String json = Storage.readFile(path);
   if (json.isEmpty()) {
     return false;
   }
