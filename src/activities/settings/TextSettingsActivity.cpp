@@ -113,8 +113,11 @@ TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputMan
 void TextSettingsActivity::saveSettings() {
   // With per-book memory on, the typography in SETTINGS is this book's; only the
   // entered global values may reach the settings file, and the session has to
-  // keep rendering with the book's. Without a snapshot (memory was off when the
-  // book opened) the live values already are the global ones.
+  // keep rendering with the book's. The snapshot is not what distinguishes the
+  // other case: the reader takes it unconditionally, so it is present even when
+  // memory is off. Saving the live values directly is decided inside
+  // saveGlobalSettingsKeepingBookStyle(), by its !SETTINGS.bookStyleMemory
+  // branch — with memory off the live values already are the global ones.
   saveGlobalSettingsKeepingBookStyle(globalSnapshot_);
 }
 

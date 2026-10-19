@@ -152,9 +152,12 @@ inline BookStyle captureStyleFromSettings() {
 // global style, then put the live values back so the session keeps rendering
 // with the book's. Every screen that edits SETTINGS while a book is open must
 // save through here — a raw saveToFile() would write the book's overrides into
-// the global settings file. `enteredGlobal` is null when no baseline was taken
-// (memory was off when the book opened): the live values are then already
-// global, so a plain save is right.
+// the global settings file. `enteredGlobal` is null when no book session stands
+// behind this screen (the text settings opened from the main settings menu):
+// there is no book style to protect, so a plain save is right. The
+// !SETTINGS.bookStyleMemory half of the test covers the opposite case —
+// entering from the reader still takes a snapshot with memory off, but the live
+// values are then already global and are what has to be saved.
 inline void saveGlobalSettingsKeepingBookStyle(const BookStyle* enteredGlobal) {
   if (enteredGlobal == nullptr || !SETTINGS.bookStyleMemory) {
     SETTINGS.saveToFile();
