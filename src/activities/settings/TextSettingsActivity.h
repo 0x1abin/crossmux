@@ -28,7 +28,7 @@ class TextSettingsActivity final : public UiTabListActivity {
   TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const SdCardFontRegistry* registry,
                        Tab initialTab = Tab::Family, InitialFontState initialFontState = InitialFontState::Unchanged,
                        StartMode startMode = StartMode::Interactive, const std::string* bookPath = nullptr,
-                       const BookStyle* globalSnapshot = nullptr);
+                       BookStyle* globalSnapshot = nullptr);
 
   void onEnter() override;
   void onExit() override;
@@ -98,6 +98,10 @@ class TextSettingsActivity final : public UiTabListActivity {
   // Repopulates sizes_ (and currentSizeIndex_) from the active family's
   // installed point sizes. Call after any family change.
   void rebuildSizeList();
+  // Every SETTINGS write in this screen goes through here. With per-book memory
+  // on, SETTINGS carries this book's typography and only the entered global
+  // values may reach the settings file (BookStyleStore.h contract).
+  void saveSettings();
   void confirmLayoutRow(int row);
   void confirmStyleRow(int row);
   // Applies the row at the given list index for the active tab (Confirm and tap share this).
@@ -156,7 +160,9 @@ class TextSettingsActivity final : public UiTabListActivity {
   // are owned by the reader and stay valid while this activity lives; the
   // clear-overrides row restores the snapshot the same way the reader does.
   const std::string* bookPath_ = nullptr;
-  const BookStyle* globalSnapshot_ = nullptr;
+  // Non-const: the memory toggle refreshes this baseline when the mode changes
+  // (see confirmStyleRow), so the reader's session state has to follow.
+  BookStyle* globalSnapshot_ = nullptr;
   bool bookOverrideMode() const { return bookPath_ != nullptr && globalSnapshot_ != nullptr; }
 
   Tab tab_;

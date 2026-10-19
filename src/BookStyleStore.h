@@ -120,6 +120,140 @@ inline void applyStyleOverrides(const BookStyle& style) {
   if (m & BookStyle::kGuideLineOffset) SETTINGS.readingGuideLineOffset = style.readingGuideLineOffset;
 }
 
+// Copies the typography fields currently in SETTINGS into a BookStyle. Used for
+// the session baseline (the global values this book opened with) and, when
+// per-book memory is toggled, for swapping the live values out for the write.
+inline BookStyle captureStyleFromSettings() {
+  BookStyle style;
+  style.fontFamily = SETTINGS.fontFamily;
+  memcpy(style.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(style.sdFontFamilyName));
+  style.fontPointSize = SETTINGS.fontPointSize;
+  style.lineSpacing = SETTINGS.lineSpacing;
+  style.paragraphAlignment = SETTINGS.paragraphAlignment;
+  style.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  style.firstLineIndent = SETTINGS.firstLineIndent;
+  style.paragraphIndentSpaces = SETTINGS.paragraphIndentSpaces;
+  style.fakeBold = SETTINGS.fakeBold;
+  style.textAntiAliasing = SETTINGS.textAntiAliasing;
+  style.wordSpacing = SETTINGS.wordSpacing;
+  style.characterSpacing = SETTINGS.characterSpacing;
+  style.screenMargin = SETTINGS.screenMargin;
+  style.embeddedStyle = SETTINGS.embeddedStyle;
+  style.focusReadingEnabled = SETTINGS.focusReadingEnabled;
+  style.hyphenationEnabled = SETTINGS.hyphenationEnabled;
+  style.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
+  style.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
+  style.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
+  return style;
+}
+
+// The one save path for "SETTINGS currently carries this book's typography but
+// the settings file must keep the user's global values": write the entered
+// global style, then put the live values back so the session keeps rendering
+// with the book's. Every screen that edits SETTINGS while a book is open must
+// save through here — a raw saveToFile() would write the book's overrides into
+// the global settings file. `enteredGlobal` is null when no baseline was taken
+// (memory was off when the book opened): the live values are then already
+// global, so a plain save is right.
+inline void saveGlobalSettingsKeepingBookStyle(const BookStyle* enteredGlobal) {
+  if (enteredGlobal == nullptr || !SETTINGS.bookStyleMemory) {
+    SETTINGS.saveToFile();
+    return;
+  }
+  const BookStyle liveStyle = captureStyleFromSettings();
+  applyStyleToSettings(*enteredGlobal);
+  SETTINGS.saveToFile();
+  applyStyleToSettings(liveStyle);
+}
+
+// Compares the live typography in SETTINGS with the entered global snapshot.
+// A field the user changed in the text settings differs from the snapshot and
+// gets its bit set; a field reverted to the global value clears its bit ("follow
+// global"). Fields already overridden for this book differ from the snapshot
+// too, so existing overrides are preserved by the same comparison. Shared by the
+// reader's exit capture and the text-settings memory toggle.
+inline BookStyle diffStyleFromSettings(const BookStyle& globalSnapshot) {
+  BookStyle overrides;
+  uint32_t& m = overrides.overrideMask;
+  if (SETTINGS.fontFamily != globalSnapshot.fontFamily) {
+    m |= BookStyle::kFontFamily;
+    overrides.fontFamily = SETTINGS.fontFamily;
+  }
+  if (strcmp(SETTINGS.sdFontFamilyName, globalSnapshot.sdFontFamilyName) != 0) {
+    m |= BookStyle::kSdFontFamily;
+    memcpy(overrides.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(overrides.sdFontFamilyName));
+  }
+  if (SETTINGS.fontPointSize != globalSnapshot.fontPointSize) {
+    m |= BookStyle::kFontPointSize;
+    overrides.fontPointSize = SETTINGS.fontPointSize;
+  }
+  if (SETTINGS.lineSpacing != globalSnapshot.lineSpacing) {
+    m |= BookStyle::kLineSpacing;
+    overrides.lineSpacing = SETTINGS.lineSpacing;
+  }
+  if (SETTINGS.paragraphAlignment != globalSnapshot.paragraphAlignment) {
+    m |= BookStyle::kParagraphAlignment;
+    overrides.paragraphAlignment = SETTINGS.paragraphAlignment;
+  }
+  if (SETTINGS.extraParagraphSpacing != globalSnapshot.extraParagraphSpacing) {
+    m |= BookStyle::kExtraParagraphSpacing;
+    overrides.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  }
+  if (SETTINGS.firstLineIndent != globalSnapshot.firstLineIndent) {
+    m |= BookStyle::kFirstLineIndent;
+    overrides.firstLineIndent = SETTINGS.firstLineIndent;
+  }
+  if (SETTINGS.paragraphIndentSpaces != globalSnapshot.paragraphIndentSpaces) {
+    m |= BookStyle::kParagraphIndentSpaces;
+    overrides.paragraphIndentSpaces = SETTINGS.paragraphIndentSpaces;
+  }
+  if (SETTINGS.fakeBold != globalSnapshot.fakeBold) {
+    m |= BookStyle::kFakeBold;
+    overrides.fakeBold = SETTINGS.fakeBold;
+  }
+  if (SETTINGS.textAntiAliasing != globalSnapshot.textAntiAliasing) {
+    m |= BookStyle::kTextAntiAliasing;
+    overrides.textAntiAliasing = SETTINGS.textAntiAliasing;
+  }
+  if (SETTINGS.wordSpacing != globalSnapshot.wordSpacing) {
+    m |= BookStyle::kWordSpacing;
+    overrides.wordSpacing = SETTINGS.wordSpacing;
+  }
+  if (SETTINGS.characterSpacing != globalSnapshot.characterSpacing) {
+    m |= BookStyle::kCharacterSpacing;
+    overrides.characterSpacing = SETTINGS.characterSpacing;
+  }
+  if (SETTINGS.screenMargin != globalSnapshot.screenMargin) {
+    m |= BookStyle::kScreenMargin;
+    overrides.screenMargin = SETTINGS.screenMargin;
+  }
+  if (SETTINGS.embeddedStyle != globalSnapshot.embeddedStyle) {
+    m |= BookStyle::kEmbeddedStyle;
+    overrides.embeddedStyle = SETTINGS.embeddedStyle;
+  }
+  if (SETTINGS.focusReadingEnabled != globalSnapshot.focusReadingEnabled) {
+    m |= BookStyle::kFocusReading;
+    overrides.focusReadingEnabled = SETTINGS.focusReadingEnabled;
+  }
+  if (SETTINGS.hyphenationEnabled != globalSnapshot.hyphenationEnabled) {
+    m |= BookStyle::kHyphenation;
+    overrides.hyphenationEnabled = SETTINGS.hyphenationEnabled;
+  }
+  if (SETTINGS.readingGuideLineEnabled != globalSnapshot.readingGuideLineEnabled) {
+    m |= BookStyle::kGuideLine;
+    overrides.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
+  }
+  if (SETTINGS.readingGuideLineStyle != globalSnapshot.readingGuideLineStyle) {
+    m |= BookStyle::kGuideLineStyle;
+    overrides.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
+  }
+  if (SETTINGS.readingGuideLineOffset != globalSnapshot.readingGuideLineOffset) {
+    m |= BookStyle::kGuideLineOffset;
+    overrides.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
+  }
+  return overrides;
+}
+
 // Persisted at /.crosspoint/book_styles.json. One entry per book path (path is
 // the same identity the reader activities use everywhere else).
 class BookStyleStore : public PersistableStore<BookStyleStore> {
@@ -184,3 +318,30 @@ class BookStyleStore : public PersistableStore<BookStyleStore> {
 };
 
 #define BOOK_STYLES BookStyleStore::getInstance()
+
+// Applies a BookStyleMemory switch flip to the live session. `enteredGlobal` is
+// the session baseline and `wasOn` the state before the flip; the caller flips
+// SETTINGS.bookStyleMemory and persists (saveGlobalSettingsKeepingBookStyle).
+//   off: capture what the user has picked so far as the book's overrides (the
+//        exit capture will not run any more), then put the global values back.
+//   on:  SETTINGS now holds the user's global typography — possibly edited while
+//        memory was off — so it becomes the new baseline, and the remembered
+//        overrides are re-applied on top. Without the refresh a global edit made
+//        while memory was off would be rolled back on exit, and without the
+//        re-apply the exit capture would store "no overrides" and delete the
+//        remembered entry.
+inline void applyBookStyleMemoryToggle(const std::string& bookPath, BookStyle& enteredGlobal, const bool wasOn) {
+  if (wasOn) {
+    const BookStyle overrides = diffStyleFromSettings(enteredGlobal);
+    if (overrides.overrideMask != 0) {
+      BOOK_STYLES.updateStyle(bookPath, overrides);
+    } else {
+      BOOK_STYLES.removeByPath(bookPath);
+    }
+    applyStyleToSettings(enteredGlobal);
+  } else {
+    enteredGlobal = captureStyleFromSettings();
+    BookStyle stored;
+    if (BOOK_STYLES.findStyle(bookPath, stored)) applyStyleOverrides(stored);
+  }
+}

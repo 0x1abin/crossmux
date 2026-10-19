@@ -57,6 +57,9 @@ def anonymous_helpers():
 # CrossPointSettings include.
 header = store_h[store_h.index("struct BookStyle {"):store_h.index("// Persisted at")]
 header = header.replace("#include", "// #include")
+# The memory-toggle helper lives after the store class in the real header (it
+# calls BOOK_STYLES), so it is appended after the stubbed store below.
+toggle_h = store_h[store_h.index("// Applies a BookStyleMemory switch flip"):]
 
 harness = (
     r'''
@@ -204,7 +207,9 @@ struct BookStyleStore {
   bool removeByPath(const std::string& bookPath);
 };
 #define BOOK_STYLES BookStyleStore::getInstance()
-
+'''
+    + toggle_h
+    + r'''
 // A fresh "boot": load the store from what the last successful write left.
 struct RebootedStore {
   std::vector<std::string> paths;
@@ -236,8 +241,6 @@ struct ReaderActivity {
   void saveSettingsKeepingBookStyle();
 };
 '''
-    + method(reader_cpp, "BookStyle snapshotStyleFromSettings")
-    + "\n"
     + method(reader_cpp, "void ReaderActivity::applyBookStyle")
     + "\n"
     + method(reader_cpp, "void ReaderActivity::saveBookStyle")
@@ -438,6 +441,84 @@ int main() {
     assert(SETTINGS.fontPointSize == 20);
     SETTINGS.bookStyleMemory = 1;
   }
+  // 10. Review repro: on -> off -> on in one session keeps the remembered
+  //     override and puts it back in front of the user.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();                            // baseline 12, no entry
+    SETTINGS.fontPointSize = 22;                        // picks 22pt for the book
+    assert(reader.persistBookStyleEdits());             // stored as an override
+    assert(store.styles.size() == 1);
+
+    SETTINGS.bookStyleMemory = 0;                       // switch off
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/true);
+    reader.saveSettingsKeepingBookStyle();
+    assert(SETTINGS.fontPointSize == 12);               // live follows global
+    assert(SETTINGS.persistedFontPointSize == 12);
+    assert(store.styles.size() == 1);                   // entry kept while off
+
+    SETTINGS.bookStyleMemory = 1;                       // switch back on
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/false);
+    reader.saveSettingsKeepingBookStyle();
+    assert(SETTINGS.fontPointSize == 22);               // remembered 22pt is back
+    assert(SETTINGS.persistedFontPointSize == 12);      // file still global
+    assert(reader.persistBookStyleEdits());             // exit capture
+    assert(store.styles.size() == 1);                   // NOT deleted by the capture
+    assert(store.styles[0].style.overrideMask == BookStyle::kFontPointSize);
+    assert(store.styles[0].style.fontPointSize == 22);
+  }
+
+  // 11. Review repro: a global edit made while memory was off must not be
+  //     rolled back when memory comes back on and the book is left.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();                            // baseline 12
+    SETTINGS.fontPointSize = 22;
+    reader.persistBookStyleEdits();                     // book override 22
+
+    SETTINGS.bookStyleMemory = 0;                       // switch off
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/true);
+    reader.saveSettingsKeepingBookStyle();
+    SETTINGS.fontPointSize = 26;                        // deliberate global edit
+    reader.saveSettingsKeepingBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 26);
+
+    SETTINGS.bookStyleMemory = 1;                       // switch back on
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/false);
+    reader.saveSettingsKeepingBookStyle();
+    assert(SETTINGS.fontPointSize == 22);               // book override re-applied
+    reader.persistBookStyleEdits();                     // leaving the reader
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 26);      // global edit survives
+    assert(store.styles.size() == 1);
+    assert(store.styles[0].style.fontPointSize == 22);  // override still 22
+    SETTINGS.fontPointSize = 26;
+  }
+
+  // 12. The memory toggle with no edits made: switch-off must not delete an
+  //     existing entry, and switch-on with nothing stored applies nothing.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    reader.persistBookStyleEdits();
+    SETTINGS.fontPointSize = 12;                        // user reverts in-session
+    SETTINGS.bookStyleMemory = 0;
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/true);
+    assert(store.styles.empty());                       // reverted -> no entry
+    SETTINGS.bookStyleMemory = 1;
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/false);
+    assert(SETTINGS.fontPointSize == 12);               // nothing to re-apply
+  }
   std::puts("book style memory flow passed");
 }
 '''
@@ -453,4 +534,17 @@ with tempfile.TemporaryDirectory(prefix="book-style-memory-") as tmp:
         check=True,
     )
     subprocess.run([str(exe)], check=True)
+
+# Guard for the review finding this test missed the first time: a child screen
+# that edits SETTINGS while a book is open must not write the file itself.
+# ReaderActivity keeps its own two writes (the exit restore and the no-snapshot
+# save); both put the global values in SETTINGS first by construction.
+for rel in (
+    "src/activities/settings/TextSettingsActivity.cpp",
+    "src/activities/reader/EpubReaderActivity.cpp",
+    "src/activities/reader/EpubReaderMenuActivity.cpp",
+    "src/activities/reader/XtcReaderActivity.cpp",
+):
+    text = (ROOT / rel).read_text()
+    assert "SETTINGS.saveToFile()" not in text, f"{rel} bypasses the book-style save path"
 print("Book style memory flow passed")

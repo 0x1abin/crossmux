@@ -49,34 +49,6 @@ std::unique_ptr<ReaderActivity> ReaderActivity::create(GfxRenderer& renderer, Ma
 
 void ReaderActivity::applyInitialOrientation() { ReaderUtils::applyOrientation(renderer, SETTINGS.orientation); }
 
-namespace {
-
-BookStyle snapshotStyleFromSettings() {
-  BookStyle style;
-  style.fontFamily = SETTINGS.fontFamily;
-  memcpy(style.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(style.sdFontFamilyName));
-  style.fontPointSize = SETTINGS.fontPointSize;
-  style.lineSpacing = SETTINGS.lineSpacing;
-  style.paragraphAlignment = SETTINGS.paragraphAlignment;
-  style.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
-  style.firstLineIndent = SETTINGS.firstLineIndent;
-  style.paragraphIndentSpaces = SETTINGS.paragraphIndentSpaces;
-  style.fakeBold = SETTINGS.fakeBold;
-  style.textAntiAliasing = SETTINGS.textAntiAliasing;
-  style.wordSpacing = SETTINGS.wordSpacing;
-  style.characterSpacing = SETTINGS.characterSpacing;
-  style.screenMargin = SETTINGS.screenMargin;
-  style.embeddedStyle = SETTINGS.embeddedStyle;
-  style.focusReadingEnabled = SETTINGS.focusReadingEnabled;
-  style.hyphenationEnabled = SETTINGS.hyphenationEnabled;
-  style.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
-  style.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
-  style.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
-  return style;
-}
-
-}  // namespace
-
 void ReaderActivity::applyBookStyle() {
   // The per-book overrides can be turned off from the text settings; then every
   // book opens with the global settings, exactly like the stock firmware.
@@ -87,7 +59,7 @@ void ReaderActivity::applyBookStyle() {
   // edited while reading can be restored on exit and never leak into the next
   // book — even when per-book memory is turned off mid-session.
   if (!globalSettingsSnapshotted_) {
-    globalSettingsSnapshot_ = snapshotStyleFromSettings();
+    globalSettingsSnapshot_ = captureStyleFromSettings();
     globalSettingsSnapshotted_ = true;
   }
   BookStyle style;
@@ -124,90 +96,7 @@ void ReaderActivity::saveBookStyle() {
 }
 
 BookStyle ReaderActivity::captureStyleDiff(const BookStyle& globalSnapshot) const {
-  // A field the user changed in the text settings differs from the entered
-  // snapshot and gets its bit set; a field reverted to the global value clears
-  // its bit ("follow global"). Fields already overridden for this book differ
-  // from the snapshot too, so existing overrides are preserved by the same
-  // comparison.
-  BookStyle overrides;
-  uint32_t& m = overrides.overrideMask;
-  if (SETTINGS.fontFamily != globalSnapshot.fontFamily) {
-    m |= BookStyle::kFontFamily;
-    overrides.fontFamily = SETTINGS.fontFamily;
-  }
-  if (strcmp(SETTINGS.sdFontFamilyName, globalSnapshot.sdFontFamilyName) != 0) {
-    m |= BookStyle::kSdFontFamily;
-    memcpy(overrides.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(overrides.sdFontFamilyName));
-  }
-  if (SETTINGS.fontPointSize != globalSnapshot.fontPointSize) {
-    m |= BookStyle::kFontPointSize;
-    overrides.fontPointSize = SETTINGS.fontPointSize;
-  }
-  if (SETTINGS.lineSpacing != globalSnapshot.lineSpacing) {
-    m |= BookStyle::kLineSpacing;
-    overrides.lineSpacing = SETTINGS.lineSpacing;
-  }
-  if (SETTINGS.paragraphAlignment != globalSnapshot.paragraphAlignment) {
-    m |= BookStyle::kParagraphAlignment;
-    overrides.paragraphAlignment = SETTINGS.paragraphAlignment;
-  }
-  if (SETTINGS.extraParagraphSpacing != globalSnapshot.extraParagraphSpacing) {
-    m |= BookStyle::kExtraParagraphSpacing;
-    overrides.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
-  }
-  if (SETTINGS.firstLineIndent != globalSnapshot.firstLineIndent) {
-    m |= BookStyle::kFirstLineIndent;
-    overrides.firstLineIndent = SETTINGS.firstLineIndent;
-  }
-  if (SETTINGS.paragraphIndentSpaces != globalSnapshot.paragraphIndentSpaces) {
-    m |= BookStyle::kParagraphIndentSpaces;
-    overrides.paragraphIndentSpaces = SETTINGS.paragraphIndentSpaces;
-  }
-  if (SETTINGS.fakeBold != globalSnapshot.fakeBold) {
-    m |= BookStyle::kFakeBold;
-    overrides.fakeBold = SETTINGS.fakeBold;
-  }
-  if (SETTINGS.textAntiAliasing != globalSnapshot.textAntiAliasing) {
-    m |= BookStyle::kTextAntiAliasing;
-    overrides.textAntiAliasing = SETTINGS.textAntiAliasing;
-  }
-  if (SETTINGS.wordSpacing != globalSnapshot.wordSpacing) {
-    m |= BookStyle::kWordSpacing;
-    overrides.wordSpacing = SETTINGS.wordSpacing;
-  }
-  if (SETTINGS.characterSpacing != globalSnapshot.characterSpacing) {
-    m |= BookStyle::kCharacterSpacing;
-    overrides.characterSpacing = SETTINGS.characterSpacing;
-  }
-  if (SETTINGS.screenMargin != globalSnapshot.screenMargin) {
-    m |= BookStyle::kScreenMargin;
-    overrides.screenMargin = SETTINGS.screenMargin;
-  }
-  if (SETTINGS.embeddedStyle != globalSnapshot.embeddedStyle) {
-    m |= BookStyle::kEmbeddedStyle;
-    overrides.embeddedStyle = SETTINGS.embeddedStyle;
-  }
-  if (SETTINGS.focusReadingEnabled != globalSnapshot.focusReadingEnabled) {
-    m |= BookStyle::kFocusReading;
-    overrides.focusReadingEnabled = SETTINGS.focusReadingEnabled;
-  }
-  if (SETTINGS.hyphenationEnabled != globalSnapshot.hyphenationEnabled) {
-    m |= BookStyle::kHyphenation;
-    overrides.hyphenationEnabled = SETTINGS.hyphenationEnabled;
-  }
-  if (SETTINGS.readingGuideLineEnabled != globalSnapshot.readingGuideLineEnabled) {
-    m |= BookStyle::kGuideLine;
-    overrides.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
-  }
-  if (SETTINGS.readingGuideLineStyle != globalSnapshot.readingGuideLineStyle) {
-    m |= BookStyle::kGuideLineStyle;
-    overrides.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
-  }
-  if (SETTINGS.readingGuideLineOffset != globalSnapshot.readingGuideLineOffset) {
-    m |= BookStyle::kGuideLineOffset;
-    overrides.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
-  }
-  return overrides;
+  return diffStyleFromSettings(globalSnapshot);
 }
 
 bool ReaderActivity::persistBookStyleEdits() {
@@ -229,19 +118,9 @@ bool ReaderActivity::persistBookStyleEdits() {
 }
 
 void ReaderActivity::saveSettingsKeepingBookStyle() {
-  // Only a live snapshot plus memory on can leave overrides in SETTINGS;
-  // without one, SETTINGS already holds the user's global values.
-  if (!globalSettingsSnapshotted_ || !SETTINGS.bookStyleMemory) {
-    SETTINGS.saveToFile();
-    return;
-  }
-  // The write must carry the entered global typography, but the session must
-  // keep rendering with this book's overrides. Swap the snapshot in for the
-  // write and put the live style back afterwards.
-  const BookStyle liveStyle = snapshotStyleFromSettings();
-  applyStyleToSettings(globalSettingsSnapshot_);
-  SETTINGS.saveToFile();
-  applyStyleToSettings(liveStyle);
+  // Shared contract (BookStyleStore.h): with a snapshot and memory on, the file
+  // gets the entered global typography and the session keeps the book's.
+  saveGlobalSettingsKeepingBookStyle(globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
 }
 
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }

@@ -3808,7 +3808,12 @@ void EpubReaderActivity::paintOverlayPopup() {
 }
 
 void EpubReaderActivity::applyReaderTextSettings() {
-  SETTINGS.saveToFile();
+  // Shared reflow path for every reader entry point (toolbar picker, reader
+  // menu, live apply). It must use the book-style persistence contract: with
+  // per-book memory on, SETTINGS carries this book's typography, so a raw
+  // saveToFile() here would write it into the global settings file right after
+  // the caller's persistBookStyleEdits() restored the global values.
+  saveSettingsKeepingBookStyle();
   RenderLock lock;
   // (Re)load or unload the selected SD-card font for the current family/size.
   // The reader otherwise only loads SD fonts on book open, so without this an

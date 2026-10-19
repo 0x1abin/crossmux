@@ -100,7 +100,7 @@ static_assert(std::size(WORD_SPACING_IDS) == (WORD_SPACING_MAX - WORD_SPACING_MI
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const SdCardFontRegistry* registry, Tab initialTab,
                                            const InitialFontState initialFontState, const StartMode startMode,
-                                           const std::string* bookPath, const BookStyle* globalSnapshot)
+                                           const std::string* bookPath, BookStyle* globalSnapshot)
     : UiTabListActivity("TextSettings", renderer, mappedInput),
       registry_(registry),
       tab_(initialTab),
@@ -108,6 +108,14 @@ TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputMan
       startMode_(startMode),
       bookPath_(bookPath),
       globalSnapshot_(globalSnapshot) {}
+
+void TextSettingsActivity::saveSettings() {
+  // With per-book memory on, the typography in SETTINGS is this book's; only the
+  // entered global values may reach the settings file, and the session has to
+  // keep rendering with the book's. Without a snapshot (memory was off when the
+  // book opened) the live values already are the global ones.
+  saveGlobalSettingsKeepingBookStyle(globalSnapshot_);
+}
 
 const char* TextSettingsActivity::tabLabel(const int index) const { return I18N.get(TAB_NAME_IDS[index]); }
 
@@ -518,7 +526,7 @@ void TextSettingsActivity::activateRow(int row) {
         // gesture/key or a sleep. Saved here, not inside applyFamily, so the
         // SD write happens outside its RenderLock.
         if (currentFamilyIndex_ == row) {
-          SETTINGS.saveToFile();
+          saveSettings();
         }
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
@@ -529,7 +537,7 @@ void TextSettingsActivity::activateRow(int row) {
     case Tab::Size:
       if (row != currentSizeIndex_) {
         applySize(row);
-        SETTINGS.saveToFile();
+        saveSettings();
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
 #endif
@@ -562,17 +570,17 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
   switch (static_cast<LayoutRow>(row)) {
     case LayoutRow::ParaSpacing:
       optionPopup_.show(StrId::STR_EXTRA_SPACING, EXTRA_SPACING_IDS, static_cast<int>(std::size(EXTRA_SPACING_IDS)),
-                        SETTINGS.extraParagraphSpacing, [](int idx) {
+                        SETTINGS.extraParagraphSpacing, [this](int idx) {
                           SETTINGS.extraParagraphSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
     case LayoutRow::FirstLineIndent:
       optionPopup_.show(StrId::STR_FIRST_LINE_INDENT, FIRST_LINE_INDENT_IDS,
-                        static_cast<int>(std::size(FIRST_LINE_INDENT_IDS)), SETTINGS.firstLineIndent, [](int idx) {
+                        static_cast<int>(std::size(FIRST_LINE_INDENT_IDS)), SETTINGS.firstLineIndent, [this](int idx) {
                           SETTINGS.firstLineIndent = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
@@ -580,26 +588,26 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       std::vector<std::string> options;
       options.reserve(6);
       for (int spaces = 0; spaces <= 5; ++spaces) options.push_back(std::to_string(spaces));
-      optionPopup_.show(StrId::STR_PARAGRAPH_INDENTATION, options, SETTINGS.paragraphIndentSpaces, [](int idx) {
+      optionPopup_.show(StrId::STR_PARAGRAPH_INDENTATION, options, SETTINGS.paragraphIndentSpaces, [this](int idx) {
         SETTINGS.paragraphIndentSpaces = static_cast<uint8_t>(idx);
-        SETTINGS.saveToFile();
+        saveSettings();
       });
       requestUpdate();
       break;
     }
     case LayoutRow::LineSpacing:
       optionPopup_.show(StrId::STR_LINE_SPACING, LINE_SPACING_IDS, static_cast<int>(std::size(LINE_SPACING_IDS)),
-                        SETTINGS.lineSpacing, [](int idx) {
+                        SETTINGS.lineSpacing, [this](int idx) {
                           SETTINGS.lineSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
     case LayoutRow::Alignment:
       optionPopup_.show(StrId::STR_ALIGNMENT, ALIGNMENT_IDS, static_cast<int>(std::size(ALIGNMENT_IDS)),
-                        SETTINGS.paragraphAlignment, [](int idx) {
+                        SETTINGS.paragraphAlignment, [this](int idx) {
                           SETTINGS.paragraphAlignment = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
@@ -607,18 +615,18 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       const int cur = (std::clamp<int>(SETTINGS.wordSpacing, WORD_SPACING_MIN, WORD_SPACING_MAX) - WORD_SPACING_MIN) /
                       WORD_SPACING_STEP;
       optionPopup_.show(StrId::STR_WORD_SPACING, WORD_SPACING_IDS, static_cast<int>(std::size(WORD_SPACING_IDS)), cur,
-                        [](int idx) {
+                        [this](int idx) {
                           SETTINGS.wordSpacing = static_cast<uint8_t>(WORD_SPACING_MIN + idx * WORD_SPACING_STEP);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
     }
     case LayoutRow::CharacterSpacing:
       optionPopup_.show(StrId::STR_CHARACTER_SPACING, CHARACTER_SPACING_IDS,
-                        static_cast<int>(std::size(CHARACTER_SPACING_IDS)), SETTINGS.characterSpacing, [](int idx) {
+                        static_cast<int>(std::size(CHARACTER_SPACING_IDS)), SETTINGS.characterSpacing, [this](int idx) {
                           SETTINGS.characterSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
@@ -627,9 +635,9 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       options.reserve((MARGIN_MAX - MARGIN_MIN) / MARGIN_STEP + 1);
       for (int m = MARGIN_MIN; m <= MARGIN_MAX; m += MARGIN_STEP) options.push_back(std::to_string(m));
       const int cur = (std::clamp<int>(SETTINGS.screenMargin, MARGIN_MIN, MARGIN_MAX) - MARGIN_MIN) / MARGIN_STEP;
-      optionPopup_.show(StrId::STR_SCREEN_MARGIN, options, cur, [](int idx) {
+      optionPopup_.show(StrId::STR_SCREEN_MARGIN, options, cur, [this](int idx) {
         SETTINGS.screenMargin = static_cast<uint8_t>(MARGIN_MIN + idx * MARGIN_STEP);
-        SETTINGS.saveToFile();
+        saveSettings();
       });
       requestUpdate();
       break;
@@ -697,9 +705,10 @@ void TextSettingsActivity::confirmStyleRow(int row) {
       break;
     case StyleRow::ReadingGuideLineStyle:
       optionPopup_.show(StrId::STR_READING_GUIDE_LINE_STYLE, GUIDE_LINE_STYLE_IDS,
-                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle, [](int idx) {
+                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle,
+                        [this](int idx) {
                           SETTINGS.readingGuideLineStyle = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       return;
@@ -711,7 +720,7 @@ void TextSettingsActivity::confirmStyleRow(int row) {
               SETTINGS.readingGuideLineOffset = static_cast<int8_t>(
                   std::clamp(value, static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN),
                              static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX)));
-              SETTINGS.saveToFile();
+              saveSettings();
             }
             requestUpdate();
           },
@@ -727,9 +736,9 @@ void TextSettingsActivity::confirmStyleRow(int row) {
       break;
     case StyleRow::FakeBold:
       optionPopup_.show(StrId::STR_FAKE_BOLD, SYNTHETIC_BOLD_IDS, static_cast<int>(std::size(SYNTHETIC_BOLD_IDS)),
-                        SETTINGS.fakeBold, [](int idx) {
+                        SETTINGS.fakeBold, [this](int idx) {
                           SETTINGS.fakeBold = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       return;
@@ -739,16 +748,15 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     case StyleRow::BookStyleMemory: {
       const bool wasOn = SETTINGS.bookStyleMemory;
       SETTINGS.bookStyleMemory = !wasOn;
-      if (wasOn && bookOverrideMode()) {
-        // Turning per-book memory off mid-session: drop the overrides already
-        // applied to the in-memory settings and persist the global baseline,
-        // so the book follows the global settings immediately and later global
-        // edits are not rolled back on exit. The stored entry is kept;
-        // re-enabling memory reapplies it.
-        applyStyleToSettings(*globalSnapshot_);
-        SETTINGS.saveToFile();
+      if (bookOverrideMode()) {
+        // Shared with the tests: captures the edits made so far on switch-off,
+        // refreshes the session baseline and restores the remembered overrides
+        // on switch-on (BookStyleStore.h).
+        applyBookStyleMemoryToggle(*bookPath_, *globalSnapshot_, wasOn);
+        saveSettings();
       }
-      break;
+      requestUpdate();
+      return;
     }
     case StyleRow::ClearBookStyles: {
       // Two-step confirm: forgetting a book's overrides is not recoverable.
@@ -766,13 +774,13 @@ void TextSettingsActivity::confirmStyleRow(int row) {
                               // the in-memory values are already global.
                               if (globalSnapshot_) {
                                 applyStyleToSettings(*globalSnapshot_);
-                                SETTINGS.saveToFile();
+                                saveSettings();
                               }
                             }
                           });
       } else {
         optionPopup_.show(StrId::STR_CLEAR_BOOK_STYLES_CONFIRM, CONFIRM_OPTIONS,
-                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [](int idx) {
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
                             if (idx == 1) BOOK_STYLES.clear();
                           });
       }
@@ -783,7 +791,7 @@ void TextSettingsActivity::confirmStyleRow(int row) {
     default:
       return;
   }
-  SETTINGS.saveToFile();
+  saveSettings();
   requestUpdate();
 }
 
@@ -927,7 +935,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   if (startMode_ == StartMode::PreviewOnly) {
     // The reader owns the complete preview session and asks only on return to
     // the page. Home/sleep must not turn a preview into a Flash write either.
-    SETTINGS.saveToFile();
+    saveSettings();
     completeExit();
     return;
   }
@@ -937,7 +945,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   if (!fontChanged) {
     const bool restoreFlash = initialSdFontFlashPreload_ != 0 && SETTINGS.sdFontFlashPreload == 0;
     SETTINGS.sdFontFlashPreload = initialSdFontFlashPreload_;
-    SETTINGS.saveToFile();
+    saveSettings();
     if (restoreFlash) {
       RenderLock lock(*this);
       sdFontSystem.releaseLoadedFont(renderer);
@@ -949,7 +957,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
 
   if (SETTINGS.sdFontFamilyName[0] == '\0') {
     SETTINGS.sdFontFlashPreload = 0;
-    SETTINGS.saveToFile();
+    saveSettings();
     completeExit();
     return;
   }
@@ -959,7 +967,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
 
 void TextSettingsActivity::finishFinalFont(const bool accepted) {
   SETTINGS.sdFontFlashPreload = 0;
-  SETTINGS.saveToFile();
+  saveSettings();
   const auto* family = registry_ ? registry_->findFamily(SETTINGS.sdFontFamilyName) : nullptr;
   if (family && family->vector) {
     completeExit();
@@ -992,7 +1000,7 @@ void TextSettingsActivity::finishFinalFont(const bool accepted) {
       check == SdCardFontCache::Result::AlreadyCached ? check : preloadFont(*file, SETTINGS.sdFontFamilyName);
   const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
   SETTINGS.sdFontFlashPreload = succeeded ? 1 : 0;
-  SETTINGS.saveToFile();
+  saveSettings();
   {
     RenderLock lock(*this);
     fontLoadState_.store(FontLoadState::Idle);
@@ -1051,7 +1059,7 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
     return;
   }
 
-  SETTINGS.saveToFile();
+  saveSettings();
   auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
       renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage,
       startMode_ == StartMode::PreviewOnly ? FontDownloadActivity::StartMode::PreviewOnly
