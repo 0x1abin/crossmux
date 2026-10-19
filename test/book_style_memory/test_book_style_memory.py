@@ -469,6 +469,8 @@ int main() {
     assert(store.styles.size() == 1);                   // NOT deleted by the capture
     assert(store.styles[0].style.overrideMask == BookStyle::kFontPointSize);
     assert(store.styles[0].style.fontPointSize == 22);
+    std::printf("re-enable: entries while off=1, after re-enable/result=%zu, live font=%u, disk font=%u\n",
+                store.styles.size(), (unsigned)SETTINGS.fontPointSize, (unsigned)SETTINGS.persistedFontPointSize);
   }
 
   // 11. Review repro: a global edit made while memory was off must not be
@@ -498,6 +500,9 @@ int main() {
     assert(SETTINGS.persistedFontPointSize == 26);      // global edit survives
     assert(store.styles.size() == 1);
     assert(store.styles[0].style.fontPointSize == 22);  // override still 22
+    std::printf("global edit while off: disk=%u (wanted 26), live=%u, override=%u\n",
+                (unsigned)SETTINGS.persistedFontPointSize, (unsigned)SETTINGS.fontPointSize,
+                (unsigned)store.styles[0].style.fontPointSize);
     SETTINGS.fontPointSize = 26;
   }
 
