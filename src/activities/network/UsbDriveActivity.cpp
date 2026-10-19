@@ -173,6 +173,14 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
   // SD-card CJK fallback that is unavailable while the USB host owns the card.
   constexpr int fontId = NOTOSANS_12_FONT_ID;
   constexpr EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+  // The flash CJK face covers CJK and Latin but has no Hebrew, and the SD-backed
+  // fallback that used to supply other scripts is gone for the duration of the
+  // USB session. Point its fallback at the flash UI face, which does cover
+  // Hebrew, so a Hebrew UI renders the status text instead of empty boxes.
+  // A run switches to the fallback only when the primary lacks one of its
+  // codepoints, so Latin and CJK text keep the CJK face. Restored below: no
+  // other screen may inherit this registration.
+  renderer.setFallbackFont(fontId, UI_12_FONT_ID);
   const int lineHeight = renderer.getLineHeight(fontId);
   constexpr int gap = UiHighDpiProfile::controlGap;  // equals FreeInkUI spaceMd (UIThemeTokens.h)
 
@@ -203,6 +211,10 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
   drawLines(detailLines);
   y += secondaryDetail ? gap : 0;
   drawLines(secondaryLines);
+  // Undo the script fallback: this screen is the only place that wants the CJK
+  // face to reach Hebrew, and leaving it registered would change how every
+  // other screen resolves missing glyphs.
+  renderer.setFallbackFont(fontId, 0, 0);
 }
 
 void UsbDriveActivity::restartToHome() {

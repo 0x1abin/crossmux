@@ -322,7 +322,12 @@ void silentRestartToJoinNetwork() {
 // right after the handoff. Mirror drawPopup's full layout (frame, margins,
 // rounded corners, text style) with the flash-resident CJK face instead; the
 // popup geometry stays identical to every other loading popup in the UI.
-static Rect drawStorageHandoffPopup(const GfxRenderer& renderer, const char* message) {
+static Rect drawStorageHandoffPopup(GfxRenderer& renderer, const char* message) {
+  // That CJK face has no Hebrew, and the SD face that used to supply other
+  // scripts is already detached, so point its fallback at the flash UI face,
+  // which covers Hebrew. Only runs whose codepoints the CJK face lacks switch to
+  // it, so the CJK prompt itself is unchanged.
+  renderer.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int marginX = metrics.popupMarginX;
   const int marginY = metrics.popupMarginY;

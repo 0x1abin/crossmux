@@ -10,6 +10,139 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class UiFontFallbackTest(unittest.TestCase):
+    def test_usb_status_text_keeps_hebrew_and_cjk_without_sd(self):
+        """The USB screen and the handoff popup draw with the flash CJK face.
+
+        That face (notosans_cjk_12, behind NOTOSANS_12_FONT_ID) covers CJK and
+        Latin but no Hebrew, and the SD-backed fallback is unavailable for the
+        whole USB session because the USB host owns the card. Both call sites
+        therefore register the flash UI face (ubuntu_12 behind UI_12_FONT_ID) as
+        NOTOSANS_12's fallback. Execute the real resolveTextFontId() against the
+        real interval tables with no SD font registered, and check that each
+        sample is drawn in a face that actually covers it.
+        """
+        from test_builtin_font_shrink import rows
+
+        fonts = ROOT / 'lib/EpdFont/builtinFonts'
+
+        def intervals(*names):
+            found = []
+            for name in names:
+                found += [(first, last) for first, last, _ in rows((fonts / f'{name}.h').read_text(), 'Intervals')]
+            return found
+
+        # notosans_cjk_12.h embeds the shared common-interval table, so that one
+        # file is the CJK face's real coverage.
+        cjk_face = intervals('notosans_cjk_common_intervals')
+        ui_face = intervals('ubuntu_12_regular')
+
+        def table(name, values):
+            body = ','.join(f'{{{first}u,{last}u}}' for first, last in values)
+            return f'static const uint32_t {name}[][2]={{{body}}};\n'
+
+        # The two call sites must keep the registration; the runtime check below
+        # then proves what it buys.
+        usb = (ROOT / 'src/activities/network/UsbDriveActivity.cpp').read_text()
+        self.assertIn('renderer.setFallbackFont(fontId, UI_12_FONT_ID);', usb)
+        self.assertIn('renderer.setFallbackFont(fontId, 0, 0);', usb)
+        main = (ROOT / 'src/main.cpp').read_text()
+        popup = method(main, 'static Rect drawStorageHandoffPopup(')
+        self.assertIn('renderer.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);', popup)
+
+        renderer = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
+        run_cpp(
+            r'''
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cstring>
+#include <map>
+#include <set>
+#include <string>
+#define LOG_ERR(...) ((void)0)
+namespace BidiUtils { enum class BidiBaseDir { AUTO }; }
+const char* resolveVisualText(const char* text, std::string&, BidiUtils::BidiBaseDir) { return text; }
+#include "Utf8.h"
+#include "Utf8.cpp"
+
+'''
+            + table('kCjk', cjk_face)
+            + table('kUi', ui_face)
+            + r'''
+constexpr int kNotoSans12 = 10;  // NOTOSANS_12_FONT_ID: the flash CJK face
+constexpr int kUi12 = 11;        // UI_12_FONT_ID: the flash Ubuntu face
+
+std::set<uint32_t> coverage(const uint32_t (*table)[2], const size_t count) {
+  std::set<uint32_t> set;
+  for (size_t i = 0; i < count; ++i) {
+    for (uint32_t cp = table[i][0]; cp <= table[i][1]; ++cp) set.insert(cp);
+  }
+  return set;
+}
+
+struct EpdFontFamily {
+  enum Style { REGULAR, BOLD };
+  std::set<uint32_t> coverage;
+  bool hasCodepoint(uint32_t cp, Style) const { return coverage.count(cp) != 0; }
+};
+struct GfxRenderer {
+  std::map<int, EpdFontFamily> fontMap;
+  std::map<int, std::array<int, 2>> fallbackFontMap_;
+  std::map<int, int> preferredFontMap_;
+  void ensureSdGlyphsResident(int, const char*, EpdFontFamily::Style, bool) const {}
+  int resolveFontFamilyId(int) const;
+  int resolveTextFontId(int, const char*, EpdFontFamily::Style = EpdFontFamily::REGULAR) const;
+};
+'''
+            + method(renderer, 'int GfxRenderer::resolveFontFamilyId(')
+            + method(renderer, 'int GfxRenderer::resolveTextFontId(')
+            + r'''
+bool faceCovers(const GfxRenderer& r, const int faceId, const char* text) {
+  const auto face = r.fontMap.find(faceId);
+  if (face == r.fontMap.end()) return false;
+  const char* cursor = text;
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
+    if (!face->second.hasCodepoint(cp, EpdFontFamily::REGULAR)) return false;
+  }
+  return true;
+}
+
+int main() {
+  GfxRenderer r;
+  r.fontMap[kNotoSans12] = {coverage(kCjk, std::size(kCjk))};
+  r.fontMap[kUi12] = {coverage(kUi, std::size(kUi))};
+  // No SD face is registered: beginUsbDrive() detached the card, so anything
+  // the resolver returns has to live in flash.
+
+  const char* kHebrew = "\xD7\x9E\xD7\xA2\xD7\x91\xD7\x99\xD7\xA8";  // מעביר
+  const char* kChinese = "\xE6\xB5\xB7\xE6\xA2\xA6";                  // 海梦
+  const char* kLatin = "USB";
+
+  // Without the registration the Hebrew run is handed to the CJK face, which
+  // has no Hebrew: this is the reported defect.
+  assert(r.resolveTextFontId(kNotoSans12, kHebrew) == kNotoSans12);
+  assert(!faceCovers(r, kNotoSans12, kHebrew));
+
+  // Both call sites register the UI face; the run now resolves to a flash face
+  // that covers every one of its codepoints.
+  r.fallbackFontMap_[kNotoSans12] = {kUi12, 0};
+  assert(r.resolveTextFontId(kNotoSans12, kHebrew) == kUi12);
+  assert(faceCovers(r, kUi12, kHebrew));
+
+  // CJK and Latin keep the CJK face, so the fix does not trade one script for
+  // the other.
+  assert(r.resolveTextFontId(kNotoSans12, kChinese) == kNotoSans12);
+  assert(faceCovers(r, kNotoSans12, kChinese));
+  assert(r.resolveTextFontId(kNotoSans12, kLatin) == kNotoSans12);
+
+  // A style other than REGULAR resolves through the same chain.
+  assert(r.resolveTextFontId(kNotoSans12, kHebrew, EpdFontFamily::BOLD) == kUi12);
+}
+''',
+            include_dirs=(ROOT / 'lib/Utf8',),
+        )
+
     def test_high_dpi_whole_run_coverage(self):
         from test_builtin_font_shrink import rows
         directory = ROOT / 'lib/EpdFont/builtinFonts'
