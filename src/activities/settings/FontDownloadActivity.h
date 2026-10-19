@@ -33,6 +33,11 @@ class FontDownloadActivity final : public UiListActivity {
 
   void onEnter() override;
   void onExit() override;
+  // Whether a family was committed to the settings file during this visit. The
+  // screen's result carries it, so a caller holding a reader session baseline
+  // refreshes that baseline only for a real install, never for a cancelled
+  // prompt, a failed download or a plain visit.
+  bool fontFamilyCommitted() const { return fontFamilyCommitted_; }
   void render(RenderLock&&) override;
   bool preventAutoSleep() override {
     return state_ == LOADING_MANIFEST || state_ == DOWNLOADING ||
@@ -113,6 +118,9 @@ class FontDownloadActivity final : public UiListActivity {
   bool readingStatsReleased_ = false;
   DownloadOperation operation_ = DownloadOperation::None;
   bool selectionUpdated_ = false;
+  // Sticky for the whole visit: set once saveFontSelection() reports success,
+  // and reported to the opener in the result from onExit().
+  bool fontFamilyCommitted_ = false;
   bool accelerationCompleted_ = false;
   uint8_t targetPointSize_ = 0;
   AutomaticError automaticError_ = AutomaticError::Download;

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstring>
+#include <variant>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -226,6 +227,17 @@ void FontDownloadActivity::startWifiSelection() {
 }
 
 void FontDownloadActivity::onExit() {
+  // Report a committed family to the screen that opened this installer before
+  // the activity stack pops us and hands its result back. A managed install
+  // often leaves through the plain back path, which sets no result of its own,
+  // so "back after installing" has to carry the news as well.
+  if (fontFamilyCommitted_) {
+    if (auto* menu = std::get_if<MenuResult>(&result.data)) {
+      menu->fontFamilyCommitted = true;
+    } else {
+      setResult(MenuResult{-1, 0, 0, false, true});
+    }
+  }
   Activity::onExit();
 
   const bool wifiWasEnabled = WiFi.getMode() != WIFI_MODE_NULL;
@@ -978,7 +990,11 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
   SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
   SETTINGS.sdFontFlashPreload = 0;
-  saveFontSelection();
+  // Report the commit to whichever screen opened this installer. Only a
+  // successful save counts: a failed one is still applied for this session in
+  // SETTINGS, but the file - and so the baseline the caller will restore - is
+  // untouched, and telling the caller otherwise would hide that divergence.
+  fontFamilyCommitted_ = saveFontSelection();
   selectionUpdated_ = true;
   accelerationCompleted_ = false;
   {
@@ -995,6 +1011,8 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
     renderer.requestNextFullRefresh();
   });
 }
+
+bool FontDownloadActivity::fontFamilyCommitted() const { return fontFamilyCommitted_; }
 
 void FontDownloadActivity::retryDownloadOperation() {
   currentFileIndex_ = 0;

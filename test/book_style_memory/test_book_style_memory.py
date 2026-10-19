@@ -27,6 +27,8 @@ reader_cpp = (ROOT / "src/activities/reader/ReaderActivity.cpp").read_text()
 store_cpp = (ROOT / "src/BookStyleStore.cpp").read_text()
 store_h = (ROOT / "src/BookStyleStore.h").read_text()
 font_cpp = (ROOT / "src/activities/settings/FontDownloadActivity.cpp").read_text()
+ts_cpp = (ROOT / "src/activities/settings/TextSettingsActivity.cpp").read_text()
+epub_cpp = (ROOT / "src/activities/reader/EpubReaderActivity.cpp").read_text()
 
 
 def method(text, signature):
@@ -42,12 +44,34 @@ def method(text, signature):
     return text[start:end]
 
 
-def anonymous_helpers():
-    """The cap constants BookStyleStore.cpp keeps in its anonymous namespace.
+def installer_caller(text, signature, name):
+    """Rebuild a screen's installer return callback as a named method.
 
-    styleToJson/styleFromJson belong to toJson()/fromJson(), which this flow
-    does not exercise, and boundedInteger() is only used by styleFromJson().
+    Both screens hand the installer a lambda that decides whether a committed
+    family has to reach the session baseline. That lambda is what the review
+    found wrong, so the test runs the production one rather than a copy: take
+    the function, keep the lambda's body only, and expose it as a method the
+    shell can call with the result a visit produced.
     """
+    body = method(text, signature)
+    call = body.index("startActivityForResult(")
+    lambda_start = body.index("[", call)
+    lambda_end = lambda_start
+    depth = 0
+    # Walk the lambda body braces so a nested if/else cannot end it early.
+    paren = body.index(")", lambda_start)
+    brace = body.index("{", paren)
+    lambda_end = brace + 1
+    depth = 1
+    while depth:
+        depth += (body[lambda_end] == "{") - (body[lambda_end] == "}")
+        lambda_end += 1
+    lambda_body = body[brace + 1 : lambda_end - 1]
+    owner = "ReaderActivity::" if "EpubReaderActivity" in signature else "TextSettingsActivity::"
+    return "void " + owner + name + "(const ActivityResult& result) {" + lambda_body + "}"
+
+
+def anonymous_helpers():
     start = store_cpp.index("constexpr uint8_t kMaxFontPointSize")
     end = store_cpp.index("// Reads an integer key from the JSON object.", start)
     return store_cpp[start:end]
@@ -69,7 +93,10 @@ harness = (
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 // --- CrossPointSettings stub: only the fields the style code touches ---------
@@ -234,12 +261,59 @@ struct RebootedStore {
 
 constexpr const char* kBook = "/books/one.epub";
 
-// FontDownloadActivity::saveFontSelection(): the production body is extracted
-// below; this shell supplies the two session pointers the constructor takes.
+// --- font installer: the two production return paths the review found ------
+// Reading stats pause/resume around a child activity; irrelevant here.
+struct ReadingStatsStore {
+  void resumeSession() {}
+};
+inline ReadingStatsStore READING_STATS;
+
+// Both callers must refresh the session baseline only when a family was really
+// committed. The flag rides on the installer's result, set at the moment it is
+// saved, so a cancelled prompt or a failed download cannot reach the baseline.
+struct MenuResult {
+  int action = -1;
+  uint8_t orientation = 0;
+  uint8_t pageTurnRate = 0;
+  bool settingsDirty = false;
+  bool fontFamilyCommitted = false;
+};
+struct ActivityResult {
+  bool isCancelled = false;
+  std::variant<std::monostate, MenuResult> data;
+  ActivityResult() = default;
+  ActivityResult(MenuResult menu) : data{menu} {}
+};
+
 struct FontDownloadActivity {
   const BookStyle* sessionGlobal_ = nullptr;
   const BookStyle* sessionLive_ = nullptr;
+  bool fontFamilyCommitted_ = false;
   bool saveFontSelection();
+};
+struct ReaderActivity;
+
+// TextSettingsActivity::maybeOfferCompleteChineseFont(): the production body is
+// extracted below; this shell supplies the session context it captures.
+struct TextSettingsActivity {
+  ReaderActivity* reader_ = nullptr;
+  const std::string* bookPath_ = nullptr;
+  BookStyle* globalSnapshot_ = nullptr;
+  BookStyle fontInstallLiveStyle_;
+  int updates = 0;
+  bool bookOverrideMode() const { return bookPath_ != nullptr && globalSnapshot_ != nullptr; }
+  void requestUpdate() { ++updates; }
+  template <typename T>
+  void startActivityForResult(std::unique_ptr<T>&&, std::function<void(const ActivityResult&)> handler) {
+    handler_ = std::move(handler);
+  }
+  void maybeOfferCompleteChineseFont();
+  void onFontInstallerReturn(const ActivityResult& result);
+  std::function<void(const ActivityResult&)> handler_;
+  // Simulates the installer's own exit: commit a family (or not) and deliver
+  // whatever result that visit produced to this screen.
+  void installThenReturn(const char* family);
+  void cancelPrompt();
 };
 
 // --- production code under test ---------------------------------------------
@@ -247,12 +321,24 @@ struct ReaderActivity {
   std::string bookPath = kBook;
   bool globalSettingsSnapshotted_ = false;
   BookStyle globalSettingsSnapshot_;
+  BookStyle fontInstallLiveStyle_;
+  int updates = 0;
+  bool autoInstallActive = false;
 
   void applyBookStyle();
   void saveBookStyle();
   BookStyle captureStyleDiff(const BookStyle&) const;
   bool persistBookStyleEdits();
   void saveSettingsKeepingBookStyle();
+  void startActivityForResult(std::unique_ptr<FontDownloadActivity>&&,
+                              std::function<void(const ActivityResult&)> handler) {
+    handler_ = std::move(handler);
+  }
+  // The reader's own auto-install prompt returns through this handler.
+  std::function<void(const ActivityResult&)> handler_;
+  void openReaderAutoInstall();
+  void requestUpdate() { ++updates; }
+  void onReaderAutoInstallReturn(const ActivityResult& result);
 };
 '''
     + method(reader_cpp, "void ReaderActivity::applyBookStyle")
@@ -281,6 +367,33 @@ bool BookStyleStore::saveToFile() {
     + "\n"
     # The installer's write is the same contract from a child screen.
     + method(font_cpp, "bool FontDownloadActivity::saveFontSelection")
+    + "\n"
+    # Both callers of the installer: the reader's auto-install prompt and the
+    # text settings picker. Each refreshes the session baseline only for a
+    # committed family, and each is extracted as written so the test fails if
+    # that gate is dropped. Their lambdas are turned into named methods because
+    # the surrounding activity shells are stubs.
+    + installer_caller(epub_cpp, "bool EpubReaderActivity::maybeOfferCompleteChineseFont", "onReaderAutoInstallReturn")
+    + "\n"
+    + installer_caller(ts_cpp, "void TextSettingsActivity::maybeOfferCompleteChineseFont",
+                       "onFontInstallerReturn")
+    + r'''
+// The shells' simulated installer visits: one that commits a family (and says
+// so, exactly as the installer's result does) and one that walks away. Both
+// call the production return callback the open path installs.
+void TextSettingsActivity::installThenReturn(const char* family) {
+  strncpy(SETTINGS.sdFontFamilyName, family, sizeof(SETTINGS.sdFontFamilyName) - 1);
+  SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+  ActivityResult result;
+  result.data = MenuResult{-1, 0, 0, false, true};
+  onFontInstallerReturn(result);
+}
+void TextSettingsActivity::cancelPrompt() {
+  ActivityResult result;
+  result.isCancelled = true;
+  onFontInstallerReturn(result);
+}
+'''
     + r'''
 // ORDER(5): entry -> snapshot -> persist -> switch-off -> exit/restart -> failure
 int main() {
@@ -640,11 +753,10 @@ int main() {
                 (unsigned)SETTINGS.lineSpacing);
 
     // The installer's result handler then refreshes the session baseline with
-    // the family it just made global (EpubReaderActivity's auto-install
-    // callback). Without that line the exit below would restore the baseline's
-    // older family over the install - the reviewer's repro.
-    memcpy(reader.globalSettingsSnapshot_.sdFontFamilyName, SETTINGS.sdFontFamilyName,
-           sizeof(reader.globalSettingsSnapshot_.sdFontFamilyName));
+    // the family it just made global; the production callback runs here, not a
+    // copy. Without it the exit below restores the baseline's older family over
+    // the install - the reviewer's repro.
+    reader.onReaderAutoInstallReturn(ActivityResult{MenuResult{-1, 0, 0, false, true}});
 
     // The ordinary reader exit follows: the page-turn block above was the last
     // book edit, so run the ordinary post-edit capture first (it runs only while
@@ -655,6 +767,81 @@ int main() {
     assert(SETTINGS.persistedLineSpacing == 1);         // still no book line spacing
     std::printf("font install then exit: disk family=%s lineSpacing=%u\n",
                 SETTINGS.persistedFamily, (unsigned)SETTINGS.persistedLineSpacing);
+  }
+
+  // 16b. Same book, same exit, but the family was chosen from the Text
+  //      Settings picker: that screen opens the installer too, and its own
+  //      callback is the one that has to carry the commit into the baseline.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.lineSpacing = 1;
+    memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    SETTINGS.lineSpacing = 2;
+    reader.persistBookStyleEdits();
+
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    assert(picker.bookOverrideMode());
+    FontDownloadActivity installer;
+    installer.sessionGlobal_ = picker.globalSnapshot_;
+    const BookStyle live = captureStyleFromSettings();
+    installer.sessionLive_ = &live;
+    strncpy(SETTINGS.sdFontFamilyName, "DownloadedFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
+    assert(installer.saveFontSelection());
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    picker.installThenReturn("DownloadedFamily");
+
+    reader.persistBookStyleEdits();
+    reader.saveBookStyle();
+    assert(strcmp(SETTINGS.persistedFamily, "DownloadedFamily") == 0);
+    assert(SETTINGS.persistedLineSpacing == 1);
+    std::printf("text-settings install then exit: disk family=%s lineSpacing=%u\n",
+                SETTINGS.persistedFamily, (unsigned)SETTINGS.persistedLineSpacing);
+  }
+
+  // 16c. Cancelling the prompt commits nothing, so it must not touch the
+  //      baseline: the book uses the built-in face (empty SD family) while the
+  //      global family is GlobalFamily, and backing out of the prompt has to
+  //      leave GlobalFamily global.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.lineSpacing = 1;
+    strncpy(SETTINGS.sdFontFamilyName, "GlobalFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
+    ReaderActivity reader;
+    reader.applyBookStyle();                            // baseline: GlobalFamily
+    SETTINGS.fontPointSize = 22;
+    memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));  // book: built-in
+    reader.persistBookStyleEdits();
+
+    reader.onReaderAutoInstallReturn(ActivityResult{});
+    reader.persistBookStyleEdits();
+    reader.saveBookStyle();
+    assert(strcmp(SETTINGS.persistedFamily, "GlobalFamily") == 0);
+    std::printf("cancelled prompt: disk family=%s (wanted GlobalFamily)\n", SETTINGS.persistedFamily);
+
+    // The picker's cancelled prompt takes the same exit.
+    ReaderActivity pickerReader;
+    strncpy(SETTINGS.sdFontFamilyName, "GlobalFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
+    SETTINGS.fontPointSize = 12;
+    pickerReader.applyBookStyle();
+    memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));
+    pickerReader.persistBookStyleEdits();
+    TextSettingsActivity picker;
+    picker.bookPath_ = &pickerReader.bookPath;
+    picker.globalSnapshot_ = &pickerReader.globalSettingsSnapshot_;
+    picker.cancelPrompt();
+    pickerReader.persistBookStyleEdits();
+    pickerReader.saveBookStyle();
+    assert(strcmp(SETTINGS.persistedFamily, "GlobalFamily") == 0);
+    std::printf("cancelled picker prompt: disk family=%s (wanted GlobalFamily)\n", SETTINGS.persistedFamily);
   }
 
   // 17. Standalone installer (Settings, no book): a plain save.
@@ -675,6 +862,8 @@ with tempfile.TemporaryDirectory(prefix="book-style-memory-") as tmp:
     cpp = Path(tmp) / "flow.cpp"
     exe = Path(tmp) / "flow"
     cpp.write_text(harness)
+    if os.environ.get("DUMP_HARNESS"):
+        Path(os.environ["DUMP_HARNESS"]).write_text(harness)
     subprocess.run(
         shlex.split(os.environ.get("CXX", "c++"))
         + ["-std=c++20", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(exe)],

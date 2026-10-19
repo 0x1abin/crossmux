@@ -26,6 +26,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <variant>
 
 #include "AchievementsStore.h"
 #include "BleInput.h"
@@ -765,13 +766,17 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return false;
   }
-  startActivityForResult(std::move(downloader), [this](const ActivityResult&) {
+  startActivityForResult(std::move(downloader), [this](const ActivityResult& result) {
     READING_STATS.resumeSession();
     // Installing a family is a device-level change (saveFontSelection() writes it
     // to the global file through the book-style contract), so the session
     // baseline has to learn it too: otherwise the exit path restores the
     // baseline's older family and the next write drops the install again.
-    if (globalSettingsSnapshotted_) {
+    // Only a committed family may do that. Cancelling the prompt, a Wi-Fi
+    // failure or a visit that saved nothing leaves the baseline - and the
+    // global family it holds - exactly as it was.
+    const auto* menu = std::get_if<MenuResult>(&result.data);
+    if (globalSettingsSnapshotted_ && menu != nullptr && menu->fontFamilyCommitted) {
       memcpy(globalSettingsSnapshot_.sdFontFamilyName, SETTINGS.sdFontFamilyName,
              sizeof(globalSettingsSnapshot_.sdFontFamilyName));
     }
