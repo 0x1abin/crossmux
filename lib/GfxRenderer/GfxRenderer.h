@@ -18,6 +18,7 @@ class TtfEpdFont;
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <map>
 #include <string>
@@ -72,7 +73,8 @@ class GfxRenderer {
   RenderMode renderMode;
   mutable bool absoluteGrayPlanes = false;
   Orientation orientation;
-  bool fadingFix;
+  // The loop updates this flag while the render task reads refresh policy.
+  std::atomic<bool> fadingFix;
   mutable uint8_t syntheticBoldPixels = 0;
   uint8_t* frameBuffer = nullptr;
   uint32_t frameBufferLoans = 0;
