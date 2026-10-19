@@ -13,6 +13,7 @@
 
 namespace {
 constexpr char ACHIEVEMENTS_FILE_JSON[] = "/.crosspoint/achievements.json";
+constexpr char ACHIEVEMENTS_FILE_TEMP[] = "/.crosspoint/achievements.json.tmp";
 
 uint32_t countGoalDaysFromStats() {
   uint32_t count = 0;
@@ -543,14 +544,7 @@ bool AchievementsStore::saveToFile() const {
 }
 
 bool AchievementsStore::loadFromFile() {
-  const std::string tempPath = std::string(ACHIEVEMENTS_FILE_JSON) + ".tmp";
-  if (!Storage.exists(ACHIEVEMENTS_FILE_JSON) && Storage.exists(tempPath.c_str())) {
-    if (Storage.rename(tempPath.c_str(), ACHIEVEMENTS_FILE_JSON)) {
-      LOG_DBG("ACH", "Recovered achievements.json from interrupted temp file");
-    }
-  }
-
-  if (!Storage.exists(ACHIEVEMENTS_FILE_JSON)) {
+  if (!Storage.exists(ACHIEVEMENTS_FILE_JSON) && !Storage.exists(ACHIEVEMENTS_FILE_TEMP)) {
     bootstrapFromCurrentStats();
     return saveToFile();
   }

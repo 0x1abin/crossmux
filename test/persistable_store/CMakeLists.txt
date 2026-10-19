@@ -10,4 +10,4 @@ endif()
 
 add_test(NAME PersistableStoreWrite
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_write.py
-    ${CMAKE_CXX_COMPILER} ${arduinojson_SOURCE_DIR}/src)
+    ${CMAKE_CXX_COMPILER} ${arduinojson_SOURCE_DIR}/src ${crosspoint_simulator_SOURCE_DIR}/src)

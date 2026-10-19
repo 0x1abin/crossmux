@@ -49,6 +49,9 @@ class PersistableStoreBase {
   // Rejects overflowed documents before I/O; otherwise writes JSON (ensures /.crosspoint exists). Logs on failure.
   static bool writeDocToFile(const char* path, const JsonDocument& doc);
 
+  // Promotes an available .tmp if path is missing; the caller must still validate its contents.
+  static bool recoverTempFile(const char* path);
+
   // Reads path and parses it into doc. Returns false silently when the file
   // does not exist (expected on first boot); logs on read/parse failure.
   static bool readDocFromFile(const char* path, JsonDocument& doc);
