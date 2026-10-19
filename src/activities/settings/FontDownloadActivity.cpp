@@ -1012,8 +1012,6 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   });
 }
 
-bool FontDownloadActivity::fontFamilyCommitted() const { return fontFamilyCommitted_; }
-
 void FontDownloadActivity::retryDownloadOperation() {
   currentFileIndex_ = 0;
   currentFileTotal_ = 0;
