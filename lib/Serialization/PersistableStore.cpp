@@ -8,6 +8,11 @@
 #include <limits>
 
 bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& doc) {
+  if (doc.overflowed()) {
+    LOG_ERR("PERSIST", "Insufficient heap for JSON document");
+    return false;
+  }
+
   const std::string targetPath = path ? path : "";
   if (targetPath.empty()) {
     LOG_ERR("PERSIST", "Missing JSON path for write");
