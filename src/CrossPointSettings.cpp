@@ -564,7 +564,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
 }
 
 bool CrossPointSettings::loadFromFile() {
-  if (Storage.exists(getFilePath()) && PersistableStore<CrossPointSettings>::loadFromFile()) {
+  if (PersistableStore<CrossPointSettings>::loadFromFile()) {
     migrateLanguageBinaryFile();
     return true;
   }
