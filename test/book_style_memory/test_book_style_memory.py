@@ -128,6 +128,42 @@ def installer_wiring(text, signature):
     )
 
 
+def commit_installer(text):
+    """Rebuild the managed install's commit as a named method.
+
+    The managed branch of selectDownloadedFontAndPreview() is where a family
+    becomes global: it writes SETTINGS.sdFontFamilyName, saves through
+    saveFontSelection() and reports the commit. Those production lines are taken
+    as written - and they end exactly where the publish has to happen - so the
+    test fails if the commit stops being reported at the moment it is saved.
+    """
+    body = method(text, "void FontDownloadActivity::selectDownloadedFontAndPreview")
+    # The last occurrence: the managed branch, after the auto-install one.
+    start = body.rindex("strncpy(SETTINGS.sdFontFamilyName, familyName,")
+    end = body.index("selectionUpdated_ = true;", start)
+    return (
+        "bool FontDownloadActivity::commitInstalledFamily(const char* familyName) {"
+        + body[start:end]
+        + "\n  return fontFamilyCommitted_;\n}"
+    )
+
+
+def publish_commit(text):
+    """The installer's result publish, taken as written.
+
+    It is a named method after this fix. Before it the same statements sat
+    inline at the top of onExit(), and pointing this test at the pre-fix head
+    (to watch it fail) still has to run the production code, so that shape is
+    lifted out of onExit() as the same method.
+    """
+    name = "void FontDownloadActivity::publishFontFamilyCommitted"
+    if name in text:
+        return method(text, name)
+    body = method(text, "void FontDownloadActivity::onExit")
+    inner = body[body.index("{") + 1 : body.index("Activity::onExit();")]
+    return name + "() {" + inner + "\n}"
+
+
 def anonymous_helpers():
     start = store_cpp.index("constexpr uint8_t kMaxFontPointSize")
     end = store_cpp.index("// Reads an integer key from the JSON object.", start)
@@ -160,6 +196,7 @@ harness = (
 struct {
   uint8_t fontFamily = 0;
   char sdFontFamilyName[32] = "";
+  uint8_t sdFontFlashPreload = 0;
   uint8_t fontPointSize = 12;
   uint8_t lineSpacing = 1;
   uint8_t paragraphAlignment = 1;
@@ -396,6 +433,14 @@ struct FontDownloadActivity {
   FontDownloadActivity(int, int, Purpose, StartMode, const BookStyle* global, const BookStyle* live)
       : sessionGlobal_(global), sessionLive_(live) {}
   bool saveFontSelection();
+  ActivityResult result;
+  void setResult(ActivityResult&& r) { result = std::move(r); }
+  // The production publish, extracted below. onExit() runs it, and the commit
+  // itself runs it earlier - the ordering between the two is what this test is
+  // about (see popInstaller()).
+  void publishFontFamilyCommitted();
+  // The managed install's own commit lines, extracted below.
+  bool commitInstalledFamily(const char* familyName);
 };
 template <typename T, typename... Args>
 std::unique_ptr<T> makeUniqueNoThrow(Args&&... args) {
@@ -500,6 +545,12 @@ bool BookStyleStore::saveToFile() {
     # The installer's write is the same contract from a child screen.
     + method(font_cpp, "bool FontDownloadActivity::saveFontSelection")
     + "\n"
+    # How the installer puts a committed family into its result, and the managed
+    # install's commit that has to use it.
+    + publish_commit(font_cpp)
+    + "\n"
+    + commit_installer(font_cpp)
+    + "\n"
     # Both callers of the installer: the reader's auto-install prompt and the
     # text settings picker. Each refreshes the session baseline only for a
     # committed family, and each is extracted as written so the test fails if
@@ -515,20 +566,45 @@ bool BookStyleStore::saveToFile() {
     + installer_caller(ts_cpp, "void TextSettingsActivity::maybeOfferCompleteChineseFont",
                        "onFontInstallerReturn")
     + r'''
-// The shells' simulated installer visits: one that commits a family (and says
-// so, exactly as the installer's result does) and one that walks away. Both
+// What ActivityManager::loop() does to a popping activity
+// (src/activities/ActivityManager.cpp): it moves `result` out FIRST, then runs
+// onExit(), then hands what it moved to the opener's handler. Anything the
+// activity writes into its result after that move lands on the moved-from
+// object and never reaches the handler - which is why the commit has to be
+// published while the result is still the activity's.
+ActivityResult popInstaller(FontDownloadActivity& installer) {
+  ActivityResult pendingResult = std::move(installer.result);
+  installer.publishFontFamilyCommitted();  // what onExit() does with the result
+  return pendingResult;
+}
+
+// The shells' simulated installer visits: one that commits a family and one
+// that walks away. Neither fabricates the result - both run the installer's own
+// commit/publish code and hand over whatever the pop above produced, and then
 // call the production return callback the open path installs.
 void TextSettingsActivity::installThenReturn(const char* family) {
-  strncpy(SETTINGS.sdFontFamilyName, family, sizeof(SETTINGS.sdFontFamilyName) - 1);
-  SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
-  ActivityResult result;
-  result.data = MenuResult{-1, 0, 0, false, true};
-  onFontInstallerReturn(result);
+  FontDownloadActivity installer;
+  installer.sessionGlobal_ = globalSnapshot_;
+  const BookStyle live = captureStyleFromSettings();
+  installer.sessionLive_ = &live;
+  assert(installer.commitInstalledFamily(family));
+  const ActivityResult delivered = popInstaller(installer);
+  const auto* menu = std::get_if<MenuResult>(&delivered.data);
+  std::printf("managed install then back: delivered fontFamilyCommitted=%d\n",
+              menu != nullptr && menu->fontFamilyCommitted ? 1 : 0);
+  assert(menu != nullptr && menu->fontFamilyCommitted);  // the review's ordering
+  onFontInstallerReturn(delivered);
 }
 void TextSettingsActivity::cancelPrompt() {
-  ActivityResult result;
-  result.isCancelled = true;
-  onFontInstallerReturn(result);
+  FontDownloadActivity installer;
+  installer.sessionGlobal_ = globalSnapshot_;
+  const BookStyle live = captureStyleFromSettings();
+  installer.sessionLive_ = &live;
+  ActivityResult delivered = popInstaller(installer);
+  delivered.isCancelled = true;
+  const auto* menu = std::get_if<MenuResult>(&delivered.data);
+  assert(menu == nullptr || !menu->fontFamilyCommitted);
+  onFontInstallerReturn(delivered);
 }
 '''
     # The ClearBookStyles row: its confirm callback decides whether the entered
@@ -945,20 +1021,16 @@ int main() {
     picker.bookPath_ = &reader.bookPath;
     picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
     assert(picker.bookOverrideMode());
-    FontDownloadActivity installer;
-    installer.sessionGlobal_ = picker.globalSnapshot_;
-    const BookStyle live = captureStyleFromSettings();
-    installer.sessionLive_ = &live;
-    strncpy(SETTINGS.sdFontFamilyName, "DownloadedFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
-    assert(installer.saveFontSelection());
-    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    // The managed install: the production commit lines run inside
+    // installThenReturn(), and the result is handed over through the
+    // ActivityManager pop order rather than being fabricated.
     picker.installThenReturn("DownloadedFamily");
 
     reader.persistBookStyleEdits();
     reader.saveBookStyle();
     assert(strcmp(SETTINGS.persistedFamily, "DownloadedFamily") == 0);
     assert(SETTINGS.persistedLineSpacing == 1);
-    std::printf("text-settings install then exit: disk family=%s lineSpacing=%u\n",
+    std::printf("text-settings install then exit: disk family=%s (wanted DownloadedFamily) lineSpacing=%u\n",
                 SETTINGS.persistedFamily, (unsigned)SETTINGS.persistedLineSpacing);
   }
 

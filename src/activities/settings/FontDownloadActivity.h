@@ -119,7 +119,8 @@ class FontDownloadActivity final : public UiListActivity {
   DownloadOperation operation_ = DownloadOperation::None;
   bool selectionUpdated_ = false;
   // Sticky for the whole visit: set once saveFontSelection() reports success,
-  // and reported to the opener in the result from onExit().
+  // and published into the result at that moment; onExit() re-publishes it as a
+  // safety net.
   bool fontFamilyCommitted_ = false;
   bool accelerationCompleted_ = false;
   uint8_t targetPointSize_ = 0;
@@ -174,6 +175,8 @@ class FontDownloadActivity final : public UiListActivity {
   // Persists the installed family without writing the open book's typography
   // into the settings file (see the definition). Plain save outside a reader.
   bool saveFontSelection();
+  // Puts a committed family into this activity's result (see the definition).
+  void publishFontFamilyCommitted();
   void downloadAll();
   void updateAll();
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);

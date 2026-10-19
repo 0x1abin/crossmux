@@ -227,17 +227,12 @@ void FontDownloadActivity::startWifiSelection() {
 }
 
 void FontDownloadActivity::onExit() {
-  // Report a committed family to the screen that opened this installer before
-  // the activity stack pops us and hands its result back. A managed install
-  // often leaves through the plain back path, which sets no result of its own,
-  // so "back after installing" has to carry the news as well.
-  if (fontFamilyCommitted_) {
-    if (auto* menu = std::get_if<MenuResult>(&result.data)) {
-      menu->fontFamilyCommitted = true;
-    } else {
-      setResult(MenuResult{-1, 0, 0, false, true});
-    }
-  }
+  // Safety net for a commit that has not reached the result yet (a managed
+  // install often leaves through the plain back path, which sets no result of
+  // its own). The commit is normally published at commit time, because the
+  // activity stack moves the result out before calling this; publishing again
+  // here is idempotent.
+  publishFontFamilyCommitted();
   Activity::onExit();
 
   const bool wifiWasEnabled = WiFi.getMode() != WIFI_MODE_NULL;
@@ -947,6 +942,19 @@ bool FontDownloadActivity::saveFontSelection() {
   return ok;
 }
 
+void FontDownloadActivity::publishFontFamilyCommitted() {
+  // Report a committed family to the screen that opened this installer. This
+  // has to run while `result` is still ours: ActivityManager::loop() moves it
+  // out before it calls onExit(), so a flag written there would only land on
+  // the moved-from copy and never reach the opener's handler.
+  if (!fontFamilyCommitted_) return;
+  if (auto* menu = std::get_if<MenuResult>(&result.data)) {
+    menu->fontFamilyCommitted = true;
+  } else {
+    setResult(MenuResult{-1, 0, 0, false, true});
+  }
+}
+
 void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName) {
   if (purpose_ == Purpose::ReaderAutoInstall) {
     char previousFamily[sizeof(SETTINGS.sdFontFamilyName)];
@@ -995,6 +1003,9 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   // SETTINGS, but the file - and so the baseline the caller will restore - is
   // untouched, and telling the caller otherwise would hide that divergence.
   fontFamilyCommitted_ = saveFontSelection();
+  // Publish it now, not from onExit(): the manager consumes the result before
+  // it calls onExit(), so a flag raised there is already too late.
+  publishFontFamilyCommitted();
   selectionUpdated_ = true;
   accelerationCompleted_ = false;
   {
