@@ -168,7 +168,6 @@ def touch_page_turn_source():
         'struct TouchPageTurn',
         'gestureAllowsSwipe',
         'gestureAllowsTap',
-        'allowsTap',
         'miniFallbackZone',
         'zoneRawShortAction',
         'zoneShortAction',
@@ -560,11 +559,13 @@ static const SettingInfo* find(StrId id) {
 }
 
 // Reload the way the device does after a fresh save: the real load path over a
-// document that carries only the stored gesture pair (everything else keeps its
-// struct-initialiser default).
+// document that carries the stored gesture pair (everything else keeps its
+// struct-initialiser default). The master toggle is part of every save -- it is
+// a base setting -- so the migration sees it exactly as on the device.
 static void reloadFromDocument(uint8_t storedPage, uint8_t storedPrev) {
   resetSettings();  // a reboot starts from the struct initialisers
   JsonDocument doc;
+  doc.set("touchReaderControls", TOUCH_READER_ON);
   doc.set("pageTurnGesture", storedPage);
   doc.set("previousPageGesture", storedPrev);
   loadSettingsDocument(doc);
@@ -701,7 +702,13 @@ int main() {
   {
     GfxRenderer renderer;
     const Turn right = tapAt(renderer, 460, 400);
-    expect(right.next, "legacy inverted tap still taps for the next page", right.next, 1);
+    // Inverted Tap meant "the right edge goes back". The reader no longer folds
+    // the gesture itself, so the migration moves that swap into the stock zones:
+    // the save keeps its stored 3 and still goes back on the right edge.
+    expect(right.prev, "legacy inverted tap keeps its swapped side", right.prev, 1);
+    expect(!right.next, "legacy inverted tap does not turn next on the right", right.next, 0);
+    expect(SETTINGS.tapZones[0] == CrossPointSettings::TAP_ZONE_NEXT, "legacy inverted tap swapped the stock zones",
+           SETTINGS.tapZones[0], CrossPointSettings::TAP_ZONE_NEXT);
   }
 
   // 3b. The old combined selector: 1 = tap, 2 = swipe, 3 = inverted tap. The
@@ -758,6 +765,9 @@ int main() {
     JsonDocument afterResave = doc;
     afterResave.set("pageTurnGesture", pageOnce);
     afterResave.set("previousPageGesture", prevOnce);
+    // The resave carries the version key (toJson() writes it), which is what
+    // stops the side swap from running again.
+    afterResave.set("touchControlsVersion", TOUCH_CONTROLS_VERSION);
     loadSettingsDocument(afterResave);
     expect(SETTINGS.pageTurnGesture == pageOnce, "second load keeps the next gesture", SETTINGS.pageTurnGesture,
            pageOnce);

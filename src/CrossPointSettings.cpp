@@ -237,6 +237,10 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   }
 
   doc["fakeBoldVersion"] = FAKE_BOLD_VERSION;
+  // Written so the touch gesture migration in loadTouchGestureSettings() runs
+  // once: without it the version check reads 0 on every boot and re-applies the
+  // side swap to a save that already has it.
+  doc["touchControlsVersion"] = TOUCH_CONTROLS_VERSION;
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   doc["frontButtonBack"] = frontButtonBack;
   doc["frontButtonConfirm"] = frontButtonConfirm;
@@ -650,20 +654,20 @@ bool CrossPointSettings::loadTouchGestureSettings(JsonVariantConst doc) {
   // SettingsList loop above already collapsed the old value to Off/On; read the
   // raw document here to recover which legacy mode to preserve. v1 saves may
   // also hold the now-removed Inverted Tap gesture (legacy value 3), which
-  // folds to Tap Only. Saves from the gesture-pair era have no
-  // touchReaderControls key at all and are left untouched (the key check keeps
-  // a version bump from re-running the migration against them). Saves that
-  // already carry the per-direction gesture keys are also left untouched, so a
-  // user-configured gesture survives reloads (the version key is never written,
-  // otherwise every boot would re-enter this migration and fold the gestures
-  // back to Tap Only).
+  // folds to Tap Only.
+  // A save from the gesture-pair era wrote pageTurnGesture itself and has no
+  // legacy mode, so it is recognised by the loaded value instead: a stored
+  // Inverted Tap (3) there is the same side swap as legacy mode 3 and must get
+  // it too. touchControlsVersion, written by toJson(), keeps the swap from
+  // running again on the next boot; a save with its own tapZones is skipped
+  // below either way.
   if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
-      !doc["touchReaderControls"].isNull() && doc["pageTurnGesture"].isNull()) {
+      !doc["touchReaderControls"].isNull() && (doc["pageTurnGesture"].isNull() || pageTurnGesture == INVERTED_TAP)) {
     const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
     if (legacyTouch == LEGACY_TOUCH_SWIPE) {
       pageTurnGesture = SWIPE_ONLY;
       previousPageGesture = SWIPE_ONLY;
-    } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP) {
+    } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP || pageTurnGesture == INVERTED_TAP) {
       // Legacy Inverted Tap is tap-only on both directions, and it swapped the
       // page-turn sides (right edge = previous, left edge = next). Keep the
       // swapped zones for saves that never had custom ones; a save with its own
