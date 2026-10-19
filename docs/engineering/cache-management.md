@@ -78,6 +78,11 @@ contents at the same path does not change the hash; preserve freshness checks.
    - Line spacing (`SETTINGS.lineSpacing`)
    - Paragraph spacing (`SETTINGS.extraParagraphSpacing`)
    - Screen margins (`SETTINGS.screenMargin`)
+   - Built-in reader font data or coverage changes: generated reader IDs also
+     hash `notosans_cjk_12.h` and `notosans_cjk_common_intervals.h`. High-DPI
+     mode uses that generated ID instead of a fixed revision. Complete and
+     partial sections rebuild on demand; book metadata and source-offset
+     progress are preserved. No startup-wide cache deletion is needed.
 3. **Viewport dimensions change**:
    - Screen orientation change
    - Display resolution change

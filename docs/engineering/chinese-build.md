@@ -260,6 +260,34 @@ charset it must reproduce the existing glyph metrics and bitmap bytes. The
 subset step deliberately excludes zero-width compatibility code point U+FFA0,
 which is present in the official OTF but was absent from the previous source.
 
+All six CJK sizes retain the source font's 66 Cyrillic letters (U+0410–044F,
+Ё and ё) plus U+2116 (№). Retention must be enabled in both the OTF subset and
+the bitmap export: № needs an explicit `--additional-intervals 0x2116,0x2116`
+because it is outside `fontconvert.py`'s default intervals. These CJK assets
+do not add Ukrainian-specific Є, І, Ї or Ґ, which the source OTF lacks; use an
+SD font with the required coverage when those letters are needed.
+
+`python3 scripts/tests/test_builtin_font_shrink.py` checks all six sizes and
+keeps fingerprints of every pre-existing code point, metric and bitmap byte.
+The common-size DEFLATE groups remain bounded to 4096 uncompressed bytes.
+
+The generator publishes `src/fontIds.h` with the font set. Reader IDs include
+the offline CJK 12pt header and its shared interval table; the high-DPI reader
+uses the generated NotoSans 12pt alias for that same face. A changed bitmap or
+coverage table therefore invalidates both complete and partial pagination through
+the existing font-ID check. Metadata and source-offset progress are retained.
+Clipping layout signatures also change, while source-offset clipping anchors
+remain independent of pagination. The wire format does not change.
+
+For a manual ID rebuild, run this from the repository root after updating font
+headers, so a failed generator leaves the committed IDs intact:
+
+```bash
+bash lib/EpdFont/scripts/build-font-ids.sh > src/fontIds.h.tmp && mv src/fontIds.h.tmp src/fontIds.h
+```
+
+The generator uses Python's standard library; Ruby is no longer required.
+
 `build_cn_charset.py --top N` means "keep the top N characters from the base
 pool, then add every required character." Required glyphs never displace base
 glyphs, so output can contain more than N characters. `--top` may equal the
@@ -398,12 +426,12 @@ After regenerating, confirm the character lists and bitmap headers match:
   3500-char base pool.
 - `cn_i18n_chars.txt` has 807 unique CJK glyphs and contains every glyph
   scanned from `chinese.yaml` and feature-specific files.
-- 8/10/12pt each contain 4014 glyphs; 14/16/18pt each contain 1304 glyphs.
+- 8/10/12pt each contain 4081 glyphs; 14/16/18pt each contain 1371 glyphs.
 - Every generated header says `mode: 2-bit`.
 
-The 2026-10-13 upstream sync regenerates the i18n tier for `限强类导` from
-the translation/feature sources. All existing glyph metrics and bitmap bytes
-remain identical, as do the 8/10/12pt headers and shared common intervals.
+The 2026-10-13 upstream sync regenerated the i18n tier for `限强类导` from
+the translation/feature sources. In that sync, all existing glyph metrics and
+bitmap bytes remained identical, as did the 8/10/12pt headers and shared common intervals.
 The three larger sizes add 2,891 raw bitmap bytes in total; this counts bitmap
 arrays, not the final linked firmware size or runtime memory headroom.
 
@@ -419,10 +447,10 @@ common = cjk((scripts / 'cn_common_chars.txt').read_text())
 i18n = cjk((scripts / 'cn_i18n_chars.txt').read_text())
 required = cjk((root / 'lib/I18n/translations/chinese.yaml').read_text())
 required |= cjk((scripts / 'cn_almanac_chars.txt').read_text())
-assert (len(pool), len(common), len(i18n)) == (3500, 3517, 802)
+assert (len(pool), len(common), len(i18n)) == (3500, 3517, 807)
 assert common == pool | required and i18n == required
-for size, expected in [(8, 4014), (10, 4014), (12, 4014),
-                       (14, 1299), (16, 1299), (18, 1299)]:
+for size, expected in [(8, 4081), (10, 4081), (12, 4081),
+                       (14, 1371), (16, 1371), (18, 1371)]:
     header = (root / f'lib/EpdFont/builtinFonts/notosans_cjk_{size}.h').read_text()
     index_header = ((root / 'lib/EpdFont/builtinFonts/notosans_cjk_common_intervals.h').read_text()
                     if size <= 12 else header)
@@ -432,14 +460,18 @@ for size, expected in [(8, 4014), (10, 4014), (12, 4014),
         codepoints.update(range(int(first, 16), int(last, 16) + 1))
     expected_cjk = common if size <= 12 else i18n
     assert {ord(char) for char in expected_cjk} <= codepoints
+    assert {0x0401, 0x0451, 0x2116} | set(range(0x0410, 0x0450)) <= codepoints
     assert 'mode: 2-bit' in header
-    assert '\n    true,\n    nullptr,\n' in header  # EpdFontData::is2Bit
     assert len(codepoints) == expected, (size, len(codepoints))
     if size == 14:
         assert not {ord(char) for char in common - i18n} & codepoints
 print('Chinese font coverage OK')
 "
 ```
+
+The native `FontDecompressorTest` also checks the actual `EpdFontData` bit-depth
+flags, glyph lookup and bitmap paths; compressed headers have a group pointer
+after `is2Bit`, so a textual `true, nullptr` layout check is not valid for them.
 
 Any assertion failure means a list or header is stale; re-run the regeneration
 steps before committing.
