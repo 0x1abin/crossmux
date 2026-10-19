@@ -65,6 +65,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                false,
                                false,
                                0,
+                               false,  // verticalBottomAlign
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
                                false,
@@ -583,9 +584,10 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 78);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 82);
   ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
   bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
+  bytes.erase(12, 1);  // vertical bottom-align toggle appended after alignment.
   // Normalize the two new spacing bytes and their absolute file offsets back
   // to the historical v70 layout; keep its verified digest unchanged.
   constexpr size_t spacingOffset = 21;
@@ -598,7 +600,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     return value;
   };
   const auto adjustOffset = [&bytes, &readOffset](size_t position) {
-    const uint32_t value = readOffset(position) - 3;
+    const uint32_t value = readOffset(position) - 4;
     std::memcpy(bytes.data() + position, &value, sizeof(value));
   };
   // pageCount follows spacing; the next five fields address tables in the file.
@@ -610,11 +612,14 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   append(bytes);
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
-  // Pre-refactor cache, text and footnotes. The expected value tracks
-  // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
-  // moved when the version went 64 -> 66 for the versioned image cache prefix,
-  // then 66 -> 68 for first-line indent and 68 -> 70 for paragraph spacing.
-  EXPECT_EQ(digest, 9535508317497758948ULL);  // v71/v70 cache (paragraph spacing levels), text and footnotes.
+  // Pre-refactor cache, text and footnotes. The expected value tracks the
+  // section cache header: the digest moved each time the header gained a field
+  // (image-prefix 64->66, first-line indent 66->68, paragraph spacing 68->70,
+  // character/word spacing 70->76 and the vertical bottom-align toggle, which
+  // is normalized away together with the indent/spacing bytes). The leading
+  // version byte is normalized to 70 so a version bump alone never moves the
+  // digest.
+  EXPECT_EQ(digest, 9535508317497758948ULL);  // Verified main v71/v70 layout, text and footnotes.
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
@@ -764,7 +769,155 @@ TEST_F(SectionMemoryTest, ParagraphSpacingLevelsRoundTripWithoutCollapsingToBool
   }
 }
 
+TEST_F(ChapterHtmlSlimParserTest, VerticalBottomAlignDistributesEvenlyToContentBottom) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 80;  // four lines at 0/20/40/60; last bottom = 80
+
+  Page page;
+  for (int16_t i = 0; i < 4; ++i) {
+    page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, i * 20));
+  }
+  parser.applyVerticalBottomAlign(&page);
+
+  // leftover = 100 - 80 = 20 over 3 gaps -> +6/gap plus remainder 2 spread on the
+  // first two gaps. First line stays at the top; the last line shifts by the full
+  // leftover so its bottom lands exactly on viewportHeight.
+  ASSERT_EQ(page.elements.size(), 4U);
+  EXPECT_EQ(page.elements[0]->yPos, 0);
+  EXPECT_EQ(page.elements[1]->yPos, 20 + 7);
+  EXPECT_EQ(page.elements[2]->yPos, 40 + 14);
+  EXPECT_EQ(page.elements[3]->yPos, 60 + 20);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, VerticalBottomAlignCapsSparsePageGapGrowth) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 20;  // two lines at 0 and 20; last bottom = 20
+
+  Page page;
+  page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 0));
+  page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 20));
+  parser.applyVerticalBottomAlign(&page);
+
+  // leftover = 80 over one gap, but the safety cap is lineHeight/2 = 10: the gap
+  // grows by only 10 (second line -> y 30) and the excess stays at the bottom,
+  // instead of one enormous gap in the middle of a two-line page.
+  ASSERT_EQ(page.elements.size(), 2U);
+  EXPECT_EQ(page.elements[0]->yPos, 0);
+  EXPECT_EQ(page.elements[1]->yPos, 30);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignMovesRaisedLinksWithTheirLines) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 80;
+  Page page;
+  page.elements.reserve(4);
+  for (int16_t i = 0; i < 4; ++i) page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, i * 20));
+  ASSERT_TRUE(page.links.resize(3));
+  page.links[0].y = -3;
+  page.links[1].y = 17;
+  page.links[2].y = 64;
+  parser.currentPageLinkLines[0] = 0;
+  parser.currentPageLinkLines[1] = 1;
+  parser.currentPageLinkLines[2] = 3;
+  parser.applyVerticalBottomAlign(&page);
+  EXPECT_EQ(page.links[0].y, -3);
+  EXPECT_EQ(page.links[1].y, 24);
+  EXPECT_EQ(page.links[2].y, 84);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignSkipsTablesRulesAndDisabledPages) {
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 40;
+  enum class ExcludedPage { Disabled, GridTable, HorizontalRule };
+  for (const auto kind : {ExcludedPage::Disabled, ExcludedPage::GridTable, ExcludedPage::HorizontalRule}) {
+    Page page;
+    page.elements.reserve(3);
+    page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 0));
+    page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 20));
+    parser.verticalBottomAlign = kind != ExcludedPage::Disabled;
+    parser.currentPageHasGridTable = kind == ExcludedPage::GridTable;
+    if (kind == ExcludedPage::HorizontalRule)
+      page.elements.push_back(std::make_unique<PageHorizontalRule>(100, 2, 0, 40));
+    parser.applyVerticalBottomAlign(&page);
+    EXPECT_EQ(page.elements[1]->yPos, 20);
+  }
+  ASSERT_TRUE(parser.allocatePage());
+  EXPECT_FALSE(parser.currentPageHasGridTable);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignKeepsTocAndTxtChapterEndPagesTopAligned) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.anchorData.reserve(1);
+  for (const bool txt : {false, true}) {
+    parser.txtChapterBoundaries = txt;
+    parser.tocAnchors = txt ? std::vector<std::string>{} : std::vector<std::string>{"next"};
+    parser.pendingAnchorId = "next";
+    ASSERT_TRUE(parser.allocatePage());
+    parser.currentPage->elements.reserve(3);
+    for (int16_t y : {0, 16, 32}) parser.currentPage->elements.push_back(std::make_unique<PageLine>(nullptr, 0, y));
+    parser.currentPageNextY = parser.currentPageContentBottom = 48;
+    parser.currentLineHeight = 16;
+    bool completed = false;
+    parser.completePageFn = [&](std::unique_ptr<Page> page, auto, auto, auto) {
+      completed = true;
+      ASSERT_EQ(page->elements.size(), 3u);
+      EXPECT_EQ(page->elements[1]->yPos, 16);
+      EXPECT_EQ(page->elements[2]->yPos, 32);
+    };
+    parser.flushPendingAnchor();
+    EXPECT_TRUE(completed);
+    EXPECT_TRUE(parser.currentPage->elements.empty());
+  }
+}
+
 }  // namespace
+
+TEST_F(SectionMemoryTest, BottomAlignRejectsOppositeToggleAndMalformedByteInCompleteAndPartialCaches) {
+  std::string html = "<html><body>";
+  html.reserve(6000);
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  for (const bool partial : {false, true}) {
+    for (const bool enabled : {false, true}) {
+      spec.verticalBottomAlign = enabled;
+      {
+        Section build(epub, 0, renderer);
+        ASSERT_TRUE(build.startBuild(spec));
+        ASSERT_TRUE(build.buildSomeMore(partial ? 1 : 0));
+      }
+      const auto path = epub->cachePath + "/sections/0.bin";
+      std::ifstream input(path, std::ios::binary);
+      const std::string bytes{std::istreambuf_iterator<char>(input), {}};
+      ASSERT_GT(bytes.size(), 47u);
+      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 200 : 82);
+      {
+        Section same(epub, 0, renderer);
+        ASSERT_TRUE(same.loadSectionFile(spec));
+        EXPECT_EQ(same.isPartial(), partial);
+      }
+      auto changed = spec;
+      changed.verticalBottomAlign = !enabled;
+      Section mismatch(epub, 0, renderer);
+      EXPECT_FALSE(mismatch.loadSectionFile(changed));
+      auto malformed = bytes;
+      malformed[13] = 2;
+      {
+        std::ofstream(path, std::ios::binary).write(malformed.data(), malformed.size());
+      }
+      Section invalid(epub, 0, renderer);
+      EXPECT_FALSE(invalid.loadSectionFile(spec));
+    }
+  }
+}
 
 TEST_F(SectionMemoryTest, TocAnchorsTrackSubchaptersDuringBuildAndAfterReload) {
   epub->tocItems = {{"chapter.xhtml", "", 0}, {"chapter.xhtml", "first", 0}, {"chapter.xhtml", "second", 0}};

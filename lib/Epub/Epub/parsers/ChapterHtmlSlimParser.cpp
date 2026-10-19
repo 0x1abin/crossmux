@@ -297,7 +297,7 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
   // block is flushed so the chapter starts on a fresh page.
   if (txtChapterBoundaries || std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
     if (currentPage && !currentPage->elements.empty()) {
-      completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
+      completeCurrentPage(false);
       if (hasFailed()) return;
       completedPageCount++;
       if (!allocatePage()) return;
@@ -320,6 +320,9 @@ bool ChapterHtmlSlimParser::allocatePage() {
   }
   currentPage = std::move(page);
   currentPageNextY = 0;
+  currentPageContentBottom = 0;
+  currentLineHeight = 0;
+  currentPageHasGridTable = false;
   currentPageVisibleOffsetSet = false;
   return true;
 }
@@ -480,7 +483,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
 
   if (!currentPage->elements.empty() && currentPageNextY + totalHeight > viewportHeight) {
     setCurrentPageVisibleOffset(visibleTextOffset);
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
+    completeCurrentPage(true);
     if (hasFailed()) return;
     completedPageCount++;
     if (!allocatePage()) return;
@@ -680,7 +683,7 @@ void ChapterHtmlSlimParser::finishTableRow() {
     if (!currentPage || pageFull) {
       if (pageFull) {
         setCurrentPageVisibleOffset(lineVisibleOffset);
-        completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
+        completeCurrentPage(true);
         if (hasFailed()) return;
         completedPageCount++;
       }
@@ -693,6 +696,7 @@ void ChapterHtmlSlimParser::finishTableRow() {
       currentPageVisibleOffsetSet = false;
     }
 
+    currentPageHasGridTable = true;
     const int16_t rowY = currentPageNextY;
     const size_t requiredCapacity = currentPage->elements.size() + columnCount;
     if (currentPage->elements.capacity() < requiredCapacity) {
@@ -1212,8 +1216,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 if (self->currentPage && !self->currentPage->elements.empty() &&
                     (self->currentPageNextY + imageMarginTop + displayHeight + imageMarginBottom >
                      self->viewportHeight)) {
-                  self->completePageFn(std::move(self->currentPage), self->xpathParagraphIndex,
-                                       self->xpathListItemIndex, self->currentPageVisibleOffset);
+                  self->completeCurrentPage(true);
                   if (self->hasFailed()) return;
                   self->completedPageCount++;
                   if (!self->allocatePage()) return;
@@ -2310,7 +2313,7 @@ bool ChapterHtmlSlimParser::finishParse() {
       pendingAnchorId.clear();
     }
     setCurrentPageVisibleOffset(visibleTextOffset);
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
+    completeCurrentPage(false);  // the chapter's final page stays top-aligned
     if (hasFailed()) return false;
     completedPageCount++;
     currentPage.reset();
@@ -2348,7 +2351,7 @@ bool ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
 
   if (currentPageNextY + lineHeight > viewportHeight) {
     setCurrentPageVisibleOffset(visibleOffset);
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
+    completeCurrentPage(true);  // a filled page is never the chapter's final page
     if (hasFailed()) return false;
     completedPageCount++;
     if (!allocatePage()) return false;
@@ -2369,10 +2372,13 @@ bool ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
   const int rubyShift = line->getRubyShift(renderer.getFontAscenderSize(fontId));
   const int baseLineHeight = renderer.getLineHeight(fontId, lineCompression);
   for (const auto& link : line->takeLinkSpans()) {
+    const size_t linkIndex = currentPage->links.size();
     if (!currentPage->addLink(link.href, static_cast<int16_t>(xOffset + link.x),
                               static_cast<int16_t>(currentPageNextY + rubyShift - link.topLift), link.width,
                               static_cast<int16_t>(baseLineHeight + link.topLift))) {
       LOG_DBG("EHP", "Dropped page link: %.48s", link.href);
+    } else if (verticalBottomAlign) {
+      currentPageLinkLines[linkIndex] = static_cast<uint16_t>(currentPage->elements.size());
     }
   }
   auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
@@ -2382,8 +2388,60 @@ bool ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
     return false;
   }
   currentPage->elements.push_back(std::move(pageLine));
+  currentLineHeight = static_cast<int16_t>(lineHeight);
   currentPageNextY += lineHeight;
+  currentPageContentBottom = currentPageNextY;
   return true;
+}
+
+void ChapterHtmlSlimParser::completeCurrentPage(const bool doBottomAlign) {
+  if (doBottomAlign) {
+    applyVerticalBottomAlign(currentPage.get());
+  }
+  completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
+}
+
+void ChapterHtmlSlimParser::applyVerticalBottomAlign(Page* page) {
+  if (!verticalBottomAlign || !page || currentPageHasGridTable || page->elements.empty()) return;
+  // Only pages made entirely of text lines are redistributed; a page carrying an
+  // image or a horizontal rule keeps its fixed layout.
+  size_t lineCount = 0;
+  for (const auto& el : page->elements) {
+    if (el->getTag() != TAG_PageLine) return;
+    ++lineCount;
+  }
+  if (lineCount < 2) return;  // a single line cannot span top and bottom
+
+  // Leftover space is the gap between the last line's bottom and the content
+  // bottom. currentPageContentBottom is the exact cursor after the last push, so
+  // a trailing paragraph gap is not mistaken for already-consumed space.
+  const int leftover = static_cast<int>(viewportHeight) - static_cast<int>(currentPageContentBottom);
+  if (leftover <= 0) return;  // full page — nothing to distribute
+
+  const int gapCount = static_cast<int>(lineCount - 1);
+  // Safety cap: no inter-line gap may grow by more than half a line height.
+  // Without it a sparse page (a few lines plus lots of empty space) would gain
+  // one enormous gap in the middle; instead we stop stretching and leave the
+  // excess at the bottom. Ordinary pages have a small leftover and never hit
+  // the cap, so the last line still sits flush to the content bottom.
+  const int maxExtraPerGap = std::max<int>(currentLineHeight / 2, 1);
+  const int rawExtraPerGap = leftover / gapCount;
+  const int extraPerGap = std::min(rawExtraPerGap, maxExtraPerGap);
+  const int extraRemainder = (extraPerGap == rawExtraPerGap) ? (leftover % gapCount) : 0;
+
+  // Link indices follow line insertion order, including raised and ruby links.
+  size_t lineIndex = 0;
+  size_t linkIndex = 0;
+  for (auto& el : page->elements) {
+    const int shift =
+        static_cast<int>(lineIndex) * extraPerGap + std::min<size_t>(lineIndex, static_cast<size_t>(extraRemainder));
+    el->yPos = static_cast<int16_t>(el->yPos + shift);
+    while (linkIndex < page->links.size() && currentPageLinkLines[linkIndex] == lineIndex) {
+      page->links[linkIndex].y = static_cast<int16_t>(page->links[linkIndex].y + shift);
+      ++linkIndex;
+    }
+    ++lineIndex;
+  }
 }
 
 void ChapterHtmlSlimParser::makePages(const bool includeLastLine) {
