@@ -311,7 +311,8 @@ void TapZoneSettingsActivity::showPopupSection() {
   }
 
   char title[24];
-  snprintf(title, sizeof(title), "Zone %d · %s", popupZone, isShort ? tr(STR_TAP_ZONE_SHORT) : tr(STR_TAP_ZONE_LONG));
+  snprintf(title, sizeof(title), tr(STR_TAP_ZONE_TITLE_FMT), popupZone,
+           isShort ? tr(STR_TAP_ZONE_SHORT) : tr(STR_TAP_ZONE_LONG));
   popup_.show(title, labels, popupOptionCount_, currentIndex, [this](int index) { onPopupPicked(index); });
 }
 
