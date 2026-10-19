@@ -645,7 +645,7 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
     case LayoutRow::VerticalBottomAlign:
       // Plain on/off toggle, like the Style tab's boolean rows.
       SETTINGS.verticalBottomAlign = !SETTINGS.verticalBottomAlign;
-      SETTINGS.saveToFile();
+      saveSettings();
       requestUpdate();
       break;
 
