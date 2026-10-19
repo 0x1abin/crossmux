@@ -41,10 +41,13 @@ class UiFontFallbackTest(unittest.TestCase):
             return f'static const uint32_t {name}[][2]={{{body}}};\n'
 
         # The two call sites must keep the registration; the runtime check below
-        # then proves what it buys.
+        # then proves what it buys. The USB screen holds it for the whole frame
+        # (UsbFrameFontScope), so the header and the button hints are covered too,
+        # and it restores every mapping it changed instead of leaving them cleared.
         usb = (ROOT / 'src/activities/network/UsbDriveActivity.cpp').read_text()
-        self.assertIn('renderer.setFallbackFont(fontId, UI_12_FONT_ID);', usb)
-        self.assertIn('renderer.setFallbackFont(fontId, 0, 0);', usb)
+        self.assertIn('renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);', usb)
+        self.assertIn('renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, statusSaved_[0], statusSaved_[1]);', usb)
+        self.assertIn('renderer_.setFallbackFont(kFontIds[i], saved_[i][0], saved_[i][1]);', usb)
         main = (ROOT / 'src/main.cpp').read_text()
         popup = method(main, 'static Rect drawStorageHandoffPopup(')
         self.assertIn('renderer.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);', popup)

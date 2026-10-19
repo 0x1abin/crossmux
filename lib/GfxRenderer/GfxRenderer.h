@@ -215,6 +215,13 @@ class GfxRenderer {
   void setFallbackFont(int primaryFontId, int fallbackFontId, int backupFontId = 0) {
     fallbackFontMap_[primaryFontId] = {fallbackFontId, backupFontId};
   }
+  // Read back the two fallback slots, so a caller can override them temporarily and
+  // restore exactly what was there. {0, 0} when nothing is registered: 0 is the
+  // "not found" sentinel, and every resolve path skips it.
+  std::array<int, 2> getFallbackFont(int primaryFontId) const {
+    const auto it = fallbackFontMap_.find(primaryFontId);
+    return (it != fallbackFontMap_.end()) ? it->second : std::array<int, 2>{0, 0};
+  }
   void clearFallbackFonts() { fallbackFontMap_.clear(); }
   // Rebind which family a font id actually resolves to, leaving fontMap untouched.
   // Read Pico sets this so its whole UI renders in the selected reading family at the

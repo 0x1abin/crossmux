@@ -107,7 +107,63 @@ void UsbDriveActivity::loop() {
   }
 }
 
+namespace {
+
+// USB MSC hands the raw card to the host, so no face served from the SD card can
+// supply glyphs for the session. EpdFontFamily::hasCodepoint() reads only the
+// in-memory coverage table, so resolveTextFontId() still selects those faces and
+// the run draws as blank ink. Drop them from the UI fallback chains for one frame
+// and restore every mapping on scope exit, so nothing leaks past this screen.
+//
+// The override has to cover the whole frame, not just the status body: the header
+// title resolves UI_12_FONT_ID and the button hints resolve UI_10_FONT_ID, and both
+// are drawn by render() outside buildDriveScreen(). Which slot holds the SD face
+// depends on the UI profile, so test both instead of assuming an index.
+class UsbFrameFontScope {
+ public:
+  explicit UsbFrameFontScope(GfxRenderer& renderer) : renderer_(renderer) {
+    for (size_t i = 0; i < kFontCount; ++i) {
+      saved_[i] = renderer_.getFallbackFont(kFontIds[i]);
+      int chain[2] = {saved_[i][0], saved_[i][1]};
+      for (int& id : chain) {
+        if (id != 0 && (renderer_.isSdCardFont(id) || renderer_.getTtfFonts().count(id) != 0)) id = 0;
+      }
+      if (chain[0] != saved_[i][0] || chain[1] != saved_[i][1]) {
+        renderer_.setFallbackFont(kFontIds[i], chain[0], chain[1]);
+      }
+    }
+    // Hebrew coverage for the flash CJK status face: see buildDriveScreen().
+    statusSaved_ = renderer_.getFallbackFont(NOTOSANS_12_FONT_ID);
+    renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);
+  }
+
+  ~UsbFrameFontScope() {
+    renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, statusSaved_[0], statusSaved_[1]);
+    for (size_t i = 0; i < kFontCount; ++i) {
+      renderer_.setFallbackFont(kFontIds[i], saved_[i][0], saved_[i][1]);
+    }
+  }
+
+  UsbFrameFontScope(const UsbFrameFontScope&) = delete;
+  UsbFrameFontScope& operator=(const UsbFrameFontScope&) = delete;
+
+ private:
+  static constexpr int kFontIds[] = {UI_12_FONT_ID, UI_10_FONT_ID, SMALL_FONT_ID};
+  static constexpr size_t kFontCount = std::size(kFontIds);
+
+  GfxRenderer& renderer_;
+  std::array<int, 2> saved_[kFontCount]{};
+  std::array<int, 2> statusSaved_{};
+};
+
+}  // namespace
+
 void UsbDriveActivity::render(RenderLock&&) {
+  // Held for the whole frame: the header and the button hints resolve through the
+  // same detached SD fallback as the status body, and they draw outside the screen
+  // builder. RAII, so none of the early returns below can skip the restore.
+  UsbFrameFontScope usbFrameFonts(renderer);
+
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -160,7 +216,8 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
   // served at runtime from a TTF on the SD card (see UIScale.h), and
   // beginUsbDrive() detaches the SD filesystem for the USB host, so that
   // fallback is unavailable here and FreeInkUI text renders as empty boxes.
-  // The built-in CJK font lives in flash and needs no SD access.
+  // The built-in CJK font lives in flash and needs no SD access. Its own fallback
+  // is registered and undone by the frame-wide scope in render(), not here.
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
@@ -173,14 +230,6 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
   // SD-card CJK fallback that is unavailable while the USB host owns the card.
   constexpr int fontId = NOTOSANS_12_FONT_ID;
   constexpr EpdFontFamily::Style style = EpdFontFamily::REGULAR;
-  // The flash CJK face covers CJK and Latin but has no Hebrew, and the SD-backed
-  // fallback that used to supply other scripts is gone for the duration of the
-  // USB session. Point its fallback at the flash UI face, which does cover
-  // Hebrew, so a Hebrew UI renders the status text instead of empty boxes.
-  // A run switches to the fallback only when the primary lacks one of its
-  // codepoints, so Latin and CJK text keep the CJK face. Restored below: no
-  // other screen may inherit this registration.
-  renderer.setFallbackFont(fontId, UI_12_FONT_ID);
   const int lineHeight = renderer.getLineHeight(fontId);
   constexpr int gap = UiHighDpiProfile::controlGap;  // equals FreeInkUI spaceMd (UIThemeTokens.h)
 
@@ -211,10 +260,6 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
   drawLines(detailLines);
   y += secondaryDetail ? gap : 0;
   drawLines(secondaryLines);
-  // Undo the script fallback: this screen is the only place that wants the CJK
-  // face to reach Hebrew, and leaving it registered would change how every
-  // other screen resolves missing glyphs.
-  renderer.setFallbackFont(fontId, 0, 0);
 }
 
 void UsbDriveActivity::restartToHome() {
