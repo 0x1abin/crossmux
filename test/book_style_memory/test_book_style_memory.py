@@ -454,6 +454,9 @@ void TextSettingsActivity::cancelPrompt() {
     + r'''
 // ORDER(5): entry -> snapshot -> persist -> switch-off -> exit/restart -> failure
 int main() {
+  // Unbuffered: the printf probes have to survive an abort() from a failed
+  // assertion, which is what they are for.
+  setvbuf(stdout, nullptr, _IONBF, 0);
   BookStyleStore& store = BOOK_STYLES;
 
   // 1. Opening a book with memory on takes the global snapshot.
@@ -982,6 +985,99 @@ int main() {
     assert(SETTINGS.persistedBookStyleMemory == 1);
     std::printf("standalone toggle: writes=%d (wanted 2), disk bookStyleMemory=%d (wanted back to 1)\n", SETTINGS.saves,
                 SETTINGS.persistedBookStyleMemory);
+  }
+
+  // 21. Review finding 2: a book opened with memory OFF, its font changed in
+  //     the book, then memory enabled from the menu. The row is the production
+  //     one, so `wasOn` and the flag flip are the real ones.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 0;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();                          // opened while off
+    assert(reader.globalSettingsSnapshotted_);        // baseline exists
+    SETTINGS.fontPointSize = 22;                      // changed in the book
+    reader.saveSettingsKeepingBookStyle();            // ... while memory is off
+    // The edit is a global one: with memory off this is the stock behaviour, so
+    // it is already in the file before the switch is even touched. That is what
+    // the maintainer asked for in the earlier round ("with the feature disabled
+    // throughout ... should retain 24/24"), and it is why enabling memory later
+    // cannot turn this 22 into a book override: it would roll a persisted global
+    // change back to 12 for every other book.
+    assert(SETTINGS.persistedFontPointSize == 22);
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    picker.toggleBookStyleMemory();
+    assert(reader.globalSettingsSnapshot_.fontPointSize == 22);  // refreshed
+    const int snapshotted = reader.globalSettingsSnapshotted_ ? 1 : 0;
+    // Memory is active for this session now: a later edit is book-scoped.
+    SETTINGS.fontPointSize = 26;
+    assert(reader.persistBookStyleEdits());
+    assert(store.styles.size() == 1);
+    assert(store.styles[0].style.fontPointSize == 26);
+    reader.saveBookStyle();
+    std::printf("book opened OFF then enabled: snapshot=%d disk=%u (wanted 22) entries=%zu value=%u\n", snapshotted,
+                (unsigned)SETTINGS.persistedFontPointSize, store.styles.size(),
+                (unsigned)store.styles[0].style.fontPointSize);
+    assert(SETTINGS.persistedFontPointSize == 22);    // global edit survives
+    SETTINGS.fontPointSize = 12;
+  }
+  // 21b. The same entry context, but the edit comes AFTER memory is enabled:
+  //      then it is this book's, and the global file keeps 12.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 0;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();                          // opened while off
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    picker.toggleBookStyleMemory();
+    assert(SETTINGS.bookStyleMemory == 1);            // the row flipped it
+    SETTINGS.fontPointSize = 22;                      // edit with memory on
+    assert(reader.persistBookStyleEdits());
+    reader.saveBookStyle();                           // close
+    assert(SETTINGS.persistedFontPointSize == 12);    // global kept
+    assert(store.styles.size() == 1);
+    assert(store.styles[0].style.fontPointSize == 22);
+    std::printf("book opened OFF, enabled, then edited: disk=%d (wanted 12) entries=%zu value=%u\n",
+                (unsigned)SETTINGS.persistedFontPointSize, store.styles.size(),
+                (unsigned)store.styles[0].style.fontPointSize);
+  }
+  // 21c. ... and with a style already remembered for this book: enabling memory
+  //      has to bring that override back in front of the user.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity remembered;
+    remembered.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    remembered.persistBookStyleEdits();               // book override 22
+    assert(store.styles.size() == 1);
+    remembered.saveBookStyle();
+
+    SETTINGS.bookStyleMemory = 0;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();                          // opened while off: 12
+    assert(SETTINGS.fontPointSize == 12);
+    TextSettingsActivity picker;
+    picker.bookPath_ = &reader.bookPath;
+    picker.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    picker.toggleBookStyleMemory();
+    assert(SETTINGS.bookStyleMemory == 1);            // the row flipped it
+    assert(SETTINGS.fontPointSize == 22);             // remembered override back
+    std::printf("book opened OFF then enabled, stored style: live=%u entries=%zu, ", (unsigned)SETTINGS.fontPointSize,
+                store.styles.size());
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 12);    // global kept
+    assert(store.styles.size() == 1);
+    std::printf("disk=%d (wanted 12)\n", (unsigned)SETTINGS.persistedFontPointSize);
+    SETTINGS.fontPointSize = 12;
   }
 
   std::puts("book style memory flow passed");
