@@ -3209,8 +3209,7 @@ void EpubReaderActivity::applyTextSettingLive() {
   requestUpdate();
 }
 
-// Settings-style option pickers for the Text panel's enum rows. Every
-// selection applies immediately to the page under the sheet.
+// Text panel choices apply immediately to the page under the sheet.
 void EpubReaderActivity::showTextRowPopup(const int row) {
   switch (row) {
     case 1: {
@@ -3255,6 +3254,14 @@ void EpubReaderActivity::showTextRowPopup(const int row) {
                           applyTextSettingLive();
                         });
       break;
+    case 5:
+      SETTINGS.focusReadingEnabled = !SETTINGS.focusReadingEnabled;
+      applyTextSettingLive();
+      return;
+    case 6:
+      SETTINGS.verticalBottomAlign = !SETTINGS.verticalBottomAlign;
+      applyTextSettingLive();
+      return;
     default:
       return;
   }

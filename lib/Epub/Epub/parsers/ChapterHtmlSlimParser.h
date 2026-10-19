@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Epub/FootnoteEntry.h"
+#include "Epub/PageLink.h"
 #include "Epub/ParsedText.h"
 #include "Epub/blocks/ImageBlock.h"
 #include "Epub/blocks/TextBlock.h"
@@ -57,11 +58,9 @@ class ChapterHtmlSlimParser {
   // addLineToPage's local). applyVerticalBottomAlign uses it as the safety cap
   // for how much a single inter-line gap may grow when justifying a page.
   int16_t currentLineHeight = 0;
-  // For the page currently being assembled: one [start,end) index range into
-  // currentPage->links per text line (the links added by that line). Kept in
-  // lockstep with the PageLine push order so vertical bottom-align can shift a
-  // line's links by the same delta as the line itself.
-  std::vector<std::pair<uint16_t, uint16_t>> pendingPageLinkRanges;
+  // The existing 32-link limit bounds tracking to 64 bytes without another allocation.
+  std::array<uint16_t, PageLinkList::MAX_SIZE> currentPageLinkLines{};
+  bool currentPageHasGridTable = false;
   int fontId;
   float lineCompression;
   uint8_t extraParagraphSpacing;  // 0=off, 1..5=0.5x/0.75x/1x/1.25x/1.5x line height

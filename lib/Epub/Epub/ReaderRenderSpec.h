@@ -43,10 +43,10 @@ struct ReaderRenderSpec {
            extraParagraphSpacing == other.extraParagraphSpacing && firstLineIndent == other.firstLineIndent &&
            paragraphIndentSpaces == other.paragraphIndentSpaces && characterSpacing == other.characterSpacing &&
            wordSpacingPercent == other.wordSpacingPercent && paragraphAlignment == other.paragraphAlignment &&
-           viewportWidth == other.viewportWidth && viewportHeight == other.viewportHeight &&
-           hyphenationEnabled == other.hyphenationEnabled && embeddedStyle == other.embeddedStyle &&
-           imageRendering == other.imageRendering && focusReadingEnabled == other.focusReadingEnabled &&
-           collectTouchLinks == other.collectTouchLinks;
+           verticalBottomAlign == other.verticalBottomAlign && viewportWidth == other.viewportWidth &&
+           viewportHeight == other.viewportHeight && hyphenationEnabled == other.hyphenationEnabled &&
+           embeddedStyle == other.embeddedStyle && imageRendering == other.imageRendering &&
+           focusReadingEnabled == other.focusReadingEnabled && collectTouchLinks == other.collectTouchLinks;
   }
 };
 
@@ -73,5 +73,7 @@ inline uint32_t readerRenderSpecSignature(const ReaderRenderSpec& spec) {
   mix(spec.imageRendering);
   mix(spec.focusReadingEnabled);
   mix(spec.collectTouchLinks);
+  // Preserve disabled signatures; the high bit also stays distinct from reserved 0/1.
+  if (spec.verticalBottomAlign) signature ^= 0x80000000u;
   return signature == 0 ? 1 : signature;
 }

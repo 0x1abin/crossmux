@@ -54,11 +54,11 @@ namespace {
 //   74 / 75 - character and word spacing in the render spec and cached text
 //   76 / 77 - independent Western paragraph indentation width
 //   78 / 79 - per-word source ranges, NFC source composition, paragraph starts, and soft-flush continuity
-//   80 / 79 - vertical bottom-align toggle field in the section header
+//   82 / 83 - bottom-align header and table-safe layout; skip overlapping early PR versions 79/80
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 80;
+constexpr uint8_t SECTION_FILE_VERSION = 83;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 79;
+constexpr uint8_t SECTION_FILE_VERSION = 82;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -206,7 +206,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     uint8_t fileFirstLineIndent = 0;
     uint8_t fileParagraphIndentSpaces = 3;
     uint8_t fileParagraphAlignment = 0;
-    bool fileVerticalBottomAlign = false;
+    uint8_t fileVerticalBottomAlign = 0;
     bool fileHyphenationEnabled = false;
     bool fileEmbeddedStyle = false;
     uint8_t fileImageRendering = 0;
@@ -228,11 +228,12 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     if (!headerValid || spec.fontId != fileFontId || spec.lineCompression != fileLineCompression ||
         spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.firstLineIndent != fileFirstLineIndent ||
         spec.paragraphIndentSpaces != fileParagraphIndentSpaces || spec.paragraphAlignment != fileParagraphAlignment ||
-        spec.verticalBottomAlign != fileVerticalBottomAlign || spec.viewportWidth != fileViewportWidth ||
-        spec.viewportHeight != fileViewportHeight || spec.hyphenationEnabled != fileHyphenationEnabled ||
-        spec.embeddedStyle != fileEmbeddedStyle || spec.imageRendering != fileImageRendering ||
-        spec.focusReadingEnabled != fileFocusReadingEnabled || spec.collectTouchLinks != fileCollectTouchLinks ||
-        spec.characterSpacing != fileCharacterSpacing || spec.wordSpacingPercent != fileWordSpacingPercent) {
+        fileVerticalBottomAlign > 1 || spec.verticalBottomAlign != (fileVerticalBottomAlign != 0) ||
+        spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
+        spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
+        spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled ||
+        spec.collectTouchLinks != fileCollectTouchLinks || spec.characterSpacing != fileCharacterSpacing ||
+        spec.wordSpacingPercent != fileWordSpacingPercent) {
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();

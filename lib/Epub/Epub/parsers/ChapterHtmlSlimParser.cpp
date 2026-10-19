@@ -297,7 +297,7 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
   // block is flushed so the chapter starts on a fresh page.
   if (txtChapterBoundaries || std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
     if (currentPage && !currentPage->elements.empty()) {
-      completeCurrentPage(true);
+      completeCurrentPage(false);
       if (hasFailed()) return;
       completedPageCount++;
       if (!allocatePage()) return;
@@ -322,6 +322,7 @@ bool ChapterHtmlSlimParser::allocatePage() {
   currentPageNextY = 0;
   currentPageContentBottom = 0;
   currentLineHeight = 0;
+  currentPageHasGridTable = false;
   currentPageVisibleOffsetSet = false;
   return true;
 }
@@ -695,6 +696,7 @@ void ChapterHtmlSlimParser::finishTableRow() {
       currentPageVisibleOffsetSet = false;
     }
 
+    currentPageHasGridTable = true;
     const int16_t rowY = currentPageNextY;
     const size_t requiredCapacity = currentPage->elements.size() + columnCount;
     if (currentPage->elements.capacity() < requiredCapacity) {
@@ -2369,17 +2371,16 @@ bool ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
   const int16_t xOffset = line->getBlockStyle().leftInset();
   const int rubyShift = line->getRubyShift(renderer.getFontAscenderSize(fontId));
   const int baseLineHeight = renderer.getLineHeight(fontId, lineCompression);
-  const uint16_t linkStart = static_cast<uint16_t>(currentPage->links.size());
   for (const auto& link : line->takeLinkSpans()) {
+    const size_t linkIndex = currentPage->links.size();
     if (!currentPage->addLink(link.href, static_cast<int16_t>(xOffset + link.x),
                               static_cast<int16_t>(currentPageNextY + rubyShift - link.topLift), link.width,
                               static_cast<int16_t>(baseLineHeight + link.topLift))) {
       LOG_DBG("EHP", "Dropped page link: %.48s", link.href);
+    } else if (verticalBottomAlign) {
+      currentPageLinkLines[linkIndex] = static_cast<uint16_t>(currentPage->elements.size());
     }
   }
-  // Keep the [start,end) link range in lockstep with the PageLine push below so
-  // vertical bottom-align can shift a line's links by the same delta as the line.
-  pendingPageLinkRanges.emplace_back(linkStart, static_cast<uint16_t>(currentPage->links.size()));
   auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
   if (!pageLine) {
     LOG_ERR("EHP", "OOM: PageLine (%u bytes)", static_cast<unsigned>(sizeof(PageLine)));
@@ -2398,11 +2399,10 @@ void ChapterHtmlSlimParser::completeCurrentPage(const bool doBottomAlign) {
     applyVerticalBottomAlign(currentPage.get());
   }
   completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex, currentPageVisibleOffset);
-  pendingPageLinkRanges.clear();
 }
 
 void ChapterHtmlSlimParser::applyVerticalBottomAlign(Page* page) {
-  if (!verticalBottomAlign || !page || page->elements.empty()) return;
+  if (!verticalBottomAlign || !page || currentPageHasGridTable || page->elements.empty()) return;
   // Only pages made entirely of text lines are redistributed; a page carrying an
   // image or a horizontal rule keeps its fixed layout.
   size_t lineCount = 0;
@@ -2429,25 +2429,16 @@ void ChapterHtmlSlimParser::applyVerticalBottomAlign(Page* page) {
   const int extraPerGap = std::min(rawExtraPerGap, maxExtraPerGap);
   const int extraRemainder = (extraPerGap == rawExtraPerGap) ? (leftover % gapCount) : 0;
 
-  // Apply per-line shifts to the lines and to that line's links (kept in
-  // lockstep via pendingPageLinkRanges). Line i shifts down by i*extraPerGap,
-  // plus one extra pixel for the first `extraRemainder` lines.
+  // Link indices follow line insertion order, including raised and ruby links.
   size_t lineIndex = 0;
+  size_t linkIndex = 0;
   for (auto& el : page->elements) {
-    if (el->getTag() != TAG_PageLine) continue;
     const int shift =
         static_cast<int>(lineIndex) * extraPerGap + std::min<size_t>(lineIndex, static_cast<size_t>(extraRemainder));
-    if (shift > 0) {
-      el->yPos = static_cast<int16_t>(el->yPos + shift);
-      if (lineIndex < pendingPageLinkRanges.size()) {
-        const uint16_t linkStart = pendingPageLinkRanges[lineIndex].first;
-        const uint16_t linkEnd = pendingPageLinkRanges[lineIndex].second;
-        for (uint16_t li = linkStart; li < linkEnd; ++li) {
-          if (li < page->links.size()) {
-            page->links[li].y = static_cast<int16_t>(page->links[li].y + shift);
-          }
-        }
-      }
+    el->yPos = static_cast<int16_t>(el->yPos + shift);
+    while (linkIndex < page->links.size() && currentPageLinkLines[linkIndex] == lineIndex) {
+      page->links[linkIndex].y = static_cast<int16_t>(page->links[linkIndex].y + shift);
+      ++linkIndex;
     }
     ++lineIndex;
   }

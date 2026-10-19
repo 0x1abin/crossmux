@@ -309,6 +309,26 @@ TEST(ClippingHighlight, LegacySignatureIncludesCharacterAndWordSpacing) {
   EXPECT_NE(readerRenderSpecSignature(spec), original);
 }
 
+TEST(ClippingHighlight, BottomAlignmentChangesLayoutIdentity) {
+  ReaderRenderSpec original;
+  EXPECT_EQ(readerRenderSpecSignature(original), 1191936047u);  // Exact a78a39ed default-layout signature.
+  auto changed = original;
+  changed.verticalBottomAlign = true;
+  EXPECT_FALSE(original == changed);
+  EXPECT_NE(readerRenderSpecSignature(original), readerRenderSpecSignature(changed));
+}
+
+TEST(ClippingHighlight, BottomAlignmentKeepsReservedLegacySignaturesDistinct) {
+  // Exact main layouts whose raw FNV signatures are the reserved values 0/1.
+  for (const int fontId : {440373625, 1135237658}) {
+    ReaderRenderSpec spec;
+    spec.fontId = fontId;
+    ASSERT_EQ(readerRenderSpecSignature(spec), 1u);
+    spec.verticalBottomAlign = true;
+    EXPECT_NE(readerRenderSpecSignature(spec), 1u);
+  }
+}
+
 TEST(SelectionGeometry, KeepsCursorClearOfHintsOnEitherAxis) {
   EXPECT_EQ(selectionGeometry::keepVisible(0, 20, 40, 700), 40);
   EXPECT_EQ(selectionGeometry::keepVisible(735, 20, 40, 700), -15);

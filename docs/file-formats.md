@@ -100,6 +100,21 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Versions 82 / 83
+
+Adds a one-byte `bool verticalBottomAlign` immediately after
+`paragraphAlignment` in the 47-byte section header. Complete versions are
+82 (Latin) / 83 (CJK); partial sentinels are 200 / 199, derived with
+`0xFE - (completeVersion - 28)`. Early PR builds used overlapping 79/80
+versions, so the final format skips 80/81 to avoid accepting their layouts.
+
+The option redistributes spare height between lines on non-final text pages,
+with a half-line-height cap per gap. Grid-table, image and rule pages retain
+fixed geometry; the final chapter page stays top-aligned. Links move with their
+text lines. Both section-cache identity and clipping layout signatures include
+the toggle. Complete and partial layouts rebuild on an option/version change;
+book metadata and source-offset reading/clipping anchors remain available.
+
 ### Versions 78 / 79
 
 Unified firmware uses version **79**; the Latin counter is **78**. Partial
@@ -142,18 +157,10 @@ adds `characterSpacing` after `directionDefined`. Existing caches rebuild;
 CrossMux paragraph spacing levels, first-line indentation and touch-link flags
 remain in the header.
 
-### Versions 78 / 79
-
-Adds the `verticalBottomAlign` toggle to the section header as a bool
-immediately after `paragraphAlignment`. When enabled, the last text row is
-pushed to the bottom of the page. Complete and partial caches rebuild; the
-partial sentinels advance with the version.
-
 ### Versions 72 / 73
 
-> Unified firmware uses the CJK-capable cache version **77** (78 once the page
-> bottom-align header field below lands). Version 72 is the Latin-build counter;
-> its layout is identical, but font metrics differ,
+> Unified firmware uses the CJK-capable cache version **73**. Version 72 is the
+> Latin-build counter; its layout is identical, but font metrics differ,
 > so old pagination caches are deliberately invalidated.
 >
 > Versions 34/35 introduced the flat TextBlock arena layout. Versions 36/37
@@ -191,15 +198,6 @@ Versions 72/73 keep the binary layout unchanged but invalidate complete and part
 pagination caches because missing glyphs now reserve a visible outline placeholder.
 The outline is sized from the active font ascender and replaces implicit U+FFFD
 fallback. Existing source-offset progress, metadata and chapter indexes are retained.
-
-Versions 73/74 add a `bool verticalBottomAlign` header field after
-`paragraphAlignment`. When enabled, every non-final page's text lines are
-redistributed so the first line stays at the top and the last line reaches the
-content bottom, with the leftover vertical space spread evenly between the
-lines; the chapter's final page stays top-aligned. The toggle is a cache key, so
-flipping it discards and rebuilds both complete and partial caches. Older caches
-are rebuilt because their headers lack this field; partial-cache sentinels move
-in lockstep to 209/208.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
@@ -280,8 +278,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 78
-#define CHINESE_VERSION 79
+#define LATIN_VERSION 82
+#define CHINESE_VERSION 83
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -459,6 +457,7 @@ struct SectionBin {
     u8 firstLineIndent;
     u8 paragraphIndentSpaces; // forced Western indent, 0..5
     u8 paragraphAlignment;
+    bool verticalBottomAlign;
     u16 viewportWidth;
     u16 viewportHeight;
     bool hyphenationEnabled;
