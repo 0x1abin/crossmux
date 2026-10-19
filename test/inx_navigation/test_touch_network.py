@@ -117,10 +117,18 @@ int main(){
   p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
   input.snap.touchPressed=false;input.snap.touchReleased=true;p.handleInput(input,update);
   assert(!p.active&&calls==1&&chosen==layout.first+1);assert(!p.handleInput(input,update));
-  // A confirm held across entry must not activate on its inherited release.
-  OptionPopup q;q.ignoreInitialConfirmRelease=true;q.onSelectCallback=[&](int){++calls;};
+  // A confirm held across entry must not activate on its inherited release;
+  // the three entry states are exercised in full below.
+  OptionPopup q;q.onSelectCallback=[&](int){++calls;};
+  input={};input.held=int(MappedInputManager::Button::Confirm);q.finishShow(0,q.onSelectCallback);
+  q.handleInput(input,update);
   input={};input.released=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
-  assert(q.active&&calls==1);q.handleInput(input,update);assert(!q.active&&calls==2);
+  assert(q.active&&calls==1);
+  // Closes and fires once, on the release of a fresh press.
+  input={};input.pressed=int(MappedInputManager::Button::Confirm);
+  input.held=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
+  input={};input.released=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
+  assert(!q.active&&calls==2);
 
   // --- popped open by a touch, then a quick fresh Confirm ---------------
   // The author's reproduction: a touch opens the dialog (the finger lifts
