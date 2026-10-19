@@ -42,6 +42,7 @@ struct BookStyle {
     kGuideLine = 1u << 16,
     kGuideLineStyle = 1u << 17,
     kGuideLineOffset = 1u << 18,
+    kVerticalBottomAlign = 1u << 19,
   };
   uint32_t overrideMask = 0;
   uint8_t fontFamily = CrossPointSettings::NOTOSANS;
@@ -63,6 +64,7 @@ struct BookStyle {
   uint8_t readingGuideLineEnabled = 0;
   uint8_t readingGuideLineStyle = static_cast<uint8_t>(readingGuideLine::Style::ShortDash);
   int8_t readingGuideLineOffset = CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT;
+  uint8_t verticalBottomAlign = 0;
 };
 
 // Copies every field of `style` into the in-memory global settings. Shared by
@@ -89,6 +91,7 @@ inline void applyStyleToSettings(const BookStyle& style) {
   SETTINGS.readingGuideLineEnabled = style.readingGuideLineEnabled;
   SETTINGS.readingGuideLineStyle = style.readingGuideLineStyle;
   SETTINGS.readingGuideLineOffset = style.readingGuideLineOffset;
+  SETTINGS.verticalBottomAlign = style.verticalBottomAlign;
 }
 
 // Applies only the fields a book explicitly overrides; cleared mask bits keep
@@ -118,6 +121,7 @@ inline void applyStyleOverrides(const BookStyle& style) {
   if (m & BookStyle::kGuideLine) SETTINGS.readingGuideLineEnabled = style.readingGuideLineEnabled;
   if (m & BookStyle::kGuideLineStyle) SETTINGS.readingGuideLineStyle = style.readingGuideLineStyle;
   if (m & BookStyle::kGuideLineOffset) SETTINGS.readingGuideLineOffset = style.readingGuideLineOffset;
+  if (m & BookStyle::kVerticalBottomAlign) SETTINGS.verticalBottomAlign = style.verticalBottomAlign;
 }
 
 // Copies the typography fields currently in SETTINGS into a BookStyle. Used for
@@ -144,6 +148,7 @@ inline BookStyle captureStyleFromSettings() {
   style.readingGuideLineEnabled = SETTINGS.readingGuideLineEnabled;
   style.readingGuideLineStyle = SETTINGS.readingGuideLineStyle;
   style.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
+  style.verticalBottomAlign = SETTINGS.verticalBottomAlign;
   return style;
 }
 
@@ -253,6 +258,10 @@ inline BookStyle diffStyleFromSettings(const BookStyle& globalSnapshot) {
   if (SETTINGS.readingGuideLineOffset != globalSnapshot.readingGuideLineOffset) {
     m |= BookStyle::kGuideLineOffset;
     overrides.readingGuideLineOffset = SETTINGS.readingGuideLineOffset;
+  }
+  if (SETTINGS.verticalBottomAlign != globalSnapshot.verticalBottomAlign) {
+    m |= BookStyle::kVerticalBottomAlign;
+    overrides.verticalBottomAlign = SETTINGS.verticalBottomAlign;
   }
   return overrides;
 }

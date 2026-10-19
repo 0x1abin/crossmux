@@ -52,13 +52,14 @@ void styleToJson(JsonObject obj, const BookStyle& style) {
   obj["readingGuideLineEnabled"] = style.readingGuideLineEnabled;
   obj["readingGuideLineStyle"] = style.readingGuideLineStyle;
   obj["readingGuideLineOffset"] = style.readingGuideLineOffset;
+  obj["verticalBottomAlign"] = style.verticalBottomAlign;
 }
 
 // Reads a BookStyle from a JSON object. Unknown or out-of-range values fall
 // back to the defaults so a hand-edited or forward-versioned file cannot push
 // the reader into an invalid state.
 bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
-  style.overrideMask = boundedInteger<uint32_t>(obj, "overrideMask", 0, 0, (1u << 19) - 1);
+  style.overrideMask = boundedInteger<uint32_t>(obj, "overrideMask", 0, 0, (1u << 20) - 1);
   style.fontFamily = boundedInteger<uint8_t>(obj, "fontFamily", CrossPointSettings::NOTOSANS, 0,
                                              CrossPointSettings::FONT_FAMILY_COUNT - 1);
   const char* sdFamily = obj["sdFontFamilyName"] | "";
@@ -98,6 +99,7 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   style.readingGuideLineOffset = boundedInteger<int8_t>(
       obj, "readingGuideLineOffset", CrossPointSettings::READING_GUIDE_LINE_OFFSET_DEFAULT,
       CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN, CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX);
+  style.verticalBottomAlign = boundedInteger<uint8_t>(obj, "verticalBottomAlign", 0, 0, 1);
   return true;
 }
 

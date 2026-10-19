@@ -163,6 +163,7 @@ struct {
   uint8_t fontPointSize = 12;
   uint8_t lineSpacing = 1;
   uint8_t paragraphAlignment = 1;
+  uint8_t verticalBottomAlign = 0;
   uint8_t extraParagraphSpacing = 0;
   uint8_t firstLineIndent = 0;
   uint8_t paragraphIndentSpaces = 3;
@@ -185,12 +186,14 @@ struct {
   int persistedFontPointSize = -1;  // what the last write put in the file
   int persistedLineSpacing = -1;
   int persistedBookStyleMemory = -1;
+  int persistedVerticalBottomAlign = -1;
   char persistedFamily[32] = "";
   bool saveToFile() {
     ++saves;
     if (!saveOk) return false;
     persistedFontPointSize = fontPointSize;
     persistedLineSpacing = lineSpacing;
+    persistedVerticalBottomAlign = verticalBottomAlign;
     persistedBookStyleMemory = bookStyleMemory;
     memcpy(persistedFamily, sdFontFamilyName, sizeof(persistedFamily));
     return true;
@@ -223,6 +226,7 @@ constexpr uint8_t NoIndent = 2;
 namespace readingGuideLine {
 enum class Style : uint8_t { ShortDash = 0, Count = 3 };
 }
+
 
 // --- logging ----------------------------------------------------------------
 int loggedErrors = 0;
@@ -1156,6 +1160,35 @@ int main() {
     assert(SETTINGS.persistedLineSpacing == 1);
     assert(strcmp(SETTINGS.persistedFamily, "DownloadedFamily") == 0);
     SETTINGS.lineSpacing = 1;
+  }
+
+  // 23. Review finding: the Layout tab's "vertical bottom align" row. It feeds
+  //     the render spec like the other eight layout rows, so it has to be a
+  //     per-book override too. Missed, the diff had no bit for it and the
+  //     global restore never rolled it back, so the last save quietly wrote it
+  //     into the settings file for every other book.
+  {
+    store.reset();
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.verticalBottomAlign = 0;
+    ReaderActivity reader;
+    reader.applyBookStyle();                            // the entered global
+    SETTINGS.fontPointSize = 22;                        // the user's layout edits
+    SETTINGS.verticalBottomAlign = 1;
+    assert(reader.persistBookStyleEdits());
+    BookStyle stored;
+    assert(store.findStyle(kBook, stored));
+    assert(SETTINGS.persistedVerticalBottomAlign == 0);     // file keeps the global
+    assert(SETTINGS.verticalBottomAlign == 1);              // session keeps it
+    assert(stored.overrideMask & BookStyle::kVerticalBottomAlign);
+    std::printf("vertical bottom align: disk=%d (wanted 0), live=%d\n",
+                SETTINGS.persistedVerticalBottomAlign, SETTINGS.verticalBottomAlign);
+    // Re-opening the book has to bring it back with the rest of the layout.
+    SETTINGS.verticalBottomAlign = 0;
+    ReaderActivity reopened;
+    reopened.applyBookStyle();
+    assert(SETTINGS.verticalBottomAlign == 1);
+    SETTINGS.verticalBottomAlign = 0;
   }
 
   std::puts("book style memory flow passed");
