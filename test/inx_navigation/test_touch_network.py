@@ -172,6 +172,29 @@ int main(){
     assert(!inherited.active&&inheritedCalls==1);
   }
 
+  // --- inherited Confirm: the first pass is already its release -----------
+  // The render/input handoff can swallow the whole hold: the popup opens while
+  // Confirm is down, the first pass it ever sees carries only the release
+  // (wasPressed() and isPressed() both false). That release belongs to the
+  // opening gesture, so it must not reach handleButtons() as a confirmation.
+  {
+    OptionPopup early;int earlyCalls=0;
+    early.onSelectCallback=[&](int){++earlyCalls;};
+    early.finishShow(0,early.onSelectCallback);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    early.handleInput(input,update);
+    assert(!early.confirmBarrierPending);
+    assert(early.active&&earlyCalls==0);
+    // The owned release was consumed; the popup is still up and a real press
+    // afterwards selects normally.
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    early.handleInput(input,update);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    early.handleInput(input,update);
+    assert(!early.active&&earlyCalls==1);
+  }
+
   // --- a popup opened with no button down: nothing is pending -----------
   {
     OptionPopup idle;int idleCalls=0;

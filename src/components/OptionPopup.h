@@ -149,18 +149,25 @@ class OptionPopup {
     const auto confirm = MappedInputManager::Button::Confirm;
     if (confirmBarrierPending) {
       // The popup was just opened and cannot know, by itself, whether Confirm
-      // was already down before it appeared. Decide from the first input pass
-      // that sees the button: a press edge means the user pressed it for this
-      // popup and it must be honoured, while "held without an edge" can only be
-      // a contact inherited from the gesture that opened the popup, which is
-      // owned until it is released. Nothing is pending once this has decided,
-      // so a later press is always fresh.
+      // belongs to it or to whatever opened it. Decide from the first input pass
+      // that sees the button at all:
+      //   - a press edge is the user pressing it for this popup: honour it;
+      //   - held with no edge is the opening gesture's own contact: own it until
+      //     it is released, so it can neither select nor dismiss;
+      //   - a bare release is that contact already finishing — consume it and
+      //     own nothing further, since the button is up again.
+      // The release-only case is the one the render handoff can produce: the
+      // popup opens and the first pass it ever sees already carries the
+      // inherited release, with wasPressed() and isPressed() both false. Without
+      // this branch it fell through to handleButtons() as a confirmation.
       confirmBarrierPending = false;
       ignoreInitialConfirmRelease = false;
-      if (!input.wasPressed(confirm) && input.isPressed(confirm)) {
+      if (input.wasPressed(confirm)) {
+        // A real press edge: this popup owns the press, deliver its release.
+      } else if (input.isPressed(confirm)) {
         ignoreInitialConfirmRelease = true;
-        return true;
       }
+      if (input.isPressed(confirm) || input.wasReleased(confirm)) return true;
     }
     if (ignoreInitialConfirmRelease) {
       if (input.wasReleased(confirm)) {
