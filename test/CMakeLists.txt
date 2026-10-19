@@ -188,6 +188,10 @@ add_test(NAME ThemeCheckboxRows COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/
 add_test(NAME LegacyThemeListGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_legacy_list_adapter.py)
 
 add_test(NAME InxSettingControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_setting_controls.py)
+add_test(NAME TapZoneGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_tap_zone_geometry.py)
+add_test(NAME TapZoneChapter COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_tap_zone_chapter.py)
+
+add_test(NAME TouchPageTurnSettings COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/touch_page_turn/test_page_turn_settings.py)
 
 add_test(NAME SettingsApiKeys COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/settings_api/test_settings_api_keys.py)
 

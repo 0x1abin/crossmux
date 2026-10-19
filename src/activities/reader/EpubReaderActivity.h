@@ -154,7 +154,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // does NOT re-render the page: the overlay page snapshot was decoded with the
   // old filter, so it is dropped on close and the page re-decodes once there.
   bool imageScalingDirty = false;
-  int autoTurnOption = 0;  // current auto page-turn rate index (More panel)
+  int autoTurnOption = 0;                // auto page-turn option: 0=off, 1..3=rates[1..3], 4=custom
+  uint8_t customAutoPageTurnRate_ = 15;  // custom rate used when autoTurnOption == 4
   std::vector<EpubReaderMenuActivity::MenuItem> moreItems;
 
   // Footnote support
@@ -215,8 +216,20 @@ class EpubReaderActivity final : public ReaderActivity {
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   bool jumpToFraction(float fraction);
   void jumpToPercent(int percent);
+  bool handleZoneShortAction(const uint8_t action) override;
+  bool handleZoneLongAction(const uint8_t action) override;
+  void showAutoPageTurnPopup();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   int currentTocIndex() const;
+  // Index of the chapter being read: the TOC index for TXT/MD (whose named
+  // chapters are anchors inside one spine) and the spine index otherwise.
+  int currentChapterIndex() const;
+  // Chapter navigation shared by the toolbar and the tap zones. TXT/MD books
+  // keep every named chapter in one spine, so a spine step would clamp back to
+  // the same offset and do nothing; this routes them through the TOC anchor
+  // instead. Returns whether the chapter actually changed, so a no-op tap can
+  // skip the repaint.
+  bool gotoChapterIndex(int target);
   // Live section position, or the values cached before a child screen
   // released the section.
   ChapterPosition chapterPosition() const;
