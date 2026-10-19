@@ -57,7 +57,7 @@ HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
 // Original (0/85/170/255) dither thresholds match the native 4-level ramp of
 // the X4/X4 Pro 800x480 glass, whether it carries an SSD1677, UC8179 or UC8279
 // controller. X3 (792x528) and other panels retain the legacy tuning.
-bool useOriginalGrayscaleThresholds(const GfxRenderer&) {
+bool useOriginalGrayscaleThresholds() {
   switch (display.getController()) {
     case HalDisplay::Controller::SSD1677:
       return true;
@@ -656,7 +656,7 @@ void SleepActivity::renderCustomSleepScreen() const {
   if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
     Bitmap bitmap(file, !native,
                   renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                      useOriginalGrayscaleThresholds(renderer) &&
+                      useOriginalGrayscaleThresholds() &&
                       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading: /sleep.bmp");
@@ -679,7 +679,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       delay(100);
       Bitmap bitmap(randFile, !native,
                     renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                        useOriginalGrayscaleThresholds(renderer) &&
+                        useOriginalGrayscaleThresholds() &&
                         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
         renderBitmapSleepScreen(bitmap, false, native);
@@ -910,8 +910,7 @@ void SleepActivity::renderCoverSleepScreen() const {
   // controllers, all exposing the native 0/85/170/255 4-level ramp — keep the
   // original thresholds for those batches too. X3 (792x528) stays on legacy.
   const bool originalThresholds =
-      renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-      useOriginalGrayscaleThresholds(renderer) &&
+      renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() && useOriginalGrayscaleThresholds() &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
   std::string coverBmpPath;
   bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
