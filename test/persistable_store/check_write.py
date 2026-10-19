@@ -1,4 +1,4 @@
-"""Run the production writer with real JSON allocator failures and host files."""
+"""Run both production JSON writers with allocator failures and short writes."""
 
 from pathlib import Path
 import subprocess
@@ -14,13 +14,17 @@ if __name__ == "__main__":
     compiler, arduinojson = sys.argv[1:]
     writer = method((ROOT / "lib/Serialization/PersistableStore.cpp").read_text(),
                     "bool PersistableStoreBase::writeDocToFile(")
+    analytics = method((ROOT / "src/JsonSettingsIO.cpp").read_text(),
+                       "bool saveJsonDocumentToFile(")
     program = r'''
 #include <ArduinoJson.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -83,65 +87,73 @@ std::string read(const std::filesystem::path& p) {
   std::ifstream in(p, std::ios::binary);
   return std::string(std::istreambuf_iterator<char>(in), {});
 }
-''' + writer + r'''
+''' + writer + analytics + r'''
 int main(int argc, char** argv) {
   assert(argc == 2);
+  std::setbuf(stdout, nullptr);
   Storage.root = argv[1];
   std::filesystem::create_directories(Storage.root / ".crosspoint");
-  constexpr const char* path = "/.crosspoint/settings.json";
-  const auto target = Storage.resolve(path), temp = Storage.resolve("/.crosspoint/settings.json.tmp");
-  const std::string original = "{\"value\":12,\"retained\":\"previous valid configuration\"}";
-  for (const bool previous : {false, true})
-    for (const bool partial : {false, true}) {
-      std::filesystem::remove(target);
-      if (previous) {
+  const auto runCases = [](const char* name, auto save) {
+    constexpr const char* path = "/.crosspoint/settings.json";
+    const auto target = Storage.resolve(path), temp = Storage.resolve("/.crosspoint/settings.json.tmp");
+    const std::string original = "{\"value\":12,\"retained\":\"previous valid configuration\"}";
+    for (const bool previous : {false, true})
+      for (const bool partial : {false, true}) {
+        std::filesystem::remove(target);
+        if (previous) {
+          std::ofstream old(target);
+          old << original;
+        }
+        {
+          std::ofstream staging(temp);
+          staging << "stale staging file";
+        }
+        GateAllocator allocator;
+        allocator.reject = !partial;
+        JsonDocument doc(&allocator);
+        doc["value"] = 22;
+        if (partial) {
+          allocator.reject = true;
+          doc["payload"] = std::string(512, 'x');
+        }
+        assert(doc.overflowed());
+        Storage.calls = 0;
+        assert(!save(path, doc));
+        assert(Storage.calls == 0);
+        assert(std::filesystem::exists(target) == previous);
+        assert(!previous || read(target) == original);
+        assert(read(temp) == "stale staging file");
+      }
+    JsonDocument doc;
+    doc["value"] = 22;
+    for (const char* invalid : {static_cast<const char*>(nullptr), ""}) {
+      Storage.calls = 0;
+      assert(!save(invalid, doc));
+      assert(Storage.calls == 0);
+    }
+    for (const size_t limit : {size_t(0), size_t(5)}) {
+      {
         std::ofstream old(target);
         old << original;
       }
-      {
-        std::ofstream staging(temp);
-        staging << "stale staging file";
-      }
-      GateAllocator allocator;
-      allocator.reject = !partial;
-      JsonDocument doc(&allocator);
-      doc["value"] = 22;
-      if (partial) {
-        allocator.reject = true;
-        doc["payload"] = std::string(512, 'x');
-      }
-      assert(doc.overflowed());
-      Storage.calls = 0;
-      assert(!PersistableStoreBase::writeDocToFile(path, doc));
-      assert(Storage.calls == 0);
-      assert(std::filesystem::exists(target) == previous);
-      assert(!previous || read(target) == original);
-      assert(read(temp) == "stale staging file");
+      Storage.writeLimit = limit;
+      const bool saved = save(path, doc);
+      std::printf("%s: write limit=%zu saved=%d target=%s\n", name, limit, saved, read(target).c_str());
+      assert(!saved);
+      assert(read(target) == original && !std::filesystem::exists(temp));
     }
-  JsonDocument doc;
-  doc["value"] = 22;
-  for (const char* invalid : {static_cast<const char*>(nullptr), ""}) {
-    Storage.calls = 0;
-    assert(!PersistableStoreBase::writeDocToFile(invalid, doc));
-    assert(Storage.calls == 0);
-  }
-  for (const size_t limit : {size_t(0), size_t(5)}) {
-    {
-      std::ofstream old(target);
-      old << original;
-    }
-    Storage.writeLimit = limit;
-    assert(!PersistableStoreBase::writeDocToFile(path, doc));
-    assert(read(target) == original && !std::filesystem::exists(temp));
-  }
-  Storage.writeLimit = SIZE_MAX;
-  assert(PersistableStoreBase::writeDocToFile(path, doc));
-  assert(read(target) == "{\"value\":22}" && !std::filesystem::exists(temp));
-  JsonDocument empty;
-  empty.to<JsonObject>();
-  assert(!empty.overflowed() && PersistableStoreBase::writeDocToFile(path, empty));
-  assert(read(target) == "{}");
-  std::printf("10 persistence cases passed with ArduinoJson %s\n", ARDUINOJSON_VERSION);
+    Storage.writeLimit = SIZE_MAX;
+    assert(save(path, doc));
+    assert(read(target) == "{\"value\":22}" && !std::filesystem::exists(temp));
+    JsonDocument empty;
+    empty.to<JsonObject>();
+    assert(!empty.overflowed() && save(path, empty));
+    assert(read(target) == "{}");
+    std::printf("%s: 10 persistence cases passed with ArduinoJson %s\n", name, ARDUINOJSON_VERSION);
+  };
+  runCases("stores/bookmarks", PersistableStoreBase::writeDocToFile);
+  runCases("analytics",
+           [](const char* path, const JsonDocument& doc) { return saveJsonDocumentToFile("TEST", path, doc); });
 }
 '''
     with tempfile.TemporaryDirectory(prefix="persistable-write-") as directory:
@@ -150,5 +162,5 @@ int main(int argc, char** argv) {
         cpp.write_text(program)
         for index, flags in enumerate(([], ["-fno-exceptions"])):
             subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror",
-                            *flags, "-I" + arduinojson, str(cpp), "-o", str(binary)], check=True)
+                            *flags, "-I" + arduinojson, "-I" + str(ROOT / "lib/Memory"), str(cpp), "-o", str(binary)], check=True)
             subprocess.run([str(binary), str(root / str(index))], check=True)
