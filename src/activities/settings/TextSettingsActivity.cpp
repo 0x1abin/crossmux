@@ -753,8 +753,11 @@ void TextSettingsActivity::confirmStyleRow(int row) {
         // refreshes the session baseline and restores the remembered overrides
         // on switch-on (BookStyleStore.h).
         applyBookStyleMemoryToggle(*bookPath_, *globalSnapshot_, wasOn);
-        saveSettings();
       }
+      // Persisted in both contexts: opened from global Settings there is no book
+      // baseline, and the toggle is an ordinary setting that must survive a
+      // sleep or power loss without the normal exit path.
+      saveSettings();
       requestUpdate();
       return;
     }
@@ -1060,10 +1063,23 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   }
 
   saveSettings();
+  // The installer writes SETTINGS when it selects a family. Inside a reader
+  // session that write must not carry this book's typography (the book's live
+  // values are in SETTINGS right now), so it gets the same session context the
+  // reader's own prompt passes. The member holds the snapshot because the
+  // installer keeps a pointer to it for as long as it is open.
+  const BookStyle* sessionGlobal = nullptr;
+  const BookStyle* sessionLive = nullptr;
+  if (bookOverrideMode()) {
+    fontInstallLiveStyle_ = captureStyleFromSettings();
+    sessionGlobal = globalSnapshot_;
+    sessionLive = &fontInstallLiveStyle_;
+  }
   auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
       renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage,
       startMode_ == StartMode::PreviewOnly ? FontDownloadActivity::StartMode::PreviewOnly
-                                           : FontDownloadActivity::StartMode::Normal);
+                                           : FontDownloadActivity::StartMode::Normal,
+      sessionGlobal, sessionLive);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return;

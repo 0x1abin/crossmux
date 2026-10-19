@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 reader_cpp = (ROOT / "src/activities/reader/ReaderActivity.cpp").read_text()
 store_cpp = (ROOT / "src/BookStyleStore.cpp").read_text()
 store_h = (ROOT / "src/BookStyleStore.h").read_text()
+font_cpp = (ROOT / "src/activities/settings/FontDownloadActivity.cpp").read_text()
 
 
 def method(text, signature):
@@ -98,10 +99,14 @@ struct {
   int saves = 0;
   bool saveOk = true;
   int persistedFontPointSize = -1;  // what the last write put in the file
+  int persistedLineSpacing = -1;
+  char persistedFamily[32] = "";
   bool saveToFile() {
     ++saves;
     if (!saveOk) return false;
     persistedFontPointSize = fontPointSize;
+    persistedLineSpacing = lineSpacing;
+    memcpy(persistedFamily, sdFontFamilyName, sizeof(persistedFamily));
     return true;
   }
 } SETTINGS;
@@ -229,11 +234,20 @@ struct RebootedStore {
 
 constexpr const char* kBook = "/books/one.epub";
 
+// FontDownloadActivity::saveFontSelection(): the production body is extracted
+// below; this shell supplies the two session pointers the constructor takes.
+struct FontDownloadActivity {
+  const BookStyle* sessionGlobal_ = nullptr;
+  const BookStyle* sessionLive_ = nullptr;
+  bool saveFontSelection();
+};
+
 // --- production code under test ---------------------------------------------
 struct ReaderActivity {
   std::string bookPath = kBook;
   bool globalSettingsSnapshotted_ = false;
   BookStyle globalSettingsSnapshot_;
+  bool bookStyleMemoryUsed_ = false;
   void applyBookStyle();
   void saveBookStyle();
   BookStyle captureStyleDiff(const BookStyle&) const;
@@ -264,6 +278,9 @@ bool BookStyleStore::saveToFile() {
     + method(store_cpp, "bool BookStyleStore::updateStyle")
     + "\n"
     + method(store_cpp, "bool BookStyleStore::removeByPath")
+    + "\n"
+    # The installer's write is the same contract from a child screen.
+    + method(font_cpp, "bool FontDownloadActivity::saveFontSelection")
     + r'''
 // ORDER(5): entry -> snapshot -> persist -> switch-off -> exit/restart -> failure
 int main() {
@@ -432,9 +449,12 @@ int main() {
   {
     store.reset();
     SETTINGS.bookStyleMemory = 0;                       // memory off throughout
+    SETTINGS.fontPointSize = 12;
     ReaderActivity reader;
     reader.applyBookStyle();
-    assert(!reader.globalSettingsSnapshotted_);
+    // The baseline is always taken: enabling memory mid-session needs it.
+    assert(reader.globalSettingsSnapshotted_);
+    assert(!reader.bookStyleMemoryUsed_);
     SETTINGS.fontPointSize = 20;                        // edited as a global
     reader.saveBookStyle();
     assert(SETTINGS.persistedFontPointSize == 20);      // persisted, no rollback
@@ -524,6 +544,112 @@ int main() {
     applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/false);
     assert(SETTINGS.fontPointSize == 12);               // nothing to re-apply
   }
+  // 13. Review repro (standalone Text Settings): the memory row toggled from
+  //     global Settings has no book baseline, and must still persist. The
+  //     toggle row saves in both contexts (TextSettingsActivity), so this
+  //     asserts the contract, not the branch: a plain write when there is no
+  //     baseline.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    ReaderActivity reader;                              // no book session
+    SETTINGS.saves = 0;
+    SETTINGS.bookStyleMemory = 0;
+    saveGlobalSettingsKeepingBookStyle(nullptr);        // the toggle's save
+    assert(SETTINGS.saves == 1);                        // wrote, did not skip
+    SETTINGS.bookStyleMemory = 1;
+    saveGlobalSettingsKeepingBookStyle(nullptr);
+    assert(SETTINGS.saves == 2);
+  }
+
+  // 14. Review repro (book opened with memory OFF, enabled mid-session): the
+  //     session must have a baseline, keep global 12 on disk, and remember the
+  //     book's 22.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 0;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();                            // opened while off
+    assert(reader.globalSettingsSnapshotted_);          // baseline exists
+    assert(!reader.bookStyleMemoryUsed_);
+
+    SETTINGS.fontPointSize = 14;                        // global edit while off
+    SETTINGS.bookStyleMemory = 1;                       // enabled from the menu
+    // Exactly what the toggle row does: TextSettingsActivity flips the flag and
+    // calls the shared helper with the reader session's baseline.
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/false);
+    reader.bookStyleMemoryUsed_ = true;                 // ReaderActivity flags it
+    assert(reader.globalSettingsSnapshot_.fontPointSize == 14);  // refreshed
+    SETTINGS.fontPointSize = 22;                        // book edit
+    assert(reader.persistBookStyleEdits());             // now book-scoped
+    assert(store.styles.size() == 1);
+    assert(store.styles[0].style.fontPointSize == 22);
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 14);      // global edit kept
+    assert(SETTINGS.fontPointSize == 14);               // session rolled back
+    std::printf("book opened OFF then enabled: global=%u entries=%zu\n",
+                (unsigned)SETTINGS.persistedFontPointSize, store.styles.size());
+  }
+
+  // 15. Opened with memory ON, switched OFF mid-session: the exit write must
+  //     still put the baseline in the file, never the book's live values.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    reader.persistBookStyleEdits();
+    SETTINGS.bookStyleMemory = 0;                       // switched off
+    applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/true);
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 12);      // baseline, not 22
+    assert(store.styles.size() == 1);                   // entry kept
+    SETTINGS.bookStyleMemory = 1;
+  }
+
+  // 16. Font install (review repro): installing a family while a book is open
+  //     makes that family global but must not write the book's other typography
+  //     (line spacing here) into the settings file, and the session keeps the
+  //     book's values afterwards.
+  {
+    store.reset();
+    SETTINGS.bookStyleMemory = 1;
+    SETTINGS.fontPointSize = 12;
+    SETTINGS.lineSpacing = 1;
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;                        // book override
+    SETTINGS.lineSpacing = 2;                           // book override
+    reader.persistBookStyleEdits();
+
+    FontDownloadActivity installer;
+    installer.sessionGlobal_ = &reader.globalSettingsSnapshot_;
+    const BookStyle live = captureStyleFromSettings();
+    installer.sessionLive_ = &live;
+    strncpy(SETTINGS.sdFontFamilyName, "DownloadedFamily", sizeof(SETTINGS.sdFontFamilyName) - 1);
+    assert(installer.saveFontSelection());
+    assert(SETTINGS.persistedLineSpacing == 1);         // global kept
+    assert(strcmp(SETTINGS.persistedFamily, "DownloadedFamily") == 0);  // family is global
+    assert(SETTINGS.lineSpacing == 2);                  // session keeps the book's
+    assert(SETTINGS.fontPointSize == 22);
+    std::printf("font install: disk lineSpacing=%u (wanted 1), family=%s, live=%u\n",
+                (unsigned)SETTINGS.persistedLineSpacing, SETTINGS.persistedFamily,
+                (unsigned)SETTINGS.lineSpacing);
+  }
+
+  // 17. Standalone installer (Settings, no book): a plain save.
+  {
+    store.reset();
+    SETTINGS.saves = 0;
+    FontDownloadActivity installer;
+    assert(installer.saveFontSelection());
+    assert(SETTINGS.saves == 1);
+  }
+
   std::puts("book style memory flow passed");
 }
 '''
@@ -552,4 +678,35 @@ for rel in (
 ):
     text = (ROOT / rel).read_text()
     assert "SETTINGS.saveToFile()" not in text, f"{rel} bypasses the book-style save path"
+
+# The font installer has to work with no book open, so it owns one plain-save
+# branch, but every write in it must go through saveFontSelection(), which keeps
+# the book's typography out of the file while a reader session is open.
+installer = (ROOT / "src/activities/settings/FontDownloadActivity.cpp").read_text()
+body = installer[installer.index("bool FontDownloadActivity::saveFontSelection"):]
+body = body[:body.index("\n}\n")]
+assert installer.count("SETTINGS.saveToFile()") == body.count("SETTINGS.saveToFile()"), (
+    "FontDownloadActivity.cpp writes SETTINGS outside saveFontSelection()")
+
+# The memory row has to persist in BOTH entry contexts. Opened from global
+# Settings there is no book baseline, so bookOverrideMode() is false and only a
+# save outside that branch keeps the toggle across a sleep or power loss; the
+# helper-based case above cannot see this because it calls the helper directly.
+settings_cpp = (ROOT / "src/activities/settings/TextSettingsActivity.cpp").read_text()
+memory_case = settings_cpp[settings_cpp.index("case StyleRow::BookStyleMemory:") :]
+memory_case = memory_case[: memory_case.index("case StyleRow::ClearBookStyles:")]
+toggle_body = memory_case[memory_case.index("const bool wasOn") :]
+# Strip the branch so what remains is the unconditional tail.
+outside_branch = toggle_body
+if "if (bookOverrideMode()) {" in outside_branch:
+    head, rest = outside_branch.split("if (bookOverrideMode()) {", 1)
+    depth = 1
+    index = 0
+    while depth:
+        depth += (rest[index] == "{") - (rest[index] == "}")
+        index += 1
+    outside_branch = head + rest[index:]
+assert "saveSettings()" in outside_branch, (
+    "the memory toggle saves only inside bookOverrideMode(), so global Settings never persists it")
+assert "applyBookStyleMemoryToggle" in memory_case, "the book transition is no longer applied"
 print("Book style memory flow passed")

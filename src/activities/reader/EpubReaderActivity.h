@@ -104,6 +104,10 @@ class EpubReaderActivity final : public ReaderActivity {
   std::atomic<uint32_t> pendingMissingChineseCodepoint_{0};
   char wereadBookId_[64] = {};
   bool clearInitialProgressAfterSave_ = false;
+  // The book's typography at the moment the font installer was opened. The
+  // installer keeps a pointer to it for the lifetime of that child activity, so
+  // it lives here rather than in the opening function's frame.
+  BookStyle fontInstallLiveStyle_;
   bool maybeOfferCompleteChineseFont();
 #endif
 

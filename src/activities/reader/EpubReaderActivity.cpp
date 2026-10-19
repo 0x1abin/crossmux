@@ -748,8 +748,14 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
 
   LOG_INF("FONT", "Missing built-in Chinese glyph U+%04X; offering automatic NotoSansSC install",
           static_cast<unsigned>(codepoint));
-  auto downloader =
-      makeUniqueNoThrow<FontDownloadActivity>(renderer, mappedInput, FontDownloadActivity::Purpose::ReaderAutoInstall);
+  // The installer writes SETTINGS, so it gets this session's baseline and the
+  // book's live typography: the installed family becomes global, the book's
+  // other typography fields stay out of the settings file. The pointer must
+  // outlive the child activity that stores it.
+  fontInstallLiveStyle_ = captureStyleFromSettings();
+  auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
+      renderer, mappedInput, FontDownloadActivity::Purpose::ReaderAutoInstall, FontDownloadActivity::StartMode::Normal,
+      globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr, &fontInstallLiveStyle_);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return false;

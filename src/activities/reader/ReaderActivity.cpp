@@ -50,18 +50,19 @@ std::unique_ptr<ReaderActivity> ReaderActivity::create(GfxRenderer& renderer, Ma
 void ReaderActivity::applyInitialOrientation() { ReaderUtils::applyOrientation(renderer, SETTINGS.orientation); }
 
 void ReaderActivity::applyBookStyle() {
-  // The per-book overrides can be turned off from the text settings; then every
-  // book opens with the global settings, exactly like the stock firmware.
-  // When it was off before this book opened, take no snapshot either, so
-  // ordinary typography edits keep the stock behaviour and persist as-is.
-  if (!SETTINGS.bookStyleMemory) return;
-  // Snapshot the global settings once on enter, for every book, so overrides
-  // edited while reading can be restored on exit and never leak into the next
-  // book — even when per-book memory is turned off mid-session.
+  // Snapshot the global settings once on enter, for every book and whether or
+  // not memory is on: enabling memory from the text settings later in the
+  // session needs a baseline, and a baseline that only exists for some
+  // sessions is what made that toggle a no-op (applyBookStyleMemoryToggle()).
   if (!globalSettingsSnapshotted_) {
     globalSettingsSnapshot_ = captureStyleFromSettings();
     globalSettingsSnapshotted_ = true;
   }
+  // The per-book overrides can be turned off from the text settings; then every
+  // book opens with the global settings, exactly like the stock firmware, and
+  // the baseline above is only used to keep ordinary typography edits global.
+  if (!SETTINGS.bookStyleMemory) return;
+  bookStyleMemoryUsed_ = true;
   BookStyle style;
   // Books without their own entry keep the global settings from the settings
   // screen.
@@ -74,23 +75,22 @@ void ReaderActivity::saveBookStyle() {
   // which persists the store itself; exiting a book no longer snapshots the
   // current settings into the book. Only restore the global snapshot so the
   // in-memory overrides never leak into the next book.
-  if (!globalSettingsSnapshotted_) {
-    // No snapshot means memory was off when this book opened, so SETTINGS only
-    // ever held the user's global values. Persist them: an in-place edit from a
-    // child screen (night mode, frontlight in the reader menu) may have no
-    // other save point when the device sleeps straight out of that screen.
+  if (!globalSettingsSnapshotted_ || !bookStyleMemoryUsed_) {
+    // Memory was never on in this session, so SETTINGS only ever held the
+    // user's global values. Persist them: an in-place edit from a child screen
+    // (night mode, frontlight in the reader menu) may have no other save point
+    // when the device sleeps straight out of that screen.
     SETTINGS.saveToFile();
     return;
   }
-  if (SETTINGS.bookStyleMemory) {
-    // Memory is still on: roll back to the entered global snapshot so a
-    // book's overrides never leak into the next book or the settings file.
-    applyStyleToSettings(globalSettingsSnapshot_);
-  }
-  // Memory was switched off mid-session: the switch-off handler already
-  // restored the snapshot, so the currently displayed values are the user's
-  // new global baseline — keep them and persist instead of rolling back
-  // edits made after the switch was turned off.
+  // With memory still on, SETTINGS may hold this book's overrides: roll them
+  // back to the entered baseline before the write.
+  //
+  // With memory switched off mid-session the live values are the user's global
+  // baseline — the switch-off handler captured the book's edits and put the
+  // global style back, and edits made afterwards are deliberately global — so
+  // they are what belongs in the file and must not be rolled back.
+  if (SETTINGS.bookStyleMemory) applyStyleToSettings(globalSettingsSnapshot_);
   SETTINGS.saveToFile();
   globalSettingsSnapshotted_ = false;
 }

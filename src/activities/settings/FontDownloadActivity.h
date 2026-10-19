@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "BookStyleStore.h"
 #include "FontInstaller.h"
 #include "SdCardFont.h"
 #include "activities/UiListActivity.h"
@@ -22,7 +23,8 @@ class FontDownloadActivity final : public UiListActivity {
   enum class StartMode : uint8_t { Normal, PreviewOnly, ResumeFontLoadError };
 
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal);
+                                Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal,
+                                const BookStyle* sessionGlobal = nullptr, const BookStyle* sessionLive = nullptr);
 
 #ifdef ENABLE_CHINESE_VERSION
   static bool wasChineseFontPromptShownThisBoot();
@@ -80,6 +82,12 @@ class FontDownloadActivity final : public UiListActivity {
   State state_ = WIFI_SELECTION;
   Purpose purpose_;
   StartMode startMode_;
+  // Reader session context, null when this screen was opened from Settings with
+  // no book open. `sessionGlobal_` is the reader's entered baseline and
+  // `sessionLive_` the book's typography that is currently in SETTINGS; both are
+  // owned by the calling reader and stay valid while this activity lives.
+  const BookStyle* sessionGlobal_ = nullptr;
+  const BookStyle* sessionLive_ = nullptr;
   FontInstaller fontInstaller_;
 
   // Manifest data
@@ -155,6 +163,9 @@ class FontDownloadActivity final : public UiListActivity {
   void downloadSingle(int familyIndex);
   void retryDownloadOperation();
   void selectDownloadedFontAndPreview(const char* familyName);
+  // Persists the installed family without writing the open book's typography
+  // into the settings file (see the definition). Plain save outside a reader.
+  bool saveFontSelection();
   void downloadAll();
   void updateAll();
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);

@@ -163,6 +163,9 @@ class TextSettingsActivity final : public UiTabListActivity {
   // Non-const: the memory toggle refreshes this baseline when the mode changes
   // (see confirmStyleRow), so the reader's session state has to follow.
   BookStyle* globalSnapshot_ = nullptr;
+  // This book's typography at the moment the font installer was opened; the
+  // installer keeps a pointer to it for its lifetime, so it lives here.
+  BookStyle fontInstallLiveStyle_;
   bool bookOverrideMode() const { return bookPath_ != nullptr && globalSnapshot_ != nullptr; }
 
   Tab tab_;

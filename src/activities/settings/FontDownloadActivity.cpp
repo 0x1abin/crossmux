@@ -88,10 +88,13 @@ bool parseManifestPointSize(const char* familyName, const char* fileName, uint8_
 }  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const Purpose purpose, const StartMode startMode)
+                                           const Purpose purpose, const StartMode startMode,
+                                           const BookStyle* sessionGlobal, const BookStyle* sessionLive)
     : UiListActivity("FontDownload", renderer, mappedInput),
       purpose_(purpose),
       startMode_(startMode),
+      sessionGlobal_(sessionGlobal),
+      sessionLive_(sessionLive),
       fontInstaller_(sdFontSystem.registry()) {}
 
 #ifdef ENABLE_CHINESE_VERSION
@@ -905,6 +908,29 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
   return DownloadResult::Success;
 }
 
+bool FontDownloadActivity::saveFontSelection() {
+  // Installing a font is a device-level action that also has to work from
+  // Settings with no book open, where sessionGlobal_ is null and this is a
+  // plain save.
+  //
+  // With a reader session it must not carry the open book's typography into the
+  // settings file. The installed family is the one field here that is meant to
+  // become global ("the selected family may intentionally change a device-level
+  // preference"), so the file gets the entered baseline plus this new family,
+  // and the session keeps rendering with the book's typography afterwards.
+  if (sessionGlobal_ == nullptr || sessionLive_ == nullptr || !SETTINGS.bookStyleMemory) {
+    return SETTINGS.saveToFile();
+  }
+  BookStyle fileStyle = *sessionGlobal_;
+  fileStyle.overrideMask = BookStyle::kSdFontFamily;
+  memcpy(fileStyle.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(fileStyle.sdFontFamilyName));
+  const BookStyle liveStyle = *sessionLive_;
+  applyStyleToSettings(fileStyle);
+  const bool ok = SETTINGS.saveToFile();
+  applyStyleToSettings(liveStyle);
+  return ok;
+}
+
 void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName) {
   if (purpose_ == Purpose::ReaderAutoInstall) {
     char previousFamily[sizeof(SETTINGS.sdFontFamilyName)];
@@ -915,7 +941,7 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
     strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
     SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
     SETTINGS.sdFontFlashPreload = 0;
-    if (!SETTINGS.saveToFile()) {
+    if (!saveFontSelection()) {
       LOG_ERR("FONT", "Failed to save selected family %s", familyName);
       strncpy(SETTINGS.sdFontFamilyName, previousFamily, sizeof(SETTINGS.sdFontFamilyName));
       SETTINGS.sdFontFlashPreload = previousFlashPreload;
@@ -948,7 +974,7 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
   SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
   SETTINGS.sdFontFlashPreload = 0;
-  SETTINGS.saveToFile();
+  saveFontSelection();
   selectionUpdated_ = true;
   accelerationCompleted_ = false;
   {

@@ -85,9 +85,21 @@ struct ActivityResult{};
 struct BookStyle { uint32_t overrideMask=0; };
 void applyStyleToSettings(const BookStyle&) {}
 void applyStyleOverrides(const BookStyle&) {}
-struct {bool bookStyleMemory=false; void saveToFile(){}} SETTINGS;
+struct {bool bookStyleMemory=false; int writes=0; bool saveToFile(){++writes; return true;}} SETTINGS;
 struct {void resumeSession(){}} READING_STATS;
-struct {void updateStyle(const std::string&, const BookStyle&){} void removeByPath(const std::string&){} } BOOK_STYLES;
+// The production callback calls persistBookStyleEdits() and
+// applyReaderTextSettings() -> saveSettingsKeepingBookStyle(). Both are the
+// shared book-style contract; this session has no book baseline
+// (globalSettingsSnapshotted_ stays false), so the persist is a no-op and the
+// save is the plain write the assertion below counts.
+struct {
+  int updates=0;
+  void updateStyle(const std::string&, const BookStyle&){++updates;}
+  void removeByPath(const std::string&){++updates;}
+} BOOK_STYLES;
+inline void saveGlobalSettingsKeepingBookStyle(const BookStyle* enteredGlobal) {
+  if (enteredGlobal == nullptr || !SETTINGS.bookStyleMemory) SETTINGS.saveToFile();
+}
 struct {bool loaded=false;void ensureLoaded(int){assert(locked);loaded=true;}} sdFontSystem;
 struct Section {int pageCount=8,currentPage=3;};
 struct EpubReaderActivity {
@@ -96,6 +108,8 @@ struct EpubReaderActivity {
  BookStyle globalSettingsSnapshot_;
  std::string bookPath="book.epub";
  BookStyle captureStyleDiff(const BookStyle&) const {return {};}
+ bool persistBookStyleEdits(){return false;}
+ void saveSettingsKeepingBookStyle(){saveGlobalSettingsKeepingBookStyle(nullptr);}
  std::unique_ptr<Section> section=std::make_unique<Section>();
  void rememberCurrentContentOffset(){}
  void openReaderMenu(){assert(sdFontSystem.loaded&&!locked);}
@@ -112,8 +126,13 @@ struct SettingsActivity {
 int main(){
  EpubReaderActivity reader;reader.returned();
  assert(sdFontSystem.loaded&&!reader.section&&reader.nextPageNumber==3&&!locked);
+ // The result callback runs the shared save path, not a raw write.
+ assert(SETTINGS.writes==1);
  sdFontSystem.loaded=false;SettingsActivity settings;settings.returned();
  assert(sdFontSystem.loaded&&!locked);
+ // The settings entry relies on TextSettingsActivity saving each change and
+ // does not write here (SettingsActivity.cpp: "no save needed here").
+ assert(SETTINGS.writes==1);
 }
 ''')
 
