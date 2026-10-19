@@ -247,7 +247,7 @@ struct ReaderActivity {
   std::string bookPath = kBook;
   bool globalSettingsSnapshotted_ = false;
   BookStyle globalSettingsSnapshot_;
-  bool bookStyleMemoryUsed_ = false;
+
   void applyBookStyle();
   void saveBookStyle();
   BookStyle captureStyleDiff(const BookStyle&) const;
@@ -454,7 +454,6 @@ int main() {
     reader.applyBookStyle();
     // The baseline is always taken: enabling memory mid-session needs it.
     assert(reader.globalSettingsSnapshotted_);
-    assert(!reader.bookStyleMemoryUsed_);
     SETTINGS.fontPointSize = 20;                        // edited as a global
     reader.saveBookStyle();
     assert(SETTINGS.persistedFontPointSize == 20);      // persisted, no rollback
@@ -573,14 +572,12 @@ int main() {
     ReaderActivity reader;
     reader.applyBookStyle();                            // opened while off
     assert(reader.globalSettingsSnapshotted_);          // baseline exists
-    assert(!reader.bookStyleMemoryUsed_);
 
     SETTINGS.fontPointSize = 14;                        // global edit while off
     SETTINGS.bookStyleMemory = 1;                       // enabled from the menu
     // Exactly what the toggle row does: TextSettingsActivity flips the flag and
     // calls the shared helper with the reader session's baseline.
     applyBookStyleMemoryToggle(kBook, reader.globalSettingsSnapshot_, /*wasOn=*/false);
-    reader.bookStyleMemoryUsed_ = true;                 // ReaderActivity flags it
     assert(reader.globalSettingsSnapshot_.fontPointSize == 14);  // refreshed
     SETTINGS.fontPointSize = 22;                        // book edit
     assert(reader.persistBookStyleEdits());             // now book-scoped
@@ -611,15 +608,17 @@ int main() {
     SETTINGS.bookStyleMemory = 1;
   }
 
-  // 16. Font install (review repro): installing a family while a book is open
-  //     makes that family global but must not write the book's other typography
-  //     (line spacing here) into the settings file, and the session keeps the
-  //     book's values afterwards.
+  // 16. Font install (review repro): the book has its own typography, then the
+  //     user installs a family while the book is open and normally exits.
+  //     Installing a family is device-level: it must become global and stay
+  //     global after the exit, while the book's other typography (line spacing
+  //     here) stays out of the settings file.
   {
     store.reset();
     SETTINGS.bookStyleMemory = 1;
     SETTINGS.fontPointSize = 12;
     SETTINGS.lineSpacing = 1;
+    memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));
     ReaderActivity reader;
     reader.applyBookStyle();
     SETTINGS.fontPointSize = 22;                        // book override
@@ -639,6 +638,23 @@ int main() {
     std::printf("font install: disk lineSpacing=%u (wanted 1), family=%s, live=%u\n",
                 (unsigned)SETTINGS.persistedLineSpacing, SETTINGS.persistedFamily,
                 (unsigned)SETTINGS.lineSpacing);
+
+    // The installer's result handler then refreshes the session baseline with
+    // the family it just made global (EpubReaderActivity's auto-install
+    // callback). Without that line the exit below would restore the baseline's
+    // older family over the install - the reviewer's repro.
+    memcpy(reader.globalSettingsSnapshot_.sdFontFamilyName, SETTINGS.sdFontFamilyName,
+           sizeof(reader.globalSettingsSnapshot_.sdFontFamilyName));
+
+    // The ordinary reader exit follows: the page-turn block above was the last
+    // book edit, so run the ordinary post-edit capture first (it runs only while
+    // the reader is still up, i.e. before onExit) and then exit.
+    reader.persistBookStyleEdits();
+    reader.saveBookStyle();
+    assert(strcmp(SETTINGS.persistedFamily, "DownloadedFamily") == 0);
+    assert(SETTINGS.persistedLineSpacing == 1);         // still no book line spacing
+    std::printf("font install then exit: disk family=%s lineSpacing=%u\n",
+                SETTINGS.persistedFamily, (unsigned)SETTINGS.persistedLineSpacing);
   }
 
   // 17. Standalone installer (Settings, no book): a plain save.

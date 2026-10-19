@@ -752,6 +752,11 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
   // book's live typography: the installed family becomes global, the book's
   // other typography fields stay out of the settings file. The pointer must
   // outlive the child activity that stores it.
+  //
+  // saveFontSelection() swaps this snapshot back in after its write, so it has
+  // to be taken at save time, not here: the family the user picks does not exist
+  // yet when the installer opens, and restoring this pre-install snapshot would
+  // erase the very selection that was just written.
   fontInstallLiveStyle_ = captureStyleFromSettings();
   auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
       renderer, mappedInput, FontDownloadActivity::Purpose::ReaderAutoInstall, FontDownloadActivity::StartMode::Normal,
@@ -762,6 +767,14 @@ bool EpubReaderActivity::maybeOfferCompleteChineseFont() {
   }
   startActivityForResult(std::move(downloader), [this](const ActivityResult&) {
     READING_STATS.resumeSession();
+    // Installing a family is a device-level change (saveFontSelection() writes it
+    // to the global file through the book-style contract), so the session
+    // baseline has to learn it too: otherwise the exit path restores the
+    // baseline's older family and the next write drops the install again.
+    if (globalSettingsSnapshotted_) {
+      memcpy(globalSettingsSnapshot_.sdFontFamilyName, SETTINGS.sdFontFamilyName,
+             sizeof(globalSettingsSnapshot_.sdFontFamilyName));
+    }
     requestUpdate();
   });
   return true;

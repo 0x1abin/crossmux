@@ -921,10 +921,14 @@ bool FontDownloadActivity::saveFontSelection() {
   if (sessionGlobal_ == nullptr || sessionLive_ == nullptr || !SETTINGS.bookStyleMemory) {
     return SETTINGS.saveToFile();
   }
+  // Read the live typography now rather than trusting the snapshot the reader
+  // handed over when it opened the installer: the family the user just picked
+  // lives in SETTINGS and was not there when that snapshot was taken, so
+  // restoring it afterwards would undo the install.
+  const BookStyle liveStyle = captureStyleFromSettings();
   BookStyle fileStyle = *sessionGlobal_;
   fileStyle.overrideMask = BookStyle::kSdFontFamily;
   memcpy(fileStyle.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(fileStyle.sdFontFamilyName));
-  const BookStyle liveStyle = *sessionLive_;
   applyStyleToSettings(fileStyle);
   const bool ok = SETTINGS.saveToFile();
   applyStyleToSettings(liveStyle);

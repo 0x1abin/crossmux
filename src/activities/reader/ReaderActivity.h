@@ -92,12 +92,6 @@ class ReaderActivity : public Activity {
 
   BookStyle globalSettingsSnapshot_;
   bool globalSettingsSnapshotted_ = false;
-  // True while per-book memory has been active in this session: it was on when
-  // the book opened, or the user switched it on while reading. Once set, the
-  // exit path rolls SETTINGS back to the baseline; when it was never on, the
-  // typography edits are global and must persist as-is. Re-enabling the switch
-  // mid-session is covered by persistBookStyleEdits() refreshing the baseline.
-  bool bookStyleMemoryUsed_ = false;
 
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
