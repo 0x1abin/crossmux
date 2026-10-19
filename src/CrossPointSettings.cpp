@@ -846,7 +846,7 @@ int CrossPointSettings::getReaderFontId() const {
   // in the page render loop) so rendering is correct even before it has run.
   const uint8_t pt =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
-  if (UiHighDpiProfile::enabled) return UiHighDpiProfile::reader12FontId;
+  if (UiHighDpiProfile::enabled) return NOTOSANS_12_FONT_ID;
   const bool sans = (fontFamily == NOTOSANS);
   switch (pt) {
     case 12:

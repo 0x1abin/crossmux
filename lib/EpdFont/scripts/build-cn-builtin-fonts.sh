@@ -8,7 +8,7 @@
 #   14/16/18pt (I18N, reader MEDIUM/LARGE/EXTRA_LARGE) : UI-only chars
 #                                                          (cn_i18n_chars.txt)
 #
-# Every tier also ships ASCII + Latin-1 + CJK punctuation + full-width forms.
+# Every tier also ships ASCII + Latin-1 + source-supported Cyrillic + № + CJK punctuation + full-width forms.
 #
 # Pipeline:
 #   1. pyftsubset trims NotoSansSC-Regular.otf to the requested character set
@@ -107,7 +107,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$SUBSET_OTF") (common
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$SUBSET_OTF" \
   --text-file="$CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
+  --unicodes="U+0020-007E,U+00A0-00FF,U+0400-04FF,U+2010-2026,U+2116,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
   --layout-features='*' \
   --notdef-outline \
   --recommended-glyphs \
@@ -120,7 +120,7 @@ echo "Subsetting $(basename "$SOURCE_OTF") → $(basename "$I18N_OTF") (i18n)...
 "$PYTHON" -m fontTools.subset "$SOURCE_OTF" \
   --output-file="$I18N_OTF" \
   --text-file="$I18N_CHARSET_FILE" \
-  --unicodes="U+0020-007E,U+00A0-00FF,U+2010-2026,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
+  --unicodes="U+0020-007E,U+00A0-00FF,U+0400-04FF,U+2010-2026,U+2116,U+3000-303F,U+FF00-FF9F,U+FFA1-FFEF,U+FFFD" \
   --layout-features='*' \
   --notdef-outline \
   --recommended-glyphs \
@@ -144,6 +144,7 @@ emit_size() {
   echo "Generating ${output_path} from $(basename "$otf")..."
   "$PYTHON" fontconvert.py "$font_name" "$size" "$otf" \
     --2bit \
+    --additional-intervals 0x2116,0x2116 \
     --additional-intervals 0x4E00,0x9FFF \
     --additional-intervals 0x3000,0x303F \
     --additional-intervals 0xFF00,0xFFEF \
@@ -166,7 +167,8 @@ done
 
 "$PYTHON" share-cn-font-intervals.py "$STAGING_DIR"
 "$PYTHON" compress-cn-builtin-fonts.py "$STAGING_DIR"
-"$PYTHON" publish-cn-builtin-fonts.py "$STAGING_DIR" ../builtinFonts
+"$PYTHON" build-font-ids.py --cjk-dir "$STAGING_DIR" > "$STAGING_DIR/fontIds.h"
+"$PYTHON" publish-cn-builtin-fonts.py "$STAGING_DIR" ../builtinFonts --font-ids ../../../src/fontIds.h
 
 echo ""
 echo "Done. Generated $((${#CN_FONT_SIZES_SMALL[@]} + ${#CN_FONT_SIZES_I18N[@]})) CJK font headers in ../builtinFonts/"

@@ -8,8 +8,6 @@ inline constexpr bool enabled = true;
 #else
 inline constexpr bool enabled = false;
 #endif
-// Distinct bitmap revisions invalidate sections laid out with the legacy faces.
-inline constexpr int reader12FontId = 0x4738000C;
 inline constexpr int contentPadding = 32;
 inline constexpr int controlGap = 12;
 inline constexpr int navigationHeight = 96;

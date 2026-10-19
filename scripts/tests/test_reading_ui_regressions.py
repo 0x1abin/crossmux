@@ -504,12 +504,12 @@ int main() {
     settings.fontFamily=family; settings.fontPointSize=size;
     int id=settings.getReaderFontId();
     if (UiHighDpiProfile::enabled) {
-      assert(id==UiHighDpiProfile::reader12FontId);
-      assert(id==0x4738000C);
-      assert(id!=0x4737000C && id!=0x4737000E);
-      assert(id!=NOTOSANS_12_FONT_ID && id!=NOTOSERIF_12_FONT_ID);
+      assert(id==NOTOSANS_12_FONT_ID);
+      assert(id!=0x4738000C && id!=0x4737000C && id!=0x4737000E);
+      assert(id!=NOTOSERIF_12_FONT_ID);
       assert(id!=NOTOSANS_14_FONT_ID && id!=NOTOSERIF_14_FONT_ID);
     } else assert(id==(family==1?NOTOSANS_12_FONT_ID:NOTOSERIF_12_FONT_ID));
+    assert(id!=1597191560 && id!=778531645);
     assert(settings.fontPointSize==size);
   }
   settings.sdFontFamilyName[0]='A';
