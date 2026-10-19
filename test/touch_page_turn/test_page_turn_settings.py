@@ -13,7 +13,11 @@ covering the stored values, not a re-reading of the switch statements:
   * the reader's tap classifier must keep the page-turn direction semantics the
     stock outer-thirds zones had: mirrored reader or right-to-left book swaps
     the sides, the two together cancel, and each direction's own gesture still
-    decides whether taps are accepted.
+    decides whether taps are accepted;
+  * the row has to hold end to end: a stored 4 must come back out of the load
+    path and then make the real classifier's tap branch quiet, while a stored 3
+    run through the same path still turns -- one direction alone would also
+    pass for a value that silently folded back to Tap Only.
 
 Nothing here re-implements the production logic: SettingsList.h, the
 CrossPointSettings load/save pair and ReaderUtils::detectTouchPageTurn() are
@@ -868,6 +872,43 @@ int main() {
     const Turn topRight = tapAt(renderer, 460, 100);
     expect(topRight.next, "mirrored: the top-right zone turns forward", topRight.next, 1);
     expect(!topRight.prev, "mirrored: the top-right zone does not go back", topRight.prev, 0);
+  }
+
+  // 8. The end-to-end case behind the "Disabled" row: a stored
+  //    PAGE_TURN_GESTURE_DISABLED (4) must survive the real load path -- it is
+  //    only kept by enumValueCount = PAGE_TURN_GESTURE_COUNT(5), the row count
+  //    would clamp it to 3 -- and the tap branch of the real classifier must
+  //    then stay silent. The neighbouring stored 3 (INVERTED_TAP) walks the
+  //    same load + classify path and must still turn; without that counterpart
+  //    this assertion would hold for every stored value, including one the
+  //    loader had folded back to Tap Only.
+  const struct {
+    uint8_t stored;
+    bool turnsOnTap;
+    const char* what;
+  } storedGestures[] = {
+      {CrossPointSettings::PAGE_TURN_GESTURE_DISABLED, false, "a stored 4 stops the tap turn"},
+      {CrossPointSettings::INVERTED_TAP, true, "a stored 3 still turns on tap"},
+  };
+  for (const auto& g : storedGestures) {
+    reloadFromDocument(g.stored, g.stored);
+    expect(SETTINGS.pageTurnGesture == g.stored, "the stored value survives the load", SETTINGS.pageTurnGesture,
+           g.stored);
+    GfxRenderer renderer;
+    const Turn right = tapAt(renderer, 460, 400);
+    const Turn left = tapAt(renderer, 20, 400);
+    // Loading a stored 3 is the legacy Inverted Tap, whose migration swaps the
+    // stock sides, so the physical side that means "forward" is read back from
+    // the loaded zones rather than hard-coded.
+    const bool rightIsNext = zoneShortAction(tapZoneAt(renderer, 460, 400)) == CrossPointSettings::TAP_ZONE_NEXT;
+    const bool leftIsNext = zoneShortAction(tapZoneAt(renderer, 20, 400)) == CrossPointSettings::TAP_ZONE_NEXT;
+    expect(rightIsNext || leftIsNext, "one side holds the forward slot", rightIsNext || leftIsNext, 1);
+    const Turn& forward = rightIsNext ? right : left;
+    const Turn& backward = rightIsNext ? left : right;
+    std::printf("stored %d: forward tap next=%d, backward tap prev=%d (want %d)\n", static_cast<int>(g.stored),
+                forward.next, backward.prev, g.turnsOnTap);
+    expect(forward.next == g.turnsOnTap, g.what, forward.next, g.turnsOnTap);
+    expect(backward.prev == g.turnsOnTap, g.what, backward.prev, g.turnsOnTap);
   }
 
   if (failures == 0) std::printf("touch page-turn settings path passed\n");
