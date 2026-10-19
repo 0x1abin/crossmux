@@ -655,38 +655,48 @@ bool CrossPointSettings::loadTouchGestureSettings(JsonVariantConst doc) {
   // raw document here to recover which legacy mode to preserve. v1 saves may
   // also hold the now-removed Inverted Tap gesture (legacy value 3), which
   // folds to Tap Only.
-  // A save from the gesture-pair era wrote pageTurnGesture itself and has no
-  // legacy mode, so it is recognised by the loaded value instead: a stored
-  // Inverted Tap (3) there is the same side swap as legacy mode 3 and must get
-  // it too. touchControlsVersion, written by toJson(), keeps the swap from
-  // running again on the next boot; a save with its own tapZones is skipped
-  // below either way.
+  // A save from the gesture-pair era wrote both directions itself and has no
+  // legacy mode, so only its stored values decide: upstream's classifier
+  // swapped the sides when either direction held the Inverted Tap (3), and the
+  // migration moves exactly that swap into the zones -- the saved pair itself
+  // is never overwritten. touchControlsVersion, written by toJson(), keeps the
+  // swap from running again on the next boot; a save with its own tapZones is
+  // skipped below either way.
   if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
-      !doc["touchReaderControls"].isNull() && (doc["pageTurnGesture"].isNull() || pageTurnGesture == INVERTED_TAP)) {
+      !doc["touchReaderControls"].isNull() &&
+      (doc["pageTurnGesture"].isNull() || pageTurnGesture == INVERTED_TAP || previousPageGesture == INVERTED_TAP)) {
     const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
-    if (legacyTouch == LEGACY_TOUCH_SWIPE) {
-      pageTurnGesture = SWIPE_ONLY;
-      previousPageGesture = SWIPE_ONLY;
-    } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP || pageTurnGesture == INVERTED_TAP) {
-      // Legacy Inverted Tap is tap-only on both directions, and it swapped the
-      // page-turn sides (right edge = previous, left edge = next). Keep the
-      // swapped zones for saves that never had custom ones; a save with its own
-      // tapZones is preserved untouched.
-      pageTurnGesture = INVERTED_TAP;
-      previousPageGesture = INVERTED_TAP;
-      if (doc["tapZones"].isNull()) {
-        for (uint8_t i = 0; i < 9; ++i) {
-          if (tapZones[i] == TAP_ZONE_PREV) {
-            tapZones[i] = TAP_ZONE_NEXT;
-          } else if (tapZones[i] == TAP_ZONE_NEXT) {
-            tapZones[i] = TAP_ZONE_PREV;
-          }
+    // Only the old single-selector shape (no gesture keys yet) expands the
+    // legacy mode into both directions; a pair-era save keeps its values.
+    const bool expansionPending = doc["pageTurnGesture"].isNull();
+    if (expansionPending) {
+      if (legacyTouch == LEGACY_TOUCH_SWIPE) {
+        pageTurnGesture = SWIPE_ONLY;
+        previousPageGesture = SWIPE_ONLY;
+      } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP) {
+        // Legacy Inverted Tap is tap-only on both directions.
+        pageTurnGesture = INVERTED_TAP;
+        previousPageGesture = INVERTED_TAP;
+      } else if (legacyTouch != TOUCH_READER_OFF) {
+        // Legacy Tap mode: taps only, same zones on both directions.
+        pageTurnGesture = TAP_ONLY;
+        previousPageGesture = TAP_ONLY;
+      }
+    }
+    // Either direction holding the legacy Inverted Tap swapped the page-turn
+    // sides (right edge = previous, left edge = next). Keep the swapped zones
+    // for saves that never had custom ones; a save with its own tapZones is
+    // preserved untouched.
+    if ((legacyTouch == LEGACY_TOUCH_INVERTED_TAP || pageTurnGesture == INVERTED_TAP ||
+         previousPageGesture == INVERTED_TAP) &&
+        doc["tapZones"].isNull()) {
+      for (uint8_t i = 0; i < 9; ++i) {
+        if (tapZones[i] == TAP_ZONE_PREV) {
+          tapZones[i] = TAP_ZONE_NEXT;
+        } else if (tapZones[i] == TAP_ZONE_NEXT) {
+          tapZones[i] = TAP_ZONE_PREV;
         }
       }
-    } else if (legacyTouch != TOUCH_READER_OFF) {
-      // Legacy Tap mode: taps only, same zones on both directions.
-      pageTurnGesture = TAP_ONLY;
-      previousPageGesture = TAP_ONLY;
     }
     needsResave = true;
   }
