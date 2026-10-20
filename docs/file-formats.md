@@ -11,7 +11,7 @@ bytes invalidates the cache; the output value is left unchanged.
 
 ## `book.bin`
 
-### Version 11
+### Version 12
 
 `book.bin` stores EPUB metadata plus lookup tables for spine and TOC entries.
 The current firmware writes this version from `BookMetadataCache`.
@@ -20,6 +20,8 @@ The current firmware writes this version from `BookMetadataCache`.
 > Upstream version 10 ignores ambiguous EPUB guide text references. CrossMux uses
 > 11 to include both changes while remaining above every shipped value from
 > either lineage. `BookMetadataCache.cpp` is the source of truth.
+> Version 12 adds the spine `linear` flag. Non-linear resources remain reachable
+> by links but do not contribute to sequential navigation or book progress.
 
 ImHex pattern:
 
@@ -28,7 +30,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 11
+#define EXPECTED_VERSION 12
 #define MAX_STRING_LENGTH 65535
 
 struct String {
@@ -53,8 +55,9 @@ struct Metadata {
 
 struct SpineEntry {
     String href [[comment("Resource path")]];
-    u32 cumulativeSize [[comment("Cumulative uncompressed spine size through this entry")]];
+    u32 cumulativeSize [[comment("Cumulative uncompressed linear spine size through this entry")]];
     s16 tocIndex [[comment("Index into TOC, or inherited/previous TOC index when no direct entry exists")]];
+    u8 linear [[comment("0: auxiliary resource; 1: default reading order")]];
 };
 
 struct TocEntry {
@@ -632,7 +635,7 @@ location is not migrated or read.
   indexes start with a 12-byte little-endian header:
   `uint32 magic`, `uint16 version`, `uint16 recordSize`, `uint32 recordCount`.
   Their magic values are `WRS6` (`0x36535257`) and `WRT2` (`0x32545257`);
-  image indexes use `WRI2` (`0x32495257`) and image work indexes use `WIP1`
+  image indexes use `WRI4` (`0x34495257`) and image work indexes use `WIP1`
   (`0x31504957`). Version is currently `1`.
 - Shelf records contain fixed `bookId[64]`, `title[192]`, `author[96]`, and
   validated HTTPS `coverUrl[512]` fields followed by `uint32 readUpdateTime`.
@@ -640,21 +643,21 @@ location is not migrated or read.
   bytes must identify as JPEG/PNG. TOC records contain fixed
   `chapterUid[64]`, `title[192]`, `uint32 wordCount`,
   `uint32 chapterIdx`, and a paid flag.
-- `WRI2` records contain a generated EPUB-relative `href[64]` and the original
+- `WRI4` records contain a generated EPUB-relative `href[64]` and the original
   HTTPS image URL in `url[512]`; both are NUL-terminated. TXT chapters have a
   valid zero-record index. Images that pass download and JPEG/PNG validation
   are stored below `<bookId>/images/` and embedded into the generated EPUB.
-- `WIP1` records contain one `WRI2` record followed by `uint8 state`,
+- `WIP1` records contain one `WRI4` record followed by `uint8 state`,
   `uint8 attempts`, `uint8 redirects`, and one reserved byte. They schedule
   pending images by HTTPS host so one TLS connection can serve a host batch.
   During an `Embed` download, completed records are also the authoritative
   image list for the OPF manifest and ZIP packaging pass.
-  `images.work` is always rebuilt from `WRI2`, may be deleted after interruption,
+  `images.work` is always rebuilt from `WRI4`, may be deleted after interruption,
   and is removed when the job finishes; it is not a durable cache format.
 - Per-book `options.bin` is an atomic fixed 8-byte `WRO1` record:
   `uint32 magic` (`0x314F5257`), `uint16 version` (`1`), `uint8 imagePolicy`,
   and one zero reserved byte. Policy `0` embeds validated images and policy `1`
-  excludes image requests and EPUB image entries while retaining `WRI2` and
+  excludes image requests and EPUB image entries while retaining `WRI4` and
   existing image files. Missing, truncated, unknown-policy, or otherwise
   damaged records fall back to policy `0`. The record is replaced only after a
   generated EPUB succeeds; a directly returned complete EPUB remains unchanged.
@@ -746,10 +749,31 @@ rejected `WRS4` shelves because shelf records added `readUpdateTime`; records
 are rewritten in descending timestamp order while preserving server order for
 ties. `WRS4` rejected `WRS3` shelves whose book
 titles could be overwritten by nested category titles. A cached chapter
-without a valid `WRI2` index is downloaded again so pre-image-support chapter
-caches cannot silently lose figures. `WRI2` also rejects chapters generated
-before unsupported footnote references and bodies were filtered. Existing
-`/WeRead/*.epub` files remain readable and are not upgraded automatically;
+without a valid `WRI4` index is downloaded again so pre-image-support chapter
+caches cannot silently lose figures. `WRI2` rejected chapters generated
+before unsupported footnote references and bodies were filtered. `WRI3` also
+rejects `WRI2` chapters that could render `qqreader-footnote` image `alt` text
+inline. `WRI4` rejects earlier generated chapters because `qqreader-footnote`
+images now become EPUB 3 noterefs with complete text in a separate notes
+resource. Both HTML `<img>` and XHTML `<img/>` forms are supported, independently
+of the image download policy. Other unsupported annotation types remain filtered.
+
+Each chapter has `chapters/NNNNNN.notes.xhtml`: zero bytes means no notes;
+otherwise it is a complete UTF-8 XHTML document. A reusable chapter requires its
+body, notes sidecar and valid `WRI4` index. Conversion publishes the notes and
+body before the image index, which is the chapter completion marker. Notes are
+streamed from the decoded source with the existing bounded buffers, including
+attributes larger than the 4096-byte tag buffer; there is no fixed note-length
+cap beyond SD/file and existing UTF-16 offset limits.
+Conversion checks cancellation between input and look-back chunks; cancellation
+removes temporary files without replacing the existing EPUB.
+
+The EPUB includes nonempty sidecars as `OEBPS/notesNNNNNN.xhtml`, with linked
+`noteref`, `footnote` and `backlink` semantics. All body spine items precede notes
+items; notes use `linear="no"` and are omitted from the chapter TOC. Note numbering
+starts at one for each chapter. Empty or missing `alt` attributes produce no
+reference. The package includes its UTC `dcterms:modified` value.
+Existing `/WeRead/*.epub` files remain readable and are not upgraded automatically;
 cache a book again to rebuild affected chapters and embed its available cover
 and selected chapter images.
 
@@ -760,8 +784,10 @@ of WeRead's native `chapterOffset`.
 Newly generated chapter XHTML embeds `<!--wr-co:N-->` comments at source-text,
 entity, image, and final boundaries. `N` is the zero-based UTF-16 code-unit
 offset in the decoded raw chapter source after removing a UTF-8 BOM. The reader
-ignores these comments; manual sync streams the loose generated chapter to map
-between its visible-text offsets and WeRead's native offsets. Old chapters have
+ignores these comments; manual sync extracts the chapter from the EPUB being
+read to a temporary `weread-progress-map.part` in its reader-cache directory,
+maps visible-text offsets to WeRead's native offsets, then removes the temporary
+file. It never uses a possibly newer loose chapter left by an interrupted recache. Old chapters have
 no marker and remain compatible through the approximate fallback.
 Manual progress sync refreshes only an old or invalid TOC; an existing
 `/WeRead/*.epub` is retained.

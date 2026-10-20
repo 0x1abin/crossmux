@@ -168,6 +168,7 @@ class EpubReaderActivity final : public ReaderActivity {
     int pageNumber;
     // Fixed-size return stack; offsets survive session CSS fallback without heap storage.
     std::optional<uint32_t> visibleTextOffset;
+    int pageCount = 0;
   };
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
@@ -176,6 +177,10 @@ class EpubReaderActivity final : public ReaderActivity {
   // still returns to where a followed link was tapped.
   void saveLinkStack() const;
   void loadLinkStack();
+  bool pushSavedPosition();
+  bool isViewingNonlinearSpine() const;
+  void leaveNonlinearSpine(int targetSpineIndex);
+  CrossPointPosition getReadingPosition() const;
 
   uint16_t buildViewportWidth = 0;
   uint16_t buildViewportHeight = 0;
@@ -222,7 +227,7 @@ class EpubReaderActivity final : public ReaderActivity {
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   int currentTocIndex() const;
   // Index of the chapter being read: the TOC index for TXT/MD (whose named
-  // chapters are anchors inside one spine) and the spine index otherwise.
+  // chapters are anchors inside one spine) and the linear spine index otherwise.
   int currentChapterIndex() const;
   // Chapter navigation shared by the toolbar and the tap zones. TXT/MD books
   // keep every named chapter in one spine, so a spine step would clamp back to
@@ -233,6 +238,7 @@ class EpubReaderActivity final : public ReaderActivity {
   // Live section position, or the values cached before a child screen
   // released the section.
   ChapterPosition chapterPosition() const;
+  float bookProgressFor(const ChapterPosition& position, bool includeCurrentPage = false) const;
   int bookPercentFor(const ChapterPosition& position) const;
   void openReaderMenu();
   // Toolbar reader menu (see Overlay above).

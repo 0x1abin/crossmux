@@ -360,7 +360,7 @@ class Operation {
   void startDownloadMetrics();
   void logDownloadMetrics(const char* result) const;
   Event inspectPrimary();
-  Event decodeChapter(bool plainText);
+  Event decodeChapter(bool plainText, WeReadStore::WorkCallback callback, void* callbackContext);
   Event finishWholeBook(const std::string& source);
   bool persistCoverOverride();
   Event cancelNow();
