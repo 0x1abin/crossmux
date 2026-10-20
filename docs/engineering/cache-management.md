@@ -78,6 +78,11 @@ contents at the same path does not change the hash; preserve freshness checks.
    - Line spacing (`SETTINGS.lineSpacing`)
    - Paragraph spacing (`SETTINGS.extraParagraphSpacing`)
    - Screen margins (`SETTINGS.screenMargin`)
+   - Built-in reader font data or coverage changes: generated reader IDs also
+     hash `notosans_cjk_12.h` and `notosans_cjk_common_intervals.h`. High-DPI
+     mode uses that generated ID instead of a fixed revision. Complete and
+     partial sections rebuild on demand; book metadata and source-offset
+     progress are preserved. No startup-wide cache deletion is needed.
 3. **Viewport dimensions change**:
    - Screen orientation change
    - Display resolution change
@@ -112,9 +117,11 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
 - `book.bin`: **Version 11** (metadata structure) — includes NFC-composed titles and ignores ambiguous EPUB guide text references while remaining above every version shipped by either lineage.
-- `section.bin`: **Version 78/79**, complete; partial versions are **204/203**,
+- `section.bin`: **Version 82/83**, complete; partial versions are **200/199**,
   derived as `0xFE - (completeVersion - 28)`.
-  Unified Chinese firmware uses 79. TextBlocks add chapter-codepoint ranges and
+  Unified Chinese firmware uses 83. The header includes `verticalBottomAlign`;
+  toggling it rebuilds layouts and changes clipping signatures. Early overlapping
+  PR versions 79/80 are rejected. TextBlocks retain chapter-codepoint ranges and
   `paragraphStartWord`, with discretionary-hyphen style metadata. NFC/redaction
   width and clipping changes invalidate both complete and partial pagination.
   Local paragraph indentation, ruby and header/style ordering remain intact.

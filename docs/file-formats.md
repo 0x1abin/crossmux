@@ -100,6 +100,21 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Versions 82 / 83
+
+Adds a one-byte `bool verticalBottomAlign` immediately after
+`paragraphAlignment` in the 47-byte section header. Complete versions are
+82 (Latin) / 83 (CJK); partial sentinels are 200 / 199, derived with
+`0xFE - (completeVersion - 28)`. Early PR builds used overlapping 79/80
+versions, so the final format skips 80/81 to avoid accepting their layouts.
+
+The option redistributes spare height between lines on non-final text pages,
+with a half-line-height cap per gap. Grid-table, image and rule pages retain
+fixed geometry; the final chapter page stays top-aligned. Links move with their
+text lines. Both section-cache identity and clipping layout signatures include
+the toggle. Complete and partial layouts rebuild on an option/version change;
+book metadata and source-offset reading/clipping anchors remain available.
+
 ### Versions 78 / 79
 
 Unified firmware uses version **79**; the Latin counter is **78**. Partial
@@ -263,8 +278,8 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define LATIN_VERSION 78
-#define CHINESE_VERSION 79
+#define LATIN_VERSION 82
+#define CHINESE_VERSION 83
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -442,6 +457,7 @@ struct SectionBin {
     u8 firstLineIndent;
     u8 paragraphIndentSpaces; // forced Western indent, 0..5
     u8 paragraphAlignment;
+    bool verticalBottomAlign;
     u16 viewportWidth;
     u16 viewportHeight;
     bool hyphenationEnabled;
@@ -573,6 +589,8 @@ count as their decoded visible Unicode codepoint. Source offsets inside a multib
 character resolve to that character. Lookup binary-searches records on disk. The inverse lookup searches visible
 offsets, then resolves the source position through `chapters.bin` for the current
 TOC title and chapter navigation, without retaining chapter tables.
+Chapter lookup treats visible offset 0 (the generated leading body newline) as
+position 1, the first source-mapped visible position, including any dropped BOM.
 Maps publish from `.tmp` only after successful conversion and flush. Books at or
 above 4GiB and chapter counts exceeding the existing 16-bit TOC budget fail safely.
 

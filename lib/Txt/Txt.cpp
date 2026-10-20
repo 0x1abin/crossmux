@@ -447,8 +447,10 @@ int Txt::tocIndexForPosition(const std::string& filepath, const std::string& epu
   HalFile mapping, chapters;
   uint32_t sourceOffset = 0, count = 0, chapterIndex = 0;
   txt_encoding::Encoding encoding = txt_encoding::Encoding::Unknown;
+  // Page 0 can start at the generated body newline; source mapping starts at 1.
   if (!txt.load() || !Storage.openFileForRead("TXT", epubCachePath + "/txt-map.bin", mapping) ||
-      !txt_progress::sourceForVisible(mapping, txt.getFileSize(), visibleOffset, sourceOffset) ||
+      !txt_progress::sourceForVisible(mapping, txt.getFileSize(), visibleOffset == 0 ? 1 : visibleOffset,
+                                      sourceOffset) ||
       !txt.openChapterIndex(chapters, encoding, count))
     return -1;
   const auto progressWithin = [&](uint32_t begin, uint32_t end) {

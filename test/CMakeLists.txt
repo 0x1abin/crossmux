@@ -120,7 +120,7 @@ add_subdirectory(reader_build_failure)
 add_subdirectory(reader_font_preview)
 
 # Font fallback reuses the existing Unicode mark classification.
-foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest)
+foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest FontDecompressorTest)
   target_sources(${font_test} PRIVATE
     ${REPO_ROOT}/lib/MiniBidi/minibidi.c
     ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp)
@@ -188,6 +188,10 @@ add_test(NAME ThemeCheckboxRows COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/
 add_test(NAME LegacyThemeListGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_legacy_list_adapter.py)
 
 add_test(NAME InxSettingControls COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_inx_setting_controls.py)
+add_test(NAME TapZoneGeometry COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_tap_zone_geometry.py)
+add_test(NAME TapZoneChapter COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/inx_navigation/test_tap_zone_chapter.py)
+
+add_test(NAME TouchPageTurnSettings COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/touch_page_turn/test_page_turn_settings.py)
 
 add_test(NAME SettingsApiKeys COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/settings_api/test_settings_api_keys.py)
 
@@ -246,3 +250,5 @@ add_test(NAME TxtCoverCopy
 
 add_test(NAME CjkGenerationTransaction COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_cjk_generation_transaction.py)
 add_test(NAME PowerConfirmRelease COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_power_confirm_release.py ${crosspoint_simulator_SOURCE_DIR})
+
+add_subdirectory(persistable_store)

@@ -102,7 +102,7 @@ bool CrossPointState::fromJson(JsonVariantConst doc) {
 }
 
 bool CrossPointState::loadFromFile() {
-  if (Storage.exists(getFilePath()) && PersistableStore<CrossPointState>::loadFromFile()) {
+  if (PersistableStore<CrossPointState>::loadFromFile()) {
     return true;
   }
 

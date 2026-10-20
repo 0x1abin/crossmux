@@ -20,14 +20,15 @@ CHARSETS=['cn_common_chars.txt','cn_i18n_chars.txt']
 
 class GenerationTransactionTest(unittest.TestCase):
     def test_generation_or_postprocessing_failure_never_changes_outputs(self):
-        for failure in ('fontconvert.py','share-cn-font-intervals.py','compress-cn-builtin-fonts.py'):
+        for failure in ('fontconvert.py','share-cn-font-intervals.py','compress-cn-builtin-fonts.py','build-font-ids.py'):
             with self.subTest(failure=failure),tempfile.TemporaryDirectory() as directory:
-                root=Path(directory);scripts=root/'scripts';fonts=root/'builtinFonts'
-                scripts.mkdir();fonts.mkdir();(fonts/'source/NotoSansSC').mkdir(parents=True)
+                root=Path(directory);scripts=root/'lib/EpdFont/scripts';fonts=root/'lib/EpdFont/builtinFonts'
+                scripts.mkdir(parents=True);fonts.mkdir();(fonts/'source/NotoSansSC').mkdir(parents=True)
+                (root/'src').mkdir();font_ids=root/'src/fontIds.h';font_ids.write_text('old font IDs')
                 (fonts/'source/NotoSansSC/NotoSansSC-Regular.otf').write_bytes(b'fixture')
                 for name in CHARSETS:shutil.copy2(SCRIPTS/name,scripts/name)
                 for name in NAMES:shutil.copy2(FONTS/name,fonts/name)
-                for name in ['build-cn-builtin-fonts.sh','share-cn-font-intervals.py','compress-cn-builtin-fonts.py','publish-cn-builtin-fonts.py','verify_compression.py']:
+                for name in ['build-cn-builtin-fonts.sh','share-cn-font-intervals.py','compress-cn-builtin-fonts.py','publish-cn-builtin-fonts.py','verify_compression.py','build-font-ids.py']:
                     shutil.copy2(SCRIPTS/name,scripts/name)
                 wrapper=root/'python';wrapper.write_text(f'#!{sys.executable}\n'+r'''
 import os,sys,re,subprocess
@@ -50,7 +51,7 @@ if step=='fontconvert.py':
  print(text,end='');sys.exit(0)
 subprocess.run([sys.executable,*args],check=True)
 ''');wrapper.chmod(0o755)
-                before={p:p.read_bytes() for p in [*(fonts/n for n in NAMES),*(scripts/n for n in CHARSETS)]}
+                before={p:p.read_bytes() for p in [*(fonts/n for n in NAMES),*(scripts/n for n in CHARSETS),font_ids]}
                 result=subprocess.run(['bash',str(scripts/'build-cn-builtin-fonts.sh')],env=dict(os.environ,SKIP_CHARSET='1',PYTHON=str(wrapper),REAL_FONTS=str(FONTS),FAIL_STAGE=failure),capture_output=True)
                 self.assertNotEqual(result.returncode,0,result.stdout.decode())
                 self.assertEqual(before,{p:p.read_bytes() for p in before})
@@ -74,5 +75,36 @@ subprocess.run([sys.executable,*args],check=True)
                 with self.assertRaises(OSError):publisher.publish(stage,dest)
             self.assertEqual(before,{p:p.read_bytes() for p in before})
             self.assertFalse(list(root.glob('.cjk-backup-*')))
+
+    def test_font_id_publication_failure_restores_all_fonts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);stage=root/'stage';dest=root/'builtinFonts';scripts=root/'scripts'
+            stage.mkdir();dest.mkdir();scripts.mkdir();(root/'src').mkdir()
+            ids=root/'src/fontIds.h';ids.write_text('old IDs');(stage/'fontIds.h').write_text('new IDs')
+            for name in NAMES+CHARSETS:
+                (stage/name).write_text('new '+name)
+                ((scripts if name in CHARSETS else dest)/name).write_text('old '+name)
+            before={p:p.read_bytes() for p in [*dest.iterdir(),*scripts.iterdir(),ids]}
+            replace=Path.replace
+            def fail_ids(path,target):
+                if target==ids:raise OSError('injected font ID publication failure')
+                return replace(path,target)
+            with patch.object(Path,'replace',fail_ids):
+                with self.assertRaises(OSError):publisher.publish(stage,dest,ids)
+            self.assertEqual(before,{p:p.read_bytes() for p in before})
+            for name in NAMES+CHARSETS:(stage/name).write_text('new '+name)
+            publisher.publish(stage,dest,ids)
+            self.assertEqual(ids.read_text(),'new IDs')
+            for name in NAMES+CHARSETS:
+                self.assertEqual(((scripts if name in CHARSETS else dest)/name).read_text(),'new '+name)
+            self.assertFalse(list(root.glob('.cjk-backup-*')))
+
+    def test_missing_font_ids_rejects_set_before_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);stage=root/'stage';dest=root/'builtinFonts'
+            stage.mkdir();dest.mkdir()
+            for name in NAMES+CHARSETS:(stage/name).write_text('new '+name)
+            with self.assertRaises(ValueError):publisher.publish(stage,dest,root/'fontIds.h')
+            self.assertFalse(list(dest.iterdir()))
 
 if __name__=='__main__':unittest.main()

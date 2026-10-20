@@ -619,7 +619,7 @@ bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false)
   renderer.setFallbackFont(READER_ESTIMATE_FONT_ID, CJK_UI_10_FONT_ID);
 #endif
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-  renderer.insertFont(UiHighDpiProfile::reader12FontId, offlineReaderFontFamily);
+  renderer.insertFont(NOTOSANS_12_FONT_ID, offlineReaderFontFamily);
   // Same-size Chinese UI first, then common Chinese and Ubuntu script coverage.
   renderer.insertFont(CJK_UI_14_FONT_ID, ui14FallbackFamily);
   renderer.insertFont(CJK_UI_16_FONT_ID, ui16FallbackFamily);
