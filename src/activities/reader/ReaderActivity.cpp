@@ -412,7 +412,7 @@ void ReaderActivity::rotateOrientation(const int delta) {
                                             CrossPointSettings::ORIENTATION_COUNT);
   if (next == SETTINGS.orientation) return;
   SETTINGS.orientation = next;
-  SETTINGS.saveToFile();
+  saveSettingsKeepingBookStyle();
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 }
 
@@ -421,7 +421,7 @@ void ReaderActivity::toggleFrontlight() {
   const bool on = !Frontlight.isOn();
   Frontlight.setOn(on);
   SETTINGS.frontlightOn = on ? 1 : 0;
-  SETTINGS.saveToFile();
+  saveSettingsKeepingBookStyle();
 }
 
 void ReaderActivity::render(RenderLock&&) {
