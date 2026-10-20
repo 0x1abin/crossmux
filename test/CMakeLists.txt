@@ -71,6 +71,7 @@ add_subdirectory(minibidi_arabic)
 add_subdirectory(combining_marks)
 add_subdirectory(time_utils)
 add_subdirectory(weread_webapi)
+add_subdirectory(weread_epub_package)
 add_subdirectory(airpage)
 add_subdirectory(chinese_chess)
 add_subdirectory(sd_card_font_cache_format)
@@ -145,6 +146,8 @@ add_test(NAME ControlCenterGesture
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_control_center_gesture.py)
 add_test(NAME ReadingUiRegressions
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reading_ui_regressions.py)
+add_test(NAME EpubFootnoteNavigation
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_epub_footnote_navigation.py)
 add_test(NAME DownloadMemoryLifecycle
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_download_memory_lifecycle.py)
 add_test(NAME ReadingStatsNetworkMemory

@@ -91,6 +91,12 @@ class Epub {
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
   int getSpineItemsCount() const;
+  bool isLinearSpineItem(int spineIndex) const;
+  int getLinearSpineItemsCount() const;
+  int getSpineIndexForLinearIndex(int linearIndex) const;
+  int getLinearIndexForSpineIndex(int spineIndex) const;
+  int getNextLinearSpineIndex(int spineIndex) const;
+  int getPreviousLinearSpineIndex(int spineIndex) const;
   int getTocItemsCount() const;
   int getSpineIndexForTocIndex(int tocIndex) const;
   int getTocIndexForSpineIndex(int spineIndex) const;
@@ -99,6 +105,8 @@ class Epub {
 
   size_t getBookSize() const;
   float calculateProgress(int currentSpineIndex, float currentSpineRead) const;
+  // Percentage jumps select weighted linear content; output arguments are unchanged on failure.
+  bool findSpineForProgress(float fraction, int& spineIndex, float& chapterFraction) const;
   CssParser* getCssParser() const { return cssParser.get(); }
   int resolveHrefToSpineIndex(const std::string& href) const;
 };
