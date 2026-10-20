@@ -70,6 +70,31 @@ use `python3 scripts/tests/test_sd_space.py` for FAT calculation regressions.
 
 ---
 
+## Persistent JSON recovery
+
+`PersistableStoreBase` (settings, state, credentials, recent books and bookmarks)
+and `JsonSettingsIO` (statistics and achievements) write to `<path>.tmp`. An
+overflowed document or incomplete write fails before replacing the main file.
+Failure to remove the old main file or rename completed output retains the
+staging file. Readers prefer an existing main file; when it is missing, they
+promote the staging file and then parse it through the normal loader. Malformed
+JSON still fails validation. A retry restores a sole staging file before opening
+a new output, and leaves it untouched if recovery cannot rename it.
+
+Writes and recovery/read sequences hold the existing recursive HAL storage lock;
+domain parsing runs after releasing it. Recovery allocates exactly
+`strlen(path) + 5` bytes for the variable-length staging path, checks OOM, and
+frees it before reading the JSON text. No new mutex, sidecar name or file format
+is introduced. Reset and book-path operations must continue handling `.tmp`.
+
+This is recoverable staging, not atomic replacement or a power-loss guarantee.
+Recovery requires working storage/rename, and cannot repair a partial file left
+by a power cut. `PersistableStoreWrite` exercises both writers and the three
+loaders with real ArduinoJson, host files, allocation/short-write/rename/remove
+failures and retries. Device verification should reopen settings, state,
+bookmarks, statistics and achievements with only their valid `.tmp` present,
+then confirm ordinary saves and subsequent restarts preserve their contents.
+
 ## Common Patterns
 
 ### Singleton Access

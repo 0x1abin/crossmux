@@ -1578,10 +1578,10 @@ void CrossPointWebServer::handleGetSettings() const {
         const bool toggle = s.enumStringValues.empty() && labels.size() == 2 && labels[0] == StrId::STR_STATE_OFF &&
                             labels[1] == StrId::STR_STATE_ON;
         doc["type"] = toggle ? "toggle" : "enum";
-        if (s.valuePtr) {
-          doc["value"] = static_cast<int>(SETTINGS.*(s.valuePtr));
-        } else if (s.valueGetter) {
+        if (s.valueGetter) {
           doc["value"] = static_cast<int>(s.valueGetter());
+        } else if (s.valuePtr) {
+          doc["value"] = static_cast<int>(SETTINGS.*(s.valuePtr));
         }
         if (toggle) break;
         JsonArray options = doc["options"].to<JsonArray>();
@@ -1713,10 +1713,10 @@ void CrossPointWebServer::handlePostSettings() {
         const int maxVal = s.enumStringValues.empty() ? static_cast<int>(s.enumLabels().size())
                                                       : static_cast<int>(s.enumStringValues.size());
         if (val >= 0 && val < maxVal) {
-          if (s.valuePtr) {
-            SETTINGS.*(s.valuePtr) = static_cast<uint8_t>(val);
-          } else if (s.valueSetter) {
+          if (s.valueSetter) {
             s.valueSetter(static_cast<uint8_t>(val));
+          } else if (s.valuePtr) {
+            SETTINGS.*(s.valuePtr) = static_cast<uint8_t>(val);
           }
           applied++;
         }

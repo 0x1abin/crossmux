@@ -293,6 +293,12 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
 
 class BaseTheme {
  public:
+  // True when drawButtonHints() paints a bottom hint row on this board (no
+  // touch controller and hints enabled, see buttonHintsVisible()). Anything
+  // that hit-tests over the bottom of the screen uses it to know which pixels
+  // the drawn row takes away from it.
+  bool hintsRowDrawn() const { return buttonHintsVisible(); }
+
 #if defined(ENABLE_CHINESE_VERSION) || defined(CROSSMUX_UI_PROFILE_HIGH_DPI)
   static constexpr int STATUS_NUMERIC_FONT_ID = -858375107;
 #else

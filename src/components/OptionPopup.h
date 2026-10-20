@@ -147,6 +147,35 @@ class OptionPopup {
     }
 
     const auto confirm = MappedInputManager::Button::Confirm;
+    if (confirmBarrierPending) {
+      // The popup was just opened and cannot know, by itself, whether Confirm
+      // belongs to it or to whatever opened it. Decide from the first input pass
+      // that sees the button at all:
+      //   - a press edge is the user pressing it for this popup: honour it;
+      //   - held with no edge is the opening gesture's own contact: own it until
+      //     it is released, so it can neither select nor dismiss;
+      //   - a bare release is that contact already finishing — consume it and
+      //     own nothing further, since the button is up again.
+      // The release-only case is the one the render handoff can produce: the
+      // popup opens and the first pass it ever sees already carries the
+      // inherited release, with wasPressed() and isPressed() both false. Without
+      // this branch it fell through to handleButtons() as a confirmation.
+      confirmBarrierPending = false;
+      ignoreInitialConfirmRelease = false;
+      if (input.wasPressed(confirm)) {
+        // A real press edge: this popup owns the press, deliver its release.
+      } else if (input.isPressed(confirm)) {
+        ignoreInitialConfirmRelease = true;
+      }
+      // Only a release that arrives without a press edge in the same pass is the
+      // inherited contact finishing. MappedInputManager reports a logical Confirm
+      // - one mapped from a home-button action or from a short power press - as
+      // pressed and released at once (MappedInputManager.cpp:510-525), so a fresh
+      // click of that kind carries wasPressed() too. It belongs to this popup and
+      // has to reach handleButtons() below to select, so the release test must
+      // not swallow it.
+      if (input.isPressed(confirm) || (input.wasReleased(confirm) && !input.wasPressed(confirm))) return true;
+    }
     if (ignoreInitialConfirmRelease) {
       if (input.wasReleased(confirm)) {
         ignoreInitialConfirmRelease = false;
@@ -334,6 +363,9 @@ class OptionPopup {
   void dismiss() {
     active = false;
     onSelectCallback = nullptr;
+    confirmBarrierPending = false;
+    ignoreInitialConfirmRelease = false;
+    ignoreInitialTouchContact = false;
   }
 
  private:
@@ -350,7 +382,11 @@ class OptionPopup {
     selectedIndex = std::clamp(currentIndex, 0, count - 1);
     firstOption = -1;
     onSelectCallback = std::move(onSelect);
-    ignoreInitialConfirmRelease = true;
+    // Deferred, not armed: handleInput() decides from the first input pass
+    // whether Confirm was inherited from the opening gesture or freshly
+    // pressed. See the Confirm branch there.
+    confirmBarrierPending = true;
+    ignoreInitialConfirmRelease = false;
     ignoreInitialTouchContact = true;
     uiReady = false;
     active = true;
@@ -382,6 +418,9 @@ class OptionPopup {
   int selectedIndex = 0;
   std::function<void(int)> onSelectCallback;
   bool ignoreInitialConfirmRelease = false;
+  // Set by finishShow() and cleared by the first input pass that reaches the
+  // Confirm decision; see handleInput().
+  bool confirmBarrierPending = false;
   bool ignoreInitialTouchContact = false;
   // Written by the render task (frame registration), routed by the loop task;
   // uiReady closes the rebuild window exactly like UiListActivity::uiReady.
