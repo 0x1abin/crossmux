@@ -24,7 +24,8 @@ class FontDownloadActivity final : public UiListActivity {
 
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                 Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal,
-                                const BookStyle* sessionGlobal = nullptr, const BookStyle* sessionLive = nullptr);
+                                BookStyle* sessionGlobal = nullptr, const BookStyle* sessionLive = nullptr,
+                                const std::string* sessionBookPath = nullptr);
 
 #ifdef ENABLE_CHINESE_VERSION
   static bool wasChineseFontPromptShownThisBoot();
@@ -33,10 +34,8 @@ class FontDownloadActivity final : public UiListActivity {
 
   void onEnter() override;
   void onExit() override;
-  // Whether a family was committed to the settings file during this visit. The
-  // screen's result carries it, so a caller holding a reader session baseline
-  // refreshes that baseline only for a real install, never for a cancelled
-  // prompt, a failed download or a plain visit.
+  // The result records a durable family selection; a reader's shared baseline
+  // is updated at the write, before any nested preview can save settings.
   bool fontFamilyCommitted() const { return fontFamilyCommitted_; }
   void render(RenderLock&&) override;
   bool preventAutoSleep() override {
@@ -87,12 +86,11 @@ class FontDownloadActivity final : public UiListActivity {
   State state_ = WIFI_SELECTION;
   Purpose purpose_;
   StartMode startMode_;
-  // Reader session context, null when this screen was opened from Settings with
-  // no book open. `sessionGlobal_` is the reader's entered baseline and
-  // `sessionLive_` the book's typography that is currently in SETTINGS; both are
-  // owned by the calling reader and stay valid while this activity lives.
-  const BookStyle* sessionGlobal_ = nullptr;
+  // The opener owns this context through the nested preview; a successful font
+  // commit updates its global baseline before that preview can save settings.
+  BookStyle* sessionGlobal_ = nullptr;
   const BookStyle* sessionLive_ = nullptr;
+  const std::string* sessionBookPath_ = nullptr;
   FontInstaller fontInstaller_;
 
   // Manifest data

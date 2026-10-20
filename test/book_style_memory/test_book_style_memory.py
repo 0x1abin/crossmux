@@ -47,11 +47,8 @@ def method(text, signature):
 def installer_caller(text, signature, name):
     """Rebuild a screen's installer return callback as a named method.
 
-    Both screens hand the installer a lambda that decides whether a committed
-    family has to reach the session baseline. That lambda is what the review
-    found wrong, so the test runs the production one rather than a copy: take
-    the function, keep the lambda's body only, and expose it as a method the
-    shell can call with the result a visit produced.
+    Run the real return callback too: it must not overwrite the committed
+    global baseline with a child's later book-local font choice.
     """
     body = method(text, signature)
     call = body.index("startActivityForResult(")
@@ -68,7 +65,7 @@ def installer_caller(text, signature, name):
         lambda_end += 1
     lambda_body = body[brace + 1 : lambda_end - 1]
     owner = "ReaderActivity::" if "EpubReaderActivity" in signature else "TextSettingsActivity::"
-    return "void " + owner + name + "(const ActivityResult& result) {" + lambda_body + "}"
+    return "void " + owner + name + "([[maybe_unused]] const ActivityResult& result) {" + lambda_body + "}"
 
 
 def confirm_caller(text, anchor, name):
@@ -145,6 +142,30 @@ def commit_installer(text):
         "bool FontDownloadActivity::commitInstalledFamily(const char* familyName) {"
         + body[start:end]
         + "\n  return fontFamilyCommitted_;\n}"
+    )
+
+
+def preview_wiring(text):
+    """Run the actual managed-preview constructor call against the host shell."""
+    body = method(text, "void FontDownloadActivity::selectDownloadedFontAndPreview")
+    start = body.index("auto textSettings = makeUniqueNoThrow<TextSettingsActivity>(")
+    end = body.index(";", start) + 1
+    return (
+        "std::unique_ptr<TextSettingsActivity> FontDownloadActivity::openManagedPreview() {"
+        + body[start:end]
+        + "\n  return textSettings;\n}"
+    )
+
+
+def settings_installer_wiring(text):
+    """Keep the real parent-to-installer context setup in the regression."""
+    body = method(text, "void TextSettingsActivity::maybeOfferCompleteChineseFont")
+    start = body.index("  BookStyle* sessionGlobal = nullptr;")
+    end = body.index("startActivityForResult(")
+    return (
+        "void TextSettingsActivity::openManagedInstaller() {"
+        + body[start:end]
+        + "\n  installer_ = std::move(downloader);\n}"
     )
 
 
@@ -405,9 +426,8 @@ struct ReadingStatsStore {
 };
 inline ReadingStatsStore READING_STATS;
 
-// Both callers must refresh the session baseline only when a family was really
-// committed. The flag rides on the installer's result, set at the moment it is
-// saved, so a cancelled prompt or a failed download cannot reach the baseline.
+// The result still records the commit; the shared baseline changes at the
+// successful write, before a nested child can save or edit the book's style.
 struct MenuResult {
   int action = -1;
   uint8_t orientation = 0;
@@ -422,17 +442,28 @@ struct ActivityResult {
   ActivityResult(MenuResult menu) : data{menu} {}
 };
 
+struct TextSettingsActivity;
+struct {
+  SdCardFontRegistry registry_;
+  const SdCardFontRegistry& registry() const { return registry_; }
+} sdFontSystem;
+
 struct FontDownloadActivity {
-  enum class Purpose { ReaderAutoInstall };
-  enum class StartMode { Normal };
-  const BookStyle* sessionGlobal_ = nullptr;
+  enum class Purpose { ReaderAutoInstall, PromptThenManage };
+  enum class StartMode { Normal, PreviewOnly };
+  int renderer = 0;
+  int mappedInput = 0;
+  StartMode startMode_ = StartMode::Normal;
+  BookStyle* sessionGlobal_ = nullptr;
   const BookStyle* sessionLive_ = nullptr;
+  const std::string* sessionBookPath_ = nullptr;
   bool fontFamilyCommitted_ = false;
   FontDownloadActivity() = default;
   // The production constructor: the last two arguments are the session context
   // the reader hands over (see installer_wiring()).
-  FontDownloadActivity(int, int, Purpose, StartMode, const BookStyle* global, const BookStyle* live)
-      : sessionGlobal_(global), sessionLive_(live) {}
+  FontDownloadActivity(int, int, Purpose, StartMode mode, BookStyle* global, const BookStyle* live,
+                       const std::string* bookPath = nullptr)
+      : startMode_(mode), sessionGlobal_(global), sessionLive_(live), sessionBookPath_(bookPath) {}
   bool saveFontSelection();
   ActivityResult result;
   void setResult(ActivityResult&& r) { result = std::move(r); }
@@ -442,6 +473,7 @@ struct FontDownloadActivity {
   void publishFontFamilyCommitted();
   // The managed install's own commit lines, extracted below.
   bool commitInstalledFamily(const char* familyName);
+  std::unique_ptr<TextSettingsActivity> openManagedPreview();
 };
 template <typename T, typename... Args>
 std::unique_ptr<T> makeUniqueNoThrow(Args&&... args) {
@@ -452,6 +484,16 @@ struct ReaderActivity;
 // TextSettingsActivity::maybeOfferCompleteChineseFont(): the production body is
 // extracted below; this shell supplies the session context it captures.
 struct TextSettingsActivity {
+  enum class Tab { Family };
+  enum class InitialFontState { Changed };
+  enum class StartMode { Interactive, PreviewOnly };
+  int renderer = 0;
+  int mappedInput = 0;
+  StartMode startMode_ = StartMode::Interactive;
+  TextSettingsActivity() = default;
+  TextSettingsActivity(int, int, const SdCardFontRegistry* registry, Tab, InitialFontState, StartMode mode,
+                       const std::string* bookPath = nullptr, BookStyle* globalSnapshot = nullptr)
+      : startMode_(mode), bookPath_(bookPath), globalSnapshot_(globalSnapshot), registry_(registry) {}
   ReaderActivity* reader_ = nullptr;
   const std::string* bookPath_ = nullptr;
   BookStyle* globalSnapshot_ = nullptr;
@@ -472,6 +514,8 @@ struct TextSettingsActivity {
     handler_ = std::move(handler);
   }
   void maybeOfferCompleteChineseFont();
+  void openManagedInstaller();
+  std::unique_ptr<FontDownloadActivity> installer_;
   void onFontInstallerReturn(const ActivityResult& result);
   // The "clear this book's overrides" confirm callback and the screen's own
   // save path, both production bodies extracted below.
@@ -554,11 +598,12 @@ bool BookStyleStore::saveToFile() {
     + "\n"
     + commit_installer(font_cpp)
     + "\n"
-    # Both callers of the installer: the reader's auto-install prompt and the
-    # text settings picker. Each refreshes the session baseline only for a
-    # committed family, and each is extracted as written so the test fails if
-    # that gate is dropped. Their lambdas are turned into named methods because
-    # the surrounding activity shells are stubs.
+    + preview_wiring(font_cpp)
+    + "\n"
+    + settings_installer_wiring(ts_cpp)
+    + "\n"
+    # Opener callbacks must not copy a later book-local font into the baseline.
+    # Extract their real lambdas as named methods for the host activity shells.
     + installer_caller(epub_cpp, "bool EpubReaderActivity::maybeOfferCompleteChineseFont", "onReaderAutoInstallReturn")
     + "\n"
     # The wiring that gives the installer the session baseline, extracted as
@@ -1037,10 +1082,7 @@ int main() {
                 (unsigned)SETTINGS.persistedLineSpacing, SETTINGS.persistedFamily,
                 (unsigned)SETTINGS.lineSpacing);
 
-    // The installer's result handler then refreshes the session baseline with
-    // the family it just made global; the production callback runs here, not a
-    // copy. Without it the exit below restores the baseline's older family over
-    // the install - the reviewer's repro.
+    // Returning must preserve the baseline already updated by the durable save.
     reader.onReaderAutoInstallReturn(ActivityResult{MenuResult{-1, 0, 0, false, true}});
 
     // The ordinary reader exit follows: the page-turn block above was the last
@@ -1056,7 +1098,7 @@ int main() {
 
   // 16b. Same book, same exit, but the family was chosen from the Text
   //      Settings picker: that screen opens the installer too, and its own
-  //      callback is the one that has to carry the commit into the baseline.
+  //      shared baseline has to learn the commit before any child save.
   {
     store.reset();
     SETTINGS.bookStyleMemory = 1;
@@ -1304,9 +1346,8 @@ int main() {
   // 22. Review finding 3: the reader's own auto-install prompt. The installer
   //     is wired with the production lines (openReaderAutoInstall()) so the
   //     session baseline it saves through is the real one. This is the
-  //     lineSpacing leak, not the MenuResult::fontFamilyCommitted gate: that
-  //     one decides whether the baseline learns the new family, while this one
-  //     decides whether the book's other fields reach the file at all.
+  //     lineSpacing leak: the new family must reach the baseline at commit
+  //     time while the book's other fields stay out of the global file.
   {
     store.reset();
     SETTINGS.bookStyleMemory = 1;
@@ -1417,6 +1458,165 @@ int main() {
                 picker.currentSizeIndex_, picker.sizes_.size());
     SETTINGS.sdFontFamilyName[0] = '\0';
     SETTINGS.fontPointSize = 12;
+  }
+
+  // The installed-font child must retain its opener's book context in both modes.
+  for (const auto mode : {FontDownloadActivity::StartMode::Normal, FontDownloadActivity::StartMode::PreviewOnly}) {
+    store.reset();
+    SETTINGS = decltype(SETTINGS){};
+    strcpy(SETTINGS.sdFontFamilyName, "GlobalFamily");
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    SETTINGS.lineSpacing = 2;
+    assert(reader.persistBookStyleEdits());
+    TextSettingsActivity opener;
+    opener.startMode_ = mode == FontDownloadActivity::StartMode::PreviewOnly
+                            ? TextSettingsActivity::StartMode::PreviewOnly
+                            : TextSettingsActivity::StartMode::Interactive;
+    opener.bookPath_ = &reader.bookPath;
+    opener.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    opener.openManagedInstaller();
+    assert(opener.installer_);
+    auto& installer = *opener.installer_;
+    auto preview = installer.openManagedPreview();  // production constructs before committing
+    assert(installer.commitInstalledFamily("InstalledFamily"));
+    preview->saveSettings();
+    std::printf("managed child preview: disk=%d/%d, live=%u/%u\n", SETTINGS.persistedFontPointSize,
+                SETTINGS.persistedLineSpacing, SETTINGS.fontPointSize, SETTINGS.lineSpacing);
+    assert(SETTINGS.persistedFontPointSize == 12 && SETTINGS.persistedLineSpacing == 1);
+    assert(SETTINGS.fontPointSize == 22 && SETTINGS.lineSpacing == 2);
+    assert(strcmp(SETTINGS.persistedFamily, "InstalledFamily") == 0);
+    strcpy(SETTINGS.sdFontFamilyName, "BookFamily");  // a later preview choice is book-local
+    preview->saveSettings();
+    opener.onFontInstallerReturn(popInstaller(installer));
+    assert(strcmp(reader.globalSettingsSnapshot_.sdFontFamilyName, "InstalledFamily") == 0);
+    assert(reader.persistBookStyleEdits());
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 12 && SETTINGS.persistedLineSpacing == 1);
+    assert(strcmp(SETTINGS.persistedFamily, "InstalledFamily") == 0);
+  }
+
+  // Child toggles update the reader's actual baseline; clearing affects this book only.
+  {
+    store.reset();
+    SETTINGS = decltype(SETTINGS){};
+    strcpy(SETTINGS.sdFontFamilyName, "GlobalFamily");
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    SETTINGS.lineSpacing = 2;
+    assert(reader.persistBookStyleEdits());
+    TextSettingsActivity opener;
+    opener.bookPath_ = &reader.bookPath;
+    opener.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    opener.openManagedInstaller();
+    assert(opener.installer_);
+    auto& installer = *opener.installer_;
+    auto preview = installer.openManagedPreview();
+    assert(installer.commitInstalledFamily("InstalledFamily"));
+    strcpy(SETTINGS.sdFontFamilyName, "BookFamily");
+    preview->toggleBookStyleMemory();
+    std::printf("managed child memory off: disk=%d/%d, live=%u/%u\n", SETTINGS.persistedFontPointSize,
+                SETTINGS.persistedLineSpacing, SETTINGS.fontPointSize, SETTINGS.lineSpacing);
+    assert(!SETTINGS.bookStyleMemory && SETTINGS.fontPointSize == 12 && SETTINGS.lineSpacing == 1);
+    SETTINGS.fontPointSize = 18;  // edits with memory off are global
+    SETTINGS.lineSpacing = 0;
+    strcpy(SETTINGS.sdFontFamilyName, "GlobalLater");
+    preview->saveSettings();
+    preview->toggleBookStyleMemory();
+    assert(SETTINGS.bookStyleMemory && SETTINGS.fontPointSize == 22 && SETTINGS.lineSpacing == 2);
+    assert(reader.globalSettingsSnapshot_.fontPointSize == 18 && reader.globalSettingsSnapshot_.lineSpacing == 0);
+    opener.onFontInstallerReturn(popInstaller(installer));
+    assert(strcmp(reader.globalSettingsSnapshot_.sdFontFamilyName, "GlobalLater") == 0);
+    BookStyle other;
+    other.overrideMask = BookStyle::kFontPointSize;
+    other.fontPointSize = 24;
+    assert(store.updateStyle("/books/other.epub", other));
+    preview->onClearBookStylesConfirm(1);
+    assert(store.styles.size() == 1 && store.styles[0].path == "/books/other.epub");
+    assert(SETTINGS.fontPointSize == 18 && SETTINGS.lineSpacing == 0);
+    assert(reader.persistBookStyleEdits());
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 18 && SETTINGS.persistedLineSpacing == 0);
+    assert(strcmp(SETTINGS.persistedFamily, "GlobalLater") == 0);
+  }
+
+  // A failed install save cannot publish a different global baseline to its child.
+  {
+    store.reset();
+    SETTINGS = decltype(SETTINGS){};
+    strcpy(SETTINGS.sdFontFamilyName, "GlobalFamily");
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    SETTINGS.fontPointSize = 22;
+    SETTINGS.lineSpacing = 2;
+    assert(reader.persistBookStyleEdits());
+    TextSettingsActivity opener;
+    opener.bookPath_ = &reader.bookPath;
+    opener.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    opener.openManagedInstaller();
+    assert(opener.installer_);
+    auto& installer = *opener.installer_;
+    auto preview = installer.openManagedPreview();
+    SETTINGS.saveOk = false;
+    assert(!installer.commitInstalledFamily("FailedFamily"));
+    assert(strcmp(reader.globalSettingsSnapshot_.sdFontFamilyName, "GlobalFamily") == 0);
+    SETTINGS.saveOk = true;
+    preview->saveSettings();
+    opener.onFontInstallerReturn(popInstaller(installer));
+    assert(reader.persistBookStyleEdits());
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 12 && SETTINGS.persistedLineSpacing == 1);
+    assert(strcmp(SETTINGS.persistedFamily, "GlobalFamily") == 0);
+  }
+
+  // Installing with memory off remains global; enabling it restores remembered book values.
+  {
+    store.reset();
+    SETTINGS = decltype(SETTINGS){};
+    SETTINGS.bookStyleMemory = 0;
+    SETTINGS.fontPointSize = 18;
+    SETTINGS.lineSpacing = 0;
+    strcpy(SETTINGS.sdFontFamilyName, "GlobalFamily");
+    BookStyle remembered;
+    remembered.overrideMask = BookStyle::kFontPointSize | BookStyle::kLineSpacing | BookStyle::kSdFontFamily;
+    remembered.fontPointSize = 22;
+    remembered.lineSpacing = 2;
+    strcpy(remembered.sdFontFamilyName, "BookFamily");
+    assert(store.updateStyle(kBook, remembered));
+    ReaderActivity reader;
+    reader.applyBookStyle();
+    TextSettingsActivity opener;
+    opener.bookPath_ = &reader.bookPath;
+    opener.globalSnapshot_ = &reader.globalSettingsSnapshot_;
+    opener.openManagedInstaller();
+    assert(opener.installer_);
+    auto& installer = *opener.installer_;
+    auto preview = installer.openManagedPreview();
+    assert(installer.commitInstalledFamily("InstalledFamily"));
+    assert(strcmp(reader.globalSettingsSnapshot_.sdFontFamilyName, "InstalledFamily") == 0);
+    preview->toggleBookStyleMemory();
+    assert(SETTINGS.fontPointSize == 22 && SETTINGS.lineSpacing == 2);
+    assert(strcmp(SETTINGS.sdFontFamilyName, "BookFamily") == 0);
+    assert(reader.persistBookStyleEdits());
+    reader.saveBookStyle();
+    assert(SETTINGS.persistedFontPointSize == 18 && SETTINGS.persistedLineSpacing == 0);
+    assert(strcmp(SETTINGS.persistedFamily, "InstalledFamily") == 0);
+  }
+
+  // No reader session still uses the ordinary global save path.
+  {
+    SETTINGS = decltype(SETTINGS){};
+    SETTINGS.fontPointSize = 18;
+    TextSettingsActivity opener;
+    opener.openManagedInstaller();
+    assert(opener.installer_);
+    auto& installer = *opener.installer_;
+    auto preview = installer.openManagedPreview();
+    assert(installer.commitInstalledFamily("GlobalInstall"));
+    preview->saveSettings();
+    assert(SETTINGS.persistedFontPointSize == 18 && strcmp(SETTINGS.persistedFamily, "GlobalInstall") == 0);
   }
 
   std::puts("book style memory flow passed");

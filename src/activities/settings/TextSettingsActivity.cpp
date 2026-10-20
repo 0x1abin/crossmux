@@ -1092,7 +1092,7 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
   // values are in SETTINGS right now), so it gets the same session context the
   // reader's own prompt passes. The member holds the snapshot because the
   // installer keeps a pointer to it for as long as it is open.
-  const BookStyle* sessionGlobal = nullptr;
+  BookStyle* sessionGlobal = nullptr;
   const BookStyle* sessionLive = nullptr;
   if (bookOverrideMode()) {
     fontInstallLiveStyle_ = captureStyleFromSettings();
@@ -1103,25 +1103,12 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
       renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage,
       startMode_ == StartMode::PreviewOnly ? FontDownloadActivity::StartMode::PreviewOnly
                                            : FontDownloadActivity::StartMode::Normal,
-      sessionGlobal, sessionLive);
+      sessionGlobal, sessionLive, bookPath_);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return;
   }
-  startActivityForResult(std::move(downloader), [this](const ActivityResult& result) {
-    // Committing a family is a device-level change, and the installer writes it
-    // to the settings file next to the generic values only. Teach the session
-    // baseline the new family too, otherwise the caller's later save restores
-    // the older baseline and the next write drops the install. Every other
-    // return - a cancelled prompt, a Wi-Fi or download failure, no selection at
-    // all - must leave the baseline alone, so this keys off the flag the
-    // installer sets for exactly the committed case.
-    const auto* menu = std::get_if<MenuResult>(&result.data);
-    if (bookOverrideMode() && menu != nullptr && menu->fontFamilyCommitted) {
-      memcpy(globalSnapshot_->sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(globalSnapshot_->sdFontFamilyName));
-    }
-    requestUpdate();
-  });
+  startActivityForResult(std::move(downloader), [this](const ActivityResult&) { requestUpdate(); });
 }
 
 TextSettingsActivity::StyleRow TextSettingsActivity::styleRowAt(int visibleIndex) const {

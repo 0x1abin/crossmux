@@ -89,13 +89,14 @@ bool parseManifestPointSize(const char* familyName, const char* fileName, uint8_
 }  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const Purpose purpose, const StartMode startMode,
-                                           const BookStyle* sessionGlobal, const BookStyle* sessionLive)
+                                           const Purpose purpose, const StartMode startMode, BookStyle* sessionGlobal,
+                                           const BookStyle* sessionLive, const std::string* sessionBookPath)
     : UiListActivity("FontDownload", renderer, mappedInput),
       purpose_(purpose),
       startMode_(startMode),
       sessionGlobal_(sessionGlobal),
       sessionLive_(sessionLive),
+      sessionBookPath_(sessionBookPath),
       fontInstaller_(sdFontSystem.registry()) {}
 
 #ifdef ENABLE_CHINESE_VERSION
@@ -926,7 +927,11 @@ bool FontDownloadActivity::saveFontSelection() {
   // preference"), so the file gets the entered baseline plus this new family,
   // and the session keeps rendering with the book's typography afterwards.
   if (sessionGlobal_ == nullptr || sessionLive_ == nullptr || !SETTINGS.bookStyleMemory) {
-    return SETTINGS.saveToFile();
+    const bool ok = SETTINGS.saveToFile();
+    if (ok && sessionGlobal_ != nullptr) {
+      memcpy(sessionGlobal_->sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(sessionGlobal_->sdFontFamilyName));
+    }
+    return ok;
   }
   // Read the live typography now rather than trusting the snapshot the reader
   // handed over when it opened the installer: the family the user just picked
@@ -939,6 +944,9 @@ bool FontDownloadActivity::saveFontSelection() {
   applyStyleToSettings(fileStyle);
   const bool ok = SETTINGS.saveToFile();
   applyStyleToSettings(liveStyle);
+  if (ok) {
+    memcpy(sessionGlobal_->sdFontFamilyName, fileStyle.sdFontFamilyName, sizeof(sessionGlobal_->sdFontFamilyName));
+  }
   return ok;
 }
 
@@ -985,7 +993,8 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
       renderer, mappedInput, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
       TextSettingsActivity::InitialFontState::Changed,
       startMode_ == StartMode::PreviewOnly ? TextSettingsActivity::StartMode::PreviewOnly
-                                           : TextSettingsActivity::StartMode::Interactive);
+                                           : TextSettingsActivity::StartMode::Interactive,
+      sessionBookPath_, sessionGlobal_);
   if (!textSettings) {
     LOG_ERR("FONT", "OOM allocating TextSettingsActivity (%zu bytes)", sizeof(TextSettingsActivity));
     RenderLock lock(*this);
