@@ -1145,6 +1145,15 @@ int Epub::getTocItemsCount() const {
   return bookMetadataCache->getTocCount();
 }
 
+bool Epub::forEachTocItem(const std::function<bool(int tocIndex, const BookMetadataCache::TocEntry& entry)>& fn,
+                          const int fromIndex) const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    LOG_DBG("EBP", "forEachTocItem called but cache not loaded");
+    return false;
+  }
+  return bookMetadataCache->forEachTocEntry(fn, fromIndex);
+}
+
 // work out the section index for a toc index
 int Epub::getSpineIndexForTocIndex(const int tocIndex) const {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {

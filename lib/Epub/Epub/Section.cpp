@@ -178,6 +178,8 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
 
 bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
   collectTouchLinks_ = spec.collectTouchLinks;
+  // A freshly loaded file backs a different anchor map, so drop any cached table.
+  invalidateSubChapterTable();
   if (!Storage.openFileForRead("SCT", filePath, file)) {
     return false;
   }
@@ -289,6 +291,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
 
 // Your updated class method (assuming you are using the 'SD' object, which is a wrapper for a specific filesystem)
 bool Section::clearCache() const {
+  invalidateSubChapterTable();
   const std::string tmpBin = binTmpPath();
   if (Storage.exists(tmpBin.c_str())) {
     Storage.remove(tmpBin.c_str());
@@ -328,6 +331,9 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   reclaimLayoutCaches(renderer, "start");
   buildComplete_ = false;
   builtPageCount_ = 0;
+  // This build re-lays the section, so the anchor pages the cached table carries are
+  // stale (the parser's live anchors take over until it is committed).
+  invalidateSubChapterPages();
   // Pages from a loaded partial stay readable (from filePath) while this build writes
   // to the tmp .bin, so availability never drops below the partial's watermark.
   pageCount = partial_ ? partialPageCount_ : 0;
@@ -583,27 +589,121 @@ std::optional<uint16_t> Section::findAnchor(const std::string& anchor) const {
   return getPageForAnchor(anchor);
 }
 
+void Section::buildSubChapterTable() const {
+  subChaptersBuilt_ = true;
+  subChapterPagesResolved_ = false;
+  subChapterOverflow_ = false;
+  subChapterCount_ = 0;
+  baseTocIndex_ = kBaseTocIndexUnset;
+  if (!epub) return;
+  baseTocIndex_ = epub->getTocIndexForSpineIndex(spineIndex);
+  // Start where the scan this replaces started: at this spine's first TOC index. A TOC
+  // entry laid out before it was invisible to the old lookup too, so staying put keeps
+  // both paths equivalent -- and skips the front of the book on late chapters, which is
+  // exactly what made the old code fast near the end.
+  const int first = std::max(0, baseTocIndex_);
+  const bool scanned = epub->forEachTocItem(
+      [this](const int tocIndex, const BookMetadataCache::TocEntry& entry) {
+        if (entry.spineIndex != spineIndex) return true;
+        if (subChapterCount_ >= kMaxSubChapters) {
+          subChapterOverflow_ = true;
+          return false;
+        }
+        subChapters_[subChapterCount_++] = {entry.anchor, tocIndex, 0, false};
+        return true;
+      },
+      first);
+  if (!scanned) {
+    LOG_ERR("SCT", "Failed to stream the TOC for spine %d", spineIndex);
+    return;
+  }
+  if (subChapterOverflow_) {
+    LOG_INF("SCT", "Spine %d has more than %u TOC boundaries; falling back to the per-call scan", spineIndex,
+            static_cast<unsigned>(kMaxSubChapters));
+    subChapterCount_ = 0;
+    return;
+  }
+  LOG_INF("SCT", "Sub-chapter table: spine %d, %u entries", spineIndex, static_cast<unsigned>(subChapterCount_));
+}
+
+void Section::resolveSubChapterPages() const {
+  subChapterPagesResolved_ = true;
+  if (subChapterCount_ == 0) return;
+  HalFile anchorFile;
+  uint16_t anchorCount = 0;
+  if (!openAnchorMap(anchorFile, anchorCount)) return;
+  serialization::BufferedFileReader reader(anchorFile, 1024);
+  // Reused buffer: a spine can carry many anchors, and allocating one string per anchor
+  // is the kind of churn that fragments the heap on the no-PSRAM builds.
+  std::string cachedAnchor;
+  for (uint16_t i = 0; i < anchorCount; ++i) {
+    uint16_t anchorPage = 0;
+    if (!serialization::readStringInto(reader, cachedAnchor, serialization::MAX_PATH_BYTES) ||
+        !serialization::readPod(reader, anchorPage)) {
+      LOG_ERR("SCT", "Truncated TOC anchor map");
+      break;
+    }
+    for (size_t s = 0; s < subChapterCount_; ++s) {
+      if (subChapters_[s].anchor != cachedAnchor) continue;
+      subChapters_[s].page = anchorPage;
+      subChapters_[s].pageKnown = true;
+    }
+  }
+}
+
 int Section::getTocIndexForPage(const int page) const {
+  if (!subChaptersBuilt_) buildSubChapterTable();
+  // A spine with a boundary per sub-section is rare but real (index-like chapters), and
+  // reporting a stale sub-chapter title is worse than reading the TOC again.
+  if (subChapterOverflow_) return scanTocIndexForPage(page);
+
+  const int base = baseTocIndex_ == kBaseTocIndexUnset ? epub->getTocIndexForSpineIndex(spineIndex) : baseTocIndex_;
+  if (page < 0 || subChapterCount_ == 0) return base;
+
+  // While a build is live the parser's anchors win (they cover entries the committed map
+  // doesn't have yet); the on-disk map still resolves anchors the build hasn't reached.
+  const bool building = build_ && build_->parser;
+  if (!subChapterPagesResolved_) resolveSubChapterPages();
+
+  int selected = base;
+  int latestPage = -1;
+  for (size_t i = 0; i < subChapterCount_; ++i) {
+    const SubChapter& sub = subChapters_[i];
+    int resolvedPage = sub.anchor.empty() ? 0 : sub.page;
+    bool pageKnown = sub.anchor.empty() || sub.pageKnown;
+    if (building && !sub.anchor.empty()) {
+      if (const auto built = findAnchorDuringBuild(sub.anchor)) {
+        resolvedPage = *built;
+        pageKnown = true;
+      }
+    }
+    if (!pageKnown || resolvedPage > page) continue;
+    if (resolvedPage > latestPage || (resolvedPage == latestPage && sub.tocIndex > selected)) {
+      selected = sub.tocIndex;
+      latestPage = resolvedPage;
+    }
+  }
+  return selected;
+}
+
+int Section::scanTocIndexForPage(const int page) const {
   int selected = epub->getTocIndexForSpineIndex(spineIndex);
   int latestPage = -1;
   struct TocAnchor {
     size_t hash;
     int index;
   };
-  // Bound scratch space to 512 bytes on C3; anchor text stays in the existing caches.
+  // 512 bytes of stack rather than a heap scratch buffer: this path exists so the lookup
+  // stays correct, and the no-PSRAM builds must not be able to fail it. Batching bounds
+  // the work between anchor-map reads, as before.
   constexpr size_t BATCH_SIZE = 64;
-  auto targets = makeUniqueNoThrow<TocAnchor[]>(BATCH_SIZE);
-  if (!targets) {
-    LOG_ERR("SCT", "OOM: TOC anchor lookup");
-    return selected;
-  }
+  TocAnchor targets[BATCH_SIZE];
   HalFile anchorFile;
   uint16_t anchorCount = 0;
   std::optional<serialization::BufferedFileReader> anchorReader;
   uint32_t anchorStart = 0;
   if (openAnchorMap(anchorFile, anchorCount)) {
     anchorStart = anchorFile.position();
-    // Reuse one 1 KB buffer across batches and interleaved TOC metadata reads.
     anchorReader.emplace(anchorFile, 1024);
   }
   std::string cachedAnchor;
@@ -872,6 +972,8 @@ void Section::releaseBuildResources() {
   if (file) file.close();
   if (Storage.exists(binTmpPath().c_str())) Storage.remove(binTmpPath().c_str());
   build_.reset();
+  // The build (or its commit) rewrote the anchor map; re-resolve the cached pages.
+  invalidateSubChapterPages();
 }
 
 void Section::abandonBuild() {

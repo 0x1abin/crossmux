@@ -88,6 +88,15 @@ bool readTocEntryFrom(F& file, BookMetadataCache::TocEntry& entry) {
   entry = std::move(next);
   return true;
 }
+
+// Streaming variant for whole-TOC passes: the same fields, read into an existing entry
+// so its three string buffers are reused instead of reallocated per entry.
+[[nodiscard]] bool readTocEntryInto(serialization::BufferedFileReader& file, BookMetadataCache::TocEntry& entry) {
+  return serialization::readStringInto(file, entry.title, serialization::MAX_TEXT_BYTES) &&
+         serialization::readStringInto(file, entry.href, serialization::MAX_PATH_BYTES) &&
+         serialization::readStringInto(file, entry.anchor, serialization::MAX_PATH_BYTES) &&
+         serialization::readPod(file, entry.level) && serialization::readPod(file, entry.spineIndex);
+}
 }  // namespace
 
 /* ============= WRITING / BUILDING FUNCTIONS ================ */
@@ -653,6 +662,44 @@ BookMetadataCache::TocEntry BookMetadataCache::getTocEntry(const int index) {
     return {};
   }
   return entry;
+}
+
+bool BookMetadataCache::forEachTocEntry(const std::function<bool(int index, const TocEntry& entry)>& fn,
+                                        const int fromIndex) {
+  if (!loaded) {
+    LOG_ERR("BMC", "forEachTocEntry called but cache not loaded");
+    return false;
+  }
+  if (fromIndex < 0 || fromIndex > tocCount) return false;
+  if (fromIndex == tocCount) return true;
+
+  // The build appends TOC entries in index order right after the spine block, so the
+  // LUT slot of the first index to read marks the start of one contiguous run.
+  uint32_t firstEntryPos = 0;
+  if (!bookFile.seek(lutOffset + sizeof(uint32_t) * (spineCount + fromIndex)) ||
+      !serialization::readPod(bookFile, firstEntryPos) || firstEntryPos >= bookFile.size() ||
+      !bookFile.seek(firstEntryPos)) {
+    LOG_ERR("BMC", "Invalid TOC LUT entry %d", fromIndex);
+    invalidateCorruptCache();
+    return false;
+  }
+  // 1 KB blocks: thousands of entries stream in a couple of hundred sector reads
+  // instead of a LUT seek + an entry seek per index, and the buffer stays cheap enough
+  // to allocate mid-page-turn on the C3 builds (no PSRAM there).
+  serialization::BufferedFileReader reader(bookFile, 1024);
+  // One entry for the whole pass: its string buffers grow once and are then reused, so a
+  // 6000-entry stream costs a handful of allocations instead of three per entry.
+  TocEntry entry;
+  for (int i = fromIndex; i < tocCount; ++i) {
+    if (!readTocEntryInto(reader, entry)) {
+      LOG_ERR("BMC", "TOC entry %d is truncated while streaming", i);
+      invalidateCorruptCache();
+      return false;
+    }
+    // entry is reused across calls: fn must copy anything it keeps.
+    if (!fn(i, entry)) return true;
+  }
+  return true;
 }
 
 bool BookMetadataCache::readSpineEntry(HalFile& file, SpineEntry& entry) const {
