@@ -323,11 +323,13 @@ void silentRestartToJoinNetwork() {
 // rounded corners, text style) with the flash-resident CJK face instead; the
 // popup geometry stays identical to every other loading popup in the UI.
 static Rect drawStorageHandoffPopup(GfxRenderer& renderer, const char* message) {
-  // That CJK face has no Hebrew, and the SD face that used to supply other
-  // scripts is already detached, so point its fallback at the flash UI face,
-  // which covers Hebrew. Only runs whose codepoints the CJK face lacks switch to
-  // it, so the CJK prompt itself is unchanged.
+  // The frame guard has restored the UI's SD fallback; select its flash script
+  // face directly while the card is still detached.
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  renderer.setFallbackFont(NOTOSANS_12_FONT_ID, kRtlFontId);
+#else
   renderer.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);
+#endif
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int marginX = metrics.popupMarginX;
   const int marginY = metrics.popupMarginY;
@@ -360,6 +362,8 @@ static Rect drawStorageHandoffPopup(GfxRenderer& renderer, const char* message) 
 
 void restartToHomeAfterStorageHandoff() {
   if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
+  // Wait for the USB frame and prevent another render before reboot.
+  RenderLock lock;
   silentRebootTarget = static_cast<uint32_t>(SilentRebootTarget::Home);
   silentRebootFontPointSize = 0;
   silentRebootPayload = Frontlight.isOn() ? SILENT_REBOOT_LIGHT_ON : 0;
