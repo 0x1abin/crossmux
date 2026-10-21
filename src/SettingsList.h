@@ -334,11 +334,12 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
     statusBarClockValues[CrossPointSettings::STATUS_BAR_CLOCK_LEFT] = StrId::STR_DIR_LEFT;
 
     std::vector<SettingInfo> v;
-    // 89 = the upstream 88 plus the TapZones row this branch adds outside the
-    // capability guards. reserve() is the only thing keeping the C3 build from
-    // growing the vector, so a new base entry has to raise this number in the
-    // same commit (SettingsApiKeys checks it for every capability combination).
-    constexpr size_t entryCount = 89
+    // 90 = the upstream 88 plus the TapZones row (#314) and the
+    // bookStyleMemory row this branch adds, both outside the capability
+    // guards. reserve() is the only thing keeping the C3 build from growing
+    // the vector, so a new base entry has to raise this number in the same
+    // commit (SettingsApiKeys checks it for every capability combination).
+    constexpr size_t entryCount = 90
 #if FREEINK_CAP_FRONTLIGHT
                                   + 1
 #endif
@@ -503,6 +504,11 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                            "paragraphIndentSpaces", StrId::STR_CAT_READER)
             .withTextSettings(),
         SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
+                            StrId::STR_CAT_READER)
+            .withTextSettings(),
+    });
+    v.insert(v.end(), {
+        SettingInfo::Toggle(StrId::STR_BOOK_STYLE_MEMORY, &CrossPointSettings::bookStyleMemory, "bookStyleMemory",
                             StrId::STR_CAT_READER)
             .withTextSettings(),
     });

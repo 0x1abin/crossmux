@@ -78,6 +78,9 @@ class EpubReaderMenuActivity final : public UiListActivity {
   std::string title = "Reader Menu";
   uint8_t pendingOrientation = 0;
   uint8_t selectedPageTurnOption = 0;
+  // Night mode / frontlight are edited in place and persisted by the reader on
+  // return, so it can restore the global typography snapshot before saving.
+  bool settingsDirty_ = false;
   const std::vector<StrId> orientationLabels = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                                 StrId::STR_LANDSCAPE_CCW};
   const std::vector<const char*> pageTurnLabels = {I18N.get(StrId::STR_STATE_OFF), "1", "3", "6", "12"};
