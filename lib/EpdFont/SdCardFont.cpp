@@ -53,25 +53,66 @@ inline uint16_t readU16(const uint8_t* p) { return p[0] | (p[1] << 8); }
 inline int16_t readI16(const uint8_t* p) { return static_cast<int16_t>(p[0] | (p[1] << 8)); }
 inline uint32_t readU32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
 
-// Walks a null-terminated UTF-8 string and appends each unique codepoint to
-// codepoints[0..cpCount-1] via O(n²) dedup.  Returns true if the buffer
-// reached maxCount (cap hit), false if all codepoints fit.
-bool collectUniqueCodepoints(const char* text, uint32_t* codepoints, uint32_t& cpCount, uint32_t maxCount,
-                             const bool includeSmallCaps) {
-  const auto append = [&](const uint32_t cp) {
-    if (std::find(codepoints, codepoints + cpCount, cp) == codepoints + cpCount) {
-      if (cpCount >= maxCount) return true;
-      codepoints[cpCount++] = cp;
+// Collects distinct codepoints into a caller-owned buffer of `limit` entries
+// (plus two reserved slots, see addReserved). Once full, a smaller codepoint
+// replaces the largest held, so the buffer ends as the `limit` lowest
+// codepoints offered: the only new entries a lowest-first merge capped at
+// `limit` entries could keep. Deduplication is O(n²), as before.
+class LowestCodepoints {
+ public:
+  LowestCodepoints(uint32_t* buffer, const uint32_t limit) : codepoints_(buffer), limit_(limit) {}
+
+  void add(const uint32_t cp) {
+    // Once full, nothing at or above the largest held can enter, duplicate or
+    // not, so reject it before the linear duplicate search.
+    if (count_ == limit_ && cp >= codepoints_[largestAt_]) return;
+    if (contains(cp)) return;
+    if (count_ < limit_) {
+      codepoints_[count_++] = cp;
+      if (count_ == limit_) findLargest();
+      return;
     }
-    return false;
-  };
+    codepoints_[largestAt_] = cp;
+    findLargest();
+  }
+
+  // For the injected space and hyphen, which bypass the limit like before.
+  void addReserved(const uint32_t cp) {
+    if (!contains(cp)) codepoints_[count_++] = cp;
+  }
+
+  uint32_t* data() const { return codepoints_; }
+  uint32_t size() const { return count_; }
+
+ private:
+  bool contains(const uint32_t cp) const {
+    return std::find(codepoints_, codepoints_ + count_, cp) != codepoints_ + count_;
+  }
+  void findLargest() {
+    largestAt_ = static_cast<uint32_t>(std::max_element(codepoints_, codepoints_ + limit_) - codepoints_);
+  }
+
+  uint32_t* codepoints_;
+  uint32_t limit_;
+  uint32_t count_ = 0;
+  uint32_t largestAt_ = 0;
+};
+
+// Offers each codepoint of a null-terminated UTF-8 string, and with
+// includeSmallCaps its small-caps uppercase too, to `collected` if `wanted`
+// accepts it.
+template <typename Wanted>
+void collectCodepoints(const char* text, LowestCodepoints& collected, const bool includeSmallCaps, Wanted wanted) {
   const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
   while (*p) {
     const uint32_t cp = utf8NextCodepoint(&p);
     if (cp == 0) break;
-    if (append(cp) || (includeSmallCaps && append(utf8SmallCapsUpper(cp)))) return true;
+    if (wanted(cp)) collected.add(cp);
+    if (includeSmallCaps) {
+      const uint32_t upper = utf8SmallCapsUpper(cp);
+      if (upper != cp && wanted(upper)) collected.add(upper);
+    }
   }
-  return false;
 }
 
 // resetStyleMiniData retention bounds (see the PerStyle comment in the header).
@@ -1673,54 +1714,84 @@ int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_
     }
   }
 
-  static constexpr uint32_t MAX_UNIQUE_CODEPOINTS = 4096;
-  size_t maxCodepoints = extraText ? std::min<size_t>(strlen(extraText), MAX_UNIQUE_CODEPOINTS) : 0;
-  for (size_t seg = 0; seg < segmentCount; ++seg) {
-    maxCodepoints = std::min<size_t>(MAX_UNIQUE_CODEPOINTS,
-                                     maxCodepoints + std::min<size_t>(segmentLens[seg], MAX_UNIQUE_CODEPOINTS));
+  // A full table takes no more entries (mergeIntoAdvanceTable), so once every
+  // requested style is full there is nothing to collect. The table is only
+  // cleared on unload, so on CJK text this is most layout passes.
+  uint8_t openStyles = 0;
+  for (uint8_t si = 0; si < MAX_STYLES; si++) {
+    if ((styleMask & (1 << si)) && styles_[si].present && advanceTableSize_[si] < ADVANCE_CACHE_LIMIT) {
+      openStyles |= 1 << si;
+    }
   }
-  if (includeSmallCaps) maxCodepoints = std::min<size_t>(MAX_UNIQUE_CODEPOINTS, maxCodepoints * 2);
-  // Byte counts bound codepoints. Short table words need no heap scratch; paragraphs keep the existing cap.
+  if (openStyles == 0) {
+    stats_.prewarmTotalMs = millis() - startMs;
+    return 0;
+  }
+
+  // The merge keeps the lowest ADVANCE_CACHE_LIMIT codepoints of the table and
+  // the new entries, so it can never keep more new entries than that, and only
+  // the lowest of them: collecting those is enough to build the same table.
+  // Byte counts also bound the codepoints, so short table words need no heap.
+  size_t limit = extraText ? strlen(extraText) : 0;
+  for (size_t seg = 0; seg < segmentCount; ++seg) limit += segmentLens[seg];
+  if (includeSmallCaps) limit *= 2;
+  limit = std::min<size_t>(limit, ADVANCE_CACHE_LIMIT);
   static constexpr size_t INLINE_CODEPOINTS = 32;
-  uint32_t inlineCodepoints[INLINE_CODEPOINTS + 2];  // space and hyphen can be injected below
+  uint32_t inlineCodepoints[INLINE_CODEPOINTS + 2];  // +2 reserved slots for space and hyphen
   std::unique_ptr<uint32_t[]> heapCodepoints;
   uint32_t* codepoints = inlineCodepoints;
-  if (maxCodepoints > INLINE_CODEPOINTS) {
-    heapCodepoints = makeUniqueNoThrow<uint32_t[]>(maxCodepoints + 2);
+  if (limit > INLINE_CODEPOINTS) {
+    heapCodepoints = makeUniqueNoThrow<uint32_t[]>(limit + 2);
     if (!heapCodepoints) {
       LOG_ERR("SDCF", "buildAdvanceTable: failed to allocate codepoint buffer (%u bytes)",
-              static_cast<unsigned>((maxCodepoints + 2) * sizeof(uint32_t)));
+              static_cast<unsigned>((limit + 2) * sizeof(uint32_t)));
       return -1;
     }
     codepoints = heapCodepoints.get();
   }
-  uint32_t cpCount = 0;
-  bool hitCap = false;
 
-  // Each segment holds consecutive NUL-terminated words; walk word by word.
-  for (size_t seg = 0; seg < segmentCount && !hitCap; ++seg) {
-    const char* p = segments[seg];
-    const char* const end = p + segmentLens[seg];
-    while (p < end && !hitCap) {
-      hitCap = collectUniqueCodepoints(p, codepoints, cpCount, maxCodepoints, includeSmallCaps);
-      p += strlen(p) + 1;
+  // One pass per style: each skips the codepoints its own table already holds,
+  // and those it can never cache (no glyph and no replacement glyph), so the
+  // lowest-entries bound above holds per style. The latter are counted as
+  // missed in a second pass, run only when any were seen.
+  int totalMissed = 0;
+  for (uint8_t si = 0; si < MAX_STYLES; si++) {
+    if (!(openStyles & (1 << si))) continue;
+    const PerStyle& style = styles_[si];
+    const bool hasReplacement = findGlobalGlyphIndex(style, REPLACEMENT_GLYPH) >= 0;
+    const auto resolves = [&](const uint32_t cp) { return hasReplacement || findGlobalGlyphIndex(style, cp) >= 0; };
+    const auto collect = [&](LowestCodepoints& into, auto wanted) {
+      // Each segment holds consecutive NUL-terminated words; walk word by word.
+      for (size_t seg = 0; seg < segmentCount; ++seg) {
+        const char* p = segments[seg];
+        const char* const end = p + segmentLens[seg];
+        while (p < end) {
+          collectCodepoints(p, into, includeSmallCaps, wanted);
+          p += strlen(p) + 1;
+        }
+      }
+      if (extraText) collectCodepoints(extraText, into, includeSmallCaps, wanted);
+      if (includeSpace && wanted(' ')) into.addReserved(' ');
+      if (includeHyphen && wanted('-')) into.addReserved('-');
+    };
+
+    bool anyLacking = false;
+    LowestCodepoints collected(codepoints, static_cast<uint32_t>(limit));
+    collect(collected, [&](const uint32_t cp) {
+      if (advanceTableLookup(si, cp, nullptr)) return false;
+      if (resolves(cp)) return true;
+      anyLacking = true;
+      return false;
+    });
+    std::sort(collected.data(), collected.data() + collected.size());
+    totalMissed += fetchAdvancesForCodepoints(collected.data(), collected.size(), 1 << si);
+
+    if (anyLacking) {
+      LowestCodepoints lacking(codepoints, static_cast<uint32_t>(limit));
+      collect(lacking, [&](const uint32_t cp) { return !resolves(cp); });
+      totalMissed += static_cast<int>(lacking.size());
     }
   }
-  if (extraText && !hitCap) {
-    hitCap = collectUniqueCodepoints(extraText, codepoints, cpCount, maxCodepoints, includeSmallCaps);
-  }
-
-  if (includeSpace && std::none_of(codepoints, codepoints + cpCount, [](uint32_t c) { return c == ' '; }))
-    codepoints[cpCount++] = ' ';
-  if (includeHyphen && std::none_of(codepoints, codepoints + cpCount, [](uint32_t c) { return c == '-'; }))
-    codepoints[cpCount++] = '-';
-
-  if (hitCap) {
-    LOG_ERR("SDCF", "buildAdvanceTable: unique codepoint cap (%u) hit, layout may be approximate",
-            MAX_UNIQUE_CODEPOINTS);
-  }
-  std::sort(codepoints, codepoints + cpCount);
-  int totalMissed = fetchAdvancesForCodepoints(codepoints, cpCount, styleMask);
   stats_.prewarmTotalMs = millis() - startMs;
   return totalMissed;
 }
