@@ -198,9 +198,12 @@ void ImageViewerActivity::onEnter() {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   } else if (Storage.openFileForRead("IMAGE", bitmapPath, file)) {
+    // Same threshold decision as preparePreview(): a .bmp opened directly must
+    // dither against the same ramp as a converted PNG, otherwise UC8179/UC8279
+    // 800x480 batches show the two differently on the same panel.
     Bitmap bitmap(file, true,
                   renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported() &&
-                      display.getController() == HalDisplay::Controller::SSD1677);
+                      useOriginalGrayscaleThresholds());
 
     // 2. Parse headers to get dimensions
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
