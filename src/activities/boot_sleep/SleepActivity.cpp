@@ -28,6 +28,7 @@
 #include "fontIds.h"
 #include "images/MoonIcon.h"
 #include "util/SleepCover.h"
+#include "util/SleepGrayscale.h"
 
 namespace {
 // Metalio: B/W sleep images use the full 0xF7 waveform instead of HALF (two
@@ -46,12 +47,6 @@ void cleanBeforeAbsoluteGray(GfxRenderer& renderer) {
 #else
   (void)renderer;
 #endif
-}
-
-HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
-  return renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct).supported()
-             ? HalDisplay::GrayscaleMode::Direct
-             : HalDisplay::GrayscaleMode::Absolute;
 }
 
 // Kept separate from /sleep.bmp and /.sleep so alpha-overlay art does not mix with full-screen wallpapers.
@@ -640,7 +635,7 @@ void SleepActivity::renderCustomSleepScreen() const {
   if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
     Bitmap bitmap(file, !native,
                   renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                      display.getController() == HalDisplay::Controller::SSD1677 &&
+                      useOriginalGrayscaleThresholds() &&
                       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading: /sleep.bmp");
@@ -663,7 +658,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       delay(100);
       Bitmap bitmap(randFile, !native,
                     renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-                        display.getController() == HalDisplay::Controller::SSD1677 &&
+                        useOriginalGrayscaleThresholds() &&
                         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
         renderBitmapSleepScreen(bitmap, false, native);
@@ -889,10 +884,11 @@ void SleepActivity::renderCoverSleepScreen() const {
     return (this->*renderNoCoverSleepScreen)();
   }
 
-  // SSD absolute images use the new thresholds; other panels retain legacy tuning.
+  // X4/X4 Pro ship the same 800x480 glass under SSD1677, UC8179 or UC8279
+  // controllers, all exposing the native 0/85/170/255 4-level ramp — keep the
+  // original thresholds for those batches too. X3 (792x528) stays on legacy.
   const bool originalThresholds =
-      renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
-      display.getController() == HalDisplay::Controller::SSD1677 &&
+      renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() && useOriginalGrayscaleThresholds() &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
   std::string coverBmpPath;
   bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
