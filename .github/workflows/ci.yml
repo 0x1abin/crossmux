@@ -47,7 +47,9 @@ jobs:
           git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
 
   cppcheck:
-    runs-on: ubuntu-latest
+    # Pin 24.04: PlatformIO's prebuilt cppcheck links against PCRE1 (libpcre3),
+    # which Ubuntu 26.04 no longer ships, so the binary exits 127 there.
+    runs-on: ubuntu-24.04
     steps:
       - name: Isolate PlatformIO toolchains
         run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/.platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
