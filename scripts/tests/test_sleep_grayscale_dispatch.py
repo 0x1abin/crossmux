@@ -1,7 +1,7 @@
 """Pin which panels keep the original (0/85/170/255) sleep-image dither thresholds.
 
-The dispatch lives in src/activities/boot_sleep/SleepActivity.cpp as a file-static
-helper nobody else can reach, so this extracts it and runs it against a stub
+The dispatch lives in src/util/SleepGrayscale.h, shared by the book-cover and
+image-viewer cover paths, so this extracts it and runs it against a stub
 HalDisplay -- the same "production snippet plus seams" shape as
 test_gfx_fill_clip.py. Every (controller, geometry) row below is a real panel or
 a real registration hazard: the 800x480 and 480x800 rows are the X4 family's
@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-SLEEP_SOURCE = ROOT / "src/activities/boot_sleep/SleepActivity.cpp"
+GRAYSCALE_SOURCE = ROOT / "src/util/SleepGrayscale.h"
 
 # Mirrors BoardConfig::DisplayController in the SDK header. The helper switches
 # on these names, so only the set of names has to stay in step.
@@ -82,7 +82,7 @@ def method(source, name):
 
 class SleepGrayscaleDispatchTest(unittest.TestCase):
     def test_controller_and_geometry_select_the_thresholds(self):
-        source = SLEEP_SOURCE.read_text()
+        source = GRAYSCALE_SOURCE.read_text()
         helper = method(source, "bool useOriginalGrayscaleThresholds()")
         # Fail loudly instead of testing a stale slice if the helper is renamed or reshaped.
         self.assertIn("display.getDisplayWidth()", helper)

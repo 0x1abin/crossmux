@@ -28,6 +28,7 @@
 #include "fontIds.h"
 #include "images/MoonIcon.h"
 #include "util/SleepCover.h"
+#include "util/SleepGrayscale.h"
 
 namespace {
 // Metalio: B/W sleep images use the full 0xF7 waveform instead of HALF (two
@@ -46,30 +47,6 @@ void cleanBeforeAbsoluteGray(GfxRenderer& renderer) {
 #else
   (void)renderer;
 #endif
-}
-
-HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
-  return renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct).supported()
-             ? HalDisplay::GrayscaleMode::Direct
-             : HalDisplay::GrayscaleMode::Absolute;
-}
-
-// Original (0/85/170/255) dither thresholds match the native 4-level ramp of
-// the X4/X4 Pro 800x480 glass, whether it carries an SSD1677, UC8179 or UC8279
-// controller. X3 (792x528) and other panels retain the legacy tuning.
-bool useOriginalGrayscaleThresholds() {
-  // Physical panel geometry — logical size rotates with orientation, so accept
-  // the 800x480 glass whichever way round the panel registers its native scan.
-  const bool is800x480 = (display.getDisplayWidth() == 800 && display.getDisplayHeight() == 480) ||
-                         (display.getDisplayWidth() == 480 && display.getDisplayHeight() == 800);
-  switch (display.getController()) {
-    case HalDisplay::Controller::SSD1677:
-    case HalDisplay::Controller::UC8279:
-    case HalDisplay::Controller::UC8179:
-      return is800x480;
-    default:
-      return false;
-  }
 }
 
 // Kept separate from /sleep.bmp and /.sleep so alpha-overlay art does not mix with full-screen wallpapers.
@@ -907,7 +884,6 @@ void SleepActivity::renderCoverSleepScreen() const {
     return (this->*renderNoCoverSleepScreen)();
   }
 
-  // SSD absolute images use the new thresholds; other panels retain legacy tuning.
   // X4/X4 Pro ship the same 800x480 glass under SSD1677, UC8179 or UC8279
   // controllers, all exposing the native 0/85/170/255 4-level ramp — keep the
   // original thresholds for those batches too. X3 (792x528) stays on legacy.

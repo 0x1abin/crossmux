@@ -16,6 +16,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/SleepCover.h"
+#include "util/SleepGrayscale.h"
 
 namespace {
 constexpr const char* IMAGE_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
@@ -96,7 +97,14 @@ bool ImageViewerActivity::preparePreview() {
   bool prepared = false;
   {
     GfxRenderer::FrameBufferLoan loan(renderer);
-    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), IMAGE_PREVIEW_PATH, true);
+    // Mirror SleepActivity's book-cover decision: without this the user-supplied
+    // cover falls back to the skewed legacy ramp (30/55/150, error targets
+    // 15/35/90/210) while an automatic book cover uses the native 0/85/170/255
+    // ramp, so the two look noticeably different on the same panel.
+    const bool originalThresholds =
+        renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() && useOriginalGrayscaleThresholds() &&
+        SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), IMAGE_PREVIEW_PATH, true, originalThresholds);
   }
   if (!prepared) Storage.remove(IMAGE_PREVIEW_PATH);
   return prepared;
