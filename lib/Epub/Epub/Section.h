@@ -19,6 +19,8 @@ class Section {
   BuildError buildError() const { return buildError_; }
 
  private:
+  // Sentinel for "the spine's first TOC index hasn't been read yet" (a valid index is >= -1).
+  static constexpr int kBaseTocIndexUnset = -2;
   BuildError buildError_ = BuildError::None;
   bool collectTouchLinks_ = false;
   std::shared_ptr<Epub> epub;
@@ -85,6 +87,50 @@ class Section {
   // the partially-written tmp .bin without disturbing the build's write cursor.
   std::unique_ptr<Page> loadPageDuringBuild(int page);
   bool openAnchorMap(HalFile& anchorFile, uint16_t& count) const;
+
+  // This spine's TOC boundaries, resolved once per Section and reused by every page
+  // turn. Building the table costs one sequential pass over the book's TOC; lookups
+  // afterwards are a handful of in-RAM comparisons. The previous implementation
+  // re-read the whole TOC (and, per 64-entry batch, the whole anchor map) on every
+  // call, which stalled page turns for seconds on books with thousands of entries.
+  //
+  // Storage is a fixed array, not a vector: sections are created per chapter on the
+  // no-PSRAM builds too (X3/X4 Classic, ~380 KB RAM), and `-fno-exceptions` turns a
+  // failed growth into abort() rather than something a caller could retry. 64 entries
+  // cap the table at ~2.5 KB and only the current section's table is ever live.
+  struct SubChapter {
+    std::string anchor;
+    // Book-wide TOC index, as the old lookup returned it (int keeps the API's range).
+    int tocIndex;
+    uint16_t page;
+    // False until an anchor page is known: a build that hasn't reached the anchor yet
+    // must not make it look like page 0 (the old lookup skipped such entries too).
+    bool pageKnown;
+  };
+  static constexpr size_t kMaxSubChapters = 64;
+  mutable SubChapter subChapters_[kMaxSubChapters];
+  mutable size_t subChapterCount_ = 0;
+  // A spine with more boundaries than kMaxSubChapters keeps the old per-call scan: rare,
+  // and showing a stale sub-chapter title is worse than reading the TOC again.
+  mutable bool subChapterOverflow_ = false;
+  mutable bool subChaptersBuilt_ = false;
+  mutable bool subChapterPagesResolved_ = false;
+  // This spine's first TOC index, resolved with the table so a lookup costs no disk read.
+  mutable int baseTocIndex_ = kBaseTocIndexUnset;
+  void buildSubChapterTable() const;
+  // Fill SubChapter::page from the on-disk anchor map, in one sequential read.
+  void resolveSubChapterPages() const;
+  // The pre-table lookup, kept for sections whose TOC boundaries exceed the table.
+  int scanTocIndexForPage(int page) const;
+  // A freshly loaded file backs a different anchor map: drop the table and the cached base.
+  void invalidateSubChapterPages() const { subChapterPagesResolved_ = false; }
+  void invalidateSubChapterTable() const {
+    subChaptersBuilt_ = false;
+    subChapterPagesResolved_ = false;
+    subChapterOverflow_ = false;
+    subChapterCount_ = 0;
+    baseTocIndex_ = kBaseTocIndexUnset;
+  }
 
  public:
   uint16_t pageCount = 0;
