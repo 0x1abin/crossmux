@@ -508,6 +508,7 @@ int EpubReaderActivity::bookPercentFor(const ChapterPosition& position) const {
 void EpubReaderActivity::openReaderMenu() {
   pendingManualTurn = 0;
   if (usesToolbarMenu()) {
+    RenderLock lock;
     // Reached from a child activity's result handler (footnotes, bookmarks,
     // go-to-percent... cancelled back to the menu), so the framebuffer holds
     // that screen, not the page: re-render the page and let renderBook() put
@@ -3522,6 +3523,7 @@ void EpubReaderActivity::settleOverlayRefresh() {
 }
 
 void EpubReaderActivity::openOverlay(Overlay target) {
+  RenderLock lock;  // Keep menu state and lifetime stable while the render task paints it.
   mappedInput.resetHomeButtonInput();
   const Overlay previous = overlay;
   overlay = target;
@@ -3569,7 +3571,6 @@ void EpubReaderActivity::openOverlay(Overlay target) {
     // Serialize against the render task: renderBook may be mid-page (status
     // bar included) in the shared framebuffer, and painting the chrome from
     // the loop task at the same time interleaves the two frames.
-    RenderLock lock;
     settleOverlayRefresh();
     if (previous == Overlay::None) {
       // Snapshot the clean page so stepping back from a panel to the toolbar
@@ -3593,6 +3594,7 @@ void EpubReaderActivity::openOverlay(Overlay target) {
 
 // Grayscale panels re-render to restore AA; other boards restore the B/W snapshot.
 void EpubReaderActivity::closeOverlayToPage() {
+  RenderLock lock;  // A pending render may still be using toolbarUi after its null check.
   mappedInput.resetHomeButtonInput();
   overlay = Overlay::None;
   overlayPopup.dismiss();  // an option picker cannot outlive its panel
@@ -3606,7 +3608,6 @@ void EpubReaderActivity::closeOverlayToPage() {
   }
   if (renderer.grayscaleReplacesFrame()) pagesUntilFullRefresh = 1;
   if (!xteinkClassPanel() && overlayPageStored) {
-    RenderLock lock;  // the render task shares the framebuffer
     settleOverlayRefresh();
     // No baseline resync: the glass shows the chrome, and erasing it needs
     // the differential to keep diffing against the last pushed frame.
@@ -3816,6 +3817,7 @@ void EpubReaderActivity::handleOverlayInput() {
         }
         startActivityForResult(std::move(textSettings), [this](const ActivityResult&) {
           applyReaderTextSettings();
+          RenderLock lock;
           overlay = Overlay::Text;  // back to the Text panel
           panelIndex = 0;
           if (toolbarUi) toolbarUi->begin();  // the picker drew its own FUI screen
