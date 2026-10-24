@@ -10,6 +10,7 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
+#include "fontIds.h"
 
 namespace fui = freeink::ui;
 
@@ -106,7 +107,63 @@ void UsbDriveActivity::loop() {
   }
 }
 
+namespace {
+
+// USB MSC hands the raw card to the host, so no face served from the SD card can
+// supply glyphs for the session. EpdFontFamily::hasCodepoint() reads only the
+// in-memory coverage table, so resolveTextFontId() still selects those faces and
+// the run draws as blank ink. Drop them from the UI fallback chains for one frame
+// and restore every mapping on scope exit, so nothing leaks past this screen.
+//
+// The override has to cover the whole frame, not just the status body: the header
+// title resolves UI_12_FONT_ID and the button hints resolve UI_10_FONT_ID, and both
+// are drawn by render() outside buildDriveScreen(). Which slot holds the SD face
+// depends on the UI profile, so test both instead of assuming an index.
+class UsbFrameFontScope {
+ public:
+  explicit UsbFrameFontScope(GfxRenderer& renderer) : renderer_(renderer) {
+    for (size_t i = 0; i < kFontCount; ++i) {
+      saved_[i] = renderer_.getFallbackFont(kFontIds[i]);
+      int chain[2] = {saved_[i][0], saved_[i][1]};
+      for (int& id : chain) {
+        if (id != 0 && (renderer_.isSdCardFont(id) || renderer_.getTtfFonts().count(id) != 0)) id = 0;
+      }
+      if (chain[0] != saved_[i][0] || chain[1] != saved_[i][1]) {
+        renderer_.setFallbackFont(kFontIds[i], chain[0], chain[1]);
+      }
+    }
+    // Hebrew coverage for the flash CJK status face: see buildDriveScreen().
+    statusSaved_ = renderer_.getFallbackFont(NOTOSANS_12_FONT_ID);
+    renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, UI_12_FONT_ID);
+  }
+
+  ~UsbFrameFontScope() {
+    renderer_.setFallbackFont(NOTOSANS_12_FONT_ID, statusSaved_[0], statusSaved_[1]);
+    for (size_t i = 0; i < kFontCount; ++i) {
+      renderer_.setFallbackFont(kFontIds[i], saved_[i][0], saved_[i][1]);
+    }
+  }
+
+  UsbFrameFontScope(const UsbFrameFontScope&) = delete;
+  UsbFrameFontScope& operator=(const UsbFrameFontScope&) = delete;
+
+ private:
+  static constexpr int kFontIds[] = {UI_12_FONT_ID, UI_10_FONT_ID, SMALL_FONT_ID};
+  static constexpr size_t kFontCount = std::size(kFontIds);
+
+  GfxRenderer& renderer_;
+  std::array<int, 2> saved_[kFontCount]{};
+  std::array<int, 2> statusSaved_{};
+};
+
+}  // namespace
+
 void UsbDriveActivity::render(RenderLock&&) {
+  // Held for the whole frame: the header and the button hints resolve through the
+  // same detached SD fallback as the status body, and they draw outside the screen
+  // builder. RAII, so none of the early returns below can skip the restore.
+  UsbFrameFontScope usbFrameFonts(renderer);
+
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -153,38 +210,56 @@ void UsbDriveActivity::buildDriveScreen(UiScreen& screen) const {
     }
   }
 
+  // Draw the status text through the GfxRenderer with the built-in CJK
+  // NotoSans subset instead of the FreeInkUI text component. The UI fonts
+  // (Ubuntu UI / Noto Sans 8px) only cover Latin and Hebrew; CJK glyphs are
+  // served at runtime from a TTF on the SD card (see UIScale.h), and
+  // beginUsbDrive() detaches the SD filesystem for the USB host, so that
+  // fallback is unavailable here and FreeInkUI text renders as empty boxes.
+  // The built-in CJK font lives in flash and needs no SD access. Its own fallback
+  // is registered and undone by the frame-wide scope in render(), not here.
   const auto& metrics = UITheme::getInstance().getMetrics();
-  screen.setContentMarginFromScreen(fui::Insets{
-      static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), static_cast<int16_t>(metrics.contentSidePadding),
-      static_cast<int16_t>(metrics.buttonHintsHeight), static_cast<int16_t>(metrics.contentSidePadding)});
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const Rect body{metrics.contentSidePadding, metrics.topPadding + metrics.headerHeight,
+                  pageWidth - 2 * metrics.contentSidePadding,
+                  pageHeight - metrics.topPadding - metrics.headerHeight - metrics.buttonHintsHeight};
 
-  auto messageStyle = SETTINGS.uiTheme == CrossPointSettings::INX ? screen.theme().titleText : screen.theme().smallText;
-  messageStyle.align = fui::TextAlign::Center;
-  messageStyle.bold = true;
-  messageStyle.maxLines = 2;
-  auto detailStyle = SETTINGS.uiTheme == CrossPointSettings::INX ? screen.theme().bodyText : screen.theme().smallText;
-  detailStyle.align = fui::TextAlign::Center;
-  detailStyle.maxLines = 3;
+  // notosans_cjk_* ship in flash without a bold variant, so the message line
+  // is drawn in REGULAR here; the original bold flag was applied through the
+  // SD-card CJK fallback that is unavailable while the USB host owns the card.
+  constexpr int fontId = NOTOSANS_12_FONT_ID;
+  constexpr EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+  const int lineHeight = renderer.getLineHeight(fontId);
+  constexpr int gap = UiHighDpiProfile::controlGap;  // equals FreeInkUI spaceMd (UIThemeTokens.h)
 
-  const fui::Rect body = screen.body();
-  const int16_t messageHeight = fui::measureWrappedText(screen.target(), message, messageStyle, body.width).height;
-  const int16_t detailHeight =
-      detail ? fui::measureWrappedText(screen.target(), detail, detailStyle, body.width).height : 0;
-  const int16_t secondaryDetailHeight =
-      secondaryDetail ? fui::measureWrappedText(screen.target(), secondaryDetail, detailStyle, body.width).height : 0;
-  const int16_t gap = detail ? screen.theme().spaceMd : 0;
-  const int16_t secondaryGap = secondaryDetail ? screen.theme().spaceMd : 0;
-  const int16_t totalHeight =
-      static_cast<int16_t>(messageHeight + gap + detailHeight + secondaryGap + secondaryDetailHeight);
-  if (body.height > totalHeight) screen.spacer(static_cast<int16_t>((body.height - totalHeight) / 2));
+  const auto lines = [&](const char* text, const int maxLines) {
+    if (!text) return std::vector<std::string>{};
+    return renderer.wrappedText(fontId, text, body.width, maxLines, style);
+  };
+  const auto messageLines = lines(message, 2);
+  const auto detailLines = lines(detail, 3);
+  const auto secondaryLines = lines(secondaryDetail, 3);
+  const int messageHeight = static_cast<int>(messageLines.size()) * lineHeight;
+  const int detailHeight = static_cast<int>(detailLines.size()) * lineHeight;
+  const int secondaryHeight = static_cast<int>(secondaryLines.size()) * lineHeight;
+  const int totalHeight =
+      messageHeight + (detail ? gap : 0) + detailHeight + (secondaryDetail ? gap : 0) + secondaryHeight;
 
-  screen.target().text(screen.takeTop(messageHeight, gap), message, messageStyle);
-  if (detail) {
-    screen.target().text(screen.takeTop(detailHeight, secondaryGap), detail, detailStyle);
-  }
-  if (secondaryDetail) {
-    screen.target().text(screen.takeTop(secondaryDetailHeight), secondaryDetail, detailStyle);
-  }
+  // Center vertically only when the content fits; otherwise start at the body
+  // top (mirrors the original spacer guard) so lines never draw above the header.
+  int y = body.y + (body.height > totalHeight ? (body.height - totalHeight) / 2 : 0);
+  const auto drawLines = [&](const std::vector<std::string>& textLines) {
+    for (const auto& line : textLines) {
+      UITheme::drawCenteredText(renderer, body, fontId, y, line.c_str(), true, style);
+      y += lineHeight;
+    }
+  };
+  drawLines(messageLines);
+  y += detail ? gap : 0;
+  drawLines(detailLines);
+  y += secondaryDetail ? gap : 0;
+  drawLines(secondaryLines);
 }
 
 void UsbDriveActivity::restartToHome() {
