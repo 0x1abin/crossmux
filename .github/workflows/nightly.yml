@@ -3,6 +3,11 @@ name: Firmware Release
 on:
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: 'Build and verify Actions artifacts without publishing or cleanup'
+        required: false
+        type: boolean
+        default: false
       notes_en:
         description: 'English OTA release notes (2-8 lines, max 96 ASCII bytes each)'
         required: true
@@ -16,7 +21,7 @@ on:
       - '*.*.*'
 
 concurrency:
-  group: firmware-${{ github.event_name == 'push' && 'stable' || 'nightly' }}-publish
+  group: firmware-${{ github.event_name == 'push' && 'stable' || 'nightly' }}-${{ inputs.dry_run && format('dry-run-{0}', github.ref) || 'publish' }}
   cancel-in-progress: false
 
 permissions:
@@ -80,7 +85,7 @@ jobs:
             printf '\n' >> release-body.md
             cat ota-notes.md >> release-body.md
           else
-            printf 'Nightly build `%s` from `main`.\n' "${GITHUB_SHA::7}" > release-body.md
+            printf 'Nightly build `%s` from `%s`.\n' "${GITHUB_SHA::7}" "$GITHUB_REF_NAME" > release-body.md
             if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
               python3 scripts/generate_ota_notes.py \
                 --en-notes="$NOTES_EN" --zh-notes="$NOTES_ZH" --output ota-notes.md
@@ -125,8 +130,6 @@ jobs:
 
       - name: Prepare platform tools
         run: python scripts/patch_pioarduino_cache.py --prepare-platform
-      - name: Set seven-character build revision
-        run: echo "CROSSPOINT_RC_HASH=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       - name: Build unified target
         run: pio run -e "${{ matrix.environment }}"
       - name: Package and verify unified target
@@ -143,8 +146,63 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish_github:
+  validate:
     needs: [prepare, notes, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-${{ needs.prepare.outputs.channel }}-*
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-release-notes
+          path: notes
+      - name: Build and verify both regional indexes against local artifacts
+        env:
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          BUILD_ID: ${{ needs.prepare.outputs.build_id }}
+          BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
+        run: |
+          set -euo pipefail
+          notes_args=()
+          [ ! -f notes/ota-notes.md ] || notes_args+=(--release-notes notes/ota-notes.md)
+          updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for region in global cn; do
+            if [ "$region" = global ]; then
+              base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${BUILD_TAG}/"
+              index_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL}/release-index.json"
+              index=release-index.json
+            else
+              base_url="https://assets.crossmux.cn/firmware/builds/${BUILD_ID}/"
+              index_url="https://assets.crossmux.cn/firmware/releases/${CHANNEL}/index.json"
+              index=release-index-cn.json
+            fi
+            python3 scripts/build_nightly_index.py \
+              --channel "$CHANNEL" --manifests artifacts --region "$region" \
+              --base-url "$base_url" --updated-at "$updated_at" --build-id "$BUILD_ID" \
+              --output "$index" "${notes_args[@]}"
+            python3 scripts/verify_nightly_release.py --channel "$CHANNEL" \
+              --index-url "$index_url" --index-file "$index" --artifacts artifacts \
+              --expected-sha "$GITHUB_SHA"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: global-release-index
+          path: release-index.json
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cn-release-index
+          path: release-index-cn.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish_github:
+    if: ${{ !inputs.dry_run }}
+    needs: [prepare, notes, validate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -173,25 +231,17 @@ jobs:
           path: previous/global/release-index.json
           if-no-files-found: error
           retention-days: 1
-      - name: Build global index
-        env:
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
-          BUILD_ID: ${{ needs.prepare.outputs.build_id }}
-          BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
-        run: |
-          notes_args=()
-          [ ! -f notes/ota-notes.md ] || notes_args+=(--release-notes notes/ota-notes.md)
-          python3 scripts/build_nightly_index.py \
-            --channel "$CHANNEL" --manifests artifacts --region global \
-            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${BUILD_TAG}/" \
-            --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-id "$BUILD_ID" \
-            --output release-index.json "${notes_args[@]}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: global-release-index
+          path: .
       - name: Publish immutable GitHub build
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
           BUILD_TAG: ${{ needs.prepare.outputs.build_tag }}
         run: |
+          set -euo pipefail
           mapfile -t assets < <(find artifacts -type f -print)
           gh release create "$BUILD_TAG" "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
@@ -202,6 +252,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
+          set -euo pipefail
           title="CrossMux ${CHANNEL^} (${GITHUB_SHA::7})"
           if gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
@@ -210,19 +261,14 @@ jobs:
             gh release create "$CHANNEL" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "$title" --notes-file notes/release-body.md --prerelease
           fi
+          mapfile -t bundles < <(find artifacts -type f -name '*.zip' -print)
+          test "${#bundles[@]}" -gt 0
+          gh release upload "$CHANNEL" "${bundles[@]}" --repo "$GITHUB_REPOSITORY" --clobber
           gh release upload "$CHANNEL" release-index.json --repo "$GITHUB_REPOSITORY" --clobber
-          if [ -d "artifacts/firmware-${CHANNEL}-xteink_x4" ]; then
-            cp "artifacts/firmware-${CHANNEL}-xteink_x4/xteink-firmware.bin" firmware.bin
-            gh release upload "$CHANNEL" firmware.bin --repo "$GITHUB_REPOSITORY" --clobber
-          fi
-          legacy_assets="$(gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name')"
-          if grep -Fxq firmware-cn.bin <<< "$legacy_assets"; then
-            gh release delete-asset "$CHANNEL" firmware-cn.bin --repo "$GITHUB_REPOSITORY" --yes
-          fi
 
   publish_cn:
-    needs: [prepare, notes, build]
+    if: ${{ !inputs.dry_run }}
+    needs: [prepare, notes, validate]
     runs-on: [self-hosted, Linux, X64, h2o]
     permissions:
       contents: read
@@ -234,10 +280,6 @@ jobs:
         with:
           pattern: firmware-${{ needs.prepare.outputs.channel }}-*
           path: artifacts
-      - uses: actions/download-artifact@v4
-        with:
-          name: firmware-release-notes
-          path: notes
       - name: Load previous China Nightly index
         if: needs.prepare.outputs.channel == 'nightly'
         run: |
@@ -251,18 +293,10 @@ jobs:
           path: previous/cn.json
           if-no-files-found: error
           retention-days: 1
-      - name: Build China index
-        env:
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
-          BUILD_ID: ${{ needs.prepare.outputs.build_id }}
-        run: |
-          notes_args=()
-          [ ! -f notes/ota-notes.md ] || notes_args+=(--release-notes notes/ota-notes.md)
-          python3 scripts/build_nightly_index.py \
-            --channel "$CHANNEL" --manifests artifacts --region cn \
-            --base-url "https://assets.crossmux.cn/firmware/builds/${BUILD_ID}/" \
-            --updated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-id "$BUILD_ID" \
-            --output release-index-cn.json "${notes_args[@]}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: cn-release-index
+          path: .
       - name: Install COS CLI
         run: |
           curl -fsSL https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 \
@@ -278,6 +312,7 @@ jobs:
           COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
           COS_BUCKET: ${{ secrets.COS_BUCKET }}
           COS_REGION: ${{ secrets.COS_REGION }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
           BUILD_ID: ${{ needs.prepare.outputs.build_id }}
         run: |
           set -euo pipefail
@@ -285,7 +320,7 @@ jobs:
             -e "cos.${COS_REGION}.myqcloud.com")
           [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
           for artifact in artifacts/firmware-*; do
-            target="${artifact##*-}"
+            target="${artifact#artifacts/firmware-${CHANNEL}-}"
             if ! "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" "$artifact/" \
               "cos://${COS_BUCKET}/firmware/builds/${BUILD_ID}/${target}/" \
               --recursive --forbid-overwrite --meta 'Cache-Control:public,max-age=31536000,immutable' \
@@ -315,8 +350,11 @@ jobs:
           fi
 
   verify_publish:
+    if: ${{ !inputs.dry_run }}
     needs: [prepare, publish_github, publish_cn]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - name: Verify published indexes and assets
@@ -330,8 +368,27 @@ jobs:
             --index-url "https://assets.crossmux.cn/firmware/releases/${CHANNEL}/index.json?run=${GITHUB_RUN_ID}" \
             --expected-sha "$GITHUB_SHA"
 
+      - name: Retire obsolete rolling assets after verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          gh release download "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
+            --pattern release-index.json --dir current
+          python3 -c 'import json; i=json.load(open("current/release-index.json")); print("\n".join(t["bundle"]["name"] for t in i["targets"].values()))' > current-assets.txt
+          echo release-index.json >> current-assets.txt
+          gh release view "$CHANNEL" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' > published-assets.txt
+          # Only the rolling release is updated; historical version releases stay untouched.
+          while IFS= read -r asset; do
+            if ! grep -Fxq "$asset" current-assets.txt; then
+              gh release delete-asset "$CHANNEL" "$asset" --repo "$GITHUB_REPOSITORY" --yes
+            fi
+          done < published-assets.txt
+
   publish_stable_release:
-    if: needs.prepare.outputs.channel == 'stable'
+    if: ${{ !inputs.dry_run && needs.prepare.outputs.channel == 'stable' }}
     needs: [prepare, notes, build, verify_publish]
     runs-on: ubuntu-latest
     permissions:
@@ -346,15 +403,16 @@ jobs:
         with:
           name: firmware-release-notes
           path: notes
-      - name: Publish versioned compatibility release
+      - uses: actions/download-artifact@v4
+        with:
+          name: global-release-index
+          path: .
+      - name: Publish versioned release bundles
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp artifacts/xteink-firmware.bin firmware.bin
-          cp artifacts/xteink-firmware.bin firmware-cn.bin
-          cp artifacts/xteink-bootloader.bin bootloader.bin
-          cp artifacts/xteink-partitions.bin partitions.bin
-          assets=(firmware.bin firmware-cn.bin bootloader.bin partitions.bin artifacts/*)
+          set -euo pipefail
+          assets=(artifacts/*.zip release-index.json)
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
@@ -365,7 +423,7 @@ jobs:
           fi
 
   cleanup_github:
-    if: needs.prepare.outputs.channel == 'nightly'
+    if: ${{ !inputs.dry_run && needs.prepare.outputs.channel == 'nightly' }}
     needs: [prepare, verify_publish, publish_github]
     runs-on: ubuntu-latest
     permissions:
@@ -393,7 +451,7 @@ jobs:
           done < obsolete-github-builds.txt
 
   cleanup_cn:
-    if: needs.prepare.outputs.channel == 'nightly'
+    if: ${{ !inputs.dry_run && needs.prepare.outputs.channel == 'nightly' }}
     needs: [prepare, verify_publish, publish_cn]
     runs-on: [self-hosted, Linux, X64, h2o]
     permissions:
