@@ -22,32 +22,31 @@
 
 ## 设备与发布渠道
 
-| 设备 | 芯片 | 发布渠道 |
+| 设备 | 芯片 | 配置支持的渠道 |
 |---|---|---|
 | Xteink X3 / X4（共用固件） | ESP32-C3 | Stable、Nightly |
-| [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Nightly |
-| Xteink X4 Pro | ESP32-S3 | Nightly |
-| M5Stack Paper Mono | ESP32-S3 | Nightly |
-| eego A4 | ESP32-S3 | Nightly |
-| Murphy M4 | ESP32-S3 | Nightly |
-| Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
-| [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Nightly |
-| [Read Pico（小纸 Pico）](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
+| [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Stable、Nightly |
+| Xteink X4 Pro | ESP32-S3 | Stable、Nightly |
+| M5Stack Paper Mono | ESP32-S3 | Stable、Nightly |
+| eego A4 | ESP32-S3 | Stable、Nightly |
+| Murphy M4 | ESP32-S3 | Stable、Nightly |
+| Waveshare ePaper 3.97 | ESP32-S3 | Stable、Nightly |
+| [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable、Nightly |
+| [Read Pico（小纸 Pico）](./docs/engineering/read-pico.md) | ESP32-S3 | Stable、Nightly |
 
-此表表示配置中的发布目标，不代表所有功能均已通过实机验收。每个 S3 目标使用独立固件。X4 Classic（`x4c`）和 [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md)（`lilygo_t5s3`）提供开发构建目标，均不加入公开 Nightly 与 OTA 索引。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
+九个目标均已配置 Stable 和 Nightly。实际可下载版本以所选区域目录中成功发布的产物为准；新增 Stable 产物在新发布链路上线后的下一次正式版本提供。配置支持不代表实机验收完成。每个 S3 目标使用独立固件。X4 Classic（`x4c`）和 [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md)（`lilygo_t5s3`）仅提供开发构建。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
 
-X3/X4 稳定渠道使用 [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable)，开发版本使用 [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly)。[目标表](./scripts/nightly_targets.py) 定义渠道与产物名称；[发布架构](./docs/engineering/firmware-release.md) 说明打包与 OTA。当前源码版本及构建环境以 [platformio.ini](./platformio.ini) 为准。
+正式版本使用 [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable)，开发版本使用 [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly)，两渠道采用相同目标与打包规则。[目标表](./scripts/nightly_targets.py) 定义渠道与产物名称；[发布架构](./docs/engineering/firmware-release.md) 说明打包与 OTA。当前源码版本及构建环境以 [platformio.ini](./platformio.ini) 为准。
 
 ## 安装固件
 
-1. 打开 [CrossMux Releases](https://github.com/0x1abin/crossmux/releases)，选择渠道和准确设备型号，按该版本的产物链接与安装说明操作。X3/X4 共用固件，S3 必须按板型选择。
-2. 更换固件前备份 SD 卡数据。使用匹配的安装包；只有应用部分的 `firmware.bin` 不是完整的首次安装镜像。
-3. 对已有固件的 X3/X4，可使用[上游 CrossPoint 网页烧录器](https://crosspointreader.com/#flash-tools)的自定义二进制上传功能：选择 X3/X4，上传 **CrossMux** 应用固件。选择烧录器中的上游版本会安装 CrossPoint。
-4. S3 的安装与恢复请遵循对应[设备文档](./docs/engineering/device-variants.md)和发布说明，不要套用 X3/X4 的烧录命令或偏移地址。
+1. 打开[全球网页工具](https://crossmux.com)或[中国网页工具](https://crossmux.cn)，进入固件烧录工具，选择准确型号和可用的 Stable 或 Nightly 版本。部署后的工具从所在区域的发布目录发现选项。X3/X4 共用固件，S3 必须按板型选择。
+2. 更换固件前备份 SD 卡数据；设备首次安装或恢复说明要求时，还须保留完整 Flash 备份。遵循对应[设备文档](./docs/engineering/device-variants.md)和工具中的确认提示。
+3. 离线安装可从 [CrossMux Releases](https://github.com/0x1abin/crossmux/releases) 下载。新发布链路上线后，两渠道均提供 `crossmux-<版本>-<deviceSlug>.zip`，内含完整安装段、清单和 SHA-256 校验文件。只有应用部分的 `firmware.bin` 不是完整的首次安装镜像。历史 Release 保留原有文件与说明。
 
-从源码构建并烧录 X3/X4 可使用下方的[开发命令](#开发快速开始)。已安装 CrossMux 时，设备 OTA 按型号、内容区和渠道选择固件；S3 目标没有 Stable 渠道。
+从源码构建可使用下方的[开发命令](#开发快速开始)。已安装 CrossMux 时，设备 OTA 按型号、内容区和渠道选择已发布的可用固件。
 
-Metalio E-Ink 4 使用 `metalio-eink4` Nightly 安装包，型号与板型标签为 `metalio_eink4`。两种语言入口指向同一多语言固件。首次安装、接线和真机验收状态见 [Metalio 设备指南](./docs/engineering/metalio-eink4.md)。[全球网页工具](https://crossmux.com)和[中国网页工具](https://crossmux.cn)将在 Web 支持部署完成、发布目录包含匹配的 Nightly 安装包后显示该设备的烧录入口。
+X4 Pro 安装包使用标识 `x4pro`；Metalio E-Ink 4 使用 `metalio-eink4`，型号与板型标签为 `metalio_eink4`。每个设备的两种语言入口指向同一多语言固件。网页工具仅在目录包含匹配安装包时提供对应渠道。首次安装、接线和实机验收状态见 [Metalio 设备指南](./docs/engineering/metalio-eink4.md)。
 
 ### USB 锁定的 Xteink 设备
 
@@ -82,20 +81,27 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-应用固件位于 `.pio/build/gh_release/firmware.bin`。其它板型使用[构建文档](./docs/engineering/build-system.md)中的对应环境。
+应用固件位于 `.pio/build/<环境>/firmware.bin`。仓库配置共 35 个构建入口：九个发布目标各有 Dev、Stable、Nightly，另有两个仅开发板型和六个模拟器。版本与 Git 哈希自动生成：Stable 为 `<基础版本>`，Nightly 为 `<基础版本>-rc+<7位SHA>`，Dev 为 `<基础版本>-dev-<分支>-<7位SHA>`。其它板型见[构建文档](./docs/engineering/build-system.md)。
 
-Metalio E-Ink 4 构建命令：
+X4 Pro 与 Metalio E-Ink 4 构建命令：
 
 ```bash
+# X4 Pro：Dev / Stable / Nightly
+pio run -e x4pro
+pio run -e x4pro-gh_release
+pio run -e x4pro_nightly
+
+# Metalio E-Ink 4：Dev / Stable / Nightly
 pio run -e metalio_eink4
-CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nightly
+pio run -e metalio_eink4-gh_release
+pio run -e metalio_eink4_nightly
 ```
 
-开发版应用固件位于 `.pio/build/metalio_eink4/firmware.bin`；首次安装还需要匹配的引导程序和分区布局，详见 [Metalio 设备指南](./docs/engineering/metalio-eink4.md)。
+Stable ZIP 名为 `crossmux-<版本>-x4pro.zip` 和 `crossmux-<版本>-metalio-eink4.zip`。首次安装还需要匹配的引导程序和分区布局，请使用完整安装包并遵循设备指南。
 
 Read Pico（小纸 Pico）构建命令：
 
-FreeInk SDK PR #35 合入前，请先按[设备指南](./docs/engineering/read-pico.md#current-implementation--2026-09-30)临时切换 SDK，再构建。
+递归检出包含固定版本的 SDK 驱动，实现细节见[设备指南](./docs/engineering/read-pico.md#current-implementation--2026-09-30)。
 
 ```bash
 pio run -e readpico
@@ -103,7 +109,7 @@ pio run -e readpico
 
 Windows 上运行 `pio` 前请先设置 `PYTHONIOENCODING=utf-8`，否则 PlatformIO 打印阿拉伯语 i18n 语言行时可能编码崩溃、构建静默卡住。
 
-应用固件位于 `.pio/build/readpico/firmware.bin`。首次安装为**整表烧录**——`bootloader@0x0`、`partitions@0x8000`、`boot_app0@0xe000`、`app@0x10000`——且须先有一份已核验的整片（16 MiB）备份，因为本仓库分区表与板厂出厂 `partitions_16M.csv` 在 `0xE000` 冲突且 app 槽大小不同。本轮该目标**仅提供构建**：未加入 Nightly/OTA/Web 发布映射，也尚无实机验收记录。引脚表、冻结的构建参数与待办验收清单见 [Read Pico 设备指南](./docs/engineering/read-pico.md)。
+应用固件位于 `.pio/build/readpico/firmware.bin`。首次安装为**整表烧录**——`bootloader@0x0`、`partitions@0x8000`、`boot_app0@0xe000`、`app@0x10000`——且须先有一份已核验的整片（16 MiB）备份，因为本仓库分区表与板厂出厂 `partitions_16M.csv` 在 `0xE000` 冲突且 app 槽大小不同。Stable/Nightly 配置不代表实机验收完成。引脚表、冻结的构建参数与待办验收清单见 [Read Pico 设备指南](./docs/engineering/read-pico.md)。
 
 ### 桌面模拟器
 
