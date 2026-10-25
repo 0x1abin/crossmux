@@ -68,6 +68,78 @@ int main() {
     print("Metalio authoritative/unknown power and USB SOF fallback; LilyGo USB cold boot passed")
 
 
+def x3_current():
+    source = (ROOT / "lib/hal/HalGPIO.cpp").read_text()
+    reads = "\n".join(function(source, signature) for signature in (
+        "bool readI2CReg16LE(", "bool readBQ27220CurrentMA("))
+    usb = function(source, "bool HalGPIO::isUsbConnected() const")
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+constexpr int HIGH=1, I2C_ADDR_BQ27220=0x55, BQ27220_CUR_REG=0x0c;
+void delay(int) {} int digitalRead(int) {return 0;}
+namespace BoardConfig {
+struct Gauge {int i2cSda=17,i2cScl=18;uint32_t i2cHz=100000;};
+struct Profile {int usbDetect=-1;Gauge batteryGauge;};Profile ACTIVE;
+}
+struct {
+ bool ready=false,failBegin=true;int begins=0,transactions=0,status=0,count=2,index=0;
+ uint16_t current=120;
+ void end() {ready=false;}
+ bool begin(int sda,int scl,uint32_t hz) {
+  assert(sda==17 && scl==18 && hz==100000);++begins;
+  ready=!failBegin;return ready;
+ }
+ void beginTransmission(int addr) {assert(ready && addr==0x55);++transactions;}
+ void write(int reg) {assert(ready && reg==0x0c);}
+ int endTransmission(bool stop) {assert(!stop);return status;}
+ int requestFrom(int addr,uint8_t bytes,uint8_t stop) {
+  assert(addr==0x55 && bytes==2 && stop);index=0;return count;
+ }
+ int available() {return count-index;}
+ int read() {assert(index<count);return (current>>(8*index++))&255;}
+} Wire;
+struct BatteryMonitor {bool isCharging() const {return false;}};
+struct HalGPIO {bool deviceIsX3() const {return true;} bool isUsbConnected() const;};
+namespace X3GPIO {
+""" + reads + "\n}\n" + usb + r"""
+int main(int argc,char** argv) {
+ assert(argc==2);
+ if (!strcmp(argv[1],"probe")) Wire.end();
+ uint16_t value=0x1234;
+ assert(!X3GPIO::readI2CReg16LE(0x55,0x0c,&value));
+ assert(value==0x1234 && Wire.begins==1 && Wire.transactions==0);
+ Wire.failBegin=false;
+ assert(X3GPIO::readI2CReg16LE(0x55,0x0c,&value) && value==120);
+ assert(Wire.begins==2 && Wire.transactions==1);
+ HalGPIO gpio;
+ assert(gpio.isUsbConnected());
+ Wire.current=static_cast<uint16_t>(-120);assert(!gpio.isUsbConnected());
+ Wire.current=0;assert(!gpio.isUsbConnected());
+ Wire.status=4;value=0x1234;
+ assert(!X3GPIO::readI2CReg16LE(0x55,0x0c,&value) && value==0x1234);
+ int before=Wire.transactions;
+ assert(!gpio.isUsbConnected() && Wire.transactions==before+2);
+ Wire.status=0;Wire.count=1;
+ assert(!X3GPIO::readI2CReg16LE(0x55,0x0c,&value));
+ assert(value==0x1234 && Wire.available()==0);
+ Wire.count=2;Wire.current=300;
+ assert(gpio.isUsbConnected() && Wire.begins==2);
+}
+"""
+    with tempfile.TemporaryDirectory(prefix="hal-x3-current-") as directory:
+        tmp = Path(directory)
+        (tmp / "check.cpp").write_text(harness)
+        binary = tmp / "check"
+        subprocess.run(["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                        str(tmp / "check.cpp"), "-o", str(binary)], check=True,
+                       env=dict(os.environ, CCACHE_DISABLE="1"))
+        for startup in ("probe", "cached"):
+            subprocess.run([str(binary), startup], check=True, timeout=10)
+    print("X3 Wire restart, initialization retry, signed current and telemetry faults passed")
+
+
 def sleep_order():
     body = function((ROOT / "lib/hal/HalPowerManager.cpp").read_text(),
                     "void HalPowerManager::startDeepSleep(HalGPIO& gpio) const")
@@ -121,4 +193,5 @@ int main() {
 
 if __name__ == "__main__":
     run()
+    x3_current()
     sleep_order()
