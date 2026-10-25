@@ -102,8 +102,8 @@ int main() {
   }
   for (const char* name : {"InxRecent", "FileBrowser", "AppsMenu", "Settings", "ReadingStats"}) {
     for (int x : {2, 3, 476, 477})
-      for (int y : {8, 9, 36, 37, 40, 41, 42, 43, 46, 47, 52, 53}) {
-        const bool opens = x >= 3 && x < 477 && y >= 9 && y < 37;
+      for (int y : {8, 9, 28, 29, 36, 37, 40, 41, 42, 43, 46, 47, 52, 53}) {
+        const bool opens = x >= 3 && x < 477 && y >= 9 && y < 9 + MainTabs::statusBarHeight;
         check({.name = name, .mainTabs = true},
               {.topSwipe = false, .tap = true, .tapX = x, .tapY = y}, opens, !opens);
       }

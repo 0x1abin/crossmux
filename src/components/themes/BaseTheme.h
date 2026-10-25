@@ -376,6 +376,9 @@ class BaseTheme {
   // per call (headers draw on the single render task).
   static void applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::HeaderProps& props,
                                 bool upstreamStyle = false);
+  // Status-only overlay: reuse the shared header chrome without changing INX's title or navigation.
+  static void drawHeaderStatus(const GfxRenderer& renderer, Rect rect, const char* date = nullptr);
+  static int headerStatusHeight();
   // The header band every screen draws in: the caller's full-width rect inset
   // by the board's side insets, its top edge lowered by the board's
   // headerOffsetY (bottom edge fixed, so content below keeps its boundary).

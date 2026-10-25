@@ -561,6 +561,49 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 // looks like it overhangs the content columns.
 int BaseTheme::headerStatusInset(bool upstreamStyle) { return uiThemeMetrics(upstreamStyle).headerSidePadding + 4; }
 
+int BaseTheme::headerStatusHeight() { return HeaderStatusMetrics::stripHeight + BoardConfig::ACTIVE.headerOffsetY; }
+
+void BaseTheme::drawHeaderStatus(const GfxRenderer& renderer, const Rect rect, const char* date) {
+  if (rect.width <= 0 || rect.height <= 0) return;
+  namespace fui = freeink::ui;
+  fui::GfxRendererFrame<1> ui(renderer, SMALL_FONT_ID, SMALL_FONT_ID, SMALL_FONT_ID);
+  applyUiTextAlignment(ui.target, true);
+  fui::HeaderProps props;
+  applyHeaderStatus(renderer, props, true);
+  props.styles.explicitlySet = true;  // Transparent overlay; keep INX's existing fill and separator.
+  // headerBand owns board insets. Start at full width, then intersect the caller's safe area.
+  fui::Rect band =
+      headerBand(renderer,
+                 fui::Rect{0, static_cast<int16_t>(rect.y), static_cast<int16_t>(renderer.getScreenWidth()),
+                           static_cast<int16_t>(rect.height)},
+                 props);
+  const int right = std::min<int>(band.right(), rect.x + rect.width);
+  band.x = static_cast<int16_t>(std::max<int>(band.x, rect.x));
+  band.width = static_cast<int16_t>(std::max(0, right - band.x));
+  band.height = static_cast<int16_t>(std::min<int>(props.status.stripHeight, rect.y + rect.height - band.y));
+  if (band.empty()) return;
+  props.status.stripHeight = band.height;
+  const GfxRenderer::ClipScope clip(renderer, band.x, band.y, band.width, band.height);
+  fui::header(ui.frame, band, props);
+  if (!date || !*date) return;
+
+  const auto& status = props.status;
+  auto text = status.battery.text;
+  text.align = fui::TextAlign::Right;
+  int left = band.x + status.edgeInset;
+  if (status.clockText) left += ui.target.measureText(text.font, status.clockText, text).width + 8;
+  int dateRight = band.right() - status.edgeInset - status.battery.glyphWidth - 2 - 8;
+  if (status.battery.label) {
+    dateRight -= status.battery.gap + ui.target.measureText(text.font, status.battery.label, text).width;
+  }
+  if (dateRight <= left) return;
+  const auto ink = ui.target.inkBounds(text.font, date, text);
+  const int y = band.y + (band.height - ink.height) / 2 - ink.y;
+  ui.target.text(fui::Rect{static_cast<int16_t>(left), static_cast<int16_t>(y), static_cast<int16_t>(dateRight - left),
+                           ui.target.lineHeight(text.font)},
+                 date, text);
+}
+
 void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::HeaderProps& props, bool upstreamStyle) {
   const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
   auto& status = props.status;

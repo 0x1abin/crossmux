@@ -146,6 +146,10 @@ const ThemeMetrics& UITheme::getMetrics() const {
   if (!metricsValid || showButtonHints != metricsForButtonHints) {
     adjustedMetrics = *currentMetrics;
     UiHighDpiProfile::apply(adjustedMetrics);
+    if (currentType == CrossPointSettings::INX) {
+      // The status strip starts below the board's header offset, before the title.
+      adjustedMetrics.headerHeight += BoardConfig::ACTIVE.headerOffsetY;
+    }
     if (!showButtonHints) {
       adjustedMetrics.buttonHintsHeight = 0;
     }

@@ -22,13 +22,13 @@ def method(source, name):
     return source[start:end]
 
 
-def run_cpp(program, include_dirs=(), defines=()):
+def run_cpp(program, include_dirs=(), defines=(), extra_sources=()):
     with tempfile.TemporaryDirectory(prefix='reading-ui-') as directory:
         cpp = Path(directory) / 'check.cpp'
         exe = Path(directory) / 'check'
         cpp.write_text(f'#include "{ROOT}/src/components/UiHighDpiProfile.h"\n' + program)
         subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                        *('-I'+str(path) for path in include_dirs), *('-D'+define for define in defines), str(cpp), '-o', str(exe)], check=True)
+                        *('-I'+str(path) for path in include_dirs), *('-D'+define for define in defines), str(cpp), *map(str, extra_sources), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
 
@@ -459,6 +459,7 @@ struct GfxRenderer {
 };
 struct InxTheme {
   void drawMainTabStatusBar(const GfxRenderer&,Rect) const;
+  void drawHeaderStatus(const GfxRenderer&,Rect) const {}
   void drawBatteryRight(const GfxRenderer& r,Rect rect,bool,int font) const {
     assert(font==SMALL_FONT_ID && rect.y>=r.clip.y);
     assert(rect.y+34<=r.clip.y+r.clip.height);
@@ -657,7 +658,7 @@ class GfxRenderer {
  public:
   int getScreenWidth() const { return 1300; }
   int getScreenHeight() const { return 1300; }
-  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=*r=*b=*l=0; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=9;*r=3;*b=3;*l=3; }
 };
 struct UITheme {
   bool tabs=true;
@@ -723,7 +724,7 @@ struct ActivityManager {
   MainTabFocus getMainTabFocus() const { return mainTabFocus; }
 };
 ActivityManager activityManager;
-''' + method(activity, 'bool Activity::showMainTabContentSelection(') + method(activity, 'bool Activity::usesMainTabBar(') + method(activity, 'MainTabLayout Activity::mainTabLayout(') + method(activity, 'void Activity::drawPageHeader(') + method(manager, 'bool ActivityManager::handleMainTabInput(') + r'''
+''' + method(activity, 'bool Activity::showMainTabContentSelection(') + method(activity, 'bool Activity::usesMainTabBar(') + 'int BaseTheme::headerStatusHeight() { return MainTabs::statusBarHeight; }\n' + method(activity, 'MainTabLayout Activity::mainTabLayout(') + method(activity, 'void Activity::drawPageHeader(') + method(manager, 'bool ActivityManager::handleMainTabInput(') + r'''
 int main() {
   auto& theme=UITheme::getInstance();
   for (const Rect safe : {Rect{5,5,674,1203},Rect{8,5,1203,674},Rect{5,8,674,1203},Rect{5,5,1203,674},Rect{0,0,480,800}}) {
@@ -734,7 +735,14 @@ int main() {
       assert(!page.showMainTabContentSelection());
       activityManager.mainTabFocus=MainTabFocus::Content;
       assert(page.showMainTabContentSelection());
-      const Rect expected=page.mainTabLayout().tabBar;
+      const auto layout=page.mainTabLayout();
+      const Rect expected=layout.tabBar;
+      if (bottom) {
+        // WiFi and ordinary subpages draw their header at metrics.topPadding.
+        assert(layout.statusBar.y==theme.metrics.topPadding);
+        assert(layout.content.y>=layout.statusBar.y+layout.statusBar.height+MainTabs::controlGap);
+        assert(layout.content.y==std::max(safe.y,9)+theme.metrics.topPadding+BaseTheme::headerStatusHeight()+MainTabs::controlGap);
+      }
       page.drawPageHeader(Rect{0,0,999,66},"title");
       assert(theme.drawn.x==expected.x && theme.drawn.y==expected.y);
       assert(theme.drawn.width==expected.width && theme.drawn.height==expected.height && theme.selected==current);
@@ -1203,7 +1211,7 @@ struct InxRecentActivity {
   void drawFooter();
   void render(RenderLock&&) { renderer.clearScreen(); drawChrome(); UiScreen screen; buildScreen(screen); drawFooter(); renderer.displayBuffer(); }
 };
-''' + method(source, 'Rect InxRecentActivity::contentRect(') + method(source, 'Rect fitCoverRect(') + '\n'.join(
+''' + 'int BaseTheme::headerStatusHeight() { return HeaderStatusMetrics::stripHeight; }\n' + method(source, 'Rect InxRecentActivity::contentRect(') + method(source, 'Rect fitCoverRect(') + '\n'.join(
             method(source, 'void InxRecentActivity::draw'+layout+'(')
             for layout in ('Flow', 'Grid', 'List', 'Icons', 'Cover')) +
                 method(source, 'void InxRecentActivity::buildScreen(') + method(source, 'void InxRecentActivity::drawChrome(') + method(source, 'void InxRecentActivity::drawFooter(') + r'''
@@ -1329,7 +1337,8 @@ struct GfxRenderer {
   }
 };
 struct InxTheme {
-  void drawBatteryRight(const GfxRenderer&, Rect, bool, int = 1) const {}
+  void drawHeaderStatus(const GfxRenderer&, Rect) const {}
+  int headerStatusHeight() const { return HeaderStatusMetrics::stripHeight; }
   void drawHeader(const GfxRenderer&, Rect, const char*, const char*, bool = true) const;
 };
 ''' + code + r'''
@@ -1664,83 +1673,58 @@ int main() {
         run_cpp(r'''
 #include <algorithm>
 #include <cassert>
-#include <cstring>
-#include <initializer_list>
 struct Rect { int x, y, width, height; };
-constexpr int STATUS_NUMERIC_FONT_ID = 1, SMALL_FONT_ID = 1;
+constexpr int STATUS_NUMERIC_FONT_ID=1, SMALL_FONT_ID=1;
 struct CrossPointSettings {
   enum { INX_TAB_TOP, INX_TAB_BOTTOM };
   enum class HIDE_BATTERY_PERCENTAGE { SHOW, HIDE_ALWAYS };
 };
 struct {
-  int inxTabPosition = CrossPointSettings::INX_TAB_BOTTOM, clockFormat = 0;
+  int inxTabPosition=CrossPointSettings::INX_TAB_BOTTOM;
   CrossPointSettings::HIDE_BATTERY_PERCENTAGE hideBatteryPercentage{};
 } SETTINGS;
-struct Metrics { int batteryWidth=16, batteryHeight=12, topPadding=0; };
+struct Metrics { int batteryWidth=16, batteryHeight=12, topPadding=10; };
 struct UITheme {
   static UITheme& getInstance() { static UITheme ui; return ui; }
   const Metrics& getMetrics() const { static Metrics m; return m; }
 };
-namespace TimeUtils {
-bool valid=true, formatted12=false;
-int calls=0;
-bool formatCurrentTime(char* out, size_t size, bool hour12) {
-  assert(size == 9); ++calls; formatted12=hour12;
-  if (!valid) return false;
-  std::strcpy(out, hour12 ? "12:59 PM" : "23:59"); return true;
-}
-}
+struct BaseTheme { static int headerStatusHeight() { return HeaderStatusMetrics::stripHeight; } };
 struct GfxRenderer {
-  int width=480, height=800, top=9, right=3, bottom=3, left=3;
-  mutable int clocks=0, clockX=0, clockY=0;
-  mutable char clock[9]{};
-  mutable Rect clip{};
+  int width=480,height=800,left=3,right=3,top=9,bottom=3;
   mutable bool clipped=false;
   struct ClipScope {
     const GfxRenderer& r;
-    ClipScope(const GfxRenderer& r, int x, int y, int w, int h):r(r) {
-      r.clip={x,y,w,h}; r.clipped=true;
-    }
+    ClipScope(const GfxRenderer& r,int,int,int,int):r(r) { r.clipped=true; }
     ~ClipScope() { r.clipped=false; }
   };
-  int getLineHeight(int) const { return 18; }
   int getScreenWidth() const { return width; }
   int getScreenHeight() const { return height; }
-  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=top; *r=right; *b=bottom; *l=left; }
-  void drawText(int font, int x, int y, const char* text) const {
-    assert(font == STATUS_NUMERIC_FONT_ID && clipped);
-    ++clocks; clockX=x; clockY=y; std::strcpy(clock,text);
-  }
+  int getLineHeight(int) const { return 18; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=top;*r=right;*b=bottom;*l=left; }
 };
 struct InxTheme {
   mutable Rect battery{};
-  mutable bool percentage=false;
-  void drawBatteryRight(const GfxRenderer& r, Rect rect, bool show, int = 1) const {
-    assert(r.clipped); battery=rect; percentage=show;
-  }
-  void drawMainTabStatusBar(const GfxRenderer&, Rect) const;
+  mutable int topCalls=0,bottomCalls=0;
+  void drawHeaderStatus(const GfxRenderer&,Rect) const { ++topCalls; }
+  void drawBatteryRight(const GfxRenderer& r,Rect rect,bool,int=1) const { assert(r.clipped);battery=rect;++bottomCalls; }
+  void drawMainTabStatusBar(const GfxRenderer&,Rect) const;
 };
 ''' + status + r'''
 namespace InxRecentGeometry {
 constexpr int footerReservedHeight=40;
 Rect batteryRect(Rect safe) { return {safe.x+safe.width-27,safe.y+safe.height-30,15,12}; }
 }
-struct Input { bool touch=true; bool hasTouch() const { return touch; } };
 struct Gui {
-  int statusCalls=0, legacyCalls=0;
-  Rect footer{};
-  InxTheme theme;
-  void drawMainTabStatusBar(const GfxRenderer& r, Rect rect) {
-    ++statusCalls; footer=rect; theme.drawMainTabStatusBar(r,rect);
-  }
-  void drawBatteryRight(const GfxRenderer&, Rect, bool) { ++legacyCalls; }
+  int statusCalls=0,legacyCalls=0;Rect footer{};InxTheme theme;
+  void drawMainTabStatusBar(const GfxRenderer& r,Rect rect) { ++statusCalls;footer=rect;theme.drawMainTabStatusBar(r,rect); }
+  void drawBatteryRight(const GfxRenderer&,Rect,bool) { ++legacyCalls; }
 } GUI;
 struct InxRecentActivity {
   GfxRenderer renderer;
-  Input mappedInput;
+  struct { bool touch=true;bool hasTouch() const { return touch; } } mappedInput;
   bool inx=true;
   bool usesMainTabBar() const { return inx; }
-  bool mainTabsAtBottom() const { return SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM; }
+  bool mainTabsAtBottom() const { return SETTINGS.inxTabPosition==CrossPointSettings::INX_TAB_BOTTOM; }
   bool hasMainTabStatusBar() const { return inx && mappedInput.touch && mainTabsAtBottom(); }
   void drawFooter() {
     const int width=renderer.getScreenWidth();
@@ -1750,62 +1734,163 @@ struct InxRecentActivity {
   }
 };
 int main() {
-  for (bool landscape : {false,true}) for (bool largeInsets : {false,true})
-    for (bool hour12 : {false,true}) for (bool valid : {false,true}) for (bool hide : {false,true}) {
-      GfxRenderer r;
-      if (landscape) { r.width=800; r.height=480; }
-      if (largeInsets) { r.top=20; r.left=18; r.right=21; r.bottom=18; }
-      SETTINGS.clockFormat=hour12;
-      SETTINGS.hideBatteryPercentage=hide ? CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS
-                                         : CrossPointSettings::HIDE_BATTERY_PERCENTAGE::SHOW;
-      TimeUtils::valid=valid;
-      for (bool bottom : {false,true}) {
-        SETTINGS.inxTabPosition=bottom ? CrossPointSettings::INX_TAB_BOTTOM : CrossPointSettings::INX_TAB_TOP;
-        const Rect rect=bottom ? Rect{r.left,r.top,r.width-r.left-r.right,28}
-                               : Rect{r.left,r.height-40,r.width-r.left-r.right,40-r.bottom};
-        InxTheme theme;
-        const int clocks=r.clocks, formats=TimeUtils::calls;
-        theme.drawMainTabStatusBar(r,rect);
-        assert(!r.clipped && theme.percentage == !hide);
-        assert(r.clocks-clocks == bottom && TimeUtils::calls-formats == bottom);
-        assert(r.width-theme.battery.x-theme.battery.width == std::max(12,r.right+1));
-        assert(theme.battery.x+theme.battery.width < rect.x+rect.width);
-        const int iconY=theme.battery.y+6;
-        if (bottom) assert(iconY == std::max(12,r.top));
-        else {
-          assert(r.height-iconY-theme.battery.height == std::max(12,r.bottom+1));
-          assert(theme.battery.y+6+theme.battery.height < rect.y+rect.height);
-        }
-        assert(iconY >= rect.y && iconY+theme.battery.height <= rect.y+rect.height);
-        if (bottom) {
-          assert(r.clockX == std::max(12,r.left) && theme.battery.y == r.clockY);
-          assert(r.clockX+8*8+6 < theme.battery.x-4*8);
-          assert(TimeUtils::formatted12 == hour12);
-          assert(std::strcmp(r.clock, !valid ? "--:--" : hour12 ? "12:59 PM" : "23:59") == 0);
-        }
-      }
-      const int clocks=r.clocks;
-      InxTheme{}.drawMainTabStatusBar(r,{0,0,0,28});
-      InxTheme{}.drawMainTabStatusBar(r,{0,0,480,0});
-      assert(r.clocks == clocks);
-    }
-  for (bool inx : {false,true}) for (bool touch : {false,true}) for (bool bottom : {false,true}) {
+  GfxRenderer r;InxTheme theme;
+  SETTINGS.inxTabPosition=CrossPointSettings::INX_TAB_BOTTOM;
+  theme.drawMainTabStatusBar(r,{3,19,474,20});
+  assert(theme.topCalls==1 && theme.bottomCalls==0);
+  SETTINGS.inxTabPosition=CrossPointSettings::INX_TAB_TOP;
+  theme.drawMainTabStatusBar(r,{3,760,474,37});
+  assert(theme.topCalls==1 && theme.bottomCalls==1);
+  assert(theme.battery.x==452 && theme.battery.y==770);
+  theme.drawMainTabStatusBar(r,{0,0,0,20});
+  assert(theme.topCalls==1 && theme.bottomCalls==1);
+  for (bool touch : {false,true}) for (bool bottom : {false,true}) {
     GUI.statusCalls=GUI.legacyCalls=0;
     SETTINGS.inxTabPosition=bottom ? CrossPointSettings::INX_TAB_BOTTOM : CrossPointSettings::INX_TAB_TOP;
-    InxRecentActivity home; home.inx=inx; home.mappedInput.touch=touch;
-    const int formats=TimeUtils::calls;
-    home.drawFooter();
-    assert(home.renderer.clocks == 0 && TimeUtils::calls == formats);
-    const bool footer=inx && touch && !bottom;
-    assert(GUI.statusCalls == footer);
-    assert(GUI.legacyCalls == (!footer && !home.hasMainTabStatusBar()));
-    if (footer) {
-      assert(GUI.footer.y == 760 && GUI.footer.height == 37);
-      assert(GUI.theme.battery.y == 770 && GUI.theme.battery.x == 452);
+    InxRecentActivity page;page.mappedInput.touch=touch;page.drawFooter();
+    assert(GUI.statusCalls==(touch != bottom) && GUI.legacyCalls==(!bottom && !touch));
+    if (!bottom && touch) {
+      assert(GUI.footer.y==760 && GUI.footer.height==37);
+      assert(GUI.theme.battery.y==770 && GUI.theme.battery.x==452);
     }
+    if (bottom && !touch) assert(GUI.footer.y==19 && GUI.footer.height==20);
   }
 }
 ''')
+
+
+    def test_inx_top_status_uses_shared_sdk_ink_alignment(self):
+        source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
+        methods = '\n'.join(method(source, name) for name in (
+            'int BaseTheme::headerStatusInset(', 'int BaseTheme::headerStatusHeight(',
+            'void BaseTheme::applyHeaderStatus(', 'freeink::ui::Rect BaseTheme::headerBand(',
+            'void BaseTheme::drawHeaderStatus('))
+        program = r'''
+#include <algorithm>
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+#include "components/Rect.h"
+#include <FreeInkUI.h>
+constexpr int SMALL_FONT_ID=7, batteryPercentSpacing=4;
+struct CrossPointSettings { enum HIDE_BATTERY_PERCENTAGE { SHOW,HIDE_ALWAYS }; };
+struct { int hideBatteryPercentage=0,clockShowInHeader=1,clockFormat=0; } SETTINGS;
+namespace BoardConfig { struct Profile { int headerOffsetY=0,cornerRadius=0; }; Profile ACTIVE; }
+struct { int percent=100;int getBatteryPercentage() const { return percent; } } powerManager;
+struct { bool charging=false;bool isUsbConnected() const { return charging; } } gpio;
+namespace TimeUtils {
+bool valid=true;
+bool formatCurrentTime(char* out,size_t size,bool hour12) {
+  if (!valid) return false;
+  std::snprintf(out,size,"%s",hour12 ? "12:59 PM" : "23:59");return true;
+}
+}
+struct Metrics {
+  int batteryWidth=UiHighDpiProfile::enabled?32:16,batteryHeight=UiHighDpiProfile::enabled?20:12;
+  int headerSidePadding=18,headerBatterySide=0,headerHeight=UiHighDpiProfile::enabled?112:84;
+  int batteryBarHeight=HeaderStatusMetrics::stripHeight;
+  bool headerClockCentered=false,headerShowsClock=true;
+} metrics;
+using ThemeMetrics = Metrics;
+const Metrics& uiThemeMetrics(bool) { return metrics; }
+struct { int titleFontId=SMALL_FONT_ID; } scale;
+auto uiScaleSpec(bool) { return scale; }
+struct GfxRenderer {
+  int width=480,height=800,left=0,right=0,top=0,bottom=0;
+  struct Op { freeink::ui::Rect rect;std::string text;bool stroke=false; };
+  mutable std::vector<Op> ops;
+  mutable freeink::ui::Rect clip{0,0,32767,32767};
+  int getScreenWidth() const { return width; }
+  int getLineHeight(int) const { return UiHighDpiProfile::enabled?36:24; }
+  int getTextHeight(int font) const { return getLineHeight(font)-4; }
+  void getOrientedViewableTRBL(int* t,int* r,int* b,int* l) const { *t=top;*r=right;*b=bottom;*l=left; }
+  struct ClipScope {
+    const GfxRenderer& r;freeink::ui::Rect previous;
+    ClipScope(const GfxRenderer& r,int x,int y,int w,int h):r(r),previous(r.clip) {
+      r.clip={static_cast<int16_t>(x),static_cast<int16_t>(y),static_cast<int16_t>(w),static_cast<int16_t>(h)};
+    }
+    ~ClipScope() { r.clip=previous; }
+  };
+};
+namespace freeink::ui {
+struct GfxRendererTarget : DrawTarget {
+  static constexpr int FONT_LABEL=3;
+  const GfxRenderer& r;
+  explicit GfxRendererTarget(const GfxRenderer& r):r(r) {}
+  Size measureText(FontId,const char* text,TextStyle) const override {
+    return {static_cast<int16_t>(strlen(text)*(UiHighDpiProfile::enabled?10:6)),lineHeight(0)};
+  }
+  int16_t lineHeight(FontId) const override { return r.getLineHeight(0); }
+  Rect inkBounds(FontId f,const char* text,TextStyle st) const override {
+    return {0,static_cast<int16_t>(UiHighDpiProfile::enabled?8:5),measureText(f,text,st).width,
+            static_cast<int16_t>(UiHighDpiProfile::enabled?20:14)};
+  }
+  void fill(Rect rect,Paint p,uint8_t,uint8_t) override {
+    if (p.kind!=PaintKind::None) r.ops.push_back({rect,"",false});
+  }
+  void stroke(Rect rect,Paint,uint8_t,uint8_t,uint8_t) override { r.ops.push_back({rect,"",true}); }
+  void line(Point,Point,uint8_t,Paint) override {}
+  void triangle(Point,Point,Point,Paint) override {}
+  void text(Rect rect,const char* text,TextStyle st) override {
+    const auto ink=inkBounds(st.font,text,st);
+    const int w=std::min<int>(rect.width,ink.width);
+    int x=rect.x;
+    if (st.align==TextAlign::Right) x=rect.right()-w;
+    r.ops.push_back({{static_cast<int16_t>(x),static_cast<int16_t>(rect.y+ink.y),static_cast<int16_t>(w),ink.height},text,false});
+  }
+  void bitmap(Rect,BitmapRef,BitmapMode,Paint,Rotation) override {}
+};
+template <size_t N> struct GfxRendererFrame {
+  GfxRendererTarget target;DeviceContext device;InputSnapshot input;InteractionBuffer<N> interactions;Frame<N> frame;
+  GfxRendererFrame(const GfxRenderer& r,int,int,int):target(r),frame(target,device,input,interactions) {}
+};
+}
+void applyUiTextAlignment(freeink::ui::GfxRendererTarget&,bool) {}
+struct BaseTheme {
+  static int headerStatusInset(bool=false);
+  static int headerStatusHeight();
+  static void applyHeaderStatus(const GfxRenderer&,freeink::ui::HeaderProps&,bool=false);
+  static freeink::ui::Rect headerBand(const GfxRenderer&,freeink::ui::Rect,freeink::ui::HeaderProps&);
+  static void drawHeaderStatus(const GfxRenderer&,Rect,const char*=nullptr);
+};
+'''.replace('const char*=nullptr','const char* = nullptr') + methods + r'''
+int main() {
+  for (int width : {480,800,684,1216}) for (int inset : {0,18}) for (int offset : {0,6})
+  for (bool hide : {false,true}) for (bool clock : {false,true}) for (bool valid : {false,true})
+  for (bool hour12 : {false,true}) for (bool charging : {false,true}) for (int percent : {0,1,99,100}) {
+    GfxRenderer r;r.width=width;r.left=inset;r.right=inset;r.top=inset;
+    BoardConfig::ACTIVE={offset,inset?24:0};gpio.charging=charging;powerManager.percent=percent;
+    SETTINGS.hideBatteryPercentage=hide?CrossPointSettings::HIDE_ALWAYS:CrossPointSettings::SHOW;
+    SETTINGS.clockShowInHeader=clock;SETTINGS.clockFormat=hour12;TimeUtils::valid=valid;
+    const int y=inset+HeaderStatusMetrics::topPadding;
+    const Rect slot{inset,y,width-2*inset,BaseTheme::headerStatusHeight()};
+    BaseTheme::drawHeaderStatus(r,slot,"2026-10-25");
+    const GfxRenderer::Op *battery=nullptr,*date=nullptr,*time=nullptr,*label=nullptr;
+    for (const auto& op:r.ops) {
+      if (op.stroke) battery=&op;
+      if (op.text=="2026-10-25") date=&op;
+      if (op.text=="23:59" || op.text=="12:59 PM") time=&op;
+      if (op.text.find('%')!=std::string::npos) label=&op;
+      assert(op.rect.x>=slot.x && op.rect.right()<=slot.x+slot.width);
+      assert(op.rect.y>=slot.y+offset && op.rect.bottom()<=slot.y+slot.height);
+    }
+    assert(battery && date && bool(time)==(clock&&valid) && bool(label)==!hide);
+    assert(battery->rect.x==width-inset-(22+std::max(0,BoardConfig::ACTIVE.cornerRadius-inset))-metrics.batteryWidth-2);
+    if (time) {
+      assert(std::abs((time->rect.y*2+time->rect.height)-(battery->rect.y*2+battery->rect.height))<=1);
+      assert(time->rect.right()+8<=date->rect.x);
+    }
+    assert(date->rect.right()+8<=(label?label->rect.x:battery->rect.x));
+    const size_t before=r.ops.size();BaseTheme::drawHeaderStatus(r,Rect{0,0,0,20});assert(r.ops.size()==before);
+  }
+}
+'''
+        sdk = ROOT / 'freeink-sdk/libs/ui/FreeInkUI'
+        for defines in ((), ('CROSSMUX_UI_PROFILE_HIGH_DPI',)):
+            run_cpp(program, include_dirs=(ROOT / 'src', sdk / 'include'), defines=defines,
+                    extra_sources=(sdk / 'src/FreeInkUI.cpp',))
 
 
 if __name__ == '__main__':
