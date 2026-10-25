@@ -91,6 +91,13 @@ static_assert(HalGPIO::BTN_UP != HalGPIO::BTN_CONFIRM && HalGPIO::BTN_CONFIRM !=
 namespace X3GPIO {
 
 bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
+  static bool wireReady = false;
+  if (!wireReady) {
+    const auto& gauge = BoardConfig::ACTIVE.batteryGauge;
+    // The temporary device fingerprint ends Wire before the first USB check.
+    if (!Wire.begin(gauge.i2cSda, gauge.i2cScl, gauge.i2cHz)) return false;
+    wireReady = true;
+  }
   Wire.beginTransmission(addr);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) {
