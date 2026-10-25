@@ -27,16 +27,16 @@
 | Xteink X3 / X4（共用固件） | ESP32-C3 | Stable、Nightly |
 | [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Stable、Nightly |
 | Xteink X4 Pro | ESP32-S3 | Stable、Nightly |
-| M5Stack Paper Mono | ESP32-S3 | Stable、Nightly |
-| eego A4 | ESP32-S3 | Stable、Nightly |
-| Murphy M4 | ESP32-S3 | Stable、Nightly |
-| Waveshare ePaper 3.97 | ESP32-S3 | Stable、Nightly |
+| M5Stack Paper Mono | ESP32-S3 | Nightly |
+| eego A4 | ESP32-S3 | Nightly |
+| Murphy M4 | ESP32-S3 | Nightly |
+| Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable、Nightly |
-| [Read Pico（小纸 Pico）](./docs/engineering/read-pico.md) | ESP32-S3 | Stable、Nightly |
+| [Read Pico（小纸 Pico）](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
-九个目标均已配置 Stable 和 Nightly。实际可下载版本以所选区域目录中成功发布的产物为准；新增 Stable 产物在新发布链路上线后的下一次正式版本提供。配置支持不代表实机验收完成。每个 S3 目标使用独立固件。X4 Classic（`x4c`）和 [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md)（`lilygo_t5s3`）仅提供开发构建。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
+正式版仅发布 X3/X4、Sticky、X4 Pro 和 Metalio E-Ink 4 四个目标；Nightly 发布九个目标。本地 Stable 构建模式不代表具备正式发布资格，实际可下载版本以所选区域目录为准。配置支持不代表实机验收完成。每个 S3 目标使用独立固件。X4 Classic（`x4c`）和 [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md)（`lilygo_t5s3`）仅提供开发构建。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
 
-正式版本使用 [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable)，开发版本使用 [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly)，两渠道采用相同目标与打包规则。[目标表](./scripts/nightly_targets.py) 定义渠道与产物名称；[发布架构](./docs/engineering/firmware-release.md) 说明打包与 OTA。当前源码版本及构建环境以 [platformio.ini](./platformio.ini) 为准。
+正式版本使用 [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable)，开发版本使用 [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly)，两渠道采用相同的打包规则，发布目标名单分别维护。[目标表](./scripts/nightly_targets.py) 定义渠道与产物名称；[发布架构](./docs/engineering/firmware-release.md) 说明打包与 OTA。当前源码版本及构建环境以 [platformio.ini](./platformio.ini) 为准。
 
 ## 安装固件
 
@@ -81,7 +81,7 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-应用固件位于 `.pio/build/<环境>/firmware.bin`。仓库配置共 35 个构建入口：九个发布目标各有 Dev、Stable、Nightly，另有两个仅开发板型和六个模拟器。版本与 Git 哈希自动生成：Stable 为 `<基础版本>`，Nightly 为 `<基础版本>-rc+<7位SHA>`，Dev 为 `<基础版本>-dev-<分支>-<7位SHA>`。其它板型见[构建文档](./docs/engineering/build-system.md)。
+应用固件位于 `.pio/build/<环境>/firmware.bin`。仓库配置共 35 个构建入口：九个硬件目标各有本地 Dev、Stable、Nightly 模式，另有两个仅开发板型和六个模拟器；只有上表四个目标具备正式发布资格。版本与 Git 哈希自动生成：Stable 为 `<基础版本>`，Nightly 为 `<基础版本>-rc+<7位SHA>`，Dev 为 `<基础版本>-dev-<分支>-<7位SHA>`。其它板型见[构建文档](./docs/engineering/build-system.md)。
 
 X4 Pro 与 Metalio E-Ink 4 构建命令：
 
@@ -109,7 +109,7 @@ pio run -e readpico
 
 Windows 上运行 `pio` 前请先设置 `PYTHONIOENCODING=utf-8`，否则 PlatformIO 打印阿拉伯语 i18n 语言行时可能编码崩溃、构建静默卡住。
 
-应用固件位于 `.pio/build/readpico/firmware.bin`。首次安装为**整表烧录**——`bootloader@0x0`、`partitions@0x8000`、`boot_app0@0xe000`、`app@0x10000`——且须先有一份已核验的整片（16 MiB）备份，因为本仓库分区表与板厂出厂 `partitions_16M.csv` 在 `0xE000` 冲突且 app 槽大小不同。Stable/Nightly 配置不代表实机验收完成。引脚表、冻结的构建参数与待办验收清单见 [Read Pico 设备指南](./docs/engineering/read-pico.md)。
+应用固件位于 `.pio/build/readpico/firmware.bin`。首次安装为**整表烧录**——`bootloader@0x0`、`partitions@0x8000`、`boot_app0@0xe000`、`app@0x10000`——且须先有一份已核验的整片（16 MiB）备份，因为本仓库分区表与板厂出厂 `partitions_16M.csv` 在 `0xE000` 冲突且 app 槽大小不同。Read Pico 仅发布 Nightly；本地 Stable 构建入口不代表正式发布资格或实机验收完成。引脚表、冻结的构建参数与待办验收清单见 [Read Pico 设备指南](./docs/engineering/read-pico.md)。
 
 ### 桌面模拟器
 

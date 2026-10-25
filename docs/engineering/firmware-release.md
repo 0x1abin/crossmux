@@ -1,9 +1,10 @@
 # Firmware Release Architecture
 
 CrossMux has two release channels, `stable` and `nightly`, managed by one
-channel-aware pipeline. Hardware identity is not a release channel. Both channels
-contain the same nine targets: the shared X3/X4 image and eight independent S3
-images. X4 Classic and LilyGo remain development-only.
+channel-aware pipeline. Stable publishes four targets: the shared X3/X4 image,
+Sticky, X4 Pro and Metalio E-Ink 4. Nightly publishes all nine targets. Local
+build modes do not grant publication eligibility. X4 Classic and LilyGo remain
+development-only.
 
 ## Canonical targets
 
@@ -18,10 +19,10 @@ The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
 image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky Stable uses
 `sticky-gh_release`. Sticky, X4 Pro,
 Paper Mono, EEGO A4, Murphy M4, Waveshare ePaper 3.97, Metalio E-Ink 4, and MindReset Read Pico each produce their own
-ESP32-S3 image per channel. Each image is aliased by the compatibility `global` and
+ESP32-S3 image for each eligible channel. Each image is aliased by the compatibility `global` and
 `zh-CN` pointers.
 
-Read Pico uses `readpico-gh_release` and `readpico_nightly`, with artifact slug and board tag `readpico`.
+Read Pico publishes only Nightly using `readpico_nightly`, with artifact slug and board tag `readpico`. Its local `readpico-gh_release` build mode is retained but is not eligible for Stable packaging.
 The model list accepts both `readpico` and the SDK runtime name `read_pico`.
 Its full-install package uses the existing 16 MB S3 partition
 profile. The Web flasher displays it as **MindReset Read Pico**. First installation replaces the factory partition layout
@@ -176,7 +177,7 @@ Unknown strategies, wrong-board images and invalid URLs remain rejected.
 
 Device OTA keeps the GitHub-like response with one
 `firmware.bin` asset and selects by exact model, variant, and channel. A target
-that does not support a requested channel in a historical index returns
+missing from the requested channel but known in the other catalog returns
 `ota_status: unsupported_channel` rather than falling back to another channel or board.
 
 Deploy the Web compatibility layer before enabling the new CI indexes. Verify
