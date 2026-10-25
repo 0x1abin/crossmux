@@ -273,4 +273,10 @@ sleep mode. `/sleep.bmp.bak` remains until the installed BMP validates and the
 settings save succeeds. The versioned three-byte `/sleep.bmp.txn` record
 identifies an unfinished transaction even when old and new sleep modes match.
 Failed recovery leaves its marker/backup intact and reports the failure.
+
+Cover + Transparent saves the viewer's transparent PNG/BMP as
+`/sleep-overlay.bmp`, retaining the combined sleep mode and any `/sleep.bmp`.
+Its `.part`, `.bak`, and `.txn` files follow the same transaction and three-byte
+version-1 record as the ordinary cover. Recovery checks both target sets;
+ordinary/overlay installs and rollback do not overwrite the other image.
 See [the private marker format](../file-formats.md#sleep-cover-transaction).

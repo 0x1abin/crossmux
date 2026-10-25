@@ -236,6 +236,9 @@ const EpdGlyph* EpdFont::getGlyph(const uint32_t cp, bool* const usedReplacement
     if (loaded) return loaded;
   }
 
+  // The turned comma uses the matching quotation-mark shape when absent.
+  if (cp == 0x02BB && hasCodepoint(0x2018)) return getGlyph(0x2018);
+
   if (usedReplacement) *usedReplacement = true;
   return nullptr;
 }

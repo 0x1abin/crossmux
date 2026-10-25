@@ -64,24 +64,25 @@ class BookMetadataCache {
   // wrapper serves whichever pass is active (spine, then toc).
   std::unique_ptr<serialization::BufferedFileWriter> passOut;
 
-  // Cumulative spine sizes, cached in RAM at load() so progress/percent lookups avoid
-  // two seeks and a heap-allocating SpineEntry read. Linear bits share this allocation,
-  // adding at most 128 bytes to the bounded 4KB size cache.
-  std::unique_ptr<uint32_t[]> cumulativeSizes;
-  uint16_t cumulativeSizeCount = 0;
+  // At most 8 KiB of sparse totals for a uint16_t spine count; OOM uses direct window reads.
+  static constexpr int SIZE_WINDOW = 32;
+  std::unique_ptr<uint32_t[]> windowStarts;
+  uint32_t bookSize = 0;
+  mutable int windowFirst = -1;
+  mutable uint32_t window[SIZE_WINDOW] = {};
+  mutable uint32_t windowLinear = 0;
+  bool fillWindow(int first) const;
 
-  // Index for fast href→spineIndex lookup (used only for large EPUBs)
+  // Index for fast href→spineIndex lookup. Exists only during a large EPUB's
+  // TOC pass; a bare deque member would hold its first node for every open book.
   struct SpineHrefIndexEntry {
     uint64_t hrefHash;  // FNV-1a 64-bit hash
     uint16_t hrefLen;   // length for collision reduction
     int16_t spineIndex;
   };
-  std::deque<SpineHrefIndexEntry> spineHrefIndex;
-  bool useSpineHrefIndex = false;
+  std::unique_ptr<std::deque<SpineHrefIndexEntry>> spineHrefIndex;
 
   static constexpr uint16_t LARGE_SPINE_THRESHOLD = 400;
-  // ponytail: cap the optimization; larger books fall back to SD reads.
-  static constexpr uint16_t MAX_CUMULATIVE_SIZE_CACHE_ITEMS = 1024;
 
   // FNV-1a 64-bit hash function
   static uint64_t fnvHash64(const std::string& s) {
@@ -127,6 +128,7 @@ class BookMetadataCache {
   // Returns whether the in-RAM cache contains the requested cumulative byte size.
   bool getCumulativeSize(int index, uint32_t& size) const;
   bool getLinear(int index, bool& linear) const;
+  int getSpineIndexForSize(uint32_t size) const;
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }
   bool isLoaded() const { return loaded; }

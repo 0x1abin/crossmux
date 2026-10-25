@@ -3,7 +3,7 @@
 
 #include "ImageToFramebufferDecoder.h"
 
-// Streaming JPEG/PNG header parser: finds image dimensions from the first few
+// Streaming JPEG/PNG/GIF header parser: finds image dimensions from the first few
 // KB of a compressed stream without inflating the whole image. Feed bytes via
 // the Print interface (e.g. Epub::readItemContentsToStream with
 // allowEarlyStop=true); write() returns short once the dimensions are known or
@@ -13,12 +13,13 @@
 // JPEG: walks marker segments (skipping EXIF/APPn of any size statefully, so
 // nothing is buffered) until a SOFn frame header yields the dimensions.
 // PNG: reads the IHDR fields at their fixed offsets (bytes 16..23).
+// GIF: validates GIF87a/GIF89a and reads the logical screen size (bytes 6..9).
 class ImageDimsProbe : public Print {
  public:
   // Format identified from the stream's leading bytes. The extension in an
   // EPUB's href is only a hint — manifests legitimately point at images named
   // without one — so callers that must choose a decoder should trust this.
-  enum class Format : uint8_t { Unknown, Jpeg, Png };
+  enum class Format : uint8_t { Unknown, Jpeg, Png, Gif };
 
   size_t write(uint8_t b) override;
   size_t write(const uint8_t* data, size_t len) override;
@@ -37,6 +38,8 @@ class ImageDimsProbe : public Print {
         return ".jpg";
       case Format::Png:
         return ".png";
+      case Format::Gif:
+        return ".gif";
       case Format::Unknown:
         break;
     }
@@ -49,6 +52,7 @@ class ImageDimsProbe : public Print {
   enum class State : uint8_t {
     Sniff,       // first byte selects the parser; the format follows on validation
     PngHeader,   // PNG signature + IHDR at fixed offsets
+    GifHeader,   // GIF signature + little-endian logical screen dimensions
     JpegSoi,     // second SOI byte (0xD8)
     JpegFf,      // expect a 0xFF marker prefix
     JpegMarker,  // marker type byte (0xFF padding allowed)

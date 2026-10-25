@@ -153,7 +153,7 @@
           document.getElementById('version').textContent = data.version || fallback;
           document.getElementById('serial').textContent = data.serial || fallback;
           document.getElementById('ip-address').textContent = data.ip || fallback;
-          document.getElementById('free-heap').textContent = data.freeHeap
+          document.getElementById('free-heap').textContent = Number.isFinite(data.freeHeap)
             ? data.freeHeap.toLocaleString('zh-CN') + ' 字节'
             : fallback;
         } catch (error) {

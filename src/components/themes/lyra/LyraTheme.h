@@ -10,8 +10,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .batteryHeight = 12,
                                  // Shared anchor for every header band, including the cover-grid
                                  // home's status band; roomy enough that the strip clears the edge.
-                                 .topPadding = 10,
-                                 .batteryBarHeight = 20,
+                                 .topPadding = HeaderStatusMetrics::topPadding,
+                                 .batteryBarHeight = HeaderStatusMetrics::baseStripHeight,
                                  .headerHeight = 84,
                                  .verticalSpacing = 16,
                                  .previewPadding = 12,

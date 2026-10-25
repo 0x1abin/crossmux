@@ -58,8 +58,10 @@ class SdCardFontMemoryTest : public ::testing::Test {
     ESP = {};
     font.loaded_ = true;
     std::strncpy(font.filePath_, path.c_str(), sizeof(font.filePath_) - 1);
-    auto& style = font.styles_[0];
-    style.present = true;
+    font.styles_ = std::make_unique<SdCardFont::PerStyle[]>(1);
+    font.styleCount_ = 1;
+    font.styleSlots_[0] = 1;
+    auto& style = font.styleData(0);
     style.header.intervalCount = 1;
     style.header.glyphCount = 2;
     style.fullIntervals = new EpdUnicodeInterval[1]{{'A', 'B', 0}};
@@ -69,7 +71,10 @@ class SdCardFontMemoryTest : public ::testing::Test {
     EpdGlyph glyphs[2]{};
     glyphs[0].advanceX = 9;
     glyphs[1].advanceX = 13;
+    glyphs[0].width = glyphs[1].width = 8;
+    glyphs[0].height = glyphs[1].height = 16;
     glyphs[0].dataLength = glyphs[1].dataLength = 16;
+    font.fileSize_ = sizeof(glyphs) + 32;
     glyphs[1].dataOffset = 16;
     std::ofstream file(path, std::ios::binary);
     file.write(reinterpret_cast<const char*>(glyphs), sizeof(glyphs));
@@ -343,7 +348,8 @@ TEST_F(SdCardFontMemoryTest, PagedIndexRejectsCorruptIntervalsAndReleasesFailedA
   for (const size_t bytesToFail : {size_t(126 * 4), size_t(32 * sizeof(EpdUnicodeInterval))}) {
     failArraySize = bytesToFail;
     EXPECT_FALSE(font.load(path.c_str()));
-    EXPECT_FALSE(font.styles_[0].hasCoverageIndex());
+    EXPECT_FALSE(font.hasStyle(0));
+    EXPECT_EQ(font.styles_, nullptr);
   }
   failArraySize = 0;
   EXPECT_TRUE(font.load(path.c_str()));

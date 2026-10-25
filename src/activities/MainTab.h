@@ -20,7 +20,7 @@ struct MainTabLayout {
 
 namespace MainTabs {
 inline constexpr int controlGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 6;
-inline constexpr int statusBarHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::statusHeight : 28;
+inline constexpr int statusBarHeight = HeaderStatusMetrics::stripHeight;
 inline constexpr int bottomBarHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight : 56;
 inline constexpr std::array<MainTab, 5> values = {MainTab::Recent, MainTab::Library, MainTab::Apps, MainTab::Settings,
                                                   MainTab::Statistics};

@@ -11,6 +11,9 @@
 ## Features
 
 - **Reading and library**: EPUB, TXT, XTC/XTCH and images; chapter navigation, bookmarks, dictionaries, custom fonts, reading backgrounds, and KOReader progress sync.
+- **Highlights and clippings**: select EPUB text with buttons or touch, look up words and phrases, save highlighted excerpts, and optionally sync clippings through a compatible CrossPoint Sync server. [Clippings guide](./USER_GUIDE.md#53-clippings-and-highlights).
+- **Bluetooth page turners**: connect and map tap/hold actions under **Settings → Connectivity → Bluetooth Page Turner** for pages, chapters, reader menus, and clipping selection.
+- **SD-card plugins**: enable **Settings → Connectivity → Plugins**, then open **Home → Plugins**. Install optional Plugin Hub manually or over Wi-Fi when selected; existing sideloaded plugins remain usable. Browser-side plugin JavaScript runs while its browser page stays open. [Plugin guide](./docs/sd-plugins.md).
 - **Wireless workflows**: browser file transfer and settings, Calibre wireless, OPDS downloads, WebDAV, and device OTA updates.
 - **Apps**: lightweight games and tools including Sudoku, Gomoku, Chinese Chess, Minesweeper, 2048, Electronic Woodfish, and Ugly Avatar. [Apps guide](./src/activities/apps/README.md).
 - **AirPage**: scan to upload content, then display BMP/JPEG images with manual refresh or foreground live delivery; images can become a sleep screen. [Usage and network behavior](./src/activities/apps/README.md#airpage).
@@ -34,7 +37,7 @@
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable, Nightly |
 | [Read Pico (小纸 Pico)](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
-Stable publishes only X3/X4, Sticky, X4 Pro and Metalio E-Ink 4. All nine targets publish Nightly. Local Stable build modes do not grant release eligibility; availability follows the selected regional catalog. This configuration does not establish hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`) and [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`) remain development-only. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
+Stable publishes only X3/X4, Sticky, X4 Pro and Metalio E-Ink 4. All nine targets publish Nightly. Local Stable build modes do not grant release eligibility; availability follows the selected regional catalog. This configuration does not establish hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`), [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`), and BOOX Picco (`picco`) remain development-only. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
 
 Use [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable) for formal releases, or [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly) for development builds. Both channels use the same package rules, with separate eligible target sets. The [target table](./scripts/nightly_targets.py) defines channels and artifact names; [release architecture](./docs/engineering/firmware-release.md) explains packaging and OTA. Current source version and build environments live in [platformio.ini](./platformio.ini).
 
@@ -81,7 +84,7 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 35 build entries: local Dev, Stable and Nightly modes for nine hardware targets, two development-only boards and six simulators. Only the four targets listed above are eligible for Stable publication. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
+The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 36 build entries: local Dev, Stable and Nightly modes for nine hardware targets, three development-only boards and six simulators. Only the four targets listed above are eligible for Stable publication. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
 
 For X4 Pro and Metalio E-Ink 4:
 

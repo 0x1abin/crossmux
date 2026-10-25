@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,45 @@ struct DictLocation {
   // reaching a verdict, so a failed search isn't reported as a genuine miss.
   bool readError = false;
 };
+
+// One resolved entry of a word: the headword it is filed under and where its
+// definition lives. A .idx may list the same headword more than once (one
+// entry per part of speech) and a .syn can point at several entries, so one
+// word can map to several of these.
+struct DictEntry {
+  std::unique_ptr<char[]> headword;
+  DictLocation location;
+};
+
+// One lookup owns the collected metadata. Growth is bounded by the complete
+// 64 KiB output and explicit free/largest-block checks, with no entry-count cap.
+// It is released before returning, so recursive history never retains payloads.
+class DictEntryList {
+ public:
+  enum class Failure : uint8_t { None, LowMemory, TooLarge };
+  explicit DictEntryList(bool html = false, size_t queryBytes = 0) : html_(html), queryBytes_(queryBytes) {}
+  bool lowMemory() const { return failure_ == Failure::LowMemory; }
+  Failure failure() const { return failure_; }
+  bool empty() const { return entries_.empty(); }
+  size_t size() const { return entries_.size(); }
+  size_t combinedSize() const { return combinedSize_; }
+  const DictEntry& at(size_t index) const { return entries_[index]; }
+  const DictEntry& front() const { return entries_.front(); }
+  void labelSingle(bool label = true) { labelSingle_ = label; }
+  bool appendUnique(const char* headword, const DictLocation& location);
+
+ private:
+  std::vector<DictEntry> entries_;
+  size_t combinedSize_ = 0;
+  bool html_ = false;
+  bool labelSingle_ = false;
+  size_t queryBytes_ = 0;
+  Failure failure_ = Failure::None;
+};
+
+// Marks the headword label line of a plain-text definition. The wrap loop
+// draws a line that starts with it in bold.
+inline constexpr char DICTIONARY_PLAIN_HEADWORD_MARKER = '\x01';
 
 // Slim StarDict reader: exact-match lookup with a synonym and mini stemming
 // fallback.
@@ -52,7 +92,7 @@ class Dictionary {
   // missing or stale — call buildIndex() first so the UI can show an
   // "Indexing…" message for the slow first pass.
 
-  // True when the .ifo declares sametypesequence=h — definitions are HTML and
+  // True when the .ifo declares sametypesequence=h or x (HTML or XDXF) and
   // the viewer may lay them out through the EPUB rendering pipeline.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
@@ -76,13 +116,19 @@ class Dictionary {
   bool buildIndex(void (*yieldFn)(void*) = nullptr, void* ctx = nullptr, IndexResult* outResult = nullptr);
 
   // Clean the word, look it up, and on a miss retry dictionary-authored
-  // synonyms then mini stem variants (-'s/-s/-es/-ies/-ed/-ing). On a hit fills
-  // the definition text (capped at MAX_DEFINITION_BYTES) and the headword as
-  // stored in the index. Returns true on a hit. *outResult (if provided)
-  // reports the precise outcome so the UI can distinguish a genuine miss from a
-  // decompression / low-memory / read failure.
+  // synonyms then mini stem variants (-'s/-s/-es/-ies/-ed/-ing). When several
+  // .syn records resolve to distinct headwords, their definitions are combined
+  // in dictionary order and capped at MAX_DEFINITION_BYTES. Each headword is
+  // labelled: <h2> in the HTML path, DICTIONARY_PLAIN_HEADWORD_MARKER in the
+  // plain-text path, which draws the marked line in bold. Returns true on a
+  // hit. *outResult (if provided) reports the precise outcome so the UI can
+  // distinguish a genuine miss from a decompression / low-memory / read failure.
   bool lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
               LookupResult* outResult = nullptr);
+
+  // Reload the exact entry, including synonym targets with duplicate headwords.
+  bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr,
+                      bool append = false);
 
   static std::string cleanWord(const char* word);
 
@@ -145,21 +191,27 @@ class Dictionary {
   bool openSynonyms(LookupSession& session);
 
   // Bisect a sampled-offset sidecar (.qidx over .idx, .sidx over .syn) to the
-  // byte offset of the last sampled entry whose word is <= target, so the caller
-  // only has to linear-scan at most SAMPLE_INTERVAL entries from there. Returns
-  // 0 — scan source from the start — when sampleCount is 0 or a sample is
-  // unreadable. Clobbers wordBuf.
+  // byte offset of the last sampled entry whose word is strictly below target,
+  // so the caller scans from there and sees every entry sharing the word — a
+  // headword can be listed several times, and that run may start before the
+  // last sample that is <= target. Returns 0 — scan source from the start —
+  // when sampleCount is 0 or a sample is unreadable. Clobbers wordBuf.
   uint32_t bisectSamples(HalFile& sidecar, HalFile& source, uint32_t sampleCount, const char* target);
 
-  DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  // Every .idx entry whose headword matches target exactly. The .idx is
+  // sorted, so the entries of one headword are adjacent and one scan collects
+  // them all. *readError is set when the scan was cut short by an IO failure,
+  // which is a read failure rather than a miss.
+  void locateAll(LookupSession& session, const char* target, DictEntryList& out, bool* readError);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
-  // the .qidx samples. Used to follow a .syn synonym back to its headword.
-  DictLocation locateByOrdinal(LookupSession& session, uint32_t ordinal, std::string* matchedHeadwordOut);
+  // the .qidx samples. Leaves the resolved headword in wordBuf.
+  DictLocation locateByOrdinal(LookupSession& session, uint32_t ordinal);
 
-  // Bisect the .syn/.sidx synonym index for target; on a hit follow its ordinal
-  // through locateByOrdinal(). Returns not-found when no .syn exists.
-  DictLocation locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  // Scan every .syn/.sidx record for target, following each ordinal through
+  // locateByOrdinal(). Every resolved entry is returned in dictionary order; a
+  // failed synonym read is reported separately from a genuine miss.
+  bool locateSynonyms(LookupSession& session, const char* target, DictEntryList& out, bool* readError);
 
   // One streaming pass over sourcePath writing a sampled-offset sidecar. Each
   // source entry is a NUL-terminated word followed by suffixBytes fixed bytes
@@ -173,9 +225,6 @@ class Dictionary {
   // buildIndex() so each sidecar is rebuilt only when actually stale.
   static bool sidecarIsStale(const std::string& sourcePath, const std::string& sidecarPath, uint32_t magic);
 
-  // Read the definition at location. On failure returns false and, if outResult
-  // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
-  bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
   static void stemVariants(const std::string& word, std::vector<std::string>& out);
 
   // Read a null-terminated word from an open file into buf (max bufSize-1

@@ -70,7 +70,7 @@ int main() {
 
 def sleep_order():
     body = function((ROOT / "lib/hal/HalPowerManager.cpp").read_text(),
-                    "void HalPowerManager::startDeepSleep(HalGPIO& gpio) const")
+                    "void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton) const")
     harness = r"""
 #include <cassert>
 #include <cstdint>
@@ -94,9 +94,11 @@ namespace metalio {bool powerOff() {events+='M';return false;}}
 struct PowerManager {
  static void powerDownRailsForSleep() {assert(held && level==HIGH);events+='R';}
  static void deepSleepUntilPowerButton() {events+='S';}
+ static void armPowerButtonWakeup() {events+='A';}
+ static void deepSleep() {events+='S';}
 };
 }
-struct HalPowerManager {void startDeepSleep(HalGPIO&) const;};
+struct HalPowerManager {void startDeepSleep(HalGPIO&, bool=false) const;};
 """ + body + r"""
 int main() {
  HalGPIO gpio;HalPowerManager{}.startDeepSleep(gpio);
@@ -119,6 +121,86 @@ int main() {
     print("Frontlight/touch/latch sleep ordering and Metalio failed-power-off fallback passed")
 
 
+def sleep_modes():
+    source = (ROOT / "src/activities/boot_sleep/SleepActivity.cpp").read_text()
+    body = function(source, "void SleepActivity::onEnter()")
+    settings = (ROOT / "src/CrossPointSettings.h").read_text()
+    start = settings.index("  enum SLEEP_SCREEN_MODE {")
+    values = settings[start:settings.index("};", start) + 2]
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+constexpr int STR_ENTERING_SLEEP=0;
+#define tr(x) "sleep"
+struct CrossPointSettings {
+""" + values + r"""
+ enum QUICK_RESUME_SLEEP_SCREEN { OFF, QUICK_RESUME_AFTER_TIMEOUT };
+ uint8_t sleepScreen=DARK,quickResumeSleepScreen=OFF,orientation=0;
+} SETTINGS;
+struct {bool lastSleepFromReader=false;} APP_STATE;
+struct {bool inverted=false;bool isInverted() {return inverted;}void setInverted(bool value) {inverted=value;}} display;
+struct HalDisplay {enum {FULL_REFRESH};};
+struct GfxRenderer {
+ enum class Orientation {Portrait};
+ int washes=0,inversions=0;
+ void invertScreen() {++inversions;}
+ void setOrientation(Orientation) {}
+ void clearScreen() {++washes;}
+ void displayBuffer(int) {}
+};
+namespace sleepCover {bool ok=true;bool recover() {return ok;}}
+namespace ReaderUtils {void applyOrientation(GfxRenderer&,uint8_t) {}}
+struct {void drawPopup(GfxRenderer&,const char*) {}} GUI;
+void drawSleepPopupPreservingFrame(GfxRenderer&) {}
+void releaseSdFontCachesForDecode(GfxRenderer&) {}
+struct Activity {void onEnter() {}};
+struct SleepActivity:Activity {
+ bool fromTimeout=false;
+ GfxRenderer renderer;
+ char chosen='?';
+ void renderDefaultSleepScreen() {chosen='D';}
+ void renderCustomSleepScreen() {chosen='I';}
+ void renderCoverSleepScreen() {chosen='C';}
+ void renderLastScreenSleepScreen() {chosen='L';}
+ void renderTransparentCustomSleepScreen() {chosen='T';}
+ void renderBlankSleepScreen() {chosen='B';}
+ void onEnter();
+};
+""" + body + r"""
+int main() {
+ static_assert(CrossPointSettings::TRANSPARENT==7 && CrossPointSettings::TRANSPARENT_CUSTOM==7);
+ static_assert(CrossPointSettings::COVER_TRANSPARENT==8);
+ const char expected[]={'D','D','I','C','B','I','L','T','C'};
+ for(bool reader : {false,true}) for(bool inverted : {false,true}) for(int mode=0;mode<9;++mode) {
+  APP_STATE.lastSleepFromReader=reader;
+  display.inverted=inverted;
+  SETTINGS.sleepScreen=mode;
+  SleepActivity activity;
+  activity.onEnter();
+  const char want=reader && mode==CrossPointSettings::COVER_CUSTOM ? 'C' : expected[mode];
+  assert(activity.chosen==want);
+  if(mode>=6) assert(activity.renderer.washes==0);
+#if FREEINK_DEVICE_READPICO
+  else assert(activity.renderer.washes==1);
+#endif
+ }
+ SETTINGS.sleepScreen=CrossPointSettings::COVER_TRANSPARENT;
+ SETTINGS.quickResumeSleepScreen=CrossPointSettings::QUICK_RESUME_AFTER_TIMEOUT;
+ SleepActivity timeout;timeout.fromTimeout=true;timeout.onEnter();assert(timeout.chosen=='L');
+ sleepCover::ok=false;
+ SleepActivity failed;failed.onEnter();assert(failed.chosen=='D');
+}
+"""
+    with tempfile.TemporaryDirectory(prefix="sleep-modes-") as directory:
+        tmp=Path(directory);(tmp/"check.cpp").write_text("#include <initializer_list>\n"+harness)
+        for pico in (0,1):
+            binary=tmp/f"check-{pico}"
+            subprocess.run(["c++","-std=c++17",f"-DFREEINK_DEVICE_READPICO={pico}",str(tmp/"check.cpp"),"-o",str(binary)],check=True)
+            subprocess.run([str(binary)],check=True)
+    print("Sleep modes 0..8, transparent alias7, cover-overlay8, reader/night and ReadPico wash routing passed")
+
+
 if __name__ == "__main__":
     run()
     sleep_order()
+    sleep_modes()

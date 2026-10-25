@@ -181,19 +181,23 @@ action**.
   before the page sees them, while reader and feature subpages remain outside
   the top-level loop. `SETTINGS.inxTabPosition` places this shared bar at the
   top or bottom; touch devices default to the bottom. In bottom mode, touch
-  devices share a 28 px top status bar across all five main tabs, with the clock
-  on the left and battery on the right. It uses the configured clock format,
-  time zone and battery percentage visibility, and updates only when the page
+  devices share a top status bar across all five main tabs, using Lyra's 10 px
+  top padding and 20 px strip (48 px on high-DPI screens), plus the board's
+  header offset. The clock is on the left and battery on the right, matching
+  the shared header chrome. It respects the header-clock visibility setting,
+  clock validity, format, time zone and battery percentage visibility, and updates only when the page
   renders. Tapping the status bar opens the control center. Its drawing and hit
   region share the main-tab layout, which also reserves viewable margins and
   at least 6 px between the status bar, content and navigation. With top tabs,
   the touch INX Recent page displays only its bottom-right battery inside the
   existing 40 px footer reservation; it neither formats nor draws a footer clock
-  and has no new touch action. Both placements use a 12 px logical-screen-edge
-  inset, clamped to the board's oriented viewable margins rather than added to
-  them. Clock and battery percentage share the numeric font and text baseline;
-  positioning compensates for the battery icon's internal 6 px vertical offset. The clock
-  uses a 9-byte stack buffer. Non-touch devices retain their existing home battery.
+  and has no new touch action. This bottom placement retains its 12 px
+  logical-screen-edge inset and existing battery positioning. Top status chrome
+  instead uses the shared header's side and corner clearance, with battery,
+  clock and percentage centered by their visible ink. INX subpage headers and
+  the non-touch bottom-tab home's top status line use the same chrome, while
+  retaining INX fonts and title/navigation styling. Date headers reserve the
+  space between the clock and battery rather than overprinting either.
   `Activity::mainTabLayout()` resolves complete status, content and navigation
   rectangles in one pass; `pageContentRect()` also owns the normal-header
   fallback, so pages do not repeat the main-tab eligibility/layout calculation.
