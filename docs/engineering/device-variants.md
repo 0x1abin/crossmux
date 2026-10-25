@@ -38,17 +38,33 @@ pio run -e waveshare_epaper_397
 pio run -e metalio_eink4
 pio run -e readpico
 pio run -e lilygo_t5s3
+pio run -e picco
 ```
 
 Eight S3 targets are published by the shared Stable and Nightly matrices, including
 MindReset Read Pico (`readpico-gh_release` and `readpico_nightly`). X4 Classic uses
 its development environment `x4c` in Hardware CI and remains build-only.
-LilyGo T5 S3 adds `lilygo_t5s3` for local development. Neither target joins the
+LilyGo T5 S3 adds `lilygo_t5s3` for local development. Picco adds `picco` with
+its stock partition table and app-only upload; it remains development-only. None of these targets joins the
 public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
+
+### BOOX Picco development target
+
+`picco` is a separate ESP32-S3 development environment, outside CrossMux's
+public Nightly/OTA registry. Its vendor bootloader, partition table, otadata and
+recovery partition must be retained. The board's application-only upload hook
+removes both the extra-image list and operands already captured in PlatformIO's
+upload command. It permits the standard USB esptool application upload and
+rejects full erase, filesystem upload and other upload protocols. Firmware updates use USB;
+Wi-Fi OTA and SD-card `firmware.bin` updates are unavailable on this board.
+Their settings entries and direct activity/backend entry points are disabled.
+The shared SD writer also rejects a destination at the running application's
+flash address, including the single-slot layout, before allocating or erasing.
+Build/host checks do not establish physical display, power or recovery acceptance.
 
 ## Standby-display light sleep
 

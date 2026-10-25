@@ -14,6 +14,12 @@ void OpdsServerStore::toJson(JsonDocument& doc) const {
     obj["url"] = server.url;
     obj["username"] = server.username;
     obj["password_obf"] = obfuscation::obfuscateToBase64(server.password);
+    JsonArray headers = obj["headers"].to<JsonArray>();
+    for (const auto& header : server.customHeaders) {
+      JsonObject headerObj = headers.add<JsonObject>();
+      headerObj["name"] = header.name;
+      headerObj["value_obf"] = obfuscation::obfuscateToBase64(header.value);
+    }
   }
 }
 
@@ -32,6 +38,20 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
     server.url = obj["url"] | "";
     server.username = obj["username"] | "";
     server.password = extractPassword(obj, needsResave);
+
+    size_t headerIndex = 0;
+    for (JsonObjectConst headerObj : obj["headers"].as<JsonArrayConst>()) {
+      if (headerIndex >= OpdsServer::MAX_CUSTOM_HEADERS) break;
+      server.customHeaders[headerIndex].name = headerObj["name"] | "";
+      server.customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "");
+      if ((!server.customHeaders[headerIndex].name.empty() || !server.customHeaders[headerIndex].value.empty()) &&
+          !isValidHttpHeader(server.customHeaders[headerIndex])) {
+        server.customHeaders[headerIndex] = {};
+        needsResave = true;
+      }
+      headerIndex++;
+    }
+
     servers.push_back(std::move(server));
   }
 
@@ -46,6 +66,12 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
 }
 
 bool OpdsServerStore::addServer(const OpdsServer& server) {
+  for (const auto& header : server.customHeaders) {
+    if (!header.name.empty() && !isValidHttpHeader(header)) {
+      LOG_ERR("OPS", "Invalid custom HTTP header");
+      return false;
+    }
+  }
   if (servers.size() >= MAX_SERVERS) {
     LOG_DBG("OPS", "Cannot add more servers, limit of %zu reached", MAX_SERVERS);
     return false;
@@ -57,6 +83,12 @@ bool OpdsServerStore::addServer(const OpdsServer& server) {
 }
 
 bool OpdsServerStore::updateServer(size_t index, const OpdsServer& server) {
+  for (const auto& header : server.customHeaders) {
+    if (!header.name.empty() && !isValidHttpHeader(header)) {
+      LOG_ERR("OPS", "Invalid custom HTTP header");
+      return false;
+    }
+  }
   if (index >= servers.size()) {
     return false;
   }
@@ -81,4 +113,13 @@ const OpdsServer* OpdsServerStore::getServer(size_t index) const {
     return nullptr;
   }
   return &servers[index];
+}
+
+std::vector<HttpDownloader::Header> OpdsServer::activeCustomHeaders() const {
+  std::vector<HttpDownloader::Header> active;
+  active.reserve(MAX_CUSTOM_HEADERS);
+  for (const auto& header : customHeaders) {
+    if (isValidHttpHeader(header)) active.emplace_back(header.name, header.value);
+  }
+  return active;
 }

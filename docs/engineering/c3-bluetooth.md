@@ -60,11 +60,14 @@ which supplies the C3 host configuration, tuned controller-only core and Flash
 controller link script. The existing S3 hardware profiles supply their PSRAM
 host configuration to every firmware flavor, including Stable and Nightly.
 
-The common `ble_host` profile pins NimBLE-Arduino 2.3.8 and SDK compatibility
+The common `ble_host` profile pins NimBLE-Arduino 2.5.1 and SDK compatibility
 middleware. C3 injects `NimbleC3Config.h` into both NimBLE and the SDK host:
 internal RAM, Central/Observer, one connection, four bonds, MTU 23, six blocks
 per mbuf pool (256/320 B), and 12 high-priority events. Pool sizes do not describe
 total runtime heap. S3 retains its PSRAM allocator and IPC wrapper; C3 uses neither.
+
+Historical hardware acceptance records below remain tied to their recorded images
+and library revisions; they do not establish physical acceptance of the 2.5.1 pin.
 
 The controller-only custom core enables `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY`.
 Pioarduino's final Arduino link still needs the matching ESP-IDF

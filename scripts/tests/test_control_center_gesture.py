@@ -24,6 +24,7 @@ class ControlCenterGestureTest(unittest.TestCase):
 #include "activities/MainTab.h"
 #define LOG_ERR(...) ((void)0)
 namespace haptic_feedback { void touchAction() {} }
+struct { bool available=true; bool present() const { return available; } } Frontlight;
 enum { eIncrement };
 void xTaskNotify(int, int, int) {}
 struct Activity {
@@ -112,6 +113,13 @@ int main() {
     check({.name = name, .mainTabs = true},
           {.topSwipe = false, .tap = true, .touch = false}, false, true);
   }
+  Frontlight.available = false;
+  for (const char* name : {"Home", "InxRecent", "EpubReader", "FileBrowser", "Settings", "FrontlightPanel"}) {
+    check({.name = name}, {.light = true}, false, true);
+    check({.name = name}, {.topSwipe = false, .tap = true}, false, true);
+    check({.name = name, .mainTabs = true}, {.light = true, .tap = true}, false, true);
+  }
+  Frontlight.available = true;
   check({}, {.light = true, .suppressed = true}, false, false);
   check({.exclusive = true}, {.light = true}, false, true);
   check({}, {.topSwipe = false}, false, true);

@@ -99,6 +99,7 @@ class Epub {
   BookMetadataCache::SpineEntry getSpineItem(int) const;
   size_t getCumulativeSpineItemSize(int) const;
   size_t getBookSize() const;
+  int getSpineIndexForSize(size_t) const;
   int getSpineIndexForTextReference() const;
   int getLinearSpineItemsCount() const;
   int getSpineIndexForLinearIndex(int) const;
@@ -211,7 +212,7 @@ int main(int argc,char** argv) {
     build("/many",manyFlags,manySizes);Epub many("/many");
     assert(many.getLinearSpineItemsCount()==static_cast<int>((count+1)/3));
     for(size_t i=0;i<count;++i) assert(many.getSpineItem(i).linear==manyFlags[i]);
-    bool value=false;assert(many.bookMetadataCache->getLinear(32,value)==(count<=1024));
+    bool value=false;assert(many.bookMetadataCache->getLinear(32,value));assert(value==manyFlags[32]);
   }
   build("/notes-only",{false,false},{10,20});auto notes=std::make_shared<Epub>("/notes-only");
   assert(notes->getLinearSpineItemsCount()==0&&notes->getSpineIndexForTextReference()==-1);
@@ -231,6 +232,7 @@ def main():
     names = ('int Epub::getSpineItemsCount(', 'bool Epub::isLinearSpineItem(',
              'BookMetadataCache::SpineEntry Epub::getSpineItem(',
              'size_t Epub::getCumulativeSpineItemSize(', 'size_t Epub::getBookSize(',
+             'int Epub::getSpineIndexForSize(',
              'int Epub::getSpineIndexForTextReference(', 'int Epub::getLinearSpineItemsCount(',
              'int Epub::getSpineIndexForLinearIndex(', 'int Epub::getLinearIndexForSpineIndex(',
              'int Epub::getNextLinearSpineIndex(', 'int Epub::getPreviousLinearSpineIndex(',

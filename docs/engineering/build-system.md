@@ -71,6 +71,7 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
   * `metalio_eink4`: Metalio E-Ink 4 ESP32-S3 development build
   * `readpico`: MindReset Read Pico ESP32-S3 development build
   * `lilygo_t5s3`: LilyGo T5 S3 4.7 PRO/Lite ESP32-S3 build-only development build
+  * `picco`: BOOX Picco ESP32-S3 development build, stock partitions and app-only upload
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
@@ -78,8 +79,8 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
   * `simulator_readpico`: Native 1216x684 Read Pico simulator, 684x1216 in portrait
   * `simulator_sticky`: Native Sticky desktop simulator
 
-The committed configuration has 35 environments: development, Stable and Nightly
-for each of the nine published targets, development-only `x4c` and `lilygo_t5s3`,
+The committed configuration has 36 environments: development, Stable and Nightly
+for each of the nine published targets, development-only `x4c`, `lilygo_t5s3` and `picco`,
 and six simulators. S3 Stable environments use `<board>-gh_release`; Nightly uses
 `<board>_nightly`. `mode_dev`, `mode_stable` and `mode_nightly` supply common
 logging and version policy; hardware profiles retain their SDK configuration,
@@ -93,7 +94,7 @@ share the version function and read the revision from Git HEAD.
 The S3 environments are separate hardware binaries, each with unified languages.
 Inspect `bin/ci-check` and current workflow matrices for validation coverage;
 published targets and channels come from `scripts/nightly_targets.py`.
-X4 Classic and LilyGo development builds do not join the public Nightly/OTA set.
+X4 Classic, LilyGo and Picco development builds do not join the public Nightly/OTA set.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware

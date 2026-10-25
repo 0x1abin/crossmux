@@ -822,12 +822,14 @@ int main() {
 enum { eIncrement };
 void xTaskNotify(int,int,int) {}
 namespace haptic_feedback { inline void touchAction(bool=false) {} }
+struct { bool available=true; bool present() const { return available; } } Frontlight;
 struct { void clearTouchTapEvent() {} } gpio;
 struct RenderLock {
   static inline bool busy=false;
   static bool peek() { return busy; }
   void unlock() {}
 };
+namespace bleturner { bool beforeScreenChange(unsigned,bool) { return true; } }
 struct ActivityResult {};
 struct MappedInputManager {
   enum class Button { None,Back,Confirm,Left,Right,Up,Down };
@@ -861,6 +863,8 @@ struct Activity {
   void loop() { ++loops; if(action) action(); }
   bool requiresExclusiveStorageLoop() const { return exclusive; }
   bool isHomeActivity() const { return home; }
+  bool isReaderActivity() const { return false; }
+  bool keepsBluetoothAlive() const { return false; }
   bool handleHomeGesture() const { return false; }
   bool usesMainTabBar() const { return tabs; }
   MainTab mainTab() const { return tab; }
@@ -885,13 +889,15 @@ template<class T,class... Args> auto makeUniqueNoThrow(Args&&... args) {
 struct { bool standbyShortcutEnabled=true; } SETTINGS;
 struct ActivityManager {
 ''' + header[state_start:state_end] + r'''
-  enum class PendingAction { None,Push,Pop,Replace };
+  enum class PendingAction { None,Push,Pop,Replace,ReplaceForSleep };
   std::atomic<PendingAction> pendingAction{PendingAction::None};
   std::atomic<bool> requestedUpdate{false};
   std::unique_ptr<Activity> currentActivity,pendingActivity;
   std::vector<std::unique_ptr<Activity>> stackActivities;
   MappedInputManager mappedInput;
   MainTabFocus mainTabFocus=MainTabFocus::Tabs;
+  unsigned screenVisit=0;
+  bool keepsBluetoothAlive() const { return false; }
   bool mainTabEntryReleasePending=false;
   bool mainTabTouchFocusPending=false;
   int renderer=0,renderTaskHandle=0,standbyCalls=0;
@@ -1013,6 +1019,16 @@ int main() {
       book.tick({.released=releaseWithTap,.held=!releaseWithTap,.tap=true,.x=100,.y=200});
       assert(book.currentActivity->name=="Reader" && book.standbyCalls==0);
     }
+    ActivityManager missingLight(theme);
+    Frontlight.available=false;
+    missingLight.tick({.light=true});
+    assert(missingLight.currentActivity->name!="FrontlightPanel" && missingLight.stackActivities.empty());
+    missingLight.tick({.tap=true,.x=100,.y=10});
+    assert(missingLight.currentActivity->name!="FrontlightPanel" && missingLight.stackActivities.empty());
+    Frontlight.available=true;
+    missingLight.tick({.light=true});
+    assert(missingLight.currentActivity->name=="FrontlightPanel");
+
     ActivityManager panel(theme);
     panel.mappedInput={.held=true};panel.resetHomeStandbyInput();
     panel.tick({.held=true,.tap=true,.x=100,.y=10});
@@ -1138,7 +1154,12 @@ struct UITheme {
 };
 #define GUI UITheme::getInstance().getTheme()
 struct RenderLock {};
-namespace freeink::ui { using Rect=::Rect; constexpr int InputTouch=1,InputLongPress=2; }
+namespace freeink::ui {
+struct Rect : ::Rect {
+ Rect(int x,int y,int width,int height) : ::Rect{x,y,width,height} {}
+};
+constexpr int InputTouch=1,InputLongPress=2;
+}
 struct UiScreen {
   struct Frame { void hit(Rect,int,int,int) {} } f;
   Frame& frame(){return f;}

@@ -15,6 +15,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "components/CoverGridHomeUi.h"
+#include "components/UIThemeTokens.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
@@ -36,6 +37,7 @@ EpdFont ui12BoldFont(&ubuntu_12_bold);
 #endif
 
 extern EpdFont offlineReaderFont;
+extern void reloadSmallUiFont(bool inxTheme);
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
 EpdFont ui18RegularFont(&notosans_16_regular);
 EpdFont ui18BoldFont(&notosans_16_bold);
@@ -133,6 +135,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     currentMetrics = nextMetrics;
     currentType = type;
   }
+  reloadSmallUiFont(currentType == CrossPointSettings::INX);
   metricsValid = false;
 }
 
@@ -217,6 +220,16 @@ Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButton
       break;
   }
   return safeArea;
+}
+
+Rect UITheme::getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints,
+                            const bool upstreamStyle) {
+  const Rect safe = getScreenSafeArea(renderer, hasFrontButtonHints, hasSideButtonHints);
+  const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
+  if (hasMainTabs()) return Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight};
+  const Rect content = getContentArea(renderer);
+  return Rect{safe.x - content.x, safe.y - content.y + metrics.topPadding,
+              safe.width + renderer.getScreenWidth() - content.width, metrics.headerHeight};
 }
 
 std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int coverHeight) {

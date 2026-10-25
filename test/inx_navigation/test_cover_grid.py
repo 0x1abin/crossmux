@@ -30,7 +30,8 @@ program = r'''
 #include <iterator>
 #define LOG_DBG(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
-bool psram = false, oom = false;
+bool psram = false, oom = false, smallInx = false;
+void reloadSmallUiFont(bool inx){smallInx=inx;}
 struct CrossPointSettings { @ENUM@ int uiTheme=0; } SETTINGS;
 enum class StrId { @IDS@ };
 struct HalMemory { struct Heap {size_t totalBytes;}; static Heap getPsramHeap(){return {psram?8388608u:0u};} };
@@ -70,6 +71,7 @@ int main(){
   assert(ui18BoldFont.data==(inx?&fallback:&notosans_18_bold));
   assert(ui10RegularFont.data==&ubuntu_10_regular && ui10BoldFont.data==&ubuntu_10_bold);
   assert(ui12RegularFont.data==&ubuntu_12_regular && ui12BoldFont.data==&ubuntu_12_bold);
+  assert(smallInx==(theme.currentType==CrossPointSettings::INX));
   assert(SETTINGS.uiTheme==saved);
   assert(theme.currentType==(saved==6&&!psram?1:saved));
   assert(UITheme::hasCoverGridHome()==(saved==6&&psram));
@@ -79,7 +81,7 @@ int main(){
  }
  oom=true; SETTINGS.uiTheme=6; UITheme theme; theme.setTheme(CrossPointSettings::COVER_GRID);
  assert(theme.currentTheme==&theme.fallbackTheme && theme.currentType==CrossPointSettings::CLASSIC);
- assert(SETTINGS.uiTheme==6);
+ assert(SETTINGS.uiTheme==6 && !smallInx);
 }
 '''
 for key, value in {'ENUM':enum,'IDS':','.join(ids),'LABELS':label_method,

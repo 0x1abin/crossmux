@@ -126,6 +126,7 @@ int main() {
 unsigned long millis() { return 100; }
 struct RenderLock { RenderLock() {} };
 namespace Txt { bool isTxtOrMd(const std::string&) { return false; } }
+namespace bleturner { void acknowledgeLinkNote() {} }
 struct Epub {
  struct Item { bool linear=true; };
  std::vector<Item> items={{true},{false},{true},{false},{true},{false}};

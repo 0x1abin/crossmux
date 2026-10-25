@@ -1,0 +1,45 @@
+#include "OpdsHttpTransport.h"
+
+#include <ResumableFetch.h>
+
+#include "network/HttpDownloader.h"
+#include "util/UrlUtils.h"
+
+namespace fo = freeink::opds;
+
+void OpdsHttpTransport::setServerUrl(const std::string& url) { serverOrigin = freeink::fetchOrigin(url); }
+
+// Consume downloadAuth()'s temporary and move it out without copying credentials.
+// cppcheck-suppress passedByValue
+fo::HttpAuth OpdsHttpTransport::authFor(const std::string& url, fo::HttpAuth auth) const {
+  if (serverOrigin.empty() || freeink::fetchOrigin(url) != serverOrigin) return {};
+  return auth;
+}
+
+fo::HttpResult OpdsHttpTransport::get(const std::string& url, const fo::HttpAuth& auth, const char* accept,
+                                      const char* acceptLanguage, const bool captureErrorBody,
+                                      const fo::OpdsDataSink& onChunk) {
+  int status = 0;
+  HttpDownloader::FetchOptions options;
+  if (!serverOrigin.empty() && freeink::fetchOrigin(url) == serverOrigin) {
+    options.username = auth.username;
+    options.password = auth.password;
+    options.bearer = auth.bearer;
+    options.headers = auth.headers;
+  }
+  if (accept) options.accept = accept;
+  if (acceptLanguage) options.acceptLanguage = acceptLanguage;
+  options.captureErrorBody = captureErrorBody;
+  options.statusOut = &status;
+  const bool ok = HttpDownloader::fetchUrl(url, onChunk, options);
+  return fo::HttpResult{ok, status};
+}
+
+bool OpdsHttpTransport::postForm(const std::string& url, const std::string& body, std::string& outResponse,
+                                 int& outStatus) {
+  return HttpDownloader::postForm(url, body, outResponse, &outStatus);
+}
+
+std::string OpdsHttpTransport::resolveUrl(const std::string& base, const std::string& ref) {
+  return UrlUtils::buildUrl(base, ref);
+}

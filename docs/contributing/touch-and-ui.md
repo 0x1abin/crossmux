@@ -184,11 +184,12 @@ Select a checked-in environment before adding a local profile:
 | Waveshare ePaper 3.97 | `waveshare_epaper_397` | ESP32-S3 |
 | Metalio E-Ink 4 / Read Pico | `metalio_eink4` / `readpico` | ESP32-S3 |
 | LilyGo T5 S3 4.7 PRO/Lite | `lilygo_t5s3` | ESP32-S3 |
+| Onyx BOOX Picco | `picco` | ESP32-S3 |
 
 Build with `pio run -e <environment>`. X3/X4 share a runtime-selected image;
 S3 board profiles have separate images. These are build environments, not a
 publication or physical-acceptance matrix. The Nightly/OTA registry stays in
-[`nightly_targets.py`](../../scripts/nightly_targets.py); X4 Classic and LilyGo
+[`nightly_targets.py`](../../scripts/nightly_targets.py); X4 Classic, LilyGo and Picco
 remain outside it. Additional [SDK profiles](../../freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h)
 do not establish CrossMux product support.
 

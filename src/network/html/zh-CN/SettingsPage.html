@@ -200,7 +200,6 @@
   <!--#include file="../shared/Header.zh-CN.html.inc" -->
 <main class="page-content">
 
-  <div id="message" class="toast"></div>
 
   <div id="settings-container">
     <div class="loader-container">
@@ -237,13 +236,6 @@
       .replaceAll("'", "&#039;");
   }
 
-  function showMessage(text, isError) {
-    const msg = document.getElementById('message');
-    msg.textContent = text;
-    msg.className = 'message ' + (isError ? 'error' : 'success');
-    msg.style.display = 'block';
-    setTimeout(function() { msg.style.display = 'none'; }, 4000);
-  }
 
   function renderControl(setting) {
     const id = 'setting-' + setting.key;
@@ -479,7 +471,7 @@
     });
 
     if (Object.keys(changes).length === 0) {
-      showMessage('没有需要保存的更改。', false);
+      showWebToast('没有需要保存的更改。', false);
       btn.textContent = '保存设置';
       return;
     }
@@ -501,10 +493,10 @@
         originalValues[key] = changes[key];
       }
 
-      showMessage('设置已保存。', false);
+      showWebToast('设置已保存。', false);
     } catch (e) {
       console.error(e);
-      showMessage('错误：' + e.message, true);
+      showWebToast('错误：' + e.message, true);
     }
 
     btn.textContent = '保存设置';
@@ -582,7 +574,7 @@
     const id = idx === -1 ? 'new' : idx;
     const ssid = document.getElementById('wifi-ssid-' + id).value.trim();
     if (!ssid) {
-      showMessage('请输入 SSID。', true);
+      showWebToast('请输入 SSID。', true);
       return;
     }
 
@@ -600,15 +592,15 @@
         body: JSON.stringify(data)
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('Wi-Fi 网络已保存。', false);
+      showWebToast('Wi-Fi 网络已保存。', false);
       await loadWifiNetworks();
     } catch (e) {
-      showMessage('错误：' + e.message, true);
+      showWebToast('错误：' + e.message, true);
     }
   }
 
   async function deleteWifiNetwork(idx) {
-    if (!confirm('确定删除这个 Wi-Fi 网络吗？')) return;
+    if (!await showWebConfirm('确定删除这个 Wi-Fi 网络吗？')) return;
     try {
       const resp = await fetch('/api/wifi/delete', {
         method: 'POST',
@@ -616,10 +608,10 @@
         body: JSON.stringify({index: idx})
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('Wi-Fi 网络已删除。', false);
+      showWebToast('Wi-Fi 网络已删除。', false);
       await loadWifiNetworks();
     } catch (e) {
-      showMessage('错误：' + e.message, true);
+      showWebToast('错误：' + e.message, true);
     }
   }
 
@@ -628,6 +620,26 @@
   // /api/opds REST endpoints. Password fields are never pre-filled for security;
   // the "(unchanged)" placeholder indicates an existing password is preserved on save.
   let opdsServers = [];
+
+  const OPDS_MAX_CUSTOM_HEADERS = 2;
+
+  function renderOpdsHeaderRows(srv, id) {
+    const headers = srv.headers || [];
+    let html = '';
+    for (let i = 0; i < OPDS_MAX_CUSTOM_HEADERS; i++) {
+      const header = headers[i] || {name: '', hasValue: false};
+      html +=
+        '<div class="setting-row">' +
+          '<span class="setting-name">请求头 ' + (i + 1) + ' 名称</span>' +
+          '<span class="setting-control"><input type="text" id="opds-header' + i + '-name-' + id + '" value="' + escapeHtml(header.name || '') + '"></span>' +
+        '</div>' +
+        '<div class="setting-row">' +
+          '<span class="setting-name">请求头 ' + (i + 1) + ' 值</span>' +
+          '<span class="setting-control"><input type="password" id="opds-header' + i + '-value-' + id + '" placeholder="' + (header.hasValue ? '（保持不变）' : '') + '"></span>' +
+        '</div>';
+    }
+    return html;
+  }
 
   function renderOpdsServer(srv, idx) {
     const isNew = idx === -1;
@@ -649,6 +661,7 @@
         '<span class="setting-name">密码</span>' +
         '<span class="setting-control"><input type="password" id="opds-pass-' + id + '" placeholder="' + (srv.hasPassword ? '（保持不变）' : '') + '"></span>' +
       '</div>' +
+      renderOpdsHeaderRows(srv, id) +
       '<div class="opds-actions">' +
         '<button class="btn-small btn-save-server" onclick="saveOpdsServer(' + idx + ')">保存</button>' +
         (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteOpdsServer(' + idx + ')">删除</button>') +
@@ -691,7 +704,7 @@
     const addBtn = card.querySelector('.btn-add').parentElement;
     // Prevent multiple unsaved new-server forms at once (idx -1 → id "new")
     if (document.getElementById('opds-new')) return;
-    addBtn.insertAdjacentHTML('beforebegin', renderOpdsServer({name:'',url:'',username:'',hasPassword:false}, -1));
+    addBtn.insertAdjacentHTML('beforebegin', renderOpdsServer({name:'',url:'',username:'',hasPassword:false,headers:[]}, -1));
   }
 
   async function saveOpdsServer(idx) {
@@ -705,6 +718,20 @@
     // omitting it tells the server to keep the existing password.
     const pass = document.getElementById('opds-pass-' + id).value;
     if (pass) data.password = pass;
+
+    // Same rule per header: omit "value" to keep that slot's existing value unchanged.
+    const headers = [];
+    for (let i = 0; i < OPDS_MAX_CUSTOM_HEADERS; i++) {
+      const name = document.getElementById('opds-header' + i + '-name-' + id).value.trim();
+      const value = document.getElementById('opds-header' + i + '-value-' + id).value;
+      const header = {name: name};
+      // Also send an explicit (empty) value when the name was cleared, so the
+      // server can tell "delete this header" apart from "leave value unchanged".
+      if (value || !name) header.value = value;
+      headers.push(header);
+    }
+    data.headers = headers;
+
     if (idx >= 0) data.index = idx;
 
     try {
@@ -714,15 +741,15 @@
         body: JSON.stringify(data)
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('OPDS 服务器已保存。', false);
+      showWebToast('OPDS 服务器已保存。', false);
       await loadOpdsServers();
     } catch (e) {
-      showMessage('错误：' + e.message, true);
+      showWebToast('错误：' + e.message, true);
     }
   }
 
   async function deleteOpdsServer(idx) {
-    if (!confirm('确定删除这个 OPDS 服务器吗？')) return;
+    if (!await showWebConfirm('确定删除这个 OPDS 服务器吗？')) return;
     try {
       const resp = await fetch('/api/opds/delete', {
         method: 'POST',
@@ -730,10 +757,10 @@
         body: JSON.stringify({index: idx})
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('OPDS 服务器已删除。', false);
+      showWebToast('OPDS 服务器已删除。', false);
       await loadOpdsServers();
     } catch (e) {
-      showMessage('错误：' + e.message, true);
+      showWebToast('错误：' + e.message, true);
     }
   }
 
