@@ -1,0 +1,185 @@
+name: Repair 1.6.5 Stable catalog
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: firmware-stable-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Capture indexes, Release attachments and annotated tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/repair_stable_165.py capture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-165-before-repair
+          path: repair/backup
+          if-no-files-found: error
+          retention-days: 30
+      - name: Download only the original four Stable target artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r target; do
+            gh run download 40158384505 --repo "$GITHUB_REPOSITORY" \
+              --name "firmware-stable-$target" --dir "repair/artifacts/$target"
+          done < <(python3 -c 'import sys; sys.path.insert(0,"scripts"); from nightly_targets import targets_for; print("\n".join(targets_for("stable")))')
+      - name: Verify original images and corrected regional indexes locally
+        run: python3 scripts/repair_stable_165.py prepare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-165-repair-metadata
+          path: |
+            repair/backup
+            repair/global
+            repair/cn
+          if-no-files-found: error
+          retention-days: 30
+
+  publish_global:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-165-repair-metadata
+          path: repair
+      - name: Replace only rolling and versioned Stable indexes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_stable_165.py guard --region global
+          gh release upload stable repair/global/release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload 1.6.5 repair/global/release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+
+  publish_cn:
+    needs: prepare
+    runs-on: [self-hosted, Linux, X64, h2o]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-165-repair-metadata
+          path: repair
+      - name: Install verified COS CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 -o "$RUNNER_TEMP/coscli"
+          echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" | sha256sum --check -
+          chmod 0755 "$RUNNER_TEMP/coscli"
+      - name: Replace only the China Stable index
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+          COS_BUCKET: ${{ secrets.COS_BUCKET }}
+          COS_REGION: ${{ secrets.COS_REGION }}
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_stable_165.py guard --region cn
+          cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" -e "cos.${COS_REGION}.myqcloud.com")
+          [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
+          "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" repair/cn/release-index.json \
+            "cos://${COS_BUCKET}/firmware/releases/stable/index.json" --meta 'Cache-Control:no-cache' \
+            --fail-output-path "$RUNNER_TEMP/repair-cos-errors"
+
+  verify:
+    needs: [publish_global, publish_cn]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      content_failure: ${{ steps.verify.outputs.content_failure }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-165-repair-metadata
+          path: repair
+      - name: Verify both regions and protected releases before removing ZIPs
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/repair_stable_165.py verify
+      - name: Retire only the five withdrawn ZIPs from human-facing releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/repair_stable_165.py retire
+
+  rollback_global:
+    if: ${{ always() && needs.verify.outputs.content_failure == 'true' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-165-repair-metadata
+          path: repair
+      - name: Restore backed-up GitHub indexes after a content validation failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_stable_165.py guard --region global
+          mkdir -p repair/rollback
+          cp repair/backup/stable-global.json repair/rollback/release-index.json
+          gh release upload stable repair/rollback/release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+          cp repair/backup/version-index.json repair/rollback/release-index.json
+          gh release upload 1.6.5 repair/rollback/release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+
+  rollback_cn:
+    if: ${{ always() && needs.verify.outputs.content_failure == 'true' }}
+    needs: verify
+    runs-on: [self-hosted, Linux, X64, h2o]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-165-repair-metadata
+          path: repair
+      - name: Install verified COS CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64 -o "$RUNNER_TEMP/coscli"
+          echo "7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91  $RUNNER_TEMP/coscli" | sha256sum --check -
+          chmod 0755 "$RUNNER_TEMP/coscli"
+      - name: Restore the backed-up China Stable index after a content validation failure
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+          COS_BUCKET: ${{ secrets.COS_BUCKET }}
+          COS_REGION: ${{ secrets.COS_REGION }}
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_stable_165.py guard --region cn
+          cos_args=(--init-skip --disable-log -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" -e "cos.${COS_REGION}.myqcloud.com")
+          [ -z "$COS_SESSION_TOKEN" ] || cos_args+=(--token "$COS_SESSION_TOKEN")
+          "$RUNNER_TEMP/coscli" cp "${cos_args[@]}" repair/backup/stable-cn.json \
+            "cos://${COS_BUCKET}/firmware/releases/stable/index.json" --meta 'Cache-Control:no-cache' \
+            --fail-output-path "$RUNNER_TEMP/repair-cos-errors"

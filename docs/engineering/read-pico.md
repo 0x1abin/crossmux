@@ -75,11 +75,11 @@ ghosting, power or sleep/wake acceptance items below.
 
 ### Stable, Nightly and Web release integration
 
-Read Pico is included in the shared target table as `readpico`, using
-`readpico-gh_release` for Stable (`<version>`) and `readpico_nightly` for Nightly
-(`<version>-rc+<sha7>`). Both inherit the same board profile and release logging;
-neither waits for a USB Serial connection at boot. Stable packages become
-available with the next formal release after the new pipeline is enabled.
+Read Pico is included in the shared target table as `readpico` and publishes
+only Nightly through `readpico_nightly` (`<version>-rc+<sha7>`). The local
+`readpico-gh_release` mode (`<version>`) remains available but is not eligible
+for official Stable packaging. Both modes inherit the same board profile and
+release logging; neither waits for a USB Serial connection at boot.
 
 Packaging emits one ESP32-S3 binary set, a checksum file, `global` / `zh-CN`
 compatibility manifests referencing the same assets, and a complete installation

@@ -79,13 +79,23 @@ class NightlyTargetTest(unittest.TestCase):
             )
         self.assertEqual(urlopen.call_count, 2)
 
-    def test_both_channels_have_the_same_nine_targets(self):
+    def test_exact_channel_release_targets(self):
+        stable = {'xteink_x4', 'sticky', 'xteink_x4_pro', 'metalio_eink4'}
         for channel in nightly_targets.CHANNELS:
+            expected = stable if channel == 'stable' else set(nightly_targets.TARGETS)
             matrix = package_nightly_target.matrix(channel)['include']
             with self.subTest(channel=channel):
-                self.assertEqual(len(matrix), 9)
-                self.assertEqual({entry['targetId'] for entry in matrix}, set(nightly_targets.TARGETS))
-                self.assertEqual(len({entry['environment'] for entry in matrix}), 9)
+                self.assertEqual({entry['targetId'] for entry in matrix}, expected)
+                self.assertEqual(len(matrix), len(expected))
+                self.assertEqual(len({entry['environment'] for entry in matrix}), len(expected))
+
+    def test_nightly_only_targets_cannot_be_packaged_as_stable(self):
+        for target_id in set(nightly_targets.TARGETS) - {'xteink_x4', 'sticky', 'xteink_x4_pro', 'metalio_eink4'}:
+            with self.subTest(target=target_id), tempfile.TemporaryDirectory() as temp:
+                output = Path(temp) / 'output'
+                with self.assertRaisesRegex(SystemExit, 'does not support the stable channel'):
+                    package_nightly_target.package_target(Path(temp), target_id, 'stable', output)
+                self.assertFalse(output.exists())
 
     def test_runtime_models_and_board_tags_are_explicit(self):
         targets = nightly_targets.TARGETS
@@ -105,7 +115,7 @@ class NightlyTargetTest(unittest.TestCase):
         self.assertEqual(target['models'], ['readpico', 'read_pico'])
         self.assertEqual(target['chip'], 'ESP32-S3')
         self.assertEqual(target['boardTag'], 'readpico')
-        self.assertEqual(target['supportedChannels'], ['stable', 'nightly'])
+        self.assertEqual(target['supportedChannels'], ['nightly'])
         for flavor in nightly_targets.FLAVOR_TOKENS:
             self.assertEqual(nightly_targets.environment_for('readpico', 'nightly', flavor), 'readpico_nightly')
             self.assertEqual(nightly_targets.environment_for('readpico', 'stable', flavor), 'readpico-gh_release')
@@ -250,7 +260,7 @@ class NightlyTargetTest(unittest.TestCase):
 
     def test_all_target_channel_packages_have_one_binary_set_and_compatible_manifests(self):
         for target_id, target in nightly_targets.TARGETS.items():
-            for channel in nightly_targets.CHANNELS:
+            for channel in target['supportedChannels']:
                 with self.subTest(target=target_id, channel=channel), tempfile.TemporaryDirectory() as temp:
                     root = Path(temp)
                     version = '1.6.0' if channel == 'stable' else '1.6.0-rc+aaaaaaa'
@@ -299,7 +309,7 @@ class NightlyTargetTest(unittest.TestCase):
                                      ['bootloader', 'partitions', 'boot_app0', 'firmware'])
                     self.assertEqual(manifests[0]['channel'], channel)
                     self.assertEqual(manifests[0]['version'], version)
-                    self.assertEqual(manifests[0]['supportedChannels'], ['stable', 'nightly'])
+                    self.assertEqual(manifests[0]['supportedChannels'], target['supportedChannels'])
                     bundle = output / nightly_targets.bundle_name(target_id, version)
                     with zipfile.ZipFile(bundle) as archive:
                         self.assertEqual(set(archive.namelist()), {path.name for path in output.iterdir()} - {bundle.name})
@@ -549,7 +559,7 @@ class NightlyIndexTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'invalid sticky/global manifest'):
             build_nightly_index.build_index(self.root, 'global', 'https://example.com/', 'now', 'test', 'nightly')
 
-    def test_stable_index_requires_notes_and_contains_all_targets(self):
+    def test_stable_index_requires_notes_and_contains_eligible_targets(self):
         self.write_all_pairs(channel='stable')
         with self.assertRaisesRegex(ValueError, 'Stable release notes are required'):
             build_nightly_index.build_index(
@@ -559,7 +569,7 @@ class NightlyIndexTest(unittest.TestCase):
         index = build_nightly_index.build_index(
             self.root, 'global', 'https://example.com/', 'now', 'test', 'stable', notes
         )
-        self.assertEqual(set(index['targets']), set(nightly_targets.TARGETS))
+        self.assertEqual(set(index['targets']), {'xteink_x4', 'sticky', 'xteink_x4_pro', 'metalio_eink4'})
         self.assertEqual(index['releaseNotes'], {'global': notes['en'], 'zh-CN': notes['zh']})
 
     def test_rejects_incomplete_target_set(self):
@@ -824,11 +834,12 @@ class PublishedNightlyTest(unittest.TestCase):
             if url.endswith(('.bin', '.zip')):
                 self.assertEqual(self.fetches[url], 1)
 
-    def test_verifies_stable_with_the_same_targets_and_four_assets(self):
+    def test_verifies_four_stable_targets_and_sixteen_assets(self):
         self.prepare_release('stable')
         result = verify_nightly_release.verify_release(self.index_url, self.current_sha, 'stable', self.fetch)
-        self.assertEqual(result['targets'], 9)
-        self.assertEqual(result['assets'], 36)
+        self.assertEqual(result['targets'], 4)
+        self.assertEqual(result['assets'], 16)
+        self.assertEqual(result['bundles'], 4)
 
     def local_release(self, root, region='global'):
         artifacts = root / 'artifacts'
@@ -876,7 +887,8 @@ class PublishedNightlyTest(unittest.TestCase):
                         verify_nightly_release.urllib.request, 'urlopen', side_effect=AssertionError('network')
                     ), mock.patch('builtins.print') as output:
                         verify_nightly_release.main()
-                    self.assertIn('36 assets plus 9 ZIP bundles', output.call_args.args[0])
+                    self.assertIn('16 assets plus 4 ZIP bundles' if channel == 'stable' else '36 assets plus 9 ZIP bundles',
+                                  output.call_args.args[0])
 
     def test_local_missing_ambiguous_or_corrupt_artifacts_fail_without_remote_fallback(self):
         for failure in ('missing', 'ambiguous', 'corrupt'):

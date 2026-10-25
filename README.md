@@ -27,16 +27,16 @@
 | Xteink X3 / X4 (shared image) | ESP32-C3 | Stable, Nightly |
 | [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Stable, Nightly |
 | Xteink X4 Pro | ESP32-S3 | Stable, Nightly |
-| M5Stack Paper Mono | ESP32-S3 | Stable, Nightly |
-| eego A4 | ESP32-S3 | Stable, Nightly |
-| Murphy M4 | ESP32-S3 | Stable, Nightly |
-| Waveshare ePaper 3.97 | ESP32-S3 | Stable, Nightly |
+| M5Stack Paper Mono | ESP32-S3 | Nightly |
+| eego A4 | ESP32-S3 | Nightly |
+| Murphy M4 | ESP32-S3 | Nightly |
+| Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
 | [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable, Nightly |
-| [Read Pico (小纸 Pico)](./docs/engineering/read-pico.md) | ESP32-S3 | Stable, Nightly |
+| [Read Pico (小纸 Pico)](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
-All nine targets are configured for both channels. Availability depends on a successful publication in the selected regional catalog; newly enabled Stable packages arrive with the next formal release after the pipeline rollout. This configuration does not establish hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`) and [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`) remain development-only. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
+Stable publishes only X3/X4, Sticky, X4 Pro and Metalio E-Ink 4. All nine targets publish Nightly. Local Stable build modes do not grant release eligibility; availability follows the selected regional catalog. This configuration does not establish hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`) and [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`) remain development-only. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
 
-Use [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable) for formal releases, or [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly) for development builds. Both channels use the same target and package rules. The [target table](./scripts/nightly_targets.py) defines channels and artifact names; [release architecture](./docs/engineering/firmware-release.md) explains packaging and OTA. Current source version and build environments live in [platformio.ini](./platformio.ini).
+Use [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable) for formal releases, or [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly) for development builds. Both channels use the same package rules, with separate eligible target sets. The [target table](./scripts/nightly_targets.py) defines channels and artifact names; [release architecture](./docs/engineering/firmware-release.md) explains packaging and OTA. Current source version and build environments live in [platformio.ini](./platformio.ini).
 
 ## Install firmware
 
@@ -81,7 +81,7 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 35 build entries: Dev, Stable and Nightly for each of the nine release targets, two development-only boards and six simulators. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
+The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 35 build entries: local Dev, Stable and Nightly modes for nine hardware targets, two development-only boards and six simulators. Only the four targets listed above are eligible for Stable publication. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
 
 For X4 Pro and Metalio E-Ink 4:
 
@@ -109,7 +109,7 @@ pio run -e readpico
 
 On Windows, set `PYTHONIOENCODING=utf-8` before running `pio`, otherwise the build can stall when PlatformIO prints the Arabic i18n language row.
 
-The application is `.pio/build/readpico/firmware.bin`. First installation is a **full-table flash** — `bootloader@0x0`, `partitions@0x8000`, `boot_app0@0xe000`, `app@0x10000` — after a verified full-chip (16 MiB) backup, because the repository partition table and the board's factory `partitions_16M.csv` disagree at `0xE000` and use different app-slot sizes. Stable/Nightly configuration does not close physical acceptance. See the [Read Pico guide](./docs/engineering/read-pico.md) for the pin map, the frozen build flags and the pending acceptance checklist.
+The application is `.pio/build/readpico/firmware.bin`. First installation is a **full-table flash** — `bootloader@0x0`, `partitions@0x8000`, `boot_app0@0xe000`, `app@0x10000` — after a verified full-chip (16 MiB) backup, because the repository partition table and the board's factory `partitions_16M.csv` disagree at `0xE000` and use different app-slot sizes. Read Pico is published on Nightly only. Its local Stable build mode does not enable official publication or close physical acceptance. See the [Read Pico guide](./docs/engineering/read-pico.md) for the pin map, the frozen build flags and the pending acceptance checklist.
 
 ### Desktop simulator
 

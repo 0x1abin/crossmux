@@ -76,7 +76,7 @@ TARGETS = {
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
         'environments': {'stable': 'papermono-gh_release', 'nightly': 'papermono_nightly'},
-        'supportedChannels': ['stable', 'nightly'],
+        'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
     'eego_a4': {
@@ -93,7 +93,7 @@ TARGETS = {
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
         'environments': {'stable': 'eego_a4-gh_release', 'nightly': 'eego_a4_nightly'},
-        'supportedChannels': ['stable', 'nightly'],
+        'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
     'murphy_m4': {
@@ -110,7 +110,7 @@ TARGETS = {
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
         'environments': {'stable': 'murphy_m4-gh_release', 'nightly': 'murphy_m4_nightly'},
-        'supportedChannels': ['stable', 'nightly'],
+        'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
     'waveshare_epaper_397': {
@@ -127,7 +127,7 @@ TARGETS = {
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
         'environments': {'stable': 'waveshare_epaper_397-gh_release', 'nightly': 'waveshare_epaper_397_nightly'},
-        'supportedChannels': ['stable', 'nightly'],
+        'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
     'metalio_eink4': {
@@ -173,7 +173,7 @@ TARGETS = {
         'chip': 'ESP32-S3',
         'chipId': 0x0009,
         'environments': {'stable': 'readpico-gh_release', 'nightly': 'readpico_nightly'},
-        'supportedChannels': ['stable', 'nightly'],
+        'supportedChannels': ['nightly'],
         'fullInstall': True,
     },
 }
