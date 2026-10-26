@@ -96,6 +96,30 @@ TEST(KoreanLineBreaking, HyphenationOnSplitsBetweenDigitAndHangul) {
   EXPECT_EQ(wordsOf(lines), expected);
 }
 
+TEST(KoreanLineBreaking, MixedScriptsKeepBoundariesTouchingHangulTogether) {
+  const auto lines = layout({"ab中가나國cd文"}, false, 300);
+  const std::vector<std::vector<std::string>> expected{{"ab", "中가나國", "cd", "文"}};
+  EXPECT_EQ(wordsOf(lines), expected);
+}
+
+TEST(KoreanLineBreaking, ExplicitHyphensBeforeFirstCjkCharacterRemainBreaks) {
+  const auto lines = layout({"ab-cd가-나中"}, false, 300);
+  const std::vector<std::vector<std::string>> expected{{"ab-", "cd가-", "나中"}};
+  EXPECT_EQ(wordsOf(lines), expected);
+}
+
+TEST(KoreanLineBreaking, LatinHyphenRunsKeepTheNonCjkPath) {
+  const auto lines = layout({"ab--cd"}, false, 300);
+  const std::vector<std::vector<std::string>> expected{{"ab--", "cd"}};
+  EXPECT_EQ(wordsOf(lines), expected);
+}
+
+TEST(KoreanLineBreaking, CombiningMarksAndCjkPunctuationStayAttached) {
+  const auto lines = layout({"（中）文\xCC\x81字"}, false, 300);
+  const std::vector<std::vector<std::string>> expected{{"（中）", "文\xCC\x81", "字"}};
+  EXPECT_EQ(wordsOf(lines), expected);
+}
+
 // Preserve GTest fatal assertions inside the upstream inspection callbacks while
 // propagating a failed inspection through CrossMux's fallible layout callback.
 template <typename Inspect>

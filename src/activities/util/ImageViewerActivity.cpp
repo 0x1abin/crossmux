@@ -13,6 +13,7 @@
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/SleepCover.h"
@@ -40,6 +41,7 @@ RenderConfig fitImage(const ImageDimensions& dimensions, const GfxRenderer& rend
   config.useExactDimensions = true;
   return config;
 }
+
 }  // namespace
 
 ImageViewerActivity::ImageViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path)
@@ -401,21 +403,23 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool tra
   if (!imageReady) return;
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
+  const bool coverOverlay = transparent && SETTINGS.sleepScreen == CrossPointSettings::COVER_TRANSPARENT;
+  const char* partPath = coverOverlay ? sleepCover::overlayPartPath : SLEEP_IMAGE_PART_PATH;
   const char* preparedPath = sourcePath;
   bool success = sleepCover::recover();
-  if (success && transparent) {
+  if (success && transparent && FsHelpers::hasPngExtension(std::string_view{sourcePath})) {
     GfxRenderer::FrameBufferLoan loan(renderer);
     success = PngToBmpConverter::pngFileToTransparentBmpFile(sourcePath, TRANSPARENT_PREVIEW_PATH, true);
     if (success) preparedPath = TRANSPARENT_PREVIEW_PATH;
   }
 
-  if (Storage.exists(SLEEP_IMAGE_PART_PATH) && !Storage.remove(SLEEP_IMAGE_PART_PATH)) success = false;
+  if (Storage.exists(partPath) && !Storage.remove(partPath)) success = false;
   const bool jpeg = FsHelpers::hasJpgExtension(std::string_view{sourcePath});
   if (success && jpeg) success = prepareJpegSleepCover();
   if (success && !jpeg) {
     HalFile inFile, outFile;
     if (Storage.openFileForRead("IMAGE", preparedPath, inFile) &&
-        Storage.openFileForWrite("IMAGE", SLEEP_IMAGE_PART_PATH, outFile)) {
+        Storage.openFileForWrite("IMAGE", partPath, outFile)) {
       const uint64_t expected = inFile.fileSize64();
       uint64_t copied = 0;
       char buffer[128];
@@ -434,10 +438,13 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool tra
     }
   }
 
-  if (success)
-    success = sleepCover::commit(transparent ? CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT
-                                             : CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM);
-  Storage.remove(SLEEP_IMAGE_PART_PATH);
+  if (success) {
+    const auto mode = coverOverlay  ? CrossPointSettings::COVER_TRANSPARENT
+                      : transparent ? CrossPointSettings::TRANSPARENT
+                                    : CrossPointSettings::CUSTOM;
+    success = sleepCover::commit(mode);
+  }
+  Storage.remove(partPath);
   GUI.drawPopup(renderer, success ? tr(STR_DONE) : tr(STR_FAILED_LOWER));
   delay(1000);
 }
@@ -445,13 +452,26 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool tra
 void ImageViewerActivity::showSleepCoverOptions() {
   if (!imageReady) return;
   if (!isPng()) {
-    doSetSleepCover(filePath.c_str(), false);
+    auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_SET_SLEEP_COVER_CONFIRM),
+                                                                filePath.substr(filePath.find_last_of('/') + 1));
+    if (!confirmation) {
+      LOG_ERR("IMAGE", "OOM: sleep cover confirmation (%zu bytes)", sizeof(ConfirmationActivity));
+      return;
+    }
+    startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
+      if (!result.isCancelled) {
+        const bool overlay =
+            FsHelpers::hasBmpExtension(filePath) && SETTINGS.sleepScreen == CrossPointSettings::COVER_TRANSPARENT;
+        doSetSleepCover(filePath.c_str(), overlay);
+      }
+      onEnter();
+    });
     return;
   }
 
   static constexpr StrId options[] = {StrId::STR_NORMAL, StrId::STR_TRANSPARENT};
   static constexpr int optionCount = sizeof(options) / sizeof(options[0]);
-  sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER, options, optionCount, 0, [this](const int index) {
+  sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER_CONFIRM, options, optionCount, 0, [this](const int index) {
     doSetSleepCover(index == 1 ? filePath.c_str() : IMAGE_PREVIEW_PATH, index == 1);
   });
   requestUpdate();

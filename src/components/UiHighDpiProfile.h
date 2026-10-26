@@ -27,3 +27,9 @@ inline constexpr int readerContentStatusGap = 6;
 // NotoSans 12 with centered CJK 12 fallback leaves 5px below the Chinese ink.
 inline constexpr int readerStatusBottomPadding = 1;
 }  // namespace UiHighDpiProfile
+
+namespace HeaderStatusMetrics {
+inline constexpr int topPadding = 10;
+inline constexpr int baseStripHeight = 20;
+inline constexpr int stripHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::statusHeight : baseStripHeight;
+}  // namespace HeaderStatusMetrics

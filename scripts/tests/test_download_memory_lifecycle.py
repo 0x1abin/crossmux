@@ -225,5 +225,68 @@ int main() {
             subprocess.run([str(binary)], check=True)
 
 
+
+class ManifestMemoryOrderTest(unittest.TestCase):
+    def test_registry_rescan_releases_old_catalog_before_tls_preflight(self):
+        source = (ROOT / "src/activities/settings/FontDownloadActivity.cpp").read_text()
+        begin = source.index("bool FontDownloadActivity::fetchAndParseManifest()")
+        prefix = source[begin:source.index("  char manifestUrl[160];", begin)]
+        harness = r"""
+#include <cassert>
+#include <string>
+#include <vector>
+#define STR_MEMORY_ERROR 0
+const char* tr(int) { return "memory"; }
+bool locked=false, refreshed=false, allowTls=true;
+int cacheReleases=0;
+struct Activity {};
+struct RenderLock { explicit RenderLock(Activity&){assert(!locked);locked=true;} ~RenderLock(){locked=false;} };
+namespace fui { struct ListItem {}; }
+struct ManifestFamily { std::string name; };
+struct ManifestFile { int size; };
+struct Cache { void releaseSdFontCaches(){++cacheReleases;} } cache;
+struct Renderer { Cache* getFontCacheManager(){return &cache;} };
+void verifyReleased();
+struct Installer { void refreshRegistry(){assert(!locked);verifyReleased();refreshed=true;} };
+struct HttpDownloader { static bool hasMemoryForTls(){assert(refreshed);return allowTls;} };
+struct FontDownloadActivity:Activity {
+ Renderer renderer; Installer fontInstaller_;
+ std::vector<ManifestFamily> families_; std::vector<ManifestFile> files_;
+ std::vector<std::string> scriptGroupLabels_,rowLabels_; std::vector<int> filteredIndices_;
+ std::vector<fui::ListItem> rowItems_; std::string baseUrl_,errorMessage_;
+ bool rowsDirty_=false;int downloadingFamilyIndex_=3;
+ bool fetchAndParseManifest();
+} activity;
+void verifyReleased(){
+ assert(activity.families_.capacity()==0 && activity.files_.capacity()==0);
+ assert(activity.scriptGroupLabels_.capacity()==0 && activity.filteredIndices_.capacity()==0);
+ assert(activity.rowLabels_.capacity()==0 && activity.rowItems_.capacity()==0);
+ assert(activity.baseUrl_.empty() && activity.downloadingFamilyIndex_==-1 && activity.rowsDirty_);
+}
+""" + prefix + r"""
+  (void)MANIFEST_TMP;
+  return true;
+}
+int main(){
+ for(bool tls:{true,false}) {
+  allowTls=tls;refreshed=false;
+  activity.families_.resize(32);activity.files_.resize(128);
+  activity.scriptGroupLabels_.resize(32);activity.filteredIndices_.resize(32);
+  activity.rowLabels_.resize(32);activity.rowItems_.resize(32);activity.baseUrl_=std::string(256,'x');
+  assert(activity.fetchAndParseManifest()==tls);verifyReleased();
+ }
+ assert(cacheReleases==2 && !locked);
+}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            cpp = Path(directory) / "manifest.cpp"
+            cpp.write_text(harness)
+            binary = Path(directory) / "manifest"
+            subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
+                "-std=c++20", "-fno-exceptions", "-Wall", "-Wextra", "-Werror",
+                str(cpp), "-o", str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ArduinoJson.h>
+#include <BlePageTurner.h>
 #include <BoardConfig.h>
 #include <Epub/ReaderRenderSpec.h>
 #include <PersistableStore.h>
@@ -51,6 +52,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     COVER_CUSTOM = 5,
     QUICK_RESUME = 6,
     TRANSPARENT = 7,
+    TRANSPARENT_CUSTOM = TRANSPARENT,
+    COVER_TRANSPARENT = 8,
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
@@ -212,8 +215,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     REFRESH_FREQUENCY_COUNT
   };
 
-  // Short power button press actions. PWR_CONFIRM is only offered on touch
-  // boards (see SettingsList.h).
+  // Short power button press actions. Touch boards get PWR_CONFIRM in place of
+  // CREATE_CLIPPING; touch boards without a home key also get the reader
+  // shortcuts (see SettingsList.h). Persisted by index: append only.
   enum SHORT_PWRBTN {
     IGNORE = 0,
     SLEEP = 1,
@@ -222,6 +226,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     FOOTNOTES = 4,
     PWR_CONFIRM = 5,
     CREATE_CLIPPING = 6,
+    PWR_BOOKMARK = 7,
+    PWR_SYNC = 8,
+    PWR_READER_MENU = 9,
     SHORT_PWRBTN_COUNT
   };
 
@@ -234,6 +241,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LP_MENU_DICTIONARY = 3,
     LP_MENU_READER_MENU = 4,
     LP_MENU_CREATE_CLIPPING = 5,
+    LP_MENU_FOOTNOTES = 6,
     LONG_PRESS_MENU_FUNCTION_COUNT
   };
 
@@ -522,6 +530,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t sdFontFlashPreload = 0;
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
+  // Master switch for all SD-card plugin discovery/execution. New installs keep
+  // this disabled; settings migration enables it when pre-existing plugin files
+  // are found so a firmware update never silently disables an existing setup.
+  uint8_t pluginsEnabled = 0;
+  // User hid the Plugin Hub install row; cleared when plugins are turned back on.
+  uint8_t pluginHubPromptHidden = 0;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
   // Physical-button audio feedback level. Surfaced only by capable builds.
@@ -620,7 +634,15 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Any other value is an explicit choice and is used as-is: the language of the
   // books someone reads is not necessarily the language of their UI.
   // See keyboard_layouts:: for the bit assignment and the defaulting rules.
+  enum SLIDE_SWITCH_ACTION : uint8_t {
+    SLIDE_SWITCH_FRONTLIGHT = 0,
+    SLIDE_SWITCH_NIGHT_MODE = 1,
+    SLIDE_SWITCH_TOUCH_CONTROLS = 2,
+  };
+  uint8_t slideSwitchAction = SLIDE_SWITCH_FRONTLIGHT;
   uint16_t keyboardLayouts = 0;
+  // Bluetooth page turner, saved under the keys lib/BlePageTurner reads and writes (BlePageTurnerJson.h).
+  bleturner::Config ble;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
   // OTA update channel preference (0 = stable, 1 = nightly).

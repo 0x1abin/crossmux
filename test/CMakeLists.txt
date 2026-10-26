@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG 5a199a0e682529150c261375ef724f3c4b4ffff7
+  GIT_TAG 1cbe1b775c9b37e23551d2ca9334052f1fb3b0e3
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -71,6 +71,7 @@ add_subdirectory(minibidi_arabic)
 add_subdirectory(combining_marks)
 add_subdirectory(time_utils)
 add_subdirectory(weread_webapi)
+add_subdirectory(weread_epub_package)
 add_subdirectory(airpage)
 add_subdirectory(chinese_chess)
 add_subdirectory(sd_card_font_cache_format)
@@ -112,6 +113,7 @@ add_subdirectory(font_decompressor)
 add_subdirectory(css_parser)
 add_subdirectory(chapter_html_slim_parser)
 add_subdirectory(korean_line_breaking)
+add_subdirectory(em_dash_line_breaking)
 add_subdirectory(ligature_guard)
 add_subdirectory(page_link)
 add_subdirectory(ble_key_mapping)
@@ -119,13 +121,16 @@ add_subdirectory(ble_input)
 add_subdirectory(reader_build_failure)
 add_subdirectory(reader_font_preview)
 
+add_subdirectory(plugin_picker_layout)
+
 # Font fallback reuses the existing Unicode mark classification.
-foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest FontDecompressorTest)
+foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest SdCardFontMemoryTest SdCardFontPagedTest FontDecompressorTest PluginPickerLayoutTest)
   target_sources(${font_test} PRIVATE
     ${REPO_ROOT}/lib/MiniBidi/minibidi.c
     ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp)
   target_include_directories(${font_test} PRIVATE
     ${REPO_ROOT}/lib/MiniBidi
+    ${REPO_ROOT}/lib/Memory
     ${REPO_ROOT}/test/minibidi_arabic/stubs)
 endforeach()
 
@@ -145,6 +150,8 @@ add_test(NAME ControlCenterGesture
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_control_center_gesture.py)
 add_test(NAME ReadingUiRegressions
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reading_ui_regressions.py)
+add_test(NAME EpubFootnoteNavigation
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_epub_footnote_navigation.py)
 add_test(NAME DownloadMemoryLifecycle
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_download_memory_lifecycle.py)
 add_test(NAME ReadingStatsNetworkMemory
@@ -162,16 +169,22 @@ add_test(NAME UiFontFallback
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)
 add_subdirectory(content_opf_parser)
 add_subdirectory(chapter_position)
+add_subdirectory(book_metadata_cache)
 add_subdirectory(home_button)
 add_subdirectory(button_press_navigation)
 
 add_subdirectory(inflate_stream)
+add_subdirectory(zip_file)
 add_subdirectory(fs_helpers)
+add_subdirectory(http_header)
 add_subdirectory(txt_to_html)
 
 add_subdirectory(absolute_grayscale)
 
+add_subdirectory(gif_support)
+
 add_subdirectory(sd_card_font)
+add_subdirectory(sd_font_registry)
 add_subdirectory(clipping_preview)
 add_subdirectory(glyph_bitmap)
 
@@ -254,3 +267,38 @@ add_test(NAME CjkGenerationTransaction COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT
 add_test(NAME PowerConfirmRelease COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_power_confirm_release.py ${crosspoint_simulator_SOURCE_DIR})
 
 add_subdirectory(persistable_store)
+add_test(NAME RemoteButtonInputIntegration COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_remote_button_input.py)
+add_test(NAME confirmation_translations COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_confirmation_translations.py)
+add_test(NAME BleLearning COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_ble_learning.py)
+add_subdirectory(ble_link_note_title)
+add_subdirectory(ble_chapter_build_gate)
+add_subdirectory(ble_remote_turn_gate)
+
+add_subdirectory(${REPO_ROOT}/lib/BlePageTurner/test BlePageTurnerTests)
+
+add_test(NAME selection_buttons COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_selection_buttons.py)
+add_test(NAME list_viewport COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_list_viewport.py)
+add_test(NAME clipping_highlight_planes COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_clipping_highlight_planes.py)
+add_test(NAME clipping_selection_text COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_clipping_selection_text.py)
+
+add_test(NAME recursive_dictionary COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_recursive_dictionary.py)
+
+add_test(NAME PluginDiskDiscovery
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_plugin_disk_discovery.py)
+add_test(NAME SettingsTranslations
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_settings_translations.py)
+
+add_test(NAME HttpDownloaderTransport
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_http_downloader_transport.py)
+add_test(NAME UiSurfaceSync
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_surface_sync.py)
+
+add_test(NAME WebSourceParity
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_web_source_parity.py)
+
+add_test(NAME OpdsSafety
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_opds_safety.py)
+
+add_test(NAME ReaderPluginSync COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reader_plugin_sync.py)
+
+add_test(NAME OpdsRowBudget COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_opds_row_budget.py)

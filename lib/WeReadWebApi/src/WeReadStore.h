@@ -16,7 +16,7 @@ constexpr const char* kSessionPath = "/.crosspoint/weread/session.bin";
 constexpr const char* kShelfPath = "/.crosspoint/weread/shelf.bin";
 constexpr uint32_t kShelfMagic = 0x36535257;            // WRS6
 constexpr uint32_t kTocMagic = 0x32545257;              // WRT2
-constexpr uint32_t kImageMagic = 0x32495257;            // WRI2
+constexpr uint32_t kImageMagic = 0x34495257;            // WRI4
 constexpr uint32_t kImageWorkMagic = 0x31504957;        // WIP1
 constexpr uint32_t kBookOptionsMagic = 0x314F5257;      // WRO1
 constexpr uint32_t kBookDetailMagic = 0x31444257;       // WBD1
@@ -199,6 +199,7 @@ std::string bookDirectory(const char* bookId);
 std::string tocPath(const char* bookId);
 std::string chapterPath(const std::string& bookDir, uint32_t chapterIndex);
 std::string imageIndexPath(const std::string& bookDir, uint32_t chapterIndex);
+std::string notesPath(const std::string& bookDir, uint32_t chapterIndex);
 std::string imageWorkPath(const std::string& bookDir);
 std::string optionsPath(const std::string& bookDir);
 std::string initialProgressPath(const char* bookId);

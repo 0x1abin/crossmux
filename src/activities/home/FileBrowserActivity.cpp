@@ -386,7 +386,7 @@ void FileBrowserActivity::promptDelete(const std::string& fullPath, const std::s
     showNotice(StrId::STR_FILE_OPERATION_FAILED);
   };
 
-  const std::string heading = tr(STR_DELETE) + std::string("? ");
+  const std::string heading = tr(STR_DELETE_ITEM_CONFIRM);
   if (!startActivityForResultWith<ConfirmationActivity>(std::move(handler), heading, cleanEntryName(entry))) {
     showNotice(StrId::STR_FILE_OPERATION_FAILED);
   }
