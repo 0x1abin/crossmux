@@ -83,7 +83,11 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, const 
 void EpubReaderMenuActivity::toggleBluetooth() {
   SETTINGS.ble.enabled = SETTINGS.ble.enabled ? 0 : 1;
   if (!SETTINGS.ble.enabled) bleturner::switchOff();
-  SETTINGS.saveToFile();
+  // The flag applies immediately; the reader persists it on return so the save
+  // can restore the global typography snapshot first (with per-book memory on,
+  // SETTINGS holds this book's overrides, and saving here would write them into
+  // the global settings file).
+  settingsDirty_ = true;
   // Enabling waits for the main-loop lifecycle's reader heap gates, then says in the status bar
   // whether a remote linked.
   if (SETTINGS.ble.enabled) bleturner::requestConnect();
