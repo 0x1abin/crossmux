@@ -65,7 +65,7 @@ class BleHostCompatTest(unittest.TestCase):
                 sdk.write_text(content)
                 env.action([target], [source], env)
                 self.assertEqual(sdk.read_text(), content)
-                self.assertEqual(target.path.read_text(), content.replace(module["METHOD"], "", 1))
+                self.assertEqual(target.path.read_text(), content)
 
             previous = target.path.read_text()
             for content in ("// unexpected SDK", original + module["METHOD"]):

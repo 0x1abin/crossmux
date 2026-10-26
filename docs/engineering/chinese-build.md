@@ -271,6 +271,12 @@ SD font with the required coverage when those letters are needed.
 keeps fingerprints of every pre-existing code point, metric and bitmap byte.
 The common-size DEFLATE groups remain bounded to 4096 uncompressed bytes.
 
+The 2026-10-23 translation increment adds the 12 i18n characters
+`买仍仓代便借序忙核满组购` to the 14/16/18pt subsets. They were already present
+in the common 8/10/12pt fonts. Tests exclude only these additions when checking
+the original 14/16/18pt fingerprints and verify the new glyphs separately;
+all historical glyph metrics, bitmap bytes and hashes remain unchanged.
+
 The generator publishes `src/fontIds.h` with the font set. Reader IDs include
 the offline CJK 12pt header and its shared interval table; the high-DPI reader
 uses the generated NotoSans 12pt alias for that same face. A changed bitmap or

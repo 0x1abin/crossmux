@@ -63,11 +63,14 @@ MainTabLayout Activity::mainTabLayout() const {
     safe.width = std::max(0, safeRight - safe.x);
     safe.height = std::max(0, safeBottom - safe.y);
   }
-  return MainTabs::layout(safe, metrics.topPadding,
-                          tabsAtBottom                ? MainTabs::bottomBarHeight
-                          : UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight
-                                                      : metrics.headerHeight,
-                          tabsAtBottom, showStatus ? MainTabs::statusBarHeight : 0);
+  MainTabLayout layout = MainTabs::layout(safe, metrics.topPadding,
+                                          tabsAtBottom                ? MainTabs::bottomBarHeight
+                                          : UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight
+                                                                      : metrics.headerHeight,
+                                          tabsAtBottom, showStatus ? BaseTheme::headerStatusHeight() : 0);
+  // Status chrome shares subpage header coordinates; only content inherits the safe-area top.
+  if (showStatus) layout.statusBar.y = metrics.topPadding;
+  return layout;
 }
 
 Rect Activity::pageContentRect() const {

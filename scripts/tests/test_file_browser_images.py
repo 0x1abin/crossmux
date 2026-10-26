@@ -22,8 +22,7 @@ class FileBrowserImagesTest(unittest.TestCase):
         cover_source = (ROOT / 'src/util/SleepCover.cpp').read_text()
         cover = cover_source[cover_source.index('namespace sleepCover {'):]
         cover = cover.replace(method(cover, 'bool validImage('), 'bool validImage(const char* path) { return Storage.exists(path); }')
-        cover = ('namespace sleepCover { constexpr char imagePath[]="/sleep.bmp"; '
-                 'constexpr char partPath[]="/sleep.bmp.part"; constexpr char backupPath[]="/sleep.bmp.bak"; }\n') + cover
+        cover = '#include "' + str(ROOT / 'src/util/SleepCover.h') + '"\n' + cover
         methods = '\n'.join((
             method(browser, 'void FileBrowserActivity::loadFiles()'),
             method(browser, 'void FileBrowserActivity::finishEdit('),
@@ -83,6 +82,7 @@ struct HalFile {
 struct StorageMock {
  std::map<std::string, std::string> data;
  bool removeFails = false, writeFails = false, directoryFails = false;
+ std::string failRenameFrom;
  HalFile open(const char*) { HalFile f; f.valid = true; f.directory = true; return f; }
  bool ensureDirectoryExists(const char*) { return !directoryFails; }
  bool exists(const char* path) { return data.contains(path); }
@@ -96,15 +96,16 @@ struct StorageMock {
    data[path].clear(); f.valid = true; f.bytes = &data[path]; return true;
  }
  bool rename(const char* from, const char* to) {
-   if (!exists(from)) return false;
+   if (!exists(from) || from == failRenameFrom) return false;
    data[to] = data[from]; data.erase(from); return true;
  }
 } Storage;
 struct CrossPointSettings {
- enum SLEEP_SCREEN_MODE { CUSTOM, TRANSPARENT, SLEEP_SCREEN_MODE_COUNT };
+ enum SLEEP_SCREEN_MODE { CUSTOM, TRANSPARENT, COVER_TRANSPARENT, SLEEP_SCREEN_MODE_COUNT };
  enum SLEEP_SCREEN_COVER_FILTER { NO_FILTER, BLACK_AND_WHITE, INVERTED_BLACK_AND_WHITE };
  bool showHiddenFiles = false; uint8_t sleepScreen = CUSTOM; uint8_t sleepScreenCoverFilter = NO_FILTER;
- bool saveToFile() { return true; }
+ int failedSaves = 0;
+ bool saveToFile() { if (failedSaves > 0) { --failedSaves; return false; } return true; }
 } SETTINGS;
 struct GfxRenderer {
  int width = 480, height = 800;
@@ -134,8 +135,8 @@ struct PngToBmpConverter {
    Storage.data[out] = "ALPHA-BMP"; return !conversionFails;
  }
 };
-enum class StrId { STR_NORMAL, STR_TRANSPARENT, STR_SET_SLEEP_COVER };
-constexpr int STR_LOADING_POPUP = 0, STR_DONE = 1, STR_FAILED_LOWER = 2;
+enum class StrId { STR_NORMAL, STR_TRANSPARENT, STR_SET_SLEEP_COVER, STR_SET_SLEEP_COVER_CONFIRM };
+constexpr int STR_LOADING_POPUP = 0, STR_DONE = 1, STR_FAILED_LOWER = 2, STR_SET_SLEEP_COVER_CONFIRM = 3;
 const char* tr(int) { return ""; }
 struct Gui { void drawPopup(GfxRenderer&, const char*) {} } GUI;
 void delay(int) {}
@@ -143,7 +144,20 @@ struct Popup {
  int choice = 0;
  template<class Callback> void show(StrId, const StrId*, int, int, Callback callback) { callback(choice); }
 };
+struct ActivityResult { bool isCancelled = false; };
+bool cancelConfirmation = false, confirmationOom = false;
+struct ConfirmationActivity {
+ template<class... Args> explicit ConfirmationActivity(Args&&...) {}
+};
+template<class T, class... Args> std::unique_ptr<T> makeUniqueNoThrow(Args&&... args) {
+ return confirmationOom ? nullptr : std::make_unique<T>(std::forward<Args>(args)...);
+}
 struct ImageViewerActivity {
+ int mappedInput = 0, entries = 0;
+ void onEnter() { ++entries; }
+ template<class Handler> void startActivityForResult(std::unique_ptr<ConfirmationActivity>, Handler handler) {
+   handler(ActivityResult{cancelConfirmation});
+ }
  std::string filePath; GfxRenderer renderer;
  std::vector<std::string> siblingImages; int currentImageIndex = -1;
  bool imageReady = false; Popup sleepCoverPopup;
@@ -257,6 +271,43 @@ int main() {
    viewer.doSetSleepCover(viewer.filePath.c_str(), false);
    assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
  }
+ // Confirmation cancellation and allocation failure never overwrite an installed cover.
+ conversionFails = false; viewer.filePath = "/2.bmp"; viewer.imageReady = true;
+ cancelConfirmation = true; viewer.showSleepCoverOptions();
+ assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
+ cancelConfirmation = false; confirmationOom = true; viewer.showSleepCoverOptions();
+ assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp"); confirmationOom = false;
+ // Cover+Transparent keeps its mode and writes only its overlay target.
+ SETTINGS.sleepScreen = CrossPointSettings::COVER_TRANSPARENT;
+ viewer.filePath = "/AirPage/3.PNG"; assert(viewer.preparePreview());
+ viewer.sleepCoverPopup.choice = 1; viewer.showSleepCoverOptions();
+ assert(Storage.data[sleepCover::overlayImagePath] == "ALPHA-BMP");
+ assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
+ assert(SETTINGS.sleepScreen == CrossPointSettings::COVER_TRANSPARENT);
+ viewer.filePath = "/2.bmp"; viewer.showSleepCoverOptions();
+ assert(Storage.data[sleepCover::overlayImagePath] == "original-bmp");
+ // Failed swap and settings persistence restore the previous overlay and mode.
+ Storage.data[sleepCover::overlayPartPath] = "replacement";
+ Storage.failRenameFrom = sleepCover::overlayPartPath;
+ assert(!sleepCover::commit(CrossPointSettings::COVER_TRANSPARENT));
+ assert(Storage.data[sleepCover::overlayImagePath] == "original-bmp");
+ assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
+ Storage.failRenameFrom.clear(); Storage.data[sleepCover::overlayPartPath] = "replacement";
+ SETTINGS.failedSaves = 1; assert(!sleepCover::commit(CrossPointSettings::COVER_TRANSPARENT));
+ assert(Storage.data[sleepCover::overlayImagePath] == "original-bmp");
+ assert(SETTINGS.sleepScreen == CrossPointSettings::COVER_TRANSPARENT);
+ // Crash recovery uses the existing three-byte marker separately for each target.
+ Storage.data["/sleep-overlay.bmp.bak"] = "recover-overlay";
+ Storage.data["/sleep-overlay.bmp"] = "partial-overlay";
+ Storage.data["/sleep-overlay.bmp.txn"] = std::string({char(1), char(CrossPointSettings::COVER_TRANSPARENT), char(1)});
+ assert(sleepCover::recover());
+ assert(Storage.data[sleepCover::overlayImagePath] == "recover-overlay");
+ assert(Storage.data[SLEEP_IMAGE_PATH] == "original-bmp");
+ assert(!Storage.exists("/sleep-overlay.bmp.bak") && !Storage.exists("/sleep-overlay.bmp.txn"));
+ Storage.data["/sleep.bmp.bak"] = "legacy-cover";
+ Storage.data["/sleep.bmp.txn"] = std::string({char(1), char(CrossPointSettings::CUSTOM), char(1)});
+ assert(sleepCover::recover()); assert(Storage.data[SLEEP_IMAGE_PATH] == "legacy-cover");
+ assert(SETTINGS.sleepScreen == CrossPointSettings::CUSTOM);
  conversionFails = false; viewer.filePath = "/AirPage/missing.PNG";
  assert(!viewer.preparePreview()); assert(!Storage.exists(IMAGE_PREVIEW_PATH));
  Storage.data[IMAGE_PREVIEW_PATH] = "stale-preview"; Storage.removeFails = true;

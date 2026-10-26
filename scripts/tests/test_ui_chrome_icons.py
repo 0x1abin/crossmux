@@ -178,10 +178,11 @@ int main() {
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <map>
 #include <string>
 #include <vector>
 struct Rect { int x,y,width,height; };
-constexpr int READER_STATUS_FONT_ID=1, READER_ESTIMATE_FONT_ID=2;
+constexpr int READER_STATUS_FONT_ID=1, READER_ESTIMATE_FONT_ID=2, SMALL_FONT_ID=4;
 struct CrossPointSettings {
  enum STATUS_BAR_PROGRESS_BAR { BOOK_PROGRESS=1 };
  enum { STATUS_BAR_CLOCK_HIDE=0,
@@ -199,7 +200,15 @@ struct CrossPointSettings {
 struct { uint16_t getBatteryPercentage() const {return 100;} } powerManager;
 namespace bleinput { bool connected=false; bool isConnected() {return connected;} }
 namespace TimeUtils { bool formatCurrentTime(char* text,size_t,bool) { std::strcpy(text,"23:59"); return true; } }
+struct EpdFontFamily { enum { REGULAR }; };
+struct Glyph { int top=0,height=0; };
+struct Font { const Glyph* getGlyph(char,int) const {return nullptr;} };
+namespace BoardConfig {
+struct { int statusBarOffsetY=0,bottomCornerRadius=0,cornerRadius=0; } ACTIVE;
+}
 struct GfxRenderer {
+ const std::map<int,Font>& getFontMap() const {static const std::map<int,Font> fonts;return fonts;}
+ int getFontAscenderSize(int) const {return 34;}
  int width=684,height=1216,top=5,right=5,bottom=8,left=5;
  int footerLineHeight=34;
  mutable std::vector<Rect> texts;
@@ -236,6 +245,8 @@ struct BaseTheme {
  static void drawStatusBar(GfxRenderer&,float,int,int,std::string,int,int,bool,bool,bool);
 };
 struct UITheme {
+ inline static bool inx=false;
+ bool hasMainTabs() const {return inx;}
  static UITheme& getInstance() {static UITheme theme;return theme;}
  Metrics getMetrics() const {return {};}
  BaseTheme& getTheme() {static BaseTheme theme;return theme;}
@@ -253,11 +264,12 @@ void drawBluetoothStatusIcon(const GfxRenderer& r,int x,int y) {drawBookmarkStat
             + method(source, 'void BaseTheme::drawStatusBar(') + r'''
 int main() {
  for (auto size : {Rect{0,0,684,1216},Rect{0,0,600,1000}})
+ for (bool inx : {false,true})
  for (int orientation=0;orientation<4;++orientation) for (bool percent : {false,true})
  for (int clock : {CrossPointSettings::STATUS_BAR_CLOCK_HIDE,CrossPointSettings::STATUS_BAR_CLOCK_LEFT,
                    CrossPointSettings::STATUS_BAR_CLOCK_RIGHT}) for(bool markers : {false,true})
  for(int footerLineHeight : {26,34,42}) {
-   GfxRenderer r;
+   GfxRenderer r; UITheme::inx=inx;
    r.footerLineHeight=footerLineHeight;
    r.width=size.width;r.height=size.height;
    if (orientation%2) {r.width=size.height;r.height=size.width;}

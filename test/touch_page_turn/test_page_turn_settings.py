@@ -86,13 +86,7 @@ def settings_list_source():
     # The base list is trimmed to the two page-turn rows: this regression is
     # about their stored values, and every other row would drag in unrelated
     # enums and collaborators.
-    start = blocks.index('baseList = [] {')
-    end = blocks.index('return v;', start) + len('return v;')
-    body = blocks[start:end]
-    # Keep the two page-turn rows verbatim. Each entry is one
-    # `SettingInfo::DynamicEnum( ... ),` call; find it by its label and copy up
-    # to the balanced closing paren, which the inner calls make unsafe to
-    # search for by text.
+    body = read('src/SettingsList.cpp')
     kept = []
     for entry_start in re.finditer(r'SettingInfo::', body):
         cursor = body.index('(', entry_start.end() - 1)
@@ -100,17 +94,15 @@ def settings_list_source():
         for index in range(cursor, len(body)):
             depth += (body[index] == '(') - (body[index] == ')')
             if depth == 0:
-                entry = body[entry_start.start() : index + 2]  # include the trailing comma
+                entry = body[entry_start.start():index + 1]
                 break
         if 'STR_NEXT_PAGE_GESTURE' in entry or 'STR_PREV_PAGE_GESTURE' in entry:
-            kept.append(entry.rstrip().rstrip(','))
+            kept.append(entry)
     assert len(kept) == 2, kept
-    trimmed = (
-        'baseList = [] {\n    std::vector<SettingInfo> v;\n'
-        '    v.insert(v.end(), {\n        ' + ',\n        '.join(kept) + ',\n    });\n    return v;'
-    )
-    blocks = blocks[:start] + trimmed + blocks[end:]
-    assert 'STR_NEXT_PAGE_GESTURE' in blocks and 'STR_PREV_PAGE_GESTURE' in blocks
+    blocks += '\ninline std::vector<SettingInfo> getBaseSettingsList() {\n'
+    blocks += '  std::vector<SettingInfo> v; v.reserve(2);\n'
+    blocks += ''.join('  v.push_back(' + entry + ');\n' for entry in kept)
+    blocks += '  return v;\n}'
     return blocks
 
 def gesture_enums():
@@ -129,7 +121,7 @@ def persistence_loader_source():
     text = read('src/CrossPointSettings.cpp')
     # toJson() has a near-identical loop further up; anchor on the load-side
     # comment so the save path is never compiled in here.
-    start = text.index('  for (const auto& info : getBaseSettingsList()) {', text.index('// Legacy migration'))
+    start = text.index('  auto visit = [&](const SettingInfo& info) {', text.index('// Legacy migration'))
     block = brace_block(text, text.index('{', start))
     # The loop is a loader; the only harness-side change is that the default it
     # reads back for a missing key is the struct member itself, which the stub
@@ -168,7 +160,7 @@ def persistence_loader_source():
                                     'const uint8_t count =')
     block = block[:count_start] + count_expr + block[count_end:]
     assert 'SettingType' not in block and 'uiTheme' not in block and 'COVER_GRID' not in block
-    return 'for (const auto& info : getBaseSettingsList()) ' + block
+    return 'auto visit = [&](const SettingInfo& info) ' + block + '; for (const auto& info : getBaseSettingsList()) visit(info);'
 
 def touch_page_turn_source():
     utils = read('src/activities/reader/ReaderUtils.h')
@@ -560,7 +552,9 @@ static void expect(bool ok, const char* what, long got, long want) {
 }
 
 static const SettingInfo* find(StrId id) {
-  for (const auto& s : getBaseSettingsList()) {
+  // Keep the collected rows alive for the UI callbacks, as the activity does.
+  static const auto entries = getBaseSettingsList();
+  for (const auto& s : entries) {
     if (s.nameId == id) return &s;
   }
   return nullptr;

@@ -612,6 +612,12 @@ std::string imageIndexPath(const std::string& bookDir, const uint32_t chapterInd
   return bookDir + filename;
 }
 
+std::string notesPath(const std::string& bookDir, const uint32_t chapterIndex) {
+  char filename[40];
+  snprintf(filename, sizeof(filename), "/chapters/%06u.notes.xhtml", static_cast<unsigned>(chapterIndex));
+  return bookDir + filename;
+}
+
 std::string imageWorkPath(const std::string& bookDir) { return bookDir + "/images.work"; }
 
 std::string optionsPath(const std::string& bookDir) { return bookDir + "/options.bin"; }

@@ -57,8 +57,9 @@ int main() {
             self.assertIn('if (!HttpDownloader::hasMemoryForTls())', source)
             self.assertNotIn('HttpDownloader::MIN_TLS_', source)
         opds = (ROOT / 'src/activities/browser/OpdsBookBrowserActivity.cpp').read_text()
-        self.assertIn('downloadFile(downloadUrl, filename, server.username, server.password)', opds)
-        self.assertNotIn('HttpDownloader::MIN_TLS_', opds)
+        book = method(opds, 'void OpdsBookBrowserActivity::downloadBook(')
+        self.assertIn('downloadFile(downloadUrl, staged, dlAuth.username, dlAuth.password, headers)', book)
+        self.assertNotIn('HttpDownloader::MIN_TLS_', book)
 
 
 if __name__ == '__main__':
