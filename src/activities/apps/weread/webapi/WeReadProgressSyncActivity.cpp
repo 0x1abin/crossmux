@@ -36,7 +36,27 @@
 
 namespace {
 static_assert(sizeof(WeReadClient::Operation) <= 8 * 1024, "WeRead progress workspace exceeds its fixed heap budget");
+
+enum class OffsetDirection { VisibleToNative, NativeToVisible };
+
+bool mapPackagedOffset(const Epub& epub, const int spineIndex, const OffsetDirection direction, const uint32_t input,
+                       uint32_t& output) {
+  const std::string path = epub.getCachePath() + "/weread-progress-map.part";
+  if (Storage.exists(path.c_str()) && !Storage.remove(path.c_str())) return false;
+  // ZIP extraction uses a fallible 8 KiB transfer buffer, never a whole chapter allocation.
+  if (!epub.extractItemToFile(epub.getSpineItem(spineIndex).href, path)) return false;
+  bool mapped = false;
+  switch (direction) {
+    case OffsetDirection::VisibleToNative:
+      mapped = WeReadXhtmlCodec::visibleToNativeOffset(path, input, output);
+      break;
+    case OffsetDirection::NativeToVisible:
+      mapped = WeReadXhtmlCodec::nativeToVisibleOffset(path, input, output);
+      break;
+  }
+  return Storage.remove(path.c_str()) && mapped;
 }
+}  // namespace
 
 WeReadProgressSyncActivity::WeReadProgressSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                        std::string epubPath, const char* bookId,
@@ -73,8 +93,8 @@ WeReadProgressContext WeReadProgressSyncActivity::makeContext(const Epub& epub, 
   context.localOffset = localPosition.visibleTextOffset;
   context.localOffsetBasis = WeReadClient::LocalOffsetBasis::VisibleText;
   uint32_t nativeOffset = 0;
-  if (WeReadXhtmlCodec::visibleToNativeOffset(WeReadStore::chapterPath(bookDir, context.localTocIndex),
-                                              context.localOffset, nativeOffset)) {
+  if (mapPackagedOffset(epub, localPosition.spineIndex, OffsetDirection::VisibleToNative, context.localOffset,
+                        nativeOffset)) {
     context.localOffset = nativeOffset;
     context.localOffsetBasis = WeReadClient::LocalOffsetBasis::RawXhtmlUtf16;
   }
@@ -292,9 +312,8 @@ void WeReadProgressSyncActivity::applyRemoteProgress(const WeReadProtocol::Remot
   }
   std::optional<uint32_t> visibleTextOffset;
   uint32_t resolvedVisibleOffset = 0;
-  if (preciseRemote && WeReadXhtmlCodec::nativeToVisibleOffset(
-                           WeReadStore::chapterPath(WeReadStore::bookDirectory(bookId_), remoteTocIndex),
-                           remoteProgress.chapterOffset, resolvedVisibleOffset)) {
+  if (preciseRemote && mapPackagedOffset(*uniqueEpub, exactSpineIndex, OffsetDirection::NativeToVisible,
+                                         remoteProgress.chapterOffset, resolvedVisibleOffset)) {
     visibleTextOffset = resolvedVisibleOffset;
   }
   if (!EpubReaderUtils::saveProgress(*uniqueEpub, target.spineIndex, target.pageNumber, target.totalPages,

@@ -347,15 +347,30 @@ void FontDownloadActivity::finishAutomaticFlow(const ExitRoute route) {
 // --- Manifest fetching ---
 
 bool FontDownloadActivity::fetchAndParseManifest() {
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->releaseSdFontCaches();
+  }
+  // Rescan installed families before any TLS or JSON buffers exist. The rescan
+  // frees and reallocates every registry entry, which fragments the heap if it
+  // runs while the manifest DOM and the catalog arena are live.
+  {
+    RenderLock lock(*this);
+    std::vector<ManifestFamily>().swap(families_);
+    std::vector<ManifestFile>().swap(files_);
+    std::vector<std::string>().swap(scriptGroupLabels_);
+    std::vector<int>().swap(filteredIndices_);
+    std::vector<std::string>().swap(rowLabels_);
+    std::vector<fui::ListItem>().swap(rowItems_);
+    std::string().swap(baseUrl_);
+    rowsDirty_ = true;
+    downloadingFamilyIndex_ = -1;
+  }
+  fontInstaller_.refreshRegistry();
+
   // Download manifest to a temp file on SD card to avoid holding both
   // TLS buffers and the full JSON string in RAM simultaneously.
   static constexpr const char* MANIFEST_TMP = "/fonts_manifest.tmp";
-  families_.clear();
-  files_.clear();
-  baseUrl_.clear();
-  downloadingFamilyIndex_ = -1;
 
-  if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
   if (!HttpDownloader::hasMemoryForTls()) {
     errorMessage_ = tr(STR_MEMORY_ERROR);
     return false;
@@ -423,11 +438,6 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     errorMessage_ = "Invalid font manifest";
     return false;
   }
-  families_.clear();
-  files_.clear();
-  scriptGroupLabels_.clear();
-  filteredIndices_.clear();
-  fontInstaller_.refreshRegistry();
 
   JsonArray groupsArr = doc["scriptGroups"].as<JsonArray>();
   const size_t groupCount = std::min(groupsArr.size(), MAX_SCRIPT_GROUPS);
@@ -1241,9 +1251,6 @@ void FontDownloadActivity::rebuildFamilyRowItems() {
         item.value = tr(STR_UPDATE_AVAILABLE);
       } else if (family.installed) {
         item.value = tr(STR_INSTALLED);
-        // Dimmed but still tappable (opens the delete prompt): visual-only
-        // disabled state, the row stays enabled for hit registration.
-        item.state = fui::StateDisabled;
       }
     }
     item.actionValue = static_cast<int16_t>(i);

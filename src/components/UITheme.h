@@ -27,6 +27,11 @@ class UITheme {
   static Rect getContentArea(const GfxRenderer& renderer);
   Rect getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints = false,
                          bool hasSideButtonHints = false);
+  // Header rect for GUI.drawHeader() on a screen laid out in getScreenSafeArea().
+  // Shared themes leave bezel insets to headerBand; INX keeps its existing safe rect.
+  // upstreamStyle matches drawHeaderWithStyle for shared reading pages.
+  Rect getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHints = false, bool hasSideButtonHints = false,
+                     bool upstreamStyle = false);
   static void drawCenteredText(const GfxRenderer& renderer, Rect screen, int fontId, int y, const char* text,
                                bool black = true, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   // Wraps only overflowing text, then aligns the complete line block within bounds.

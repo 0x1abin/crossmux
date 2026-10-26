@@ -131,7 +131,7 @@ InxRecentLayout InxRecentActivity::layout() const {
 Rect InxRecentActivity::contentRect() const {
   Rect content = pageContentRect();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int topInset = mainTabsAtBottom() && !hasMainTabStatusBar() ? metrics.batteryBarHeight : 0;
+  const int topInset = mainTabsAtBottom() && !hasMainTabStatusBar() ? BaseTheme::headerStatusHeight() : 0;
   content.y += topInset + metrics.verticalSpacing;
   content.height -= topInset + metrics.verticalSpacing * 2;
   if (!mainTabsAtBottom()) {
@@ -573,8 +573,12 @@ void InxRecentActivity::drawFooter() {
     GUI.drawMainTabStatusBar(renderer, Rect{left, footerTop, std::max(0, width - left - right),
                                             std::max(0, renderer.getScreenHeight() - bottom - footerTop)});
   } else if (!hasMainTabStatusBar()) {
+    if (mainTabsAtBottom()) {
+      GUI.drawMainTabStatusBar(
+          renderer, Rect{safeArea.x, safeArea.y + metrics.topPadding, safeArea.width, BaseTheme::headerStatusHeight()});
+      return;
+    }
     Rect battery = InxRecentGeometry::batteryRect(safeArea);
-    if (mainTabsAtBottom()) battery.y = safeArea.y + metrics.topPadding + 5;
     GUI.drawBatteryRight(renderer, battery,
                          SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS);
   }

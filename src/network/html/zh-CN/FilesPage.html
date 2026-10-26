@@ -179,19 +179,27 @@
     }
     /* Upload modal */
     .modal-overlay {
-      display: none;
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 200;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
+      margin: auto;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      overflow: visible;
       justify-content: center;
       align-items: center;
     }
-    .modal-overlay.open {
+    .modal-overlay[open] {
       display: flex;
+    }
+    .modal-overlay::backdrop {
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
     }
     .modal {
       background: var(--card-bg);
@@ -331,9 +339,6 @@
     .file-link:hover {
       color: var(--accent-hover-color);
       text-decoration: underline;
-    }
-    .upload-form {
-      margin-bottom: 10px;
     }
     .upload-form input[type="file"] {
       margin: 10px 0;
@@ -1066,6 +1071,18 @@
       margin-bottom: 10px;
       box-sizing: border-box;
     }
+    .modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+      justify-content: flex-end;
+    }
+    .modal-actions > button,
+    .modal-actions > a {
+      width: auto;
+      margin-top: 0;
+    }
     .folder-btn {
       background-color: var(--warning-color);
       color: var(--button-text);
@@ -1351,6 +1368,9 @@
         margin-right: 6px;
         font-size: 0.9em;
       }
+      .modal-actions {
+        flex-direction: column-reverse;
+      }
       .action-buttons {
         gap: 6px;
       }
@@ -1608,10 +1628,10 @@
 </main>
 <!--#include file="../shared/Footer.zh-CN.html.inc" -->
 <!-- Upload Modal -->
-<div class="modal-overlay" id="uploadModal">
+<dialog class="modal-overlay" id="uploadModal" aria-labelledby="uploadModalTitle">
   <div class="modal">
-    <button class="modal-close" id="uploadModalClose" onclick="closeUploadModal()">&times;</button>
-    <h3><svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> 上传文件</h3>
+    <button class="modal-close" aria-label="关闭上传对话框" id="uploadModalClose" onclick="closeUploadModal()">&times;</button>
+    <h3 id="uploadModalTitle"><svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> 上传文件</h3>
     <div class="upload-form">
       <p class="file-info">选择要上传到 <strong id="uploadPathDisplay"></strong> 的文件</p>
       <div class="drop-zone" id="dropZone">
@@ -1804,9 +1824,11 @@
         请先备份文件或关闭同步。
       </div>
       <!-- Optimize & Upload button - shown when picker is visible, replaces Upload -->
-      <button id="startConversionBtn" class="upload-btn optimize" style="display:none;" onclick="startConversionWithImageStates()">优化并上传</button>
-      <button id="uploadBtn" class="upload-btn" onclick="uploadFile()" disabled>上传</button>
-      <button class="delete-btn-cancel" onclick="handleCancelUploadModal()">取消</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="handleCancelUploadModal()">取消</button>
+        <button id="uploadBtn" class="upload-btn" onclick="uploadFile()" disabled>上传</button>
+        <button id="startConversionBtn" class="upload-btn optimize" style="display:none;" onclick="startConversionWithImageStates()">优化并上传</button>
+      </div>
       <div id="progress-container">
         <div id="progress-bar"><div id="progress-fill"></div></div>
         <div id="progress-text"></div>
@@ -1819,73 +1841,81 @@
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- New Folder Modal -->
-<div class="modal-overlay" id="folderModal">
+<dialog class="modal-overlay" id="folderModal" aria-labelledby="folderModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeFolderModal()">&times;</button>
-    <h3><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg> 新建文件夹</h3>
+    <button class="modal-close" aria-label="关闭新建文件夹对话框" onclick="closeFolderModal()">&times;</button>
+    <h3 id="folderModalTitle"><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg> 新建文件夹</h3>
     <div class="folder-form">
       <p class="file-info">在 <strong id="folderPathDisplay"></strong> 中新建文件夹</p>
       <input type="text" id="folderName" class="folder-input" placeholder="文件夹名称…" oninput="document.getElementById('createFolderBtn').disabled = !this.value.trim();">
-      <button class="folder-btn" id="createFolderBtn" onclick="createFolder()" disabled>创建文件夹</button>
-      <button class="delete-btn-cancel" onclick="closeFolderModal()">取消</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeFolderModal()">取消</button>
+        <button class="folder-btn" id="createFolderBtn" onclick="createFolder()" disabled>创建文件夹</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Delete Confirmation Modal -->
-<div class="modal-overlay" id="deleteModal">
+<dialog class="modal-overlay" id="deleteModal" aria-labelledby="deleteModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
-    <h3><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg> 删除项目</h3>
+    <button class="modal-close" aria-label="关闭删除对话框" onclick="closeDeleteModal()">&times;</button>
+    <h3 id="deleteModalTitle"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg> 删除项目</h3>
     <div class="folder-form">
       <p class="delete-warning"><svg class="icon"><use href="/assets/icons.svg#warning"></use></svg> 此操作无法撤销！</p>
       <p class="file-info">确定删除以下项目吗？</p>
       <div id="deleteItemList" style="max-height:240px; overflow:auto; margin-bottom:10px;"></div>
-      <button class="delete-btn-confirm" onclick="confirmDelete()">删除</button>
-      <button class="delete-btn-cancel" onclick="closeDeleteModal()">取消</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeDeleteModal()">取消</button>
+        <button class="delete-btn-confirm" onclick="confirmDelete()">删除</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Rename Modal -->
-<div class="modal-overlay" id="renameModal">
+<dialog class="modal-overlay" id="renameModal" aria-labelledby="renameModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeRenameModal()">&times;</button>
-    <h3><svg class="icon"><use href="/assets/icons.svg#edit"></use></svg> 重命名文件</h3>
+    <button class="modal-close" aria-label="关闭重命名对话框" onclick="closeRenameModal()">&times;</button>
+    <h3 id="renameModalTitle"><svg class="icon"><use href="/assets/icons.svg#edit"></use></svg> 重命名文件</h3>
     <div class="folder-form">
       <p class="file-info">正在重命名 <strong id="renameItemName"></strong></p>
       <input type="text" id="renameNewName" class="folder-input" placeholder="新文件名…">
       <input type="hidden" id="renameItemPath">
-      <button class="rename-btn-confirm" onclick="confirmRename()">重命名</button>
-      <button class="delete-btn-cancel" onclick="closeRenameModal()">取消</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeRenameModal()">取消</button>
+        <button class="rename-btn-confirm" onclick="confirmRename()">重命名</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Move Modal -->
-<div class="modal-overlay" id="moveModal">
+<dialog class="modal-overlay" id="moveModal" aria-labelledby="moveModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeMoveModal()">&times;</button>
-    <h3><svg class="icon"><use href="/assets/icons.svg#move"></use></svg> 移动文件</h3>
+    <button class="modal-close" aria-label="关闭移动对话框" onclick="closeMoveModal()">&times;</button>
+    <h3 id="moveModalTitle"><svg class="icon"><use href="/assets/icons.svg#move"></use></svg> 移动文件</h3>
     <div class="folder-form">
       <p class="file-info">正在移动 <strong id="moveItemName"></strong></p>
       <input type="text" id="moveDestPath" class="folder-input" list="moveFolderOptions" placeholder="/目标/文件夹">
       <datalist id="moveFolderOptions"></datalist>
       <input type="hidden" id="moveItemPath">
-      <button class="move-btn-confirm" onclick="confirmMove()">移动</button>
-      <button class="delete-btn-cancel" onclick="closeMoveModal()">取消</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeMoveModal()">取消</button>
+        <button class="move-btn-confirm" onclick="confirmMove()">移动</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Image Preview Modal -->
-<div class="modal-overlay" id="imagePreviewModal">
+<dialog class="modal-overlay" id="imagePreviewModal" aria-labelledby="imagePreviewModalTitle">
   <div class="modal image-preview-mode">
-    <button class="modal-close" onclick="closeImagePreview()">&times;</button>
-    <h3>🖼️ 预览</h3>
+    <button class="modal-close" aria-label="关闭图片预览对话框" onclick="closeImagePreview()">&times;</button>
+    <h3 id="imagePreviewModalTitle">🖼️ 预览</h3>
     <div class="folder-form">
       <p class="file-info"><strong id="imagePreviewName"></strong></p>
       <div class="image-preview-stage">
@@ -1894,7 +1924,7 @@
       <a id="imagePreviewDownload" class="move-btn-confirm" rel="noopener noreferrer" target="_blank" href="#">下载</a>
     </div>
   </div>
-</div>
+</dialog>
 
 <div id="plugin-container"></div>
 <script>
@@ -1956,12 +1986,15 @@
       document.body.appendChild(notification);
     }
 
+    clearTimeout(notification.hideTimer);
+    clearTimeout(notification.removeTimer);
+
     // Set styles based on type
     const styles = {
-      'success': 'background-color: #27ae60;',
-      'error': 'background-color: #e74c3c;',
-      'warning': 'background-color: #f39c12;',
-      'info': 'background-color: #3498db;'
+      'success': 'background-color: var(--button-bg); color: var(--button-text);',
+      'error': 'background-color: var(--danger-bg); color: var(--danger-color);',
+      'warning': 'background-color: var(--warning-bg); color: var(--warning-text);',
+      'info': 'background-color: var(--accent-color-10); color: var(--accent-color);'
     };
     notification.style.cssText += styles[type] || styles['info'];
     notification.textContent = message;
@@ -1971,10 +2004,10 @@
     notification.style.transform = 'translateX(0)';
 
     // Auto-hide after 5 seconds
-    setTimeout(() => {
+    notification.hideTimer = setTimeout(() => {
       notification.style.opacity = '0';
       notification.style.transform = 'translateX(100%)';
-      setTimeout(() => {
+      notification.removeTimer = setTimeout(() => {
         if (notification.parentNode) {
           notification.parentNode.removeChild(notification);
         }
@@ -2019,19 +2052,22 @@
     // Load any SD-hosted plugins that mount on the File Manager page.
     loadPlugins('files');
 
-    // Close modals when clicking overlay - call proper cleanup functions
-    document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
-      overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) {
-          // Call the appropriate close function for each modal to ensure cleanup
-          if (overlay.id === 'uploadModal') return closeUploadModal();
-          if (overlay.id === 'folderModal') return closeFolderModal();
-          if (overlay.id === 'deleteModal') return closeDeleteModal();
-          if (overlay.id === 'renameModal') return closeRenameModal();
-          if (overlay.id === 'moveModal') return closeMoveModal();
-          if (overlay.id === 'imagePreviewModal') return closeImagePreview();
-          overlay.classList.remove('open');
-        }
+    // Keep upload cleanup rules when a dialog is cancelled or its backdrop is clicked.
+    const closeModal = {
+      uploadModal: closeUploadModal,
+      folderModal: closeFolderModal,
+      deleteModal: closeDeleteModal,
+      renameModal: closeRenameModal,
+      moveModal: closeMoveModal,
+      imagePreviewModal: closeImagePreview
+    };
+    document.querySelectorAll('dialog.modal-overlay').forEach(function(modal) {
+      modal.addEventListener('cancel', function(event) {
+        event.preventDefault();
+        closeModal[modal.id]();
+      });
+      modal.addEventListener('click', function(event) {
+        if (event.target === modal) closeModal[modal.id]();
       });
     });
 
@@ -2178,17 +2214,27 @@
     return `/download?path=${encodeURIComponent(filePath)}`;
   }
 
+  function openWebModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal.open) modal.showModal();
+  }
+
+  function closeWebModal(id) {
+    const modal = document.getElementById(id);
+    if (modal.open) modal.close();
+  }
+
   function openImagePreview(url, name) {
     const img = document.getElementById('imagePreviewImg');
     document.getElementById('imagePreviewName').textContent = name;
     img.src = url;
     img.alt = name;
     document.getElementById('imagePreviewDownload').href = url;
-    document.getElementById('imagePreviewModal').classList.add('open');
+    openWebModal('imagePreviewModal');
   }
 
   function closeImagePreview() {
-    document.getElementById('imagePreviewModal').classList.remove('open');
+    closeWebModal('imagePreviewModal');
     // Clear src to free the decoded image and avoid showing the stale one on reopen.
     document.getElementById('imagePreviewImg').src = '';
   }
@@ -2211,7 +2257,7 @@
     if (logContainer) logContainer.innerHTML = '';
 
     document.getElementById('uploadPathDisplay').textContent = currentPath;
-    document.getElementById('uploadModal').classList.add('open');
+    openWebModal('uploadModal');
   }
 
   function handleCancelUploadModal() {
@@ -2248,7 +2294,7 @@
     if (isUploadInProgress) {
       return;
     }
-    document.getElementById('uploadModal').classList.remove('open');
+    closeWebModal('uploadModal');
     const fileInput = document.getElementById('fileInput');
     fileInput.value = '';
     fileInput.classList.remove('has-files');
@@ -2802,7 +2848,7 @@
     // Check if JSZip is available
     if (typeof JSZip === 'undefined') {
       console.error('JSZip not loaded');
-      alert('JSZip 不可用，将跳过图像选择并继续转换。');
+      showWebAlert('JSZip 不可用，将跳过图像选择并继续转换。');
       startConversionWithImageStates();
       return;
     }
@@ -2860,7 +2906,7 @@
 
     } catch (error) {
       console.error('Failed to extract images:', error);
-      alert('预览图像失败：' + localizeError(error.message) + '\n\n将继续正常转换。');
+      showWebAlert('预览图像失败：' + localizeError(error.message) + '\n\n将继续正常转换。');
       // Fallback: start conversion directly
       startConversionWithImageStates();
     }
@@ -3129,14 +3175,14 @@
 
   function openFolderModal() {
     document.getElementById('folderPathDisplay').textContent = currentPath;
-    document.getElementById('folderModal').classList.add('open');
+    openWebModal('folderModal');
     document.getElementById('folderName').value = '';
     setTimeout(() => document.getElementById('folderName').focus(), 50);
     document.getElementById('folderName').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) createFolder(); };
   }
 
   function closeFolderModal() {
-    document.getElementById('folderModal').classList.remove('open');
+    closeWebModal('folderModal');
   }
 
   // Toggle select-all checkbox
@@ -3164,7 +3210,7 @@
   function openDeleteSelectedModal() {
     const items = getSelectedItems();
     if (items.length === 0) {
-      alert('请至少选择一个要删除的项目。');
+      showWebAlert('请至少选择一个要删除的项目。');
       return;
     }
     openDeleteModalForItems(items);
@@ -3187,11 +3233,11 @@
       div.textContent = it.path;
       listEl.appendChild(div);
     });
-    document.getElementById('deleteModal').classList.add('open');
+    openWebModal('deleteModal');
   }
 
   function closeDeleteModal() {
-    document.getElementById('deleteModal').classList.remove('open');
+    closeWebModal('deleteModal');
   }
 
   function confirmDelete() {
@@ -3217,11 +3263,11 @@
         window.location.reload();
       } else {
         const text = await res.text();
-        alert('删除失败：' + text);
+        showWebAlert('删除失败：' + text);
         closeDeleteModal();
       }
     }).catch(() => {
-      alert('删除失败：网络错误');
+      showWebAlert('删除失败：网络错误');
       closeDeleteModal();
     });
   }
@@ -4051,7 +4097,13 @@ async function maybeRenameEbookFile(file) {
 }
 
 function reserveAvailableUploadFilename(fileName, usedFileNames) {
-  const normalize = name => name.toLowerCase();
+  // Use NFC filenames for cross-platform SD card compatibility.
+  const normalizedName = fileName.normalize('NFC');
+  if (normalizedName !== fileName) {
+    console.log(`[Upload] Normalized filename to NFC: ${fileName} -> ${normalizedName}`);
+    fileName = normalizedName;
+  }
+  const normalize = name => name.normalize('NFC').toLowerCase();
   if (!usedFileNames.has(normalize(fileName))) {
     usedFileNames.add(normalize(fileName));
     return fileName;
@@ -4070,6 +4122,7 @@ function reserveAvailableUploadFilename(fileName, usedFileNames) {
   } while (usedFileNames.has(normalize(candidateName)));
 
   usedFileNames.add(normalize(candidateName));
+  console.log(`[Upload] Renamed to avoid collision: ${fileName} -> ${candidateName}`);
   return candidateName;
 }
 
@@ -4079,7 +4132,7 @@ async function fetchExistingUploadNames() {
     throw new Error(response.status + ' ' + response.statusText);
   }
   const entries = await response.json();
-  return new Set(entries.map(entry => entry.name.toLowerCase()));
+  return new Set(entries.map(entry => entry.name.normalize('NFC').toLowerCase()));
 }
 
 /**
@@ -5576,7 +5629,7 @@ async function uploadFile() {
   const convertEnabled = document.getElementById('convertBeforeUpload').checked;
 
   if (files.length === 0) {
-    alert('请至少选择一个文件。');
+    showWebAlert('请至少选择一个文件。');
     return;
   }
 
@@ -5586,7 +5639,7 @@ async function uploadFile() {
     usedFileNames = await fetchExistingUploadNames();
   } catch (error) {
     isUploadInProgress = false;
-    alert('检查已有文件失败：' + localizeError(error.message));
+    showWebAlert('检查已有文件失败：' + localizeError(error.message));
     return;
   }
 
@@ -5693,7 +5746,6 @@ async function uploadFile() {
 
     const availableName = reserveAvailableUploadFilename(file.name, usedFileNames);
     if (availableName !== file.name) {
-      console.log(`[Upload] Renamed to avoid collision: ${file.name} -> ${availableName}`);
       file = new File([file], availableName, {
         type: file.type,
         lastModified: file.lastModified
@@ -5934,14 +5986,14 @@ function retryAllFailedUploads() {
     const folderName = document.getElementById('folderName').value.trim();
 
     if (!folderName) {
-      alert('请输入文件夹名称。');
+      showWebAlert('请输入文件夹名称。');
       return;
     }
 
     // Validate folder name
     const validName = /^(?!\.{1,2}$)[^"*:<>?\/\\|]+$/.test(folderName);
     if (!validName) {
-      alert('文件夹名称不能包含 \" * : < > ? / \\ |，也不能是 . 或 ..');
+      showWebAlert('文件夹名称不能包含 \" * : < > ? / \\ |，也不能是 . 或 ..');
       return;
     }
 
@@ -5956,12 +6008,12 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('创建文件夹失败：' + xhr.responseText);
+        showWebAlert('创建文件夹失败：' + xhr.responseText);
       }
     };
 
     xhr.onerror = function() {
-      alert('创建文件夹失败：网络错误');
+      showWebAlert('创建文件夹失败：网络错误');
     };
 
     xhr.send(formData);
@@ -5972,7 +6024,7 @@ function retryAllFailedUploads() {
     document.getElementById('renameItemName').textContent = name;
     document.getElementById('renameItemPath').value = path;
     document.getElementById('renameNewName').value = name;
-    document.getElementById('renameModal').classList.add('open');
+    openWebModal('renameModal');
     setTimeout(() => {
       const input = document.getElementById('renameNewName');
       input.focus();
@@ -5981,7 +6033,7 @@ function retryAllFailedUploads() {
   }
 
   function closeRenameModal() {
-    document.getElementById('renameModal').classList.remove('open');
+    closeWebModal('renameModal');
   }
 
   function confirmRename() {
@@ -5989,11 +6041,11 @@ function retryAllFailedUploads() {
     const newName = document.getElementById('renameNewName').value.trim();
 
     if (!newName) {
-      alert('请输入新名称。');
+      showWebAlert('请输入新名称。');
       return;
     }
     if (newName.includes('/') || newName.includes('\\')) {
-      alert('文件名不能包含斜杠。');
+      showWebAlert('文件名不能包含斜杠。');
       return;
     }
 
@@ -6008,13 +6060,13 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('重命名失败：' + xhr.responseText);
+        showWebAlert('重命名失败：' + xhr.responseText);
       }
       closeRenameModal();
     };
 
     xhr.onerror = function() {
-      alert('重命名失败：网络错误');
+      showWebAlert('重命名失败：网络错误');
       closeRenameModal();
     };
 
@@ -6087,7 +6139,7 @@ function retryAllFailedUploads() {
     document.getElementById('moveItemName').textContent = name;
     document.getElementById('moveItemPath').value = path;
     document.getElementById('moveDestPath').value = currentPath === '/' ? '/' : currentPath;
-    document.getElementById('moveModal').classList.add('open');
+    openWebModal('moveModal');
     loadMoveFolderOptions();
     setTimeout(() => {
       document.getElementById('moveDestPath').focus();
@@ -6095,7 +6147,7 @@ function retryAllFailedUploads() {
   }
 
   function closeMoveModal() {
-    document.getElementById('moveModal').classList.remove('open');
+    closeWebModal('moveModal');
   }
 
   function confirmMove() {
@@ -6103,7 +6155,7 @@ function retryAllFailedUploads() {
     const destPath = normalizePath(document.getElementById('moveDestPath').value);
 
     if (!destPath) {
-      alert('请输入目标文件夹。');
+      showWebAlert('请输入目标文件夹。');
       return;
     }
 
@@ -6118,13 +6170,13 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('移动失败：' + xhr.responseText);
+        showWebAlert('移动失败：' + xhr.responseText);
       }
       closeMoveModal();
     };
 
     xhr.onerror = function() {
-      alert('移动失败：网络错误');
+      showWebAlert('移动失败：网络错误');
       closeMoveModal();
     };
 

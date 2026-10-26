@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep base settings keys unique and reserved capacity equal to the entry count."""
+"""Keep streamed settings keys unique and reserve before collecting descriptors."""
 
 from collections import Counter
 from itertools import product
@@ -9,7 +9,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SETTINGS_LIST = ROOT / "src/SettingsList.h"
+SETTINGS_LIST = ROOT / "src/SettingsList.cpp"
 
 
 def matching_delimiter(source, opening, opening_char, closing_char):
@@ -69,8 +69,8 @@ def split_arguments(arguments):
 
 
 def base_list_source(source):
-    marker = "baseList = [] {"
-    start = source.index(marker) + len(marker) - 1
+    marker = "void forEachBaseSetting("
+    start = source.index("{", source.index(marker))
     end = matching_delimiter(source, start, "{", "}")
     entries = source[start + 1 : end]
     # Inline the two board-dependent selector factories for metadata/capacity
@@ -140,14 +140,15 @@ def setting_keys(source, capabilities):
 
 
 def main():
-    source = SETTINGS_LIST.read_text()
-    capacity_checks = ["#include <cstddef>"]
+    source = SETTINGS_LIST.read_text() + "\n" + (ROOT / "src/SettingsList.h").read_text()
+    capacities = set()
     capability_names = (
         "FREEINK_CAP_FRONTLIGHT",
         "FREEINK_CAP_TOUCH",
         "CROSSPOINT_CAP_SOUND_FEEDBACK",
         "FREEINK_CAP_HAPTIC",
         "FREEINK_CAP_WARMLIGHT",
+        "FREEINK_DEVICE_PICCO",
     )
     for values in product((False, True), repeat=len(capability_names)):
         capabilities = dict(zip(capability_names, values))
@@ -158,25 +159,44 @@ def main():
         )
         entries = preprocess_capability_guards(base_list_source(source), capabilities)
         entry_count = len(re.findall(r"SettingInfo::\w+\(", entries))
-        batch_sizes = []
-        for batch in re.finditer(r"v\.insert\(v\.end\(\), \{", entries):
-            opening = batch.end() - 1
-            closing = matching_delimiter(entries, opening, "{", "}")
-            batch_sizes.append(len(re.findall(r"SettingInfo::\w+\(", entries[opening:closing])))
-        assert sum(batch_sizes) == entry_count, f"settings outside insert batches for {capabilities}"
-        assert batch_sizes and max(batch_sizes) <= 4, f"oversized settings batch for {capabilities}: {batch_sizes}"
-        declaration = re.search(r"constexpr size_t entryCount = [^;]+;", entries).group()
-        capacity_checks.append(
-            f"namespace combination_{len(capacity_checks)} {{ {declaration} "
-            f"static_assert(entryCount == {entry_count}); }}"
-        )
-    subprocess.run(
-        ["c++", "-std=c++20", "-x", "c++", "-fsyntax-only", "-"],
-        input="\n".join(capacity_checks), text=True, check=True,
-    )
+        assert entries.count("emit(") == entry_count, capabilities
+        capacities.add(entry_count)
+    # Compile the actual collector with descriptors for every capability count;
+    # the list contents above come from the production visitor, including its factories.
+    collector_start = source.index('std::vector<SettingInfo> getBaseSettingsList(')
+    collector_open = source.index('{', collector_start)
+    collector_end = matching_delimiter(source, collector_open, '{', '}')
+    collector = source[collector_start:collector_end + 1]
+    capacities = sorted(capacities)
+    checks = r"""
+#include <cassert>
+#include <cstddef>
+#include <utility>
+#include <vector>
+struct SettingInfo {size_t id;};
+using SettingVisitor=void(*)(void*,SettingInfo&);
+size_t descriptorCount=0;
+void forEachBaseSetting(SettingVisitor visit,void* context){
+  for(size_t i=0;i<descriptorCount;++i){SettingInfo info{i};visit(context,info);}
+}
+""" + collector + '\nint main(){for(size_t count : {' + ','.join(str(n)+'u' for n in capacities) + r"""}){
+ descriptorCount=count;
+ for(size_t extra:{0u,1u,4u}){
+  auto rows=getBaseSettingsList(extra);
+  assert(rows.size()==count && rows.capacity()>=count+extra);
+  for(size_t i=0;i<count;++i)assert(rows[i].id==i);
+ }
+}}
+"""
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="settings-capacity-", dir=os.environ.get("TMPDIR")) as directory:
+        binary = Path(directory) / 'check'
+        subprocess.run(["c++", "-std=c++20", "-x", "c++", "-", "-o", str(binary)], input=checks, text=True, check=True)
+        subprocess.run([str(binary)], check=True)
     print(f"Web Settings API keys are unique across {2 ** len(capability_names)} capability combinations")
     print("Base settings capacity matches every capability combination without vector growth")
-    print("Every settings initializer batch has at most four entries")
+    print("Production visitor emits one descriptor at a time; collector reserves every capability count plus caller slots")
 
 
 if __name__ == "__main__":

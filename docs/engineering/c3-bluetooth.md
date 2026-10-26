@@ -1,7 +1,7 @@
 # ESP32-C3 BLE page-turner support
 
 All hardware firmware builds include BLE support, including the shared X3/X4
-`default`, release, RC and slim profiles. Compilation makes Bluetooth available
+`default`, Stable and Nightly profiles. Compilation makes Bluetooth available
 in settings; the saved Bluetooth switch still defaults to **off**. Native
 simulators retain the SDK stub because they have no BLE radio backend.
 X4 users have confirmed pairing, physical page/menu keys, chapter changes,
@@ -55,16 +55,19 @@ return-route guarantees and remaining fragmentation/acceptance limits.
 ## Reproducible build
 
 No local override is needed. Build X3/X4 with `pio run -e default`,
-`-e gh_release`, `-e gh_release_rc`, or `-e slim`. Each inherits `c3_hardware`,
+`-e gh_release`, or `-e gh_release_rc`. Each inherits `c3_hardware`,
 which supplies the C3 host configuration, tuned controller-only core and Flash
 controller link script. The existing S3 hardware profiles supply their PSRAM
-host configuration to every firmware flavor, including release and RC.
+host configuration to every firmware flavor, including Stable and Nightly.
 
-The common `ble_host` profile pins NimBLE-Arduino 2.3.8 and SDK compatibility
+The common `ble_host` profile pins NimBLE-Arduino 2.5.1 and SDK compatibility
 middleware. C3 injects `NimbleC3Config.h` into both NimBLE and the SDK host:
 internal RAM, Central/Observer, one connection, four bonds, MTU 23, six blocks
 per mbuf pool (256/320 B), and 12 high-priority events. Pool sizes do not describe
 total runtime heap. S3 retains its PSRAM allocator and IPC wrapper; C3 uses neither.
+
+Historical hardware acceptance records below remain tied to their recorded images
+and library revisions; they do not establish physical acceptance of the 2.5.1 pin.
 
 The controller-only custom core enables `CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY`.
 Pioarduino's final Arduino link still needs the matching ESP-IDF
@@ -85,8 +88,8 @@ cmake --build build/test --target ble_input_internal_tests ble_input_psram_tests
   ChapterHtmlSlimParserTest
 ctest --test-dir build/test --output-on-failure \
   -R 'Ble|Nimble|internal\.|psram\.|unavailable\.|SdCardFont|FontCacheManager|ChapterHtmlSlimParser|Section'
-pio run -e default -e gh_release -e gh_release_rc -e slim \
-  -e sticky-gh_release -e x4pro-gh_release -e x4c-gh_release -e papermono-gh_release
+pio run -e default -e gh_release -e gh_release_rc \
+  -e sticky-gh_release -e x4pro-gh_release -e x4c -e papermono-gh_release
 ```
 
 Host checks exercise production lifecycle methods, startup failure/retry, input
@@ -122,6 +125,9 @@ Flash/controller-only operation, without S3 IPC symbols. S3 retains PSRAM and
 IPC symbols without the C3 paged index or Flash controller; the three USB release
 ELFs also retain TinyUSB/MSC. Every application image passes checksum/hash
 validation. Download interruptions were resolved without source changes.
+
+These are historical measurements; `slim` and `x4c-gh_release` are no longer
+shared build environments.
 
 | Build | Static DRAM | IRAM reservation | Program | Image | SHA256 prefix |
 | --- | ---: | ---: | ---: | ---: | --- |

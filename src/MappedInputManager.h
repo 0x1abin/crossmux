@@ -3,9 +3,8 @@
 #include <BoardConfig.h>
 #include <HalGPIO.h>
 
-#include <array>
-
 #include "util/HomeButtonInput.h"
+#include "util/RemoteButtonInput.h"
 
 class GfxRenderer;
 namespace freeink {
@@ -56,6 +55,8 @@ class MappedInputManager {
   // expires. The main loop supplies that one-frame event here.
   void setPowerConfirmClickFrame(const bool clicked) { powerConfirmClickFrame = clicked; }
 #endif
+  bool injectRemoteClick(RemoteButton button);
+  bool hasRemoteClick() const { return remoteInput.button != RemoteButton::None; }
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
   // One-shot threshold event while the button is down; consumes its release.
@@ -152,7 +153,7 @@ class MappedInputManager {
   Button mapScreenDirection(Button button) const;
   Labels mapFrontLabels(const char* back, const char* confirm, const char* left, const char* right) const;
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
-  bool bleEdge(const std::array<bool, kButtonCount>& edges, Button button) const;
+  bool remoteEdge(Button button) const;
   void pollBle() const;
   // SDK edge classification (fui::edgeSwipe) + the shared decode/held-time
   // bookkeeping; the wrappers below give each edge its board meaning.
@@ -169,6 +170,7 @@ class MappedInputManager {
   void rememberTouchHeldTime() const;
   void suppressNextRelease(Button button) const;
 
+  mutable RemoteButtonInput remoteInput;
   mutable HomeButtonInput homeButtonInput;
   mutable HomeButtonAction homeAction = HomeButtonAction::Ignore;
   mutable HomeButtonAction deferredHomeAction = HomeButtonAction::Ignore;
@@ -177,9 +179,6 @@ class MappedInputManager {
   mutable unsigned long touchHeldOverrideAt = 0;
   mutable uint16_t longPressFiredButtons = 0;
   mutable uint16_t suppressedReleaseButtons = 0;
-  mutable std::array<bool, kButtonCount> blePressEdges{};
-  mutable std::array<bool, kButtonCount> bleReleaseEdges{};
-  mutable std::array<bool, kButtonCount> blePendingEdges{};
   mutable bool bleActivityThisFrame = false;
   bool bleCaptureMode = false;
   mutable bool bleHasCaptured = false;

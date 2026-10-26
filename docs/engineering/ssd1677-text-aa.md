@@ -21,8 +21,9 @@ existing driver and cleanup policy.
 Normal/release/Nightly inherit the SDK defaults without per-environment enable
 flags. The maintainer requested default rollout on all four platforms; the
 three separate candidate environments have been removed.
-`metalio_eink4_transition_experiment` retains diagnostics for the same default
-behavior. Each platform uses the shared core with its voltage tail, border,
+Diagnostics use a local `SSD1677_PROBE_DEBUG=1` override as described in
+[local build overrides](build-system.md#platformiolocalini-personal-overrides);
+the shared configuration has no diagnostic build target. Each platform uses the shared core with its voltage tail, border,
 scan orientation, sleep key and power-off control. Murphy's original-driver batch selection and
 temperature policy remain intact. These panels' independent calibration entries
 are retained; equal initial frame counts do not establish equal optical results.

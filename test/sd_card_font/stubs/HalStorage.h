@@ -36,6 +36,7 @@ class HalFile {
     opened_ = false;
     return true;
   }
+  size_t size() const { return sdFontTestFile.size(); }
   void open() {
     opened_ = true;
     position_ = 0;

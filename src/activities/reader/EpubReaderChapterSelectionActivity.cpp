@@ -163,8 +163,6 @@ void EpubReaderChapterSelectionActivity::buildScreen(UiScreen& screen) {
 }
 
 void EpubReaderChapterSelectionActivity::drawChrome() {
-  const auto& metrics = uiThemeMetrics(true);
-  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
-  GUI.drawHeaderWithStyle(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight},
-                          tr(STR_SELECT_CHAPTER), nullptr, true, true);
+  const Rect header = UITheme::getInstance().getHeaderRect(renderer, true, false, true);
+  GUI.drawHeaderWithStyle(renderer, header, tr(STR_SELECT_CHAPTER), nullptr, true, true);
 }
