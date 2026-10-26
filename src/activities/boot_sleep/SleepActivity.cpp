@@ -49,11 +49,9 @@ void cleanBeforeAbsoluteGray(GfxRenderer& renderer) {
 #endif
 }
 
-HalDisplay::GrayscaleMode sleepGrayscaleMode(const GfxRenderer& renderer) {
-  return renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct).supported()
-             ? HalDisplay::GrayscaleMode::Direct
-             : HalDisplay::GrayscaleMode::Absolute;
-}
+// sleepGrayscaleMode() comes from util/SleepGrayscale.h: the sleep cover and the
+// "set as cover" path must pick the same ramp, so the predicate is not duplicated
+// here.
 
 // Kept separate from /sleep.bmp and /.sleep so alpha-overlay art does not mix with full-screen wallpapers.
 constexpr char TRANSPARENT_SLEEP_ROOT_BMP[] = "/sleep-overlay.bmp";
