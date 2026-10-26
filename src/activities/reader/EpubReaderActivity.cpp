@@ -4529,6 +4529,10 @@ void EpubReaderActivity::activateMoreRow(int row) {
     }
     case MA::BLUETOOTH:
       EpubReaderMenuActivity::toggleBluetooth();
+      // Save through the book-style path: with per-book memory on, SETTINGS
+      // carries this book's typography and a plain save would write the book's
+      // overrides into the global settings file.
+      saveSettingsKeepingBookStyle();
       {
         RenderLock lock;
         renderOverlay();
