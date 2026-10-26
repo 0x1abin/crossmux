@@ -11,6 +11,9 @@
 ## Features
 
 - **Reading and library**: EPUB, TXT, XTC/XTCH and images; chapter navigation, bookmarks, dictionaries, custom fonts, reading backgrounds, and KOReader progress sync.
+- **Highlights and clippings**: select EPUB text with buttons or touch, look up words and phrases, save highlighted excerpts, and optionally sync clippings through a compatible CrossPoint Sync server. [Clippings guide](./USER_GUIDE.md#53-clippings-and-highlights).
+- **Bluetooth page turners**: connect and map tap/hold actions under **Settings → Connectivity → Bluetooth Page Turner** for pages, chapters, reader menus, and clipping selection.
+- **SD-card plugins**: enable **Settings → Connectivity → Plugins**, then open **Home → Plugins**. Install optional Plugin Hub manually or over Wi-Fi when selected; existing sideloaded plugins remain usable. Browser-side plugin JavaScript runs while its browser page stays open. [Plugin guide](./docs/sd-plugins.md).
 - **Wireless workflows**: browser file transfer and settings, Calibre wireless, OPDS downloads, WebDAV, and device OTA updates.
 - **Apps**: lightweight games and tools including Sudoku, Gomoku, Chinese Chess, Minesweeper, 2048, Electronic Woodfish, and Ugly Avatar. [Apps guide](./src/activities/apps/README.md).
 - **AirPage**: scan to upload content, then display BMP/JPEG images with manual refresh or foreground live delivery; images can become a sleep screen. [Usage and network behavior](./src/activities/apps/README.md#airpage).
@@ -22,32 +25,31 @@
 
 ## Devices and release channels
 
-| Device | Chip | Published channels |
+| Device | Chip | Configured channels |
 |---|---|---|
 | Xteink X3 / X4 (shared image) | ESP32-C3 | Stable, Nightly |
-| [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Nightly |
-| Xteink X4 Pro | ESP32-S3 | Nightly |
+| [Seeed Sticky](https://www.seeedstudio.com/sticky/?utm_source=partner&utm_medium=crossmux&utm_campaign=readme) | ESP32-S3 | Stable, Nightly |
+| Xteink X4 Pro | ESP32-S3 | Stable, Nightly |
 | M5Stack Paper Mono | ESP32-S3 | Nightly |
 | eego A4 | ESP32-S3 | Nightly |
 | Murphy M4 | ESP32-S3 | Nightly |
 | Waveshare ePaper 3.97 | ESP32-S3 | Nightly |
-| [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Nightly |
+| [Metalio E-Ink 4](./docs/engineering/metalio-eink4.md) | ESP32-S3 | Stable, Nightly |
 | [Read Pico (小纸 Pico)](./docs/engineering/read-pico.md) | ESP32-S3 | Nightly |
 
-This table describes configured release targets, not a claim that every feature has passed hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`) and [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`) have development build targets and are absent from public Nightly/OTA indexes. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
+Stable publishes only X3/X4, Sticky, X4 Pro and Metalio E-Ink 4. All nine targets publish Nightly. Local Stable build modes do not grant release eligibility; availability follows the selected regional catalog. This configuration does not establish hardware acceptance. Each S3 target needs its own image. X4 Classic (`x4c`), [LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md) (`lilygo_t5s3`), and BOOX Picco (`picco`) remain development-only. See [device variants](./docs/engineering/device-variants.md) for target-specific limitations.
 
-Use [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable) for the stable X3/X4 channel, or [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly) for development builds. The [target table](./scripts/nightly_targets.py) defines channels and artifact names; [release architecture](./docs/engineering/firmware-release.md) explains packaging and OTA. Current source version and build environments live in [platformio.ini](./platformio.ini).
+Use [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable) for formal releases, or [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly) for development builds. Both channels use the same package rules, with separate eligible target sets. The [target table](./scripts/nightly_targets.py) defines channels and artifact names; [release architecture](./docs/engineering/firmware-release.md) explains packaging and OTA. Current source version and build environments live in [platformio.ini](./platformio.ini).
 
 ## Install firmware
 
-1. Open [CrossMux Releases](https://github.com/0x1abin/crossmux/releases), choose the channel and exact device, and follow that release's asset links and installation notes. X3/X4 share an image; S3 images are board-specific.
-2. Back up your SD card data before changing firmware. Use the matching installation package; an application-only `firmware.bin` is not a complete first-install image.
-3. For an existing X3/X4 installation, the [upstream CrossPoint web flasher](https://crosspointreader.com/#flash-tools) offers a custom binary upload: select X3/X4 and upload the **CrossMux** application binary. Choosing an upstream release installs CrossPoint instead.
-4. For S3 installation and recovery, follow the matching [device documentation](./docs/engineering/device-variants.md) and release instructions. Do not reuse X3/X4 flash commands or offsets for another board.
+1. Open the [global Web tool](https://crossmux.com) or [China Web tool](https://crossmux.cn), enter the firmware flasher, and choose your exact device and an available Stable or Nightly version. The deployed tool discovers options from its regional release catalog. X3/X4 share an image; S3 images are board-specific.
+2. Back up your SD card data before changing firmware, and retain a complete Flash backup when the device's first-install or recovery instructions require one. Follow the matching [device documentation](./docs/engineering/device-variants.md) and the tool's confirmations.
+3. For offline installation, use [CrossMux Releases](https://github.com/0x1abin/crossmux/releases). After the new pipeline rollout, both channels publish `crossmux-<version>-<deviceSlug>.zip` with all installation segments, manifests and SHA-256 checksums. An application-only `firmware.bin` is not a complete first-install image. Historical releases retain their existing assets and instructions.
 
-To build and flash X3/X4 from source, use the [development commands](#development-quick-start) below. For an existing CrossMux installation, device OTA selects the model, content profile, and channel; S3 targets have no Stable channel.
+To build from source, use the [development commands](#development-quick-start) below. For an existing CrossMux installation, device OTA selects an available release by model, content profile and channel.
 
-Metalio E-Ink 4 uses the `metalio-eink4` Nightly package and model/board tag `metalio_eink4`. Both language entries point to the same multilingual firmware. Follow the [Metalio guide](./docs/engineering/metalio-eink4.md) for first installation, wiring, and hardware validation status. The [global Web tool](https://crossmux.com) and [China Web tool](https://crossmux.cn) show its install option once Web support is deployed and a matching Nightly package is present in the release catalog.
+X4 Pro packages use slug `x4pro`; Metalio E-Ink 4 packages use `metalio-eink4` and model/board tag `metalio_eink4`. Both language entries point to the same multilingual firmware per device. The Web tool offers a channel only when its catalog contains a matching package. Follow the [Metalio guide](./docs/engineering/metalio-eink4.md) for first installation, wiring and hardware validation status.
 
 ### USB-locked Xteink devices
 
@@ -82,20 +84,27 @@ pio run -e gh_release
 pio run -e gh_release -t upload
 ```
 
-The application binary is `.pio/build/gh_release/firmware.bin`. For other boards, use the matching environment in [build-system.md](./docs/engineering/build-system.md).
+The application binary is `.pio/build/<environment>/firmware.bin`. The committed configuration has 36 build entries: local Dev, Stable and Nightly modes for nine hardware targets, three development-only boards and six simulators. Only the four targets listed above are eligible for Stable publication. Versions and Git hashes are generated automatically: Stable `<base>`, Nightly `<base>-rc+<sha7>`, Dev `<base>-dev-<branch>-<sha7>`. For other boards, see [build-system.md](./docs/engineering/build-system.md).
 
-For Metalio E-Ink 4:
+For X4 Pro and Metalio E-Ink 4:
 
 ```bash
+# X4 Pro: Dev / Stable / Nightly
+pio run -e x4pro
+pio run -e x4pro-gh_release
+pio run -e x4pro_nightly
+
+# Metalio E-Ink 4: Dev / Stable / Nightly
 pio run -e metalio_eink4
-CROSSPOINT_RC_HASH=$(git rev-parse --short=7 HEAD) pio run -e metalio_eink4_nightly
+pio run -e metalio_eink4-gh_release
+pio run -e metalio_eink4_nightly
 ```
 
-The development application is `.pio/build/metalio_eink4/firmware.bin`; first installation also requires the matching bootloader and partition layout described in the [Metalio guide](./docs/engineering/metalio-eink4.md).
+The Stable ZIPs are `crossmux-<version>-x4pro.zip` and `crossmux-<version>-metalio-eink4.zip`. First installation also requires the matching bootloader and partition layout; use the complete installation package and the device guide.
 
 For Read Pico (小纸 Pico):
 
-Until FreeInk SDK PR #35 is merged, first follow the temporary SDK checkout in the [Read Pico guide](./docs/engineering/read-pico.md#current-implementation--2026-09-30).
+The recursive checkout includes the pinned SDK drivers; see the [Read Pico guide](./docs/engineering/read-pico.md#current-implementation--2026-09-30) for implementation details.
 
 ```bash
 pio run -e readpico
@@ -103,7 +112,7 @@ pio run -e readpico
 
 On Windows, set `PYTHONIOENCODING=utf-8` before running `pio`, otherwise the build can stall when PlatformIO prints the Arabic i18n language row.
 
-The application is `.pio/build/readpico/firmware.bin`. First installation is a **full-table flash** — `bootloader@0x0`, `partitions@0x8000`, `boot_app0@0xe000`, `app@0x10000` — after a verified full-chip (16 MiB) backup, because the repository partition table and the board's factory `partitions_16M.csv` disagree at `0xE000` and use different app-slot sizes. This target is **build-only in this round**: it is absent from the Nightly/OTA/Web release mappings, and no hardware acceptance has been recorded yet. See the [Read Pico guide](./docs/engineering/read-pico.md) for the pin map, the frozen build flags, and the pending acceptance checklist.
+The application is `.pio/build/readpico/firmware.bin`. First installation is a **full-table flash** — `bootloader@0x0`, `partitions@0x8000`, `boot_app0@0xe000`, `app@0x10000` — after a verified full-chip (16 MiB) backup, because the repository partition table and the board's factory `partitions_16M.csv` disagree at `0xE000` and use different app-slot sizes. Read Pico is published on Nightly only. Its local Stable build mode does not enable official publication or close physical acceptance. See the [Read Pico guide](./docs/engineering/read-pico.md) for the pin map, the frozen build flags and the pending acceptance checklist.
 
 ### Desktop simulator
 

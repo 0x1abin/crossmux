@@ -38,17 +38,33 @@ pio run -e waveshare_epaper_397
 pio run -e metalio_eink4
 pio run -e readpico
 pio run -e lilygo_t5s3
+pio run -e picco
 ```
 
-Eight S3 targets are published by the shared Nightly matrix, including MindReset
-Read Pico (`readpico_nightly`). X4 Classic has the
-same `x4c_nightly` build and Hardware CI coverage, but remains build-only.
-LilyGo T5 S3 adds `lilygo_t5s3` for local development. Neither target joins the
+Eight S3 targets are published by the shared Stable and Nightly matrices, including
+MindReset Read Pico (`readpico-gh_release` and `readpico_nightly`). X4 Classic uses
+its development environment `x4c` in Hardware CI and remains build-only.
+LilyGo T5 S3 adds `lilygo_t5s3` for local development. Picco adds `picco` with
+its stock partition table and app-only upload; it remains development-only. None of these targets joins the
 public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
+
+### BOOX Picco development target
+
+`picco` is a separate ESP32-S3 development environment, outside CrossMux's
+public Nightly/OTA registry. Its vendor bootloader, partition table, otadata and
+recovery partition must be retained. The board's application-only upload hook
+removes both the extra-image list and operands already captured in PlatformIO's
+upload command. It permits the standard USB esptool application upload and
+rejects full erase, filesystem upload and other upload protocols. Firmware updates use USB;
+Wi-Fi OTA and SD-card `firmware.bin` updates are unavailable on this board.
+Their settings entries and direct activity/backend entry points are disabled.
+The shared SD writer also rejects a destination at the running application's
+flash address, including the single-slot layout, before allocating or erasing.
+Build/host checks do not establish physical display, power or recovery acceptance.
 
 ## Standby-display light sleep
 
@@ -82,8 +98,8 @@ targets remain in the normal downclocked standby loop; a successful build alone
 is not a hardware acceptance test.
 
 Bluetooth Page Turner Beta is enabled in the C3 hardware flavors and the S3
-profiles using `s3_ble_psram`, including development, Nightly, release, RC and
-slim where those profiles exist. The runtime setting remains disabled by
+profiles using `s3_ble_psram`, including development, Nightly and Stable.
+The runtime setting remains disabled by
 default; existing saved choices are kept. EEGO A4 and native simulator builds
 use the SDK BLE stub.
 
@@ -91,7 +107,7 @@ X3/X4 profiles share `c3_hardware`: internal RAM, a Flash controller and paged
 coverage indexes for large SD fonts. The HAL protects the entire C3 BLE host
 lifetime from manual 10 MHz idle downclocking. Sticky, X4 Pro, X4 Classic, Paper
 Mono, Murphy M4, Waveshare 3.97, Metalio E-Ink 4, Read Pico and LilyGo T5 S3
-inherit `s3_ble_psram` through their hardware profiles, including release/RC
+inherit `s3_ble_psram` through their hardware profiles, including published
 flavors where present. Sticky and Read Pico keep their tuned controller-only
 cores. EEGO A4 uses the prebuilt TinyUSB graph with BLE stubs; other USB-capable
 boards also keep the prebuilt graph. C3 never inherits the S3 allocator or IPC
@@ -261,8 +277,8 @@ this is why X3 "just works" without per-screen code (see
 
 ## Build & flash for X3
 
-Same envs as X4 (`platformio.ini`): `default`, `gh_release`, `gh_release_rc`,
-and `slim`. Flash any of them to an X3:
+Same envs as X4 (`platformio.ini`): `default`, `gh_release`, and `gh_release_rc`.
+Flash any of them to an X3:
 
 ```bash
 pio run -e gh_release -t upload

@@ -145,6 +145,10 @@ bool streamDeflatedPrefix(HalFile& file, Print& out, const size_t chunkSize, con
 }  // namespace
 
 bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
+  if (lastLookupValid && lastLookupName == filename) {
+    *fileStat = lastLookup;
+    return true;
+  }
   const ScopedOpenClose zip{*this};
   if (!zip) return false;
 
@@ -187,6 +191,9 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
         fileStat->localHeaderOffset = entry.localHeaderOffset;
         lastCentralDirPos = file.position();
         lastCentralDirPosValid = true;
+        lastLookupName = filename;
+        lastLookup = *fileStat;
+        lastLookupValid = true;
         found = true;
         break;
       }
@@ -319,6 +326,7 @@ bool ZipFile::close() {
   }
   lastCentralDirPos = 0;
   lastCentralDirPosValid = false;
+  lastLookupValid = false;  // The archive may change before it is opened again.
   return true;
 }
 

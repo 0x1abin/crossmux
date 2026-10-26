@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from native_reader_gray_contract import prepare as prepare_reader_contract
+from test_reading_ui_regressions import method
 
 
 def main():
@@ -35,7 +36,7 @@ def main():
     #include <cstdint>
     class CrossPointSettings {
      public:
-      enum SLEEP_SCREEN_MODE : uint8_t { LIGHT, CUSTOM, TRANSPARENT, SLEEP_SCREEN_MODE_COUNT };
+      enum SLEEP_SCREEN_MODE : uint8_t { LIGHT, CUSTOM, TRANSPARENT, COVER_TRANSPARENT, SLEEP_SCREEN_MODE_COUNT };
       enum class SLEEP_SCREEN_COVER_MODE { FIT, CROP };
       enum class SLEEP_SCREEN_COVER_FILTER { NO_FILTER, BLACK_AND_WHITE, INVERTED_BLACK_AND_WHITE };
       SLEEP_SCREEN_COVER_MODE sleepScreenCoverMode = SLEEP_SCREEN_COVER_MODE::FIT;
@@ -57,18 +58,23 @@ def main():
         placement = sleep[sleep.index('// Metalio:'):sleep.index('// Kept separate')]
         placement += sleep[sleep.index('struct BitmapPlacement {'):sleep.index('struct OverlayBmpInfo {')]
         placement += sleep[sleep.index('BitmapPlacement calculateBitmapPlacement('):sleep.index('bool parseOverlayBmpHeader(')]
+        placement += sleep[sleep.index('class BwFrameKeeper {'):sleep.index('bool beginOverlayGrayPlane(')]
+        placement += method(sleep, 'bool beginOverlayGrayPlane(')
         custom = sleep[sleep.index('void SleepActivity::renderCustomSleepScreen()'):sleep.index('// Sleep screens paint')]
         bitmap_sleep = sleep[sleep.index('void SleepActivity::renderBitmapSleepScreen('):sleep.index('bool SleepActivity::renderSleepOverlayFile(')]
         probe = """#include "util/SleepCover.h"
     #include <cmath>
     #include <Logging.h>
     enum class SleepRecentKind { Standard };
-    inline bool selectRandomSleepFile(const char*, SleepRecentKind, std::string&) { return false; }
+    inline bool selectRandomSleepFile(const char*, const char*, SleepRecentKind, std::string&) { return false; }
     class SleepProbe {
      public:
       explicit SleepProbe(GfxRenderer& value) : renderer(value) {}
       GfxRenderer& renderer;
       mutable int defaults = 0;
+      mutable const Bitmap* overlayCover = nullptr;
+      mutable const Bitmap* overlayGrayCover = nullptr;
+      void renderTransparentCustomSleepScreen() const {}
       void renderDefaultSleepScreen() const { ++defaults; }
       void renderCustomSleepScreen() const;
       void renderBitmapSleepScreen(const Bitmap&, bool = false, bool = false) const;
@@ -77,7 +83,6 @@ def main():
         (work / 'SleepProbe.h').write_text(probe + placement +
             (custom + bitmap_sleep).replace('SleepActivity::', 'SleepProbe::'))
         # Compile the new viewer's JPEG and publication methods with real renderer/decoder/storage.
-        from test_reading_ui_regressions import method
         viewer = (ROOT / 'src/activities/util/ImageViewerActivity.cpp').read_text()
         constants = viewer[viewer.index('constexpr const char* IMAGE_PREVIEW_PATH'):viewer.index('Rect sleepCoverActionRect')]
         methods = '\n'.join(method(viewer, name) for name in (

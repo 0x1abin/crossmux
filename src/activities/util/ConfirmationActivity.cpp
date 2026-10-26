@@ -12,6 +12,14 @@ ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputMan
                                            const BodyPlacement bodyPlacement)
     : Activity("Confirmation", renderer, mappedInput), heading(heading), body(body), bodyPlacement(bodyPlacement) {}
 
+ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                           const std::string& heading, const std::string& body,
+                                           const std::string& cancelLabel, const std::string& confirmLabel)
+    : ConfirmationActivity(renderer, mappedInput, heading, body, BodyPlacement::Page) {
+  this->cancelLabel = cancelLabel;
+  this->confirmLabel = confirmLabel;
+}
+
 void ConfirmationActivity::onEnter() {
   if (!UITheme::getInstance().hasMainTabs()) {
     Activity::onEnter();
@@ -19,7 +27,8 @@ void ConfirmationActivity::onEnter() {
     // Both texts live inside the dialog: the heading as its caption and the
     // subject (a book title) as the wrapping headline beneath it. No
     // pre-truncation — the dialog wraps both to its own width.
-    const char* options[] = {I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM)};
+    const char* options[] = {cancelLabel.empty() ? tr(STR_CANCEL) : cancelLabel.c_str(),
+                             confirmLabel.empty() ? tr(STR_CONFIRM) : confirmLabel.c_str()};
     confirmPopup.show(heading.c_str(), body.c_str(), options, 2, 0, [this](int idx) {
       ActivityResult res;
       res.isCancelled = (idx != 1);
@@ -49,7 +58,8 @@ void ConfirmationActivity::onEnter() {
     }
   }
 
-  const char* options[] = {I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM)};
+  const char* options[] = {cancelLabel.empty() ? tr(STR_CANCEL) : cancelLabel.c_str(),
+                           confirmLabel.empty() ? tr(STR_CONFIRM) : confirmLabel.c_str()};
   const char* popupTitle = nullptr;
   switch (bodyPlacement) {
     case BodyPlacement::Page:

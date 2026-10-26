@@ -1,4 +1,4 @@
-"""Compile a build-local SDK copy compatible with pinned NimBLE-Arduino 2.3.8."""
+"""Compile a build-local SDK copy compatible with pinned NimBLE-Arduino 2.5.1."""
 
 from pathlib import Path
 
@@ -21,7 +21,7 @@ def write_compatible_source(target, source, env):
         raise RuntimeError("Unsupported BleKeyboardHost passkey callback; check the SDK/NimBLE pins")
     output = Path(target[0].get_abspath())
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(original.replace(METHOD, "", 1), encoding="utf-8")
+    output.write_text(original, encoding="utf-8")
 
 
 def compile_compatible_host(build_env, node):

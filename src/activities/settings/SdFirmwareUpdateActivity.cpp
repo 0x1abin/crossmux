@@ -25,6 +25,11 @@ constexpr unsigned int PROGRESS_REFRESH_STEP_PERCENT = 10;
 
 void SdFirmwareUpdateActivity::onEnter() {
   Activity::onEnter();
+#if FREEINK_DEVICE_PICCO
+  // The stock Picco application slot is the running slot, not an update destination.
+  finish();
+  return;
+#endif
   // Build-identity marker — confirms which firmware build owns the SD update flow.
   LOG_INF("FW", "SdFirmwareUpdateActivity build=%s %s recovery=%d", __DATE__, __TIME__, recoveryMode ? 1 : 0);
   state = State::PICKING;
@@ -87,7 +92,8 @@ bool SdFirmwareUpdateActivity::validateFirmware() {
   // size, which had the side effect of erasing partition state and was wasted
   // work since we only need the size bound for validation here.
   const esp_partition_t* dest = esp_ota_get_next_update_partition(nullptr);
-  if (!dest) {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  if (!dest || !running || dest->address == running->address) {
     LOG_ERR("FW", "no next-update partition available");
     errorMessage = tr(STR_INVALID_FIRMWARE);
     return false;

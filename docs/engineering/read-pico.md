@@ -73,19 +73,21 @@ bottom clearance.
 Simulator acceptance cannot close the physical bottom-clearance, waveform,
 ghosting, power or sleep/wake acceptance items below.
 
-### Nightly and Web release integration — 2026-10-01
+### Stable, Nightly and Web release integration
 
-Read Pico is included in the Nightly target table as `readpico`, using the
-`readpico_nightly` environment and version `<version>-readpico-rc+<sha7>`. This
-environment inherits the board profile and normal S3 Nightly logging; it does not
-wait for a USB Serial connection at boot. Stable remains unsupported.
+Read Pico is included in the shared target table as `readpico` and publishes
+only Nightly through `readpico_nightly` (`<version>-rc+<sha7>`). The local
+`readpico-gh_release` mode (`<version>`) remains available but is not eligible
+for official Stable packaging. Both modes inherit the same board profile and
+release logging; neither waits for a USB Serial connection at boot.
 
-Packaging emits one ESP32-S3 binary set, a checksum file, and `global` / `zh-CN`
-compatibility manifests referencing the same assets. Target, slug and board tag
+Packaging emits one ESP32-S3 binary set, a checksum file, `global` / `zh-CN`
+compatibility manifests referencing the same assets, and a complete installation
+ZIP. Target, slug and board tag
 are `readpico`; the model list also accepts the SDK runtime name `read_pico`.
 The website displays **MindReset Read Pico**, at 684 × 1216,
 and reuses the existing S3 download, full-install and inactive-slot OTA paths.
-The option appears only after a regional Nightly index includes the target.
+Each channel appears only after its regional index includes the target.
 First installation replaces the factory partition layout; back up the full
 16 MB Flash before proceeding. Later compatible installations use OTA.
 

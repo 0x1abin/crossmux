@@ -584,7 +584,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 82);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 86);
   ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
   bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
   bytes.erase(12, 1);  // vertical bottom-align toggle appended after alignment.
@@ -610,6 +610,14 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   for (size_t position = pageLut; position < anchorMap; position += 4) adjustOffset(position);
   bytes.front() = 70;
   append(bytes);
+  std::string actualVisible;
+  for (const auto& word : laidOutWords) actualVisible += word;
+  std::string expectedVisible;
+  for (int i = 0; i < 900; ++i) expectedVisible += "中文正文";
+  expectedVisible += "汉字[1]";
+  for (int i = 0; i < 80; ++i) expectedVisible += "Englishparagraphwords.";
+  expectedVisible += "Footnotetext.";
+  EXPECT_EQ(actualVisible, expectedVisible);  // No dropped or duplicated words across soft flush/page moves.
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
   // Pre-refactor cache, text and footnotes. The expected value tracks the
@@ -619,7 +627,10 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   // is normalized away together with the indent/spacing bytes). The leading
   // version byte is normalized to 70 so a version bump alone never moves the
   // digest.
-  EXPECT_EQ(digest, 9535508317497758948ULL);  // Verified main v71/v70 layout, text and footnotes.
+  // CSS19 widow/orphan flow changes page boundaries even without embedded CSS.
+  // The complete visible text is checked independently above; this snapshot
+  // fixes the new LUT/anchor layout while keeping the old header normalization.
+  EXPECT_EQ(digest, 13619351531823302489ULL);
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
@@ -855,7 +866,6 @@ TEST_F(ChapterHtmlSlimParserTest, BottomAlignSkipsTablesRulesAndDisabledPages) {
 TEST_F(ChapterHtmlSlimParserTest, BottomAlignKeepsTocAndTxtChapterEndPagesTopAligned) {
   parser.verticalBottomAlign = true;
   parser.viewportHeight = 100;
-  parser.anchorData.reserve(1);
   for (const bool txt : {false, true}) {
     parser.txtChapterBoundaries = txt;
     parser.tocAnchors = txt ? std::vector<std::string>{} : std::vector<std::string>{"next"};
@@ -898,7 +908,7 @@ TEST_F(SectionMemoryTest, BottomAlignRejectsOppositeToggleAndMalformedByteInComp
       std::ifstream input(path, std::ios::binary);
       const std::string bytes{std::istreambuf_iterator<char>(input), {}};
       ASSERT_GT(bytes.size(), 47u);
-      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 200 : 82);
+      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 196 : 86);
       {
         Section same(epub, 0, renderer);
         ASSERT_TRUE(same.loadSectionFile(spec));
@@ -963,7 +973,8 @@ TEST_F(SectionMemoryTest, TocAnchorsTrackSubchaptersDuringBuildAndAfterReload) {
 
 TEST_F(SectionMemoryTest, RejectsOldCompleteAndPartialVersionsBeforeReadingNewBlocks) {
   writeHtml("<html><body><p>one</p><p>two</p></body></html>");
-  for (const uint8_t legacy : {uint8_t{76}, uint8_t{77}, uint8_t{206}, uint8_t{205}}) {
+  for (const uint8_t legacy :
+       {uint8_t{76}, uint8_t{77}, uint8_t{206}, uint8_t{205}, uint8_t{84}, uint8_t{85}, uint8_t{198}, uint8_t{197}}) {
     Section section(epub, 0, renderer);
     ASSERT_TRUE(section.createSectionFile(spec));
     {

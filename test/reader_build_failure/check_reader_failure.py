@@ -7,7 +7,13 @@ import tempfile
 # implementation of the retry policy. This does not model the full Activity lifecycle.
 repo = Path(__file__).resolve().parents[2]
 s = (repo / 'src/activities/reader/EpubReaderActivity.cpp').read_text()
-method = s[s.index('bool EpubReaderActivity::handleBuildFailure('):s.index('bool EpubReaderActivity::buildTickHeapGate(')]
+start = s.index('bool EpubReaderActivity::handleBuildFailure(')
+end = s.index('{', start) + 1
+depth = 1
+while depth:
+    depth += (s[end] == '{') - (s[end] == '}')
+    end += 1
+method = s[start:end]
 # Compile the actual production method, with only its collaborators stubbed.
 prelude = r'''
 #include <cassert>

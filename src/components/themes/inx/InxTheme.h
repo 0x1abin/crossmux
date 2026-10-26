@@ -85,8 +85,9 @@ constexpr ThemeMetrics makeValues() {
                           .sheetRadius = 6,
                           .capsuleRadius = 6,
                           .headerBatteryDetached = true};
-  metrics.topPadding = 0;
-  metrics.batteryBarHeight = 24;
+  metrics.topPadding = HeaderStatusMetrics::topPadding;
+  metrics.batteryBarHeight = HeaderStatusMetrics::baseStripHeight;
+  metrics.headerClockCentered = false;
   metrics.headerHeight = 66;
   metrics.verticalSpacing = 0;
   metrics.contentSidePadding = 20;
