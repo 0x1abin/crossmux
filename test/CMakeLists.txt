@@ -135,6 +135,9 @@ foreach(font_test DifferentialRoundingTest LigatureGuardTest CalculatorFontTest 
 endforeach()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME HalPowerSources COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_hal_power_sources.py)
+add_test(NAME SdkBatteryMonitor
+  COMMAND sh ${REPO_ROOT}/freeink-sdk/libs/hardware/BatteryMonitor/test/host/run.sh)
 add_test(NAME ClippingHighlightPlanes COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_clipping_highlight_planes.py)
 add_test(NAME ClippingSelectionText COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_clipping_selection_text.py)
 add_test(NAME SelectionButtons COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_selection_buttons.py)
