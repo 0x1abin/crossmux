@@ -15,7 +15,6 @@
 #include <PowerManager.h>
 #include <Preferences.h>
 #include <SPI.h>
-#include <Wire.h>
 #include <XteinkDetect.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
@@ -87,37 +86,6 @@ static_assert(InputManager::BTN_UP == HalGPIO::BTN_UP && InputManager::BTN_CONFI
 static_assert(HalGPIO::BTN_UP != HalGPIO::BTN_CONFIRM && HalGPIO::BTN_CONFIRM != HalGPIO::BTN_DOWN,
               "Each Read Pico key zone must land on its own logical button");
 #endif
-
-namespace X3GPIO {
-
-bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  if (Wire.requestFrom(addr, static_cast<uint8_t>(2), static_cast<uint8_t>(true)) < 2) {
-    while (Wire.available()) {
-      Wire.read();
-    }
-    return false;
-  }
-  const uint8_t lo = Wire.read();
-  const uint8_t hi = Wire.read();
-  *outValue = (static_cast<uint16_t>(hi) << 8) | lo;
-  return true;
-}
-
-bool readBQ27220CurrentMA(int16_t* outCurrent) {
-  uint16_t raw = 0;
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_CUR_REG, &raw)) {
-    return false;
-  }
-  *outCurrent = static_cast<int16_t>(raw);
-  return true;
-}
-
-}  // namespace X3GPIO
 
 namespace {
 constexpr char HW_NAMESPACE[] = "cphw";
@@ -216,10 +184,8 @@ void HalGPIO::begin() {
   _deviceType = detectDeviceTypeWithFingerprint();
   BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
 
-  // Resolve the per-batch controller before SPI owns the display pins. FreeInk
-  // checks the OEM hw_calib/screenType value first, then falls back to its
-  // two-pass display-bus probe. X3's facade keys panel selection off the sibling
-  // board profile, so preserve a detected UC8279 through setDisplayX3().
+  // Probe the controller before SPI owns the pins; OEM NVS is diagnostic only.
+  // Preserve the X3 UC8279 sibling through setDisplayX3().
   freeink::applyXteinkDisplayController();
   if (deviceIsX3() && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
     BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
@@ -451,18 +417,6 @@ static bool usbHostSofActive() {
 #endif
 
 bool HalGPIO::isUsbConnected() const {
-  if (deviceIsX3()) {
-    // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
-    // Positive current means charging.
-    for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-      int16_t currentMa = 0;
-      if (X3GPIO::readBQ27220CurrentMA(&currentMa)) {
-        return currentMa > 0;
-      }
-      delay(2);
-    }
-    return false;
-  }
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   bool connected = false;
   if (Waveshare397Power::externalPowerConnected(connected)) return connected;
@@ -475,7 +429,7 @@ bool HalGPIO::isUsbConnected() const {
   if (known) return connected;
   if (usbHostSofActive()) return true;
 #endif
-  if (BoardConfig::ACTIVE.usbDetect >= 0) {
+  if (!deviceIsX3() && BoardConfig::ACTIVE.usbDetect >= 0) {
     return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
   }
   // X3 uses GPIO20 for I2C, not USB detection. Boards without a digital
