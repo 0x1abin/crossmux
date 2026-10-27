@@ -102,7 +102,8 @@ struct StorageMock {
 } Storage;
 struct CrossPointSettings {
  enum SLEEP_SCREEN_MODE { CUSTOM, TRANSPARENT, COVER_TRANSPARENT, SLEEP_SCREEN_MODE_COUNT };
- bool showHiddenFiles = false; uint8_t sleepScreen = CUSTOM;
+ enum SLEEP_SCREEN_COVER_FILTER { NO_FILTER, BLACK_AND_WHITE, INVERTED_BLACK_AND_WHITE };
+ bool showHiddenFiles = false; uint8_t sleepScreen = CUSTOM; uint8_t sleepScreenCoverFilter = NO_FILTER;
  int failedSaves = 0;
  bool saveToFile() { if (failedSaves > 0) { --failedSaves; return false; } return true; }
 } SETTINGS;
@@ -111,7 +112,13 @@ struct GfxRenderer {
  int getScreenWidth() const { return width; }
  int getScreenHeight() const { return height; }
  struct FrameBufferLoan { explicit FrameBufferLoan(GfxRenderer&) {} };
+ // The threshold predicates live in util/SleepGrayscale.h; this harness only
+ // needs the same call shape, and pins the legacy branch (unsupported panel).
+ struct GrayscaleCapabilitiesStub { bool supported() const { return false; } };
+ GrayscaleCapabilitiesStub grayscaleCapabilities(int) const { return {}; }
 };
+int sleepGrayscaleMode(const GfxRenderer&) { return 0; }
+bool useOriginalGrayscaleThresholds() { return false; }
 bool conversionFails = false;
 int jpegWidth = 0, jpegHeight = 0, pngConversions = 0;
 struct JpegToBmpConverter {
@@ -121,7 +128,7 @@ struct JpegToBmpConverter {
  }
 };
 struct PngToBmpConverter {
- static bool pngFileToBmpFile(const char* input, const char* out, bool) {
+ static bool pngFileToBmpFile(const char* input, const char* out, bool, bool) {
    ++pngConversions; Storage.data[out] = "PNG-BMP"; return !conversionFails && !Storage.writeFails && Storage.exists(input);
  }
  static bool pngFileToTransparentBmpFile(const char*, const char* out, bool) {
