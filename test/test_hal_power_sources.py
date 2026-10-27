@@ -26,31 +26,61 @@ def run():
 #include <cassert>
 #include <cstdint>
 constexpr int HIGH=1;
-void delay(int) {} int digitalRead(int) {return 0;}
-namespace X3GPIO {bool readBQ27220CurrentMA(int16_t*) {return false;}}
+bool x3=false;int usbLevel=0,digitalReads=0;
+int digitalRead(int pin) {assert(pin==20);++digitalReads;return usbLevel;}
 namespace BoardConfig {struct Profile {int usbDetect=-1;};Profile ACTIVE;}
 struct BatteryMonitor {
  static inline bool known=false,present=false,charging=false;
- bool isExternalPowerPresent(bool* out) const {*out=known;return present;}
- bool isCharging() const {return charging;}
+ static inline int powerReads=0,chargeReads=0;
+ bool isExternalPowerPresent(bool* out) const {++powerReads;*out=known;return present;}
+ bool isCharging() const {++chargeReads;return charging;}
 };
 bool frames=false;bool usbHostSofActive() {return frames;}
-struct HalGPIO {bool deviceIsX3() const {return false;} bool isUsbConnected() const;};
+struct Waveshare397Power {
+ static inline bool known=false,present=false;
+ static bool externalPowerConnected(bool& out) {out=present;return known;}
+};
+struct HalGPIO {bool deviceIsX3() const {return x3;} bool isUsbConnected() const;};
 struct {bool stopped=false;void prepareForDeepSleep() {stopped=true;}} Storage;
 struct {void startDeepSleep(HalGPIO&) {Storage.stopped=true;}} powerManager;
 """ + usb + "\nvoid bootOnUsb(HalGPIO& gpio) {do {\n" + boot + r"""
 } while(false);}
 int main() {
  HalGPIO gpio;
-#if FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397
+ Waveshare397Power::known=true;Waveshare397Power::present=true;assert(gpio.isUsbConnected());
+ Waveshare397Power::present=false;frames=true;assert(!gpio.isUsbConnected());
+ Waveshare397Power::known=false;assert(gpio.isUsbConnected());
+ frames=false;assert(!gpio.isUsbConnected());
+ assert(BatteryMonitor::powerReads==0 && BatteryMonitor::chargeReads==0);
+#elif FREEINK_DEVICE_METALIO_EINK4
  BatteryMonitor::known=true;BatteryMonitor::present=true;assert(gpio.isUsbConnected());
  BatteryMonitor::present=false;BatteryMonitor::charging=true;assert(!gpio.isUsbConnected());
  BatteryMonitor::known=false;assert(gpio.isUsbConnected());
  BatteryMonitor::charging=false;frames=true;assert(gpio.isUsbConnected());
  frames=false;assert(!gpio.isUsbConnected());
+#else
+ // X4 uses the physical USB pin, independently of battery telemetry.
+ BoardConfig::ACTIVE.usbDetect=20;
+ BatteryMonitor::charging=true;
+ assert(!gpio.isUsbConnected());usbLevel=HIGH;assert(gpio.isUsbConnected());
+ assert(digitalReads==2 && BatteryMonitor::powerReads==0 && BatteryMonitor::chargeReads==0);
+ // X3 must never sample SDA20 as a digital USB signal, even with an old profile.
+ x3=true;assert(gpio.isUsbConnected());
+ BatteryMonitor::charging=false;assert(!gpio.isUsbConnected());
+ assert(digitalReads==2 && BatteryMonitor::chargeReads==2);
+ BoardConfig::ACTIVE.usbDetect=-1;
+ assert(!gpio.isUsbConnected());
+ BatteryMonitor::charging=true;assert(gpio.isUsbConnected());
+ // An authoritative external-power reading wins over charging state.
+ BatteryMonitor::known=true;
+ int before=BatteryMonitor::chargeReads;
+ assert(!gpio.isUsbConnected());
+ BatteryMonitor::present=true;BatteryMonitor::charging=false;assert(gpio.isUsbConnected());
+ assert(BatteryMonitor::chargeReads==before && digitalReads==2);
 #endif
  bootOnUsb(gpio);
-#if FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_WAVESHARE_EPAPER_397
  assert(!Storage.stopped);
 #else
  assert(Storage.stopped);
@@ -59,13 +89,15 @@ int main() {
 """
     with tempfile.TemporaryDirectory(prefix="hal-power-") as directory:
         tmp=Path(directory);(tmp/"check.cpp").write_text(harness)
-        for metalio,lilygo in ((0,0),(0,1),(1,0)):
-            binary=tmp/f"check-{metalio}-{lilygo}"
+        for metalio,lilygo,waveshare in ((0,0,0),(0,1,0),(1,0,0),(0,0,1)):
+            binary=tmp/f"check-{metalio}-{lilygo}-{waveshare}"
             subprocess.run(["c++","-std=c++17",f"-DFREEINK_DEVICE_METALIO_EINK4={metalio}",
-                            f"-DFREEINK_DEVICE_LILYGO={lilygo}",str(tmp/"check.cpp"),"-o",str(binary)],check=True,
+                            f"-DFREEINK_DEVICE_LILYGO={lilygo}",
+                            f"-DFREEINK_DEVICE_WAVESHARE_EPAPER_397={waveshare}",
+                            str(tmp/"check.cpp"),"-o",str(binary)],check=True,
                            env=dict(os.environ,CCACHE_DISABLE="1"))
             subprocess.run([str(binary)],check=True)
-    print("Metalio authoritative/unknown power and USB SOF fallback; LilyGo USB cold boot passed")
+    print("X3/X4 SDK power routing, authoritative telemetry, board fallbacks and USB cold boot passed")
 
 
 def sleep_order():
