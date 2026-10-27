@@ -3,6 +3,7 @@
 #include <ContentProtection.h>
 #include <Print.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -90,6 +91,10 @@ class Epub {
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
+  // Stream every TOC entry in index order (see BookMetadataCache::forEachTocEntry).
+  // One sequential pass instead of a LUT seek + entry seek per index.
+  bool forEachTocItem(const std::function<bool(int tocIndex, const BookMetadataCache::TocEntry& entry)>& fn,
+                      int fromIndex = 0) const;
   int getSpineItemsCount() const;
   bool isLinearSpineItem(int spineIndex) const;
   int getLinearSpineItemsCount() const;

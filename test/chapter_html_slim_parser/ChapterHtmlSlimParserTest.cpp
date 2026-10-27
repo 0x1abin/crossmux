@@ -961,9 +961,14 @@ TEST_F(SectionMemoryTest, TocAnchorsTrackSubchaptersDuringBuildAndAfterReload) {
     ASSERT_EQ(count, 2);
     mapStart = file.position();
   }
-  // A truncated anchor must not be mistaken for the second chapter.
+  // A truncated anchor must not be mistaken for the second chapter. Pages are resolved
+  // once per loaded section rather than on every lookup, so the damaged map surfaces on
+  // the next load: anchors it no longer holds stay unknown and fall back to the spine's
+  // first entry.
   std::filesystem::resize_file(epub->cachePath + "/sections/0.bin", mapStart + 1);
-  EXPECT_EQ(restored.getTocIndexForPage(*second), 0);
+  Section damaged(epub, 0, renderer);
+  ASSERT_TRUE(damaged.loadSectionFile(spec));
+  EXPECT_EQ(damaged.getTocIndexForPage(*second), 0);
 }
 
 TEST_F(SectionMemoryTest, RejectsOldCompleteAndPartialVersionsBeforeReadingNewBlocks) {
