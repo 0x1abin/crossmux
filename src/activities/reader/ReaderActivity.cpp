@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
+#include "BookStyleStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
@@ -48,6 +50,81 @@ std::unique_ptr<ReaderActivity> ReaderActivity::create(GfxRenderer& renderer, Ma
 
 void ReaderActivity::applyInitialOrientation() { ReaderUtils::applyOrientation(renderer, SETTINGS.orientation); }
 
+void ReaderActivity::applyBookStyle() {
+  // Snapshot the global settings once on enter, for every book and whether or
+  // not memory is on: enabling memory from the text settings later in the
+  // session needs a baseline, and a baseline that only exists for some
+  // sessions is what made that toggle a no-op (applyBookStyleMemoryToggle()).
+  if (!globalSettingsSnapshotted_) {
+    globalSettingsSnapshot_ = captureStyleFromSettings();
+    globalSettingsSnapshotted_ = true;
+  }
+  // The per-book overrides can be turned off from the text settings; then every
+  // book opens with the global settings, exactly like the stock firmware, and
+  // the baseline above is only used to keep ordinary typography edits global.
+  if (!SETTINGS.bookStyleMemory) return;
+  BookStyle style;
+  // Books without their own entry keep the global settings from the settings
+  // screen.
+  if (!BOOK_STYLES.findStyle(bookPath, style)) return;
+  applyStyleOverrides(style);
+}
+
+void ReaderActivity::saveBookStyle() {
+  // Override model: per-book values are captured by the text-settings entry,
+  // which persists the store itself; exiting a book no longer snapshots the
+  // current settings into the book. Only restore the global snapshot so the
+  // in-memory overrides never leak into the next book.
+  if (!globalSettingsSnapshotted_) {
+    // No book session ever started here, so SETTINGS only holds global values.
+    // Persist them: an in-place edit from a child screen (night mode,
+    // frontlight in the reader menu) may have no other save point when the
+    // device sleeps straight out of that screen.
+    SETTINGS.saveToFile();
+    return;
+  }
+  // Roll back to the entered baseline only while memory is on: SETTINGS may then
+  // hold this book's overrides, and writing them would put the book's font into
+  // the global settings file.
+  //
+  // With memory switched off - either it was off when the book opened, or the
+  // user switched it off mid-session (the switch-off handler captured the book's
+  // edits and put the global style back) - the live values ARE the user's global
+  // baseline, and edits made afterwards are deliberately global, so they are
+  // what belongs in the file and must not be rolled back.
+  if (SETTINGS.bookStyleMemory) applyStyleToSettings(globalSettingsSnapshot_);
+  SETTINGS.saveToFile();
+  globalSettingsSnapshotted_ = false;
+}
+
+BookStyle ReaderActivity::captureStyleDiff(const BookStyle& globalSnapshot) const {
+  return diffStyleFromSettings(globalSnapshot);
+}
+
+bool ReaderActivity::persistBookStyleEdits() {
+  if (!SETTINGS.bookStyleMemory || !globalSettingsSnapshotted_) return false;
+  const BookStyle overrides = captureStyleDiff(globalSettingsSnapshot_);
+  if (overrides.overrideMask != 0) {
+    BOOK_STYLES.updateStyle(bookPath, overrides);
+  } else {
+    // Everything was reverted to the global values: forget the entry so the
+    // book follows the global settings again.
+    BOOK_STYLES.removeByPath(bookPath);
+  }
+  // Put the entered global values back, persist those, then re-apply the
+  // overrides in memory: the edits live in the book-style store only.
+  applyStyleToSettings(globalSettingsSnapshot_);
+  SETTINGS.saveToFile();
+  if (overrides.overrideMask != 0) applyStyleOverrides(overrides);
+  return true;
+}
+
+void ReaderActivity::saveSettingsKeepingBookStyle() {
+  // Shared contract (BookStyleStore.h): with a snapshot and memory on, the file
+  // gets the entered global typography and the session keeps the book's.
+  saveGlobalSettingsKeepingBookStyle(globalSettingsSnapshotted_ ? &globalSettingsSnapshot_ : nullptr);
+}
+
 void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
 void ReaderActivity::notePageTurn(const bool forward, const bool succeeded) {
@@ -67,6 +144,11 @@ void ReaderActivity::onEnter() {
     finish();
     return;
   }
+
+  // Restore this book's own remembered style before the font system and the
+  // render spec are built, so the book opens exactly as it was left. Books
+  // without a remembered style simply keep the global settings.
+  applyBookStyle();
 
   // Clear remembered book after opening it
   if (!APP_STATE.openEpubPath.empty()) {
@@ -96,6 +178,23 @@ void ReaderActivity::rememberBookOnceRendered() {
 }
 
 void ReaderActivity::onExit() {
+  // Per-book overrides are captured and persisted by the text-settings entry;
+  // here we only restore the global snapshot so the in-memory overrides never
+  // leak into the next book.
+  saveBookStyle();
+  // saveBookStyle() restored the global settings (incl. font family). Re-sync
+  // the loaded font cache with the restored values so an SD-card font applied
+  // by this book's style (which also registers UI fallbacks) is unloaded again;
+  // otherwise the UI would keep rendering with the book's font after exit.
+  // Note: onExit() is always invoked by ActivityManager while it already holds
+  // the rendering mutex (exitActivity()'s contract: "lock must be held by the
+  // caller"). Taking RenderLock again here would self-deadlock on the
+  // non-recursive mutex — the stock firmware's onExit() has no lock for the
+  // same reason. ensureLoaded() is safe lock-free here: it runs on the UI
+  // thread with the render task quiesced behind the held mutex, matching the
+  // lock-free ensureLoaded() in onEnter().
+  sdFontSystem.ensureLoaded(renderer);
+
   Activity::onExit();
 
   // Keep rebuildable font buffers from pinning the heap between reading sessions.
@@ -313,7 +412,7 @@ void ReaderActivity::rotateOrientation(const int delta) {
                                             CrossPointSettings::ORIENTATION_COUNT);
   if (next == SETTINGS.orientation) return;
   SETTINGS.orientation = next;
-  SETTINGS.saveToFile();
+  saveSettingsKeepingBookStyle();
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 }
 
@@ -322,7 +421,7 @@ void ReaderActivity::toggleFrontlight() {
   const bool on = !Frontlight.isOn();
   Frontlight.setOn(on);
   SETTINGS.frontlightOn = on ? 1 : 0;
-  SETTINGS.saveToFile();
+  saveSettingsKeepingBookStyle();
 }
 
 void ReaderActivity::render(RenderLock&&) {

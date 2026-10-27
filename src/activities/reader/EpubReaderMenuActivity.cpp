@@ -83,7 +83,11 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, const 
 void EpubReaderMenuActivity::toggleBluetooth() {
   SETTINGS.ble.enabled = SETTINGS.ble.enabled ? 0 : 1;
   if (!SETTINGS.ble.enabled) bleturner::switchOff();
-  SETTINGS.saveToFile();
+  // No write here: this is a static helper also called from the reader's own
+  // overlay, so the caller persists the change. With per-book memory on,
+  // SETTINGS carries this book's typography and a saveToFile() would write the
+  // book's overrides into the global settings file — the reader saves through
+  // saveSettingsKeepingBookStyle() and the menu marks its result dirty instead.
   // Enabling waits for the main-loop lifecycle's reader heap gates, then says in the status bar
   // whether a remote linked.
   if (SETTINGS.ble.enabled) bleturner::requestConnect();
@@ -95,7 +99,8 @@ void EpubReaderMenuActivity::closeCancelled() {
   result.data =
       MenuResult{-1, pendingOrientation,
                  static_cast<uint8_t>(
-                     selectedPageTurnOption == 0 ? 0 : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption])};
+                     selectedPageTurnOption == 0 ? 0 : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption]),
+                 settingsDirty_};
   setResult(std::move(result));
   finish();
 }
@@ -140,13 +145,21 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
 
   if (selectedAction == MenuAction::NIGHT_MODE) {
     SETTINGS.screenInverted = SETTINGS.screenInverted == 0 ? 1 : 0;
-    SETTINGS.saveToFile();
+    settingsDirty_ = true;
+    // The value applies immediately; the reader persists it on return so the
+    // save can restore the global typography snapshot first (with per-book
+    // memory on, SETTINGS holds this book's overrides, and saving here would
+    // write them into the global settings file).
     requestUpdate();
     return;
   }
 
   if (selectedAction == MenuAction::BLUETOOTH) {
     toggleBluetooth();
+    // The toggle applies immediately; the reader persists it on return so the
+    // save can restore the global typography snapshot first (with per-book
+    // memory on, SETTINGS holds this book's overrides).
+    settingsDirty_ = true;
     requestUpdate();
     return;
   }
@@ -155,7 +168,7 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
     const bool lightOn = !Frontlight.isOn();
     Frontlight.setOn(lightOn);
     SETTINGS.frontlightOn = lightOn ? 1 : 0;
-    SETTINGS.saveToFile();
+    settingsDirty_ = true;
     requestUpdate();
     return;
   }
@@ -163,7 +176,8 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
   setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation,
                        static_cast<uint8_t>(selectedPageTurnOption == 0
                                                 ? 0
-                                                : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption])});
+                                                : std::array<uint8_t, 5>{0, 1, 3, 6, 12}[selectedPageTurnOption]),
+                       settingsDirty_});
   finish();
 }
 

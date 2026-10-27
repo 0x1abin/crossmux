@@ -50,8 +50,18 @@ StrId failureMessage(Result) { return StrId::Error; }
 struct {
   char sdFontFamilyName[32] = "Sans";
   uint8_t sdFontFlashPreload = 0, fontPointSize = 18;
-  void saveToFile() {}
+  int saves = 0;
+  bool saveToFile() {
+    ++saves;
+    return true;
+  }
 } SETTINGS;
+// The production save path defers to the shared book-style contract; these
+// flows are a plain standalone session (no book baseline), i.e. a plain save.
+// Counting the call keeps the exit flows' assertions on the real behaviour:
+// a write happens exactly where the flow finalises a font choice.
+struct BookStyle {};
+inline void saveGlobalSettingsKeepingBookStyle(const BookStyle*) { SETTINGS.saveToFile(); }
 struct MappedInputManager {
   enum class Button { Back };
   static constexpr uint8_t kButtonCount = 1;
@@ -123,6 +133,8 @@ class TextSettingsActivity {
   const char* preloadFamilyName_ = "";
   MappedInputManager mappedInput;
   Popup optionPopup_;
+  const BookStyle* globalSnapshot_ = nullptr;
+  void saveSettings();
   void requestUpdate() {}
   void requestUpdateAndWait() { now += 500; } // Display time is not part of notice dwell.
   void finish() { exited = true; }
@@ -136,7 +148,7 @@ class TextSettingsActivity {
   bool handleHomeGesture();
 };
 ''' + "\n".join(method(n) for n in (
-    "exitAfterFinalFont", "finishFinalFont", "showPreloadFailure", "completeExit",
+    "saveSettings", "exitAfterFinalFont", "finishFinalFont", "showPreloadFailure", "completeExit",
     "handleCustomInput", "handleHomeGesture"
 )) + r'''
 int main() {

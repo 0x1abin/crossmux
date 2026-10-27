@@ -38,6 +38,7 @@
 
 #include "AchievementsStore.h"
 #include "BleInput.h"
+#include "BookStyleStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"
@@ -1008,6 +1009,7 @@ void setup() {
   const bool recentsLoaded = RECENT_BOOKS.loadFromFile();
   if (!recoveryFirmwareMode && !HalSystem::isRebootFromPanic()) UserGuide::prepare(recentsLoaded);
   READING_STATS.loadFromFile();
+  BOOK_STYLES.loadFromFile();
   ACHIEVEMENTS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
