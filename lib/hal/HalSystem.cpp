@@ -21,12 +21,14 @@
 
 #define MAX_PANIC_STACK_DEPTH 32
 #define PANIC_CAPTURE_MAGIC 0x50414E49u
+#define PANIC_REPORT_MAGIC 0x52505449u
 
 RTC_NOINIT_ATTR char panicMessage[256];
 RTC_NOINIT_ATTR HalSystem::StackFrame panicStack[MAX_PANIC_STACK_DEPTH];
 // RTC_NOINIT is uninitialized on cold boot, so only this exact marker proves a
 // panic diagnostic was captured before the reset.
 RTC_NOINIT_ATTR volatile uint32_t panicCaptureMarker;
+RTC_NOINIT_ATTR volatile uint32_t panicReportMarker;
 
 extern "C" {
 
@@ -93,10 +95,23 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
 
 namespace HalSystem {
 
+static bool rebootedFromPanic = false;
+static bool panicReportPending = false;
+
 void begin() {
+  const auto resetReason = esp_reset_reason();
+  const bool watchdogReset =
+      resetReason == ESP_RST_INT_WDT || resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
+  rebootedFromPanic = resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP ||
+                      (watchdogReset && panicCaptureMarker == PANIC_CAPTURE_MAGIC);
+  // A reset during reporting skips one attempt without changing this boot's crash routing.
+  panicReportPending = rebootedFromPanic && panicReportMarker != PANIC_REPORT_MAGIC;
+  panicReportMarker = 0;
+  panicCaptureMarker = 0;
+
   // On a panic reboot, preserve diagnostics until checkPanic() has tried to write them to the SD card.
   // Ordinary boots clear any stale retained diagnostics.
-  if (!isRebootFromPanic()) {
+  if (!rebootedFromPanic) {
     clearPanic();
   } else {
     // Panic reboot: preserve logs and panic info, but clamp logHead in case the
@@ -110,16 +125,17 @@ void begin() {
 }
 
 void checkPanic() {
-  if (isRebootFromPanic()) {
+  if (!panicReportPending) return;
+  panicReportPending = false;
+  // Keep this separate from capture hooks, which can run again if reporting panics.
+  panicReportMarker = PANIC_REPORT_MAGIC;
+  {
     auto panicInfo = getPanicInfo(true);
     auto file = Storage.open("/crash_report.txt", O_WRITE | O_CREAT | O_TRUNC);
     if (file) {
       const size_t written = file.write(panicInfo.c_str(), panicInfo.size());
       file.close();
       if (written == panicInfo.size()) {
-        // Keep the crash data for CrashActivity, but mark it consumed so a
-        // later watchdog reset cannot be mistaken for this panic.
-        panicCaptureMarker = 0;
         LOG_INF("SYS", "Dumped panic info to SD card");
       } else {
         LOG_ERR("SYS", "Failed to write complete crash report (%zu of %zu bytes)", written, panicInfo.size());
@@ -128,9 +144,13 @@ void checkPanic() {
       LOG_ERR("SYS", "Failed to open crash_report.txt for writing");
     }
   }
+  // Destructors must finish before a later independent panic can create another report.
+  panicReportMarker = 0;
 }
 
 void clearPanic() {
+  panicReportPending = false;
+  panicReportMarker = 0;
   panicCaptureMarker = 0;
   panicMessage[0] = '\0';
   for (size_t i = 0; i < MAX_PANIC_STACK_DEPTH; i++) {
@@ -260,15 +280,6 @@ std::string getPanicInfo(bool full) {
   }
 }
 
-bool isRebootFromPanic() {
-  const auto resetReason = esp_reset_reason();
-  if (resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP) {
-    return true;
-  }
-
-  const bool watchdogReset =
-      resetReason == ESP_RST_INT_WDT || resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
-  return watchdogReset && panicCaptureMarker == PANIC_CAPTURE_MAGIC;
-}
+bool isRebootFromPanic() { return rebootedFromPanic; }
 
 }  // namespace HalSystem

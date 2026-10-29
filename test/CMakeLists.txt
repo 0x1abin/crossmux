@@ -263,6 +263,8 @@ add_test(NAME TextSettingsFontExit
 
 add_test(NAME TxtCoverCopy
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_txt_cover_copy.py)
+add_test(NAME PanicReportRetry
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_panic_report_retry.py)
 
 add_test(NAME CjkGenerationTransaction COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_cjk_generation_transaction.py)
 add_test(NAME PowerConfirmRelease COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/test_power_confirm_release.py ${crosspoint_simulator_SOURCE_DIR})
