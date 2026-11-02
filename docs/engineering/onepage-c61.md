@@ -61,7 +61,9 @@ measured.
 | Item | Revision |
 |---|---|
 | CrossMux base | `6b5566c844667857acebfe565d373423cdd16e06` |
-| FreeInk SDK gitlink | `65323afd0cbfa7bcfbabafd509248d024ceaab14` |
+| CrossMux bring-up commit | `abd991a` on `codex/port-device-bsp` |
+| FreeInk SDK gitlink | `65323afd0cbfa7bcfbabafd509248d024ceaab14` (unchanged) |
+| FreeInk SDK local branch | `codex/onepage-c61` at `ceeca4b` (USB polarity, SD rail, EPD reset, C61 library-pass device default); not yet in the gitlink |
 | Toolchain | pioarduino Core 6.2.0, Espressif32 platform 55.3.37 for `onepage` |
 | Board definition | `boards/onepage-c61.json` |
 
