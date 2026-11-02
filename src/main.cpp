@@ -942,8 +942,13 @@ void setup() {
   // from the same 270 dps. halClock.begin() restores the system clock from the board RTC
   // when the system clock is invalid; Read Pico's RTC is the PMU, whose hooks
   // BoardReadPico::begin() already installed.
+  // OnePage has no IMU or external RTC. Probing absent I2C parts on the
+  // C61 strap pins can hang boot in the vendor port, so only the system clock
+  // is used. HalClock's remaining calls are safe without begin().
+#if !FREEINK_DEVICE_ONEPAGE
   halTiltSensor.begin();
   halClock.begin();
+#endif
 
   LOG_INF("MAIN", "Hardware detect: %s", BoardConfig::ACTIVE.name);
 

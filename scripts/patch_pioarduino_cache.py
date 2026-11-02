@@ -120,4 +120,9 @@ if rebuild and not board.get("build.esp-idf.sdkconfig_path", ""):
         resolved.unlink()
         print(f"Reset generated SDK configuration: {resolved.name}")
 
-request_file.write_text(cache_request + "\n", encoding="utf-8")
+if request_file.parent.is_dir():
+    request_file.write_text(cache_request + "\n", encoding="utf-8")
+else:
+    # C61 is assembled from framework-arduino-c61-skeleton-lib by espidf.py
+    # after this pre-script runs. Defer the marker until that directory exists.
+    print(f"Deferred framework cache marker for {mcu}: {request_file.parent} is not prepared yet")

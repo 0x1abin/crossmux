@@ -34,6 +34,7 @@ that matches your task — don't load everything at once.
 | [Metalio E-Ink 4](metalio-eink4.md) | Metalio BSP, CST816S bezel keys, SDMMC, power sequencing and acceptance |
 | [read-pico.md](read-pico.md) | Building, first-flashing, or hardware-validating the Read Pico (小纸 Pico, RDP-G01-W) ESP32-S3 target: 16-bit parallel EPD through epdiy LCD_CAM, CST836U touch, CW32L010 PMU, and the frozen interface contract. |
 | [high-dpi-ui-profile.md](high-dpi-ui-profile.md) | High-density UI preset, currently validated on ReadPico and Nightly, fixed fonts, resource budget and validation. |
+| [onepage-c61.md](onepage-c61.md) | Building, flashing, or hardware-validating the OnePage ESP32-C61 target; C61 build profile, USB-detect polarity, and pending acceptance. |
 
 ## Related docs outside this directory
 
