@@ -2,6 +2,10 @@
   "name": "expat",
   "version": "2.7.3",
   "build": {
+    "flags": [
+      "-DXML_GE=0",
+      "-DXML_CONTEXT_BYTES=0"
+    ],
     "srcFilter": [
       "+<xmlparse.c>",
       "+<xmlrole.c>",
