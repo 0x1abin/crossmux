@@ -24,6 +24,7 @@ class ControlCenterGestureTest(unittest.TestCase):
 #include "activities/MainTab.h"
 #define LOG_ERR(...) ((void)0)
 namespace haptic_feedback { void touchAction() {} }
+struct { bool available=true; bool present() const { return available; } } Frontlight;
 enum { eIncrement };
 void xTaskNotify(int, int, int) {}
 struct Activity {
@@ -101,8 +102,8 @@ int main() {
   }
   for (const char* name : {"InxRecent", "FileBrowser", "AppsMenu", "Settings", "ReadingStats"}) {
     for (int x : {2, 3, 476, 477})
-      for (int y : {8, 9, 36, 37, 40, 41, 42, 43, 46, 47, 52, 53}) {
-        const bool opens = x >= 3 && x < 477 && y >= 9 && y < 37;
+      for (int y : {8, 9, 28, 29, 36, 37, 40, 41, 42, 43, 46, 47, 52, 53}) {
+        const bool opens = x >= 3 && x < 477 && y >= 9 && y < 9 + MainTabs::statusBarHeight;
         check({.name = name, .mainTabs = true},
               {.topSwipe = false, .tap = true, .tapX = x, .tapY = y}, opens, !opens);
       }
@@ -112,6 +113,13 @@ int main() {
     check({.name = name, .mainTabs = true},
           {.topSwipe = false, .tap = true, .touch = false}, false, true);
   }
+  Frontlight.available = false;
+  for (const char* name : {"Home", "InxRecent", "EpubReader", "FileBrowser", "Settings", "FrontlightPanel"}) {
+    check({.name = name}, {.light = true}, false, true);
+    check({.name = name}, {.topSwipe = false, .tap = true}, false, true);
+    check({.name = name, .mainTabs = true}, {.light = true, .tap = true}, false, true);
+  }
+  Frontlight.available = true;
   check({}, {.light = true, .suppressed = true}, false, false);
   check({.exclusive = true}, {.light = true}, false, true);
   check({}, {.topSwipe = false}, false, true);

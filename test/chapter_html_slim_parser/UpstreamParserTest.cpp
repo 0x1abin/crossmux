@@ -36,6 +36,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                false,
                                FirstLineIndent::Auto,
                                0,
+                               false,  // verticalBottomAlign
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
                                false,
@@ -88,6 +89,7 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
 }
 
 TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
+  parser.verticalBottomAlign = true;
   parser.viewportWidth = 240;
   parser.viewportHeight = 32;
   parser.tableRowCells.reserve(2);
@@ -107,6 +109,11 @@ TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
   unsigned rubyLines = 0;
   auto inspect = [&](std::unique_ptr<Page> page, auto, auto, auto) {
     ++pages;
+    if (pages == 1) {
+      ASSERT_GE(page->elements.size(), 2u);
+      EXPECT_GT(page->elements[1]->xPos, page->elements[0]->xPos);
+      EXPECT_EQ(page->elements[0]->yPos, page->elements[1]->yPos);
+    }
     for (const auto& element : page->elements) {
       if (element->getTag() != TAG_PageLine) continue;
       const auto& line = static_cast<const PageLine&>(*element);
@@ -138,6 +145,80 @@ TEST_F(ChapterHtmlSlimParserTest, PageImageDeserializeRejectsMissingImageBlock) 
   HalFile input;
   ASSERT_TRUE(input.open(path.c_str(), "rb"));
   EXPECT_EQ(PageImage::deserialize(input), nullptr);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignKeepsMaximumLinkCountAndRaisedGeometry) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 600;
+  const std::vector<std::string> words{"link"};
+  const std::vector<int16_t> xPositions{0};
+  const std::vector<EpdFontFamily::Style> styles{EpdFontFamily::REGULAR};
+  for (size_t i = 0; i <= Page::MAX_LINKS_PER_PAGE; ++i) {
+    TextBlock::LinkSpan span{};
+    std::strcpy(span.href, "#note");
+    span.width = 8;
+    span.topLift = 3;
+    auto line =
+        std::make_unique<TextBlock>(words, xPositions, styles, std::vector<uint8_t>{}, std::vector<uint16_t>{},
+                                    BlockStyle{}, std::vector<std::string>{}, std::vector<TextBlock::LinkSpan>{span});
+    ASSERT_TRUE(line->valid());
+    ASSERT_TRUE(parser.addLineToPage(std::move(line), i));
+  }
+  ASSERT_EQ(parser.currentPage->links.size(), Page::MAX_LINKS_PER_PAGE);
+  parser.applyVerticalBottomAlign(parser.currentPage.get());
+  for (size_t i = 0; i < Page::MAX_LINKS_PER_PAGE; ++i) {
+    EXPECT_EQ(parser.currentPage->links[i].y, parser.currentPage->elements[i]->yPos - 3);
+  }
+  EXPECT_EQ(parser.currentPage->elements.back()->yPos + 16, parser.viewportHeight);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignStretchesNonFinalPagesAndKeepsFinalPageUnchanged) {
+  std::string html = "<html><body>";
+  html.reserve(1600);
+  for (int i = 0; i < 20; ++i) html += "<p>alpha beta gamma delta epsilon</p>";
+  html += "</body></html>";
+  std::ofstream(filepath) << html;
+  std::vector<std::vector<int16_t>> layouts[2];
+  for (const bool enabled : {false, true}) {
+    auto& pages = layouts[enabled];
+    pages.reserve(32);
+    ChapterHtmlSlimParser subject{nullptr,
+                                  filepath,
+                                  renderer,
+                                  0,
+                                  1.0f,
+                                  0,
+                                  FirstLineIndent::NoIndent,
+                                  0,
+                                  enabled,
+                                  160,
+                                  100,
+                                  false,
+                                  false,
+                                  [&](std::unique_ptr<Page> page, auto, auto, auto) {
+                                    std::vector<int16_t> positions;
+                                    positions.reserve(page->elements.size());
+                                    for (const auto& element : page->elements) {
+                                      EXPECT_EQ(element->getTag(), TAG_PageLine);
+                                      positions.push_back(element->yPos);
+                                    }
+                                    pages.push_back(std::move(positions));
+                                  },
+                                  true,
+                                  "",
+                                  "",
+                                  0,
+                                  {},
+                                  nullptr,
+                                  &cssParser,
+                                  true};
+    ASSERT_TRUE(subject.parseAndBuildPages());
+  }
+  ASSERT_EQ(layouts[0].size(), layouts[1].size());
+  ASSERT_GT(layouts[0].size(), 1u);
+  EXPECT_EQ(layouts[0].back(), layouts[1].back());
+  EXPECT_EQ(layouts[0].front().front(), layouts[1].front().front());
+  EXPECT_GT(layouts[1].front().back(), layouts[0].front().back());
 }
 
 TEST_P(ChapterHtmlSlimParserTest, KeepsCssVerticalAlignAndInternalLinkMetadata) {

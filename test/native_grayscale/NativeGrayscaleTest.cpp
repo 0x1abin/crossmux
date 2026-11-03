@@ -276,6 +276,31 @@ int main(int argc, char** argv) {
   setenv("CROSSPOINT_SIM_SD", argv[2], 1);
   GfxRenderer renderer(display);
   renderer.begin();
+  // Overlay gray restores the retained B/W frame; absolute gray keeps its baseline.
+  bw.fill(0xA5);
+  {
+    const BwFrameKeeper kept(renderer, true);
+    assert(kept.ready());
+    bw.fill(0x00);
+  }
+  for (const auto byte : bw) assert(byte == 0xA5);
+  {
+    const BwFrameKeeper absolute(renderer, false);
+    assert(absolute.ready());
+    bw.fill(0x3C);
+  }
+  for (const auto byte : bw) assert(byte == 0x3C);
+#if defined(READER_TEST_WRAP_MALLOC)
+  trackBwAllocations = true;
+  failBwAllocation = 0;
+  {
+    const BwFrameKeeper failed(renderer, true);
+    assert(!failed.ready());
+  }
+  assert(liveBwBytes == 0);
+  for (const auto byte : bw) assert(byte == 0x3C);
+  trackBwAllocations = false;
+#endif
   testFourLevelBitmapPaths(renderer);
   levels = 4;
   assert(renderer.getGrayscaleLevels() == 4 && !renderer.beginGrayscale16());

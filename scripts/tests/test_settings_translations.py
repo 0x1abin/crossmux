@@ -13,10 +13,29 @@ spec.loader.exec_module(generator)
 
 
 class SettingsTranslationsTest(unittest.TestCase):
+    def test_all_chinese_keys_placeholders_and_library_terms(self):
+        english = generator.parse_yaml_file(str(ROOT / "lib/I18n/translations/english.yaml"))
+        chinese = generator.parse_yaml_file(str(ROOT / "lib/I18n/translations/chinese.yaml"))
+        keys = {key for key in english if key.startswith("STR_")}
+        self.assertFalse(keys - chinese.keys(), sorted(keys - chinese.keys()))
+        placeholders = re.compile(
+            r"%(?:[1-9]\d*\$)?[-+#0 ']*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|ll|[hljztL])?[diuoxXfFeEgGaAcspn%]"
+        )
+        for key in sorted(keys):
+            with self.subTest(key=key):
+                self.assertTrue(chinese[key].strip())
+                self.assertEqual(placeholders.findall(english[key]), placeholders.findall(chinese[key]))
+        self.assertEqual(chinese["STR_LIBRARY"], "书库")
+        for key in ("STR_LIBRARY_TITLE_UNSORTED", "STR_LIBRARY_REBUILD", "STR_LIBRARY_REBUILD_DONE",
+                    "STR_LIBRARY_REBUILD_FAILED", "STR_INX_LIBRARY_LAYOUT"):
+            self.assertIn("书库", chinese[key], key)
+        self.assertEqual(chinese["STR_LCP_OFFICIAL_BUILD"], "LCP 需要官方发布版固件")
+        self.assertEqual(chinese["STR_FONT_DAMAGED"], "字体文件已损坏")
+
     def test_settings_and_glyph_coverage(self):
         english = generator.parse_yaml_file(str(ROOT / "lib/I18n/translations/english.yaml"))
         chinese = generator.parse_yaml_file(str(ROOT / "lib/I18n/translations/chinese.yaml"))
-        sources = [ROOT / "src/SettingsList.h", ROOT / "src/HomeButtonSettings.h"]
+        sources = [ROOT / "src/SettingsList.h", ROOT / "src/SettingsList.cpp", ROOT / "src/HomeButtonSettings.h"]
         sources += list((ROOT / "src/activities/settings").glob("*.cpp"))
         sources += list((ROOT / "src/activities/settings").glob("*.h"))
         keys = set().union(*(set(re.findall(r"\bSTR_[A-Z0-9_]+\b", path.read_text())) for path in sources))

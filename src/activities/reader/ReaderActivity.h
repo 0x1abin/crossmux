@@ -10,6 +10,8 @@
 #include "activities/Activity.h"
 
 class ReaderActivity : public Activity {
+  friend class ActivityManager;  // turns pages for a Bluetooth remote (ActivityManager::remoteTurn)
+
  protected:
   std::string bookPath;
   int pagesUntilFullRefresh = 0;
@@ -52,8 +54,24 @@ class ReaderActivity : public Activity {
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
   virtual bool skipPages(int amount) { return pageTurn(amount > 0); }
+  // A Bluetooth remote asks for the reader menu (true) or a new clipping (false).
+  virtual bool remoteShortcut(bool /*readerMenu*/) { return false; }
   virtual bool isAtEndOfBook() const = 0;
   virtual void onReturnFromEndOfBook() {}
+
+  // Tap-zone action dispatch. The base implementation handles the actions that
+  // every reader shares (orientation, frontlight, home); subclasses extend it
+  // with reader-specific actions (bookmark / dictionary / chapter / percent /
+  // KOReader / auto turn). Returning false leaves the action unhandled, which
+  // the loop treats as "not supported on this reader" and swallows.
+  virtual bool handleZoneShortAction(uint8_t action);
+  virtual bool handleZoneLongAction(uint8_t action);
+
+  // Rotate the reading orientation by +1 (clockwise) / -1 (counter-clockwise)
+  // and toggle the frontlight. Shared by all readers; orientation reflows are
+  // handled by each reader's own rendering pass on the next update.
+  void rotateOrientation(int delta);
+  void toggleFrontlight();
 
   virtual void renderBook() = 0;
   virtual void applyInitialOrientation();
@@ -62,6 +80,8 @@ class ReaderActivity : public Activity {
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
   bool endOfBookMenuActive() const;
+  /** True while a toolbar, panel or menu over the page owns the device keys: a remote turn is refused. */
+  virtual bool inputOverPage() const { return endOfBookMenuActive(); }
   bool handleEndOfBookMenu(bool suppressConfirmRelease = false);
   bool handleEndOfBookPageTurn(bool prevTriggered, bool nextTriggered);
   void clearEndOfBookOptionsIfNeeded();
@@ -82,5 +102,6 @@ class ReaderActivity : public Activity {
   void render(RenderLock&& lock) override;
 
   bool isReaderActivity() const final { return true; }
+  bool acceptsRemoteInput() const final { return pageRendered.load(std::memory_order_acquire); }
   bool handleForcedRefresh() final;
 };

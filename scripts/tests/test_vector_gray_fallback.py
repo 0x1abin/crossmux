@@ -84,7 +84,7 @@ int main(){
  renderCharImpl(sample,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR);
  assert(sample.pixels[0]==1&&sample.pixels[1]==-1&&sample.pixels[2]==1&&sample.pixels[3]==-1);
  GfxRenderer scaled;scaled.packed={0xf0,0xf0};
- renderCharScaled(scaled,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR,0);
+ renderCharScaled(scaled,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR,1,2,0);
  assert(scaled.pixels[0]==1&&scaled.pixels[1]==1);
  // Synthetic solid metrics draw rectangles and never request bitmap storage.
  font.solid=true; font.glyph={5,7,3,9}; font.data.ascender=14;
@@ -98,7 +98,7 @@ int main(){
   assert((rotatedSolid.rectangle==std::array<int,5>{25,23,7,5,int(ink)}));
   assert(rotatedSolid.bitmapReads==0);
   GfxRenderer scaledSolid;
-  renderCharScaled(scaledSolid,GfxRenderer::BW,font,0x25A0,20,30,ink,EpdFontFamily::REGULAR,0);
+  renderCharScaled(scaledSolid,GfxRenderer::BW,font,0x25A0,20,30,ink,EpdFontFamily::REGULAR,1,2,0);
   assert((scaledSolid.rectangle==std::array<int,5>{21,26,3,4,int(ink)}));
   assert(scaledSolid.bitmapReads==0);
  }

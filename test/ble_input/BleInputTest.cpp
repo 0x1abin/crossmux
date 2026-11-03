@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include "BleInput.h"
+#include "BleRuntimeHarness.h"
+#include "CrossPointSettings.h"
 #include "SdCardFontSystem.h"
 #include "esp_heap_caps.h"
 #include "esp_memory_utils.h"
@@ -21,10 +23,7 @@ static_assert(CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL == 1);
 class BleInputTest : public testing::Test {
  protected:
   GfxRenderer renderer;
-  bleinput::StartResult start(bleinput::StartContext context) {
-    RenderLock lock;
-    return bleinput::ensureStarted(renderer, context);
-  }
+  bleinput::StartResult start(bleinput::StartContext context) { return bleinput::ensureStarted(renderer, context); }
   void SetUp() override {
     sdFontSystem = {};
     BleHid = {};
@@ -35,6 +34,8 @@ class BleInputTest : public testing::Test {
     probes = probeFrees = 0;
     probeFails = false;
     probeExternal = true;
+    SETTINGS = {};
+    bleharness::reset(renderer);
   }
 };
 
@@ -45,13 +46,13 @@ TEST_F(BleInputTest, InternalGateBoundariesRemainUnchanged) {
     const size_t minLargest = context == bleinput::StartContext::Reader ? 32768 : 24576;
     freeInternal = minFree - 1;
     largestInternal = minLargest;
-    EXPECT_EQ(start(context), bleinput::StartResult::LowMemory);
+    EXPECT_NE(bleinput::validateStart(context == bleinput::StartContext::Explicit, false), bleturner::Why::Ok);
     freeInternal = minFree;
     largestInternal = minLargest - 1;
-    EXPECT_EQ(start(context), bleinput::StartResult::LowMemory);
+    EXPECT_NE(bleinput::validateStart(context == bleinput::StartContext::Explicit, false), bleturner::Why::Ok);
     EXPECT_EQ(probes, 0);
     largestInternal = minLargest;
-    EXPECT_EQ(start(context), bleinput::StartResult::Started);
+    EXPECT_EQ(bleinput::validateStart(context == bleinput::StartContext::Explicit, false), bleturner::Why::Ok);
     bleinput::stop();
     probes = 0;
   }
@@ -102,17 +103,17 @@ TEST_F(BleInputTest, ReaderRecoversOnceWithoutUnloadingFonts) {
   EXPECT_EQ(start(bleinput::StartContext::Reader), bleinput::StartResult::Started);
   EXPECT_EQ(renderer.cache.releases, 1);
   EXPECT_TRUE(renderer.cache.recoveredUnderLock);
-  EXPECT_TRUE(BleHid.startUnderLock);
+  EXPECT_FALSE(BleHid.startUnderLock);
   EXPECT_EQ(renderer.cache.clears, 0);
   EXPECT_EQ(sdFontSystem.unloads, 0);
 }
 
 TEST_F(BleInputTest, ExplicitRecoversFontsAndCachesUsingItsOwnGate) {
-  freeInternal = bleinput::kExplicitMinFreeInternal - 1;
-  largestInternal = bleinput::kExplicitMinLargestInternal;
+  freeInternal = bleinput::kExplicitMinFreeInternal - 2;
+  largestInternal = 40 * 1024;
   renderer.cache.recoveredInternal = 1;
   EXPECT_EQ(start(bleinput::StartContext::Explicit), bleinput::StartResult::Started);
-  EXPECT_EQ(renderer.cache.releases, 0);
+  EXPECT_EQ(renderer.cache.releases, 1);
   EXPECT_EQ(renderer.cache.clears, 1);
   EXPECT_EQ(sdFontSystem.unloads, 1);
 }
@@ -120,7 +121,7 @@ TEST_F(BleInputTest, ExplicitRecoversFontsAndCachesUsingItsOwnGate) {
 TEST_F(BleInputTest, HealthyMemoryDoesNotDiscardCaches) {
   EXPECT_EQ(start(bleinput::StartContext::Explicit), bleinput::StartResult::Started);
   EXPECT_EQ(renderer.cache.clears, 0);
-  EXPECT_EQ(renderer.cache.releases, 0);
+  EXPECT_EQ(renderer.cache.releases, 1);
   EXPECT_EQ(sdFontSystem.unloads, 0);
 }
 
@@ -130,7 +131,8 @@ TEST_F(BleInputTest, InsufficientRecoveryReturnsAfterOneAttempt) {
     sdFontSystem = {};
     freeInternal = 0;
     EXPECT_EQ(start(context), bleinput::StartResult::LowMemory);
-    EXPECT_EQ(renderer.cache.releases + renderer.cache.clears, 1);
+    EXPECT_EQ(renderer.cache.releases, 1);
+    EXPECT_EQ(renderer.cache.clears, context == bleinput::StartContext::Explicit ? 1 : 0);
     EXPECT_EQ(BleHid.begins, 0);
     EXPECT_EQ(probes, 0);
   }

@@ -267,3 +267,28 @@ TEST(ContentOpfParserCover, ReadingParserStillOpensManifestCache) {
   EXPECT_EQ(Storage.writeOpens, 1);
   EXPECT_EQ(Storage.readOpens, 1);
 }
+
+TEST(ContentOpfParserSpine, PreservesAuxiliaryEntriesAndDefaultsToLinearAcrossChunks) {
+  const std::string xml = R"(<package><metadata/><manifest>
+    <item id="a" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+    <item id="n" href="notes.xhtml" media-type="application/xhtml+xml"/>
+    </manifest><spine><itemref idref="a"/><itemref linear="no" idref="n"/>
+    <itemref idref="a" linear="yes"/><itemref idref="n" linear="no"/></spine></package>)";
+  const std::string cachePath = "/reading-cache";
+  const std::string basePath = "OPS/";
+  for (const size_t chunk : {size_t{1}, size_t{7}, xml.size()}) {
+    BookMetadataCache cache;
+    Storage = {};
+    ContentOpfParser parser(cachePath, basePath, xml.size(), &cache);
+    ASSERT_TRUE(parser.setup());
+    for (size_t offset = 0; offset < xml.size(); offset += chunk) {
+      const size_t size = std::min(chunk, xml.size() - offset);
+      ASSERT_EQ(parser.write(reinterpret_cast<const uint8_t*>(xml.data() + offset), size), size);
+    }
+    const std::vector<std::pair<std::string, bool>> expected = {{"OPS/chapter.xhtml", true},
+                                                                {"OPS/notes.xhtml", false},
+                                                                {"OPS/chapter.xhtml", true},
+                                                                {"OPS/notes.xhtml", false}};
+    EXPECT_EQ(cache.entries, expected);
+  }
+}

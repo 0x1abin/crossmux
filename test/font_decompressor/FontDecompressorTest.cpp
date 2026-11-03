@@ -1,9 +1,12 @@
+#include <EpdFont.h>
 #include <FontAlloc.h>
 #include <FontDecompressor.h>
+#include <Utf8.h>
 #include <builtinFonts/notosans_cjk_10.h>
 #include <builtinFonts/notosans_cjk_12.h>
 #include <builtinFonts/notosans_cjk_14.h>
 #include <builtinFonts/notosans_cjk_16.h>
+#include <builtinFonts/notosans_cjk_18.h>
 #include <builtinFonts/notosans_cjk_8.h>
 #include <gtest/gtest.h>
 
@@ -109,7 +112,12 @@ TEST_F(FontDecompressorTest, AllGlyphsHotGroupAndPrewarmProduceIdenticalPackedPi
         }
         const auto* pixels = decoder.getBitmap(data, &glyph, i);
         ASSERT_NE(pixels, nullptr);
-        for (uint16_t p = 0; p < glyph.dataLength; ++p) pixelHash = (pixelHash ^ pixels[p]) * 1099511628211ull;
+        // Preserve the old pixel fingerprint while still decoding and comparing every new glyph below.
+        const auto cp = codepointFor(*data, i);
+        const bool added = cp == 0x0401 || cp == 0x0451 || (cp >= 0x0410 && cp <= 0x044f) || cp == 0x2116;
+        if (!added) {
+          for (uint16_t p = 0; p < glyph.dataLength; ++p) pixelHash = (pixelHash ^ pixels[p]) * 1099511628211ull;
+        }
         expected.emplace_back(pixels, pixels + glyph.dataLength);
         appendUtf8(text, codepointFor(*data, i));
       }
@@ -130,6 +138,51 @@ TEST_F(FontDecompressorTest, AllGlyphsHotGroupAndPrewarmProduceIdenticalPackedPi
       decoder.clearCache();
     }
     EXPECT_EQ(pixelHash, expectedHash);  // raw 441a854b glyph pixels, independent of this decoder
+  }
+}
+
+TEST_F(FontDecompressorTest, CyrillicAndNumeroLookupAndPixelsAcrossAllSizes) {
+  constexpr char text[] = "ЁёАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюя№";
+  for (const bool psram : {false, true}) {
+    testHasPsram = psram;
+    for (const auto* data :
+         {&notosans_cjk_8, &notosans_cjk_10, &notosans_cjk_12, &notosans_cjk_14, &notosans_cjk_16, &notosans_cjk_18}) {
+      FontDecompressor decoder;
+      ASSERT_TRUE(decoder.init());
+      ASSERT_TRUE(data->is2Bit);
+      ASSERT_FALSE(data->is4Bit);
+      const EpdFont font(data);
+      uint64_t hotHash = 0;
+      for (const bool warm : {false, true}) {
+        if (warm) {
+          decoder.clearCache();
+          ASSERT_EQ(decoder.prewarmCache(data, text), 0);
+        }
+        uint64_t pixelHash = 14695981039346656037ull;
+        const auto* cursor = reinterpret_cast<const uint8_t*>(text);
+        uint32_t cp;
+        size_t count = 0;
+        while ((cp = utf8NextCodepoint(&cursor))) {
+          ASSERT_TRUE(font.hasCodepoint(cp));
+          bool replacement = true;
+          const auto* glyph = font.getGlyph(cp, &replacement);
+          ASSERT_NE(glyph, nullptr);
+          EXPECT_FALSE(replacement);
+          const auto index = static_cast<uint32_t>(glyph - data->glyph);
+          const auto* pixels = data->groups ? decoder.getBitmap(data, glyph, index) : data->bitmap + glyph->dataOffset;
+          ASSERT_NE(pixels, nullptr);
+          ASSERT_GT(glyph->dataLength, 0u);
+          EXPECT_TRUE(std::any_of(pixels, pixels + glyph->dataLength, [](uint8_t pixel) { return pixel != 0; }));
+          for (uint16_t p = 0; p < glyph->dataLength; ++p) pixelHash = (pixelHash ^ pixels[p]) * 1099511628211ull;
+          ++count;
+        }
+        EXPECT_EQ(count, 67u);
+        if (warm)
+          EXPECT_EQ(pixelHash, hotHash);
+        else
+          hotHash = pixelHash;
+      }
+    }
   }
 }
 

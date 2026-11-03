@@ -98,6 +98,13 @@ class PageLinkList {
   size_t size() const { return size_; }
   bool empty() const { return size_ == 0; }
   bool allocationFailed() const { return allocationFailed_; }
+  PageLink* erase(const PageLink* entry) {
+    const size_t index = static_cast<size_t>(entry - entries_.get());
+    if (index >= size_) return end();
+    for (size_t i = index + 1; i < size_; ++i) entries_[i - 1] = entries_[i];
+    --size_;
+    return entries_.get() + index;
+  }
   PageLink* begin() { return entries_.get(); }
   const PageLink* begin() const { return entries_.get(); }
   PageLink* end() { return entries_ ? &entries_[size_] : nullptr; }

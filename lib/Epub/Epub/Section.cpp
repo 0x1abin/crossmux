@@ -54,10 +54,13 @@ namespace {
 //   74 / 75 - character and word spacing in the render spec and cached text
 //   76 / 77 - independent Western paragraph indentation width
 //   78 / 79 - per-word source ranges, NFC source composition, paragraph starts, and soft-flush continuity
+//   82 / 83 - bottom-align header and table-safe layout; skip overlapping early PR versions 79/80
+//   84 / 85 - CSS font variants, page boxes/drop caps, inheritance, and GIF layout
+//   86 / 87 - literal-space justification, wrapped NBSP, RTL gaps, and bounded drop-cap hyphenation
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 79;
+constexpr uint8_t SECTION_FILE_VERSION = 87;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 78;
+constexpr uint8_t SECTION_FILE_VERSION = 86;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -79,7 +82,8 @@ constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFE - (SECTION_FILE_VERSION - 
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
                                  sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) +
                                  sizeof(bool) + sizeof(bool) + sizeof(uint8_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint32_t) * 5 + sizeof(int8_t) + sizeof(uint8_t) + sizeof(uint8_t);
+                                 sizeof(uint32_t) * 5 + sizeof(int8_t) + sizeof(uint8_t) + sizeof(uint8_t) +
+                                 sizeof(bool);
 // Called only between layout/render operations; no borrowed glyph pointer is live.
 void reclaimLayoutCaches(GfxRenderer& renderer, const char* stage) {
 #ifndef BOARD_HAS_PSRAM
@@ -140,12 +144,12 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   static_assert(HEADER_SIZE == sizeof(SECTION_FILE_VERSION) + sizeof(spec.fontId) + sizeof(spec.lineCompression) +
                                    sizeof(spec.extraParagraphSpacing) + sizeof(spec.firstLineIndent) +
                                    sizeof(spec.paragraphIndentSpaces) + sizeof(spec.paragraphAlignment) +
-                                   sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
-                                   sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
-                                   sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) +
-                                   sizeof(spec.collectTouchLinks) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent),
+                                   sizeof(spec.verticalBottomAlign) + sizeof(spec.viewportWidth) +
+                                   sizeof(spec.viewportHeight) + sizeof(pageCount) + sizeof(spec.hyphenationEnabled) +
+                                   sizeof(spec.embeddedStyle) + sizeof(spec.imageRendering) +
+                                   sizeof(spec.focusReadingEnabled) + sizeof(spec.collectTouchLinks) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                   sizeof(uint32_t) + sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -156,6 +160,7 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   serialization::writePod(file, spec.firstLineIndent);
   serialization::writePod(file, spec.paragraphIndentSpaces);
   serialization::writePod(file, spec.paragraphAlignment);
+  serialization::writePod(file, spec.verticalBottomAlign);
   serialization::writePod(file, spec.viewportWidth);
   serialization::writePod(file, spec.viewportHeight);
   serialization::writePod(file, spec.hyphenationEnabled);
@@ -203,6 +208,7 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     uint8_t fileFirstLineIndent = 0;
     uint8_t fileParagraphIndentSpaces = 3;
     uint8_t fileParagraphAlignment = 0;
+    uint8_t fileVerticalBottomAlign = 0;
     bool fileHyphenationEnabled = false;
     bool fileEmbeddedStyle = false;
     uint8_t fileImageRendering = 0;
@@ -214,15 +220,17 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
         serialization::readPod(file, fileFontId) && serialization::readPod(file, fileLineCompression) &&
         serialization::readPod(file, fileExtraParagraphSpacing) && serialization::readPod(file, fileFirstLineIndent) &&
         serialization::readPod(file, fileParagraphIndentSpaces) &&
-        serialization::readPod(file, fileParagraphAlignment) && serialization::readPod(file, fileViewportWidth) &&
-        serialization::readPod(file, fileViewportHeight) && serialization::readPod(file, fileHyphenationEnabled) &&
-        serialization::readPod(file, fileEmbeddedStyle) && serialization::readPod(file, fileImageRendering) &&
-        serialization::readPod(file, fileFocusReadingEnabled) && serialization::readPod(file, fileCollectTouchLinks) &&
-        serialization::readPod(file, fileCharacterSpacing) && serialization::readPod(file, fileWordSpacingPercent);
+        serialization::readPod(file, fileParagraphAlignment) && serialization::readPod(file, fileVerticalBottomAlign) &&
+        serialization::readPod(file, fileViewportWidth) && serialization::readPod(file, fileViewportHeight) &&
+        serialization::readPod(file, fileHyphenationEnabled) && serialization::readPod(file, fileEmbeddedStyle) &&
+        serialization::readPod(file, fileImageRendering) && serialization::readPod(file, fileFocusReadingEnabled) &&
+        serialization::readPod(file, fileCollectTouchLinks) && serialization::readPod(file, fileCharacterSpacing) &&
+        serialization::readPod(file, fileWordSpacingPercent);
 
     if (!headerValid || spec.fontId != fileFontId || spec.lineCompression != fileLineCompression ||
         spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.firstLineIndent != fileFirstLineIndent ||
         spec.paragraphIndentSpaces != fileParagraphIndentSpaces || spec.paragraphAlignment != fileParagraphAlignment ||
+        fileVerticalBottomAlign > 1 || spec.verticalBottomAlign != (fileVerticalBottomAlign != 0) ||
         spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
         spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
         spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled ||
@@ -481,8 +489,8 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   BuildContext* ctxPtr = ctx.get();
   ctx->parser = makeUniqueNoThrow<ChapterHtmlSlimParser>(
       epub, ctxPtr->parsePath, renderer, spec.fontId, spec.lineCompression, spec.extraParagraphSpacing,
-      spec.firstLineIndent, spec.paragraphAlignment, spec.viewportWidth, spec.viewportHeight, spec.hyphenationEnabled,
-      spec.focusReadingEnabled,
+      spec.firstLineIndent, spec.paragraphAlignment, spec.verticalBottomAlign, spec.viewportWidth, spec.viewportHeight,
+      spec.hyphenationEnabled, spec.focusReadingEnabled,
       [this, ctxPtr](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex,
                      const uint32_t visibleTextOffset) {
         const uint32_t position = this->onPageComplete(std::move(page));
@@ -520,7 +528,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   return true;
 }
 
-bool Section::buildSomeMore(const int maxPages) {
+bool Section::buildSomeMore(const int maxPages, bool (*yieldNow)()) {
   if (!build_ || !build_->parser) {
     LOG_ERR("SCT", "buildSomeMore with no active build");
     return false;
@@ -543,7 +551,7 @@ bool Section::buildSomeMore(const int maxPages) {
         return finalizeBuild();
       case ChapterHtmlSlimParser::ParseStatus::More:
         // Yield once we've laid out the requested number of pages.
-        if (maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) {
+        if ((maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) || (yieldNow && yieldNow())) {
           build_->bytesConsumed = build_->parser->parseBytesConsumed();
           return true;
         }

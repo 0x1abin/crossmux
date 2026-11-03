@@ -82,7 +82,10 @@ void prepare(GfxRenderer& renderer) {
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
-  bleinput::stop();
+  if (mode != WIFI_OFF && !bleinput::stop()) {
+    LOG_ERR("NET", "Bluetooth stop incomplete; refusing WiFi startup");
+    return false;
+  }
   logMemory("after BLE stop");
   prepare(renderer);
   const bool started = WiFi.mode(mode);

@@ -110,6 +110,40 @@ TEST_F(TxtProgressTest, ResolvesAsciiGbkAndUtf8SpansIncludingMidCharacterAndEnd)
   ASSERT_TRUE(Storage.openFileForRead("TXT", "/map", mapping));
   EXPECT_FALSE(txt_progress::resolve(mapping, 29, 1, visible));
 }
+
+TEST_F(TxtProgressTest, IdentifiesFirstChapterAtTheLeadingNewlineWithAndWithoutBom) {
+  for (const char* prefix : {"", "\xEF\xBB\xBF"}) {
+    const std::string book = std::string(prefix) + "Chapter 1\nbody\nChapter 2\nend\n";
+    {
+      std::ofstream output(root / "book.txt", std::ios::binary | std::ios::trunc);
+      output << book;
+    }
+    Txt txt("/book.txt", "/.crosspoint");
+    ASSERT_TRUE(txt.load());
+    std::array<uint8_t, 8192> scratch{};
+    uint32_t count = 0;
+    auto encoding = txt_encoding::Encoding::Unknown;
+    ASSERT_TRUE(txt.buildChapterIndex(encoding, scratch.data(), scratch.size(), count));
+    ASSERT_EQ(count, 2U);
+    std::filesystem::create_directories(root / "converted");
+    const uint32_t size = static_cast<uint32_t>(book.size());
+    const uint32_t start = static_cast<uint32_t>(strlen(prefix));
+    const uint32_t skip = start == 0 ? 1 : 0;
+    const txt_progress::Header header{txt_progress::MAGIC, size, 3 - skip, 12, txt_progress::VERSION, 1};
+    const txt_progress::Record records[] = {{0, 1, 3, 0}, {start, 1, 1, 1}, {size, size - start + 1, 0, 0}};
+    {
+      std::ofstream output(root / "converted/txt-map.bin", std::ios::binary | std::ios::trunc);
+      output.write(reinterpret_cast<const char*>(&header), sizeof(header));
+      output.write(reinterpret_cast<const char*>(records + skip), (3 - skip) * sizeof(records[0]));
+    }
+    uint8_t progress = 255;
+    EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", 0, &progress), 1);
+    uint8_t mappedProgress = 255;
+    EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", 1, &mappedProgress), 1);
+    EXPECT_EQ(progress, mappedProgress);
+  }
+}
+
 TEST_F(TxtProgressTest, FindsTheCurrentConvertedChapterWithoutRetainingChapterTables) {
   const std::string book = "Preface\nChapter 1\nbody\nChapter 2\nend\n";
   {
@@ -133,6 +167,7 @@ TEST_F(TxtProgressTest, FindsTheCurrentConvertedChapterWithoutRetainingChapterTa
     output.write(reinterpret_cast<const char*>(&header), sizeof(header));
     output.write(reinterpret_cast<const char*>(records), sizeof(records));
   }
+  EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", 0), 0);
   EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", 1), 0);
   EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", book.find("Chapter 1") + 1), 1);
   EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", book.find("Chapter 2") + 1), 2);
@@ -144,5 +179,8 @@ TEST_F(TxtProgressTest, FindsTheCurrentConvertedChapterWithoutRetainingChapterTa
   EXPECT_EQ(progress, 100);
   std::filesystem::resize_file(root / "converted/txt-map.bin", sizeof(header));
   EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", 1), -1);
+  progress = 77;
+  EXPECT_EQ(Txt::tocIndexForPosition("/book.txt", "/converted", 0, &progress), -1);
+  EXPECT_EQ(progress, 77);
 }
 }  // namespace

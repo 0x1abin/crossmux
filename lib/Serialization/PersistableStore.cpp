@@ -2,20 +2,57 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <ObfuscationUtils.h>
 
 #include <cstring>
 #include <limits>
 
+bool PersistableStoreBase::recoverTempFile(const char* path) {
+  if (!path || !*path) {
+    LOG_ERR("PERSIST", "Missing JSON path for recovery");
+    return false;
+  }
+  HalStorage::StorageLock lock;
+  if (Storage.exists(path)) return true;
+
+  const size_t pathLength = strlen(path);
+  // Bookmark/export paths vary; allocate exactly the recovery path without a large stack buffer.
+  auto tempPath = makeUniqueNoThrow<char[]>(pathLength + sizeof(".tmp"));
+  if (!tempPath) {
+    LOG_ERR("PERSIST", "OOM allocating %zu bytes for JSON recovery path", pathLength + sizeof(".tmp"));
+    return false;
+  }
+  memcpy(tempPath.get(), path, pathLength);
+  memcpy(tempPath.get() + pathLength, ".tmp", sizeof(".tmp"));
+  if (!Storage.exists(tempPath.get())) return false;
+  if (!Storage.rename(tempPath.get(), path)) {
+    LOG_ERR("PERSIST", "Cannot recover staged JSON for %s", path);
+    return false;
+  }
+  return true;
+}
+
 bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& doc) {
+  if (doc.overflowed()) {
+    LOG_ERR("PERSIST", "Insufficient heap for JSON document");
+    return false;
+  }
+
   const std::string targetPath = path ? path : "";
   if (targetPath.empty()) {
     LOG_ERR("PERSIST", "Missing JSON path for write");
     return false;
   }
 
+  HalStorage::StorageLock lock;
   Storage.mkdir("/.crosspoint");
   const std::string tempPath = targetPath + ".tmp";
+  if (!Storage.exists(targetPath.c_str()) && Storage.exists(tempPath.c_str()) &&
+      !Storage.rename(tempPath.c_str(), targetPath.c_str())) {
+    LOG_ERR("PERSIST", "Cannot recover staged JSON for %s", targetPath.c_str());
+    return false;
+  }
   if (Storage.exists(tempPath.c_str())) {
     Storage.remove(tempPath.c_str());
   }
@@ -37,12 +74,10 @@ bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& 
   }
 
   if (Storage.exists(targetPath.c_str()) && !Storage.remove(targetPath.c_str())) {
-    Storage.remove(tempPath.c_str());
     LOG_ERR("PERSIST", "Failed to replace %s", targetPath.c_str());
     return false;
   }
   if (!Storage.rename(tempPath.c_str(), targetPath.c_str())) {
-    Storage.remove(tempPath.c_str());
     LOG_ERR("PERSIST", "Failed to rename temp file for %s", targetPath.c_str());
     return false;
   }
@@ -50,10 +85,14 @@ bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& 
 }
 
 bool PersistableStoreBase::readDocFromFile(const char* path, JsonDocument& doc) {
-  if (!Storage.exists(path)) {
-    return false;  // Expected on first boot — not an error.
+  String json;
+  {
+    HalStorage::StorageLock lock;
+    if (!recoverTempFile(path)) {
+      return false;  // Expected on first boot — not an error.
+    }
+    json = Storage.readFile(path);
   }
-  String json = Storage.readFile(path);
   if (json.isEmpty()) {
     LOG_ERR("PERSIST", "Failed to read %s (empty)", path);
     return false;

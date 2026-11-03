@@ -80,6 +80,19 @@ class WeReadStoreTest : public ::testing::Test {
     return root_ / sdPath;
   }
 
+  std::string readText(const std::string& sdPath) const {
+    std::ifstream source(hostPath(sdPath.c_str()), std::ios::binary);
+    return {(std::istreambuf_iterator<char>(source)), std::istreambuf_iterator<char>()};
+  }
+
+  void expectValidXml(const std::string& text) {
+    XML_Parser parser = XML_ParserCreate(nullptr);
+    ASSERT_NE(parser, nullptr);
+    EXPECT_EQ(XML_Parse(parser, text.data(), static_cast<int>(text.size()), XML_TRUE), XML_STATUS_OK)
+        << XML_ErrorString(XML_GetErrorCode(parser));
+    XML_ParserFree(parser);
+  }
+
   void beginBrowseCache(WeReadBrowse::CacheManifest& manifest) {
     ASSERT_TRUE(WeReadBrowse::beginCache(kBrowseBook, kBrowseOwner, manifest));
   }
@@ -345,9 +358,9 @@ TEST_F(WeReadStoreTest, KeepsUtf8CodepointsIntactAcrossSanitizerReadBoundaries) 
 
   std::array<uint8_t, 512> readBuffer{};
   std::array<char, 4096> tagBuffer{};
-  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imageIndexPath, 0, "Boundary", false,
-                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
-                                                tagBuffer.size()));
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(
+      inputPath, outputPath, imageIndexPath, WeReadStore::notesPath(bookDir, 0), 0, "Boundary", false,
+      readBuffer.data(), readBuffer.size(), tagBuffer.data(), tagBuffer.size()));
 
   std::ifstream generated(hostPath(outputPath.c_str()), std::ios::binary);
   ASSERT_TRUE(generated.good());
@@ -369,6 +382,8 @@ TEST_F(WeReadStoreTest, KeepsUtf8CodepointsIntactAcrossSanitizerReadBoundaries) 
   uint32_t visibleOffset = 0;
   EXPECT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, 1021, visibleOffset));
   EXPECT_EQ(visibleOffset, 1017U);
+  EXPECT_TRUE(Storage.exists(WeReadStore::notesPath(bookDir, 0).c_str()));
+  EXPECT_TRUE(readText(WeReadStore::notesPath(bookDir, 0)).empty());
 }
 
 TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) {
@@ -377,6 +392,7 @@ TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) 
   const std::string inputPath = bookDir + "/decoded.xhtml";
   const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
   const std::string imageIndexPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string longNote(300, 'N');
   const std::string input =
       "<p>A<a class='marker DUOKAN-footnote extra' href='#d1'><img src='https://res.weread.qq.com/note.png'/></a>"
       "<img class='duokan-footnote' src='https://res.weread.qq.com/direct.png'/>B</p>"
@@ -389,7 +405,12 @@ TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) 
       "<a type='noteref'>Type ref</a><aside type='footnote'>Type footnote</aside>"
       "<aside type='endnote'>Type endnote</aside><aside type='rearnote'>Type rearnote</aside>"
       "<a role='doc-noteref'>Role ref</a><aside role='doc-footnote'>Role footnote</aside>"
-      "<aside role='doc-endnote'>Role endnote</aside><aside role='doc-rearnote'>Role rearnote</aside><p>E</p>";
+      "<aside role='doc-endnote'>Role endnote</aside><aside role='doc-rearnote'>Role rearnote</aside><p>E</p>"
+      "<p>甲😀<img class='marker QQREADER-footnote extra' src='../Images/short.png' alt='Qqreader note &amp; + %'/>"
+      "<img class='qqreader-footnote' src='https://res.weread.qq.com/long.png' alt='" +
+      longNote +
+      "'></p><p>乙</p>"
+      "<img class='qqreader-footnote-extra' src='../Images/ordinary.png' alt='Ordinary image'/>";
   {
     std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
     ASSERT_TRUE(source.good());
@@ -398,9 +419,9 @@ TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) 
 
   std::array<uint8_t, 7> readBuffer{};
   std::array<char, 4096> tagBuffer{};
-  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imageIndexPath, 0, "Annotations", false,
-                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
-                                                tagBuffer.size()));
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(
+      inputPath, outputPath, imageIndexPath, WeReadStore::notesPath(bookDir, 0), 0, "Annotations", false,
+      readBuffer.data(), readBuffer.size(), tagBuffer.data(), tagBuffer.size()));
 
   std::ifstream generated(hostPath(outputPath.c_str()), std::ios::binary);
   ASSERT_TRUE(generated.good());
@@ -418,7 +439,18 @@ TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) 
   for (const char* removed : kRemovedText) EXPECT_EQ(xhtml.find(removed), std::string::npos) << removed;
   EXPECT_EQ(xhtml.find("note.png"), std::string::npos);
   EXPECT_EQ(xhtml.find("direct.png"), std::string::npos);
+  EXPECT_EQ(xhtml.find("Qqreader note"), std::string::npos);
+  EXPECT_EQ(xhtml.find(longNote), std::string::npos);
+  EXPECT_EQ(xhtml.find("long.png"), std::string::npos);
+  EXPECT_NE(xhtml.find("Ordinary image"), std::string::npos);
   EXPECT_EQ(xhtml.find(">2<"), std::string::npos);
+  EXPECT_NE(xhtml.find("href=\"notes000000.xhtml#wr-note-1\">[1]</a>"), std::string::npos);
+  EXPECT_NE(xhtml.find("href=\"notes000000.xhtml#wr-note-2\">[2]</a>"), std::string::npos);
+  const std::string notes = readText(WeReadStore::notesPath(bookDir, 0));
+  expectValidXml(notes);
+  EXPECT_NE(notes.find("Qqreader note &amp; + %"), std::string::npos);
+  EXPECT_NE(notes.find(longNote), std::string::npos);
+  EXPECT_NE(notes.find("href=\"ch000000.xhtml#wr-ref-1\">[1]</a>"), std::string::npos);
 
   HalFile imageIndex;
   uint32_t imageCount = UINT32_MAX;
@@ -437,6 +469,209 @@ TEST_F(WeReadStoreTest, FiltersBookAnnotationsWithoutDroppingOrdinaryAsideText) 
   uint32_t visibleOffset = UINT32_MAX;
   ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, input.find("Duokan note"), visibleOffset));
   EXPECT_EQ(visibleOffset, 9U);
+
+  // The preceding 甲😀 takes seven UTF-8 bytes but three UTF-16 code units.
+  const uint32_t nativeAfterNotes = input.find(">乙<") + 1 - 4;
+  uint32_t nativeOffset = UINT32_MAX;
+  ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 20, nativeOffset));
+  EXPECT_EQ(nativeOffset, nativeAfterNotes);
+  ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, nativeAfterNotes, visibleOffset));
+  EXPECT_EQ(visibleOffset, 20U);
+  ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, input.find("Qqreader note") - 4, visibleOffset));
+  EXPECT_EQ(visibleOffset, 17U);
+}
+
+TEST_F(WeReadStoreTest, StreamsUnboundedAnnotationAttributesAndRestoresTheMainInputChunk) {
+  const std::string bookDir = WeReadStore::bookDirectory("long-annotation-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 7);
+  const std::string imagesPath = WeReadStore::imageIndexPath(bookDir, 7);
+  const std::string notesPath = WeReadStore::notesPath(bookDir, 7);
+  const std::string note = "BEGIN>" + std::string(64 * 1024, 'N') + "&amp;&lt;b&gt;&quot;&apos;&nbsp;&#x1F600;&#" +
+                           std::string(5000, '0') + "65;&unknown;&" + std::string(100, 'z') + ";END";
+  const std::string expected = "&amp;&lt;b&gt;&quot;&apos; 😀A&amp;unknown;&amp;" + std::string(100, 'z') + ";END";
+  for (const bool classFirst : {false, true}) {
+    SCOPED_TRACE(classFirst);
+    const std::string input =
+        "<p>甲😀<img " + std::string(classFirst ? "class='marker QQREADER-footnote extra' " : "") + "alt='" + note +
+        "' " + std::string(classFirst ? "" : "class='marker QQREADER-footnote extra' ") +
+        "src='../note.png'>乙<img src='https://res.weread.qq.com/ordinary.png' alt='ordinary'>丙</p>";
+    {
+      std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+      source << input;
+      ASSERT_TRUE(source.good());
+    }
+    std::array<uint8_t, 7> readBuffer{};
+    std::array<char, 4096> tagBuffer{};
+    ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imagesPath, notesPath, 7, "Long", false,
+                                                  readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                  tagBuffer.size()));
+    const std::string main = readText(outputPath);
+    const std::string notes = readText(notesPath);
+    expectValidXml(main);
+    expectValidXml(notes);
+    EXPECT_EQ(main.find("BEGIN"), std::string::npos);
+    EXPECT_NE(main.find("href=\"notes000007.xhtml#wr-note-1\">[1]</a>"), std::string::npos);
+    EXPECT_NE(notes.find("BEGIN&gt;" + std::string(64 * 1024, 'N')), std::string::npos);
+    EXPECT_NE(notes.find(expected), std::string::npos);
+    EXPECT_NE(notes.find("href=\"ch000007.xhtml#wr-ref-1\">[1]</a>"), std::string::npos);
+    EXPECT_EQ(notes.find("wr-note-2"), std::string::npos);
+    HalFile images;
+    uint32_t count = 0;
+    ASSERT_TRUE(WeReadStore::openImageIndex(imagesPath, images, count));
+    EXPECT_EQ(count, 1U);
+    uint32_t native = 0;
+    ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 5, native));
+    EXPECT_EQ(native, input.find("乙") - 4);
+    uint32_t visible = 0;
+    ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, native, visible));
+    EXPECT_EQ(visible, 5U);
+    EXPECT_NE(main.find("丙"), std::string::npos);
+  }
+}
+
+TEST_F(WeReadStoreTest, KeepsPreviousChapterAndNotesWhenPublishingNotesFails) {
+  const std::string bookDir = WeReadStore::bookDirectory("annotation-atomic-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imagesPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string notesPath = WeReadStore::notesPath(bookDir, 0);
+  ASSERT_TRUE(Storage.writeFile(inputPath.c_str(), "<p>A<img class='qqreader-footnote' alt='note'>B</p>"));
+  ASSERT_TRUE(Storage.writeFile(outputPath.c_str(), "previous chapter"));
+  ASSERT_TRUE(Storage.writeFile(notesPath.c_str(), "previous notes"));
+  ASSERT_TRUE(Storage.ensureDirectoryExists((notesPath + ".bak/occupied").c_str()));
+  std::array<uint8_t, 7> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  EXPECT_FALSE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imagesPath, notesPath, 0, "Atomic", false,
+                                                 readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                 tagBuffer.size()));
+  EXPECT_EQ(readText(outputPath), "previous chapter");
+  EXPECT_EQ(readText(notesPath), "previous notes");
+  EXPECT_FALSE(Storage.exists((outputPath + ".part").c_str()));
+  EXPECT_FALSE(Storage.exists((notesPath + ".part").c_str()));
+  EXPECT_FALSE(Storage.exists((imagesPath + ".part").c_str()));
+  HalFile images;
+  uint32_t count = 0;
+  EXPECT_FALSE(WeReadStore::openImageIndex(imagesPath, images, count));
+}
+
+TEST_F(WeReadStoreTest, DropsOversizedOrdinaryTagsAndReplacesOldNotesWithAnEmptySidecar) {
+  const std::string bookDir = WeReadStore::bookDirectory("ordinary-overflow-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imagesPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string notesPath = WeReadStore::notesPath(bookDir, 0);
+  const std::string longAttribute(5000, 'x');
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    source << "<!-- don't change declaration handling -->"
+              "<p>A<img alt='"
+           << longAttribute << "' class='qqreader-footnote-extra'>B<custom data-long='" << longAttribute
+           << "'>C</custom><img class='qqreader-footnote' alt=''>D</p>";
+    ASSERT_TRUE(source.good());
+  }
+  ASSERT_TRUE(Storage.writeFile(notesPath.c_str(), "old notes"));
+  std::array<uint8_t, 512> readBuffer{};
+  std::array<char, 512> tagBuffer{};
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imagesPath, notesPath, 0, "Ordinary", false,
+                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                tagBuffer.size()));
+  const std::string main = readText(outputPath);
+  expectValidXml(main);
+  EXPECT_EQ(main.find("noteref"), std::string::npos);
+  EXPECT_EQ(main.find(longAttribute), std::string::npos);
+  EXPECT_TRUE(readText(notesPath).empty());
+  uint32_t native = 0;
+  ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 3, native));
+  EXPECT_EQ(native, readText(inputPath).find("D</p>"));
+}
+
+TEST_F(WeReadStoreTest, RejectsUnterminatedAnnotationAttributesWithoutPublishingPartialFiles) {
+  const std::string bookDir = WeReadStore::bookDirectory("unfinished-annotation-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imagesPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string notesPath = WeReadStore::notesPath(bookDir, 0);
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    source << "<p>A<img class='qqreader-footnote' alt='" << std::string(64 * 1024, 'N') << ">";
+  }
+  ASSERT_TRUE(Storage.writeFile(outputPath.c_str(), "previous chapter"));
+  ASSERT_TRUE(Storage.writeFile(notesPath.c_str(), "previous notes"));
+  std::array<uint8_t, 512> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  EXPECT_FALSE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imagesPath, notesPath, 0, "Incomplete", false,
+                                                 readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                 tagBuffer.size()));
+  EXPECT_EQ(readText(outputPath), "previous chapter");
+  EXPECT_EQ(readText(notesPath), "previous notes");
+  EXPECT_FALSE(Storage.exists((outputPath + ".part").c_str()));
+  EXPECT_FALSE(Storage.exists((notesPath + ".part").c_str()));
+  EXPECT_FALSE(Storage.exists((imagesPath + ".part").c_str()));
+}
+
+TEST_F(WeReadStoreTest, CancelsDuringLongAnnotationReadbackWithoutPublishingAndKeepsSuccessfulMappings) {
+  const std::string bookDir = WeReadStore::bookDirectory("cancel-annotation-book");
+  ASSERT_TRUE(Storage.ensureDirectoryExists((bookDir + "/chapters").c_str()));
+  const std::string inputPath = bookDir + "/decoded.xhtml";
+  const std::string outputPath = WeReadStore::chapterPath(bookDir, 0);
+  const std::string imagesPath = WeReadStore::imageIndexPath(bookDir, 0);
+  const std::string notesPath = WeReadStore::notesPath(bookDir, 0);
+  const std::string note(64 * 1024, 'N');
+  const std::string input = "<p>A<img class='qqreader-footnote' alt='" + note + "'>B</p>";
+  {
+    std::ofstream source(hostPath(inputPath.c_str()), std::ios::binary);
+    source << input;
+    ASSERT_TRUE(source.good());
+  }
+  ASSERT_TRUE(Storage.writeFile(outputPath.c_str(), "previous chapter"));
+  ASSERT_TRUE(Storage.writeFile(notesPath.c_str(), "previous notes"));
+  WeReadStore::IndexWriter writer;
+  ASSERT_TRUE(writer.begin(imagesPath, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord)));
+  ASSERT_TRUE(writer.finish());
+
+  std::array<uint8_t, 512> readBuffer{};
+  std::array<char, 4096> tagBuffer{};
+  const size_t tagEnd = input.find("'>B") + 2;
+  const size_t mainReads = (tagEnd + readBuffer.size() - 1) / readBuffer.size();
+  const size_t tagReads = (tagEnd - input.find("<img") - 2 + tagBuffer.size() - 1) / tagBuffer.size();
+  struct {
+    size_t calls = 0;
+    size_t stopAt;
+  } work{0, mainReads + tagReads + 2};  // Cancel on the second refill while writing the note text.
+  const auto continueWork = [](void* context) {
+    auto& state = *static_cast<decltype(work)*>(context);
+    return ++state.calls < state.stopAt;
+  };
+  EXPECT_FALSE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imagesPath, notesPath, 0, "Cancelled", false,
+                                                 readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                 tagBuffer.size(), continueWork, &work));
+  EXPECT_EQ(work.calls, work.stopAt);
+  EXPECT_EQ(readText(outputPath), "previous chapter");
+  EXPECT_EQ(readText(notesPath), "previous notes");
+  EXPECT_FALSE(Storage.exists((outputPath + ".part").c_str()));
+  EXPECT_FALSE(Storage.exists((notesPath + ".part").c_str()));
+  EXPECT_FALSE(Storage.exists((imagesPath + ".part").c_str()));
+  HalFile images;
+  uint32_t count = 0;
+  EXPECT_FALSE(WeReadStore::openImageIndex(imagesPath, images, count));
+
+  work = {0, std::numeric_limits<size_t>::max()};
+  ASSERT_TRUE(WeReadXhtmlCodec::sanitizeChapter(inputPath, outputPath, imagesPath, notesPath, 0, "Completed", false,
+                                                readBuffer.data(), readBuffer.size(), tagBuffer.data(),
+                                                tagBuffer.size(), continueWork, &work));
+  EXPECT_GT(work.calls, mainReads + tagReads);
+  EXPECT_NE(readText(notesPath).find(note), std::string::npos);
+  uint32_t native = 0;
+  ASSERT_TRUE(WeReadXhtmlCodec::visibleToNativeOffset(outputPath, 4, native));
+  EXPECT_EQ(native, input.find("B</p>"));
+  uint32_t visible = 0;
+  ASSERT_TRUE(WeReadXhtmlCodec::nativeToVisibleOffset(outputPath, native, visible));
+  EXPECT_EQ(visible, 4U);
 }
 
 TEST_F(WeReadStoreTest, RejectsMissingAndMalformedSourceOffsetMarkers) {
@@ -727,10 +962,10 @@ TEST_F(WeReadStoreTest, WritesCurrentImageIndexesAndRejectsLegacyOrCorruptIndexe
     EXPECT_STREQ(loaded.url, second.url);
   }
 
-  static constexpr uint32_t kLegacyImageMagic = 0x31495257;  // WRI1
-  ASSERT_TRUE(images.begin(path, kLegacyImageMagic, sizeof(WeReadStore::ImageRecord)));
-  ASSERT_TRUE(images.finish());
-  {
+  static constexpr uint32_t kLegacyImageMagics[] = {0x31495257, 0x32495257, 0x33495257};  // WRI1, WRI2, WRI3
+  for (const auto magic : kLegacyImageMagics) {
+    ASSERT_TRUE(images.begin(path, magic, sizeof(WeReadStore::ImageRecord)));
+    ASSERT_TRUE(images.finish());
     HalFile rejected;
     EXPECT_FALSE(WeReadStore::openImageIndex(path, rejected, count));
   }

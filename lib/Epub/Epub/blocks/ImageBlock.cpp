@@ -44,8 +44,6 @@ void ImageBlock::setBilinearScaling(const bool enabled) {
           enabled ? ".b.pxc" : ".pxc");
 }
 
-bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
-
 namespace {
 
 std::string getCachePath(const std::string& imagePath) {

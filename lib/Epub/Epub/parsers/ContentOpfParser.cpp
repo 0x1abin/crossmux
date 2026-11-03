@@ -386,6 +386,10 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
   // Only run the spine parsing if there's a cache to add it to
   if (self->cache) {
     if (self->state == IN_SPINE && xmlLocalNameEquals(name, "itemref")) {
+      bool linear = true;
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "linear") == 0 && strcmp(atts[i + 1], "no") == 0) linear = false;
+      }
       for (int i = 0; atts[i]; i += 2) {
         if (strcmp(atts[i], "idref") == 0) {
           const std::string idref = atts[i + 1];
@@ -432,7 +436,7 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
           }
 
           if (found && self->cache) {
-            self->cache->createSpineEntry(href);
+            self->cache->createSpineEntry(href, linear);
           }
         }
       }

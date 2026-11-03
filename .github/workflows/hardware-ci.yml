@@ -36,6 +36,9 @@ on:
       - scripts/package_nightly_target.py
       - scripts/build_nightly_index.py
       - scripts/nightly_targets.py
+      - scripts/git_branch.py
+      - scripts/verify_nightly_release.py
+      - scripts/tests/test_build_modes.py
       - scripts/tests/test_nightly_release.py
       - scripts/patch_ble_keyboard_host.py
       - scripts/configure_nimble_psram.py
@@ -73,6 +76,9 @@ on:
       - scripts/package_nightly_target.py
       - scripts/build_nightly_index.py
       - scripts/nightly_targets.py
+      - scripts/git_branch.py
+      - scripts/verify_nightly_release.py
+      - scripts/tests/test_build_modes.py
       - scripts/tests/test_nightly_release.py
       - scripts/patch_ble_keyboard_host.py
       - scripts/configure_nimble_psram.py
@@ -95,7 +101,7 @@ jobs:
       runner_status_token: ${{ secrets.H2O_RUNNER_TOKEN }}
 
   build:
-    name: Build simulators and S3 hardware
+    name: Build simulators and hardware
     needs: select_runner
     runs-on: ${{ fromJSON(needs.select_runner.outputs['runs-on']) }}
     steps:
@@ -140,25 +146,22 @@ jobs:
           key: pio-cache-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-cache-${{ runner.os }}-
 
-      - name: Build simulators and S3 hardware
+      - name: Build simulators and hardware
         run: |
           set -euo pipefail
-          export CROSSPOINT_RC_HASH="${GITHUB_SHA::7}"
+          mapfile -t release_environments < <(python3 -c 'import sys; sys.path.insert(0, "scripts"); from nightly_targets import matrix; print("\n".join(entry["environment"] for entry in matrix("nightly")["include"]))')
+          test "${#release_environments[@]}" -gt 0
+          build_args=()
+          for environment in "${release_environments[@]}"; do build_args+=(-e "$environment"); done
           pio run \
             -e simulator \
             -e simulator_x3 \
             -e simulator_eego_a4 \
             -e simulator_murphy_m4 \
             -e simulator_readpico \
-            -e sticky_nightly \
-            -e x4pro_nightly \
-            -e x4c_nightly \
-            -e papermono_nightly \
-            -e eego_a4_nightly \
-            -e murphy_m4_nightly \
-            -e waveshare_epaper_397_nightly \
-            -e metalio_eink4_nightly \
-            -e readpico_nightly | tee pio.log
+            -e simulator_sticky \
+            -e x4c \
+            "${build_args[@]}" | tee pio.log
 
       - name: Check ReadPico display and input
         run: xvfb-run -a bash .pio/libdeps/simulator_readpico/simulator/tests/run_readpico_self_test.sh "$PWD"
@@ -166,7 +169,7 @@ jobs:
       - name: Record firmware stats
         run: |
           {
-            echo "## Simulator and S3 hardware build stats"
+            echo "## Simulator and hardware build stats"
             echo '```text'
             grep -E '^Processing |RAM:\s|Flash:\s' pio.log || true
             echo '```'
@@ -175,7 +178,9 @@ jobs:
       - name: Verify hardware packages
         run: |
           set -euo pipefail
-          for target in sticky xteink_x4_pro m5stack_paper_mono eego_a4 murphy_m4 waveshare_epaper_397 metalio_eink4 readpico; do
+          mapfile -t targets < <(python3 -c 'import sys; sys.path.insert(0, "scripts"); from nightly_targets import targets_for; print("\n".join(targets_for("nightly")))')
+          test "${#targets[@]}" -gt 0
+          for target in "${targets[@]}"; do
             python3 scripts/package_nightly_target.py "$target" --channel nightly
             (cd "dist/nightly/$target" && sha256sum --check *-SHA256SUMS)
           done

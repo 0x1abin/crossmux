@@ -232,6 +232,16 @@ states remain unchanged. Multi-valued settings keep their existing selection typ
 Compare with the fixed reference plus those exact increments; historical INX
 baselines remain immutable. A later latest-main/upstream sync is a separate task.
 
+Explicitly approved settings-group exception (2026-10-23): all themes, including
+INX, use the upstream System, Display, Reader, Controls, Library and Connectivity
+groups. This supersedes only the historical category-organization constraint.
+Retain CrossMux extension settings in their corresponding groups with their
+relative insertion points, action/value bindings, persistence, Web API and
+capability checks. Preserve INX page chrome, accordion/row styling, fonts,
+ordinary pickers and existing setting-control appearance. Historical baselines
+and earlier four-category latency records stay unchanged; validate the six
+current groups independently.
+
 ## C3 memory compatibility
 
 Review C3 memory behavior even in clean merges. Trace resident caches, fonts,

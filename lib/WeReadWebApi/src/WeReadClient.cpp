@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 #include "../../../src/util/BookCacheUtils.h"
@@ -1636,6 +1637,13 @@ bool combineAndDecode(const std::string* shards, const size_t shardCount, const 
   return true;
 }
 
+bool chapterHasNotes(const std::string& bookDir, const uint32_t chapterIndex, bool& hasNotes) {
+  HalFile notes;
+  if (!Storage.openFileForRead("WR", WeReadStore::notesPath(bookDir, chapterIndex), notes)) return false;
+  hasNotes = notes.fileSize64() != 0;
+  return true;
+}
+
 Error writePackageFiles(const std::string& bookDir, const WeReadStore::BookRecord& book, const std::string& tocPath,
                         const uint32_t chapterCount, const uint32_t firstChapter, const uint32_t lastChapter,
                         const WeReadStore::ImagePolicy imagePolicy, const std::string& workPath,
@@ -1654,6 +1662,13 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::BookRecor
       !WeReadStore::openToc(tocPath, toc, verifiedCount) || verifiedCount != chapterCount) {
     return Error::SdCard;
   }
+  const time_t modifiedTime = halClock.nowUtc();
+  struct tm modifiedUtc{};
+  char modified[24];
+  if (modifiedTime == 0 || !gmtime_r(&modifiedTime, &modifiedUtc) ||
+      strftime(modified, sizeof(modified), "%Y-%m-%dT%H:%M:%SZ", &modifiedUtc) == 0) {
+    return Error::Clock;
+  }
   if (!writeLiteral(nav,
                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                     "<html xmlns=\"http://www.w3.org/1999/xhtml\" "
@@ -1667,8 +1682,10 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::BookRecor
       !writeXmlText(opf, book.bookId) || !writeLiteral(opf, "</dc:identifier><dc:title>") ||
       !writeXmlText(opf, book.title) || !writeLiteral(opf, "</dc:title><dc:creator>") ||
       !writeXmlText(opf, book.author) ||
+      !writeLiteral(opf, "</dc:creator><dc:language>zh-CN</dc:language><meta property=\"dcterms:modified\">") ||
+      !writeLiteral(opf, modified) ||
       !writeLiteral(opf,
-                    "</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest>"
+                    "</meta></metadata><manifest>"
                     "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" "
                     "properties=\"nav\"/>"
                     "<item id=\"style\" href=\"styles.css\" media-type=\"text/css\"/>")) {
@@ -1697,6 +1714,17 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::BookRecor
                  static_cast<unsigned>(i), filename);
     if (opfLen <= 0 || static_cast<size_t>(opfLen) >= sizeof(item) || !writeLiteral(opf, item)) {
       return Error::SdCard;
+    }
+    bool hasNotes = false;
+    if (!chapterHasNotes(bookDir, i, hasNotes)) return Error::Integrity;
+    if (hasNotes) {
+      const int length = snprintf(item, sizeof(item),
+                                  "<item id=\"notes%06u\" href=\"notes%06u.xhtml\" "
+                                  "media-type=\"application/xhtml+xml\"/>",
+                                  static_cast<unsigned>(i), static_cast<unsigned>(i));
+      if (length <= 0 || static_cast<size_t>(length) >= sizeof(item) || !writeLiteral(opf, item)) {
+        return Error::SdCard;
+      }
     }
     if (callback) callback(callbackContext);
   }
@@ -1731,6 +1759,16 @@ Error writePackageFiles(const std::string& bookDir, const WeReadStore::BookRecor
     char item[64];
     snprintf(item, sizeof(item), "<itemref idref=\"ch%06u\"/>", static_cast<unsigned>(i));
     if (!writeLiteral(opf, item)) return Error::SdCard;
+    if (callback) callback(callbackContext);
+  }
+  for (uint32_t i = firstChapter; i <= lastChapter; ++i) {
+    bool hasNotes = false;
+    if (!chapterHasNotes(bookDir, i, hasNotes)) return Error::Integrity;
+    if (hasNotes) {
+      char item[80];
+      snprintf(item, sizeof(item), "<itemref idref=\"notes%06u\" linear=\"no\"/>", static_cast<unsigned>(i));
+      if (!writeLiteral(opf, item)) return Error::SdCard;
+    }
     if (callback) callback(callbackContext);
   }
   if (!writeLiteral(opf, "</spine></package>")) return Error::SdCard;
@@ -1796,6 +1834,18 @@ Error packageBook(const WeReadStore::BookRecord& book, const std::string& bookDi
     if (!zip.addFile(entryName, WeReadStore::chapterPath(bookDir, i), callback, callbackContext)) {
       zip.abort();
       return Error::SdCard;
+    }
+    bool hasNotes = false;
+    if (!chapterHasNotes(bookDir, i, hasNotes)) {
+      zip.abort();
+      return Error::Integrity;
+    }
+    if (hasNotes) {
+      snprintf(entryName, sizeof(entryName), "OEBPS/notes%06u.xhtml", static_cast<unsigned>(i));
+      if (!zip.addFile(entryName, WeReadStore::notesPath(bookDir, i), callback, callbackContext)) {
+        zip.abort();
+        return Error::SdCard;
+      }
     }
     if (callback) callback(callbackContext);
   }
@@ -2222,8 +2272,10 @@ Operation::Event Operation::fail(const Error error) {
   if (kind_ == Kind::Download && !bookDir_.empty()) {
     const std::string chapterPart = WeReadStore::chapterPath(bookDir_, chapterIndex_) + ".part";
     const std::string imageIndexPart = WeReadStore::imageIndexPath(bookDir_, chapterIndex_) + ".part";
+    const std::string notesPart = WeReadStore::notesPath(bookDir_, chapterIndex_) + ".part";
     if (Storage.exists(chapterPart.c_str())) Storage.remove(chapterPart.c_str());
     if (Storage.exists(imageIndexPart.c_str())) Storage.remove(imageIndexPart.c_str());
+    if (Storage.exists(notesPart.c_str())) Storage.remove(notesPart.c_str());
     cleanupTransient(bookDir_, finalPartPath_);
   } else if ((kind_ == Kind::Detail || kind_ == Kind::Sync) && !bookDir_.empty()) {
     cleanupDetailTransient(bookDir_);
@@ -3629,7 +3681,8 @@ Operation::Event Operation::inspectPrimary() {
   return Event::None;
 }
 
-Operation::Event Operation::decodeChapter(const bool plainText) {
+Operation::Event Operation::decodeChapter(const bool plainText, const WeReadStore::WorkCallback callback,
+                                          void* const callbackContext) {
   const std::string raw0 = bookDir_ + "/shard0.part";
   const std::string raw1 = bookDir_ + "/shard1.part";
   const std::string raw3 = bookDir_ + "/shard3.part";
@@ -3677,16 +3730,28 @@ Operation::Event Operation::decodeChapter(const bool plainText) {
     return retryChapterResponse();
   }
   const unsigned long sanitizeStartedAt = millis();
+  struct SanitizeWork {
+    Operation* operation;
+    WeReadStore::WorkCallback callback;
+    void* context;
+  } work{this, callback, callbackContext};
   const bool ok = WeReadXhtmlCodec::sanitizeChapter(
       decoded, WeReadStore::chapterPath(bookDir_, chapterIndex_), WeReadStore::imageIndexPath(bookDir_, chapterIndex_),
-      chapterIndex_, chapter_.title, plainText, reinterpret_cast<uint8_t*>(url_), sizeof(url_),
-      reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_));
+      WeReadStore::notesPath(bookDir_, chapterIndex_), chapterIndex_, chapter_.title, plainText,
+      reinterpret_cast<uint8_t*>(url_), sizeof(url_), reinterpret_cast<char*>(ioBuffer_), sizeof(ioBuffer_),
+      [](void* raw) {
+        auto& work = *static_cast<SanitizeWork*>(raw);
+        if (work.callback) work.callback(work.context);
+        delay(1);
+        return !checkCancellation(work.operation);
+      },
+      &work);
   const unsigned long sanitizeMs = millis() - sanitizeStartedAt;
   chapterSanitizeMs_ += sanitizeMs;
   LOG_DBG("WR", "chapter XHTML: index=%u ms=%lu bytes=%llu", static_cast<unsigned>(chapterIndex_), sanitizeMs,
           static_cast<unsigned long long>(decodedBytes));
   cleanup();
-  if (!ok) return fail(Error::SdCard);
+  if (!ok) return fail(cancelRequested_ ? Error::Cancelled : Error::SdCard);
   phase_ = Phase::AdvanceChapter;
   return Event::None;
 }
@@ -4075,6 +4140,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       uint32_t imageCount = 0;
       if (reuseChapterFile(Storage.exists(outputPath_.c_str()),
                            Storage.exists(WeReadStore::chapterPath(bookDir_, chapterIndex_).c_str())) &&
+          Storage.exists(WeReadStore::notesPath(bookDir_, chapterIndex_).c_str()) &&
           WeReadStore::openImageIndex(WeReadStore::imageIndexPath(bookDir_, chapterIndex_), imageIndex, imageCount)) {
         phase_ = Phase::AdvanceChapter;
         return Event::None;
@@ -4210,12 +4276,12 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
     case Phase::DecodeText:
       guardBookSession("text decode");
       logMemory("chapter decode");
-      return decodeChapter(true);
+      return decodeChapter(true, callback, callbackContext);
 
     case Phase::DecodeEpub:
       guardBookSession("epub decode");
       logMemory("chapter decode");
-      return decodeChapter(false);
+      return decodeChapter(false, callback, callbackContext);
 
     case Phase::AdvanceChapter:
       guardBookSession("progress");
@@ -4269,6 +4335,10 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       const bool hadPreviousOptions = WeReadStore::loadBookOptions(bookDir_, previousOptions);
       WeReadStore::BookOptions savedOptions;
       savedOptions.imagePolicy = options_.imagePolicy;
+      if (wholeChapterRange(firstChapterIndex_, lastChapterIndex_, chapterCount_) &&
+          !clearBookDerivedCache(outputPath_)) {
+        return fail(Error::SdCard);
+      }
       if (!WeReadStore::saveBookOptions(bookDir_, savedOptions)) return fail(Error::SdCard);
       if (!WeReadStore::atomicReplace(finalPartPath_, outputPath_)) {
         if (hadPreviousOptions) {

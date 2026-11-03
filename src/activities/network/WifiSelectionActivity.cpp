@@ -948,7 +948,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
   // so 32 truncated it. See ClockSyncActivity for the same class of bug.
   char countStr[64];
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
-  GUI.drawHeader(renderer, Rect{0, screen.y + metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
                  tr(STR_WIFI_NETWORKS), UITheme::getInstance().hasMainTabs() ? nullptr : countStr);
   const int subHeight = subtitleHeight();
   const Rect subtitle{screen.x, screen.y + metrics.topPadding + metrics.headerHeight, screen.width, subHeight};
@@ -1279,10 +1279,9 @@ void WifiSelectionActivity::renderConnected(const Rect* screen, const ThemeMetri
 
   UITheme::drawCenteredText(renderer, *screen, UI_12_FONT_ID, top - 30, tr(STR_CONNECTED), true, EpdFontFamily::BOLD);
 
-  std::string ssidInfo = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
-  if (ssidInfo.length() > 28) {
-    ssidInfo.replace(25, ssidInfo.length() - 25, "...");
-  }
+  const std::string ssidInfo =
+      renderer.truncatedText(UI_10_FONT_ID, (std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID).c_str(),
+                             screen->width - metrics->contentSidePadding * 2);
   UITheme::drawCenteredText(renderer, *screen, UI_10_FONT_ID, top + 10, ssidInfo.c_str());
 
   const std::string ipInfo = std::string(tr(STR_IP_ADDRESS_PREFIX)) + connectedIP;

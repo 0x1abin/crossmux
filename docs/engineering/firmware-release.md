@@ -1,30 +1,31 @@
 # Firmware Release Architecture
 
 CrossMux has two release channels, `stable` and `nightly`, managed by one
-channel-aware pipeline. Hardware identity is not a release channel. Stable
-contains the shared X3/X4 image and a separate Sticky image. Both targets support
-`stable` and `nightly`; the other seven ESP32-S3 release targets remain Nightly-only.
+channel-aware pipeline. Stable publishes four targets: the shared X3/X4 image,
+Sticky, X4 Pro and Metalio E-Ink 4. Nightly publishes all nine targets. Local
+build modes do not grant publication eligibility. X4 Classic and LilyGo remain
+development-only.
 
 ## Canonical targets
 
 [`scripts/nightly_targets.py`](../../scripts/nightly_targets.py) is the release
 source of truth despite its compatibility filename. Each target defines its
 runtime models, artifact slug, embedded board tag, per-channel PlatformIO
-environments, chip, install capability, and supported channels. The workflow,
+environments, chip, model display information, partition/Flash parameters, USB
+filters, install strategy, optional factory sources, and supported channels. The workflow,
 packager, index builder, and tests import this table rather than copy it.
 
 The X3/X4 target accepts `xteink_x3` and `xteink_x4` and produces one ESP32-C3
 image. Stable uses `gh_release`; Nightly uses `gh_release_rc`. Sticky Stable uses
 `sticky-gh_release`. Sticky, X4 Pro,
 Paper Mono, EEGO A4, Murphy M4, Waveshare ePaper 3.97, Metalio E-Ink 4, and MindReset Read Pico each produce their own
-ESP32-S3 Nightly image. Each image is aliased by the compatibility `global` and
+ESP32-S3 image for each eligible channel. Each image is aliased by the compatibility `global` and
 `zh-CN` pointers.
 
-Read Pico uses `readpico_nightly`, with artifact slug and board tag `readpico`.
+Read Pico publishes only Nightly using `readpico_nightly`, with artifact slug and board tag `readpico`. Its local `readpico-gh_release` build mode is retained but is not eligible for Stable packaging.
 The model list accepts both `readpico` and the SDK runtime name `read_pico`.
 Its full-install package uses the existing 16 MB S3 partition
-profile. The Web flasher displays it as **MindReset Read Pico**; Stable OTA returns
-`unsupported_channel`. First installation replaces the factory partition layout
+profile. The Web flasher displays it as **MindReset Read Pico**. First installation replaces the factory partition layout
 and requires a complete Flash backup. See [Read Pico](read-pico.md) for hardware
 evidence and the outstanding physical acceptance checks.
 
@@ -55,9 +56,18 @@ not establish physical display or reboot acceptance.
 
 ## Publishing
 
-Each target job builds once and packages one binary set plus two compatibility
-manifests. Packaging checks the ESP image chip ID, required board tag, partition
-layout, app-slot size, and SHA-256 before emitting the manifests.
+Each target job builds once and packages the same four roles in both channels:
+bootloader, partitions, boot_app0 and firmware. Packaging checks the ESP image
+chip ID, required board tag, complete embedded version, partition layout,
+app-slot size, and SHA-256 before emitting two compatibility manifests.
+`crossmux-<version>-<deviceSlug>.zip` contains those files and their checksum list.
+The regional index includes the ZIP name, size, SHA-256 and immutable download URL.
+
+Before either region publishes, one shared validation job generates both regional
+indexes and resolves every manifest, binary and ZIP against the downloaded build
+artifacts. It uses the same verifier as published assets, including HTTPS/source
+restrictions and checksum checks. A missing local artifact fails validation;
+the verifier never falls back to a remote download in local mode.
 
 The global and China publish jobs run independently. Each writes in this order:
 
@@ -77,10 +87,12 @@ immutable `<channel>-build-<sha>-<run>-<attempt>` GitHub Release. China indexes
 are `/firmware/releases/<channel>/index.json`; target assets live under
 `/firmware/builds/<channel>-build-<sha>-<run>-<attempt>/<target>/` in COS. Region chooses the storage
 provider; both variant manifests reference the same neutral binary names and
-differing hashes fail publication. After Stable verification, the version tag
-also receives the legacy `firmware.bin`, `firmware-cn.bin`, `bootloader.bin`,
-and `partitions.bin` assets, alongside the neutral binaries, compatibility manifests,
-and checksum files for every Stable target.
+differing hashes fail publication. Human-facing rolling and versioned Releases
+contain only the per-target ZIPs and the total index. Raw binaries and manifests
+remain in dedicated immutable build Releases for OTA and Web installation.
+New versioned Releases do not duplicate legacy `firmware.bin`, `firmware-cn.bin`,
+`bootloader.bin` or `partitions.bin`. Historical version Releases and their links
+are retained unchanged.
 
 At steady state, GitHub and COS retain the current build and the build or builds
 referenced by the previous index. Normally this means two immutable builds; the
@@ -110,11 +122,35 @@ The COS identity also needs `cos:GetBucket` for the current-object listing,
 `cos:DeleteMultipleObjects`. Cleanup detects versioned buckets and removes every
 version of an obsolete build prefix rather than leaving hidden historical objects.
 
+### Branch rehearsal
+
+Manual dispatch accepts `dry_run` (boolean, default `false`). Enable it to build
+all nine Nightly targets on a branch and run the same packaging and two-region
+index validation without any GitHub Release or COS writes or cleanup. Build notes
+record the actual branch. Rehearsals have a separate concurrency group, so they
+do not serialize with production publishing. Firmware packages and both indexes
+remain available as Actions artifacts for 14 days.
+
+```bash
+gh workflow run nightly.yml --ref codex/unified-build-release \
+  -f dry_run=true \
+  -f notes_en=$'Build and package validation\nNo production firmware update' \
+  -f notes_zh=$'构建及打包验证\n不更新线上固件'
+```
+
+To repeat the index check locally, use `verify_nightly_release.py --channel nightly
+--expected-sha <full-sha> --index-url <regional-published-index-url> --index-file
+<local-index.json> --artifacts <downloaded-artifacts-directory>`. `--index-url`
+still defines the trusted regional URL policy; `--index-file` and `--artifacts`
+must be supplied together. Normal manual dispatch and version-tag publishing
+retain their existing behavior when `dry_run` is false or absent.
+
 ## Index contract and failure behavior
 
 The schema-v1 index contains `channel`, `updatedAt`, `buildId`, and a `targets`
-map, plus optional regional `releaseNotes`. Each target repeats its identity and
-channel capabilities and contains `global` and `zh-CN` pointers with version,
+map, plus optional regional `releaseNotes`. Each target repeats its identity,
+public display/install metadata, optional factory sources and ZIP descriptor,
+and contains `global` and `zh-CN` pointers with version,
 CrossMux SHA, SDK SHA, publish time, and immutable manifest URL. Stable requires
 both release-note locales.
 
@@ -126,11 +162,28 @@ indexes and their assets pass verification.
 
 ## Consumers and safety
 
-The Web flasher reads the regional catalog and then the selected target's
-install manifests. Device OTA keeps the GitHub-like response with one
+The Web flasher and download dialog share the regional catalog. The home page
+loads both channels and prefetches install manifests and factory metadata with
+at most four concurrent requests. Successful metadata is cached for five minutes
+with in-flight request sharing; failures and missing manifests can be retried.
+Binary downloads begin only for an explicit flash/download.
+
+The Web validates generic targets and dispatches existing install strategies,
+rather than maintaining another platform list. Platforms reusing a supported
+chip, partition and install strategy need only firmware-side metadata; a new
+hardware write strategy still requires implementation and validation. Factory
+options describe the fixed Xteink update provider or an immutable pinned image.
+Unknown strategies, wrong-board images and invalid URLs remain rejected.
+
+Device OTA keeps the GitHub-like response with one
 `firmware.bin` asset and selects by exact model, variant, and channel. A target
-that does not support Stable returns `ota_status: unsupported_channel` rather
-than falling back to Nightly or another board.
+missing from the requested channel but known in the other catalog returns
+`ota_status: unsupported_channel` rather than falling back to another channel or board.
+
+Deploy the Web compatibility layer before enabling the new CI indexes. Verify
+both regional Nightly indexes, ZIPs and direct assets before switching consumers;
+Stable adopts the format on the next version tag. Legacy v1 manifests and API
+responses remain readable during this transition.
 
 Official packages must contain the board tag. The OTA stream aborts a tagged
 image for another board before selecting the new partition. Untagged historical

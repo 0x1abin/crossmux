@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <cstring>
 
+#include "BleKeyMapping.h"
+#include "CrossPointSettings.h"
+
 #if FREEINK_CAP_BLE_HID_HOST
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
@@ -164,72 +167,143 @@ void logDiagnostics(const char* phase) {
 #endif
 }
 
-StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
+bleturner::Why validateStart(const bool explicitStart, const bool afterStart) {
 #if !FREEINK_CAP_BLE_HID_HOST
-  (void)renderer;
-  (void)context;
-  return StartResult::Unavailable;
+  (void)explicitStart;
+  (void)afterStart;
+  return bleturner::Why::Off;
 #else
-  if (BleHid.isRunning()) return StartResult::AlreadyRunning;
-
-  const auto before = readMemory();
-  auto memory = before;
-  if (gateFailure(memory, context) != GateFailure::None) {
-    switch (context) {
-      case StartContext::Reader:
-        // Keep reading fonts registered; only discard rebuildable caches.
-        if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
-        break;
-      case StartContext::Explicit:
-        sdFontSystem.releaseLoadedFont(renderer);
-        if (auto* cache = renderer.getFontCacheManager()) cache->clearCache();
-        break;
-    }
-    memory = readMemory();
+  const auto memory = readMemory();
+  const auto context = explicitStart ? StartContext::Explicit : StartContext::Reader;
+#if !defined(SIMULATOR)
+  if (afterStart) {
+#if FREEINK_DEVICE_READPICO
+    constexpr size_t largest = kReaderMinLargestInternal;
+#elif CROSSPOINT_BLE_HOST_PSRAM
+    constexpr size_t largest = 24 * 1024;
+#else
+    constexpr size_t largest = 32 * 1024;
+#endif
+    return memory.largestInternal >= largest ? bleturner::Why::Ok : bleturner::Why::HeapInPieces;
   }
   const auto failure = gateFailure(memory, context);
   if (failure != GateFailure::None) {
-    reportStartFailure(failure, context, before, memory);
-    return StartResult::LowMemory;
+    reportStartFailure(failure, context, memory, memory);
+    return failure == GateFailure::InternalBlock ? bleturner::Why::HeapInPieces : bleturner::Why::HeapLow;
   }
-
-#if CROSSPOINT_BLE_HOST_PSRAM && !defined(SIMULATOR)
-  // A stack buffer cannot verify the linked NimBLE allocator. Its C API owns
-  // this 16-byte diagnostic allocation, which is released before starting BLE.
+#if CROSSPOINT_BLE_HOST_PSRAM
+  // Verify the linked allocator with 16 bytes, released before the radio starts.
+  // A stack/static buffer cannot prove NimBLE's configured allocation region.
   void* probe = nimble_platform_mem_malloc(16);
   if (!probe) {
     LOG_ERR("BLE", "NimBLE allocator probe failed (16 bytes)");
-    return StartResult::Failed;
+    return bleturner::Why::HeapLow;
   }
   const bool external = esp_ptr_external_ram(probe);
   nimble_platform_mem_free(probe);
   if (!external) {
     LOG_ERR("BLE", "NimBLE allocator probe returned internal RAM; refusing start");
-    return StartResult::Failed;
+    return bleturner::Why::HeapLow;
   }
-  LOG_INF("BLE", "NimBLE allocator probe: PSRAM verified (16 bytes, released)");
 #endif
-
-  HalPowerManager::Lock powerLock;
-  if (!BleHid.begin("CrossMux")) {
-    reportStartFailure(GateFailure::HostStart, context, before, readMemory());
-    return StartResult::Failed;
-  }
+#else
+  (void)memory;
+  (void)context;
+  (void)afterStart;
+#endif
   lastGateFailure = GateFailure::None;
-  LOG_INF("BLE", "BLE HID host started");
-  logDiagnostics("after start");
-  return StartResult::Started;
+  return bleturner::Why::Ok;
 #endif
 }
 
-void stop() {
+StartResult ensureStarted(GfxRenderer& renderer, const StartContext context) {
+  (void)renderer;
+  (void)context;
+  const auto before = bleturner::status();
+  if (!before.compiledIn) return StartResult::Unavailable;
+  if (before.running) return StartResult::AlreadyRunning;
+  if (bleturner::switchOn(context == StartContext::Explicit)) return StartResult::Started;
 #if FREEINK_CAP_BLE_HID_HOST
-  if (!BleHid.isRunning()) return;
-  HalPowerManager::Lock powerLock;
-  logDiagnostics("before stop");
-  BleHid.end();
-  logDiagnostics("after stop");
+  if (gateFailure(readMemory(), context) != GateFailure::None) return StartResult::LowMemory;
 #endif
+  return StartResult::Failed;
+}
+
+bool stop() { return bleturner::stopNow(2000); }
+
+bleturner::Action legacyKeyAction(const uint8_t usage, const uint8_t mods) {
+  if (!SETTINGS.ble.enabled || usage == 0 || mods != 0) return bleturner::Action::None;
+  freeink::KeyEvent key{};
+  key.keycode = usage;
+  using Special = freeink::SpecialKey;
+  switch (usage) {
+    case 0x28:
+      key.special = Special::Enter;
+      break;
+    case 0x2A:
+      key.special = Special::Backspace;
+      break;
+    case 0x2B:
+      key.special = Special::Tab;
+      break;
+    case 0x29:
+      key.special = Special::Escape;
+      break;
+    case 0x4C:
+      key.special = Special::Delete;
+      break;
+    case 0x50:
+      key.special = Special::Left;
+      break;
+    case 0x4F:
+      key.special = Special::Right;
+      break;
+    case 0x52:
+      key.special = Special::Up;
+      break;
+    case 0x51:
+      key.special = Special::Down;
+      break;
+    case 0x4A:
+      key.special = Special::Home;
+      break;
+    case 0x4D:
+      key.special = Special::End;
+      break;
+    case 0x4B:
+      key.special = Special::PageUp;
+      break;
+    case 0x4E:
+      key.special = Special::PageDown;
+      break;
+    default:
+      break;
+  }
+  uint8_t kind = 0, value = 0;
+  Action action{};
+  if (!encodeKey(key, kind, value) || !lookup(SETTINGS.bleKeyMap, kind, value, action)) return bleturner::Action::None;
+  using Out = bleturner::Action;
+  switch (action) {
+    case Action::PageForward:
+      return Out::NextPage;
+    case Action::PageBack:
+      return Out::PrevPage;
+    case Action::Confirm:
+      return Out::Confirm;
+    case Action::Back:
+      return Out::Back;
+    case Action::Up:
+      return Out::Up;
+    case Action::Down:
+      return Out::Down;
+    case Action::Left:
+      return Out::Left;
+    case Action::Right:
+      return Out::Right;
+    case Action::Count:
+      return Out::None;
+  }
+  return Out::None;
 }
 
 bool encodeKey(const freeink::KeyEvent& event, uint8_t& kind, uint8_t& value) {

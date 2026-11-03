@@ -127,6 +127,18 @@ class LocalRehearsalTest(unittest.TestCase):
 
 
 class PinUpdateTest(unittest.TestCase):
+    def test_local_simulator_rewrites_dependency_and_pre_hook_together(self):
+        candidate = Path("/reviewed/simulator")
+        source = (
+            "simulator=https://github.com/0x1abin/crosspoint-simulator.git#" + "a" * 40
+            + "\npre:.pio/libdeps/$PIOENV/simulator/skip_device_content_protection.py\n"
+        )
+        result = sync_upstream.replace_simulator_with_local_candidate(source, candidate)
+        self.assertEqual(result, (
+            f"simulator=symlink://{candidate}\n"
+            f"pre:{candidate}/skip_device_content_protection.py\n"
+        ))
+
     def test_updates_both_simulator_pins_to_one_revision(self):
         sha = "c" * 40
         platformio, cmake = sync_upstream.replace_simulator_pins(

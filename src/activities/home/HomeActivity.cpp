@@ -21,7 +21,6 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
-#include "activities/plugins/PluginCatalogActivity.h"  // anyPluginInstalled()
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookCoverLoader.h"
@@ -326,7 +325,10 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   hasOpdsServers = OPDS_STORE.hasServers();
-  hasPlugins = anyPluginInstalled();
+  // Plugin System is the global opt-in. Once enabled, expose the Plugins entry
+  // even when no SD plugins are installed yet so Plugin Hub can be installed
+  // from inside the Plugins screen (or users can sideload plugins manually).
+  hasPlugins = SETTINGS.pluginsEnabled != 0;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (UITheme::getInstance().hasCoverGridHome()) {
@@ -419,7 +421,7 @@ void HomeActivity::loop() {
 
   auto activateSelection = [this, isCarousel] {
     if (selectorIndex < recentBooks.size()) {
-      onSelectBook(recentBooks[selectorIndex].path);
+      onRecentBookSelected(recentBooks[selectorIndex].path);
       return;
     }
     const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
@@ -497,6 +499,13 @@ void HomeActivity::loop() {
       selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
       requestUpdate();
     });
+  }
+
+  // The standby shortcut keeps ownership of Back when enabled.
+  if (!SETTINGS.standbyShortcutEnabled && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
+      hasContinueReading && !recentBooks.empty()) {
+    onRecentBookSelected(recentBooks[0].path);
+    return;
   }
 
   if (coverGridUi) {
@@ -697,16 +706,20 @@ void HomeActivity::render(RenderLock&&) {
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
+  const char* backLabel = hasContinueReading ? tr(STR_RESUME) : "";
+  if (SETTINGS.standbyShortcutEnabled) backLabel = tr(STR_STANDBY_TITLE);
+
   const Rect content = isCarousel ? Rect{0, 0, pageWidth, pageHeight} : UITheme::getContentArea(renderer);
-  const int homeMenuItemCount = hasOpdsServers ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
+  const int homeMenuItemCount = hasLibrarySlot() ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
   const bool showContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
   std::vector<const char*> menuItems;
   std::vector<UIIcon> menuIcons;
   menuItems.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
   menuIcons.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
   for (int i = 0; i < homeMenuItemCount; ++i) {
-    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasOpdsServers, isCarousel);
-    menuItems.push_back(I18N.get(entry->label));
+    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasLibrarySlot(), isCarousel);
+    menuItems.push_back(entry->item == HomeMenuItem::OPDS_BROWSER && hasPlugins ? tr(STR_PLUGINS)
+                                                                                : I18N.get(entry->label));
     menuIcons.push_back(entry->item == HomeMenuItem::OPDS_BROWSER && hasPlugins ? Plugins : entry->icon);
   }
 
@@ -754,8 +767,7 @@ void HomeActivity::render(RenderLock&&) {
     UITheme::getInstance().drawCoverGridHome(*coverGridUi);
     // Front Left/Right walk the tabs, so their hints read Left/Right; the
     // side page buttons (unhinted) walk the covers.
-    const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
-                                              tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(!firstRenderDone ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
     // Slot heights are recorded during the draw above; a change (first layout
@@ -777,7 +789,7 @@ void HomeActivity::render(RenderLock&&) {
     }
     return;
   }
-  bool bufferRestored = coverBufferStored && restoreCoverBuffer();
+  bool bufferRestored = coverRendered && coverBufferStored && restoreCoverBuffer();
 
   if (isCarousel) {
     drawHeader();
@@ -806,8 +818,7 @@ void HomeActivity::render(RenderLock&&) {
   drawMenu();
 
   if (!isCarousel) {
-    const auto labels = mappedInput.mapLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "",
-                                              tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
@@ -823,7 +834,7 @@ void HomeActivity::render(RenderLock&&) {
   }
 }
 
-void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
+void HomeActivity::onRecentBookSelected(const std::string& path) { activityManager.goToReader(path); }
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

@@ -46,6 +46,7 @@ class TextSettingsActivity final : public UiTabListActivity {
     ParaIndentation,
     Alignment,
     ScreenMargin,
+    VerticalBottomAlign,
     Count
   };
   enum class StyleRow {
@@ -81,7 +82,7 @@ class TextSettingsActivity final : public UiTabListActivity {
 
   void applyFamily(int listIndex);
   void applySize(int listIndex);
-  SdCardFontCache::Result preloadFont(const SdCardFontFileInfo& file, const char* familyName);
+  SdCardFontCache::Result preloadFont(const SdCardFontFamilyInfo& family, const SdCardFontFileInfo& file);
   void exitAfterFinalFont(ExitDestination destination);
   void finishFinalFont(bool accepted);
   void showPreloadFailure(SdCardFontCache::Result result);

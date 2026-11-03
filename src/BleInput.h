@@ -1,6 +1,7 @@
 #pragma once
 
 #include <BleKeyboardHost.h>
+#include <BlePageTurner.h>
 #include <BoardConfig.h>
 
 #include <cstddef>
@@ -35,19 +36,16 @@ inline constexpr size_t kExplicitMinLargestInternal = 24 * 1024;
 inline constexpr size_t kMinFreePsram = 256 * 1024;
 inline constexpr size_t kMinLargestPsram = 32 * 1024;
 
-// Caller holds RenderLock across lifecycle checks, memory recovery and startup.
+// The module owns lifecycle and cache-release locking; caller must not hold RenderLock.
 StartResult ensureStarted(GfxRenderer& renderer, StartContext context);
-void stop();
+bool stop();
+bleturner::Why validateStart(bool explicitStart, bool afterStart);
+bleturner::Action legacyKeyAction(uint8_t usage, uint8_t mods);
 void logDiagnostics(const char* phase);
 bool encodeKey(const freeink::KeyEvent& event, uint8_t& kind, uint8_t& value);
 void describeKey(uint8_t kind, uint8_t value, char* out, size_t outLen);
 
-#if FREEINK_CAP_BLE_HID_HOST
-inline bool isRunning() { return BleHid.isRunning(); }
-inline bool isConnected() { return BleHid.isConnected(); }
-#else
-inline bool isRunning() { return false; }
-inline bool isConnected() { return false; }
-#endif
+inline bool isRunning() { return bleturner::status().running; }
+inline bool isConnected() { return bleturner::status().connected; }
 
 }  // namespace bleinput

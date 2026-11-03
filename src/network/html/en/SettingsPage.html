@@ -201,8 +201,6 @@
 <main class="page-content">
 
 
-  <div id="message" class="toast"></div>
-
   <div id="settings-container">
     <div class="loader-container">
       <span class="loader"></span>
@@ -239,14 +237,6 @@
       .replaceAll("'", "&#039;");
   }
 
-
-  function showMessage(text, isError) {
-    const msg = document.getElementById('message');
-    msg.textContent = text;
-    msg.className = 'toast ' + (isError ? 'error' : 'success');
-    msg.style.display = 'block';
-    setTimeout(function() { msg.style.display = 'none'; }, 4000);
-  }
 
   function renderControl(setting) {
     const id = 'setting-' + setting.key;
@@ -493,7 +483,7 @@
     });
 
     if (Object.keys(changes).length === 0) {
-      showMessage('No changes to save.', false);
+      showWebToast('No changes to save.', false);
       btn.textContent = 'Save Settings';
       return;
     }
@@ -515,10 +505,10 @@
         originalValues[key] = changes[key];
       }
 
-      showMessage('Settings saved successfully!', false);
+      showWebToast('Settings saved successfully!', false);
     } catch (e) {
       console.error(e);
-      showMessage('Error: ' + e.message, true);
+      showWebToast('Error: ' + e.message, true);
     }
 
     btn.textContent = 'Save Settings';
@@ -596,7 +586,7 @@
     const id = idx === -1 ? 'new' : idx;
     const ssid = document.getElementById('wifi-ssid-' + id).value.trim();
     if (!ssid) {
-      showMessage('SSID is required.', true);
+      showWebToast('SSID is required.', true);
       return;
     }
 
@@ -614,15 +604,15 @@
         body: JSON.stringify(data)
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('Wi-Fi network saved!', false);
+      showWebToast('Wi-Fi network saved!', false);
       await loadWifiNetworks();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showWebToast('Error: ' + e.message, true);
     }
   }
 
   async function deleteWifiNetwork(idx) {
-    if (!confirm('Delete this Wi-Fi network?')) return;
+    if (!await showWebConfirm('Delete this Wi-Fi network?')) return;
     try {
       const resp = await fetch('/api/wifi/delete', {
         method: 'POST',
@@ -630,10 +620,10 @@
         body: JSON.stringify({index: idx})
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('Wi-Fi network deleted', false);
+      showWebToast('Wi-Fi network deleted', false);
       await loadWifiNetworks();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showWebToast('Error: ' + e.message, true);
     }
   }
 
@@ -642,6 +632,26 @@
   // /api/opds REST endpoints. Password fields are never pre-filled for security;
   // the "(unchanged)" placeholder indicates an existing password is preserved on save.
   let opdsServers = [];
+
+  const OPDS_MAX_CUSTOM_HEADERS = 2;
+
+  function renderOpdsHeaderRows(srv, id) {
+    const headers = srv.headers || [];
+    let html = '';
+    for (let i = 0; i < OPDS_MAX_CUSTOM_HEADERS; i++) {
+      const header = headers[i] || {name: '', hasValue: false};
+      html +=
+        '<div class="setting-row">' +
+          '<span class="setting-name">Header ' + (i + 1) + ' Name</span>' +
+          '<span class="setting-control"><input type="text" id="opds-header' + i + '-name-' + id + '" value="' + escapeHtml(header.name || '') + '"></span>' +
+        '</div>' +
+        '<div class="setting-row">' +
+          '<span class="setting-name">Header ' + (i + 1) + ' Value</span>' +
+          '<span class="setting-control"><input type="password" id="opds-header' + i + '-value-' + id + '" placeholder="' + (header.hasValue ? '(unchanged)' : '') + '"></span>' +
+        '</div>';
+    }
+    return html;
+  }
 
   function renderOpdsServer(srv, idx) {
     const isNew = idx === -1;
@@ -663,6 +673,7 @@
         '<span class="setting-name">Password</span>' +
         '<span class="setting-control"><input type="password" id="opds-pass-' + id + '" placeholder="' + (srv.hasPassword ? '(unchanged)' : '') + '"></span>' +
       '</div>' +
+      renderOpdsHeaderRows(srv, id) +
       '<div class="opds-actions">' +
         '<button class="btn-small btn-save-server" onclick="saveOpdsServer(' + idx + ')">Save</button>' +
         (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteOpdsServer(' + idx + ')">Delete</button>') +
@@ -705,7 +716,7 @@
     const addBtn = card.querySelector('.btn-add').parentElement;
     // Prevent multiple unsaved new-server forms at once (idx -1 → id "new")
     if (document.getElementById('opds-new')) return;
-    addBtn.insertAdjacentHTML('beforebegin', renderOpdsServer({name:'',url:'',username:'',hasPassword:false}, -1));
+    addBtn.insertAdjacentHTML('beforebegin', renderOpdsServer({name:'',url:'',username:'',hasPassword:false,headers:[]}, -1));
   }
 
   async function saveOpdsServer(idx) {
@@ -719,6 +730,20 @@
     // omitting it tells the server to keep the existing password.
     const pass = document.getElementById('opds-pass-' + id).value;
     if (pass) data.password = pass;
+
+    // Same rule per header: omit "value" to keep that slot's existing value unchanged.
+    const headers = [];
+    for (let i = 0; i < OPDS_MAX_CUSTOM_HEADERS; i++) {
+      const name = document.getElementById('opds-header' + i + '-name-' + id).value.trim();
+      const value = document.getElementById('opds-header' + i + '-value-' + id).value;
+      const header = {name: name};
+      // Also send an explicit (empty) value when the name was cleared, so the
+      // server can tell "delete this header" apart from "leave value unchanged".
+      if (value || !name) header.value = value;
+      headers.push(header);
+    }
+    data.headers = headers;
+
     if (idx >= 0) data.index = idx;
 
     try {
@@ -728,15 +753,15 @@
         body: JSON.stringify(data)
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('OPDS server saved!', false);
+      showWebToast('OPDS server saved!', false);
       await loadOpdsServers();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showWebToast('Error: ' + e.message, true);
     }
   }
 
   async function deleteOpdsServer(idx) {
-    if (!confirm('Delete this OPDS server?')) return;
+    if (!await showWebConfirm('Delete this OPDS server?')) return;
     try {
       const resp = await fetch('/api/opds/delete', {
         method: 'POST',
@@ -744,10 +769,10 @@
         body: JSON.stringify({index: idx})
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('OPDS server deleted', false);
+      showWebToast('OPDS server deleted', false);
       await loadOpdsServers();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showWebToast('Error: ' + e.message, true);
     }
   }
 

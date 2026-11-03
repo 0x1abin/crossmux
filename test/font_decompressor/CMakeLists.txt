@@ -1,5 +1,6 @@
 add_executable(FontDecompressorTest
   FontDecompressorTest.cpp
+  ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
   ${REPO_ROOT}/lib/EpdFont/FontDecompressor.cpp
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp

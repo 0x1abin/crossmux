@@ -886,9 +886,8 @@ CrossPointPosition ProgressMapper::toCrossPointImpl(const std::shared_ptr<Epub>&
                                                     const float exactIntraSpine) {
   CrossPointPosition result{};
   const size_t bookSize = epub->getBookSize();
-  if (bookSize == 0) return result;
-
   const int spineCount = epub->getSpineItemsCount();
+  if (spineCount == 0 || !std::isfinite(koPos.percentage)) return result;
   const float clampedPercentage = std::max(0.0f, std::min(1.0f, koPos.percentage));
   const size_t targetBytes = static_cast<size_t>(static_cast<float>(bookSize) * clampedPercentage);
 
@@ -904,18 +903,14 @@ CrossPointPosition ProgressMapper::toCrossPointImpl(const std::shared_ptr<Epub>&
   const bool useAncestry = xpathStepCount > 0;
   const bool useBodyText = !useAncestry && isBodyTextXPath(koPos.xpath);
 
+  float fallbackIntra = -1.0f;
   if (exactSpineIndex >= 0 && exactSpineIndex < spineCount) {
     result.spineIndex = exactSpineIndex;
   } else if (xpathSpine >= 0 && xpathSpine < spineCount) {
     result.spineIndex = xpathSpine;
     result.hasResolvedSpineIndex = true;
   } else {
-    for (int i = 0; i < spineCount; i++) {
-      if (epub->getCumulativeSpineItemSize(i) >= targetBytes) {
-        result.spineIndex = i;
-        break;
-      }
-    }
+    if (!epub->findSpineForProgress(clampedPercentage, result.spineIndex, fallbackIntra)) return result;
   }
 
   const size_t prevCum = (result.spineIndex > 0) ? epub->getCumulativeSpineItemSize(result.spineIndex - 1) : 0;
@@ -1027,6 +1022,8 @@ CrossPointPosition ProgressMapper::toCrossPointImpl(const std::shared_ptr<Epub>&
   }
   if (exactIntraSpine >= 0.0f) {
     intra = std::max(0.0f, std::min(1.0f, exactIntraSpine));
+  } else if (fallbackIntra >= 0.0f) {
+    intra = fallbackIntra;
   } else {
     const size_t bytesIn = (targetBytes > prevCum) ? (targetBytes - prevCum) : 0;
     intra = spineSize > 0 ? std::max(0.0f, std::min(1.0f, static_cast<float>(bytesIn) / static_cast<float>(spineSize)))
