@@ -56,6 +56,31 @@ if old_check in source:
 elif new_check not in source:
     raise RuntimeError("Unsupported pioarduino cache check")
 
+# pioarduino 55.03.37 hands a NodeList to this build middleware when a source
+# filter matches several files; the stock callback calls node.srcnode()
+# directly and aborts with AttributeError. Handle both shapes.
+espidf = Path(platform.get_dir()) / "builder" / "frameworks" / "espidf.py"
+source = espidf.read_text(encoding="utf-8")
+old_skip = (
+    "def _skip_prj_source_files(node):\n"
+    "    project_src_resolved = Path(PROJECT_SRC_DIR).resolve()\n"
+    "    node_path_resolved = Path(node.srcnode().get_path()).resolve()\n"
+)
+new_skip = (
+    "def _skip_prj_source_files(node):\n"
+    "    # CrossMux: 55.03.37 hands a NodeList here for multi-file filters.\n"
+    "    if not hasattr(node, \"srcnode\"):\n"
+    "        kept = [_skip_prj_source_files(n) for n in node]\n"
+    "        kept = [n for n in kept if n is not None]\n"
+    "        return type(node)(kept) if kept else None\n"
+    "    project_src_resolved = Path(PROJECT_SRC_DIR).resolve()\n"
+    "    node_path_resolved = Path(node.srcnode().get_path()).resolve()\n"
+)
+if old_skip in source:
+    espidf.write_text(source.replace(old_skip, new_skip, 1), encoding="utf-8")
+elif new_skip not in source:
+    raise RuntimeError("Unsupported pioarduino src-filter callback")
+
 requested = env.GetProjectOption("custom_sdkconfig", "")
 board = env.BoardConfig()
 mcu = board.get("build.mcu", "esp32")
