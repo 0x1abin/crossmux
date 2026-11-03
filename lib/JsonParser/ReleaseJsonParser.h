@@ -1,11 +1,11 @@
 #pragma once
 
+#include <StreamingJsonParser.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
-
-#include "StreamingJsonParser.h"
 
 class ReleaseJsonParser {
  public:
@@ -20,6 +20,9 @@ class ReleaseJsonParser {
 
   void reset();
   void feed(const char* data, size_t len);
+
+  // Release-asset filename to match (default "firmware.bin").
+  void setFirmwareAssetName(const char* name);
 
   bool foundTag() const;
   bool foundFirmware() const;
@@ -82,7 +85,9 @@ class ReleaseJsonParser {
   size_t releaseNoteCount;
   std::span<ReleaseNote> releaseNotes;
 
-  char currentAssetName[32];
+  char currentAssetName[48];
   char currentAssetUrl[512];
   size_t currentAssetSize;
+
+  char firmwareAssetName[48];
 };

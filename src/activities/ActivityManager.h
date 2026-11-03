@@ -15,12 +15,13 @@
 #include "MappedInputManager.h"
 #include "Memory.h"
 #include "activities/MainTab.h"
+#include "settings/SettingsSection.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
-enum class HomeMenuItem { NONE, FILE_BROWSER, RECENTS, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU, APPS };
+enum class HomeMenuItem { NONE, FILE_BROWSER, RECENTS, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU, APPS };
 
 /**
  * ActivityManager
@@ -44,15 +45,23 @@ class ActivityManager {
   MappedInputManager& mappedInput;
   std::vector<std::unique_ptr<Activity>> stackActivities;
   std::unique_ptr<Activity> currentActivity;
-  MainTabFocus mainTabFocus = MainTabFocus::Tabs;
+  std::atomic<MainTabFocus> mainTabFocus{MainTabFocus::Tabs};
   bool mainTabEntryReleasePending = false;
+  bool mainTabTouchFocusPending = false;
 
+ private:
+  enum class StandbyBackState : uint8_t { Idle, Pressed, WaitingForRelease };
+  StandbyBackState standbyBackState = StandbyBackState::Idle;
+  bool handleHomeStandbyInput();
+  void resetHomeStandbyInput();
+
+ protected:
   void exitActivity(const RenderLock& lock);
   bool handleMainTabInput();
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
-  enum class PendingAction { None, Push, Pop, Replace };
+  enum class PendingAction { None, Push, Pop, Replace, ReplaceForSleep };
   // Shared between the main task (core 0) and the render task (core 1), so it
   // must be atomic rather than a plain/volatile enum (FreeRTOS SMP data race).
   std::atomic<PendingAction> pendingAction{PendingAction::None};
@@ -72,17 +81,25 @@ class ActivityManager {
   // Cross-task render request flag. requestUpdate() may set it from any task;
   // loop() consumes and clears it with exchange(false).
   std::atomic<bool> requestedUpdate{false};
+  std::atomic<uint32_t> idleRenderGeneration{0};
+
+  // Counts screen changes, so the Bluetooth page turner can tell one visit of a book from the next.
+  // Written by the main loop under RenderLock; the render task captures it under that lock.
+  uint32_t screenVisit = 0;
+  // The screen visit whose frame the render task painted last.
+  std::atomic<uint32_t> paintedVisit{0};
 
  public:
-  explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
-    assert(renderingMutex != nullptr && "Failed to create rendering mutex");
-    stackActivities.reserve(10);
-  }
-  ~ActivityManager() { assert(false); /* should never be called */ };
+  explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  ~ActivityManager();
 
   void begin();
   void loop();
+  void cancelIdleRender() { idleRenderGeneration.fetch_add(1, std::memory_order_relaxed); }
+  bool idleRenderCancelled(uint32_t generation) const {
+    return generation != idleRenderGeneration.load(std::memory_order_relaxed) || isSwitchPending() ||
+           requestedUpdate.load();
+  }
 
   // Will replace currentActivity and drop all activities on stack
   void replaceActivity(std::unique_ptr<Activity>&& newActivity);
@@ -102,16 +119,19 @@ class ActivityManager {
 
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer();
+  void goToJoinNetwork();  // File Transfer straight into Join Network (post heap-defrag reboot)
   void goToUsbDrive();
-  void goToSettings();
+  void goToSettings(SettingsSection openSection = SettingsSection::End);
   void goToUglyAvatar();
   void goToReadingStatsMenu();
   void goToReadingStats();
   void goToInxRecent();
   void goToMainTab(MainTab tab);
   void goToFileBrowser(std::string path = {});
+  void goToLibrary();
   void goToRecentBooks();
   void goToBrowser();
+  void goToPlugins(bool showOpds);
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
@@ -138,6 +158,7 @@ class ActivityManager {
 #endif
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
   MainTabFocus getMainTabFocus() const { return mainTabFocus; }
+  void focusMainTabContent() { mainTabFocus = MainTabFocus::Content; }
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);
@@ -151,9 +172,21 @@ class ActivityManager {
   bool isReaderActivity() const;
   bool keepsBluetoothAlive() const;
   bool deferBluetoothStart() const;
+  // Bluetooth page turner (lib/BlePageTurner): the book in front, whether it has painted a page, and
+  // a page or chapter turn from a remote. False when no book in front took the turn.
+  bool isForegroundReader() const;
+  bool isRemoteReaderContext() const;
+  bool remoteClick(RemoteButton button);
+  // Home is in front and has painted a frame of its own (not one left from the screen before).
+  bool isForegroundHomeShown() const;
+  uint32_t visit() const { return screenVisit; }
+  bool remoteTurn(bool forward, bool chapter);
+  // A remote button mapped to the reader menu (true) or to a new clipping (false).
+  bool remoteShortcut(bool readerMenu);
   bool handleForcedRefresh();
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
+  void prepareForSleep();
 
   // Returns true when a Push/Pop/Replace is waiting for the render lock.
   // The render task can call this to abort a long render early and let the

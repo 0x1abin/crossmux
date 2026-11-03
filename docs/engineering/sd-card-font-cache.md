@@ -160,39 +160,41 @@ The hidden `sdFontFlashPreload` setting stores the user's preference:
 
 - Font and point-size changes in Text Settings load only the data needed for
   preview from SD; they do not rebuild the cache.
-- Leaving standalone Text Settings by Back or Home enables acceleration only
-  when the final font family or point size differs from the values on entry. Layout- or
-  style-only edits, and font changes restored before exit, keep the previous
-  acceleration preference and skip the preprocessing page. The font downloader
-  marks its newly selected family as changed before opening Text Settings.
-  A matching cache is reused without rewriting Flash. Selecting a built-in font
-  disables the preference and exits without a cache write.
-- The reader toolbar's Text panel owns one preview session across its font
-  picker, size popup, and switches between panels. Its font picker (including
-  a nested font download/preview) defers acceleration. Only returning to the
-  reading page ends the session: a changed final SD family or point size with
-  no valid cache prompts to start acceleration or skip it (the default).
-  Back or tapping outside the prompt also skips. The selection remains saved;
-  simply reopening the menu does not prompt again. Returning to the toolbar
-  alone does not prompt. Home, sleep, and activity destruction never start a
-  write. Built-in fonts, layout/style-only changes, and changes restored before
-  exit skip the prompt; restored selections retain their original preference.
-  A changed selection with a valid cache enables and reloads that cache without
-  prompting or writing. Confirmed preloads reuse Text Settings' progress and
-  failure UI and return to the same reading position. Touch and physical
-  buttons follow the same flow; the classic reader menu is unchanged.
-- The Chinese EPUB missing-glyph flow uses the same Text Settings preload path
-  in an automatic exit mode. It first requires the `NotoSansSC` manifest to
-  contain the reader's exact point size, so `ensureLoaded()` cannot snap the
-  setting. It downloads the whole family, saves the selection with preload off,
-  and silently restarts before loading it. This avoids asking the Wi-Fi/TLS-
-  fragmented heap for the complete CJK font's 48,000-byte contiguous interval
-  table. The clean boot loads and caches only the selected size, then returns to
-  the same book. A cache failure persists `sdFontFlashPreload=0` and continues
-  from SD after one acknowledgement.
+- On every device, leaving standalone Text Settings by Back or Home offers
+  acceleration only when the final SD font family or point size differs from
+  the values on entry. Preview changes never write Flash. Layout/style-only
+  edits and changes restored before exit retain the original preference.
+- The reader toolbar owns one preview session across its font/size pickers,
+  panel switches and nested downloads. Only returning to the reading page ends
+  that session. Returning to the toolbar alone does not prompt; Home, sleep
+  and activity destruction do not start a write. The classic reader menu uses
+  the standalone Text Settings flow.
+- Both paths check the selected size's `.cpfont` with the read-only
+  `SdCardFontCache::preflight()` before asking. A valid cache is enabled and
+  reloaded without a prompt or progress page. Built-in and vector fonts skip
+  this Flash-cache flow; PSRAM glyph caches and page prewarming are unchanged.
+- For an eligible, uncached font, the prompt defaults to **Start acceleration**.
+  Not now, Back and outside taps save the selection with acceleration disabled
+  and complete the original exit. Reopening the settings without changing the
+  font/size does not ask again. Accepting runs the existing progress page and
+  returns to the same reading position; the actual preload rechecks eligibility.
+- A file exceeding `capacity()` displays a wrapped, button-free notice:
+  "Font exceeds acceleration capacity; loading directly from SD card."
+  It automatically continues after two seconds measured from the displayed
+  frame. The limit concerns the selected `.cpfont` file, not the whole family
+  directory or free PSRAM. No progress page, copy buffer, erase or write occurs.
+  Other preflight errors show their reason; write failures retain the SD
+  fallback acknowledgement. Skips and failures persist acceleration off.
+- Downloaded fonts use the same rules. The completion screen reports a ready
+  cache only when acceleration is actually enabled. The Chinese missing-glyph
+  flow still requires the exact requested NotoSansSC point size and restarts
+  after downloading to avoid the Wi-Fi/TLS-fragmented heap. After the clean
+  restart it asks before accelerating the selected font, then returns to the
+  same book. It does not reuse the already-consented reader preload mode.
 - A newly installed OTA image automatically rebuilds once, after successful
-  firmware confirmation, when the selected SD font exists and the cache is
-  invalid.
+  firmware confirmation, when acceleration was previously enabled and the
+  selected `.cpfont` has no valid cache. It uses the same preflight, skips the
+  confirmation question, and automatically dismisses the oversized notice.
 - An ordinary boot does not retry a failed post-OTA rebuild. A later final font
   or point-size change in standalone Text Settings, or an accepted reader
   toolbar prompt after such a change, provides the next explicit retry.
@@ -200,16 +202,22 @@ The hidden `sdFontFlashPreload` setting stores the user's preference:
   trigger. Sleep, power loss, and forced activity destruction do not start a
   write.
 
-To verify the reader prompt, build `ReaderFontPreviewTest` and run:
+To verify preview decisions and read-only preflight boundaries, build
+`ReaderFontPreviewTest` and `SdCardFontPreflightTest`, then run:
 
 ```sh
-ctest --test-dir build/test -R ReaderFontPreview --output-on-failure
+ctest --test-dir build/test -R "ReaderFontPreview|SdCardFontPreflight|FontPreloadFlow" --output-on-failure
 ```
 
 On a touch device, change an SD font size, return through the toolbar to the page, and decline;
 reopening and closing the menu must stay silent. Change again and accept:
 the progress page must finish before returning to the same text. Repeat with
-physical buttons, a cached size, and changes restored to their original value.
+physical buttons, a cached size, vector fonts, and changes restored to their
+original value. Repeat standalone settings and download/automatic-install
+entry points on both C3 and PSRAM devices. An oversized font must show the
+notice without buttons and exit automatically; skipped/oversized selections
+must never report "cache ready" or erase/write Flash. Check narrow and rotated
+screens for complete notice text. Sleep or power loss must not launch a preload.
 Serial font statistics should report `source=flash` (or `psram+flash`) after a
 successful preload or cache reuse, and `source=sd` (or `psram+sd`) after skipping
 an uncached selection. Verify actual Flash writes and power-loss recovery on
@@ -222,7 +230,11 @@ OTA, copying, or verification.
 
 Internally, copying still occupies total progress 0-50% and read-back
 verification occupies 50-100%. The page uses fast refreshes at the pass
-transition and 10% increments. Both entry points physically complete the
+transition and 10% increments. Each progress callback waits for its requested
+frame to finish before returning to the Flash writer. Progress state is updated under the render lock, which is
+released before waiting. This prevents Flash erase/write from suspending the
+ReadPico display feeder tasks during a progress refresh. Both entry points
+physically complete the
 verified 100% frame and the Ready page. Text Settings reloads the final font
 afterward so a reader that opened the screen can resume rendering immediately;
 post-OTA rebuilds continue to Home without clearing the last-open book or its

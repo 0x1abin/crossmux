@@ -14,11 +14,13 @@ namespace WeReadHttpClient {
 
 using DataCallback = std::function<bool(const uint8_t* data, size_t len)>;
 using HeaderCallback = std::function<void(const char* name, const char* value)>;
+using AbortCallback = bool (*)(void*);
 
 enum class Result : uint8_t {
   Ok,
   NetworkError,
   Aborted,
+  Cancelled,
 };
 
 struct Header {
@@ -35,6 +37,9 @@ struct RequestOptions {
   int timeoutMs = 60000;
   uint8_t* readBuffer = nullptr;
   size_t readBufferSize = 0;
+  bool (*acceptStatus)(int) = nullptr;
+  AbortCallback shouldAbort = nullptr;
+  void* abortContext = nullptr;
 };
 
 struct HttpsUrlView {

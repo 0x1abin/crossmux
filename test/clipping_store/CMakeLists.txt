@@ -1,0 +1,7 @@
+foreach(target ClippingStoreTest ClippingStoreS3Test)
+  add_executable(${target} ClippingStoreTest.cpp ${REPO_ROOT}/src/ClippingStore.cpp ${REPO_ROOT}/src/util/BookCacheUtils.cpp ${REPO_ROOT}/src/util/BookmarkUtil.cpp ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp ${REPO_ROOT}/lib/Utf8/Utf8.cpp)
+  target_link_libraries(${target} PRIVATE crosspoint_test_common GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${REPO_ROOT}/lib/FsHelpers stubs ../library_builder/stubs ${REPO_ROOT}/src ${REPO_ROOT}/lib/Serialization ${REPO_ROOT}/lib/Utf8 ${crosspoint_simulator_SOURCE_DIR}/src)
+  gtest_discover_tests(${target} TEST_PREFIX "${target}.")
+endforeach()
+target_compile_definitions(ClippingStoreS3Test PRIVATE CONFIG_IDF_TARGET_ESP32S3=1)

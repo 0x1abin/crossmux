@@ -37,6 +37,11 @@ class HalClock {
   // external RTC, when present, is used only to restore time after power loss.
   void begin();
   void update();
+  bool isAvailable() const { return _rtcAvailable; }
+  void setTimezone(const char* posixTz);
+  bool localTime(struct tm& out) const;
+  bool formatTime(char* buf, size_t bufSize, bool use12Hour = false) const;
+  bool syncFromNTP() { return syncNow(); }
 
   time_t nowUtc() const;
   bool hasValidTime() const;

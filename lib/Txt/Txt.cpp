@@ -74,8 +74,12 @@ bool Txt::load() {
     return false;
   }
 
-  fileSize = file.size();
-  file.close();
+  const uint64_t sourceSize = file.fileSize64();
+  if (sourceSize >= UINT32_MAX) {
+    LOG_ERR("TXT", "Source is too large for 32-bit positions: %s", filepath.c_str());
+    return false;
+  }
+  fileSize = static_cast<size_t>(sourceSize);
 
   loaded = true;
   LOG_DBG("TXT", "Loaded TXT file: %s (%zu bytes)", filepath.c_str(), fileSize);
@@ -169,10 +173,32 @@ bool Txt::generateCoverBmp() const {
     if (!Storage.openFileForWrite("TXT", getCoverBmpPath(), dst)) {
       return false;
     }
+    // read() returns -1 on an I/O error. Looping on available() and handing the
+    // result to write() as a length turns that -1 into SIZE_MAX, asking for a
+    // four-gigabyte write out of a one-kilobyte stack buffer; and a read that
+    // returns 0 while available() stays positive spins until the watchdog. Loop
+    // on the read itself, and check the write so a full card cannot leave a
+    // truncated cover that exists() then treats as valid for good.
     uint8_t buffer[1024];
-    while (src.available()) {
-      size_t bytesRead = src.read(buffer, sizeof(buffer));
-      dst.write(buffer, bytesRead);
+    const uint64_t sourceSize = src.fileSize64();
+    uint64_t copiedBytes = 0;
+    bool ok = true;
+    int bytesRead = 0;
+    while ((bytesRead = src.read(buffer, sizeof(buffer))) > 0) {
+      if (dst.write(buffer, static_cast<size_t>(bytesRead)) != static_cast<size_t>(bytesRead)) {
+        ok = false;
+        break;
+      }
+      copiedBytes += static_cast<uint64_t>(bytesRead);
+    }
+    if (bytesRead < 0 || copiedBytes != sourceSize) ok = false;
+    dst.flush();
+    dst.close();
+    src.close();
+    if (!ok) {
+      LOG_ERR("TXT", "Failed to copy BMP cover; removing the partial file");
+      Storage.remove(getCoverBmpPath().c_str());
+      return false;
     }
     LOG_DBG("TXT", "Copied BMP cover to cache");
     return true;
@@ -413,4 +439,48 @@ bool Txt::findChapterForOffset(HalFile& file, const uint32_t count, const uint32
   }
   chapterIndex = first == 0 ? 0 : first - 1;
   return true;
+}
+
+int Txt::tocIndexForPosition(const std::string& filepath, const std::string& epubCachePath,
+                             const uint32_t visibleOffset, uint8_t* chapterProgress) {
+  Txt txt(filepath, "/.crosspoint");
+  HalFile mapping, chapters;
+  uint32_t sourceOffset = 0, count = 0, chapterIndex = 0;
+  txt_encoding::Encoding encoding = txt_encoding::Encoding::Unknown;
+  // Page 0 can start at the generated body newline; source mapping starts at 1.
+  if (!txt.load() || !Storage.openFileForRead("TXT", epubCachePath + "/txt-map.bin", mapping) ||
+      !txt_progress::sourceForVisible(mapping, txt.getFileSize(), visibleOffset == 0 ? 1 : visibleOffset,
+                                      sourceOffset) ||
+      !txt.openChapterIndex(chapters, encoding, count))
+    return -1;
+  const auto progressWithin = [&](uint32_t begin, uint32_t end) {
+    if (chapterProgress)
+      *chapterProgress =
+          end > begin
+              ? static_cast<uint8_t>(std::min<uint64_t>(100, uint64_t(sourceOffset - begin) * 100 / (end - begin)))
+              : 0;
+  };
+  if (!count) {
+    progressWithin(0, txt.getFileSize());
+    return 0;
+  }
+  txt_chapter_index::Record first;
+  if (!txt.readChapter(chapters, count, 0, first)) return -1;
+  if (sourceOffset < first.sourceOffset) {
+    progressWithin(0, first.sourceOffset);
+    return 0;
+  }  // Preface precedes the first named chapter.
+  if (!txt.findChapterForOffset(chapters, count, sourceOffset, chapterIndex)) return -1;
+  if (chapterProgress) {
+    if (!txt.readChapter(chapters, count, chapterIndex, first)) return -1;
+    const uint32_t begin = first.sourceOffset;
+    uint32_t end = txt.getFileSize();
+    if (chapterIndex + 1 < count) {
+      if (!txt.readChapter(chapters, count, chapterIndex + 1, first) || first.sourceOffset <= begin) return -1;
+      end = first.sourceOffset;
+    }
+    progressWithin(begin, end);
+  }
+  // The converted TOC starts with the book title, followed by disk-indexed chapters.
+  return static_cast<int>(chapterIndex + 1);
 }

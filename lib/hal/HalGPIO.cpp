@@ -1,15 +1,20 @@
 #include <BoardConfig.h>
 #if FREEINK_DEVICE_METALIO_EINK4
-#include <MetalioEink4Board.h>
+#include <MetalioEInk4Board.h>
+#endif
+#if FREEINK_DEVICE_READPICO
+#include <BoardReadPico.h>
+#endif
+#if FREEINK_DEVICE_LILYGO
+#include <BoardT5S3.h>
 #endif
 #include <BatteryMonitor.h>
 #include <HalGPIO.h>
-#include <HapticFeedback.h>
+#include <HapticManager.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <Preferences.h>
 #include <SPI.h>
-#include <Wire.h>
 #include <XteinkDetect.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
@@ -27,36 +32,60 @@
 // Global HalGPIO instance
 HalGPIO gpio;
 
-namespace X3GPIO {
-
-bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  if (Wire.requestFrom(addr, static_cast<uint8_t>(2), static_cast<uint8_t>(true)) < 2) {
-    while (Wire.available()) {
-      Wire.read();
-    }
-    return false;
-  }
-  const uint8_t lo = Wire.read();
-  const uint8_t hi = Wire.read();
-  *outValue = (static_cast<uint16_t>(hi) << 8) | lo;
-  return true;
-}
-
-bool readBQ27220CurrentMA(int16_t* outCurrent) {
-  uint16_t raw = 0;
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_CUR_REG, &raw)) {
-    return false;
-  }
-  *outCurrent = static_cast<int16_t>(raw);
-  return true;
-}
-
-}  // namespace X3GPIO
+#if FREEINK_DEVICE_READPICO
+// --- Read Pico input model ---------------------------------------------------
+//
+// The board has NO GPIO buttons. Navigation comes from the CST836U
+// two-point touch panel plus three capacitive key zones in the strip of the
+// touch panel BELOW the drawn image (raw y > 1300 vs display y <= 1215;
+// centres x = 80/240/400, pitch 160 — BoardReadPicoPins.h, main/ui/ui_menu.h).
+// The board support library owns that hit test
+// (BoardReadPico::keyStripHook(), installed on InputManager's button hook by
+// BoardReadPico::begin()) because the SDK seam can only express `1 << BTN_*`,
+// and it maps the zones as:
+//
+//   KEY1 (x = 80)  -> BTN_UP       -> Button::Up / Button::PageBack
+//   KEY2 (x = 240) -> BTN_BACK     -> Button::Back   (返回上一级 / go back)
+//   KEY3 (x = 400) -> BTN_DOWN     -> Button::Down / Button::PageForward
+//
+// Why this mapping and not the reference firmware's (KEY1 = previous page,
+// KEY2 = full GC16 redraw, KEY3 = menu)?
+//   * The `1 << BTN_*` seam cannot express "redraw" or "menu" — those are not
+//     buttons, and inventing a BTN_* index for them would leak a device action
+//     into the shared logical-button space (golden rule #7).
+//   * Emitting exactly the indices the X3/X4 side rocker already drives makes
+//     the strip keys interchangeable with it at the logical layer, so every
+//     existing one-gesture/one-action barrier applies unchanged (golden rule
+//     #13): MappedInputManager's longPressFiredButtons/suppressedReleaseButtons
+//     release consumption, and ActivityManager's mainTabEntryReleasePending
+//     held-key gate, both key off these buttons.
+//   * The middle zone used to be BTN_CONFIRM, mirroring the X4's front confirm.
+//     It is BTN_BACK now: the same index the X3/X4 back key drives, and the same
+//     "leave this level" role eego-a4's Back plays. Selection moved to the touch
+//     panel — a centre-third tap opens the reader menu (ReaderUtils.h
+//     isTouchMenuTap) and list rows are tapped directly — so the middle zone no
+//     longer has to be Confirm, and Back was otherwise unreachable from the
+//     hardware. Key2 reaches SETTINGS.frontButtonBack = FRONT_HW_BACK =
+//     BTN_BACK with no remap, exactly as Key2-as-Confirm used to reach
+//     frontButtonConfirm.
+//
+// Back is now reachable from three places on this board: the middle strip zone
+// above, the left-edge swipe MappedInputManager::wasPressed(Button::Back)
+// accepts for every board, and the reader header tap
+// (MappedInputManager::wasHeaderTapBack, enabled for this board alongside
+// eego-a4).
+//
+// The gesture is a LEVEL from the chip (a zone reports held while the finger is
+// on it), so it rides InputManager's ordinary debounce/edge machinery exactly
+// like a GPIO button: one press edge, one release edge, held time tracked by
+// getHeldTime(). No HAL-side latch is layered on top — a second barrier here
+// would suppress the release that MappedInputManager is already tracking.
+static_assert(InputManager::BTN_UP == HalGPIO::BTN_UP && InputManager::BTN_CONFIRM == HalGPIO::BTN_CONFIRM &&
+                  InputManager::BTN_DOWN == HalGPIO::BTN_DOWN,
+              "Read Pico strip keys must use the same BTN_* indices HalGPIO re-exports");
+static_assert(HalGPIO::BTN_UP != HalGPIO::BTN_CONFIRM && HalGPIO::BTN_CONFIRM != HalGPIO::BTN_DOWN,
+              "Each Read Pico key zone must land on its own logical button");
+#endif
 
 namespace {
 constexpr char HW_NAMESPACE[] = "cphw";
@@ -155,10 +184,8 @@ void HalGPIO::begin() {
   _deviceType = detectDeviceTypeWithFingerprint();
   BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
 
-  // Resolve the per-batch controller before SPI owns the display pins. FreeInk
-  // checks the OEM hw_calib/screenType value first, then falls back to its
-  // two-pass display-bus probe. X3's facade keys panel selection off the sibling
-  // board profile, so preserve a detected UC8279 through setDisplayX3().
+  // Probe the controller before SPI owns the pins; OEM NVS is diagnostic only.
+  // Preserve the X3 UC8279 sibling through setDisplayX3().
   freeink::applyXteinkDisplayController();
   if (deviceIsX3() && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
     BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
@@ -173,6 +200,34 @@ void HalGPIO::begin() {
 #else
   _deviceType = DeviceType::X4;
 #endif
+#if FREEINK_DEVICE_READPICO
+  // BOARD PHASE, before anything else on this board: shared I2C (SDA39/SCL40,
+  // 400 kHz), the FCA9555 expander self-test + Port-0 configuration, the
+  // MODE/TP_RST preload, the CST836U reset pulse, the CW32L010 PMU handshake and
+  // the accelerometer identity probe. Everything downstream is gated by that
+  // expander — P0.3 SY_EN and P0.4 VCOM_EN (EPD rails), P0.1 XOE, P0.7 touch
+  // reset, P0.6 card detect — and a CST836U that went to its own deep sleep is
+  // reachable only through the P0.7 pulse, so this has to run first
+  // (read-pico.md 1.4/1.6). BoardReadPico::begin() also registers the
+  // InputManager strip-key hook, the BatteryMonitor PMU hook and the Rtc PMU
+  // time hooks, so battery/time/keys are only meaningful after it returns.
+  //
+  // A board that never answered is reported and the boot continues: the panel
+  // stays dark, keys/touch are dead and the PMU reports no battery, but nothing
+  // aborts. Do NOT call InputManager::setButtonHook() anywhere in this file for
+  // this device — BoardReadPico::begin() owns that single hook slot for the
+  // three capacitive key zones, and any later registration would replace it.
+  if (!BoardReadPico::begin()) {
+    LOG_ERR("HW", "Read Pico board bring-up failed: FCA9555 did not answer");
+  }
+  // INPUT PHASE is deferred to beginInput(), which src/main.cpp calls right after
+  // the panel is up. The panel's power sequence (SY7636A writes + PGOOD polling)
+  // owns the shared I2C bus while it runs, and the reference firmware also
+  // initialises the EPD before the touch driver (read_pico_init.c: epd_init then
+  // cst836u_init). Sequencing, not a hard electrical dependency: the CST836U is
+  // always powered and its reset already ran above.
+  return;
+#endif
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   InputManager::setButtonHook(wavesharePowerButtonHook);
 #endif
@@ -182,11 +237,23 @@ void HalGPIO::begin() {
   inputMgr.setMurphyM4Batch(_murphyM4Batch);
 #endif
 #if FREEINK_DEVICE_METALIO_EINK4
-  if (!freeink::metalio::begin()) LOG_ERR("HW", "Metalio power/expander initialization failed");
+  if (!freeink::metalio::ensureBooted()) LOG_ERR("HW", "Metalio power/expander initialization failed");
 #endif
-#if FREEINK_CAP_HAPTIC
-  if (!freeink::haptic::begin()) LOG_ERR("HW", "Haptic initialization failed; feedback disabled");
+#if FREEINK_DEVICE_LILYGO
+  BoardT5S3::begin();
+  if (!BoardT5S3::pca9535Present()) LOG_ERR("HW", "LilyGo board bring-up failed: expander did not answer");
 #endif
+  inputMgr.begin();
+  inputBegun = true;
+}
+
+void HalGPIO::beginInput() {
+  // Idempotent: begin() already did it on every target that does not defer, and
+  // main.cpp's post-display call plus the safety net in update() can both reach
+  // this point on the target that does.
+  if (inputBegun) return;
+  inputBegun = true;
+  LOG_INF("HW", "Starting input backends");
   inputMgr.begin();
 }
 
@@ -199,14 +266,17 @@ bool HalGPIO::saveMurphyM4Batch(const freeink::MurphyM4Batch batch) {
 #endif
 
 void HalGPIO::update() {
+#if FREEINK_DEVICE_READPICO
+  // Safety net for the deferred INPUT PHASE (see begin()): a consumer that polls
+  // input before the panel came up gets the touch backend started here rather
+  // than silently reading nothing. Not an ordering bug worth aborting over — the
+  // whole point of the deferral is an electrical preference, not a requirement.
+  beginInput();
+#endif
   inputMgr.update();
-  const bool buttonActivity = inputMgr.wasPressed(BTN_BACK) || inputMgr.wasPressed(BTN_CONFIRM) ||
-                              inputMgr.wasPressed(BTN_LEFT) || inputMgr.wasPressed(BTN_RIGHT) ||
-                              inputMgr.wasPressed(BTN_UP) || inputMgr.wasPressed(BTN_DOWN);
-  const InputModality previous = inputModality.load(std::memory_order_relaxed);
-  const InputModality next = inputModalityAfter(previous, buttonActivity, inputMgr.wasTouchActivity());
-  inputModalityChanged = next != previous;
-  inputModality.store(next, std::memory_order_relaxed);
+  const uint8_t pageButtons = inputMgr.capacitivePageButtonMask();
+  capacitivePagePressed = (pageButtons & ~previousCapacitivePageButtons) != 0;
+  previousCapacitivePageButtons = pageButtons;
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
@@ -220,23 +290,20 @@ bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed
 
 uint8_t HalGPIO::physicalPressedMask() const { return inputMgr.physicalPressedMask(); }
 
-#if FREEINK_CAP_HAPTIC
-bool HalGPIO::wasTouchContactPressed() const { return inputMgr.wasTouchContactPressed(); }
-void HalGPIO::updateHapticFeedback(uint8_t level) {
-  const uint16_t duration = freeink::haptic::pulseDuration(level);
-  if (duration == 0)
-    stopHapticFeedback();
-  else if (wasTouchContactPressed())
-    freeink::haptic::pulse(duration);
-}
-void HalGPIO::stopHapticFeedback() { freeink::haptic::stop(); }
-#endif
-
 bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
 
 bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return inputMgr.wasReleased(buttonIndex); }
 
 bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
+
+bool HalGPIO::rawInputActive() {
+  if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
+  InputManager::ButtonAdcSample g1{}, g2{};
+  inputMgr.readButtonAdc(g1, g2);
+  // The Xteink ladder idles at the ADC full-scale rail (~4095); every button band sits below 3900.
+  constexpr int kIdleRailMin = 4000;
+  return (g1.raw >= 0 && g1.raw < kIdleRailMin) || (g2.raw >= 0 && g2.raw < kIdleRailMin);
+}
 
 unsigned long HalGPIO::getHeldTime() const { return inputMgr.getHeldTime(); }
 
@@ -246,7 +313,13 @@ bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
 
 bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
 
+bool HalGPIO::wasHomeKeyPressed() const { return inputMgr.wasHomeKeyPressed(); }
+
 bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
+
+bool HalGPIO::hasToggleSwitch() const { return inputMgr.hasToggleSwitch(); }
+
+bool HalGPIO::isToggleSwitchOn() const { return inputMgr.isToggleSwitchOn(); }
 
 bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
 
@@ -278,9 +351,9 @@ void HalGPIO::clearTouchTapEvent() { inputMgr.clearTouchTapEvent(); }
 
 void HalGPIO::prepareForDeepSleep() {
 #if FREEINK_CAP_HAPTIC
-  freeink::haptic::prepareForSleep();
+  HapticManager::getInstance().end();
 #endif
-  inputMgr.prepareForDeepSleep();
+  if (!inputMgr.prepareForDeepSleep()) LOG_ERR("GPIO", "Failed to put touch controller to sleep");
 }
 
 bool HalGPIO::restoreTouchAfterDisplayReset() { return inputMgr.reinitializeTouchAfterSharedReset(); }
@@ -322,29 +395,6 @@ bool HalGPIO::verifyPowerButtonWakeup() {
   return heldAtFirstSample && inputMgr.isPowerButtonPhysicallyPressed();
 }
 
-bool HalGPIO::verifyPowerButtonWakeup(const uint16_t requiredDurationMs, const bool shortPressAllowed) {
-  if (BoardConfig::isX4Pro() || FREEINK_DEVICE_X4CLASSIC || BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() ||
-      BoardConfig::ACTIVE.input.power < 0 || shortPressAllowed) {
-    return true;
-  }
-
-  const unsigned long calibration = millis();
-  const unsigned long calibratedDuration = calibration < requiredDurationMs ? requiredDurationMs - calibration : 1;
-  const unsigned long start = millis();
-  inputMgr.update();
-  while (!inputMgr.isPressed(BTN_POWER) && millis() - start < 1000) {
-    delay(10);
-    inputMgr.update();
-  }
-  if (!inputMgr.isPressed(BTN_POWER)) return false;
-
-  do {
-    delay(10);
-    inputMgr.update();
-  } while (inputMgr.isPressed(BTN_POWER) && inputMgr.getPowerButtonHeldTime() < calibratedDuration);
-  return inputMgr.getPowerButtonHeldTime() >= calibratedDuration;
-}
-
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
 // Keep the last positive USB Serial/JTAG SOF result across nearby polls.
 static bool usbHostSofActive() {
@@ -367,37 +417,33 @@ static bool usbHostSofActive() {
 #endif
 
 bool HalGPIO::isUsbConnected() const {
-  if (deviceIsX3()) {
-    // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
-    // Positive current means charging.
-    for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-      int16_t currentMa = 0;
-      if (X3GPIO::readBQ27220CurrentMA(&currentMa)) {
-        return currentMa > 0;
-      }
-      delay(2);
-    }
-    return false;
-  }
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   bool connected = false;
   if (Waveshare397Power::externalPowerConnected(connected)) return connected;
   return usbHostSofActive();
 #endif
 #if FREEINK_DEVICE_METALIO_EINK4
-  bool connected = false;
-  if (freeink::metalio::externalPowerConnected(connected)) return connected;
+  static const BatteryMonitor powerSource;
+  bool known = false;
+  const bool connected = powerSource.isExternalPowerPresent(&known);
+  if (known) return connected;
   if (usbHostSofActive()) return true;
 #endif
-  if (BoardConfig::ACTIVE.usbDetect >= 0) {
+  if (!deviceIsX3() && BoardConfig::ACTIVE.usbDetect >= 0) {
     return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
   }
-  // No digital USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
+  // X3 uses GPIO20 for I2C, not USB detection. Boards without a digital
+  // USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
   // divider): infer external power from charging state instead. BatteryMonitor
   // picks the board's best source — charger IC status, gauge Current() sign, or
   // a /STAT pin — and reports false on boards with no battery telemetry at all.
-  // Caveat: charge termination at 100% reads as "not connected".
+  // A charger IC that reports its input rail (BQ25896, SGM41562, M5 PMIC)
+  // answers directly; otherwise infer from charging state, where charge
+  // termination at 100% reads as "not connected".
   static const BatteryMonitor battery;
+  bool inputKnown = false;
+  const bool present = battery.isExternalPowerPresent(&inputKnown);
+  if (inputKnown) return present;
   return battery.isCharging();
 }
 
@@ -410,7 +456,8 @@ bool HalGPIO::coldBootImpliesPowerButton() const {
   // post-flash boots as battery button boots, and STAT-only boards like the
   // EEGO A4 misread them the same way once the charger terminates at 100%
   // (STAT inactive reads as "no USB").
-  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky();
+  // The Metalio sleeps powered off and only its button turns it back on.
+  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky() || BoardConfig::isMetalioEInk4();
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {

@@ -2,8 +2,20 @@
 #include <BoardConfig.h>
 #include <FreeInkUIGfxRenderer.h>
 
-#include "SelectionCursorPolicy.h"
 #include "UITheme.h"
+#include "themes/lyra/LyraTheme.h"
+
+inline const ThemeMetrics& uiThemeMetrics(bool upstreamStyle = false) {
+  if (upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX) {
+    static constexpr ThemeMetrics lyra = [] {
+      auto metrics = LyraMetrics::values;
+      UiHighDpiProfile::apply(metrics);
+      return metrics;
+    }();
+    return lyra;
+  }
+  return UITheme::getInstance().getMetrics();
+}
 
 namespace ui_theme_detail {
 template <typename Profile>
@@ -15,16 +27,35 @@ int16_t scrollInset(const Profile& profile, const uint8_t side) {
 }
 }  // namespace ui_theme_detail
 
+// Keep INX's original advance-based alignment, including one-digit controls.
+inline void applyUiTextAlignment(freeink::ui::GfxRendererTarget& target, bool upstreamStyle = false) {
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  target.setTextCentering(!upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX
+                              ? freeink::ui::TextCentering::Advance
+                              : freeink::ui::TextCentering::InkBounds);
+#else
+  (void)target;
+#endif
+}
+
 // Merges the active UITheme's shape (row gaps, radii, insets, selection
 // style) with the uiScale-derived sizes into FreeInkUI theme tokens: the
 // theme says what lists look like, the scale says how big they are.
 // Everything read here is plain data from ThemeMetrics — the same values an
 // SD-card theme file will eventually supply.
-inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarget& target) {
+inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarget& target,
+                                              bool upstreamStyle = false) {
   namespace fui = freeink::ui;
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
+  const bool inxTheme = !upstreamStyle && SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX;
 
   fui::ThemeTokens tokens = fui::themeTokensForLineHeight(target.lineHeight(fui::GfxRendererTarget::FONT_BODY));
+  if (!inxTheme && !BoardConfig::hasTouch()) tokens.listMinRowHeight = static_cast<int16_t>(metrics.listRowHeight);
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  if (inxTheme) {
+    tokens.listLayoutPolicy = fui::ListLayoutPolicy::ThemeRow;
+  }
+#endif
   tokens.listRowGap = static_cast<int16_t>(metrics.listRowGap);
   tokens.listRowRadius = static_cast<uint8_t>(metrics.listRowRadius);
   tokens.listInset = static_cast<int16_t>(metrics.listInset);
@@ -42,11 +73,8 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   // inward past the covered side. Bezel truth is per-board data
   // (BoardConfig::ViewableInsets); lists render in the portrait UI frame, so
   // the panel-native portrait insets apply directly.
-  tokens.listScrollInset = ui_theme_detail::scrollInset(BoardConfig::ACTIVE, metrics.listScrollSide);
+  tokens.listScrollInset = inxTheme ? ui_theme_detail::scrollInset(BoardConfig::ACTIVE, metrics.listScrollSide) : 0;
 #endif
-  tokens.listSeparator = static_cast<fui::SeparatorStyle>(metrics.listSeparatorStyle);
-  tokens.listValueMaxWidth = static_cast<int16_t>(metrics.listValueMaxWidth);
-  tokens.listSelectionCoversScrollReservation = metrics.listSelectionCoversScrollReservation;
   // Screen::header()/status() band height. Without this the SDK's
   // line-height-derived default applies and fui-drawn headers (OPDS) come out
   // a different height than every GUI.drawHeader band.
@@ -60,9 +88,24 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   tokens.sheetRadius = static_cast<uint8_t>(metrics.sheetRadius);
   tokens.capsuleRadius = static_cast<uint8_t>(metrics.capsuleRadius);
   tokens.bodyText.bold = metrics.listTitleBold;
-  tokens.listEmphasizedText = tokens.titleText;
-  tokens.listEmphasizedText.bold = true;
-  tokens.listValueText = tokens.bodyText;
-  if (!UITheme::getInstance().showSelectionCursor()) SelectionCursorPolicy::hideFreeInkListFocus(tokens);
+  if (inxTheme) {
+    tokens.listSeparator = static_cast<fui::SeparatorStyle>(metrics.listSeparatorStyle);
+    tokens.listValueMaxWidth = static_cast<int16_t>(metrics.listValueMaxWidth);
+    tokens.listSelectionCoversScrollReservation = metrics.listSelectionCoversScrollReservation;
+    tokens.listEmphasizedText = tokens.titleText;
+    tokens.listEmphasizedText.bold = true;
+    tokens.listValueText = tokens.bodyText;
+  }
+  if (UiHighDpiProfile::enabled) {
+    tokens.minTouchSize = UiHighDpiProfile::buttonHeight;
+    tokens.rowHeight = UiHighDpiProfile::rowHeight;
+    tokens.listMinRowHeight = UiHighDpiProfile::rowHeight;
+    tokens.listTouchMinRowHeight = UiHighDpiProfile::rowHeight;
+    tokens.listTouchRowPaddingY = 16;
+    tokens.listTouchRowGap = UiHighDpiProfile::controlGap;
+    tokens.spaceSm = 8;
+    tokens.spaceMd = UiHighDpiProfile::controlGap;
+    tokens.spaceLg = 24;
+  }
   return tokens;
 }

@@ -7,7 +7,7 @@ that matches your task — don't load everything at once.
 
 | Doc | Read this when… |
 |---|---|
-| [hardware-constraints.md](hardware-constraints.md) | Touching RAM/flash budgets, allocations, `std::vector`/string usage, SPIFFS writes, or detecting the host platform. The Resource Protocol (9 rules) lives here. |
+| [hardware-constraints.md](hardware-constraints.md) | Touching RAM/flash budgets, allocations, `std::vector`/string usage, SD persistence, or detecting the host platform. The Resource Protocol (9 rules) lives here. |
 | [memory-and-allocation.md](memory-and-allocation.md) | Allocating heap memory, using `new`/`malloc`/`makeUniqueNoThrow`, smart pointers, or RAII cleanup. |
 | [esp32-pitfalls.md](esp32-pitfalls.md) | Writing ISRs, `string_view` at C boundaries, raw buffer casts (RISC-V alignment), templates/`std::function`, or parsing network JSON (ArduinoJson v7). |
 | [build-system.md](build-system.md) | Working with PlatformIO, build environments, the critical build flags (DESTRUCTOR_CLOSES_FILE / SINGLE_BUFFER_MODE), or `platformio.local.ini`. |
@@ -23,12 +23,17 @@ that matches your task — don't load everything at once.
 | [chinese-build.md](chinese-build.md) | Working on unified-firmware content profiles or embedded CJK fonts. |
 | [firmware-release.md](firmware-release.md) | Changing Nightly targets, packaging, GitHub/COS publishing, regional indexes, rollback, or OTA release contracts. |
 | [device-variants.md](device-variants.md) | Building or flashing for the Xteink X3 vs X4, runtime device detection (one binary, both panels), and the per-device hardware differences. |
+| [ssd1677-text-aa.md](ssd1677-text-aa.md) | Default S3 SSD1677 text AA, original image routing, PSRAM fallback, calibration and validation. |
+| [sticky-aa-test.md](sticky-aa-test.md) | Historical Sticky test2 firmware and its physical observations. |
 | [eego-a4.md](eego-a4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 eego A4 target. |
+| [lilygo-t5s3.md](lilygo-t5s3.md) | Building and physically validating the build-only LilyGo T5 S3 4.7 PRO/Lite target, SDK BoardT5S3, memory and sleep. |
 | [murphy-m4.md](murphy-m4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 Murphy M4 target. |
 | [waveshare-epaper-397.md](waveshare-epaper-397.md) | Building, flashing, or hardware-validating the experimental Waveshare ESP32-S3 ePaper 3.97 target. |
 | [sdk-upstream-sync.md](sdk-upstream-sync.md) | Reviewing the September 2026 SDK integration, upstream touch-menu behavior, source snapshots, and hardware acceptance limits. |
 | [upstream-merge-policy.md](upstream-merge-policy.md) | Reconciling upstream guide changes with the canonical `AGENTS.md` layout — how to keep the map thin and route upstream changes into these docs. |
 | [Metalio E-Ink 4](metalio-eink4.md) | Metalio BSP, CST816S bezel keys, SDMMC, power sequencing and acceptance |
+| [read-pico.md](read-pico.md) | Building, first-flashing, or hardware-validating the Read Pico (小纸 Pico, RDP-G01-W) ESP32-S3 target: 16-bit parallel EPD through epdiy LCD_CAM, CST836U touch, CW32L010 PMU, and the frozen interface contract. |
+| [high-dpi-ui-profile.md](high-dpi-ui-profile.md) | High-density UI preset, currently validated on ReadPico and Nightly, fixed fonts, resource budget and validation. |
 
 ## Related docs outside this directory
 

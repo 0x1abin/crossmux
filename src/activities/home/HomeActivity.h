@@ -7,6 +7,7 @@
 #include "./FileBrowserActivity.h"
 #include "RecentBooksStore.h"
 #include "activities/Activity.h"
+#include "components/CoverGridHomeUi.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -14,12 +15,18 @@ struct Rect;
 class HomeActivity final : public Activity {
   enum class CarouselUpdateScope { None, MenuOnly, Full };
 
+  std::unique_ptr<CoverGridHomeUi> coverGridUi;
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;
   bool hasOpdsServers = false;
+  bool hasPlugins = false;
+  // The home "library" slot (index 2) shows Plugins when the plugin system is
+  // enabled, otherwise OPDS. The index converters gate on its presence.
+  bool hasLibrarySlot() const { return hasPlugins || hasOpdsServers; }
+  bool hasContinueReading = false;
   int lastCarouselBookIndex = 0;
   bool coverRendered = false;           // Track if cover has been rendered once
   bool coverBufferStored = false;       // Track if cover buffer is stored
@@ -36,20 +43,16 @@ class HomeActivity final : public Activity {
   int coverRectH = 0;
   std::vector<RecentBook> recentBooks;
   const HomeMenuItem initialMenuItem;
-  // Only enter Standby when this activity has observed a complete press→release
-  // pair locally. Prevents a release edge that leaks across an activity switch
-  // (e.g. Back pressed in SettingsActivity, released after HomeActivity took over)
-  // from immediately punching the user into Standby.
-  bool sawBackPressInActivity = false;
 
-  void onSelectBook(const std::string& path);
+  void onRecentBookSelected(const std::string& path);
   void onFileBrowserOpen();
+  void onLibraryOpen();
   void onRecentsOpen();
   void onSettingsOpen();
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
   void onAppsOpen();
-  void onStandbyOpen();
+  void onPluginsOpen();
 
   int getMenuItemCount() const;
   static constexpr bool canRenderCarouselMenuOnly(bool isCarousel, bool recentsLoaded, CarouselUpdateScope scope) {
@@ -61,6 +64,9 @@ class HomeActivity final : public Activity {
   void freeCoverBuffer();     // Free the stored cover buffer
   void loadRecentBooks(int maxBooks);
   void loadRecentCovers(int coverHeight);
+  void fillCoverGridFromLibrary();
+  void resolveGridCoverPaths();
+  void loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <cstring>
 
+#include "HapticFeedback.h"
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/themes/lyra/LyraTheme.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -17,6 +19,19 @@ namespace fui = freeink::ui;
 namespace {
 
 constexpr fui::ActionId ACTION_KEY = 1;
+constexpr int KEYBOARD_MIN_GAP = 6;
+constexpr int KEYBOARD_PANEL_PADDING = 4;
+constexpr int BUTTON_KEY_HEIGHT = 42;
+constexpr int BUTTON_KEYBOARD_HINT_GAP = 4;
+
+int keyboardGap(const ThemeMetrics& metrics, const bool compact = false) {
+  return compact ? KEYBOARD_MIN_GAP : std::max(metrics.keyboardKeySpacing, KEYBOARD_MIN_GAP);
+}
+
+int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool hasTouch) {
+  const int keyHeight = hasTouch ? metrics.keyboardKeyHeight : BUTTON_KEY_HEIGHT;
+  return rows * keyHeight + (rows > 1 ? (rows - 1) * keyboardGap(metrics) : 0) + KEYBOARD_PANEL_PADDING * 2;
+}
 
 // ---------------------------------------------------------------------------
 // URL layers. The SDK builtin layouts have no URL variant (":", "/", ".", the
@@ -25,14 +40,19 @@ constexpr fui::ActionId ACTION_KEY = 1;
 // regardless of UI language.
 // ---------------------------------------------------------------------------
 
+constexpr uint8_t URL_KEY_WIDTH = 2;
+constexpr uint8_t URL_WIDE_CONTROL_WIDTH = 3;
+
 #define UK(label, output, value) \
-  fui::KeyboardKey { label, output, fui::KeyKind::Normal, fui::StateNormal, value, 1, true, nullptr }
+  fui::KeyboardKey { label, output, fui::KeyKind::Normal, fui::StateNormal, value, URL_KEY_WIDTH, true, nullptr }
 #define UKA(label, output, value, alt) \
-  fui::KeyboardKey { label, output, fui::KeyKind::Normal, fui::StateNormal, value, 1, true, alt }
+  fui::KeyboardKey { label, output, fui::KeyKind::Normal, fui::StateNormal, value, URL_KEY_WIDTH, true, alt }
 #define UKW(label, output, value, units) \
-  fui::KeyboardKey { label, output, fui::KeyKind::Normal, fui::StateNormal, value, units, true, nullptr }
+  fui::KeyboardKey { label, output, fui::KeyKind::Normal, fui::StateNormal, value, units *URL_KEY_WIDTH, true, nullptr }
 #define UKS(label, kind, value, units) \
-  fui::KeyboardKey { label, nullptr, kind, fui::StateNormal, value, units, true, nullptr }
+  fui::KeyboardKey { label, nullptr, kind, fui::StateNormal, value, units *URL_KEY_WIDTH, true, nullptr }
+#define UK15(label, kind, value) \
+  fui::KeyboardKey { label, nullptr, kind, fui::StateNormal, value, URL_WIDE_CONTROL_WIDTH, true, nullptr }
 
 constexpr int16_t URL_PANEL_VALUE = -3;  // mirrors KeyboardEntryActivity::URL_PANEL_KEY
 
@@ -47,7 +67,7 @@ const fui::KeyboardKey URL_ROW1[] = {UK("q", "q", 'q'), UK("w", "w", 'w'), UK("e
 const fui::KeyboardKey URL_ROW2[] = {UK("a", "a", 'a'), UK("s", "s", 's'), UK("d", "d", 'd'),
                                      UK("f", "f", 'f'), UK("g", "g", 'g'), UK("h", "h", 'h'),
                                      UK("j", "j", 'j'), UK("k", "k", 'k'), UK("l", "l", 'l')};
-const fui::KeyboardKey URL_ROW3[] = {UKS("Shift", fui::KeyKind::Shift, fui::QWERTY_KEY_SHIFT, 2),
+const fui::KeyboardKey URL_ROW3[] = {UK15(nullptr, fui::KeyKind::Shift, fui::QWERTY_KEY_SHIFT),
                                      UK("z", "z", 'z'),
                                      UK("x", "x", 'x'),
                                      UK("c", "c", 'c'),
@@ -55,7 +75,7 @@ const fui::KeyboardKey URL_ROW3[] = {UKS("Shift", fui::KeyKind::Shift, fui::QWER
                                      UK("b", "b", 'b'),
                                      UK("n", "n", 'n'),
                                      UK("m", "m", 'm'),
-                                     UKS("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE, 2)};
+                                     UK15("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE)};
 // URLs have no spaces, so the URL bottom row spends the space slot on ":",
 // "/", "." and the snippet-panel toggle instead (the legacy keyboard did the
 // same with its "URL" key).
@@ -63,7 +83,7 @@ const fui::KeyboardKey URL_BOTTOM[] = {UKS("?123", fui::KeyKind::Mode, fui::QWER
                                        UK(":", ":", ':'),
                                        UK("/", "/", '/'),
                                        UK(".", ".", '.'),
-                                       UKW("URL", nullptr, URL_PANEL_VALUE, 2),
+                                       UKW("URL", nullptr, URL_PANEL_VALUE, 3),
                                        UKS("OK", fui::KeyKind::Ok, fui::QWERTY_KEY_ENTER, 2)};
 
 const fui::KeyboardKey URL_SHIFT_ROW1[] = {UK("Q", "Q", 'Q'), UK("W", "W", 'W'), UK("E", "E", 'E'), UK("R", "R", 'R'),
@@ -72,7 +92,7 @@ const fui::KeyboardKey URL_SHIFT_ROW1[] = {UK("Q", "Q", 'Q'), UK("W", "W", 'W'),
 const fui::KeyboardKey URL_SHIFT_ROW2[] = {UK("A", "A", 'A'), UK("S", "S", 'S'), UK("D", "D", 'D'),
                                            UK("F", "F", 'F'), UK("G", "G", 'G'), UK("H", "H", 'H'),
                                            UK("J", "J", 'J'), UK("K", "K", 'K'), UK("L", "L", 'L')};
-const fui::KeyboardKey URL_SHIFT_ROW3[] = {UKS("Shift", fui::KeyKind::Shift, fui::QWERTY_KEY_SHIFT, 2),
+const fui::KeyboardKey URL_SHIFT_ROW3[] = {UK15(nullptr, fui::KeyKind::Shift, fui::QWERTY_KEY_SHIFT),
                                            UK("Z", "Z", 'Z'),
                                            UK("X", "X", 'X'),
                                            UK("C", "C", 'C'),
@@ -80,7 +100,7 @@ const fui::KeyboardKey URL_SHIFT_ROW3[] = {UKS("Shift", fui::KeyKind::Shift, fui
                                            UK("B", "B", 'B'),
                                            UK("N", "N", 'N'),
                                            UK("M", "M", 'M'),
-                                           UKS("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE, 2)};
+                                           UK15("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE)};
 
 // Snippet keys: multi-character outputs, stable ids above the localized-key
 // range so they never collide with layout key ids.
@@ -91,14 +111,15 @@ const fui::KeyboardKey URL_SNIP_ROW2[] = {UK("http://", "http://", 2004), UK("19
 const fui::KeyboardKey URL_SNIP_ROW3[] = {UK("/opds", "/opds", 2007), UK(":8080", ":8080", 2008),
                                           UK(".net", ".net", 2009)};
 const fui::KeyboardKey URL_SNIP_BOTTOM[] = {UKS("abc", fui::KeyKind::Mode, fui::QWERTY_KEY_MODE, 2),
-                                            UKW("URL", nullptr, URL_PANEL_VALUE, 2),
-                                            UKS("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE, 2),
+                                            UKW("URL", nullptr, URL_PANEL_VALUE, 3),
+                                            UK15("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE),
                                             UKS("OK", fui::KeyKind::Ok, fui::QWERTY_KEY_ENTER, 2)};
 
 #undef UK
 #undef UKA
 #undef UKW
 #undef UKS
+#undef UK15
 
 const fui::KeyboardRow URL_ROWS[] = {
     {URL_NUM_ROW, 10, 0}, {URL_ROW1, 10, 0}, {URL_ROW2, 9, 1}, {URL_ROW3, 9, 0}, {URL_BOTTOM, 6, 0}};
@@ -147,12 +168,12 @@ void KeyboardEntryActivity::onEnter() {
 void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::currentLayout() const {
-  if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true);
+  if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true, false, false);
   if (inputType == InputType::Url) {
     if (urlPanel) return URL_SNIPPET_LAYOUT;
     return shifted ? URL_SHIFT_LAYOUT : URL_LAYOUT;
   }
-  return fui::builtinKeyboardLayout(layoutId, shifted, false, /*numberRow=*/true, showLangKey);
+  return fui::builtinKeyboardLayout(layoutId, shifted, false, true, showLangKey);
 }
 
 const fui::KeyboardKey* KeyboardEntryActivity::selectedKey() const {
@@ -353,14 +374,11 @@ std::string KeyboardEntryActivity::displayTextForCurrentState() const {
     return displayText;
   }
 
-  size_t revealPos;
-  if (cursorMode) {
-    revealPos = text.length();  // no reveal in displayText; block draws actual char directly
-  } else {
-    revealPos = (text.length() > 0 && cursorPos > 0) ? cursorPos - 1 : std::string::npos;
-  }
+  // Keep byte offsets aligned with text, but never reveal a lone UTF-8 byte.
+  const size_t revealEnd = cursorMode ? 0 : std::min(cursorPos, text.length());
+  const size_t revealStart = utf8Prev(text, revealEnd);
   for (size_t i = 0; i < displayText.length(); i++) {
-    if (i != revealPos) {
+    if (i < revealStart || i >= revealEnd) {
       displayText[i] = '*';
     }
   }
@@ -414,8 +432,30 @@ int KeyboardEntryActivity::lineBreakEnd(std::string& s, const int start, const i
   return best < firstCharEnd ? firstCharEnd : best;
 }
 
+int KeyboardEntryActivity::inputLineCount() const {
+  return UiHighDpiProfile::enabled && renderer.getScreenWidth() > renderer.getScreenHeight() ? 1 : 2;
+}
+
+int KeyboardEntryActivity::inputWindowStart(std::string& displayText, const int width) const {
+  if (!UiHighDpiProfile::enabled) return 0;
+  int previous = 0;
+  int start = 0;
+  while (start < static_cast<int>(displayText.size())) {
+    const int end = lineBreakEnd(displayText, start, width);
+    if (cursorPos < static_cast<size_t>(end) || end == static_cast<int>(displayText.size()))
+      return inputLineCount() == 1 ? start : previous;
+    previous = start;
+    start = end;
+  }
+  return inputLineCount() == 1 ? start : previous;
+}
+
 int KeyboardEntryActivity::inputStartY() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
+  if (UiHighDpiProfile::enabled) {
+    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer);
+    return safe.y + metrics.topPadding + metrics.headerHeight + UiHighDpiProfile::controlGap;
+  }
   constexpr int MIN_HEADER_GAP = 6;
   const int themedY =
       metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 5 + metrics.keyboardVerticalOffset;
@@ -429,38 +469,44 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   // never the text field, so skip the wrap/measure work entirely.
   if (y >= keyboardRect().y) return false;
 
-  const int pageWidth = renderer.getScreenWidth();
   const auto& metrics = UITheme::getInstance().getMetrics();
+  // Text and cursor hit-testing live in the same bezel-safe content box the
+  // field underline (drawTextField) and keyboard use; deriving the margin from
+  // getScreenWidth() instead offset taps from the glyphs by content.x on
+  // inset panels (EEGO A4).
+  const Rect content = UITheme::getContentArea(renderer);
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int inputY = inputStartY();
 
-  int availableWidth = pageWidth;
+  int availableWidth = content.width;
   if (gpio.deviceIsX3()) {
     availableWidth -= 2 * metrics.sideButtonHintsWidth;
   }
-  const int effectiveMargin = (pageWidth - availableWidth * metrics.keyboardTextFieldWidthPercent / 100) / 2;
+  const int effectiveMargin = (content.width - availableWidth * metrics.keyboardTextFieldWidthPercent / 100) / 2;
+  const int textLeft = content.x + effectiveMargin;
   const int toggleGap = inputType == InputType::Password ? 4 : 0;
   const int toggleReserve = inputType == InputType::Password ? std::max(renderer.getTextWidth(UI_12_FONT_ID, "[abc]"),
                                                                         renderer.getTextWidth(UI_12_FONT_ID, "[***]")) +
                                                                    toggleGap
                                                              : 0;
-  const int textAreaWidth = pageWidth - 2 * effectiveMargin - toggleReserve;
+  const int textAreaWidth = content.width - 2 * effectiveMargin - toggleReserve;
   const int maxLineWidth = textAreaWidth;
   const bool centerText = metrics.keyboardCenteredText;
   std::string displayText = displayTextForCurrentState();
 
-  int lineStartIdx = 0;
+  int lineStartIdx = inputWindowStart(displayText, maxLineWidth);
   int lineY = inputY;
   int lastLineStartIdx = 0;
   int lastLineEndIdx = static_cast<int>(displayText.length());
-  int lastLineStartX = effectiveMargin;
+  int lastLineStartX = textLeft;
   int lastLineWidth = 0;
 
   while (true) {
+    if (UiHighDpiProfile::enabled && lineY >= inputY + inputLineCount() * lineHeight) break;
     const int lineEndIdx = lineBreakEnd(displayText, lineStartIdx, maxLineWidth);
     const int textWidth = measureRange(displayText, lineStartIdx, lineEndIdx);
-    const int lineStartX = centerText ? effectiveMargin + (maxLineWidth - textWidth) / 2 : effectiveMargin;
+    const int lineStartX = centerText ? textLeft + (maxLineWidth - textWidth) / 2 : textLeft;
     const bool isRtl = rangeIsRtl(displayText, lineStartIdx, lineEndIdx);
     lastLineStartIdx = lineStartIdx;
     lastLineEndIdx = lineEndIdx;
@@ -506,16 +552,17 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   if (inputType == InputType::Password) {
     const int toggleWidth =
         std::max(renderer.getTextWidth(UI_12_FONT_ID, "[abc]"), renderer.getTextWidth(UI_12_FONT_ID, "[***]"));
-    const int toggleX = pageWidth - effectiveMargin - toggleWidth;
-    if (x >= toggleX - 4 && x < pageWidth - effectiveMargin + 4 && y >= lineY - 2 && y < lineY + lineHeight + 5) {
+    const int toggleX = content.x + content.width - effectiveMargin - toggleWidth;
+    if (x >= toggleX - 4 && x < content.x + content.width - effectiveMargin + 4 && y >= lineY - 2 &&
+        y < lineY + lineHeight + 5) {
       passwordToggle = true;
       return true;
     }
   }
 
   const int underlineBottom = lineY + lineHeight + metrics.verticalSpacing + 8;
-  if (y >= inputY - metrics.verticalSpacing && y < underlineBottom && x >= effectiveMargin &&
-      x < effectiveMargin + maxLineWidth + toggleReserve) {
+  if (y >= inputY - metrics.verticalSpacing && y < underlineBottom && x >= textLeft &&
+      x < textLeft + maxLineWidth + toggleReserve) {
     const bool isRtl = rangeIsRtl(displayText, lastLineStartIdx, lastLineEndIdx);
     const bool insideText = x < lastLineStartX + lastLineWidth;
     position = static_cast<size_t>(insideText == isRtl ? lastLineEndIdx : lastLineStartIdx);
@@ -527,16 +574,48 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
 
 fui::Rect KeyboardEntryActivity::keyboardRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int pageWidth = renderer.getScreenWidth();
+  const Rect content = UITheme::getContentArea(renderer);  // clear the bezel on rounded panels
   const int pageHeight = renderer.getScreenHeight();
   const int rows = currentLayout().rowCount;
-  const int gap = metrics.keyboardKeySpacing;
-  const int height = rows * metrics.keyboardKeyHeight + (rows > 1 ? (rows - 1) * gap : 0);
-  const int width = pageWidth * metrics.keyboardWidthPercent / 100;
-  const int x = (pageWidth - width) / 2;
-  const int y =
-      pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing - height + metrics.keyboardVerticalOffset;
-  return fui::Rect{static_cast<int16_t>(x), static_cast<int16_t>(y), static_cast<int16_t>(width),
+  const bool hasTouch = mappedInput.hasTouch();
+  if (UiHighDpiProfile::enabled) {
+    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer);
+    const int bottom = safe.y + safe.height - metrics.buttonHintsHeight - UiHighDpiProfile::controlGap;
+    // Compact landscape keeps the cursor's line visible and spends the saved
+    // height on keys. The underline and its 6px gap remain inside the input band.
+    const int keyboardInputY =
+        SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX
+            ? std::max(inputStartY(), safe.y + LyraMetrics::values.topPadding + UiHighDpiProfile::headerHeight +
+                                          UiHighDpiProfile::controlGap)
+            : inputStartY();
+    const int inputBottom = keyboardInputY + inputLineCount() * renderer.getLineHeight(UI_12_FONT_ID) +
+                            metrics.verticalSpacing + 4 + KEYBOARD_MIN_GAP;
+    const int available = bottom - inputBottom;
+    const int keyHeight = std::min(
+        metrics.keyboardKeyHeight,
+        (available - KEYBOARD_PANEL_PADDING * 2 - (rows - 1) * keyboardGap(metrics, inputLineCount() == 1)) / rows);
+    const int height =
+        rows * keyHeight + (rows - 1) * keyboardGap(metrics, inputLineCount() == 1) + KEYBOARD_PANEL_PADDING * 2;
+    return fui::Rect{static_cast<int16_t>(safe.x), static_cast<int16_t>(bottom - height),
+                     static_cast<int16_t>(safe.width), static_cast<int16_t>(height)};
+  }
+  const int height = keyboardKeysHeight(metrics, rows, hasTouch);
+  const int hintGap = hasTouch
+                          ? (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::INX ? LyraMetrics::values.verticalSpacing
+                                                                                   : metrics.verticalSpacing) -
+                                metrics.keyboardVerticalOffset
+                          : BUTTON_KEYBOARD_HINT_GAP;
+  const int y = pageHeight - metrics.buttonHintsHeight - height - hintGap;
+  return fui::Rect{static_cast<int16_t>(content.x), static_cast<int16_t>(y), static_cast<int16_t>(content.width),
+                   static_cast<int16_t>(hasTouch ? pageHeight - y : height)};
+}
+
+fui::Rect KeyboardEntryActivity::keyboardKeysRect() const {
+  const fui::Rect panel = keyboardRect();
+  if (UiHighDpiProfile::enabled) return panel;
+  const int height =
+      keyboardKeysHeight(UITheme::getInstance().getMetrics(), currentLayout().rowCount, mappedInput.hasTouch());
+  return fui::Rect{panel.x, static_cast<int16_t>(panel.y + (panel.height - height) / 2), panel.width,
                    static_cast<int16_t>(height)};
 }
 
@@ -548,6 +627,7 @@ void KeyboardEntryActivity::loop() {
   bool touchedPasswordToggle = false;
   if (mappedInput.wasScreenTapped(tx, ty) && cursorPositionFromPoint(tx, ty, touchedCursorPos, touchedPasswordToggle)) {
     if (touchedPasswordToggle) {
+      haptic_feedback::touchAction();
       passwordVisible = !passwordVisible;
       cursorMode = false;
       togglePos = false;
@@ -556,6 +636,7 @@ void KeyboardEntryActivity::loop() {
       requestUpdate();
       return;
     }
+    haptic_feedback::touchAction();
     cursorPos = std::min(touchedCursorPos, text.length());
     // The masked text field maps taps per byte; snap back to a boundary so
     // the cursor never lands inside a multi-byte character.
@@ -585,6 +666,7 @@ void KeyboardEntryActivity::loop() {
     if (result.event) {
       syncSelectionToValue(result.event.value);
       if (activateValue(result.event.value, result.event.longPress)) {
+        haptic_feedback::touchAction(result.event.longPress);
         requestUpdate();
       }
       return;
@@ -750,6 +832,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
+  const Rect content = UITheme::getContentArea(renderer);  // bezel-safe content bounds
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title.c_str());
@@ -761,17 +844,21 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   std::string displayText = displayTextForCurrentState();
 
   const bool isPassword = (inputType == InputType::Password);
-  int availableWidth = pageWidth;
+  // Field text/cursor share the bezel-safe content box the underline and
+  // keyboard use (matches cursorPositionFromPoint); content.x offsets them past
+  // the bezel on inset panels (EEGO A4).
+  int availableWidth = content.width;
   if (gpio.deviceIsX3()) {
     availableWidth -= 2 * metrics.sideButtonHintsWidth;
   }
-  const int effectiveMargin = (pageWidth - availableWidth * metrics.keyboardTextFieldWidthPercent / 100) / 2;
+  const int effectiveMargin = (content.width - availableWidth * metrics.keyboardTextFieldWidthPercent / 100) / 2;
+  const int textLeft = content.x + effectiveMargin;
   const int toggleGap = isPassword ? 4 : 0;
   const int toggleReserve = isPassword ? std::max(renderer.getTextWidth(UI_12_FONT_ID, "[abc]"),
                                                   renderer.getTextWidth(UI_12_FONT_ID, "[***]")) +
                                              toggleGap
                                        : 0;
-  const int textAreaWidth = pageWidth - 2 * effectiveMargin - toggleReserve;
+  const int textAreaWidth = content.width - 2 * effectiveMargin - toggleReserve;
   const int maxLineWidth = textAreaWidth;
   const bool centerText = metrics.keyboardCenteredText;
 
@@ -792,19 +879,20 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     if (w > cursorCharWidth) cursorCharWidth = w;
   }
 
-  int lineStartIdx = 0;
+  int lineStartIdx = inputWindowStart(displayText, maxLineWidth);
   int textWidth = 0;
-  int cursorPixelX = effectiveMargin;
+  int cursorPixelX = textLeft;
   int cursorLineY = inputY;
   bool cursorDrawn = false;
 
   while (true) {
+    if (UiHighDpiProfile::enabled && inputHeight >= inputLineCount() * lineHeight) break;
     const int lineEndIdx = lineBreakEnd(displayText, lineStartIdx, maxLineWidth);
     const std::string lineText = displayText.substr(lineStartIdx, lineEndIdx - lineStartIdx);
     textWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, lineText.c_str(), EpdFontFamily::REGULAR);
     {
       const bool isRtl = rangeIsRtl(displayText, lineStartIdx, lineEndIdx);
-      const int lineStartX = centerText ? effectiveMargin + (maxLineWidth - textWidth) / 2 : effectiveMargin;
+      const int lineStartX = centerText ? textLeft + (maxLineWidth - textWidth) / 2 : textLeft;
       const bool isLastLine = (lineEndIdx == static_cast<int>(displayText.length()));
       bool isCursorLine = false;
       if (!cursorDrawn && cursorPos >= lineStartIdx &&
@@ -863,8 +951,8 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   const int fieldWidth = (inputHeight > 0) ? maxLineWidth : textWidth;
   const int lineMargin = effectiveMargin;
-  GUI.drawTextField(renderer, Rect{0, inputY, pageWidth, inputHeight}, fieldWidth, cursorMode, lineMargin,
-                    pageWidth - 2 * lineMargin);
+  GUI.drawTextField(renderer, Rect{content.x, inputY, content.width, inputHeight}, fieldWidth, cursorMode, lineMargin,
+                    content.width - 2 * lineMargin);
 
   if (cursorMode && !togglePos && cursorPos <= displayText.length()) {
     static constexpr int blockPadding = 1;
@@ -887,7 +975,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   if (isPassword) {
     const char* toggleLabel = passwordVisible ? "[***]" : "[abc]";
     const int toggleWidth = renderer.getTextWidth(UI_12_FONT_ID, toggleLabel);
-    const int toggleX = pageWidth - effectiveMargin - toggleWidth;
+    const int toggleX = content.x + content.width - effectiveMargin - toggleWidth;
     const int toggleY = inputY + inputHeight;
     const bool toggleSelected = cursorMode && togglePos;
 
@@ -899,52 +987,49 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  if (!mappedInput.hasTouch() && hintVisible && !text.empty()) {
+  if ((!UITheme::getInstance().hasMainTabs() || !mappedInput.hasTouch()) && hintVisible && cursorMode &&
+      !text.empty()) {
     const int hintLh = renderer.getLineHeight(SMALL_FONT_ID);
     const int underlineY = inputY + inputHeight + lineHeight + metrics.verticalSpacing;
     const int hintY = underlineY + 4;
-    if (cursorMode) {
-      int hintLineY = hintY;
-      if (inputType == InputType::Password && togglePos) {
-        renderer.drawCenteredText(
-            SMALL_FONT_ID, hintLineY,
-            passwordVisible ? tr(STR_KB_HINT_TOGGLE_HIDE_PASSWORD) : tr(STR_KB_HINT_TOGGLE_SHOW_PASSWORD), true);
-        hintLineY += hintLh;
-        renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_RETURN_CURSOR), true);
-      } else {
-        renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_MOVE_CURSOR), true);
-        hintLineY += hintLh;
-        if (inputType == InputType::Password) {
-          const char* passTip = passwordVisible ? tr(STR_KB_HINT_HIDE_PASSWORD) : tr(STR_KB_HINT_SHOW_PASSWORD);
-          renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, passTip, true);
-        }
-      }
+    int hintLineY = hintY;
+    if (inputType == InputType::Password && togglePos) {
+      renderer.drawCenteredText(
+          SMALL_FONT_ID, hintLineY,
+          passwordVisible ? tr(STR_KB_HINT_TOGGLE_HIDE_PASSWORD) : tr(STR_KB_HINT_TOGGLE_SHOW_PASSWORD), true);
+      hintLineY += hintLh;
+      renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_RETURN_CURSOR), true);
     } else {
-      renderer.drawCenteredText(SMALL_FONT_ID, hintY, tr(STR_KB_HINT_EDIT_ENTRY), true);
+      renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_MOVE_CURSOR), true);
+      hintLineY += hintLh;
+      if (inputType == InputType::Password) {
+        const char* passTip = passwordVisible ? tr(STR_KB_HINT_HIDE_PASSWORD) : tr(STR_KB_HINT_SHOW_PASSWORD);
+        renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, passTip, true);
+      }
     }
   }
 
   const fui::Rect kbRect = keyboardRect();
+  const fui::Rect keysRect = keyboardKeysRect();
 
   const int tipsLh = renderer.getLineHeight(SMALL_FONT_ID);
   const int underlineBottom = inputY + inputHeight + lineHeight + metrics.verticalSpacing + 4;
   auto drawTip = [&](const char* tip, int y) { renderer.drawCenteredText(SMALL_FONT_ID, y, tip, true); };
 
-  int tipCount = 0;
-  if (cursorMode) {
-    tipCount = 1;
-  } else if (urlPanel) {
-    tipCount = 1 + (!text.empty() ? 1 : 0);
-  } else if (symbols) {
-    tipCount = !text.empty() ? 1 : 0;
-  } else {
-    tipCount = 1 + (inputType == InputType::Url ? 1 : 0) + (!text.empty() ? 1 : 0);
-  }
+  // Reserve the Clear Text row even when the entry is empty.
+  const int tipCount = cursorMode ? 1 : urlPanel ? 3 : symbols ? 2 : 3 + (inputType == InputType::Url ? 1 : 0);
+  const int tipsHeight = (tipCount + 1) * tipsLh;
+  // Reserve cursor instructions even for an empty field; passwords need a second row.
+  const int tipsTop = underlineBottom + (cursorMode ? (isPassword ? 2 : 1) * tipsLh : 0);
 
-  if (!mappedInput.hasTouch() && tipCount > 0) {
-    int y = (underlineBottom + kbRect.y) / 2 - (tipCount + 1) * tipsLh / 2;
+  if ((!UITheme::getInstance().hasMainTabs() || !mappedInput.hasTouch()) && kbRect.y - tipsTop >= tipsHeight) {
+    int y = tipsTop + (kbRect.y - tipsTop - tipsHeight) / 2;
     drawTip(tr(STR_KB_TIPS), y);
     y += tipsLh;
+    if (!cursorMode) {
+      drawTip(tr(STR_KB_HINT_EDIT_ENTRY), y);
+      y += tipsLh;
+    }
     if (cursorMode) {
       drawTip(tr(STR_KB_HINT_RETURN_KEYBOARD), y);
     } else if (urlPanel) {
@@ -997,22 +1082,34 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.layout = &layout;
   props.keyAction = ACTION_KEY;  // one action id; loop() dispatches on key value
   props.okLabel = tr(STR_OK_BUTTON);
-  props.shiftLabel = tr(STR_KEY_SHIFT);
   // Match the label to the layer the mode key leads back from: the symbols
   // layer and the URL snippet panel both label it "abc" in the static tables.
   props.modeLabel =
       (symbols || (inputType == InputType::Url && urlPanel)) ? tr(STR_KEY_MODE_ABC) : tr(STR_KEY_MODE_SYMBOLS);
   props.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
-  props.selectedIndex = cursorMode ? -1 : static_cast<int16_t>(selectedLogicalIndex());
-  props.labelText.font = fui::GfxRendererTarget::FONT_BODY;
+  props.selectedIndex = (cursorMode || mappedInput.hasTouch()) ? -1 : static_cast<int16_t>(selectedLogicalIndex());
+  // The 12-column Arabic rows need the smaller font for wide isolated letters.
+  props.labelText.font = layoutId == fui::KeyboardLayoutId::ArabicAr && !symbols ? fui::GfxRendererTarget::FONT_SMALL
+                                                                                 : fui::GfxRendererTarget::FONT_BODY;
   props.altText.font = fui::GfxRendererTarget::FONT_SMALL;
-  props.gap = static_cast<int16_t>(metrics.keyboardKeySpacing);
-  props.padding = fui::Insets{0, 0, 0, 0};
-  // Fingers land low on the bottom row (occlusion) and there is no key below
-  // to catch the miss — extend its hit band down to the button hints bar.
-  const int hintsTop = renderer.getScreenHeight() - metrics.buttonHintsHeight;
-  props.bottomHitOverflow = static_cast<int16_t>(std::max(0, hintsTop - (kbRect.y + kbRect.height)));
-  fui::keyboard(frame, kbRect, props);
+  if (UiHighDpiProfile::enabled) {
+    const int rows = layout.rowCount;
+    const int keyHeight =
+        (keysRect.height - KEYBOARD_PANEL_PADDING * 2 - (rows - 1) * keyboardGap(metrics, inputLineCount() == 1)) /
+        rows;
+    if (keyHeight < renderer.getLineHeight(UI_12_FONT_ID) + renderer.getLineHeight(SMALL_FONT_ID) + 8)
+      props.labelText.font = fui::GfxRendererTarget::FONT_SMALL;
+  }
+  props.gap = props.rowGap =
+      static_cast<int16_t>(keyboardGap(metrics, UiHighDpiProfile::enabled && inputLineCount() == 1));
+  if (urlPanel) props.uniformKeyWidth = false;  // Shortcut rows stretch independently.
+  if (!mappedInput.hasTouch()) props.background = fui::Paint::none();
+  frame.target().fill(kbRect, props.background);
+  const int bottomEdge =
+      mappedInput.hasTouch() ? renderer.getScreenHeight() : renderer.getScreenHeight() - metrics.buttonHintsHeight;
+  props.bottomHitOverflow =
+      UiHighDpiProfile::enabled ? 0 : static_cast<int16_t>(std::max(0, bottomEdge - keysRect.bottom()));
+  fui::keyboard(frame, keysRect, props);
   interactions.publish();
   interactionsReady = true;
 

@@ -62,6 +62,12 @@ git ls-files --exclude-standard ${GIT_LS_FILES_FLAG:+"${GIT_LS_FILES_FLAG}"} \
     | grep -v -E '^lib/Epub/Epub/hyphenation/generated/' \
     | grep -v -E '^lib/uzlib/' \
     | grep -v -E '^lib/miniz/third_party/' \
-    | xargs -r "${CLANG_FORMAT_BIN}" "${CLANG_FORMAT_FLAGS[@]}"
+    | while IFS= read -r file; do
+        # Unstaged deletions are still returned by git ls-files.
+        if [[ -f "${file}" ]]; then
+          printf '%s\0' "${file}"
+        fi
+      done \
+    | xargs -0 -r "${CLANG_FORMAT_BIN}" "${CLANG_FORMAT_FLAGS[@]}"
 # Restore strict pipeline failure handling for the rest of the script.
 set -o pipefail

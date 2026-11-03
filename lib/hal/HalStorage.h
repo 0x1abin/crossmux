@@ -26,6 +26,14 @@ class HalStorage {
   bool begin();
   bool ready() const;
   bool getSpace(uint64_t& totalBytes, uint64_t& freeBytes);
+  // Physical card-detect hint, when the board has one (Read Pico: FCA9555 P0.6,
+  // active-low). ADVISORY ONLY, never a mount gate: the frozen round-1 decision
+  // is mount-by-attempt (docs/engineering/read-pico.md B11), because a CD line
+  // can be wrong about a card that mounts fine, and a failed expander read must
+  // never be reported as "present" or as "absent". Returns false on boards with
+  // no CD line and on any read failure, so a caller that wants a real answer must
+  // combine it with the mount result — do not render "no card" from false alone.
+  bool cardDetectAsserted() const;
   // Stop the SD card for deep sleep: unmount, stop the SDMMC host, and release
   // the bus pads (no-op on SPI boards). Call only after all file users have
   // stopped; open HalFiles become invalid. A deep-sleep wake resets the MCU and
@@ -37,6 +45,7 @@ class HalStorage {
   bool disconnectUsbDriveHost();
   void endUsbDrive();
   UsbDriveState usbDriveState() const;
+  bool usbDriveHostSuspended() const;
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);
@@ -46,6 +55,9 @@ class HalStorage {
   bool readFileToStream(const char* path, Print& out, size_t chunkSize = 256);
   // Read up to `bufferSize-1` bytes into `buffer`, null-terminating it. Returns bytes read.
   size_t readFileToBuffer(const char* path, char* buffer, size_t bufferSize, size_t maxBytes = 0);
+  // Read the whole file at `path` into `out`. Fails (without allocating) on
+  // missing, directory, empty, above-`cap`, or short-read files.
+  bool readFileToString(const char* moduleName, const std::string& path, size_t cap, std::string& out);
   // Write a string to `path` on the SD card. Overwrites existing file.
   // Returns true on success.
   bool writeFile(const char* path, const String& content);
@@ -57,6 +69,8 @@ class HalStorage {
   bool exists(const char* path);
   bool remove(const char* path);
   bool rename(const char* oldPath, const char* newPath);
+  // Move a fully written temp file over `path`, replacing any existing file.
+  bool replaceFile(const char* tmpPath, const char* path);
   bool rmdir(const char* path);
 
   bool openFileForRead(const char* moduleName, const char* path, HalFile& file);
@@ -111,10 +125,12 @@ class HalFile : public Print {
   size_t size();
   size_t fileSize();
   uint64_t fileSize64();
+  uint32_t modificationTime();
   bool seek(size_t pos);
   bool seek64(uint64_t pos);
   bool seekCur(int64_t offset);
   bool seekSet(size_t offset);
+  bool truncate(uint64_t length);
   int available() const;
   size_t position() const;
   int read(void* buf, size_t count);

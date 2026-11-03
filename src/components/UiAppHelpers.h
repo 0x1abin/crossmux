@@ -6,12 +6,18 @@
 
 #include <atomic>
 
+#include "HapticFeedback.h"
 #include "MappedInputManager.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/icons/customListIcons.h"
+#include "components/icons/inx_apps.h"
 #include "components/icons/listIcons.h"
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include "components/icons/listIcons48.h"
+#include "components/icons/uiChromeIcons.h"
+#endif
 
 // Shared glue for activities hosting a FreeInkApp: the font-bound render
 // target and the touch snapshot FreeInkApp routing consumes.
@@ -42,12 +48,13 @@ inline std::atomic<const freeink::ui::ThemeTokens*>& sharedUiThemeCell() {
 // that also want to read it back immediately (e.g. BaseTheme::drawHeader(),
 // which derives the same tokens as a render-path scratch value instead of
 // stack-allocating its own copy).
-inline const freeink::ui::ThemeTokens& refreshSharedUiThemeTokens(const freeink::ui::GfxRendererTarget& target) {
+inline const freeink::ui::ThemeTokens& refreshSharedUiThemeTokens(const freeink::ui::GfxRendererTarget& target,
+                                                                  bool upstreamStyle = false) {
   static freeink::ui::ThemeTokens pool[2];
   auto& cell = sharedUiThemeCell();
   const auto* current = cell.load(std::memory_order_relaxed);
   freeink::ui::ThemeTokens* next = (current == &pool[0]) ? &pool[1] : &pool[0];
-  *next = uiThemeTokens(target);
+  *next = uiThemeTokens(target, upstreamStyle);
   cell.store(next, std::memory_order_release);
   return *next;
 }
@@ -55,20 +62,24 @@ inline const freeink::ui::ThemeTokens& refreshSharedUiThemeTokens(const freeink:
 // Refresh the shared tokens from the active UITheme + this target's fonts and
 // point the app at them. Replaces the old per-app `app.setTheme(...)` copies.
 template <typename App>
-inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& target) {
-  refreshSharedUiThemeTokens(target);
+inline void applySharedUiTheme(App& app, const freeink::ui::GfxRendererTarget& target, bool upstreamStyle = false) {
+  refreshSharedUiThemeTokens(target, upstreamStyle);
   app.setThemeRef(&sharedUiThemeCell());
 }
 
 // Bind the uiScale fonts before FreeInkApp's constructor derives its theme
 // metrics from the body font's line height.
-inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) {
-  freeink::ui::GfxRendererTarget target(renderer);
-  const auto spec = uiScaleSpec();
+inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer, bool upstreamStyle = false) {
+  freeink::ui::GfxRendererTarget target(renderer, BoardConfig::hasTouch());
+  applyUiTextAlignment(target, upstreamStyle);
+  const auto spec = uiScaleSpec(upstreamStyle);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL,
-                 UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
+                 !upstreamStyle && UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : spec.smallFontId);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, spec.bodyFontId);
   target.setFont(freeink::ui::GfxRendererTarget::FONT_TITLE, spec.titleFontId);
+  // Status chrome (header battery percent, clock) stays at the fixed small
+  // font; the uiScale FONT_SMALL is for list subtitles.
+  target.setFont(freeink::ui::GfxRendererTarget::FONT_LABEL, SMALL_FONT_ID);
   return target;
 }
 
@@ -80,6 +91,38 @@ inline freeink::ui::GfxRendererTarget makeUiTarget(const GfxRenderer& renderer) 
 // the legacy drawIcon assets use a different bit layout). Two crisp sizes:
 // 24 for single-line rows, 32 for label+subtitle rows.
 inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24) {
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (size >= 48 || UiHighDpiProfile::enabled) {
+    switch (icon) {
+      case UIIcon::Settings:
+        return freeink::ui::bitmapFromIcon(icon_settings_2_48);
+      case UIIcon::Folder:
+        return freeink::ui::bitmapFromIcon(icon_folder_48);
+      case UIIcon::Text:
+        return freeink::ui::bitmapFromIcon(icon_file_text_48);
+      case UIIcon::Image:
+        return freeink::ui::bitmapFromIcon(icon_image_48);
+      case UIIcon::Book:
+        return freeink::ui::bitmapFromIcon(icon_book_48);
+      case UIIcon::File:
+        return freeink::ui::bitmapFromIcon(icon_file_48);
+      case UIIcon::Wifi:
+        return freeink::ui::bitmapFromIcon(icon_wifi_48);
+      case UIIcon::Library:
+        return freeink::ui::bitmapFromIcon(icon_library_48);
+      case UIIcon::Hotspot:
+        return freeink::ui::bitmapFromIcon(icon_radio_tower_48);
+      case UIIcon::Usb:
+        return freeink::ui::bitmapFromIcon(icon_usb_48);
+      case UIIcon::Bookmark:
+        return freeink::ui::bitmapFromIcon(icon_bookmark_48);
+      case UIIcon::Blocks:
+        return freeink::ui::bitmapFromIcon(icon_blocks_48);
+      default:
+        break;
+    }
+  }
+#endif
   if (size >= 32) {
     switch (icon) {
       case UIIcon::Folder:
@@ -96,13 +139,24 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
         return freeink::ui::bitmapFromIcon(icon_wifi_32);
       case UIIcon::Library:
         return freeink::ui::bitmapFromIcon(icon_library_32);
+      case UIIcon::Plugins:
+        return freeink::ui::bitmapFromIcon(icon_blocks_32);
       case UIIcon::Hotspot:
         return freeink::ui::bitmapFromIcon(icon_radio_tower_32);
       case UIIcon::Usb:
         return freeink::ui::bitmapFromIcon(icon_usb_32);
       case UIIcon::Bookmark:
         return freeink::ui::bitmapFromIcon(icon_bookmark_32);
+      case UIIcon::Blocks:
+        return freeink::ui::bitmapFromIcon(icon_blocks_32);
       default:
+        // App-specific icons (Transfer, AirPage, ...) have no Lucide asset;
+        // reuse the Inx grid artwork instead. It is the same 32x32 MSB-first
+        // 0-is-ink layout freeink::Icon expects, so wrap it directly.
+        if (const uint8_t* bits = InxAppIcons::get(icon)) {
+          const freeink::Icon appIcon{32, 32, 16, bits};
+          return freeink::ui::bitmapFromIcon(appIcon);
+        }
         return {};
     }
   }
@@ -121,12 +175,16 @@ inline freeink::ui::BitmapRef listIconFor(const UIIcon icon, const int size = 24
       return freeink::ui::bitmapFromIcon(icon_wifi_24);
     case UIIcon::Library:
       return freeink::ui::bitmapFromIcon(icon_library_24);
+    case UIIcon::Plugins:
+      return freeink::ui::bitmapFromIcon(icon_blocks_24);
     case UIIcon::Hotspot:
       return freeink::ui::bitmapFromIcon(icon_radio_tower_24);
     case UIIcon::Usb:
       return freeink::ui::bitmapFromIcon(icon_usb_24);
     case UIIcon::Bookmark:
       return freeink::ui::bitmapFromIcon(icon_bookmark_24);
+    case UIIcon::Blocks:
+      return freeink::ui::bitmapFromIcon(icon_blocks_24);
     default:
       return {};
   }

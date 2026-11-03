@@ -3,12 +3,14 @@
 
 import argparse
 import copy
+import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlparse
 
 from publish_firmware import REPO, download, publish_channel, release, same_asset, release_identity, channel_alias_data
 
@@ -24,6 +26,8 @@ def identity(index):
     value = copy.deepcopy(index)
     value.pop('updatedAt', None)
     for target in value['targets'].values():
+        if isinstance(target.get('bundle'), dict):
+            target['bundle'].pop('url', None)
         for pointer in target['variants'].values():
             pointer.pop('manifestUrl', None)
             pointer.pop('publishedAt', None)
@@ -33,6 +37,9 @@ def identity(index):
 def global_index(source, tag):
     result = copy.deepcopy(source)
     for target in result['targets'].values():
+        if isinstance(target.get('bundle'), dict):
+            name = target['bundle']['url'].rsplit('/', 1)[1]
+            target['bundle']['url'] = f'https://github.com/{REPO}/releases/download/{tag}/{name}'
         for pointer in target['variants'].values():
             name = pointer['manifestUrl'].rsplit('/', 1)[1]
             pointer['manifestUrl'] = f'https://github.com/{REPO}/releases/download/{tag}/{name}'
@@ -54,6 +61,33 @@ print(verify_release(index_url, sha, channel, fetch=fetch))
 '''
     subprocess.run([sys.executable, '-c', code, str(candidate), index_url, sha, index['channel']],
                    cwd=root, check=True)
+
+
+def verify_bundles(index, region, tag):
+    """Check bundles even when the historical build verifier predates bundles."""
+    for target_id, target in index['targets'].items():
+        bundle = target.get('bundle')
+        if bundle is None:  # Historical releases may predate bundled packages.
+            continue
+        if not isinstance(bundle, dict):
+            raise ValueError('invalid bundle')
+        name, url = bundle.get('name'), bundle.get('url')
+        size, digest = bundle.get('size'), bundle.get('sha256')
+        if (not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9._+-]*\.zip', name)
+                or type(size) is not int or size <= 0 or not re.fullmatch(r'[0-9a-f]{64}', str(digest))
+                or not isinstance(url, str)):
+            raise ValueError('invalid bundle metadata')
+        parsed = urlparse(url)
+        prefix = (f'/firmware/builds/{index["buildId"]}/' if region == 'cos'
+                  else f'/{REPO}/releases/download/{tag}/')
+        host = 'assets.crossmux.cn' if region == 'cos' else 'github.com'
+        expected_path = prefix + (target_id + '/' if region == 'cos' else '') + name
+        if (parsed.scheme != 'https' or parsed.netloc != host or parsed.query or parsed.fragment
+                or parsed.path != expected_path):
+            raise ValueError('invalid bundle URL')
+        data = download(url)
+        if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError('bundle failed size or SHA-256 verification')
 
 
 def restore(channel):
@@ -88,6 +122,8 @@ def restore(channel):
             subprocess.run(['git', 'archive', '--format=tar', sha, 'scripts'], stdout=output, check=True)
         subprocess.run(['tar', '-xf', str(root / 'contract.tar'), '-C', str(root)], check=True)
         verify_snapshot(source, source_url, sha, root)
+        verify_bundles(source, "cos", tag)
+        verify_bundles(candidate, "github", tag)
         for target_id, target in source['targets'].items():
             for flavor, pointer in target['variants'].items():
                 remote = candidate['targets'][target_id]['variants'][flavor]['manifestUrl']

@@ -78,6 +78,16 @@ void report(ProgressCallback progress, size_t completed, size_t total, void* con
 
 size_t roundUp(size_t value, size_t alignment) { return (value + alignment - 1) / alignment * alignment; }
 
+Result inspectSource(const char* sourcePath, SourceIdentity& source) {
+  if (!identifySource(sourcePath, source)) return Result::InvalidFont;
+  if (isValidFor(sourcePath)) return Result::AlreadyCached;
+
+  const HalOtaSlot slot = HalOtaSlot::inactive();
+  if (!slot.valid() || !slot.safeForScratchWrite()) return Result::NotSafe;
+  if (source.size > capacity()) return Result::TooLarge;
+  return Result::Ok;
+}
+
 }  // namespace
 
 size_t capacity() {
@@ -112,14 +122,16 @@ bool readAt(size_t offset, void* data, size_t length, size_t payloadSize) {
   return length == 0 || slot.read(sd_card_font_cache_format::HEADER_AREA_SIZE + offset, data, length);
 }
 
+Result preflight(const char* sourcePath) {
+  SourceIdentity source{};
+  return inspectSource(sourcePath, source);
+}
+
 Result preload(const char* sourcePath, ProgressCallback progress, void* context) {
   SourceIdentity source{};
-  if (!identifySource(sourcePath, source)) return Result::InvalidFont;
-  if (isValidFor(sourcePath)) return Result::AlreadyCached;
-
+  const Result check = inspectSource(sourcePath, source);
+  if (check != Result::Ok) return check;
   const HalOtaSlot slot = HalOtaSlot::inactive();
-  if (!slot.valid() || !slot.safeForScratchWrite()) return Result::NotSafe;
-  if (source.size > capacity()) return Result::TooLarge;
 
   auto buffer = makeUniqueNoThrow<uint8_t[]>(CHUNK_SIZE);
   if (!buffer) return Result::Oom;

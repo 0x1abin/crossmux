@@ -7,6 +7,9 @@
 #include <Logging.h>
 #include <esp_ota_ops.h>
 
+#include <algorithm>
+#include <cstdint>
+
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
 #include "activities/home/FileBrowserActivity.h"
@@ -16,8 +19,17 @@
 #include "fontIds.h"
 #include "network/FirmwareFlasher.h"
 
+namespace {
+constexpr unsigned int PROGRESS_REFRESH_STEP_PERCENT = 10;
+}
+
 void SdFirmwareUpdateActivity::onEnter() {
   Activity::onEnter();
+#if FREEINK_DEVICE_PICCO
+  // The stock Picco application slot is the running slot, not an update destination.
+  finish();
+  return;
+#endif
   // Build-identity marker — confirms which firmware build owns the SD update flow.
   LOG_INF("FW", "SdFirmwareUpdateActivity build=%s %s recovery=%d", __DATE__, __TIME__, recoveryMode ? 1 : 0);
   state = State::PICKING;
@@ -80,7 +92,8 @@ bool SdFirmwareUpdateActivity::validateFirmware() {
   // size, which had the side effect of erasing partition state and was wasted
   // work since we only need the size bound for validation here.
   const esp_partition_t* dest = esp_ota_get_next_update_partition(nullptr);
-  if (!dest) {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  if (!dest || !running || dest->address == running->address) {
     LOG_ERR("FW", "no next-update partition available");
     errorMessage = tr(STR_INVALID_FIRMWARE);
     return false;
@@ -145,7 +158,7 @@ void SdFirmwareUpdateActivity::onConfirmationResult(const ActivityResult& result
     RenderLock lock(*this);
     state = State::UPDATING;
     writtenBytes = 0;
-    lastRenderedPercent = 101;
+    lastProgressRefreshPercent = 0;
     sdFontSystem.releaseLoadedFont(renderer);
   }
   requestUpdateAndWait();
@@ -157,11 +170,21 @@ void SdFirmwareUpdateActivity::performUpdate() {
 
   auto progressCb = +[](size_t written, size_t total, void* ctx) {
     auto* self = static_cast<SdFirmwareUpdateActivity*>(ctx);
-    self->writtenBytes = written;
-    self->firmwareSize = total;
-    // immediate=true: wake the render task directly. We're in a tight sync
-    // loop so the main loop won't drain the requestedUpdate flag for us.
-    self->requestUpdate(true);
+    bool refresh = false;
+    {
+      RenderLock lock(*self);
+      self->writtenBytes = written;
+      self->firmwareSize = total;
+      const unsigned int percent =
+          total > 0 ? static_cast<unsigned int>(static_cast<uint64_t>(std::min(written, total)) * 100 / total) : 0;
+      if (percent >= self->lastProgressRefreshPercent + PROGRESS_REFRESH_STEP_PERCENT ||
+          (percent == 100 && self->lastProgressRefreshPercent != 100)) {
+        self->lastProgressRefreshPercent = percent;
+        refresh = true;
+      }
+    }
+    // Flash erase/write must not interrupt Read Pico's in-flight panel refresh.
+    if (refresh) self->requestUpdateAndWait();
   };
 
   // Re-validate at flash time (TOCTOU): SD is removable, so don't trust the
@@ -212,6 +235,60 @@ void SdFirmwareUpdateActivity::loop() {
 }
 
 void SdFirmwareUpdateActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs()) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    renderer.clearScreen();
+
+    const char* headerText = recoveryMode ? tr(STR_RECOVERY_MODE) : tr(STR_SD_FIRMWARE_UPDATE);
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerText);
+
+    const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto top = (pageHeight - lineHeight) / 2;
+
+    if (state == State::VALIDATING) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_VALIDATING_FIRMWARE));
+    } else if (state == State::UPDATING) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING), true, EpdFontFamily::BOLD);
+
+      int y = top + lineHeight + metrics.verticalSpacing;
+      GUI.drawProgressBar(
+          renderer,
+          Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+          std::min(writtenBytes, firmwareSize), std::max<size_t>(firmwareSize, 1));
+      y += metrics.progressBarHeight + metrics.verticalSpacing;
+      // Percent label is drawn by BaseTheme::drawProgressBar; this slot is left intentionally empty
+      // so the do-not-power-off line below stays at the same Y as before.
+      y += lineHeight + metrics.verticalSpacing;
+      renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF));
+    } else if (state == State::SUCCESS) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_COMPLETE), true, EpdFontFamily::BOLD);
+      const int hintY = top + lineHeight + metrics.verticalSpacing;
+      const Rect hintBounds{metrics.contentSidePadding, hintY, pageWidth - metrics.contentSidePadding * 2,
+                            pageHeight - hintY};
+      UITheme::drawCenteredWrappedText(renderer, hintBounds, UI_10_FONT_ID, tr(STR_RESTARTING_HINT), 3, true,
+                                       EpdFontFamily::REGULAR, UITheme::TextVerticalAlignment::TOP);
+    } else if (state == State::FAILED) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+      if (!errorMessage.empty()) {
+        renderer.drawCenteredText(UI_10_FONT_ID, top + lineHeight + metrics.verticalSpacing, errorMessage.c_str());
+      }
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else {
+      // PICKING / CONFIRMING: a sub-activity is on top, nothing to draw.
+      if (recoveryMode) {
+        renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_RECOVERY_MODE_HINT));
+      }
+    }
+
+    renderer.displayBuffer();
+
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
 
@@ -234,13 +311,6 @@ void SdFirmwareUpdateActivity::render(RenderLock&&) {
       UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, SubpageLayout::centeredTop(content, titleHeight),
                                 tr(STR_VALIDATING_FIRMWARE));
     } else if (state == State::UPDATING) {
-      // Throttle redraws to once per percent.
-      const unsigned int pct = firmwareSize > 0 ? static_cast<unsigned int>((writtenBytes * 100) / firmwareSize) : 0;
-      if (pct == lastRenderedPercent) {
-        return;
-      }
-      lastRenderedPercent = pct;
-
       const int blockHeight = titleHeight + sectionGap +
                               GUI.measureProgressBarHeight(renderer, metrics.progressBarHeight) + sectionGap +
                               lineHeight;
@@ -248,7 +318,7 @@ void SdFirmwareUpdateActivity::render(RenderLock&&) {
       UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, y, tr(STR_UPDATING), true, EpdFontFamily::BOLD);
       y += titleHeight + sectionGap;
       y = GUI.drawProgressBar(renderer, Rect{textBounds.x, y, textBounds.width, metrics.progressBarHeight},
-                              static_cast<int>(pct), 100);
+                              std::min(writtenBytes, firmwareSize), std::max<size_t>(firmwareSize, 1));
       UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, y + sectionGap,
                                 tr(STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF));
     } else if (state == State::SUCCESS) {

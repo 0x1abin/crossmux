@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BitmapHelpers.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
 #include <stdint.h>
@@ -17,6 +18,7 @@
 struct DirectPixelWriter {
   uint8_t* fb;
   GfxRenderer::RenderMode mode;
+  bool absolute = false;
   uint16_t displayWidthBytes;  // Runtime framebuffer stride (X4: 100, X3: 99)
   // Active write target: for tiled grayscale, fb is the band scratch, originY is
   // the band's top physical row, and clipRows is the band height. Off-band
@@ -40,6 +42,7 @@ struct DirectPixelWriter {
     originY = renderer.getWriteOriginY();
     clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
+    absolute = renderer.grayPlanesAreAbsolute();
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -145,7 +148,7 @@ struct DirectPixelWriter {
   // Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
-    auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue);
+    auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue, absolute);
     if (mode == GfxRenderer::BW && writeWhiteInBw && pixelValue >= 3) pixel = {true, false};
     if (!pixel.draw) return;
 
@@ -157,10 +160,18 @@ struct DirectPixelWriter {
     const int sy = phyY - originY;
     if (static_cast<unsigned>(sy) >= static_cast<unsigned>(clipRows)) return;
 
-    const uint16_t byteIndex = static_cast<uint16_t>(sy * displayWidthBytes + (phyX >> 3));
+    // uint32_t, NOT uint16_t: this index has to cover the whole framebuffer,
+    // which is `displayWidthBytes * panelHeight` bytes. On the boards this was
+    // written for it happened to fit in 16 bits (X4: 100 x 480 -> 47,999 max;
+    // X3: 99 x 528 -> 52,271 max), so the narrower type was invisible. Read
+    // Pico's panel is 1216/8 = 152 bytes x 684 rows = 103,968 bytes, and every
+    // index past 65,535 wrapped to an earlier row: inline images were written to
+    // the wrong place ("错位") while text stayed correct, because
+    // GfxRenderer::drawPixel() already indexes with uint32_t.
+    const uint32_t byteIndex = static_cast<uint32_t>(sy * displayWidthBytes + (phyX >> 3));
     const uint8_t bitMask = 1 << (7 - (phyX & 7));
 
-    if (GfxRenderer::framebufferState(mode, pixel.state)) {
+    if (pixel.state) {
       fb[byteIndex] &= ~bitMask;  // Clear bit (draw black)
     } else {
       fb[byteIndex] |= bitMask;  // Set bit (draw white)

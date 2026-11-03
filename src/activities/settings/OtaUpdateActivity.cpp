@@ -19,6 +19,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
+#include "components/UIThemeTokens.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
 #include "util/ButtonNavigator.h"
@@ -33,6 +34,7 @@ enum ReadyRow {
 };
 
 constexpr uint8_t RELEASE_NOTE_MAX_LINES = 4;
+constexpr unsigned int PROGRESS_REFRESH_STEP_PERCENT = 10;
 
 fui::TextStyle releaseNoteStyle() {
   fui::TextStyle style;
@@ -126,6 +128,12 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
+
+#if FREEINK_DEVICE_PICCO
+  // Picco retains its vendor single-app layout and updates through USB only.
+  finish();
+  return;
+#endif
 
   resetUi();
   failedDetail = nullptr;
@@ -240,6 +248,8 @@ void OtaUpdateActivity::rebuildReleaseNotePages(const Rect& safeArea, const int 
   }
 
   fui::GfxRendererTarget target(renderer);
+
+  applyUiTextAlignment(target);
   target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
   const fui::TextStyle style = releaseNoteStyle();
   const int titleHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -306,6 +316,7 @@ void OtaUpdateActivity::renderUpdateAvailable(const Rect& safeArea) {
                               tr(STR_NO_RELEASE_NOTES));
   } else {
     fui::GfxRendererTarget target(renderer);
+    applyUiTextAlignment(target);
     target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_10_FONT_ID);
     const fui::TextStyle style = releaseNoteStyle();
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
@@ -366,6 +377,71 @@ void OtaUpdateActivity::onInstallUpdate(const fui::ActionEvent&, void* user) {
 }
 
 void OtaUpdateActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs() && state != State::Ready && state != State::UpdateAvailable &&
+      state != State::ConfirmingUpdate) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    renderer.clearScreen();
+
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_UPDATE));
+    const auto height = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto top = (pageHeight - height) / 2;
+
+    if (state == State::CheckingForUpdate) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_CHECKING_UPDATE));
+    } else if (state == State::ConfirmingUpdate) {
+      // Version info sits in the upper part of the screen so the centered
+      // Cancel/Update popup doesn't cover it (same layout as ConfirmationActivity).
+      const int infoTop = pageHeight / 6;
+      renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, infoTop,
+                        (std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION).c_str());
+      renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, infoTop + height + metrics.verticalSpacing,
+                        (std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion()).c_str());
+
+      if (updateConfirmation.processRender(renderer, mappedInput)) return;
+    } else if (state == State::UpdateInProgress) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING));
+
+      int y = top + height + metrics.verticalSpacing;
+      GUI.drawProgressBar(
+          renderer,
+          Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+          std::min(progressBytes, progressTotalBytes), std::max<size_t>(progressTotalBytes, 1));
+
+      y += metrics.progressBarHeight + metrics.verticalSpacing;
+      // Percent label is drawn by BaseTheme::drawProgressBar; this slot is left intentionally empty
+      // so the bytes line below stays at the same Y it was at when the activity drew its own percent.
+      y += height + metrics.verticalSpacing;
+      char progressText[48];
+      snprintf(progressText, sizeof(progressText), "%zu / %zu", progressBytes, progressTotalBytes);
+      renderer.drawCenteredText(UI_10_FONT_ID, y, progressText);
+    } else if (state == State::NoUpdate) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_UPDATE), true, EpdFontFamily::BOLD);
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state == State::Failed) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+      if (failedDetail != nullptr) {
+        renderer.drawCenteredText(UI_10_FONT_ID, top + height + metrics.verticalSpacing, failedDetail);
+      }
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state == State::Finished) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_COMPLETE), true, EpdFontFamily::BOLD);
+      const int hintY = top + height + metrics.verticalSpacing;
+      const Rect hintBounds{metrics.contentSidePadding, hintY, pageWidth - metrics.contentSidePadding * 2,
+                            pageHeight - hintY};
+      UITheme::drawCenteredWrappedText(renderer, hintBounds, UI_10_FONT_ID, tr(STR_AUTO_RESTART_HINT), 3, true,
+                                       EpdFontFamily::REGULAR, UITheme::TextVerticalAlignment::TOP);
+    }
+
+    renderer.displayBuffer();
+
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safeArea = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   const Rect content = SubpageLayout::contentRect(safeArea, metrics);
@@ -374,16 +450,6 @@ void OtaUpdateActivity::render(RenderLock&&) {
   const int height = renderer.getLineHeight(UI_10_FONT_ID);
   const int relatedGap = SubpageLayout::relatedGap(metrics);
   const int sectionGap = SubpageLayout::sectionGap(metrics);
-
-  float updaterProgress = 0;
-  if (state == State::UpdateInProgress) {
-    LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
-    updaterProgress = updater.getTotalSize() > 0
-                          ? static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize())
-                          : 0;
-    if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) return;
-    lastUpdaterPercentage = static_cast<int>(updaterProgress * 100);
-  }
 
   renderer.clearScreen();
 
@@ -441,10 +507,10 @@ void OtaUpdateActivity::render(RenderLock&&) {
       UITheme::drawCenteredText(renderer, textBounds, UI_12_FONT_ID, y, tr(STR_UPDATING), true, EpdFontFamily::BOLD);
       y += titleHeight + sectionGap;
       y = GUI.drawProgressBar(renderer, Rect{textBounds.x, y, textBounds.width, metrics.progressBarHeight},
-                              static_cast<int>(updaterProgress * 100), 100) +
+                              std::min(progressBytes, progressTotalBytes), std::max<size_t>(progressTotalBytes, 1)) +
           relatedGap;
       char progressText[48];
-      snprintf(progressText, sizeof(progressText), "%zu / %zu", updater.getProcessedSize(), updater.getTotalSize());
+      snprintf(progressText, sizeof(progressText), "%zu / %zu", progressBytes, progressTotalBytes);
       UITheme::drawCenteredText(renderer, textBounds, UI_10_FONT_ID, y, progressText);
       break;
     }
@@ -494,6 +560,9 @@ void OtaUpdateActivity::runUpdateInstall() {
   LOG_DBG("OTA", "New update available, starting download...");
   {
     RenderLock lock(*this);
+    progressBytes = 0;
+    progressTotalBytes = updater.getTotalSize();
+    lastProgressRefreshPercent = 0;
     state = State::UpdateInProgress;
   }
   requestUpdateAndWait();
@@ -505,10 +574,26 @@ void OtaUpdateActivity::runUpdateInstall() {
 #endif
   const auto res = updater.installUpdate(
       [](void* ctx) {
-        // immediate=true notifies the render task directly. The default deferred path only
-        // sets a flag consumed at the end of ActivityManager::loop(), which never runs while
-        // installUpdate() blocks this task.
-        static_cast<OtaUpdateActivity*>(ctx)->requestUpdate(true);
+        auto* self = static_cast<OtaUpdateActivity*>(ctx);
+        bool refresh = false;
+        {
+          RenderLock lock(*self);
+          self->progressBytes = self->updater.getProcessedSize();
+          self->progressTotalBytes = self->updater.getTotalSize();
+          const unsigned int percent =
+              self->progressTotalBytes > 0
+                  ? static_cast<unsigned int>(
+                        static_cast<uint64_t>(std::min(self->progressBytes, self->progressTotalBytes)) * 100 /
+                        self->progressTotalBytes)
+                  : 0;
+          if (percent >= self->lastProgressRefreshPercent + PROGRESS_REFRESH_STEP_PERCENT ||
+              (percent == 100 && self->lastProgressRefreshPercent != 100)) {
+            self->lastProgressRefreshPercent = percent;
+            refresh = true;
+          }
+        }
+        // Flash writes suspend Read Pico's display feeder tasks; finish the frame before resuming the writer.
+        if (refresh) self->requestUpdateAndWait();
       },
       this);
 

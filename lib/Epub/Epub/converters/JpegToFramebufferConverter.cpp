@@ -3,11 +3,13 @@
 #include <BuildScratch.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <JPEGDEC.h>
 #include <Logging.h>
 #include <Memory.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <memory>
 #include <new>
@@ -15,6 +17,7 @@
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"
+#include "SampleRowClamp.h"
 
 namespace {
 
@@ -27,9 +30,11 @@ struct JpegContext {
   int screenWidth{0};
   int screenHeight{0};
 
-  // Source dimensions after JPEGDEC's built-in scaling
+  // Visible source dimensions after JPEGDEC's built-in scaling
   int scaledSrcWidth{0};
   int scaledSrcHeight{0};
+  int cropLeft{0};
+  int cropTop{0};
 
   // Final output dimensions
   int dstWidth{0};
@@ -103,11 +108,15 @@ constexpr size_t JPEG_DECODER_SIZE = sizeof(JPEGDEC);
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_SIZE + 16 * 1024;
 
 bool hasHeapForJpegDecoder(const char* operation) {
-  const size_t freeHeap = ESP.getFreeHeap();
-  const size_t maxAlloc = ESP.getMaxAllocHeap();
-  if (freeHeap >= MIN_FREE_HEAP_FOR_JPEG && maxAlloc >= JPEG_DECODER_SIZE) return true;
-  LOG_ERR("JPG", "Not enough heap for JPEG %s (free=%u need=%u, maxAlloc=%u need=%u)", operation, freeHeap,
-          MIN_FREE_HEAP_FOR_JPEG, maxAlloc, JPEG_DECODER_SIZE);
+  const auto available = HalMemory::getDefaultHeap();
+  if (available.freeBytes >= MIN_FREE_HEAP_FOR_JPEG && available.largestBlockBytes >= JPEG_DECODER_SIZE) return true;
+  const auto internal = HalMemory::getInternalHeap();
+  const auto psram = HalMemory::getPsramHeap();
+  LOG_ERR("JPG",
+          "Not enough heap for JPEG %s (default free=%zu largest=%zu need=%zu/%zu, "
+          "internal free=%zu largest=%zu, PSRAM free=%zu largest=%zu)",
+          operation, available.freeBytes, available.largestBlockBytes, MIN_FREE_HEAP_FOR_JPEG, JPEG_DECODER_SIZE,
+          internal.freeBytes, internal.largestBlockBytes, psram.freeBytes, psram.largestBlockBytes);
   return false;
 }
 
@@ -138,6 +147,7 @@ constexpr int32_t FP_MASK = FP_ONE - 1;
 int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
+  if (ctx->config->cancellation.isCancelled()) return 0;
 
   ImageToFramebufferDecoder::yieldDuringDecode(ctx->lastYieldMs);
 
@@ -160,8 +170,8 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   GfxRenderer& renderer = *ctx->renderer;
   const int cfgX = ctx->config->x;
   const int cfgY = ctx->config->y;
-  const int blockX = pDraw->x;
-  const int blockY = pDraw->y;
+  const int blockX = pDraw->x - ctx->cropLeft;
+  const int blockY = pDraw->y - ctx->cropTop;
 
   // Determine destination pixel range covered by this source block
   const int srcYEnd = blockY + blockH;
@@ -206,6 +216,16 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     }
   }
 
+  const auto writeSample = [&](int outX, int outY, uint8_t gray) {
+    if (ctx->config->output == DecodeOutput::NativeGrayscale16) {
+      renderer.drawGrayscale16Pixel(outX, outY, gray);
+      return;
+    }
+    const uint8_t level = useDithering ? applyBayerDither4Level(gray, outX, outY) : gray / 85;
+    if (writeFramebuffer) pw.writePixel(outX, level);
+    if (caching) cw.writePixel(outX, level);
+  };
+
   // === 1:1 fast path: no scaling math ===
   if (fineScaleFPX == FP_ONE && fineScaleFPY == FP_ONE) {
     for (int dstY = dstYStart; dstY < dstYEnd; dstY++) {
@@ -216,24 +236,19 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         uint8_t gray = row[dstX - blockX];
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
     }
     return 1;
   }
 
-  // === Bilinear interpolation (upscale: fineScale > 1.0) ===
-  // Smooths block boundaries that would otherwise create visible banding
-  // on progressive JPEG DC-only decode (1/8 resolution upscaled to target).
-  if (fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) {
+  // === Bilinear interpolation ===
+  // Used for upscaling (smooths the block boundaries that a progressive JPEG's
+  // DC-only 1/8 decode would otherwise band), and for downscaling when the
+  // reader asks for it — nearest neighbour drops source detail and produces
+  // stair-step edges on scaled artwork.
+  const bool bilinearRequested = ctx->config != nullptr && ctx->config->bilinearScaling;
+  if ((fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) || bilinearRequested) {
     // Pre-compute safe X range where lx0 and lx0+1 are both in [0, validW-1].
     // Only the left/right edge pixels (typically 0-2 and 1-8 respectively) need clamping.
     int safeXStart = (int)(((int64_t)blockX * fineScaleFPX + FP_MASK) >> FP_SHIFT);
@@ -249,90 +264,63 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       const int32_t srcFyFP = dstY * invScaleFPY;
       const int32_t fy = srcFyFP & FP_MASK;
       const int32_t fyInv = FP_ONE - fy;
-      int ly0 = (srcFyFP >> FP_SHIFT) - blockY;
-      int ly1 = ly0 + 1;
-      if (ly0 < 0) ly0 = 0;
-      if (ly0 >= blockH) ly0 = blockH - 1;
-      if (ly1 >= blockH) ly1 = blockH - 1;
+      // Both sample rows are clamped inside the block; clamping only the lower
+      // bound of ly0 leaves ly1 at -1 for the first row of a shifted block.
+      const SampleRows rows = sampleRowsFor(dstY, invScaleFPY, blockY, blockH);
 
-      const uint8_t* row0 = &pixels[ly0 * stride];
-      const uint8_t* row1 = &pixels[ly1 * stride];
+      const uint8_t* row0 = &pixels[rows.row0 * stride];
+      const uint8_t* row1 = &pixels[rows.row1 * stride];
 
-      // Left edge (with X boundary clamping)
+      // Left edge: the source column falls before the block, so both sampled
+      // columns come from the shared clamp instead of local bounds logic.
       for (int dstX = dstXStart; dstX < safeXStart; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 < 0) lx0 = 0;
-        if (lx1 < 0) lx1 = 0;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
 
-      // Interior (no X boundary checks — lx0 and lx0+1 guaranteed in bounds)
+      // Interior. The range split above is an optimisation, not a guarantee: it
+      // is computed from fineScaleFPX while the samples below come from
+      // invScaleFPX, and both divide with truncation, so the split start can be
+      // one destination column too early. For 100x100 -> 60x60 the block at
+      // x = 80 starts its interior at dstX = 48, whose first sample is
+      // (48 * 109226) >> 16 - 80 = -1. Sample through the same clamp as the
+      // edges rather than trusting the split.
       for (int dstX = safeXStart; dstX < safeXEnd; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        const int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx0 + 1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
 
-      // Right edge (with X boundary clamping)
+      // Right edge: the source column runs past the block's valid columns.
       for (int dstX = safeXEnd; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         const int32_t srcFxFP = dstX * invScaleFPX;
         const int32_t fx = srcFxFP & FP_MASK;
         const int32_t fxInv = FP_ONE - fx;
-        int lx0 = (srcFxFP >> FP_SHIFT) - blockX;
-        int lx1 = lx0 + 1;
-        if (lx0 >= validW) lx0 = validW - 1;
-        if (lx1 >= validW) lx1 = validW - 1;
+        const SampleCols cols = sampleColsFor(dstX, invScaleFPX, blockX, validW);
 
-        int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
-        int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
+        int top = ((int)row0[cols.col0] * fxInv + (int)row0[cols.col1] * fx) >> FP_SHIFT;
+        int bot = ((int)row1[cols.col0] * fxInv + (int)row1[cols.col1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
-        if (writeFramebuffer) pw.writePixel(outX, dithered);
-        if (caching) cw.writePixel(outX, dithered);
+        writeSample(outX, outY, gray);
       }
     }
     return 1;
@@ -344,28 +332,15 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     if (writeFramebuffer) pw.beginRow(outY);
     if (caching) cw.beginRow(outY, cacheOriginY);
     const int32_t srcFyFP = dstY * invScaleFPY;
-    int ly = (srcFyFP >> FP_SHIFT) - blockY;
-    if (ly < 0) ly = 0;
-    if (ly >= blockH) ly = blockH - 1;
-    const uint8_t* row = &pixels[ly * stride];
+    const uint8_t* row = &pixels[clampSampleIndex((srcFyFP >> FP_SHIFT) - blockY, blockH) * stride];
 
     for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
       const int outX = cfgX + dstX;
       const int32_t srcFxFP = dstX * invScaleFPX;
-      int lx = (srcFxFP >> FP_SHIFT) - blockX;
-      if (lx < 0) lx = 0;
-      if (lx >= validW) lx = validW - 1;
+      const int lx = clampSampleIndex((srcFxFP >> FP_SHIFT) - blockX, validW);
       uint8_t gray = row[lx];
 
-      uint8_t dithered;
-      if (useDithering) {
-        dithered = applyBayerDither4Level(gray, outX, outY);
-      } else {
-        dithered = gray / 85;
-        if (dithered > 3) dithered = 3;
-      }
-      if (writeFramebuffer) pw.writePixel(outX, dithered);
-      if (caching) cw.writePixel(outX, dithered);
+      writeSample(outX, outY, gray);
     }
   }
 
@@ -400,8 +375,23 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                      const RenderConfig& config) {
+  bool cacheWritten = false;
+  return decodeToFramebuffer(imagePath, renderer, config, cacheWritten);
+}
+
+bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
+                                                     const RenderConfig& config, bool& cacheWritten) {
+  cacheWritten = false;
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    return false;
+  }
+  if (config.error) *config.error = ImageRenderError::Failed;
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
+  if (config.output == DecodeOutput::NativeGrayscale16 &&
+      (!renderer.isGrayscale16Active() || !config.cachePath.empty()))
+    return false;
   const bool cacheOnly = config.output == DecodeOutput::CacheOnly;
   if (cacheOnly && config.cachePath.empty()) {
     LOG_ERR("JPG", "Cache-only decode requires a cache path");
@@ -409,7 +399,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
 
   uint8_t* decoderScratch = cacheOnly ? buildscratch::claim(JPEG_DECODER_SIZE) : nullptr;
-  if (!decoderScratch && !hasHeapForJpegDecoder("decode")) return false;
+  if (!decoderScratch && !hasHeapForJpegDecoder("decode")) {
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
+    return false;
+  }
 
   std::unique_ptr<JPEGDEC> heapJpeg;
   JPEGDEC* jpeg = nullptr;
@@ -421,6 +414,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jpeg = heapJpeg.get();
   }
   if (!jpeg) {
+    if (config.error) *config.error = ImageRenderError::OutOfMemory;
     LOG_ERR("JPG", "Failed to allocate JPEG decoder");
     return false;
   }
@@ -447,6 +441,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   if (!validateAndStoreDimensions(jpeg->getWidth(), jpeg->getHeight(), sourceDimensions, "JPEG")) return false;
   const int srcWidth = sourceDimensions.width;
   const int srcHeight = sourceDimensions.height;
+  const float cropX = std::clamp(config.sourceCropX, 0.0f, 0.99f);
+  const float cropY = std::clamp(config.sourceCropY, 0.0f, 0.99f);
+  const int visibleWidth = srcWidth - 2 * static_cast<int>(srcWidth * cropX / 2);
+  const int visibleHeight = srcHeight - 2 * static_cast<int>(srcHeight * cropY / 2);
 
   bool isProgressive = jpeg->getJPEGType() == JPEG_MODE_PROGRESSIVE;
   if (isProgressive) {
@@ -460,15 +458,17 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   if (config.useExactDimensions && config.maxWidth > 0 && config.maxHeight > 0) {
     destWidth = config.maxWidth;
     destHeight = config.maxHeight;
-    targetScale = (float)destWidth / srcWidth;
+    targetScale = (float)destWidth / visibleWidth;
   } else {
-    float scaleX = (config.maxWidth > 0 && srcWidth > config.maxWidth) ? (float)config.maxWidth / srcWidth : 1.0f;
-    float scaleY = (config.maxHeight > 0 && srcHeight > config.maxHeight) ? (float)config.maxHeight / srcHeight : 1.0f;
+    float scaleX =
+        (config.maxWidth > 0 && visibleWidth > config.maxWidth) ? (float)config.maxWidth / visibleWidth : 1.0f;
+    float scaleY =
+        (config.maxHeight > 0 && visibleHeight > config.maxHeight) ? (float)config.maxHeight / visibleHeight : 1.0f;
     targetScale = (scaleX < scaleY) ? scaleX : scaleY;
     if (targetScale > 1.0f) targetScale = 1.0f;
 
-    destWidth = (int)(srcWidth * targetScale);
-    destHeight = (int)(srcHeight * targetScale);
+    destWidth = (int)(visibleWidth * targetScale);
+    destHeight = (int)(visibleHeight * targetScale);
   }
 
   // Choose JPEGDEC built-in scaling for coarse downscaling.
@@ -492,6 +492,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
 
   ctx.scaledSrcWidth = (srcWidth + jpegScaleDenom - 1) / jpegScaleDenom;
   ctx.scaledSrcHeight = (srcHeight + jpegScaleDenom - 1) / jpegScaleDenom;
+  ctx.cropLeft = static_cast<int>(ctx.scaledSrcWidth * cropX / 2);
+  ctx.cropTop = static_cast<int>(ctx.scaledSrcHeight * cropY / 2);
+  ctx.scaledSrcWidth -= 2 * ctx.cropLeft;
+  ctx.scaledSrcHeight -= 2 * ctx.cropTop;
   ctx.dstWidth = destWidth;
   ctx.dstHeight = destHeight;
   ctx.fineScaleFPX = (int32_t)((int64_t)destWidth * FP_ONE / ctx.scaledSrcWidth);
@@ -524,6 +528,11 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.lastYieldMs = decodeStart;
   rc = jpeg->decode(0, 0, jpegScaleOption);
   unsigned long decodeTime = millis() - decodeStart;
+  if (config.cancellation.isCancelled()) {
+    if (config.error) *config.error = ImageRenderError::Cancelled;
+    if (ctx.caching || cacheOnly) ctx.cache.abort();
+    return false;
+  }
 
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());
@@ -535,14 +544,12 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
 
   // Finalize the streamed cache file. Note: a flush failure mid-decode clears
   // ctx.caching (the partial file is dropped), so re-read the flag here.
-  if (cacheOnly) {
-    if (!ctx.caching) {
-      ctx.cache.abort();
-      return false;
-    }
-    return ctx.cache.finalize();
+  if (ctx.caching) cacheWritten = ctx.cache.finalize(config.cancellation);
+  if (cacheOnly && !cacheWritten) {
+    ctx.cache.abort();
+    return false;
   }
-  if (ctx.caching) ctx.cache.finalize();
+  if (config.error) *config.error = ImageRenderError::None;
 
   return true;
 }

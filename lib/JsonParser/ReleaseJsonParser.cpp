@@ -30,6 +30,7 @@ ReleaseJsonParser::ReleaseJsonParser(const std::span<ReleaseNote> releaseNotes)
     : parser(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
                            sOnArrayStart, sOnArrayEnd, nullptr}),
       releaseNotes(releaseNotes) {
+  safeCopy(firmwareAssetName, sizeof(firmwareAssetName), "firmware.bin", sizeof("firmware.bin") - 1);
   reset();
 }
 
@@ -65,7 +66,7 @@ size_t ReleaseJsonParser::getReleaseNoteCount() const { return releaseNotesFound
 size_t ReleaseJsonParser::getFirmwareSize() const { return firmwareSize; }
 
 void ReleaseJsonParser::commitAsset() {
-  if (strcmp(currentAssetName, "firmware.bin") == 0) {
+  if (strcmp(currentAssetName, firmwareAssetName) == 0) {
     memcpy(firmwareUrl, currentAssetUrl, sizeof(firmwareUrl));
     firmwareSize = currentAssetSize;
     firmwareFound = true;
@@ -319,4 +320,8 @@ void ReleaseJsonParser::sOnArrayEnd(void* ctx) {
       self->lastKey = LastKey::NONE;
       break;
   }
+}
+
+void ReleaseJsonParser::setFirmwareAssetName(const char* name) {
+  safeCopy(firmwareAssetName, sizeof(firmwareAssetName), name, strlen(name));
 }

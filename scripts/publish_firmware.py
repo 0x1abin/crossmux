@@ -12,7 +12,23 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urljoin, urlparse
 
-from nightly_targets import compatibility_aliases, manifest_name
+from nightly_targets import manifest_name
+
+
+def compatibility_aliases(channel, scope):
+    """Legacy X3/X4 names retained by the current publishing workflow."""
+    if channel not in ("stable", "nightly"):
+        raise ValueError("unknown release channel")
+    if scope == "channel":
+        return {"firmware.bin": ("xteink_x4", "firmware")}
+    if scope == "stable" and channel == "stable":
+        return {name: ("xteink_x4", role) for name, role in {
+            "firmware.bin": "firmware", "firmware-cn.bin": "firmware",
+            "bootloader.bin": "bootloader", "partitions.bin": "partitions",
+        }.items()}
+    if scope == "nightly" and channel == "nightly":
+        return {}
+    raise ValueError("unsupported compatibility scope")
 
 REPO = '0x1abin/crossmux'
 

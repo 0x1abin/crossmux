@@ -269,3 +269,4 @@ TEST(HyphenationFallback, LinguisticBreaksRemainAvailableBeforeEmergencyFallback
   EXPECT_TRUE(std::any_of(legalBreaks.begin(), legalBreaks.end(),
                           [](const auto& info) { return info.requiresInsertedHyphen; }));
 }
+TEST(HyphenationEval, Portuguese) { runLanguageEval("portuguese", "pt", "portuguese_hyphenation_tests.txt", 98.21); }

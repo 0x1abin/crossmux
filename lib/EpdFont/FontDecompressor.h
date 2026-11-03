@@ -7,7 +7,7 @@
 class FontDecompressor {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
-  static constexpr uint8_t MAX_PAGE_SLOTS = 4;  // One per font style (R/B/I/BI)
+  static constexpr uint8_t MAX_PAGE_SLOTS = 8;  // One per font/style pair: body R/B/I/BI plus heading sizes
 
   FontDecompressor() = default;
   ~FontDecompressor();
@@ -52,7 +52,7 @@ class FontDecompressor {
   InflateReader inflateReader;
 
   // Page buffer slots: each style gets its own flat glyph buffer with sorted lookup.
-  // Up to MAX_PAGE_SLOTS (4) styles can be prewarmed simultaneously.
+  // Up to MAX_PAGE_SLOTS font/style pairs can be prewarmed simultaneously.
   struct PageGlyphEntry {
     uint32_t glyphIndex;
     uint32_t bufferOffset;
@@ -66,6 +66,7 @@ class FontDecompressor {
   };
   PageSlot pageSlots[MAX_PAGE_SLOTS] = {};
   uint8_t pageSlotCount = 0;
+  uint32_t cjkPageBytes = 0;
 
   // Hot group: last decompressed group (byte-aligned) for non-prewarmed fallback path.
   // Kept in byte-aligned format; individual glyphs are compacted on demand into hotGlyphBuf.
@@ -91,6 +92,7 @@ class FontDecompressor {
   uint16_t getGroupIndex(const EpdFontData* fontData, uint32_t glyphIndex);
   uint32_t getAlignedOffset(const EpdFontData* fontData, uint16_t groupIndex, uint32_t glyphIndex);
   bool decompressGroup(const EpdFontData* fontData, uint16_t groupIndex, uint8_t* outBuf, uint32_t outSize);
+  bool loadHotGroup(const EpdFontData* fontData, uint16_t groupIndex);
   static void compactSingleGlyph(const uint8_t* alignedSrc, uint8_t* packedDst, uint8_t width, uint8_t height);
   static int32_t findGlyphIndex(const EpdFontData* fontData, uint32_t codepoint);
 };

@@ -31,6 +31,8 @@ class AirPageActivity final : public Activity, private UiAppHost {
     None,
     NoImage,
     InvalidImage,
+    ImageOutOfMemory,
+    ImageDisplayFailed,
     WifiRequired,
     WifiFailed,
     DownloadFailed,
@@ -41,7 +43,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
   };
   enum class SettingRow : uint8_t { Mode, AutoWallpaper, Count };
   enum class WallpaperResult : uint8_t { None, Saved, Failed };
-  enum class ImageDisplayResult : uint8_t { None, Success, Failure };
+  enum class ImageDisplayResult : uint8_t { None, Success, OutOfMemory, Failure };
   enum class TouchAction : int16_t {
     BackToApps,
     ShowQr,
@@ -72,6 +74,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
   void openImageMenu();
   void applyTouchAction(TouchAction action);
   void rebuildHistoryRows();
+  size_t historyRowCount() const;
   void moveSettingsSelection(int index);
   void moveHistorySelection(int index);
 
@@ -109,11 +112,12 @@ class AirPageActivity final : public Activity, private UiAppHost {
   freeink::ui::ListNav settingsNav_;
   freeink::ui::ListNav historyNav_;
   freeink::ui::ListItem settingsRows_[kSettingsRows]{};
-  freeink::ui::ListItem historyRows_[airpage::AirPageImageStore::kMaxHistoryEntries]{};
-  char historyLabels_[airpage::AirPageImageStore::kMaxHistoryEntries][48]{};
-  char historySubtitles_[airpage::AirPageImageStore::kMaxHistoryEntries][40]{};
+  freeink::ui::ListItem historyRows_[airpage::AirPageImageStore::kHistoryPageSize + 2]{};
+  char historyLabels_[airpage::AirPageImageStore::kHistoryPageSize][48]{};
+  char historySubtitles_[airpage::AirPageImageStore::kHistoryPageSize][40]{};
 
   bool imageNeedsDisplay_ = true;
+  bool imageNeedsClean_ = false;
   bool waitForInputRelease_ = false;
   bool autoSleepWallpaper_ = false;
   int displayedScreenWidth_ = 0;

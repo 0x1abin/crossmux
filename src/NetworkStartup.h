@@ -6,6 +6,9 @@ class GfxRenderer;
 
 namespace NetworkStartup {
 
+// One snapshot per network lifecycle transition; no persistent buffers.
+void logMemory(const char* stage);
+
 // Preserve render memory when PSRAM/internal SRAM headroom is healthy; otherwise
 // release it before the Wi-Fi driver starts allocating.
 void prepare(GfxRenderer& renderer);

@@ -17,28 +17,38 @@ class ControlCenterGestureTest(unittest.TestCase):
         dispatch = source[start:end] + "}\n"
         harness = r'''
 #include <atomic>
+#include "HeaderBackTapTarget.h"
 #include <cassert>
 #include <memory>
 #include <string>
+#include "activities/MainTab.h"
 #define LOG_ERR(...) ((void)0)
+namespace haptic_feedback { void touchAction() {} }
+struct { bool available=true; bool present() const { return available; } } Frontlight;
 enum { eIncrement };
 void xTaskNotify(int, int, int) {}
 struct Activity {
   std::string name = "InxRecent";
   bool reader = false, exclusive = false;
+  bool mainTabs = false;
+  Rect status{3, 9, 474, MainTabs::statusBarHeight};
   int loops = 0;
   bool requiresExclusiveStorageLoop() { return exclusive; }
   bool isReaderActivity() { return reader; }
   bool isHomeActivity() { return false; }
   bool handleHomeGesture() { return false; }
+  bool usesMainTabBar() { return mainTabs; }
+  MainTabLayout mainTabLayout() { return {Rect{}, status, Rect{}}; }
   void loop() { ++loops; }
 };
 struct Input {
   bool topSwipe = true, light = false, tap = false, suppressed = false;
+  bool touch = true;
+  int tapX = 20, tapY = 10;
   bool consumeSuppressedRelease() { return suppressed; }
   bool wasHomeGesture() { return false; }
-  bool hasTouch() { return true; }
-  bool wasScreenTapped(int&, int& y) { y = 10; return tap; }
+  bool hasTouch() { return touch; }
+  bool wasScreenTapped(int& x, int& y) { x = tapX; y = tapY; return tap; }
   bool wasLightPanelGesture() { return light && topSwipe; }
   bool wasMenuGesture() { return topSwipe; }
 };
@@ -55,6 +65,8 @@ struct ActivityManager {
   Input mappedInput;
   int renderer = 0, renderTaskHandle = 0, pushes = 0;
   bool handleMainTabInput() { return false; }
+  bool handleHomeStandbyInput() { return false; }
+  void resetHomeStandbyInput() {}
   void goHome() { assert(false); }
   void pushActivity(std::unique_ptr<FrontlightPanelActivity>) {
     ++pushes; pendingAction = PendingAction::Push;
@@ -88,6 +100,26 @@ int main() {
                        page == "Settings" || page == "NetworkModeSelection";
     check({.name = name}, {.topSwipe = false, .tap = true}, opens, !opens);
   }
+  for (const char* name : {"InxRecent", "FileBrowser", "AppsMenu", "Settings", "ReadingStats"}) {
+    for (int x : {2, 3, 476, 477})
+      for (int y : {8, 9, 28, 29, 36, 37, 40, 41, 42, 43, 46, 47, 52, 53}) {
+        const bool opens = x >= 3 && x < 477 && y >= 9 && y < 9 + MainTabs::statusBarHeight;
+        check({.name = name, .mainTabs = true},
+              {.topSwipe = false, .tap = true, .tapX = x, .tapY = y}, opens, !opens);
+      }
+    // Top tabs have no status bar; button-only devices ignore touch input.
+    check({.name = name, .mainTabs = true, .status = Rect{3, 9, 474, 0}},
+          {.topSwipe = false, .tap = true}, false, true);
+    check({.name = name, .mainTabs = true},
+          {.topSwipe = false, .tap = true, .touch = false}, false, true);
+  }
+  Frontlight.available = false;
+  for (const char* name : {"Home", "InxRecent", "EpubReader", "FileBrowser", "Settings", "FrontlightPanel"}) {
+    check({.name = name}, {.light = true}, false, true);
+    check({.name = name}, {.topSwipe = false, .tap = true}, false, true);
+    check({.name = name, .mainTabs = true}, {.light = true, .tap = true}, false, true);
+  }
+  Frontlight.available = true;
   check({}, {.light = true, .suppressed = true}, false, false);
   check({.exclusive = true}, {.light = true}, false, true);
   check({}, {.topSwipe = false}, false, true);
@@ -101,7 +133,7 @@ int main() {
             exe = Path(directory) / "check"
             cpp.write_text(harness + dispatch + cases)
             subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
-                "-std=c++20", str(cpp), "-o", str(exe)], check=True)
+                "-std=c++20", "-I" + str(ROOT / "src"), "-I" + str(ROOT / "src/components"), str(cpp), "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
 

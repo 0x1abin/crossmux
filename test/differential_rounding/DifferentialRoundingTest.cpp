@@ -5,6 +5,7 @@
 
 #include "lib/EpdFont/EpdFont.h"
 #include "lib/EpdFont/EpdFontData.h"
+#include "lib/EpdFont/MissingGlyph.h"
 
 // ============================================================================
 // Synthetic test font
@@ -407,7 +408,7 @@ TEST(EpdFont, CoveredGlyphDoesNotReportReplacement) {
 
 TEST(EpdFont, MissingGlyphReportsReplacement) {
   bool usedReplacement = false;
-  EXPECT_EQ(replacementFont().getGlyph(0x749F, &usedReplacement), &kReplacementGlyphs[0]);
+  EXPECT_EQ(replacementFont().getGlyph(0x749F, &usedReplacement), nullptr);
   EXPECT_TRUE(usedReplacement);
 }
 
@@ -472,21 +473,45 @@ TEST(EpdFont, PairConsistencyViaFont) {
   EXPECT_EQ(oo_gap_after_o, oo_gap_bare);
 }
 
-// Null-glyph handling: when a codepoint has no glyph (and no replacement
-// glyph), the pending advance from the previous glyph must still be flushed.
-// Without the flush fix, the glyph after the null would overlap the one before.
-TEST(EpdFont, NullGlyphAdvancePreserved) {
-  // 'Z' (0x5A) is not in our font and there's no U+FFFD, so getGlyph returns null.
-  // "oZo" should lay out as: o1 at 0, Z skipped (advance flushed), o2 at 9.
-  //   toPixel(145) = 9 (o's advance, no kern since Z resets prevCp).
-  //   w = 9 + 8 = 17
-  EXPECT_EQ(textWidth("oZo"), 17);
+TEST(EpdFont, MissingGlyphReservesOutlineWidth) {
+  // ascender 12: 9px square, 1px bearing on each side, 11px advance.
+  EXPECT_EQ(textWidth("Z"), 10);
+  EXPECT_EQ(textWidth("oZo"), 28);
+  EXPECT_EQ(textWidth("oZZo"), 39);
+  EXPECT_EQ(textWidth("Zo"), 19);
+  EXPECT_EQ(textWidth("oZ"), 19);
+  EXPECT_EQ(textWidth("ZZ"), 21);
+  int w = 0, h = 0;
+  replacementFont().getTextDimensions("Z", &w, &h);
+  EXPECT_EQ(w, textWidth("Z"));
+  EXPECT_EQ(h, 9);
+  EXPECT_EQ(replacementFont().getGlyph(REPLACEMENT_GLYPH), &kReplacementGlyphs[0]);
+}
 
-  // Multi-null: "oZZo" -- two consecutive nulls, advance still preserved.
-  EXPECT_EQ(textWidth("oZZo"), 17);
+TEST(EpdFont, MissingGlyphMetricsScaleAndIgnoreNonPrintingCharacters) {
+  EXPECT_EQ(missingGlyph::metrics(24, 'Z').width, 18);
+  EXPECT_EQ(missingGlyph::metrics(24, 'Z').advanceX, 20 * 16);
+  EXPECT_EQ(missingGlyph::metrics(-1, 'Z').width, 4);
+  EXPECT_EQ(missingGlyph::metrics(10000, 'Z').width, 255);
+  for (const uint32_t cp :
+       {0x20, 0xA0, 0xAD, 0x3000, 0x200B, 0x200D, 0x2060, 0xFE0F, 0xFEFF, 0xE0100, 0x301, 0x5B0, 0x64E}) {
+    SCOPED_TRACE(cp);
+    EXPECT_EQ(missingGlyph::metrics(24, cp).width, 0);
+    EXPECT_EQ(missingGlyph::metrics(24, cp).advanceX, 0);
+  }
+  EXPECT_EQ(textWidth("o\xCC\x81o"), textWidth("oo"));
+  EXPECT_EQ(textWidth("o\xD6\xB0o"), textWidth("oo"));
+}
 
-  // Null at start: "Zo" -- no pending advance to flush, o renders at 0.
-  EXPECT_EQ(textWidth("Zo"), 8);
+TEST(EpdFont, MissingGlyphDoesNotUseKerningClassesLeftInSubsetFont) {
+  auto data = kTestFontData;
+  // 'T' still has kerning classes but its glyph is no longer in the subset.
+  data.intervals = kIntervals + 1;
+  data.intervalCount = 3;
+  EpdFont font(&data);
+  int w = 0, h = 0;
+  font.getTextDimensions("Ta", &w, &h);
+  EXPECT_EQ(w, 11 + 7);
 }
 
 TEST(EpdFont, HeightCalculation) {
@@ -535,4 +560,87 @@ TEST(SdCardMeasure, MeasureNeverNarrowerThanRenderWithKern) {
   for (const char* s : {"To", "Ta", "oo", "ooo", "Too", "oa", "xo", "Taoo"}) {
     EXPECT_GE(newSdMeasure(s), renderAdvanceWithKern(s)) << "s=" << s;
   }
+}
+
+TEST(EpdFont, MissingSolidSymbolsHaveVisibleBounds) {
+  // No M or replacement glyph: the fallback uses 3/4 of the 12px ascender.
+  EXPECT_EQ(textWidth("█"), 9);
+  EXPECT_EQ(textHeight("█"), 12);
+  EXPECT_EQ(textWidth("███"), 27);
+  EXPECT_EQ(textWidth("■"), 8);
+  EXPECT_EQ(textHeight("■"), 10);
+  EXPECT_EQ(textWidth("o█o"), 26);
+}
+
+TEST(EpdFont, SolidSymbolsUseEmAdvanceAndKeepRealGlyphs) {
+  const EpdGlyph glyphs[] = {{10, 12, 168, 0, 12, 0, 0}, {3, 4, 64, 1, 4, 1, 0}};
+  const EpdUnicodeInterval intervals[] = {{'M', 'M', 0}, {0x25A0, 0x25A0, 1}};
+  EpdFontData data{};
+  data.glyph = glyphs;
+  data.intervals = intervals;
+  data.intervalCount = 2;
+  data.ascender = 12;
+  const EpdFont font(&data);
+  EpdGlyph fallback;
+  const auto* block = font.getGlyphMetrics(0x2588, fallback);
+  ASSERT_EQ(block, &fallback);
+  EXPECT_EQ(block->advanceX, 168);
+  EXPECT_EQ(block->width, 11);
+  EXPECT_EQ(block->height, 12);
+  EXPECT_EQ(font.getGlyphMetrics(0x25A0, fallback), &glyphs[1]);
+}
+
+TEST(EpdFont, SolidFallbackOverridesReplacementGlyph) {
+  const EpdGlyph replacement{2, 3, 32, 0, 3, 1, 0};
+  const EpdUnicodeInterval interval{0xFFFD, 0xFFFD, 0};
+  EpdFontData data{};
+  data.glyph = &replacement;
+  data.intervals = &interval;
+  data.intervalCount = 1;
+  data.ascender = 12;
+  const EpdFont font(&data);
+  EpdGlyph fallback;
+  EXPECT_EQ(font.getGlyphMetrics(0x2588, fallback), &fallback);
+  EXPECT_EQ(fallback.advanceX, fp4::fromPixel(9));
+  EXPECT_EQ(fallback.width, 9);
+  EXPECT_EQ(fallback.height, 12);
+  EXPECT_EQ(font.getGlyphMetrics('Z', fallback), nullptr);
+}
+
+TEST(EpdFont, SolidSymbolsRespectOnDemandFontCoverage) {
+  const EpdGlyph realBlock{7, 9, 112, 0, 9, 1, 0};
+  EpdFontData data{};
+  data.ascender = 12;
+  data.glyphMissCtx = const_cast<EpdGlyph*>(&realBlock);
+  data.coverageHandler = [](void*, uint32_t cp) { return cp == 0x2588; };
+  data.glyphMissHandler = [](void* ctx, uint32_t cp) -> const EpdGlyph* {
+    return cp == 0x2588 ? static_cast<const EpdGlyph*>(ctx) : nullptr;
+  };
+  const EpdFont font(&data);
+  EpdGlyph fallback;
+  EXPECT_EQ(font.getGlyphMetrics(0x2588, fallback), &realBlock);
+  EXPECT_EQ(font.getGlyphMetrics(0x25A0, fallback), &fallback);
+}
+
+TEST(EpdFont, EmptyFontStillMeasuresSolidSymbols) {
+  const EpdFontData data{};
+  const EpdFont font(&data);
+  int width, height;
+  font.getTextDimensions("██", &width, &height);
+  EXPECT_EQ(width, 12);
+  EXPECT_EQ(height, 8);
+}
+
+TEST(EpdFont, MissingTurnedCommaUsesQuoteAndNativeGlyphWins) {
+  const EpdGlyph glyphs[] = {{3, 5, 64, 0, 8, 1, 0}, {4, 6, 80, 0, 9, 1, 1}};
+  const EpdUnicodeInterval intervals[] = {{0x02BB, 0x02BB, 0}, {0x2018, 0x2018, 1}};
+  EpdFontData data{};
+  data.glyph = glyphs;
+  data.intervals = intervals + 1;
+  data.intervalCount = 1;
+  const EpdFont font(&data);
+  EXPECT_EQ(font.getGlyph(0x02BB), &glyphs[1]);
+  data.intervals = intervals;
+  data.intervalCount = 2;
+  EXPECT_EQ(font.getGlyph(0x02BB), &glyphs[0]);
 }

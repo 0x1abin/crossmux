@@ -306,12 +306,20 @@ bool saveSession(const Session& session) {
   return Storage.writeFile(kSessionPath, encoded);
 }
 
-bool clearSession() { return !Storage.exists(kSessionPath) || Storage.remove(kSessionPath); }
+bool clearSession() {
+  if (!Storage.exists(kSessionPath) || Storage.remove(kSessionPath)) return true;
+  LOG_ERR("WR", "Failed to remove session: %s", kSessionPath);
+  return false;
+}
 
 bool clearShelf() {
   bool ok = true;
-  if (Storage.exists(kShelfPath)) ok = Storage.remove(kShelfPath) && ok;
-  if (Storage.exists(kShelfPartPath)) ok = Storage.remove(kShelfPartPath) && ok;
+  for (const char* path : {kShelfPath, kShelfPartPath}) {
+    if (Storage.exists(path) && !Storage.remove(path)) {
+      LOG_ERR("WR", "Failed to remove shelf index: %s", path);
+      ok = false;
+    }
+  }
   return ok;
 }
 
@@ -601,6 +609,12 @@ std::string chapterPath(const std::string& bookDir, const uint32_t chapterIndex)
 std::string imageIndexPath(const std::string& bookDir, const uint32_t chapterIndex) {
   char filename[40];
   snprintf(filename, sizeof(filename), "/chapters/%06u.images", static_cast<unsigned>(chapterIndex));
+  return bookDir + filename;
+}
+
+std::string notesPath(const std::string& bookDir, const uint32_t chapterIndex) {
+  char filename[40];
+  snprintf(filename, sizeof(filename), "/chapters/%06u.notes.xhtml", static_cast<unsigned>(chapterIndex));
   return bookDir + filename;
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <CancelCheck.h>
 #include <HalStorage.h>
 
 #include <deque>
@@ -53,6 +54,11 @@ class ZipFile {
   // Cursor for sequential central-dir scanning optimization
   uint32_t lastCentralDirPos = 0;
   bool lastCentralDirPosValid = false;
+  // Reuse the lookup when extraction follows a size query for the same entry
+  // while the archive stays open
+  std::string lastLookupName;
+  FileStatSlim lastLookup = {};
+  bool lastLookupValid = false;
 
   bool loadFileStatSlim(const char* filename, FileStatSlim* fileStat);
   long getDataOffset(const FileStatSlim& fileStat);
@@ -78,7 +84,8 @@ class ZipFile {
   // allowEarlyStop: a short write from `out` is treated as the sink asking to
   // stop (returns true) instead of a write failure — used by header probes
   // that only need the first bytes of an entry.
-  bool readFileToStream(const char* filename, Print& out, size_t chunkSize, bool allowEarlyStop = false);
+  bool readFileToStream(const char* filename, Print& out, size_t chunkSize, bool allowEarlyStop = false,
+                        size_t psramChunkSize = 0, CancelCheck cancellation = {});
 
   template <typename F>
   bool enumerateFilePaths(F&& callback) {

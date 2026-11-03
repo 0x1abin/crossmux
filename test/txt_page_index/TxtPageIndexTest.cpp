@@ -19,19 +19,20 @@ TEST(TxtPageIndex, AdvancesLazilyAndFinishesWithExactPageCount) {
   EXPECT_EQ(progressPercent(1000, 1000), 100);
 }
 
-TEST(TxtPageIndex, BoundsRecoveryAndAcceptsTheCompleteV4Cache) {
+TEST(TxtPageIndex, BoundsRecoveryAndRejectsPrePlaceholderPagination) {
   using namespace txt_page_index;
 
-  EXPECT_TRUE(isSupportedCacheVersion(LEGACY_CACHE_VERSION));
-  EXPECT_TRUE(isSupportedCacheVersion(LAZY_CACHE_VERSION));
-  EXPECT_TRUE(isSupportedCacheVersion(ENCODING_CACHE_VERSION));
+  EXPECT_FALSE(isSupportedCacheVersion(LEGACY_CACHE_VERSION));
+  EXPECT_FALSE(isSupportedCacheVersion(LAZY_CACHE_VERSION));
+  EXPECT_FALSE(isSupportedCacheVersion(ENCODING_CACHE_VERSION));
+  EXPECT_FALSE(isSupportedCacheVersion(PARAGRAPH_LAYOUT_CACHE_VERSION));
   EXPECT_TRUE(isSupportedCacheVersion(CACHE_VERSION));
   EXPECT_FALSE(isSupportedCacheVersion(CACHE_VERSION + 1));
   EXPECT_FALSE(canReuseCacheVersion(LEGACY_CACHE_VERSION, false));
   EXPECT_FALSE(canReuseCacheVersion(LAZY_CACHE_VERSION, false));
-  EXPECT_TRUE(canReuseCacheVersion(LEGACY_CACHE_VERSION, true));
-  EXPECT_TRUE(canReuseCacheVersion(LAZY_CACHE_VERSION, true));
-  EXPECT_TRUE(canReuseCacheVersion(ENCODING_CACHE_VERSION, false));
+  EXPECT_FALSE(canReuseCacheVersion(LEGACY_CACHE_VERSION, true));
+  EXPECT_FALSE(canReuseCacheVersion(LAZY_CACHE_VERSION, true));
+  EXPECT_FALSE(canReuseCacheVersion(ENCODING_CACHE_VERSION, false));
   EXPECT_TRUE(canReuseCacheVersion(CACHE_VERSION, false));
   EXPECT_FALSE(canReuseCacheVersion(CACHE_VERSION + 1, true));
   EXPECT_TRUE(canReuseParagraphLayout(LEGACY_CACHE_VERSION, true, false));

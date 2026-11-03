@@ -28,6 +28,7 @@ uint32_t silentRebootMagic;
 bool deepSleepInProgress = false, hasTouch = false;
 unsigned restarts = 0, popups = 0, wifiStops = 0, delayedMs = 0;
 int renderer;
+struct { bool on = false; bool isOn() const { return on; } } Frontlight;
 struct { void restart() { ++restarts; } } ESP;
 struct { void drawPopup(int, const char*) { ++popups; } } GUI;
 void delay(unsigned ms) { delayedMs += ms; }
@@ -43,12 +44,14 @@ bool finishWifiSessionWithoutRestart() {
 int main() {
   for (bool touch : {false, true}) {
     hasTouch = touch;
-    for (bool sleeping : {false, true}) {
+    for (bool light : {false, true}) for (bool sleeping : {false, true}) {
+      Frontlight.on = light;
       deepSleepInProgress = sleeping;
       for (bool suppress : {false, true}) {
         silentRebootMagic = 0;
         silentRebootTarget = static_cast<uint32_t>(SilentRebootTarget::Home);
         silentRebootFontPointSize = 24;
+        silentRebootPayload = 0x80;
         restarts = popups = wifiStops = delayedMs = 0;
         silentRestartToReader(suppress);
         assert(wifiStops == 0);
@@ -59,6 +62,7 @@ int main() {
             suppress ? SilentRebootTarget::ReaderSuppressFontPrompt : SilentRebootTarget::Reader;
         assert(silentRebootTarget == static_cast<uint32_t>(expected));
         assert(silentRebootFontPointSize == (sleeping ? 24u : 0u));
+        assert(silentRebootPayload == (sleeping ? 0x80u : light ? SILENT_REBOOT_LIGHT_ON : 0u));
       }
     }
   }

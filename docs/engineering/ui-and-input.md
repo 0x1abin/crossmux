@@ -107,6 +107,31 @@ may run after the edge's frame. Do not simulate consumption with another
 Touch input remains independent; only arm a physical-button barrier when that
 button is actually held.
 
+Home's Back-to-Standby shortcut is owned by `ActivityManager`, before the home
+Activity's input loop. It applies to all `HomeActivity` themes, including Cover
+Grid, and to INX Recent while focus is on the tabs. All use
+`standbyShortcutEnabled`; selecting Standby directly in Apps remains independent.
+The shortcut defaults to off on first boot, after restoring system settings, or
+when the saved settings omit this key. Existing saved On/Off values are preserved;
+users can enable it in Display settings.
+The manager requires a local logical Back press followed by release, or a
+completed touch Back gesture that publishes both edges in the same frame.
+Push/Pop/Replace cancel the old pair; activation and parent restoration seed a
+release barrier from the held state. Tab/focus actions and consumed long-press
+releases also cancel the pair. An inherited hold never blocks independent touch
+navigation, and its release cannot activate Standby. INX content Back returns to
+the tabs, and other tabs return to Recent; entering Standby requires a new gesture.
+This ownership guard does not change the SDK's button debounce interval.
+
+Run `python3 scripts/tests/test_reading_ui_regressions.py` for the production
+dispatch/transition regression cases. Enable the shortcut before testing its
+activation. On ReadPico, hold the middle strip key to
+exit the crash report, then release after Home appears: it must stay on Home.
+A fresh middle-key press/release must enter Standby exactly once. Repeat on INX,
+Classic, carousel, and Cover Grid, including returning from the control center
+and disabling the shortcut. In INX content focus, the first Back returns to the
+tabs; only a subsequent gesture enters Standby.
+
 Settings enums normally cycle in place when they have two choices and open an
 `OptionPopup` when they have more. A dynamic enum marked with
 `withManagedEnumPicker()` always opens the popup and receives callbacks only
@@ -154,7 +179,31 @@ action**.
 * INX top-level tabs are owned by `ActivityManager`; only Activities with a
   non-`None` `MainTab` participate. Left/Right and tab touches are consumed
   before the page sees them, while reader and feature subpages remain outside
-  the top-level loop.
+  the top-level loop. `SETTINGS.inxTabPosition` places this shared bar at the
+  top or bottom; touch devices default to the bottom. In bottom mode, touch
+  devices share a top status bar across all five main tabs, using Lyra's 10 px
+  top padding and 20 px strip (48 px on high-DPI screens), plus the board's
+  header offset. The clock is on the left and battery on the right, matching
+  the shared header chrome. It respects the header-clock visibility setting,
+  clock validity, format, time zone and battery percentage visibility, and updates only when the page
+  renders. Tapping the status bar opens the control center. Its drawing and hit
+  region share the main-tab layout, which also reserves viewable margins and
+  at least 6 px between the status bar, content and navigation. With top tabs,
+  the touch INX Recent page displays only its bottom-right battery inside the
+  existing 40 px footer reservation; it neither formats nor draws a footer clock
+  and has no new touch action. This bottom placement retains its 12 px
+  logical-screen-edge inset and existing battery positioning. Top status chrome
+  instead uses the shared header's side and corner clearance, with battery,
+  clock and percentage centered by their visible ink. INX subpage headers and
+  the non-touch bottom-tab home's top status line use the same chrome, while
+  retaining INX fonts and title/navigation styling. Date headers reserve the
+  space between the clock and battery rather than overprinting either.
+  `Activity::mainTabLayout()` resolves complete status, content and navigation
+  rectangles in one pass; `pageContentRect()` also owns the normal-header
+  fallback, so pages do not repeat the main-tab eligibility/layout calculation.
+  Bottom navigation is 56 px high, with 38 px icons, 6 px bottom padding and
+  a 38 × 5 px top selection marker. Only top navigation draws a full-width
+  separator; device viewable margins and button-hint reservations remain additional.
 * `GUI.drawProgressBar()` returns the first free Y coordinate after the bar and
   optional percentage line. Callers place following text from that value rather
   than reproducing the theme's font or spacing calculations.
@@ -177,10 +226,43 @@ action**.
 * INX header subtitles share one rectangle for drawing and clipping, including
   their vertical centering offset. Clipping at the title's original top cuts off
   the smaller subtitle's lower glyph rows.
-* On touch hardware, INX list and app-grid navigation focus follows the last
-  input modality: touch hides it, while a physical button restores it. The
-  logical selection and viewport remain intact, and FreeInkUI's active touch
-  feedback plus semantic values such as checks and switches remain visible.
+* All five touch INX main tabs start with no established item selection,
+  in lists and grids. Valid item actions or initial key navigation establish it;
+  blank/cancelled touches and scrolling do not. First Next selects the first item,
+  Previous the last. First Confirm selects the first item in Files/Apps/Settings,
+  or the currently visible entry in Recent/Statistics; another Confirm executes.
+  An off-screen operated entry in Recent/Statistics requires the same visible-entry
+  confirmation. Consume the entire initial key gesture and inherited holds.
+  Existing page instances retain the operated item and viewport on return;
+  directory reloads clear selection and restore only an existing operated entry.
+  The render task snapshots visibility once for scan and paint and cancels hidden
+  row-follow work. State is fixed-size and page-local. Established highlights follow
+  actual Tabs/Content focus; current main tabs, popup setting values, toggle states
+  and accordion expansion remain visible independently. Statistics separates its
+  display position from the operated entry, preserving its initial book/overview
+  display and decorative borders; cover loading follows the visible page.
+  Recent Flow accepts Left/Right swipes starting in its shared cover-band geometry,
+  advances one book and stops at either end. Up/Down paging remains available.
+  Touch releases cancel the old pressed state before moving the viewport. Global
+  edge/Home/control-center gestures retain priority. Other themes, non-touch
+  devices, statistics subpages and firmware/image pickers keep existing behavior.
+* Shared lists scan visible built-in compressed CJK glyphs before painting, using
+  the same fonts and viewport geometry. The scan does not publish interactions,
+  dispatch input, or consume tap-flash frames. After bounded viewport convergence,
+  the renderer prewarms the collected glyphs, clears scan pixels and paints normally.
+  Font aliases/styles sharing one `EpdFontData` share a cache slot. Both standard
+  (CJK8/10/12) and high-DPI (CJK12/14/16) profiles use this path on every board.
+  The UI scope uses only the existing decompressor page cache; it leaves SD/TTF
+  caches alone. It retains the four-slot/512-codepoint limits, the 16 KiB page
+  budget without PSRAM, and the hot-group fallback on allocation/budget failure.
+  Its existing fallible glyph allocations are bounded by the visible text; no
+  framebuffer or interaction-table allocation is added, and caches are freed at
+  the end of the frame.
+* Content touch-down changes main-tab focus without refreshing the old page.
+  The raw release (including drag-off/cancel) settles that visual focus in the
+  same deferred update as the action. Physical-button release barriers remain
+  independent of this touch repaint state.
+
 
 The calculator registers a dedicated built-in Noto Sans 18pt regular/bold family
 for its expression and result, then unregisters it on exit. Legacy reader font
@@ -197,6 +279,17 @@ framebuffer or SD font is needed.
 
 The default sleep screen is Light. Existing saved sleep-screen selections are
 preserved; the default applies when no selection has been saved.
+
+### WiFi connection status
+
+Touch and button devices share the upstream connection layout: the connection
+status is centered above the SSID, which retains the translated "to" prefix.
+On touch devices the text uses the body below the header/MAC band and above
+the Cancel/Show Networks buttons, rather than placing the SSID in a top-aligned
+text area. Scanning displays only the centered status. Physical button hints
+remain exclusive to button devices. The SSID label uses a bounded stack buffer;
+long names keep the existing ellipsis style at a complete UTF-8 boundary and
+are clipped to the content width.
 
 ## Retained Framebuffer Updates
 
@@ -222,6 +315,28 @@ Incremental drawing does not imply a different panel waveform or windowed
 refresh. Those are display-driver decisions and require separate hardware
 measurement.
 
+### File browser images
+
+The file browser lists BMP, JPEG (`.jpg` / `.jpeg`), and PNG files, with
+case-insensitive extensions, in every directory including `/AirPage`. All three
+formats open in the image viewer and participate in its sorted sibling navigation.
+Firmware and PNG-only pickers retain their own filters.
+
+BMPs render directly. JPEG decoding targets the renderer and fits the current
+oriented screen without cropping. It attempts native 16-level grayscale when
+available, then falls back to the four-level path, decoding again for each gray
+plane. PNG previews reuse `/.crosspoint/image_preview.bmp`; conversion borrows
+the existing framebuffer and streams through the existing converter. A failed
+preview cannot display an old image or save it as a sleep cover.
+
+JPEG sleep covers honor the fit/crop setting and stream a two-bit palette,
+top-down BMP into `/sleep.bmp.part`, reusing one row buffer. Publishing retains
+the previous cover in `/sleep.bmp.bak` until the new file and settings succeed;
+failure restores the previous cover and setting. PNG retains its normal and
+transparent cover choices. Temporary previews are removed on exit, and source
+images are never replaced. See
+[`ImageViewerActivity.cpp`](../../src/activities/util/ImageViewerActivity.cpp).
+
 ### Lyra Carousel home
 
 Lyra Carousel displays one centered recent-book cover in a `380x540` frame.
@@ -234,3 +349,63 @@ shared icon assets and other themes remain unchanged.
 > User-facing text must use the `tr()` macro — see
 > [hardware-constraints.md](hardware-constraints.md) → Resource Protocol rule 5,
 > and the i18n workflow in [generated-files.md](generated-files.md).
+
+INX SDK layout compatibility and regression coverage: [INX theme compatibility](inx-theme-compatibility.md).
+
+### Missing glyphs
+
+After the existing font selection/fallback and SD on-demand lookup, unsupported
+visible characters render as hollow squares, except missing U+2588/U+25A0
+redaction symbols, which use font-sized solid rectangles. `missingGlyph::metrics` is shared
+by text bounds, advances, SD advance prewarm and rendering: the side is three
+quarters of the font ascender (clamped to 4–255 px), with one pixel of spacing
+on each side and the bottom aligned to the baseline. The outline is procedural;
+it allocates no bitmap or heap storage. SUP/SUB halves the metrics, and rotated
+text uses the same orientation mapping as real glyphs. Missing glyphs do not
+participate in kerning. Missing whitespace, controls, zero-width formatters and
+combining marks produce no square. Real U+FFFD text is still rendered when the
+font contains it; missing characters no longer borrow its glyph or width.
+
+## Shared UI and input owners
+
+Use `UiListActivity` for lists, `UiTabListActivity` for tabbed lists and
+`UiAppHost` for custom FreeInkUI layouts. Keep interaction-table publication and
+the `uiReady` handshake in the host. `fui::ListNav` separates selection from
+viewport scrolling: swipes scroll; buttons select and bring the row into view.
+Tabbed navigation reserves ring position zero for the tab bar while row indices
+stay zero-based. Large lists use `rowProvider` and reusable scratch storage;
+bounded lists keep activity-owned reserved/fixed rows. Do not allocate on each
+repaint or retain FUI props past the lifetime of their backing rows.
+
+`ButtonNavigator` owns navigation press/hold callbacks; Confirm/Back retain
+release and long-press semantics. Global Home/Back/control-center gestures and
+header Back taps have shared routing. Reader overlays and end-of-book menus
+consume input before page turns. Touch/shared actions can synthesize both edges
+in one frame; trace the owner before treating them as a physical hold.
+`wasLongPressed()` suppresses its release through the manager. Preserve existing
+release barriers, navigation-repeat cadence and independent touch input.
+
+`UiContentSelection` owns the fixed-size initial-selection and held-key barrier for
+INX touch main tabs. The independent statistics page returns `Stop`, `TouchOnly`
+or `All` from its button pass, preserving Back/Confirm priority while allowing
+independent touch during a deferred-selection release barrier.
+
+List rendering collects glyphs through `UiAppHost::scanUi()` and the SDK's
+`paintForScan()` before the normal paint. Scanning retains the published hit table,
+tap flash and refresh state; it must not dispatch actions. Reuse the same selection
+snapshot for both passes and discard scan pixels before painting. UI prewarm scopes
+cover only built-in compressed CJK data, merge aliases by font data and preserve
+SD/TTF preview caches. Their scan enum identifies the cleanup domain; a nullable
+manager pointer transfers ownership on move. Ending a scan is idempotent and a
+moved-from scope is inert. The reader prewarm API keeps its existing behavior.
+The four font slots, 512 codepoints and non-PSRAM 16 KiB budget remain unchanged;
+uncached glyphs use the existing decompression fallback.
+
+The SDK native suite owns scan-publication and feedback protocol tests. CrossMux
+host tests cover page selection, input transitions, viewport integration, font
+aliases, allocation failure and prewarm ownership.
+
+PSRAM-only grid/vector-font features keep capability gates; no-PSRAM boards retain
+supported list themes and `.cpfont`. Review each selected theme and the
+[INX compatibility contract](inx-theme-compatibility.md), including draw/hit
+geometry, remapping and all four orientations.

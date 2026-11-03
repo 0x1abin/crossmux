@@ -4,15 +4,11 @@
 #include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <Memory.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <string>
 
-#include "ClockOffsetActivity.h"
-#include "ClockSyncActivity.h"
-#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
@@ -49,105 +45,8 @@ void DateTimeSettingsActivity::onEnter() {
   app.on(ACTION_CANCEL, &DateTimeSettingsActivity::onCancel, this);
   app.on(ACTION_OK, &DateTimeSettingsActivity::onOk, this);
   app.setScreen(&DateTimeSettingsActivity::manualScreen, this);
-  if (SETTINGS.clockUtcOffsetQ > 104) SETTINGS.clockUtcOffsetQ = 48;
-  if (SETTINGS.clockFormat > 1) SETTINGS.clockFormat = 0;
-  if (SETTINGS.clockAutoSync > 1) SETTINGS.clockAutoSync = 1;
-  halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
-  mode = Mode::Menu;
-  selectedMenuItem = 0;
-  requestUpdate();
-}
-
-void DateTimeSettingsActivity::onExit() {
-  SETTINGS.saveToFile();
-  Activity::onExit();
-}
-
-void DateTimeSettingsActivity::loop() {
-  switch (mode) {
-    case Mode::Menu:
-      loopMenu();
-      break;
-    case Mode::ManualEdit:
-      loopManualEdit();
-      break;
-  }
-}
-
-void DateTimeSettingsActivity::loopMenu() {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight =
-      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-  switch (handleListTouch(selectedMenuItem, MENU_ITEM_COUNT, contentTop, contentHeight, false)) {
-    case ListTouchResult::Activated:
-      activateMenuItem();
-      return;
-    case ListTouchResult::Consumed:
-      return;
-    case ListTouchResult::None:
-      break;
-  }
-
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    finish();
-    return;
-  }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    activateMenuItem();
-    return;
-  }
-
-  buttonNavigator.onNextRelease([this] {
-    selectedMenuItem = ButtonNavigator::nextIndex(selectedMenuItem, MENU_ITEM_COUNT);
-    requestUpdate();
-  });
-  buttonNavigator.onPreviousRelease([this] {
-    selectedMenuItem = ButtonNavigator::previousIndex(selectedMenuItem, MENU_ITEM_COUNT);
-    requestUpdate();
-  });
-}
-
-void DateTimeSettingsActivity::activateMenuItem() {
-  const auto item = static_cast<MenuItem>(selectedMenuItem);
-  switch (item) {
-    case MenuItem::AutoTime:
-      SETTINGS.clockAutoSync = SETTINGS.clockAutoSync ? 0 : 1;
-      halClock.setAutoSyncEnabled(SETTINGS.clockAutoSync != 0);
-      SETTINGS.saveToFile();
-      requestUpdate();
-      break;
-    case MenuItem::DateTime:
-      if (!SETTINGS.clockAutoSync) beginManualEdit();
-      break;
-    case MenuItem::TimeZone: {
-      // ActivityManager owns the picker across frames; stack lifetime is insufficient.
-      auto activity = makeUniqueNoThrow<ClockOffsetActivity>(renderer, mappedInput);
-      if (!activity) {
-        LOG_ERR("CLK", "OOM: ClockOffsetActivity (%u bytes)", static_cast<unsigned>(sizeof(ClockOffsetActivity)));
-        return;
-      }
-      startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
-      break;
-    }
-    case MenuItem::Hour24:
-      SETTINGS.clockFormat = SETTINGS.clockFormat == 0 ? 1 : 0;
-      SETTINGS.saveToFile();
-      requestUpdate();
-      break;
-    case MenuItem::SyncNow: {
-      // ActivityManager owns the sync screen across frames; stack lifetime is insufficient.
-      auto activity = makeUniqueNoThrow<ClockSyncActivity>(renderer, mappedInput);
-      if (!activity) {
-        LOG_ERR("CLK", "OOM: ClockSyncActivity (%u bytes)", static_cast<unsigned>(sizeof(ClockSyncActivity)));
-        return;
-      }
-      startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
-      break;
-    }
-    case MenuItem::Count:
-      break;
-  }
+  waitForConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  beginManualEdit();
 }
 
 void DateTimeSettingsActivity::beginManualEdit() {
@@ -168,20 +67,23 @@ void DateTimeSettingsActivity::beginManualEdit() {
   }
   selectedEditField = 0;
   closeRouting();
-  mode = Mode::ManualEdit;
   requestUpdate();
 }
 
-void DateTimeSettingsActivity::loopManualEdit() {
+void DateTimeSettingsActivity::loop() {
+  if (waitForConfirmRelease_) {
+    waitForConfirmRelease_ = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+    return;
+  }
   const auto touch = routeTouch(mappedInput);
   if (touch.routed && app.invalidated()) requestUpdate();
   if (touch) return;
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     cancelManualEdit();
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     confirmManualEdit();
     return;
   }
@@ -236,23 +138,22 @@ bool DateTimeSettingsActivity::applyManualTime() {
 
 void DateTimeSettingsActivity::cancelManualEdit() {
   closeRouting();
-  mode = Mode::Menu;
-  requestUpdate();
+  finish();
 }
 
 void DateTimeSettingsActivity::confirmManualEdit() {
   if (!applyManualTime()) return;
   closeRouting();
-  mode = Mode::Menu;
-  requestUpdate();
+  finish();
 }
 
 void DateTimeSettingsActivity::manualScreen(UiScreen& screen, void* user) {
-  static_cast<DateTimeSettingsActivity*>(user)->buildManualScreen(screen);
+  auto& self = *static_cast<DateTimeSettingsActivity*>(user);
+  self.buildManualScreen(screen);
 }
 
 void DateTimeSettingsActivity::buildManualScreen(UiScreen& screen) {
-  if (mode != Mode::ManualEdit || !mappedInput.hasTouch()) return;
+  if (!mappedInput.hasTouch()) return;
   const auto& metrics = UITheme::getInstance().getMetrics();
   screen.setContentMargin(fui::Insets{
       static_cast<int16_t>(metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing),
@@ -286,95 +187,24 @@ void DateTimeSettingsActivity::buildManualScreen(UiScreen& screen) {
 
 void DateTimeSettingsActivity::onStep(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<DateTimeSettingsActivity*>(user);
-  if (self->mode != Mode::ManualEdit || event.value == 0) return;
+  if (event.value == 0 || event.value < -EDIT_FIELD_COUNT || event.value > EDIT_FIELD_COUNT) return;
   self->selectedEditField = event.value > 0 ? event.value - 1 : -event.value - 1;
   self->adjustEditField(event.value > 0 ? 1 : -1);
 }
 
 void DateTimeSettingsActivity::onCancel(const fui::ActionEvent&, void* user) {
   auto* self = static_cast<DateTimeSettingsActivity*>(user);
-  if (self->mode != Mode::ManualEdit) return;
   self->app.clearTapFlash();
   self->cancelManualEdit();
 }
 
 void DateTimeSettingsActivity::onOk(const fui::ActionEvent&, void* user) {
   auto* self = static_cast<DateTimeSettingsActivity*>(user);
-  if (self->mode != Mode::ManualEdit) return;
   self->app.clearTapFlash();
   self->confirmManualEdit();
 }
 
 void DateTimeSettingsActivity::render(RenderLock&&) {
-  switch (mode) {
-    case Mode::Menu:
-      renderMenu();
-      break;
-    case Mode::ManualEdit:
-      renderManualEdit();
-      break;
-  }
-}
-
-void DateTimeSettingsActivity::renderMenu() {
-  renderer.clearScreen();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_DATE_AND_TIME));
-  GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, MENU_ITEM_COUNT, selectedMenuItem,
-      [](int index) {
-        static constexpr StrId NAMES[] = {StrId::STR_AUTO_TIME, StrId::STR_DATE_AND_TIME, StrId::STR_TIME_ZONE,
-                                          StrId::STR_24_HOUR_TIME, StrId::STR_CLOCK_SYNC_NOW};
-        return std::string(I18N.get(NAMES[index]));
-      },
-      nullptr, nullptr,
-      [](int index) {
-        const auto item = static_cast<MenuItem>(index);
-        switch (item) {
-          case MenuItem::AutoTime:
-            return std::string(SETTINGS.clockAutoSync ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
-          case MenuItem::DateTime: {
-            char buffer[24];
-            return TimeUtils::formatCurrentDateTime(buffer, sizeof(buffer), SETTINGS.clockFormat == 1)
-                       ? std::string(buffer)
-                       : std::string(tr(STR_NOT_SET));
-          }
-          case MenuItem::TimeZone: {
-            char buffer[16];
-            TimeUtils::formatUtcOffset(SETTINGS.clockUtcOffsetQ, buffer, sizeof(buffer));
-            return std::string(buffer);
-          }
-          case MenuItem::Hour24:
-            return std::string(SETTINGS.clockFormat == 0 ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
-          case MenuItem::SyncNow:
-            switch (halClock.syncState()) {
-              case ClockSyncState::Idle:
-                return std::string();
-              case ClockSyncState::Syncing:
-                return std::string(tr(STR_CLOCK_SYNCING));
-              case ClockSyncState::Succeeded:
-                return std::string(tr(STR_CLOCK_SYNC_OK));
-              case ClockSyncState::Failed:
-                return std::string(tr(STR_CLOCK_SYNC_FAIL));
-            }
-          case MenuItem::Count:
-            return std::string();
-        }
-        return std::string();
-      },
-      true, [](int index) { return index == static_cast<int>(MenuItem::DateTime) && SETTINGS.clockAutoSync; });
-
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_TOGGLE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  renderer.displayBuffer();
-}
-
-void DateTimeSettingsActivity::renderManualEdit() {
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();

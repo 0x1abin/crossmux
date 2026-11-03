@@ -11,11 +11,36 @@ The startup guide and later UI-language changes apply the same rule.
 | Resource | Unified behavior |
 |---|---|
 | i18n | `gen_i18n.py` always emits all 33 languages. |
-| UI fonts | International 8/10/12pt faces are primary; Simplified-Chinese 8/10/12pt subsets are registered through `setFallbackFont()`. |
-| Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time. |
+| UI fonts | International 8/10/12pt faces are primary; Simplified-Chinese subsets remain the built-in fallback. PSRAM-equipped S3 devices additionally use the selected SD family at matching sizes for multilingual missing glyphs. |
+| Reader fonts | Only the 12pt CJK subset is an offline fallback. Complete families and other sizes use the existing `.cpfont` download/SD loader, one reader size resident at a time, plus optional S3 UI sizes. |
 | EPUB/TXT | Unicode CJK parsing, line breaking and missing-glyph detection are always compiled and trigger from text content. |
 | Apps | App visibility is independent of language and content profile. WeRead is visible by default in every language; Chinese Chess is hidden by default. Language changes preserve app visibility choices. |
 | Services | China uses `crossmux.cn`, OTA variant `cn`, and China NTP servers; Global uses `crossmux.com`, variant `global`, and international NTP servers. Initial onboarding alone sets the default UTC offset. |
+
+**S3 UI fallback residency**
+
+`SdCardFontSystem::setupUiFallbacks()` enables SD UI sizes only on real ESP32-S3
+PSRAM targets with `memory::psramHasHeadroom(0, 0, 0)`. No-PSRAM unified builds
+retain their previous one-reader-size policy, independently of UI language.
+The renderer retains two ordered candidates per UI face: SD first, embedded
+CJK second. Removing an SD font clears only that candidate, so network memory
+release and failed font reloads cannot erase the built-in Chinese fallback.
+
+At most three extra `.cpfont` instances live alongside the reader font; matching
+reader/UI sizes share one instance. The manager reserves four tracking records
+before loading. These fonts need dynamic, file-dependent coverage indices and
+text caches across screens, so task-stack or static font buffers are unsuitable.
+The existing file limits bound additional resident coverage indices to
+`3 × 4 styles × 4096 intervals × 12 bytes = 576 KiB` (BMP-only indices use half).
+This is the index ceiling, not total heap use: font objects and existing text
+mini-caches also consume memory. Loading remains fallible. UI-only sizes do not
+request another 1 MiB PSRAM glyph cache or flash preload. All are released by
+the existing manager unload path.
+
+Verify on S3 with an SD family containing 8/10/12pt files: check multilingual
+file names, switch families, and enter/leave network features while observing
+`SDMGR` load logs and free/largest internal heap blocks. Check a missing or corrupt
+UI-size file still leaves Chinese UI usable. C3 must load no extra UI sizes.
 
 **Flash budget** (default `partitions.csv`, dual A/B app slot = 6.25 MB):
 
@@ -90,9 +115,20 @@ Flash; calling them while cache was disabled caused an early-boot Cache Error.
 Do not re-enable LTO without checking the final ELF and map for the affected
 IRAM mappings.
 
-The active size strategy is to embed only 8/10/12pt CJK subsets and externalize
-large reading faces to `.cpfont`. This removes flash data without introducing a
-decompression buffer or a new long-lived heap allocation.
+The active size strategy embeds the existing 8/10/12pt CJK coverage as lossless
+raw-DEFLATE groups of at most 4096 decoded bytes. Large reading faces remain
+external `.cpfont` assets. No glyph pixels, metrics, IDs or paging formats change.
+On devices without actual PSRAM, CJK page buffers plus their lookup tables share
+a 16 KiB budget; excess text uses the reusable hot group. CJK prewarm uses that
+same hot-group buffer, avoiding a second temporary group allocation. The existing
+single-glyph buffer is reused and every allocation retains its OOM check.
+
+`builtinFonts/all.h` selects `standard.h` or `high_dpi.h` with the existing
+`CROSSMUX_UI_PROFILE_HIGH_DPI` macro, alongside `common.h`. Only ReadPico hardware,
+nightly and simulator profiles enable the high-DPI pack. The normal Noto18 UI
+faces are still needed outside that profile and are not ReadPico-only assets.
+Common CJK12, chess glyphs and Ubuntu12 Regular/Bold are shared; high-DPI Latin12,
+Noto14/16 and CJK14/16 are excluded from ordinary targets.
 
 ## WeRead transport
 
@@ -150,15 +186,13 @@ through the reader's existing pagination LUT. Older generated books without
 anchors retain the visible-offset approximation, and other EPUBs fall back to
 the whole-book percentage derived from `WRT2` word counts. Different canonical
 positions show the direction selector. A local upload uses an enter/report pair
-and includes the whole seconds recorded by the local reading session that ended
-when manual sync was opened. When the remote position is selected, its exact
-chapter and offset are reported before being applied locally, so reporting time
-cannot move cloud progress backwards. Upload is accepted only after a read-back
-verifies the chapter and offset. A timed report is not automatically repeated
-after an ambiguous network failure; the current sync screen retains it for an
-explicit Retry, but no pending time is persisted after leaving the screen. An
-expired session directs the user back to **Apps → WeRead** to sign in; it does
-not open a QR flow from the reader.
+and is accepted only after a read-back verifies the chapter and offset. Selecting
+the remote position updates local progress without reporting it to the server;
+matching positions complete without an upload. The sync context and request body
+do not include local reading duration. Restoring duration reporting is tracked in
+[#332](https://github.com/0x1abin/crossmux/issues/332). An expired session directs
+the user back to **Apps → WeRead** to sign in; it does not open a QR flow from the
+reader.
 
 For a new standard-book cache, the downloader fetches cloud progress after the
 `WRT2` catalog and before any chapter or image. This request is best effort:
@@ -225,6 +259,40 @@ Verify a replacement source before regeneration: on the current committed
 charset it must reproduce the existing glyph metrics and bitmap bytes. The
 subset step deliberately excludes zero-width compatibility code point U+FFA0,
 which is present in the official OTF but was absent from the previous source.
+
+All six CJK sizes retain the source font's 66 Cyrillic letters (U+0410–044F,
+Ё and ё) plus U+2116 (№). Retention must be enabled in both the OTF subset and
+the bitmap export: № needs an explicit `--additional-intervals 0x2116,0x2116`
+because it is outside `fontconvert.py`'s default intervals. These CJK assets
+do not add Ukrainian-specific Є, І, Ї or Ґ, which the source OTF lacks; use an
+SD font with the required coverage when those letters are needed.
+
+`python3 scripts/tests/test_builtin_font_shrink.py` checks all six sizes and
+keeps fingerprints of every pre-existing code point, metric and bitmap byte.
+The common-size DEFLATE groups remain bounded to 4096 uncompressed bytes.
+
+The 2026-10-23 translation increment adds the 12 i18n characters
+`买仍仓代便借序忙核满组购` to the 14/16/18pt subsets. They were already present
+in the common 8/10/12pt fonts. Tests exclude only these additions when checking
+the original 14/16/18pt fingerprints and verify the new glyphs separately;
+all historical glyph metrics, bitmap bytes and hashes remain unchanged.
+
+The generator publishes `src/fontIds.h` with the font set. Reader IDs include
+the offline CJK 12pt header and its shared interval table; the high-DPI reader
+uses the generated NotoSans 12pt alias for that same face. A changed bitmap or
+coverage table therefore invalidates both complete and partial pagination through
+the existing font-ID check. Metadata and source-offset progress are retained.
+Clipping layout signatures also change, while source-offset clipping anchors
+remain independent of pagination. The wire format does not change.
+
+For a manual ID rebuild, run this from the repository root after updating font
+headers, so a failed generator leaves the committed IDs intact:
+
+```bash
+bash lib/EpdFont/scripts/build-font-ids.sh > src/fontIds.h.tmp && mv src/fontIds.h.tmp src/fontIds.h
+```
+
+The generator uses Python's standard library; Ruby is no longer required.
 
 `build_cn_charset.py --top N` means "keep the top N characters from the base
 pool, then add every required character." Required glyphs never displace base
@@ -362,10 +430,16 @@ After regenerating, confirm the character lists and bitmap headers match:
 
 - `cn_common_chars.txt` has 3517 unique CJK glyphs and contains the complete
   3500-char base pool.
-- `cn_i18n_chars.txt` has 747 unique CJK glyphs and contains every glyph
+- `cn_i18n_chars.txt` has 807 unique CJK glyphs and contains every glyph
   scanned from `chinese.yaml` and feature-specific files.
-- 8/10/12pt each contain 4014 glyphs; 14/16/18pt each contain 1244 glyphs.
+- 8/10/12pt each contain 4081 glyphs; 14/16/18pt each contain 1371 glyphs.
 - Every generated header says `mode: 2-bit`.
+
+The 2026-10-13 upstream sync regenerated the i18n tier for `限强类导` from
+the translation/feature sources. In that sync, all existing glyph metrics and
+bitmap bytes remained identical, as did the 8/10/12pt headers and shared common intervals.
+The three larger sizes add 2,891 raw bitmap bytes in total; this counts bitmap
+arrays, not the final linked firmware size or runtime memory headroom.
 
 ```bash
 python3 -c "
@@ -379,10 +453,10 @@ common = cjk((scripts / 'cn_common_chars.txt').read_text())
 i18n = cjk((scripts / 'cn_i18n_chars.txt').read_text())
 required = cjk((root / 'lib/I18n/translations/chinese.yaml').read_text())
 required |= cjk((scripts / 'cn_almanac_chars.txt').read_text())
-assert (len(pool), len(common), len(i18n)) == (3500, 3517, 747)
+assert (len(pool), len(common), len(i18n)) == (3500, 3517, 807)
 assert common == pool | required and i18n == required
-for size, expected in [(8, 4014), (10, 4014), (12, 4014),
-                       (14, 1244), (16, 1244), (18, 1244)]:
+for size, expected in [(8, 4081), (10, 4081), (12, 4081),
+                       (14, 1371), (16, 1371), (18, 1371)]:
     header = (root / f'lib/EpdFont/builtinFonts/notosans_cjk_{size}.h').read_text()
     index_header = ((root / 'lib/EpdFont/builtinFonts/notosans_cjk_common_intervals.h').read_text()
                     if size <= 12 else header)
@@ -392,14 +466,18 @@ for size, expected in [(8, 4014), (10, 4014), (12, 4014),
         codepoints.update(range(int(first, 16), int(last, 16) + 1))
     expected_cjk = common if size <= 12 else i18n
     assert {ord(char) for char in expected_cjk} <= codepoints
+    assert {0x0401, 0x0451, 0x2116} | set(range(0x0410, 0x0450)) <= codepoints
     assert 'mode: 2-bit' in header
-    assert '\n    true,\n    nullptr,\n' in header  # EpdFontData::is2Bit
     assert len(codepoints) == expected, (size, len(codepoints))
     if size == 14:
         assert not {ord(char) for char in common - i18n} & codepoints
 print('Chinese font coverage OK')
 "
 ```
+
+The native `FontDecompressorTest` also checks the actual `EpdFontData` bit-depth
+flags, glyph lookup and bitmap paths; compressed headers have a group pointer
+after `is2Bit`, so a textual `true, nullptr` layout check is not valid for them.
 
 Any assertion failure means a list or header is stale; re-run the regeneration
 steps before committing.

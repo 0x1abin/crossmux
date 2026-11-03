@@ -6,6 +6,7 @@ struct Rect {
 struct UITheme {
   struct Metrics {
     int topPadding = 0, headerHeight = 20, tabBarHeight = 20, verticalSpacing = 6;
+    int listRowGap = 0, listInset = 0;
   } metrics;
   mutable const char* lastSubHeader = nullptr;
   static UITheme& getInstance() {

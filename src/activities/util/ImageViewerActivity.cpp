@@ -1,24 +1,29 @@
 #include "ImageViewerActivity.h"
 
 #include <Bitmap.h>
+#include <Epub/converters/JpegToFramebufferConverter.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <PngToBmpConverter.h>
 
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/SleepCover.h"
 
 namespace {
-constexpr const char* PNG_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
+constexpr const char* IMAGE_PREVIEW_PATH = "/.crosspoint/image_preview.bmp";
 constexpr const char* TRANSPARENT_PREVIEW_PATH = "/.crosspoint/image_preview.transparent.bmp";
-constexpr const char* SLEEP_IMAGE_PATH = "/sleep.bmp";
 constexpr const char* SLEEP_IMAGE_PART_PATH = "/sleep.bmp.part";
-constexpr const char* SLEEP_IMAGE_BACKUP_PATH = "/sleep.bmp.bak";
+constexpr const char* JPEG_SLEEP_TMP_PXC = "/sleep.bmp.pxc.tmp";
+constexpr uint8_t GRAYSCALE_PALETTE[] = {0, 0, 0, 0, 85, 85, 85, 0, 170, 170, 170, 0, 255, 255, 255, 0};
 
 Rect sleepCoverActionRect(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -26,6 +31,17 @@ Rect sleepCoverActionRect(const GfxRenderer& renderer) {
               renderer.getScreenHeight() - metrics.contentSidePadding - metrics.menuRowHeight,
               renderer.getScreenWidth() - metrics.contentSidePadding * 2, metrics.menuRowHeight);
 }
+RenderConfig fitImage(const ImageDimensions& dimensions, const GfxRenderer& renderer) {
+  const float scale = std::min({static_cast<float>(renderer.getScreenWidth()) / dimensions.width,
+                                static_cast<float>(renderer.getScreenHeight()) / dimensions.height, 1.0f});
+  const int width = std::max(1, std::min(renderer.getScreenWidth(), static_cast<int>(dimensions.width * scale)));
+  const int height = std::max(1, std::min(renderer.getScreenHeight(), static_cast<int>(dimensions.height * scale)));
+  RenderConfig config{(renderer.getScreenWidth() - width) / 2, (renderer.getScreenHeight() - height) / 2, width,
+                      height};
+  config.useExactDimensions = true;
+  return config;
+}
+
 }  // namespace
 
 ImageViewerActivity::ImageViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string path)
@@ -45,12 +61,20 @@ void ImageViewerActivity::loadSiblingImages() {
   if (!dir || !dir.isDirectory()) return;
 
   char name[500];
+  size_t imageCount = 0;
+  for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
+    if (file.isDirectory()) continue;
+    file.getName(name, sizeof(name));
+    if (name[0] != '.' && FsHelpers::hasImageExtension(std::string_view{name})) ++imageCount;
+  }
+  dir.rewindDirectory();
+  siblingImages.reserve(imageCount);
   for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
     if (!file.isDirectory()) {
       file.getName(name, sizeof(name));
       if (name[0] != '.') {
         std::string fname(name);
-        if (FsHelpers::hasBmpExtension(fname) || FsHelpers::hasPngExtension(fname)) {
+        if (FsHelpers::hasImageExtension(fname)) {
           siblingImages.push_back(fname);
         }
       }
@@ -59,18 +83,82 @@ void ImageViewerActivity::loadSiblingImages() {
 
   FsHelpers::sortFileList(siblingImages);
 
-  for (size_t i = 0; i < siblingImages.size(); ++i) {
-    if (siblingImages[i] == fileName) {
-      currentImageIndex = static_cast<int>(i);
-      break;
-    }
+  const auto image = std::find(siblingImages.begin(), siblingImages.end(), fileName);
+  if (image != siblingImages.end()) {
+    currentImageIndex = static_cast<int>(image - siblingImages.begin());
   }
 }
 
 bool ImageViewerActivity::isPng() const { return FsHelpers::hasPngExtension(filePath); }
 
+bool ImageViewerActivity::preparePreview() {
+  if (!Storage.ensureDirectoryExists("/.crosspoint")) return false;
+  if (Storage.exists(IMAGE_PREVIEW_PATH) && !Storage.remove(IMAGE_PREVIEW_PATH)) return false;
+
+  bool prepared = false;
+  {
+    GfxRenderer::FrameBufferLoan loan(renderer);
+    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), IMAGE_PREVIEW_PATH, true);
+  }
+  if (!prepared) Storage.remove(IMAGE_PREVIEW_PATH);
+  return prepared;
+}
+
+bool ImageViewerActivity::renderJpeg() {
+  JpegToFramebufferConverter decoder;
+  ImageDimensions dimensions;
+  if (!decoder.getDimensions(filePath, dimensions) || dimensions.width <= 0 || dimensions.height <= 0) return false;
+  auto config = fitImage(dimensions, renderer);
+  const bool hasPrevious = siblingImages.size() > 1 && currentImageIndex > 0;
+  const bool hasNext = siblingImages.size() > 1 && currentImageIndex >= 0 &&
+                       currentImageIndex < static_cast<int>(siblingImages.size()) - 1;
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SET_SLEEP_COVER), hasPrevious ? "<" : "", hasNext ? ">" : "");
+  const auto drawChrome = [&] {
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (mappedInput.hasTouch()) GUI.drawActionButton(renderer, sleepCoverActionRect(renderer), tr(STR_SET_SLEEP_COVER));
+  };
+  const auto drawImage = [&](const DecodeOutput output) {
+    config.output = output;
+    if (!decoder.decodeToFramebuffer(filePath, renderer, config)) return false;
+    drawChrome();
+    return true;
+  };
+  renderer.clearScreen();
+  if (renderer.getGrayscaleLevels() == 16 && renderer.beginGrayscale16()) {
+    if (drawImage(DecodeOutput::NativeGrayscale16) && renderer.commitGrayscale16()) return true;
+    renderer.cancelGrayscale16();
+    renderer.clearScreen();
+  }
+  if (!drawImage(DecodeOutput::FrameBufferAndCache)) return false;
+  const bool absolute = renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported();
+  if (absolute && !renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute)) return false;
+  if (!absolute) renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
+  const ScopedCleanup resetMode{[this] { renderer.setRenderMode(GfxRenderer::BW); }};
+  bool ready = true;
+  for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+    renderer.clearScreen(absolute ? 0xFF : 0x00);
+    renderer.setRenderMode(mode);
+    if (!drawImage(DecodeOutput::FrameBufferAndCache)) {
+      ready = false;
+      break;
+    }
+    if (mode == GfxRenderer::GRAYSCALE_LSB)
+      renderer.copyGrayscaleLsbBuffers();
+    else
+      renderer.copyGrayscaleMsbBuffers();
+  }
+  if (ready) renderer.displayGrayBuffer();
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.clearScreen();
+  if (!drawImage(DecodeOutput::FrameBufferAndCache)) ready = false;
+  renderer.cleanupGrayscaleWithFrameBuffer();
+  return ready;
+}
+
 void ImageViewerActivity::onEnter() {
   Activity::onEnter();
+  imageReady = false;
 
   if (siblingImages.empty() && !filePath.empty()) {
     loadSiblingImages();
@@ -80,13 +168,21 @@ void ImageViewerActivity::onEnter() {
   const auto pageHeight = renderer.getScreenHeight();
   Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
-  const bool png = isPng();
-  bool prepared = !png;
-  if (png && Storage.ensureDirectoryExists("/.crosspoint")) {
-    GfxRenderer::FrameBufferLoan loan(renderer);
-    prepared = PngToBmpConverter::pngFileToBmpFile(filePath.c_str(), PNG_PREVIEW_PATH, true);
+  if (FsHelpers::hasJpgExtension(filePath)) {
+    imageReady = renderJpeg();
+    if (!imageReady) {
+      renderer.setRenderMode(GfxRenderer::BW);
+      renderer.clearScreen();
+      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_FILE_OPEN_FAILED));
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    }
+    return;
   }
-  const char* bitmapPath = png ? PNG_PREVIEW_PATH : filePath.c_str();
+  const bool needsPreview = isPng();
+  const bool prepared = !needsPreview || preparePreview();
+  const char* bitmapPath = needsPreview ? IMAGE_PREVIEW_PATH : filePath.c_str();
   HalFile file;
   // 1. Open the file
   if (!prepared) {
@@ -96,7 +192,9 @@ void ImageViewerActivity::onEnter() {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   } else if (Storage.openFileForRead("IMAGE", bitmapPath, file)) {
-    Bitmap bitmap(file, true);
+    Bitmap bitmap(file, true,
+                  renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported() &&
+                      display.getController() == HalDisplay::Controller::SSD1677);
 
     // 2. Parse headers to get dimensions
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
@@ -132,18 +230,63 @@ void ImageViewerActivity::onEnter() {
       GUI.fillPopupProgress(renderer, popupRect, 50);
 
       renderer.clearScreen();
-      // Assuming drawBitmap defaults to 0,0 crop if omitted, or pass explicitly: drawBitmap(bitmap, x, y, pageWidth,
-      // pageHeight, 0, 0)
-      renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
+      if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0)) {
+        renderer.clearScreen();
+        renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_FILE_OPEN_FAILED));
+        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+        return;
+      }
 
       // Draw UI hints on the base layer
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       if (mappedInput.hasTouch()) {
         GUI.drawActionButton(renderer, sleepCoverActionRect(renderer), tr(STR_SET_SLEEP_COVER));
       }
-      // Single pass for non-grayscale images
+      if (bitmap.hasGreyscale()) {
+        const bool absolute = renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported();
+        if (absolute && !renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute)) return;
+        if (!absolute) renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
+        bool planesReady = true;
+        for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+          if (bitmap.rewindToData() != BmpReaderError::Ok) {
+            LOG_ERR("BMP", "Failed to rewind bitmap for grayscale rendering");
+            planesReady = false;
+            break;
+          }
+          renderer.clearScreen(absolute ? 0xFF : 0x00);
+          renderer.setRenderMode(mode);
+          if (!renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0)) {
+            planesReady = false;
+            break;
+          }
+          GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+          if (mappedInput.hasTouch())
+            GUI.drawActionButton(renderer, sleepCoverActionRect(renderer), tr(STR_SET_SLEEP_COVER));
+          if (mode == GfxRenderer::GRAYSCALE_LSB) {
+            renderer.copyGrayscaleLsbBuffers();
+          } else {
+            renderer.copyGrayscaleMsbBuffers();
+          }
+        }
+        if (planesReady) renderer.displayGrayBuffer();
 
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+        // Rebuild the BW framebuffer for popups and subsequent differential updates.
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.clearScreen();
+        if (bitmap.rewindToData() != BmpReaderError::Ok ||
+            !renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0)) {
+          LOG_ERR("BMP", "Failed to rewind bitmap to restore the BW framebuffer");
+          renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_FILE_OPEN_FAILED));
+          planesReady = false;
+        }
+        GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+        renderer.cleanupGrayscaleWithFrameBuffer();
+        imageReady = planesReady;
+        if (!planesReady) renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      } else {
+        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+        imageReady = true;
+      }
 
     } else {
       // Handle file parsing error
@@ -166,28 +309,117 @@ void ImageViewerActivity::onEnter() {
 
 void ImageViewerActivity::onExit() {
   Activity::onExit();
-  if (Storage.exists(PNG_PREVIEW_PATH)) Storage.remove(PNG_PREVIEW_PATH);
+  imageReady = false;
+  if (Storage.exists(IMAGE_PREVIEW_PATH)) Storage.remove(IMAGE_PREVIEW_PATH);
   if (Storage.exists(TRANSPARENT_PREVIEW_PATH)) Storage.remove(TRANSPARENT_PREVIEW_PATH);
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
+bool ImageViewerActivity::prepareJpegSleepCover() {
+  if (Storage.exists(JPEG_SLEEP_TMP_PXC) && !Storage.remove(JPEG_SLEEP_TMP_PXC)) {
+    LOG_ERR("BMP", "Failed to remove previous sleep image pixels");
+    return false;
+  }
+  bool prepared = false;
+  const ScopedCleanup cleanup{[&prepared]() {
+    Storage.remove(JPEG_SLEEP_TMP_PXC);
+    if (!prepared) Storage.remove(SLEEP_IMAGE_PART_PATH);
+  }};
+
+  JpegToFramebufferConverter decoder;
+  ImageDimensions dimensions;
+  if (!decoder.getDimensions(filePath, dimensions)) return false;
+  auto config = fitImage(dimensions, renderer);
+  if (SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP &&
+      (dimensions.width > renderer.getScreenWidth() || dimensions.height > renderer.getScreenHeight())) {
+    const float ratio = static_cast<float>(dimensions.width) / dimensions.height;
+    const float screenRatio = static_cast<float>(renderer.getScreenWidth()) / renderer.getScreenHeight();
+    config.x = config.y = 0;
+    config.maxWidth = renderer.getScreenWidth();
+    config.maxHeight = renderer.getScreenHeight();
+    if (ratio > screenRatio) {
+      config.sourceCropX = 1.0f - screenRatio / ratio;
+    } else {
+      config.sourceCropY = 1.0f - ratio / screenRatio;
+    }
+  }
+  config.cachePath = JPEG_SLEEP_TMP_PXC;
+  renderer.clearScreen();
+  bool cacheWritten;
+  if (!decoder.decodeToFramebuffer(filePath, renderer, config, cacheWritten) || !cacheWritten) {
+    LOG_ERR("BMP", "Failed to decode sleep image pixels");
+    return false;
+  }
+
+  HalFile input, output;
+  if (!Storage.openFileForRead("BMP", JPEG_SLEEP_TMP_PXC, input)) return false;
+  uint16_t width, height;
+  if (input.read(&width, sizeof(width)) != sizeof(width) || input.read(&height, sizeof(height)) != sizeof(height) ||
+      width != config.maxWidth || height != config.maxHeight) {
+    LOG_ERR("BMP", "Invalid sleep image pixels");
+    return false;
+  }
+  const size_t pixelRowBytes = (width + 3) / 4;
+  const size_t bmpRowBytes = (width + 15) / 16 * 4;
+  if (input.size() != 4 + pixelRowBytes * height) {
+    LOG_ERR("BMP", "Incomplete sleep image pixels");
+    return false;
+  }
+  // One variable-width BMP row is reused; full-frame pixels remain streamed on SD.
+  auto row = makeUniqueNoThrow<uint8_t[]>(bmpRowBytes);
+  if (!row) {
+    LOG_ERR("BMP", "OOM: sleep image row");
+    return false;
+  }
+  if (!Storage.openFileForWrite("BMP", SLEEP_IMAGE_PART_PATH, output)) return false;
+  BmpHeader header;
+  createBmpHeader(&header, width, height, BmpRowOrder::TopDown);
+  header.infoHeader.biBitCount = 2;
+  header.infoHeader.biClrUsed = header.infoHeader.biClrImportant = 4;
+  header.infoHeader.biSizeImage = bmpRowBytes * height;
+  header.fileHeader.bfOffBits = sizeof(header) - sizeof(header.colors) + sizeof(GRAYSCALE_PALETTE);
+  header.fileHeader.bfSize = header.fileHeader.bfOffBits + header.infoHeader.biSizeImage;
+  if (output.write(&header, sizeof(header) - sizeof(header.colors)) != sizeof(header) - sizeof(header.colors) ||
+      output.write(GRAYSCALE_PALETTE, sizeof(GRAYSCALE_PALETTE)) != sizeof(GRAYSCALE_PALETTE)) {
+    LOG_ERR("BMP", "Failed to write sleep image header");
+    return false;
+  }
+  for (int y = 0; y < height; ++y) {
+    if (input.read(row.get(), pixelRowBytes) != pixelRowBytes || output.write(row.get(), bmpRowBytes) != bmpRowBytes) {
+      LOG_ERR("BMP", "Failed to write sleep image row %d", y);
+      return false;
+    }
+  }
+  if (!output.close()) {
+    LOG_ERR("BMP", "Failed to close sleep image");
+    return false;
+  }
+  prepared = true;
+  return true;
+}
+
 void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool transparent) {
+  if (!imageReady) return;
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
+  const bool coverOverlay = transparent && SETTINGS.sleepScreen == CrossPointSettings::COVER_TRANSPARENT;
+  const char* partPath = coverOverlay ? sleepCover::overlayPartPath : SLEEP_IMAGE_PART_PATH;
   const char* preparedPath = sourcePath;
-  bool success = true;
-  if (transparent) {
+  bool success = sleepCover::recover();
+  if (success && transparent && FsHelpers::hasPngExtension(std::string_view{sourcePath})) {
     GfxRenderer::FrameBufferLoan loan(renderer);
     success = PngToBmpConverter::pngFileToTransparentBmpFile(sourcePath, TRANSPARENT_PREVIEW_PATH, true);
     if (success) preparedPath = TRANSPARENT_PREVIEW_PATH;
   }
 
-  Storage.remove(SLEEP_IMAGE_PART_PATH);
-  if (success) {
+  if (Storage.exists(partPath) && !Storage.remove(partPath)) success = false;
+  const bool jpeg = FsHelpers::hasJpgExtension(std::string_view{sourcePath});
+  if (success && jpeg) success = prepareJpegSleepCover();
+  if (success && !jpeg) {
     HalFile inFile, outFile;
     if (Storage.openFileForRead("IMAGE", preparedPath, inFile) &&
-        Storage.openFileForWrite("IMAGE", SLEEP_IMAGE_PART_PATH, outFile)) {
+        Storage.openFileForWrite("IMAGE", partPath, outFile)) {
       const uint64_t expected = inFile.fileSize64();
       uint64_t copied = 0;
       char buffer[128];
@@ -200,55 +432,47 @@ void ImageViewerActivity::doSetSleepCover(const char* sourcePath, const bool tra
         copied += bytesRead;
       }
       outFile.flush();
-      success = success && copied == expected;
+      success = success && copied == expected && outFile.close();
     } else {
       success = false;
     }
   }
 
   if (success) {
-    Storage.remove(SLEEP_IMAGE_BACKUP_PATH);
-    const bool hadPrevious = Storage.exists(SLEEP_IMAGE_PATH);
-    if ((hadPrevious && !Storage.rename(SLEEP_IMAGE_PATH, SLEEP_IMAGE_BACKUP_PATH)) ||
-        !Storage.rename(SLEEP_IMAGE_PART_PATH, SLEEP_IMAGE_PATH)) {
-      if (hadPrevious && !Storage.exists(SLEEP_IMAGE_PATH)) {
-        Storage.rename(SLEEP_IMAGE_BACKUP_PATH, SLEEP_IMAGE_PATH);
-      }
-      success = false;
-    }
+    const auto mode = coverOverlay  ? CrossPointSettings::COVER_TRANSPARENT
+                      : transparent ? CrossPointSettings::TRANSPARENT
+                                    : CrossPointSettings::CUSTOM;
+    success = sleepCover::commit(mode);
   }
-
-  if (success) {
-    const uint8_t previousMode = SETTINGS.sleepScreen;
-    SETTINGS.sleepScreen = transparent ? CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT
-                                       : CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    if (!SETTINGS.saveToFile()) {
-      SETTINGS.sleepScreen = previousMode;
-      (void)SETTINGS.saveToFile();
-      Storage.remove(SLEEP_IMAGE_PATH);
-      if (Storage.exists(SLEEP_IMAGE_BACKUP_PATH)) {
-        Storage.rename(SLEEP_IMAGE_BACKUP_PATH, SLEEP_IMAGE_PATH);
-      }
-      success = false;
-    }
-  }
-
-  Storage.remove(SLEEP_IMAGE_PART_PATH);
-  if (success) Storage.remove(SLEEP_IMAGE_BACKUP_PATH);
+  Storage.remove(partPath);
   GUI.drawPopup(renderer, success ? tr(STR_DONE) : tr(STR_FAILED_LOWER));
   delay(1000);
 }
 
 void ImageViewerActivity::showSleepCoverOptions() {
+  if (!imageReady) return;
   if (!isPng()) {
-    doSetSleepCover(filePath.c_str(), false);
+    auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_SET_SLEEP_COVER_CONFIRM),
+                                                                filePath.substr(filePath.find_last_of('/') + 1));
+    if (!confirmation) {
+      LOG_ERR("IMAGE", "OOM: sleep cover confirmation (%zu bytes)", sizeof(ConfirmationActivity));
+      return;
+    }
+    startActivityForResult(std::move(confirmation), [this](const ActivityResult& result) {
+      if (!result.isCancelled) {
+        const bool overlay =
+            FsHelpers::hasBmpExtension(filePath) && SETTINGS.sleepScreen == CrossPointSettings::COVER_TRANSPARENT;
+        doSetSleepCover(filePath.c_str(), overlay);
+      }
+      onEnter();
+    });
     return;
   }
 
   static constexpr StrId options[] = {StrId::STR_NORMAL, StrId::STR_TRANSPARENT};
   static constexpr int optionCount = sizeof(options) / sizeof(options[0]);
-  sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER, options, optionCount, 0, [this](const int index) {
-    doSetSleepCover(index == 1 ? filePath.c_str() : PNG_PREVIEW_PATH, index == 1);
+  sleepCoverPopup.show(StrId::STR_SET_SLEEP_COVER_CONFIRM, options, optionCount, 0, [this](const int index) {
+    doSetSleepCover(index == 1 ? filePath.c_str() : IMAGE_PREVIEW_PATH, index == 1);
   });
   requestUpdate();
 }

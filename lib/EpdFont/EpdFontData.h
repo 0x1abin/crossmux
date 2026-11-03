@@ -224,8 +224,8 @@ typedef struct {
 
   /// On-demand glyph loading for fonts that don't keep all glyphs in RAM (e.g. SD card fonts).
   /// Called by getGlyph() when a codepoint is not found in the interval table.
-  /// Returns a valid EpdGlyph* with correct metadata, or nullptr to fall back to the
-  /// replacement glyph.  The returned pointer is valid until the next glyphMissHandler
+  /// Returns a valid EpdGlyph* with correct metadata, or nullptr for the renderer's
+  /// outline placeholder. The returned pointer is valid until the next glyphMissHandler
   /// call that causes a ring-buffer eviction — callers must consume it (measure or draw)
   /// before requesting another missed glyph.
   const EpdGlyph* (*glyphMissHandler)(void* ctx, uint32_t codepoint);
@@ -240,4 +240,47 @@ typedef struct {
   /// coverage index may read storage, but never substitutes a glyph. Shares glyphMissCtx.
   /// nullptr for fonts whose interval table is already complete (built-ins).
   bool (*coverageHandler)(void* ctx, uint32_t codepoint);
+
+  /// Vector-font bitmap accessor (FreeInkFont / TtfEpdFont). When non-null,
+  /// GfxRenderer::getGlyphBitmap() returns vectorBitmapHandler(glyphMissCtx, glyph)
+  /// instead of indexing ->bitmap or going through the SdCardFont overflow path.
+  /// This lets a runtime-rasterized TTF fault + cache glyphs on ANY draw path
+  /// (via glyphMissHandler) without pre-warming. nullptr for every other font,
+  /// so the SD/built-in bitmap paths are unaffected (all fonts zero-init this).
+  const uint8_t* (*vectorBitmapHandler)(void* ctx, const EpdGlyph* glyph);
+
+  /// Dynamic kerning for handler-backed fonts (TTF via FreeInkFont): returns
+  /// the 4.4 fixed-point pixel adjustment for the pair, 0 when none. Checked
+  /// by getKerning() before the static class tables (handler fonts carry
+  /// none). Shares glyphMissCtx. nullptr for built-in and SD fonts, whose
+  /// kerning is baked into the tables above (all fonts zero-init this).
+  int8_t (*kernHandler)(void* ctx, uint32_t leftCp, uint32_t rightCp);
+
+  /// 4 位覆盖度（两个像素一字节，高半字节在前，0 = 全透明，15 = 满墨）。
+  /// 只有矢量字体（TtfEpdFont）会置位：FreeType 本来就算出 8 位覆盖度，压成 2 位等于把
+  /// 抗锯齿的层次丢掉。预烤好的 .cpfont 位图仍是 2 位，所以它为 false。
+  /// 渲染器据此选择读取路径：见 GfxRenderer 的 get4BitCoverage()。
+  ///
+  /// 必须留在结构体**最末尾**：内置字体（lib/EpdFont/builtinFonts/*.h）是用位置初始化
+  /// 填这张表的，插在中间会让后面每个字段的取值整体错位 —— 编译期就会报
+  /// "invalid conversion from 'int' to 'const EpdFontGroup*'"。放在最后则既不影响它们
+  /// （新字段零初始化 = false），也不影响按名字赋值的 TtfEpdFont。
+  /// / 4-bit coverage (two pixels per byte, high nibble first, 0 = transparent, 15 = full
+  /// ink). Set only by vector faces: FreeType already computes 8-bit coverage, and packing
+  /// it to 2 bits throws away the anti-aliasing depth. Pre-rasterised .cpfont bitmaps stay
+  /// 2-bit, so this is false for them. GfxRenderer::get4BitCoverage() reads it.
+  ///
+  /// It MUST stay the last member: the built-in fonts initialise this table positionally,
+  /// so a field inserted anywhere else shifts every following value and fails to compile
+  /// ("invalid conversion from 'int' to 'const EpdFontGroup*'"). Last means they are
+  /// untouched (the new field zero-initialises to false) and name-wise writers such as
+  /// TtfEpdFont are unaffected too.
+  bool is4Bit = false;
 } EpdFontData;
+
+// Solid Unicode symbols can be drawn as rectangles when the font lacks them.
+namespace syntheticGlyph {
+constexpr uint32_t FULL_BLOCK = 0x2588;
+constexpr uint32_t BLACK_SQUARE = 0x25A0;
+constexpr bool isSolid(uint32_t cp) { return cp == FULL_BLOCK || cp == BLACK_SQUARE; }
+}  // namespace syntheticGlyph

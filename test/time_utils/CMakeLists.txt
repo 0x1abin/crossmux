@@ -1,6 +1,7 @@
 add_executable(TimeUtilsTest
   TimeUtilsTest.cpp
   ${REPO_ROOT}/src/util/TimeUtils.cpp
+  ${REPO_ROOT}/src/util/Timezones.cpp
   ${REPO_ROOT}/src/activities/apps/standby/StandbyTime.cpp
 )
 

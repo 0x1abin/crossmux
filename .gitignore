@@ -3,6 +3,7 @@
 .idea
 .DS_Store
 .vscode
+.zed
 open-x4-sdk
 fs_
 /simulator/build*/
@@ -34,4 +35,6 @@ weread_apikey*.bin
 /CMakeLists.txt
 /dependencies.lock
 /sdkconfig.*
+sdkconfig.sticky
+sdkconfig.x4pro
 flake.*

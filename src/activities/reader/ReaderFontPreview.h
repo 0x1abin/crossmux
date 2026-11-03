@@ -20,10 +20,10 @@ class ReaderFontPreview {
 
   bool active() const { return active_; }
 
-  Decision finish(const char* family, uint8_t pointSize, bool cached) {
+  Decision finish(const char* family, uint8_t pointSize, bool cached, bool supportsPreload = true) {
     if (!active_) return Decision::Keep;
     active_ = false;
-    if (family[0] == '\0') return Decision::Disable;
+    if (family[0] == '\0' || !supportsPreload) return Decision::Disable;
     if (pointSize == pointSize_ && std::strcmp(family_, family) == 0) {
       return accelerated_ ? Decision::Enable : Decision::Disable;
     }

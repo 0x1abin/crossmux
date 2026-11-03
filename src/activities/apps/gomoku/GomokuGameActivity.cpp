@@ -1,6 +1,7 @@
 #include "GomokuGameActivity.h"
 
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <I18n.h>
 #include <Logging.h>
 
@@ -135,12 +136,58 @@ void GomokuGameActivity::loop() {
 
 // ---------- Geometry ----------
 
-int GomokuGameActivity::boardPitch() const { return (board.boardSize == 15) ? 30 : 50; }
+int GomokuGameActivity::boardPitch() const {
+  // The 30 / 50 pitch was tuned on an 800x480 panel, where a 15x15 grid at 30 px
+  // covers 420 of ~448 usable px (94%) and nearly fills the available height too.
+  // Read Pico drives a 1216x684 panel as a 684x1216 logical board, so the same
+  // 420 px grid covered only ~64% of the width and ~41% of the available height:
+  // the board came out small and stranded in the middle of a lot of white.
+  //
+  // Gated on the device on purpose: every other board keeps the exact pitch it
+  // was tuned with, byte for byte, so this cannot regress them.
+#if defined(FREEINK_DEVICE_READPICO) && FREEINK_DEVICE_READPICO
+  const int n = board.boardSize - 1;
+  const int side = UITheme::getInstance().getMetrics().contentSidePadding;
+  const int availW = renderer.getScreenWidth() - 2 * side;
+  const int availH = actionBarY() - BOARD_AREA_Y;
+  const int fit = std::min(availW, availH) / n;
+  // Floor at the legacy value (never shrink below the old tuning), ceiling so the
+  // grid lines stay a sensible distance apart on a very large board.
+  const int legacy = (board.boardSize == 15) ? 30 : 50;
+  return std::max(legacy, std::min(fit, 64));
+#else
+  return (board.boardSize == 15) ? 30 : 50;
+#endif
+}
 int GomokuGameActivity::boardOriginX() const {
   return (renderer.getScreenWidth() - (board.boardSize - 1) * boardPitch()) / 2;
 }
-int GomokuGameActivity::boardOriginY() const { return BOARD_AREA_Y + boardPitch() / 2; }
-int GomokuGameActivity::stoneRadius() const { return (board.boardSize == 15) ? 12 : 20; }
+int GomokuGameActivity::boardOriginY() const {
+  // Read Pico's board is much taller than the grid, so top-anchoring (the legacy
+  // rule, correct when the grid nearly filled the panel) would leave a large gap
+  // above the action bar. Center it in the available band instead. Gated, so no
+  // other board's origin moves.
+#if defined(FREEINK_DEVICE_READPICO) && FREEINK_DEVICE_READPICO
+  const int n = board.boardSize - 1;
+  const int availH = actionBarY() - BOARD_AREA_Y;
+  const int used = n * boardPitch();
+  return BOARD_AREA_Y + std::max(0, (availH - used) / 2) + boardPitch() / 2;
+#else
+  return BOARD_AREA_Y + boardPitch() / 2;
+#endif
+}
+int GomokuGameActivity::stoneRadius() const {
+  // Historically a fixed 12 px (15x15) / 20 px (9x9) -- exactly 0.4 of the 30 / 50
+  // pitch. Read Pico's board is much larger, so keep that same stone-to-cell ratio
+  // against the adaptive pitch instead of freezing the stones at 12 px on a grid
+  // whose cells are now ~46 px (which read as tiny dots in big squares).
+  // Gated, so every other board keeps its pixel-exact stones.
+#if defined(FREEINK_DEVICE_READPICO) && FREEINK_DEVICE_READPICO
+  return std::max(1, boardPitch() * 2 / 5);
+#else
+  return (board.boardSize == 15) ? 12 : 20;
+#endif
+}
 
 void GomokuGameActivity::intersectionXY(uint8_t r, uint8_t c, int* x, int* y) const {
   *x = boardOriginX() + static_cast<int>(c) * boardPitch();

@@ -10,8 +10,15 @@ class EpdFont {
   ~EpdFont() = default;
   void getTextDimensions(const char* string, int* w, int* h) const;
 
+  // Missing glyphs return nullptr. Callers use missingGlyph::metrics for the outline fallback.
   const EpdGlyph* getGlyph(uint32_t cp) const;
+  // usedReplacement reports an absent source glyph; no font-owned replacement is substituted.
   const EpdGlyph* getGlyph(uint32_t cp, bool* usedReplacement) const;
+
+  /// Like getGlyph(), but supplies metrics for missing solid block symbols.
+  /// If the returned pointer is &solidFallback, draw a filled rectangle;
+  /// it has no bitmap. The caller owns the fallback storage.
+  const EpdGlyph* getGlyphMetrics(uint32_t cp, EpdGlyph& solidFallback) const;
 
   /// Returns true if this font covers `cp`: either via its in-RAM interval
   /// table or, for SD card fonts, via the coverageHandler that consults the

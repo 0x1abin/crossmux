@@ -5,7 +5,6 @@
 
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
-#include "fontIds.h"
 
 class ConfirmationActivity : public Activity {
  public:
@@ -16,6 +15,8 @@ class ConfirmationActivity : public Activity {
   std::string heading;
   std::string body;
   BodyPlacement bodyPlacement;
+  std::string cancelLabel;
+  std::string confirmLabel;
 
   static constexpr int MARGIN = 20;
   static constexpr int SPACING = 30;
@@ -32,6 +33,8 @@ class ConfirmationActivity : public Activity {
  public:
   ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& heading,
                        const std::string& body, BodyPlacement bodyPlacement = BodyPlacement::Page);
+  ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& heading,
+                       const std::string& body, const std::string& cancelLabel, const std::string& confirmLabel);
 
   void onEnter() override;
   void loop() override;

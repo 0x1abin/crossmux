@@ -17,6 +17,7 @@
 #include "components/UIThemeTokens.h"
 #include "components/icons/customListIcons.h"
 #include "components/icons/listIcons.h"
+#include "util/SlideSwitch.h"
 
 namespace fui = freeink::ui;
 
@@ -35,8 +36,8 @@ constexpr fui::ActionId ACTION_TILE = 6;  // value = tile index
 constexpr int16_t kPanelSideMargin = 16;
 constexpr int16_t kGrabberHeight = 5;     // fui::SheetProps default, mirrored here
 constexpr int16_t kSliderRowHeight = 56;  // the pill itself (finger-sized)
-constexpr int16_t kTileHeight = 84;
-constexpr int16_t kTileGap = 16;
+constexpr int16_t kTileHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 84;
+constexpr int16_t kTileGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 16;
 constexpr int kTileCols = 2;
 // One percent per press, on the -/+ buttons and on the physical Left/Right keys
 // alike (both repeat while held), so a level can be set exactly.
@@ -55,7 +56,7 @@ uint8_t percentFromPermille(const int16_t permille) {
 }  // namespace
 
 FrontlightPanelActivity::FrontlightPanelActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("FrontlightPanel", renderer, mappedInput), UiAppHost(renderer) {}
+    : Activity("FrontlightPanel", renderer, mappedInput), UiAppHost(renderer, true) {}
 
 void FrontlightPanelActivity::onEnter() {
   Activity::onEnter();
@@ -67,12 +68,6 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
-#if FREEINK_DEVICE_EEGO_A4
-  // The first frame draws over the reader's gray AA page; a HALF refresh keeps
-  // the overlay clean instead of ghosting. Other boards keep the standard
-  // FAST_REFRESH first frame (X4 Pro reference behavior).
-  renderer.requestNextRefresh(HalDisplay::HALF_REFRESH);
-#endif
 
   // Seed the touch tile's restore mode from the live setting, so toggling off
   // and back on within this session returns to the mode the user had.
@@ -110,11 +105,6 @@ void FrontlightPanelActivity::persistLightSettings() {
 void FrontlightPanelActivity::onExit() {
   persistLightSettings();
   Activity::onExit();
-#if FREEINK_DEVICE_EEGO_A4
-  // The overlay pops back to the reader's gray AA page; force a clean first
-  // frame so the panel's white region does not ghost over the text.
-  renderer.requestNextFullRefresh();
-#endif
 }
 
 void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, void* user) {
@@ -122,7 +112,7 @@ void FrontlightPanelActivity::onBrightnessEvent(const fui::ActionEvent& event, v
   if (event.dragPermille < 0) return;
   self->brightness = std::max(MIN_BRIGHTNESS, percentFromPermille(event.dragPermille));
   Frontlight.setBrightness(self->brightness);
-  if (!self->lightOn) {
+  if (!self->lightOn && !slideSwitchOwnsLight()) {
     self->lightOn = true;
     self->lightOnChanged = true;
     Frontlight.setOn(true);
@@ -203,7 +193,7 @@ void FrontlightPanelActivity::adjustBrightness(const int delta) {
   if (next == brightness) return;
   brightness = static_cast<uint8_t>(next);
   Frontlight.setBrightness(brightness);
-  if (!lightOn) {
+  if (!lightOn && !slideSwitchOwnsLight()) {
     lightOn = true;
     lightOnChanged = true;
     Frontlight.setOn(true);
@@ -260,7 +250,11 @@ void FrontlightPanelActivity::loop() {
     }
   }
   if (draggingSlider) {
-    if (!touch.snap.touchHeld) draggingSlider = false;
+    if (!touch.snap.touchHeld) {
+      draggingSlider = false;
+      cleanRefreshPending = true;
+      requestUpdate();
+    }
     return;
   }
 
@@ -269,7 +263,7 @@ void FrontlightPanelActivity::loop() {
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    toggleLight();
+    if (!slideSwitchOwnsLight()) toggleLight();
     return;
   }
 
@@ -280,8 +274,8 @@ void FrontlightPanelActivity::loop() {
 }
 
 int FrontlightPanelActivity::computePanelBottom() const {
-  const auto tokens = uiThemeTokens(uiTarget);
-  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto tokens = uiThemeTokens(uiTarget, true);
+  const auto& metrics = uiThemeMetrics(true);
   const int16_t lineHeight = uiTarget.lineHeight(tokens.smallText.font);
   // Slim battery band + the air around it (mirrors buildPanelScreen).
   const int y0 = std::max<int>(metrics.batteryHeight, lineHeight);
@@ -364,19 +358,19 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   // the base implementation directly because RoundedRaff suppresses its
   // untitled Home header.
   {
-    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto& metrics = uiThemeMetrics(true);
     screen.spacer(theme.spaceMd);
     const int16_t bandH = std::max<int16_t>(static_cast<int16_t>(metrics.batteryHeight),
                                             screen.target().lineHeight(theme.smallText.font));
     screen.takeTop(bandH, theme.spaceMd);
-    UITheme::getInstance().getTheme().BaseTheme::drawHeader(
+    GUI.drawHeaderWithStyle(
         renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.homeTopPadding - metrics.topPadding},
-        nullptr);
+        nullptr, nullptr, true, true);
   }
 
   if (Frontlight.present()) {
     addSliderRow(screen, tr(STR_BRIGHTNESS), brightness, ACTION_BRIGHTNESS, ACTION_BRIGHTNESS_STEP,
-                 /*showToggle=*/true);
+                 /*showToggle=*/!slideSwitchOwnsLight());
     if (Frontlight.hasColorTemperature()) {
       addSliderRow(screen, tr(STR_WARMTH), warmth, ACTION_WARMTH, ACTION_WARMTH_STEP, /*showToggle=*/false);
     }
@@ -432,10 +426,6 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   // flip the whole frame's polarity without the FULL waveform's blackout
   // flash. Any faint residue clears with the panel's dedicated refresh tile
   // or the next scheduled clean refresh.
-#if FREEINK_DEVICE_EEGO_A4
-  renderer.displayBuffer(cleanRefreshPending ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
-#else
   renderer.displayBuffer(cleanRefreshPending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-#endif
   cleanRefreshPending = false;
 }

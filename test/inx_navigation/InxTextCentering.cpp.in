@@ -1,0 +1,43 @@
+// Exercise the actual adapter alignment lambda with asymmetric font bearings.
+#include <FreeInkUICore.h>
+#include <cassert>
+#include <map>
+using namespace freeink::ui;
+struct EpdFontFamily { enum Style { REGULAR = 0, SUP = 1, SUB = 2 }; };
+struct Glyph { int width = 3, height = 5, left = -2, top = 3; };
+struct Font {
+  Glyph glyph;
+  const Glyph* getGlyph(uint32_t, EpdFontFamily::Style) const { return &glyph; }
+};
+struct Renderer {
+  std::map<int, Font> fonts{{0, {}}};
+  int x = -1, y = -1;
+  int getTextWidth(int, const char*, EpdFontFamily::Style) const { return 11; }
+  int getFontAscenderSize(int) const { return 12; }
+  const auto& getFontMap() const { return fonts; }
+  void drawText(int, int drawX, int drawY, const char*, bool, EpdFontFamily::Style) { x = drawX; y = drawY; }
+};
+Color gfxColor(Color c) { return c; }
+bool tryDrawTextDither(Renderer&, int, int, int, const char*, Color, EpdFontFamily::Style, int) { return false; }
+int main() {
+  Renderer renderer;
+  const Rect rect{10, 10, 40, 40};
+  TextStyle style; style.align = TextAlign::Center;
+  const int fontId = 0;
+  const auto epdStyle = EpdFontFamily::REGULAR;
+  const auto inkColor = Color::Black;
+  const bool dithered = false, black = true;
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  TextCentering textCentering_ = TextCentering::Advance;
+#endif
+  @DRAW_ALIGNED@
+  drawAligned("1", 22);
+  assert(renderer.x == 24 && renderer.y == 22);
+#ifdef FREEINK_UI_THEME_LAYOUT_POLICY
+  textCentering_ = TextCentering::InkBounds;
+  drawAligned("1", 22);
+  assert(renderer.x == 30 && renderer.y == 18);
+  drawAligned("11", 22);
+  assert(renderer.x == 24 && renderer.y == 22);
+#endif
+}

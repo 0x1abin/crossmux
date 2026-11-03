@@ -31,6 +31,7 @@ class KeyboardEntryActivity : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool preventAutoSleep() override { return true; }
 
  private:
   std::string title;
@@ -46,7 +47,8 @@ class KeyboardEntryActivity : public Activity {
   // app-defined tables in the .cpp.
   freeink::ui::KeyboardLayoutId layoutId = freeink::ui::KeyboardLayoutId::QwertyEn;
   // Asks the SDK for a layout variant with the language key. Only the Latin
-  // layouts honour it; the Cyrillic and Hebrew tables carry the key either way.
+  // layouts honour it; the Cyrillic, Hebrew and Arabic tables carry the key
+  // either way.
   // Resolved once in onEnter(): the set cannot change while a keyboard is on
   // screen, and currentLayout() runs on every loop pass.
   bool showLangKey = false;
@@ -105,6 +107,7 @@ class KeyboardEntryActivity : public Activity {
   void onComplete(std::string text);
   void onCancel();
   int inputStartY() const;
+  int inputLineCount() const;
   bool cursorPositionFromPoint(int x, int y, size_t& position, bool& passwordToggle) const;
   std::string displayTextForCurrentState() const;
   // Advance of s[start, end) measured in place by temporarily null-terminating
@@ -134,6 +137,8 @@ class KeyboardEntryActivity : public Activity {
   static size_t utf8Next(const std::string& s, size_t pos);
 
   freeink::ui::Rect keyboardRect() const;
+  freeink::ui::Rect keyboardKeysRect() const;
+  int inputWindowStart(std::string& displayText, int width) const;
 
   static constexpr uint16_t LONG_PRESS_MS = 500;
   static constexpr uint16_t DEL_LONG_PRESS_MS = 1500;

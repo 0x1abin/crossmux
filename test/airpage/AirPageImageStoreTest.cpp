@@ -96,10 +96,10 @@ TEST_F(AirPageImageStoreTest, DistinguishesEmptyInvalidAndValidCaches) {
   AirPageImageStore store;
   EXPECT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Empty);
 
-  writeBytes("/.crosspoint/airpage/latest.bmp", {'B', 'M', 0});
+  writeBytes("/AirPage/latest.bmp", {'B', 'M', 0});
   EXPECT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Invalid);
 
-  writeBmp("/.crosspoint/airpage/latest.bmp");
+  writeBmp("/AirPage/latest.bmp");
   EXPECT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
   ASSERT_EQ(store.historyCount(), 1U);
   EXPECT_TRUE(store.historyEntry(0).isCurrent());
@@ -115,7 +115,7 @@ TEST_F(AirPageImageStoreTest, RejectsTruncatedBmpAndJpegHeaders) {
 }
 
 TEST_F(AirPageImageStoreTest, DeduplicatesAnIdenticalDownload) {
-  writeBmp("/.crosspoint/airpage/latest.bmp", 0x80);
+  writeBmp("/AirPage/latest.bmp", 0x80);
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
   writeBmp(AirPageImageStore::kDownloadPartPath, 0x80);
@@ -127,7 +127,7 @@ TEST_F(AirPageImageStoreTest, DeduplicatesAnIdenticalDownload) {
 }
 
 TEST_F(AirPageImageStoreTest, CommitsAFormatChangeAndArchivesThePreviousImage) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
+  writeBmp("/AirPage/latest.bmp");
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
   writeJpegHeader(AirPageImageStore::kDownloadPartPath);
@@ -144,11 +144,11 @@ TEST_F(AirPageImageStoreTest, CommitsAFormatChangeAndArchivesThePreviousImage) {
   EXPECT_TRUE(store.historyEntry(0).isCurrent());
   EXPECT_EQ(store.historyEntry(0).image.format, ImageFormat::Jpeg);
   EXPECT_EQ(store.historyEntry(1).image.format, ImageFormat::Bmp);
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/20260730_123456.bmp"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456.bmp"));
 }
 
 TEST_F(AirPageImageStoreTest, RollsBackARejectedDownloadedImage) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
+  writeBmp("/AirPage/latest.bmp");
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
   writeJpegHeader(AirPageImageStore::kDownloadPartPath);
@@ -160,12 +160,12 @@ TEST_F(AirPageImageStoreTest, RollsBackARejectedDownloadedImage) {
   ASSERT_TRUE(store.selectCurrent(selected));
   EXPECT_EQ(selected.image.format, ImageFormat::Bmp);
   EXPECT_FALSE(store.hasPendingDownload());
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/latest.bmp"));
-  EXPECT_FALSE(Storage.exists("/.crosspoint/airpage/latest.jpg"));
+  EXPECT_TRUE(Storage.exists("/AirPage/latest.bmp"));
+  EXPECT_FALSE(Storage.exists("/AirPage/latest.jpg"));
 }
 
 TEST_F(AirPageImageStoreTest, RecoversACompletedPartAndCommitsItAfterDisplay) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
+  writeBmp("/AirPage/latest.bmp");
   writeJpegHeader(AirPageImageStore::kDownloadPartPath);
 
   AirPageImageStore store;
@@ -175,73 +175,96 @@ TEST_F(AirPageImageStoreTest, RecoversACompletedPartAndCommitsItAfterDisplay) {
 
   store.commitDisplayedDownload(kArchiveDateKey);
   EXPECT_FALSE(store.hasPendingDownload());
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/20260730_123456.bmp"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456.bmp"));
   EXPECT_EQ(store.historyCount(), 2U);
 }
 
 TEST_F(AirPageImageStoreTest, RecoversAndArchivesABackupWithoutCollidingWithHistory) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
-  writeJpegHeader("/.crosspoint/airpage/latest.jpg.bak");
-  writeBmp("/.crosspoint/airpage/history/00000001.bmp", 0x80);
+  writeBmp("/AirPage/latest.bmp");
+  writeJpegHeader("/AirPage/latest.jpg.bak");
+  writeBmp("/AirPage/00000001.bmp", 0x80);
 
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(kArchiveDateKey), AirPageImageStore::InitializationResult::Ready);
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/20260730_123456.jpg"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456.jpg"));
   ASSERT_EQ(store.historyCount(), 3U);
   EXPECT_EQ(store.historyEntry(1).archiveId, kArchiveDateKey * 100u);
   EXPECT_EQ(store.historyEntry(2).archiveId, 1U);
 }
 
-TEST_F(AirPageImageStoreTest, KeepsTwentyNewestImagesIncludingCurrent) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
-  for (unsigned sequence = 1; sequence <= 20; ++sequence) {
+TEST_F(AirPageImageStoreTest, PagesAllImagesWithoutDeletingOldFiles) {
+  writeBmp("/AirPage/latest.bmp");
+  for (unsigned sequence = 1; sequence <= 45; ++sequence) {
     char path[96];
-    snprintf(path, sizeof(path), "/.crosspoint/airpage/history/%08u.bmp", sequence);
+    snprintf(path, sizeof(path), "/AirPage/%08u.bmp", sequence);
     writeBmp(path, static_cast<uint8_t>(sequence));
   }
 
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
-  ASSERT_EQ(store.historyCount(), AirPageImageStore::kMaxHistoryEntries);
+  ASSERT_EQ(store.historyCount(), AirPageImageStore::kHistoryPageSize);
   EXPECT_TRUE(store.historyEntry(0).isCurrent());
-  EXPECT_EQ(store.historyEntry(1).archiveId, 20U);
-  EXPECT_EQ(store.historyEntry(19).archiveId, 2U);
-  EXPECT_FALSE(Storage.exists("/.crosspoint/airpage/history/00000001.bmp"));
+  EXPECT_EQ(store.historyEntry(1).archiveId, 45U);
+  EXPECT_EQ(store.historyEntry(19).archiveId, 27U);
+  EXPECT_TRUE(Storage.exists("/AirPage/00000001.bmp"));
+  EXPECT_FALSE(store.hasPreviousHistoryPage());
+  ASSERT_TRUE(store.nextHistoryPage());
+  ASSERT_EQ(store.historyCount(), 20U);
+  EXPECT_EQ(store.historyEntry(0).archiveId, 26U);
+  EXPECT_EQ(store.historyEntry(19).archiveId, 7U);
+  ASSERT_TRUE(store.nextHistoryPage());
+  ASSERT_EQ(store.historyCount(), 6U);
+  EXPECT_EQ(store.historyEntry(0).archiveId, 6U);
+  EXPECT_EQ(store.historyEntry(5).archiveId, 1U);
+  EXPECT_FALSE(store.nextHistoryPage());
+  ASSERT_TRUE(store.previousHistoryPage());
+  EXPECT_EQ(store.historyEntry(0).archiveId, 26U);
+  EXPECT_EQ(store.historyEntry(19).archiveId, 7U);
+  ASSERT_TRUE(store.previousHistoryPage());
+  EXPECT_TRUE(store.historyEntry(0).isCurrent());
+  EXPECT_FALSE(store.previousHistoryPage());
+  AirPageImageStore reopened;
+  EXPECT_EQ(reopened.initialize(), AirPageImageStore::InitializationResult::Ready);
+  for (unsigned sequence = 1; sequence <= 45; ++sequence) {
+    char path[96];
+    snprintf(path, sizeof(path), "/AirPage/%08u.bmp", sequence);
+    EXPECT_TRUE(Storage.exists(path));
+  }
 }
 
 TEST_F(AirPageImageStoreTest, DropsAHistoryEntryThatBecomesInvalidAfterInitialization) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
-  writeBmp("/.crosspoint/airpage/history/00000001.bmp");
+  writeBmp("/AirPage/latest.bmp");
+  writeBmp("/AirPage/00000001.bmp");
 
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
   ASSERT_EQ(store.historyCount(), 2U);
-  ASSERT_TRUE(std::filesystem::remove(hostPath("/.crosspoint/airpage/history/00000001.bmp")));
+  ASSERT_TRUE(std::filesystem::remove(hostPath("/AirPage/00000001.bmp")));
 
   SelectedImage selected;
   EXPECT_FALSE(store.selectHistory(1, selected));
   EXPECT_EQ(store.historyCount(), 1U);
 }
 
-TEST_F(AirPageImageStoreTest, ArchivesJpegPixelCacheAndRemovesOrphans) {
-  writeJpegHeader("/.crosspoint/airpage/latest.jpg");
-  writePixelCache("/.crosspoint/airpage/latest.pxc");
-  writePixelCache("/.crosspoint/airpage/history/00000009.pxc");
+TEST_F(AirPageImageStoreTest, ArchivesJpegPixelCacheAndKeepsUnrelatedFiles) {
+  writeJpegHeader("/AirPage/latest.jpg");
+  writePixelCache("/AirPage/latest.pxc");
+  writePixelCache("/AirPage/00000009.pxc");
 
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
-  EXPECT_FALSE(Storage.exists("/.crosspoint/airpage/history/00000009.pxc"));
+  EXPECT_TRUE(Storage.exists("/AirPage/00000009.pxc"));
 
   writeBmp(AirPageImageStore::kDownloadPartPath);
   ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
   store.commitDisplayedDownload(kArchiveDateKey);
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/20260730_123456.jpg"));
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/20260730_123456.pxc"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456.jpg"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456.pxc"));
 }
 
 TEST_F(AirPageImageStoreTest, AddsASuffixWhenTwoArchivesShareTheSameSecond) {
-  writeBmp("/.crosspoint/airpage/latest.bmp");
-  writeBmp("/.crosspoint/airpage/history/20260730_123456.bmp", 0x80);
+  writeBmp("/AirPage/latest.bmp");
+  writeBmp("/AirPage/20260730_123456.bmp", 0x80);
 
   AirPageImageStore store;
   ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
@@ -249,10 +272,147 @@ TEST_F(AirPageImageStoreTest, AddsASuffixWhenTwoArchivesShareTheSameSecond) {
   ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
   store.commitDisplayedDownload(kArchiveDateKey);
 
-  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/20260730_123456-01.bmp"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456-01.bmp"));
   ASSERT_EQ(store.historyCount(), 3U);
   EXPECT_EQ(store.historyEntry(1).archiveId, kArchiveDateKey * 100u + 1u);
   EXPECT_EQ(store.historyEntry(2).archiveId, kArchiveDateKey * 100u);
 }
 
 }  // namespace
+
+TEST_F(AirPageImageStoreTest, PendingDownloadCanBeRetriedFromHistoryWithoutLosingBackup) {
+  writeBmp("/AirPage/latest.bmp");
+  AirPageImageStore store;
+  ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+
+  // A transient render failure leaves the staged image untouched. Reopening
+  // history must select the JPEG, not the previous BMP's stale list entry.
+  ASSERT_EQ(store.historyCount(), 1U);
+  SelectedImage retry;
+  ASSERT_TRUE(store.selectHistory(0, retry));
+  EXPECT_TRUE(retry.current);
+  EXPECT_EQ(retry.image.format, ImageFormat::Jpeg);
+  EXPECT_TRUE(store.hasPendingDownload());
+  EXPECT_TRUE(Storage.exists("/AirPage/latest.jpg"));
+  EXPECT_TRUE(Storage.exists("/AirPage/latest.bmp.bak"));
+  store.commitDisplayedDownload(kArchiveDateKey);
+  EXPECT_FALSE(store.hasPendingDownload());
+  ASSERT_EQ(store.historyCount(), 2U);
+  ASSERT_TRUE(store.selectHistory(1, retry));
+  EXPECT_EQ(retry.image.format, ImageFormat::Bmp);
+  EXPECT_TRUE(Storage.exists(retry.path));
+}
+
+TEST_F(AirPageImageStoreTest, LaterPushRecoversBackupAfterAnUnrenderedJpeg) {
+  writeBmp("/AirPage/latest.bmp");
+  AirPageImageStore store;
+  ASSERT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Ready);
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath, 4, 5);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  SelectedImage selected;
+  ASSERT_TRUE(store.selectHistory(0, selected));
+  EXPECT_EQ(selected.image.width, 4);
+  EXPECT_TRUE(Storage.exists("/AirPage/latest.bmp.bak"));
+  store.commitDisplayedDownload(kArchiveDateKey);
+  ASSERT_EQ(store.historyCount(), 2U);
+  EXPECT_TRUE(store.selectHistory(1, selected));
+  EXPECT_EQ(selected.image.format, ImageFormat::Bmp);
+}
+
+TEST_F(AirPageImageStoreTest, LeavesOldDirectoryAndUnknownRootFilesUntouched) {
+  writeBmp("/.crosspoint/airpage/latest.bmp");
+  writeBmp("/.crosspoint/airpage/history/00000001.bmp");
+  writeBmp("/AirPage/holiday.bmp");
+  writeBytes("/AirPage/readme.txt", {'h', 'i'});
+  AirPageImageStore store;
+  EXPECT_EQ(store.initialize(), AirPageImageStore::InitializationResult::Empty);
+  EXPECT_EQ(store.historyCount(), 0U);
+  writeBmp(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  store.commitDisplayedDownload();
+  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/latest.bmp"));
+  EXPECT_TRUE(Storage.exists("/.crosspoint/airpage/history/00000001.bmp"));
+  EXPECT_TRUE(Storage.exists("/AirPage/holiday.bmp"));
+  EXPECT_TRUE(Storage.exists("/AirPage/readme.txt"));
+}
+
+TEST_F(AirPageImageStoreTest, PagesBothFormatsWithTheSameArchiveId) {
+  for (unsigned sequence = 1; sequence <= 31; ++sequence) {
+    char path[96];
+    snprintf(path, sizeof(path), "/AirPage/%08u.bmp", sequence);
+    writeBmp(path);
+    snprintf(path, sizeof(path), "/AirPage/%08u.jpg", sequence);
+    writeJpegHeader(path);
+  }
+  AirPageImageStore store;
+  store.initialize();
+  unsigned remaining = 62;
+  do {
+    for (size_t i = 0; i < store.historyCount(); ++i) {
+      const auto& entry = store.historyEntry(i);
+      EXPECT_EQ(entry.archiveId, (remaining + 1) / 2);
+      EXPECT_EQ(entry.image.format, remaining % 2 == 0 ? ImageFormat::Jpeg : ImageFormat::Bmp);
+      SelectedImage selected;
+      EXPECT_TRUE(store.selectHistory(i, selected));
+      --remaining;
+    }
+  } while (store.nextHistoryPage());
+  EXPECT_EQ(remaining, 0U);
+  store.firstHistoryPage();
+  EXPECT_EQ(store.historyEntry(0).archiveId, 31U);
+}
+
+TEST_F(AirPageImageStoreTest, SequenceAllocationScansBeyondTheLoadedPage) {
+  writeBmp("/AirPage/latest.bmp");
+  for (unsigned sequence = 1; sequence <= 25; ++sequence) {
+    char path[96];
+    snprintf(path, sizeof(path), "/AirPage/%08u.bmp", sequence);
+    writeBmp(path);
+  }
+  AirPageImageStore store;
+  store.initialize();
+  ASSERT_TRUE(store.nextHistoryPage());
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  store.commitDisplayedDownload();
+  EXPECT_TRUE(Storage.exists("/AirPage/00000026.bmp"));
+  EXPECT_TRUE(Storage.exists("/AirPage/00000025.bmp"));
+}
+
+TEST_F(AirPageImageStoreTest, ArchiveFailureRetainsBackupAndAllExistingImages) {
+  writeBmp("/AirPage/latest.bmp");
+  for (unsigned collision = 0; collision <= 99; ++collision) {
+    char path[96];
+    if (collision == 0)
+      snprintf(path, sizeof(path), "/AirPage/20260730_123456.pxc");
+    else
+      snprintf(path, sizeof(path), "/AirPage/20260730_123456-%02u.pxc", collision);
+    writeBytes(path, {0});
+  }
+  AirPageImageStore store;
+  store.initialize();
+  writeJpegHeader(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  store.commitDisplayedDownload(kArchiveDateKey);
+  EXPECT_TRUE(Storage.exists("/AirPage/latest.bmp.bak"));
+  EXPECT_TRUE(Storage.exists("/AirPage/latest.jpg"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456.pxc"));
+  EXPECT_TRUE(Storage.exists("/AirPage/20260730_123456-99.pxc"));
+}
+
+TEST_F(AirPageImageStoreTest, SequenceWrapDoesNotOverwriteAnOrphanPixelCache) {
+  writeJpegHeader("/AirPage/latest.jpg");
+  writeBmp("/AirPage/99999999.bmp");
+  writePixelCache("/AirPage/00000001.pxc");
+  AirPageImageStore store;
+  store.initialize();
+  writeBmp(AirPageImageStore::kDownloadPartPath);
+  ASSERT_EQ(store.stageDownloadedImage(), AirPageImageStore::StageResult::PendingDisplay);
+  store.commitDisplayedDownload();
+  EXPECT_TRUE(Storage.exists("/AirPage/00000002.jpg"));
+  EXPECT_TRUE(Storage.exists("/AirPage/00000001.pxc"));
+}

@@ -84,6 +84,8 @@ void AchievementsActivity::rebuildVisibleIndexes() {
 
   for (int i = 0; i < static_cast<int>(achievements.size()); ++i) {
     if (achievements[i].state.unlocked == showCompleted) {
+      // Store source indices for navigation, rather than copying achievement views.
+      // cppcheck-suppress useStlAlgorithm
       visibleIndexes.push_back(i);
     }
   }
@@ -93,6 +95,8 @@ void AchievementsActivity::rebuildVisibleIndexes() {
     const bool fallbackCompleted = selectedTab == FilterTab::Completed;
     for (int i = 0; i < static_cast<int>(achievements.size()); ++i) {
       if (achievements[i].state.unlocked == fallbackCompleted) {
+        // Store source indices for navigation, rather than copying achievement views.
+        // cppcheck-suppress useStlAlgorithm
         visibleIndexes.push_back(i);
       }
     }

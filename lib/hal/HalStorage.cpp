@@ -4,11 +4,16 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <SDCardManager.h>
+#include <esp_heap_caps.h>
 #if FREEINK_CAP_USB_MSC
 #include <UsbMassStorage.h>
 #endif
 
 #include <cassert>
+
+#if FREEINK_DEVICE_READPICO
+#include <BoardReadPico.h>
+#endif
 
 #define SDCard SDCardManager::getInstance()
 
@@ -27,9 +32,36 @@ HalStorage::HalStorage() {
 
 // begin() and ready() are only called from setup, no need to acquire mutex for them
 
-bool HalStorage::begin() { return SDCard.begin(); }
+bool HalStorage::begin() {
+  const bool mounted = SDCard.begin();
+#if FREEINK_DEVICE_READPICO
+  if (!mounted) {
+    // Read Pico's slot is 1-bit SDMMC (CLK38/CMD42/D0) with no ESP-side detect
+    // pin: card detect lives on the FCA9555 (P0.6, active-low) and the mount is
+    // by attempt — the SDK already re-runs the whole mount after a 200 ms settle,
+    // which is the vendor's first-clock-negotiation workaround
+    // (SdmmcBlockDevice.cpp; read_pico_sd.c). The CD line is a hint for this
+    // message only, read AFTER the mount so a card that came up fine is never
+    // rejected by it. Unreadable-card handling belongs to the caller (src/main.cpp
+    // shows the SD error screen and returns); nothing here aborts.
+    const bool cardDetect = cardDetectAsserted();
+    LOG_ERR("STORAGE", "SD mount failed; card detect %s",
+            cardDetect ? "asserted (card present but unreadable)" : "released or unreadable");
+  }
+#endif
+  return mounted;
+}
 
 bool HalStorage::ready() const { return SDCard.ready(); }
+
+bool HalStorage::cardDetectAsserted() const {
+#if FREEINK_DEVICE_READPICO
+  // P0.6, active-low; false on any I2C failure (see the header contract).
+  return BoardReadPico::sdCardPresent();
+#else
+  return false;
+#endif
+}
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
@@ -51,16 +83,12 @@ void HalStorage::prepareForDeepSleep() {
   SDCard.shutdown();
 }
 
-#if FREEINK_CAP_USB_MSC && !FREEINK_SD_SDMMC
-#error "USB Drive requires an SDMMC-backed storage profile"
-#endif
-
 bool HalStorage::beginUsbDrive() {
 #if FREEINK_CAP_USB_MSC
   StorageLock lock;
   auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
   if (!blockDevice) {
-    LOG_ERR("USB", "USB Drive requires a mounted SDMMC filesystem");
+    LOG_ERR("USB", "USB Drive requires a mounted SD filesystem");
     return false;
   }
 
@@ -81,6 +109,15 @@ bool HalStorage::disconnectUsbDriveHost() {
 #if FREEINK_CAP_USB_MSC
   StorageLock lock;
   return usbMassStorage.disconnectHost();
+#else
+  return false;
+#endif
+}
+
+bool HalStorage::usbDriveHostSuspended() const {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  return usbMassStorage.hostSuspended();
 #else
   return false;
 #endif
@@ -133,6 +170,25 @@ size_t HalStorage::readFileToBuffer(const char* path, char* buffer, size_t buffe
   HAL_STORAGE_WRAPPED_CALL(readFileToBuffer, path, buffer, bufferSize, maxBytes);
 }
 
+// Composed of already-locked HalStorage/HalFile operations; needs no
+// StorageLock of its own.
+bool HalStorage::readFileToString(const char* moduleName, const std::string& path, size_t cap, std::string& out) {
+  out.clear();
+  HalFile file;
+  if (!openFileForRead(moduleName, path, file)) return false;
+  if (file.isDirectory()) return false;
+  const size_t size = file.fileSize();
+  if (size == 0 || size > cap) return false;
+  // string growth is a bare allocation under -fno-exceptions; probe first so
+  // a large file on a fragmented heap fails soft instead of abort()ing.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < size + 512) {
+    LOG_ERR(moduleName, "readFileToString OOM: %u bytes for %s", static_cast<unsigned>(size), path.c_str());
+    return false;
+  }
+  out.resize(size);
+  return file.read(out.data(), size) == static_cast<int>(size);
+}
+
 bool HalStorage::writeFile(const char* path, const String& content) {
   HAL_STORAGE_WRAPPED_CALL(writeFile, path, content);
 }
@@ -181,6 +237,10 @@ bool HalStorage::exists(const char* path) { HAL_STORAGE_WRAPPED_CALL(exists, pat
 bool HalStorage::remove(const char* path) { HAL_STORAGE_WRAPPED_CALL(remove, path); }
 bool HalStorage::rename(const char* oldPath, const char* newPath) {
   HAL_STORAGE_WRAPPED_CALL(rename, oldPath, newPath);
+}
+
+bool HalStorage::replaceFile(const char* tmpPath, const char* path) {
+  HAL_STORAGE_WRAPPED_CALL(replaceFile, tmpPath, path);
 }
 
 bool HalStorage::rmdir(const char* path) { HAL_STORAGE_WRAPPED_CALL(rmdir, path); }
@@ -255,10 +315,18 @@ size_t HalFile::getName(char* name, size_t len) { HAL_FILE_WRAPPED_CALL(getName,
 size_t HalFile::size() { HAL_FILE_FORWARD_CALL(size, ); }              // already thread-safe, no need to wrap
 size_t HalFile::fileSize() { HAL_FILE_FORWARD_CALL(fileSize, ); }      // already thread-safe, no need to wrap
 uint64_t HalFile::fileSize64() { HAL_FILE_FORWARD_CALL(fileSize, ); }  // already thread-safe, no need to wrap
+uint32_t HalFile::modificationTime() {
+  HalStorage::StorageLock lock;
+  uint16_t date = 0;
+  uint16_t time = 0;
+  if (!impl || !impl->file.getModifyDateTime(&date, &time) || date == 0) return 0;
+  return (static_cast<uint32_t>(date) << 16) | time;
+}
 bool HalFile::seek(size_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
 bool HalFile::seek64(uint64_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, pos); }
 bool HalFile::seekCur(int64_t offset) { HAL_FILE_WRAPPED_CALL(seekCur, offset); }
 bool HalFile::seekSet(size_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, offset); }
+bool HalFile::truncate(const uint64_t length) { HAL_FILE_WRAPPED_CALL(truncate, length); }
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, ); }
 size_t HalFile::position() const { HAL_FILE_WRAPPED_CALL(position, ); }
 int HalFile::read(void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(read, buf, count); }
@@ -269,7 +337,19 @@ size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }
 bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, newPath); }
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, ); }  // already thread-safe, no need to wrap
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }
-bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, ); }
+// Closing an unopened handle is a no-op, not misuse. openFileForRead()/openFileForWrite()
+// deliberately hand back a null handle when the open fails (file = HalFile()), and the
+// tree-wide pattern for member files is to close them unconditionally -- so every caller
+// that closes a member whose open failed lands here with impl == nullptr. The failure has
+// already been reported by that open* return value, and asserting on it turns a
+// recoverable error (a book whose container is not a readable ZIP, a full or missing SD
+// card) into a panic. Field report on a Read Pico: assert here while opening a book, with
+// "[ZIP] EOCD signature not found in zip file" immediately before it.
+bool HalFile::close() {
+  HalStorage::StorageLock lock;
+  if (!impl) return true;
+  return impl->file.close();
+}
 HalFile HalFile::openNextFile() {
   HalStorage::StorageLock lock;
   assert(impl != nullptr);

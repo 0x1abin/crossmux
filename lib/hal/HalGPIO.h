@@ -3,10 +3,6 @@
 #include <Arduino.h>
 #include <InputManager.h>
 
-#include <atomic>
-
-#include "InputModality.h"
-
 // Display SPI pins (custom pins for XteinkX4, not hardware SPI defaults)
 #define EPD_SCLK 8   // SPI Clock
 #define EPD_MOSI 10  // SPI MOSI (Master Out Slave In)
@@ -49,8 +45,9 @@ class HalGPIO {
 
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
-  std::atomic<InputModality> inputModality{InputModality::Touch};
-  bool inputModalityChanged = false;
+  bool inputBegun = false;  // InputManager::begin() ran exactly once
+  uint8_t previousCapacitivePageButtons = 0;
+  bool capacitivePagePressed = false;
 
  public:
   enum class DeviceType : uint8_t { X4, X3 };
@@ -81,30 +78,48 @@ class HalGPIO {
 
   // Start button GPIO and setup SPI for screen and SD card
   void begin();
+  void prepareForDeepSleep();
+
+  // Bring the input backends up: button pins plus the touch controller
+  // (InputManager::begin()). Split out of begin() because a board can have a real
+  // ordering dependency between its panel rails and its input devices — on Read
+  // Pico the CST836U probe must not run before the SY7636A rails are sequenced,
+  // so src/main.cpp calls this right after display.begin(). Idempotent, and
+  // update() calls it as a safety net: an un-begun InputManager reports no input
+  // at all, which on a touch-only board would be a brick, so an ordering
+  // preference must never be able to cause that.
+  void beginInput();
 
   // Button input methods
   void update();
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   uint8_t physicalPressedMask() const;
-#if FREEINK_CAP_HAPTIC
-  bool wasTouchContactPressed() const;
-  void updateHapticFeedback(uint8_t level);
-  void stopHapticFeedback();
-#endif
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
   unsigned long getPowerButtonHeldTime() const;
+  // True when any button contact is closed right now, read straight from the
+  // hardware (ADC ladder off its idle rail, or the power GPIO asserted), without
+  // going through the debounced state. Cheap enough to call every few ms.
+  bool rawInputActive();
   bool hasTouch() const;
   // Capacitive Home key reported by the touch controller (X4 Pro). The tap
   // event fires on release and excludes a long hold.
   bool hasHomeKey() const;
+  // Two-position slide switch (Picco). Debounced position and its change edge.
+  bool hasToggleSwitch() const;
+  bool isToggleSwitchOn() const;
+  bool wasHomeKeyPressed() const;
   bool wasHomeKeyTapped() const;
   bool wasHomeKeyLongPressed() const;
   bool wasTouchTap(float& nx, float& ny) const;
   bool wasTouchDown(float& nx, float& ny) const;
+  bool wasCapacitivePagePressed() const { return capacitivePagePressed; }
+  bool isCapacitivePagePressed(uint8_t buttonIndex) const {
+    return buttonIndex < 8 && (previousCapacitivePageButtons & (1u << buttonIndex)) != 0;
+  }
   // Raw release edge, reported even when the contact was not a tap (swipe end,
   // drag-off). Snapshot builders forward it so interaction routing can clear
   // pressed state.
@@ -122,14 +137,11 @@ class HalGPIO {
   unsigned long lastTouchHeldMs() const;
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
   bool wasTouchActivity() const;
-  InputModality lastInputModality() const { return inputModality.load(std::memory_order_relaxed); }
-  bool wasInputModalityChanged() const { return inputModalityChanged; }
   // Drop the one-shot touch tap/release edge events. Call on activity
   // transitions so the incoming activity does not re-read a tap the outgoing
   // one consumed (InputManager clears these in update(), but a pushActivity
   // runs mid-frame; without this the incoming activity double-activates).
   void clearTouchTapEvent();
-  void prepareForDeepSleep();
   bool restoreTouchAfterDisplayReset();
   void setSharedConfirmPowerShortPressEmitsPower(bool enabled);
 
@@ -137,7 +149,6 @@ class HalGPIO {
   // Returns true if verification succeeded, false if device should return to sleep.
   // Should only be called when wakeup reason is PowerButton.
   bool verifyPowerButtonWakeup();
-  bool verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed);
 
   // Check if USB is connected
   bool isUsbConnected() const;

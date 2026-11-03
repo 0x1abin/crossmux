@@ -89,10 +89,10 @@ uint32_t PixelSwitchRateLimiter::retryAfterMs(const uint32_t now, const uint8_t 
 }
 
 int PixelSwitchPendingBatch::find(const int x, const int y) const {
-  for (uint8_t i = 0; i < count_; ++i) {
-    if (changes_[i].x == x && changes_[i].y == y) return i;
-  }
-  return -1;
+  const auto end = changes_.begin() + count_;
+  const auto found =
+      std::find_if(changes_.begin(), end, [&](const auto& change) { return change.x == x && change.y == y; });
+  return found == end ? -1 : static_cast<int>(found - changes_.begin());
 }
 
 void PixelSwitchPendingBatch::remove(const uint8_t index) {

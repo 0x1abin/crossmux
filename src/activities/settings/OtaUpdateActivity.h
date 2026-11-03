@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "activities/Activity.h"
@@ -22,15 +23,14 @@ class OtaUpdateActivity : public Activity, private UiAppHost {
     ShuttingDown,
   };
 
-  // Can't initialize this to 0 or the first render doesn't happen
-  static constexpr unsigned int UNINITIALIZED_PERCENTAGE = 111;
-
   State state = State::Ready;
   OtaUpdater::Channel selectedChannel = OtaUpdater::Channel::Stable;
   int selectedReadyRow = 0;
   bool waitForConfirmRelease = false;
   bool readingStatsReleased = false;
-  unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
+  size_t progressBytes = 0;
+  size_t progressTotalBytes = 0;
+  unsigned int lastProgressRefreshPercent = 0;
   OtaUpdater updater;
   OptionPopup updateConfirmation;
   std::array<uint8_t, ReleaseJsonParser::RELEASE_NOTE_COUNT_MAX + 1> releaseNotePageStarts{};

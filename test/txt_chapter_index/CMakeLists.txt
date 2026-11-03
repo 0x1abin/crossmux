@@ -1,6 +1,8 @@
 add_executable(txt_chapter_index_test
   TxtChapterCacheTest.cpp
   TxtChapterIndexTest.cpp
+  TxtProgressTest.cpp
+  ${REPO_ROOT}/lib/Txt/TxtProgress.cpp
   ${REPO_ROOT}/lib/Txt/Txt.cpp
   ${REPO_ROOT}/lib/Txt/TxtChapterIndex.cpp
   ${REPO_ROOT}/lib/Txt/TxtEncoding.cpp

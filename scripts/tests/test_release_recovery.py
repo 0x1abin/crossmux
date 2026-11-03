@@ -135,6 +135,7 @@ class RecoveryTest(unittest.TestCase):
         self.source = {'schemaVersion': 1, 'channel': 'stable', 'updatedAt': 'original', 'buildId': build,
                        'releaseNotes': {'global': ['One', 'Two'], 'zh-CN': ['一', '二']},
                        'targets': {'xteink_x4': {'variants': {'global': pointer, 'zh-CN': copy.deepcopy(pointer)}}}}
+        self.source['targets']['xteink_x4']['bundle'] = {'name': 'test.zip', 'size': 7, 'sha256': 'c' * 64, 'url': f'https://assets.crossmux.cn/firmware/builds/{build}/xteink_x4/test.zip'}
         self.global_index = recovery.global_index(self.source, build)
         self.current = None
         self.assets = []
@@ -157,6 +158,10 @@ class RecoveryTest(unittest.TestCase):
     def test_url_conversion_preserves_original_metadata(self):
         self.assertEqual(recovery.identity(self.global_index), recovery.identity(self.source))
         self.assertEqual(self.global_index['updatedAt'], 'original')
+        self.assertEqual(self.global_index['targets']['xteink_x4']['bundle']['url'], f"https://github.com/0x1abin/crossmux/releases/download/{self.source['buildId']}/test.zip")
+        altered = copy.deepcopy(self.global_index)
+        altered['targets']['xteink_x4']['bundle']['sha256'] = 'd' * 64
+        self.assertNotEqual(recovery.identity(altered), recovery.identity(self.source))
         self.assertIn('/releases/download/stable-build-', self.global_index['targets']['xteink_x4']['variants']['global']['manifestUrl'])
         changed = copy.deepcopy(self.global_index)
         changed['buildId'] = 'different'
@@ -167,7 +172,7 @@ class RecoveryTest(unittest.TestCase):
             self.current = json.loads(index.read_text())
             self.assets = [{'name': 'release-index.json', 'id': 1, 'updated_at': 'now'},
                            {'name': 'firmware.bin', 'id': 2, 'updated_at': 'now'}]
-        with mock.patch.object(recovery, 'release', side_effect=self.release), mock.patch.object(recovery, 'download', side_effect=self.download), mock.patch.object(recovery, 'verify_snapshot', side_effect=self.verify), mock.patch.object(recovery.subprocess, 'run'), mock.patch.object(recovery, 'same_asset', return_value=True), mock.patch.object(recovery, 'channel_alias_data', return_value={'firmware.bin': b'verified'}), mock.patch.object(recovery, 'publish_channel', side_effect=publish_channel) as publish_channel:
+        with mock.patch.object(recovery, 'release', side_effect=self.release), mock.patch.object(recovery, 'download', side_effect=self.download), mock.patch.object(recovery, 'verify_snapshot', side_effect=self.verify), mock.patch.object(recovery, 'verify_bundles'), mock.patch.object(recovery.subprocess, 'run'), mock.patch.object(recovery, 'same_asset', return_value=True), mock.patch.object(recovery, 'channel_alias_data', return_value={'firmware.bin': b'verified'}), mock.patch.object(recovery, 'publish_channel', side_effect=publish_channel) as publish_channel:
             recovery.restore('stable')
             self.assertEqual(publish_channel.call_count, 1)
             publish_channel.reset_mock()
@@ -175,7 +180,7 @@ class RecoveryTest(unittest.TestCase):
             publish_channel.assert_not_called()
 
     def test_disagreement_or_corrupt_resources_never_publish(self):
-        with mock.patch.object(recovery, 'release', side_effect=self.release), mock.patch.object(recovery, 'download', side_effect=self.download), mock.patch.object(recovery, 'verify_snapshot', side_effect=ValueError('bad checksum')), mock.patch.object(recovery.subprocess, 'run'), mock.patch.object(recovery, 'publish_channel') as publish_channel:
+        with mock.patch.object(recovery, 'release', side_effect=self.release), mock.patch.object(recovery, 'download', side_effect=self.download), mock.patch.object(recovery, 'verify_snapshot', side_effect=ValueError('bad checksum')), mock.patch.object(recovery, 'verify_bundles'), mock.patch.object(recovery.subprocess, 'run'), mock.patch.object(recovery, 'publish_channel') as publish_channel:
             with self.assertRaisesRegex(ValueError, 'bad checksum'):
                 recovery.restore('stable')
             publish_channel.assert_not_called()
@@ -185,6 +190,26 @@ class RecoveryTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'regional channels differ'):
                 recovery.restore('stable')
             publish_channel.assert_not_called()
+
+    def test_bundle_failure_never_publishes(self):
+        with mock.patch.object(recovery, 'release', side_effect=self.release), mock.patch.object(recovery, 'download', side_effect=self.download), mock.patch.object(recovery.subprocess, 'run'), mock.patch.object(recovery, 'verify_snapshot'), mock.patch.object(recovery, 'verify_bundles', side_effect=ValueError('bad bundle')), mock.patch.object(recovery, 'publish_channel') as publish_channel:
+            with self.assertRaisesRegex(ValueError, 'bad bundle'):
+                recovery.restore('stable')
+            publish_channel.assert_not_called()
+
+    def test_bundle_resource_is_checked_for_both_regions(self):
+        data = b'package'
+        for index, region in ((self.source, 'cos'), (self.global_index, 'github')):
+            bundle = index['targets']['xteink_x4']['bundle']
+            bundle['sha256'] = hashlib.sha256(data).hexdigest()
+            with mock.patch.object(recovery, 'download', return_value=data):
+                recovery.verify_bundles(index, region, self.source['buildId'])
+                bundle['sha256'] = 'd' * 64
+                with self.assertRaisesRegex(ValueError, 'SHA-256'):
+                    recovery.verify_bundles(index, region, self.source['buildId'])
+                bundle['url'] = 'https://evil.example/test.zip'
+                with self.assertRaisesRegex(ValueError, 'URL'):
+                    recovery.verify_bundles(index, region, self.source['buildId'])
 
     def test_draft_channel_requires_inspection(self):
         with mock.patch.object(recovery, 'release', return_value={'draft': True}), mock.patch.object(recovery, 'download', side_effect=self.download), mock.patch.object(recovery, 'publish_channel') as publish_channel:

@@ -192,10 +192,37 @@ connections, and allows normal auto-sleep again after the retry window expires.
 Manual mode keeps foreground Wi-Fi available but permits idle auto-sleep.
 Downloads are identified by signature and accept BMP or JPEG from the same
 endpoint. Exact duplicates reuse the current entry. Unique downloads are
-validated transactionally before the old image is archived; JPEG uses the EPUB
-aspect-fit, dithering, streamed pixel-cache, and 4-level grayscale path without
-loading the full pixel cache into RAM. A selected JPEG is converted to a
-fit-without-cropping BMP before atomically replacing `/sleep.bmp`.
+validated transactionally before the old image is archived. The QR uses physical
+height/width for portrait upload dimensions and `mode=gray4` or `mode=gray16`
+from `GfxRenderer::getGrayscaleLevels()`. Legacy boards and the simulator default
+to four levels; Read Pico explicitly advertises sixteen.
+
+Four-level JPEG output retains the EPUB aspect-fit, dithering and streamed pixel
+cache. Read Pico decodes BMP/JPEG once from the original file into the existing
+native 4bpp framebuffer, bypassing four-level quantization and the pixel cache.
+Gray8 brightness maps to `(gray + 8) / 17`; the renderer applies the existing
+orientation transform. A B/W proxy remains available for modal menus. Closing a
+menu, or selecting a historical original, re-renders the native image. Decode or
+refresh failure rejects the new image through the existing rollback transaction;
+a four-level substitute is never reported as native sixteen-level success.
+
+Set Cover copies BMP originals unchanged. JPEG converts to an 8-bit grayscale BMP
+on a sixteen-level board and the existing 2-bit BMP elsewhere, fit without
+cropping. Header, palette and row short writes fail conversion. Installation
+retains `/sleep.bmp.part` and `/sleep.bmp.bak`, validating the generated file and
+rolling back on replacement or settings-save failure. Custom sleep images use
+native output only on a sixteen-level board with No Filter; failure displays the
+default sleep screen. Book covers, text AA, alpha sleep overlays and filters keep
+their existing paths.
+
+The native BMP scratch is bounded to one Gray8 row plus one source row (at most
+10,240 bytes); it is fallible and released with the Bitmap. JPEG reuses its
+existing decoder and bounded row/MCU workspaces, without another full-screen
+buffer or a new cache format. `python3 scripts/tests/test_native_grayscale.py`
+compiles the production renderer, decoders and AirPage transactions with recording
+HAL seams and checks the sleep methods in isolation. Firmware builds and these
+host checks do not establish panel polarity, tone separation, ghosting, or physical
+sleep/wake acceptance; see `docs/engineering/read-pico.md`.
 
 ## Resource budget
 

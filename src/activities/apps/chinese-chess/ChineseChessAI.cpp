@@ -228,7 +228,7 @@ class Searcher {
     }
   }
 
-  void reorderByScore(Move* moves, int32_t* scores, uint8_t n) const {
+  static void reorderByScore(Move* moves, int32_t* scores, uint8_t n) {
     for (uint8_t i = 1; i < n; i++) {
       const Move m = moves[i];
       const int32_t sc = scores[i];

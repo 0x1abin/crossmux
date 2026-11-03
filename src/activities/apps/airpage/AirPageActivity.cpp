@@ -23,6 +23,7 @@
 #include "network/CrossMuxEndpoints.h"
 #include "network/HttpDownloader.h"
 #include "util/QrUtils.h"
+#include "util/SleepCover.h"
 #include "util/TimeUtils.h"
 
 namespace {
@@ -106,7 +107,7 @@ void AirPageActivity::onEnter() {
   }
   rebuildHistoryRows();
   autoSleepWallpaper_ = airpage::loadAutoSleepWallpaper();
-  airpage::AirPageWallpaper::recoverInterruptedTransaction();
+  (void)sleepCover::recover();
 
   const std::string& deviceId = airpage::deviceId();
   uploadUrl_.reserve(64 + deviceId.size());
@@ -116,8 +117,9 @@ void AirPageActivity::onEnter() {
   uploadUrl_ += "/?id=";
   uploadUrl_ += deviceId;
   char displayParams[48];
-  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray4",
-           static_cast<unsigned>(renderer.getDisplayHeight()), static_cast<unsigned>(renderer.getDisplayWidth()));
+  snprintf(displayParams, sizeof(displayParams), "&w=%u&h=%u&mode=gray%u",
+           static_cast<unsigned>(renderer.getDisplayHeight()), static_cast<unsigned>(renderer.getDisplayWidth()),
+           static_cast<unsigned>(renderer.getGrayscaleLevels()));
   uploadUrl_ += displayParams;
 
   downloadUrl_.reserve(64 + deviceId.size());
@@ -152,12 +154,7 @@ void AirPageActivity::onExit() {
   LOG_DBG("AIRP", "onExit free=%u largest=%u", static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()));
   Activity::onExit();
-#if FREEINK_DEVICE_EEGO_A4
-  // EEGO can render the AirPage image as a grayscale full-screen frame; force
-  // a clean first frame after exit so its pixels do not ghost into the next
-  // activity (same A4-only treatment as the EPUB reader).
-  renderer.requestNextFullRefresh();
-#endif
+  airpage::AirPageImageRenderer::cleanScreen(renderer);
 }
 
 bool AirPageActivity::preventAutoSleep() { return phase_ != Phase::Idle || connection_.preventsAutoSleep(); }
@@ -183,23 +180,16 @@ bool AirPageActivity::processImageDisplayResult() {
       return true;
     }
 
+    case ImageDisplayResult::OutOfMemory:
     case ImageDisplayResult::Failure:
+      // A display failure does not establish file corruption. Keep both the
+      // pending download and its backup until display succeeds or a new push arrives.
       airpage::AirPageImageRenderer::resetSessionFailures();
-      switch (imageStore_.rejectDisplayedImage(selectedImage_)) {
-        case airpage::AirPageImageStore::RejectResult::CurrentRestored:
-        case airpage::AirPageImageStore::RejectResult::CurrentInvalid:
-          setAirPageScreen(Screen::Qr);
-          break;
-        case airpage::AirPageImageStore::RejectResult::HistoryInvalid:
-          if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
-            historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
-          }
-          setAirPageScreen(Screen::History);
-          break;
-      }
+      if (selectedImage_.current) historySelection_ = 0;
       rebuildHistoryRows();
-      notice_ = Notice::InvalidImage;
-      imageNeedsDisplay_ = true;
+      setAirPageScreen(Screen::History);
+      notice_ = result == ImageDisplayResult::OutOfMemory ? Notice::ImageOutOfMemory : Notice::ImageDisplayFailed;
+      imageNeedsDisplay_ = false;
       requestUpdate();
       return true;
   }
@@ -247,6 +237,8 @@ void AirPageActivity::clearConnectionNotice() {
     case Notice::None:
     case Notice::NoImage:
     case Notice::InvalidImage:
+    case Notice::ImageOutOfMemory:
+    case Notice::ImageDisplayFailed:
     case Notice::DownloadFailed:
     case Notice::SettingsSaveFailed:
     case Notice::WallpaperFailed:
@@ -342,13 +334,15 @@ void AirPageActivity::loop() {
     }
 
     case Screen::History: {
-      if (mappedInput.wasAnyReleased() && notice_ == Notice::InvalidImage) notice_ = Notice::None;
+      if (mappedInput.wasAnyReleased() && (notice_ == Notice::InvalidImage || notice_ == Notice::ImageOutOfMemory ||
+                                           notice_ == Notice::ImageDisplayFailed))
+        notice_ = Notice::None;
       if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
         setAirPageScreen(Screen::Qr);
         requestUpdate();
         return;
       }
-      const size_t historyCount = imageStore_.historyCount();
+      const size_t historyCount = historyRowCount();
       if (historyCount > 0 && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
         openSelectedHistoryImage();
         return;
@@ -405,12 +399,6 @@ void AirPageActivity::loop() {
 void AirPageActivity::setAirPageScreen(const Screen screen) {
   if (screen_ == screen) return;
   closeRouting();
-#if FREEINK_DEVICE_EEGO_A4
-  // Leaving the full-screen image for a normal UI page (QR/settings/history):
-  // the image may have been driven as a grayscale frame whose residue a plain
-  // FAST diff won't scrub. Force a clean first frame on the A4.
-  if (screen_ == Screen::Image && screen != Screen::Image) renderer.requestNextFullRefresh();
-#endif
   screen_ = screen;
 }
 
@@ -472,7 +460,7 @@ void AirPageActivity::buildTouchScreen(UiScreen& screen) {
                                           static_cast<int16_t>(renderer.getScreenWidth() - content.x - content.width),
                                           static_cast<int16_t>(renderer.getScreenHeight() - content.y - content.height),
                                           static_cast<int16_t>(content.x)});
-      const int count = static_cast<int>(imageStore_.historyCount());
+      const int count = static_cast<int>(historyRowCount());
       if (count == 0) {
         screen.centeredText(tr(STR_AIRPAGE_NO_IMAGE), screen.theme().bodyText);
         return;
@@ -511,8 +499,7 @@ void AirPageActivity::onSettingsRow(const fui::ActionEvent& event, void* user) {
 
 void AirPageActivity::onHistoryRow(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<AirPageActivity*>(user);
-  if (self->screen_ != Screen::History || event.value < 0 ||
-      event.value >= static_cast<int>(self->imageStore_.historyCount())) {
+  if (self->screen_ != Screen::History || event.value < 0 || event.value >= static_cast<int>(self->historyRowCount())) {
     return;
   }
   self->app.clearTapFlash();
@@ -617,6 +604,10 @@ void AirPageActivity::applySettingsSelection() {
 
 void AirPageActivity::openHistory() {
   if (phase_ != Phase::Idle) return;
+  {
+    RenderLock lock(*this);
+    imageStore_.firstHistoryPage();
+  }
   historyNav_.reset();
   historySelection_ = 0;
   rebuildHistoryRows();
@@ -629,45 +620,78 @@ void AirPageActivity::moveHistorySelection(const int index) {
     RenderLock lock(*this);
     historySelection_ = index;
     historyNav_.selected = index;
-    historyNav_.follow(static_cast<int>(imageStore_.historyCount()));
+    historyNav_.follow(static_cast<int>(historyRowCount()));
   }
   requestUpdate();
 }
 
+size_t AirPageActivity::historyRowCount() const {
+  return imageStore_.historyCount() + (imageStore_.hasPreviousHistoryPage() ? 1u : 0u) +
+         (imageStore_.hasNextHistoryPage() ? 1u : 0u);
+}
+
 void AirPageActivity::rebuildHistoryRows() {
   RenderLock lock(*this);
-  const int count = static_cast<int>(imageStore_.historyCount());
+  const int count = static_cast<int>(historyRowCount());
   historySelection_ = std::min(historySelection_, std::max(0, count - 1));
-  for (int i = 0; i < count; ++i) {
-    const auto& entry = imageStore_.historyEntry(static_cast<size_t>(i));
+  const size_t offset = imageStore_.hasPreviousHistoryPage() ? 1u : 0u;
+  if (offset) {
+    historyRows_[0] = {};
+    historyRows_[0].label = tr(STR_PREV_PAGE);
+  }
+  for (size_t i = 0; i < imageStore_.historyCount(); ++i) {
+    const auto& entry = imageStore_.historyEntry(i);
     if (entry.isCurrent()) {
       snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s", tr(STR_AIRPAGE_CURRENT_IMAGE));
     } else if (!formatArchiveDate(entry.archiveId, historyLabels_[i], sizeof(historyLabels_[i]))) {
-      snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s %d", tr(STR_AIRPAGE_IMAGE_LABEL), i + 1);
+      snprintf(historyLabels_[i], sizeof(historyLabels_[i]), "%s %llu", tr(STR_AIRPAGE_IMAGE_LABEL),
+               static_cast<unsigned long long>(entry.archiveId));
     }
     const char* format = entry.image.format == airpage::ImageFormat::Jpeg ? "JPEG" : "BMP";
     snprintf(historySubtitles_[i], sizeof(historySubtitles_[i]), "%s · %d×%d", format, entry.image.width,
              entry.image.height);
-    historyRows_[i].label = historyLabels_[i];
-    historyRows_[i].subtitle = historySubtitles_[i];
-    historyRows_[i].actionValue = static_cast<int16_t>(i);
+    historyRows_[i + offset] = {};
+    historyRows_[i + offset].label = historyLabels_[i];
+    historyRows_[i + offset].subtitle = historySubtitles_[i];
   }
+  if (imageStore_.hasNextHistoryPage()) {
+    historyRows_[count - 1] = {};
+    historyRows_[count - 1].label = tr(STR_NEXT_PAGE);
+  }
+  for (int i = 0; i < count; ++i) historyRows_[i].actionValue = static_cast<int16_t>(i);
   historyNav_.selected = historySelection_;
   historyNav_.scrollBy(0, count);
   historyNav_.follow(count);
 }
 
 void AirPageActivity::openSelectedHistoryImage() {
-  if (historySelection_ < 0 || !imageStore_.selectHistory(static_cast<size_t>(historySelection_), selectedImage_)) {
-    if (historySelection_ >= static_cast<int>(imageStore_.historyCount())) {
-      historySelection_ = imageStore_.historyCount() == 0 ? 0 : static_cast<int>(imageStore_.historyCount() - 1);
+  if (historySelection_ < 0 || historySelection_ >= static_cast<int>(historyRowCount())) return;
+  const bool previous = imageStore_.hasPreviousHistoryPage() && historySelection_ == 0;
+  const bool next = imageStore_.hasNextHistoryPage() && historySelection_ == static_cast<int>(historyRowCount() - 1);
+  if (previous || next) {
+    {
+      RenderLock lock(*this);
+      if (previous)
+        imageStore_.previousHistoryPage();
+      else
+        imageStore_.nextHistoryPage();
+      historyNav_.reset();
+      historySelection_ = 0;
     }
+    rebuildHistoryRows();
+    requestUpdate();
+    return;
+  }
+  const size_t index = static_cast<size_t>(historySelection_) - (imageStore_.hasPreviousHistoryPage() ? 1u : 0u);
+  if (!imageStore_.selectHistory(index, selectedImage_)) {
     rebuildHistoryRows();
     notice_ = Notice::InvalidImage;
     requestUpdate();
     return;
   }
   wallpaperResult_ = WallpaperResult::None;
+  notice_ = Notice::None;
+  airpage::AirPageImageRenderer::resetSessionFailures();
   setAirPageScreen(Screen::Image);
   imageNeedsDisplay_ = true;
   requestUpdate();
@@ -814,6 +838,7 @@ void AirPageActivity::doFetch() {
       return;
 
     case airpage::AirPageImageStore::StageResult::PendingDisplay:
+      imageNeedsClean_ = true;
       airpage::AirPageImageRenderer::resetSessionFailures();
       imageStore_.selectCurrent(selectedImage_);
       imageNeedsDisplay_ = true;
@@ -860,8 +885,11 @@ void AirPageActivity::render(RenderLock&&) {
     const bool screenSizeChanged =
         displayedScreenWidth_ != fullScreen.width || displayedScreenHeight_ != fullScreen.height;
     if (imageNeedsDisplay_ || screenSizeChanged) {
-      const bool rendered = airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_);
-      if (rendered) {
+      const bool cleanBeforeDisplay = imageNeedsClean_;
+      imageNeedsClean_ = false;
+      const auto rendered =
+          airpage::AirPageImageRenderer::render(renderer, fullScreen, selectedImage_, cleanBeforeDisplay);
+      if (rendered == airpage::AirPageImageRenderer::Result::Success) {
         imageNeedsDisplay_ = false;
         displayedScreenWidth_ = fullScreen.width;
         displayedScreenHeight_ = fullScreen.height;
@@ -874,7 +902,10 @@ void AirPageActivity::render(RenderLock&&) {
         imageDisplayResult_.store(ImageDisplayResult::Success, std::memory_order_release);
         if (mappedInput.hasTouch()) renderUi();
       } else {
-        imageDisplayResult_.store(ImageDisplayResult::Failure, std::memory_order_release);
+        imageDisplayResult_.store(rendered == airpage::AirPageImageRenderer::Result::OutOfMemory
+                                      ? ImageDisplayResult::OutOfMemory
+                                      : ImageDisplayResult::Failure,
+                                  std::memory_order_release);
       }
       return;
     }
@@ -941,6 +972,9 @@ void AirPageActivity::render(RenderLock&&) {
 
   if (mappedInput.hasTouch() || screen_ == Screen::Settings || screen_ == Screen::History) renderUi();
 
+  if (screen_ == Screen::History && (notice_ == Notice::ImageOutOfMemory || notice_ == Notice::ImageDisplayFailed)) {
+    GUI.drawPopup(renderer, noticeText());
+  }
   renderer.displayBuffer();
   imageNeedsDisplay_ = true;
   displayedScreenWidth_ = 0;
@@ -955,6 +989,10 @@ const char* AirPageActivity::noticeText() const {
       return tr(STR_AIRPAGE_NO_IMAGE);
     case Notice::InvalidImage:
       return tr(STR_AIRPAGE_INVALID_IMAGE);
+    case Notice::ImageOutOfMemory:
+      return tr(STR_AIRPAGE_IMAGE_OUT_OF_MEMORY);
+    case Notice::ImageDisplayFailed:
+      return tr(STR_AIRPAGE_IMAGE_DISPLAY_FAILED);
     case Notice::WifiRequired:
       return tr(STR_AIRPAGE_WIFI_REQUIRED);
     case Notice::WifiFailed:

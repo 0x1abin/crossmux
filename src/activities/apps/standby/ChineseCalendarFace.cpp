@@ -117,7 +117,7 @@ void formatClash(const AlmanacDay& d, char* buf, size_t sz) {
 
 // Draw a row of inline tokens (same font) centred horizontally in the viewport.
 // `gapPx` is the literal pixel spacer between adjacent tokens.
-void drawCenteredRow(GfxRenderer& renderer, int fontId, const Rect& viewport, int y, const char* const* tokens,
+void drawCenteredRow(const GfxRenderer& renderer, int fontId, const Rect& viewport, int y, const char* const* tokens,
                      int tokenCount, int gapPx) {
   if (tokenCount <= 0) return;
   int total = 0;

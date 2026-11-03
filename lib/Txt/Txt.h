@@ -1,12 +1,17 @@
 #pragma once
 
 #include <HalStorage.h>
+#include <Print.h>
+
+#include <string_view>
+class BookMetadataCache;
 
 #include <memory>
 #include <string>
 
 #include "TxtChapterIndex.h"
 #include "TxtEncoding.h"
+#include "TxtProgress.h"
 
 class Txt {
   std::string filepath;
@@ -16,6 +21,21 @@ class Txt {
   size_t fileSize = 0;
 
  public:
+  static bool isTxtOrMd(std::string_view path);
+  static bool validateCache(const std::string& filepath, const std::string& cachePath, size_t cachedSize);
+  static void invalidateCache(const std::string& cachePath);
+  static bool streamTxtToHtml(const std::string& filepath, Print& out, const std::string& cachePath);
+  static int tocIndexForPosition(const std::string& filepath, const std::string& cachePath, uint32_t visibleOffset,
+                                 uint8_t* chapterProgress = nullptr);
+  static bool resolveChapterPosition(const std::string& filepath, const std::string& cachePath, std::string_view anchor,
+                                     uint32_t& visibleOffset);
+  static txt_progress::LegacyResult restoreLegacyProgress(const std::string& filepath, const std::string& cachePath,
+                                                          uint32_t& visibleOffset);
+  static std::string findCompanionCoverImage(const std::string& filepath);
+  static bool convertCoverImageToBmp(const std::string& imagePath, const std::string& destBmpPath, int thumbHeight = 0,
+                                     bool cropped = false, bool originalThresholds = false);
+  static bool buildTxtCache(const std::string& filepath, const std::string& cachePath,
+                            std::unique_ptr<BookMetadataCache>& bookMetadataCache);
   explicit Txt(std::string path, std::string cacheBasePath);
 
   bool load();

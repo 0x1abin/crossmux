@@ -1,7 +1,9 @@
 #pragma once
 #include <HalStorage.h>
 
+#include <algorithm>
 #include <iostream>
+#include <limits>
 #include <utility>
 
 namespace serialization {
@@ -16,6 +18,11 @@ void writePod(std::ostream& os, const T& value) {
 template <typename T>
 void writePod(HalFile& file, const T& value) {
   file.write(reinterpret_cast<const uint8_t*>(&value), sizeof(T));
+}
+
+template <typename T>
+bool tryWritePod(HalFile& file, const T& value) {
+  return file.write(reinterpret_cast<const uint8_t*>(&value), sizeof(T)) == static_cast<int>(sizeof(T));
 }
 
 template <typename T>
@@ -34,6 +41,11 @@ template <typename T>
   return true;
 }
 
+template <typename T>
+bool tryReadPod(HalFile& file, T& value) {
+  return readPod(file, value);
+}
+
 inline void writeString(std::ostream& os, const std::string& s) {
   const uint32_t len = s.size();
   writePod(os, len);
@@ -44,6 +56,12 @@ inline void writeString(HalFile& file, const std::string& s) {
   const uint32_t len = s.size();
   writePod(file, len);
   file.write(reinterpret_cast<const uint8_t*>(s.data()), len);
+}
+
+inline bool tryWriteString(HalFile& file, const std::string& s) {
+  const uint32_t len = s.size();
+  return tryWritePod(file, len) &&
+         (len == 0 || file.write(reinterpret_cast<const uint8_t*>(s.data()), len) == static_cast<int>(len));
 }
 
 [[nodiscard]] inline bool readString(std::istream& is, std::string& s, const uint32_t maxLength) {
@@ -68,5 +86,9 @@ inline void writeString(HalFile& file, const std::string& s) {
   if (len > 0 && file.read(next.data(), len) != static_cast<int>(len)) return false;
   s = std::move(next);
   return true;
+}
+inline bool tryReadString(HalFile& file, std::string& s, const size_t maxLength) {
+  const uint32_t bound = static_cast<uint32_t>(std::min<size_t>(maxLength, std::numeric_limits<int>::max()));
+  return readString(file, s, bound);
 }
 }  // namespace serialization

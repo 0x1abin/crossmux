@@ -3,9 +3,14 @@
 CrossPoint supports loading additional fonts from the SD card, including fonts
 with extended Unicode coverage (CJK, Cyrillic, Greek, etc.).
 
+If CrossPoint enables external RAM on your device, you can load `.ttf`, `.otf`,
+and `.ttc` files directly. Otherwise, convert them to `.cpfont` files first.
+All devices can use `.cpfont` files.
+
 ## Installing Fonts
 
-There are three ways to install fonts:
+There are three ways to install `.cpfont` fonts. Direct TTF/OTF/TTC loading uses
+the manual SD card copy method below.
 
 ### Option 1: Download from device (recommended)
 
@@ -60,16 +65,101 @@ There are three ways to install fonts:
 
 3. Insert the SD card and power on your CrossPoint reader
 
-## CJK in the User Interface
+## Missing Glyphs in the User Interface
+### Direct TTF/OTF/TTC fonts
+
+If CrossPoint enables external RAM on your device, copy a `.ttf`, `.otf`, or
+`.ttc` file directly into `/fonts/` or `/.fonts/`. The filename without its
+extension becomes the family name. For example, `/fonts/Bookerly.ttf` appears as
+`Bookerly` in **Settings > Reader > Font Family**.
+
+For a family with separate styles, put its files in one subfolder. The folder
+name becomes the family name. For example:
+
+    /fonts/Bookerly/Bookerly-Regular.ttf
+    /fonts/Bookerly/Bookerly-Bold.ttf
+    /fonts/Bookerly/Bookerly-Italic.ttf
+    /fonts/Bookerly/Bookerly-BoldItalic.ttf
+
+The reader selects regular, bold, italic, and bold italic faces from the font
+files. One regular file is enough; the reader derives missing styles. A `.cpfont`
+file in the same family folder takes priority over TTF/OTF/TTC files, so keep
+the two formats in separate folders. If both font roots contain the same family
+name, the copy in `/.fonts/` takes priority.
+
+Direct fonts use the standard reader sizes: 12, 14, 16, and 18 pt. The **Fonts**
+tab in File Transfer accepts `.cpfont` files only. Copy direct fonts to the SD
+card instead. To remove a loose font file, delete that file from the SD card.
+The Fonts page can delete families stored in subfolders.
+
+## Non-Latin Scripts Fallback in the User Interface
 
 Unified firmware registers embedded Simplified-Chinese 8/10/12pt subsets as
-fallbacks for the compact international UI fonts. No extra SD UI sizes stay
-resident, preserving contiguous heap. Japanese, Korean, Traditional Chinese,
-and uncommon Han glyphs outside those subsets may still show replacement boxes.
+fallbacks for the compact international UI fonts.
 
-Reader content uses only the selected reader-size `.cpfont` at runtime. The
-built-in 12pt subset is an offline fallback; install a complete CJK family for
-broader coverage, other point sizes, and style variants.
+On devices with working PSRAM and the existing 256 KiB reserve, the selected
+SD font family may supply size-matched non-Latin UI fallbacks. Install the sizes
+selected by the active UI profile alongside your reader size. The reader-size
+face must match a detection codepoint in `kFallbackProbes` in
+[`SdCardFontSystem.cpp`](../src/SdCardFontSystem.cpp); converter coverage alone
+does not enable detection. Missing files or failed loads preserve the embedded
+fallback. No fonts are downloaded automatically.
+
+As upstream does, when the primary font lacks a non-ASCII character covered by
+the SD fallback, the entire string is measured and drawn using that face.
+This is not per-character font mixing: a string mixing scripts still needs a
+font covering those scripts. If the SD face cannot supply any missing character,
+the embedded Chinese subset is tried next. Unloading or switching SD fonts
+preserves that embedded fallback.
+
+C3 and devices without PSRAM keep only the selected reader-size `.cpfont`
+resident. The Read Pico simulator retains its hardware UI-size font policy;
+other simulators use the standard host policy. Japanese, Korean, Traditional Chinese, and uncommon Han
+glyphs outside the embedded subsets may still show replacement boxes there.
+The built-in 12pt reader subset remains an offline fallback.
+The standard UI uses **8, 10 and 12 pt**; the high-density profile uses
+**12, 14 and 16 pt**. A `.cpfont` family needs the active profile's sizes in
+addition to the reader size. Missing a UI file can leave boxes for glyphs outside
+the embedded fallback even when book content renders correctly. Direct
+TTF/OTF/TTC families reuse their file at those sizes.
+
+These UI sizes only take effect if the reader-size font also matches one of
+CrossPoint's built-in fallback-detection codepoints — see `kFallbackProbes` in
+`src/SdCardFontSystem.cpp` for the current list. A script outside that list
+gets no UI fallback even with the correct `.cpfont` sizes present.
+
+For `.cpfont` families, **Settings > Reader > Font Size** lists every size the family ships,
+so a family built at 8,10,12,14,16,18 offers all six as reading sizes — the UI
+sizes are not hidden from the list. Reading at 8 pt is your call; if you would
+rather not see the small sizes there, convert two families (one with the UI
+sizes for fallback, one with only the reading sizes you want).
+
+When converting your own font, include the UI sizes:
+
+    python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
+      MyCJKFont-Regular.otf \
+      --intervals cjk \
+      --sizes 8,10,12,14,16,18 \
+      --style regular \
+      --name MyCJKFont \
+      --output-dir ./MyCJKFont/
+
+What this means in practice:
+
+- Select a non-Latin-capable SD font under **Settings > Reader > Font Family**
+  (see [Installing Fonts](#installing-fonts) and the interval presets for
+  `.cpfont` under [Converting Custom Fonts](#converting-custom-fonts)). That
+  single selection drives both book content *and* size-matched fallback in
+  the UI.
+- Pure-Latin UI strings keep the crisp built-in font; only strings that
+  actually contain a character the built-in font lacks are routed to the SD
+  font.
+- The fallback is per *string*, not per glyph: a mixed title such as
+  `三体 Vol.1` renders entirely in the SD font (including the Latin part). If
+  that SD font is a `Mono` family, the Latin portion will appear half/full
+  width.
+- Without a selected SD font, embedded Simplified-Chinese UI fallbacks remain
+  available. Other uncovered scripts require a compatible selected SD family.
 
 ## Available Pre-Built Fonts
 
@@ -100,7 +190,7 @@ interactive preview flow described above.
 
 ## Converting Custom Fonts
 
-To convert your own TrueType/OpenType fonts:
+To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
 
 ### Prerequisites
 
@@ -135,13 +225,18 @@ wrapping, or the `.cpfont` format, and it does not affect menus or status-bar
 text. Standard is the default; existing Standard and Heavy choices retain their
 names and move to the stronger two- and three-pixel effects on upgrade.
 
+> For non-Latin UI fallback, include the active UI sizes as well as reader sizes:
+> `--sizes 8,10,12,14,16,18` covers standard and high-density profiles. The
+> reader-size face must also match the loader's detection probes; see
+> [UI fallback](#non-latin-scripts-fallback-in-the-user-interface).
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |
 |--------|----------|
 | `ascii` | U+0020–U+007E (Basic Latin) |
 | `latin1` | U+0080–U+00FF (Latin-1 Supplement) |
-| `latin-ext` | European languages (Latin + Extended-A/B + punctuation + ligatures) |
+| `latin-ext` | European languages (Latin + Extended-A/B + punctuation + currency + letterlike symbols such as ™ and № + minus sign + ligatures) |
 | `greek` | Greek + Extended Greek |
 | `cyrillic` | Cyrillic + Supplement |
 | `hebrew` | Hebrew + Alphabetic Presentation Forms |
@@ -163,7 +258,7 @@ names and move to the stronger two- and three-pixel effects on upgrade.
 Combine presets with commas: `--intervals latin-ext,greek,cyrillic`
 
 You can also specify arbitrary Unicode ranges directly:
-`--intervals latin-ext,(0x2100-0x214F)`
+`--intervals 'latin-ext,(0x2190-0x21FF)'`
 
 To list all presets with codepoint counts:
 

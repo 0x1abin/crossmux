@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "MissingGlyph.h"
+
 void EpdFont::getTextBounds(const char* string, const int startX, const int startY, int* minX, int* minY, int* maxX,
                             int* maxY) const {
   *minX = startX;
@@ -22,33 +24,26 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   uint32_t cp;
   uint32_t prevCp = 0;
+  bool prevMissing = false;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
-    const bool isCombining = utf8IsCombiningMark(cp);
+    const bool isCombining = missingGlyph::isCombining(cp);
 
     if (!isCombining) {
       cp = applyLigatures(cp, string);
     }
 
-    const EpdGlyph* glyph = getGlyph(cp);
-    if (!glyph) {
-      // Keep cursor movement stable when a base glyph is missing, but don't attach subsequent
-      // combining marks to stale base metrics.
-      if (!isCombining) {
-        lastBaseX += fp4::toPixel(prevAdvanceFP);  // flush pending advance before resetting
-        prevCp = 0;
-        prevAdvanceFP = 0;
-        lastBaseLeft = 0;
-        lastBaseWidth = 0;
-        lastBaseTop = 0;
-      }
-      continue;
-    }
+    EpdGlyph solidFallback;
+    const EpdGlyph* glyph = getGlyphMetrics(cp, solidFallback);
+    const bool missing = glyph == nullptr;
+    if (missing && isCombining) continue;
+    const EpdGlyph placeholder = missing ? missingGlyph::metrics(data->ascender, cp) : EpdGlyph{};
+    if (missing) glyph = &placeholder;
 
     const combiningMark::Anchor anchor = combiningMark::anchorFor(cp);
     const int raiseBy = isCombining ? combiningMark::raiseAboveBase(anchor, glyph->top, glyph->height, lastBaseTop) : 0;
 
     if (!isCombining && prevCp != 0) {
-      const auto kernFP = getKerning(prevCp, cp);  // 4.4 fixed-point kern
+      const auto kernFP = missing || prevMissing ? 0 : getKerning(prevCp, cp);
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
     }
 
@@ -68,6 +63,7 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
       lastBaseTop = glyph->top;
       prevAdvanceFP = glyph->advanceX;  // 12.4 fixed-point
       prevCp = cp;
+      prevMissing = missing;
     }
   }
 }
@@ -116,6 +112,9 @@ static uint8_t lookupKernClass(const EpdKernClassEntry* entries, const uint16_t 
 int8_t EpdFont::getKerning(const uint32_t leftCp, const uint32_t rightCp) const {
   if (utf8IsCjkBreakable(leftCp) || utf8IsCjkBreakable(rightCp)) {
     return 0;
+  }
+  if (data->kernHandler) {
+    return data->kernHandler(data->glyphMissCtx, leftCp, rightCp);
   }
   if (!data->kernMatrix && !data->kernRowOffsets) {
     return 0;
@@ -237,10 +236,10 @@ const EpdGlyph* EpdFont::getGlyph(const uint32_t cp, bool* const usedReplacement
     if (loaded) return loaded;
   }
 
-  if (cp != REPLACEMENT_GLYPH) {
-    if (usedReplacement) *usedReplacement = true;
-    return getGlyph(REPLACEMENT_GLYPH);
-  }
+  // The turned comma uses the matching quotation-mark shape when absent.
+  if (cp == 0x02BB && hasCodepoint(0x2018)) return getGlyph(0x2018);
+
+  if (usedReplacement) *usedReplacement = true;
   return nullptr;
 }
 
@@ -260,4 +259,29 @@ bool EpdFont::hasCodepoint(const uint32_t cp) const {
     return data->coverageHandler(data->glyphMissCtx, cp);
   }
   return false;
+}
+
+const EpdGlyph* EpdFont::getGlyphMetrics(const uint32_t cp, EpdGlyph& solidFallback) const {
+  if (!syntheticGlyph::isSolid(cp) || hasCodepoint(cp)) return getGlyph(cp);
+
+  // Match the current font's em width and ascender without allocating a bitmap.
+  const EpdGlyph* emGlyph = hasCodepoint('M') ? getGlyph('M') : nullptr;
+  const int ascender = data->ascender > 0 ? data->ascender : 8;
+  const uint16_t advance = emGlyph && emGlyph->advanceX > 0
+                               ? emGlyph->advanceX
+                               : static_cast<uint16_t>(fp4::fromPixel(std::max(1, (ascender * 3 + 3) / 4)));
+  const int advancePx = std::max(1, fp4::toPixel(advance));
+  const bool square = cp == syntheticGlyph::BLACK_SQUARE;
+  const int height = std::clamp(square ? (ascender * 2 + 2) / 3 : ascender, 1, 255);
+  const int width = std::min(255, square ? std::min(height, advancePx) : advancePx);
+  const int left = square ? std::max(0, (advancePx - width) / 2) : 0;
+  const int top = square ? height + std::max(0, (ascender - height) / 2) : height;
+  solidFallback = {static_cast<uint8_t>(width),
+                   static_cast<uint8_t>(height),
+                   advance,
+                   static_cast<int16_t>(left),
+                   static_cast<int16_t>(top),
+                   0,
+                   0};
+  return &solidFallback;
 }

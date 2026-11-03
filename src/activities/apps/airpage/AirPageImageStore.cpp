@@ -17,12 +17,12 @@ namespace airpage {
 
 namespace {
 
-constexpr char kBmpImagePath[] = "/.crosspoint/airpage/latest.bmp";
-constexpr char kJpegImagePath[] = "/.crosspoint/airpage/latest.jpg";
-constexpr char kBmpBackupPath[] = "/.crosspoint/airpage/latest.bmp.bak";
-constexpr char kJpegBackupPath[] = "/.crosspoint/airpage/latest.jpg.bak";
-constexpr char kPixelCachePath[] = "/.crosspoint/airpage/latest.pxc";
-constexpr char kPixelCacheBackupPath[] = "/.crosspoint/airpage/latest.pxc.bak";
+constexpr char kBmpImagePath[] = "/AirPage/latest.bmp";
+constexpr char kJpegImagePath[] = "/AirPage/latest.jpg";
+constexpr char kBmpBackupPath[] = "/AirPage/latest.bmp.bak";
+constexpr char kJpegBackupPath[] = "/AirPage/latest.jpg.bak";
+constexpr char kPixelCachePath[] = "/AirPage/latest.pxc";
+constexpr char kPixelCacheBackupPath[] = "/AirPage/latest.pxc.bak";
 constexpr size_t kIoBufferSize = 128;
 
 }  // namespace
@@ -40,11 +40,11 @@ AirPageImageStore::InitializationResult AirPageImageStore::initialize(const uint
   return hadCanonicalImage ? InitializationResult::Invalid : InitializationResult::Empty;
 }
 
-bool AirPageImageStore::ensureDirectories() const {
-  return Storage.ensureDirectoryExists(kCacheDir) && Storage.ensureDirectoryExists(kHistoryDir);
-}
+// Keep the existing instance API for the store operation.
+// cppcheck-suppress functionStatic
+bool AirPageImageStore::ensureDirectories() const { return Storage.ensureDirectoryExists(kCacheDir); }
 
-const char* AirPageImageStore::imagePathForFormat(const ImageFormat format) const {
+const char* AirPageImageStore::imagePathForFormat(const ImageFormat format) {
   switch (format) {
     case ImageFormat::None:
       return nullptr;
@@ -56,7 +56,7 @@ const char* AirPageImageStore::imagePathForFormat(const ImageFormat format) cons
   return nullptr;
 }
 
-const char* AirPageImageStore::backupPathForFormat(const ImageFormat format) const {
+const char* AirPageImageStore::backupPathForFormat(const ImageFormat format) {
   switch (format) {
     case ImageFormat::None:
       return nullptr;
@@ -136,7 +136,7 @@ bool AirPageImageStore::inspectImage(const char* path, ImageInfo& info) {
   return true;
 }
 
-bool AirPageImageStore::isValidPixelCache(const char* path) const {
+bool AirPageImageStore::isValidPixelCache(const char* path) {
   HalFile file;
   if (!path || !Storage.openFileForRead("AIRP", path, file)) return false;
 
@@ -274,6 +274,7 @@ bool AirPageImageStore::installDownloadedImage(const ImageInfo& downloaded, cons
   if (Storage.exists(inactivePath)) Storage.remove(inactivePath);
   currentImage_ = downloaded;
   pendingDisplayValidation_ = true;
+  if (historyInitialized_) setCurrentHistoryEntry();
   return true;
 }
 
@@ -380,7 +381,7 @@ bool AirPageImageStore::recoverCachedImage(const uint64_t archiveDateKey) {
 }
 
 bool AirPageImageStore::formatHistoryPath(const uint64_t archiveId, const ImageFormat format, char* path,
-                                          const size_t pathSize) const {
+                                          const size_t pathSize) {
   const char* extension = nullptr;
   switch (format) {
     case ImageFormat::None:
@@ -430,7 +431,7 @@ bool AirPageImageStore::formatPixelCachePath(const char* imagePath, char* path, 
   return true;
 }
 
-bool AirPageImageStore::parseHistoryId(const char* name, uint64_t& archiveId) const {
+bool AirPageImageStore::parseHistoryId(const char* name, uint64_t& archiveId) {
   archiveId = 0;
   if (!name) return false;
   const char* base = strrchr(name, '/');
@@ -479,7 +480,7 @@ bool AirPageImageStore::parseHistoryId(const char* name, uint64_t& archiveId) co
   return true;
 }
 
-bool AirPageImageStore::parseHistoryName(const char* name, HistoryEntry& entry) const {
+bool AirPageImageStore::parseHistoryName(const char* name, HistoryEntry& entry) {
   entry = {};
   uint64_t archiveId = 0;
   if (!parseHistoryId(name, archiveId)) return false;
@@ -510,12 +511,12 @@ void AirPageImageStore::insertHistoryEntry(const HistoryEntry& entry) {
   size_t position = 0;
   while (position < historyCount_) {
     const HistoryEntry& existing = history_[position];
-    if (entry.isCurrent() || (!existing.isCurrent() && entry.archiveId > existing.archiveId)) break;
+    if (newerHistoryEntry(entry, existing)) break;
     ++position;
   }
-  if (position >= kMaxHistoryEntries) return;
+  if (position >= kHistoryPageSize) return;
 
-  const size_t newCount = std::min(kMaxHistoryEntries, historyCount_ + 1);
+  const size_t newCount = std::min(kHistoryPageSize, historyCount_ + 1);
   for (size_t i = newCount - 1; i > position; --i) history_[i] = history_[i - 1];
   history_[position] = entry;
   historyCount_ = newCount;
@@ -531,6 +532,10 @@ void AirPageImageStore::removeCurrentHistoryEntry() {
 }
 
 void AirPageImageStore::setCurrentHistoryEntry() {
+  if (historyInitialized_) {
+    scanHistory();
+    return;
+  }
   removeCurrentHistoryEntry();
   if (hasImage()) insertHistoryEntry(HistoryEntry{0, currentImage_});
 }
@@ -544,19 +549,72 @@ void AirPageImageStore::removeHistoryEntry(const uint64_t archiveId, const Image
   }
 }
 
-bool AirPageImageStore::historyContains(const uint64_t archiveId, const ImageFormat format) const {
-  for (size_t i = 0; i < historyCount_; ++i) {
-    if (!history_[i].isCurrent() && history_[i].archiveId == archiveId && history_[i].image.format == format) {
-      return true;
-    }
-  }
-  return false;
+bool AirPageImageStore::newerHistoryEntry(const HistoryEntry& lhs, const HistoryEntry& rhs) {
+  if (lhs.isCurrent() != rhs.isCurrent()) return lhs.isCurrent();
+  if (lhs.archiveId != rhs.archiveId) return lhs.archiveId > rhs.archiveId;
+  return lhs.image.format > rhs.image.format;
 }
 
-void AirPageImageStore::scanHistory() {
-  historyCount_ = 0;
-  setCurrentHistoryEntry();
+void AirPageImageStore::firstHistoryPage() { scanHistory(); }
 
+bool AirPageImageStore::nextHistoryPage() {
+  if (!hasNextPage_ || historyCount_ == 0) return false;
+  const HistoryEntry anchor = history_[historyCount_ - 1];
+  scanHistory(HistoryPage::Next, anchor);
+  return true;
+}
+
+bool AirPageImageStore::previousHistoryPage() {
+  if (!hasPreviousPage_ || historyCount_ == 0) return false;
+  const HistoryEntry anchor = history_[0];
+  scanHistory(HistoryPage::Previous, anchor);
+  return true;
+}
+
+void AirPageImageStore::scanHistory(const HistoryPage page, const HistoryEntry& anchor) {
+  historyCount_ = 0;
+  hasPreviousPage_ = false;
+  hasNextPage_ = false;
+  // ponytail: linear directory scans keep RAM fixed; add a disk index only if large collections make paging too slow.
+  const auto consider = [&](const HistoryEntry& entry) {
+    const bool newer = newerHistoryEntry(entry, anchor);
+    const bool older = newerHistoryEntry(anchor, entry);
+    switch (page) {
+      case HistoryPage::First:
+        break;
+      case HistoryPage::Next:
+        if (!older) {
+          hasPreviousPage_ = true;
+          return;
+        }
+        break;
+      case HistoryPage::Previous:
+        if (!newer) {
+          hasNextPage_ = true;
+          return;
+        }
+        break;
+    }
+    if (historyCount_ == kHistoryPageSize) {
+      if (page == HistoryPage::Previous)
+        hasPreviousPage_ = true;
+      else
+        hasNextPage_ = true;
+    }
+    if (page != HistoryPage::Previous) {
+      insertHistoryEntry(entry);
+      return;
+    }
+    // Keep the nearest newer page in ascending order, then reverse for display.
+    size_t position = 0;
+    while (position < historyCount_ && newerHistoryEntry(entry, history_[position])) ++position;
+    if (position >= kHistoryPageSize) return;
+    const size_t count = std::min(kHistoryPageSize, historyCount_ + 1);
+    for (size_t i = count - 1; i > position; --i) history_[i] = history_[i - 1];
+    history_[position] = entry;
+    historyCount_ = count;
+  };
+  if (hasImage()) consider(HistoryEntry{0, currentImage_});
   if (Storage.ensureDirectoryExists(kHistoryDir)) {
     auto directory = Storage.open(kHistoryDir);
     if (directory && directory.isDirectory()) {
@@ -566,15 +624,15 @@ void AirPageImageStore::scanHistory() {
         char name[kPathBufferSize];
         if (!file.getName(name, sizeof(name))) continue;
         HistoryEntry entry;
-        if (parseHistoryName(name, entry)) insertHistoryEntry(entry);
+        if (parseHistoryName(name, entry)) consider(entry);
       }
     }
   }
+  if (page == HistoryPage::Previous) std::reverse(history_.begin(), history_.begin() + historyCount_);
   historyInitialized_ = true;
-  pruneHistoryFiles();
 }
 
-uint64_t AirPageImageStore::nextHistoryId(const uint64_t archiveDateKey) const {
+uint64_t AirPageImageStore::nextHistoryId(const uint64_t archiveDateKey) {
   constexpr uint64_t kMinimumDateKey = 20240101000000u;
   constexpr uint64_t kMaximumDateKey = 20991231235959u;
   if (archiveDateKey >= kMinimumDateKey && archiveDateKey <= kMaximumDateKey) {
@@ -595,24 +653,16 @@ uint64_t AirPageImageStore::nextHistoryId(const uint64_t archiveDateKey) const {
 
   constexpr uint64_t kMaximumSequence = 99999999u;
   uint64_t maximum = 0;
-  if (historyInitialized_) {
-    for (size_t i = 0; i < historyCount_; ++i) {
-      if (!history_[i].isCurrent() && history_[i].archiveId <= kMaximumSequence) {
-        maximum = std::max(maximum, history_[i].archiveId);
-      }
-    }
-  } else {
-    auto directory = Storage.open(kHistoryDir);
-    if (directory && directory.isDirectory()) {
-      directory.rewindDirectory();
-      for (auto file = directory.openNextFile(); file; file = directory.openNextFile()) {
-        if (file.isDirectory()) continue;
-        char name[kPathBufferSize];
-        if (!file.getName(name, sizeof(name))) continue;
-        uint64_t archiveId = 0;
-        if (parseHistoryId(name, archiveId) && archiveId <= kMaximumSequence) {
-          maximum = std::max(maximum, archiveId);
-        }
+  auto directory = Storage.open(kHistoryDir);
+  if (directory && directory.isDirectory()) {
+    directory.rewindDirectory();
+    for (auto file = directory.openNextFile(); file; file = directory.openNextFile()) {
+      if (file.isDirectory()) continue;
+      char name[kPathBufferSize];
+      if (!file.getName(name, sizeof(name))) continue;
+      uint64_t archiveId = 0;
+      if (parseHistoryId(name, archiveId) && archiveId <= kMaximumSequence) {
+        maximum = std::max(maximum, archiveId);
       }
     }
   }
@@ -621,11 +671,13 @@ uint64_t AirPageImageStore::nextHistoryId(const uint64_t archiveDateKey) const {
   for (uint64_t candidate = 1; candidate <= kMaximumSequence; ++candidate) {
     char bmpPath[kPathBufferSize];
     char jpegPath[kPathBufferSize];
+    char cachePath[kPathBufferSize];
     if (!formatHistoryPath(candidate, ImageFormat::Bmp, bmpPath, sizeof(bmpPath)) ||
-        !formatHistoryPath(candidate, ImageFormat::Jpeg, jpegPath, sizeof(jpegPath))) {
+        !formatHistoryPath(candidate, ImageFormat::Jpeg, jpegPath, sizeof(jpegPath)) ||
+        !formatPixelCachePath(jpegPath, cachePath, sizeof(cachePath))) {
       return 0;
     }
-    if (!Storage.exists(bmpPath) && !Storage.exists(jpegPath)) return candidate;
+    if (!Storage.exists(bmpPath) && !Storage.exists(jpegPath) && !Storage.exists(cachePath)) return candidate;
   }
   return 0;
 }
@@ -666,65 +718,6 @@ bool AirPageImageStore::archivePendingBackup(const uint64_t archiveDateKey, Hist
   Storage.remove(format == ImageFormat::Bmp ? kJpegBackupPath : kBmpBackupPath);
   if (archived) *archived = HistoryEntry{archiveId, backupInfo};
   return true;
-}
-
-void AirPageImageStore::pruneHistoryFiles() {
-  while (true) {
-    char removePath[kPathBufferSize]{};
-    bool removeRelatedCache = false;
-    {
-      auto directory = Storage.open(kHistoryDir);
-      if (!directory || !directory.isDirectory()) return;
-      directory.rewindDirectory();
-      for (auto file = directory.openNextFile(); file; file = directory.openNextFile()) {
-        if (file.isDirectory()) continue;
-        char name[kPathBufferSize];
-        if (!file.getName(name, sizeof(name))) continue;
-        const char* base = strrchr(name, '/');
-        base = base ? base + 1 : name;
-
-        bool keep = false;
-        HistoryEntry entry;
-        if (parseHistoryName(base, entry)) {
-          keep = historyContains(entry.archiveId, entry.image.format);
-          if (!keep) {
-            formatHistoryPath(entry.archiveId, entry.image.format, removePath, sizeof(removePath));
-            removeRelatedCache = true;
-          }
-        } else if (const char* extension = strrchr(base, '.'); extension && strcmp(extension + 1, "pxc") == 0) {
-          uint64_t archiveId = 0;
-          keep = parseHistoryId(base, archiveId) && historyContains(archiveId, ImageFormat::Jpeg);
-          if (!keep) {
-            const size_t prefixLength = strlen(kHistoryDir);
-            const size_t nameLength = strlen(base);
-            if (prefixLength + 1 + nameLength < sizeof(removePath)) {
-              memcpy(removePath, kHistoryDir, prefixLength);
-              removePath[prefixLength] = '/';
-              memcpy(removePath + prefixLength + 1, base, nameLength + 1);
-            }
-          }
-        } else {
-          const size_t prefixLength = strlen(kHistoryDir);
-          const size_t nameLength = strlen(base);
-          if (prefixLength + 1 + nameLength < sizeof(removePath)) {
-            memcpy(removePath, kHistoryDir, prefixLength);
-            removePath[prefixLength] = '/';
-            memcpy(removePath + prefixLength + 1, base, nameLength + 1);
-          }
-        }
-        if (!keep && removePath[0] != '\0') break;
-      }
-    }
-    if (removePath[0] == '\0') return;
-    if (!Storage.remove(removePath)) {
-      LOG_ERR("AIRP", "Could not prune history file: %s", removePath);
-      return;
-    }
-    if (removeRelatedCache) {
-      char cachePath[kPathBufferSize];
-      if (formatPixelCachePath(removePath, cachePath, sizeof(cachePath))) Storage.remove(cachePath);
-    }
-  }
 }
 
 bool AirPageImageStore::selectCurrent(SelectedImage& selected) const {
@@ -795,7 +788,6 @@ void AirPageImageStore::commitDisplayedDownload(const uint64_t archiveDateKey) {
   }
   if (historyInitialized_) {
     setCurrentHistoryEntry();
-    pruneHistoryFiles();
   }
 }
 

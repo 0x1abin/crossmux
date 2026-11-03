@@ -79,3 +79,9 @@ it carries one of those contracts or hides a real implementation choice.
 - [ ] User-facing strings use `tr(STR_*)`; new keys added to YAML and
       regenerated.
 - [ ] Any new SDK capability is exposed as a HAL method, not called inline.
+
+Before adding an SDK capability, inspect the pinned SDK source and the current
+HAL owner. Shared list/tab/custom-layout hosts and their interaction-table
+publication are documented in
+[UI/input guidance](../../../docs/engineering/ui-and-input.md#shared-ui-and-input-owners).
+Reuse those owners and the established global gesture routing.

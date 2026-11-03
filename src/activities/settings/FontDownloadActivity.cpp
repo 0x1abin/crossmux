@@ -1,6 +1,7 @@
 #include "FontDownloadActivity.h"
 
 #include <ArduinoJson.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -346,14 +347,34 @@ void FontDownloadActivity::finishAutomaticFlow(const ExitRoute route) {
 // --- Manifest fetching ---
 
 bool FontDownloadActivity::fetchAndParseManifest() {
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->releaseSdFontCaches();
+  }
+  // Rescan installed families before any TLS or JSON buffers exist. The rescan
+  // frees and reallocates every registry entry, which fragments the heap if it
+  // runs while the manifest DOM and the catalog arena are live.
+  {
+    RenderLock lock(*this);
+    std::vector<ManifestFamily>().swap(families_);
+    std::vector<ManifestFile>().swap(files_);
+    std::vector<std::string>().swap(scriptGroupLabels_);
+    std::vector<int>().swap(filteredIndices_);
+    std::vector<std::string>().swap(rowLabels_);
+    std::vector<fui::ListItem>().swap(rowItems_);
+    std::string().swap(baseUrl_);
+    rowsDirty_ = true;
+    downloadingFamilyIndex_ = -1;
+  }
+  fontInstaller_.refreshRegistry();
+
   // Download manifest to a temp file on SD card to avoid holding both
   // TLS buffers and the full JSON string in RAM simultaneously.
   static constexpr const char* MANIFEST_TMP = "/fonts_manifest.tmp";
-  families_.clear();
-  files_.clear();
-  baseUrl_.clear();
-  downloadingFamilyIndex_ = -1;
 
+  if (!HttpDownloader::hasMemoryForTls()) {
+    errorMessage_ = tr(STR_MEMORY_ERROR);
+    return false;
+  }
   char manifestUrl[160];
   const int manifestUrlLength =
       snprintf(manifestUrl, sizeof(manifestUrl), CrossMuxEndpoints::FONT_MANIFEST_FORMAT, CrossMuxEndpoints::host(),
@@ -363,7 +384,9 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     errorMessage_ = "Failed to fetch font list";
     return false;
   }
+  NetworkStartup::logMemory("font manifest request");
   auto result = HttpDownloader::downloadToFile(manifestUrl, MANIFEST_TMP, nullptr);
+  NetworkStartup::logMemory("font manifest request finished");
   if (result != HttpDownloader::OK) {
     LOG_ERR("FONT", "Failed to fetch manifest from %s", manifestUrl);
     errorMessage_ = "Failed to fetch font list";
@@ -371,6 +394,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     return false;
   }
 
+  NetworkStartup::logMemory("font manifest parse begin");
   JsonDocument doc;
   DeserializationError err;
   bool manifestTooLarge = false;
@@ -399,6 +423,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     return false;
   }
 
+  NetworkStartup::logMemory("font manifest JSON parsed");
   int version = doc["version"] | 0;
   if (version != FONTS_MANIFEST_VERSION) {
     LOG_ERR("FONT", "Unsupported manifest version: %d", version);
@@ -413,11 +438,6 @@ bool FontDownloadActivity::fetchAndParseManifest() {
     errorMessage_ = "Invalid font manifest";
     return false;
   }
-  families_.clear();
-  files_.clear();
-  scriptGroupLabels_.clear();
-  filteredIndices_.clear();
-  fontInstaller_.refreshRegistry();
 
   JsonArray groupsArr = doc["scriptGroups"].as<JsonArray>();
   const size_t groupCount = std::min(groupsArr.size(), MAX_SCRIPT_GROUPS);
@@ -541,6 +561,7 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   rowLabels_.reserve(rowCapacity);
   rowItems_.reserve(rowCapacity);
 
+  NetworkStartup::logMemory("font manifest ready");
   LOG_DBG("FONT", "Manifest loaded: %zu families, %zu script groups", families_.size(), scriptGroupLabels_.size());
   return true;
 }
@@ -872,6 +893,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
     const auto& file = files_[family.fileOffset + i];
     const auto result = downloadFile(family, file);
     if (result != DownloadResult::Success) {
+      NetworkStartup::logMemory("font family download stopped");
       family.installed = wasInstalled;
       family.hasUpdate = hadUpdate;
       if (result == DownloadResult::Cancelled) operation_ = DownloadOperation::None;
@@ -889,6 +911,7 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
   fontInstaller_.refreshRegistry();
   family.installed = true;
   family.hasUpdate = false;
+  NetworkStartup::logMemory("font family installed");
   return DownloadResult::Success;
 }
 
@@ -946,7 +969,7 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   startActivityForResult(std::move(textSettings), [this](const ActivityResult& result) {
     RenderLock lock(*this);
     accelerationCompleted_ =
-        startMode_ != StartMode::PreviewOnly && !result.isCancelled && SETTINGS.sdFontFamilyName[0] != '\0';
+        startMode_ != StartMode::PreviewOnly && !result.isCancelled && SETTINGS.sdFontFlashPreload != 0;
     state_ = COMPLETE;
     operation_ = DownloadOperation::None;
     renderer.requestNextFullRefresh();
@@ -1130,7 +1153,7 @@ void FontDownloadActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the status and the row edge
-  syncListViewport(screen, props, /*hasSubtitle=*/state_ == FAMILY_LIST);
+  syncListViewport(screen, props);
   screen.list(props);
 }
 
@@ -1228,9 +1251,6 @@ void FontDownloadActivity::rebuildFamilyRowItems() {
         item.value = tr(STR_UPDATE_AVAILABLE);
       } else if (family.installed) {
         item.value = tr(STR_INSTALLED);
-        // Dimmed but still tappable (opens the delete prompt): visual-only
-        // disabled state, the row stays enabled for hit registration.
-        item.state = fui::StateDisabled;
       }
     }
     item.actionValue = static_cast<int16_t>(i);
@@ -1309,6 +1329,84 @@ const char* FontDownloadActivity::automaticErrorText() const {
 }
 
 void FontDownloadActivity::render(RenderLock&&) {
+  if (!UITheme::getInstance().hasMainTabs() && purpose_ != Purpose::ReaderAutoInstall) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const auto pageWidth = renderer.getScreenWidth();
+    const auto pageHeight = renderer.getScreenHeight();
+
+    renderer.clearScreen();
+
+    const char* headerSubtitle = nullptr;
+    if (state_ == FAMILY_LIST && hasGroupScreen()) {
+      const int scriptGroupIndex = groupNav_.selected - 1;
+      headerSubtitle = scriptGroupIndex >= 0 && scriptGroupIndex < static_cast<int>(scriptGroupLabels_.size())
+                           ? scriptGroupLabels_[scriptGroupIndex].c_str()
+                           : tr(STR_ALL_FONTS);
+    }
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FONT_BROWSER),
+                   headerSubtitle);
+
+    const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const auto centerY = (pageHeight - lineHeight) / 2;
+
+    if (state_ == LOADING_MANIFEST) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_LOADING_FONT_LIST));
+    } else if (state_ == GROUP_LIST) {
+      renderUi();
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == FAMILY_LIST) {
+      renderUi();
+
+      const bool hasVisibleFamilies = !filteredIndices_.empty();
+      const char* confirmLabel = !hasVisibleFamilies            ? ""
+                                 : isSelectedFamilyDeletable()  ? tr(STR_DELETE)
+                                 : isUpdateAllRow(nav.selected) ? tr(STR_UPDATE)
+                                                                : tr(STR_DOWNLOAD);
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, hasVisibleFamilies ? tr(STR_DIR_UP) : "",
+                                                hasVisibleFamilies ? tr(STR_DIR_DOWN) : "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == DOWNLOADING) {
+      const auto& family = families_[downloadingFamilyIndex_];
+
+      std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + family.name + " (" +
+                               std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, statusText.c_str());
+
+      float progress = 0;
+      if (downloadTotal_ > 0) {
+        progress = static_cast<float>(downloadProgress_) / static_cast<float>(downloadTotal_);
+      }
+
+      int barY = centerY + metrics.verticalSpacing;
+      GUI.drawProgressBar(
+          renderer,
+          Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+          static_cast<int>(progress * 100), 100);
+
+      const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == COMPLETE) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    } else if (state_ == ERROR) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
+                                EpdFontFamily::BOLD);
+      if (!errorMessage_.empty()) {
+        renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, errorMessage_.c_str());
+      }
+      const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
+      GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    }
+
+    if (state_ == DOWNLOADING || state_ == COMPLETE || state_ == ERROR) renderUi();
+    renderer.displayBuffer();
+
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -1326,7 +1424,6 @@ void FontDownloadActivity::render(RenderLock&&) {
                  headerSubtitle);
 
   const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const auto contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const auto centerY = (pageHeight - lineHeight) / 2;
 
   if (state_ == LOADING_MANIFEST) {

@@ -6,6 +6,11 @@
 
 namespace SubpageLayout {
 
+inline Rect headerRect(const Rect& safeArea, const ThemeMetrics& metrics) {
+  const int top = std::clamp(metrics.topPadding, 0, safeArea.height);
+  return Rect{safeArea.x, safeArea.y + top, safeArea.width, std::min(metrics.headerHeight, safeArea.height - top)};
+}
+
 inline int relatedGap(const ThemeMetrics& metrics) { return std::max(4, metrics.verticalSpacing / 2); }
 
 inline int sectionGap(const ThemeMetrics& metrics) { return std::max(12, metrics.verticalSpacing); }

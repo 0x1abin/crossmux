@@ -1,23 +1,57 @@
 #include "UITheme.h"
 
+#include <EpdFont.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
-#include <HalGPIO.h>
+#include <HalMemory.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <builtinFonts/all.h>
 
 #include <algorithm>
 #include <memory>
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
-#include "components/SelectionCursorPolicy.h"
+#include "SdCardFontSystem.h"
+#include "components/CoverGridHomeUi.h"
+#include "components/UIThemeTokens.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
+
+// The registered families keep these stable addresses across theme changes.
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+EpdFont ui10RegularFont(&notosans_14_regular);
+EpdFont ui10BoldFont(&notosans_14_bold);
+EpdFont ui12RegularFont(&notosans_16_regular);
+EpdFont ui12BoldFont(&notosans_16_bold);
+#else
+EpdFont ui10RegularFont(&ubuntu_10_regular);
+EpdFont ui10BoldFont(&ubuntu_10_bold);
+EpdFont ui12RegularFont(&ubuntu_12_regular);
+EpdFont ui12BoldFont(&ubuntu_12_bold);
+#endif
+
+extern EpdFont offlineReaderFont;
+extern void reloadSmallUiFont(bool inxTheme);
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+EpdFont ui18RegularFont(&notosans_16_regular);
+EpdFont ui18BoldFont(&notosans_16_bold);
+EpdFontFamily control18FontFamily(&ui12RegularFont, &ui12BoldFont);
+#else
+EpdFont ui18RegularFont(&notosans_18_regular);
+EpdFont ui18BoldFont(&notosans_18_bold);
+
+// Fixed control faces share the existing bitmap data; theme reload never mutates them.
+static EpdFont control18RegularFont(&notosans_18_regular);
+static EpdFont control18BoldFont(&notosans_18_bold);
+EpdFontFamily control18FontFamily(&control18RegularFont, &control18BoldFont);
+
+#endif
 
 UITheme UITheme::instance;
 
@@ -27,18 +61,36 @@ UITheme::UITheme() {
 }
 
 void UITheme::reload() {
+  const bool inx = SETTINGS.uiTheme == CrossPointSettings::INX;
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  (void)inx;
+  ui18RegularFont.data = &notosans_16_regular;
+  ui18BoldFont.data = &notosans_16_bold;
+#else
+  ui18RegularFont.data = inx ? offlineReaderFont.data : &notosans_18_regular;
+  ui18BoldFont.data = inx ? offlineReaderFont.data : &notosans_18_bold;
+#endif
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   setTheme(themeType);
 }
 
+bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes > 0; }
+
+bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
+
+void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
+
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   std::unique_ptr<BaseTheme> nextTheme;
   const ThemeMetrics* nextMetrics = &BaseMetrics::values;
+  if (type == CrossPointSettings::COVER_GRID && !supportsCoverGrid()) type = CrossPointSettings::LYRA;
+
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
       LOG_DBG("UI", "Using Classic theme");
       nextTheme = makeUniqueNoThrow<BaseTheme>();
       break;
+    case CrossPointSettings::UI_THEME::COVER_GRID:
     case CrossPointSettings::UI_THEME::LYRA:
       LOG_DBG("UI", "Using Lyra theme");
       nextTheme = makeUniqueNoThrow<LyraTheme>();
@@ -83,6 +135,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     currentMetrics = nextMetrics;
     currentType = type;
   }
+  reloadSmallUiFont(currentType == CrossPointSettings::INX);
   metricsValid = false;
 }
 
@@ -92,6 +145,11 @@ const ThemeMetrics& UITheme::getMetrics() const {
   const bool showButtonHints = currentTheme->buttonHintsVisible();
   if (!metricsValid || showButtonHints != metricsForButtonHints) {
     adjustedMetrics = *currentMetrics;
+    UiHighDpiProfile::apply(adjustedMetrics);
+    if (currentType == CrossPointSettings::INX) {
+      // The status strip starts below the board's header offset, before the title.
+      adjustedMetrics.headerHeight += BoardConfig::ACTIVE.headerOffsetY;
+    }
     if (!showButtonHints) {
       adjustedMetrics.buttonHintsHeight = 0;
     }
@@ -99,15 +157,6 @@ const ThemeMetrics& UITheme::getMetrics() const {
     metricsValid = true;
   }
   return adjustedMetrics;
-}
-
-bool UITheme::showSelectionCursor() const {
-#ifdef CROSSPOINT_EMULATED
-  return true;
-#else
-  return SelectionCursorPolicy::visible(currentType == CrossPointSettings::UI_THEME::INX, gpio.hasTouch(),
-                                        gpio.lastInputModality());
-#endif
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
@@ -125,16 +174,30 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
       orientation != GfxRenderer::Orientation::LandscapeCounterClockwise) {
     reservedHeight += metrics.verticalSpacing + metrics.buttonHintsHeight;
   }
-  const int availableHeight = renderer.getScreenHeight() - reservedHeight - extraReservedHeight;
+  const int availableHeight =
+      UITheme::getInstance().getScreenSafeArea(renderer).height - reservedHeight - extraReservedHeight;
   return UITheme::getInstance().getTheme().getListPageItems(availableHeight, hasSubtitle);
 }
 
-// Screen area excluding the button hints
+// Full drawable content area: screen minus the board's viewable insets (bezel /
+// rounded-corner clearance), oriented to the current rotation. The single place
+// the inset math lives; every screen derives its content bounds from here (or
+// from getScreenSafeArea, which builds on it).
+Rect UITheme::getContentArea(const GfxRenderer& renderer) {
+  int viTop = 0, viRight = 0, viBottom = 0, viLeft = 0;
+  renderer.getOrientedViewableTRBL(&viTop, &viRight, &viBottom, &viLeft);
+  return Rect{viLeft, viTop, renderer.getScreenWidth() - viLeft - viRight,
+              renderer.getScreenHeight() - viTop - viBottom};
+}
+
+// Content area excluding the button hints.
 Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints) {
   auto orientation = renderer.getOrientation();
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
-  Rect safeArea = Rect{0, 0, screenWidth, screenHeight};
+  Rect safeArea = getContentArea(renderer);
+#if !FREEINK_DEVICE_READPICO
+  if (currentType == CrossPointSettings::UI_THEME::INX)
+    safeArea = Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
+#endif
   const ThemeMetrics metrics = getMetrics();
   switch (orientation) {
     case GfxRenderer::Orientation::Portrait:
@@ -163,6 +226,16 @@ Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButton
   return safeArea;
 }
 
+Rect UITheme::getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints,
+                            const bool upstreamStyle) {
+  const Rect safe = getScreenSafeArea(renderer, hasFrontButtonHints, hasSideButtonHints);
+  const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
+  if (hasMainTabs()) return Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight};
+  const Rect content = getContentArea(renderer);
+  return Rect{safe.x - content.x, safe.y - content.y + metrics.topPadding,
+              safe.width + renderer.getScreenWidth() - content.width, metrics.headerHeight};
+}
+
 std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int coverHeight) {
   size_t pos = coverBmpPath.find("[HEIGHT]", 0);
   if (pos != std::string::npos) {
@@ -181,7 +254,7 @@ UIIcon UITheme::getFileIcon(const std::string& filename) {
   if (FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename)) {
     return Text;
   }
-  if (FsHelpers::hasBmpExtension(filename) || FsHelpers::hasPngExtension(filename)) {
+  if (FsHelpers::hasImageExtension(filename)) {
     return Image;
   }
   return File;
@@ -201,6 +274,19 @@ int UITheme::getProgressBarHeight() {
   const ThemeMetrics metrics = UITheme::getInstance().getMetrics();
   const auto sb = SETTINGS.statusBarSpec();
   return sb.showsProgressBar() ? (sb.progressBarHeightPx + metrics.progressBarMarginTop) : 0;
+}
+
+int UITheme::getStatusBarTextTopPadding(const GfxRenderer& renderer) {
+  if (!UiHighDpiProfile::enabled) return 0;
+#if FREEINK_DEVICE_READPICO
+  constexpr int textFontId = READER_STATUS_FONT_ID;
+#else
+  constexpr int textFontId = SMALL_FONT_ID;
+#endif
+  const int lineHeight =
+      std::max(renderer.getLineHeight(textFontId), renderer.getLineHeight(BaseTheme::STATUS_NUMERIC_FONT_ID));
+  return std::max(0, UITheme::getInstance().getMetrics().statusBarVerticalMargin - lineHeight -
+                         UiHighDpiProfile::readerStatusBottomPadding);
 }
 
 // Centered text implementation that takes the safe area into account

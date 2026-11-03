@@ -33,7 +33,7 @@ ReadingDayDetailActivity::ReadingDayDetailActivity(GfxRenderer& renderer, Mapped
 
 void ReadingDayDetailActivity::refreshEntries() {
   entries = ReadingStatsAnalytics::getBooksReadOnDay(dayOrdinal);
-  nav.selected = std::min(nav.selected, std::max(0, listCount() - 1));
+  nav.selected = std::min<int>(nav.selected, std::max(0, listCount() - 1));
   nav.scrollBy(0, listCount());
   nav.follow(listCount());
 
@@ -127,7 +127,7 @@ void ReadingDayDetailActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;
   props.valueInset = 8;
-  syncListViewport(screen, props, /*hasSubtitle=*/true);
+  syncListViewport(screen, props);
   screen.list(props);
 }
 

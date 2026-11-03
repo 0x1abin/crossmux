@@ -63,7 +63,9 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                0,
                                1.0f,
                                false,
+                               false,
                                0,
+                               false,  // verticalBottomAlign
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
                                false,
@@ -82,7 +84,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
     ESP = {};
     collectedFootnotes.clear();
     laidOutWords.clear();
-    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, BlockStyle{}, true);
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, false, BlockStyle{}, true);
   }
   void TearDown() override {
     ESP = {};
@@ -100,7 +102,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
 
 TEST_F(ChapterHtmlSlimParserTest, NoTouchKeepsFootnotesWithoutLinkStorage) {
   parser.collectTouchLinks = false;
-  parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, BlockStyle{}, false);
+  parser.currentTextBlock = std::make_unique<ParsedText>(false, false, false, false, BlockStyle{}, false);
   const XML_Char* attributes[] = {"href", "#note-target", nullptr};
   ChapterHtmlSlimParser::startElement(&parser, "a", attributes);
   ChapterHtmlSlimParser::characterData(&parser, "1", 1);
@@ -362,6 +364,56 @@ class SectionMemoryTest : public ::testing::Test {
   }
 };
 
+TEST_F(SectionMemoryTest, TallerViewportRebuildsCacheAndPreservesBodyAndOffsets) {
+  std::string html = "<html><body><p>";
+  for (int i = 0; i < 400; ++i) html += "word" + std::to_string(i) + " ";
+  html += "</p></body></html>";
+  writeHtml(html);
+  spec.viewportHeight = 57;
+  uint32_t offset = 0;
+  uint16_t oldPageCount = 0;
+  {
+    Section original(epub, 0, renderer);
+    ASSERT_TRUE(original.createSectionFile(spec));
+    ASSERT_GT(original.pageCount, 1U);
+    oldPageCount = original.pageCount;
+    offset = *original.getVisibleTextOffsetForPage(1);
+  }
+
+  spec.viewportHeight += 7;
+  Section rebuilt(epub, 0, renderer);
+  EXPECT_FALSE(rebuilt.loadSectionFile(spec));
+  laidOutWords.clear();
+  ASSERT_TRUE(rebuilt.createSectionFile(spec));
+  EXPECT_LT(rebuilt.pageCount, oldPageCount);
+  ASSERT_EQ(laidOutWords.size(), 400U);
+  for (int i = 0; i < 400; ++i) EXPECT_EQ(laidOutWords[i], "word" + std::to_string(i));
+  const auto page = rebuilt.getPageForVisibleTextOffset(offset);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_LE(*rebuilt.getVisibleTextOffsetForPage(*page), offset);
+  if (*page + 1 < rebuilt.pageCount) EXPECT_GT(*rebuilt.getVisibleTextOffsetForPage(*page + 1), offset);
+  Section restored(epub, 0, renderer);
+  ASSERT_TRUE(restored.loadSectionFile(spec));
+  EXPECT_EQ(restored.getPageForVisibleTextOffset(offset), page);
+}
+
+TEST_F(SectionMemoryTest, TallerViewportInvalidatesPartialCache) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  {
+    Section original(epub, 0, renderer);
+    ASSERT_TRUE(original.startBuild(spec));
+    ASSERT_TRUE(original.buildSomeMore(1));
+  }
+  Section restored(epub, 0, renderer);
+  ASSERT_TRUE(restored.loadSectionFile(spec));
+  ASSERT_TRUE(restored.isPartial());
+  spec.viewportHeight += 7;
+  EXPECT_FALSE(restored.loadSectionFile(spec));
+}
+
 TEST_F(SectionMemoryTest, OomAbandonsBuildAndBasicRetryPreservesBodyAndOffsets) {
   std::string html = "<html><body><p id='start'>";
   for (int i = 0; i < 400; ++i) html += "word" + std::to_string(i) + " ";
@@ -526,18 +578,59 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   ASSERT_TRUE(section.createSectionFile(spec));
   const auto path = epub->cachePath + "/sections/0.bin";
   std::ifstream file(path, std::ios::binary);
-  const std::string bytes{std::istreambuf_iterator<char>(file), {}};
+  std::string bytes{std::istreambuf_iterator<char>(file), {}};
   uint64_t digest = 14695981039346656037ULL;
   const auto append = [&digest](const std::string& value) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
+  ASSERT_FALSE(bytes.empty());
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 86);
+  ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
+  bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
+  bytes.erase(12, 1);  // vertical bottom-align toggle appended after alignment.
+  // Normalize the two new spacing bytes and their absolute file offsets back
+  // to the historical v70 layout; keep its verified digest unchanged.
+  constexpr size_t spacingOffset = 21;
+  ASSERT_EQ(static_cast<uint8_t>(bytes[spacingOffset]), 0);
+  ASSERT_EQ(static_cast<uint8_t>(bytes[spacingOffset + 1]), 100);
+  bytes.erase(spacingOffset, 2);
+  const auto readOffset = [&bytes](size_t position) {
+    uint32_t value;
+    std::memcpy(&value, bytes.data() + position, sizeof(value));
+    return value;
+  };
+  const auto adjustOffset = [&bytes, &readOffset](size_t position) {
+    const uint32_t value = readOffset(position) - 4;
+    std::memcpy(bytes.data() + position, &value, sizeof(value));
+  };
+  // pageCount follows spacing; the next five fields address tables in the file.
+  for (size_t position = spacingOffset + 2; position < spacingOffset + 22; position += 4) adjustOffset(position);
+  const uint32_t pageLut = readOffset(spacingOffset + 2);
+  const uint32_t anchorMap = readOffset(spacingOffset + 6);
+  for (size_t position = pageLut; position < anchorMap; position += 4) adjustOffset(position);
+  bytes.front() = 70;
   append(bytes);
+  std::string actualVisible;
+  for (const auto& word : laidOutWords) actualVisible += word;
+  std::string expectedVisible;
+  for (int i = 0; i < 900; ++i) expectedVisible += "中文正文";
+  expectedVisible += "汉字[1]";
+  for (int i = 0; i < 80; ++i) expectedVisible += "Englishparagraphwords.";
+  expectedVisible += "Footnotetext.";
+  EXPECT_EQ(actualVisible, expectedVisible);  // No dropped or duplicated words across soft flush/page moves.
   for (const auto& word : laidOutWords) append(word);
   for (const auto& href : collectedFootnotes) append(href);
-  // Pre-refactor cache, text and footnotes. The expected value tracks
-  // SECTION_FILE_VERSION, whose byte is the first thing in the file: the digest
-  // moved when the version went 64 -> 66 for the versioned image cache prefix.
-  EXPECT_EQ(digest, 12249067298013490136ULL);
+  // Pre-refactor cache, text and footnotes. The expected value tracks the
+  // section cache header: the digest moved each time the header gained a field
+  // (image-prefix 64->66, first-line indent 66->68, paragraph spacing 68->70,
+  // character/word spacing 70->76 and the vertical bottom-align toggle, which
+  // is normalized away together with the indent/spacing bytes). The leading
+  // version byte is normalized to 70 so a version bump alone never moves the
+  // digest.
+  // CSS19 widow/orphan flow changes page boundaries even without embedded CSS.
+  // The complete visible text is checked independently above; this snapshot
+  // fixes the new LUT/anchor layout while keeping the old header normalization.
+  EXPECT_EQ(digest, 13619351531823302489ULL);
 }
 
 TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
@@ -573,4 +666,318 @@ TEST_F(SectionMemoryTest, CssCacheOomIsReportedAndBasicBuildDoesNotHydrateCss) {
   EXPECT_TRUE(restored.loadSectionFile(spec));
 }
 
+TEST_F(ChapterHtmlSlimParserTest, FirstLineIndentPreservesCssAndExplicitOverrides) {
+  for (const bool spacing : {false, true}) {
+    for (const int cssIndent : {-16, 0, 24}) {
+      BlockStyle style;
+      style.textIndentDefined = true;
+      style.textIndent = cssIndent;
+      ParsedText text(spacing, FirstLineIndent::Auto, false, false, style);
+      text.isNaturalAlign = true;
+      text.addWord("word", EpdFontFamily::REGULAR);
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), cssIndent);
+      text.firstLineIndent = FirstLineIndent::NoIndent;
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), 0);
+      text.firstLineIndent = FirstLineIndent::Indent;
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), 12);
+      text.addWord("中文", EpdFontFamily::REGULAR);
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0),
+                2 * renderer.getTextAdvanceX(0, "我", EpdFontFamily::REGULAR));
+      EXPECT_EQ(text.resolveFirstLineIndent(false, renderer, 0), 0);
+      text.firstLinePending = false;
+      EXPECT_EQ(text.resolveFirstLineIndent(true, renderer, 0), 0);
+    }
+  }
+  ParsedText automatic(false, FirstLineIndent::Auto);
+  automatic.isNaturalAlign = true;
+  EXPECT_EQ(automatic.resolveFirstLineIndent(true, renderer, 0), 0);
+}
+
+TEST_F(SectionMemoryTest, FirstLineIndentRoundTripsAndInvalidatesChangedAndLegacyCaches) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  for (const bool partial : {false, true}) {
+    for (const uint8_t mode : {FirstLineIndent::Auto, FirstLineIndent::Indent, FirstLineIndent::NoIndent}) {
+      spec.firstLineIndent = mode;
+      {
+        Section section(epub, 0, renderer);
+        ASSERT_TRUE(section.startBuild(spec));
+        ASSERT_TRUE(section.buildSomeMore(partial ? 1 : 0));
+      }
+      {
+        Section restored(epub, 0, renderer);
+        ASSERT_TRUE(restored.loadSectionFile(spec));
+        EXPECT_EQ(restored.isPartial(), partial);
+      }
+      auto changed = spec;
+      changed.firstLineIndent = (mode + 1) % 3;
+      Section mismatch(epub, 0, renderer);
+      EXPECT_FALSE(mismatch.loadSectionFile(changed));
+    }
+  }
+  for (const uint8_t oldVersion : {66, 68, 70, 71, 212, 211}) {
+    Section section(epub, 0, renderer);
+    ASSERT_TRUE(section.createSectionFile(spec));
+    section.file.close();
+    const auto cachePath = epub->cachePath + "/sections/0.bin";
+    {
+      std::fstream file(cachePath, std::ios::binary | std::ios::in | std::ios::out);
+      ASSERT_TRUE(file.good());
+      file.write(reinterpret_cast<const char*>(&oldVersion), 1);
+    }
+    Section legacy(epub, 0, renderer);
+    EXPECT_FALSE(legacy.loadSectionFile(spec));
+    EXPECT_TRUE(legacy.createSectionFile(spec));
+    Section rebuilt(epub, 0, renderer);
+    EXPECT_TRUE(rebuilt.loadSectionFile(spec));
+  }
+}
+
+TEST_F(ChapterHtmlSlimParserTest, ParagraphSpacingLevelsAddToCssMargins) {
+  constexpr int gaps[] = {0, 8, 12, 16, 20, 24};
+  for (uint8_t level = 0; level < std::size(gaps); ++level) {
+    parser.extraParagraphSpacing = level;
+    parser.wordsExtractedInBlock = 0;
+    parser.currentPage.reset();
+    parser.currentPageNextY = 0;
+    BlockStyle style;
+    style.marginTop = 7;
+    style.marginBottom = 3;
+    parser.currentTextBlock = std::make_unique<ParsedText>(level, FirstLineIndent::Auto, false, false, style);
+    parser.currentTextBlock->addWord("word", EpdFontFamily::REGULAR);
+    parser.makePages();
+    ASSERT_FALSE(parser.hasFailed());
+    EXPECT_EQ(parser.currentPageNextY, 16 + 10 + gaps[level]);
+  }
+}
+
+TEST_F(SectionMemoryTest, ParagraphSpacingLevelsRoundTripWithoutCollapsingToBool) {
+  std::string html = "<html><body>";
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  spec.firstLineIndent = FirstLineIndent::NoIndent;
+  for (const bool partial : {false, true}) {
+    for (uint8_t level = 0; level <= 5; ++level) {
+      spec.extraParagraphSpacing = level;
+      {
+        Section section(epub, 0, renderer);
+        ASSERT_TRUE(section.startBuild(spec));
+        ASSERT_TRUE(section.buildSomeMore(partial ? 1 : 0));
+      }
+      {
+        Section restored(epub, 0, renderer);
+        ASSERT_TRUE(restored.loadSectionFile(spec));
+        EXPECT_EQ(restored.isPartial(), partial);
+      }
+      auto changed = spec;
+      changed.extraParagraphSpacing = (level + 1) % 6;
+      Section mismatch(epub, 0, renderer);
+      EXPECT_FALSE(mismatch.loadSectionFile(changed));
+    }
+  }
+}
+
+TEST_F(ChapterHtmlSlimParserTest, VerticalBottomAlignDistributesEvenlyToContentBottom) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 80;  // four lines at 0/20/40/60; last bottom = 80
+
+  Page page;
+  for (int16_t i = 0; i < 4; ++i) {
+    page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, i * 20));
+  }
+  parser.applyVerticalBottomAlign(&page);
+
+  // leftover = 100 - 80 = 20 over 3 gaps -> +6/gap plus remainder 2 spread on the
+  // first two gaps. First line stays at the top; the last line shifts by the full
+  // leftover so its bottom lands exactly on viewportHeight.
+  ASSERT_EQ(page.elements.size(), 4U);
+  EXPECT_EQ(page.elements[0]->yPos, 0);
+  EXPECT_EQ(page.elements[1]->yPos, 20 + 7);
+  EXPECT_EQ(page.elements[2]->yPos, 40 + 14);
+  EXPECT_EQ(page.elements[3]->yPos, 60 + 20);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, VerticalBottomAlignCapsSparsePageGapGrowth) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 20;  // two lines at 0 and 20; last bottom = 20
+
+  Page page;
+  page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 0));
+  page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 20));
+  parser.applyVerticalBottomAlign(&page);
+
+  // leftover = 80 over one gap, but the safety cap is lineHeight/2 = 10: the gap
+  // grows by only 10 (second line -> y 30) and the excess stays at the bottom,
+  // instead of one enormous gap in the middle of a two-line page.
+  ASSERT_EQ(page.elements.size(), 2U);
+  EXPECT_EQ(page.elements[0]->yPos, 0);
+  EXPECT_EQ(page.elements[1]->yPos, 30);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignMovesRaisedLinksWithTheirLines) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 80;
+  Page page;
+  page.elements.reserve(4);
+  for (int16_t i = 0; i < 4; ++i) page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, i * 20));
+  ASSERT_TRUE(page.links.resize(3));
+  page.links[0].y = -3;
+  page.links[1].y = 17;
+  page.links[2].y = 64;
+  parser.currentPageLinkLines[0] = 0;
+  parser.currentPageLinkLines[1] = 1;
+  parser.currentPageLinkLines[2] = 3;
+  parser.applyVerticalBottomAlign(&page);
+  EXPECT_EQ(page.links[0].y, -3);
+  EXPECT_EQ(page.links[1].y, 24);
+  EXPECT_EQ(page.links[2].y, 84);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignSkipsTablesRulesAndDisabledPages) {
+  parser.viewportHeight = 100;
+  parser.currentLineHeight = 20;
+  parser.currentPageContentBottom = 40;
+  enum class ExcludedPage { Disabled, GridTable, HorizontalRule };
+  for (const auto kind : {ExcludedPage::Disabled, ExcludedPage::GridTable, ExcludedPage::HorizontalRule}) {
+    Page page;
+    page.elements.reserve(3);
+    page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 0));
+    page.elements.push_back(std::make_unique<PageLine>(nullptr, 0, 20));
+    parser.verticalBottomAlign = kind != ExcludedPage::Disabled;
+    parser.currentPageHasGridTable = kind == ExcludedPage::GridTable;
+    if (kind == ExcludedPage::HorizontalRule)
+      page.elements.push_back(std::make_unique<PageHorizontalRule>(100, 2, 0, 40));
+    parser.applyVerticalBottomAlign(&page);
+    EXPECT_EQ(page.elements[1]->yPos, 20);
+  }
+  ASSERT_TRUE(parser.allocatePage());
+  EXPECT_FALSE(parser.currentPageHasGridTable);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignKeepsTocAndTxtChapterEndPagesTopAligned) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 100;
+  for (const bool txt : {false, true}) {
+    parser.txtChapterBoundaries = txt;
+    parser.tocAnchors = txt ? std::vector<std::string>{} : std::vector<std::string>{"next"};
+    parser.pendingAnchorId = "next";
+    ASSERT_TRUE(parser.allocatePage());
+    parser.currentPage->elements.reserve(3);
+    for (int16_t y : {0, 16, 32}) parser.currentPage->elements.push_back(std::make_unique<PageLine>(nullptr, 0, y));
+    parser.currentPageNextY = parser.currentPageContentBottom = 48;
+    parser.currentLineHeight = 16;
+    bool completed = false;
+    parser.completePageFn = [&](std::unique_ptr<Page> page, auto, auto, auto) {
+      completed = true;
+      ASSERT_EQ(page->elements.size(), 3u);
+      EXPECT_EQ(page->elements[1]->yPos, 16);
+      EXPECT_EQ(page->elements[2]->yPos, 32);
+    };
+    parser.flushPendingAnchor();
+    EXPECT_TRUE(completed);
+    EXPECT_TRUE(parser.currentPage->elements.empty());
+  }
+}
+
 }  // namespace
+
+TEST_F(SectionMemoryTest, BottomAlignRejectsOppositeToggleAndMalformedByteInCompleteAndPartialCaches) {
+  std::string html = "<html><body>";
+  html.reserve(6000);
+  for (int i = 0; i < 400; ++i) html += "<p>word</p>";
+  html += "</body></html>";
+  writeHtml(html);
+  for (const bool partial : {false, true}) {
+    for (const bool enabled : {false, true}) {
+      spec.verticalBottomAlign = enabled;
+      {
+        Section build(epub, 0, renderer);
+        ASSERT_TRUE(build.startBuild(spec));
+        ASSERT_TRUE(build.buildSomeMore(partial ? 1 : 0));
+      }
+      const auto path = epub->cachePath + "/sections/0.bin";
+      std::ifstream input(path, std::ios::binary);
+      const std::string bytes{std::istreambuf_iterator<char>(input), {}};
+      ASSERT_GT(bytes.size(), 47u);
+      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 196 : 86);
+      {
+        Section same(epub, 0, renderer);
+        ASSERT_TRUE(same.loadSectionFile(spec));
+        EXPECT_EQ(same.isPartial(), partial);
+      }
+      auto changed = spec;
+      changed.verticalBottomAlign = !enabled;
+      Section mismatch(epub, 0, renderer);
+      EXPECT_FALSE(mismatch.loadSectionFile(changed));
+      auto malformed = bytes;
+      malformed[13] = 2;
+      {
+        std::ofstream(path, std::ios::binary).write(malformed.data(), malformed.size());
+      }
+      Section invalid(epub, 0, renderer);
+      EXPECT_FALSE(invalid.loadSectionFile(spec));
+    }
+  }
+}
+
+TEST_F(SectionMemoryTest, TocAnchorsTrackSubchaptersDuringBuildAndAfterReload) {
+  epub->tocItems = {{"chapter.xhtml", "", 0}, {"chapter.xhtml", "first", 0}, {"chapter.xhtml", "second", 0}};
+  std::string html = "<html><body><h2 id='first'>First</h2><p>";
+  for (int i = 0; i < 240; ++i) html += "first ";
+  html += "</p><h2 id='second'>Second</h2><p>";
+  for (int i = 0; i < 240; ++i) html += "second ";
+  html += "</p></body></html>";
+  writeHtml(html);
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.startBuild(spec));
+  ASSERT_TRUE(section.buildSomeMore(1));
+  EXPECT_EQ(section.getTocIndexForPage(0), 1);
+  ASSERT_TRUE(section.buildSomeMore(0));
+  const auto first = section.getPageForAnchor("first");
+  const auto second = section.getPageForAnchor("second");
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  ASSERT_GT(*second, *first);
+  EXPECT_EQ(section.getTocIndexForPage(*first), 1);
+  EXPECT_EQ(section.getTocIndexForPage(*second), 2);
+  Section restored(epub, 0, renderer);
+  ASSERT_TRUE(restored.loadSectionFile(spec));
+  EXPECT_EQ(restored.getTocIndexForPage(*first), 1);
+  EXPECT_EQ(restored.getTocIndexForPage(*second), 2);
+  uint32_t mapStart = 0;
+  {
+    HalFile file;
+    uint16_t count = 0;
+    ASSERT_TRUE(restored.openAnchorMap(file, count));
+    ASSERT_EQ(count, 2);
+    mapStart = file.position();
+  }
+  // A truncated anchor must not be mistaken for the second chapter.
+  std::filesystem::resize_file(epub->cachePath + "/sections/0.bin", mapStart + 1);
+  EXPECT_EQ(restored.getTocIndexForPage(*second), 0);
+}
+
+TEST_F(SectionMemoryTest, RejectsOldCompleteAndPartialVersionsBeforeReadingNewBlocks) {
+  writeHtml("<html><body><p>one</p><p>two</p></body></html>");
+  for (const uint8_t legacy :
+       {uint8_t{76}, uint8_t{77}, uint8_t{206}, uint8_t{205}, uint8_t{84}, uint8_t{85}, uint8_t{198}, uint8_t{197}}) {
+    Section section(epub, 0, renderer);
+    ASSERT_TRUE(section.createSectionFile(spec));
+    {
+      HalFile file;
+      ASSERT_TRUE(file.open((epub->cachePath + "/sections/0.bin").c_str(), "rb+"));
+      ASSERT_EQ(file.write(&legacy, sizeof(legacy)), sizeof(legacy));
+    }
+    Section restored(epub, 0, renderer);
+    EXPECT_FALSE(restored.loadSectionFile(spec));
+  }
+}

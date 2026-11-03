@@ -29,7 +29,7 @@ class UiAppHost {
   using UiApp = freeink::ui::FreeInkApp<24, 6>;
   using UiScreen = UiApp::ScreenType;
 
-  explicit UiAppHost(const GfxRenderer& renderer);
+  explicit UiAppHost(const GfxRenderer& renderer, bool upstreamStyle = false);
 
   // Screen-entry reset: close the routing gate and rebind the shared theme
   // tokens (refreshed for the active UITheme + this target's fonts). Call from
@@ -42,6 +42,7 @@ class UiAppHost {
   // complete published generation. Call from the render task wherever the app
   // should paint; chrome before, hints after.
   void renderUi();
+  void scanUi();
 
   // What loop-task routing saw this pass. `routed` is true when the gate was
   // open and the snapshot carried relevant touch input — the invalidated()
@@ -67,12 +68,15 @@ class UiAppHost {
   // interaction table indexes is released mid-state. Reopens on renderUi().
   void closeRouting() { uiReady = false; }
   bool routingReady() const { return uiReady.load(); }
+  bool usesUpstreamStyle() const { return upstreamStyle; }
 
   freeink::ui::GfxRendererTarget uiTarget;  // must precede `app`: the app holds a reference to it
   UiApp app;
 
  private:
+  void prepareUi();
   // Opened by the render task after publication and closed on lifecycle/state
   // resets; read by the loop task (route*).
   std::atomic<bool> uiReady{false};
+  const bool upstreamStyle;
 };

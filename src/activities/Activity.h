@@ -15,8 +15,6 @@
 #include "activities/MainTab.h"
 #include "util/ScreenshotInfo.h"
 
-struct Rect;
-
 class Activity {
   friend class ActivityManager;
 
@@ -34,9 +32,15 @@ class Activity {
   virtual ~Activity() = default;
   virtual void onEnter();
   virtual void onExit();
+  // Last chance to queue activity-owned state before sleep events are drained.
+  virtual void prepareForSleep() {}
   virtual void loop() {}
 
   virtual void render(RenderLock&&) {}
+
+  // One cancellable idle pass after a normal render; zero keeps the task asleep.
+  virtual uint32_t idleRenderDelayMs() const { return 0; }
+  virtual void renderIdle(uint32_t) {}
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
@@ -55,6 +59,7 @@ class Activity {
   virtual bool deferBluetoothStart() const { return false; }
   // Reading surfaces opt into output-polarity inversion; menus and overlays stay normal.
   virtual bool appliesNightMode() const { return false; }
+  virtual bool acceptsRemoteInput() const { return false; }
   // Returns true when the activity schedules its own forced refresh.
   virtual bool handleForcedRefresh() { return false; }
   virtual bool isHomeActivity() const { return false; }
@@ -62,6 +67,8 @@ class Activity {
   virtual MainTab mainTab() const { return MainTab::None; }
   virtual bool mainTabBackReturnsToTabs() const { return true; }
   virtual void selectMainTabContentEdge(MainTabContentEdge) {}
+  virtual bool defersContentSelection() const;
+  virtual bool hasContentSelection() const { return true; }
   bool usesMainTabBar() const;
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
@@ -86,7 +93,7 @@ class Activity {
   void setResult(ActivityResult&& result);
 
   // Finish this activity and return to the previous one on the stack (if any)
-  void finish();
+  static void finish();
 
   // Convenience method to facilitate API transition to ActivityManager
   // TODO: remove this in near future
@@ -96,7 +103,11 @@ class Activity {
  protected:
   MappedInputManager::Labels mainTabButtonLabels(const char* back, const char* confirm, bool canMove,
                                                  bool showTabDirections = true) const;
-  bool showMainTabContentSelection() const;
+  virtual bool showMainTabContentSelection() const;
+  bool mainTabsAtBottom() const;
+  bool hasMainTabStatusBar() const;
+  MainTabLayout mainTabLayout() const;
+  Rect pageContentRect() const;
   void drawPageHeader(const Rect& rect, const char* title, const char* subtitle = nullptr) const;
 
   enum class ListTouchResult : uint8_t {

@@ -2,6 +2,8 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
+#include <Logging.h>
 #include <WiFi.h>
 
 #if !defined(SIMULATOR)
@@ -52,18 +54,43 @@ MemorySnapshot readMemorySnapshot() {
 
 namespace NetworkStartup {
 
-void prepare(GfxRenderer& renderer) {
-  if (!shouldReleaseRenderMemory(readMemorySnapshot())) return;
+void logMemory(const char* stage) {
+  const auto internal = HalMemory::getInternalHeap();
+#if defined(SIMULATOR)
+  const HalMemory::HeapStats dma{};  // No hardware DMA heap in the desktop simulator.
+#else
+  const auto dma = HalMemory::getInternalDmaHeap();
+#endif
+  const auto psram = HalMemory::getPsramHeap();
+  LOG_INF("NET", "%s: internal free=%u largest=%u, DMA free=%u largest=%u, PSRAM free=%u", stage,
+          static_cast<unsigned>(internal.freeBytes), static_cast<unsigned>(internal.largestBlockBytes),
+          static_cast<unsigned>(dma.freeBytes), static_cast<unsigned>(dma.largestBlockBytes),
+          static_cast<unsigned>(psram.freeBytes));
+}
 
-  RenderLock lock;
-  sdFontSystem.releaseLoadedFont(renderer);
-  if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
+void prepare(GfxRenderer& renderer) {
+  logMemory("before font reclaim");
+  const MemorySnapshot before = readMemorySnapshot();
+  if (!shouldReleaseRenderMemory(before)) return;
+
+  {
+    RenderLock lock;
+    sdFontSystem.releaseLoadedFont(renderer);
+    if (auto* fontCache = renderer.getFontCacheManager()) fontCache->clearCache();
+  }
+  logMemory("after font reclaim");
 }
 
 bool setMode(GfxRenderer& renderer, const wifi_mode_t mode) {
-  bleinput::stop();
+  if (mode != WIFI_OFF && !bleinput::stop()) {
+    LOG_ERR("NET", "Bluetooth stop incomplete; refusing WiFi startup");
+    return false;
+  }
+  logMemory("after BLE stop");
   prepare(renderer);
-  return WiFi.mode(mode);
+  const bool started = WiFi.mode(mode);
+  logMemory(started ? "WiFi mode ready" : "WiFi mode failed");
+  return started;
 }
 
 }  // namespace NetworkStartup

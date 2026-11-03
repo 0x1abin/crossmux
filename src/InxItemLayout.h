@@ -1,8 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+
+#include "components/Rect.h"
+#include "components/UiHighDpiProfile.h"
 
 enum class InxItemLayout : uint8_t { Icons, List, Count };
 
@@ -56,18 +60,29 @@ constexpr int pageStart(const int selected, const int itemCount) {
   return clamped / itemsPerPage * itemsPerPage;
 }
 
+constexpr Rect cellBounds(const int slot, const int width, const int height) {
+  constexpr int inset = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap / 2 : 4;
+  const int column = slot % columns;
+  const int row = slot / columns;
+  const int left = column * width / columns;
+  const int top = row * height / rows;
+  return Rect{left + inset, top + inset, (column + 1) * width / columns - left - inset * 2,
+              (row + 1) * height / rows - top - inset * 2};
+}
+
 constexpr int indexFromPoint(const int x, const int y, const int width, const int height, const int start,
                              const int itemCount) {
   if (x < 0 || y < 0 || x >= width || y >= height || width <= 0 || height <= 0) return -1;
-  const int column = x * columns / width;
-  const int row = y * rows / height;
-  const int index = start + row * columns + column;
-  return index < itemCount ? index : -1;
+  for (int slot = 0; slot < itemsPerPage && start + slot < itemCount; ++slot) {
+    const Rect cell = cellBounds(slot, width, height);
+    if (x >= cell.x && x < cell.x + cell.width && y >= cell.y && y < cell.y + cell.height) return start + slot;
+  }
+  return -1;
 }
 }  // namespace InxGridGeometry
 
 namespace InxMenuGeometry {
-inline constexpr int rowHeight = 66;
+inline constexpr int rowHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::rowHeight : 66;
 
 constexpr int pageItems(const int contentHeight) { return contentHeight < rowHeight ? 1 : contentHeight / rowHeight; }
 
@@ -81,8 +96,8 @@ constexpr int pageStart(const int selected, const int itemCount, const int conte
 
 namespace InxOptionGeometry {
 inline constexpr int visibleRowLimit = 5;
-inline constexpr int rowHeight = 62;
-inline constexpr int headerHeight = 62;
+inline constexpr int rowHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 62;
+inline constexpr int headerHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 62;
 
 constexpr int visibleRows(const int optionCount) {
   return optionCount < visibleRowLimit ? (optionCount > 0 ? optionCount : 0) : visibleRowLimit;
@@ -95,6 +110,26 @@ constexpr int start(const int selected, const int optionCount) {
   const int wanted = clamped - visible / 2;
   const int maxStart = optionCount - visible;
   return wanted < 0 ? 0 : (wanted > maxStart ? maxStart : wanted);
+}
+struct Layout {
+  Rect panel;
+  int rows;
+  int first;
+
+  Rect optionRect(const int slot) const {
+    return Rect{panel.x + 2, panel.y + headerHeight + slot * rowHeight + 3, panel.width - 4, rowHeight - 6};
+  }
+};
+
+inline Layout layout(const Rect bounds, const int optionCount, const int selected) {
+  const int availableRows = std::max(1, (bounds.height - headerHeight) / rowHeight);
+  const int rows = std::min(visibleRows(optionCount), availableRows);
+  const int width = std::max(1, std::min(bounds.width - 24, UiHighDpiProfile::enabled ? 608 : 360));
+  const int height = headerHeight + rows * rowHeight;
+  const int first = std::clamp(selected - rows / 2, 0, std::max(0, optionCount - rows));
+  return {
+      Rect{bounds.x + (bounds.width - width) / 2, bounds.y + std::max(0, (bounds.height - height) / 2), width, height},
+      rows, first};
 }
 }  // namespace InxOptionGeometry
 

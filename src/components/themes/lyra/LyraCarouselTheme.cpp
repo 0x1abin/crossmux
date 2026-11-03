@@ -175,14 +175,3 @@ void LyraCarouselTheme::drawHomeMenu(GfxRenderer& renderer, Rect rect, int butto
     }
   }
 }
-
-void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
-                                 const std::function<std::string(int index)>& rowTitle,
-                                 const std::function<std::string(int index)>& rowSubtitle,
-                                 const std::function<UIIcon(int index)>& rowIcon,
-                                 const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                                 const std::function<bool(int index)>& rowDimmed, const bool showSelection,
-                                 const std::function<bool(int index)>&) const {
-  drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
-                      highlightValue, rowDimmed, LyraCarouselMetrics::values, true, showSelection);
-}

@@ -23,9 +23,12 @@
 class KOReaderSyncActivity final : public Activity, private UiAppHost {
  public:
   explicit KOReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& epubPath,
-                                int currentSpineIndex, int currentPage, int totalPagesInSpine,
-                                SavedProgressPosition localKoPos, std::string localChapterName,
-                                std::optional<uint16_t> currentParagraphIndex = std::nullopt);
+                                CrossPointPosition localPosition, SavedProgressPosition localKoPos,
+                                std::string localChapterName, const bool pluginEventsOnly = false);
+
+  // The reader allocates this owner before releasing its payload, then maps
+  // progress using the released framebuffer before lifecycle handoff.
+  void setLocalMappedProgress(SavedProgressPosition&& progress) { localProgress = std::move(progress); }
 
   void onEnter() override;
   void onExit() override;
@@ -50,10 +53,7 @@ class KOReaderSyncActivity final : public Activity, private UiAppHost {
   std::unique_ptr<Epub> epub;  // null until lazy-loaded after TLS in performSync()
   std::string epubPath;
   std::string localChapterName;
-  int currentSpineIndex;
-  int currentPage;
-  int totalPagesInSpine;
-  std::optional<uint16_t> currentParagraphIndex;
+  CrossPointPosition localPosition;
 
   State state = WIFI_SELECTION;
   std::string statusMessage;
@@ -79,6 +79,10 @@ class KOReaderSyncActivity final : public Activity, private UiAppHost {
   // WiFi.getMode() because performUpload() calls esp_wifi_stop() on the way out,
   // which makes WiFi.getMode() return WIFI_MODE_NULL.
   bool wifiActivated = false;
+
+  // Reuses the KOReader WiFi connect/drain/return flow without a server: flush
+  // plugged-outbox events instead of syncing progress.
+  bool pluginEventsOnly = false;
 
   void onWifiSelectionComplete(bool success);
   void performSync();

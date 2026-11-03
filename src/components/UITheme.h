@@ -8,6 +8,8 @@
 #include "CrossPointSettings.h"
 #include "components/themes/BaseTheme.h"
 
+class CoverGridHomeUi;
+
 class UITheme {
   // Static instance
   static UITheme instance;
@@ -22,9 +24,14 @@ class UITheme {
   const BaseTheme& getTheme() const { return *currentTheme; }
   bool usesClassicTabs() const { return currentType == CrossPointSettings::UI_THEME::CLASSIC; }
   bool hasMainTabs() const { return currentType == CrossPointSettings::UI_THEME::INX; }
-  bool showSelectionCursor() const;
+  static Rect getContentArea(const GfxRenderer& renderer);
   Rect getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints = false,
                          bool hasSideButtonHints = false);
+  // Header rect for GUI.drawHeader() on a screen laid out in getScreenSafeArea().
+  // Shared themes leave bezel insets to headerBand; INX keeps its existing safe rect.
+  // upstreamStyle matches drawHeaderWithStyle for shared reading pages.
+  Rect getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHints = false, bool hasSideButtonHints = false,
+                     bool upstreamStyle = false);
   static void drawCenteredText(const GfxRenderer& renderer, Rect screen, int fontId, int y, const char* text,
                                bool black = true, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   // Wraps only overflowing text, then aligns the complete line block within bounds.
@@ -32,6 +39,9 @@ class UITheme {
                                       int maxLines, bool black = true,
                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                                       TextVerticalAlignment verticalAlignment = TextVerticalAlignment::CENTER);
+  static bool supportsCoverGrid();
+  static bool hasCoverGridHome();
+  static void drawCoverGridHome(CoverGridHomeUi& home);
   void reload();
   void setTheme(CrossPointSettings::UI_THEME type);
   static int getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
@@ -39,6 +49,7 @@ class UITheme {
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static UIIcon getFileIcon(const std::string& filename);
   static int getStatusBarHeight();
+  static int getStatusBarTextTopPadding(const GfxRenderer& renderer);
   static int getProgressBarHeight();
 
  private:

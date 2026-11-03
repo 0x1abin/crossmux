@@ -7,7 +7,11 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from generate_ota_notes import extract_notes
-from nightly_targets import supported_channels, CHANNELS, FLAVOR_TOKENS, TARGETS, environment_for, manifest_name, targets_for
+from nightly_targets import (
+    CHANNELS, FLAVOR_TOKENS, bundle_name, environment_for, manifest_name,
+    public_target, targets_for,
+)
+from package_nightly_target import sha256
 
 
 def read_json(path):
@@ -15,17 +19,12 @@ def read_json(path):
 
 
 def valid_manifest(manifest, target_id, flavor, channel):
-    target = TARGETS[target_id]
     return (
-        manifest.get('schemaVersion') == 1
+        isinstance(manifest, dict)
+        and manifest.get('schemaVersion') == 1
         and manifest.get('channel') == channel
-        and manifest.get('chip') == target['chip']
-        and ('assetProfile' not in manifest or manifest['assetProfile'] == target['assetProfile'])
         and manifest.get('targetId') == target_id
-        and manifest.get('models') == target['models']
-        and manifest.get('deviceSlug') == target['deviceSlug']
-        and manifest.get('boardTag') == target['boardTag']
-        and manifest.get('supportedChannels') == supported_channels(target)
+        and all(manifest.get(key) == value for key, value in public_target(target_id).items())
         and manifest.get('environment') == environment_for(target_id, channel, flavor)
         and manifest.get('flavor') == flavor
         and isinstance(manifest.get('crossmuxSha'), str)
@@ -43,7 +42,10 @@ def valid_manifest(manifest, target_id, flavor, channel):
 
 
 def manifest_url(base_url, region, target_id, flavor):
-    name = manifest_name(target_id, flavor)
+    return asset_url(base_url, region, target_id, manifest_name(target_id, flavor))
+
+
+def asset_url(base_url, region, target_id, name):
     if region == 'global':
         return urljoin(base_url, name)
     return urljoin(base_url, f'{target_id}/{name}')
@@ -53,8 +55,7 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
     targets = {}
     crossmux_revisions = set()
     sdk_revisions = set()
-    release_versions = set()
-    for target_id, target in targets_for(channel).items():
+    for target_id in targets_for(channel):
         manifests = {}
         for flavor in FLAVOR_TOKENS:
             matches = list(manifest_root.rglob(manifest_name(target_id, flavor)))
@@ -74,15 +75,22 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
             raise ValueError(f'{target_id} flavor versions do not match')
         if len({json.dumps(manifest['assets'], sort_keys=True) for manifest in manifests.values()}) != 1:
             raise ValueError(f'{target_id} flavor assets do not match')
-        release_versions.add(manifests['global']['version'])
         crossmux_revisions.update(revisions)
         sdk_revisions.update(target_sdk_revisions)
+        name = bundle_name(target_id, manifests['global']['version'])
+        bundles = list(manifest_root.rglob(name))
+        if len(bundles) != 1:
+            raise ValueError(f'expected one {target_id} bundle, found {len(bundles)}')
+        bundle = bundles[0]
         targets[target_id] = {
             'targetId': target_id,
-            'models': target['models'],
-            'deviceSlug': target['deviceSlug'],
-            'boardTag': target['boardTag'],
-            'supportedChannels': supported_channels(target),
+            **public_target(target_id),
+            'bundle': {
+                'name': name,
+                'size': bundle.stat().st_size,
+                'sha256': sha256(bundle),
+                'url': asset_url(base_url, region, target_id, name),
+            },
             'variants': {
                 flavor: {
                     'version': manifest['version'],
@@ -98,8 +106,6 @@ def build_index(manifest_root, region, base_url, updated_at, build_id, channel, 
         raise ValueError('target CrossMux revisions do not match')
     if len(sdk_revisions) != 1:
         raise ValueError('target SDK revisions do not match')
-    if channel == 'stable' and len(release_versions) != 1:
-        raise ValueError('Stable target versions do not match')
     if channel == 'stable' and release_notes is None:
         raise ValueError('Stable release notes are required')
     index = {

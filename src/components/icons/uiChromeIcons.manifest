@@ -1,0 +1,6 @@
+# Regenerate with python3 scripts/build_ui_chrome_icons.py
+tab-recent = house
+tab-library = folders
+tab-settings = settings-2
+tab-statistics = chart-line
+tab-apps = layout-grid

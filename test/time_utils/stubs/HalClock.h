@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <ctime>
 
 class HalClock {
@@ -8,6 +9,10 @@ class HalClock {
 
   bool hasValidTime() const { return now != 0; }
   time_t nowUtc() const { return now; }
+  void setTimezone(const char* tz) {
+    setenv("TZ", tz, 1);
+    tzset();
+  }
 };
 
 inline HalClock halClock;

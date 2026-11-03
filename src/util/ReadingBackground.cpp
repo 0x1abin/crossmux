@@ -93,6 +93,8 @@ bool createCacheFromPng(GfxRenderer& renderer, const char* pngPath) {
   return created;
 }
 
+// This operation writes pixel bytes into the renderer framebuffer.
+// cppcheck-suppress constParameterReference
 bool load(GfxRenderer& renderer) {
   const uint8_t orientation = static_cast<uint8_t>(renderer.getOrientation());
   if (!isValidOrientation(orientation)) return false;

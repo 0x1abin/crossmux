@@ -68,12 +68,36 @@ bool XtcReaderActivity::handleFormatInput() {
   }
 
   // Enter chapter selection activity on Confirm release or touch menu gesture
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
-      ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
+  const bool touchMenu = ReaderUtils::isTouchMenuGesture(renderer, mappedInput);
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || touchMenu) {
+    if (touchMenu && xtc->hasChapters() && !xtc->getChapters().empty()) haptic_feedback::touchAction();
     openChapterSelection();
     return true;
   }
   return false;
+}
+
+bool XtcReaderActivity::handleZoneShortAction(const uint8_t action) {
+  // XTC comics have no bookmark / dictionary / KOReader sync / percent jump:
+  // only the base actions (orientation, frontlight, home) and the chapter jump
+  // apply to short taps.
+  if (action == CrossPointSettings::TAP_ZONE_CHAPTER || action == CrossPointSettings::TAP_ZONE_MENU) {
+    openChapterSelection();
+    return true;
+  }
+  return ReaderActivity::handleZoneShortAction(action);
+}
+
+bool XtcReaderActivity::handleZoneLongAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
+    case CrossPointSettings::TAP_ZONE_LONG_MENU:
+      // XTC has no reader menu: the chapter selector doubles as its menu.
+      openChapterSelection();
+      return true;
+    default:
+      return ReaderActivity::handleZoneLongAction(action);
+  }
 }
 
 void XtcReaderActivity::applyInitialOrientation() { renderer.setOrientation(GfxRenderer::Orientation::Portrait); }
@@ -165,7 +189,7 @@ void XtcReaderActivity::renderPage() {
 
   size_t pageBufferSize;
   if (bitDepth == 2) {
-    pageBufferSize = ((static_cast<size_t>(pageWidth) * pageHeight + 7) / 8) * 2;
+    pageBufferSize = static_cast<size_t>(pageWidth) * ((static_cast<size_t>(pageHeight) + 7) / 8) * 2;
   } else {
     pageBufferSize = ((pageWidth + 7) / 8) * pageHeight;
   }
@@ -195,7 +219,7 @@ void XtcReaderActivity::renderPage() {
   const uint16_t maxSrcY = pageHeight;
 
   if (bitDepth == 2) {
-    const size_t planeSize = (static_cast<size_t>(pageWidth) * pageHeight + 7) / 8;
+    const size_t planeSize = static_cast<size_t>(pageWidth) * ((static_cast<size_t>(pageHeight) + 7) / 8);
     const uint8_t* plane1 = pageBuffer;
     const uint8_t* plane2 = pageBuffer + planeSize;
     const size_t colBytes = (pageHeight + 7) / 8;
@@ -224,7 +248,7 @@ void XtcReaderActivity::renderPage() {
       // the display sync, so only the gentle reinforcement cells fire).
       // Combined-base panels (Paper Mono) instead defer the base so the gray
       // planes below join it in one waveform.
-      if (renderer.combinesGrayscaleBase()) {
+      if (renderer.grayscaleCapabilities().base == HalDisplay::GrayscaleBase::Combined) {
         renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
       } else {
         renderer.displayBuffer(HalDisplay::HALF_REFRESH);
@@ -273,6 +297,7 @@ void XtcReaderActivity::renderPage() {
     free(pageBuffer);
 
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
+    markPageRendered();
     return;
   } else {
     const size_t srcRowBytes = (pageWidth + 7) / 8;
@@ -303,6 +328,7 @@ void XtcReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
+  if (renderer.displayCommitted()) markPageRendered();
 }
 
 bool XtcReaderActivity::pageTurn(bool isForward) {

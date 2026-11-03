@@ -19,28 +19,63 @@ The production fix has two parts:
 - Settings releases its rebuildable lists before launching the font downloader,
   using the existing helper already used by OTA and Bluetooth settings. Child
   allocation failure and normal return rebuild those lists.
-- On C3, OTA and font activities call the existing
+- On C3, OTA, font and WeRead activities call the existing
   `ReadingStatsStore::releaseMemoryForNetwork()` under `RenderLock` before
   allocating Wi-Fi selection. It ends the active session and saves dirty data
   **before** releasing the vectors. Save failure prevents network launch and
   leaves statistics resident. Each activity records successful release once.
 
-The owning activity's existing exit path reloads statistics through reboot,
+OTA and font activities' existing exit paths reload statistics through reboot,
 including cancellation or allocation failure before Wi-Fi starts. Font exits
 retain their destination: Home, Reader, Reader with the prompt suppressed, or
 Reader with Chinese font preload. Successful OTA installation keeps its normal
 restart into the new image. The existing deep-sleep guard suppresses an exit
 restart when sleep is already underway; wake loads statistics normally.
 
+WeRead releases statistics once before its first network operation, including
+when Wi-Fi is already connected. On C3, exit closes TLS and Wi-Fi, then uses the
+existing silent Home restart to restore statistics during startup. Do not reload
+statistics on the fragmented network heap: vector growth can call `abort()` with
+exceptions disabled before `reloadAfterNetwork()` can return a failure. Successful
+book caching keeps its existing reader restart. The independent reader
+progress-sync activity does not unload statistics.
+
 S3 and simulator builds do not unload statistics. In particular, touch devices
 can stop Wi-Fi without rebooting and must retain their live statistics. This is
 not a global Wi-Fi policy: background/live network applications may continue
 using reading data. The existing font-cache preparation and BLE teardown remain
-shared in `NetworkStartup`; only these two foreground download owners opt into
+shared in `NetworkStartup`; only these foreground network owners opt into
 statistics release.
 
 No new heap buffers, tasks, dependency, persistent setting or SDK API are added.
 There is one boolean per download activity (object padding may absorb it).
+
+### Reclaim vector capacity with firmware exception flags
+
+The ESP32 toolchain's libstdc++ implements vector `shrink_to_fit()` as a no-op
+with `-fno-exceptions`. Clearing statistics therefore destroyed their elements
+but retained the book, day and session arrays throughout Wi-Fi/TLS. Network
+release now swaps each vector with an empty vector, after successful persistence.
+This allocates no replacement buffers and releases the old capacity immediately;
+save failure still retains the in-memory data for retry.
+
+The regression test compiles the actual release method and statistics types
+with both normal host flags and `-fno-exceptions`. It checks capacity, retained
+data after save failure and repeated release. The old method passes with host
+exceptions enabled but fails the capacity check with firmware flags. Run:
+
+```sh
+python3 scripts/tests/test_reading_stats_network_memory.py
+```
+
+On the connected X3, the original OTA run had 38,672 free / 28,660 largest bytes
+after font reclaim and failed TLS with `PEER_KEY_ERROR` (-342). With capacity
+release fixed, the font manifest run had 47,464 free / 36,852 largest bytes,
+completed TLS 1.3 and downloaded the 2,157-byte manifest. The user also confirmed
+OTA checking and font networking worked. These are different activity snapshots,
+not a matched allocation-time benchmark or full-download/endurance acceptance.
+The rejected font-registry compaction experiment is absent from production;
+font assets, stack sizes, TLS thresholds and Wi-Fi configuration are unchanged.
 
 ## Review of the diagnostic iterations
 

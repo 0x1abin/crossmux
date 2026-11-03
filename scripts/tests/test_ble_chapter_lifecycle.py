@@ -46,7 +46,7 @@ class ChapterLifecycleTest(unittest.TestCase):
 #include <optional>
 #define LOG_DBG(...) ((void)0)
 #define LOG_INF(...) ((void)0)
-struct { bool bluetoothEnabled = true; } SETTINGS;
+struct { struct { bool enabled = true; } ble; } SETTINGS;
 constexpr bool hasBle = FREEINK_CAP_BLE_HID_HOST;
 constexpr bool keepBleDuringBuild = hasBle && (CONFIG_IDF_TARGET_ESP32C3 || CROSSPOINT_BLE_HOST_PSRAM);
 constexpr int buildStops = hasBle && !keepBleDuringBuild ? 1 : 0;
@@ -67,11 +67,19 @@ namespace bleinput {
 struct Cache { int releases=0; void releaseSdFontCaches() { assert(!running || keepBleDuringBuild); ++releases; } };
 struct { Cache cache; Cache* getFontCacheManager() { return &cache; } } renderer;
 struct RenderLock {
+ enum class Mode { Blocking, Try };
+ bool acquired=false;
  static inline bool held=false;
  static inline int depth=0;
  static inline void (*onAcquire)()=nullptr;
- RenderLock() { if(onAcquire) onAcquire(); ++depth; }
- ~RenderLock() { --depth; }
+ explicit RenderLock(Mode mode=Mode::Blocking) {
+   if(onAcquire) onAcquire();
+   assert(mode==Mode::Try || !held); // A blocking acquisition here would stall input.
+   acquired=!held;
+   if(acquired) ++depth;
+ }
+ ~RenderLock() { if(acquired) --depth; }
+ bool ownsLock() const { return acquired; }
  static bool peek() { return held; }
 };
 using ReaderRenderSpec=int;
@@ -124,43 +132,33 @@ unsigned long millis() { return now; }
         production = constants + '\n' + method(EPUB, 'bool EpubReaderActivity::deferBluetoothStart() const') + '\n' + method(EPUB, 'void EpubReaderActivity::prepareChapterBuild()')
         production += '\n' + method(EPUB, 'bool EpubReaderActivity::needsPartialRebuild() const')
         production += '\n' + method(EPUB, 'bool EpubReaderActivity::updateChapterBuild()')
-        production += method((ROOT / 'src/main.cpp').read_text(), 'void updateBluetoothLifecycle()')
         checks = r'''
 int main() {
  Section section; reader.section=&section;
  assert(!reader.deferBluetoothStart());
  reader.section=nullptr; assert(reader.deferBluetoothStart());
- updateBluetoothLifecycle(); assert(bleinput::starts==0); // Initial open / chapter selection.
- running=hasBle; updateBluetoothLifecycle(); assert(running==hasBle); // Menu / cancellation holds link.
- reader.section=&section; updateBluetoothLifecycle(); assert(running==hasBle);
+ running=hasBle;
+ reader.section=&section;
  const int stopsBeforePrepare=bleinput::stops;
  reader.prepareChapterBuild(); assert(running==keepBleDuringBuild);
  assert(bleinput::stops==stopsBeforePrepare+buildStops);
  assert(renderer.cache.releases==(CONFIG_IDF_TARGET_ESP32C3 && hasBle ? 1 : 0));
- section.building=true; updateBluetoothLifecycle(); assert(bleinput::starts==0);
- section.building=false; section.pageCount=0;
- assert(reader.deferBluetoothStart()); // Failed build cannot reconnect into unreadable state.
- section.pageCount=30; section.partial=true;
- assert(!reader.deferBluetoothStart()); // Far from partial watermark is ready.
- updateBluetoothLifecycle();
-#if FREEINK_CAP_BLE_HID_HOST
- assert(running);
- WiFi.mode=1; updateBluetoothLifecycle(); assert(!running); WiFi.mode=0;
- RenderLock::onAcquire=[] { reader.section=nullptr; };
- updateBluetoothLifecycle(); assert(!running); // Preparation began while taking the render lock.
- RenderLock::onAcquire=nullptr; reader.section=&section;
- bleinput::result=bleinput::StartResult::LowMemory;
- updateBluetoothLifecycle(); int attempts=bleinput::starts;
- now=1999; updateBluetoothLifecycle(); assert(bleinput::starts==attempts);
- now=2000; updateBluetoothLifecycle(); assert(bleinput::starts==attempts+1);
- bleinput::result=bleinput::StartResult::Started; now=4000;
- updateBluetoothLifecycle(); assert(running);
-#endif
+ section.building=true;assert(reader.deferBluetoothStart());
+ section.building=false;section.pageCount=0;assert(reader.deferBluetoothStart());
+ section.pageCount=30;section.partial=true;assert(!reader.deferBluetoothStart());
+ // Real RuntimeTest/TickTest own the asynchronous start/idle/retry assertions;
+ // this fixture executes chapter methods and preserves their allocation boundaries.
  const int stopsBeforeBackground=bleinput::stops;
+ section.currentPage=15; // This page would trigger a partial build if the lock were acquired.
  RenderLock::held=true;
  assert(reader.updateChapterBuild());
- assert(section.begins==0); // Busy rendering must never trigger construction.
+ assert(section.begins==0 && RenderLock::depth==0); // Busy rendering must never trigger construction.
  RenderLock::held=false;
+ RenderLock::onAcquire=[] { RenderLock::held=true; };
+ assert(reader.updateChapterBuild());
+ assert(section.begins==0 && RenderLock::depth==0);
+ RenderLock::held=false;
+ section.currentPage=0;
  // A render that invalidates the section before lock acquisition must not
  // dereference the old section or start a build.
  RenderLock::onAcquire=[] { reader.section=nullptr; };
@@ -177,10 +175,6 @@ int main() {
  assert(section.complete && section.suspends==0);
 #endif
  assert(!reader.deferBluetoothStart());
- now=6000; updateBluetoothLifecycle();
-#if FREEINK_CAP_BLE_HID_HOST
- assert(running);
-#endif
  const int stopsBeforeFailure=bleinput::stops;
  section.partial=true; section.currentPage=section.pageCount-1; section.fail=true;
  reader.updateChapterBuild(); assert(running==keepBleDuringBuild && !section.building && reader.failures==1);

@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <map>
 #include <new>
+#include <utility>
 
 #include "FontCacheManager.h"
 #include "FontDecompressor.h"
@@ -12,6 +13,10 @@ namespace {
 
 bool countHeapAllocations = false;
 size_t heapAllocationCount = 0;
+
+// TTF fonts are PSRAM-gated and stubbed out on the host (see stubs/TtfEpdFont.h);
+// every manager gets an empty map for that slot.
+const std::map<int, TtfEpdFont*> kNoTtfFonts;
 
 const SdCardFont::PrewarmCall* findCall(const SdCardFont& font, const uint8_t styleMask) {
   for (int i = 0; i < font.prewarmCallCount; i++) {
@@ -37,7 +42,7 @@ TEST(FontCacheManagerTest, PrewarmScopeBatchesEachFontAndResolvedStyleSeparately
   SdCardFont fallbackFont;
   const std::map<int, EpdFontFamily> noBuiltinFonts;
   const std::map<int, SdCardFont*> sdFonts{{-17, &readerFont}, {23, &fallbackFont}};
-  FontCacheManager manager(noBuiltinFonts, sdFonts);
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
 
   auto scope = manager.createPrewarmScope();
   manager.recordText("A", -17, EpdFontFamily::REGULAR);
@@ -49,9 +54,11 @@ TEST(FontCacheManagerTest, PrewarmScopeBatchesEachFontAndResolvedStyleSeparately
   const auto* regularCall = findCall(readerFont, 0x01);
   ASSERT_NE(nullptr, regularCall);
   EXPECT_STREQ("A", regularCall->text);
+  EXPECT_FALSE(regularCall->accumulate);
   const auto* boldCall = findCall(readerFont, 0x02);
   ASSERT_NE(nullptr, boldCall);
   EXPECT_STREQ("B", boldCall->text);
+  EXPECT_FALSE(boldCall->accumulate);
 
   ASSERT_EQ(1, fallbackFont.prewarmCallCount);
   EXPECT_STREQ("C", fallbackFont.prewarmCalls[0].text);
@@ -63,7 +70,7 @@ TEST(FontCacheManagerTest, PrewarmScopeMergesStylesThatResolveToTheSameSdFontDat
   font.resolvedStyles[EpdFontFamily::BOLD] = EpdFontFamily::REGULAR;
   const std::map<int, EpdFontFamily> noBuiltinFonts;
   const std::map<int, SdCardFont*> sdFonts{{7, &font}};
-  FontCacheManager manager(noBuiltinFonts, sdFonts);
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
 
   auto scope = manager.createPrewarmScope();
   manager.recordText("A", 7, EpdFontFamily::REGULAR);
@@ -82,7 +89,7 @@ TEST(FontCacheManagerTest, PrewarmScopeMergesBuiltInStylesThatShareFontData) {
   const std::map<int, EpdFontFamily> builtinFonts{{5, family}};
   const std::map<int, SdCardFont*> noSdFonts;
   FontDecompressor decompressor;
-  FontCacheManager manager(builtinFonts, noSdFonts);
+  FontCacheManager manager(builtinFonts, noSdFonts, kNoTtfFonts);
   manager.setFontDecompressor(&decompressor);
 
   auto scope = manager.createPrewarmScope();
@@ -100,11 +107,25 @@ TEST(FontCacheManagerTest, PrewarmScopeMergesBuiltInStylesThatShareFontData) {
   EXPECT_STREQ("B", boldCall->text);
 }
 
+TEST(FontCacheManagerTest, DirectPrewarmDeduplicatesBuiltinStyleAliases) {
+  EpdFontData data{reinterpret_cast<const void*>(1)};
+  const EpdFontFamily family(&data, &data, &data, &data);
+  const std::map<int, EpdFontFamily> builtinFonts{{5, family}};
+  const std::map<int, SdCardFont*> noSdFonts;
+  FontDecompressor decoder;
+  FontCacheManager manager(builtinFonts, noSdFonts, kNoTtfFonts);
+  manager.setFontDecompressor(&decoder);
+  manager.prewarmCache(5, "abc", 0x0f);
+  ASSERT_EQ(decoder.prewarmCallCount, 1);
+  EXPECT_EQ(decoder.prewarmCalls[0].fontData, &data);
+  EXPECT_STREQ(decoder.prewarmCalls[0].text, "abc");
+}
+
 TEST(FontCacheManagerTest, PrewarmScopePreservesUniqueMultibyteCodepoints) {
   SdCardFont font;
   const std::map<int, EpdFontFamily> noBuiltinFonts;
   const std::map<int, SdCardFont*> sdFonts{{7, &font}};
-  FontCacheManager manager(noBuiltinFonts, sdFonts);
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
 
   auto scope = manager.createPrewarmScope();
   manager.recordText("\xC3\xA9\xE4\xB8\xAD\xF0\x9F\x98\x80\xC3\xA9", 7, EpdFontFamily::REGULAR);
@@ -118,7 +139,7 @@ TEST(FontCacheManagerTest, PrewarmScanDoesNotAllocateHeapMemory) {
   SdCardFont font;
   const std::map<int, EpdFontFamily> noBuiltinFonts;
   const std::map<int, SdCardFont*> sdFonts{{7, &font}};
-  FontCacheManager manager(noBuiltinFonts, sdFonts);
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
 
   heapAllocationCount = 0;
   countHeapAllocations = true;
@@ -136,7 +157,7 @@ TEST(FontCacheManagerTest, ResidentCacheReleaseAllocatesNothingAndKeepsFontsAvai
   FontDecompressor decompressor;
   const std::map<int, EpdFontFamily> noBuiltinFonts;
   const std::map<int, SdCardFont*> sdFonts{{7, &readerFont}, {8, &fallbackFont}};
-  FontCacheManager manager(noBuiltinFonts, sdFonts);
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
   manager.setFontDecompressor(&decompressor);
 
   heapAllocationCount = 0;
@@ -152,4 +173,133 @@ TEST(FontCacheManagerTest, ResidentCacheReleaseAllocatesNothingAndKeepsFontsAvai
   manager.prewarmCache(8, "Fallback", 1);
   EXPECT_EQ(1, readerFont.prewarmCallCount);
   EXPECT_EQ(1, fallbackFont.prewarmCallCount);
+}
+
+TEST(FontCacheManagerTest, IncrementalPrewarmRequestsAccumulation) {
+  SdCardFont font;
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> sdFonts{{7, &font}};
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
+  manager.prewarmCache(7, "title", 1);
+  ASSERT_EQ(1, font.prewarmCallCount);
+  EXPECT_TRUE(font.prewarmCalls[0].accumulate);
+}
+
+TEST(FontCacheManagerTest, UiCjkScanMergesFontAliasesAndPreservesSdPreviewCaches) {
+  EpdFontData cjk{reinterpret_cast<const void*>(1), true};
+  EpdFontData latin{reinterpret_cast<const void*>(1), false};
+  const EpdFontFamily cjkFamily(&cjk, &cjk, &cjk, &cjk);
+  const EpdFontFamily latinFamily(&latin, nullptr, nullptr, nullptr);
+  const std::map<int, EpdFontFamily> fonts{{5, cjkFamily}, {6, cjkFamily}, {7, latinFamily}};
+  SdCardFont preview;
+  const std::map<int, SdCardFont*> sdFonts{{8, &preview}};
+  FontDecompressor decoder;
+  FontCacheManager manager(fonts, sdFonts, kNoTtfFonts);
+  manager.setFontDecompressor(&decoder);
+  {
+    auto scope = manager.createUiCjkPrewarmScope();
+    EXPECT_TRUE(manager.isScanning());
+    manager.recordText("A", 5, EpdFontFamily::REGULAR);
+    manager.recordText("B", 6, EpdFontFamily::BOLD);
+    manager.recordText("A", 5, EpdFontFamily::ITALIC);
+    manager.recordText("Latin", 7, EpdFontFamily::REGULAR);
+    manager.recordText("Preview", 8, EpdFontFamily::REGULAR);
+    scope.endScanAndPrewarm();
+    EXPECT_FALSE(manager.isScanning());
+    ASSERT_EQ(1, decoder.prewarmCallCount);
+    EXPECT_EQ(&cjk, decoder.prewarmCalls[0].fontData);
+    EXPECT_STREQ("AB", decoder.prewarmCalls[0].text);
+    EXPECT_EQ(0, preview.clearCacheCount);
+    EXPECT_EQ(0, preview.prewarmCallCount);
+  }
+  EXPECT_EQ(0, preview.clearCacheCount);
+  EXPECT_EQ(2, decoder.clearCacheCount);
+}
+
+TEST(FontCacheManagerTest, UiCjkScanUsesFourSlotsAndNeverAllocatesWhileCollecting) {
+  EpdFontData data[5] = {};
+  std::map<int, EpdFontFamily> fonts;
+  for (int i = 0; i < 5; ++i) {
+    data[i] = {reinterpret_cast<const void*>(1), true};
+    fonts.emplace(i, EpdFontFamily(&data[i], nullptr, nullptr, nullptr));
+  }
+  const std::map<int, SdCardFont*> sdFonts;
+  FontDecompressor decoder;
+  FontCacheManager manager(fonts, sdFonts, kNoTtfFonts);
+  manager.setFontDecompressor(&decoder);
+  heapAllocationCount = 0;
+  countHeapAllocations = true;
+  auto scope = manager.createUiCjkPrewarmScope();
+  for (int i = 0; i < 5; ++i) manager.recordText("A", i, EpdFontFamily::REGULAR);
+  scope.endScanAndPrewarm();
+  countHeapAllocations = false;
+  EXPECT_EQ(0U, heapAllocationCount);
+  EXPECT_EQ(4, decoder.prewarmCallCount);
+}
+
+TEST(FontCacheManagerTest, UiCjkScanDoesNotTreatSdOrVectorFontIdsAsBuiltinAliases) {
+  EpdFontData cjk{reinterpret_cast<const void*>(1), true};
+  const EpdFontFamily family(&cjk, nullptr, nullptr, nullptr);
+  const std::map<int, EpdFontFamily> fonts{{5, family}, {6, family}};
+  SdCardFont preview;
+  const std::map<int, SdCardFont*> sdFonts{{5, &preview}};
+  const std::map<int, TtfEpdFont*> ttfFonts{{6, nullptr}};
+  FontDecompressor decoder;
+  FontCacheManager manager(fonts, sdFonts, ttfFonts);
+  manager.setFontDecompressor(&decoder);
+  auto scope = manager.createUiCjkPrewarmScope();
+  manager.recordText("SD", 5, EpdFontFamily::REGULAR);
+  manager.recordText("TTF", 6, EpdFontFamily::REGULAR);
+  scope.endScanAndPrewarm();
+  EXPECT_EQ(0, decoder.prewarmCallCount);
+  EXPECT_EQ(0, preview.clearCacheCount);
+}
+
+TEST(FontCacheManagerTest, MovedUiScopeHasOneOwnerAndEndIsIdempotent) {
+  EpdFontData cjk{reinterpret_cast<const void*>(1), true};
+  const std::map<int, EpdFontFamily> fonts{{5, EpdFontFamily(&cjk, nullptr, nullptr, nullptr)}};
+  SdCardFont preview;
+  const std::map<int, SdCardFont*> sdFonts{{8, &preview}};
+  FontDecompressor decoder;
+  FontCacheManager manager(fonts, sdFonts, kNoTtfFonts);
+  manager.setFontDecompressor(&decoder);
+  {
+    auto source = manager.createUiCjkPrewarmScope();
+    manager.recordText("A", 5, EpdFontFamily::REGULAR);
+    {
+      auto owner = std::move(source);
+      source.endScanAndPrewarm();
+      EXPECT_TRUE(manager.isScanning());
+      EXPECT_EQ(0, decoder.prewarmCallCount);
+      owner.endScanAndPrewarm();
+      owner.endScanAndPrewarm();
+      EXPECT_FALSE(manager.isScanning());
+      EXPECT_EQ(1, decoder.prewarmCallCount);
+      EXPECT_EQ(1, decoder.clearCacheCount);
+    }
+    EXPECT_EQ(2, decoder.clearCacheCount);
+  }
+  EXPECT_EQ(2, decoder.clearCacheCount);
+  EXPECT_EQ(0, preview.clearCacheCount);
+}
+
+TEST(FontCacheManagerTest, MovedReaderScopeFinishesAndReleasesOnDestruction) {
+  const std::map<int, EpdFontFamily> fonts;
+  SdCardFont reader;
+  const std::map<int, SdCardFont*> sdFonts{{8, &reader}};
+  FontCacheManager manager(fonts, sdFonts, kNoTtfFonts);
+  {
+    auto source = manager.createPrewarmScope();
+    manager.recordText("A", 8, EpdFontFamily::REGULAR);
+    {
+      auto owner = std::move(source);
+      source.endScanAndPrewarm();
+      EXPECT_TRUE(manager.isScanning());
+      EXPECT_EQ(0, reader.prewarmCallCount);
+    }
+    EXPECT_FALSE(manager.isScanning());
+    EXPECT_EQ(1, reader.prewarmCallCount);
+    EXPECT_EQ(2, reader.clearCacheCount);
+  }
+  EXPECT_EQ(2, reader.clearCacheCount);
 }
