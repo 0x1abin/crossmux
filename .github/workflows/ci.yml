@@ -152,6 +152,53 @@ jobs:
           path: .pio/build/default/firmware.bin
           if-no-files-found: error
 
+  build-onepage:
+    name: Build OnePage C61
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Isolate PlatformIO toolchains
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/.platformio-$GITHUB_RUN_ID-$GITHUB_JOB" >> "$GITHUB_ENV"
+
+      - name: Use runner temporary directory
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U pioarduino==6.2.0
+
+      - name: Prepare platform tools
+        run: python scripts/patch_pioarduino_cache.py --prepare-platform
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLATFORMIO_CORE_DIR }}/.cache
+          key: pio-cache-onepage-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-cache-onepage-${{ runner.os }}-
+
+      - name: Build OnePage firmware
+        run: pio run -e onepage | tee pio-onepage.log
+
+      - name: Upload OnePage firmware
+        uses: actions/upload-artifact@v6
+        with:
+          name: firmware-onepage.bin
+          path: .pio/build/onepage/firmware.bin
+          if-no-files-found: error
+
   unit-tests:
     runs-on: ubuntu-latest
     steps:
@@ -195,6 +242,7 @@ jobs:
     name: Test Status
     needs:
       - build-default
+      - build-onepage
       - clang-format
       - cppcheck
       - select_runner
