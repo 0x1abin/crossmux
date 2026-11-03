@@ -1,9 +1,10 @@
 # OnePage ESP32-C61
 
-Status: **bring-up in progress; Windows build blocked**. A reference CrossMux
-nightly image for this board is available (see below), but it has not been
-flashed and no physical acceptance has run. Build and physical acceptance are
-recorded separately; a successful compile is not hardware acceptance.
+Status: **bring-up in progress; Windows build blocked**. The reference CrossMux
+nightly app was flashed to the unit on 2026-11-03 and verified; it boots with
+display, SD, fonts and PSRAM working. Physical key/battery/sleep acceptance is
+still pending. Build and physical acceptance are recorded separately; a
+successful compile or flash is not full hardware acceptance.
 
 Scope decision (2026-11-01): the first slice is the basic reading link —
 display, seven keys, SD, battery/charging, and deep sleep/wake. BLE page-turner
@@ -144,6 +145,25 @@ it overwrites the existing firmware while books and settings on the microSD stay
 untouched. Recovery: hold the next-page key, short-press Reset, release Reset
 first to force download mode, then retry.
 
+## Flash result (2026-11-03)
+
+- Device: `COM9`, MAC `d8:85:ac:60:e4:28`, ESP32-C61HR2 v1.0, 16 MB flash,
+  2 MB embedded PSRAM.
+- Image: extracted reference app, SHA-256
+  `5C7426A77959172424C1A827C3B5B275124CBC777EB05475F12C0497E2ADB0BB`.
+- Write: `esptool --chip esp32c61 -p COM9 -b 460800 write_flash --flash-mode dio
+  --flash-freq 80m --flash-size 16MB 0x10000 reference-app.bin`; wrote 6,821,412
+  bytes in 48 s, hash verified; `verify_flash` reported digest matched.
+- Only app0 was written. Bootloader, partition table, NVS, otadata, app1 and
+  spiffs were not touched.
+- Boot log confirms: `Hardware detect: onepage`; SD card detected; SSD1677
+  hardware/soft reset and full refreshes complete; `Display initialized`;
+  built-in and SD fonts loaded; `Starting CrossPoint version 1.6.5-onepage`;
+  `Entering activity: Home`; PSRAM total 2,076,952 B, free 1,909,796 B.
+- Interpretation: the **reference upstream image** boots and drives the panel,
+  SD and PSRAM on this unit. It is not the CrossMux branch under development, so
+  it does not validate the port's own build or HAL changes.
+
 ## Device under test
 
 | Field | Value |
@@ -180,19 +200,19 @@ the CrossMux worktree and must not be committed.
   ```
 - Recovery: restore the full 16 MB backup at `0x0`; see
   `device-backups/README.md`.
-- Status: **authorized (user: 烧录吧 / 以这个固件为准)** and the reference app is
-  ready, but the device is not enumerated (`NO_SERIAL_PORTS`) at the time of
-  writing; not executed yet.
+- Status: **executed 2026-11-03**: reference app written to `0x10000` and
+  verified on `COM9`; the unit boots into the reference Home screen.
 
 ## Verification
 
 | Check | Target / revision | Status | Evidence |
 |---|---|---|---|
 | Compile `onepage` | CrossMux branch + SDK working tree, platform 55.03.37 | failed | Windows platform defects; libraries compile, app link is blocked (see build blocker above) |
-| Reference image | CrossMux nightly `83b0f810…`, app extracted | ready | app0 6,821,409 B, SHA-256 `5c7426…adb0bb`, 80 MHz DIO, fits app0 |
-| Host/unit checks | CrossMux branch | pending | not run |
-| Display, input, SD, battery | OnePage V1, exact unit | blocked | no serial port; device not enumerated |
-| Sleep/wake x3 | OnePage V1 | pending | requires device |
+| Reference image | CrossMux nightly `83b0f810…`, app extracted | flashed | app0 6,821,409 B, SHA-256 `5c7426…adb0bb`, 80 MHz DIO, verify digest matched |
+| Boot / display / SD / PSRAM | OnePage V1, reference image | passed (serial) | `onepage` detected, SSD1677 refreshes, SD card + fonts, PSRAM 2 MB, Home activity |
+| Front/side keys | OnePage V1, reference image | pending | needs physical key test |
+| Battery / charging | OnePage V1, reference image | pending | needs physical observation |
+| Sleep/wake x3 | OnePage V1, reference image | pending | needs physical test |
 | BLE page turner | OnePage V1 | not applicable (first slice) | deferred by scope decision |
 | Current measurement | OnePage V1 | pending | no measurement |
 
