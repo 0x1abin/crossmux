@@ -110,6 +110,28 @@ if old_skip in source:
 elif new_skip not in source:
     raise RuntimeError("Unsupported pioarduino src-filter callback")
 
+# The hybrid pass clears BUILD_FLAGS before building the project libraries.
+# Keep the -D macros (device selection, wolfSSL features, expat config) so
+# library translation units see the same configuration as the application.
+old_hybrid_flags = (
+    "        PROJECT_SRC_DIR=PROJECT_SRC_DIR,\n"
+    "        BUILD_FLAGS=\"\",\n"
+)
+new_hybrid_flags = (
+    "        PROJECT_SRC_DIR=PROJECT_SRC_DIR,\n"
+    "        BUILD_FLAGS=[_f for _f in env.get(\"BUILD_FLAGS\", [])"
+    " if str(_f).startswith(\"-D\")],\n"
+)
+if old_hybrid_flags in source:
+    espidf.write_text(
+        espidf.read_text(encoding="utf-8").replace(
+            old_hybrid_flags, new_hybrid_flags, 1
+        ),
+        encoding="utf-8",
+    )
+elif "startswith(\"-D\")" not in source:
+    raise RuntimeError("Unsupported pioarduino hybrid build flags")
+
 # 55.03.37 library envs do not reliably inherit project BUILD_FLAGS, so
 # FREEINK_*/WOLFSSL_* guarded headers are missing during library compilation.
 # Mirror every -D flag into CPPDEFINES on the project env (library envs clone
