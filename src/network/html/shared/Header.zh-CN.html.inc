@@ -16,6 +16,7 @@
       <a href="/files">文件</a>
       <a href="/settings">设置</a>
       <a href="/fonts">字体</a>
+      <a href="/plugins">插件</a>
     </nav>
   </div>
   <details class="mobile-nav">
@@ -31,10 +32,14 @@
       <a href="/files">文件</a>
       <a href="/settings">设置</a>
       <a href="/fonts">字体</a>
+      <a href="/plugins">插件</a>
     </nav>
   </details>
 </header>
 <script>
+  if (!document.cookie.split('; ').includes('cpPlugins=1')) {
+    document.querySelectorAll('.brand a[href="/plugins"]').forEach(a => a.remove());
+  }
   document.querySelectorAll('.brand .nav-links a').forEach(link => {
     if (link.pathname === location.pathname) {
       link.classList.add('active');

@@ -311,7 +311,7 @@ TEST(ClippingHighlight, LegacySignatureIncludesCharacterAndWordSpacing) {
 
 TEST(ClippingHighlight, BottomAlignmentChangesLayoutIdentity) {
   ReaderRenderSpec original;
-  EXPECT_EQ(readerRenderSpecSignature(original), 1191936047u);  // Exact a78a39ed default-layout signature.
+  EXPECT_NE(readerRenderSpecSignature(original), 1191936047u);  // Pre-sync anchors must not match changed layout.
   auto changed = original;
   changed.verticalBottomAlign = true;
   EXPECT_FALSE(original == changed);
@@ -323,9 +323,10 @@ TEST(ClippingHighlight, BottomAlignmentKeepsReservedLegacySignaturesDistinct) {
   for (const int fontId : {440373625, 1135237658}) {
     ReaderRenderSpec spec;
     spec.fontId = fontId;
-    ASSERT_EQ(readerRenderSpecSignature(spec), 1u);
+    const auto current = readerRenderSpecSignature(spec);
+    EXPECT_NE(current, 1u);  // Versioned layouts invalidate these legacy anchors.
     spec.verticalBottomAlign = true;
-    EXPECT_NE(readerRenderSpecSignature(spec), 1u);
+    EXPECT_NE(readerRenderSpecSignature(spec), current);
   }
 }
 

@@ -314,11 +314,12 @@ struct Item {std::string title,author,id,url,version,base;std::vector<std::strin
 struct Result {std::vector<Item> items;bool oom,hasMore;};
 ''' + constants + budget + r'''
 Result parseRows(std::vector<JsonListParser::Row> rows,bool filtered,std::vector<int> compatibleRows,size_t pageOffset=0) {
+ const auto paging = plugincatalogpaging::Paging::Static;
  struct {int pageSize=2;bool filtered;bool filtersCompatibility() const {return filtered;}} manifest{2,filtered};
  std::vector<Item> items;items.reserve(manifest.pageSize+1);
 ''' + append + r'''
  for(auto& row : rows) append(row);
- return {std::move(items),outOfMemory,visibleWindow.hasMore()};
+ return {std::move(items),outOfMemory,visibleWindow.hasMore(paging)};
 }
 int main() {
  std::vector<JsonListParser::Row> rows(3);
