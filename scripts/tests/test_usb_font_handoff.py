@@ -111,16 +111,16 @@ struct SdCardFontSystem {
 ''' + method(system,'void SdCardFontSystem::beginStorageHandoff(') + method(system,'void SdCardFontSystem::endStorageHandoff(') + r'''
 int main(){
  GfxRenderer r; SdCardFontSystem s;
- r.fontMap[14]={from(latin,std::size(latin))};r.fontMap[116]={from(cjk16,std::size(cjk16))};
+ for(int id:{14,15,16,17,18}) r.fontMap[id]={from(latin,std::size(latin))};r.fontMap[116]={from(cjk16,std::size(cjk16))};
  r.fontMap[112]={from(cjk12,std::size(cjk12))};r.fontMap[212]={from(rtl,std::size(rtl))};
  r.fontMap[414]={from(rtl,std::size(rtl))};r.fontMap[415]={from(rtl,std::size(rtl))};
- SdFace sd; r.sdCardFonts_[414]=&sd;r.fallbackFontMap_[14]={116,414};r.fallbackFontMap_[116]={112,0};r.fallbackFontMap_[112]={212,0};
- for(auto style:{EpdFontFamily::REGULAR,EpdFontFamily::BOLD}) {assert(r.resolveTextFontId(14,"טוען",style)==414);assert(r.getTextWidth(14,"טוען",style,BidiUtils::BidiBaseDir::AUTO)==10);}
- assert(sd.calls==2);r.preferredFontMap_[14]=415;assert(r.resolveTextFontId(14,"טוען",EpdFontFamily::REGULAR)==415);r.preferredFontMap_.clear();
+ SdFace sd; r.sdCardFonts_[414]=&sd;for(int id:{14,15,16,17,18}) r.fallbackFontMap_[id]={116,414};r.fallbackFontMap_[116]={112,0};r.fallbackFontMap_[112]={212,0};
+ for(int id:{14,15,16,17,18}) for(auto style:{EpdFontFamily::REGULAR,EpdFontFamily::BOLD}) {assert(r.resolveTextFontId(id,"טוען",style)==414);assert(r.getTextWidth(id,"טוען",style,BidiUtils::BidiBaseDir::AUTO)==10);}
+ assert(sd.calls==10);r.preferredFontMap_[14]=415;assert(r.resolveTextFontId(14,"טוען",EpdFontFamily::REGULAR)==415);r.preferredFontMap_.clear();
  s.beginStorageHandoff(r);assert(s.storageHandoff_.load());assert(r.cache.releases==1);
  assert((s.events==std::vector<int>{1,2}));assert(!r.fontMap.contains(414)&&!r.fontMap.contains(415));
- for(auto style:{EpdFontFamily::REGULAR,EpdFontFamily::BOLD}) {assert(r.resolveTextFontId(14,"טוען",style)==212);assert(r.resolveTextFontId(14,"海",style)==116);assert(r.getTextWidth(14,"טוען",style,BidiUtils::BidiBaseDir::AUTO)==10);}
- assert(sd.calls==2);
+ for(int id:{14,15,16,17,18}) for(auto style:{EpdFontFamily::REGULAR,EpdFontFamily::BOLD}) {assert(r.resolveTextFontId(id,"טוען",style)==212);assert(r.resolveTextFontId(id,"海",style)==116);assert(r.getTextWidth(id,"טוען",style,BidiUtils::BidiBaseDir::AUTO)==10);}
+ assert(sd.calls==10);
  Storage.mounted=false;s.endStorageHandoff(r);assert(s.storageHandoff_.load()&&s.reloads==0);
  Storage.mounted=true;s.endStorageHandoff(r);assert(!s.storageHandoff_.load()&&s.reloads==1);
 }

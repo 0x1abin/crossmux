@@ -181,6 +181,10 @@ int main() {
         self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", resolve("c3_ble", "custom_sdkconfig"))
         self.assertIn("CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y", resolve("c3_ble", "custom_sdkconfig"))
         self.assertIn("CONFIG_BT_NIMBLE_ENABLED=n", resolve("c3_ble", "custom_sdkconfig"))
+        # Read Pico uses the same application LTO policy as the other S3 boards;
+        # patch_pioarduino_cache separately disables LTO for the IDF bootstrap.
+        self.assertIn('-flto=auto', resolve('readpico_hardware', 'build_flags'))
+        self.assertIn('-fno-lto', resolve('readpico_hardware', 'build_unflags'))
         hardware_environments = set()
         for section in config.sections():
             if not section.startswith("env:"):

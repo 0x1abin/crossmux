@@ -1334,6 +1334,8 @@ existing stub bodies, so the profile stays valid in a capability-off build.
 > a non-restart exit reloads only if storage is mounted. Final core/library ABI,
 > read/write, eject, cable removal and serial/reflash recovery still need device
 > acceptance; no new device measurements have been made for this change.
+> The candidate enables application LTO to fit the existing OTA slot; the
+> custom-IDF bootstrap remains non-LTO as on other tuned S3 targets.
 
 ```ini
 ; --- Read Pico (小纸 Pico, RDP-G01-W) — ESP32-S3 N16R8, E0470A01 684x1216 ------
