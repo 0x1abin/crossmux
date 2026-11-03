@@ -38,6 +38,7 @@ class Epub {
   const std::string& getCachePath() const { return cachePath; }
   Item getSpineItem(int) const { return {}; }
   std::vector<Item> tocItems;
+  int failTocAfter = -1;
   Item getTocItem(int index) const { return tocItems.at(index); }
   int getTocIndexForSpineIndex(int spineIndex) const {
     for (size_t i = 0; i < tocItems.size(); ++i) {
@@ -50,6 +51,7 @@ class Epub {
   bool forEachTocItem(const std::function<bool(int, const BookMetadataCache::TocEntry&)>& fn,
                       const int fromIndex = 0) const {
     for (size_t i = static_cast<size_t>(std::max(0, fromIndex)); i < tocItems.size(); ++i) {
+      if (static_cast<int>(i) == failTocAfter) return false;
       BookMetadataCache::TocEntry entry;
       entry.title = tocItems[i].href;
       entry.href = tocItems[i].href;

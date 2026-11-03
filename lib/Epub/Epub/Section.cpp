@@ -574,10 +574,10 @@ bool Section::hasHtmlCache() const {
   return Storage.exists(htmlPath.c_str());
 }
 
-std::optional<uint16_t> Section::findAnchorDuringBuild(const std::string& anchor) const {
+std::optional<uint16_t> Section::findAnchorDuringBuild(const std::string_view anchor) const {
   if (!build_ || !build_->parser) return std::nullopt;
   for (const auto& [key, page] : build_->parser->getAnchors()) {
-    if (key == anchor) return page;
+    if (std::string_view(key) == anchor) return page;
   }
   return std::nullopt;
 }
@@ -596,6 +596,7 @@ void Section::buildSubChapterTable() const {
   subChapterPagesResolved_ = false;
   subChapterOverflow_ = false;
   subChapterCount_ = 0;
+  subChapterAnchorBytes_ = 0;
   baseTocIndex_ = kBaseTocIndexUnset;
   if (!epub) return;
   baseTocIndex_ = epub->getTocIndexForSpineIndex(spineIndex);
@@ -607,21 +608,26 @@ void Section::buildSubChapterTable() const {
   const bool scanned = epub->forEachTocItem(
       [this](const int tocIndex, const BookMetadataCache::TocEntry& entry) {
         if (entry.spineIndex != spineIndex) return true;
-        if (subChapterCount_ >= kMaxSubChapters) {
+        if (subChapterCount_ >= kMaxSubChapters ||
+            entry.anchor.size() + 1 > kSubChapterAnchorBytes - subChapterAnchorBytes_) {
           subChapterOverflow_ = true;
           return false;
         }
-        subChapters_[subChapterCount_++] = {entry.anchor, tocIndex, 0, false};
+        const auto offset = static_cast<uint16_t>(subChapterAnchorBytes_);
+        memcpy(subChapterAnchors_ + offset, entry.anchor.c_str(), entry.anchor.size() + 1);
+        subChapterAnchorBytes_ += entry.anchor.size() + 1;
+        subChapters_[subChapterCount_++] = {tocIndex, offset, 0, false};
         return true;
       },
       first);
   if (!scanned) {
     LOG_ERR("SCT", "Failed to stream the TOC for spine %d", spineIndex);
+    subChapterOverflow_ = true;
+    subChapterCount_ = 0;
     return;
   }
   if (subChapterOverflow_) {
-    LOG_INF("SCT", "Spine %d has more than %u TOC boundaries; falling back to the per-call scan", spineIndex,
-            static_cast<unsigned>(kMaxSubChapters));
+    LOG_INF("SCT", "Spine %d exceeds the TOC cache budget; falling back to the per-call scan", spineIndex);
     subChapterCount_ = 0;
     return;
   }
@@ -646,7 +652,7 @@ void Section::resolveSubChapterPages() const {
       break;
     }
     for (size_t s = 0; s < subChapterCount_; ++s) {
-      if (subChapters_[s].anchor != cachedAnchor) continue;
+      if (cachedAnchor != subChapterAnchors_ + subChapters_[s].anchorOffset) continue;
       subChapters_[s].page = anchorPage;
       subChapters_[s].pageKnown = true;
     }
@@ -671,10 +677,11 @@ int Section::getTocIndexForPage(const int page) const {
   int latestPage = -1;
   for (size_t i = 0; i < subChapterCount_; ++i) {
     const SubChapter& sub = subChapters_[i];
-    int resolvedPage = sub.anchor.empty() ? 0 : sub.page;
-    bool pageKnown = sub.anchor.empty() || sub.pageKnown;
-    if (building && !sub.anchor.empty()) {
-      if (const auto built = findAnchorDuringBuild(sub.anchor)) {
+    const std::string_view anchor(subChapterAnchors_ + sub.anchorOffset);
+    int resolvedPage = anchor.empty() ? 0 : sub.page;
+    bool pageKnown = anchor.empty() || sub.pageKnown;
+    if (building && !anchor.empty()) {
+      if (const auto built = findAnchorDuringBuild(anchor)) {
         resolvedPage = *built;
         pageKnown = true;
       }

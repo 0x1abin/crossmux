@@ -9,6 +9,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <type_traits>
 
 #define class struct
 #define private public
@@ -969,6 +970,43 @@ TEST_F(SectionMemoryTest, TocAnchorsTrackSubchaptersDuringBuildAndAfterReload) {
   Section damaged(epub, 0, renderer);
   ASSERT_TRUE(damaged.loadSectionFile(spec));
   EXPECT_EQ(damaged.getTocIndexForPage(*second), 0);
+}
+
+TEST_F(SectionMemoryTest, TocCacheBoundsRetainedAnchorBytesAndEntryCount) {
+  static_assert(std::is_trivially_destructible_v<Section::SubChapter>);
+  static_assert(sizeof(Section::SubChapter) * Section::kMaxSubChapters + Section::kSubChapterAnchorBytes <= 2048);
+  epub->tocItems = {{"chapter.xhtml", std::string(1023, 'x'), 0}};
+  Section exact(epub, 0, renderer);
+  exact.buildSubChapterTable();
+  EXPECT_FALSE(exact.subChapterOverflow_);
+  EXPECT_EQ(exact.subChapterCount_, 1u);
+  EXPECT_EQ(exact.subChapterAnchorBytes_, 1024u);
+  EXPECT_EQ(std::string(exact.subChapterAnchors_), epub->tocItems[0].anchor);
+
+  epub->tocItems.push_back({"chapter.xhtml", "", 0});
+  Section tooManyBytes(epub, 0, renderer);
+  tooManyBytes.buildSubChapterTable();
+  EXPECT_TRUE(tooManyBytes.subChapterOverflow_);
+  EXPECT_EQ(tooManyBytes.subChapterCount_, 0u);
+
+  epub->tocItems.assign(64, {"chapter.xhtml", "", 0});
+  Section limit(epub, 0, renderer);
+  EXPECT_EQ(limit.getTocIndexForPage(0), 63);
+  EXPECT_FALSE(limit.subChapterOverflow_);
+  epub->tocItems.push_back({"chapter.xhtml", "", 0});
+  Section overflow(epub, 0, renderer);
+  EXPECT_EQ(overflow.getTocIndexForPage(0), 64);
+  EXPECT_TRUE(overflow.subChapterOverflow_);
+  EXPECT_EQ(overflow.subChapterCount_, 0u);
+}
+
+TEST_F(SectionMemoryTest, FailedTocStreamDoesNotCacheAPartialResult) {
+  epub->tocItems = {{"chapter.xhtml", "", 0}, {"chapter.xhtml", "", 0}};
+  epub->failTocAfter = 1;
+  Section failed(epub, 0, renderer);
+  EXPECT_EQ(failed.getTocIndexForPage(0), 1);
+  EXPECT_TRUE(failed.subChapterOverflow_);
+  EXPECT_EQ(failed.subChapterCount_, 0u);
 }
 
 TEST_F(SectionMemoryTest, RejectsOldCompleteAndPartialVersionsBeforeReadingNewBlocks) {
