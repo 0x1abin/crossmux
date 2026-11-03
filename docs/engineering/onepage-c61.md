@@ -2,9 +2,11 @@
 
 Status: **bring-up in progress; Windows build blocked**. The reference CrossMux
 nightly app was flashed to the unit on 2026-11-03 and verified; it boots with
-display, SD, fonts and PSRAM working. Physical key/battery/sleep acceptance is
-still pending. Build and physical acceptance are recorded separately; a
-successful compile or flash is not full hardware acceptance.
+display, SD, fonts, PSRAM and all seven keys working. One Power-key sleep and
+USB-reconnect wake were logged; the full three-cycle sleep test was stopped at
+the user's request, and battery/charging has not been measured. Build and
+physical acceptance are recorded separately; a successful compile or flash is
+not full hardware acceptance.
 
 Scope decision (2026-11-01): the first slice is the basic reading link —
 display, seven keys, SD, battery/charging, and deep sleep/wake. BLE page-turner
@@ -210,9 +212,9 @@ the CrossMux worktree and must not be committed.
 | Compile `onepage` | CrossMux branch + SDK working tree, platform 55.03.37 | failed | Windows platform defects; libraries compile, app link is blocked (see build blocker above) |
 | Reference image | CrossMux nightly `83b0f810…`, app extracted | flashed | app0 6,821,409 B, SHA-256 `5c7426…adb0bb`, 80 MHz DIO, verify digest matched |
 | Boot / display / SD / PSRAM | OnePage V1, reference image | passed (serial) | `onepage` detected, SSD1677 refreshes, SD card + fonts, PSRAM 2 MB, Home activity |
-| Front/side keys | OnePage V1, reference image | pending | needs physical key test |
-| Battery / charging | OnePage V1, reference image | pending | needs physical observation |
-| Sleep/wake x3 | OnePage V1, reference image | pending | needs physical test |
+| Front/side keys | OnePage V1, reference image | passed (user) | all seven keys reported working; Power logged `Power button held 11ms, sleeping` |
+| Battery / charging | OnePage V1, reference image | pending | not measured |
+| Sleep/wake x3 | OnePage V1, reference image | partial | one Power sleep + USB-reconnect wake logged; 3-cycle test stopped at user request |
 | BLE page turner | OnePage V1 | not applicable (first slice) | deferred by scope decision |
 | Current measurement | OnePage V1 | pending | no measurement |
 
@@ -221,8 +223,8 @@ the CrossMux worktree and must not be committed.
 - The ESP32-C61HR2 identity and 16 MB flash are confirmed by esptool. The PCB
   revision marking still needs a visual check against the V1 2026-08-19
   schematic.
-- A full 16 MB backup now exists and is hash-recorded above. Flashing still
-  requires explicit user authorization and a final image/offset plan.
+- A full 16 MB backup exists and is hash-recorded above. The reference app was
+  flashed and verified on 2026-11-03; our own build still has no verified image.
 - Confirm whether the BLE page-turner and full CrossMux feature set are in
   scope for this port.
 - Confirm U12 `ST` (USB detect) and U3 `CE` (charge enable) polarity against
