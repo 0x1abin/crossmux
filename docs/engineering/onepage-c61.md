@@ -173,6 +173,11 @@ the CrossMux worktree and must not be committed.
 - Do **not** write the whole merged file at `0x0`: its tail at `0x6D0000` is an
   SD-content container, not app1.
 - Verify the written application with `esptool verify_flash 0x10000`.
+- Commands (from the esptool v5.5.0 folder):
+  ```powershell
+  .\esptool.exe --chip esp32c61 -p COM9 -b 460800 write_flash 0x10000 reference-app.bin
+  .\esptool.exe --chip esp32c61 -p COM9 -b 460800 verify_flash 0x10000 reference-app.bin
+  ```
 - Recovery: restore the full 16 MB backup at `0x0`; see
   `device-backups/README.md`.
 - Status: **authorized (user: 烧录吧 / 以这个固件为准)** and the reference app is
