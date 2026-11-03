@@ -1325,6 +1325,16 @@ existing stub bodies, so the profile stays valid in a capability-off build.
 
 ### 3.7 PlatformIO environment
 
+> **USB Drive candidate:** The historical configuration and frozen decisions
+> below predate this draft's USB MSC work. The candidate enables TinyUSB MSC in
+> the custom core while keeping USB Serial/JTAG as the normal console. Before
+> handing over the SD card it releases resident SD and streamed vector fonts
+> under the render lock and uses the embedded UI/RTL fallback chain. Font reload
+> is blocked while storage is detached; a normal session ends in a reboot, and
+> a non-restart exit reloads only if storage is mounted. Final core/library ABI,
+> read/write, eject, cable removal and serial/reflash recovery still need device
+> acceptance; no new device measurements have been made for this change.
+
 ```ini
 ; --- Read Pico (小纸 Pico, RDP-G01-W) — ESP32-S3 N16R8, E0470A01 684x1216 ------
 ; Raw-parallel EPD with no on-glass controller: LovyanGFX Panel_EPD/Bus_EPD owns

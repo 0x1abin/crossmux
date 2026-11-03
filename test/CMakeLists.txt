@@ -170,6 +170,8 @@ add_test(NAME InxRecentThumbnails
 
 add_test(NAME UiFontFallback
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_ui_font_fallback.py)
+add_test(NAME UsbFontHandoff
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_usb_font_handoff.py)
 add_subdirectory(content_opf_parser)
 add_subdirectory(chapter_position)
 add_subdirectory(book_metadata_cache)
