@@ -14,8 +14,10 @@
 #include <cstring>
 #include <iterator>
 #include <string>
+#include <variant>
 #include <vector>
 
+#include "BookStyleStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "NetworkStartup.h"
@@ -47,7 +49,9 @@ constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_HYPHENATION,
                                         StrId::STR_EMBEDDED_STYLE,
                                         StrId::STR_FAKE_BOLD,
-                                        StrId::STR_TEXT_AA};
+                                        StrId::STR_TEXT_AA,
+                                        StrId::STR_BOOK_STYLE_MEMORY,
+                                        StrId::STR_CLEAR_BOOK_STYLES};
 
 constexpr StrId LINE_SPACING_IDS[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE};
 constexpr StrId FIRST_LINE_INDENT_IDS[] = {StrId::STR_FIRST_LINE_INDENT_AUTO, StrId::STR_FIRST_LINE_INDENT_INDENT,
@@ -96,12 +100,26 @@ static_assert(std::size(WORD_SPACING_IDS) == (WORD_SPACING_MAX - WORD_SPACING_MI
 
 TextSettingsActivity::TextSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const SdCardFontRegistry* registry, Tab initialTab,
-                                           const InitialFontState initialFontState, const StartMode startMode)
+                                           const InitialFontState initialFontState, const StartMode startMode,
+                                           const std::string* bookPath, BookStyle* globalSnapshot)
     : UiTabListActivity("TextSettings", renderer, mappedInput),
       registry_(registry),
       tab_(initialTab),
       initialFontState_(initialFontState),
-      startMode_(startMode) {}
+      startMode_(startMode),
+      bookPath_(bookPath),
+      globalSnapshot_(globalSnapshot) {}
+
+void TextSettingsActivity::saveSettings() {
+  // With per-book memory on, the typography in SETTINGS is this book's; only the
+  // entered global values may reach the settings file, and the session has to
+  // keep rendering with the book's. The snapshot is not what distinguishes the
+  // other case: the reader takes it unconditionally, so it is present even when
+  // memory is off. Saving the live values directly is decided inside
+  // saveGlobalSettingsKeepingBookStyle(), by its !SETTINGS.bookStyleMemory
+  // branch — with memory off the live values already are the global ones.
+  saveGlobalSettingsKeepingBookStyle(globalSnapshot_);
+}
 
 const char* TextSettingsActivity::tabLabel(const int index) const { return I18N.get(TAB_NAME_IDS[index]); }
 
@@ -146,19 +164,7 @@ void TextSettingsActivity::onEnter() {
     }
   }
 
-  rebuildSizeList();
-
-  currentFamilyIndex_ = 0;
-  for (int i = 0; i < static_cast<int>(fonts_.size()); i++) {
-    const auto& font = fonts_[i];
-    const bool selected = font.isBuiltin
-                              ? SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily
-                              : font.name == SETTINGS.sdFontFamilyName;
-    if (selected) {
-      currentFamilyIndex_ = i;
-      break;
-    }
-  }
+  syncSelectionFromSettings();
   initialFamilyIndex_ = currentFamilyIndex_;
   initialPointSize_ = SETTINGS.fontPointSize;
   initialSdFontFlashPreload_ = SETTINGS.sdFontFlashPreload;
@@ -204,9 +210,13 @@ void TextSettingsActivity::rebuildRowItems() {
       case Tab::Layout:
         item.label = I18N.get(LAYOUT_ROW_NAME_IDS[i]);
         break;
-      case Tab::Style:
-        item.label = I18N.get(STYLE_ROW_NAME_IDS[static_cast<int>(styleRowAt(i))]);
+      case Tab::Style: {
+        const StyleRow row = styleRowAt(i);
+        item.label = I18N.get(row == StyleRow::ClearBookStyles && bookPath_ != nullptr
+                                  ? StrId::STR_CLEAR_BOOK_OVERRIDES
+                                  : STYLE_ROW_NAME_IDS[static_cast<int>(row)]);
         break;
+      }
       default:
         break;
     }
@@ -237,6 +247,26 @@ void TextSettingsActivity::rebuildSizeList() {
     snprintf(label, sizeof(label), "%u pt", pt);
     if (pt == selectedPt) currentSizeIndex_ = static_cast<int>(sizes_.size());
     sizes_.push_back({label, pt});
+  }
+}
+
+// The Family/Size rows mark `currentFamilyIndex_`/`currentSizeIndex_` as the
+// selected ones, and tapping a row that is already "selected" does nothing, so
+// anything that swaps the typography in SETTINGS behind this screen's back has
+// to re-point them instead of leaving the rows at the values the screen was
+// entered with.
+void TextSettingsActivity::syncSelectionFromSettings() {
+  rebuildSizeList();
+  currentFamilyIndex_ = 0;
+  for (int i = 0; i < static_cast<int>(fonts_.size()); i++) {
+    const auto& font = fonts_[i];
+    const bool selected = font.isBuiltin
+                              ? SETTINGS.sdFontFamilyName[0] == '\0' && font.settingIndex == SETTINGS.fontFamily
+                              : font.name == SETTINGS.sdFontFamilyName;
+    if (selected) {
+      currentFamilyIndex_ = i;
+      break;
+    }
   }
 }
 
@@ -363,6 +393,9 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
         case StyleRow::AntiAliasing:
           GUI.setCheckboxRow(rowItems_[i], SETTINGS.textAntiAliasing);
           break;
+        case StyleRow::BookStyleMemory:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.bookStyleMemory);
+          break;
         default:
           break;
       }
@@ -405,7 +438,7 @@ const char* TextSettingsActivity::confirmLabelText() const {
       if (ringPos() > 0) {
         const StyleRow row = styleRowAt(ringPos() - 1);
         if (row == StyleRow::ReadingGuideLineStyle || row == StyleRow::ReadingGuideLineOffset ||
-            row == StyleRow::FakeBold) {
+            row == StyleRow::FakeBold || row == StyleRow::ClearBookStyles) {
           return tr(STR_SELECT);
         }
       }
@@ -505,7 +538,7 @@ void TextSettingsActivity::activateRow(int row) {
         // gesture/key or a sleep. Saved here, not inside applyFamily, so the
         // SD write happens outside its RenderLock.
         if (currentFamilyIndex_ == row) {
-          SETTINGS.saveToFile();
+          saveSettings();
         }
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
@@ -516,7 +549,7 @@ void TextSettingsActivity::activateRow(int row) {
     case Tab::Size:
       if (row != currentSizeIndex_) {
         applySize(row);
-        SETTINGS.saveToFile();
+        saveSettings();
 #ifdef ENABLE_CHINESE_VERSION
         maybeOfferCompleteChineseFont();
 #endif
@@ -549,17 +582,17 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
   switch (static_cast<LayoutRow>(row)) {
     case LayoutRow::ParaSpacing:
       optionPopup_.show(StrId::STR_EXTRA_SPACING, EXTRA_SPACING_IDS, static_cast<int>(std::size(EXTRA_SPACING_IDS)),
-                        SETTINGS.extraParagraphSpacing, [](int idx) {
+                        SETTINGS.extraParagraphSpacing, [this](int idx) {
                           SETTINGS.extraParagraphSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
     case LayoutRow::FirstLineIndent:
       optionPopup_.show(StrId::STR_FIRST_LINE_INDENT, FIRST_LINE_INDENT_IDS,
-                        static_cast<int>(std::size(FIRST_LINE_INDENT_IDS)), SETTINGS.firstLineIndent, [](int idx) {
+                        static_cast<int>(std::size(FIRST_LINE_INDENT_IDS)), SETTINGS.firstLineIndent, [this](int idx) {
                           SETTINGS.firstLineIndent = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
@@ -567,26 +600,26 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       std::vector<std::string> options;
       options.reserve(6);
       for (int spaces = 0; spaces <= 5; ++spaces) options.push_back(std::to_string(spaces));
-      optionPopup_.show(StrId::STR_PARAGRAPH_INDENTATION, options, SETTINGS.paragraphIndentSpaces, [](int idx) {
+      optionPopup_.show(StrId::STR_PARAGRAPH_INDENTATION, options, SETTINGS.paragraphIndentSpaces, [this](int idx) {
         SETTINGS.paragraphIndentSpaces = static_cast<uint8_t>(idx);
-        SETTINGS.saveToFile();
+        saveSettings();
       });
       requestUpdate();
       break;
     }
     case LayoutRow::LineSpacing:
       optionPopup_.show(StrId::STR_LINE_SPACING, LINE_SPACING_IDS, static_cast<int>(std::size(LINE_SPACING_IDS)),
-                        SETTINGS.lineSpacing, [](int idx) {
+                        SETTINGS.lineSpacing, [this](int idx) {
                           SETTINGS.lineSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
     case LayoutRow::Alignment:
       optionPopup_.show(StrId::STR_ALIGNMENT, ALIGNMENT_IDS, static_cast<int>(std::size(ALIGNMENT_IDS)),
-                        SETTINGS.paragraphAlignment, [](int idx) {
+                        SETTINGS.paragraphAlignment, [this](int idx) {
                           SETTINGS.paragraphAlignment = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
@@ -594,18 +627,18 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       const int cur = (std::clamp<int>(SETTINGS.wordSpacing, WORD_SPACING_MIN, WORD_SPACING_MAX) - WORD_SPACING_MIN) /
                       WORD_SPACING_STEP;
       optionPopup_.show(StrId::STR_WORD_SPACING, WORD_SPACING_IDS, static_cast<int>(std::size(WORD_SPACING_IDS)), cur,
-                        [](int idx) {
+                        [this](int idx) {
                           SETTINGS.wordSpacing = static_cast<uint8_t>(WORD_SPACING_MIN + idx * WORD_SPACING_STEP);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
     }
     case LayoutRow::CharacterSpacing:
       optionPopup_.show(StrId::STR_CHARACTER_SPACING, CHARACTER_SPACING_IDS,
-                        static_cast<int>(std::size(CHARACTER_SPACING_IDS)), SETTINGS.characterSpacing, [](int idx) {
+                        static_cast<int>(std::size(CHARACTER_SPACING_IDS)), SETTINGS.characterSpacing, [this](int idx) {
                           SETTINGS.characterSpacing = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       break;
@@ -614,9 +647,9 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       options.reserve((MARGIN_MAX - MARGIN_MIN) / MARGIN_STEP + 1);
       for (int m = MARGIN_MIN; m <= MARGIN_MAX; m += MARGIN_STEP) options.push_back(std::to_string(m));
       const int cur = (std::clamp<int>(SETTINGS.screenMargin, MARGIN_MIN, MARGIN_MAX) - MARGIN_MIN) / MARGIN_STEP;
-      optionPopup_.show(StrId::STR_SCREEN_MARGIN, options, cur, [](int idx) {
+      optionPopup_.show(StrId::STR_SCREEN_MARGIN, options, cur, [this](int idx) {
         SETTINGS.screenMargin = static_cast<uint8_t>(MARGIN_MIN + idx * MARGIN_STEP);
-        SETTINGS.saveToFile();
+        saveSettings();
       });
       requestUpdate();
       break;
@@ -624,7 +657,7 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
     case LayoutRow::VerticalBottomAlign:
       // Plain on/off toggle, like the Style tab's boolean rows.
       SETTINGS.verticalBottomAlign = !SETTINGS.verticalBottomAlign;
-      SETTINGS.saveToFile();
+      saveSettings();
       requestUpdate();
       break;
 
@@ -684,9 +717,10 @@ void TextSettingsActivity::confirmStyleRow(int row) {
       break;
     case StyleRow::ReadingGuideLineStyle:
       optionPopup_.show(StrId::STR_READING_GUIDE_LINE_STYLE, GUIDE_LINE_STYLE_IDS,
-                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle, [](int idx) {
+                        static_cast<int>(std::size(GUIDE_LINE_STYLE_IDS)), SETTINGS.readingGuideLineStyle,
+                        [this](int idx) {
                           SETTINGS.readingGuideLineStyle = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       return;
@@ -698,7 +732,7 @@ void TextSettingsActivity::confirmStyleRow(int row) {
               SETTINGS.readingGuideLineOffset = static_cast<int8_t>(
                   std::clamp(value, static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MIN),
                              static_cast<int>(CrossPointSettings::READING_GUIDE_LINE_OFFSET_MAX)));
-              SETTINGS.saveToFile();
+              saveSettings();
             }
             requestUpdate();
           },
@@ -714,20 +748,77 @@ void TextSettingsActivity::confirmStyleRow(int row) {
       break;
     case StyleRow::FakeBold:
       optionPopup_.show(StrId::STR_FAKE_BOLD, SYNTHETIC_BOLD_IDS, static_cast<int>(std::size(SYNTHETIC_BOLD_IDS)),
-                        SETTINGS.fakeBold, [](int idx) {
+                        SETTINGS.fakeBold, [this](int idx) {
                           SETTINGS.fakeBold = static_cast<uint8_t>(idx);
-                          SETTINGS.saveToFile();
+                          saveSettings();
                         });
       requestUpdate();
       return;
     case StyleRow::AntiAliasing:
       SETTINGS.textAntiAliasing = !SETTINGS.textAntiAliasing;
       break;
+    case StyleRow::BookStyleMemory: {
+      const bool wasOn = SETTINGS.bookStyleMemory;
+      SETTINGS.bookStyleMemory = !wasOn;
+      if (bookOverrideMode()) {
+        // Shared with the tests: captures the edits made so far on switch-off,
+        // refreshes the session baseline and restores the remembered overrides
+        // on switch-on (BookStyleStore.h).
+        applyBookStyleMemoryToggle(*bookPath_, *globalSnapshot_, wasOn);
+        // The toggle swapped the typography in SETTINGS (global values back on
+        // switch-off, this book's overrides on switch-on), so the rows have to
+        // follow it or they keep marking the values it just replaced.
+        syncSelectionFromSettings();
+      }
+      // Persisted in both contexts: opened from global Settings there is no book
+      // baseline, and the toggle is an ordinary setting that must survive a
+      // sleep or power loss without the normal exit path.
+      saveSettings();
+      requestUpdate();
+      return;
+    }
+    case StyleRow::ClearBookStyles: {
+      // Two-step confirm: forgetting a book's overrides is not recoverable.
+      constexpr StrId CONFIRM_OPTIONS[] = {StrId::STR_CANCEL, StrId::STR_OK_BUTTON};
+      if (bookPath_ != nullptr) {
+        optionPopup_.show(StrId::STR_CLEAR_BOOK_OVERRIDES_CONFIRM, CONFIRM_OPTIONS,
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
+                            if (idx == 1) {
+                              BOOK_STYLES.removeByPath(*bookPath_);
+                              // The reader snapshots the global settings on
+                              // enter whether or not memory is on (so that
+                              // switching memory on later has a baseline), so
+                              // a snapshot exists either way. Restoring it is
+                              // only correct while memory is on: SETTINGS then
+                              // carries this book's overrides and the session
+                              // (and the exit capture) must see the global
+                              // values again. With memory off the live values
+                              // ARE the global ones and every edit made here
+                              // is deliberately global, so restoring the
+                              // snapshot would roll those edits back.
+                              if (globalSnapshot_ && SETTINGS.bookStyleMemory) {
+                                applyStyleToSettings(*globalSnapshot_);
+                                saveSettings();
+                                // The snapshot put the global typography back,
+                                // so the rows have to point at it.
+                                syncSelectionFromSettings();
+                              }
+                            }
+                          });
+      } else {
+        optionPopup_.show(StrId::STR_CLEAR_BOOK_STYLES_CONFIRM, CONFIRM_OPTIONS,
+                          static_cast<int>(std::size(CONFIRM_OPTIONS)), 0, [this](int idx) {
+                            if (idx == 1) BOOK_STYLES.clear();
+                          });
+      }
+      requestUpdate();
+      return;
+    }
 
     default:
       return;
   }
-  SETTINGS.saveToFile();
+  saveSettings();
   requestUpdate();
 }
 
@@ -754,6 +845,10 @@ std::string TextSettingsActivity::styleValueText(int row) const {
     }
     case StyleRow::AntiAliasing:
       return SETTINGS.textAntiAliasing ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::BookStyleMemory:
+      return SETTINGS.bookStyleMemory ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    case StyleRow::ClearBookStyles:
+      return "";
 
     default:
       return "";
@@ -765,7 +860,8 @@ std::string TextSettingsActivity::styleValueText(int row) const {
 bool TextSettingsActivity::focusedRowHasNoPreview() const {
   if (ringPos() == 0 || tab_ != Tab::Style) return false;
   const StyleRow row = styleRowAt(ringPos() - 1);
-  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing;
+  return row == StyleRow::Hyphenation || row == StyleRow::EmbeddedStyle || row == StyleRow::AntiAliasing ||
+         row == StyleRow::BookStyleMemory || row == StyleRow::ClearBookStyles;
 }
 
 void TextSettingsActivity::switchTab(const int direction) {
@@ -871,7 +967,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   if (startMode_ == StartMode::PreviewOnly) {
     // The reader owns the complete preview session and asks only on return to
     // the page. Home/sleep must not turn a preview into a Flash write either.
-    SETTINGS.saveToFile();
+    saveSettings();
     completeExit();
     return;
   }
@@ -881,7 +977,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
   if (!fontChanged) {
     const bool restoreFlash = initialSdFontFlashPreload_ != 0 && SETTINGS.sdFontFlashPreload == 0;
     SETTINGS.sdFontFlashPreload = initialSdFontFlashPreload_;
-    SETTINGS.saveToFile();
+    saveSettings();
     if (restoreFlash) {
       RenderLock lock(*this);
       sdFontSystem.releaseLoadedFont(renderer);
@@ -893,7 +989,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
 
   if (SETTINGS.sdFontFamilyName[0] == '\0') {
     SETTINGS.sdFontFlashPreload = 0;
-    SETTINGS.saveToFile();
+    saveSettings();
     completeExit();
     return;
   }
@@ -903,7 +999,7 @@ void TextSettingsActivity::exitAfterFinalFont(const ExitDestination destination)
 
 void TextSettingsActivity::finishFinalFont(const bool accepted) {
   SETTINGS.sdFontFlashPreload = 0;
-  SETTINGS.saveToFile();
+  saveSettings();
   const auto* family = registry_ ? registry_->findFamily(SETTINGS.sdFontFamilyName) : nullptr;
   if (family && family->vector) {
     completeExit();
@@ -938,7 +1034,7 @@ void TextSettingsActivity::finishFinalFont(const bool accepted) {
   const auto result = check == SdCardFontCache::Result::AlreadyCached ? check : preloadFont(*family, *file);
   const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
   SETTINGS.sdFontFlashPreload = succeeded ? 1 : 0;
-  SETTINGS.saveToFile();
+  saveSettings();
   {
     RenderLock lock(*this);
     fontLoadState_.store(FontLoadState::Idle);
@@ -997,11 +1093,24 @@ void TextSettingsActivity::maybeOfferCompleteChineseFont() {
     return;
   }
 
-  SETTINGS.saveToFile();
+  saveSettings();
+  // The installer writes SETTINGS when it selects a family. Inside a reader
+  // session that write must not carry this book's typography (the book's live
+  // values are in SETTINGS right now), so it gets the same session context the
+  // reader's own prompt passes. The member holds the snapshot because the
+  // installer keeps a pointer to it for as long as it is open.
+  BookStyle* sessionGlobal = nullptr;
+  const BookStyle* sessionLive = nullptr;
+  if (bookOverrideMode()) {
+    fontInstallLiveStyle_ = captureStyleFromSettings();
+    sessionGlobal = globalSnapshot_;
+    sessionLive = &fontInstallLiveStyle_;
+  }
   auto downloader = makeUniqueNoThrow<FontDownloadActivity>(
       renderer, mappedInput, FontDownloadActivity::Purpose::PromptThenManage,
       startMode_ == StartMode::PreviewOnly ? FontDownloadActivity::StartMode::PreviewOnly
-                                           : FontDownloadActivity::StartMode::Normal);
+                                           : FontDownloadActivity::StartMode::Normal,
+      sessionGlobal, sessionLive, bookPath_);
   if (!downloader) {
     LOG_ERR("FONT", "OOM allocating FontDownloadActivity (%zu bytes)", sizeof(FontDownloadActivity));
     return;

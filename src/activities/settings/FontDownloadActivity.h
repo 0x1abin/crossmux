@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "BookStyleStore.h"
 #include "FontInstaller.h"
 #include "SdCardFont.h"
 #include "activities/UiListActivity.h"
@@ -22,7 +23,9 @@ class FontDownloadActivity final : public UiListActivity {
   enum class StartMode : uint8_t { Normal, PreviewOnly, ResumeFontLoadError };
 
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal);
+                                Purpose purpose = Purpose::Manage, StartMode startMode = StartMode::Normal,
+                                BookStyle* sessionGlobal = nullptr, const BookStyle* sessionLive = nullptr,
+                                const std::string* sessionBookPath = nullptr);
 
 #ifdef ENABLE_CHINESE_VERSION
   static bool wasChineseFontPromptShownThisBoot();
@@ -31,6 +34,9 @@ class FontDownloadActivity final : public UiListActivity {
 
   void onEnter() override;
   void onExit() override;
+  // The result records a durable family selection; a reader's shared baseline
+  // is updated at the write, before any nested preview can save settings.
+  bool fontFamilyCommitted() const { return fontFamilyCommitted_; }
   void render(RenderLock&&) override;
   bool preventAutoSleep() override {
     return state_ == LOADING_MANIFEST || state_ == DOWNLOADING ||
@@ -80,6 +86,11 @@ class FontDownloadActivity final : public UiListActivity {
   State state_ = WIFI_SELECTION;
   Purpose purpose_;
   StartMode startMode_;
+  // The opener owns this context through the nested preview; a successful font
+  // commit updates its global baseline before that preview can save settings.
+  BookStyle* sessionGlobal_ = nullptr;
+  const BookStyle* sessionLive_ = nullptr;
+  const std::string* sessionBookPath_ = nullptr;
   FontInstaller fontInstaller_;
 
   // Manifest data
@@ -105,6 +116,10 @@ class FontDownloadActivity final : public UiListActivity {
   bool readingStatsReleased_ = false;
   DownloadOperation operation_ = DownloadOperation::None;
   bool selectionUpdated_ = false;
+  // Sticky for the whole visit: set once saveFontSelection() reports success,
+  // and published into the result at that moment; onExit() re-publishes it as a
+  // safety net.
+  bool fontFamilyCommitted_ = false;
   bool accelerationCompleted_ = false;
   uint8_t targetPointSize_ = 0;
   AutomaticError automaticError_ = AutomaticError::Download;
@@ -155,6 +170,11 @@ class FontDownloadActivity final : public UiListActivity {
   void downloadSingle(int familyIndex);
   void retryDownloadOperation();
   void selectDownloadedFontAndPreview(const char* familyName);
+  // Persists the installed family without writing the open book's typography
+  // into the settings file (see the definition). Plain save outside a reader.
+  bool saveFontSelection();
+  // Puts a committed family into this activity's result (see the definition).
+  void publishFontFamilyCommitted();
   void downloadAll();
   void updateAll();
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);

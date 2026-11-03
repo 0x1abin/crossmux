@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstring>
+#include <variant>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -88,10 +89,14 @@ bool parseManifestPointSize(const char* familyName, const char* fileName, uint8_
 }  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                           const Purpose purpose, const StartMode startMode)
+                                           const Purpose purpose, const StartMode startMode, BookStyle* sessionGlobal,
+                                           const BookStyle* sessionLive, const std::string* sessionBookPath)
     : UiListActivity("FontDownload", renderer, mappedInput),
       purpose_(purpose),
       startMode_(startMode),
+      sessionGlobal_(sessionGlobal),
+      sessionLive_(sessionLive),
+      sessionBookPath_(sessionBookPath),
       fontInstaller_(sdFontSystem.registry()) {}
 
 #ifdef ENABLE_CHINESE_VERSION
@@ -223,6 +228,12 @@ void FontDownloadActivity::startWifiSelection() {
 }
 
 void FontDownloadActivity::onExit() {
+  // Safety net for a commit that has not reached the result yet (a managed
+  // install often leaves through the plain back path, which sets no result of
+  // its own). The commit is normally published at commit time, because the
+  // activity stack moves the result out before calling this; publishing again
+  // here is idempotent.
+  publishFontFamilyCommitted();
   Activity::onExit();
 
   const bool wifiWasEnabled = WiFi.getMode() != WIFI_MODE_NULL;
@@ -915,6 +926,53 @@ FontDownloadActivity::DownloadResult FontDownloadActivity::downloadFamily(Manife
   return DownloadResult::Success;
 }
 
+bool FontDownloadActivity::saveFontSelection() {
+  // Installing a font is a device-level action that also has to work from
+  // Settings with no book open, where sessionGlobal_ is null and this is a
+  // plain save.
+  //
+  // With a reader session it must not carry the open book's typography into the
+  // settings file. The installed family is the one field here that is meant to
+  // become global ("the selected family may intentionally change a device-level
+  // preference"), so the file gets the entered baseline plus this new family,
+  // and the session keeps rendering with the book's typography afterwards.
+  if (sessionGlobal_ == nullptr || sessionLive_ == nullptr || !SETTINGS.bookStyleMemory) {
+    const bool ok = SETTINGS.saveToFile();
+    if (ok && sessionGlobal_ != nullptr) {
+      memcpy(sessionGlobal_->sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(sessionGlobal_->sdFontFamilyName));
+    }
+    return ok;
+  }
+  // Read the live typography now rather than trusting the snapshot the reader
+  // handed over when it opened the installer: the family the user just picked
+  // lives in SETTINGS and was not there when that snapshot was taken, so
+  // restoring it afterwards would undo the install.
+  const BookStyle liveStyle = captureStyleFromSettings();
+  BookStyle fileStyle = *sessionGlobal_;
+  fileStyle.overrideMask = BookStyle::kSdFontFamily;
+  memcpy(fileStyle.sdFontFamilyName, SETTINGS.sdFontFamilyName, sizeof(fileStyle.sdFontFamilyName));
+  applyStyleToSettings(fileStyle);
+  const bool ok = SETTINGS.saveToFile();
+  applyStyleToSettings(liveStyle);
+  if (ok) {
+    memcpy(sessionGlobal_->sdFontFamilyName, fileStyle.sdFontFamilyName, sizeof(sessionGlobal_->sdFontFamilyName));
+  }
+  return ok;
+}
+
+void FontDownloadActivity::publishFontFamilyCommitted() {
+  // Report a committed family to the screen that opened this installer. This
+  // has to run while `result` is still ours: ActivityManager::loop() moves it
+  // out before it calls onExit(), so a flag written there would only land on
+  // the moved-from copy and never reach the opener's handler.
+  if (!fontFamilyCommitted_) return;
+  if (auto* menu = std::get_if<MenuResult>(&result.data)) {
+    menu->fontFamilyCommitted = true;
+  } else {
+    setResult(MenuResult{-1, 0, 0, false, true});
+  }
+}
+
 void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName) {
   if (purpose_ == Purpose::ReaderAutoInstall) {
     char previousFamily[sizeof(SETTINGS.sdFontFamilyName)];
@@ -925,7 +983,7 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
     strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
     SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
     SETTINGS.sdFontFlashPreload = 0;
-    if (!SETTINGS.saveToFile()) {
+    if (!saveFontSelection()) {
       LOG_ERR("FONT", "Failed to save selected family %s", familyName);
       strncpy(SETTINGS.sdFontFamilyName, previousFamily, sizeof(SETTINGS.sdFontFamilyName));
       SETTINGS.sdFontFlashPreload = previousFlashPreload;
@@ -945,7 +1003,8 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
       renderer, mappedInput, &sdFontSystem.registry(), TextSettingsActivity::Tab::Family,
       TextSettingsActivity::InitialFontState::Changed,
       startMode_ == StartMode::PreviewOnly ? TextSettingsActivity::StartMode::PreviewOnly
-                                           : TextSettingsActivity::StartMode::Interactive);
+                                           : TextSettingsActivity::StartMode::Interactive,
+      sessionBookPath_, sessionGlobal_);
   if (!textSettings) {
     LOG_ERR("FONT", "OOM allocating TextSettingsActivity (%zu bytes)", sizeof(TextSettingsActivity));
     RenderLock lock(*this);
@@ -958,7 +1017,14 @@ void FontDownloadActivity::selectDownloadedFontAndPreview(const char* familyName
   strncpy(SETTINGS.sdFontFamilyName, familyName, sizeof(SETTINGS.sdFontFamilyName) - 1);
   SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
   SETTINGS.sdFontFlashPreload = 0;
-  SETTINGS.saveToFile();
+  // Report the commit to whichever screen opened this installer. Only a
+  // successful save counts: a failed one is still applied for this session in
+  // SETTINGS, but the file - and so the baseline the caller will restore - is
+  // untouched, and telling the caller otherwise would hide that divergence.
+  fontFamilyCommitted_ = saveFontSelection();
+  // Publish it now, not from onExit(): the manager consumes the result before
+  // it calls onExit(), so a flag raised there is already too late.
+  publishFontFamilyCommitted();
   selectionUpdated_ = true;
   accelerationCompleted_ = false;
   {
