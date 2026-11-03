@@ -190,7 +190,9 @@ jobs:
           restore-keys: pio-cache-onepage-${{ runner.os }}-
 
       - name: Build OnePage firmware
-        run: pio run -e onepage | tee pio-onepage.log
+        run: |
+          set -euo pipefail
+          pio run -e onepage | tee pio-onepage.log
 
       - name: Upload OnePage firmware
         uses: actions/upload-artifact@v6
