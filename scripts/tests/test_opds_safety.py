@@ -127,7 +127,7 @@ struct Client {
  freeink::opds::HttpAuth downloadAuth() const{return {"u","p","token",{{"X-Secret","secret"}}};}
  bool resolveIndirect(const std::string&,std::string&,bool&){return false;}
 };
-struct RenderLock { RenderLock() = default; template<class T> explicit RenderLock(T&) {} void unlock() {} };
+struct RenderLock { RenderLock() = default; template<class T> explicit RenderLock(T&) {} ~RenderLock() {} void unlock() {} };
 struct OpdsBookBrowserActivity {
  std::string statusMessage;
  struct {std::string url="https://catalog.test";} server;
