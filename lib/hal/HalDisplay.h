@@ -147,6 +147,7 @@ class HalDisplay {
   bool supportsContinuousImageReading() const;
   bool canUseTextTransition() const;
   void cancelGrayscale();
+  bool displayCommitted() const;
 
   // Runtime geometry passthrough — the authoritative source for every layout
   // decision (GfxRenderer reads exactly these in its begin()). Prefer them over

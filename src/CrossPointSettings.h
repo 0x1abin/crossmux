@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ArduinoJson.h>
+#include <BlePageTurner.h>
 #include <BoardConfig.h>
 #include <Epub/ReaderRenderSpec.h>
 #include <PersistableStore.h>
@@ -51,6 +52,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     COVER_CUSTOM = 5,
     QUICK_RESUME = 6,
     TRANSPARENT = 7,
+    TRANSPARENT_CUSTOM = TRANSPARENT,
+    COVER_TRANSPARENT = 8,
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
@@ -212,8 +215,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     REFRESH_FREQUENCY_COUNT
   };
 
-  // Short power button press actions. PWR_CONFIRM is only offered on touch
-  // boards (see SettingsList.h).
+  // Short power button press actions. Touch boards get PWR_CONFIRM in place of
+  // CREATE_CLIPPING; touch boards without a home key also get the reader
+  // shortcuts (see SettingsList.h). Persisted by index: append only.
   enum SHORT_PWRBTN {
     IGNORE = 0,
     SLEEP = 1,
@@ -221,19 +225,23 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     FORCE_REFRESH = 3,
     FOOTNOTES = 4,
     PWR_CONFIRM = 5,
+    CREATE_CLIPPING = 6,
+    PWR_BOOKMARK = 7,
+    PWR_SYNC = 8,
+    PWR_READER_MENU = 9,
     SHORT_PWRBTN_COUNT
   };
 
-  // Long-press Confirm action while reading an EPUB. The setting cycles through these values.
-  // Persisted in settings.json by index: any new function (e.g. dictionary, bookmark) MUST use a
-  // value >= 2 and be appended at the END of the enumValues array in SettingsList.h, otherwise the
-  // stored indices shift and existing saves are silently misinterpreted.
+  // Long-press Confirm action while reading an EPUB. Persisted values are stable;
+  // SettingsList maps them to the device-specific option list shown to the user.
   enum LONG_PRESS_MENU_FUNCTION {
     LP_MENU_KOSYNC = 0,
     LP_MENU_DISABLED = 1,
     LP_MENU_BOOKMARK = 2,
     LP_MENU_DICTIONARY = 3,
     LP_MENU_READER_MENU = 4,
+    LP_MENU_CREATE_CLIPPING = 5,
+    LP_MENU_FOOTNOTES = 6,
     LONG_PRESS_MENU_FUNCTION_COUNT
   };
 
@@ -269,6 +277,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   enum READER_MENU_STYLE { READER_MENU_LIST = 0, READER_MENU_TOOLBAR = 1, READER_MENU_STYLE_COUNT };
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
+  enum VIBRATION { VIBRATION_TOUCH = 0, VIBRATION_TOUCH_PAGE = 1, VIBRATION_OFF = 2 };
+  uint8_t vibration = VIBRATION_OFF;
+  enum HAPTIC_INTENSITY { HAPTIC_LOW = 0, HAPTIC_MEDIUM = 1, HAPTIC_HIGH = 2 };
+  uint8_t hapticIntensity = HAPTIC_HIGH;
 
   enum TOUCH_READER_CONTROLS { TOUCH_READER_OFF = 0, TOUCH_READER_ON = 1, TOUCH_READER_CONTROLS_COUNT };
 
@@ -282,6 +294,55 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     INVERTED_TAP = 3,
     PAGE_TURN_GESTURE_DISABLED = 4,
     PAGE_TURN_GESTURE_COUNT
+  };
+
+  // Action of a single reader tap zone. The screen is split into a 3x3 grid
+  // (tapZones below, row-major). PREV/NEXT act on a tap (gated by the matching
+  // direction's gesture: a SWIPE_ONLY direction contributes no tap zones).
+  // MENU opens the reader menu on a tap in center-tap mode. BOOKMARK,
+  // DICTIONARY and CHAPTER also fire on a tap; the long-press list keeps its
+  // own variants so a zone can pair tap bookmarking with hold dictionary
+  // lookup without losing either action.
+  enum TAP_ZONE_ACTION {
+    TAP_ZONE_NONE = 0,
+    TAP_ZONE_PREV = 1,
+    TAP_ZONE_NEXT = 2,
+    TAP_ZONE_MENU = 3,
+    TAP_ZONE_BOOKMARK = 4,
+    TAP_ZONE_DICTIONARY = 5,
+    TAP_ZONE_ROTATE_CW = 6,      // rotate to the next orientation (right-side zones)
+    TAP_ZONE_ROTATE_CCW = 7,     // rotate to the previous orientation (left-side zones)
+    TAP_ZONE_FRONTLIGHT = 8,     // toggle the frontlight on/off
+    TAP_ZONE_KOREADER = 9,       // push progress to KOReader (EPUB readers)
+    TAP_ZONE_AUTO_TURN = 10,     // toggle automatic page turning (EPUB readers)
+    TAP_ZONE_JUMP_PERCENT = 11,  // jump-to-percent picker (EPUB readers)
+    TAP_ZONE_GO_HOME = 12,       // leave the reader for the home screen
+    TAP_ZONE_CHAPTER = 13,       // jump to a chapter (EPUB / TXT / XTC readers)
+    TAP_ZONE_FOOTNOTE = 14,      // open the footnote list (EPUB readers)
+    TAP_ZONE_REFRESH = 15,       // force a ghost-cleaning full refresh
+    TAP_ZONE_ACTION_COUNT
+  };
+
+  // Long-press actions for tap zones (fires on release after BOOKMARK_HOLD_MS).
+  // A dedicated enum keeps the per-zone option list short: the reader menu
+  // exists only as a long-press action, and PREV/NEXT keep their plain tap
+  // behavior regardless of hold duration.
+  enum TAP_ZONE_LONG_ACTION {
+    TAP_ZONE_LONG_NONE = 0,
+    TAP_ZONE_LONG_BOOKMARK = 1,    // add a bookmark (EPUB readers)
+    TAP_ZONE_LONG_DICTIONARY = 2,  // open the dictionary word picker (EPUB readers)
+    TAP_ZONE_LONG_CHAPTER = 3,     // jump to a chapter (EPUB / TXT / XTC readers)
+    TAP_ZONE_LONG_MENU = 4,        // open the reader menu / chapter list (tap menu mode)
+    TAP_ZONE_LONG_ROTATE_CW = 5,
+    TAP_ZONE_LONG_ROTATE_CCW = 6,
+    TAP_ZONE_LONG_FRONTLIGHT = 7,
+    TAP_ZONE_LONG_KOREADER = 8,
+    TAP_ZONE_LONG_AUTO_TURN = 9,
+    TAP_ZONE_LONG_JUMP_PERCENT = 10,
+    TAP_ZONE_LONG_GO_HOME = 11,
+    TAP_ZONE_LONG_FOOTNOTE = 12,  // open the footnote list (EPUB readers)
+    TAP_ZONE_LONG_REFRESH = 13,   // force a ghost-cleaning full refresh
+    TAP_ZONE_LONG_ACTION_COUNT
   };
 
   // How the reader menu opens on touch boards. Persisted under the legacy
@@ -405,6 +466,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t fontPointSize = DEFAULT_FONT_POINT_SIZE;
   uint8_t lineSpacing = NORMAL;
   uint8_t paragraphAlignment = JUSTIFIED;
+  // Vertical bottom-alignment (文字底部对齐). When on, every non-final page's
+  // text lines are redistributed so the first line stays at the top and the
+  // last line reaches the content bottom, with the leftover vertical space
+  // spread evenly between lines. The chapter's final page is left top-aligned
+  // so the book still reads naturally.
+  uint8_t verticalBottomAlign = 0;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
   // E-ink refresh frequency (default 15 pages)
@@ -459,6 +526,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t sdFontFlashPreload = 0;
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
+  // Master switch for all SD-card plugin discovery/execution. New installs keep
+  // this disabled; settings migration enables it when pre-existing plugin files
+  // are found so a firmware update never silently disables an existing setup.
+  uint8_t pluginsEnabled = 0;
+  // User hid the Plugin Hub install row; cleared when plugins are turned back on.
+  uint8_t pluginHubPromptHidden = 0;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
   // Physical-button audio feedback level. Surfaced only by capable builds.
@@ -466,9 +539,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t soundFeedbackLevel = SOUND_FEEDBACK_MEDIUM;
 #else
   uint8_t soundFeedbackLevel = SOUND_FEEDBACK_OFF;
-#endif
-#if FREEINK_CAP_HAPTIC
-  uint8_t hapticFeedbackLevel = HAPTIC_FEEDBACK_MEDIUM;
 #endif
   // Show the title and author read from inside each book rather than its
   // filename. Users can disable this to make index rebuilds skip EPUB parsing.
@@ -507,6 +577,35 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // and other apps are untouched. XORed with rtlBook (right-to-left books such as
   // vertical Japanese), so the two cancel rather than each flipping the result.
   uint8_t pageTurnDirection = 0;
+  // Reader tap zones: the screen splits into a 3x3 grid (row-major, top-left
+  // first). Each zone holds a TAP_ZONE_ACTION; MENU is only meaningful while
+  // showReaderMenu is READER_MENU_TAP, where the reader menu opens on a tap in
+  // any MENU-marked zone. A direction whose gesture is SWIPE_ONLY (or
+  // disabled) contributes no tap zone: its zones fall through. The default
+  // mirrors the stock outer-thirds behavior: the left/right columns turn pages
+  // over the full height and only the middle cell of the center column opens
+  // the menu, while the center column above/below it does nothing.
+  uint8_t tapZones[9] = {
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // top row
+      TAP_ZONE_PREV, TAP_ZONE_MENU, TAP_ZONE_NEXT,  // middle row
+      TAP_ZONE_PREV, TAP_ZONE_NONE, TAP_ZONE_NEXT,  // bottom row
+  };
+  // Long-press action of each of the 9 main zones (TAP_ZONE_LONG_ACTION,
+  // row-major, same layout as tapZones). Defaults to NONE; a settings file from
+  // an older firmware is migrated so BOOKMARK/DICTIONARY zones keep their
+  // long-press behaviour.
+  uint8_t tapZonesLong[9] = {
+      TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE,  // top row
+      TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE,  // middle row
+      TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE, TAP_ZONE_LONG_NONE,  // bottom row
+  };
+  // Extra small tap zones in the four corners plus the top/bottom edge middle.
+  // Each holds a TAP_ZONE_ACTION; mini zones are tap-only (no long press).
+  // Layout: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right,
+  // 4=top-middle, 5=bottom-middle. All default to NONE.
+  uint8_t miniZones[6] = {
+      TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE, TAP_ZONE_NONE,
+  };
   // Reader menu open gesture (SHOW_READER_MENU: off / center tap / bottom-edge
   // up-swipe). Only surfaced on home-key boards, where Home is the capacitive
   // key and the bottom edge is free; elsewhere it stays at the Tap default.
@@ -531,7 +630,15 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Any other value is an explicit choice and is used as-is: the language of the
   // books someone reads is not necessarily the language of their UI.
   // See keyboard_layouts:: for the bit assignment and the defaulting rules.
+  enum SLIDE_SWITCH_ACTION : uint8_t {
+    SLIDE_SWITCH_FRONTLIGHT = 0,
+    SLIDE_SWITCH_NIGHT_MODE = 1,
+    SLIDE_SWITCH_TOUCH_CONTROLS = 2,
+  };
+  uint8_t slideSwitchAction = SLIDE_SWITCH_FRONTLIGHT;
   uint16_t keyboardLayouts = 0;
+  // Bluetooth page turner, saved under the keys lib/BlePageTurner reads and writes (BlePageTurnerJson.h).
+  bleturner::Config ble;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
   // OTA update channel preference (0 = stable, 1 = nightly).
@@ -606,6 +713,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   bool loadFromFile();
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
+  // Touch page-turn gestures: folds the legacy combined touch mode and the
+  // removed Inverted Tap value into the per-direction gesture pair. Split out
+  // of fromJson() so the migration can be exercised on its own.
+  bool loadTouchGestureSettings(JsonVariantConst doc);
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
   static uint8_t sleepTimeoutEnumToMinutes(uint8_t legacyValue);

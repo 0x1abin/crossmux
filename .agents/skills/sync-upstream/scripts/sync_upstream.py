@@ -749,7 +749,11 @@ def replace_simulator_with_local_candidate(platformio: str, candidate: Path) -> 
     )
     if count != 1:
         raise RuntimeError("Could not point PlatformIO at the simulator candidate.")
-    return replaced
+    # Local packages use the manifest name, so resolve the pre-hook from the candidate too.
+    return replaced.replace(
+        "pre:.pio/libdeps/$PIOENV/simulator/skip_device_content_protection.py",
+        f"pre:{candidate}/skip_device_content_protection.py",
+    )
 
 
 def replace_cmake_simulator_with_local_candidate(cmake: str, candidate: Path) -> str:
@@ -1159,6 +1163,11 @@ def cmd_publish(args: argparse.Namespace) -> int:
             raise RuntimeError(
                 "CrossMux candidate does not pin one reviewed simulator revision; rerun start."
             )
+        for script in (
+            "scripts/tests/test_reading_stats_network_memory.py",
+            "scripts/tests/test_download_memory_lifecycle.py",
+        ):
+            run([sys.executable, script], cwd=candidate, capture=False)
         run_crossmux_builds(candidate, args.skip_builds, args.extra_build_env)
     commit_candidate(candidate, state)
     push_and_create_pr(candidate, state, args.review_note, args.skip_builds)

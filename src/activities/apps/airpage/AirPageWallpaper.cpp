@@ -9,14 +9,13 @@
 
 #include "CrossPointSettings.h"
 #include "JpegToBmpConverter.h"
+#include "util/SleepCover.h"
 
 namespace airpage {
 
 namespace {
 
-constexpr char kSleepImagePath[] = "/sleep.bmp";
 constexpr char kSleepImagePartPath[] = "/sleep.bmp.part";
-constexpr char kSleepImageBackupPath[] = "/sleep.bmp.bak";
 constexpr size_t kCopyBufferSize = 128;
 
 template <typename Display>
@@ -76,56 +75,15 @@ bool AirPageWallpaper::writePart(const SelectedImage& selected) {
 }
 
 bool AirPageWallpaper::install(const SelectedImage& selected) {
-  recoverInterruptedTransaction();
+  if (!sleepCover::recover()) return false;
   if (!writePart(selected)) {
     Storage.remove(kSleepImagePartPath);
     return false;
   }
 
-  ImageInfo generated;
-  if (!AirPageImageStore::inspectImage(kSleepImagePartPath, generated) || generated.format != ImageFormat::Bmp) {
-    Storage.remove(kSleepImagePartPath);
-    return false;
-  }
-
-  Storage.remove(kSleepImageBackupPath);
-  const bool hadPrevious = Storage.exists(kSleepImagePath);
-  if (hadPrevious && !Storage.rename(kSleepImagePath, kSleepImageBackupPath)) {
-    Storage.remove(kSleepImagePartPath);
-    return false;
-  }
-  if (!Storage.rename(kSleepImagePartPath, kSleepImagePath)) {
-    if (hadPrevious) Storage.rename(kSleepImageBackupPath, kSleepImagePath);
-    return false;
-  }
-
-  const uint8_t previousMode = SETTINGS.sleepScreen;
-  SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-  if (!SETTINGS.saveToFile()) {
-    SETTINGS.sleepScreen = previousMode;
-    (void)SETTINGS.saveToFile();
-    Storage.remove(kSleepImagePath);
-    if (hadPrevious) Storage.rename(kSleepImageBackupPath, kSleepImagePath);
-    return false;
-  }
-
-  Storage.remove(kSleepImageBackupPath);
-  return true;
-}
-
-void AirPageWallpaper::recoverInterruptedTransaction() {
-  Storage.remove(kSleepImagePartPath);
-  if (!Storage.exists(kSleepImageBackupPath)) return;
-
-  if (Storage.exists(kSleepImagePath) && SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM) {
-    Storage.remove(kSleepImageBackupPath);
-    return;
-  }
-
-  Storage.remove(kSleepImagePath);
-  if (!Storage.rename(kSleepImageBackupPath, kSleepImagePath)) {
-    LOG_ERR("AIRP", "Could not recover previous sleep screen");
-  }
+  const bool installed = sleepCover::commit(CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM);
+  if (!installed) Storage.remove(kSleepImagePartPath);
+  return installed;
 }
 
 }  // namespace airpage

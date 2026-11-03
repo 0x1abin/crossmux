@@ -9,7 +9,7 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
     def test_all_s3_ble_targets_share_psram_without_changing_sticky_core(self):
         config = configparser.ConfigParser(interpolation=None)
         config.read(Path(__file__).resolve().parents[2] / "platformio.ini")
-        devices = ("sticky", "x4pro", "x4c", "papermono", "eego_a4", "murphy_m4", "waveshare_epaper_397", "metalio_eink4")
+        devices = ("sticky", "x4pro", "x4c", "papermono", "lilygo_t5s3", "murphy_m4", "waveshare_epaper_397", "metalio_eink4")
         for device in devices:
             hardware = f"{device}_hardware"
             for option in ("lib_deps", "extra_scripts", "build_flags"):
@@ -25,7 +25,14 @@ class NimblePsramMiddlewareTest(unittest.TestCase):
             ["${firmware_tuned.custom_sdkconfig}", "${s3_ble_controller.custom_sdkconfig}"],
         )
         self.assertNotIn("BOARD_HAS_PSRAM", config["sticky_hardware"]["build_flags"])
-        self.assertIn("CONFIG_ARDUINO_LOOP_STACK_SIZE=16384", config["eego_a4_hardware"]["custom_sdkconfig"])
+        self.assertEqual(config["eego_a4_hardware"]["extends"], "base")
+        self.assertEqual(config["eego_a4_hardware"]["board_build.arduino.memory_type"], "dio_opi")
+        self.assertNotIn("custom_sdkconfig", config["eego_a4_hardware"])
+        source = (Path(__file__).resolve().parents[2] / "src/main.cpp").read_text()
+        self.assertIn("SET_LOOP_TASK_STACK_SIZE(24 * 1024)", source)
+        sdk_ui = (Path(__file__).resolve().parents[2] /
+                  "freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp").read_text()
+        self.assertIn("getArduinoLoopTaskStackSize(void) { return 16 * 1024; }", sdk_ui)
         self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", config["s3_ble_controller"]["custom_sdkconfig"])
         self.assertIn("CONFIG_BT_NIMBLE_ENABLED=n", config["s3_ble_controller"]["custom_sdkconfig"])
 

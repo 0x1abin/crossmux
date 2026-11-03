@@ -2,8 +2,11 @@
 configure_file(${REPO_ROOT}/src/BleInput.cpp BleInput.cpp COPYONLY)
 configure_file(${REPO_ROOT}/src/MappedInputManager.cpp MappedInputManager.cpp COPYONLY)
 foreach(mode IN ITEMS psram internal unavailable)
-  add_executable(ble_input_${mode}_tests BleInputTest.cpp ${CMAKE_CURRENT_BINARY_DIR}/BleInput.cpp)
-  target_include_directories(ble_input_${mode}_tests PRIVATE stubs ${REPO_ROOT}/src)
+  add_executable(ble_input_${mode}_tests BleInputTest.cpp BleRuntimeHarness.cpp ${REPO_ROOT}/lib/BlePageTurner/src/Runtime.cpp ${CMAKE_CURRENT_BINARY_DIR}/BleInput.cpp)
+  target_include_directories(ble_input_${mode}_tests PRIVATE stubs ${REPO_ROOT}/src
+    ${REPO_ROOT}/lib/BlePageTurner/include ${REPO_ROOT}/lib/BlePageTurner/src
+    ${REPO_ROOT}/freeink-sdk/libs/network/BleKeyboardHost/include)
+  target_compile_definitions(ble_input_${mode}_tests PRIVATE BLETURNER_TESTING)
   if(mode STREQUAL "psram")
     target_compile_definitions(ble_input_${mode}_tests PRIVATE FREEINK_CAP_BLE_HID_HOST=1 CROSSPOINT_BLE_HOST_PSRAM=1)
   elseif(mode STREQUAL "internal")
@@ -15,11 +18,13 @@ foreach(mode IN ITEMS psram internal unavailable)
   gtest_discover_tests(ble_input_${mode}_tests TEST_PREFIX "${mode}.")
 endforeach()
 
-add_executable(ble_overlay_tests BleOverlayTest.cpp ${CMAKE_CURRENT_BINARY_DIR}/MappedInputManager.cpp
+add_executable(ble_overlay_tests BleOverlayTest.cpp BleRuntimeHarness.cpp ${REPO_ROOT}/lib/BlePageTurner/src/Runtime.cpp ${CMAKE_CURRENT_BINARY_DIR}/MappedInputManager.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/BleInput.cpp)
 target_include_directories(ble_overlay_tests PRIVATE stubs ${REPO_ROOT}/src
-  ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include)
-target_compile_definitions(ble_overlay_tests PRIVATE FREEINK_CAP_BLE_HID_HOST=1 CROSSPOINT_BLE_HOST_PSRAM=0)
+  ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include
+  ${REPO_ROOT}/lib/BlePageTurner/include ${REPO_ROOT}/lib/BlePageTurner/src
+  ${REPO_ROOT}/freeink-sdk/libs/network/BleKeyboardHost/include)
+target_compile_definitions(ble_overlay_tests PRIVATE BLETURNER_TESTING BLE_OVERLAY_HARNESS FREEINK_CAP_BLE_HID_HOST=1 CROSSPOINT_BLE_HOST_PSRAM=0)
 target_link_libraries(ble_overlay_tests PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(ble_overlay_tests)
 

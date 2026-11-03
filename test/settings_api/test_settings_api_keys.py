@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Keep the Web Settings API's base-list keys unique."""
+"""Keep streamed settings keys unique and reserve before collecting descriptors."""
 
 from collections import Counter
 from itertools import product
 from pathlib import Path
+import re
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SETTINGS_LIST = ROOT / "src/SettingsList.h"
+SETTINGS_LIST = ROOT / "src/SettingsList.cpp"
 
 
 def matching_delimiter(source, opening, opening_char, closing_char):
@@ -67,10 +69,19 @@ def split_arguments(arguments):
 
 
 def base_list_source(source):
-    marker = "std::vector<SettingInfo> v = {"
-    start = source.index(marker) + len(marker) - 1
+    marker = "void forEachBaseSetting("
+    start = source.index("{", source.index(marker))
     end = matching_delimiter(source, start, "{", "}")
-    return source[start + 1 : end]
+    entries = source[start + 1 : end]
+    # Inline the two board-dependent selector factories for metadata/capacity
+    # checks. They still contribute one entry each to the production base list.
+    for factory in ("buildLongPressMenuSetting", "buildShortPowerButtonSetting"):
+        body_start = source.index("{", source.index("inline SettingInfo " + factory + "("))
+        body_end = matching_delimiter(source, body_start, "{", "}")
+        body = source[body_start + 1 : body_end].strip()
+        assert body.startswith("return ") and body.endswith(";")
+        entries = entries.replace(factory + "()", body[len("return ") : -1])
+    return entries
 
 
 def preprocess_capability_guards(source, capabilities):
@@ -129,13 +140,15 @@ def setting_keys(source, capabilities):
 
 
 def main():
-    source = SETTINGS_LIST.read_text()
+    source = SETTINGS_LIST.read_text() + "\n" + (ROOT / "src/SettingsList.h").read_text()
+    capacities = set()
     capability_names = (
         "FREEINK_CAP_FRONTLIGHT",
         "FREEINK_CAP_TOUCH",
         "CROSSPOINT_CAP_SOUND_FEEDBACK",
         "FREEINK_CAP_HAPTIC",
         "FREEINK_CAP_WARMLIGHT",
+        "FREEINK_DEVICE_PICCO",
     )
     for values in product((False, True), repeat=len(capability_names)):
         capabilities = dict(zip(capability_names, values))
@@ -144,7 +157,46 @@ def main():
         assert not duplicates, (
             f"duplicate Web Settings API keys for {capabilities}: {', '.join(duplicates)}"
         )
+        entries = preprocess_capability_guards(base_list_source(source), capabilities)
+        entry_count = len(re.findall(r"SettingInfo::\w+\(", entries))
+        assert entries.count("emit(") == entry_count, capabilities
+        capacities.add(entry_count)
+    # Compile the actual collector with descriptors for every capability count;
+    # the list contents above come from the production visitor, including its factories.
+    collector_start = source.index('std::vector<SettingInfo> getBaseSettingsList(')
+    collector_open = source.index('{', collector_start)
+    collector_end = matching_delimiter(source, collector_open, '{', '}')
+    collector = source[collector_start:collector_end + 1]
+    capacities = sorted(capacities)
+    checks = r"""
+#include <cassert>
+#include <cstddef>
+#include <utility>
+#include <vector>
+struct SettingInfo {size_t id;};
+using SettingVisitor=void(*)(void*,SettingInfo&);
+size_t descriptorCount=0;
+void forEachBaseSetting(SettingVisitor visit,void* context){
+  for(size_t i=0;i<descriptorCount;++i){SettingInfo info{i};visit(context,info);}
+}
+""" + collector + '\nint main(){for(size_t count : {' + ','.join(str(n)+'u' for n in capacities) + r"""}){
+ descriptorCount=count;
+ for(size_t extra:{0u,1u,4u}){
+  auto rows=getBaseSettingsList(extra);
+  assert(rows.size()==count && rows.capacity()>=count+extra);
+  for(size_t i=0;i<count;++i)assert(rows[i].id==i);
+ }
+}}
+"""
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="settings-capacity-", dir=os.environ.get("TMPDIR")) as directory:
+        binary = Path(directory) / 'check'
+        subprocess.run(["c++", "-std=c++20", "-x", "c++", "-", "-o", str(binary)], input=checks, text=True, check=True)
+        subprocess.run([str(binary)], check=True)
     print(f"Web Settings API keys are unique across {2 ** len(capability_names)} capability combinations")
+    print("Base settings capacity matches every capability combination without vector growth")
+    print("Production visitor emits one descriptor at a time; collector reserves every capability count plus caller slots")
 
 
 if __name__ == "__main__":

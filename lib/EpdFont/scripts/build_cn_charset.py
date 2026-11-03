@@ -105,7 +105,10 @@ def main() -> None:
         help="Print this many characters just above and just below the cutoff "
         "for hand-review (default: 50)",
     )
+    parser.add_argument("--output-dir", type=Path, default=SCRIPT_DIR)
     args = parser.parse_args()
+    output_file = args.output_dir / OUTPUT_FILE.name
+    i18n_output_file = args.output_dir / I18N_OUTPUT_FILE.name
 
     if not SOURCE_FILE.is_file():
         print(f"error: source file not found: {SOURCE_FILE}", file=sys.stderr)
@@ -137,8 +140,8 @@ def main() -> None:
     # doesn't care about order.
     kept_chars = sorted(kept_chars_set)
 
-    OUTPUT_FILE.write_text("".join(kept_chars), encoding="utf-8")
-    written_chars = set(OUTPUT_FILE.read_text(encoding="utf-8"))
+    output_file.write_text("".join(kept_chars), encoding="utf-8")
+    written_chars = set(output_file.read_text(encoding="utf-8"))
     missing_pool = pool_kept_chars - written_chars
     missing_required = required - written_chars
     if missing_pool or missing_required:
@@ -150,14 +153,14 @@ def main() -> None:
         sys.exit(1)
 
     print(
-        f"Wrote {len(kept_chars)} characters to {OUTPUT_FILE.relative_to(SCRIPT_DIR.parent.parent)}",
+        f"Wrote {len(kept_chars)} characters to {output_file}",
         file=sys.stderr,
     )
 
     if required:
         i18n_chars = sorted(required)
-        I18N_OUTPUT_FILE.write_text("".join(i18n_chars), encoding="utf-8")
-        written_i18n_chars = set(I18N_OUTPUT_FILE.read_text(encoding="utf-8"))
+        i18n_output_file.write_text("".join(i18n_chars), encoding="utf-8")
+        written_i18n_chars = set(i18n_output_file.read_text(encoding="utf-8"))
         missing_i18n = required - written_i18n_chars
         if missing_i18n:
             print(
@@ -167,7 +170,7 @@ def main() -> None:
             sys.exit(1)
         print(
             f"Wrote {len(i18n_chars)} i18n-only characters to "
-            f"{I18N_OUTPUT_FILE.relative_to(SCRIPT_DIR.parent.parent)}",
+            f"{i18n_output_file}",
             file=sys.stderr,
         )
     print(

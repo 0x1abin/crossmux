@@ -79,7 +79,6 @@ class OptionPopup {
     if (!active) return false;
 
     const int total = static_cast<int>(ownedStrings.size());
-    const int count = !upstreamStyle && UITheme::getInstance().hasMainTabs() ? total : std::min(total, MAX_OPTIONS);
     const freeink::ui::InputSnapshot snap = touchSnapshotFrom(input);
     if (ignoreInitialTouchContact) {
       if (snap.touchPressed || snap.touchHeld || snap.touchReleased) {
@@ -91,7 +90,7 @@ class OptionPopup {
       }
       ignoreInitialTouchContact = false;
     }
-    if (!upstreamStyle && UITheme::getInstance().hasMainTabs()) {
+    {
       const auto swipe = input.wasSwipe();
       if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
         freeink::ui::InputSnapshot release{};
@@ -115,6 +114,7 @@ class OptionPopup {
           selectedIndex = event.value;
           active = false;
           if (onSelectCallback) onSelectCallback(selectedIndex);
+          haptic_feedback::touchAction();
           requestUpdate();
           return true;
         }
@@ -126,10 +126,11 @@ class OptionPopup {
           // Tap released outside the dialog: dismiss without firing. Swipe-end
           // releases arrive with -1,-1 coords and fall through (no dismiss).
           active = false;
+          haptic_feedback::touchAction();
           requestUpdate();
           return true;
         }
-        if (snap.touchPressed && (upstreamStyle || !UITheme::getInstance().hasMainTabs())) {
+        if (snap.touchPressed) {
           // Touch-down on an option moves the highlight (route() latched the
           // hit as the active interaction; read it back, no re-hit-testing).
           const int16_t idx = interactions.activeIndex();
@@ -145,32 +146,72 @@ class OptionPopup {
       return true;
     }
 
-    if (input.wasPressed(MappedInputManager::Button::NavPrevious)) {
-      selectedIndex = (selectedIndex - 1 + count) % count;
-      requestUpdate();
-      return true;
-    } else if (input.wasPressed(MappedInputManager::Button::NavNext)) {
-      selectedIndex = (selectedIndex + 1) % count;
-      requestUpdate();
-      return true;
-    }
-
     const auto confirm = MappedInputManager::Button::Confirm;
-    const bool confirmReleased = input.wasReleased(confirm);
+    if (confirmBarrierPending) {
+      // The popup was just opened and cannot know, by itself, whether Confirm
+      // belongs to it or to whatever opened it. Decide from the first input pass
+      // that sees the button at all:
+      //   - a press edge is the user pressing it for this popup: honour it;
+      //   - held with no edge is the opening gesture's own contact: own it until
+      //     it is released, so it can neither select nor dismiss;
+      //   - a bare release is that contact already finishing — consume it and
+      //     own nothing further, since the button is up again.
+      // The release-only case is the one the render handoff can produce: the
+      // popup opens and the first pass it ever sees already carries the
+      // inherited release, with wasPressed() and isPressed() both false. Without
+      // this branch it fell through to handleButtons() as a confirmation.
+      confirmBarrierPending = false;
+      ignoreInitialConfirmRelease = false;
+      if (input.wasPressed(confirm)) {
+        // A real press edge: this popup owns the press, deliver its release.
+      } else if (input.isPressed(confirm)) {
+        ignoreInitialConfirmRelease = true;
+      }
+      // Only a release that arrives without a press edge in the same pass is the
+      // inherited contact finishing. MappedInputManager reports a logical Confirm
+      // - one mapped from a home-button action or from a short power press - as
+      // pressed and released at once (MappedInputManager.cpp:510-525), so a fresh
+      // click of that kind carries wasPressed() too. It belongs to this popup and
+      // has to reach handleButtons() below to select, so the release test must
+      // not swallow it.
+      if (input.isPressed(confirm) || (input.wasReleased(confirm) && !input.wasPressed(confirm))) return true;
+    }
     if (ignoreInitialConfirmRelease) {
-      if (confirmReleased) {
+      if (input.wasReleased(confirm)) {
         ignoreInitialConfirmRelease = false;
         return true;
       }
       if (!input.isPressed(confirm)) ignoreInitialConfirmRelease = false;
     }
 
-    if (confirmReleased) {
+    return handleButtons(input.wasPressed(MappedInputManager::Button::NavPrevious),
+                         input.wasPressed(MappedInputManager::Button::NavNext),
+                         input.wasReleased(MappedInputManager::Button::Confirm),
+                         input.wasReleased(MappedInputManager::Button::Back), requestUpdate);
+  }
+
+  bool handleButtons(const bool previous, const bool next, const bool confirm, const bool back,
+                     const std::function<void()>& requestUpdate) {
+    if (!active) return false;
+    const int count = static_cast<int>(ownedStrings.size());
+    if (count <= 0) return true;
+    if (previous) {
+      selectedIndex = (selectedIndex - 1 + count) % count;
+      requestUpdate();
+      return true;
+    }
+    if (next) {
+      selectedIndex = (selectedIndex + 1) % count;
+      requestUpdate();
+      return true;
+    }
+    if (confirm) {
       active = false;
       if (onSelectCallback) onSelectCallback(selectedIndex);
       requestUpdate();
       return true;
-    } else if (input.wasReleased(MappedInputManager::Button::Back)) {
+    }
+    if (back) {
       active = false;
       requestUpdate();
       return true;
@@ -211,10 +252,11 @@ class OptionPopup {
     interactions.beginPublishCycle();
     fui::Frame<INTERACTION_CAPACITY> frame(target, device, noInput, interactions);
 
-    if (!upstreamStyle && UITheme::getInstance().hasMainTabs()) {
+    if (!upstreamStyle && UITheme::getInstance().hasMainTabs() && headline.empty() && message.empty()) {
       const int optionCount = static_cast<int>(ownedStrings.size());
-      const auto layout = InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false),
-                                                    optionCount, selectedIndex);
+      auto layout = InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false),
+                                              optionCount, selectedIndex);
+      layout.first = windowStart(layout.rows);
       visibleOptionRows = layout.rows;
       const auto& panel = layout.panel;
       frame.hit(fui::Rect{static_cast<int16_t>(panel.x), static_cast<int16_t>(panel.y),
@@ -226,7 +268,7 @@ class OptionPopup {
                             static_cast<int16_t>(row.height)},
                   ACTION_OPTION, static_cast<int16_t>(layout.first + slot), fui::InputTouch);
       }
-      GUI.drawOptionPopup(renderer, title.c_str(), ownedStrings, selectedIndex);
+      GUI.drawOptionPopup(renderer, title.c_str(), ownedStrings, selectedIndex, layout.first);
       interactions.publish();
       uiReady = true;
       return;
@@ -234,15 +276,7 @@ class OptionPopup {
 
     const auto& metrics = uiThemeMetrics(upstreamStyle);
     const int totalOptions = static_cast<int>(ownedStrings.size());
-    const uint8_t count = static_cast<uint8_t>(totalOptions > MAX_OPTIONS ? MAX_OPTIONS : totalOptions);
-
     fui::DialogOption options[MAX_OPTIONS];
-    for (uint8_t i = 0; i < count; ++i) {
-      options[i].label = ownedStrings[i].c_str();
-      options[i].action = ACTION_OPTION;
-      options[i].value = static_cast<int16_t>(i);
-      options[i].state = (i == selectedIndex) ? fui::StateFocused : fui::StateNormal;
-    }
 
     fui::OptionDialogProps props;
     props.title = title.empty() ? nullptr : title.c_str();
@@ -254,7 +288,7 @@ class OptionPopup {
       props.messageText.maxLines = 6;
     }
     props.options = options;
-    props.optionCount = count;
+    props.optionCount = 0;
     props.verticalOptions = true;
     // Touch only: physical buttons stay on the legacy wrap/confirm path above,
     // so the buffer never competes with it for focus/confirm dispatch.
@@ -293,10 +327,31 @@ class OptionPopup {
     // Fixed fraction of the screen, clamped by the theme's side margins; the
     // old max-text-width sizing is gone, long labels wrap inside the buttons.
     const fui::Rect screen = device.screen();
+    const auto safe = device.safeRect();
     const int16_t width =
-        fui::clampI16(std::min<int>(screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2));
-    const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, screen.height);
-    const fui::Rect dialogRect = fui::centeredRect(screen, fui::Size{width, height});
+        fui::clampI16(std::min({screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2,
+                                static_cast<int>(safe.width)}),
+                      0, safe.width);
+    const int textHeight = fui::optionDialogHeight(target, props, width);
+    const int availableHeight = std::max(0, static_cast<int>(safe.height) - textHeight - props.gap);
+    const int count = std::min(
+        {totalOptions, MAX_OPTIONS, std::max(1, (availableHeight + props.gap) / (props.buttonHeight + props.gap))});
+    const int first = windowStart(count);
+    visibleOptionRows = count;
+    for (int i = 0; i < count; ++i) {
+      options[i].label = ownedStrings[first + i].c_str();
+      options[i].action = ACTION_OPTION;
+      options[i].value = static_cast<int16_t>(first + i);
+      options[i].state = first + i == selectedIndex ? fui::StateFocused : fui::StateNormal;
+    }
+    props.optionCount = static_cast<uint8_t>(count);
+    const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, safe.height);
+    // INX keeps its established safe-area center, including message dialogs.
+    // Shared upstream pages center on the screen and move only to clear the bezel.
+    const bool preserveInxCenter = !upstreamStyle && UITheme::getInstance().hasMainTabs();
+    fui::Rect dialogRect = fui::centeredRect(preserveInxCenter ? safe : screen, fui::Size{width, height});
+    dialogRect.x = fui::clampI16(std::clamp<int>(dialogRect.x, safe.x, safe.x + safe.width - width));
+    dialogRect.y = fui::clampI16(std::clamp<int>(dialogRect.y, safe.y, safe.y + safe.height - height));
 
     // Chrome guard first, options after: route() scans newest-first, so the
     // option buttons win inside the dialog and the guard absorbs the rest.
@@ -315,6 +370,9 @@ class OptionPopup {
   void dismiss() {
     active = false;
     onSelectCallback = nullptr;
+    confirmBarrierPending = false;
+    ignoreInitialConfirmRelease = false;
+    ignoreInitialTouchContact = false;
   }
 
  private:
@@ -329,28 +387,34 @@ class OptionPopup {
       return;
     }
     selectedIndex = std::clamp(currentIndex, 0, count - 1);
+    firstOption = -1;
     onSelectCallback = std::move(onSelect);
-    ignoreInitialConfirmRelease = true;
+    // Deferred, not armed: handleInput() decides from the first input pass
+    // whether Confirm was inherited from the opening gesture or freshly
+    // pressed. See the Confirm branch there.
+    confirmBarrierPending = true;
+    ignoreInitialConfirmRelease = false;
     ignoreInitialTouchContact = true;
     uiReady = false;
     active = true;
   }
 
-  // The dialog has no scrolling, so options past MAX_OPTIONS would render off
-  // screen anyway; a fixed cap keeps the DialogOption array on the stack and
-  // the interaction table small. +1 slot for the chrome guard rect.
+  // Bound one render's buttons and hit table, while keeping all options reachable.
   static constexpr int MAX_OPTIONS = 16;
   static constexpr size_t INTERACTION_CAPACITY = MAX_OPTIONS + 1;
   static constexpr freeink::ui::ActionId ACTION_OPTION = 1;
   static constexpr freeink::ui::ActionId ACTION_CHROME = 2;
 
-  void activate(int currentIndex, std::function<void(int)> onSelect) {
-    const int count = std::min<int>(ownedStrings.size(), MAX_OPTIONS);
-    selectedIndex = currentIndex >= 0 && currentIndex < count ? currentIndex : 0;
-    onSelectCallback = std::move(onSelect);
-    message.clear();
-    uiReady = false;
-    active = count > 0;
+  int windowStart(const int rows) const {
+    const int maximum = std::max(0, static_cast<int>(ownedStrings.size()) - rows);
+    int first = firstOption.load();
+    if (first < 0 || selectedIndex < first || selectedIndex >= first + rows) {
+      first = std::clamp(selectedIndex - rows / 2, 0, maximum);
+    } else {
+      first = std::clamp(first, 0, maximum);
+    }
+    firstOption = first;
+    return first;
   }
 
   bool active = false;
@@ -361,10 +425,14 @@ class OptionPopup {
   int selectedIndex = 0;
   std::function<void(int)> onSelectCallback;
   bool ignoreInitialConfirmRelease = false;
+  // Set by finishShow() and cleared by the first input pass that reaches the
+  // Confirm decision; see handleInput().
+  bool confirmBarrierPending = false;
   bool ignoreInitialTouchContact = false;
   // Written by the render task (frame registration), routed by the loop task;
   // uiReady closes the rebuild window exactly like UiListActivity::uiReady.
   mutable freeink::ui::InteractionBuffer<INTERACTION_CAPACITY> interactions;
+  mutable std::atomic<int> firstOption{-1};
   mutable std::atomic<int> visibleOptionRows{1};
   mutable std::atomic<bool> uiReady{false};
 };

@@ -43,6 +43,7 @@ add_executable(WeReadStoreTest
   ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadProtocol.cpp
   ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadStore.cpp
   ${REPO_ROOT}/lib/WeReadWebApi/src/WeReadXhtmlCodec.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/htmlEntities.cpp
   ${REPO_ROOT}/lib/expat/xmlparse.c
   ${REPO_ROOT}/lib/expat/xmlrole.c
   ${REPO_ROOT}/lib/expat/xmltok.c

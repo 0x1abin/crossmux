@@ -42,6 +42,7 @@ class UiAppHost {
   // complete published generation. Call from the render task wherever the app
   // should paint; chrome before, hints after.
   void renderUi();
+  void scanUi();
 
   // What loop-task routing saw this pass. `routed` is true when the gate was
   // open and the snapshot carried relevant touch input — the invalidated()
@@ -73,6 +74,7 @@ class UiAppHost {
   UiApp app;
 
  private:
+  void prepareUi();
   // Opened by the render task after publication and closed on lifecycle/state
   // resets; read by the loop task (route*).
   std::atomic<bool> uiReady{false};

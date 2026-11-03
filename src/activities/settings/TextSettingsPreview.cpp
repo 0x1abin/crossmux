@@ -47,13 +47,10 @@ void relayout(PreviewLayout& layout, const GfxRenderer& renderer, int fontId, in
   const char* text = I18N.get(StrId::STR_FONT_PREVIEW_TEXT);
   std::string word;
   word.reserve(strlen(text));
-  bool firstWord = true;
   for (const char* p = text;; p++) {
     if (*p == ' ' || *p == '\0') {
       if (!word.empty()) {
-        parsed.addWord(word, firstWord && SETTINGS.uiTheme == CrossPointSettings::INX ? EpdFontFamily::BOLD
-                                                                                      : EpdFontFamily::REGULAR);
-        firstWord = false;
+        parsed.addWord(word, EpdFontFamily::REGULAR);
         word.clear();
       }
       if (*p == '\0') break;
@@ -116,8 +113,8 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
   // geometry changed; else reuse the cache. The prewarm inputs are (fontId, constant
   // sample text, styleMask<-focusReading), all of which are key fields, so a matching
   // key means an identical prewarm call. This relies on nothing else evicting the SD
-  // glyph cache while this activity is up — true today: the only evictor is
-  // FontCacheManager::PrewarmScope, used solely by the reader/dictionary activities.
+  // glyph cache while this activity is up: shared UI scans clear only built-in
+  // compressed glyphs; the reader/dictionary scope owns SD cache eviction.
   const PreviewKey key{.fontId = fontId,
                        .fontPointSize = SETTINGS.fontPointSize,
                        .screenMargin = SETTINGS.screenMargin,
@@ -134,8 +131,7 @@ void renderPreview(const GfxRenderer& renderer, PreviewLayout& layout, int previ
                        .hyphenation = SETTINGS.hyphenationEnabled != 0};
   if (key != layout.key) {
     if (auto* fcm = renderer.getFontCacheManager()) {
-      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT),
-                        SETTINGS.uiTheme == CrossPointSettings::INX || SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
+      fcm->prewarmCache(fontId, I18N.get(StrId::STR_FONT_PREVIEW_TEXT), SETTINGS.focusReadingEnabled ? 0x03 : 0x01);
     }
     relayout(layout, renderer, fontId, textWidth, static_cast<size_t>(maxLines));
     layout.key = key;

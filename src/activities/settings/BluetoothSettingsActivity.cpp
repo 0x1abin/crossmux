@@ -27,7 +27,7 @@ constexpr uint32_t kScanMs = 8000;
 void BluetoothSettingsActivity::onEnter() {
   view = View::Menu;
   UiListActivity::onEnter();
-  if (SETTINGS.bluetoothEnabled) ensureAvailable();
+  if (SETTINGS.ble.enabled) ensureAvailable();
 }
 
 void BluetoothSettingsActivity::onExit() {
@@ -41,11 +41,7 @@ void BluetoothSettingsActivity::setBanner(const char* text) {
 }
 
 bool BluetoothSettingsActivity::ensureAvailable() {
-  bleinput::StartResult result;
-  {
-    RenderLock lock;
-    result = bleinput::ensureStarted(renderer, bleinput::StartContext::Explicit);
-  }
+  const auto result = bleinput::ensureStarted(renderer, bleinput::StartContext::Explicit);
   if (result == bleinput::StartResult::Started || result == bleinput::StartResult::AlreadyRunning) return true;
   setBanner(result == bleinput::StartResult::LowMemory ? tr(STR_BT_LOW_MEMORY) : tr(STR_BT_UNAVAILABLE));
   requestUpdate();
@@ -66,9 +62,9 @@ void BluetoothSettingsActivity::rebuildRows() {
   if (view == View::Menu) {
     if (auto* row = addRow(tr(STR_BLUETOOTH), static_cast<int16_t>(Action::Toggle))) {
       row->toggle = true;
-      row->toggleChecked = SETTINGS.bluetoothEnabled;
+      row->toggleChecked = SETTINGS.ble.enabled;
     }
-    if (!SETTINGS.bluetoothEnabled) return;
+    if (!SETTINGS.ble.enabled) return;
     addRow(tr(STR_BT_SCAN_PAIR), static_cast<int16_t>(Action::Scan));
     if (BleHid.isConnected()) {
       if (auto* row = addRow(tr(STR_BT_DISCONNECT), static_cast<int16_t>(Action::Disconnect))) {
@@ -131,9 +127,9 @@ void BluetoothSettingsActivity::activateIndex(const int index) {
   if (view == View::Menu) {
     switch (static_cast<Action>(value)) {
       case Action::Toggle:
-        SETTINGS.bluetoothEnabled = !SETTINGS.bluetoothEnabled;
+        SETTINGS.ble.enabled = !SETTINGS.ble.enabled;
         SETTINGS.saveToFile();
-        if (SETTINGS.bluetoothEnabled)
+        if (SETTINGS.ble.enabled)
           ensureAvailable();
         else
           bleinput::stop();

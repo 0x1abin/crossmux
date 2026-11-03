@@ -61,6 +61,10 @@ struct WebServer {
  void stop() { httpListening=0; }
 };
 using CrossPointHttpServer = WebServer;
+// Static route payloads are independent of the startup failure injections.
+constexpr char webCss[]="css", iconsSvg[]="icons", crosspoint_iconSvg[]="icon";
+constexpr char webCssETag[]="css-tag", iconsSvgETag[]="icons-tag", crosspoint_iconSvgETag[]="icon-tag";
+void sendStaticContent(WebServer*, const char*, size_t, const char*, const char*) {}
 struct WebSocketsServer {
  explicit WebSocketsServer(int) { ++wsLive; }
  ~WebSocketsServer() { --wsLive; }

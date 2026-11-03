@@ -1,5 +1,6 @@
 #include <Epub/Page.h>
 #include <GfxRenderer.h>
+#include <HardwareSerial.h>
 #include <Serialization.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -10,6 +11,9 @@
 #include <filesystem>
 #include <new>
 #include <utility>
+
+// Standalone host targets do not link the simulator main, which owns this endpoint.
+HardwareSerial Serial;
 
 namespace {
 
@@ -40,6 +44,9 @@ bool ImageBlock::needsDecode() const { return false; }
 bool ImageBlock::ensureExtracted(CancelCheck) { return false; }
 bool ImageBlock::cacheDecodedImage(GfxRenderer&, int, int, CancelCheck) { return false; }
 void GfxRenderer::drawLine(int, int, int, int, int, bool) const {}
+void GfxRenderer::fillRect(int, int, int, int, bool) const {}
+void GfxRenderer::fillRectDither(int, int, int, int, Color) const {}
+int GfxRenderer::drawScaledCodepoint(int, uint32_t, EpdFontFamily::Style, int, int, int) const { return 0; }
 
 TEST(FootnoteList, AllocatesOnceAndMovesItsBoundedStorage) {
   FootnoteList footnotes;

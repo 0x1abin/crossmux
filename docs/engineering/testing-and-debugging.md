@@ -28,8 +28,6 @@ pio run -e simulator_murphy_m4 -t run_simulator
 # Clean build artifacts
 pio run -t clean
 
-# Upload filesystem data (if using SPIFFS/LittleFS)
-pio run -t uploadfs
 ```
 
 **Via VS Code**:
@@ -74,7 +72,7 @@ script or workflow changes, run the focused checks and report any limitations.
 
 1. **Out of Memory** (Most common):
    ```cpp
-   LOG_DBG("MEM", "Free heap: %d bytes", ESP.getFreeHeap());
+   // Inspect HalMemory internal/PSRAM free and largest-block statistics.
    ```
    - Monitor heap usage throughout activity lifecycle
    - Check if large allocations (>10KB) occur before crash
@@ -85,7 +83,8 @@ script or workflow changes, run the focused checks and report any limitations.
    LOG_DBG("TASK", "Stack high water: %d", uxTaskGetStackHighWaterMark(taskHandle));
    ```
    - Occurs during deep recursion or large local variables
-   - Increase task stack size in `xTaskCreate()` (2048 → 4096)
+   - Size the stack from call chains and measured high-water marks; avoid
+     copying example task sizes
    - Reduce the frame or reuse an existing bounded scratch buffer; use a
      checked nothrow heap allocation only when no scoped scratch is available
 
@@ -198,8 +197,8 @@ local artifacts and are not committed to the repository.
 
 See [C3 Bluetooth](c3-bluetooth.md) for the shared hardware build profiles,
 lifecycle and font-memory ownership, reproducible checks, X4 evidence and
-remaining acceptance limits. Hardware builds include BLE; the runtime switch
-defaults off. Distinguish host/build success, application hash verification
+remaining acceptance limits. Supported hardware profiles include BLE; the runtime switch defaults off.
+EEGO A4 currently uses the SDK stub with its prebuilt USB-MSC core. Distinguish host/build success, application hash verification
 and physical-device acceptance.
 
 ### Distinguishing TCP Stalls, Watchdogs, and Restarts
@@ -223,7 +222,7 @@ and physical-device acceptance.
 
 **Verification Steps**:
 1. Check serial output for stack traces
-2. Monitor heap with `ESP.getFreeHeap()` before/after operations
+2. Monitor `HalMemory` internal/PSRAM heaps and largest blocks before/after operations
 3. Verify task deletion with task list (`vTaskList()`)
 4. Test with `LOG_LEVEL=2` (debug logging enabled)
 
@@ -234,7 +233,7 @@ and physical-device acceptance.
 ### Testing Checklist
 
 **AI agent scope** (what you CAN verify):
-1. ✅ **Build**: `pio run -t clean && pio run` (0 errors/warnings)
+1. ✅ **Build**: Build the selected target with existing tools/caches; diagnose errors and warnings
 2. ✅ **Quality**: `./bin/ci-check` and `./bin/clang-format-fix --check`
 3. ✅ **Format**: Commit messages (`feat:`/`fix:`), no `.gitignore`-excluded files staged (e.g., `*.generated.h`, `.pio/`, `platformio.local.ini`)
 4. ✅ **CI**: Fix GitHub Actions failures before review
@@ -247,7 +246,7 @@ and physical-device acceptance.
    `ESP.getMaxAllocHeap()`, and task stack high-water marks. Memory-sensitive
    EPUB paths must still work when the largest contiguous block is about 16–19KB;
    no task may fall below 512 bytes of remaining stack.
-9. 🔲 **Cache**: If EPUB modified, delete `.crosspoint/` and verify re-parse
+9. 🔲 **Cache**: Back up state, clear only the affected rendered sections and verify re-parse/resume
 
 ### CI/CD Pipeline Awareness
 
@@ -357,3 +356,23 @@ See [download memory](network-memory-validation.md) for the BLE/static-heap
 findings, foreground statistics lifetime, diagnostic review and hardware
 regression procedure. The production lifecycle check runs as
 `DownloadMemoryLifecycle` in the host suite.
+
+## Compact results and focused review
+
+Record full build output in a task-specific log and preserve the process exit
+status. Report target, outcome and log path; inspect bounded error context when
+needed. Active builds use 10–30-second waits and user updates within 60 seconds.
+Sandbox/cache-lock failure is an environment issue, not a successful build.
+Run the smallest meaningful existing regression checks for the changed contract;
+reuse passing results until a new change, failure or unresolved concern invalidates
+them. Formatting goes through `bin/clang-format-fix`, including its diagnostics.
+
+Self-review correctness/failure paths, shared architecture and ownership,
+C3/target resource limits, and UI/i18n/document contracts using the
+[review skill](../../.agents/skills/refactor-for-review/SKILL.md). No extra fixed
+reviewer workflow or publication gate is introduced. Keep host/build, CI,
+deployment and physical acceptance separate. Changed input/display/layout paths
+need all four orientations and relevant remapping. Measure internal and PSRAM
+free bytes/largest blocks across repeated book, dictionary, font and WiFi
+transitions; free bytes alone do not guarantee an allocation fits. Cache changes
+include affected TXT/Markdown and partial-build resume after backup.

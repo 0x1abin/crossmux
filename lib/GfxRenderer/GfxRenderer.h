@@ -18,12 +18,14 @@ class TtfEpdFont;
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "Bitmap.h"
+#include "FontVariantProvider.h"
 
 namespace glyphBitmap {
 struct Frame;
@@ -44,29 +46,15 @@ class GfxRenderer {
 
   // Map 0=black, 1=dark gray, 2=light gray, 3=white into the active
   // framebuffer plane. Keep every 2-bit renderer on this single table.
-  static constexpr TwoBitPixel mapTwoBitPixel(const RenderMode mode, const uint8_t value) {
+  static constexpr TwoBitPixel mapTwoBitPixel(const RenderMode mode, const uint8_t value, const bool absolute = false) {
     if (mode == BW) return {value < 3, true};
-#if FREEINK_DEVICE_EEGO_A4
-    if (mode == GRAYSCALE_MSB) return {value == 0 || value == 1, true};
-    return {value == 0 || value == 2, true};
-#else
-    if (mode == GRAYSCALE_MSB) return {value == 1 || value == 2, false};
-    return {value == 1, false};
-#endif
+    const auto pixel = grayPlanePixel(value, mode == GRAYSCALE_MSB, absolute);
+    return {pixel.write, pixel.black};
   }
 
-  static constexpr TwoBitPixel mapTwoBitGlyphCoverage(const RenderMode mode, const uint8_t coverage) {
-    // Font coverage is 0=white..3=black; bitmap pixels use 0=black..3=white.
-    return mapTwoBitPixel(mode, 3 - coverage);
-  }
-
-  static constexpr bool framebufferState(const RenderMode mode, const bool state) {
-#if FREEINK_DEVICE_EEGO_A4
-    return mode == BW ? state : !state;
-#else
-    (void)mode;
-    return state;
-#endif
+  static constexpr TwoBitPixel mapTwoBitGlyphCoverage(const RenderMode mode, const uint8_t coverage,
+                                                      const bool absolute = false) {
+    return mapTwoBitPixel(mode, 3 - coverage, absolute);
   }
 
   // Logical screen orientation from the perspective of callers
@@ -86,9 +74,11 @@ class GfxRenderer {
   RenderMode renderMode;
   mutable bool absoluteGrayPlanes = false;
   Orientation orientation;
-  bool fadingFix;
+  // The loop updates this flag while the render task reads refresh policy.
+  std::atomic<bool> fadingFix;
   mutable uint8_t syntheticBoldPixels = 0;
   uint8_t* frameBuffer = nullptr;
+  uint32_t frameBufferLoans = 0;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
   uint16_t panelWidthBytes = HalDisplay::DISPLAY_WIDTH_BYTES;
@@ -140,6 +130,7 @@ class GfxRenderer {
   // looks a family up -- glyph coverage, metrics, preloading -- must go through this,
   // or a rebound id is laid out with the built-in face and drawn in the SD one.
   int resolveFontFamilyId(int fontId) const;
+  FontVariantProvider fontVariantProvider_;
 
   // Resolve a missing-glyph fallback; the high-density profile checks whole-run coverage.
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
@@ -242,6 +233,17 @@ class GfxRenderer {
   // every other target behaves exactly as before.
   void setPreferredFont(int fontId, int preferredFontId) { preferredFontMap_[fontId] = preferredFontId; }
   void clearPreferredFonts() { preferredFontMap_.clear(); }
+
+  void setFontVariantProvider(const FontVariantProvider& provider) { fontVariantProvider_ = provider; }
+  int resolveFontVariant(const int fontId, const float scale) const {
+    return fontVariantProvider_.resolveFont(fontId, scale);
+  }
+  // True when fontId is registered, loading it through the variant provider if needed.
+  bool ensureFontLoaded(const int fontId) const {
+    if (fontMap.count(fontId) != 0) return true;
+    return fontVariantProvider_.load && fontVariantProvider_.load(fontVariantProvider_.ctx, fontId) &&
+           fontMap.count(fontId) != 0;
+  }
   // Ensure SD card font glyph data is loaded for the given text. Called from layout code
   // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on non-SD fonts (no-op).
   // styleMask: bitmask of styles to prepare (bit 0=regular, 1=bold, 2=italic, 3=bold-italic).
@@ -250,7 +252,8 @@ class GfxRenderer {
   // consecutive NUL-terminated words (WordStore chunks), so a whole paragraph
   // is scanned without materializing per-word strings.
   void ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* segmentLens, size_t segmentCount,
-                             bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F) const;
+                             bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
+                             bool includeSmallCaps = false) const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation = o; }
@@ -431,6 +434,13 @@ class GfxRenderer {
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                 BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO, int8_t tracking = 0) const;
+  // Draws one glyph at scale256/256 of its size with its baseline at baselineY (drop caps).
+  // Outlines are bilinearly resampled from the font bitmap, so no larger font is loaded.
+  // Returns the scaled advance in pixels.
+  int drawScaledCodepoint(int fontId, uint32_t cp, EpdFontFamily::Style style, int x, int baselineY,
+                          int scale256) const;
+  // Unscaled metrics for laying out drawScaledCodepoint: advance (12.4 fixed point) and top bearing.
+  bool getCodepointMetrics(int fontId, uint32_t cp, EpdFontFamily::Style style, int32_t& advanceFP, int& top) const;
   int getSpaceWidth(int fontId, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   /// Returns the total inter-word advance: fp4::toPixel(spaceAdvance + kern(leftCp,' ') + kern(' ',rightCp)).
   /// Using a single snap avoids the +/-1 px rounding error that arises when space advance and kern are
@@ -484,12 +494,14 @@ class GfxRenderer {
   // numRows)), bypassing the framebuffer. supportsStripGrayscale() gates use.
   void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const;
   bool supportsStripGrayscale() const;
+  bool grayscaleReplacesFrame() const;
   bool combinesGrayscaleBase() const;
   bool supportsTextOnlyCombinedBase() const;
   bool supportsReaderTransitions() const;
   bool supportsContinuousImageReading() const;
   bool canUseTextTransition() const;
   void cancelGrayscale() const;
+  bool displayCommitted() const;
   bool storeBwBuffer();  // Returns true if buffer was stored successfully
   // Restore and free the stored buffer. resyncPanelBaseline rewrites the
   // controller's differential baseline to the restored frame — correct after
@@ -516,6 +528,9 @@ class GfxRenderer {
   void releaseFrameBufferForBuild();
   bool restoreFrameBufferAfterBuild();
   bool hasFrameBuffer() const { return frameBuffer != nullptr; }
+  // Bumped by every loan. A loan returns the buffer white, so a caller that ran code which may lend
+  // (e.g. a background chapter-build step) compares this to know the page it drew is gone.
+  uint32_t frameBufferLoanCount() const { return frameBufferLoans; }
 
   // RAII form of the loan above, for blocking build regions with early-return
   // error paths: restores on scope exit (or explicitly via end()). Display the
@@ -562,18 +577,9 @@ class GfxRenderer {
                           size_t bufSize) const;
 };
 
-#if FREEINK_DEVICE_EEGO_A4
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 0).draw);
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 1).draw);
-static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 2).draw);
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 0).draw);
-static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 1).draw);
-static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 2).draw);
-#else
 static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 0).draw);
 static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 1).draw);
 static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_MSB, 2).draw);
 static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 0).draw);
 static_assert(GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 1).draw);
 static_assert(!GfxRenderer::mapTwoBitPixel(GfxRenderer::GRAYSCALE_LSB, 2).draw);
-#endif

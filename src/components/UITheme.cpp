@@ -3,16 +3,10 @@
 #include <EpdFont.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
-#include <HalGPIO.h>
 #include <HalMemory.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <builtinFonts/notosans_18_bold.h>
-#include <builtinFonts/notosans_18_regular.h>
-#include <builtinFonts/ubuntu_10_bold.h>
-#include <builtinFonts/ubuntu_10_regular.h>
-#include <builtinFonts/ubuntu_12_bold.h>
-#include <builtinFonts/ubuntu_12_regular.h>
+#include <builtinFonts/all.h>
 
 #include <algorithm>
 #include <memory>
@@ -21,19 +15,13 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "components/CoverGridHomeUi.h"
-#include "components/SelectionCursorPolicy.h"
+#include "components/UIThemeTokens.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/inx/InxTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
-#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-#include <builtinFonts/notosans_14_bold.h>
-#include <builtinFonts/notosans_14_regular.h>
-#include <builtinFonts/notosans_16_bold.h>
-#include <builtinFonts/notosans_16_regular.h>
-#endif
 
 // The registered families keep these stable addresses across theme changes.
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
@@ -49,6 +37,7 @@ EpdFont ui12BoldFont(&ubuntu_12_bold);
 #endif
 
 extern EpdFont offlineReaderFont;
+extern void reloadSmallUiFont(bool inxTheme);
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
 EpdFont ui18RegularFont(&notosans_16_regular);
 EpdFont ui18BoldFont(&notosans_16_bold);
@@ -146,6 +135,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     currentMetrics = nextMetrics;
     currentType = type;
   }
+  reloadSmallUiFont(currentType == CrossPointSettings::INX);
   metricsValid = false;
 }
 
@@ -156,6 +146,10 @@ const ThemeMetrics& UITheme::getMetrics() const {
   if (!metricsValid || showButtonHints != metricsForButtonHints) {
     adjustedMetrics = *currentMetrics;
     UiHighDpiProfile::apply(adjustedMetrics);
+    if (currentType == CrossPointSettings::INX) {
+      // The status strip starts below the board's header offset, before the title.
+      adjustedMetrics.headerHeight += BoardConfig::ACTIVE.headerOffsetY;
+    }
     if (!showButtonHints) {
       adjustedMetrics.buttonHintsHeight = 0;
     }
@@ -163,15 +157,6 @@ const ThemeMetrics& UITheme::getMetrics() const {
     metricsValid = true;
   }
   return adjustedMetrics;
-}
-
-bool UITheme::showSelectionCursor() const {
-#ifdef CROSSPOINT_EMULATED
-  return true;
-#else
-  return SelectionCursorPolicy::visible(currentType == CrossPointSettings::UI_THEME::INX, gpio.hasTouch(),
-                                        gpio.lastInputModality());
-#endif
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
@@ -194,16 +179,24 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
   return UITheme::getInstance().getTheme().getListPageItems(availableHeight, hasSubtitle);
 }
 
-// Screen area excluding the bezel and button hints.
+// Full drawable content area: screen minus the board's viewable insets (bezel /
+// rounded-corner clearance), oriented to the current rotation. The single place
+// the inset math lives; every screen derives its content bounds from here (or
+// from getScreenSafeArea, which builds on it).
+Rect UITheme::getContentArea(const GfxRenderer& renderer) {
+  int viTop = 0, viRight = 0, viBottom = 0, viLeft = 0;
+  renderer.getOrientedViewableTRBL(&viTop, &viRight, &viBottom, &viLeft);
+  return Rect{viLeft, viTop, renderer.getScreenWidth() - viLeft - viRight,
+              renderer.getScreenHeight() - viTop - viBottom};
+}
+
+// Content area excluding the button hints.
 Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints) {
   auto orientation = renderer.getOrientation();
-  const int screenWidth = renderer.getScreenWidth();
-  const int screenHeight = renderer.getScreenHeight();
-  Rect safeArea = Rect{0, 0, screenWidth, screenHeight};
-#if FREEINK_DEVICE_READPICO
-  int top, right, bottom, left;
-  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
-  safeArea = Rect{left, top, screenWidth - left - right, screenHeight - top - bottom};
+  Rect safeArea = getContentArea(renderer);
+#if !FREEINK_DEVICE_READPICO
+  if (currentType == CrossPointSettings::UI_THEME::INX)
+    safeArea = Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
 #endif
   const ThemeMetrics metrics = getMetrics();
   switch (orientation) {
@@ -231,6 +224,16 @@ Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButton
       break;
   }
   return safeArea;
+}
+
+Rect UITheme::getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHints, bool hasSideButtonHints,
+                            const bool upstreamStyle) {
+  const Rect safe = getScreenSafeArea(renderer, hasFrontButtonHints, hasSideButtonHints);
+  const ThemeMetrics& metrics = uiThemeMetrics(upstreamStyle);
+  if (hasMainTabs()) return Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight};
+  const Rect content = getContentArea(renderer);
+  return Rect{safe.x - content.x, safe.y - content.y + metrics.topPadding,
+              safe.width + renderer.getScreenWidth() - content.width, metrics.headerHeight};
 }
 
 std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int coverHeight) {

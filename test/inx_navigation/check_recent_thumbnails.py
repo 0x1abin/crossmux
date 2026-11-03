@@ -29,7 +29,8 @@ struct Tracked {
   Tracked(){++alive;}
   ~Tracked(){--alive;}
 };
-struct InxRecentActivity : Activity {
+struct RecentBooksActivity : Activity {};
+struct InxRecentActivity : RecentBooksActivity {
   enum class CoverCacheState { Unchecked, Ready };
   struct CoverRamCache { std::unique_ptr<Tracked> bytes; size_t size=0; bool attempted=false; };
   int thumbnailHeight=0;

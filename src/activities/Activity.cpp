@@ -15,6 +15,10 @@ void Activity::onExit() { LOG_DBG("ACT", "Exiting activity: %s", name.c_str()); 
 
 bool Activity::usesMainTabBar() const { return UITheme::getInstance().hasMainTabs() && mainTab() != MainTab::None; }
 
+bool Activity::defersContentSelection() const {
+  return mappedInput.hasTouch() && SETTINGS.uiTheme == CrossPointSettings::INX && usesMainTabBar();
+}
+
 MappedInputManager::Labels Activity::mainTabButtonLabels(const char* back, const char* confirm, const bool canMove,
                                                          const bool showTabDirections) const {
   if (!usesMainTabBar()) {
@@ -32,8 +36,7 @@ MappedInputManager::Labels Activity::mainTabButtonLabels(const char* back, const
 }
 
 bool Activity::showMainTabContentSelection() const {
-  return UITheme::getInstance().showSelectionCursor() &&
-         (!usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content);
+  return !usesMainTabBar() || activityManager.getMainTabFocus() == MainTabFocus::Content;
 }
 
 // Retain the instance-facing Activity layout API.
@@ -60,11 +63,14 @@ MainTabLayout Activity::mainTabLayout() const {
     safe.width = std::max(0, safeRight - safe.x);
     safe.height = std::max(0, safeBottom - safe.y);
   }
-  return MainTabs::layout(safe, metrics.topPadding,
-                          tabsAtBottom                ? MainTabs::bottomBarHeight
-                          : UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight
-                                                      : metrics.headerHeight,
-                          tabsAtBottom, showStatus ? MainTabs::statusBarHeight : 0);
+  MainTabLayout layout = MainTabs::layout(safe, metrics.topPadding,
+                                          tabsAtBottom                ? MainTabs::bottomBarHeight
+                                          : UiHighDpiProfile::enabled ? UiHighDpiProfile::navigationHeight
+                                                                      : metrics.headerHeight,
+                                          tabsAtBottom, showStatus ? BaseTheme::headerStatusHeight() : 0);
+  // Status chrome shares subpage header coordinates; only content inherits the safe-area top.
+  if (showStatus) layout.statusBar.y = metrics.topPadding;
+  return layout;
 }
 
 Rect Activity::pageContentRect() const {

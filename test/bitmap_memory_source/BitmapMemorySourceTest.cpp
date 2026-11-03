@@ -31,7 +31,7 @@ void writeLE32(std::vector<uint8_t>& bytes, const size_t offset, const uint32_t 
 }
 
 std::vector<uint8_t> makeBitmap(const uint16_t bpp) {
-  const uint32_t colors = 1u << bpp;
+  const uint32_t colors = bpp <= 8 ? 1u << bpp : 0;
   const uint32_t rowBytes = (kWidth * bpp + 31) / 32 * 4;
   const uint32_t pixelOffset = 14 + 40 + colors * 4;
   const uint32_t imageBytes = rowBytes * kHeight;
@@ -79,8 +79,8 @@ std::vector<uint8_t> decodeRows(Bitmap& bitmap) {
 }
 }  // namespace
 
-TEST(BitmapMemorySource, MatchesFileSourceForPalettedRows) {
-  for (const uint16_t bpp : std::array<uint16_t, 3>{1, 2, 4}) {
+TEST(BitmapMemorySource, MatchesFileSourceForSupportedRows) {
+  for (const uint16_t bpp : std::array<uint16_t, 6>{1, 2, 4, 8, 24, 32}) {
     const auto bytes = makeBitmap(bpp);
     HalFile file(bytes.data(), bytes.size());
     Bitmap fileBitmap(file);
@@ -118,6 +118,64 @@ TEST(BitmapMemorySource, ReportsTruncatedPixelRow) {
 TEST(BitmapMemorySource, RejectsPixelOffsetPastBuffer) {
   auto bytes = makeBitmap(4);
   writeLE32(bytes, 10, static_cast<uint32_t>(bytes.size() + 1));
+  Bitmap bitmap(bytes.data(), bytes.size());
+  EXPECT_EQ(bitmap.parseHeaders(), BmpReaderError::SeekPixelDataFailed);
+}
+
+TEST(BitmapMemorySource, RejectsPixelOffsetInsideMetadata) {
+  for (const uint16_t bpp : std::array<uint16_t, 3>{1, 8, 24}) {
+    auto bytes = makeBitmap(bpp);
+    writeLE32(bytes, 10, bpp == 24 ? 0 : 54);
+    HalFile file(bytes.data(), bytes.size());
+    Bitmap fileBitmap(file);
+    Bitmap memoryBitmap(bytes.data(), bytes.size());
+    EXPECT_EQ(fileBitmap.parseHeaders(), BmpReaderError::SeekPixelDataFailed) << "bpp=" << bpp;
+    EXPECT_EQ(memoryBitmap.parseHeaders(), BmpReaderError::SeekPixelDataFailed) << "bpp=" << bpp;
+  }
+}
+
+TEST(BitmapMemorySource, ReadsPaletteAfterExtendedDib) {
+  for (const uint32_t dibSize : std::array<uint32_t, 2>{108, 124}) {
+    for (const uint16_t bpp : std::array<uint16_t, 4>{1, 2, 4, 8}) {
+      const auto original = makeBitmap(bpp);
+      auto extended = original;
+      extended.insert(extended.begin() + 54, dibSize - 40, 0);
+      writeLE32(extended, 2, static_cast<uint32_t>(extended.size()));
+      writeLE32(extended, 10, 14 + dibSize + (1u << bpp) * 4);
+      writeLE32(extended, 14, dibSize);
+      Bitmap expected(original.data(), original.size());
+      const auto expectedRows = decodeRows(expected);
+      HalFile file(extended.data(), extended.size());
+      Bitmap fileBitmap(file);
+      Bitmap memoryBitmap(extended.data(), extended.size());
+      EXPECT_EQ(decodeRows(fileBitmap), expectedRows) << "DIB=" << dibSize << ", bpp=" << bpp;
+      EXPECT_EQ(decodeRows(memoryBitmap), expectedRows) << "DIB=" << dibSize << ", bpp=" << bpp;
+    }
+  }
+}
+
+TEST(BitmapMemorySource, AccountsForExternalBitfieldMasks) {
+  const auto original = makeBitmap(32);
+  auto bytes = original;
+  bytes.insert(bytes.begin() + 54, 12, 0);
+  writeLE32(bytes, 2, static_cast<uint32_t>(bytes.size()));
+  writeLE32(bytes, 10, 66);
+  writeLE32(bytes, 30, 3);
+  writeLE32(bytes, 54, 0x00FF0000);
+  writeLE32(bytes, 58, 0x0000FF00);
+  writeLE32(bytes, 62, 0x000000FF);
+  Bitmap expected(original.data(), original.size());
+  Bitmap bitmap(bytes.data(), bytes.size());
+  EXPECT_EQ(decodeRows(bitmap), decodeRows(expected));
+
+  writeLE32(bytes, 10, 54);
+  Bitmap overlapping(bytes.data(), bytes.size());
+  EXPECT_EQ(overlapping.parseHeaders(), BmpReaderError::SeekPixelDataFailed);
+}
+
+TEST(BitmapMemorySource, RejectsOverflowingDibSize) {
+  auto bytes = makeBitmap(1);
+  writeLE32(bytes, 14, UINT32_MAX);
   Bitmap bitmap(bytes.data(), bytes.size());
   EXPECT_EQ(bitmap.parseHeaders(), BmpReaderError::SeekPixelDataFailed);
 }

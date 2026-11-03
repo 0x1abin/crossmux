@@ -36,10 +36,10 @@ namespace {
 // Tab labels for Font | Size | Layout | Style.
 constexpr StrId TAB_NAME_IDS[] = {StrId::STR_FONT, StrId::STR_SIZE, StrId::STR_LAYOUT, StrId::STR_STYLE};
 
-constexpr StrId LAYOUT_ROW_NAME_IDS[] = {StrId::STR_LINE_SPACING,      StrId::STR_WORD_SPACING,
-                                         StrId::STR_CHARACTER_SPACING, StrId::STR_EXTRA_SPACING,
-                                         StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
-                                         StrId::STR_ALIGNMENT,         StrId::STR_SCREEN_MARGIN};
+constexpr StrId LAYOUT_ROW_NAME_IDS[] = {
+    StrId::STR_LINE_SPACING,  StrId::STR_WORD_SPACING,      StrId::STR_CHARACTER_SPACING,
+    StrId::STR_EXTRA_SPACING, StrId::STR_FIRST_LINE_INDENT, StrId::STR_PARAGRAPH_INDENTATION,
+    StrId::STR_ALIGNMENT,     StrId::STR_SCREEN_MARGIN,     StrId::STR_VERTICAL_BOTTOM_ALIGN};
 constexpr StrId STYLE_ROW_NAME_IDS[] = {StrId::STR_FOCUS_READING,
                                         StrId::STR_READING_GUIDE_LINE,
                                         StrId::STR_READING_GUIDE_LINE_STYLE,
@@ -133,7 +133,16 @@ void TextSettingsActivity::onEnter() {
   if (registry_) {
     const auto& families = registry_->getFamilies();
     for (int i = 0; i < static_cast<int>(families.size()); i++) {
-      fonts_.push_back({families[i].name, false, static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i)});
+      FontEntry entry;
+      entry.name = families[i].name;
+      entry.isBuiltin = false;
+      entry.settingIndex = static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
+      // 矢量字体（.ttf/.otf/.ttc）是运行时光栅化的，任意字号都能显示；其余是预烤好的
+      // .cpfont 字集。标记只进 label，不进 name —— 见 FontEntry::label 的说明。
+      // / Vector families are rasterized at runtime and work at any size; the rest are
+      // pre-rasterized .cpfont sets. The marker goes into `label`, never into `name`.
+      if (families[i].vector) entry.label = entry.name + "  " + I18N.get(StrId::STR_VECTOR_FONT_TAG);
+      fonts_.push_back(std::move(entry));
     }
   }
 
@@ -167,7 +176,13 @@ void TextSettingsActivity::onEnter() {
   }
 }
 
-void TextSettingsActivity::onExit() { Activity::onExit(); }
+void TextSettingsActivity::onExit() {
+  // Release .cpfont preview faces; the vector-font cache has a separate lifetime.
+  if (renderer.hasFrameBuffer()) {
+    sdFontSystem.releaseLoadedFont(renderer);
+  }
+  Activity::onExit();
+}
 
 // Rebuilds rowItems_ (label + actionValue) for the active tab. Structural —
 // call only when tab_ or its backing data (fonts_/sizes_) changes, never from
@@ -181,7 +196,7 @@ void TextSettingsActivity::rebuildRowItems() {
     fui::ListItem item;
     switch (tab_) {
       case Tab::Family:
-        item.label = fonts_[i].name.c_str();
+        item.label = fonts_[i].label.empty() ? fonts_[i].name.c_str() : fonts_[i].label.c_str();
         break;
       case Tab::Size:
         item.label = sizes_[i].name.c_str();
@@ -347,6 +362,17 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
           break;
         case StyleRow::AntiAliasing:
           GUI.setCheckboxRow(rowItems_[i], SETTINGS.textAntiAliasing);
+          break;
+        default:
+          break;
+      }
+    } else if (tab_ == Tab::Layout) {
+      // Boolean layout rows render as a checkbox, matching the Style tab's
+      // toggle rows (checked box when on, empty box when off). The visible row
+      // index maps 1:1 onto LayoutRow (same ordering as LAYOUT_ROW_NAME_IDS).
+      switch (static_cast<LayoutRow>(i)) {
+        case LayoutRow::VerticalBottomAlign:
+          GUI.setCheckboxRow(rowItems_[i], SETTINGS.verticalBottomAlign);
           break;
         default:
           break;
@@ -595,6 +621,12 @@ void TextSettingsActivity::confirmLayoutRow(int row) {
       requestUpdate();
       break;
     }
+    case LayoutRow::VerticalBottomAlign:
+      // Plain on/off toggle, like the Style tab's boolean rows.
+      SETTINGS.verticalBottomAlign = !SETTINGS.verticalBottomAlign;
+      SETTINGS.saveToFile();
+      requestUpdate();
+      break;
 
     default:
       break;
@@ -631,6 +663,9 @@ std::string TextSettingsActivity::layoutValueText(int row) const {
     }
     case LayoutRow::ScreenMargin:
       return std::to_string(SETTINGS.screenMargin);
+    case LayoutRow::VerticalBottomAlign:
+      // Rendered as a checkbox row; no trailing value text.
+      return "";
 
     default:
       return "";
@@ -771,11 +806,16 @@ const SdCardFontFileInfo* TextSettingsActivity::fontFileForFamily(const int list
              : nullptr;
 }
 
-SdCardFontCache::Result TextSettingsActivity::preloadFont(const SdCardFontFileInfo& file, const char* familyName) {
+SdCardFontCache::Result TextSettingsActivity::preloadFont(const SdCardFontFamilyInfo& family,
+                                                          const SdCardFontFileInfo& file) {
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
+  if (!family.filePath(file, path, sizeof(path))) return SdCardFontCache::Result::InvalidFont;
   NetworkStartup::logMemory("font preload begin");
   {
     RenderLock lock(*this);
-    preloadFamilyName_ = familyName;
+    // Settings owns this fixed array; unloading fonts or rescanning the
+    // registry cannot invalidate the label while the render task reads it.
+    preloadFamilyName_ = SETTINGS.sdFontFamilyName;
     preloadPointSize_ = file.pointSize;
     preloadVerifying_ = false;
     preloadCompleted_.store(0);
@@ -787,7 +827,7 @@ SdCardFontCache::Result TextSettingsActivity::preloadFont(const SdCardFontFileIn
   requestUpdateAndWait();
 
   const auto result = SdCardFontCache::preload(
-      file.path.c_str(),
+      path,
       [](size_t completed, size_t total, void* context) {
         auto* self = static_cast<TextSettingsActivity*>(context);
         bool refresh = false;
@@ -870,7 +910,10 @@ void TextSettingsActivity::finishFinalFont(const bool accepted) {
     return;
   }
   const auto* file = fontFileForFamily(currentFamilyIndex_, SETTINGS.fontPointSize);
-  const auto check = file ? SdCardFontCache::preflight(file->path.c_str()) : SdCardFontCache::Result::InvalidFont;
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
+  const auto check = family && file && family->filePath(*file, path, sizeof(path))
+                         ? SdCardFontCache::preflight(path)
+                         : SdCardFontCache::Result::InvalidFont;
   if (check != SdCardFontCache::Result::Ok && check != SdCardFontCache::Result::AlreadyCached) {
     showPreloadFailure(check);
     return;
@@ -892,8 +935,7 @@ void TextSettingsActivity::finishFinalFont(const bool accepted) {
     return;
   }
 
-  const auto result =
-      check == SdCardFontCache::Result::AlreadyCached ? check : preloadFont(*file, SETTINGS.sdFontFamilyName);
+  const auto result = check == SdCardFontCache::Result::AlreadyCached ? check : preloadFont(*family, *file);
   const bool succeeded = result == SdCardFontCache::Result::Ok || result == SdCardFontCache::Result::AlreadyCached;
   SETTINGS.sdFontFlashPreload = succeeded ? 1 : 0;
   SETTINGS.saveToFile();

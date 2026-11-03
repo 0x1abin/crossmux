@@ -68,12 +68,36 @@ bool XtcReaderActivity::handleFormatInput() {
   }
 
   // Enter chapter selection activity on Confirm release or touch menu gesture
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
-      ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
+  const bool touchMenu = ReaderUtils::isTouchMenuGesture(renderer, mappedInput);
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || touchMenu) {
+    if (touchMenu && xtc->hasChapters() && !xtc->getChapters().empty()) haptic_feedback::touchAction();
     openChapterSelection();
     return true;
   }
   return false;
+}
+
+bool XtcReaderActivity::handleZoneShortAction(const uint8_t action) {
+  // XTC comics have no bookmark / dictionary / KOReader sync / percent jump:
+  // only the base actions (orientation, frontlight, home) and the chapter jump
+  // apply to short taps.
+  if (action == CrossPointSettings::TAP_ZONE_CHAPTER || action == CrossPointSettings::TAP_ZONE_MENU) {
+    openChapterSelection();
+    return true;
+  }
+  return ReaderActivity::handleZoneShortAction(action);
+}
+
+bool XtcReaderActivity::handleZoneLongAction(const uint8_t action) {
+  switch (action) {
+    case CrossPointSettings::TAP_ZONE_LONG_CHAPTER:
+    case CrossPointSettings::TAP_ZONE_LONG_MENU:
+      // XTC has no reader menu: the chapter selector doubles as its menu.
+      openChapterSelection();
+      return true;
+    default:
+      return ReaderActivity::handleZoneLongAction(action);
+  }
 }
 
 void XtcReaderActivity::applyInitialOrientation() { renderer.setOrientation(GfxRenderer::Orientation::Portrait); }
@@ -304,7 +328,7 @@ void XtcReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
-  markPageRendered();
+  if (renderer.displayCommitted()) markPageRendered();
 }
 
 bool XtcReaderActivity::pageTurn(bool isForward) {

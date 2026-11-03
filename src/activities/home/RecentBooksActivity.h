@@ -7,13 +7,13 @@
 #include "RecentBooksStore.h"
 #include "activities/UiListActivity.h"
 
-class RecentBooksActivity final : public UiListActivity {
+class RecentBooksActivity : public UiListActivity {
  public:
   explicit RecentBooksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
   void onEnter() override;
   void onExit() override;
 
- private:
+ protected:
   int listCount() const override { return static_cast<int>(recentBooks.size()); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
@@ -24,7 +24,8 @@ class RecentBooksActivity final : public UiListActivity {
   const char* headerTitle() const override { return tr(STR_MENU_RECENT_BOOKS); }
   void drawFooter() override;
 
-  std::vector<RecentBook> recentBooks;
+  // The store owns the books; both skins reuse it without copying titles and paths.
+  const std::vector<RecentBook>& recentBooks = RECENT_BOOKS.getBooks();
   // Row buffer, built in loadRecentBooks() (not buildScreen(), which reuses
   // it on every repaint instead of rebuilding a ListItem vector per render).
   std::vector<freeink::ui::ListItem> rowItems;
@@ -32,6 +33,7 @@ class RecentBooksActivity final : public UiListActivity {
 
   // Data loading
   void loadRecentBooks();
+  virtual void onBooksChanged() {}
 
   // Show an OK/Cancel prompt to remove the given book from the Recent Books list.
   void promptRemoveBook(const std::string& path, const std::string& title);

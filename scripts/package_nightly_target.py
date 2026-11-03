@@ -9,6 +9,8 @@ import json
 import os
 import shutil
 import subprocess
+import struct
+import zipfile
 from pathlib import Path
 
 from nightly_targets import (
@@ -16,9 +18,11 @@ from nightly_targets import (
     CHANNELS,
     TARGETS,
     asset_name,
+    bundle_name,
     environment_for,
     manifest_name,
     matrix,
+    public_target,
     version_for,
 )
 FULL_INSTALL_SEGMENTS = (
@@ -27,17 +31,12 @@ FULL_INSTALL_SEGMENTS = (
     ('boot_app0', 'boot_app0.bin', 0xE000),
     ('firmware', 'firmware.bin', 0x10000),
 )
-STABLE_C3_SEGMENTS = (
-    ('bootloader', 'bootloader.bin', 0x0000),
-    ('partitions', 'partitions.bin', 0x8000),
-    ('firmware', 'firmware.bin', 0x10000),
-)
-OTA_SEGMENT = (('firmware', 'firmware.bin', 0x10000),)
 EXPECTED_PARTITIONS = {
     'otadata': (0xE000, 0x2000),
     'app0': (0x10000, 0x640000),
     'app1': (0x650000, 0x640000),
 }
+EXPECTED_PARTITION_TYPES = {'otadata': (1, 0), 'app0': (0, 0x10), 'app1': (0, 0x11)}
 
 
 def sha256(path):
@@ -65,6 +64,26 @@ def verify_partition_csv(root):
         raise SystemExit(f'partitions.csv has an unsupported OTA layout: {found!r}')
 
 
+def verify_partition_binary(path):
+    found = {}
+    data = path.read_bytes()
+    for offset in range(0, len(data) - 31, 32):
+        magic, kind, subtype, address, size, label, _ = struct.unpack_from('<HBBII16sI', data, offset)
+        if magic in (0xFFFF, 0xEBEB):
+            break
+        if magic != 0x50AA:
+            raise SystemExit(f'{path.name} contains an invalid partition entry')
+        name = label.split(b'\0', 1)[0].decode('ascii')
+        if name in EXPECTED_PARTITIONS:
+            if name in found:
+                raise SystemExit(f'{path.name} contains duplicate partition {name}')
+            if (kind, subtype) != EXPECTED_PARTITION_TYPES[name]:
+                raise SystemExit(f'{path.name} contains an invalid type for partition {name}')
+            found[name] = (address, size)
+    if found != EXPECTED_PARTITIONS:
+        raise SystemExit(f'{path.name} has an unsupported OTA layout: {found!r}')
+
+
 def find_boot_app0():
     core = Path(os.environ.get('PLATFORMIO_CORE_DIR') or Path.home() / '.platformio').expanduser()
     path = core / 'packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin'
@@ -79,7 +98,7 @@ def copy_asset(source, destination):
     shutil.copyfile(source, destination)
 
 
-def verify_firmware(path, chip_id, board_tag):
+def verify_firmware(path, chip_id, board_tag, expected_version=None):
     with path.open('rb') as stream:
         header = stream.read(24)
         if len(header) != 24 or header[0] != 0xE9:
@@ -91,13 +110,22 @@ def verify_firmware(path, chip_id, board_tag):
             )
 
         marker = f'CROSSPOINT-BOARD-V1:{board_tag};'.encode()
+        version_marker = expected_version.encode() + b'\0' if expected_version is not None else None
+        found_board = False
+        found_version = version_marker is None
         overlap = b''
         while chunk := stream.read(64 * 1024):
             data = overlap + chunk
             if marker in data:
+                found_board = True
+            if version_marker is not None and version_marker in data:
+                found_version = True
+            if found_board and found_version:
                 return
-            overlap = data[-(len(marker) - 1):]
-    raise SystemExit(f'{path.name} does not contain board tag {board_tag!r}')
+            overlap = data[-(max(len(marker), len(version_marker or b'')) - 1):]
+    if not found_board:
+        raise SystemExit(f'{path.name} does not contain board tag {board_tag!r}')
+    raise SystemExit(f'{path.name} does not contain firmware version {expected_version!r}')
 
 
 def package_target(root, target_id, channel, output):
@@ -108,16 +136,10 @@ def package_target(root, target_id, channel, output):
     build = root / '.pio/build' / environment
     output.mkdir(parents=True, exist_ok=True)
     verify_partition_csv(root)
+    verify_partition_binary(build / 'partitions.bin')
 
-    segments = (
-        FULL_INSTALL_SEGMENTS
-        if target['fullInstall']
-        else STABLE_C3_SEGMENTS
-        if channel == 'stable'
-        else OTA_SEGMENT
-    )
     assets = []
-    for role, source_name, offset in segments:
+    for role, source_name, offset in FULL_INSTALL_SEGMENTS:
         source = find_boot_app0() if role == 'boot_app0' else build / source_name
         destination = output / asset_name(target_id, source_name)
         copy_asset(source, destination)
@@ -132,31 +154,21 @@ def package_target(root, target_id, channel, output):
     firmware = next(output / asset['name'] for asset in assets if asset['role'] == 'firmware')
     if firmware.stat().st_size > EXPECTED_PARTITIONS['app0'][1]:
         raise SystemExit(f'{firmware.name} exceeds the OTA app slot')
-    verify_firmware(firmware, target['chipId'], target['boardTag'])
-
     config = configparser.ConfigParser()
     config.read(root / 'platformio.ini')
     short_sha = git_value(root, 'rev-parse', '--short=7', 'HEAD')
+    version = version_for(config['crosspoint']['version'], target_id, channel, 'global', short_sha)
+    verify_firmware(firmware, target['chipId'], target['boardTag'], version)
     manifest = {
+        **public_target(target_id),
         'schemaVersion': 1,
         'channel': channel,
-        'targetId': target_id,
-        'models': target['models'],
-        'deviceSlug': target['deviceSlug'],
-        'boardTag': target['boardTag'],
-        'supportedChannels': target['supportedChannels'],
         'environment': environment,
-        'chip': target['chip'],
-        'version': version_for(
-            config['crosspoint']['version'], target_id, channel, 'global', short_sha
-        ),
+        'version': version,
         'crossmuxSha': git_value(root, 'rev-parse', 'HEAD'),
         'sdkSha': git_value(root / 'freeink-sdk', 'rev-parse', 'HEAD'),
         'assets': assets,
     }
-    if target['fullInstall']:
-        manifest['partitionProfile'] = 'crossmux-sticky-v1'
-        manifest['flash'] = {'size': 0x1000000, 'mode': 'dio', 'frequency': '80m'}
 
     manifest_paths = []
     for flavor in FLAVOR_TOKENS:
@@ -166,9 +178,13 @@ def package_target(root, target_id, channel, output):
 
     checksum_paths = [output / asset['name'] for asset in assets] + manifest_paths
     checksum_name = f"{target['deviceSlug']}-SHA256SUMS"
-    (output / checksum_name).write_text(
+    checksum_path = output / checksum_name
+    checksum_path.write_text(
         ''.join(f'{sha256(path)}  {path.name}\n' for path in checksum_paths)
     )
+    with zipfile.ZipFile(output / bundle_name(target_id, version), 'w', zipfile.ZIP_DEFLATED) as bundle:
+        for path in [*checksum_paths, checksum_path]:
+            bundle.write(path, path.name)
     print(f"Packaged {target_id} {manifest['version']} in {output}")
 
 

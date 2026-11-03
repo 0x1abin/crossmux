@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "InxRecentLayout.h"
+#include "RecentBooksActivity.h"
 #include "RecentBooksStore.h"
-#include "activities/Activity.h"
 
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
 #include <cstddef>
@@ -20,7 +20,7 @@ struct ReadingBookStats;
 class HalFile;
 #endif
 
-class InxRecentActivity final : public Activity {
+class InxRecentActivity final : public RecentBooksActivity {
   enum class CoverCacheState : uint8_t { Unchecked, Ready, Missing, Unavailable };
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
   enum class CoverCacheLoadResult : uint8_t { Loaded, Stream, Invalid };
@@ -46,13 +46,13 @@ class InxRecentActivity final : public Activity {
   size_t cachedCoverBytes = 0;
 #endif
   int selected = 0;
+  std::atomic<int> visibleStart{0};
+  std::atomic<int> visibleCount{0};
   int thumbnailHeight = 0;
 
   InxRecentLayout layout() const;
   Rect contentRect() const;
   const ReadingBookStats* statsAt(int index) const;
-  int indexFromPoint(int x, int y) const;
-  void openSelected();
   void setThumbnailHeight(int displayHeight);
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
   void clearCoverCaches();
@@ -63,21 +63,28 @@ class InxRecentActivity final : public Activity {
 #endif
   bool drawBookCover(int bookIndex, const Rect& bounds);
   bool prepareNextMissingCover();
+  bool handleListSwipe(MappedInputManager::SwipeDir swipe, int startX, int startY) override;
+  int initialConfirmIndex() const override;
 
-  void drawFlow(const Rect& content);
-  void drawGrid(const Rect& content);
-  void drawList(const Rect& content);
-  void drawIcons(const Rect& content);
-  void drawCover(const Rect& content);
+  void drawFlow(UiScreen& screen, const Rect& content);
+  void drawGrid(UiScreen& screen, const Rect& content);
+  void drawList(UiScreen& screen, const Rect& content);
+  void drawIcons(UiScreen& screen, const Rect& content);
+  void drawCover(UiScreen& screen, const Rect& content);
 
  public:
   explicit InxRecentActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("InxRecent", renderer, mappedInput) {}
+      : RecentBooksActivity(renderer, mappedInput) {
+    name = "InxRecent";
+  }
 
-  void onEnter() override;
   void onExit() override;
-  void loop() override;
+  void buildScreen(UiScreen& screen) override;
+  void drawChrome() override;
+  void drawFooter() override;
+  void onBooksChanged() override;
   void render(RenderLock&&) override;
   MainTab mainTab() const override { return MainTab::Recent; }
+  bool hasContentSelection() const override;
   void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };

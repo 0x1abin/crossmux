@@ -23,6 +23,7 @@
 #include "network/CrossMuxEndpoints.h"
 #include "network/HttpDownloader.h"
 #include "util/QrUtils.h"
+#include "util/SleepCover.h"
 #include "util/TimeUtils.h"
 
 namespace {
@@ -106,7 +107,7 @@ void AirPageActivity::onEnter() {
   }
   rebuildHistoryRows();
   autoSleepWallpaper_ = airpage::loadAutoSleepWallpaper();
-  airpage::AirPageWallpaper::recoverInterruptedTransaction();
+  (void)sleepCover::recover();
 
   const std::string& deviceId = airpage::deviceId();
   uploadUrl_.reserve(64 + deviceId.size());

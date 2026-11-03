@@ -61,6 +61,7 @@ MIGRATION
     }
 };
 Settings SETTINGS;
+bool saveFailed_ = false;
 namespace timezones {
     int calls = 0;
     uint8_t offset = 48;
@@ -77,8 +78,8 @@ int main() {
     constexpr AppId ids[] = {AppId::ReadingStats, AppId::WeRead, AppId::Sudoku, AppId::Gomoku,
         AppId::ChineseChess, AppId::Minesweeper, AppId::Game2048, AppId::UglyAvatar,
         AppId::Standby, AppId::AirPage, AppId::Buddy, AppId::Sokoban, AppId::PixelSwitch,
-        AppId::FileTransfer, AppId::OpdsBrowser, AppId::Calculator, AppId::Woodfish};
-    for (unsigned i = 0; i < 17; ++i) assert(static_cast<unsigned>(ids[i]) == i);
+        AppId::FileTransfer, AppId::OpdsBrowser, AppId::Calculator, AppId::Woodfish, AppId::Library};
+    for (unsigned i = 0; i < 18; ++i) assert(static_cast<unsigned>(ids[i]) == i);
     constexpr uint32_t expected = (1u<<4)|(1u<<5)|(1u<<6)|(1u<<7)|(1u<<10)|(1u<<11)|(1u<<12)|(1u<<16);
     static_assert(DEFAULT_HIDDEN_APPS_MASK == expected);
     assert(SETTINGS.hiddenAppsMask == expected);
@@ -94,7 +95,7 @@ int main() {
         assert(SETTINGS.hiddenAppsMask == mask);
     }
     // Exhaust all current app masks, including every visible/hidden combination.
-    for (uint32_t mask = 0; mask < (1u << 17); ++mask) {
+    for (uint32_t mask = 0; mask < (1u << 18); ++mask) {
         SETTINGS.hiddenAppsMask = mask | 0x80000000u;
         for (uint8_t language : {0, 1, 2}) {
             SETTINGS.applyLanguageSelection(language);

@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <BlePageTurnerJson.h>
 #include <BoardConfig.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -19,6 +20,7 @@
 #include "SettingsList.h"
 #include "fontIds.h"
 #include "util/ParagraphIndentMigration.h"
+#include "util/PluginLocations.h"
 
 // Resolved here (not in the header) so I18nKeys.h — auto-generated and
 // changed on every translation edit — doesn't pull a recompile of every
@@ -33,6 +35,15 @@ constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 constexpr char LANG_FILE_BIN[] = "/.crosspoint/language.bin";
 constexpr char LANG_FILE_BAK[] = "/.crosspoint/language.bin.bak";
 constexpr uint8_t FAKE_BOLD_VERSION = 1;
+// Touch reader gesture config schema version: v2 folded the single
+// touchReaderControls selector into the per-direction gesture pair, removed
+// the Inverted Tap gesture (folded to Tap Only) and added the 3x3 tap zones; v3
+// preserves the legacy Inverted Tap side swap by exchanging the default zones
+// for saves that never had custom ones.
+constexpr uint8_t TOUCH_CONTROLS_VERSION = 3;
+// Legacy single-select touch mode values from before the per-direction pair.
+constexpr uint8_t LEGACY_TOUCH_SWIPE = 2;
+constexpr uint8_t LEGACY_TOUCH_INVERTED_TAP = 3;
 constexpr std::array<uint8_t, 3> LEGACY_FAKE_BOLD_MIGRATION = {
     CrossPointSettings::SYNTHETIC_BOLD_OFF,
     CrossPointSettings::SYNTHETIC_BOLD_STANDARD,
@@ -205,11 +216,9 @@ uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue)
 void CrossPointSettings::toJson(JsonDocument& doc) const {
   const CrossPointSettings& s = *this;
 
-  for (const auto& info : getBaseSettingsList()) {
-    if (!isSettingAvailableForPersistence(info)) continue;
-    if (!info.key) continue;
-    // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) continue;
+  auto visit = [&](const SettingInfo& info) {
+    if (!isSettingAvailableForPersistence(info) || !info.key) return;
+    if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) return;
 
     if (info.stringOffset) {
       const char* strPtr = (const char*)&s + info.stringOffset;
@@ -225,15 +234,20 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     } else {
       doc[info.key] = s.*(info.valuePtr);
     }
-  }
+  };
+  forEachBaseSetting(visit);
 
   doc["fakeBoldVersion"] = FAKE_BOLD_VERSION;
+  // Written so the touch gesture migration in loadTouchGestureSettings() runs
+  // once: without it the version check reads 0 on every boot and re-applies the
+  // side swap to a save that already has it.
+  doc["touchControlsVersion"] = TOUCH_CONTROLS_VERSION;
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   doc["frontButtonBack"] = frontButtonBack;
   doc["frontButtonConfirm"] = frontButtonConfirm;
   doc["frontButtonLeft"] = frontButtonLeft;
   doc["frontButtonRight"] = frontButtonRight;
-  doc["bluetoothEnabled"] = bluetoothEnabled;
+  doc["bluetoothEnabled"] = ble.enabled;
   JsonArray storedBleMap = doc["bleKeyMap"].to<JsonArray>();
   for (const auto& entry : bleKeyMap) {
     if (bleinput::isEmpty(entry)) continue;
@@ -246,6 +260,18 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["hiddenAppsMask"] = hiddenAppsMask;
   doc["appsCatalogVersion"] = appsCatalogVersion;
   doc["buddyClaimed"] = buddyClaimed;
+  JsonArray tapZonesArray = doc["tapZones"].to<JsonArray>();
+  for (const uint8_t zone : tapZones) {
+    tapZonesArray.add(zone);
+  }
+  JsonArray tapZonesLongArray = doc["tapZonesLong"].to<JsonArray>();
+  for (const uint8_t action : tapZonesLong) {
+    tapZonesLongArray.add(action);
+  }
+  JsonArray miniZonesArray = doc["miniZones"].to<JsonArray>();
+  for (const uint8_t action : miniZones) {
+    miniZonesArray.add(action);
+  }
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
   doc["fontFamily"] = fontFamily;
@@ -260,6 +286,17 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     doc["dictionaryName"] = dictionaryName;
   }
   doc["otaNightlyEnabled"] = otaNightlyEnabled;
+  // Home-button gestures are added dynamically to getSettingsList() (not the
+  // base list), so they must be persisted manually here.
+  if (BoardConfig::hasHomeKey()) {
+    doc["homeButtonTapAction"] = homeButtonTapAction;
+    doc["homeButtonDoubleTapAction"] = homeButtonDoubleTapAction;
+    doc["homeButtonLongPressAction"] = homeButtonLongPressAction;
+  }
+  // The displayed option list varies by board, so this setting uses a dynamic
+  // display-index mapping and is skipped by the generic persistence loop.
+  doc["longPressMenuFunction"] = longPressMenuFunction;
+  doc["shortPwrBtn"] = shortPwrBtn;
 
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
@@ -275,6 +312,8 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   if (keyboardLayouts != 0) {
     doc["keyboardLayouts"] = keyboardLayouts;
   }
+
+  bleturner::writeJson(ble, doc);
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc) {
@@ -290,6 +329,14 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
 #endif
 
+  if (doc["vibration"].isNull() && !doc["hapticFeedbackLevel"].isNull()) {
+    const uint8_t legacy =
+        clamp(doc["hapticFeedbackLevel"].as<uint8_t>(), HAPTIC_FEEDBACK_LEVEL_COUNT, HAPTIC_FEEDBACK_MEDIUM);
+    vibration = legacy == HAPTIC_FEEDBACK_OFF ? VIBRATION_OFF : VIBRATION_TOUCH_PAGE;
+    hapticIntensity = legacy == HAPTIC_FEEDBACK_OFF ? HAPTIC_MEDIUM : legacy - HAPTIC_FEEDBACK_LOW;
+    needsResave = true;
+  }
+
   // Legacy migration: the aggregate statusBar field predates the split fields.
   if (doc["statusBarChapterPageCount"].isNull()) {
     statusBar = clamp(doc["statusBar"] | static_cast<uint8_t>(FULL), STATUS_BAR_MODE_COUNT, FULL);
@@ -297,11 +344,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
 
-  for (const auto& info : getBaseSettingsList()) {
-    if (!isSettingAvailableForPersistence(info)) continue;
-    if (!info.key) continue;
-    // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) continue;
+  auto visit = [&](const SettingInfo& info) {
+    if (!isSettingAvailableForPersistence(info) || !info.key) return;
+    if (!info.valuePtr && !info.signedValuePtr && !info.stringOffset) return;
 
     if (info.stringOffset) {
       // destPtr starts out holding the struct-initializer default; it stays that
@@ -311,7 +356,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         LOG_ERR("CPS", "Misconfigured SettingInfo: stringMaxLen is 0 for key '%s'", info.key);
         destPtr[0] = '\0';
         needsResave = true;
-        continue;
+        return;
       }
 
       bool loaded = false;
@@ -351,9 +396,15 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       const uint8_t fieldDefault = s.*(info.valuePtr);  // struct-initializer default, read before we overwrite it
       uint8_t v = doc[info.key] | fieldDefault;
       if (info.type == SettingType::ENUM) {
-        const uint8_t count = info.valuePtr == &CrossPointSettings::uiTheme
-                                  ? static_cast<uint8_t>(COVER_GRID + 1)
-                                  : static_cast<uint8_t>(info.enumLabels().size());
+        // Clamp against the stored-value range, not the number of rows the UI
+        // shows: a row can be worth more than one stored value. The page-turn
+        // gestures are the case that matters -- the rows are four, but a save
+        // may also hold INVERTED_TAP (3), and the count must stay below the
+        // value that means Disabled (4), or a reload rewrites it to the
+        // default and the setting silently reverts.
+        const uint8_t count = info.valuePtr == &CrossPointSettings::uiTheme ? static_cast<uint8_t>(COVER_GRID + 1)
+                              : info.enumValueCount != 0                    ? info.enumValueCount
+                                                         : static_cast<uint8_t>(info.enumLabels().size());
         v = clamp(v, count, fieldDefault);
       } else if (info.type == SettingType::TOGGLE) {
         v = clamp(v, (uint8_t)2, fieldDefault);
@@ -365,6 +416,15 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       }
       s.*(info.valuePtr) = v;
     }
+  };
+  forEachBaseSetting(visit);
+
+  // Plugin System did not exist in older settings files. Preserve the behavior
+  // of users who already have SD plugins installed, while keeping the new
+  // default disabled on clean installs.
+  if (doc["pluginsEnabled"].isNull()) {
+    pluginsEnabled = PluginLocations::anyPluginInstalledOnDisk() ? 1 : 0;
+    needsResave = true;
   }
 
   if ((doc["fakeBoldVersion"] | static_cast<uint8_t>(0)) < FAKE_BOLD_VERSION) {
@@ -382,20 +442,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   paragraphIndentSpaces = migrateParagraphIndentSpaces(hasSavedWidth, savedWidth);
   if (!hasSavedWidth || savedWidth < 0 || savedWidth > 5) needsResave = true;
 
-  // Older files stored one combined touch mode under "touchReaderControls":
-  // 0=off, 1=tap, 2=swipe, 3=inverted tap. Split it into the master toggle
-  // plus the per-direction gesture pair (the generic loop above already folded
-  // out-of-range toggle values back to the On default).
-  if (doc["pageTurnGesture"].isNull() && doc["previousPageGesture"].isNull() &&
-      doc["touchReaderControls"].is<uint8_t>()) {
-    const uint8_t mode = doc["touchReaderControls"].as<uint8_t>();
-    if (mode >= 1 && mode <= 3) {
-      touchReaderControls = TOUCH_READER_ON;
-      pageTurnGesture = mode == 1 ? TAP_ONLY : mode == 2 ? SWIPE_ONLY : INVERTED_TAP;
-      previousPageGesture = pageTurnGesture;
-      needsResave = true;
-    }
-  }
+  // Touch gesture pair: legacy combined modes and the folded-away Inverted Tap
+  // value are migrated there, in the same order as the rest of the load.
+  if (loadTouchGestureSettings(doc)) needsResave = true;
 
   if (doc["sleepTimeoutMinutes"].isNull() && !doc["sleepTimeout"].isNull()) {
     const uint8_t legacyValue =
@@ -432,6 +481,53 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   appsCatalogVersion = APPS_CATALOG_VERSION;
   buddyClaimed = clamp(doc["buddyClaimed"] | static_cast<uint8_t>(0), static_cast<uint8_t>(2), static_cast<uint8_t>(0));
 
+  // Reader tap zones: keep the struct defaults for saves that predate the
+  // 3x3 grid, validate any stored values, and resave so the field catches up.
+  const JsonArrayConst storedTapZones = doc["tapZones"];
+  if (!storedTapZones.isNull()) {
+    for (uint8_t i = 0; i < 9 && i < storedTapZones.size(); ++i) {
+      const uint8_t zone = storedTapZones[i] | TAP_ZONE_NONE;
+      tapZones[i] = zone < TAP_ZONE_ACTION_COUNT ? zone : TAP_ZONE_NONE;
+    }
+    if (static_cast<uint8_t>(storedTapZones.size()) != 9) needsResave = true;
+  } else {
+    needsResave = true;
+  }
+
+  // Long-press actions for the 9 main zones. Saves from the 3x3-grid era
+  // predate long-press zones: migrate so a BOOKMARK/DICTIONARY zone keeps its
+  // original long-press behaviour, then resave once so the field catches up.
+  const JsonArrayConst storedTapZonesLong = doc["tapZonesLong"];
+  if (!storedTapZonesLong.isNull()) {
+    for (uint8_t i = 0; i < 9 && i < storedTapZonesLong.size(); ++i) {
+      const uint8_t action = storedTapZonesLong[i] | TAP_ZONE_LONG_NONE;
+      tapZonesLong[i] = action < TAP_ZONE_LONG_ACTION_COUNT ? action : TAP_ZONE_LONG_NONE;
+    }
+    if (static_cast<uint8_t>(storedTapZonesLong.size()) != 9) needsResave = true;
+  } else {
+    for (uint8_t i = 0; i < 9; ++i) {
+      if (tapZones[i] == TAP_ZONE_BOOKMARK) {
+        tapZonesLong[i] = TAP_ZONE_LONG_BOOKMARK;
+      } else if (tapZones[i] == TAP_ZONE_DICTIONARY) {
+        tapZonesLong[i] = TAP_ZONE_LONG_DICTIONARY;
+      }
+    }
+    needsResave = true;
+  }
+
+  // Extra small corner/edge zones (new field: absent in older saves, keep the
+  // struct defaults). Mini zones are tap-only; they have no long-press field.
+  const JsonArrayConst storedMiniZones = doc["miniZones"];
+  if (!storedMiniZones.isNull()) {
+    for (uint8_t i = 0; i < 6 && i < storedMiniZones.size(); ++i) {
+      const uint8_t action = storedMiniZones[i] | TAP_ZONE_NONE;
+      miniZones[i] = action < TAP_ZONE_ACTION_COUNT ? action : TAP_ZONE_NONE;
+    }
+    if (static_cast<uint8_t>(storedMiniZones.size()) != 6) needsResave = true;
+  } else {
+    needsResave = true;
+  }
+
   // Reader font size — an actual point size since 1.5. Files written by 1.4 and
   // earlier hold the old SMALL/MEDIUM/LARGE/EXTRA_LARGE slot in 0..3; no font is
   // renderable at those sizes, so the range is unambiguous and folds to the
@@ -446,11 +542,28 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Font family — uses dynamic getter/setter in SettingsList so the generic loop skips it.
   const uint8_t storedFontFamily = doc["fontFamily"] | (uint8_t)0;
   fontFamily = clamp(storedFontFamily, BUILTIN_FONT_COUNT, 0);
+  // Home-button gestures are persisted manually (see toJson), not via the
+  // base settings list loop.
+  if (BoardConfig::hasHomeKey()) {
+    homeButtonTapAction = clamp(static_cast<uint8_t>(doc["homeButtonTapAction"] | homeButtonTapAction),
+                                static_cast<uint8_t>(HomeButtonAction::Count), homeButtonTapAction);
+    homeButtonDoubleTapAction =
+        clamp(static_cast<uint8_t>(doc["homeButtonDoubleTapAction"] | homeButtonDoubleTapAction),
+              static_cast<uint8_t>(HomeButtonAction::Count), homeButtonDoubleTapAction);
+    homeButtonLongPressAction =
+        clamp(static_cast<uint8_t>(doc["homeButtonLongPressAction"] | homeButtonLongPressAction),
+              static_cast<uint8_t>(HomeButtonAction::Count), homeButtonLongPressAction);
+  }
+  // These controls use board-specific display-index mappings and are skipped by
+  // the generic settings loop. Persisted action IDs remain stable across boards.
+  longPressMenuFunction = clamp(doc["longPressMenuFunction"] | (uint8_t)LP_MENU_DISABLED,
+                                (uint8_t)LONG_PRESS_MENU_FUNCTION_COUNT, (uint8_t)LP_MENU_DISABLED);
+  shortPwrBtn = clamp(doc["shortPwrBtn"] | (uint8_t)IGNORE, (uint8_t)SHORT_PWRBTN_COUNT, (uint8_t)IGNORE);
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
-    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync, HomeButtonAction::Ignore,
-                                                  HomeButtonAction::Bookmark, HomeButtonAction::Dictionary,
-                                                  HomeButtonAction::ReaderMenu};
+    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync,       HomeButtonAction::Ignore,
+                                                  HomeButtonAction::Bookmark,   HomeButtonAction::Dictionary,
+                                                  HomeButtonAction::ReaderMenu, HomeButtonAction::CreateClipping};
     if (s.longPressMenuFunction < sizeof(LEGACY) / sizeof(LEGACY[0])) {
       s.homeButtonLongPressAction = static_cast<uint8_t>(LEGACY[s.longPressMenuFunction]);
       needsResave = true;
@@ -517,6 +630,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     keyboardLayouts = doc["keyboardLayouts"].as<uint16_t>();
   }
 
+  if (!bleturner::readJson(ble, doc)) {
+    ble.enabled = bluetoothEnabled ? 1 : 0;
+    needsResave = true;
+  }
+
+  bluetoothEnabled = ble.enabled;
+
   if (needsResave) {
     LOG_DBG("CPS", "Resaving settings to update format");
     requestResave();
@@ -527,8 +647,94 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   return true;
 }
 
+bool CrossPointSettings::loadTouchGestureSettings(JsonVariantConst doc) {
+  CrossPointSettings& s = *this;
+  bool needsResave = false;
+
+  // Older files stored one combined touch mode under "touchReaderControls":
+  // 0=off, 1=tap, 2=swipe, 3=inverted tap. Split it into the master toggle
+  // plus the per-direction gesture pair (the generic loop above already folded
+  // out-of-range toggle values back to the On default).
+  if (doc["pageTurnGesture"].isNull() && doc["previousPageGesture"].isNull() &&
+      doc["touchReaderControls"].is<uint8_t>()) {
+    const uint8_t mode = doc["touchReaderControls"].as<uint8_t>();
+    if (mode >= 1 && mode <= 3) {
+      touchReaderControls = TOUCH_READER_ON;
+      pageTurnGesture = mode == 1 ? TAP_ONLY : mode == 2 ? SWIPE_ONLY : INVERTED_TAP;
+      previousPageGesture = pageTurnGesture;
+      needsResave = true;
+    }
+  }
+
+  // Touch reader gestures: the single touchReaderControls selector (Off / Tap /
+  // Swipe / Inverted Tap) folded into the per-direction gesture pair. The
+  // SettingsList loop above already collapsed the old value to Off/On; read the
+  // raw document here to recover which legacy mode to preserve. v1 saves may
+  // also hold the now-removed Inverted Tap gesture (legacy value 3), which
+  // folds to Tap Only.
+  // A save from the gesture-pair era wrote both directions itself and has no
+  // legacy mode, so only its stored values decide: upstream's classifier
+  // swapped the sides when either direction held the Inverted Tap (3), and the
+  // migration moves exactly that swap into the zones -- the saved pair itself
+  // is never overwritten. touchControlsVersion, written by toJson(), keeps the
+  // swap from running again on the next boot; a save with its own tapZones is
+  // skipped below either way.
+  if ((doc["touchControlsVersion"] | static_cast<uint8_t>(0)) < TOUCH_CONTROLS_VERSION &&
+      !doc["touchReaderControls"].isNull() &&
+      (doc["pageTurnGesture"].isNull() || pageTurnGesture == INVERTED_TAP || previousPageGesture == INVERTED_TAP)) {
+    const uint8_t legacyTouch = doc["touchReaderControls"] | static_cast<uint8_t>(TOUCH_READER_ON);
+    // Only the old single-selector shape (no gesture keys yet) expands the
+    // legacy mode into both directions; a pair-era save keeps its values.
+    const bool expansionPending = doc["pageTurnGesture"].isNull();
+    if (expansionPending) {
+      if (legacyTouch == LEGACY_TOUCH_SWIPE) {
+        pageTurnGesture = SWIPE_ONLY;
+        previousPageGesture = SWIPE_ONLY;
+      } else if (legacyTouch == LEGACY_TOUCH_INVERTED_TAP) {
+        // Legacy Inverted Tap is tap-only on both directions.
+        pageTurnGesture = INVERTED_TAP;
+        previousPageGesture = INVERTED_TAP;
+      } else if (legacyTouch != TOUCH_READER_OFF) {
+        // Legacy Tap mode: taps only, same zones on both directions.
+        pageTurnGesture = TAP_ONLY;
+        previousPageGesture = TAP_ONLY;
+      }
+    }
+    // Either direction holding the legacy Inverted Tap swapped the page-turn
+    // sides (right edge = previous, left edge = next). Keep the swapped zones
+    // for saves that never had custom ones; a save with its own tapZones is
+    // preserved untouched.
+    if ((legacyTouch == LEGACY_TOUCH_INVERTED_TAP || pageTurnGesture == INVERTED_TAP ||
+         previousPageGesture == INVERTED_TAP) &&
+        doc["tapZones"].isNull()) {
+      for (uint8_t i = 0; i < 9; ++i) {
+        if (tapZones[i] == TAP_ZONE_PREV) {
+          tapZones[i] = TAP_ZONE_NEXT;
+        } else if (tapZones[i] == TAP_ZONE_NEXT) {
+          tapZones[i] = TAP_ZONE_PREV;
+        }
+      }
+    }
+    needsResave = true;
+  }
+  // A save may still hold the removed Inverted Tap gesture (3). Its sides are
+  // part of the legacy touch mode handled above (which also swaps the zones),
+  // so keep it verbatim: it behaves like Tap Only, but folding it to a
+  // different stored value here would make the next save silently drop the
+  // distinction before the user ever touches the setting. The settings row
+  // shows it as Tap Only either way (pageTurnGestureDisplayValue).
+  // Older saves from the gesture-pair era wrote only pageTurnGesture; give the
+  // previous direction the same mode instead of silently defaulting it.
+  if (doc["previousPageGesture"].isNull()) {
+    previousPageGesture = pageTurnGesture;
+    needsResave = true;
+  }
+
+  return needsResave;
+}
+
 bool CrossPointSettings::loadFromFile() {
-  if (Storage.exists(getFilePath()) && PersistableStore<CrossPointSettings>::loadFromFile()) {
+  if (PersistableStore<CrossPointSettings>::loadFromFile()) {
     migrateLanguageBinaryFile();
     return true;
   }
@@ -686,6 +892,7 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.characterSpacing = getCharacterSpacing();
   spec.wordSpacingPercent = wordSpacing;
   spec.paragraphAlignment = paragraphAlignment;
+  spec.verticalBottomAlign = verticalBottomAlign != 0;
   spec.viewportWidth = viewportWidth;
   spec.viewportHeight = viewportHeight;
   spec.hyphenationEnabled = hyphenationEnabled != 0;
@@ -696,11 +903,9 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
 }
 
 float CrossPointSettings::getReaderLineCompression() const {
-  // SD card and vector fonts get a wider scale than the built-ins: their
-  // faces carry their own (often generous) natural line height, so the old
-  // Bookerly-tuned 1.1/1.2 steps were visually near-indistinguishable. At
-  // 12pt in portrait (~760px viewport) this scale spans ~26/24/19/15 lines
-  // per page — each step reads as a clearly different density.
+  // One scale for all SD card fonts, whatever their format: .cpfont and vector
+  // fonts both take their line height from FreeType's size metrics. Same values
+  // as the former built-in Noto Serif; Normal keeps the font's own line height.
   if (sdFontFamilyName[0] != '\0') {
     switch (lineSpacing) {
       case TIGHT:
@@ -709,38 +914,22 @@ float CrossPointSettings::getReaderLineCompression() const {
       default:
         return 1.0f;
       case WIDE:
-        return 1.3f;
+        return 1.1f;
       case EXTRA_WIDE:
-        return 1.6f;
+        return 1.2f;
     }
   }
 
-  switch (fontFamily) {
-    case NOTOSERIF:
+  switch (lineSpacing) {
+    case TIGHT:
+      return 0.90f;
+    case NORMAL:
     default:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.95f;
-        case NORMAL:
-        default:
-          return 1.0f;
-        case WIDE:
-          return 1.1f;
-        case EXTRA_WIDE:
-          return 1.2f;
-      }
-    case NOTOSANS:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.90f;
-        case NORMAL:
-        default:
-          return 0.95f;
-        case WIDE:
-          return 1.0f;
-        case EXTRA_WIDE:
-          return 1.05f;
-      }
+      return 0.95f;
+    case WIDE:
+      return 1.0f;
+    case EXTRA_WIDE:
+      return 1.05f;
   }
 }
 
@@ -810,7 +999,7 @@ int CrossPointSettings::getReaderFontId() const {
   // in the page render loop) so rendering is correct even before it has run.
   const uint8_t pt =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
-  if (UiHighDpiProfile::enabled) return UiHighDpiProfile::reader12FontId;
+  if (UiHighDpiProfile::enabled) return NOTOSANS_12_FONT_ID;
   const bool sans = (fontFamily == NOTOSANS);
   switch (pt) {
     case 12:

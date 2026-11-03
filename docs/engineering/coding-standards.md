@@ -29,3 +29,18 @@
 
 > The full allocation-related error-handling guidance (OOM, `makeUniqueNoThrow`)
 > lives in [memory-and-allocation.md](memory-and-allocation.md).
+
+## Comment style
+
+Explain non-obvious mechanisms, constraints, ownership, field meanings or
+necessary exceptions in plain English, usually one or two lines. Describe the
+current code for a future maintainer. Read changed comments without the diff and
+remove investigation narration and restatements.
+
+## Reuse existing interfaces
+
+Trace callers and existing helpers before adding wrappers, factories or
+callbacks. Reuse `ButtonNavigator`, `UiAppHost` and the current HAL owner when
+their contracts fit. A new abstraction must own a real contract or hide a
+demonstrated implementation choice. Keep meaningful regression checks for changed
+non-trivial behavior; see [testing guidance](testing-and-debugging.md).

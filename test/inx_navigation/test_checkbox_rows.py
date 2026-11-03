@@ -83,6 +83,8 @@ struct UiListActivity {
  fui::ListNav nav;
  struct {bool touch=false;bool hasTouch()const{return touch;}} mappedInput;
  bool usesUpstreamStyle()const{return false;}
+ bool defersContentSelection()const{return false;}
+ bool showMainTabContentSelection()const{return true;}
  auto& activeNav(){return nav;}
  int listCount()const{return 1;}
  void syncListViewport(UiScreen&,fui::ListProps&,int=0);

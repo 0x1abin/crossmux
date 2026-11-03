@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Exercise production popup contacts, WiFi actions and footer hit geometry."""
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 from test_theme_menus import method, run
 
 ROOT = Path(__file__).resolve().parents[2]
+SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 popup = (ROOT / 'src/components/OptionPopup.h').read_text()
 a = popup.index('  bool handleInput(')
 a_body = popup.index('{', a)
@@ -15,6 +17,28 @@ while depth:
     depth += (popup[end] == '{') - (popup[end] == '}')
     end += 1
 handler = popup[a:end]
+a = popup.index("  bool handleButtons(")
+end = popup.index("\n  bool processRender(", a)
+handler += popup[a:end]
+for name in ("finishShow",):
+    start = popup.index("  void " + name + "(")
+    brace = popup.index("{", start)
+    end = brace + 1
+    depth = 1
+    while depth:
+        depth += (popup[end] == "{") - (popup[end] == "}")
+        end += 1
+    handler += popup[start:end]
+
+start = popup.index("  int windowStart(")
+brace = popup.index("{", start)
+end = brace + 1
+depth = 1
+while depth:
+    depth += (popup[end] == "{") - (popup[end] == "}")
+    end += 1
+handler += popup[start:end]
+
 code = r'''
 #include <cassert>
 #include <cstdio>
@@ -26,6 +50,7 @@ code = r'''
 #include "FreeInkUICore.h"
 #include "InxItemLayout.h"
 namespace fui=freeink::ui;
+namespace haptic_feedback {inline void touchAction(bool=false){}}
 struct UITheme {static UITheme& getInstance(){static UITheme t;return t;} bool hasMainTabs()const{return true;}};
 struct MappedInputManager {
  enum class Button {NavPrevious,NavNext,Confirm,Back};
@@ -39,8 +64,9 @@ struct MappedInputManager {
 };
 fui::InputSnapshot touchSnapshotFrom(const MappedInputManager& i){return i.snap;}
 struct OptionPopup {
- bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false,uiReady=true;
- int selectedIndex=0;std::atomic<int> visibleOptionRows{1};
+ bool upstreamStyle=false,active=true,ignoreInitialTouchContact=false,ignoreInitialConfirmRelease=false;
+ bool confirmBarrierPending=false,uiReady=true;
+ int selectedIndex=0;mutable std::atomic<int> firstOption{-1},visibleOptionRows{1};std::string message;
  static constexpr int MAX_OPTIONS=24;
  static constexpr fui::ActionId ACTION_OPTION=1,ACTION_CHROME=2;
  std::vector<std::string> ownedStrings=std::vector<std::string>(12,"option");
@@ -48,7 +74,8 @@ struct OptionPopup {
  std::function<void(int)> onSelectCallback;
  @HANDLER@
  void publish(Rect safe){
-  const auto layout=InxOptionGeometry::layout(safe,12,selectedIndex);
+  auto layout=InxOptionGeometry::layout(safe,int(ownedStrings.size()),selectedIndex);
+  layout.first=windowStart(layout.rows);
   visibleOptionRows=layout.rows;
   interactions.beginPublishCycle();interactions.clear();
   for(int slot=0;slot<layout.rows;++slot){
@@ -56,9 +83,12 @@ struct OptionPopup {
    interactions.addInteraction(fui::Interaction{fui::Rect{int16_t(r.x),int16_t(r.y),int16_t(r.width),int16_t(r.height)},ACTION_OPTION,int16_t(layout.first+slot),fui::InputTouch});
   }
   interactions.publish();
+  uiReady=true;
  }
 };
 int main(){
+ OptionPopup empty;empty.ownedStrings.clear();empty.finishShow(0,[](int){});assert(!empty.active);
+ empty.active=true;empty.finishShow(0,[](int){});assert(!empty.active);
  int scenes=0;
  for(Rect safe:{Rect{0,0,480,750},Rect{5,8,684-10,1216-13},Rect{8,5,1216-13,684-10},Rect{0,0,800,340}}){
   OptionPopup p;int calls=0,chosen=-1,updates=0;
@@ -72,9 +102,9 @@ int main(){
   // A swipe clears the pressed interaction and moves by the actual drawn row count.
   auto layout=InxOptionGeometry::layout(safe,12,p.selectedIndex);
   auto row=layout.optionRect(1);input.snap.touchPressed=true;input.snap.touchX=row.x+5;input.snap.touchY=row.y+5;
-  p.handleInput(input,update);assert(p.selectedIndex==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
   input.snap={};input.snap.touchReleased=true;input.snap.touchX=input.snap.touchY=-1;input.swipe=MappedInputManager::SwipeDir::Up;
-  p.handleInput(input,update);assert(p.selectedIndex==layout.rows&&p.active&&calls==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.rows+1&&p.active&&calls==0);
   assert(p.interactions.activeIndex()<0);p.publish(safe);
   input={};input.snap.touchReleased=true;input.snap.touchX=input.snap.touchY=-1;p.handleInput(input,update);
   assert(p.active&&calls==0);
@@ -84,14 +114,171 @@ int main(){
   assert(p.selectedIndex==0&&p.active&&calls==0);
   layout=InxOptionGeometry::layout(safe,12,0);row=layout.optionRect(1);
   input={};input.snap.touchPressed=true;input.snap.touchX=row.x+row.width/2;input.snap.touchY=row.y+row.height/2;
-  p.handleInput(input,update);assert(p.selectedIndex==0);
+  p.handleInput(input,update);assert(p.selectedIndex==layout.first+1);
   input.snap.touchPressed=false;input.snap.touchReleased=true;p.handleInput(input,update);
   assert(!p.active&&calls==1&&chosen==layout.first+1);assert(!p.handleInput(input,update));
-  // A confirm held across entry must not activate on its inherited release.
-  OptionPopup q;q.ignoreInitialConfirmRelease=true;q.onSelectCallback=[&](int){++calls;};
+  // A confirm held across entry must not activate on its inherited release;
+  // the three entry states are exercised in full below.
+  OptionPopup q;q.onSelectCallback=[&](int){++calls;};
+  input={};input.held=int(MappedInputManager::Button::Confirm);q.finishShow(0,q.onSelectCallback);
+  q.handleInput(input,update);
   input={};input.released=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
-  assert(q.active&&calls==1);q.handleInput(input,update);assert(!q.active&&calls==2);
+  assert(q.active&&calls==1);
+  // Closes and fires once, on the release of a fresh press.
+  input={};input.pressed=int(MappedInputManager::Button::Confirm);
+  input.held=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
+  input={};input.released=int(MappedInputManager::Button::Confirm);q.handleInput(input,update);
+  assert(!q.active&&calls==2);
+
+  // --- popped open by a touch, then a quick fresh Confirm ---------------
+  // The author's reproduction: a touch opens the dialog (the finger lifts
+  // before the popup sees an input pass), then Confirm is pressed ~30 ms later
+  // and released ~80 ms after that. finishShow() cannot know whether Confirm
+  // was inherited, so the first pass decides: a press edge means the press is
+  // for this popup and its release must select, not vanish.
+  {
+    OptionPopup fresh;int picked=-1;int freshCalls=0;
+    fresh.onSelectCallback=[&](int i){++freshCalls;picked=i;};
+    fresh.finishShow(0,fresh.onSelectCallback);
+    assert(fresh.confirmBarrierPending&&!fresh.ignoreInitialConfirmRelease);
+    input={};
+    input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    fresh.handleInput(input,update);
+    assert(!fresh.confirmBarrierPending&&!fresh.ignoreInitialConfirmRelease);
+    assert(fresh.active&&freshCalls==0);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    fresh.handleInput(input,update);
+    assert(!fresh.active&&freshCalls==1&&picked==0);
+  }
+
+  // --- inherited Confirm: held at entry, no press edge -------------------
+  // The gesture that opened the popup is still down. The first pass sees a
+  // hold with no edge, so the popup owns that contact until it lifts.
+  {
+    OptionPopup inherited;int inheritedCalls=0;
+    inherited.onSelectCallback=[&](int){++inheritedCalls;};
+    inherited.finishShow(0,inherited.onSelectCallback);
+    input={};input.held=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(!inherited.confirmBarrierPending&&inherited.ignoreInitialConfirmRelease);
+    assert(inherited.active&&inheritedCalls==0);
+    // The held button keeps reporting as held on later passes: still owned.
+    input={};input.held=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(inherited.active&&inheritedCalls==0);
+    // Its release is consumed, not delivered as a selection.
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(inherited.active&&inheritedCalls==0&&!inherited.ignoreInitialConfirmRelease);
+    // A press after that is fresh and must work.
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    inherited.handleInput(input,update);
+    assert(!inherited.active&&inheritedCalls==1);
+  }
+
+  // --- inherited Confirm: the first pass is already its release -----------
+  // The render/input handoff can swallow the whole hold: the popup opens while
+  // Confirm is down, the first pass it ever sees carries only the release
+  // (wasPressed() and isPressed() both false). That release belongs to the
+  // opening gesture, so it must not reach handleButtons() as a confirmation.
+  {
+    OptionPopup early;int earlyCalls=0;
+    early.onSelectCallback=[&](int){++earlyCalls;};
+    early.finishShow(0,early.onSelectCallback);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    early.handleInput(input,update);
+    assert(!early.confirmBarrierPending);
+    assert(early.active&&earlyCalls==0);
+    // The owned release was consumed; the popup is still up and a real press
+    // afterwards selects normally.
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    early.handleInput(input,update);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    early.handleInput(input,update);
+    assert(!early.active&&earlyCalls==1);
+  }
+
+  // --- fresh logical Confirm: pressed and released in the same pass ------
+  // A Confirm mapped from a home-button action or from a short power press is
+  // reported as pressed and released at once (MappedInputManager.cpp:510-525):
+  // no raw button is left held, so the single click already carries its own
+  // release. It has a fresh press edge, so it belongs to this popup and must
+  // select; only a release with no press edge is the inherited contact ending.
+  {
+    OptionPopup logical;int logicalCalls=0;int logicalPicked=-1;
+    logical.onSelectCallback=[&](int index){++logicalCalls;logicalPicked=index;};
+    logical.finishShow(3,logical.onSelectCallback);
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.released=int(MappedInputManager::Button::Confirm);
+    logical.handleInput(input,update);
+    assert(!logical.confirmBarrierPending&&!logical.ignoreInitialConfirmRelease);
+    assert(!logical.active&&logicalCalls==1&&logicalPicked==3);
+  }
+
+  // --- a popup opened with no button down: nothing is pending -----------
+  {
+    OptionPopup idle;int idleCalls=0;
+    idle.onSelectCallback=[&](int){++idleCalls;};
+    idle.finishShow(0,idle.onSelectCallback);
+    input={};
+    idle.handleInput(input,update);
+    assert(!idle.confirmBarrierPending&&!idle.ignoreInitialConfirmRelease);
+    input={};input.pressed=int(MappedInputManager::Button::Confirm);
+    input.held=int(MappedInputManager::Button::Confirm);
+    idle.handleInput(input,update);
+    input={};input.released=int(MappedInputManager::Button::Confirm);
+    idle.handleInput(input,update);
+    assert(!idle.active&&idleCalls==1);
+  }
+
+  // --- a quick fresh touch after a touch-opened popup -------------------
+  // The barrier owns the opening contact only; a second, fresh tap on an
+  // option must select it rather than be swallowed.
+  {
+    OptionPopup retap;int retapCalls=0;int retapPick=-1;
+    retap.onSelectCallback=[&](int i){++retapCalls;retapPick=i;};
+    retap.finishShow(0,retap.onSelectCallback);
+    retap.publish(safe);
+    // Opening contact: down, then lifted, with no idle pass in between.
+    input={};input.snap.touchPressed=true;input.snap.touchX=1;input.snap.touchY=1;
+    retap.handleInput(input,update);
+    assert(retap.active&&retapCalls==0);
+    input={};input.snap.touchReleased=true;input.snap.touchX=1;input.snap.touchY=1;
+    retap.handleInput(input,update);
+    assert(retap.active&&retapCalls==0&&!retap.ignoreInitialTouchContact);
+    // A fresh tap on the second option selects it.
+    const auto freshLayout=InxOptionGeometry::layout(safe,12,0);
+    const auto freshRow=freshLayout.optionRect(1);
+    input={};
+    input.snap.touchPressed=true;input.snap.touchX=freshRow.x+freshRow.width/2;
+    input.snap.touchY=freshRow.y+freshRow.height/2;
+    retap.handleInput(input,update);
+    input={};input.snap.touchReleased=true;input.snap.touchX=freshRow.x+freshRow.width/2;
+    input.snap.touchY=freshRow.y+freshRow.height/2;
+    retap.handleInput(input,update);
+    assert(!retap.active&&retapCalls==1&&retapPick==freshLayout.first+1);
+  }
   ++scenes;
+ }
+ for(bool upstream:{false,true}) {
+  OptionPopup p;p.upstreamStyle=upstream;p.ownedStrings.resize(40,"option");
+  int selected=-1,calls=0;
+  p.finishShow(27,[&](int i){selected=i;++calls;});
+  p.publish(Rect{0,0,480,750});
+  assert(p.selectedIndex==27 && p.firstOption==25);
+  for(int i=0;i<12;++i) p.handleButtons(false,true,false,false,[]{});
+  p.publish(Rect{0,0,480,750});
+  assert(p.selectedIndex==39 && p.firstOption==35);
+  p.handleButtons(false,false,true,false,[]{});
+  assert(selected==39 && calls==1 && !p.active);
+  p.finishShow(27,[&](int){++calls;});
+  p.handleButtons(false,false,false,true,[]{});
+  assert(calls==1 && !p.active);
  }
 }
 '''.replace('@HANDLER@', handler)
@@ -100,7 +287,7 @@ with tempfile.TemporaryDirectory(prefix='touch-network-') as directory:
     for high in (False,True):
         source=directory/'popup.cpp';source.write_text(code)
         binary=directory/'popup'
-        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(ROOT/'freeink-sdk/libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
+        command=['c++','-std=c++20','-I'+str(ROOT/'src'),'-I'+str(SDK/'libs/ui/FreeInkUI/include'),str(source),'-o',str(binary)]
         if high:command.insert(2,'-DCROSSMUX_UI_PROFILE_HIGH_DPI=1')
         subprocess.run(command,check=True);subprocess.run([str(binary)],check=True)
 

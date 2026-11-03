@@ -26,12 +26,6 @@ void BootActivity::onEnter() {
 
 void BootActivity::renderSplash() {
   GUI.drawSplash(renderer, tr(STR_BOOTING), CROSSPOINT_VERSION);
-#if FREEINK_DEVICE_EEGO_A4
-  // A4: the panel is being powered on for the first time here, and a FAST
-  // refresh on a freshly powered panel doesn't establish the frame (observed:
-  // splash never appears). Force the first paint to a full waveform.
-  renderer.requestNextFullRefresh();
-#endif
   renderer.displayBuffer();
 }
 
@@ -50,7 +44,9 @@ void BootActivity::runPostOta() {
   const auto* family = sdFontSystem.registry().findFamily(SETTINGS.sdFontFamilyName);
   const auto* file = family ? family->findNearestSize(SETTINGS.fontPointSize) : nullptr;
   if (!file || family->vector) return;
-  auto result = SdCardFontCache::preflight(file->path.c_str());
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
+  if (!family->filePath(*file, path, sizeof(path))) return;
+  auto result = SdCardFontCache::preflight(path);
   if (result == SdCardFontCache::Result::AlreadyCached) return;
 
   if (result == SdCardFontCache::Result::Ok) {
@@ -66,7 +62,7 @@ void BootActivity::runPostOta() {
     requestUpdateAndWait();
 
     result = SdCardFontCache::preload(
-        file->path.c_str(),
+        path,
         [](size_t completed, size_t total, void* context) {
           auto* self = static_cast<BootActivity*>(context);
           bool refresh = false;
@@ -134,7 +130,7 @@ void BootActivity::runPostOta() {
     }
   }
 
-  LOG_INF("SDFCACHE", "Post-OTA preload for %s: %s", file->path.c_str(), SdCardFontCache::resultName(result));
+  LOG_INF("SDFCACHE", "Post-OTA preload for %s: %s", path, SdCardFontCache::resultName(result));
   requestUpdateAndWait();
   if (result == SdCardFontCache::Result::TooLarge) delay(fontpreload::NOTICE_DURATION_MS);
 }

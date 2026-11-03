@@ -92,17 +92,18 @@ tab in File Transfer accepts `.cpfont` files only. Copy direct fonts to the SD
 card instead. To remove a loose font file, delete that file from the SD card.
 The Fonts page can delete families stored in subfolders.
 
-## CJK in the User Interface
+## Non-Latin Scripts Fallback in the User Interface
 
 Unified firmware registers embedded Simplified-Chinese 8/10/12pt subsets as
 fallbacks for the compact international UI fonts.
 
-On ESP32-S3 devices with working PSRAM and at least the existing 256 KiB
-PSRAM reserve, the selected SD font family also supplies matching 8/10/12pt
-UI fallbacks. Install those exact sizes alongside your reader size. The loader
-probes Han, Hiragana, Katakana, Hangul, Greek, Cyrillic, Hebrew, Arabic, Thai,
-and Devanagari coverage before loading extra sizes. Missing files or failed
-loads leave the embedded fallback in place. No fonts are downloaded automatically.
+On devices with working PSRAM and the existing 256 KiB reserve, the selected
+SD font family may supply size-matched non-Latin UI fallbacks. Install the sizes
+selected by the active UI profile alongside your reader size. The reader-size
+face must match a detection codepoint in `kFallbackProbes` in
+[`SdCardFontSystem.cpp`](../src/SdCardFontSystem.cpp); converter coverage alone
+does not enable detection. Missing files or failed loads preserve the embedded
+fallback. No fonts are downloaded automatically.
 
 As upstream does, when the primary font lacks a non-ASCII character covered by
 the SD fallback, the entire string is measured and drawn using that face.
@@ -111,18 +112,21 @@ font covering those scripts. If the SD face cannot supply any missing character,
 the embedded Chinese subset is tried next. Unloading or switching SD fonts
 preserves that embedded fallback.
 
-C3, devices without PSRAM, and simulators keep only the selected reader-size
-`.cpfont` resident. Japanese, Korean, Traditional Chinese, and uncommon Han
+C3 and devices without PSRAM keep only the selected reader-size `.cpfont`
+resident. The Read Pico simulator retains its hardware UI-size font policy;
+other simulators use the standard host policy. Japanese, Korean, Traditional Chinese, and uncommon Han
 glyphs outside the embedded subsets may still show replacement boxes there.
 The built-in 12pt reader subset remains an offline fallback.
-The fallback is **size-matched**. The built-in UI fonts render at 8 pt
-(small/author lines), 10 pt (list rows) and 12 pt (book-cover titles, headers),
-so CrossPoint loads your SD family at those sizes too and maps each UI font to
-its same-size SD font. CJK book names therefore appear at the same size as the
-Latin text around them. A `.cpfont` family must contain files at sizes
-**8, 10 and 12** for this UI fallback (in addition to the reader sizes 12–18).
-Any missing UI size keeps showing boxes for CJK at that size. Direct
-TTF/OTF/TTC families use the same file at all three UI sizes.
+The standard UI uses **8, 10 and 12 pt**; the high-density profile uses
+**12, 14 and 16 pt**. A `.cpfont` family needs the active profile's sizes in
+addition to the reader size. Missing a UI file can leave boxes for glyphs outside
+the embedded fallback even when book content renders correctly. Direct
+TTF/OTF/TTC families reuse their file at those sizes.
+
+These UI sizes only take effect if the reader-size font also matches one of
+CrossPoint's built-in fallback-detection codepoints — see `kFallbackProbes` in
+`src/SdCardFontSystem.cpp` for the current list. A script outside that list
+gets no UI fallback even with the correct `.cpfont` sizes present.
 
 For `.cpfont` families, **Settings > Reader > Font Size** lists every size the family ships,
 so a family built at 8,10,12,14,16,18 offers all six as reading sizes — the UI
@@ -142,19 +146,20 @@ When converting your own font, include the UI sizes:
 
 What this means in practice:
 
-- Select a CJK-capable SD font under **Settings > Reader > Font Family**
-  (see [Installing Fonts](#installing-fonts) and the `cjk` / `hangul` presets
-  for `.cpfont` under [Converting Custom Fonts](#converting-custom-fonts)). That single
-  selection drives both book content *and* size-matched CJK fallback in the UI.
+- Select a non-Latin-capable SD font under **Settings > Reader > Font Family**
+  (see [Installing Fonts](#installing-fonts) and the interval presets for
+  `.cpfont` under [Converting Custom Fonts](#converting-custom-fonts)). That
+  single selection drives both book content *and* size-matched fallback in
+  the UI.
 - Pure-Latin UI strings keep the crisp built-in font; only strings that
-  actually contain CJK are routed to the SD font.
+  actually contain a character the built-in font lacks are routed to the SD
+  font.
 - The fallback is per *string*, not per glyph: a mixed title such as
   `三体 Vol.1` renders entirely in the SD font (including the Latin part). If
   that SD font is a `Mono` family, the Latin portion will appear half/full
   width.
-- If no SD font is selected (a built-in reading font is active), there is no
-  CJK fallback and the UI again shows boxes for CJK — pick a CJK SD font to
-  restore it.
+- Without a selected SD font, embedded Simplified-Chinese UI fallbacks remain
+  available. Other uncovered scripts require a compatible selected SD family.
 
 ## Available Pre-Built Fonts
 
@@ -220,13 +225,18 @@ wrapping, or the `.cpfont` format, and it does not affect menus or status-bar
 text. Standard is the default; existing Standard and Heavy choices retain their
 names and move to the stronger two- and three-pixel effects on upgrade.
 
+> For non-Latin UI fallback, include the active UI sizes as well as reader sizes:
+> `--sizes 8,10,12,14,16,18` covers standard and high-density profiles. The
+> reader-size face must also match the loader's detection probes; see
+> [UI fallback](#non-latin-scripts-fallback-in-the-user-interface).
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |
 |--------|----------|
 | `ascii` | U+0020–U+007E (Basic Latin) |
 | `latin1` | U+0080–U+00FF (Latin-1 Supplement) |
-| `latin-ext` | European languages (Latin + Extended-A/B + punctuation + ligatures) |
+| `latin-ext` | European languages (Latin + Extended-A/B + punctuation + currency + letterlike symbols such as ™ and № + minus sign + ligatures) |
 | `greek` | Greek + Extended Greek |
 | `cyrillic` | Cyrillic + Supplement |
 | `hebrew` | Hebrew + Alphabetic Presentation Forms |
@@ -248,7 +258,7 @@ names and move to the stronger two- and three-pixel effects on upgrade.
 Combine presets with commas: `--intervals latin-ext,greek,cyrillic`
 
 You can also specify arbitrary Unicode ranges directly:
-`--intervals latin-ext,(0x2100-0x214F)`
+`--intervals 'latin-ext,(0x2190-0x21FF)'`
 
 To list all presets with codepoint counts:
 

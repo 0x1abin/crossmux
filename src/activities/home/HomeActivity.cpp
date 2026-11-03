@@ -1,6 +1,5 @@
 #include "HomeActivity.h"
 
-#include <Bitmap.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -18,10 +17,10 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "HapticFeedback.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
-#include "activities/plugins/PluginCatalogActivity.h"  // anyPluginInstalled()
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookCoverLoader.h"
@@ -187,17 +186,22 @@ void HomeActivity::resolveGridCoverPaths() {
 }
 
 void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect) {
-  if (!book.coverBmpPath.empty() && Storage.exists(UITheme::getCoverThumbPath(book.coverBmpPath, height).c_str()))
+  const bool isEpub = FsHelpers::hasReflowableBookExtension(book.path);
+  if (!book.coverBmpPath.empty() &&
+      BookCoverLoader::checkCachedCover(UITheme::getCoverThumbPath(book.coverBmpPath, height), isEpub) !=
+          BookCoverLoader::CachedCoverState::Missing)
     return;
   // Only one parser lives at a time; EPUB/XTC objects exceed the stack budget.
-  if (FsHelpers::hasReflowableBookExtension(book.path)) {
+  if (isEpub) {
     auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
     if (!epub) {
       LOG_ERR("HOME", "OOM: cover EPUB");
       return;
     }
     book.coverBmpPath = epub->getThumbBmpPath();
-    if (Storage.exists(epub->getThumbBmpPath(height).c_str())) return;
+    if (BookCoverLoader::checkCachedCover(epub->getThumbBmpPath(height), true) !=
+        BookCoverLoader::CachedCoverState::Missing)
+      return;
     if (!showingLoading) {
       showingLoading = true;
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
@@ -213,7 +217,9 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
       return;
     }
     book.coverBmpPath = xtc->getThumbBmpPath();
-    if (Storage.exists(xtc->getThumbBmpPath(height).c_str())) return;
+    if (BookCoverLoader::checkCachedCover(xtc->getThumbBmpPath(height), false) !=
+        BookCoverLoader::CachedCoverState::Missing)
+      return;
     if (!showingLoading) {
       showingLoading = true;
       popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
@@ -279,31 +285,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     if (book.coverBmpPath.empty()) continue;
 
     const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
-    if (Storage.exists(coverPath.c_str())) {
-      bool invalidCache = false;
-      {
-        HalFile cachedCover;
-        if (!Storage.openFileForRead("HOME", coverPath, cachedCover)) {
-          LOG_ERR("HOME", "Failed to open cached cover: %s", coverPath.c_str());
-          continue;
-        }
-        if (cachedCover.fileSize() == 0) {
-          // EPUB uses an empty thumbnail as a persistent "no supported cover" marker.
-          if (isEpub && !useFullCover) continue;
-          invalidCache = true;
-        } else {
-          Bitmap bitmap(cachedCover);
-          invalidCache =
-              bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0;
-        }
-      }
-      if (!invalidCache) continue;
-      LOG_ERR("HOME", "Removing invalid cached cover: %s", coverPath.c_str());
-      if (!Storage.remove(coverPath.c_str())) {
-        LOG_ERR("HOME", "Failed to remove invalid cached cover: %s", coverPath.c_str());
-        continue;
-      }
-    }
+    // EPUB thumbnails keep an empty file as the persistent "no supported cover" marker.
+    if (BookCoverLoader::checkCachedCover(coverPath, isEpub && !useFullCover) !=
+        BookCoverLoader::CachedCoverState::Missing)
+      continue;
 
     if (!showingLoading) {
       showingLoading = true;
@@ -340,7 +325,10 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   hasOpdsServers = OPDS_STORE.hasServers();
-  hasPlugins = anyPluginInstalled();
+  // Plugin System is the global opt-in. Once enabled, expose the Plugins entry
+  // even when no SD plugins are installed yet so Plugin Hub can be installed
+  // from inside the Plugins screen (or users can sideload plugins manually).
+  hasPlugins = SETTINGS.pluginsEnabled != 0;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (UITheme::getInstance().hasCoverGridHome()) {
@@ -433,7 +421,7 @@ void HomeActivity::loop() {
 
   auto activateSelection = [this, isCarousel] {
     if (selectorIndex < recentBooks.size()) {
-      onSelectBook(recentBooks[selectorIndex].path);
+      onRecentBookSelected(recentBooks[selectorIndex].path);
       return;
     }
     const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
@@ -511,6 +499,13 @@ void HomeActivity::loop() {
       selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
       requestUpdate();
     });
+  }
+
+  // The standby shortcut keeps ownership of Back when enabled.
+  if (!SETTINGS.standbyShortcutEnabled && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
+      hasContinueReading && !recentBooks.empty()) {
+    onRecentBookSelected(recentBooks[0].path);
+    return;
   }
 
   if (coverGridUi) {
@@ -603,10 +598,13 @@ void HomeActivity::loop() {
     }
   }
 
+  const Rect content = isCarousel ? Rect{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()}
+                                  : UITheme::getContentArea(renderer);
   int tx = 0;
   int ty = 0;
-  if (!recentBooks.empty() && mappedInput.wasScreenTouchDown(tx, ty) && tx >= 0 && tx < renderer.getScreenWidth() &&
-      ty >= metrics.homeTopPadding && ty < metrics.homeTopPadding + metrics.homeCoverTileHeight) {
+  if (!recentBooks.empty() && mappedInput.wasScreenTouchDown(tx, ty) && tx >= content.x &&
+      tx < content.x + content.width && ty >= metrics.homeTopPadding &&
+      ty < metrics.homeTopPadding + metrics.homeCoverTileHeight) {
     int touchedBook = 0;
     if (isCarousel) {
       const int centerBook =
@@ -623,7 +621,7 @@ void HomeActivity::loop() {
       // Multi-cover themes (Lyra3Covers and the like) render several recent
       // books side by side: map the finger to the cover it is on instead of
       // always settling on the first book.
-      touchedBook = GUI.recentBookIndexAt(tx, renderer.getScreenWidth());
+      touchedBook = GUI.recentBookIndexAt(tx - content.x, content.width);
       touchedBook = std::clamp(touchedBook, 0, static_cast<int>(recentBooks.size()) - 1);
     }
     if (selectorIndex != touchedBook) {
@@ -635,13 +633,14 @@ void HomeActivity::loop() {
 
   int tapX = 0;
   int tapY = 0;
-  if (!recentBooks.empty() && mappedInput.wasScreenTapped(tapX, tapY) && tapX >= 0 &&
-      tapX < renderer.getScreenWidth() && tapY >= metrics.homeTopPadding &&
+  if (!recentBooks.empty() && mappedInput.wasScreenTapped(tapX, tapY) && tapX >= content.x &&
+      tapX < content.x + content.width && tapY >= metrics.homeTopPadding &&
       tapY < metrics.homeTopPadding + metrics.homeCoverTileHeight) {
     if (!isCarousel) {
-      selectorIndex = GUI.recentBookIndexAt(tapX, renderer.getScreenWidth());
+      selectorIndex = GUI.recentBookIndexAt(tapX - content.x, content.width);
       selectorIndex = std::clamp(selectorIndex, 0, static_cast<int>(recentBooks.size()) - 1);
     }
+    haptic_feedback::touchAction();
     activateSelection();
     return;
   }
@@ -651,18 +650,28 @@ void HomeActivity::loop() {
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size();
   int menuRow = -1;
   MappedInputManager::RowTouch menuTouch;
+  BaseTheme::MenuRowGeometry menuGeo{};
   if (isCarousel) {
     const int menuBottom = renderer.getScreenHeight();
     const int columnWidth = renderer.getScreenWidth() / renderedMenuCount;
     menuTouch = mappedInput.colTouch(menuRow, 0, columnWidth, renderedMenuCount, menuBottom - metrics.menuRowHeight,
                                      menuBottom, columnWidth);
   } else {
-    menuTouch = mappedInput.rowTouch(menuRow, menuTop, metrics.menuRowHeight + metrics.menuSpacing, renderedMenuCount,
-                                     0, INT32_MAX, metrics.menuRowHeight);
+    // Hit-test from the theme's drawn menu geometry, never from a fixed metrics
+    // table: RoundedRaff/Inx derive the row height from the font and page the
+    // rows, Lyra draws rows without the Base vertical offset (see BaseTheme.h).
+    const Rect menuRect{
+        content.x, menuTop, content.width,
+        renderer.getScreenHeight() - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
+                                      metrics.homeMenuTopOffset + metrics.buttonHintsHeight)};
+    menuGeo = GUI.getMenuRowGeometry(renderer, menuRect, renderedMenuSelection, renderedMenuCount);
+    menuTouch = mappedInput.rowTouch(menuRow, menuGeo.firstRowY, menuGeo.rowStep, menuGeo.pageCount, menuGeo.xStart,
+                                     menuGeo.xEnd, menuGeo.rowHeight);
   }
   if (menuTouch != MappedInputManager::RowTouch::None) {
     const int touchedIndex =
-        metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size());
+        menuGeo.pageStart +
+        (metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size()));
     if (menuTouch == MappedInputManager::RowTouch::Down) {
       if (selectorIndex != touchedIndex) {
         selectorIndex = touchedIndex;
@@ -674,6 +683,7 @@ void HomeActivity::loop() {
       }
     } else {
       selectorIndex = touchedIndex;
+      haptic_feedback::touchAction();
       activateSelection();
     }
     return;
@@ -696,15 +706,20 @@ void HomeActivity::render(RenderLock&&) {
   const bool isCarousel =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
 
-  const int homeMenuItemCount = hasOpdsServers ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
+  const char* backLabel = hasContinueReading ? tr(STR_RESUME) : "";
+  if (SETTINGS.standbyShortcutEnabled) backLabel = tr(STR_STANDBY_TITLE);
+
+  const Rect content = isCarousel ? Rect{0, 0, pageWidth, pageHeight} : UITheme::getContentArea(renderer);
+  const int homeMenuItemCount = hasLibrarySlot() ? kHomeMenuItemCount : kHomeMenuItemCount - 1;
   const bool showContinueReading = metrics.homeContinueReadingInMenu && !recentBooks.empty();
   std::vector<const char*> menuItems;
   std::vector<UIIcon> menuIcons;
   menuItems.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
   menuIcons.reserve(homeMenuItemCount + (showContinueReading ? 1 : 0));
   for (int i = 0; i < homeMenuItemCount; ++i) {
-    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasOpdsServers, isCarousel);
-    menuItems.push_back(I18N.get(entry->label));
+    const HomeMenuEntry* entry = menuEntryAtIndex(i, hasLibrarySlot(), isCarousel);
+    menuItems.push_back(entry->item == HomeMenuItem::OPDS_BROWSER && hasPlugins ? tr(STR_PLUGINS)
+                                                                                : I18N.get(entry->label));
     menuIcons.push_back(entry->item == HomeMenuItem::OPDS_BROWSER && hasPlugins ? Plugins : entry->icon);
   }
 
@@ -714,7 +729,8 @@ void HomeActivity::render(RenderLock&&) {
   }
 
   const Rect headerRect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding};
-  const Rect menuRect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
+  const Rect menuRect{content.x, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset,
+                      content.width,
                       pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
                                     metrics.homeMenuTopOffset + metrics.buttonHintsHeight)};
   auto drawHeader = [&] {
@@ -751,8 +767,7 @@ void HomeActivity::render(RenderLock&&) {
     UITheme::getInstance().drawCoverGridHome(*coverGridUi);
     // Front Left/Right walk the tabs, so their hints read Left/Right; the
     // side page buttons (unhinted) walk the covers.
-    const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
-                                              tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(!firstRenderDone ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
     // Slot heights are recorded during the draw above; a change (first layout
@@ -774,7 +789,7 @@ void HomeActivity::render(RenderLock&&) {
     }
     return;
   }
-  bool bufferRestored = coverBufferStored && restoreCoverBuffer();
+  bool bufferRestored = coverRendered && coverBufferStored && restoreCoverBuffer();
 
   if (isCarousel) {
     drawHeader();
@@ -791,20 +806,19 @@ void HomeActivity::render(RenderLock&&) {
   // Record the tile rect so storeCoverBuffer (called from the theme) knows
   // which sub-region of the framebuffer to snapshot. ~16 KB in Portrait
   // instead of the 48 KB full framebuffer the previous bind captured.
-  coverRectX = 0;
+  coverRectX = content.x;
   coverRectY = metrics.homeTopPadding;
-  coverRectW = pageWidth;
+  coverRectW = content.width;
   coverRectH = metrics.homeCoverTileHeight;
 
-  GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
+  GUI.drawRecentBookCover(renderer, Rect{content.x, metrics.homeTopPadding, content.width, metrics.homeCoverTileHeight},
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
   drawMenu();
 
   if (!isCarousel) {
-    const auto labels = mappedInput.mapLabels(SETTINGS.standbyShortcutEnabled ? tr(STR_STANDBY_TITLE) : "",
-                                              tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
@@ -820,7 +834,7 @@ void HomeActivity::render(RenderLock&&) {
   }
 }
 
-void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
+void HomeActivity::onRecentBookSelected(const std::string& path) { activityManager.goToReader(path); }
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

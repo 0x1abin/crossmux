@@ -36,9 +36,8 @@ class LanguageSelectActivity final : public UiListActivity {
 
   // Row storage: totalItems is a compile-time constant, so a fixed-capacity
   // array avoids any heap allocation for the row list. Built once in
-  // onEnter() — activateIndex() finishes the activity immediately on
-  // selection, so buildScreen() never needs to see a different "Selected"
-  // row within one visit.
+  // onEnter() and updated after a failed save to keep the saved language marked.
   freeink::ui::ListItem rowItems[totalItems]{};
+  bool saveFailed_ = false;
   const Mode mode_;
 };

@@ -103,7 +103,7 @@ void TtfEpdFont::resolveFaces() {
 }
 
 bool TtfEpdFont::load(const uint16_t pointSize, const bool twoBit, const size_t glyphCacheBytes,
-                      const uint16_t maxGlyphs) {
+                      const uint16_t maxGlyphs, const bool fourBit) {
   loaded_ = false;
   if (!sources_[Regular].present) return false;
   // CrossPoint speaks point-size-at-150-DPI (matching the .cpfont converter's
@@ -119,6 +119,7 @@ bool TtfEpdFont::load(const uint16_t pointSize, const bool twoBit, const size_t 
     Face& f = faces_[i];
     f.owner = this;
     f.twoBit = twoBit;
+    f.fourBit = fourBit;
     f.sizePx = sizePx;
     f.cap = glyphCacheBytes;
     f.maxGlyphs = maxGlyphs;
@@ -227,6 +228,7 @@ void TtfEpdFont::setupFace(Face& f) {
   f.data.ascender = ascent;
   f.data.descender = lineHeight - ascent > 0 ? lineHeight - ascent : 0;
   f.data.is2Bit = f.twoBit;
+  f.data.is4Bit = f.fourBit;
   f.data.glyphMissHandler = &TtfEpdFont::missThunk;
   f.data.glyphMissCtx = &f;
   f.data.coverageHandler = &TtfEpdFont::coverageThunk;
@@ -306,7 +308,7 @@ const EpdGlyph* TtfEpdFont::faultGlyph(Face& f, const uint32_t cp) {
   const bool haveMetrics = f.ft.metricsGlyph26_6(gid, size26_6, gm);
   const freeink::font::GlyphBitmap* g = f.ft.rasterizeGlyph26_6(gid, size26_6);
   uint32_t px = (g && g->pixels) ? static_cast<uint32_t>(g->width) * g->height : 0;
-  size_t bytes = px ? (f.twoBit ? (px + 3) / 4 : (px + 7) / 8) : 0;
+  size_t bytes = px ? (f.fourBit ? (px + 1) / 2 : (f.twoBit ? (px + 3) / 4 : (px + 7) / 8)) : 0;
   if (bytes > f.cap) {
     bytes = 0;
     px = 0;
@@ -354,14 +356,12 @@ const EpdGlyph* TtfEpdFont::faultGlyph(Face& f, const uint32_t cp) {
     for (size_t i = 0; i < bytes; ++i) dst[i] = 0;
     for (uint32_t i = 0; i < px; ++i) {
       const uint8_t a = g->pixels[i];
-      if (f.twoBit) {
-        // Same 25/50/75% level thresholds as the .cpfont converter
-        // (fontconvert_sdcard.py's 4-bit >=4/8/12 downsample), so a TTF face
-        // prints at the same stroke weight as its .cpfont rendition. The BW
-        // page-turn pass inks ANY nonzero level, so the 25% start is what
-        // gives CJK strokes their full weight; starting at 50% rendered
-        // visibly thinner than cpfont.
-        const uint8_t v = a < 64 ? 0 : a < 128 ? 1 : a < 192 ? 2 : 3;
+      if (f.fourBit) {
+        // High nibble first; truncation preserves the original two-bit thresholds on fallback.
+        const uint8_t v = a >> 4;
+        dst[i >> 1] |= static_cast<uint8_t>(v << ((1 - (i & 1)) * 4));
+      } else if (f.twoBit) {
+        const uint8_t v = a < 64 ? 0 : (a < 128 ? 1 : (a < 192 ? 2 : 3));
         dst[i >> 2] |= static_cast<uint8_t>(v << ((3 - (i & 3)) * 2));
       } else if (a >= 128) {
         dst[i >> 3] |= static_cast<uint8_t>(1u << (7 - (i & 7)));

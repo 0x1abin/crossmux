@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "src/activities/settings/TextSettingsPreview.h"
+#include "src/clippings/ClippingText.h"
 #include "src/util/ParagraphIndentMigration.h"
 
 #define class struct
@@ -35,6 +36,7 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                false,
                                FirstLineIndent::Auto,
                                0,
+                               false,  // verticalBottomAlign
                                static_cast<uint16_t>(renderer.getScreenWidth()),
                                static_cast<uint16_t>(renderer.getScreenHeight()),
                                false,
@@ -87,6 +89,7 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
 }
 
 TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
+  parser.verticalBottomAlign = true;
   parser.viewportWidth = 240;
   parser.viewportHeight = 32;
   parser.tableRowCells.reserve(2);
@@ -106,6 +109,11 @@ TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
   unsigned rubyLines = 0;
   auto inspect = [&](std::unique_ptr<Page> page, auto, auto, auto) {
     ++pages;
+    if (pages == 1) {
+      ASSERT_GE(page->elements.size(), 2u);
+      EXPECT_GT(page->elements[1]->xPos, page->elements[0]->xPos);
+      EXPECT_EQ(page->elements[0]->yPos, page->elements[1]->yPos);
+    }
     for (const auto& element : page->elements) {
       if (element->getTag() != TAG_PageLine) continue;
       const auto& line = static_cast<const PageLine&>(*element);
@@ -137,6 +145,80 @@ TEST_F(ChapterHtmlSlimParserTest, PageImageDeserializeRejectsMissingImageBlock) 
   HalFile input;
   ASSERT_TRUE(input.open(path.c_str(), "rb"));
   EXPECT_EQ(PageImage::deserialize(input), nullptr);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignKeepsMaximumLinkCountAndRaisedGeometry) {
+  parser.verticalBottomAlign = true;
+  parser.viewportHeight = 600;
+  const std::vector<std::string> words{"link"};
+  const std::vector<int16_t> xPositions{0};
+  const std::vector<EpdFontFamily::Style> styles{EpdFontFamily::REGULAR};
+  for (size_t i = 0; i <= Page::MAX_LINKS_PER_PAGE; ++i) {
+    TextBlock::LinkSpan span{};
+    std::strcpy(span.href, "#note");
+    span.width = 8;
+    span.topLift = 3;
+    auto line =
+        std::make_unique<TextBlock>(words, xPositions, styles, std::vector<uint8_t>{}, std::vector<uint16_t>{},
+                                    BlockStyle{}, std::vector<std::string>{}, std::vector<TextBlock::LinkSpan>{span});
+    ASSERT_TRUE(line->valid());
+    ASSERT_TRUE(parser.addLineToPage(std::move(line), i));
+  }
+  ASSERT_EQ(parser.currentPage->links.size(), Page::MAX_LINKS_PER_PAGE);
+  parser.applyVerticalBottomAlign(parser.currentPage.get());
+  for (size_t i = 0; i < Page::MAX_LINKS_PER_PAGE; ++i) {
+    EXPECT_EQ(parser.currentPage->links[i].y, parser.currentPage->elements[i]->yPos - 3);
+  }
+  EXPECT_EQ(parser.currentPage->elements.back()->yPos + 16, parser.viewportHeight);
+}
+
+TEST_F(ChapterHtmlSlimParserTest, BottomAlignStretchesNonFinalPagesAndKeepsFinalPageUnchanged) {
+  std::string html = "<html><body>";
+  html.reserve(1600);
+  for (int i = 0; i < 20; ++i) html += "<p>alpha beta gamma delta epsilon</p>";
+  html += "</body></html>";
+  std::ofstream(filepath) << html;
+  std::vector<std::vector<int16_t>> layouts[2];
+  for (const bool enabled : {false, true}) {
+    auto& pages = layouts[enabled];
+    pages.reserve(32);
+    ChapterHtmlSlimParser subject{nullptr,
+                                  filepath,
+                                  renderer,
+                                  0,
+                                  1.0f,
+                                  0,
+                                  FirstLineIndent::NoIndent,
+                                  0,
+                                  enabled,
+                                  160,
+                                  100,
+                                  false,
+                                  false,
+                                  [&](std::unique_ptr<Page> page, auto, auto, auto) {
+                                    std::vector<int16_t> positions;
+                                    positions.reserve(page->elements.size());
+                                    for (const auto& element : page->elements) {
+                                      EXPECT_EQ(element->getTag(), TAG_PageLine);
+                                      positions.push_back(element->yPos);
+                                    }
+                                    pages.push_back(std::move(positions));
+                                  },
+                                  true,
+                                  "",
+                                  "",
+                                  0,
+                                  {},
+                                  nullptr,
+                                  &cssParser,
+                                  true};
+    ASSERT_TRUE(subject.parseAndBuildPages());
+  }
+  ASSERT_EQ(layouts[0].size(), layouts[1].size());
+  ASSERT_GT(layouts[0].size(), 1u);
+  EXPECT_EQ(layouts[0].back(), layouts[1].back());
+  EXPECT_EQ(layouts[0].front().front(), layouts[1].front().front());
+  EXPECT_GT(layouts[1].front().back(), layouts[0].front().back());
 }
 
 TEST_P(ChapterHtmlSlimParserTest, KeepsCssVerticalAlignAndInternalLinkMetadata) {
@@ -534,4 +616,123 @@ TEST_F(ChapterHtmlSlimParserTest, TxtChaptersStreamWithoutRetainingTheToc) {
   EXPECT_EQ(pages, chapters);
   EXPECT_TRUE(parser.tocAnchors.empty());
   EXPECT_TRUE(parser.getAnchors().empty());
+}
+
+TEST_F(ChapterHtmlSlimParserTest, NfdWordAcrossInlineStyleKeepsSourceRange) {
+  parser.beginParse();
+  ChapterHtmlSlimParser::startElement(&parser, "body", nullptr);
+  ChapterHtmlSlimParser::startElement(&parser, "p", nullptr);
+  const std::string prefix = "Cafe\xCC\x81";
+  ChapterHtmlSlimParser::characterData(&parser, prefix.c_str(), static_cast<int>(prefix.size()));
+  ChapterHtmlSlimParser::startElement(&parser, "b", nullptr);
+  ChapterHtmlSlimParser::characterData(&parser, "s", 1);
+  ChapterHtmlSlimParser::endElement(&parser, "b");
+  ChapterHtmlSlimParser::endElement(&parser, "p");
+  parser.makePages();
+  ASSERT_NE(parser.currentPage, nullptr);
+  std::string selected;
+  uint32_t previousEnd = 0;
+  unsigned words = 0;
+  for (const auto& element : parser.currentPage->elements) {
+    if (element->getTag() != TAG_PageLine) continue;
+    const auto& block = *static_cast<const PageLine&>(*element).getBlock();
+    for (uint16_t i = 0; i < block.wordCount(); ++i) {
+      const auto range = block.wordSourceRange(i);
+      EXPECT_EQ(range.start, words == 0 ? 0u : 5u);
+      EXPECT_EQ(range.end, words == 0 ? 5u : 6u);
+      ASSERT_TRUE(clippingText::append(selected, block.wordText(i), range.start > previousEnd ? ' ' : '\0', 4096,
+                                       block.wordHasDiscretionaryHyphen(i)));
+      previousEnd = range.end;
+      ++words;
+    }
+  }
+  EXPECT_EQ(words, 2u);
+  EXPECT_EQ(selected, "Caf\xC3\xA9s");
+}
+
+class ClippingParagraphTest : public ChapterHtmlSlimParserTest {};
+
+TEST_P(ClippingParagraphTest, CachedBlocksSeparateAdjacentParagraphs) {
+  const std::string html = std::string("<html><body>") + GetParam() + "</body></html>";
+  const std::string testId = std::to_string(std::hash<std::string>{}(html));
+  const auto tempDir = std::filesystem::temp_directory_path();
+  filepath = (tempDir / ("crosspoint-clipping-paragraphs-" + testId + ".xhtml")).string();
+  {
+    HalFile file;
+    ASSERT_TRUE(file.open(filepath.c_str(), "wb"));
+    ASSERT_EQ(file.write(html.data(), html.size()), html.size());
+  }
+  const auto cachePath = (tempDir / ("crosspoint-clipping-paragraphs-" + testId + ".bin")).string();
+  std::string selected;
+  uint32_t previousEnd = 0;
+  bool paragraphStartPending = false;
+  parser.completePageFn = [&](std::unique_ptr<Page> page, auto, auto, auto) {
+    {
+      HalFile file;
+      ASSERT_TRUE(file.open(cachePath.c_str(), "wb"));
+      ASSERT_TRUE(page->serialize(file));
+    }
+    HalFile file;
+    ASSERT_TRUE(file.open(cachePath.c_str(), "rb"));
+    auto cached = Page::deserialize(file);
+    ASSERT_NE(cached, nullptr);
+    for (const auto& element : cached->elements) {
+      if (element->getTag() != TAG_PageLine) continue;
+      const auto& block = *static_cast<const PageLine&>(*element).getBlock();
+      for (uint16_t i = 0; i < block.wordCount(); ++i) {
+        if (block.wordStartsParagraph(i)) paragraphStartPending = true;
+        if (!clippingText::hasVisibleText(block.wordText(i))) continue;
+        const auto range = block.wordSourceRange(i);
+        const char separator = paragraphStartPending ? '\n' : range.start > previousEnd ? ' ' : '\0';
+        ASSERT_TRUE(clippingText::append(selected, block.wordText(i), separator, 4096));
+        paragraphStartPending = false;
+        previousEnd = range.end;
+      }
+    }
+    EXPECT_EQ(file.position(), file.size());
+  };
+  parser.paragraphIndentSpaces = 0;
+  ASSERT_TRUE(parser.parseAndBuildPages());
+  EXPECT_EQ(selected, "one\ntwo");
+  std::filesystem::remove(filepath);
+  std::filesystem::remove(cachePath);
+}
+
+INSTANTIATE_TEST_SUITE_P(ClippingBoundaries, ClippingParagraphTest,
+                         ::testing::Values("<p>one</p><p>two</p>", "<p>one</p>\n  <p>two</p>",
+                                           "<div>one</div><div>two</div>", "<div>one</div>\n  <div>two</div>",
+                                           "<p>one<br/>two</p>", "<p>o<b>ne</b></p><p>two</p>",
+                                           "<p>one</p><p>&#160;two</p>", "<p>one</p><p>&#8239;two</p>"));
+
+TEST(TextSpacingLayout, ParagraphMarkerSurvivesBidiAndOnlyMarksFirstExtractedLine) {
+  GfxRenderer renderer;
+  for (const bool focus : {false, true}) {
+    BlockStyle style;
+    style.isRtl = true;
+    style.directionDefined = true;
+    style.alignment = CssTextAlign::Right;
+    ParsedText text(0, FirstLineIndent::NoIndent, false, focus, style, false, 0);
+    text.addWord("אחד", EpdFontFamily::REGULAR);
+    text.addWord("alpha", EpdFontFamily::REGULAR);
+    text.addWord("beta", EpdFontFamily::REGULAR);
+    text.addWord("שני", EpdFontFamily::REGULAR);
+    unsigned lines = 0;
+    unsigned starts = 0;
+    auto inspect = [&](std::unique_ptr<TextBlock> block, auto) {
+      for (uint16_t i = 0; i < block->wordCount(); ++i) {
+        if (!block->wordStartsParagraph(i)) continue;
+        EXPECT_EQ(lines, 0u);
+        EXPECT_STREQ(block->wordText(i), "אחד");
+        ++starts;
+      }
+      ++lines;
+      return true;
+    };
+    ASSERT_TRUE(text.layoutAndExtractLines(renderer, 0, 100, inspect, false));
+    ASSERT_GT(lines, 0u);
+    ASSERT_GT(text.size(), 0u);
+    ASSERT_TRUE(text.layoutAndExtractLines(renderer, 0, 100, inspect));
+    EXPECT_EQ(starts, 1u);
+    EXPECT_GT(lines, 1u);
+  }
 }

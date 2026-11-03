@@ -2,7 +2,6 @@
 #include <BoardConfig.h>
 #include <FreeInkUIGfxRenderer.h>
 
-#include "SelectionCursorPolicy.h"
 #include "UITheme.h"
 #include "themes/lyra/LyraTheme.h"
 
@@ -108,6 +107,5 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
     tokens.spaceMd = UiHighDpiProfile::controlGap;
     tokens.spaceLg = 24;
   }
-  if (!UITheme::getInstance().showSelectionCursor()) SelectionCursorPolicy::hideFreeInkListFocus(tokens);
   return tokens;
 }

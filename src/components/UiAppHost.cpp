@@ -14,12 +14,25 @@ void UiAppHost::resetUi() {
   applySharedUiTheme(app, uiTarget, upstreamStyle);
 }
 
-void UiAppHost::renderUi() {
+void UiAppHost::prepareUi() {
   applyUiTextAlignment(uiTarget, upstreamStyle);
+  const auto fonts = uiScaleSpec(upstreamStyle);
+  uiTarget.setFont(fui::GfxRendererTarget::FONT_SMALL,
+                   !upstreamStyle && UITheme::getInstance().hasMainTabs() ? SMALL_FONT_ID : fonts.smallFontId);
+  uiTarget.setFont(fui::GfxRendererTarget::FONT_BODY, fonts.bodyFontId);
   app.setDevice(uiTarget.deviceContext());
   refreshSharedUiThemeTokens(uiTarget, upstreamStyle);
+}
+
+void UiAppHost::renderUi() {
+  prepareUi();
   app.render();
   uiReady = true;
+}
+
+void UiAppHost::scanUi() {
+  prepareUi();
+  app.paintForScan();
 }
 
 UiAppHost::TouchRoute UiAppHost::routeTouch(const MappedInputManager& input, const bool withLongPress,
@@ -31,11 +44,17 @@ UiAppHost::TouchRoute UiAppHost::routeTouch(const MappedInputManager& input, con
     return result;
   }
   result.routed = true;
-  result.event = app.route(result.snap);
+  result.event = route(result.snap);
   return result;
 }
 
 fui::ActionEvent UiAppHost::route(const fui::InputSnapshot& snap) {
   if (!uiReady) return {};
-  return app.route(snap);
+  const auto event = app.route(snap);
+  // Releases activate controls; held/pressed frames only highlight or drag.
+  // Empty/disabled hit regions produce no event and therefore no feedback.
+  if (event && (snap.touchReleased || snap.swipeLeft || snap.swipeRight)) {
+    haptic_feedback::touchAction(event.longPress);
+  }
+  return event;
 }

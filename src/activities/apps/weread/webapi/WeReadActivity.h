@@ -110,6 +110,8 @@ class WeReadActivity final : public Activity {
   bool disclaimerSaveFailed_ = false;
   bool wifiSessionActive_ = false;
   bool wifiReleasePending_ = false;
+  bool readingStatsReleased_ = false;
+  uint32_t lastCancelPollAt_ = 0;
   std::atomic<bool> downloadRenderPending_{false};
   std::atomic<bool> stageRenderPending_{false};
 
@@ -126,6 +128,8 @@ class WeReadActivity final : public Activity {
   void resetShelfCoverLoading();
   void advanceShelfCovers();
   WeReadClient::Operation::Event stepOperation();
+  bool prepareNetworkMemory();
+  bool pollNetworkCancel();
   void updatePostProcessNotice(WeReadClient::Operation::ProgressStage previous,
                                WeReadClient::Operation::ProgressStage current);
   void maybeShowLongWait(RenderLock& renderBarrier);

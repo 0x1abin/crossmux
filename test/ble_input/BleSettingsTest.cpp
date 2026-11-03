@@ -2,6 +2,7 @@
 
 #include "BleButtonMapActivity.h"
 #include "BleInput.h"
+#include "BleRuntimeHarness.h"
 #include "BluetoothSettingsActivity.h"
 #include "CrossPointSettings.h"
 #include "SdCardFontSystem.h"
@@ -17,9 +18,10 @@ class BleSettingsTest : public testing::Test {
     BleHid = {};
     SETTINGS = {};
     sdFontSystem = {};
-    freeInternal = bleinput::kExplicitMinFreeInternal - 1;
-    largestInternal = bleinput::kExplicitMinLargestInternal;
+    freeInternal = bleinput::kExplicitMinFreeInternal - 2;
+    largestInternal = 40 * 1024;
     renderer.cache.recoveredInternal = 1;
+    bleharness::reset(renderer, &input);
   }
 };
 
@@ -27,7 +29,7 @@ TEST_F(BleSettingsTest, SettingsAndMappingRecoverUnderOneRenderLock) {
   BluetoothSettingsActivity settings(renderer, input);
   settings.onEnter();
   EXPECT_TRUE(BleHid.running);
-  EXPECT_TRUE(BleHid.startUnderLock);
+  EXPECT_FALSE(BleHid.startUnderLock);
   EXPECT_TRUE(renderer.cache.recoveredUnderLock);
   EXPECT_EQ(renderLockDepth, 0);
   EXPECT_EQ(sdFontSystem.unloads, 1);
@@ -35,7 +37,7 @@ TEST_F(BleSettingsTest, SettingsAndMappingRecoverUnderOneRenderLock) {
   mapping.onEnter();
   EXPECT_EQ(sdFontSystem.unloads, 1);
   bleinput::stop();
-  freeInternal = bleinput::kExplicitMinFreeInternal - 1;
+  freeInternal = bleinput::kExplicitMinFreeInternal - 2;
   BleButtonMapActivity retryMapping(renderer, input);
   retryMapping.onEnter();
   EXPECT_TRUE(BleHid.running);

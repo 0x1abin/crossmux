@@ -12,7 +12,7 @@ ad-hoc ints and nesting forces the reader to reconstruct intent.
 
 ## Core moves
 
-- **Model a closed set of states/modes as an `enum class`, not ints or bools.**
+- **Model a multi-state mode as an `enum class`, not magic ints or flags.**
   A variable kept honest by a comment ("0 = hidden, 1 = showing, 2 = confirm")
   is a latent bug. Make it an enum and the comment becomes the type.
 - **Dispatch on an enum with an exhaustive `switch`, no `default`.** This
@@ -48,7 +48,7 @@ ad-hoc ints and nesting forces the reader to reconstruct intent.
 
 ## Self-review
 
-- [ ] No int/bool standing in for a closed set of modes; it is an `enum class`.
+- [ ] Multi-state modes use an `enum class`; genuine two-outcome conditions stay boolean.
 - [ ] Enum dispatch is an exhaustive `switch` with no catch-all `default` (or
       the `default` is a documented deliberate choice).
 - [ ] No nested if/else-if ladder on a single discriminant that should be a

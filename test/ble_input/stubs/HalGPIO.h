@@ -7,7 +7,8 @@ struct HalGPIO {
   enum { BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_POWER };
   std::array<bool, 7> pressed{}, released{}, held{};
   unsigned long heldTime = 0, touchHeldTime = 0;
-  bool touchTap = false;
+  bool touchTap = false, touchDown = false;
+  uint8_t capacitivePageMask = 0;
   void update() {}
   bool wasPressed(uint8_t b) const { return pressed[b]; }
   bool wasReleased(uint8_t b) const { return released[b]; }
@@ -29,6 +30,15 @@ struct HalGPIO {
     x = y = 0.5f;
     return touchTap;
   }
+  bool wasTouchDown(float& x, float& y) const {
+    x = y = 0.5f;
+    return touchDown;
+  }
+  bool wasCapacitivePagePressed() const {
+    return (pressed[BTN_UP] && (capacitivePageMask & (1u << BTN_UP))) ||
+           (pressed[BTN_DOWN] && (capacitivePageMask & (1u << BTN_DOWN)));
+  }
+  bool isCapacitivePagePressed(uint8_t b) const { return held[b] && (capacitivePageMask & (1u << b)); }
   bool isTouchTapCandidate(float&, float&, unsigned long&) const { return false; }
   bool wasTouchLongPress(float&, float&) const { return false; }
   void suppressTouchContact() {}

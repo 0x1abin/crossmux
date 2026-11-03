@@ -23,6 +23,8 @@ enum class SpecialKey : uint8_t {
 struct KeyEvent {
   SpecialKey special = SpecialKey::None;
   uint8_t keycode = 0;
+  uint8_t mods = 0;
+  bool pressed = true;
 };
 }  // namespace freeink
 struct TestBleHost {

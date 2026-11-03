@@ -22,6 +22,7 @@ class Imu {
   static int reads;
   static bool readOk;
   bool begin() { return true; }
+  bool hasGyroscope() const { return !FREEINK_DEVICE_READPICO; }
   bool wake() { return true; }
   bool sleep() { return true; }
   bool read(Sample& out) { ++reads; out=sample; return readOk; }

@@ -12,9 +12,12 @@ EPUB/TXT 页会先准备正文和灰阶，再提交一次合并波形。三档�
 ## 当前构建与历史边界
 
 ```sh
-pio run -e sticky -e sticky_aa_rollback
+pio run -e sticky
 python3 freeink-sdk/libs/display/FreeInkDisplay/test/host/test_sticky_combined_aa.py
 ```
+
+回退对比通过 [本地构建覆盖](build-system.md#platformiolocalini-personal-overrides)
+添加 `FREEINK_SSD1677_COMBINED_AA=0`；主配置不再提供 `sticky_aa_rollback` 入口。
 
 历史 `sticky_aa_test` 使用 Sticky 硬件配置，版本为
 `1.6.0-sticky-aa-test2`，设备标识仍为 `sticky`。下述安装和日志说明仅适用于

@@ -4,11 +4,9 @@
 
 #include <type_traits>
 
-#include "InputModality.h"
 #include "InxItemLayout.h"
 #include "InxRecentLayout.h"
 #include "activities/MainTab.h"
-#include "components/SelectionCursorPolicy.h"
 #include "components/SubpageLayout.h"
 #include "components/icons/inx_apps.h"
 #include "components/themes/BaseTheme.h"
@@ -119,16 +117,16 @@ TEST(InxNavigation, ReservesStatusAndContentGapsInsideSafeArea) {
     const Rect safe{safeLeft, safeTop, safeWidth, height - safeTop - safeBottom - hints};
     const auto layout = MainTabs::layout(safe, 0, MainTabs::bottomBarHeight, true, MainTabs::statusBarHeight);
     EXPECT_EQ(layout.statusBar.y, safeTop);
-    EXPECT_EQ(layout.statusBar.height, 28);
+    EXPECT_EQ(layout.statusBar.height, 20);
     EXPECT_EQ(layout.tabBar.height, 56);
     EXPECT_EQ(layout.content.y - (layout.statusBar.y + layout.statusBar.height), 6);
     EXPECT_EQ(layout.tabBar.y - (layout.content.y + layout.content.height), 6);
     EXPECT_EQ(layout.tabBar.y + layout.tabBar.height + hints, height - safeBottom);
     EXPECT_GT(layout.content.height, 0);
     const auto previous = MainTabs::layout(safe, 0, 66, true, 44);
-    EXPECT_EQ(layout.content.height - previous.content.height, 26);
+    EXPECT_EQ(layout.content.height - previous.content.height, 34);
     const auto compact = MainTabs::layout(safe, 0, 58, true, 32);
-    EXPECT_EQ(layout.content.height - compact.content.height, 6);
+    EXPECT_EQ(layout.content.height - compact.content.height, 14);
     for (const Rect& rect : {layout.tabBar, layout.statusBar, layout.content}) {
       EXPECT_EQ(rect.x, safeLeft);
       EXPECT_EQ(rect.width, safeWidth);
@@ -143,8 +141,8 @@ TEST(InxNavigation, PreservesSafeOriginAndTopPaddingInBothPositions) {
         MainTabs::layout(safe, 5, bottom ? MainTabs::bottomBarHeight : 66, bottom, MainTabs::statusBarHeight);
     EXPECT_EQ(layout.tabBar.y, bottom ? 741 : 14);
     EXPECT_EQ(layout.statusBar.y, 14);
-    EXPECT_EQ(layout.statusBar.height, bottom ? 28 : 0);
-    EXPECT_EQ(layout.content.y, bottom ? 48 : 80);
+    EXPECT_EQ(layout.statusBar.height, bottom ? 20 : 0);
+    EXPECT_EQ(layout.content.y, bottom ? 40 : 80);
     EXPECT_EQ(layout.content.y + layout.content.height, bottom ? 735 : 797);
     for (const Rect& rect : {layout.tabBar, layout.statusBar, layout.content}) {
       EXPECT_EQ(rect.x, safe.x);
@@ -171,42 +169,6 @@ TEST(InxNavigation, ScrollsListPagesWithoutMovingSelection) {
   EXPECT_EQ(nav.top, 0);
   EXPECT_FALSE(nav.scrollBy(-nav.pageRows(), 10));
   EXPECT_EQ(nav.selected, 2);
-}
-
-TEST(InxNavigation, TracksLastInputWithTouchPriority) {
-  InputModality modality = InputModality::Touch;
-  modality = inputModalityAfter(modality, false, false);
-  EXPECT_EQ(modality, InputModality::Touch);
-  modality = inputModalityAfter(modality, true, false);
-  EXPECT_EQ(modality, InputModality::Buttons);
-  modality = inputModalityAfter(modality, false, false);
-  EXPECT_EQ(modality, InputModality::Buttons);
-  modality = inputModalityAfter(modality, true, true);
-  EXPECT_EQ(modality, InputModality::Touch);
-}
-
-TEST(InxNavigation, HidesOnlyInxTouchFocusAndKeepsActiveFeedback) {
-  EXPECT_FALSE(SelectionCursorPolicy::visible(true, true, InputModality::Touch));
-  EXPECT_TRUE(SelectionCursorPolicy::visible(true, true, InputModality::Buttons));
-  EXPECT_TRUE(SelectionCursorPolicy::visible(true, false, InputModality::Touch));
-  EXPECT_TRUE(SelectionCursorPolicy::visible(false, true, InputModality::Touch));
-
-  freeink::ui::ThemeTokens tokens;
-  tokens.listRow.normal.background = freeink::ui::Paint::solid(freeink::ui::Color::White);
-  tokens.listRow.normal.foreground = freeink::ui::Paint::solid(freeink::ui::Color::Black);
-  tokens.listRow.selected.background = freeink::ui::Paint::solid(freeink::ui::Color::Black);
-  tokens.listRow.selected.foreground = freeink::ui::Paint::solid(freeink::ui::Color::White);
-  tokens.listRow.focused.background = freeink::ui::Paint::dither(freeink::ui::Color::LightGray);
-  tokens.listRow.active.background = freeink::ui::Paint::solid(freeink::ui::Color::Black);
-  tokens.listRow.active.foreground = freeink::ui::Paint::solid(freeink::ui::Color::White);
-  const auto active = tokens.listRow.active;
-  SelectionCursorPolicy::hideFreeInkListFocus(tokens);
-  EXPECT_EQ(tokens.listRow.selected.background.kind, tokens.listRow.normal.background.kind);
-  EXPECT_EQ(tokens.listRow.selected.foreground.color, tokens.listRow.normal.foreground.color);
-  EXPECT_EQ(tokens.listRow.focused.background.kind, tokens.listRow.normal.background.kind);
-  EXPECT_EQ(tokens.listRow.focused.foreground.color, tokens.listRow.normal.foreground.color);
-  EXPECT_EQ(tokens.listRow.active.background.kind, active.background.kind);
-  EXPECT_EQ(tokens.listRow.active.foreground.color, active.foreground.color);
 }
 
 TEST(InxNavigation, KeepsLegacyListMetricsIndependentFromLyra) {
@@ -253,7 +215,7 @@ TEST(InxNavigation, PositionsRecentHeaderContentAndBatteryInsideSafeArea) {
       const Rect content = InxRecentGeometry::contentRect(safe, metrics);
       const Rect battery = InxRecentGeometry::batteryRect(safe);
       EXPECT_EQ(header.x, safe.x);
-      EXPECT_EQ(header.y, safe.y);
+      EXPECT_EQ(header.y, safe.y + HeaderStatusMetrics::topPadding);
       EXPECT_EQ(header.width, safe.width);
       EXPECT_EQ(header.height, 66);
       EXPECT_EQ(content.x, header.x);
@@ -276,18 +238,18 @@ TEST(InxNavigation, PreservesRecentGeometryWithoutBezelInsets) {
   const Rect content = InxRecentGeometry::contentRect(screen, metrics);
   const Rect battery = InxRecentGeometry::batteryRect(screen);
   EXPECT_EQ(header.x, 0);
-  EXPECT_EQ(header.y, 0);
+  EXPECT_EQ(header.y, HeaderStatusMetrics::topPadding);
   EXPECT_EQ(header.width, 480);
   EXPECT_EQ(header.height, 66);
   EXPECT_EQ(content.x, 0);
-  EXPECT_EQ(content.y, 66);
+  EXPECT_EQ(content.y, 66 + HeaderStatusMetrics::topPadding);
   EXPECT_EQ(content.width, 480);
-  EXPECT_EQ(content.height, 694);
+  EXPECT_EQ(content.height, 694 - HeaderStatusMetrics::topPadding);
   EXPECT_EQ(battery.x, 453);
   EXPECT_EQ(battery.y, 770);
   EXPECT_EQ(battery.width, 15);
   EXPECT_EQ(battery.height, 12);
-  EXPECT_EQ(SubpageLayout::headerRect(Rect{5, 5, 20, 40}, metrics).height, 40);
+  EXPECT_EQ(SubpageLayout::headerRect(Rect{5, 5, 20, 40}, metrics).height, 40 - HeaderStatusMetrics::topPadding);
   EXPECT_EQ(InxRecentGeometry::contentRect(Rect{5, 5, 20, 40}, metrics).height, 0);
 }
 

@@ -212,11 +212,12 @@ bool HalDisplay::supportsContinuousImageReading() const { return einkDisplay.sup
 bool HalDisplay::canUseTextTransition() const { return einkDisplay.canUseTextTransition(); }
 
 void HalDisplay::cancelGrayscale() {
-  if (!einkDisplay.combinesGrayscaleBase()) return;
   einkDisplay.abortPostRefresh();
-  // Discard staged planes and re-arm the next render without touching the glass.
-  einkDisplay.beginDisplayWork();
+  einkDisplay.requestResync(0);
+  einkDisplay.cleanupGrayscaleBuffers(nullptr);
 }
+
+bool HalDisplay::displayCommitted() const { return einkDisplay.displayCommitted(); }
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 

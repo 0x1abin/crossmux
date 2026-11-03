@@ -20,6 +20,8 @@ class ImageViewerActivity final : public Activity {
   void loadSiblingImages();
   bool isPng() const;
   bool preparePreview();
+  bool renderJpeg();
+  bool prepareJpegSleepCover();
   void doSetSleepCover(const char* sourcePath, bool transparent);
   void showSleepCoverOptions();
 

@@ -4,6 +4,7 @@
 #include <Print.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -14,6 +15,15 @@
 class ZipFile;
 
 class Epub {
+ public:
+  struct SyncMetadata {
+    std::string isbn;
+    std::string asin;
+    std::string series;
+    std::optional<float> seriesIndex;
+  };
+
+ private:
   // the ncx file (EPUB 2)
   std::string tocNcxItem;
   // the nav file (EPUB 3)
@@ -52,6 +62,7 @@ class Epub {
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
   bool loadMetadata(std::string& title, std::string& author);
+  bool loadSyncMetadata(SyncMetadata& metadata);
   bool clearCache() const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;
@@ -80,14 +91,24 @@ class Epub {
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
   int getSpineItemsCount() const;
+  bool isLinearSpineItem(int spineIndex) const;
+  int getLinearSpineItemsCount() const;
+  int getSpineIndexForLinearIndex(int linearIndex) const;
+  int getLinearIndexForSpineIndex(int spineIndex) const;
+  int getNextLinearSpineIndex(int spineIndex) const;
+  int getPreviousLinearSpineIndex(int spineIndex) const;
   int getTocItemsCount() const;
   int getSpineIndexForTocIndex(int tocIndex) const;
   int getTocIndexForSpineIndex(int spineIndex) const;
   size_t getCumulativeSpineItemSize(int spineIndex) const;
+  // First spine index whose cumulative size reaches `bytes`, or -1 past the end.
+  int getSpineIndexForSize(size_t bytes) const;
   int getSpineIndexForTextReference() const;
 
   size_t getBookSize() const;
   float calculateProgress(int currentSpineIndex, float currentSpineRead) const;
+  // Percentage jumps select weighted linear content; output arguments are unchanged on failure.
+  bool findSpineForProgress(float fraction, int& spineIndex, float& chapterFraction) const;
   CssParser* getCssParser() const { return cssParser.get(); }
   int resolveHrefToSpineIndex(const std::string& href) const;
 };

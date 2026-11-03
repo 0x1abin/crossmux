@@ -95,7 +95,8 @@ struct UITheme {
       &RoundedRaffMetrics::values,&LyraCarouselMetrics::values,&InxMetrics::values,&LyraMetrics::values};
     metrics=*all[int(SETTINGS.uiTheme)]; UiHighDpiProfile::apply(metrics); return metrics;
   }
-  Rect getScreenSafeArea(const Renderer& r) const {
+  static Rect getContentArea(const Renderer& r) {
+    if (!UiHighDpiProfile::enabled) return {0, 0, int16_t(r.width), int16_t(r.height)};
     // Actual ReadPico 5/5/8/5 board insets, rotated with the display.
     int t=5,ri=5,b=8,l=5;
     switch(r.orientation) {
@@ -105,6 +106,7 @@ struct UITheme {
     }
     return {int16_t(l),int16_t(t),int16_t(r.width-l-ri),int16_t(r.height-t-b)};
   }
+  Rect getScreenSafeArea(const Renderer& r) const { return getContentArea(r); }
 };
 namespace freeink::ui {
 struct GfxRendererTarget : TraceTarget {
@@ -285,7 +287,7 @@ with tempfile.TemporaryDirectory(prefix='unified-keyboard-', dir=os.environ.get(
             # INX chrome retains its own metrics; regular keyboard geometry is Lyra.
             if theme==5: assert scenes[scene,1][1]==draw, ('INX geometry',scene)
     # Build the fixed upstream with its own production metrics and keyboard code.
-    ref=os.environ.get('FREEINK_UPSTREAM_READER_REF','38280863a50988683c2c63ccd7096e872a48c411')
+    ref=os.environ.get('FREEINK_UPSTREAM_READER_REF','ba39565ce7b3a8aab14ca86da4fa4c3ca140f007')
     upstream=subprocess.check_output(['git','show',ref+':src/activities/util/KeyboardEntryActivity.cpp'],cwd=ROOT,text=True)
     code=harness.replace(metrics_code(),metrics_code(ref))
     for name in names:

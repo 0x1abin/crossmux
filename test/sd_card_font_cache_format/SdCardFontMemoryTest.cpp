@@ -58,8 +58,10 @@ class SdCardFontMemoryTest : public ::testing::Test {
     ESP = {};
     font.loaded_ = true;
     std::strncpy(font.filePath_, path.c_str(), sizeof(font.filePath_) - 1);
-    auto& style = font.styles_[0];
-    style.present = true;
+    font.styles_ = std::make_unique<SdCardFont::PerStyle[]>(1);
+    font.styleCount_ = 1;
+    font.styleSlots_[0] = 1;
+    auto& style = font.styleData(0);
     style.header.intervalCount = 1;
     style.header.glyphCount = 2;
     style.fullIntervals = new EpdUnicodeInterval[1]{{'A', 'B', 0}};
@@ -69,7 +71,10 @@ class SdCardFontMemoryTest : public ::testing::Test {
     EpdGlyph glyphs[2]{};
     glyphs[0].advanceX = 9;
     glyphs[1].advanceX = 13;
+    glyphs[0].width = glyphs[1].width = 8;
+    glyphs[0].height = glyphs[1].height = 16;
     glyphs[0].dataLength = glyphs[1].dataLength = 16;
+    font.fileSize_ = sizeof(glyphs) + 32;
     glyphs[1].dataOffset = 16;
     std::ofstream file(path, std::ios::binary);
     file.write(reinterpret_cast<const char*>(glyphs), sizeof(glyphs));
@@ -152,12 +157,65 @@ TEST_F(SdCardFontMemoryTest, EveryReplacementAllocationFailureKeepsPublishedCach
 TEST_F(SdCardFontMemoryTest, AdvanceGrowthFailurePreservesOldTable) {
   ASSERT_EQ(font.buildAdvanceTable("A", 1), 0);
   auto* table = font.advanceTable_[0];
-  const SdCardFont::AdvanceEntry entry{'B', 13};
-  failArraySize = 2 * sizeof(SdCardFont::AdvanceEntry);
-  font.mergeIntoAdvanceTable(0, &entry, 1);
+  std::vector<SdCardFont::AdvanceEntry> entries(font.advanceTableCapacity_[0]);
+  for (size_t i = 0; i < entries.size(); ++i) entries[i] = {static_cast<uint32_t>('B' + i), 13};
+  const size_t allocationsBefore = arrayAllocations;
+  failArrayAt = allocationsBefore + 1;  // Fail the preferred capacity growth.
+  failArraySize = (font.advanceTableSize_[0] + entries.size()) * sizeof(SdCardFont::AdvanceEntry);
+  font.mergeIntoAdvanceTable(0, entries.data(), entries.size());  // Exact-size retry fails too.
+  EXPECT_EQ(arrayAllocations, allocationsBefore + 2);
   EXPECT_EQ(font.advanceTable_[0], table);
+  EXPECT_EQ(font.advanceTableSize_[0], 1U);
   EXPECT_EQ(font.getAdvance('A', 0), 9);
+  EXPECT_EQ(font.getAdvance('B', 0), 0);
   EXPECT_EQ(font.getAdvanceOrLoad('B', 0), 13);
+}
+
+TEST_F(SdCardFontMemoryTest, LowBudgetSkipsOptionalKernIndexAndStreamingStillWorks) {
+  constexpr size_t glyphOffset = 64 + sizeof(EpdUnicodeInterval);
+  constexpr size_t kernOffset = glyphOffset + 2 * sizeof(EpdGlyph);
+  constexpr size_t bitmapOffset = kernOffset + 2 * sizeof(EpdKernClassEntry) + 1;
+  std::vector<uint8_t> bytes(bitmapOffset + 32, 0);
+  const auto put = [&bytes](size_t at, uint32_t value, size_t size) {
+    for (size_t i = 0; i < size; ++i) bytes[at + i] = static_cast<uint8_t>(value >> (i * 8));
+  };
+  std::memcpy(bytes.data(), "CPFONT\0\0", 8);
+  put(8, CPFONT_VERSION, 2);
+  bytes[12] = 1;
+  put(36, 1, 4);
+  put(40, 2, 4);
+  bytes[44] = 12;
+  put(45, 12, 2);
+  put(49, 1, 2);
+  put(51, 1, 2);
+  bytes[53] = bytes[54] = 1;
+  put(56, 64, 4);
+  put(64, 'A', 4);
+  put(68, 'B', 4);
+  for (size_t i = 0; i < 2; ++i) {
+    EpdGlyph glyph{8, 8, 128, 0, 8, 16, static_cast<uint32_t>(i * 16)};
+    std::memcpy(bytes.data() + glyphOffset + i * sizeof(glyph), &glyph, sizeof(glyph));
+  }
+  put(kernOffset, 'A', 2);
+  bytes[kernOffset + 2] = 1;
+  put(kernOffset + 3, 'B', 2);
+  bytes[kernOffset + 5] = 1;
+  bytes[kernOffset + 6] = static_cast<uint8_t>(-3);
+  {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  }
+  ESP.freeHeap = 16 * 1024;
+  ESP.maxAlloc = 8 * 1024;
+  ASSERT_TRUE(font.load(path.c_str()));
+  EXPECT_EQ(font.styles_[0].kernBlockIndex, nullptr);
+  ESP = {};
+  ASSERT_EQ(font.prewarm("AB", 1, false, true, false), 0);
+  const auto* data = font.getEpdFont()->data;
+  ASSERT_NE(data->kernMatrix, nullptr);
+  EXPECT_EQ(data->kernLeftClassCount, 1);
+  EXPECT_EQ(data->kernRightClassCount, 1);
+  EXPECT_EQ(data->kernMatrix[0], -3);
 }
 
 TEST_F(SdCardFontMemoryTest, PeakBudgetRejectsMiniGrowthBeforeAllocatingAndKeepsOldCache) {
@@ -290,7 +348,8 @@ TEST_F(SdCardFontMemoryTest, PagedIndexRejectsCorruptIntervalsAndReleasesFailedA
   for (const size_t bytesToFail : {size_t(126 * 4), size_t(32 * sizeof(EpdUnicodeInterval))}) {
     failArraySize = bytesToFail;
     EXPECT_FALSE(font.load(path.c_str()));
-    EXPECT_FALSE(font.styles_[0].hasCoverageIndex());
+    EXPECT_FALSE(font.hasStyle(0));
+    EXPECT_EQ(font.styles_, nullptr);
   }
   failArraySize = 0;
   EXPECT_TRUE(font.load(path.c_str()));

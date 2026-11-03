@@ -111,14 +111,9 @@ void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const ch
   constexpr int titleFont = UiHighDpiProfile::enabled ? UI_12_FONT_ID : NOTOSERIF_12_FONT_ID;
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
 
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryX = rect.x + rect.width - 12 - InxMetrics::values.batteryWidth;
-  drawBatteryRight(renderer,
-                   Rect{batteryX, rect.y + 5, InxMetrics::values.batteryWidth, InxMetrics::values.batteryHeight},
-                   showBatteryPercentage, UiHighDpiProfile::enabled ? SMALL_FONT_ID : STATUS_NUMERIC_FONT_ID);
+  drawHeaderStatus(renderer, rect);
 
-  const int titleTop = rect.y + InxMetrics::values.batteryBarHeight;
+  const int titleTop = rect.y + headerStatusHeight();
   const int rightPadding = InxMetrics::values.contentSidePadding;
   int titleRight = rect.x + rect.width - rightPadding;
   if (subtitle && *subtitle) {
@@ -265,7 +260,7 @@ void InxTheme::drawList(const GfxRenderer& renderer, const Rect rect, const int 
   const bool hasScrollBar = itemCount > pageItems;
   const int contentRight = rect.x + rect.width - (hasScrollBar ? 10 : 0);
   const int iconSize = rowSubtitle != nullptr ? kMenuIconSize : kListIconSize;
-  const bool selectionVisible = showSelection && UITheme::getInstance().showSelectionCursor();
+  const bool selectionVisible = showSelection;
 
   for (int index = pageStart; index < pageEnd; ++index) {
     const int slot = index - pageStart;
@@ -336,10 +331,9 @@ void InxTheme::drawButtonMenu(GfxRenderer& renderer, const Rect rect, const int 
   const int pageItems = InxMenuGeometry::pageItems(rect.height);
   const int pageStart = InxMenuGeometry::pageStart(selectedIndex, buttonCount, rect.height);
   const int pageEnd = std::min(buttonCount, pageStart + pageItems);
-  const bool selectionVisible = UITheme::getInstance().showSelectionCursor();
   for (int index = pageStart; index < pageEnd; ++index) {
     const int rowY = rect.y + (index - pageStart) * kRowHeight;
-    const bool selected = selectionVisible && index == selectedIndex;
+    const bool selected = index == selectedIndex;
     if (selected) renderer.fillRect(rect.x, rowY, rect.width, kRowHeight, true);
 
     int textX = rect.x + kRowPadding;
@@ -384,7 +378,7 @@ InxTheme::MenuRowGeometry InxTheme::getMenuRowGeometry(const GfxRenderer&, const
 }
 
 void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, const std::vector<std::string>& options,
-                               const int selectedIndex) const {
+                               const int selectedIndex, const int firstVisible) const {
   if (options.empty()) return;
 
   const int optionCount = static_cast<int>(options.size());
@@ -393,12 +387,11 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
       InxOptionGeometry::layout(UITheme::getInstance().getScreenSafeArea(renderer, true, false), optionCount, selected);
   const int visibleRows = layout.rows;
   const int maxStart = optionCount - visibleRows;
-  const int start = layout.first;
+  const int start = firstVisible >= 0 ? std::min(firstVisible, maxStart) : layout.first;
   const int panelWidth = layout.panel.width;
   const int panelHeight = layout.panel.height;
   const int panelX = layout.panel.x;
   const int panelY = layout.panel.y;
-  const bool selectionVisible = UITheme::getInstance().showSelectionCursor();
 
   renderer.fillRect(panelX, panelY, panelWidth, panelHeight, false);
   const std::string shownTitle = renderer.truncatedText(UI_10_FONT_ID, title, panelWidth - 32, EpdFontFamily::BOLD);
@@ -410,7 +403,7 @@ void InxTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, c
   for (int slot = 0; slot < visibleRows; ++slot) {
     const int optionIndex = start + slot;
     const int rowY = panelY + InxOptionGeometry::headerHeight + slot * InxOptionGeometry::rowHeight;
-    const bool isSelected = selectionVisible && optionIndex == selected;
+    const bool isSelected = optionIndex == selected;
     if (isSelected) {
       const Rect row = layout.optionRect(slot);
       renderer.fillRect(row.x, row.y, row.width, row.height, true);
@@ -464,23 +457,21 @@ void InxTheme::drawMainTabBar(const GfxRenderer& renderer, const Rect rect, cons
 
 void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect) const {
   if (rect.width <= 0 || rect.height <= 0) return;
+  if (SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM) {
+    drawHeaderStatus(renderer, rect);
+    return;
+  }
   constexpr int numericFontId = UiHighDpiProfile::enabled ? SMALL_FONT_ID : STATUS_NUMERIC_FONT_ID;
   constexpr int edgeInset = UiHighDpiProfile::enabled ? UiHighDpiProfile::contentPadding : 12;
   constexpr int batteryTextOffset = 6;  // drawBatteryRight offsets the icon below the text origin.
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const bool tabsAtBottom = SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM;
   // The battery cap and numeric glyphs include the positioning edge pixel.
   const int right = std::min(rect.x + rect.width - 1, renderer.getScreenWidth() - edgeInset);
-  const int textY = UiHighDpiProfile::enabled ? rect.y + (rect.height - renderer.getLineHeight(numericFontId)) / 2
-                    : tabsAtBottom            ? std::max(rect.y, edgeInset) - batteryTextOffset
-                                   : std::min(rect.y + rect.height - 1, renderer.getScreenHeight() - edgeInset) -
-                                         metrics.batteryHeight - batteryTextOffset;
+  const int textY = UiHighDpiProfile::enabled
+                        ? rect.y + (rect.height - renderer.getLineHeight(numericFontId)) / 2
+                        : std::min(rect.y + rect.height - 1, renderer.getScreenHeight() - edgeInset) -
+                              metrics.batteryHeight - batteryTextOffset;
   const GfxRenderer::ClipScope clip(renderer, rect.x, rect.y, rect.width, rect.height);
-  if (tabsAtBottom) {
-    char time[9] = "--:--";
-    TimeUtils::formatCurrentTime(time, sizeof(time), SETTINGS.clockFormat == 1);
-    renderer.drawText(numericFontId, std::max(rect.x, edgeInset), textY, time);
-  }
   drawBatteryRight(renderer, Rect{right - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
                    SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS,
                    numericFontId);

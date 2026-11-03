@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "SettingsSection.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
 
@@ -36,6 +37,7 @@ enum class SettingAction {
   Plugins,
   KeyboardLayouts,
   HomeButton,
+  TapZones,
 };
 
 struct SettingInfo {
@@ -47,6 +49,11 @@ struct SettingInfo {
   std::span<const StrId> staticEnumValues;
   std::vector<std::string> enumStringValues;  // runtime alternative to StrId enumValues (for SD card fonts etc.)
   SettingAction action = SettingAction::None;
+
+  // Number of stored values an ENUM may hold when that is more than the number
+  // of rows it shows (0 = same as the row count). Used on load to clamp a stored
+  // byte, so a value the UI folds onto one row must still live here.
+  uint8_t enumValueCount = 0;
 
   struct ValueRange {
     int16_t min;
@@ -60,7 +67,8 @@ struct SettingInfo {
   bool obfuscated = false;               // Save/load via base64 obfuscation (passwords)
   bool inTextSettings = false;           // Surfaced in the Text Settings screen; hidden from the flat Reader list
   bool inReadingStatsSettings = false;   // Surfaced in Reading Stats Settings; hidden from the flat Reader list
-  bool managedEnumPicker = false;        // Always open a picker; the dynamic setter owns the change lifecycle
+  bool webHidden = false;
+  bool managedEnumPicker = false;  // Always open a picker; the dynamic setter owns the change lifecycle
 
   // Direct char[] string fields (for settings stored in CrossPointSettings)
   size_t stringOffset = 0;
@@ -74,6 +82,11 @@ struct SettingInfo {
 
   SettingInfo& withObfuscated() {
     obfuscated = true;
+    return *this;
+  }
+
+  SettingInfo& withWebHidden() {
+    webHidden = true;
     return *this;
   }
 
@@ -131,11 +144,12 @@ struct SettingInfo {
     return s;
   }
 
-  static SettingInfo Action(StrId nameId, SettingAction action) {
+  static SettingInfo Action(StrId nameId, SettingAction action, StrId category = StrId::STR_NONE_OPT) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::ACTION;
     s.action = action;
+    s.category = category;
     return s;
   }
 
@@ -175,13 +189,22 @@ struct SettingInfo {
     return s;
   }
 
+  // field (optional) names the stored byte behind the getter/setter pair. With
+  // it the entry also persists under key like a pointer-bound enum; without it
+  // the entry is UI-only (the KOReader dialog), which is what every pre-existing
+  // caller wants. valueCount (optional) is the number of storable values when
+  // that exceeds the number of rows, e.g. the page-turn rows that are four but
+  // must keep a stored INVERTED_TAP (3) alive next to Disabled (4).
   static SettingInfo DynamicEnum(StrId nameId, std::vector<StrId> values, std::function<uint8_t()> getter,
                                  std::function<void(uint8_t)> setter, const char* key = nullptr,
-                                 StrId category = StrId::STR_NONE_OPT) {
+                                 StrId category = StrId::STR_NONE_OPT, uint8_t CrossPointSettings::* field = nullptr,
+                                 uint8_t valueCount = 0) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::ENUM;
+    s.valuePtr = field;
     s.enumValues = std::move(values);
+    s.enumValueCount = valueCount;
     s.valueGetter = std::move(getter);
     s.valueSetter = std::move(setter);
     s.key = key;
@@ -204,20 +227,18 @@ struct SettingInfo {
 };
 
 class SettingsActivity final : public UiTabListActivity {
+  const SettingsSection section;
   int selectedCategoryIndex = 0;  // Currently selected category
   int settingsCount = 0;
   uint8_t expandedCategories = 0;
 
   // Per-category settings derived from shared list + device-only actions
-  std::vector<SettingInfo> displaySettings;
-  std::vector<SettingInfo> readerSettings;
-  std::vector<SettingInfo> controlsSettings;
-  std::vector<SettingInfo> systemSettings;
+  std::array<std::vector<SettingInfo>, SETTINGS_SECTION_COUNT> categories;
   const std::vector<SettingInfo>* currentSettings = nullptr;
 
   bool preserveQuickResumeTimeoutOn = false;
   bool quickResumeTimeoutAutoEnabled = false;
-  bool dictionariesLoaded = false;
+  bool resourcesDirty = true;
 
   OptionPopup optionPopup;
 
@@ -233,13 +254,12 @@ class SettingsActivity final : public UiTabListActivity {
   void rebuildRowItems();
   void rebuildAccordionRows();
 
-  static constexpr int categoryCount = 4;
-  static constexpr StrId categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                         StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
+  static constexpr int categoryCount = SETTINGS_SECTION_COUNT;
+  static constexpr const auto& categoryNames = SETTINGS_SECTION_TITLES;
 
   // --- UiTabListActivity contract ---
   int listCount() const override;
-  int tabCount() const override { return categoryCount; }
+  int tabCount() const override { return section == SettingsSection::End ? categoryCount : 0; }
   int activeTab() const override { return selectedCategoryIndex; }
   const char* tabLabel(int index) const override { return I18N.get(categoryNames[index]); }
   void buildScreen(UiScreen& screen) override;
@@ -256,7 +276,8 @@ class SettingsActivity final : public UiTabListActivity {
   void selectCategory(int categoryIndex);
   void applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr);
 
-  void toggleCurrentSetting();
+  void toggleSetting(const SettingInfo& setting);
+  void refreshAfterSettingChange(uint8_t CrossPointSettings::* valuePtr);
   void toggleAccordionSetting(int categoryIndex, int settingIndex);
   void toggleAccordionCategory(int categoryIndex);
   bool usesAccordion() const;
@@ -275,11 +296,12 @@ class SettingsActivity final : public UiTabListActivity {
   void drawFooter() override;
 
  public:
-  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                            SettingsSection section = SettingsSection::End);
   void onEnter() override;
   void onExit() override;
   void render(RenderLock&&) override;
-  MainTab mainTab() const override { return MainTab::Settings; }
+  MainTab mainTab() const override { return section == SettingsSection::End ? MainTab::Settings : MainTab::None; }
   bool mainTabBackReturnsToTabs() const override { return !usesAccordion() || expandedCategories == 0; }
   void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };

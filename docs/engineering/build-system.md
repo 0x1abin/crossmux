@@ -59,39 +59,56 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
 * **Logging**: ALWAYS use `LOG_INF`, `LOG_DBG`, or `LOG_ERR` from `Logging.h`. Raw Serial output is deprecated.
 * **Environments** (in `platformio.ini`):
   * `default`: Development (LOG_LEVEL=2, serial enabled)
-  * `gh_release`: Production (LOG_LEVEL=0)
-  * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
-  * `slim`: Minimal build (no serial logging)
+  * `gh_release`: X3/X4 Stable (LOG_LEVEL=1)
+  * `gh_release_rc`: X3/X4 Nightly (LOG_LEVEL=1)
   * `sticky`: Seeed Sticky ESP32-S3 development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 development build
   * `x4c`: Xteink X4 Classic ESP32-S3 build-only development build
   * `papermono`: M5Stack PaperMono ESP32-S3 development build
-  * `eego_a4`: eego A4 ESP32-S3 experimental development build
+  * `eego_a4`: eego A4 ESP32-S3 development build
   * `murphy_m4`: Murphy M4 ESP32-S3 experimental development build
   * `waveshare_epaper_397`: Waveshare ePaper 3.97 ESP32-S3 experimental development build
+  * `metalio_eink4`: Metalio E-Ink 4 ESP32-S3 development build
+  * `readpico`: MindReset Read Pico ESP32-S3 development build
+  * `lilygo_t5s3`: LilyGo T5 S3 4.7 PRO/Lite ESP32-S3 build-only development build
+  * `picco`: BOOX Picco ESP32-S3 development build, stock partitions and app-only upload
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
   * `simulator_readpico`: Native 1216x684 Read Pico simulator, 684x1216 in portrait
+  * `simulator_sticky`: Native Sticky desktop simulator
 
-The seven S3 environments are separate hardware binaries, but each is a unified
-language firmware. `bin/ci-check` builds the default C3 target and six S3 release
-targets; X4 Classic is build-only and covered separately by Hardware CI.
+The committed configuration has 36 environments: development, Stable and Nightly
+for each of the nine published targets, development-only `x4c`, `lilygo_t5s3` and `picco`,
+and six simulators. S3 Stable environments use `<board>-gh_release`; Nightly uses
+`<board>_nightly`. `mode_dev`, `mode_stable` and `mode_nightly` supply common
+logging and version policy; hardware profiles retain their SDK configuration,
+dependencies and USB behavior. There are no duplicate S3 RC, slim, rollback or
+diagnostic environments in the shared configuration.
+
+Versions are `<base>` for Stable, `<base>-rc+<7sha>` for Nightly and
+`<base>-dev-<branch>-<7sha>` for development. The build middleware and packager
+share the version function and read the revision from Git HEAD.
+
+The S3 environments are separate hardware binaries, each with unified languages.
+Inspect `bin/ci-check` and current workflow matrices for validation coverage;
+published targets and channels come from `scripts/nightly_targets.py`.
+X4 Classic, LilyGo and Picco development builds do not join the public Nightly/OTA set.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
-CI workflow builds all five simulators and the configured S3 environments when
+CI workflow builds all six simulators and the configured hardware environments when
 hardware-sensitive files change, and can also be started manually.
 
-Bluetooth Page Turner Beta is compiled into every hardware environment,
-including development, Nightly, release-candidate, stable, and slim builds.
+Bluetooth Page Turner Beta uses the existing target capability gates across
+development and release profiles. EEGO A4 uses the SDK stub with the prebuilt
+USB-MSC core, so BLE is currently unavailable on that model.
 The runtime Bluetooth switch defaults to off; native simulators use SDK stubs.
 C3 environments inherit the internal-RAM and Flash-controller configuration
 from `c3_hardware`. S3 hardware profiles inherit the PSRAM and IPC configuration.
-Sticky and eego A4 use the custom-core controller-only NimBLE configuration;
-the other five S3 targets retain their prebuilt `dio_opi` core so the TinyUSB
-MSC component graph remains intact. See [C3 Bluetooth](c3-bluetooth.md) for
+Sticky uses the custom-core controller-only NimBLE configuration. USB-MSC
+profiles, including EEGO A4, retain the prebuilt `dio_opi` TinyUSB component graph. See [C3 Bluetooth](c3-bluetooth.md) for
 memory gates, validation results, and remaining hardware acceptance work.
 
 The SDK's obsolete passkey callback is removed only from a generated source copy
@@ -180,7 +197,6 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 -DARDUINO_USB_CDC_ON_BOOT=1          // Serial available immediately at boot
 -DXML_CONTEXT_BYTES=1024             // XML parser memory limit (EPUB parsing)
 -DUSE_UTF8_LONG_NAMES=1              // SD card long filename support
--DMINIZ_NO_ZLIB_COMPATIBLE_NAMES=1   // Avoid zlib name conflicts
 -DXML_GE=0                           // Disable XML general entities (security)
 -DDESTRUCTOR_CLOSES_FILE=1           // FsFile destructor auto-closes (SdFat)
 ```
@@ -233,7 +249,9 @@ upload_port = COM7              # Windows: COMx, Linux: /dev/ttyUSBx
 monitor_port = COM7
 
 build_flags =
-  ${base.build_flags}
+  ${c3_hardware.build_flags}
+  ${mode_dev.build_flags}
+  -DCROSSPOINT_WAIT_FOR_USB_SERIAL
   -DMY_DEBUG_FLAG=1             # Personal debug flags
   -DTEST_FEATURE_ENABLED=1
 ```
@@ -246,11 +264,27 @@ build_flags =
 **Rules**:
 - **NEVER commit** `platformio.local.ini`
 - **NEVER put** personal info (serial ports, credentials) in main `platformio.ini`
-- Use `${base.build_flags}` to extend (not replace) base flags
+- Preserve the selected hardware and mode flags when overriding `build_flags`.
+
+Display experiments belong in this ignored local file. For example, to inspect
+Metalio text transitions without adding a shared build target:
+
+```ini
+[env:metalio_eink4]
+build_flags =
+  ${metalio_eink4_hardware.build_flags}
+  ${mode_dev.build_flags}
+  -DSSD1677_PROBE_DEBUG=1
+```
+
+Use the same pattern with `sticky_hardware` or `metalio_eink4_hardware` and
+`-DFREEINK_SSD1677_COMBINED_AA=0` for a local AA rollback comparison. Remove the
+override before producing release or acceptance images. Historical experiment
+names are not available as compatibility aliases.
 
 See also: [getting-started](../contributing/getting-started.md) for first-time toolchain setup, [testing-and-debugging.md](testing-and-debugging.md) for build/monitor commands.
 
-### Fixed local integration builds (2026-10-02)
+### Historical local integration builds (2026-10-02)
 
 The SDK/Simulator/Reader pins are `98b4e427`, `20e73803`, and `38280863`.
 Use the real source exports recorded by `sync-upstream start --local-rehearsal`;
@@ -274,3 +308,42 @@ responses remain on SD (up to 1MiB), while API responses retain the upstream
 48KiB cap and fallible Arduino String reserve. TLS is released before downloads
 and on exit. These limits protect C3 shared code; simulator heap numbers are
 synthetic and do not verify hardware runtime headroom.
+
+## Existing environments and build graph contracts
+
+Routine builds reuse installed tools, packages, local overrides and caches.
+Install/upgrade/re-download only for requested setup or an identified missing or
+incompatible dependency, repairing the affected component after diagnosis.
+`platformio.local.ini` is ignored. A local `build_flags` value replaces the
+selected environment's list; preserve `${base.build_flags}` plus its device,
+capability, logging and version flags. A branch/SHA change alone is not a reason
+to clean unrelated objects. After an interrupted custom-core rebuild, diagnose
+duplicate `app_main` and remove only generated core scaffolding; do not use
+`git clean -fdX`, which also deletes personal overrides and unrelated work.
+
+Preserve the pinned platform/dependencies and selected core graph. USB-MSC
+profiles use the prebuilt Arduino/TinyUSB graph; custom-sdk profiles rebuild a
+core. SdFat `USE_SPI_ARRAY_TRANSFER` / `USE_SEPARATE_FAT_CACHE` depend on
+`scripts/patch_sdfat.py` and its pin; SPI array send adds stack use while SDMMC
+uses the block-device interface. Miniz defines belong in
+`lib/miniz/src/MinizConfig.h`, not obsolete global flags. `XML_GE=0` remains the
+XML general-entity security boundary.
+
+## Fixed local integration snapshot (2026-10-13)
+
+Reader `ba39565ce7b3a8aab14ca86da4fa4c3ca140f007`, SDK
+`7fcd3b34c108f28c086ade3b433924022dbc0998` and Simulator
+`1915ee0a15564c3f49d74fa2334f773f282c5364` are the upstream inputs against
+CrossMux base `83b0f810c8628701456e028c2d8566a9be149755`. Validation uses
+reviewed source exports and their recorded Git tree fingerprints. This local
+rehearsal does not commit, publish, flash, or change the Nightly/OTA registry.
+Formal publication needs real dependency commits and renewed validation.
+
+Keep the pioarduino 6.2.0 setup/preparation, CJK embedded fonts, X3/X4 shared
+image, existing environment names and fork-only M4/Waveshare/Read Pico profiles.
+LilyGo adds a normal build target using SDK `BoardT5S3` and M5GFX Git tag 0.2.20;
+see [LilyGo target](lilygo-t5s3.md). EEGO adopts the upstream USB/frontlight/sleep
+adapter. Vector-font profiles retain the 24 KiB loop stack; EEGO without vector
+fonts uses the SDK-aware weak hook to retain 16 KiB for WeRead.
+Verify WeRead and other deep loop call chains with stack high-water logs; a
+successful build does not establish that stack budget on hardware.

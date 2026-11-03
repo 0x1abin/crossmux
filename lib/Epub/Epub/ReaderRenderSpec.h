@@ -26,6 +26,10 @@ struct ReaderRenderSpec {
   int8_t characterSpacing = 0;
   uint8_t wordSpacingPercent = 100;
   uint8_t paragraphAlignment = 0;
+  // Vertical bottom-align: redistributes each non-final page's text lines so
+  // the last line reaches the content bottom with even spacing. Keyed into the
+  // section cache so a toggle change rebuilds cached pages.
+  bool verticalBottomAlign = false;
   uint16_t viewportWidth = 0;
   uint16_t viewportHeight = 0;
   bool hyphenationEnabled = false;
@@ -39,9 +43,37 @@ struct ReaderRenderSpec {
            extraParagraphSpacing == other.extraParagraphSpacing && firstLineIndent == other.firstLineIndent &&
            paragraphIndentSpaces == other.paragraphIndentSpaces && characterSpacing == other.characterSpacing &&
            wordSpacingPercent == other.wordSpacingPercent && paragraphAlignment == other.paragraphAlignment &&
-           viewportWidth == other.viewportWidth && viewportHeight == other.viewportHeight &&
-           hyphenationEnabled == other.hyphenationEnabled && embeddedStyle == other.embeddedStyle &&
-           imageRendering == other.imageRendering && focusReadingEnabled == other.focusReadingEnabled &&
-           collectTouchLinks == other.collectTouchLinks;
+           verticalBottomAlign == other.verticalBottomAlign && viewportWidth == other.viewportWidth &&
+           viewportHeight == other.viewportHeight && hyphenationEnabled == other.hyphenationEnabled &&
+           embeddedStyle == other.embeddedStyle && imageRendering == other.imageRendering &&
+           focusReadingEnabled == other.focusReadingEnabled && collectTouchLinks == other.collectTouchLinks;
   }
 };
+
+// Stable signature for clipping anchors. Page-local word ordinals are valid
+// only for the exact layout that produced them.
+inline uint32_t readerRenderSpecSignature(const ReaderRenderSpec& spec) {
+  uint32_t signature = 2166136261U;
+  const auto mix = [&signature](const uint32_t value) {
+    signature ^= value;
+    signature *= 16777619U;
+  };
+  mix(static_cast<uint32_t>(spec.fontId));
+  mix(static_cast<uint32_t>(spec.lineCompression * 1000.0f));
+  mix(spec.extraParagraphSpacing);
+  mix(spec.firstLineIndent);
+  mix(spec.paragraphIndentSpaces);
+  mix(static_cast<uint8_t>(spec.characterSpacing));
+  mix(spec.wordSpacingPercent);
+  mix(spec.paragraphAlignment);
+  mix(spec.viewportWidth);
+  mix(spec.viewportHeight);
+  mix(spec.hyphenationEnabled);
+  mix(spec.embeddedStyle);
+  mix(spec.imageRendering);
+  mix(spec.focusReadingEnabled);
+  mix(spec.collectTouchLinks);
+  // Preserve disabled signatures; the high bit also stays distinct from reserved 0/1.
+  if (spec.verticalBottomAlign) signature ^= 0x80000000u;
+  return signature == 0 ? 1 : signature;
+}

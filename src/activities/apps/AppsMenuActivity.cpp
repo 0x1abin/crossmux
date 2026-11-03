@@ -30,6 +30,7 @@ struct AppEntry {
 };
 
 constexpr AppEntry kAppEntries[] = {
+    {AppId::Library, StrId::STR_LIBRARY, UIIcon::Library, &ActivityManager::goToLibrary},
     {AppId::FileTransfer, StrId::STR_FILE_TRANSFER, UIIcon::Transfer, &ActivityManager::goToFileTransfer},
     {AppId::OpdsBrowser, StrId::STR_OPDS_BROWSER, UIIcon::Opds, &ActivityManager::goToBrowser},
 #ifdef ENABLE_CHINESE_VERSION
@@ -132,8 +133,7 @@ int AppsMenuActivity::getVisibleAppCount() {
 }
 
 void AppsMenuActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
-  nav.selected = MainTabs::contentEdgeIndex(edge, getVisibleAppCount());
-  nav.follow(getVisibleAppCount());
+  moveSelectionTo(MainTabs::contentEdgeIndex(edge, getVisibleAppCount()));
 }
 
 int AppsMenuActivity::getAppIndexForVisibleIndex(const int visibleIndex) {
@@ -172,13 +172,6 @@ Rect AppsMenuActivity::appContentRect() const {
   return content;
 }
 
-int AppsMenuActivity::iconIndexFromPoint(const int x, const int y) const {
-  const Rect content = appContentRect();
-  return InxGridGeometry::indexFromPoint(x - content.x, y - content.y, content.width, content.height,
-                                         InxGridGeometry::pageStart(nav.selected, getVisibleAppCount()),
-                                         getVisibleAppCount());
-}
-
 void AppsMenuActivity::openSelected() {
   const int appIndex = getAppIndexForVisibleIndex(nav.selected);
   if (appIndex >= 0) (activityManager.*kAppEntries[appIndex].open)();
@@ -190,44 +183,9 @@ void AppsMenuActivity::activateIndex(const int index) {
   openSelected();
 }
 
-bool AppsMenuActivity::handleCustomInput() {
-  if (!usesIconLayout()) return false;
-
-  const int visibleCount = getVisibleAppCount();
-  int x = 0;
-  int y = 0;
-  if (mappedInput.wasScreenTouchDown(x, y)) {
-    const int touched = iconIndexFromPoint(x, y);
-    if (touched >= 0 && touched != nav.selected) {
-      nav.selected = touched;
-      requestUpdate();
-    }
-    return true;
-  }
-  if (mappedInput.wasScreenTapped(x, y)) {
-    const int touched = iconIndexFromPoint(x, y);
-    if (touched >= 0) {
-      nav.selected = touched;
-      openSelected();
-    }
-    return true;
-  }
-  const auto swipe = mappedInput.wasSwipe();
-  if (swipe == MappedInputManager::SwipeDir::Up) {
-    nav.selected = ButtonNavigator::nextPageIndex(nav.selected, visibleCount, InxGridGeometry::itemsPerPage);
-    requestUpdate();
-    return true;
-  }
-  if (swipe == MappedInputManager::SwipeDir::Down) {
-    nav.selected = ButtonNavigator::previousPageIndex(nav.selected, visibleCount, InxGridGeometry::itemsPerPage);
-    requestUpdate();
-    return true;
-  }
-  return false;
-}
-
-void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, const bool showSelection) const {
-  const int start = InxGridGeometry::pageStart(nav.selected, visibleCount);
+void AppsMenuActivity::drawIconGrid(UiScreen& screen, const Rect& rect, const int visibleCount,
+                                    const bool showSelection) const {
+  const int start = nav.top;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
 
   for (int slot = 0; slot < InxGridGeometry::itemsPerPage && start + slot < visibleCount; ++slot) {
@@ -240,14 +198,20 @@ void AppsMenuActivity::drawIconGrid(const Rect& rect, const int visibleCount, co
     const int iconSize = InxAppIcons::size * iconScale;
     const bool isSelected = showSelection && visibleIndex == nav.selected;
     if (isSelected) renderer.fillRect(cell.x, cell.y, cell.width, cell.height, true);
+    screen.frame().hit(fui::Rect{static_cast<int16_t>(cell.x), static_cast<int16_t>(cell.y),
+                                 static_cast<int16_t>(cell.width), static_cast<int16_t>(cell.height)},
+                       ACTION_ROW, static_cast<int16_t>(visibleIndex), fui::InputTouch);
 
     const int iconX = cell.x + (cell.width - iconSize) / 2;
     const int iconY = cell.y + std::max(5, (cell.height - iconSize - lineHeight - 8) / 2);
     InxAppIcons::draw(renderer, kAppEntries[appIndex].icon, iconX, iconY, iconScale, isSelected);
-    const std::string label =
-        renderer.truncatedText(UI_10_FONT_ID, I18N.get(kAppEntries[appIndex].titleId), std::max(1, cell.width - 8));
-    const int labelX = cell.x + (cell.width - renderer.getTextWidth(UI_10_FONT_ID, label.c_str())) / 2;
-    renderer.drawText(UI_10_FONT_ID, labelX, iconY + iconSize + 8, label.c_str(), !isSelected);
+    auto text = screen.theme().bodyText;
+    text.align = fui::TextAlign::Center;
+    text.bold = false;
+    text.color = isSelected ? fui::Color::White : fui::Color::Black;
+    screen.target().text(fui::Rect{static_cast<int16_t>(cell.x + 4), static_cast<int16_t>(iconY + iconSize + 8),
+                                   static_cast<int16_t>(std::max(1, cell.width - 8)), static_cast<int16_t>(lineHeight)},
+                         I18N.get(kAppEntries[appIndex].titleId), text);
   }
 
   GUI.drawSideScrollBar(renderer, rect, visibleCount, start, InxGridGeometry::itemsPerPage);
@@ -263,7 +227,8 @@ void AppsMenuActivity::buildScreen(UiScreen& screen) {
   if (visibleCount == 0) {
     UITheme::drawCenteredWrappedText(renderer, content, UI_12_FONT_ID, tr(STR_NO_APPS_ENABLED), 2);
   } else if (usesIconLayout()) {
-    drawIconGrid(content, visibleCount, showSelection);
+    syncPagedViewport(InxGridGeometry::itemsPerPage);
+    drawIconGrid(screen, content, visibleCount, showSelection);
   } else {
     screen.setContentMarginFromScreen(
         fui::Insets{static_cast<int16_t>(content.y), static_cast<int16_t>(sw - content.x - content.width),
