@@ -1,9 +1,9 @@
 # OnePage ESP32-C61
 
-Status: **bring-up in progress; Windows build blocked**. No firmware image
-exists yet, so nothing has been flashed and no physical acceptance has run.
-Build and physical acceptance are recorded separately below; a successful
-compile is not hardware acceptance.
+Status: **bring-up in progress; Windows build blocked**. A reference CrossMux
+nightly image for this board is available (see below), but it has not been
+flashed and no physical acceptance has run. Build and physical acceptance are
+recorded separately; a successful compile is not hardware acceptance.
 
 Scope decision (2026-11-01): the first slice is the basic reading link —
 display, seven keys, SD, battery/charging, and deep sleep/wake. BLE page-turner
@@ -14,9 +14,11 @@ support is deferred until that slice is physically accepted.
 | Area | Fact | Evidence |
 |---|---|---|
 | Board | OnePage V1, 2026-08-19 | [OSHWHub project](https://oshwhub.com/movecall/project_ucjwpaya), [`electronics/c61/README.md`](https://github.com/MoveCall/onepage-reader/tree/main/electronics/c61) |
+| Body | 66.5 × 116 × 5 mm, about 64 g, aluminium frame, white front and back | [OnePage site](https://movecall.github.io/onepage-reader-web/zh/) |
 | SoC | ESP32-C61HR2, 160 MHz RISC-V, Wi-Fi 6, BLE 5.4 | [OnePage site](https://movecall.github.io/onepage-reader-web/zh/), [board JSON](https://github.com/MoveCall/crosspoint-onepage/blob/main/boards/onepage-c61.json) |
 | Memory | 16 MB flash, 2 MB PSRAM at 40 MHz | [`boards/onepage-c61.json`](../../boards/onepage-c61.json), `CONFIG_SPIRAM_SPEED_40M` |
-| Display | 4.26 inch, 800 x 480, SSD1677, SPI, 4-level grayscale | [`freeink-sdk/docs/onepage-c61-support.md`](../../freeink-sdk/docs/onepage-c61-support.md) |
+| Display | 4.26 inch, 800 x 480, 219 DPI, SSD1677, SPI, 4-level grayscale | [`freeink-sdk/docs/onepage-c61-support.md`](../../freeink-sdk/docs/onepage-c61-support.md), [OnePage site](https://movecall.github.io/onepage-reader-web/zh/) |
+| Storage | microSD (SPI), FAT32 only; no frontlight by design | [OnePage site](https://movecall.github.io/onepage-reader-web/zh/) |
 | Display pins | SCLK 22, MOSI 23, CS 25, DC 8, RST 27, BUSY 29; 20 MHz | Same SDK profile |
 | SD | SPI on the display bus: SCLK 22, MISO 24, MOSI 23, CS 26; unswitched rail; `SD_DEP` card detect on GPIO28 | V1 schematic and SDK profile |
 | Front keys | Four keys on one ADC ladder, GPIO4: Back, Left, Right, Confirm | Same SDK profile; physical order confirmed by the vendor `MappedInputManager` |
@@ -42,10 +44,9 @@ measured.
   input, SPI SD, and ADC battery backend. Add only the CrossMux build/HAL glue.
 - Add `boards/onepage-c61.json` and the `onepage` environment with the
   `partitions_onepage.csv` layout read from this unit.
-- Start with 40 MHz flash. The pinned pioarduino platform ties PSRAM speed to
-  `f_flash` for non-P4 chips, and the C61HR2 eco3 needs PSRAM at 40 MHz. Raising
-  flash to 80 MHz requires decoupling the platform or hardware validation of the
-  resulting PSRAM clock.
+- Use 80 MHz DIO flash, matching the reference CrossMux nightly image and the
+  vendor port. PSRAM stays at 40 MHz: pioarduino keeps the two frequencies
+  independent below 80 MHz, so raising flash does not raise the PSRAM clock.
 - Skip the IMU and external-RTC probes at boot. The vendor port documents that
   probing absent I2C devices on the C61 strap pins can hang boot.
 - Keep the four front-button hints in physical order: Back, Left, Right,
@@ -112,6 +113,37 @@ repository, and are not part of the PR.
 Do not flash until the device, image, partition offsets and a verified backup
 are recorded in this document.
 
+## Reference firmware (2026-11-01)
+
+A merged image supplied by the user is treated as the authoritative reference
+for this board:
+
+| Field | Value |
+|---|---|
+| File | `crossmux-onepage-c61-merged-20261101.bin` (13,697,024 bytes) |
+| SHA-256 | `995497FC550B7688DFD072763B13E9EBADFD5323471A3FDB7B6CB3B4C13083D1` |
+| App descriptor | `crossmux`, `nightly-build-83b0f810c86287014`, Oct 18 2026 01:46:10, IDF 5.5.5 |
+| Image header | ESP32-C61, 16 MB, **80 MHz DIO**, 5 segments |
+| app0 image @ `0x10000` | 6,821,409 bytes, fits the 6.75 MiB slot |
+| app0 SHA-256 | `5c7426a77959172424c1a827c3b5b275124cbc777eb05475f12c0497e2adb0bb` |
+
+Its partition table matches `partitions_onepage.csv` byte-for-byte (nvs
+`0x9000+0x5000`, otadata `0xE000+0x2000`, app0 `0x10000+0x6C0000`, app1
+`0x6D0000+0x6C0000`, spiffs `0xD90000+0x260000`, coredump `0xFF0000+0x10000`).
+
+The merged file is **not** a plain full-flash image: at `0x6D0000` (the app1
+slot) it carries a `CPSDFC1` SD-content container (entries such as
+`nts/1/1_23.cpfont`), not an ESP application image. Writing the whole file at
+`0x0` would put that container into app1 and leave spiffs untouched, so use the
+**app-only** image at `0x10000` unless the vendor's Web Serial flasher is being
+used and its exact write map is understood.
+
+The OnePage firmware page documents the supported flashing path: connect USB,
+open the page in a Chromium browser (Web Serial), and flash from the browser;
+it overwrites the existing firmware while books and settings on the microSD stay
+untouched. Recovery: hold the next-page key, short-press Reset, release Reset
+first to force download mode, then retry.
+
 ## Device under test
 
 | Field | Value |
@@ -133,24 +165,28 @@ the CrossMux worktree and must not be committed.
 
 - Target: the unit at `COM9`, MAC `d8:85:ac:60:e4:28`; do not flash any other
   board.
-- Image: `.pio/build/onepage/firmware.bin` (application only, linked for the
-  `partitions_onepage.csv` layout).
+- Image: the extracted reference app at `.pio/build/onepage/reference-app.bin`
+  (6,821,409 bytes, SHA-256 `5c7426…adb0bb`) until the local build produces a
+  verified `firmware.bin`.
 - Write at `0x10000` only. The current bootloader, partition table, NVS,
   otadata, app1 and SPIFFS stay untouched.
+- Do **not** write the whole merged file at `0x0`: its tail at `0x6D0000` is an
+  SD-content container, not app1.
 - Verify the written application with `esptool verify_flash 0x10000`.
 - Recovery: restore the full 16 MB backup at `0x0`; see
   `device-backups/README.md`.
-- Status: **authorized (user: 烧录吧)** once a verified image exists; not
-  executed yet. The write needs the built `firmware.bin` and a re-enumerated
-  `COM9`.
+- Status: **authorized (user: 烧录吧 / 以这个固件为准)** and the reference app is
+  ready, but the device is not enumerated (`NO_SERIAL_PORTS`) at the time of
+  writing; not executed yet.
 
 ## Verification
 
 | Check | Target / revision | Status | Evidence |
 |---|---|---|---|
-| Compile `onepage` | CrossMux branch + SDK working tree, platform 55.03.37 | failed | libraries compile; final link only has `.dummy`, `undefined reference to setup()/loop()` |
+| Compile `onepage` | CrossMux branch + SDK working tree, platform 55.03.37 | failed | Windows platform defects; libraries compile, app link is blocked (see build blocker above) |
+| Reference image | CrossMux nightly `83b0f810…`, app extracted | ready | app0 6,821,409 B, SHA-256 `5c7426…adb0bb`, 80 MHz DIO, fits app0 |
 | Host/unit checks | CrossMux branch | pending | not run |
-| Display, input, SD, battery | OnePage V1, exact unit | blocked | no firmware; device not enumerated at last check |
+| Display, input, SD, battery | OnePage V1, exact unit | blocked | no serial port; device not enumerated |
 | Sleep/wake x3 | OnePage V1 | pending | requires device |
 | BLE page turner | OnePage V1 | not applicable (first slice) | deferred by scope decision |
 | Current measurement | OnePage V1 | pending | no measurement |
