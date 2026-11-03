@@ -303,3 +303,6 @@ add_test(NAME OpdsSafety
 add_test(NAME ReaderPluginSync COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reader_plugin_sync.py)
 
 add_test(NAME OpdsRowBudget COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_opds_row_budget.py)
+
+add_test(NAME KeyboardUpHold
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_keyboard_up_hold.py)
