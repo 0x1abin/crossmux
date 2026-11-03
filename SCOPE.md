@@ -54,6 +54,15 @@ Keep device-specific behavior behind the HAL/SDK, and apply the same memory,
 input, translation, and lifecycle rules to apps as to the reader. See
 [AGENTS.md](./AGENTS.md) and the [engineering reference](./docs/engineering/index.md).
 
+## Working with upstream
+
+CrossPoint is the upstream foundation and has its own reading-focused product
+scope. Reusable, product-neutral improvements to its existing low-level
+infrastructure can be proposed upstream when they avoid substantial dependency,
+resource, or maintenance costs. CrossMux-specific apps, UI, services, and product
+policy remain here unless CrossPoint independently adopts them. Upstream's scope
+or feature freeze does not restrict the CrossMux acceptance test above.
+
 ## Proposing changes
 
 Use [CrossMux Issues](https://github.com/0x1abin/crossmux/issues) to discuss a

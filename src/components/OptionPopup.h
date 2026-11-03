@@ -327,9 +327,11 @@ class OptionPopup {
     // Fixed fraction of the screen, clamped by the theme's side margins; the
     // old max-text-width sizing is gone, long labels wrap inside the buttons.
     const fui::Rect screen = device.screen();
-    const int16_t width =
-        fui::clampI16(std::min<int>(screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2));
     const auto safe = device.safeRect();
+    const int16_t width =
+        fui::clampI16(std::min({screen.width * 3 / 4, screen.width - metrics.optionPopupDialogSideMargin * 2,
+                                static_cast<int>(safe.width)}),
+                      0, safe.width);
     const int textHeight = fui::optionDialogHeight(target, props, width);
     const int availableHeight = std::max(0, static_cast<int>(safe.height) - textHeight - props.gap);
     const int count = std::min(
@@ -344,7 +346,12 @@ class OptionPopup {
     }
     props.optionCount = static_cast<uint8_t>(count);
     const int16_t height = fui::clampI16(fui::optionDialogHeight(target, props, width), 0, safe.height);
-    const fui::Rect dialogRect = fui::centeredRect(safe, fui::Size{width, height});
+    // INX keeps its established safe-area center, including message dialogs.
+    // Shared upstream pages center on the screen and move only to clear the bezel.
+    const bool preserveInxCenter = !upstreamStyle && UITheme::getInstance().hasMainTabs();
+    fui::Rect dialogRect = fui::centeredRect(preserveInxCenter ? safe : screen, fui::Size{width, height});
+    dialogRect.x = fui::clampI16(std::clamp<int>(dialogRect.x, safe.x, safe.x + safe.width - width));
+    dialogRect.y = fui::clampI16(std::clamp<int>(dialogRect.y, safe.y, safe.y + safe.height - height));
 
     // Chrome guard first, options after: route() scans newest-first, so the
     // option buttons win inside the dialog and the guard absorbs the rest.

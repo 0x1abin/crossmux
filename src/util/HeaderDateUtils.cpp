@@ -16,6 +16,11 @@
 namespace {
 void drawHeaderTopLine(const GfxRenderer& renderer, const ThemeMetrics& metrics, const int pageWidth,
                        const std::string& dateText, const std::string& reminderText) {
+  if (UITheme::getInstance().hasMainTabs()) {
+    BaseTheme::drawHeaderStatus(renderer, Rect{0, metrics.topPadding, pageWidth, BaseTheme::headerStatusHeight()},
+                                dateText.c_str());
+    return;
+  }
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
   const int batteryX = pageWidth - 12 - metrics.batteryWidth;

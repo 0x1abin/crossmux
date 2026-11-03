@@ -749,7 +749,11 @@ def replace_simulator_with_local_candidate(platformio: str, candidate: Path) -> 
     )
     if count != 1:
         raise RuntimeError("Could not point PlatformIO at the simulator candidate.")
-    return replaced
+    # Local packages use the manifest name, so resolve the pre-hook from the candidate too.
+    return replaced.replace(
+        "pre:.pio/libdeps/$PIOENV/simulator/skip_device_content_protection.py",
+        f"pre:{candidate}/skip_device_content_protection.py",
+    )
 
 
 def replace_cmake_simulator_with_local_candidate(cmake: str, candidate: Path) -> str:

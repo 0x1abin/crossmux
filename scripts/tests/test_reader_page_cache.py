@@ -431,6 +431,8 @@ struct ActivityManager {
   enum class PendingAction {None,Push};
   std::atomic<PendingAction> pendingAction{PendingAction::None};
   std::atomic<uint32_t> idleRenderGeneration{0};
+  uint32_t screenVisit=0;
+  std::atomic<uint32_t> paintedVisit{0};
   std::unique_ptr<Activity> currentActivity=std::make_unique<Activity>();
   TaskHandle_t waitingTaskHandle=0;
   std::atomic<bool> requestedUpdate{false};
@@ -454,7 +456,8 @@ void run(ActivityManager& m,std::vector<int> events) {
   try {m.renderTaskLoop();} catch(Stop&) {}
 }
 int main() {
-  {ActivityManager m; run(m,{1,0});
+  {ActivityManager m; m.screenVisit=17; run(m,{1,0});
+   assert(m.paintedVisit.load()==17);
    assert(m.currentActivity->renders==1 && m.currentActivity->idles==1);
    assert((waits==std::vector<unsigned>{portMAX_DELAY,400,portMAX_DELAY}));}
   {ActivityManager m; run(m,{1,1,0});

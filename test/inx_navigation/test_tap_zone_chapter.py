@@ -85,6 +85,9 @@ struct Epub {
   int getTocItemsCount() const { return static_cast<int>(toc.size()); }
   TocItem getTocItem(int index) const { return toc[index]; }
   int getSpineItemsCount() const { return spines; }
+  int getLinearSpineItemsCount() const { return spines; }
+  int getLinearIndexForSpineIndex(int spine) const { return spine; }
+  int getSpineIndexForLinearIndex(int index) const { return index; }
   // A TXT's every named chapter maps back to spine 0; that is the whole point.
   int getTocIndexForSpineIndex(int) const { return 0; }
   int getSpineIndexForTocIndex(int index) const { return toc[index].spineIndex; }
@@ -104,12 +107,20 @@ struct EpubReaderActivity {
   mutable GfxRenderer renderer;
   std::optional<uint32_t> cachedVisibleTextOffset;
   std::optional<uint32_t> currentPageVisibleOffset;
+  std::optional<uint32_t> pendingOffsetJump;
+  std::optional<uint16_t> pendingPageJump;
+  bool pendingPercentJump = false;
+  int footnoteDepth = 0;
   std::string pendingAnchor;
   int currentSpineIndex = 0;
   int nextPageNumber = 0;
   int deferrals = 0;
 
   void clearDeferredReposition() { ++deferrals; }
+  bool isViewingNonlinearSpine() const { return false; }
+  void leaveNonlinearSpine(int) {}
+  struct Position { int spineIndex; };
+  Position getReadingPosition() const { return {currentSpineIndex}; }
   int currentTocIndex() const;
   int currentChapterIndex() const;
   bool gotoChapterIndex(int target);

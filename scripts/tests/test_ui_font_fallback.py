@@ -125,10 +125,12 @@ struct Manager {
   std::string family="Reader A";
   std::vector<int> sizes;
   const std::string& currentFamilyName() { return family; }
-  int loadFamilyExtraSize(const Family&,GfxRenderer&,int size) { sizes.push_back(size); return 100+size; }
+  int getFontId(const std::string&,uint8_t=0)const{return 700;}
+  int loadFamilyExtraSize(const Family&,GfxRenderer&,int size,int fontId) { sizes.push_back(size); return fontId; }
 };
 struct SdCardFontSystem {
   Registry registry_; Manager manager_;
+  static int variantFontId(int,uint8_t pointSize){return 100+pointSize;}
   void setupUiFallbacks(GfxRenderer&);
 };
 ''' + table + method(system, 'void SdCardFontSystem::setupUiFallbacks(') + r'''
@@ -223,20 +225,23 @@ struct SdCardFontSystem {
   std::string ttfFamily_="Reader";
   int ttfFontId_=114, ttfPointSize_=14;
   std::vector<int> ttfUiIds_{108,110}, ttfUi_{8,10};
+  struct Variant {int fontId;};std::vector<Variant> ttfVariants_{{120},{122}};
   OwnedFont ttf_; bool sourcesFreed=false;
-  void freeTtfSources() { sourcesFreed=true; }
+  void freeTtfSources() {assert(ttfVariants_.empty()&&ttfUi_.empty()&&ttf_.freed);sourcesFreed=true;}
+  void clearTtfVariants(GfxRenderer&);
   void unloadTtf(GfxRenderer&);
 };
-''' + method(system, 'void SdCardFontSystem::unloadTtf(') + r'''
+''' + method(system, 'void SdCardFontSystem::clearTtfVariants(')
+            + method(system, 'void SdCardFontSystem::unloadTtf(') + r'''
 int main() {
   GfxRenderer renderer; SdCardFontSystem system;
   system.unloadTtf(renderer);
   assert(renderer.fixedUiFallback);
-  assert((renderer.removed==std::vector<int>{108,110,114}));
+  assert((renderer.removed==std::vector<int>{120,122,108,110,114}));
   assert(system.ttf_.freed && system.sourcesFreed && system.ttfFamily_.empty());
   assert(system.ttfUiIds_.empty() && system.ttfUi_.empty() && system.ttfFontId_==0);
   system.unloadTtf(renderer);
-  assert(renderer.removed.size()==3);
+  assert(renderer.removed.size()==5);
 }
 ''', defines=('CROSSMUX_UI_PROFILE_HIGH_DPI',))
 
@@ -323,7 +328,7 @@ const void* measured=nullptr;
 const void* drawn=nullptr;
 std::vector<int> drawnXs;
 struct EpdFontFamily {
-  enum Style { REGULAR=0, BOLD=1, SUP=16, SUB=32 };
+  enum Style { REGULAR=0, BOLD=1, SUP=16, SUB=32, SMALL_CAPS=64 };
   std::set<uint32_t> coverage;
   const EpdFontData* getData(Style) const { static EpdFontData data{}; data.ascender=12; return &data; }
   bool hasCodepoint(uint32_t cp, Style = REGULAR) const { return coverage.contains(cp); }
@@ -342,7 +347,7 @@ enum class TextRotation { None };
 template<TextRotation> void renderCharImpl(const auto&, int, const EpdFontFamily& font, uint32_t,
                                          int x,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; drawnXs.push_back(x); }
 void renderCharScaled(const auto&, int, const EpdFontFamily& font, uint32_t,
-                      int x,int,bool,EpdFontFamily::Style,uint8_t) { drawn=&font; drawnXs.push_back(x); }
+                      int x,int,bool,EpdFontFamily::Style,int,int,uint8_t) { drawn=&font; drawnXs.push_back(x); }
 struct FontCacheManager {
   bool isScanning() const { return false; }
   void recordText(const char*,int,EpdFontFamily::Style) {}
@@ -403,14 +408,14 @@ struct SdCardFontManager {
   int failSize=0, loads=0, readerCacheLoads=0;
   std::set<uint32_t> coverage{'A', 0x4E00, 0x3042, 0x03B1, 0x0627};
   const std::string& currentFamilyName() const { return loadedFamilyName_; }
-  int getFontId(const std::string&) const;
-  int loadFile(const SdCardFontFileInfo& file, const char*, GfxRenderer& r, bool flash, bool cache) {
+  int getFontId(const std::string&,uint8_t=0) const;
+  int loadFile(const SdCardFontFamilyInfo&, const SdCardFontFileInfo& file, GfxRenderer& r, bool flash, bool cache,int fontIdOverride=0) {
     if (file.pointSize==failSize) return 0;
     assert(loaded_.size()<loaded_.capacity()); // every face fits the preallocated slots
     ++loads;
     readerCacheLoads += cache;
     assert(!flash);
-    int id=100+file.pointSize;
+    int id=fontIdOverride?fontIdOverride:100+file.pointSize;
     r.fontMap[id]={coverage};
     auto* font=new SdCardFont;
     r.sdCardFonts_[id]=font;
@@ -418,7 +423,7 @@ struct SdCardFontManager {
     return id;
   }
   bool loadFamily(const SdCardFontFamilyInfo&, GfxRenderer&, uint8_t, bool=false);
-  int loadFamilyExtraSize(const SdCardFontFamilyInfo&, GfxRenderer&, uint8_t);
+  int loadFamilyExtraSize(const SdCardFontFamilyInfo&, GfxRenderer&, uint8_t,int);
   void unloadAll(GfxRenderer&);
 };
 struct Registry {
@@ -430,10 +435,13 @@ struct Registry {
 struct SdCardFontSystem {
   Registry registry_;
   SdCardFontManager manager_;
+  static int variantFontId(int,uint8_t pointSize){return 100+pointSize;}
   void setupUiFallbacks(GfxRenderer&);
 };
 ''' + table + '\n' + method(renderer, 'int GfxRenderer::resolveFontFamilyId(') + '\n'
         program += method(renderer, 'int GfxRenderer::resolveTextFontId(') + '\n'
+        program += 'constexpr int SMALL_CAPS_SCALE_NUM=3, SMALL_CAPS_SCALE_DEN=4;\n'
+        program += method(renderer, 'constexpr int32_t scaleSmallCapAdvance(') + '\n'
         for name in ('bool SdCardFontManager::loadFamily(', 'int SdCardFontManager::loadFamilyExtraSize(',
                      'void SdCardFontManager::unloadAll(', 'int SdCardFontManager::getFontId('):
             program += method(manager, name) + '\n'

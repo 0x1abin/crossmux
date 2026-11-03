@@ -17,6 +17,8 @@ SCRIPTS = ROOT / "lib/EpdFont/scripts"
 FONTS = ROOT / "lib/EpdFont/builtinFonts"
 CHARACTERS = "0123456789 +-×÷.%=e�"
 CJK_ADDED_CODEPOINTS = {0x0401, 0x0451, 0x2116} | set(range(0x0410, 0x0450))
+# Only the 14/16/18pt i18n subsets gain these already-common Chinese glyphs.
+CJK_TRANSLATION_CODEPOINTS = set(map(ord, "买仍仓代便借序忙核满组购"))
 REGENERATE = "--regenerate" in sys.argv
 if REGENERATE:
     sys.argv.remove("--regenerate")
@@ -80,6 +82,15 @@ class BuiltinFontShrinkTest(unittest.TestCase):
                     self.assertGreater(min(metrics[:3]), 0, f"{size}pt U+{cp:04X}")
                     self.assertTrue(any(pixels), f"{size}pt U+{cp:04X} has no visible pixels")
 
+    def test_new_translation_glyphs_are_present_and_nonempty(self):
+        for size in (8, 10, 12, 14, 16, 18):
+            glyphs = cjk_glyphs(size)
+            self.assertTrue(CJK_TRANSLATION_CODEPOINTS <= glyphs.keys(), size)
+            for codepoint in CJK_TRANSLATION_CODEPOINTS:
+                metrics, pixels = glyphs[codepoint]
+                self.assertGreater(metrics[0], 0, (size, codepoint))
+                self.assertTrue(any(pixels), (size, codepoint))
+
     def test_cjk_existing_codepoints_metrics_and_pixels_are_unchanged(self):
         # Reviewed 2108d739 fonts, before adding the source-supported Cyrillic and № glyphs.
         expected = {
@@ -92,9 +103,10 @@ class BuiltinFontShrinkTest(unittest.TestCase):
         }
         for size, (count, digest) in expected.items():
             glyphs = cjk_glyphs(size)
-            legacy = {cp: glyph for cp, glyph in glyphs.items() if cp not in CJK_ADDED_CODEPOINTS}
+            added = CJK_ADDED_CODEPOINTS | (CJK_TRANSLATION_CODEPOINTS if size >= 14 else set())
+            legacy = {cp: glyph for cp, glyph in glyphs.items() if cp not in added}
             self.assertEqual(len(legacy), count)
-            self.assertEqual(len(glyphs), count + len(CJK_ADDED_CODEPOINTS))
+            self.assertEqual(len(glyphs), count + len(added))
             fingerprint = hashlib.sha256()
             for cp, (metrics, pixels) in sorted(legacy.items()):
                 fingerprint.update(struct.pack("<I6i", cp, *metrics) + pixels)

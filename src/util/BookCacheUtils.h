@@ -6,6 +6,9 @@
 // (EPUB, XTC, TXT, or Markdown). Does nothing for other file types.
 bool clearBookCache(const std::string& path);
 
+// Keep saved positions and user data when replacing a reflowable book.
+bool clearBookDerivedCache(const std::string& path);
+
 // Returns the path-keyed cache directory, or an empty string for non-book files.
 std::string bookCachePath(const std::string& path);
 

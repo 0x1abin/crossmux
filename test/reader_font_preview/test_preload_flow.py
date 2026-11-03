@@ -32,6 +32,7 @@ harness = r'''
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <iterator>
 #include <string>
@@ -58,11 +59,19 @@ struct MappedInputManager {
   bool isScreenTouchHeld(int&, int&) const { return touch; }
   bool isPressed(Button) const { return held; }
 };
-struct SdCardFontFileInfo { std::string path = "Sans_18.cpfont"; };
-struct Family { bool vector = false; };
+struct SdCardFontFileInfo { uint8_t pointSize=18; };
+struct SdCardFontFamilyInfo {
+  static constexpr size_t PATH_BUFFER_SIZE=264;
+  bool vector=false, pathOk=true;
+  bool filePath(const SdCardFontFileInfo&,char* out,size_t capacity) const {
+    if(!pathOk)return false;
+    const int count=std::snprintf(out,capacity,"/.fonts/Sans/Sans_18.cpfont");
+    return count>0&&static_cast<size_t>(count)<capacity;
+  }
+};
 struct Registry {
-  Family family;
-  const Family* findFamily(const char*) const { return &family; }
+  SdCardFontFamilyInfo family;
+  const SdCardFontFamilyInfo* findFamily(const char*) const { return &family; }
 };
 struct {
   int releases = 0;
@@ -111,13 +120,14 @@ class TextSettingsActivity {
   bool exited = false, home = false;
   unsigned long noticeStartedAt_ = 0;
   std::atomic<FontLoadState> fontLoadState_{FontLoadState::Idle};
+  const char* preloadFamilyName_ = "";
   MappedInputManager mappedInput;
   Popup optionPopup_;
   void requestUpdate() {}
   void requestUpdateAndWait() { now += 500; } // Display time is not part of notice dwell.
   void finish() { exited = true; }
   void onGoHome() { exited = home = true; }
-  Result preloadFont(const SdCardFontFileInfo&, const char*) { ++preloads; return outcome; }
+  Result preloadFont(const SdCardFontFamilyInfo&, const SdCardFontFileInfo&) { ++preloads; return outcome; }
   void exitAfterFinalFont(ExitDestination);
   void finishFinalFont(bool);
   void showPreloadFailure(Result);
@@ -200,6 +210,17 @@ int main() {
   restored.exitAfterFinalFont(Exit::Previous);
   assert(restored.exited && restored.optionPopup_.shows == 0 && restored.preloads == 0);
   assert(SETTINGS.sdFontFlashPreload == 1 && sdFontSystem.loadedFlash);
+
+  TextSettingsActivity invalidPath;
+  invalidPath.storage.family.pathOk=false;
+  const int checksBeforeInvalid=checks,releasesBeforeInvalid=sdFontSystem.releases;
+  invalidPath.startMode_=Mode::PreloadThenExit;
+  invalidPath.exitAfterFinalFont(Exit::Previous);
+  assert(invalidPath.preloads==0&&invalidPath.optionPopup_.active&&!invalidPath.exited);
+  assert(checks==checksBeforeInvalid&&sdFontSystem.releases==releasesBeforeInvalid);
+  assert(SETTINGS.sdFontFlashPreload==0);
+  invalidPath.optionPopup_.action=-1;invalidPath.handleCustomInput();
+  assert(invalidPath.exited&&invalidPath.preloads==0);
 
   TextSettingsActivity changed;
   changed.exitAfterFinalFont(Exit::Previous);

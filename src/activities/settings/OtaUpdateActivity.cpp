@@ -129,6 +129,12 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
+#if FREEINK_DEVICE_PICCO
+  // Picco retains its vendor single-app layout and updates through USB only.
+  finish();
+  return;
+#endif
+
   resetUi();
   failedDetail = nullptr;
   app.on(ACTION_RELEASE_PAGE, &OtaUpdateActivity::onReleasePage, this);

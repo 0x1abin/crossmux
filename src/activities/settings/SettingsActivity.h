@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "SettingsSection.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
 
@@ -66,7 +67,8 @@ struct SettingInfo {
   bool obfuscated = false;               // Save/load via base64 obfuscation (passwords)
   bool inTextSettings = false;           // Surfaced in the Text Settings screen; hidden from the flat Reader list
   bool inReadingStatsSettings = false;   // Surfaced in Reading Stats Settings; hidden from the flat Reader list
-  bool managedEnumPicker = false;        // Always open a picker; the dynamic setter owns the change lifecycle
+  bool webHidden = false;
+  bool managedEnumPicker = false;  // Always open a picker; the dynamic setter owns the change lifecycle
 
   // Direct char[] string fields (for settings stored in CrossPointSettings)
   size_t stringOffset = 0;
@@ -80,6 +82,11 @@ struct SettingInfo {
 
   SettingInfo& withObfuscated() {
     obfuscated = true;
+    return *this;
+  }
+
+  SettingInfo& withWebHidden() {
+    webHidden = true;
     return *this;
   }
 
@@ -220,15 +227,13 @@ struct SettingInfo {
 };
 
 class SettingsActivity final : public UiTabListActivity {
+  const SettingsSection section;
   int selectedCategoryIndex = 0;  // Currently selected category
   int settingsCount = 0;
   uint8_t expandedCategories = 0;
 
   // Per-category settings derived from shared list + device-only actions
-  std::vector<SettingInfo> displaySettings;
-  std::vector<SettingInfo> readerSettings;
-  std::vector<SettingInfo> controlsSettings;
-  std::vector<SettingInfo> systemSettings;
+  std::array<std::vector<SettingInfo>, SETTINGS_SECTION_COUNT> categories;
   const std::vector<SettingInfo>* currentSettings = nullptr;
 
   bool preserveQuickResumeTimeoutOn = false;
@@ -249,13 +254,12 @@ class SettingsActivity final : public UiTabListActivity {
   void rebuildRowItems();
   void rebuildAccordionRows();
 
-  static constexpr int categoryCount = 4;
-  static constexpr StrId categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                         StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
+  static constexpr int categoryCount = SETTINGS_SECTION_COUNT;
+  static constexpr const auto& categoryNames = SETTINGS_SECTION_TITLES;
 
   // --- UiTabListActivity contract ---
   int listCount() const override;
-  int tabCount() const override { return categoryCount; }
+  int tabCount() const override { return section == SettingsSection::End ? categoryCount : 0; }
   int activeTab() const override { return selectedCategoryIndex; }
   const char* tabLabel(int index) const override { return I18N.get(categoryNames[index]); }
   void buildScreen(UiScreen& screen) override;
@@ -292,11 +296,12 @@ class SettingsActivity final : public UiTabListActivity {
   void drawFooter() override;
 
  public:
-  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                            SettingsSection section = SettingsSection::End);
   void onEnter() override;
   void onExit() override;
   void render(RenderLock&&) override;
-  MainTab mainTab() const override { return MainTab::Settings; }
+  MainTab mainTab() const override { return section == SettingsSection::End ? MainTab::Settings : MainTab::None; }
   bool mainTabBackReturnsToTabs() const override { return !usesAccordion() || expandedCategories == 0; }
   void selectMainTabContentEdge(MainTabContentEdge edge) override;
 };

@@ -38,17 +38,33 @@ pio run -e waveshare_epaper_397
 pio run -e metalio_eink4
 pio run -e readpico
 pio run -e lilygo_t5s3
+pio run -e picco
 ```
 
-Eight S3 targets are published by the shared Nightly matrix, including MindReset
-Read Pico (`readpico_nightly`). X4 Classic has the
-same `x4c_nightly` build and Hardware CI coverage, but remains build-only.
-LilyGo T5 S3 adds `lilygo_t5s3` for local development. Neither target joins the
+Eight S3 targets are published by the shared Stable and Nightly matrices, including
+MindReset Read Pico (`readpico-gh_release` and `readpico_nightly`). X4 Classic uses
+its development environment `x4c` in Hardware CI and remains build-only.
+LilyGo T5 S3 adds `lilygo_t5s3` for local development. Picco adds `picco` with
+its stock partition table and app-only upload; it remains development-only. None of these targets joins the
 public Nightly or OTA indexes. Each published target builds
 one unified image, which is published under both legacy flavor pointers.
 Manual flashing must use the matching build; the embedded
 board tag rejects a tagged image for a different board. See
 [firmware-release.md](firmware-release.md) for publishing and rollback details.
+
+### BOOX Picco development target
+
+`picco` is a separate ESP32-S3 development environment, outside CrossMux's
+public Nightly/OTA registry. Its vendor bootloader, partition table, otadata and
+recovery partition must be retained. The board's application-only upload hook
+removes both the extra-image list and operands already captured in PlatformIO's
+upload command. It permits the standard USB esptool application upload and
+rejects full erase, filesystem upload and other upload protocols. Firmware updates use USB;
+Wi-Fi OTA and SD-card `firmware.bin` updates are unavailable on this board.
+Their settings entries and direct activity/backend entry points are disabled.
+The shared SD writer also rejects a destination at the running application's
+flash address, including the single-slot layout, before allocating or erasing.
+Build/host checks do not establish physical display, power or recovery acceptance.
 
 ## Standby-display light sleep
 
@@ -77,13 +93,14 @@ rails remain unchanged.
 
 Repeated timer wake, power-button wake, and button, display, and SD recovery
 after wake passed hardware validation on both X3 and X4. X4 sleep current has
-not yet been quantified, so no measured power reduction is claimed. All S3
-targets remain in the normal downclocked standby loop; a successful build alone
-is not a hardware acceptance test.
+not yet been quantified, so no measured power reduction is claimed. Read Pico
+has its own PMU/expander light-sleep path; other S3 targets remain in the normal
+downclocked standby loop. A successful build alone is not a hardware acceptance
+test.
 
 Bluetooth Page Turner Beta is enabled in the C3 hardware flavors and the S3
-profiles using `s3_ble_psram`, including development, Nightly, release, RC and
-slim where those profiles exist. The runtime setting remains disabled by
+profiles using `s3_ble_psram`, including development, Nightly and Stable.
+The runtime setting remains disabled by
 default; existing saved choices are kept. EEGO A4 and native simulator builds
 use the SDK BLE stub.
 
@@ -91,7 +108,7 @@ X3/X4 profiles share `c3_hardware`: internal RAM, a Flash controller and paged
 coverage indexes for large SD fonts. The HAL protects the entire C3 BLE host
 lifetime from manual 10 MHz idle downclocking. Sticky, X4 Pro, X4 Classic, Paper
 Mono, Murphy M4, Waveshare 3.97, Metalio E-Ink 4, Read Pico and LilyGo T5 S3
-inherit `s3_ble_psram` through their hardware profiles, including release/RC
+inherit `s3_ble_psram` through their hardware profiles, including published
 flavors where present. Sticky and Read Pico keep their tuned controller-only
 cores. EEGO A4 uses the prebuilt TinyUSB graph with BLE stubs; other USB-capable
 boards also keep the prebuilt graph. C3 never inherits the S3 allocator or IPC
@@ -197,26 +214,34 @@ To clear a wrong cached detection, **erase NVS** (full chip erase, or wipe the
 
 | Aspect | X4 | X3 |
 |---|---|---|
-| Panel | 800 × 480, **SSD1677** | 792 × 528, **UC81xx** |
+| Panel | 800 × 480, **SSD1677**, **UC8179**, or **UC8279** by production batch | 792 × 528, **UC8253** or **UC8279d** by production batch |
 | Framebuffer | 48000 B | 52272 B |
-| Buffer allocation | `MAX_BUFFER_SIZE = 52272` (static, covers both) — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
+| Buffer allocation | Internal heap, allocated once at the runtime panel size | Internal heap, allocated once at the runtime panel size — [FreeInkDisplay.cpp](../../freeink-sdk/libs/display/FreeInkDisplay/src/FreeInkDisplay.cpp) |
 | Geometry switch | default 800×480 | `setDisplayX3()` before `begin()` — [HalDisplay.cpp](../../lib/hal/HalDisplay.cpp) |
-| Display SPI clock | **20 MHz** (SSD1677 in-spec maximum) | UC81xx profile default, unchanged |
+| Display SPI clock | **10 MHz** by default | **10 MHz** by default — [BoardConfig.h](../../freeink-sdk/libs/hardware/BoardConfig/include/BoardConfig.h) |
 | Battery | ADC on GPIO0 | BQ27220 fuel gauge (I²C) — [HalPowerManager.cpp](../../lib/hal/HalPowerManager.cpp) |
-| USB / charge detect | GPIO20 reads HIGH | sign of BQ27220 current — [HalGPIO.cpp](../../lib/hal/HalGPIO.cpp) |
+| USB / charge detect | GPIO20 reads HIGH | No `usbDetect` GPIO; SDK `BatteryMonitor::isCharging()` infers charging from BQ27220 current — [HalGPIO.cpp](../../lib/hal/HalGPIO.cpp) |
 | Clock persistence | ESP system clock; survives deep sleep/reset, not full power loss | ESP system clock plus DS3231 UTC backup — [HalClock.cpp](../../lib/hal/HalClock.cpp) |
 | Tilt page-turn | none | QMI8658 gyro, X3-only — [HalTiltSensor.cpp](../../lib/hal/HalTiltSensor.cpp) |
 | Theme button layout | stacked on the right | up-left / down-right — [BaseTheme.cpp](../../src/components/themes/BaseTheme.cpp), [LyraTheme.cpp](../../src/components/themes/lyra/LyraTheme.cpp) |
 | INX front-button hints | four bottom segments aligned to the X4 keys | four bottom segments using the wider X3 spacing; labels remain orientation-aware — [InxTheme.cpp](../../src/components/themes/inx/InxTheme.cpp) |
-| Grayscale / refresh | SSD1677 fast LUT | UC81xx OEM pipeline + "AA-pre-BW" preconditioning — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
+| Grayscale / refresh | SDK pipeline for the detected controller | SDK UC8253/UC8279d pipeline + "AA-pre-BW" preconditioning — [FreeInkDisplay](../../freeink-sdk/libs/display/FreeInkDisplay/include/FreeInkDisplay.h) |
 
-The application HAL does not override the display bus or refresh waveform.
-`HalDisplay::begin()` only selects the X3 panel before the SDK driver starts.
-For X4, the SDK's active board profile selects a 20 MHz SPI clock and the stock
-absolute FAST sequence (`0xFC`) with its temperature and power sequencing. This
-avoids the persistent ghosting observed with the weaker incremental `0x1C`
-path. X3 never constructs the SSD1677 driver, and Sticky retains its own
-board-specific SSD1677 waveform config.
+After resolving the device, `HalGPIO::begin()` asks the SDK to probe the live
+display bus before SPI initialization. X3 uses the OEM VER-byte protocol; X4
+uses the SDK's display-controller fingerprint. OEM NVS `hw_calib/screenType`
+is diagnostic only for these C3 devices. The selected controller, geometry,
+10 MHz default SPI clock and refresh waveforms belong to the SDK. The HAL
+preserves the detected X3 UC8279 sibling through `setDisplayX3()` and keeps its
+existing wake/resync policy; it does not replace the controller's waveforms.
+
+`HalGPIO::isUsbConnected()` uses the board's digital `usbDetect` pin when one
+exists, otherwise asks SDK `BatteryMonitor` for external-power presence and
+falls back to charging only when that state is unknown. Both X3 profiles mark
+`usbDetect` unassigned because GPIO20 is I²C SDA. BQ27220 positive battery
+current indicates charging; charge termination at a full battery can therefore
+report disconnected while USB remains plugged in. This is a charging inference,
+not a separate USB-presence measurement.
 
 ### Unified system clock and optional RTC
 
@@ -261,8 +286,8 @@ this is why X3 "just works" without per-screen code (see
 
 ## Build & flash for X3
 
-Same envs as X4 (`platformio.ini`): `default`, `gh_release`, `gh_release_rc`,
-and `slim`. Flash any of them to an X3:
+Same envs as X4 (`platformio.ini`): `default`, `gh_release`, and `gh_release_rc`.
+Flash any of them to an X3:
 
 ```bash
 pio run -e gh_release -t upload
@@ -305,6 +330,26 @@ verification.
   ([CrossPointWebServer.cpp](../../src/network/CrossPointWebServer.cpp)).
 - **UI** — the X3-only Tilt Page Turn item appears only when the QMI8658 is
   detected. Clock and Date & Time settings are available on every device.
+
+### X3/X4 adapter acceptance
+
+After changing the SDK pin or HAL handoff, verify both devices and available
+controller batches: cold boot, cached detection, display/grayscale refresh,
+button input, SD access, deep sleep and standby timer/button wake. Check X3
+USB insertion/removal during charging and after charge termination; confirm
+that GPIO20 remains on the I²C bus and no digital USB read uses it. Host tests
+and a shared C3 build verify software integration; they do not replace this
+physical acceptance, and earlier light-sleep results do not validate a new
+adapter revision.
+
+On 2026-10-26, the UC8253 X3 candidate with firmware SHA-256
+`fa5118d4f1a969f15e07f417a12d2eec2568f9d2e6e350dc7c1397282dbdaa40`
+passed flash verification, fresh detection (both probe scores 3/3), two cached
+restarts, IMU/RTC/SD initialization and a three-minute idle serial check. The
+previous firmware's uninitialized-Wire errors did not recur. The tester confirmed
+physical buttons, screen, reading/page turns, sleep/power-button wake and unplugged
+standby/wake. This evidence applies to that candidate; X4, UC8279d X3 and
+quantitative power/current measurements remain unverified.
 
 ## Adding a future device variant
 

@@ -1,9 +1,11 @@
 #include "ActivityManager.h"
 
+#include <BlePageTurner.h>
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <HalDisplay.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
@@ -11,6 +13,7 @@
 
 #include <algorithm>
 
+#include "Activity.h"
 #include "CrossPointSettings.h"
 #include "HapticFeedback.h"
 #include "OpdsServerStore.h"
@@ -50,8 +53,10 @@
 #include "network/UsbDriveActivity.h"
 #include "plugins/PluginCatalogActivity.h"
 #include "reader/ReaderActivity.h"
+#include "reader/RemoteTurnGate.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "settings/SettingsListActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "util/ImageViewerActivity.h"
@@ -60,6 +65,13 @@
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
 extern HalGPIO gpio;
+ActivityManager::ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
+    : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
+  assert(renderingMutex != nullptr && "Failed to create rendering mutex");
+  stackActivities.reserve(10);
+}
+
+ActivityManager::~ActivityManager() { assert(false); /* should never be called */ }
 
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
@@ -109,7 +121,9 @@ void ActivityManager::renderTaskLoop() {
         const auto delayMs = currentActivity->idleRenderDelayMs();
         idleGeneration = idleRenderGeneration.load(std::memory_order_relaxed);
         display.setInverted(SETTINGS.screenInverted != 0);
+        const uint32_t renderingVisit = screenVisit;
         currentActivity->render(std::move(lock));
+        paintedVisit.store(renderingVisit, std::memory_order_release);
         if (delayMs != 0) waitTicks = pdMS_TO_TICKS(delayMs);
       } else if (!idleRenderCancelled(idleGeneration)) {
         currentActivity->renderIdle(idleGeneration);
@@ -175,7 +189,9 @@ void ActivityManager::loop() {
             mappedInput.wasScreenTapped(tx, ty) && ty >= 0 && ty < 44 && !HeaderBackTapTarget::contains(tx, ty);
       }
     }
-    if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
+    // Only boards whose frontlight was detected get the panel.
+    if (Frontlight.present() && currentActivity->name != "FrontlightPanel" &&
+        (statusBarTap || mappedInput.wasLightPanelGesture())) {
       haptic_feedback::touchAction();
       resetHomeStandbyInput();
       auto panel = makeUniqueNoThrow<FrontlightPanelActivity>(renderer, mappedInput);
@@ -192,6 +208,14 @@ void ActivityManager::loop() {
   }
 
   while (pendingAction.load() != PendingAction::None) {
+    const bool keepReaderLink = (pendingAction.load() == PendingAction::Push && keepsBluetoothAlive() &&
+                                 pendingActivity && !pendingActivity->requiresExclusiveStorageLoop()) ||
+                                (pendingAction.load() == PendingAction::Pop && !stackActivities.empty() &&
+                                 stackActivities.back()->keepsBluetoothAlive()) ||
+                                (pendingActivity && pendingActivity->keepsBluetoothAlive() && keepsBluetoothAlive());
+    if (pendingAction.load() != PendingAction::ReplaceForSleep && !keepReaderLink &&
+        !bleturner::beforeScreenChange(0, pendingActivity && pendingActivity->isReaderActivity()))
+      return;
     if (pendingAction.load() == PendingAction::Pop) {
       if (RenderLock::peek()) break;
       RenderLock lock;
@@ -203,6 +227,7 @@ void ActivityManager::loop() {
         continue;
       }
 
+      ++screenVisit;
       ActivityResult pendingResult = std::move(currentActivity->result);
 
       // Destroy the current activity
@@ -245,7 +270,7 @@ void ActivityManager::loop() {
       if (RenderLock::peek()) break;
       RenderLock lock;
 
-      if (pendingAction.load() == PendingAction::Replace) {
+      if (pendingAction.load() == PendingAction::Replace || pendingAction.load() == PendingAction::ReplaceForSleep) {
         // Destroy the current activity
         exitActivity(lock);
         // Clear the stack
@@ -262,6 +287,7 @@ void ActivityManager::loop() {
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
       }
       pendingAction.store(PendingAction::None);
+      ++screenVisit;
       currentActivity = std::move(pendingActivity);
       resetHomeStandbyInput();
 
@@ -501,7 +527,13 @@ void ActivityManager::goToUsbDrive() {
 #endif
 }
 
-void ActivityManager::goToSettings() { replaceActivityWith<SettingsActivity>(); }
+void ActivityManager::goToSettings(const SettingsSection openSection) {
+  if (SETTINGS.uiTheme == CrossPointSettings::INX && openSection == SettingsSection::End) {
+    replaceActivityWith<SettingsActivity>(openSection);
+  } else {
+    replaceActivityWith<SettingsListActivity>(openSection);
+  }
+}
 
 void ActivityManager::goToUglyAvatar() { replaceActivityWith<UglyAvatarActivity>(); }
 
@@ -572,6 +604,7 @@ void ActivityManager::goToReader(std::string path, const bool allowFastInitialRe
 
 void ActivityManager::goToSleep(bool fromTimeout) {
   if (replaceActivityWith<SleepActivity>(fromTimeout)) {
+    pendingAction.store(PendingAction::ReplaceForSleep);
     loop();  // The caller sleeps immediately after this returns, so render now.
   }
 }
@@ -606,7 +639,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
-    } else if (activityName == "Settings") {
+    } else if (activityName == "Settings" || activityName == "SettingsList") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }
   }
@@ -702,6 +735,48 @@ bool ActivityManager::deferBluetoothStart() const {
 bool ActivityManager::handleForcedRefresh() {
   cancelIdleRender();
   return currentActivity && currentActivity->handleForcedRefresh();
+}
+bool ActivityManager::isForegroundReader() const {
+  return pendingAction == PendingAction::None && currentActivity && currentActivity->isReaderActivity();
+}
+
+bool ActivityManager::isRemoteReaderContext() const {
+  return pendingAction == PendingAction::None && currentActivity && currentActivity->acceptsRemoteInput();
+}
+
+bool ActivityManager::remoteClick(const RemoteButton button) {
+  if (!isRemoteReaderContext() || RenderLock::peek() || requestedUpdate.load()) return false;
+  return mappedInput.injectRemoteClick(button);
+}
+
+bool ActivityManager::isForegroundHomeShown() const {
+  return pendingAction == PendingAction::None && currentActivity && currentActivity->name == "Home" &&
+         paintedVisit.load(std::memory_order_acquire) == screenVisit;
+}
+
+bool ActivityManager::remoteShortcut(const bool readerMenu) {
+  if (!isForegroundReader()) return false;
+  auto* reader = static_cast<ReaderActivity*>(currentActivity.get());
+  if (!remoteTurnAccepted(reader->pageRendered.load(std::memory_order_acquire), RenderLock::peek(),
+                          reader->inputOverPage())) {
+    return false;
+  }
+  return reader->remoteShortcut(readerMenu);
+}
+
+bool ActivityManager::remoteTurn(const bool forward, const bool chapter) {
+  if (!isRemoteReaderContext() || mappedInput.hasRemoteClick()) return false;
+  auto* reader = isForegroundReader() ? static_cast<ReaderActivity*>(currentActivity.get()) : nullptr;
+  if (!reader || reader->inputOverPage()) {
+    return !chapter && remoteClick(forward ? RemoteButton::Next : RemoteButton::Previous);
+  }
+  if (!remoteTurnAccepted(reader->pageRendered.load(std::memory_order_acquire), RenderLock::peek(),
+                          reader->inputOverPage())) {
+    return false;
+  }
+  const bool turned = chapter ? reader->skipPages(forward ? 1 : -1) : reader->pageTurn(forward);
+  if (turned) requestUpdate();
+  return turned;
 }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }

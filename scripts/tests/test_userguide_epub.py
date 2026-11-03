@@ -64,6 +64,10 @@ class UserGuideEpubTest(unittest.TestCase):
                     self.assertEqual(len(section.findall('.//x:h3', ns)), 2)
                     self.assertTrue(section.findall('.//x:blockquote', ns))
                     self.assertTrue(section.findall('.//x:link[@rel="stylesheet"]', ns))
+                    fonts = ET.fromstring(archive.read('OEBPS/' + spine[6] + '.xhtml'))
+                    font_text = ''.join(fonts.itertext())
+                    self.assertIn('字体文件已损坏' if language == 'zh-CN' else 'Damaged font file', font_text)
+                    self.assertIn('.cpfont', font_text)
                     troubleshooting = ET.fromstring(archive.read('OEBPS/' + spine[9] + '.xhtml'))
                     self.assertEqual(len(troubleshooting.findall('.//x:h3', ns)), 4)
                     self.assertTrue(any((p.text or '').startswith('1. ') for p in

@@ -111,14 +111,9 @@ void InxTheme::drawHeader(const GfxRenderer& renderer, const Rect rect, const ch
   constexpr int titleFont = UiHighDpiProfile::enabled ? UI_12_FONT_ID : NOTOSERIF_12_FONT_ID;
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
 
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryX = rect.x + rect.width - 12 - InxMetrics::values.batteryWidth;
-  drawBatteryRight(renderer,
-                   Rect{batteryX, rect.y + 5, InxMetrics::values.batteryWidth, InxMetrics::values.batteryHeight},
-                   showBatteryPercentage, UiHighDpiProfile::enabled ? SMALL_FONT_ID : STATUS_NUMERIC_FONT_ID);
+  drawHeaderStatus(renderer, rect);
 
-  const int titleTop = rect.y + InxMetrics::values.batteryBarHeight;
+  const int titleTop = rect.y + headerStatusHeight();
   const int rightPadding = InxMetrics::values.contentSidePadding;
   int titleRight = rect.x + rect.width - rightPadding;
   if (subtitle && *subtitle) {
@@ -462,23 +457,21 @@ void InxTheme::drawMainTabBar(const GfxRenderer& renderer, const Rect rect, cons
 
 void InxTheme::drawMainTabStatusBar(const GfxRenderer& renderer, const Rect rect) const {
   if (rect.width <= 0 || rect.height <= 0) return;
+  if (SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM) {
+    drawHeaderStatus(renderer, rect);
+    return;
+  }
   constexpr int numericFontId = UiHighDpiProfile::enabled ? SMALL_FONT_ID : STATUS_NUMERIC_FONT_ID;
   constexpr int edgeInset = UiHighDpiProfile::enabled ? UiHighDpiProfile::contentPadding : 12;
   constexpr int batteryTextOffset = 6;  // drawBatteryRight offsets the icon below the text origin.
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const bool tabsAtBottom = SETTINGS.inxTabPosition == CrossPointSettings::INX_TAB_BOTTOM;
   // The battery cap and numeric glyphs include the positioning edge pixel.
   const int right = std::min(rect.x + rect.width - 1, renderer.getScreenWidth() - edgeInset);
-  const int textY = UiHighDpiProfile::enabled ? rect.y + (rect.height - renderer.getLineHeight(numericFontId)) / 2
-                    : tabsAtBottom            ? std::max(rect.y, edgeInset) - batteryTextOffset
-                                   : std::min(rect.y + rect.height - 1, renderer.getScreenHeight() - edgeInset) -
-                                         metrics.batteryHeight - batteryTextOffset;
+  const int textY = UiHighDpiProfile::enabled
+                        ? rect.y + (rect.height - renderer.getLineHeight(numericFontId)) / 2
+                        : std::min(rect.y + rect.height - 1, renderer.getScreenHeight() - edgeInset) -
+                              metrics.batteryHeight - batteryTextOffset;
   const GfxRenderer::ClipScope clip(renderer, rect.x, rect.y, rect.width, rect.height);
-  if (tabsAtBottom) {
-    char time[9] = "--:--";
-    TimeUtils::formatCurrentTime(time, sizeof(time), SETTINGS.clockFormat == 1);
-    renderer.drawText(numericFontId, std::max(rect.x, edgeInset), textY, time);
-  }
   drawBatteryRight(renderer, Rect{right - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
                    SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS,
                    numericFontId);

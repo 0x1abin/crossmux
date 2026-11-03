@@ -67,6 +67,20 @@ std::string bookCachePath(const std::string& path) {
   return {};
 }
 
+bool clearBookDerivedCache(const std::string& path) {
+  if (!FsHelpers::hasReflowableBookExtension(path)) return true;
+  const std::string cache = bookCachePath(path);
+  const std::string sections = cache + "/sections";
+  if (Storage.exists(sections.c_str()) && !Storage.removeDir(sections.c_str())) return false;
+  static constexpr const char* kFiles[] = {
+      "/book.bin",      "/css_rules.cache", "/css_rules.cache.tmp", "/css_rules.cache.bak",
+      "/spine.bin.tmp", "/toc.bin.tmp",     "/.items.bin"};
+  return std::all_of(std::begin(kFiles), std::end(kFiles), [&cache](const char* name) {
+    const std::string file = cache + name;
+    return !Storage.exists(file.c_str()) || Storage.remove(file.c_str());
+  });
+}
+
 namespace {
 bool relocateBookReferences(const std::string& oldPath, const std::string& newPath) {
   bool ok = true;

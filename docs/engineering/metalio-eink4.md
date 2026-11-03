@@ -485,8 +485,8 @@ Normal and Nightly Metalio builds now use the endpoint-preserving text-turn
 core described in [SSD1677 text AA](ssd1677-text-aa.md). The user confirmed that
 the tested `g24-b32-w32-d0-khold` candidate meets synchronous AA expectations
 and resolves fading status text, guides and body strokes. Its timing and
-analog settings are retained. `metalio_eink4_transition_experiment` remains a
-diagnostic build of the same behavior; the multi-stage experimental flags
+analog settings are retained. Diagnostics use a local `SSD1677_PROBE_DEBUG=1`
+override ([instructions](build-system.md#platformiolocalini-personal-overrides)); the multi-stage experimental flags
 and duplicated Metalio update function are retired.
 
 The final selector policy refreshes all target black and white pixels on a

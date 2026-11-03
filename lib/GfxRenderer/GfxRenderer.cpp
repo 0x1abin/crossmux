@@ -21,6 +21,15 @@
 #include "Memory.h"
 
 namespace {
+// Synthesized small caps: lowercase letters draw as capitals at roughly x-height.
+constexpr int SMALL_CAPS_SCALE_NUM = 3;
+constexpr int SMALL_CAPS_SCALE_DEN = 4;
+constexpr int32_t scaleSmallCapAdvance(const int32_t advanceFP) {
+  return (advanceFP * SMALL_CAPS_SCALE_NUM + SMALL_CAPS_SCALE_DEN / 2) / SMALL_CAPS_SCALE_DEN;
+}
+}  // namespace
+
+namespace {
 constexpr int trackingBetween(const uint32_t leftCp, const uint32_t rightCp, const int8_t tracking) {
   const auto isSpace = [](const uint32_t cp) { return cp == ' ' || cp == 0xA0 || cp == 0x3000; };
   return leftCp == 0 || isSpace(leftCp) || isSpace(rightCp) ? 0 : tracking;
@@ -167,7 +176,7 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_
 
 void GfxRenderer::ensureSdCardFontReady(int fontId, const char* const* segments, const size_t* segmentLens,
                                         const size_t segmentCount, const bool includeSpace, const bool includeHyphen,
-                                        const uint8_t styleMask) const {
+                                        const uint8_t styleMask, const bool includeSmallCaps) const {
   fontId = resolveFontFamilyId(fontId);
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
@@ -183,8 +192,9 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const char* const* segments,
         p += strlen(p) + 1;
       }
     }
-    int missed = it->second->buildAdvanceTablePacked(segments, segmentLens, segmentCount, includeSpace, includeHyphen,
-                                                     styleMask, shaped.empty() ? nullptr : shaped.c_str());
+    int missed =
+        it->second->buildAdvanceTablePacked(segments, segmentLens, segmentCount, includeSpace, includeHyphen, styleMask,
+                                            shaped.empty() ? nullptr : shaped.c_str(), includeSmallCaps);
     if (missed > 0) {
       LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
     }
@@ -593,17 +603,18 @@ static void renderMissingGlyph(const GfxRenderer& renderer, const EpdFontData& f
 
 // Shared glyph rendering logic for normal and rotated text.
 // Coordinate mapping and cursor advance direction are selected at compile time via the template parameter.
-// Render a glyph at 50% scale. Used for SUP/SUB style bits.
+// Render a glyph scaled by scaleNum/scaleDen: 1/2 for SUP/SUB, 3/4 for small caps.
 //
-// Each destination pixel represents a 2x2 source block. Drawing when that block
-// contains ink preserves thin strokes that nearest-neighbor sampling can skip.
+// Each destination pixel samples the source block it covers. At 1/2, any ink in
+// the block draws, preserving thin strokes that nearest-neighbor sampling can skip;
+// milder reductions need majority coverage so stems don't thicken.
 //
-// The advance width is also halved in drawText() so layout reserves exactly the right
-// horizontal space for the scaled glyph.
+// drawText() scales the advance width by the same factor so layout reserves exactly
+// the right horizontal space for the scaled glyph.
 static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                             const bool pixelState, const EpdFontFamily::Style style,
-                             const uint8_t syntheticBoldPixels) {
+                             const bool pixelState, const EpdFontFamily::Style style, const int scaleNum,
+                             const int scaleDen, const uint8_t syntheticBoldPixels) {
   if (renderer.grayPlanesAreAbsolute()) renderMode = GfxRenderer::BW;
   EpdGlyph solidFallback;
   const EpdGlyph* glyph = fontFamily.getGlyphMetrics(cp, solidFallback, style);
@@ -614,8 +625,9 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   }
 
   if (glyph == &solidFallback) {
-    renderer.fillRect(cursorX + glyph->left / 2, cursorY - glyph->top / 2, (glyph->width + 1) / 2,
-                      (glyph->height + 1) / 2, pixelState);
+    renderer.fillRect(cursorX + glyph->left * scaleNum / scaleDen, cursorY - glyph->top * scaleNum / scaleDen,
+                      (glyph->width * scaleNum + scaleDen - 1) / scaleDen,
+                      (glyph->height * scaleNum + scaleDen - 1) / scaleDen, pixelState);
     return;
   }
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
@@ -623,56 +635,41 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
 
   const int srcW = glyph->width;
   const int srcH = glyph->height;
-  const int dstW = (srcW + 1) / 2;  // ceil so odd-width glyphs aren't clipped
-  const int dstH = (srcH + 1) / 2;
+  const int dstW = (srcW * scaleNum + scaleDen - 1) / scaleDen;  // ceil so edge columns aren't clipped
+  const int dstH = (srcH * scaleNum + scaleDen - 1) / scaleDen;
   // Scale the glyph bearing by the same factor so the scaled glyph sits at the correct
   // pixel offset from the (already-shifted) cursor position.
-  const int baseX = cursorX + glyph->left / 2;
-  const int baseY = cursorY - glyph->top / 2;
+  const int baseX = cursorX + glyph->left * scaleNum / scaleDen;
+  const int baseY = cursorY - glyph->top * scaleNum / scaleDen;
+  const bool halving = scaleNum * 2 == scaleDen;
+  const bool is2Bit = fontData->is2Bit || fontData->is4Bit;
 
-  if (fontData->is2Bit || fontData->is4Bit) {
-    // 2-bit packed format: 4 pixels per byte, MSB first, 2 bits per pixel.
-    // raw value: 0=white, 1=light-gray, 2=dark-gray, 3=black.
-    for (int dstY = 0; dstY < dstH; dstY++) {
-      const int srcY = dstY * 2;
-      for (int dstX = 0; dstX < dstW; dstX++) {
-        const int srcX = dstX * 2;
-        uint8_t coverage = 0;
-        uint8_t maxRaw = 0;
-        for (int sampleY = 0; sampleY < 2 && srcY + sampleY < srcH; sampleY++) {
-          for (int sampleX = 0; sampleX < 2 && srcX + sampleX < srcW; sampleX++) {
-            const int pos = (srcY + sampleY) * srcW + srcX + sampleX;
-            const uint8_t raw = get2BitCoverage(bitmap, pos, fontData->is4Bit);
-            coverage += raw;
-            if (raw > maxRaw) maxRaw = raw;
-          }
-        }
-        if (maxRaw >= 2 || coverage >= 2) {
-          drawGlyphPixel(renderer, baseX + dstX, baseY + dstY, pixelState, syntheticBoldPixels);
-        }
-      }
-    }
-  } else {
-    // 1-bit packed format: 8 pixels per byte, MSB first.
-    for (int dstY = 0; dstY < dstH; dstY++) {
-      const int srcY = dstY * 2;
-      for (int dstX = 0; dstX < dstW; dstX++) {
-        const int srcX = dstX * 2;
-        bool hasInk = false;
-        for (int sampleY = 0; sampleY < 2 && srcY + sampleY < srcH; sampleY++) {
-          for (int sampleX = 0; sampleX < 2 && srcX + sampleX < srcW; sampleX++) {
-            const int pos = (srcY + sampleY) * srcW + srcX + sampleX;
-            const uint8_t byte = bitmap[pos >> 3];
-            const uint8_t bit = 7 - (pos & 7);
-            if ((byte >> bit) & 1) {
-              hasInk = true;
-            }
-          }
-        }
-        if (hasInk) {
-          drawGlyphPixel(renderer, baseX + dstX, baseY + dstY, pixelState, syntheticBoldPixels);
+  // Raw sample value: 1-bit fonts read 0 or 3, 2-bit fonts 0 (white) .. 3 (black).
+  const auto sample = [&](const int pos) -> uint8_t {
+    if (is2Bit) return get2BitCoverage(bitmap, pos, fontData->is4Bit);
+    return ((bitmap[pos >> 3] >> (7 - (pos & 7))) & 1) ? 3 : 0;
+  };
+
+  for (int dstY = 0; dstY < dstH; dstY++) {
+    const int srcY0 = dstY * scaleDen / scaleNum;
+    const int srcY1 = std::min(srcH, std::max(srcY0 + 1, ((dstY + 1) * scaleDen + scaleNum - 1) / scaleNum));
+    for (int dstX = 0; dstX < dstW; dstX++) {
+      const int srcX0 = dstX * scaleDen / scaleNum;
+      const int srcX1 = std::min(srcW, std::max(srcX0 + 1, ((dstX + 1) * scaleDen + scaleNum - 1) / scaleNum));
+      int coverage = 0;
+      uint8_t maxRaw = 0;
+      int samples = 0;
+      for (int y = srcY0; y < srcY1; y++) {
+        for (int x = srcX0; x < srcX1; x++) {
+          const uint8_t raw = sample(y * srcW + x);
+          coverage += raw;
+          maxRaw = std::max(maxRaw, raw);
+          samples++;
         }
       }
+      const bool ink = halving ? (is2Bit ? (maxRaw >= 2 || coverage >= 2) : maxRaw != 0)
+                               : samples > 0 && coverage * 2 >= samples * 3;
+      if (ink) drawGlyphPixel(renderer, baseX + dstX, baseY + dstY, pixelState, syntheticBoldPixels);
     }
   }
 }
@@ -691,7 +688,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
     return;
   }
 
-  const bool is2Bit = fontData->is2Bit;
+  const bool is2Bit = fontData->is2Bit || fontData->is4Bit;
   const bool is4Bit = fontData->is4Bit;
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
@@ -1035,7 +1032,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 #ifdef ENABLE_CHINESE_VERSION
     const uint32_t sourceCp = cp;
 #endif
-    cp = font.applyLigatures(cp, textCursor, renderStyle);
+    const uint32_t smallCapCp = (style & EpdFontFamily::SMALL_CAPS) ? utf8SmallCapsUpper(cp) : cp;
+    const bool isSmallCap = smallCapCp != cp;
+    if (style & EpdFontFamily::SMALL_CAPS) {
+      cp = smallCapCp;  // no ligatures: small caps set each letter separately
+    } else {
+      cp = font.applyLigatures(cp, textCursor, renderStyle);
+    }
 
     EpdGlyph solidFallback;
 #ifdef ENABLE_CHINESE_VERSION
@@ -1067,11 +1070,17 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       // Halve the advance so the cursor advances by the same amount the scaled glyph
       // actually occupies, keeping spacing correct without needing a separate smaller font.
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+    } else if (isSmallCap) {
+      prevAdvanceFP = scaleSmallCapAdvance(prevAdvanceFP);
     }
 
     if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
-      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle, activeSyntheticBoldPixels);
+      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle, 1, 2,
+                       activeSyntheticBoldPixels);
+    } else if (isSmallCap) {
+      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, style, SMALL_CAPS_SCALE_NUM,
+                       SMALL_CAPS_SCALE_DEN, activeSyntheticBoldPixels);
     } else {
       renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, lastBaseX, yPos, black, renderStyle,
                                          activeSyntheticBoldPixels);
@@ -2630,6 +2639,9 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
       if (missingGlyph::isCombining(cp)) {
         continue;
       }
+      const uint32_t smallCapCp = (style & EpdFontFamily::SMALL_CAPS) ? utf8SmallCapsUpper(cp) : cp;
+      const bool isSmallCap = smallCapCp != cp;
+      cp = smallCapCp;
       // Differential rounding: snap each glyph step to a pixel individually, matching
       // drawText so layout (wordXpos) and render geometry agree exactly. Snapping the
       // whole sum once (as before) under-counted the rendered width whenever per-glyph
@@ -2658,6 +2670,7 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
       // SUP/SUB glyphs render at 50% scale (renderCharScaled), so halve the advance
       // to keep measurement consistent with drawText and the builtin-font path below.
       if (isSupSub) prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+      if (!isSupSub && isSmallCap) prevAdvanceFP = scaleSmallCapAdvance(prevAdvanceFP);
       havePrev = true;
       prevCp = cp;
     }
@@ -2682,7 +2695,13 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
     if (missingGlyph::isCombining(cp)) {
       continue;
     }
-    cp = font.applyLigatures(cp, text, style);
+    const uint32_t smallCapCp = (style & EpdFontFamily::SMALL_CAPS) ? utf8SmallCapsUpper(cp) : cp;
+    const bool isSmallCap = smallCapCp != cp;
+    if (style & EpdFontFamily::SMALL_CAPS) {
+      cp = smallCapCp;
+    } else {
+      cp = font.applyLigatures(cp, text, style);
+    }
 
     EpdGlyph solidFallback;
     const EpdGlyph* glyph = font.getGlyphMetrics(cp, solidFallback, style);
@@ -2698,12 +2717,79 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
     prevAdvanceFP = glyph ? glyph->advanceX : missingGlyph::metrics(font.getData(style)->ascender, cp).advanceX;
     if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+    } else if (isSmallCap) {
+      prevAdvanceFP = scaleSmallCapAdvance(prevAdvanceFP);
     }
     prevCp = cp;
     prevMissing = missing;
   }
   widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
   return widthPx;
+}
+
+bool GfxRenderer::getCodepointMetrics(const int fontId, const uint32_t cp, const EpdFontFamily::Style style,
+                                      int32_t& advanceFP, int& top) const {
+  const auto fontIt = fontMap.find(resolveFontFamilyId(fontId));
+  if (fontIt == fontMap.end()) return false;
+  const EpdGlyph* glyph = fontIt->second.getGlyph(cp, style);
+  if (!glyph) return false;
+  advanceFP = glyph->advanceX;
+  top = glyph->top;
+  return true;
+}
+
+int GfxRenderer::drawScaledCodepoint(const int fontId, const uint32_t cp, const EpdFontFamily::Style style, const int x,
+                                     const int baselineY, const int scale256) const {
+  if (scale256 <= 0) return 0;
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) {
+    char utf8[5] = {};
+    utf8AppendCodepoint(utf8, cp);
+    fontCacheManager_->recordText(utf8, fontId, style);
+    return 0;
+  }
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return 0;
+  const EpdFontFamily& font = fontIt->second;
+  const EpdGlyph* glyph = font.getGlyph(cp, style);
+  if (!glyph) return 0;
+  const int advance = fp4::toPixel(static_cast<int32_t>(glyph->advanceX) * scale256 / 256);
+  const EpdFontData* fontData = font.getData(style);
+  const uint8_t* bitmap = getGlyphBitmap(fontData, glyph);
+  if (!bitmap) return advance;
+
+  const int srcW = glyph->width;
+  const int srcH = glyph->height;
+  const bool is2Bit = fontData->is2Bit || fontData->is4Bit;
+  // Raw coverage: 1-bit fonts read 0 or 3, 2-bit fonts 0 (white) .. 3 (black); 0 outside the bitmap.
+  const auto sample = [&](const int sx, const int sy) -> int {
+    if (sx < 0 || sy < 0 || sx >= srcW || sy >= srcH) return 0;
+    const int pos = sy * srcW + sx;
+    if (is2Bit) return get2BitCoverage(bitmap, pos, fontData->is4Bit);
+    return ((bitmap[pos >> 3] >> (7 - (pos & 7))) & 1) ? 3 : 0;
+  };
+
+  const int dstW = (srcW * scale256 + 255) / 256;
+  const int dstH = (srcH * scale256 + 255) / 256;
+  const int left = x + glyph->left * scale256 / 256;
+  const int top = baselineY - glyph->top * scale256 / 256;
+  // Source position of each destination pixel centre, 16.16 fixed point.
+  const int32_t step = (256 << 16) / scale256;
+  const int32_t origin = step / 2 - (1 << 15);
+  for (int dy = 0; dy < dstH; ++dy) {
+    const int32_t sy = origin + dy * step;
+    const int y0 = sy >> 16;
+    const int fy = (sy >> 8) & 0xFF;
+    for (int dx = 0; dx < dstW; ++dx) {
+      const int32_t sx = origin + dx * step;
+      const int x0 = sx >> 16;
+      const int fx = (sx >> 8) & 0xFF;
+      const int upper = sample(x0, y0) * (256 - fx) + sample(x0 + 1, y0) * fx;
+      const int lower = sample(x0, y0 + 1) * (256 - fx) + sample(x0 + 1, y0 + 1) * fx;
+      // Ink where interpolated coverage reaches half of full black (3).
+      if ((upper * (256 - fy) + lower * fy) * 2 >= 3 * 256 * 256) drawPixel(left + dx, top + dy, true);
+    }
+  }
+  return advance;
 }
 
 int GfxRenderer::getFontAscenderSize(int fontId) const {

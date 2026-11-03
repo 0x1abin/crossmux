@@ -173,7 +173,7 @@ int main() {
         self.assertIn("-DFREEINK_CAP_BLE_HID_HOST=1", flags)
         self.assertNotIn("CROSSPOINT_BLE_HOST_PSRAM", flags)
         self.assertNotIn("xTaskCreatePinnedToCore", flags)
-        self.assertIn("h2zero/NimBLE-Arduino @ 2.3.8", resolve("c3_ble", "lib_deps"))
+        self.assertIn("h2zero/NimBLE-Arduino @ 2.5.1", resolve("c3_ble", "lib_deps"))
         self.assertIn("patch_ble_keyboard_host.py", resolve("c3_ble", "extra_scripts"))
         self.assertIn("configure_nimble_psram.py", resolve("c3_ble", "extra_scripts"))
         self.assertIn("post:scripts/configure_c3_ble_controller.py", resolve("c3_ble", "extra_scripts"))
@@ -181,7 +181,7 @@ int main() {
         self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", resolve("c3_ble", "custom_sdkconfig"))
         self.assertIn("CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y", resolve("c3_ble", "custom_sdkconfig"))
         self.assertIn("CONFIG_BT_NIMBLE_ENABLED=n", resolve("c3_ble", "custom_sdkconfig"))
-        hardware_count = 0
+        hardware_environments = set()
         for section in config.sections():
             if not section.startswith("env:"):
                 continue
@@ -194,7 +194,7 @@ int main() {
                     self.assertNotIn("NimBLE-Arduino", libraries)
                     self.assertNotIn("configure_c3_ble_controller.py", scripts)
                     continue
-                hardware_count += 1
+                hardware_environments.add(section.removeprefix("env:"))
                 if "FREEINK_DEVICE_EEGO_A4=1" in flags:
                     self.assertNotIn("FREEINK_CAP_BLE_HID_HOST=1", flags)
                     self.assertNotIn("NimBLE-Arduino", libraries)
@@ -204,7 +204,7 @@ int main() {
                     self.assertEqual(resolve(section, "board_build.arduino.memory_type"), "dio_opi")
                     continue
                 self.assertIn("-DFREEINK_CAP_BLE_HID_HOST=1", flags)
-                self.assertIn("h2zero/NimBLE-Arduino @ 2.3.8", libraries)
+                self.assertIn("h2zero/NimBLE-Arduino @ 2.5.1", libraries)
                 self.assertIn("patch_ble_keyboard_host.py", scripts)
                 self.assertIn("configure_nimble_psram.py", scripts)
                 if resolve(section, "board_build.mcu") == "esp32s3":
@@ -225,7 +225,15 @@ int main() {
                     self.assertEqual(resolve(section, "custom_nimble_config"), "src/platform/NimbleC3Config.h")
                     self.assertIn("CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y", resolve(section, "custom_sdkconfig"))
                     self.assertIn("CONFIG_BT_CONTROLLER_ONLY=y", resolve(section, "custom_sdkconfig"))
-        self.assertGreaterEqual(hardware_count, 26)
+        self.assertEqual(hardware_environments, {
+            "default", "gh_release", "gh_release_rc", "x4c", "lilygo_t5s3", "picco",
+            *{
+                environment
+                for board in ("sticky", "x4pro", "papermono", "eego_a4", "murphy_m4",
+                              "waveshare_epaper_397", "metalio_eink4", "readpico")
+                for environment in (board, f"{board}-gh_release", f"{board}_nightly")
+            },
+        })
         self.assertIn("uint8_t bluetoothEnabled = 0;", (ROOT / "src/CrossPointSettings.h").read_text())
 
     def test_flash_controller_link_uses_matching_archive_without_changing_packages(self):

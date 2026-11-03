@@ -1,5 +1,21 @@
 # INX SDK layout compatibility
 
+## Approved settings groups (2026-10-23)
+
+All themes, including INX, use the upstream **System**, **Display**, **Reader**,
+**Controls**, **Library**, and **Connectivity** groups. This is the explicitly
+approved exception to earlier INX category organization. Keep CrossMux extension
+settings in their corresponding groups through the same data source, with their
+relative insertion points, action/value bindings, persistence, Web API, and
+capability checks intact. Time to Sleep belongs to Display; Clear Reading Cache
+to Reader; Wi-Fi, Bluetooth, OPDS, sync and Plugins to Connectivity.
+
+INX retains its accordion presentation, page chrome, fonts, row cadence,
+separators, ordinary pickers and theme-specific setting controls. This category
+exception does not authorize other appearance changes. Historical four-category
+captures, latency records and visual baselines below remain unchanged and tied
+to their original images; validate all six current groups separately.
+
 ## Shared behavior across themes
 
 INX retains its fonts, rectangular switches, dotted separators, main tabs,
@@ -179,7 +195,7 @@ absolute screen coordinate. Keep one shared settings source, persistent fields,
 Web API, CrossMux update service and device capability checks.
 
 
-The current local rehearsal (2026-10-13) uses Reader
+The local rehearsal dated 2026-10-13 uses Reader
 `ba39565ce7b3a8aab14ca86da4fa4c3ca140f007`, SDK
 `7fcd3b34c108f28c086ade3b433924022dbc0998`, and Simulator
 `1915ee0a15564c3f49d74fa2334f773f282c5364`, on CrossMux

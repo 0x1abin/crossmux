@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "Epub/htmlEntities.h"
 #include "WeReadProtocol.h"
 #include "WeReadStore.h"
 
@@ -70,7 +71,7 @@ bool hasAttributeToken(const char* tag, const char* expectedName, const char* ex
 }
 
 bool isAnnotationTag(const char* tag) {
-  return hasAttributeToken(tag, "class", "duokan-footnote") ||
+  return hasAttributeToken(tag, "class", "qqreader-footnote") || hasAttributeToken(tag, "class", "duokan-footnote") ||
          hasAttributeToken(tag, "class", "duokan-footnote-content") ||
          hasAttributeToken(tag, "class", "duokan-footnote-item") || hasAttributeToken(tag, "epub:type", "noteref") ||
          hasAttributeToken(tag, "epub:type", "footnote") || hasAttributeToken(tag, "epub:type", "endnote") ||
@@ -107,17 +108,23 @@ void decodeBasicHtmlEntities(char* text) {
 }
 
 struct XhtmlSanitizer {
+  HalFile* input = nullptr;
   HalFile* output = nullptr;
+  HalFile* notes = nullptr;
   WeReadStore::IndexWriter* imageWriter = nullptr;
   char* tag = nullptr;
   size_t tagCapacity = 0;
   uint32_t chapterIndex = 0;
+  const char* title = nullptr;
+  uint32_t noteCount = 0;
   bool plainText = false;
   bool inTag = false;
   bool inEntity = false;
   bool skipHead = false;
   bool tagOverflow = false;
   bool textRunOpen = false;
+  char tagQuote = '\0';
+  char tagFirstChar = '\0';
   char skippedElement[24] = {};
   size_t skipDepth = 0;
   size_t tagLen = 0;
@@ -126,6 +133,11 @@ struct XhtmlSanitizer {
   uint32_t sourceUtf16Offset = 0;
   uint32_t tagSourceOffset = 0;
   uint32_t entitySourceOffset = 0;
+  uint64_t tagByteBegin = 0;
+  uint64_t tagByteEnd = 0;
+  uint64_t resumeByteOffset = 0;
+  bool (*continueWork)(void*) = nullptr;
+  void* workContext = nullptr;
 };
 
 bool writeSourceOffsetMarker(XhtmlSanitizer& sanitizer, const uint32_t offset) {
@@ -133,6 +145,286 @@ bool writeSourceOffsetMarker(XhtmlSanitizer& sanitizer, const uint32_t offset) {
   const int length =
       snprintf(marker, sizeof(marker), "<!--%s%u-->", kSourceOffsetMarkerName, static_cast<unsigned>(offset));
   return length > 0 && static_cast<size_t>(length) < sizeof(marker) && writeLiteral(*sanitizer.output, marker);
+}
+
+// Borrows the discarded tag workspace; the main input chunk stays intact during SD look-back.
+class SourceRangeReader {
+ public:
+  SourceRangeReader(HalFile& input, char* buffer, const size_t capacity, const uint64_t end,
+                    bool (*continueWork)(void*), void* workContext)
+      : input_(input),
+        buffer_(buffer),
+        capacity_(capacity),
+        end_(end),
+        continueWork_(continueWork),
+        workContext_(workContext) {}
+
+  bool seek(const uint64_t offset) {
+    if (offset > end_ || !input_.seek64(offset)) return false;
+    offset_ = offset;
+    index_ = 0;
+    length_ = 0;
+    return true;
+  }
+
+  int next() {
+    if (offset_ == end_) return -1;
+    if (index_ == length_) {
+      if (continueWork_ && !continueWork_(workContext_)) {
+        valid_ = false;
+        return -1;
+      }
+      const size_t wanted = static_cast<size_t>(std::min<uint64_t>(capacity_, end_ - offset_));
+      const int got = input_.read(buffer_, wanted);
+      if (got <= 0 || static_cast<size_t>(got) > wanted) {
+        valid_ = false;
+        return -1;
+      }
+      index_ = 0;
+      length_ = static_cast<size_t>(got);
+    }
+    ++offset_;
+    return static_cast<unsigned char>(buffer_[index_++]);
+  }
+
+  uint64_t position() const { return offset_; }
+  bool valid() const { return valid_; }
+
+  bool writeTextRun(HalFile& output) {
+    const size_t begin = index_ - 1;
+    while (index_ < length_) {
+      const uint8_t value = static_cast<uint8_t>(buffer_[index_]);
+      if (value == '&' || value == '<' || value == '>' || value == '\'' || value == '"' ||
+          (value < 0x20 && value != '\t' && value != '\n' && value != '\r')) {
+        break;
+      }
+      ++index_;
+      ++offset_;
+    }
+    return output.write(reinterpret_cast<const uint8_t*>(buffer_ + begin), index_ - begin) == index_ - begin;
+  }
+
+ private:
+  HalFile& input_;
+  char* buffer_;
+  size_t capacity_;
+  uint64_t end_;
+  uint64_t offset_ = 0;
+  size_t index_ = 0;
+  size_t length_ = 0;
+  bool valid_ = true;
+  bool (*continueWork_)(void*);
+  void* workContext_;
+};
+
+struct AnnotationRange {
+  bool annotation = false;
+  uint64_t begin = 0;
+  uint64_t end = 0;
+};
+
+bool readAnnotationRange(SourceRangeReader& reader, AnnotationRange& result) {
+  int value = reader.next();
+  while (value >= 0 && std::isspace(value)) value = reader.next();
+  char name[24] = {};
+  size_t length = 0;
+  while (value >= 0 && !std::isspace(value) && value != '/' && value != '>') {
+    if (length + 1 < sizeof(name)) name[length] = static_cast<char>(value);
+    length = std::min(length + 1, sizeof(name));
+    value = reader.next();
+  }
+  if (!equalsIgnoreCase(name, length, "img")) return reader.valid();
+
+  while (value >= 0) {
+    while (value >= 0 && (std::isspace(value) || value == '/')) value = reader.next();
+    if (value < 0) break;
+    length = 0;
+    memset(name, 0, sizeof(name));
+    while (value >= 0 && !std::isspace(value) && value != '=' && value != '/') {
+      if (length + 1 < sizeof(name)) name[length] = static_cast<char>(value);
+      length = std::min(length + 1, sizeof(name));
+      value = reader.next();
+    }
+    const bool classAttribute = equalsIgnoreCase(name, length, "class");
+    const bool altAttribute = equalsIgnoreCase(name, length, "alt");
+    while (value >= 0 && std::isspace(value)) value = reader.next();
+    if (value != '=') continue;
+    value = reader.next();
+    while (value >= 0 && std::isspace(value)) value = reader.next();
+    const int quote = value == '\'' || value == '"' ? value : 0;
+    const uint64_t begin = reader.position() - (quote || value < 0 ? 0 : 1);
+    if (quote) value = reader.next();
+    static constexpr char kClass[] = "qqreader-footnote";
+    size_t tokenLength = 0;
+    bool tokenMatches = true;
+    while (value >= 0 && (quote ? value != quote : !std::isspace(value))) {
+      if (classAttribute) {
+        if (std::isspace(value)) {
+          result.annotation |= tokenMatches && tokenLength == sizeof(kClass) - 1;
+          tokenLength = 0;
+          tokenMatches = true;
+        } else {
+          tokenMatches &= tokenLength < sizeof(kClass) - 1 &&
+                          std::tolower(value) == kClass[std::min(tokenLength, sizeof(kClass) - 1)];
+          tokenLength = std::min(tokenLength + 1, sizeof(kClass));
+        }
+      }
+      value = reader.next();
+    }
+    if (classAttribute) result.annotation |= tokenMatches && tokenLength == sizeof(kClass) - 1;
+    if (quote && value != quote) return false;
+    if (altAttribute) {
+      result.begin = begin;
+      result.end = reader.position() - (value < 0 ? 0 : 1);
+    }
+    if (quote) value = reader.next();
+  }
+  return reader.valid();
+}
+
+bool writeXmlByte(HalFile& output, const uint8_t value) {
+  const char* escaped = nullptr;
+  switch (value) {
+    case '&':
+      escaped = "&amp;";
+      break;
+    case '<':
+      escaped = "&lt;";
+      break;
+    case '>':
+      escaped = "&gt;";
+      break;
+    case '"':
+      escaped = "&quot;";
+      break;
+    case '\'':
+      escaped = "&apos;";
+      break;
+  }
+  return escaped ? writeLiteral(output, escaped) : output.write(value) == 1;
+}
+
+bool writeXmlCodepoint(HalFile& output, const uint32_t value) {
+  char encoded[5] = {};
+  if (value <= 0x7F) {
+    encoded[0] = static_cast<char>(value);
+  } else if (value <= 0x7FF) {
+    encoded[0] = static_cast<char>(0xC0 | (value >> 6));
+    encoded[1] = static_cast<char>(0x80 | (value & 0x3F));
+  } else if (value <= 0xFFFF) {
+    encoded[0] = static_cast<char>(0xE0 | (value >> 12));
+    encoded[1] = static_cast<char>(0x80 | ((value >> 6) & 0x3F));
+    encoded[2] = static_cast<char>(0x80 | (value & 0x3F));
+  } else {
+    encoded[0] = static_cast<char>(0xF0 | (value >> 18));
+    encoded[1] = static_cast<char>(0x80 | ((value >> 12) & 0x3F));
+    encoded[2] = static_cast<char>(0x80 | ((value >> 6) & 0x3F));
+    encoded[3] = static_cast<char>(0x80 | (value & 0x3F));
+  }
+  return writeXmlText(output, encoded);
+}
+
+bool writeAnnotationText(SourceRangeReader& reader, HalFile& output) {
+  for (int value = reader.next(); value >= 0; value = reader.next()) {
+    if (value != '&') {
+      if (value < 0x20 && value != '\t' && value != '\n' && value != '\r') return false;
+      if (value == '<' || value == '>' || value == '\'' || value == '"') {
+        if (!writeXmlByte(output, static_cast<uint8_t>(value))) return false;
+      } else if (!reader.writeTextRun(output)) {
+        return false;
+      }
+      continue;
+    }
+    const uint64_t afterAmpersand = reader.position();
+    value = reader.next();
+    if (value == '#') {
+      value = reader.next();
+      const uint32_t base = value == 'x' || value == 'X' ? 16U : 10U;
+      if (base == 16) value = reader.next();
+      uint32_t codepoint = 0;
+      bool hasDigit = false;
+      bool overflow = false;
+      while (value >= 0) {
+        const int digit = value >= '0' && value <= '9'   ? value - '0'
+                          : value >= 'a' && value <= 'f' ? value - 'a' + 10
+                          : value >= 'A' && value <= 'F' ? value - 'A' + 10
+                                                         : -1;
+        if (digit < 0 || static_cast<uint32_t>(digit) >= base) break;
+        hasDigit = true;
+        if (codepoint > (0x10FFFFU - static_cast<uint32_t>(digit)) / base) overflow = true;
+        if (!overflow) codepoint = codepoint * base + static_cast<uint32_t>(digit);
+        value = reader.next();
+      }
+      const bool validCodepoint =
+          codepoint == 9 || codepoint == 10 || codepoint == 13 || (codepoint >= 0x20 && codepoint <= 0xD7FF) ||
+          (codepoint >= 0xE000 && codepoint <= 0xFFFD) || (codepoint >= 0x10000 && codepoint <= 0x10FFFF);
+      if (value == ';' && hasDigit && !overflow && validCodepoint) {
+        if (!writeXmlCodepoint(output, codepoint)) return false;
+        continue;
+      }
+    } else {
+      char entity[24] = {'&'};
+      size_t length = 1;
+      while (value >= 0 && length < sizeof(entity) && !std::isspace(value) && value != '&' && value != '<') {
+        entity[length++] = static_cast<char>(value);
+        if (value == ';') break;
+        value = reader.next();
+      }
+      const char* decoded = value == ';' ? lookupHtmlEntity(entity, length) : nullptr;
+      if (decoded) {
+        if (!writeXmlText(output, decoded)) return false;
+        continue;
+      }
+    }
+    // Replay unknown references as literal text without retaining an unbounded token.
+    if (!reader.seek(afterAmpersand) || !writeLiteral(output, "&amp;")) return false;
+  }
+  return reader.valid();
+}
+
+bool writeAnnotation(XhtmlSanitizer& sanitizer) {
+  SourceRangeReader reader(*sanitizer.input, sanitizer.tag, sanitizer.tagCapacity, sanitizer.tagByteEnd - 1,
+                           sanitizer.continueWork, sanitizer.workContext);
+  const bool written = [&]() {
+    AnnotationRange range;
+    if (!reader.seek(sanitizer.tagByteBegin + 1) || !readAnnotationRange(reader, range)) return false;
+    if (!range.annotation || range.begin == range.end) return true;
+    if (sanitizer.noteCount == UINT32_MAX) return false;
+    if (sanitizer.noteCount == 0 && (!writeLiteral(*sanitizer.notes,
+                                                   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                                                   "<html xmlns=\"http://www.w3.org/1999/xhtml\" "
+                                                   "xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>") ||
+                                     !writeXmlText(*sanitizer.notes, sanitizer.title) ||
+                                     !writeLiteral(*sanitizer.notes, "</title></head><body>"))) {
+      return false;
+    }
+    ++sanitizer.noteCount;
+    char markup[224];
+    int length = snprintf(markup, sizeof(markup),
+                          "<a epub:type=\"noteref\" role=\"doc-noteref\" id=\"wr-ref-%u\" "
+                          "href=\"notes%06u.xhtml#wr-note-%u\">[%u]</a>",
+                          static_cast<unsigned>(sanitizer.noteCount), static_cast<unsigned>(sanitizer.chapterIndex),
+                          static_cast<unsigned>(sanitizer.noteCount), static_cast<unsigned>(sanitizer.noteCount));
+    if (length <= 0 || static_cast<size_t>(length) >= sizeof(markup) ||
+        !writeSourceOffsetMarker(sanitizer, sanitizer.tagSourceOffset) || !writeLiteral(*sanitizer.output, markup) ||
+        !writeSourceOffsetMarker(sanitizer, sanitizer.sourceUtf16Offset)) {
+      return false;
+    }
+    length = snprintf(markup, sizeof(markup),
+                      "<aside epub:type=\"footnote\" role=\"doc-footnote\" id=\"wr-note-%u\"><p>"
+                      "<a epub:type=\"backlink\" role=\"doc-backlink\" href=\"ch%06u.xhtml#wr-ref-%u\">[%u]</a> ",
+                      static_cast<unsigned>(sanitizer.noteCount), static_cast<unsigned>(sanitizer.chapterIndex),
+                      static_cast<unsigned>(sanitizer.noteCount), static_cast<unsigned>(sanitizer.noteCount));
+    if (length <= 0 || static_cast<size_t>(length) >= sizeof(markup) || !writeLiteral(*sanitizer.notes, markup)) {
+      return false;
+    }
+    SourceRangeReader text(*sanitizer.input, sanitizer.tag, sanitizer.tagCapacity, range.end, sanitizer.continueWork,
+                           sanitizer.workContext);
+    return text.seek(range.begin) && writeAnnotationText(text, *sanitizer.notes) &&
+           writeLiteral(*sanitizer.notes, "</p></aside>");
+  }();
+  const bool restored = sanitizer.input->seek64(sanitizer.resumeByteOffset);
+  return written && restored;
 }
 
 bool advanceSourceUtf16Offset(XhtmlSanitizer& sanitizer, const uint8_t* data, const size_t length) {
@@ -229,7 +521,7 @@ bool processTag(XhtmlSanitizer& sanitizer) {
     sanitizer.tagLen = 0;
     sanitizer.inTag = false;
     sanitizer.tagOverflow = false;
-    return true;
+    return sanitizer.skipDepth != 0 || sanitizer.skipHead || writeAnnotation(sanitizer);
   }
   sanitizer.tag[sanitizer.tagLen] = '\0';
   const char* tagEnd = sanitizer.tag + sanitizer.tagLen;
@@ -269,8 +561,12 @@ bool processTag(XhtmlSanitizer& sanitizer) {
     sanitizer.skipHead = !closing && !selfClosing;
     return true;
   }
+  if (!closing && strcmp(name, "img") == 0 && !sanitizer.skipHead &&
+      hasAttributeToken(sanitizer.tag, "class", "qqreader-footnote")) {
+    return writeAnnotation(sanitizer);
+  }
   if (!closing && isAnnotationTag(sanitizer.tag)) {
-    if (selfClosing) return true;
+    if (selfClosing || strcmp(name, "img") == 0) return true;
     memcpy(sanitizer.skippedElement, name, len + 1);
     sanitizer.skipDepth = 1;
     return true;
@@ -552,62 +848,62 @@ bool writeLiteral(HalFile& output, const char* text) {
 bool writeXmlText(HalFile& output, const char* text) {
   if (!text) return true;
   for (const auto* p = reinterpret_cast<const uint8_t*>(text); *p; ++p) {
-    const char* escaped = nullptr;
-    switch (*p) {
-      case '&':
-        escaped = "&amp;";
-        break;
-      case '<':
-        escaped = "&lt;";
-        break;
-      case '>':
-        escaped = "&gt;";
-        break;
-      case '"':
-        escaped = "&quot;";
-        break;
-      case '\'':
-        escaped = "&apos;";
-        break;
-      default:
-        if (output.write(*p) != 1) return false;
-        continue;
-    }
-    if (output.write(reinterpret_cast<const uint8_t*>(escaped), strlen(escaped)) != strlen(escaped)) return false;
+    if (!writeXmlByte(output, *p)) return false;
   }
   return true;
 }
 
 bool sanitizeChapter(const std::string& inputPath, const std::string& outputPath, const std::string& imageIndexPath,
-                     const uint32_t chapterIndex, const char* title, const bool plainText, uint8_t* readBuffer,
-                     const size_t readBufferSize, char* tagBuffer, const size_t tagBufferSize) {
+                     const std::string& notesPath, const uint32_t chapterIndex, const char* title, const bool plainText,
+                     uint8_t* readBuffer, const size_t readBufferSize, char* tagBuffer, const size_t tagBufferSize,
+                     bool (*continueWork)(void*), void* workContext) {
   HalFile input;
   if (!readBuffer || readBufferSize == 0 || !tagBuffer || tagBufferSize < sizeof(WeReadStore::ImageRecord::url) ||
       !Storage.openFileForRead("WR", inputPath, input)) {
     return false;
   }
   const std::string partPath = outputPath + ".part";
+  const std::string notesPartPath = notesPath + ".part";
   if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+  if (Storage.exists(notesPartPath.c_str())) Storage.remove(notesPartPath.c_str());
   if (Storage.exists(imageIndexPath.c_str()) && !Storage.remove(imageIndexPath.c_str())) return false;
   HalFile output;
-  if (!Storage.openFileForWrite("WR", partPath, output)) return false;
+  HalFile notes;
   WeReadStore::IndexWriter imageWriter;
-  if (!imageWriter.begin(imageIndexPath, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord))) return false;
 
   const bool written = [&]() {
+    if (!Storage.openFileForWrite("WR", partPath, output) || !Storage.openFileForWrite("WR", notesPartPath, notes) ||
+        !imageWriter.begin(imageIndexPath, WeReadStore::kImageMagic, sizeof(WeReadStore::ImageRecord))) {
+      return false;
+    }
     if (!writeLiteral(output,
                       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                      "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>") ||
+                      "<html xmlns=\"http://www.w3.org/1999/xhtml\" "
+                      "xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>") ||
         !writeXmlText(output, title) || !writeLiteral(output, "</title></head><body>") ||
         (plainText && !writeLiteral(output, "<p>"))) {
       return false;
     }
 
-    XhtmlSanitizer sanitizer{&output, &imageWriter, tagBuffer, tagBufferSize, chapterIndex, plainText};
+    XhtmlSanitizer sanitizer;
+    sanitizer.input = &input;
+    sanitizer.output = &output;
+    sanitizer.notes = &notes;
+    sanitizer.imageWriter = &imageWriter;
+    sanitizer.tag = tagBuffer;
+    sanitizer.tagCapacity = tagBufferSize;
+    sanitizer.chapterIndex = chapterIndex;
+    sanitizer.title = title;
+    sanitizer.plainText = plainText;
+    sanitizer.continueWork = continueWork;
+    sanitizer.workContext = workContext;
     bool firstChunk = true;
+    uint64_t chunkStart = 0;
     while (input.available()) {
+      if (continueWork && !continueWork(workContext)) return false;
       const int got = input.read(readBuffer, readBufferSize);
       if (got <= 0) return false;
+      sanitizer.resumeByteOffset = chunkStart + static_cast<uint64_t>(got);
       int i = 0;
       if (firstChunk && got >= 3 && readBuffer[0] == 0xEF && readBuffer[1] == 0xBB && readBuffer[2] == 0xBF) i = 3;
       firstChunk = false;
@@ -631,9 +927,18 @@ bool sanitizeChapter(const std::string& inputPath, const std::string& outputPath
         const uint32_t sourceOffset = sanitizer.sourceUtf16Offset;
         if (!advanceSourceUtf16Offset(sanitizer, &value, 1)) return false;
         if (!plainText && sanitizer.inTag) {
-          if (value == '>') {
+          const bool declaration = sanitizer.tagFirstChar == '!' || sanitizer.tagFirstChar == '?';
+          if (!sanitizer.tagFirstChar && !std::isspace(value)) sanitizer.tagFirstChar = static_cast<char>(value);
+          if (!declaration && sanitizer.tagQuote) {
+            if (value == sanitizer.tagQuote) sanitizer.tagQuote = '\0';
+          } else if (!declaration && (value == '\'' || value == '"')) {
+            sanitizer.tagQuote = static_cast<char>(value);
+          } else if (value == '>') {
+            sanitizer.tagByteEnd = chunkStart + static_cast<uint64_t>(i);
             if (!processTag(sanitizer)) return false;
-          } else if (sanitizer.tagLen + 1 < sanitizer.tagCapacity) {
+            continue;
+          }
+          if (sanitizer.tagLen + 1 < sanitizer.tagCapacity) {
             sanitizer.tag[sanitizer.tagLen++] = static_cast<char>(value);
           } else {
             sanitizer.tagOverflow = true;
@@ -645,26 +950,39 @@ bool sanitizeChapter(const std::string& inputPath, const std::string& outputPath
           sanitizer.inTag = true;
           sanitizer.tagOverflow = false;
           sanitizer.tagLen = 0;
+          sanitizer.tagQuote = '\0';
+          sanitizer.tagFirstChar = '\0';
+          sanitizer.tagByteBegin = chunkStart + static_cast<uint64_t>(i) - 1;
           sanitizer.tagSourceOffset = sourceOffset;
           continue;
         }
         if (!emitSanitizedTextByte(sanitizer, value, sourceOffset)) return false;
       }
+      chunkStart = sanitizer.resumeByteOffset;
     }
+    if (sanitizer.inTag) return false;
     if (sanitizer.inEntity && !emitEntity(sanitizer)) return false;
     return writeSourceOffsetMarker(sanitizer, sanitizer.sourceUtf16Offset) &&
-           (!plainText || writeLiteral(output, "</p>")) && writeLiteral(output, "</body></html>");
+           (!plainText || writeLiteral(output, "</p>")) && writeLiteral(output, "</body></html>") &&
+           (sanitizer.noteCount == 0 || writeLiteral(notes, "</body></html>"));
   }();
   if (!written) {
     imageWriter.abort();
     output.close();
+    notes.close();
     Storage.remove(partPath.c_str());
+    Storage.remove(notesPartPath.c_str());
     return false;
   }
   output.flush();
   output.close();
-  if (!WeReadStore::atomicReplace(partPath, outputPath) || !imageWriter.finish()) {
+  notes.flush();
+  notes.close();
+  if (!WeReadStore::atomicReplace(notesPartPath, notesPath) || !WeReadStore::atomicReplace(partPath, outputPath) ||
+      !imageWriter.finish()) {
+    imageWriter.abort();
     Storage.remove(partPath.c_str());
+    Storage.remove(notesPartPath.c_str());
     return false;
   }
   return true;

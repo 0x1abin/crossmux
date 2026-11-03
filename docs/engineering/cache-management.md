@@ -94,7 +94,7 @@ Malformed caches are treated as misses. Readers validate every POD/string read,
 length and lookup-table boundary before publishing parsed state. A truncated or
 oversized `book.bin` is closed and removed; the current call returns no entry,
 and the next normal EPUB load rebuilds it. This is a validation change only and
-does not alter the version-11 binary layout.
+is independent of format-version changes.
 
 **Manual Cache Clear** (safe operations):
 ```bash
@@ -116,7 +116,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Source**: `lib/Epub/Epub/Section.cpp`, `lib/Epub/Epub/BookMetadataCache.cpp`
 
 **Current Versions** (as of [../file-formats.md](../file-formats.md)):
-- `book.bin`: **Version 11** (metadata structure) — includes NFC-composed titles and ignores ambiguous EPUB guide text references while remaining above every version shipped by either lineage.
+- `book.bin`: **Version 12** — retains version 11 metadata and persists the spine `linear` flag. Auxiliary resources remain link targets but are excluded from normal chapter navigation and book-progress weights.
 - `section.bin`: **Version 82/83**, complete; partial versions are **200/199**,
   derived as `0xFE - (completeVersion - 28)`.
   Unified Chinese firmware uses 83. The header includes `verticalBottomAlign`;
@@ -135,8 +135,17 @@ WeRead caches invalidate independently through their own magic/version or a
 versioned filename. Do not add a global generation that recursively clears the
 cache during application startup. Chapter XHTML compatibility is paired with
 its image-index magic, so a mismatch causes that chapter to be rebuilt when the
-user caches the book. Manual cache clearing remains the fallback for disposable
-legacy files.
+user caches the book. `WRI4` also requires the per-chapter notes sidecar, which
+is empty when no notes exist. Nonempty sidecars are packaged as standard EPUB 3
+footnotes in non-linear spine resources. Manual cache clearing remains the
+fallback for disposable legacy files.
+
+Before replacing a fully regenerated WeRead EPUB, only rebuildable metadata,
+CSS and section caches are cleared. Progress, link state, covers, bookmarks and
+clippings are retained; inserting reference numbers can shift old visible-text
+positions. Selected-range replacement retains its existing cache-reset policy.
+A failed download leaves the previous EPUB readable; progress sync reads the
+packaged chapter instead of potentially newer loose chapter files.
 
 **Example** (incrementing section format version):
 ```cpp
@@ -264,4 +273,10 @@ sleep mode. `/sleep.bmp.bak` remains until the installed BMP validates and the
 settings save succeeds. The versioned three-byte `/sleep.bmp.txn` record
 identifies an unfinished transaction even when old and new sleep modes match.
 Failed recovery leaves its marker/backup intact and reports the failure.
+
+Cover + Transparent saves the viewer's transparent PNG/BMP as
+`/sleep-overlay.bmp`, retaining the combined sleep mode and any `/sleep.bmp`.
+Its `.part`, `.bak`, and `.txn` files follow the same transaction and three-byte
+version-1 record as the ordinary cover. Recovery checks both target sets;
+ordinary/overlay installs and rollback do not overwrite the other image.
 See [the private marker format](../file-formats.md#sleep-cover-transaction).

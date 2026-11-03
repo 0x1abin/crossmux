@@ -86,6 +86,13 @@ class FootnoteList {
 
   FootnoteEntry* data() { return entries_.get(); }
   const FootnoteEntry* data() const { return entries_.get(); }
+  FootnoteEntry* erase(const FootnoteEntry* entry) {
+    const size_t index = static_cast<size_t>(entry - entries_.get());
+    if (index >= size_) return end();
+    for (size_t i = index + 1; i < size_; ++i) entries_[i - 1] = entries_[i];
+    --size_;
+    return entries_.get() + index;
+  }
   FootnoteEntry* begin() { return data(); }
   const FootnoteEntry* begin() const { return data(); }
   FootnoteEntry* end() { return size_ ? data() + size_ : data(); }

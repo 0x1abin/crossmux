@@ -7,6 +7,7 @@ add_executable(ChapterHtmlSlimParserTest
   ${REPO_ROOT}/lib/Epub/Epub/Section.cpp
   ${REPO_ROOT}/lib/Epub/Epub/WordStore.cpp
   ${REPO_ROOT}/lib/Epub/Epub/converters/ImageDimsProbe.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )
 
@@ -17,6 +18,7 @@ target_include_directories(ChapterHtmlSlimParserTest PRIVATE
   ${REPO_ROOT}/lib/Epub/Epub
   ${REPO_ROOT}/lib/Epub/Epub/parsers
   ${REPO_ROOT}/lib/Epub/Epub/css
+  ${REPO_ROOT}/lib/AsciiText
   ${REPO_ROOT}/lib/EpdFont
   ${REPO_ROOT}/lib/Utf8
   ${REPO_ROOT}/lib/Memory
@@ -37,7 +39,11 @@ gtest_discover_tests(ChapterHtmlSlimParserTest)
 
 add_executable(UpstreamParserTest
   UpstreamParserTest.cpp
+  PinnedUpstreamRenderingTest.cpp
+  DictionaryHtmlPagesTest.cpp
+  ${REPO_ROOT}/src/util/DictHtmlPages.cpp
   UpstreamParserLinkStubs.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp
   ${REPO_ROOT}/lib/Epub/Epub/Page.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp
   ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp
@@ -51,6 +57,7 @@ add_executable(UpstreamParserTest
 )
 
 target_include_directories(UpstreamParserTest PRIVATE
+  ${REPO_ROOT}/lib/AsciiText
   ${CMAKE_CURRENT_SOURCE_DIR}/upstream_stubs
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/lib

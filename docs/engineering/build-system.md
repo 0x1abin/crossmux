@@ -59,9 +59,8 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
 * **Logging**: ALWAYS use `LOG_INF`, `LOG_DBG`, or `LOG_ERR` from `Logging.h`. Raw Serial output is deprecated.
 * **Environments** (in `platformio.ini`):
   * `default`: Development (LOG_LEVEL=2, serial enabled)
-  * `gh_release`: Production (LOG_LEVEL=0)
-  * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
-  * `slim`: Minimal build (no serial logging)
+  * `gh_release`: X3/X4 Stable (LOG_LEVEL=1)
+  * `gh_release_rc`: X3/X4 Nightly (LOG_LEVEL=1)
   * `sticky`: Seeed Sticky ESP32-S3 development build
   * `x4pro`: Xteink X4 Pro ESP32-S3 development build
   * `x4c`: Xteink X4 Classic ESP32-S3 build-only development build
@@ -72,20 +71,34 @@ prebuilt `dio_opi` core continues to supply the TinyUSB CDC/MSC component graph.
   * `metalio_eink4`: Metalio E-Ink 4 ESP32-S3 development build
   * `readpico`: MindReset Read Pico ESP32-S3 development build
   * `lilygo_t5s3`: LilyGo T5 S3 4.7 PRO/Lite ESP32-S3 build-only development build
+  * `picco`: BOOX Picco ESP32-S3 development build, stock partitions and app-only upload
   * `simulator`: Native X4 desktop simulator supplied by the pinned simulator fork
   * `simulator_x3`: Native X3 desktop simulator
   * `simulator_eego_a4`: Native 768x552 eego A4 product simulator
   * `simulator_murphy_m4`: Native 800x480 Murphy M4 product simulator
   * `simulator_readpico`: Native 1216x684 Read Pico simulator, 684x1216 in portrait
+  * `simulator_sticky`: Native Sticky desktop simulator
+
+The committed configuration has 36 environments: development, Stable and Nightly
+for each of the nine published targets, development-only `x4c`, `lilygo_t5s3` and `picco`,
+and six simulators. S3 Stable environments use `<board>-gh_release`; Nightly uses
+`<board>_nightly`. `mode_dev`, `mode_stable` and `mode_nightly` supply common
+logging and version policy; hardware profiles retain their SDK configuration,
+dependencies and USB behavior. There are no duplicate S3 RC, slim, rollback or
+diagnostic environments in the shared configuration.
+
+Versions are `<base>` for Stable, `<base>-rc+<7sha>` for Nightly and
+`<base>-dev-<branch>-<7sha>` for development. The build middleware and packager
+share the version function and read the revision from Git HEAD.
 
 The S3 environments are separate hardware binaries, each with unified languages.
 Inspect `bin/ci-check` and current workflow matrices for validation coverage;
 published targets and channels come from `scripts/nightly_targets.py`.
-X4 Classic and LilyGo development builds do not join the public Nightly/OTA set.
+X4 Classic, LilyGo and Picco development builds do not join the public Nightly/OTA set.
 
 Routine pull-request CI builds only `default` and `x4pro`. `default` remains the
 shared X3/X4 firmware with runtime device detection. The path-filtered Hardware
-CI workflow builds all five simulators and the configured S3 environments when
+CI workflow builds all six simulators and the configured hardware environments when
 hardware-sensitive files change, and can also be started manually.
 
 Bluetooth Page Turner Beta uses the existing target capability gates across
@@ -236,7 +249,9 @@ upload_port = COM7              # Windows: COMx, Linux: /dev/ttyUSBx
 monitor_port = COM7
 
 build_flags =
-  ${base.build_flags}
+  ${c3_hardware.build_flags}
+  ${mode_dev.build_flags}
+  -DCROSSPOINT_WAIT_FOR_USB_SERIAL
   -DMY_DEBUG_FLAG=1             # Personal debug flags
   -DTEST_FEATURE_ENABLED=1
 ```
@@ -249,7 +264,23 @@ build_flags =
 **Rules**:
 - **NEVER commit** `platformio.local.ini`
 - **NEVER put** personal info (serial ports, credentials) in main `platformio.ini`
-- Use `${base.build_flags}` to extend (not replace) base flags
+- Preserve the selected hardware and mode flags when overriding `build_flags`.
+
+Display experiments belong in this ignored local file. For example, to inspect
+Metalio text transitions without adding a shared build target:
+
+```ini
+[env:metalio_eink4]
+build_flags =
+  ${metalio_eink4_hardware.build_flags}
+  ${mode_dev.build_flags}
+  -DSSD1677_PROBE_DEBUG=1
+```
+
+Use the same pattern with `sticky_hardware` or `metalio_eink4_hardware` and
+`-DFREEINK_SSD1677_COMBINED_AA=0` for a local AA rollback comparison. Remove the
+override before producing release or acceptance images. Historical experiment
+names are not available as compatibility aliases.
 
 See also: [getting-started](../contributing/getting-started.md) for first-time toolchain setup, [testing-and-debugging.md](testing-and-debugging.md) for build/monitor commands.
 

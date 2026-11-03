@@ -55,10 +55,12 @@ namespace {
 //   76 / 77 - independent Western paragraph indentation width
 //   78 / 79 - per-word source ranges, NFC source composition, paragraph starts, and soft-flush continuity
 //   82 / 83 - bottom-align header and table-safe layout; skip overlapping early PR versions 79/80
+//   84 / 85 - CSS font variants, page boxes/drop caps, inheritance, and GIF layout
+//   86 / 87 - literal-space justification, wrapped NBSP, RTL gaps, and bounded drop-cap hyphenation
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 83;
+constexpr uint8_t SECTION_FILE_VERSION = 87;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 82;
+constexpr uint8_t SECTION_FILE_VERSION = 86;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
@@ -526,7 +528,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   return true;
 }
 
-bool Section::buildSomeMore(const int maxPages) {
+bool Section::buildSomeMore(const int maxPages, bool (*yieldNow)()) {
   if (!build_ || !build_->parser) {
     LOG_ERR("SCT", "buildSomeMore with no active build");
     return false;
@@ -549,7 +551,7 @@ bool Section::buildSomeMore(const int maxPages) {
         return finalizeBuild();
       case ChapterHtmlSlimParser::ParseStatus::More:
         // Yield once we've laid out the requested number of pages.
-        if (maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) {
+        if ((maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) || (yieldNow && yieldNow())) {
           build_->bytesConsumed = build_->parser->parseBytesConsumed();
           return true;
         }

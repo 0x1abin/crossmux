@@ -21,7 +21,7 @@ struct GfxRenderer {
  bool hasFrameBuffer() const {return framebuffer;}
  void clearPreferredFonts(){preferred=false;}
  void clearSdCardFonts(){sd=false;}
- void removeFont(int id){assert(id==42);}
+ void removeFont(int id){assert(id==42||id==43);}
 };
 struct SdCardFontManager {
  struct Loaded {int fontId; Font* font;};
@@ -30,7 +30,7 @@ struct SdCardFontManager {
  unsigned loadedPointSize_=0;
  void unloadAll(GfxRenderer&);
 };
-struct SdCardFontSystem {SdCardFontManager manager_; void releaseLoadedFont(GfxRenderer&);};
+struct SdCardFontSystem {SdCardFontManager manager_;std::vector<int> cpfontVariants_;void unloadCpfonts(GfxRenderer&);void releaseLoadedFont(GfxRenderer&);};
 SdCardFontSystem sdFontSystem;
 struct Activity {
  bool exited=false;
@@ -38,6 +38,7 @@ struct Activity {
 };
 struct TextSettingsActivity: Activity {GfxRenderer renderer; void onExit();};
 ''' + method(manager, 'void SdCardFontManager::unloadAll(')
+            + method(system, 'void SdCardFontSystem::unloadCpfonts(')
             + method(system, 'void SdCardFontSystem::releaseLoadedFont(')
             + method(exit_source, 'void TextSettingsActivity::onExit()') + r'''
 int main(){
@@ -45,12 +46,15 @@ int main(){
  for(int visit=0;visit<4;++visit){
   // The next reader/settings load can register the same canonical family again.
   sdFontSystem.manager_.loaded_.push_back({42,new Font});
+  sdFontSystem.manager_.loaded_.push_back({43,new Font});
+  sdFontSystem.cpfontVariants_.push_back(43);
   sdFontSystem.manager_.loadedFamilyName_="Reader";
   sdFontSystem.manager_.loadedPointSize_=22+visit;
   activity.renderer.preferred=activity.renderer.sd=true;
   activity.onExit();
   assert(activity.exited && Font::live==0);
   assert(sdFontSystem.manager_.loaded_.empty());
+  assert(sdFontSystem.cpfontVariants_.empty()); // Public release cannot retain an evicted variant id.
   assert(sdFontSystem.manager_.loadedFamilyName_.empty());
   assert(sdFontSystem.manager_.loadedPointSize_==0);
   assert(!activity.renderer.preferred && !activity.renderer.sd);

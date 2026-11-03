@@ -1,3 +1,4 @@
+#include <Epub.h>
 #include <Epub/Page.h>
 #include <Epub/TokenBoundary.h>
 #include <Epub/blocks/ImageBlock.h>
@@ -44,11 +45,10 @@ bool TextBlock::hasRuby() const { return false; }
 ImageBlock::ImageBlock(const std::string& imagePath, const std::string& srcPath, int16_t width, int16_t height)
     : imagePath(imagePath), srcPath(srcPath), width(width), height(height) {}
 
-bool ImageDecoderFactory::isFormatSupported(const std::string&) { return false; }
-ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string&) { return nullptr; }
-bool ImageToFramebufferDecoder::validateAndStoreDimensions(int64_t, int64_t, ImageDimensions&, const char*) {
-  return false;
+bool ImageDecoderFactory::isFormatSupported(const std::string& path) {
+  return Epub::enableGifProbeForTest && path.ends_with(".gif");
 }
+ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string&) { return nullptr; }
 
 std::vector<std::string> collectedFootnotes;
 void Page::addFootnote(const char*, const char* href) { collectedFootnotes.emplace_back(href); }
@@ -73,3 +73,19 @@ bool PageImage::serialize(HalFile&) { return false; }
 
 void PageHorizontalRule::render(GfxRenderer&, int, int, int) {}
 bool PageHorizontalRule::serialize(HalFile&) { return false; }
+
+int TextBlock::lineAscent(const GfxRenderer& renderer, int fontId) const {
+  return renderer.getFontAscenderSize(fontId);
+}
+int TextBlock::extraAscent(const GfxRenderer&, int) const { return 0; }
+bool TextBlock::setWordFonts(const uint8_t*, const int32_t (&)[MAX_WORD_FONTS]) { return true; }
+void PageBorderBox::render(GfxRenderer&, int, int, int) {}
+bool PageBorderBox::serialize(HalFile&) { return false; }
+void PageDropCap::render(GfxRenderer&, int, int, int) {}
+bool PageDropCap::serialize(HalFile&) { return false; }
+
+PageDropCap::PageDropCap(int32_t font, uint16_t scale, EpdFontFamily::Style face, const char* utf8, int16_t x,
+                         int16_t y)
+    : PageElement(x, y), fontId(font), scale256(scale), style(face) {
+  strncpy(text, utf8, MAX_TEXT_BYTES);
+}

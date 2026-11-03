@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -87,9 +89,10 @@ class SdCardFont {
   int buildAdvanceTable(const char* utf8Text, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
   // Packed variant: each segment holds consecutive NUL-terminated words
   // (paragraph word-arena chunks), scanned without per-word string objects.
+  // includeSmallCaps also prepares uppercase codepoints for small caps, retaining the originals.
   int buildAdvanceTablePacked(const char* const* segments, const size_t* segmentLens, size_t segmentCount,
                               bool includeSpace, bool includeHyphen, uint8_t styleMask = 0x0F,
-                              const char* extraText = nullptr);
+                              const char* extraText = nullptr, bool includeSmallCaps = false);
 
   // Look up advanceX for a codepoint from the advance table.
   // Returns the 12.4 fixed-point advance, or 0 if not found.
@@ -145,6 +148,9 @@ class SdCardFont {
   // Extract SdCardFont* from an opaque glyphMissCtx pointer.
   // Used by GfxRenderer::getGlyphBitmap() to recover the SdCardFont from EpdFontData::glyphMissCtx.
   static SdCardFont* fromMissCtx(void* ctx);
+
+  // True once after a loaded font first hits a corrupt glyph entry, so the UI can tell the user.
+  static bool takeCorruptGlyphNotice() { return corruptGlyphNotice_.exchange(false); }
 
   struct Stats {
     uint32_t prewarmTotalMs = 0;
@@ -220,11 +226,7 @@ class SdCardFont {
 #endif
       return fullIntervals || bmpIntervals;
     }
-    // True when bmpIntervals/fullIntervals above points at another style's table rather than
-    // this style's own allocation. Regular/bold/italic weights of the same family almost always
-    // cover the identical codepoint set, so a CJK font's multi-KB-per-style table is otherwise
-    // paid for once per style. Only the owning style frees it -- see freeStyleAll().
-    bool intervalsShared = false;
+    // Tables may be shared across styles and loaded fonts; paged indexes remain owned.
 
     // Ligature table (lazy-loaded on first prewarm). No kern table is resident:
     // buildMiniKernMatrix reads the class-table blocks (~3KB per side per style
@@ -304,14 +306,17 @@ class SdCardFont {
 
     // The EpdFont whose data pointer we manage
     EpdFont epdFont{&stubData};
-
-    bool present = false;
   };
 
-  PerStyle styles_[MAX_STYLES] = {};
+  // Allocated once per load; EpdFont pointers remain stable until unload.
+  std::unique_ptr<PerStyle[]> styles_;
+  // Zero means absent; present styles store their array slot plus one.
+  uint8_t styleSlots_[MAX_STYLES] = {};
+  PerStyle& styleData(uint8_t style) { return styles_[styleSlots_[style] - 1]; }
+  const PerStyle& styleData(uint8_t style) const { return styles_[styleSlots_[style] - 1]; }
   uint8_t styleCount_ = 0;
 
-  char filePath_[128] = {};
+  char filePath_[sizeof("/.fonts") + 1 + 127 + 1 + 127] = {};
   mutable bool useFlash_ = false;
   size_t flashPayloadSize_ = 0;
 #if defined(BOARD_HAS_PSRAM) && !defined(SIMULATOR) && !defined(CROSSPOINT_EMULATED)
@@ -368,6 +373,9 @@ class SdCardFont {
 
   Stats stats_;
   uint32_t contentHash_ = 0;
+  uint32_t fileSize_ = 0;  // bounds glyph bitmap offsets (glyphEntryValid)
+  mutable uint8_t corruptGlyphsLogged_ = 0;
+  static inline std::atomic<bool> corruptGlyphNotice_{false};
   bool loaded_ = false;
 
   // Per-style helpers
@@ -383,6 +391,8 @@ class SdCardFont {
   bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
+  static void releaseIntervals(PerStyle& s);
+  bool glyphEntryValid(const PerStyle& s, const EpdGlyph& glyph, uint32_t codepoint) const;
   static constexpr int32_t GLYPH_INDEX_IO_ERROR = -2;
   // Negative results distinguish missing coverage (-1) from a retryable I/O error.
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint, FontFile* file = nullptr) const;
