@@ -89,21 +89,23 @@ Simulator/build tests cannot verify touch recovery after wake, optical output,
 frontlight variations or sleep current. Keep first-flash offsets tied to the
 actual generated partition/image metadata and preserve the backup above.
 
-## GPIO6 peripheral rail (2026-10-29)
+## GPIO6 ownership across hardware revisions
 
-The 2.0.0 SDK sync re-modeled GPIO6 as the SD card's active-low power enable and
-drove it LOW for the session. GPIO6 is the board's active-high peripheral rail: it
-feeds the GPIO10 battery divider (×1.559) and the optional LM3630A boost. With it
-LOW the battery ADC read 0 mV — the UI showed 0%, and sleep-time WiFi sync skipped
-its `getBatteryPercentage() < 20` gate — and the frontlight went dark after boot.
+freeink-sdk PR [#48](https://github.com/0x1abin/freeink-sdk/pull/48) now follows
+upstream `ed7c5c3`: before SD mounting, probe the CW2015 at 0x62. Units with a
+responding gauge assign GPIO6 to active-low SD power; gauge-less units leave it
+as the display enable, driven HIGH for the GPIO10 battery ADC and frontlight.
+The actual board profile retains the gauge and its ADC fallback. Failed bus
+initialization or a transient bus error does not latch the wrong revision.
 
-freeink-sdk PR [#48](https://github.com/0x1abin/freeink-sdk/pull/48) carries GPIO6
-as the display driver's power-enable pin (driven HIGH by `EpdBus`), removes the SD
-power-enable pin, and returns the profile to `NO_GAUGE`: I²C 0x62 does not ACK on
-the retail units measured, so the ADC is the only battery source. Measured on
-hardware: driving GPIO6 HIGH moved GPIO10 from 0 mV to 2674 mV (4168 mV pack,
-100%) and restored the frontlight. Deep sleep/wake release and re-assert of the
-rail still need a hardware check.
+The contributor measured 0 mV at GPIO10 with GPIO6 LOW and 2674 mV (4168 mV
+pack) with it HIGH on a gauge-less retail unit, with frontlight recovery. These
+measurements apply to that unit; they do not establish every revision's wiring.
+
+Host checks cover both ownership choices, bus-init retry, transient bus failure,
+the real board's CW2015/ADC paths, touch and A4 display regressions. SD access,
+battery/frontlight behavior and deep sleep/wake still need physical checks on
+both hardware revisions. No new device measurements were made for this update.
 
 ## Reader adapter convergence
 
