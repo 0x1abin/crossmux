@@ -110,6 +110,38 @@ if old_skip in source:
 elif new_skip not in source:
     raise RuntimeError("Unsupported pioarduino src-filter callback")
 
+# 55.03.37 library envs do not reliably inherit project BUILD_FLAGS, so
+# FREEINK_*/WOLFSSL_* guarded headers are missing during library compilation.
+# Mirror every -D flag into CPPDEFINES on the project env (library envs clone
+# it later). Idempotent via the _mirror_defines marker.
+arduino_file = Path(platform.get_dir()) / "builder" / "frameworks" / "arduino.py"
+text = arduino_file.read_text(encoding="utf-8")
+old_env = (
+    "env = DefaultEnvironment()\n"
+    "pm = ToolPackageManager()\n"
+    "platform = env.PioPlatform()\n"
+)
+new_env = (
+    old_env
+    + "\n"
+    + "_mirror_defines = []\n"
+    + "for _flag in env.get(\"BUILD_FLAGS\", []):\n"
+    + "    if not isinstance(_flag, str) or not _flag.startswith(\"-D\"):\n"
+    + "        continue\n"
+    + "    _macro = _flag[2:]\n"
+    + "    if \"=\" in _macro:\n"
+    + "        _key, _value = _macro.split(\"=\", 1)\n"
+    + "        _mirror_defines.append((_key, _value))\n"
+    + "    else:\n"
+    + "        _mirror_defines.append(_macro)\n"
+    + "if _mirror_defines:\n"
+    + "    env.Append(CPPDEFINES=_mirror_defines)\n"
+)
+if old_env in text:
+    arduino_file.write_text(text.replace(old_env, new_env, 1), encoding="utf-8")
+elif "_mirror_defines" not in text:
+    raise RuntimeError("Unsupported pioarduino arduino env init")
+
 requested = env.GetProjectOption("custom_sdkconfig", "")
 board = env.BoardConfig()
 mcu = board.get("build.mcu", "esp32")
