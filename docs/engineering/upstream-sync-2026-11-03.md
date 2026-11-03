@@ -7,7 +7,7 @@ base branch is merged or changed. The original CrossMux checkout is preserved.
 | --- | --- | --- | --- |
 | Reader | `6b5566c844667857acebfe565d373423cdd16e06` | `136c26553980579d9f9c9176f11ce0870087cb80` (develop) | This branch |
 | SDK | `65323afd0cbfa7bcfbabafd509248d024ceaab14` | `1e1cec259e7b983be2b9762f41fbf350e138cca9` (main) | [SDK #49](https://github.com/0x1abin/freeink-sdk/pull/49), `d9a1304cd234b0536136302f629304b609f62b32` |
-| Simulator | `1cbe1b775c9b37e23551d2ca9334052f1fb3b0e3` | `4c78f3ff51b5b1e5d2f69f595dba79bc159c4c1f` (main) | [Simulator #13](https://github.com/0x1abin/crosspoint-simulator/pull/13), `e1126680507f33bd35239aa90d32be198124ad34` |
+| Simulator | `1cbe1b775c9b37e23551d2ca9334052f1fb3b0e3` | `4c78f3ff51b5b1e5d2f69f595dba79bc159c4c1f` (main) | [Simulator #13](https://github.com/0x1abin/crosspoint-simulator/pull/13), `e5e716a40379d925ef6a31f7aafccf0b2f8ebcdb` |
 
 The SDK candidate preserves the histories of SDK #45, #47 and #48. The Reader
 pins that common candidate rather than sequencing three incompatible gitlinks
@@ -86,6 +86,11 @@ Passed locally on macOS/Apple clang:
   UI reports 321,385 passing checks. Focused GPIO6, LUT and shared-SPI regressions.
 - Simulator eight-profile compatibility, NVS/clock/storage, release-duration and
   application-thread network tests; real loopback HTTP timeout/header/cancel tests.
+- Read Pico display/input checks pass for all four orientations and power-only
+  wake/relaunch. The wake test now sets its script before GPIO initialization,
+  which upstream changed to parse startup input. Before this fixture correction,
+  the orientations passed but wake hung; the corrected full check took 6.17 seconds
+  locally. Its CI step now has a five-minute timeout.
 - Bilingual generated web JavaScript checks, keyboard geometry/behavior, INX
   historical style traces and current-upstream theme/menu comparisons. The theme
   comparison reports 9,360 upstream traces and 1,872 INX bridge traces.
