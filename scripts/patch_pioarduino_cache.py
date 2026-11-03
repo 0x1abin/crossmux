@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -55,6 +56,34 @@ if old_check in source:
     builder.write_text(source.replace(old_check, new_check, 1), encoding="utf-8")
 elif new_check not in source:
     raise RuntimeError("Unsupported pioarduino cache check")
+
+# pioarduino's tool-scons package is trimmed on some releases (missing
+# SCons.Tool.FortranCommon / SCons.Scanner.Fortran, imported lazily at link
+# time). If a complete pip SCons is present, fill only the missing files into
+# the package SCons that PlatformIO already loaded.
+def _fill_missing_scons_modules():
+    import SCons
+
+    loaded = Path(SCons.__file__).resolve().parent
+    for entry in sys.path:
+        candidate = Path(entry) / "SCons"
+        try:
+            if not (candidate / "__init__.py").is_file():
+                continue
+            if candidate.resolve() == loaded:
+                continue
+        except OSError:
+            continue
+        for src in candidate.rglob("*.py"):
+            dst = loaded / src.relative_to(candidate)
+            if not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+        print(f"Filled missing SCons modules from {candidate}")
+        return
+
+
+_fill_missing_scons_modules()
 
 # pioarduino 55.03.37 hands a NodeList to this build middleware when a source
 # filter matches several files; the stock callback calls node.srcnode()
