@@ -30,6 +30,7 @@
 #endif
 #ifdef ENABLE_CHINESE_VERSION
 #include "apps/weread/WeReadActivity.h"
+#include "apps/weread/WeReadAutoSync.h"
 #endif
 #include "apps/gomoku/GomokuMenuActivity.h"
 #include "apps/minesweeper/MinesweeperMenuActivity.h"
@@ -286,7 +287,6 @@ void ActivityManager::loop() {
         HeaderBackTapTarget::clear();
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
       }
-      pendingAction.store(PendingAction::None);
       ++screenVisit;
       currentActivity = std::move(pendingActivity);
       resetHomeStandbyInput();
@@ -302,6 +302,10 @@ void ActivityManager::loop() {
 #endif
 
       lock.unlock();  // onEnter may acquire its own lock
+#ifdef ENABLE_CHINESE_VERSION
+      weread_auto::drain(renderer);
+#endif
+      pendingAction.store(PendingAction::None);
       currentActivity->onEnter();
 
       // onEnter may request another pending action, we will handle it in the next loop iteration
@@ -309,6 +313,9 @@ void ActivityManager::loop() {
     }
   }
 
+#ifdef ENABLE_CHINESE_VERSION
+  weread_auto::drain(renderer);
+#endif
   if (pendingAction.load() == PendingAction::None && requestedUpdate.exchange(false)) {
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost

@@ -324,6 +324,7 @@ void WeReadProgressSyncActivity::applyRemoteProgress(const WeReadProtocol::Remot
     return;
   }
   uniqueEpub.reset();
+  WeReadClient::rememberRemoteProgress(bookId_, remoteProgress);
   state_ = State::Success;
   requestUpdate();
 }

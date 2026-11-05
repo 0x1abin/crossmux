@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace airpage {
@@ -26,5 +27,7 @@ bool saveRealtimeMode(bool enabled);
 // custom sleep screen. Missing or invalid state defaults to OFF.
 bool loadAutoSleepWallpaper();
 bool saveAutoSleepWallpaper(bool enabled);
+uint8_t loadSyncInterval();
+bool saveSyncInterval(uint8_t index);
 
 }  // namespace airpage

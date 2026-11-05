@@ -40,6 +40,7 @@ class AirPageConnection final {
   Event pump(bool allowPush);
   Event handleWifiFailure();
   void prepareRefresh();
+  bool connectScheduled();
 
   // Connection queries remain part of the instance-facing connection API.
   // cppcheck-suppress functionStatic

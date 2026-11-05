@@ -41,7 +41,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
     SettingsSaveFailed,
     WallpaperFailed,
   };
-  enum class SettingRow : uint8_t { Mode, AutoWallpaper, Count };
+  enum class SettingRow : uint8_t { Mode, AutoWallpaper, SyncInterval, Count };
   enum class WallpaperResult : uint8_t { None, Saved, Failed };
   enum class ImageDisplayResult : uint8_t { None, Success, OutOfMemory, Failure };
   enum class TouchAction : int16_t {
@@ -54,6 +54,7 @@ class AirPageActivity final : public Activity, private UiAppHost {
     OpenImageMenu,
   };
 
+  void pumpSchedule();
   bool processImageDisplayResult();
   void applyConnectionEvent(airpage::AirPageConnection::Event event);
   void clearConnectionNotice();
@@ -97,6 +98,12 @@ class AirPageActivity final : public Activity, private UiAppHost {
 
   static constexpr int kSettingsRows = static_cast<int>(SettingRow::Count);
 
+  uint8_t syncInterval_ = 0;
+  uint32_t lastScheduledMs_ = 0;
+  uint32_t lastScheduleInputMs_ = 0;
+  uint32_t lastSleepAttemptMs_ = 0;
+  bool scheduledFetch_ = false;
+  char syncIntervalLabel_[24]{};
   Screen screen_ = Screen::Qr;
   Phase phase_ = Phase::Idle;
   Notice notice_ = Notice::None;

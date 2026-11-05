@@ -180,7 +180,7 @@ previous/next also map the side buttons to Images/Refresh in every orientation.
 Touch devices render those QR-page actions as a tappable footer, and tapping a
 full-screen image opens the same actions plus Set Cover in a modal menu.
 Connecting or reconnecting never downloads an image by itself; only Refresh or
-a live MQTT push starts a download.
+a live MQTT push starts a download, except when scheduled sync is enabled.
 Settings uses the standard themed list for manual/live mode and the optional
 "set downloads as sleep screen" toggle. Images opens a newest-first list of the
 current image plus up to 19 archived deliveries; selecting one displays it
@@ -190,6 +190,19 @@ Back returns to the QR page.
 Live mode runs only while AirPage is foregrounded, backs off failed
 connections, and allows normal auto-sleep again after the retry window expires.
 Manual mode keeps foreground Wi-Fi available but permits idle auto-sleep.
+Scheduled sync is off by default. In AirPage Settings, cycle Scheduled sync through
+Off, 5, 15, 30, 60, 120 and 360 minutes. Enabling an interval disables live mode;
+enabling live mode disables the interval. Scheduling exists only in the foreground
+AirPage activity and suppresses automatic deep sleep while enabled. Explicit sleep
+still exits AirPage and stops the schedule. Each due interval silently reconnects
+the last saved Wi-Fi network, downloads once, then turns its own Wi-Fi off. Failed
+connections retry at the next interval, without opening the Wi-Fi picker.
+X3 uses the same HAL light-sleep path as Standby after 35 seconds without input,
+with at most 60 seconds between timer wakes; USB power or unsupported wake wiring
+keeps it awake. During light sleep only Power wakes early; after waking there is
+another 35-second interaction window. No per-second display refresh is added.
+Actual wake timing, modem cleanup, panel behavior and battery life require device
+validation. Removing the interval restores normal AirPage auto-sleep behavior.
 Downloads are identified by signature and accept BMP or JPEG from the same
 endpoint. Exact duplicates reuse the current entry. Unique downloads are
 validated transactionally before the old image is archived. The QR uses physical

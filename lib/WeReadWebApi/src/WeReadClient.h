@@ -57,6 +57,7 @@ enum class ProgressSyncMode : uint8_t {
   Compare,
   ApplyRemote,
   UploadLocal,
+  AutoUpload,
 };
 
 enum class ProgressSyncOutcome : uint8_t {
@@ -66,6 +67,8 @@ enum class ProgressSyncOutcome : uint8_t {
   ApplyRemote,
   LocalUploaded,
 };
+
+bool rememberRemoteProgress(const char* bookId, const WeReadProtocol::RemoteProgress& remote);
 
 struct ProgressSyncResult {
   ProgressSyncOutcome outcome = ProgressSyncOutcome::Pending;
@@ -292,6 +295,7 @@ class Operation {
       case ProgressSyncMode::ApplyRemote:
         return ProgressAction::ApplyRemote;
       case ProgressSyncMode::UploadLocal:
+      case ProgressSyncMode::AutoUpload:
         return ProgressAction::UploadLocal;
     }
     return ProgressAction::SelectDirection;

@@ -107,6 +107,8 @@ AirPageConnection::Event AirPageConnection::setRealtime(const bool enabled) {
   return pause(Event::WifiRequired);
 }
 
+bool AirPageConnection::connectScheduled() { return wifiConnected() || startWifiAssociation(); }
+
 void AirPageConnection::prepareRefresh() {
   if (wifiConnected()) ownsWifi_ = true;
   if (!realtime_ || state_ == State::Online) return;
@@ -275,7 +277,7 @@ bool AirPageConnection::startWifiAssociation() {
   }
 
   WiFi.persistent(false);
-  NetworkStartup::setMode(renderer_, WIFI_STA);
+  if (!NetworkStartup::setMode(renderer_, WIFI_STA)) return false;
   WiFi.disconnect(true, true);
   delay(100);
   if (credential->password.empty()) {

@@ -1,5 +1,7 @@
 #include "WeReadClient.h"
 
+#include "WeReadProgressPolicy.h"
+
 #ifdef ENABLE_CHINESE_VERSION
 
 #include <Arduino.h>
@@ -3029,6 +3031,20 @@ void Operation::persistInitialProgress() {
   WeReadStore::clearInitialProgress(book_.bookId);
 }
 
+bool rememberRemoteProgress(const char* bookId, const WeReadProtocol::RemoteProgress& remote) {
+  char baseline[192];
+  if (!formatProgressBaseline(remote, baseline, sizeof(baseline))) return false;
+  const std::string path = WeReadStore::bookDirectory(bookId) + "/auto_sync_baseline";
+  return Storage.writeFile(path.c_str(), String(baseline));
+}
+
+static bool matchesRemoteBaseline(const char* bookId, const WeReadProtocol::RemoteProgress& remote) {
+  char baseline[192];
+  if (!formatProgressBaseline(remote, baseline, sizeof(baseline))) return false;
+  const std::string path = WeReadStore::bookDirectory(bookId) + "/auto_sync_baseline";
+  return Storage.readFile(path.c_str()) == baseline;
+}
+
 Error Operation::decideProgress() {
   const float remoteFraction = normalizedRemoteProgress();
   progressSyncResult_.remote.percent = remoteFraction * 100.0f;
@@ -3058,6 +3074,12 @@ Error Operation::decideProgress() {
           chapter_.chapterUid, static_cast<unsigned>(progressChapterOffset_),
           static_cast<unsigned long>(progressSyncInput_.localFraction * 1000000.0f + 0.5f));
   const bool samePosition = sameRemotePosition();
+  if (progressSyncMode_ == ProgressSyncMode::AutoUpload && !samePosition &&
+      !matchesRemoteBaseline(book_.bookId, progressSyncResult_.remote)) {
+    progressSyncResult_.outcome = ProgressSyncOutcome::SelectionRequired;
+    return Error::Ok;
+  }
+  if (samePosition) rememberRemoteProgress(book_.bookId, progressSyncResult_.remote);
   const ProgressAction action = progressAction(progressSyncMode_, samePosition);
   LOG_INF("WR", "progress decision: mode=%u same=%u action=%u", static_cast<unsigned>(progressSyncMode_),
           static_cast<unsigned>(samePosition), static_cast<unsigned>(action));
@@ -4080,6 +4102,7 @@ Operation::Event Operation::step(const WeReadStore::WorkCallback callback, void*
       switch (outcome) {
         case ProgressSyncOutcome::LocalUploaded:
         case ProgressSyncOutcome::AlreadySynced:
+          rememberRemoteProgress(book_.bookId, progressSyncResult_.remote);
           progressSyncResult_.outcome = outcome;
           break;
         case ProgressSyncOutcome::SelectionRequired:
