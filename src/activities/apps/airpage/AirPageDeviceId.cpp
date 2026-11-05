@@ -111,4 +111,16 @@ bool saveAutoSleepWallpaper(const bool enabled) {
   return true;
 }
 
+uint8_t loadSyncInterval() {
+  const String value = Storage.readFile("/.crosspoint/airpage/sync_interval");
+  if (value.length() != 1 || value[0] < '0' || value[0] > '6') return 0;
+  return static_cast<uint8_t>(value[0] - '0');
+}
+bool saveSyncInterval(const uint8_t index) {
+  if (index > 6) return false;
+  Storage.ensureDirectoryExists(kModeDir);
+  const char value[] = {static_cast<char>('0' + index), '\0'};
+  return Storage.writeFile("/.crosspoint/airpage/sync_interval", String(value));
+}
+
 }  // namespace airpage

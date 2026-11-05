@@ -3,9 +3,11 @@
 #include <Arduino.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <WiFi.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -14,6 +16,7 @@
 
 #include "AirPageDeviceId.h"
 #include "AirPageImageRenderer.h"
+#include "AirPageSchedule.h"
 #include "AirPageWallpaper.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
@@ -92,6 +95,10 @@ void AirPageActivity::onEnter() {
   settingsRows_[0].actionValue = 0;
   settingsRows_[1].label = tr(STR_AIRPAGE_AUTO_WALLPAPER);
   settingsRows_[1].actionValue = 1;
+  settingsRows_[2].label = tr(STR_AIRPAGE_SYNC_INTERVAL);
+  settingsRows_[2].actionValue = 2;
+  syncInterval_ = airpage::loadSyncInterval();
+  lastScheduledMs_ = lastScheduleInputMs_ = lastSleepAttemptMs_ = millis();
   airpage::AirPageImageRenderer::resetSessionFailures();
 
   switch (imageStore_.initialize(currentArchiveDateKey())) {
@@ -138,14 +145,18 @@ void AirPageActivity::onEnter() {
   legacyDownloadUrl_ += deviceId;
   legacyDownloadUrl_ += "/latest.bmp";
 
-  const auto connectionEvent = connection_.begin(airpage::loadRealtimeMode());
+  const auto connectionEvent = connection_.begin(syncInterval_ == 0 && airpage::loadRealtimeMode());
   applyConnectionEvent(connectionEvent);
   LOG_DBG("AIRP", "onEnter activity=%u free=%u largest=%u id=%s cached=%d realtime=%d",
           static_cast<unsigned>(sizeof(*this)), static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(ESP.getMaxAllocHeap()), deviceId.c_str(), imageStore_.hasImage() ? 1 : 0,
           connection_.realtime() ? 1 : 0);
   requestUpdate();
-  if (connectionEvent == airpage::AirPageConnection::Event::WifiRequired) openWifiSelection(false);
+  if (syncInterval_) {
+    connection_.stop();
+    clearConnectionNotice();
+  } else if (connectionEvent == airpage::AirPageConnection::Event::WifiRequired)
+    openWifiSelection(false);
 }
 
 void AirPageActivity::onExit() {
@@ -157,7 +168,42 @@ void AirPageActivity::onExit() {
   airpage::AirPageImageRenderer::cleanScreen(renderer);
 }
 
-bool AirPageActivity::preventAutoSleep() { return phase_ != Phase::Idle || connection_.preventsAutoSleep(); }
+bool AirPageActivity::preventAutoSleep() {
+  return syncInterval_ != 0 || phase_ != Phase::Idle || connection_.preventsAutoSleep();
+}
+
+void AirPageActivity::pumpSchedule() {
+  if (!syncInterval_ || connection_.realtime() || phase_ != Phase::Idle || screen_ == Screen::Settings ||
+      imageMenu_.isActive() || (screen_ == Screen::Image && imageNeedsDisplay_))
+    return;
+  const uint32_t now = millis();
+  if (scheduledFetch_) {
+    if (connection_.wifiConnected())
+      queueFetch();
+    else if (connection_.state() != airpage::AirPageConnection::State::WifiConnecting) {
+      scheduledFetch_ = false;
+      connection_.stop();
+    }
+    return;
+  }
+  if (airpage::syncDue(now, lastScheduledMs_, airpage::kSyncMinutes[syncInterval_])) {
+    lastScheduledMs_ = now;
+    scheduledFetch_ = connection_.connectScheduled();
+    return;
+  }
+#if CROSSPOINT_EMULATED == 0
+  if (now - lastScheduleInputMs_ < 35000u || now - lastSleepAttemptMs_ < 1000u || WiFi.getMode() != WIFI_MODE_NULL ||
+      gpio.isUsbConnected() || !powerManager.canStandbyLightSleep(gpio))
+    return;
+  const uint32_t intervalMs = static_cast<uint32_t>(airpage::kSyncMinutes[syncInterval_]) * 60000u;
+  const uint32_t remaining = intervalMs - (now - lastScheduledMs_);
+  // Same validated X3 HAL wake path as Standby. Only Power wakes early.
+  RenderLock lock;
+  const auto wake = powerManager.lightSleepFor(std::clamp<uint32_t>((remaining + 999u) / 1000u, 1, 60));
+  lastSleepAttemptMs_ = millis();
+  if (wake != HalPowerManager::LightSleepWakeReason::Timer) lastScheduleInputMs_ = millis();
+#endif
+}
 
 bool AirPageActivity::processImageDisplayResult() {
   const ImageDisplayResult result = imageDisplayResult_.exchange(ImageDisplayResult::None, std::memory_order_acquire);
@@ -247,6 +293,8 @@ void AirPageActivity::clearConnectionNotice() {
 }
 
 void AirPageActivity::loop() {
+  if (mappedInput.wasAnyReleased() || mappedInput.wasSwipe() != MappedInputManager::SwipeDir::None)
+    lastScheduleInputMs_ = millis();
   if (processImageDisplayResult()) return;
   if (consumeInputReleaseBarrier()) return;
 
@@ -389,11 +437,15 @@ void AirPageActivity::loop() {
   if (phase_ == Phase::FetchRequested) {
     phase_ = Phase::Fetching;
     doFetch();
+    if (syncInterval_ && !connection_.realtime()) connection_.stop();
+    scheduledFetch_ = false;
+    lastScheduledMs_ = millis();
     phase_ = Phase::Idle;
     requestUpdate();
     return;
   }
   applyConnectionEvent(connection_.pump(phase_ == Phase::Idle && screen_ != Screen::Settings));
+  pumpSchedule();
 }
 
 void AirPageActivity::setAirPageScreen(const Screen screen) {
@@ -438,6 +490,10 @@ void AirPageActivity::buildTouchScreen(UiScreen& screen) {
                                           static_cast<int16_t>(content.x)});
       settingsRows_[0].value = connection_.realtime() ? tr(STR_AIRPAGE_MODE_REALTIME) : tr(STR_AIRPAGE_MODE_MANUAL);
       settingsRows_[1].value = autoSleepWallpaper_ ? tr(STR_AIRPAGE_SETTING_ON) : tr(STR_AIRPAGE_SETTING_OFF);
+      if (syncInterval_)
+        snprintf(syncIntervalLabel_, sizeof(syncIntervalLabel_), tr(STR_AIRPAGE_MINUTES),
+                 static_cast<unsigned>(airpage::kSyncMinutes[syncInterval_]));
+      settingsRows_[2].value = syncInterval_ ? syncIntervalLabel_ : tr(STR_AIRPAGE_SETTING_OFF);
       fui::ListProps props;
       props.items = settingsRows_;
       props.count = kSettingsRows;
@@ -576,6 +632,15 @@ void AirPageActivity::applySettingsSelection() {
         requestUpdate();
         return;
       }
+      if (enabled) {
+        if (!airpage::saveSyncInterval(0)) {
+          notice_ = Notice::SettingsSaveFailed;
+          requestUpdate();
+          return;
+        }
+        syncInterval_ = 0;
+        scheduledFetch_ = false;
+      }
       const auto event = connection_.setRealtime(enabled);
       if (enabled) {
         applyConnectionEvent(event);
@@ -594,6 +659,22 @@ void AirPageActivity::applySettingsSelection() {
         return;
       }
       autoSleepWallpaper_ = enabled;
+      requestUpdate();
+      break;
+    }
+    case SettingRow::SyncInterval: {
+      const uint8_t next = (syncInterval_ + 1) % 7;
+      if (!airpage::saveSyncInterval(next) || (next && !airpage::saveRealtimeMode(false))) {
+        notice_ = Notice::SettingsSaveFailed;
+      } else {
+        syncInterval_ = next;
+        scheduledFetch_ = false;
+        lastScheduledMs_ = millis();
+        if (next) {
+          connection_.setRealtime(false);
+          connection_.stop();
+        }
+      }
       requestUpdate();
       break;
     }

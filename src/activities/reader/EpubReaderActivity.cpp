@@ -69,6 +69,7 @@
 #ifdef ENABLE_CHINESE_VERSION
 #include <WeReadStore.h>
 
+#include "activities/apps/weread/WeReadAutoSync.h"
 #include "activities/apps/weread/WeReadProgressSyncActivity.h"
 #include "activities/settings/FontDownloadActivity.h"
 #endif
@@ -334,6 +335,24 @@ EpubReaderActivity::~EpubReaderActivity() {
 }
 
 void EpubReaderActivity::onExit() {
+#ifdef ENABLE_CHINESE_VERSION
+  // Reader destruction follows immediately; capture precise position first.
+  if (epub && wereadBookId_[0] && pageRendered.load(std::memory_order_acquire)) {
+    const auto position = getReadingPosition();
+    if (position.totalPages > 0 && saveProgress(position.spineIndex, position.pageNumber, position.totalPages)) {
+      const float fraction =
+          position.totalPages > 1 ? static_cast<float>(position.pageNumber) / (position.totalPages - 1) : 0;
+      const auto context = WeReadProgressSyncActivity::makeContext(
+          *epub, wereadBookId_, epub->calculateProgress(position.spineIndex, fraction), position);
+      WeReadClient::ProgressSyncInput input;
+      input.localFraction = context.localFraction;
+      input.localTocIndex = context.localTocIndex;
+      input.localOffset = context.localOffset;
+      input.localOffsetBasis = context.localOffsetBasis;
+      weread_auto::queue(wereadBookId_, input);
+    }
+  }
+#endif
   if (isViewingNonlinearSpine()) {
     const auto position = chapterPosition();
     saveProgress(currentSpineIndex, position.pageIndex, position.totalPages);
