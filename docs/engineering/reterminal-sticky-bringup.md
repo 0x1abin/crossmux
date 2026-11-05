@@ -8,15 +8,15 @@ acceptance of this source revision on this unit.
 
 Reuse the existing SDK profile and CrossMux `sticky` environment. No driver/HAL
 change is justified by current evidence. The focused display host suite passed;
-the firmware build and offline image checks passed. Physical acceptance is pending. Factory firmware remains
-installed. No Flash erase/write has occurred. The documentation-only contribution is open as
+the firmware build and offline image checks passed. The approved image is installed;
+normal wake and physical acceptance remain pending. The contribution is open as
 [Draft PR #458](https://github.com/0x1abin/crossmux/pull/458).
 
 ## Hardware contract and evidence
 
 | Area | Evidence and unresolved facts |
 |---|---|
-| Unit | User confirms reTerminal Sticky **V1**, factory firmware, Windows 11 USB connection and installed microSD |
+| Unit | User confirms reTerminal Sticky **V1**, initially factory firmware, Windows 11 USB connection and installed microSD |
 | Recovery | User confirms an existing **verified factory Flash backup** and prefers to manage its path privately; do not request the path or another backup again |
 | USB | Windows/pyserial: CH343, COM14, VID:PID `1A86:55D3`, bridge serial `5CBC444239` |
 | Silicon | ROM: ESP32-S3 QFN56 rev v0.2, embedded 8 MB PSRAM, 40 MHz crystal; unit MAC `c4:9e:7e:18:ee:14` |
@@ -164,8 +164,8 @@ wsl -d Ubuntu-24.04 -- env TMPDIR=/mnt/d/Codex/reterminal-sticky-tools-20261105/
 | Code-change regressions / `./bin/ci-check` | Current documentation-only diff | not applicable | Repository workflow exempts documentation-only changes; reassess if code changes are needed |
 | Documentation whitespace/local links | Current diff | passed | 37 local links present; staged `git diff --check` passed; commit hook passed |
 | Factory backup available | Actual unit | passed | User explicitly confirmed verified backup; path remains user-managed |
-| Image/offset/recovery plan and overwrite authorization | Actual unit | pending | Requires a successful build and a concrete reviewed migration |
-| Flash and hash verification | Actual unit | pending | No write performed |
+| Image/offset/recovery plan and overwrite authorization | Actual V1 unit | passed | User explicitly approved the exact image and 0x0–0xFFFFFF write in chat |
+| Flash and hash verification | Approved d311882 image, V1 unit | passed | Full write-time hash verified; post-boot all bytes outside mutable NVS/OTA metadata verified separately |
 | Boot/display/orientation/touch/buttons | Actual unit and final image | pending | Real logs/visual/button observations needed |
 | SD/EPUB/progress/settings, missing-SD behavior | Actual unit and final image | pending | Copy fixture; test reading and persistence |
 | USB/battery/charge/shutdown, at least 3 sleep/wake cycles | Actual unit and final image | pending | Real observations and post-wake peripheral checks |
@@ -184,9 +184,7 @@ claimed. The current PR template's stock-firmware comparison remains unverified;
 document the existing port and this unit's evidence without claiming new support.
 AI use must be disclosed. Do not merge or publish firmware.
 
-Next: obtain approval for the prepared first-16-MB factory-layout replacement.
-Then flash the immutable checked image within that authorization and collect real
-physical results. Keep the PR Draft for any pending/failed validation or SDK
+Next: collect normal power-button wake and screen observations, then reading/input/persistence and power-cycle results. Keep the PR Draft for any pending/failed validation or SDK
 dependency. Resume from this record and the actual worktree, not historical
 claims in other device documents.
 
@@ -250,11 +248,10 @@ The image matches PlatformIO's generated `firmware.factory.bin` over its complet
 length; the remainder of the first 16 MB is verified `0xFF` padding. This makes the
 factory-to-CrossMux initialization scope explicit, including clearing covered
 NVS/app/storage state. It does not target the microSD, eFuses or Flash above 16 MB.
-The file has not been publicly published or written to hardware.
+The file has not been publicly published. The user approved it and it was written to this unit; see installation evidence below.
 
 A concrete first-install/recovery plan was supplied to the user and approval for
-that exact first-16-MB factory overwrite requested. Approval is **pending** at this
-checkpoint. The verified factory backup remains user-managed. The CH343 automatic
+that exact first-16-MB factory overwrite requested. Approval was explicitly granted and the write completed; the earlier pending state is superseded. The verified factory backup remains user-managed. The CH343 automatic
 ROM-entry path is proven by read-only operations. For a full raw factory dump,
 recovery is an esptool write at address 0x0 using the user's backup filename; a
 packaged backup must use its own verified restore procedure rather than being
@@ -263,3 +260,55 @@ mistaken for a raw dump. No repeat backup or disclosure of its path is required.
 Startup inspection: `src/main.cpp:869–875` has a bounded 250 ms development delay,
 not an indefinite native-USB wait; `lib/Logging/Logging.cpp:66–67` uses ROM/UART
 output for Sticky. Actual boot logs and display/input observations remain pending.
+
+### Authorized installation — 2026-11-05
+
+User explicitly approved the exact first-16-MB installation plan in chat. Existing verified factory backup remains user-managed. Prewrite image SHA-256, bridge serial and MCU MAC matched; proceeding with the approved immutable image. Flash and physical results will be recorded separately.
+
+
+### Installed image and verification reconciliation — 2026-11-05
+
+The user explicitly approved the exact prepared image and first-16-MB replacement.
+Prewrite bridge serial, MCU MAC, image length and SHA-256 matched the approved
+plan. Esptool 5.6.0 at 460800 baud wrote 16,777,216 bytes at 0x0 in 118.8 seconds,
+reported **Hash of data verified**, exited 0 and reset the unit. The recorded
+write range was exactly 0x00000000–0x00FFFFFF. No second backup was requested.
+Log: `sticky-flash-write.log`; authorization/write status: `sticky-flash-state.json`.
+
+The planned separate **post-boot whole padded-image comparison failed** with a
+digest mismatch (`sticky-flash-verify.log`, exit 2). This was investigated without
+reflashing or changing source. The approved image contains blank NVS, which the
+firmware can initialize on boot; Arduino core 3.3.11 calls `nvs_flash_init()` in
+`cores/esp32/esp32-hal-misc.c:331`.
+
+Read-only isolation established:
+
+- **passed:** 0x00000000–0x00008FFF matched the approved image exactly.
+- **passed:** 0x00010000–0x00FFFFFF matched the approved image exactly, including
+  the application, inactive app/storage regions and padding. Esptool digest checks
+  for both ranges exited 0 (`sticky-immutable-verify.log`).
+- Read only the remaining NVS/OTA span (0x9000, 0x7000 bytes). Offline comparison
+  found **128 changed bytes in NVS**, first 0x9000, last 0x90BF; **zero** changed
+  bytes in otadata. Combined with the two matching ranges, the whole-image
+  mismatch is localized to initialized NVS, not firmware corruption.
+- Raw NVS capture stays private under the local tools directory. Only byte counts
+  and offsets are recorded here (`flash-check/mutable-diff-summary.json`).
+
+For subsequent verification, compare immutable ranges and classify mutable NVS /
+OTA state separately. Do not expect a padded full-install file to remain a
+byte-for-byte representation of an initialized running device. Preserve the failed
+whole-image comparison as evidence; no reflash was necessary to resolve it.
+
+A 40-second controlled boot capture (`sticky-first-boot.log`) identified
+`Hardware detect: sticky`, SDK IMU initialization and an external RTC. It then
+logged `Power-button wake not held through verification, sleeping`. No home-screen,
+SD-reading, touch, memory or display-quality acceptance follows from this limited
+boot. The user was asked to hold power about two seconds, release it, and report
+the actual screen/orientation/readability. A bounded passive UART capture was
+started for that normal wake; no deliberate reset during the user's test.
+
+**Pending:** user screen observation, normal boot/reading/input, persistence,
+USB/battery/charge and three sleep/wake cycles, heap/PSRAM and current measurements.
+Draft PR #458 must remain Draft. SDK/source runtime code remains unchanged.
+
+The 90-second passive wake capture ended with zero UART bytes. No user screen observation was available at this checkpoint; normal wake remains pending, not failed or passed. The serial port was closed after the bounded capture.
