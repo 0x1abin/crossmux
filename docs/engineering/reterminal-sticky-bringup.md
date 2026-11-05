@@ -8,8 +8,9 @@ acceptance of this source revision on this unit.
 
 Reuse the existing SDK profile and CrossMux `sticky` environment. No driver/HAL
 change is justified by current evidence. The focused display host suite passed;
-the firmware build is pending after environment fixes. Factory firmware remains
-installed. No Flash erase/write, commit, push or PR has occurred yet.
+the firmware build and offline image checks passed. Physical acceptance is pending. Factory firmware remains
+installed. No Flash erase/write has occurred. The documentation-only contribution is open as
+[Draft PR #458](https://github.com/0x1abin/crossmux/pull/458).
 
 ## Hardware contract and evidence
 
@@ -42,7 +43,7 @@ heap/minimum/largest block, PSRAM usage and operating/standby current.
 | Committed SDK gitlink / checkout | `65323afd0cbfa7bcfbabafd509248d024ceaab14`, unchanged |
 | Configured SDK repository | `https://github.com/0x1abin/freeink-sdk.git`, from `.gitmodules` |
 | Nested lucide checkout | `c81680e066f45b640743ca78ae36cdedda3f0318` |
-| Firmware version setting | `2.0.0`; built-image version/hash pending |
+| Firmware version setting | `2.0.0`; verified dev image `2.0.0-dev-codex/reterminal-sticky-bringup-d311882` |
 | Build pins | pioarduino core **6.2.0** (outer and nested), platform **55.03.311**, Arduino **3.3.11**, ESP-IDF **5.5.5**, Xtensa GCC **14.2.0** |
 | Host tools | CPython **3.14.5**, clang-format **21.1.8**; Windows venv also has CMake **4.4.4** and Ninja **1.13.2**, platform supplies its own CMake **4.0.3** / Ninja **1.13.1** |
 
@@ -159,9 +160,9 @@ wsl -d Ubuntu-24.04 -- env TMPDIR=/mnt/d/Codex/reterminal-sticky-tools-20261105/
 | Factory partition capture | Actual V1 unit | passed | `factory-partition-read.log`, `materials/factory-partitions.json`; MD5 valid |
 | SDK display host checks | Pinned SDK above | passed | 4 tests in 331.775 s, exit 0, `sticky-display-host.log`; production drivers/recording bus, text-turn parameters and image/text routing |
 | Original test EPUB integrity | Local test fixture | passed | ZIP CRC and XML checks; source gray levels are not optical calibration |
-| Firmware build | `sticky`, source above | pending | Retry running; prior environment failures retained in `sticky-build-attempt1-encoding.log` / `sticky-build-attempt2-component-cache.log` |
+| Firmware build | `sticky`, d311882 / pinned SDK | passed | Exit 0, 55 min 27 s including custom core; `sticky-build.log` |
 | Code-change regressions / `./bin/ci-check` | Current documentation-only diff | not applicable | Repository workflow exempts documentation-only changes; reassess if code changes are needed |
-| Documentation whitespace/local links | Current diff | pending | Required before commit |
+| Documentation whitespace/local links | Current diff | passed | 37 local links present; staged `git diff --check` passed; commit hook passed |
 | Factory backup available | Actual unit | passed | User explicitly confirmed verified backup; path remains user-managed |
 | Image/offset/recovery plan and overwrite authorization | Actual unit | pending | Requires a successful build and a concrete reviewed migration |
 | Flash and hash verification | Actual unit | pending | No write performed |
@@ -172,7 +173,7 @@ wsl -d Ubuntu-24.04 -- env TMPDIR=/mnt/d/Codex/reterminal-sticky-tools-20261105/
 | Operating/standby current | Actual unit | pending | No measurement or power-saving claim |
 | Optional peripherals | Not separately requested | not applicable | No optional-peripheral acceptance claimed |
 | SDK contribution | No SDK changes | not applicable | Existing gitlink retained |
-| Publication | Personal fork ready | pending | No commit/push/PR yet; Draft until task validation requirements pass |
+| Publication | Draft PR #458 | passed | Open against CrossMux main from the personal fork; readiness remains pending |
 
 ## Contribution and next actions
 
@@ -183,9 +184,82 @@ claimed. The current PR template's stock-firmware comparison remains unverified;
 document the existing port and this unit's evidence without claiming new support.
 AI use must be disclosed. Do not merge or publish firmware.
 
-Next: complete the baseline build; inspect the generated image/partitions and
-Flash headroom; provide a concrete migration/recovery plan before requesting
-overwrite approval. Then flash only within that authorization and collect real
+Next: obtain approval for the prepared first-16-MB factory-layout replacement.
+Then flash the immutable checked image within that authorization and collect real
 physical results. Keep the PR Draft for any pending/failed validation or SDK
 dependency. Resume from this record and the actual worktree, not historical
 claims in other device documents.
+
+### Contribution checkpoint
+
+Draft PR: https://github.com/0x1abin/crossmux/pull/458. Verified `draft=true`,
+base `main`, head `neilnorthrop:codex/reterminal-sticky-bringup`. Initial
+contribution commit: `d311882fce5350519fd2f83e34af20aeff45b3e3` (documentation
+only; runtime sources remain identical to the starting firmware source).
+
+Commit preparation encountered CRLF in the Windows checkout's Bash scripts, then
+the Windows `bash` launcher selected WSL, which could not find the Windows formatter.
+The unchanged `.githooks/pre-commit` and `bin/clang-format-fix` were restored to their
+committed LF bytes locally. Task-local `shell-shims/bash` routes to Git's bundled
+Bash-compatible `sh`; PATH includes that shim, the bundled Git `usr/bin`, and the
+D: venv Scripts directory. The actual hook ran with clang-format 21.1.8 and passed.
+Local shell files were then restored to normal checkout bytes; no shell-script
+change is in the PR. Repository-local author uses the authenticated GitHub name
+and `2042787+neilnorthrop@users.noreply.github.com`; no global identity was changed.
+
+The custom-core build began before the documentation commit. The outer application
+stage reran version injection after that commit and selected d311882; the final
+image was verified to contain that exact CrossMux version marker. Runtime sources
+match the starting 14bd8fb revision outside documentation. Physical acceptance
+remains pending irrespective of build success or Draft publication.
+
+### Successful build and checked first-install artifact
+
+`pio run -e sticky` completed with exit 0. Full elapsed time 55:27 included the
+first tuned-core rebuild; the application stage reported 34:54. No runtime/SDK
+source fix was needed. The final image passed the repository packaging verifier
+for ESP32-S3 chip ID 9, `sticky` board tag, exact version marker and partition CSV /
+binary, plus esptool image checksum and validation hash checks.
+
+- Application: **6,224,480 bytes**, SHA-256
+  `c21ef9f90ba7dc36d13e6e52f10a21085cef803f5361566fd0e08f52e16e542d`.
+- App slot: **6,553,600 bytes**; binary headroom **329,120 bytes**.
+- Linker load-size report: Flash **6,219,267 bytes**; static RAM **80,956 bytes**
+  of PlatformIO's reported 327,680-byte budget. These are build figures, not
+  measured free/minimum/largest-block heap or PSRAM consumption.
+- ESP header: ESP32-S3, 16 MB, DIO, 80 MHz. Physical chip is 32 MB; the existing
+  CrossMux layout uses the first 16 MB. CrossMux UI version is
+  `2.0.0-dev-codex/reterminal-sticky-bringup-d311882`. The separate IDF application
+  descriptor reports `nightly-build-582d88b00785972a0`; this does not change the
+  selected development build mode.
+- Retained nonfatal warnings: repeated `NO_WOLFSSL_ESP32_CRYPT_RSA_PRI`
+  redefinition in the pinned wolfSSL configuration, and serial execution of 76
+  LTO partitions. No unrelated source changes were made to suppress warnings.
+- Current GitHub snapshot: **Title Check passed**. No firmware CI pass is inferred
+  from that metadata-only check.
+
+A private padded image was prepared at
+`D:\Codex\reterminal-sticky-tools-20261105\images\sticky-d311882-baseline\crossmux-sticky-v1-d311882-full-16MB.bin`.
+Length **16,777,216 bytes**, write offset **0x0**, SHA-256:
+`5d73c8b81e85107c70fbd5ff70e0695bcbd724b4d08c1bb9494f011e8af4e717`.
+`manifest.json` in the same folder records all segment hashes and revisions.
+
+Segments are bootloader `0x0` / 18,720 bytes, partitions `0x8000` / 3,072 bytes,
+OTA initializer `0xE000` / 8,192 bytes and app `0x10000` / 6,224,480 bytes.
+The image matches PlatformIO's generated `firmware.factory.bin` over its complete
+length; the remainder of the first 16 MB is verified `0xFF` padding. This makes the
+factory-to-CrossMux initialization scope explicit, including clearing covered
+NVS/app/storage state. It does not target the microSD, eFuses or Flash above 16 MB.
+The file has not been publicly published or written to hardware.
+
+A concrete first-install/recovery plan was supplied to the user and approval for
+that exact first-16-MB factory overwrite requested. Approval is **pending** at this
+checkpoint. The verified factory backup remains user-managed. The CH343 automatic
+ROM-entry path is proven by read-only operations. For a full raw factory dump,
+recovery is an esptool write at address 0x0 using the user's backup filename; a
+packaged backup must use its own verified restore procedure rather than being
+mistaken for a raw dump. No repeat backup or disclosure of its path is required.
+
+Startup inspection: `src/main.cpp:869–875` has a bounded 250 ms development delay,
+not an indefinite native-USB wait; `lib/Logging/Logging.cpp:66–67` uses ROM/UART
+output for Sticky. Actual boot logs and display/input observations remain pending.
