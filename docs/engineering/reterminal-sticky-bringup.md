@@ -9,7 +9,7 @@ acceptance of this source revision on this unit.
 Reuse the existing SDK profile and CrossMux `sticky` environment. No driver/HAL
 change is justified by current evidence. The focused display host suite passed;
 the firmware build and offline image checks passed. The approved image is installed;
-normal wake and physical acceptance remain pending. The contribution is open as
+normal wake reached a readable home/library screen; remaining physical acceptance is pending. The contribution is open as
 [Draft PR #458](https://github.com/0x1abin/crossmux/pull/458).
 
 ## Hardware contract and evidence
@@ -166,7 +166,8 @@ wsl -d Ubuntu-24.04 -- env TMPDIR=/mnt/d/Codex/reterminal-sticky-tools-20261105/
 | Factory backup available | Actual unit | passed | User explicitly confirmed verified backup; path remains user-managed |
 | Image/offset/recovery plan and overwrite authorization | Actual V1 unit | passed | User explicitly approved the exact image and 0x0–0xFFFFFF write in chat |
 | Flash and hash verification | Approved d311882 image, V1 unit | passed | Full write-time hash verified; post-boot all bytes outside mutable NVS/OTA metadata verified separately |
-| Boot/display/orientation/touch/buttons | Actual unit and final image | pending | Real logs/visual/button observations needed |
+| Basic wake/home/navigation | Actual V1, installed d311882 image | passed | User reports readable home/library after 2-second power hold, and correct one-action buttons plus top/bottom touch/menu-return behavior |
+| Full display/input acceptance | Actual V1 and installed image | pending | Reading refresh/ghosting, grayscale, all touch edges/rotations and held-input transitions remain to test |
 | SD/EPUB/progress/settings, missing-SD behavior | Actual unit and final image | pending | Copy fixture; test reading and persistence |
 | USB/battery/charge/shutdown, at least 3 sleep/wake cycles | Actual unit and final image | pending | Real observations and post-wake peripheral checks |
 | Internal heap/minimum/largest block and PSRAM | Actual unit | pending | Capture before/after init and repeated reading/sleep; investigate continuing decline |
@@ -312,3 +313,64 @@ USB/battery/charge and three sleep/wake cycles, heap/PSRAM and current measureme
 Draft PR #458 must remain Draft. SDK/source runtime code remains unchanged.
 
 The 90-second passive wake capture ended with zero UART bytes. No user screen observation was available at this checkpoint; normal wake remains pending, not failed or passed. The serial port was closed after the bounded capture.
+
+### User-observed normal wake and basic input — 2026-11-05
+
+The user selected **Home/library, readable** after the requested two-second power
+hold/release. This confirms a normal wake reaching the readable home screen;
+it does not establish every orientation or refresh mode. The user then reported
+**Buttons and touch behave correctly** for single Up/Down actions, menu/return,
+and touch controls near the top/bottom. The supplied acceptance EPUB is reported
+visible in the library. Do not ask again for these already supplied observations.
+
+A 35-second passive UART capture (`sticky-home-baseline.log`) overlapped settings
+navigation and opening the bundled CrossMux User Guide, so it is a **home/navigation
+and reader-entry sample**, not an idle-only baseline. It showed EPUB ZIP/CSS/cache
+reads and writes, a completed text-AA page, and progress-save logging.
+
+| Uptime / phase | Internal free / minimum / largest | PSRAM free / minimum / largest |
+|---|---|---|
+| 90.233 s, settings/navigation | 200,692 / 189,664 / 155,636 B | 7,949,976 / 0 / 7,864,308 B |
+| 100.253 s, after guide reader entry | 209,228 / 105,188 / 155,636 B | 7,949,976 / 0 / 7,864,308 B |
+| 110.270 s, later sample | 209,228 / 105,188 / 155,636 B | 7,949,976 / 0 / 7,864,308 B |
+
+Reported totals: internal 291,948 B; PSRAM 8,388,608 B. Historical minima are
+since boot, not per-phase peaks. The PSRAM minimum counter reports zero; its
+meaning has not been established, and no out-of-memory event is inferred from
+that value alone. Current free/largest values were stable across the latter two
+samples; this short sample does not establish long-run leak freedom.
+
+At uptime 113.065 s one `Page cancelled or display commit failed; preserving saved
+progress` entry appeared. `EpubReaderActivity.cpp:2520` emits this when
+`renderContents()` returns false; the text combines cancellation and commit
+failure, so it is not yet classified as a panel failure or harmless cancellation.
+A deliberate reading test was requested to correlate behavior: open the acceptance
+EPUB, wait for each draw, turn forward five pages and back two. Actual reading and
+ghosting observations remain pending. A bounded passive capture was started as
+`sticky-reading.log`; no reset or application commands were sent.
+
+### Deliberate reading observation — 2026-11-05
+
+The user reported **Pages behave correctly** after opening the acceptance EPUB,
+turning forward five pages and back two with a settled draw between actions.
+Record basic text readability/page order/single-action navigation as **passed**
+for this test. No troublesome ghosting was reported in that observation. This
+short test does not establish all refresh modes, periodic-cleaning behavior or
+long-run memory stability.
+
+The bounded log named `sticky-reading.log` actually captured mostly settings
+navigation (uptime 150–260 s); it did not provide a time-correlated trace of the
+user's reported paced reading test. Its label is not proof of the activity tested.
+Internal free varied from 180,624 to 182,376 B in its periodic samples, with
+largest block 118,772 B and historical minimum 105,188 B. PSRAM free was stable
+at 7,949,824 B, largest block 7,864,308 B, reported historical minimum zero.
+Do not use this settings trace to claim the earlier cancellation was reproduced
+or resolved during deliberate reading. No visible failure was reported, and no
+code change is justified by the ambiguous log alone.
+
+Next user checks requested: (1) four source gray bands and image-to-text/menu
+cleanup in the second chapter; (2) record a Marker after choosing a font size,
+return to library, sleep/wake, reopen, and compare position/font persistence.
+These results are **pending**. A passive capture was extended to a bounded ten
+minutes as `sticky-grayscale-persistence.log` so the test is not constrained by a
+short log window. It sends no commands and deliberately performs no reset.
