@@ -3146,13 +3146,11 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.isVector = false;
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
-      fontUpload.buffer.reset();
-
-      if (!fontUpload.buffer) {
-        LOG_ERR("WEB", "Font upload unavailable: no buffer");
-        break;
-      }
-
+      // The upload buffer is (re)allocated below, after the family/filename
+      // validation, and freed in UPLOAD_FILE_END / UPLOAD_FILE_ABORTED. Do not
+      // reset() it here: a null-check immediately after reset() always fails
+      // and rejected every font upload (the allocation at the end of this case
+      // was unreachable).
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());
         break;
