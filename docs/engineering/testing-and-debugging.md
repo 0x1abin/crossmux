@@ -201,6 +201,24 @@ remaining acceptance limits. Supported hardware profiles include BLE; the runtim
 EEGO A4 currently uses the SDK stub with its prebuilt USB-MSC core. Distinguish host/build success, application hash verification
 and physical-device acceptance.
 
+### Crash-report retry guard
+
+`HalSystem::begin()` snapshots the reset classification before consuming the retained
+capture marker. `isRebootFromPanic()` keeps that classification throughout the boot,
+including after an unsuccessful report write. The crash screen retains the diagnostic data.
+
+`checkPanic()` attempts `/crash_report.txt` once per boot. A separate RTC marker covers
+formatting, file I/O and object destruction. If reporting resets the device, the next
+boot skips the report attempt, even if panic hooks capture another diagnostic. A later
+independent panic can write a fresh report. This guard does not repair faults in SD
+mounting, settings loading or display initialization.
+
+Run `python3 scripts/tests/test_panic_report_retry.py` for host-modelled reset and
+I/O-failure coverage. Physical acceptance still requires a test device: retain its ELF
+and serial log, interrupt a report operation, and confirm the next boot skips that
+write and preserves crash-screen routing. Then trigger a fresh panic after recovery
+and confirm a new report can be written.
+
 ### Distinguishing TCP Stalls, Watchdogs, and Restarts
 
 - A task-watchdog failure prints the task watchdog banner and subscribed task

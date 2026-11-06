@@ -34,5 +34,6 @@ uint64_t getUptimeSeconds();
 HeapInfo getHeapInfo();
 
 std::string getPanicInfo(bool full = false);
+// Stable reset classification captured by begin(), including after checkPanic().
 bool isRebootFromPanic();
 }  // namespace HalSystem
