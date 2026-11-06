@@ -682,10 +682,12 @@ void KeyboardEntryActivity::loop() {
   if (!cursorMode && mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     upHeld = true;
     upLongHandled = false;
+    // Synthesized Up can arrive after the physical button has already been held.
+    upPressStart = millis();
   }
 
   if (upHeld && !upLongHandled && mappedInput.isPressed(MappedInputManager::Button::Up) &&
-      mappedInput.getHeldTime() > LONG_PRESS_MS) {
+      millis() - upPressStart > LONG_PRESS_MS) {
     cursorMode = true;
     upLongHandled = true;
     hintVisible = true;
