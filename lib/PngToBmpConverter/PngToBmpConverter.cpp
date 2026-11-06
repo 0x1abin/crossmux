@@ -1075,7 +1075,7 @@ bool PngToBmpConverter::pngFileToBmpStream(HalFile& pngFile, Print& bmpOut, bool
 }
 
 bool PngToBmpConverter::pngFileToBmpFileInternal(const char* pngPath, const char* bmpPath, const bool crop,
-                                                 const bool preserveTransparency) {
+                                                 const bool preserveTransparency, const bool originalThresholds) {
   if (!pngPath || !bmpPath) return false;
   if (Storage.exists(bmpPath)) Storage.remove(bmpPath);
 
@@ -1085,15 +1085,16 @@ bool PngToBmpConverter::pngFileToBmpFileInternal(const char* pngPath, const char
     HalFile output;
     converted = Storage.openFileForRead("PNG", pngPath, input) && Storage.openFileForWrite("PNG", bmpPath, output) &&
                 pngFileToBmpStreamInternal(input, output, display.getDisplayHeight(), display.getDisplayWidth(), false,
-                                           crop, preserveTransparency);
+                                           crop, preserveTransparency, originalThresholds);
     if (converted) output.flush();
   }
   if (!converted && Storage.exists(bmpPath)) Storage.remove(bmpPath);
   return converted;
 }
 
-bool PngToBmpConverter::pngFileToBmpFile(const char* pngPath, const char* bmpPath, const bool crop) {
-  return pngFileToBmpFileInternal(pngPath, bmpPath, crop, false);
+bool PngToBmpConverter::pngFileToBmpFile(const char* pngPath, const char* bmpPath, const bool crop,
+                                         const bool originalThresholds) {
+  return pngFileToBmpFileInternal(pngPath, bmpPath, crop, false, originalThresholds);
 }
 
 bool PngToBmpConverter::pngFileToTransparentBmpFile(const char* pngPath, const char* bmpPath, const bool crop) {
