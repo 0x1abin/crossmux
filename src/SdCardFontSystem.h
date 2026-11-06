@@ -54,6 +54,11 @@ class SdCardFontSystem {
   /// Release the resident SD font without changing the saved selection.
   void releaseLoadedFont(GfxRenderer& renderer);
 
+  // Caller holds RenderLock. Stop all SD font I/O before USB owns storage.
+  void beginStorageHandoff(GfxRenderer& renderer);
+  // Re-enable/reload only after storage is mounted again; saved settings survive.
+  void endStorageHandoff(GfxRenderer& renderer);
+
   /// Resolve an SD card font ID from family name + reader point size.
   /// Returns 0 if not found. Used by CrossPointSettings::getReaderFontId().
   /// Pure lookup: never loads and never mutates residency, so
@@ -91,6 +96,7 @@ class SdCardFontSystem {
   /// Used by the web UI so uploaded/deleted fonts appear in the list
   /// without waiting for the reader activity to run ensureLoaded().
   void refreshIfDirty() {
+    if (storageHandoff_.load(std::memory_order_acquire)) return;
     if (registryDirty_.exchange(false, std::memory_order_acquire)) {
       registry_.discover();
       adoptCompleteChineseNotoSans();
@@ -148,6 +154,7 @@ class SdCardFontSystem {
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;
   std::atomic<bool> registryDirty_{false};
+  std::atomic<bool> storageHandoff_{false};
 
 #if CROSSPOINT_VECTOR_FONTS
   // One style source file. SMALL files are read fully into `bytes` (resident,
