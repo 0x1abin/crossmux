@@ -29,6 +29,10 @@
 #include <soc/usb_serial_jtag_reg.h>
 #endif
 
+#if FREEINK_DEVICE_LILYGO
+#include <BoardT5S3.h>
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
@@ -255,6 +259,15 @@ void HalGPIO::beginInput() {
   inputBegun = true;
   LOG_INF("HW", "Starting input backends");
   inputMgr.begin();
+#if FREEINK_DEVICE_LILYGO
+  // T5S3 IO48 key sits behind the PCA9535 expander. Mirrors BoardT5S3::begin(), which also
+  // re-inits I2C/SPI and is unsafe to call here. inputMgr.begin() has started Wire.
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5S3) {
+    BoardT5S3::setPca9535PinMode(PCA9535_IO12_BUTTON, INPUT);
+    InputManager::setButtonHook(
+        []() -> uint8_t { return BoardT5S3::readButton() ? static_cast<uint8_t>(1U << InputManager::BTN_DOWN) : 0; });
+  }
+#endif
 }
 
 #if FREEINK_DEVICE_MURPHY_M4
@@ -298,6 +311,9 @@ bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
 
 bool HalGPIO::rawInputActive() {
   if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
+#if FREEINK_DEVICE_LILYGO
+  if (BoardConfig::ACTIVE.board == BoardConfig::Board::LilyGoT5S3 && BoardT5S3::readButton()) return true;
+#endif
   InputManager::ButtonAdcSample g1{}, g2{};
   inputMgr.readButtonAdc(g1, g2);
   // The Xteink ladder idles at the ADC full-scale rail (~4095); every button band sits below 3900.

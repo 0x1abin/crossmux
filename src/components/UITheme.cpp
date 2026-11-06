@@ -41,7 +41,7 @@ extern void reloadSmallUiFont(bool inxTheme);
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
 EpdFont ui18RegularFont(&notosans_16_regular);
 EpdFont ui18BoldFont(&notosans_16_bold);
-EpdFontFamily control18FontFamily(&ui12RegularFont, &ui12BoldFont);
+EpdFontFamily control18FontFamily(12, &ui12RegularFont, &ui12BoldFont);
 #else
 EpdFont ui18RegularFont(&notosans_18_regular);
 EpdFont ui18BoldFont(&notosans_18_bold);
@@ -49,7 +49,7 @@ EpdFont ui18BoldFont(&notosans_18_bold);
 // Fixed control faces share the existing bitmap data; theme reload never mutates them.
 static EpdFont control18RegularFont(&notosans_18_regular);
 static EpdFont control18BoldFont(&notosans_18_bold);
-EpdFontFamily control18FontFamily(&control18RegularFont, &control18BoldFont);
+EpdFontFamily control18FontFamily(18, &control18RegularFont, &control18BoldFont);
 
 #endif
 

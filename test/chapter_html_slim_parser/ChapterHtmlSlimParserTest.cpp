@@ -584,7 +584,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 86);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 88);
   ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
   bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
   bytes.erase(12, 1);  // vertical bottom-align toggle appended after alignment.
@@ -908,7 +908,7 @@ TEST_F(SectionMemoryTest, BottomAlignRejectsOppositeToggleAndMalformedByteInComp
       std::ifstream input(path, std::ios::binary);
       const std::string bytes{std::istreambuf_iterator<char>(input), {}};
       ASSERT_GT(bytes.size(), 47u);
-      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 196 : 86);
+      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 194 : 88);
       {
         Section same(epub, 0, renderer);
         ASSERT_TRUE(same.loadSectionFile(spec));

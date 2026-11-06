@@ -164,6 +164,7 @@ jobs:
             "${build_args[@]}" | tee pio.log
 
       - name: Check ReadPico display and input
+        timeout-minutes: 5
         run: xvfb-run -a bash .pio/libdeps/simulator_readpico/simulator/tests/run_readpico_self_test.sh "$PWD"
 
       - name: Record firmware stats

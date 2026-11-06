@@ -189,8 +189,7 @@ void ActivityManager::loop() {
             mappedInput.wasScreenTapped(tx, ty) && ty >= 0 && ty < 44 && !HeaderBackTapTarget::contains(tx, ty);
       }
     }
-    // Only boards whose frontlight was detected get the panel.
-    if (Frontlight.present() && currentActivity->name != "FrontlightPanel" &&
+    if (mappedInput.hasTouch() && currentActivity->name != "FrontlightPanel" &&
         (statusBarTap || mappedInput.wasLightPanelGesture())) {
       haptic_feedback::touchAction();
       resetHomeStandbyInput();

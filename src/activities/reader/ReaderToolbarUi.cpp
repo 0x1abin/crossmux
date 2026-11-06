@@ -300,7 +300,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   // on top of the sheet's own inset). Body-size text: small reads condensed
   // and the taller row doubles as the tap target.
   listProps_.labelText = tokens.bodyText;
-  listProps_.sidePadding = 0;
+  listProps_.sidePadding = tokens.listSidePadding;
   // The list band spans the sheet's full width -- the scroll track hugs the
   // panel edge (theme bezel inset included) exactly like a full-screen list.
   // rowInset pulls the rows back to the title's spaceLg alignment.

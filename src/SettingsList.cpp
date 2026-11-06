@@ -5,7 +5,7 @@
 
 void forEachBaseSetting(SettingVisitor visit, void* context) {
   // Load and save walk this list, so every condition here must be fixed before
-  // settings load. Runtime probes belong in getSettingsList().
+  // settings load. Runtime probes belong in isHiddenOnDevice().
 
   // Enum settings are persisted as numeric values. Assign these labels by enum
   // value so a reordered menu or enum cannot silently swap their behavior.
@@ -73,11 +73,6 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   emit(SettingInfo::Toggle(StrId::STR_RESTORE_LIGHT_ON_WAKE, &CrossPointSettings::frontlightRestoreOnWake,
                            "frontlightRestoreOnWake", StrId::STR_CAT_DISPLAY));
 #endif
-#if FREEINK_DEVICE_PICCO
-  emit(SettingInfo::Enum(StrId::STR_SLIDE_SWITCH, &CrossPointSettings::slideSwitchAction,
-                         {StrId::STR_FRONTLIGHT, StrId::STR_NIGHT_MODE, StrId::STR_TOUCH_READER_CONTROLS},
-                         "slideSwitchAction", StrId::STR_CAT_DISPLAY));
-#endif
   emit(
       // Night mode = inverted output polarity everywhere (ActivityManager
       // applies it to every activity), so it lives in the Display category.
@@ -95,9 +90,9 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
       // this entry is always replaced by buildFontSizeSetting() below. It only
       // fixes the setting's position in the Reader category.
       SettingInfo::Enum(StrId::STR_FONT_SIZE, nullptr, {}, "fontSize", StrId::STR_CAT_READER).withTextSettings());
-  emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
-                         {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE}, "lineSpacing",
-                         StrId::STR_CAT_READER)
+  // "lineHeight": fromJson() moves older "lineSpacing" saves up one slot for the added 1.0.
+  emit(SettingInfo::StaticEnum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing, LINE_SPACING_IDS,
+                               "lineHeight", StrId::STR_CAT_READER)
            .withTextSettings());
   emit(SettingInfo::Value(StrId::STR_WORD_SPACING, &CrossPointSettings::wordSpacing,
                           {CrossPointSettings::WORD_SPACING_MIN, CrossPointSettings::WORD_SPACING_MAX,
@@ -172,7 +167,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                            StrId::STR_CAT_READER)
            .withTextSettings());
   emit(SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
-                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
+                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS,
+                          StrId::STR_IMAGES_DISPLAY_BW},
                          "imageRendering", StrId::STR_CAT_READER));
   emit(SettingInfo::Enum(StrId::STR_IMAGE_SCALING, &CrossPointSettings::imageScaling,
                          {StrId::STR_IMAGE_SCALING_NEAREST, StrId::STR_IMAGE_SCALING_BILINEAR}, "imageScaling",
@@ -207,6 +203,11 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
       StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
       {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV, StrId::STR_DISABLED, StrId::STR_NEXT_NEXT, StrId::STR_PREV_PREV},
       "sideButtonLayout", StrId::STR_CAT_CONTROLS));
+#if FREEINK_DEVICE_PICCO
+  emit(SettingInfo::Enum(StrId::STR_SLIDE_SWITCH, &CrossPointSettings::slideSwitchAction,
+                         {StrId::STR_FRONTLIGHT, StrId::STR_NIGHT_MODE, StrId::STR_TOUCH_READER_CONTROLS},
+                         "slideSwitchAction", StrId::STR_CAT_CONTROLS));
+#endif
   emit(SettingInfo::Toggle(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
                            "touchReaderControls", StrId::STR_CAT_CONTROLS));
   emit(SettingInfo::DynamicEnum(
@@ -239,11 +240,10 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
       SettingInfo::Toggle(StrId::STR_DBL_CLICK_PWR_LIGHT, &CrossPointSettings::doubleClickPwrLight,
                           "doubleClickPwrLight", StrId::STR_CAT_CONTROLS));
   emit(buildShortPowerButtonSetting());
-  emit(
-      // Erased below unless the QMI8658 IMU is present (X3).
-      SettingInfo::Enum(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn,
-                        {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED}, "tiltPageTurn",
-                        StrId::STR_CAT_CONTROLS));
+  // Always persisted; isHiddenOnDevice() hides it when the IMU probe fails.
+  emit(SettingInfo::Enum(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn,
+                         {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED}, "tiltPageTurn",
+                         StrId::STR_CAT_CONTROLS));
   emit(SettingInfo::Toggle(StrId::STR_PWR_BTN_FOOTNOTE_BACK, &CrossPointSettings::pwrBtnFootnoteBack,
                            "pwrBtnFootnoteBack", StrId::STR_CAT_CONTROLS));
   emit(SettingInfo::Toggle(StrId::STR_BACK_SHORT_TO_FILE_BROWSER, &CrossPointSettings::backShortToFileBrowser,
@@ -385,22 +385,25 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   emit(SettingInfo::Enum(StrId::STR_XTC_STATUS_BAR, &CrossPointSettings::xtcStatusBarMode,
                          {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP}, "xtcStatusBarMode",
                          StrId::STR_CUSTOMISE_STATUS_BAR));
-  emit(
-      // Clock entries (web settings; device UI groups them under Date & Time).
-      // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
-      SettingInfo::StaticEnum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, STATUS_BAR_CLOCK_VALUES,
-                              "statusBarClock", StrId::STR_CUSTOMISE_STATUS_BAR));
-  emit(SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
-                          "clockUtcOffsetQ", StrId::STR_CAT_SYSTEM));
+  // Clock entries (persistence + web settings; the device UI is
+  // ClockSettingsActivity under System settings).
+  emit(SettingInfo::StaticEnum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, STATUS_BAR_CLOCK_VALUES,
+                               "statusBarClock", StrId::STR_CUSTOMISE_STATUS_BAR));
+  // LEGACY: retired quarter-hour UTC offset (biased by 48). Persisted so
+  // timezones::activeIndex() can migrate it into clockTimezone.
+  emit(SettingInfo::Value(StrId::STR_CLOCK, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1}, "clockUtcOffsetQ",
+                          StrId::STR_CUSTOMISE_STATUS_BAR)
+           .withWebHidden());
   emit(SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
                          {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H}, "clockFormat",
                          StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_AUTO_TIME, &CrossPointSettings::clockAutoSync, "clockAutoSync",
                            StrId::STR_CAT_SYSTEM));
-  emit(
-      // Index into the append-only table in src/util/Timezones.cpp; 255 = unset.
-      SettingInfo::Value(StrId::STR_TIMEZONE, &CrossPointSettings::clockTimezone, {0, 255, 1}, "clockTimezone",
-                         StrId::STR_CUSTOMISE_STATUS_BAR));
+  // Index into the append-only table in src/util/Timezones.cpp; 255 = unset.
+  // Web-hidden: a raw index is unusable there; the device has a picker.
+  emit(SettingInfo::Value(StrId::STR_TIMEZONE, &CrossPointSettings::clockTimezone, {0, 255, 1}, "clockTimezone",
+                          StrId::STR_CUSTOMISE_STATUS_BAR)
+           .withWebHidden());
   emit(SettingInfo::Enum(StrId::STR_CLOCK_DST, &CrossPointSettings::clockDst,
                          {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, "clockDst",
                          StrId::STR_CUSTOMISE_STATUS_BAR));
@@ -447,16 +450,8 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
            .withWebHidden());
 }
 
-std::vector<SettingInfo> getBaseSettingsList(const size_t extraCapacity) {
-  // Count first so the one contiguous block is sized exactly.
+size_t countBaseSettings() {
   size_t count = 0;
   forEachBaseSetting([](void* context, SettingInfo&) { ++*static_cast<size_t*>(context); }, &count);
-  std::vector<SettingInfo> v;
-  v.reserve(count + extraCapacity);
-  forEachBaseSetting(
-      [](void* context, SettingInfo& info) {
-        static_cast<std::vector<SettingInfo>*>(context)->push_back(std::move(info));
-      },
-      &v);
-  return v;
+  return count;
 }
