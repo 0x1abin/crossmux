@@ -163,12 +163,6 @@ bool externalPowerConnected(bool& connected) {
   return true;
 }
 
-bool shutdown() {
-  if (!ready && !begin()) return false;
-  const bool railsOff = updateBits(Register::LdoOn, ALDO_AUDIO | ALDO_DISPLAY, 0);
-  return railsOff && updateBits(Register::Common, 0x01, 0x01);
-}
-
 }  // namespace Waveshare397Power
 
 extern "C" void freeink_board_epd_power(bool enabled) {

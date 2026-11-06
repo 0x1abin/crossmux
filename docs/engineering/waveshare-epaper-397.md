@@ -44,6 +44,14 @@ on; the boot gesture is ignored until its first release, so it may remain held
 until the first screen is visible. A new runtime hold uses the existing 400 ms
 software shutdown threshold (about 10 ms when short Power is set to Sleep),
 while a continuous 4-second hold remains the PMIC hard-power-off fallback.
+
+Sleep is ESP32-S3 deep sleep with the AXP2101 left on (display and audio rails
+off), woken by any rotary key: Left, Function or Right (GPIO4/5/6, ext1
+any-low). The side Power key cannot wake it, because GPIO38 is not an RTC GPIO;
+it only powers the board on after a PMIC hard-off. Sleep does not use the PMIC
+soft-off (`0x10` bit 0): on battery it cut MCU power only some of the time, so
+whether Power or Function could wake the board depended on how that sleep
+ended. GPIO0 (Back) is a strapping pin and is deliberately not a wake source.
 QMI8658 and SHTC3 are deliberately not initialized by this target.
 
 System Settings exposes **Sound Feedback** with Off/Low/Medium/High levels;
@@ -86,8 +94,8 @@ strip scratch and framebuffer only—no full-screen buffer or heap allocation.
 
 The first page and periodic cleanup may still use HALF and visibly flash. Normal
 pages use only the selector path and do not run a four-gray `0xD7`, 500 ms
-settle, or hard-reset sequence. Deep sleep sends `0x10/0x01`; the existing
-AXP2101 shutdown path then removes system power.
+settle, or hard-reset sequence. Deep sleep sends `0x10/0x01` to the panel; the MCU
+then enters ESP deep sleep, described with the side Power key above.
 
 ## Physical acceptance gate
 

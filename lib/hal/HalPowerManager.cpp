@@ -291,17 +291,27 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton)
   freeink::PowerManager::powerDownRailsForSleep();
 
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
-  if (Waveshare397Power::shutdown()) {
-    delay(500);  // Battery power normally disappears before this returns.
-  } else {
-    LOG_ERR("PWR", "AXP2101 shutdown failed; falling back to ESP deep sleep");
+  // No AXP2101 soft-off: on this board it does not reliably cut MCU power, and the
+  // power key (GPIO38) is not an RTC pin, so whichever state the cut landed in left
+  // only one of PWR / confirm able to wake. Always ESP deep sleep, woken by any rotary
+  // key; a long PWR hold remains the PMIC hard-off. GPIO0 is a strap, so not a wake pin.
+  if (!Waveshare397Power::setDisplayPower(false) || !Waveshare397Power::setAudioPower(false)) {
+    LOG_ERR("PWR", "AXP2101 rail shutdown failed before deep sleep");
   }
-  // A failed PMIC shutdown still needs a usable wake source. GPIO5 is the
-  // confirm key at runtime; it is also the fallback when USB keeps the MCU on.
-  constexpr int8_t FALLBACK_WAKE_PIN = 5;
-  pinMode(FALLBACK_WAKE_PIN, INPUT_PULLUP);
-  while (digitalRead(FALLBACK_WAKE_PIN) == LOW) delay(50);
-  freeink::PowerManager::armWakeOnPins(1ULL << FALLBACK_WAKE_PIN, true);
+  constexpr int8_t WAKE_PINS[] = {4, 5, 6};
+  uint64_t wakeMask = 0;
+  for (const int8_t pin : WAKE_PINS) {
+    pinMode(pin, INPUT_PULLUP);
+    wakeMask |= 1ULL << pin;
+  }
+  const auto anyHeld = [&] {
+    for (const int8_t pin : WAKE_PINS) {
+      if (digitalRead(pin) == LOW) return true;
+    }
+    return false;
+  };
+  while (anyHeld()) delay(50);
+  freeink::PowerManager::armWakeOnPins(wakeMask, true);
   freeink::PowerManager::deepSleep();
 #elif FREEINK_DEVICE_PAPERMONO
   // Its power button is behind the M5PM1 PMIC rather than an ESP GPIO, so
