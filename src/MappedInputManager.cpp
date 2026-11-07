@@ -617,8 +617,15 @@ MappedInputManager::Labels MappedInputManager::mapFrontLabels(const char* back, 
     return "";
   };
 
+#if FREEINK_DEVICE_ONEPAGE
+  // OnePage's four front keys are physically Back, Left, Right, Confirm from
+  // left to right; drawButtonHints paints btn1..btn4 in that order.
+  return {labelForHardware(HalGPIO::BTN_BACK), labelForHardware(HalGPIO::BTN_LEFT),
+          labelForHardware(HalGPIO::BTN_RIGHT), labelForHardware(HalGPIO::BTN_CONFIRM)};
+#else
   return {labelForHardware(HalGPIO::BTN_BACK), labelForHardware(HalGPIO::BTN_CONFIRM),
           labelForHardware(HalGPIO::BTN_LEFT), labelForHardware(HalGPIO::BTN_RIGHT)};
+#endif
 }
 
 int MappedInputManager::getPressedFrontButton() const {

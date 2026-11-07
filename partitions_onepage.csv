@@ -1,0 +1,11 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# OnePage V1 factory layout (16 MB): two 6.75 MiB OTA slots and a 2.375 MiB
+# SPIFFS partition. Kept identical to the vendor partition table so an
+# application-only update, a full image, and the factory recovery image all
+# address the same slots.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xE000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x6C0000,
+app1,     app,  ota_1,   0x6D0000, 0x6C0000,
+spiffs,   data, spiffs,  0xD90000, 0x260000,
+coredump, data, coredump,0xFF0000, 0x10000,

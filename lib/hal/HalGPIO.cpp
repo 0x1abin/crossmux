@@ -446,7 +446,13 @@ bool HalGPIO::isUsbConnected() const {
   if (usbHostSofActive()) return true;
 #endif
   if (!deviceIsX3() && BoardConfig::ACTIVE.usbDetect >= 0) {
-    return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
+    const int8_t pin = BoardConfig::ACTIVE.usbDetect;
+    const bool activeHigh = BoardConfig::ACTIVE.usbDetectActiveHigh;
+    // Match BatteryMonitor's pull/inversion contract. OnePage's LM66200 ST is
+    // open-drain and pulls LOW while USB is present; treating it as active-high
+    // also made every USB-powered boot look like battery power.
+    pinMode(pin, activeHigh ? INPUT_PULLDOWN : INPUT_PULLUP);
+    return digitalRead(pin) == (activeHigh ? HIGH : LOW);
   }
   // X3 uses GPIO20 for I2C, not USB detection. Boards without a digital
   // USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
