@@ -1069,7 +1069,7 @@ void setup() {
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
     FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_READPICO ||         \
-    FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PICCO
+    FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PICCO || FREEINK_DEVICE_ONEPAGE
       // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
       // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
       // (its button is behind the PMIC). Metalio also needs native USB available
@@ -1084,6 +1084,8 @@ void setup() {
       // wake sources are the PMU key / AC-in / RTC alarm — so a cabled boot with a
       // charging battery (isUsbConnected() reads the PMU charge state) would drop
       // the EN rail immediately and look like a boot loop to the user.
+      // OnePage (C61) uses native USB Serial/JTAG for its console; a USB-powered
+      // cold boot must stay awake so the serial monitor remains reachable.
       break;
 #else
       Storage.prepareForDeepSleep();
