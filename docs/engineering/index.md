@@ -24,6 +24,7 @@ that matches your task — don't load everything at once.
 | [firmware-release.md](firmware-release.md) | Changing Nightly targets, packaging, GitHub/COS publishing, regional indexes, rollback, or OTA release contracts. |
 | [device-variants.md](device-variants.md) | Building or flashing for the Xteink X3 vs X4, runtime device detection (one binary, both panels), and the per-device hardware differences. |
 | [ssd1677-text-aa.md](ssd1677-text-aa.md) | Default S3 SSD1677 text AA, original image routing, PSRAM fallback, calibration and validation. |
+| [reterminal-sticky-bringup.md](reterminal-sticky-bringup.md) | Reproducing the current reTerminal Sticky V1 bring-up, factory partition migration and pending physical acceptance. |
 | [sticky-aa-test.md](sticky-aa-test.md) | Historical Sticky test2 firmware and its physical observations. |
 | [eego-a4.md](eego-a4.md) | Building, first-flashing, recovering, or hardware-validating the experimental ESP32-S3 eego A4 target. |
 | [lilygo-t5s3.md](lilygo-t5s3.md) | Building and physically validating the build-only LilyGo T5 S3 4.7 PRO/Lite target, SDK BoardT5S3, memory and sleep. |
