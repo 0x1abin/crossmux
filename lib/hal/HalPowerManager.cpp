@@ -4,6 +4,10 @@
 #if FREEINK_DEVICE_METALIO_EINK4
 #include <MetalioEInk4Board.h>
 #endif
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+#include <MetalioPlusPower.h>
+#include <esp_system.h>
+#endif
 #if FREEINK_DEVICE_READPICO
 #include <BoardReadPico.h>
 #endif
@@ -224,6 +228,20 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton) const {
   // Frontlight and touch may share I2C; turn the light off before releasing it.
   Frontlight.setOn(false);
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  (void)wakeOnHeldButton;
+  gpio.prepareForDeepSleep();
+  if (!freeink::metalioPlusPrepareDeepSleep()) {
+    // UI/display/storage have already shut down. Reboot instead of falling
+    // through to generic input.power == PIN_UNASSIGNED sleep with no wake.
+    LOG_ERR("PWR", "Plus sleep preparation failed; restarting reader");
+    delay(100);
+    esp_restart();
+  }
+  // The board armed checked EXT1 GPIO2. Do not replace it with the generic
+  // direct-power-pin helper or tear down the native ROM console beforehand.
+  freeink::PowerManager::deepSleep();
+#else
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   Waveshare397Power::waitForPowerButtonRelease();
 #endif
@@ -322,6 +340,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool wakeOnHeldButton)
   freeink::PowerManager::deepSleepUntilPowerButton();
 #endif
 #endif
+#endif  // FREEINK_DEVICE_METALIO_EINK4_PLUS
 }
 
 bool HalPowerManager::canStandbyLightSleep(const HalGPIO& gpio) const {

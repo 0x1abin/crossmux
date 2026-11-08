@@ -71,6 +71,10 @@ add_test(NAME GitBranchIdf
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_git_branch_idf.py)
 add_test(NAME MetalioPlusDisplay
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run.py)
+add_test(NAME MetalioPlusPower
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_power.py)
+add_test(NAME MetalioPlusBootRails
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_boot.py)
 add_test(NAME MetalioPlusLcd
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_lcd_compat.py)
 add_test(NAME MetalioPlusInput
