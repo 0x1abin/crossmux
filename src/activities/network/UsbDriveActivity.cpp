@@ -8,6 +8,9 @@
 
 #include "BleInput.h"
 #include "MappedInputManager.h"
+#if FREEINK_DEVICE_READPICO
+#include "SdCardFontSystem.h"
+#endif
 #include "SilentRestart.h"
 #include "components/UITheme.h"
 
@@ -19,6 +22,13 @@ void UsbDriveActivity::onEnter() {
   resetUi();
   app.setScreen(&UsbDriveActivity::driveScreen, this);
 
+#if FREEINK_DEVICE_READPICO
+  {
+    // The renderer and all font files must stop using SD before handoff.
+    RenderLock lock;
+    sdFontSystem.beginStorageHandoff(renderer);
+  }
+#endif
   // Show the safety instructions before giving the raw SD card to the USB host.
   requestUpdateAndWait();
   if (!Storage.beginUsbDrive()) {
@@ -38,7 +48,14 @@ void UsbDriveActivity::onEnter() {
 }
 
 void UsbDriveActivity::onExit() {
-  if (!restartRequested) Storage.endUsbDrive();
+  if (!restartRequested) {
+    Storage.endUsbDrive();
+#if FREEINK_DEVICE_READPICO
+    // onExit is called under RenderLock. Reload only if the SD card is mounted;
+    // a normal USB session reboots instead of remounting here.
+    sdFontSystem.endStorageHandoff(renderer);
+#endif
+  }
   Activity::onExit();
 }
 

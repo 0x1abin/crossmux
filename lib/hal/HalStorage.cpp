@@ -30,7 +30,7 @@ HalStorage::HalStorage() {
   assert(storageMutex != nullptr);
 }
 
-// begin() and ready() are only called from setup, no need to acquire mutex for them
+// begin() is called from setup before concurrent storage users start.
 
 bool HalStorage::begin() {
   const bool mounted = SDCard.begin();
@@ -52,7 +52,10 @@ bool HalStorage::begin() {
   return mounted;
 }
 
-bool HalStorage::ready() const { return SDCard.ready(); }
+bool HalStorage::ready() const {
+  StorageLock lock;
+  return SDCard.ready();
+}
 
 bool HalStorage::cardDetectAsserted() const {
 #if FREEINK_DEVICE_READPICO
