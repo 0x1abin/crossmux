@@ -55,6 +55,10 @@ target_compile_options(crosspoint_test_common INTERFACE
 enable_testing()
 include(GoogleTest)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME GitBranchIdf
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_git_branch_idf.py)
+
 add_subdirectory(streaming_json_parser)
 add_subdirectory(release_json_parser)
 add_subdirectory(differential_rounding)

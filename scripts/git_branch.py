@@ -90,6 +90,15 @@ def inject_version(env):
         get_git_branch(project_dir) if mode == 'dev' else 'unknown',
     )
 
+    if 'espidf' in env.get('PIOFRAMEWORK', []):
+        # Native IDF creates application objects from its CMake model before
+        # PlatformIO's source middleware pass. Define the version before those
+        # environments are cloned; returning Object() from that later pass also
+        # feeds a NodeList to IDF's source-skip middleware, which expects a File.
+        env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
+        print(f'CrossPoint build version: {version_string}')
+        return
+
     def add_version(build_env, node):
         # Only these translation units depend on Git metadata. Keep library and
         # reader objects reusable when the branch or commit changes.

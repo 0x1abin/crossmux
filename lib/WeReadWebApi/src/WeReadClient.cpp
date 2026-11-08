@@ -10,8 +10,8 @@
 #include <MD5Builder.h>
 #include <Memory.h>
 #include <PngToBmpConverter.h>
+#include <Sha256Compat.h>
 #include <StreamingJsonParser.h>
-#include <mbedtls/sha256.h>
 #include <strings.h>
 
 #include <algorithm>
