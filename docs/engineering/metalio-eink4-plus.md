@@ -404,3 +404,36 @@ records physical feedback and bounded timing evidence. The verified candidate
 is retained. Capture ended intentionally via SIGINT, leaving an expected
 KeyboardInterrupt in its report. The original active recovery association and
 restore-only-on-request policy remain in force.
+
+## Interface density trial — 2026-11-08
+
+The user reports small interface text and bottom navigation icons. Native
+1216x684 drawing already maps one source bit per panel pixel; portrait layout
+uses 684x1216. Only GfxRenderer's pre-begin defaults use the generic dimensions,
+and begin() replaces all four geometry members with the live driver values.
+This symptom is therefore addressed at UI density, not by changing panel size.
+
+The Plus build now opts into the existing `CROSSMUX_UI_PROFILE_HIGH_DPI` preset.
+It selects actual 12/14/16 interface font resources and 56px navigation icons,
+with the preset's row, header, gap and touch metrics. These are existing native
+assets, not enlarged low-resolution bitmaps. The reading-family/size setting
+remains independent. No SDK, waveform, grayscale or allocation-policy changes
+were made. An independent focused review found no actionable issues, including
+non-ReadPico font fallback and footer/cache behavior. Physical feedback below
+confirms the current footer and content layout.
+
+The S31 build passes at 108,032 bytes static RAM (+64) and 6,509,170 bytes linked
+Flash. Font resource checks pass (11 cases, one optional regeneration skip), as
+do the three selected high-density layout cases. The separate existing chrome
+suite has five passes, one optional regeneration skip and one Apple-clang
+fixture failure: unused `SMALL_FONT_ID` under ReadPico with `-Werror`. That
+harness does not read the changed PlatformIO flags; its inputs are unchanged.
+Parent `logs/crossmux-plus-ui-density-artifact-checks.json` records the unique
+artifact and full checks. The controlled update wrote and verified the image,
+retained the original recovery association and resumed reading with normal SD
+access. The user then accepted font/icon size, normal display/touch and the
+requested menu/Home/reopen/two-page reading sequence. Captured refreshes all
+committed, with no captured panic or error markers. This is a bounded current-UI
+check, not all-theme/orientation or endurance acceptance. The image remains on
+device; capture ended intentionally. Parent `logs/plus-ui-density-acceptance.json`
+records feedback and memory samples. No automatic commit or restore was made.
