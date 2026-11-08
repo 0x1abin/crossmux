@@ -73,6 +73,10 @@ add_test(NAME MetalioPlusDisplay
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run.py)
 add_test(NAME MetalioPlusLcd
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_lcd_compat.py)
+add_test(NAME MetalioPlusInput
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/InputManager/test/host/run_metalio_plus.py)
+add_test(NAME MetalioPlusSdmmc
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/SDCardManager/test/host/run_s31.py)
 add_test(NAME MetalioPlusProfile
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/BoardConfig/test/host/run_metalio_plus.py)
 add_test(NAME PsaRsaKeygen
