@@ -12,6 +12,7 @@ struct GfxRenderer {
   mutable HalDisplay::RefreshMode lastMode = HalDisplay::FAST_REFRESH;
   mutable DisplayRefreshContext lastContext = DisplayRefreshContext::Normal;
   bool combinesGrayscaleBase() const { return false; }
+  bool supportsContinuousImageReading() const { return false; }
   bool supportsTextOnlyCombinedBase() const { return combined; }
   bool supportsReaderTransitions() const { return transition; }
   bool canUseTextTransition() const { return transition; }

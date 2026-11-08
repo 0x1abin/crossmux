@@ -17,7 +17,8 @@ inline HalDisplay::RefreshMode consumeRefreshMode(int& pagesUntilFullRefresh, bo
   // alone, so the base and grey planes go out together as GC16. Ordinary pages stay
   // FAST -> GL16: anti-aliasing preserved, no flash. Vendor firmware cleans the same way
   // every APP_GC16_EVERY = 14 pages.
-#if FREEINK_DEVICE_READPICO
+// Plus also needs a real Full cleanup; its Half path is differential GL16.
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   const auto cleanMode = HalDisplay::FULL_REFRESH;
 #else
   const auto cleanMode = HalDisplay::HALF_REFRESH;
@@ -42,6 +43,25 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
     renderer.displayBufferAsync(mode, DisplayRefreshContext::ContinuousReading);
   } else {
     renderer.displayBuffer(mode, DisplayRefreshContext::ContinuousReading);
+  }
+}
+
+// Preserve the same cleanup cadence for binary image pages on Plus. Other
+// panels keep their existing continuous-image capability and cleanup debt.
+inline void displayImageWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh,
+                                         bool cleanImageBasePending) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Plus currently renders binary images only; no extra grayscale pass follows.
+  const bool continuous = true;
+#else
+  const bool continuous = renderer.supportsContinuousImageReading();
+#endif
+  if (continuous) {
+    renderer.displayBuffer(consumeRefreshMode(pagesUntilFullRefresh), DisplayRefreshContext::ImageReading);
+  } else {
+    renderer.displayBuffer(cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH,
+                           DisplayRefreshContext::ImageReading);
+    pagesUntilFullRefresh = 1;
   }
 }
 

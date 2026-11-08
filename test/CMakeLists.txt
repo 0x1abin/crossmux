@@ -69,6 +69,8 @@ add_test(NAME MetalioPlusEarlyLogging
 set_tests_properties(MetalioPlusIdf PROPERTIES ENVIRONMENT "CMAKE_COMMAND=${CMAKE_COMMAND}")
 add_test(NAME GitBranchIdf
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_git_branch_idf.py)
+add_test(NAME MetalioPlusReaderCadence
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_reader_refresh.py)
 add_test(NAME MetalioPlusDisplay
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run.py)
 add_test(NAME MetalioPlusPower
