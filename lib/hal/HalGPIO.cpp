@@ -29,7 +29,7 @@
 #include "MurphyM4BatchPreference.h"
 #endif
 
-#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_METALIO_EINK4_PLUS
 #include <soc/usb_serial_jtag_reg.h>
 #endif
 
@@ -433,7 +433,7 @@ bool HalGPIO::verifyPowerButtonWakeup() {
   return heldAtFirstSample && inputMgr.isPowerButtonPhysicallyPressed();
 }
 
-#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_METALIO_EINK4_PLUS
 // Keep the last positive USB Serial/JTAG SOF result across nearby polls.
 static bool usbHostSofActive() {
   static uint32_t lastFrame = 0;
@@ -455,6 +455,11 @@ static bool usbHostSofActive() {
 #endif
 
 bool HalGPIO::isUsbConnected() const {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // BQ27220 current is not a cable-presence signal. Observe the native USB host;
+  // the CX25601N charger remains unconfigured by this read-only bring-up.
+  return usbHostSofActive();
+#endif
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   bool connected = false;
   if (Waveshare397Power::externalPowerConnected(connected)) return connected;

@@ -500,6 +500,15 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
       return _batteryCachedPercent;
     }
     _batteryCachedPercent = percent;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    static unsigned long lastGaugeLog = 0;
+    if (lastGaugeLog == 0 || now - lastGaugeLog >= 30000) {
+      lastGaugeLog = now;
+      const auto status = battery.readStatus();
+      LOG_INF("PWR", "Plus gauge: %u%% voltage=%u mV known=%d charging=%d known=%d", percent, status.millivolts,
+              status.millivoltsKnown, status.charging, status.chargingKnown);
+    }
+#endif
     return _batteryCachedPercent;
   }
 
