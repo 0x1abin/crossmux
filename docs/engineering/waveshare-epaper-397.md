@@ -18,9 +18,19 @@ pio device monitor --port /dev/tty.usbmodem101 --baud 115200
 | SDMMC | CLK 16, CMD 17, D0/D1/D2/D3 15/7/8/18; 4-bit |
 | I²C | SDA 41, SCL 42; 400 kHz |
 | RTC | PCF85063A at `0x51` |
-| PMIC | AXP2101 at `0x34`; IRQ on GPIO38; ALDO1/2 supply audio and ALDO3 supplies the EPD |
+| PMIC | AXP2101-compatible PMIC at `0x34` (see the TG28 note below); IRQ on GPIO38; ALDO1/2 supply audio and ALDO3 supplies the EPD |
 | Audio | ES8311 at `0x18`; MCLK 13, BCLK 14, WS 47, DOUT 48; NS4150B enable 39 |
 | Buttons | Back 0, Left 4, Function 5, Right 6; active-low |
+
+### TG28 silkscreen
+
+The PMIC on the shipped board is marked **TG28**, not AXP2101, and the
+Waveshare schematic uses that name. Its pins, nets and register behaviour match
+AXP2101 at `0x34` (ALDO1-4, BLDO1/2, PWRON, PWROK, AXP_SDA/SCL, EPD_VCC_AXP), so
+the AXP2101 driver is used unchanged. The driver never reads the chip ID
+register `0x03`, so this target claims **functional equivalence only**: an ID
+readback of `0x4A` has not been observed and must not be recorded as if it had.
+A future driver that starts validating `0x03` needs a TG28 measurement first.
 
 Function single-click emits Confirm after the 300 ms double-click window. A
 second short click starting within that window emits Back. Holding either press
@@ -34,6 +44,14 @@ on; the boot gesture is ignored until its first release, so it may remain held
 until the first screen is visible. A new runtime hold uses the existing 400 ms
 software shutdown threshold (about 10 ms when short Power is set to Sleep),
 while a continuous 4-second hold remains the PMIC hard-power-off fallback.
+
+Sleep is ESP32-S3 deep sleep with the AXP2101 left on (display and audio rails
+off), woken by any rotary key: Left, Function or Right (GPIO4/5/6, ext1
+any-low). The side Power key cannot wake it, because GPIO38 is not an RTC GPIO;
+it only powers the board on after a PMIC hard-off. Sleep does not use the PMIC
+soft-off (`0x10` bit 0): on battery it cut MCU power only some of the time, so
+whether Power or Function could wake the board depended on how that sleep
+ended. GPIO0 (Back) is a strapping pin and is deliberately not a wake source.
 QMI8658 and SHTC3 are deliberately not initialized by this target.
 
 System Settings exposes **Sound Feedback** with Off/Low/Medium/High levels;
@@ -76,8 +94,8 @@ strip scratch and framebuffer only—no full-screen buffer or heap allocation.
 
 The first page and periodic cleanup may still use HALF and visibly flash. Normal
 pages use only the selector path and do not run a four-gray `0xD7`, 500 ms
-settle, or hard-reset sequence. Deep sleep sends `0x10/0x01`; the existing
-AXP2101 shutdown path then removes system power.
+settle, or hard-reset sequence. Deep sleep sends `0x10/0x01` to the panel; the MCU
+then enters ESP deep sleep, described with the side Power key above.
 
 ## Physical acceptance gate
 
@@ -105,3 +123,50 @@ AXP2101 shutdown path then removes system power.
 
 Automated builds and serial logs do not substitute for the visual, button, or
 battery checks above. Record incomplete checks as pending rather than accepted.
+
+### 2026-10-28 local flash session
+
+Board: ESP32-S3, 16 MiB flash, embedded 8 MiB PSRAM, MAC `44:b1:76:b6:a3:bc`.
+Repository `0x1abin/crossmux` at `6b5566c8`; the session ran on a topic branch
+with no source changes.
+
+- **Backup first.** The complete 16 MiB factory image was read and verified
+  before anything was written (`verify OK (digest matched)`, SHA-256
+  `34fac2c6ca24bc0f90600e245ee6edfd0b165de90ba92529e6ce0fca1d55bf07`). It is
+  kept outside the device as the only full-flash recovery image.
+- **Build.** `pio run -e waveshare_epaper_397` took 665.7 s and produced
+  `firmware.bin` 6,310,096 B and `firmware.factory.bin` 6,375,632 B. Flash use
+  is **96.2 %** of the 6,553,600-byte app partition (6,304,895 B used, 248 KB
+  free) and RAM is 34.8 % (114,116 / 327,680 B). The remaining flash headroom is
+  the binding constraint on this target.
+- **Flashing.** The factory image was written at `0x0` and hash-verified. Use
+  esptool **4.8.1** here: 5.3.0 aborted at 7.6 % with
+  `Packet content transfer stopped` at both 460800 and 921600 baud.
+- **Boot.** No panic, abort or OOM. `AXP2101 ready: battery=1 percent=95
+  external=1 charging=1` (97 % after charging), `External RTC found`, SDMMC card
+  mounted (128 GB), `Display initialized`, internal heap 168,528 B free with
+  7,951,136 B PSRAM free.
+- **Display.** First frame 1,682 ms, later full frames 505 ms. Both the text-AA
+  and the grayscale path were exercised on real pages. Reader page render was
+  1,012 ms for a full refresh and 962-998 ms for windowed updates
+  (`changed=70478`), matching the `0xCC` selector design.
+- **EPUB.** Cache build 117 ms for 11 spine items; first page 1,154 ms.
+  Progress, reading stats and the recent-books list survived reboot.
+- **Sleep and wake, three cycles.** Holding Power for 401-404 ms logged
+  `Power button held 401ms, sleeping` and entered the Sleep activity; USB power
+  disappeared. Each wake restored the external RTC time (22:10 / 22:11), the
+  selected theme, settings, reading progress (spine 3), reading stats and the SD
+  mount. The 10-minute idle auto-sleep also fired once and woke normally.
+- **Wi-Fi.** After wake the device reconnected with saved credentials
+  (`RSSI -69 dBm`) and started SNTP without re-entering a password. Internal heap
+  during Wi-Fi was 107,008 B free with a 65,524 B largest block.
+- **Themes.** Lyra, Lyra Carousel and RoundedRaff all rendered and persisted
+  across a reboot.
+- **USB Drive.** A host mounted the SD card, and copying a file through it
+  succeeded. Note that Home lists *recent books*, not a directory scan, so a
+  newly copied book only appears after it is opened once through Browse Files.
+- **Sound Feedback was not evaluated** in this session; the user deferred it.
+- **Still pending:** Off/Low/Medium/High audibility and persistence, the
+  100-press heap trend, battery-only operation and shutdown, and a repeat of the
+  USB Drive copy/rename/delete/eject cycle three times. Hosted CI and release
+  publication were not run from this session.

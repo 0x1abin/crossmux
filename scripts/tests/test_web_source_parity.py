@@ -128,7 +128,7 @@ const setTimeout=()=>++timers, clearTimeout=id=>cleared.push(id);
 const assert=require('node:assert/strict');
 const elements=Object.create(null);
 const document={getElementById:id=>elements[id]||(elements[id]={
-  open:false,style:{},value:'pending',classList:{remove(){}},
+  open:false,style:{},value:'pending',classList:{remove(){},add(){}},
   showModal(){this.open=true;},close(){this.open=false;}
 }),querySelector:()=>({classList:{remove(){}}})};
 let isUploadInProgress=false,operationCancelled=false,currentUploadWs=null,currentUploadXhr=null;

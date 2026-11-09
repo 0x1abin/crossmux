@@ -19,6 +19,7 @@ struct DirectPixelWriter {
   uint8_t* fb;
   GfxRenderer::RenderMode mode;
   bool absolute = false;
+  bool ditherBw = false;       // images on a B/W-only page: dither in BW, skip the gray planes
   uint16_t displayWidthBytes;  // Runtime framebuffer stride (X4: 100, X3: 99)
   // Active write target: for tiled grayscale, fb is the band scratch, originY is
   // the band's top physical row, and clipRows is the band height. Off-band
@@ -36,6 +37,7 @@ struct DirectPixelWriter {
 
   // Row-precomputed: the Y-dependent portion of the physical coords
   int rowPhyXBase, rowPhyYBase;
+  int rowLogicalY;
 
   void init(GfxRenderer& renderer) {
     fb = renderer.getWriteTarget();
@@ -43,6 +45,7 @@ struct DirectPixelWriter {
     clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
     absolute = renderer.grayPlanesAreAbsolute();
+    ditherBw = renderer.imagesDitheredInBw();
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -100,6 +103,7 @@ struct DirectPixelWriter {
   // Call once per row before the column loop.
   // Pre-computes the Y-dependent portion so writePixel() only needs the X part.
   inline void beginRow(int logicalY) {
+    rowLogicalY = logicalY;
     rowPhyXBase = phyXBase + logicalY * phyXStepY;
     rowPhyYBase = phyYBase + logicalY * phyYStepY;
   }
@@ -149,7 +153,15 @@ struct DirectPixelWriter {
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
     auto pixel = GfxRenderer::mapTwoBitPixel(mode, pixelValue, absolute);
-    if (mode == GfxRenderer::BW && writeWhiteInBw && pixelValue >= 3) pixel = {true, false};
+    if (ditherBw) {
+      if (mode != GfxRenderer::BW) return;
+      static constexpr uint8_t bayer[4] = {0, 2, 3, 1};
+      const auto threshold = bayer[((rowLogicalY & 1) << 1) | (logicalX & 1)];
+      const bool black = pixelValue == 0 || (pixelValue == 1 && threshold < 3) || (pixelValue == 2 && threshold < 1);
+      pixel = {writeWhiteInBw || black, black};
+    } else if (mode == GfxRenderer::BW && writeWhiteInBw && pixelValue >= 3) {
+      pixel = {true, false};
+    }
     if (!pixel.draw) return;
 
     const int phyX = rowPhyXBase + logicalX * phyXStepX;

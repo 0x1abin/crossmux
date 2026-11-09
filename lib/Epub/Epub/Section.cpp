@@ -56,11 +56,12 @@ namespace {
 //   78 / 79 - per-word source ranges, NFC source composition, paragraph starts, and soft-flush continuity
 //   82 / 83 - bottom-align header and table-safe layout; skip overlapping early PR versions 79/80
 //   84 / 85 - CSS font variants, page boxes/drop caps, inheritance, and GIF layout
+//   88 / 89 - font-size line spacing, ruby space-around, RTL focus offsets and TTF advances
 //   86 / 87 - literal-space justification, wrapped NBSP, RTL gaps, and bounded drop-cap hyphenation
 #ifdef ENABLE_CHINESE_VERSION
-constexpr uint8_t SECTION_FILE_VERSION = 87;
+constexpr uint8_t SECTION_FILE_VERSION = 89;
 #else
-constexpr uint8_t SECTION_FILE_VERSION = 86;
+constexpr uint8_t SECTION_FILE_VERSION = 88;
 #endif
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /

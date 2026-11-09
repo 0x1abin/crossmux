@@ -115,9 +115,10 @@ int main() {
   }
   Frontlight.available = false;
   for (const char* name : {"Home", "InxRecent", "EpubReader", "FileBrowser", "Settings", "FrontlightPanel"}) {
-    check({.name = name}, {.light = true}, false, true);
-    check({.name = name}, {.topSwipe = false, .tap = true}, false, true);
-    check({.name = name, .mainTabs = true}, {.light = true, .tap = true}, false, true);
+    check({.name = name}, {.light = true}, std::string(name) != "FrontlightPanel", std::string(name) == "FrontlightPanel");
+    const bool tapOpens = std::string(name) == "Home" || std::string(name) == "FileBrowser" || std::string(name) == "Settings";
+    check({.name = name}, {.topSwipe = false, .tap = true}, tapOpens, !tapOpens);
+    check({.name = name, .mainTabs = true}, {.light = true, .tap = true}, std::string(name) != "FrontlightPanel", std::string(name) == "FrontlightPanel");
   }
   Frontlight.available = true;
   check({}, {.light = true, .suppressed = true}, false, false);

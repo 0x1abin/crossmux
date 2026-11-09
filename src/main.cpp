@@ -65,6 +65,7 @@
 #include "util/ButtonNavigator.h"
 #include "util/PluginEvents.h"
 #include "util/ScreenshotUtil.h"
+#include "util/SlideSwitch.h"
 #include "util/Timezones.h"
 #include "util/UserGuide.h"
 
@@ -117,13 +118,13 @@ static bool wakePowerReleasePending = false;
 // All legacy built-in reader IDs share one 12pt offline fallback. Complete
 // families, other sizes, and style variants come from SD .cpfont files.
 EpdFont offlineReaderFont(&notosans_cjk_12);
-EpdFontFamily offlineReaderFontFamily(&offlineReaderFont);
+EpdFontFamily offlineReaderFontFamily(12, &offlineReaderFont);
 
 // Large UI text keeps the upstream face; INX restores its historical fallback
 // through the theme reload hook; Ubuntu UI families are shared by all themes.
 extern EpdFont ui18RegularFont;
 extern EpdFont ui18BoldFont;
-EpdFontFamily ui18FontFamily(&ui18RegularFont, &ui18BoldFont);
+EpdFontFamily ui18FontFamily(18, &ui18RegularFont, &ui18BoldFont);
 
 extern EpdFontFamily control18FontFamily;
 
@@ -134,7 +135,7 @@ EpdFont smallFont(&notosans_12_regular);
 #else
 EpdFont smallFont(&notosans_8_regular);
 #endif
-EpdFontFamily smallFontFamily(&smallFont);
+EpdFontFamily smallFontFamily(UiHighDpiProfile::enabled ? 12 : 8, &smallFont);
 
 void reloadSmallUiFont(const bool inxTheme) {
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
@@ -146,35 +147,35 @@ void reloadSmallUiFont(const bool inxTheme) {
 
 extern EpdFont ui10RegularFont;
 extern EpdFont ui10BoldFont;
-EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
+EpdFontFamily ui10FontFamily(10, &ui10RegularFont, &ui10BoldFont);
 
 extern EpdFont ui12RegularFont;
 extern EpdFont ui12BoldFont;
-EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+EpdFontFamily ui12FontFamily(12, &ui12RegularFont, &ui12BoldFont);
 
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-EpdFontFamily cjk8FontFamily(&offlineReaderFont);
+EpdFontFamily cjk8FontFamily(12, &offlineReaderFont);
 EpdFont cjk14Font(&notosans_cjk_14);
 EpdFont cjk16Font(&notosans_cjk_16);
-EpdFontFamily cjk10FontFamily(&cjk14Font);
-EpdFontFamily ui14FallbackFamily(&cjk14Font);
-EpdFontFamily ui16FallbackFamily(&cjk16Font);
+EpdFontFamily cjk10FontFamily(14, &cjk14Font);
+EpdFontFamily ui14FallbackFamily(14, &cjk14Font);
+EpdFontFamily ui16FallbackFamily(16, &cjk16Font);
 static EpdFont rtlRegularFont(&ubuntu_12_regular);
 static EpdFont rtlBoldFont(&ubuntu_12_bold);
-static EpdFontFamily rtlFontFamily(&rtlRegularFont, &rtlBoldFont);
+static EpdFontFamily rtlFontFamily(12, &rtlRegularFont, &rtlBoldFont);
 static constexpr int kRtlFontId = 0x52544C0C;
 #else
 EpdFont cjk8Font(&notosans_cjk_8);
 EpdFont cjk10Font(&notosans_cjk_10);
-EpdFontFamily cjk8FontFamily(&cjk8Font);
-EpdFontFamily cjk10FontFamily(&cjk10Font);
+EpdFontFamily cjk8FontFamily(8, &cjk8Font);
+EpdFontFamily cjk10FontFamily(10, &cjk10Font);
 #endif
 EpdFont cjk12Font(&notosans_cjk_12);
-EpdFontFamily cjk12FontFamily(&cjk12Font);
+EpdFontFamily cjk12FontFamily(12, &cjk12Font);
 
 // Chinese chess piece glyphs (subset CJK font, 14 characters at 16pt).
 EpdFont chineseChessPieceFont(&chinese_chess_16);
-EpdFontFamily chineseChessPieceFontFamily(&chineseChessPieceFont);
+EpdFontFamily chineseChessPieceFontFamily(16, &chineseChessPieceFont);
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
@@ -349,7 +350,9 @@ void handleSlideSwitch() {
       SETTINGS.touchReaderControls = on ? CrossPointSettings::TOUCH_READER_ON : CrossPointSettings::TOUCH_READER_OFF;
       break;
     default:
-      if (!Frontlight.present() || Frontlight.isOn() == on) return;
+      // Also compare the saved state: setup() lit the light from the switch
+      // without updating it.
+      if (!Frontlight.present() || (Frontlight.isOn() == on && (SETTINGS.frontlightOn != 0) == on)) return;
       Frontlight.setOn(on);
       SETTINGS.frontlightOn = on ? 1 : 0;
       break;
@@ -523,14 +526,17 @@ static void deliverSleepPluginEvents(const bool allowNetwork) {
   // reader.exit only fires later, inside goToSleep() — after this drain. Carry
   // the book and progress on sleep.enter itself so a sync handler bound to it
   // pushes current progress on THIS connection, not the next one.
-  pluginevents::Var vars[2];
+  pluginevents::Var vars[3];
   size_t varCount = 0;
   char percent[8];
+  char endPercent[8];
   const ScreenshotInfo info = activityManager.getScreenshotInfo();
   if (info.readerType != ScreenshotInfo::ReaderType::None && !APP_STATE.openEpubPath.empty()) {
     snprintf(percent, sizeof(percent), "%d", info.progressPercent);
+    snprintf(endPercent, sizeof(endPercent), "%d", info.endProgressPercent);
     vars[varCount++] = {"book", APP_STATE.openEpubPath.c_str()};
     vars[varCount++] = {"percent", percent};
+    vars[varCount++] = {"end_percent", endPercent};
   }
   pluginevents::emit(pluginevents::Event::SleepEnter, vars, varCount);
   if (!allowNetwork) return;
@@ -1039,9 +1045,12 @@ void setup() {
   // Brightness and warmth are always restored. A normal wake starts with the
   // light off unless Restore Light on Wake is enabled; silent maintenance
   // reboots replay the live state captured at restart, so they neither go dark
-  // nor light up against the user's wake preference.
-  const bool restoreLightOn =
-      isSilentReboot ? silentRebootLightOn : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
+  // nor light up against the user's wake preference. A slide switch bound to
+  // the light decides it from its position instead.
+  const bool restoreLightOn = isSilentReboot ? silentRebootLightOn
+                              : slideSwitchOwnsLight()
+                                  ? gpio.isToggleSwitchOn()
+                                  : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
 
   switch (wakeupReason) {
@@ -1092,6 +1101,10 @@ void setup() {
 
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
+
+  // Apply a switch moved during sleep before the first paint, so the wake
+  // screen does not draw in the old night mode and then repaint.
+  handleSlideSwitch();
 
   // Resolve the single boot-presentation decision. Skipping the splash also
   // skips the panel-clearing pass and the X3 initial-full-sync arming (see

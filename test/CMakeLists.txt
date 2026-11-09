@@ -20,7 +20,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   crosspoint_simulator
   GIT_REPOSITORY https://github.com/0x1abin/crosspoint-simulator.git
-  GIT_TAG 1cbe1b775c9b37e23551d2ca9334052f1fb3b0e3
+  GIT_TAG e1126680507f33bd35239aa90d32be198124ad34
 )
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -61,6 +61,7 @@ add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
 add_subdirectory(utf8_compose)
 add_subdirectory(opds_filename)
+add_subdirectory(url_utils)
 add_subdirectory(opds_feed_error)
 add_subdirectory(html_to_plain_text)
 add_subdirectory(library_text)
@@ -177,6 +178,7 @@ add_subdirectory(home_button)
 add_subdirectory(button_press_navigation)
 
 add_subdirectory(inflate_stream)
+add_subdirectory(inflate_reader)
 add_subdirectory(zip_file)
 add_subdirectory(fs_helpers)
 add_subdirectory(http_header)
@@ -185,6 +187,8 @@ add_subdirectory(txt_to_html)
 add_subdirectory(absolute_grayscale)
 
 add_subdirectory(gif_support)
+
+add_subdirectory(bmp_to_bmp)
 
 add_subdirectory(sd_card_font)
 add_subdirectory(sd_font_registry)
@@ -225,10 +229,14 @@ add_test(NAME FileBrowserImages
 add_test(NAME ArduinoBootstrapLto COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${REPO_ROOT}/scripts/tests -p test_pioarduino_cache.py)
 add_subdirectory(clipping_store)
 add_subdirectory(reader_session)
+add_subdirectory(plugin_catalog_paging)
 add_subdirectory(plugin_manifest_classification)
 add_subdirectory(protected_paths)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME translation_spacing COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_translation_spacing.py)
+add_test(NAME TextSettingsLayout COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_text_settings_layout.py)
+add_test(NAME ReleaseLicense COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_release_license.py)
 add_test(NAME TrustedTimeTimezone COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_trusted_time.py)
 
 add_test(NAME WebServerStartupFailure COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_webserver_startup_failure.py)

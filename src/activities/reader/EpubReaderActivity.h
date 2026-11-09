@@ -164,6 +164,7 @@ class EpubReaderActivity final : public ReaderActivity {
   int autoTurnOption = 0;                // auto page-turn option: 0=off, 1..3=rates[1..3], 4=custom
   uint8_t customAutoPageTurnRate_ = 15;  // custom rate used when autoTurnOption == 4
   std::vector<EpubReaderMenuActivity::MenuItem> moreItems;
+  EpubReaderMenuActivity::MenuAction selectedMenuAction = EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER;
 
   // Footnote support
   FootnoteList currentPageFootnotes;
