@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Epub.h"
@@ -20,6 +21,8 @@ class Section {
   BuildError buildError() const { return buildError_; }
 
  private:
+  // Sentinel for "the spine's first TOC index hasn't been read yet" (a valid index is >= -1).
+  static constexpr int kBaseTocIndexUnset = -2;
   BuildError buildError_ = BuildError::None;
   bool collectTouchLinks_ = false;
   std::shared_ptr<Epub> epub;
@@ -89,6 +92,43 @@ class Section {
   std::unique_ptr<Page> loadPageDuringBuild(int page);
   bool openAnchorMap(HalFile& anchorFile, uint16_t& count) const;
 
+  // Cache at most 64 boundaries and 1 KiB of anchor bytes per Section, with no
+  // string allocations. Larger TOCs retain the original correct scanning path.
+  struct SubChapter {
+    int tocIndex;
+    uint16_t anchorOffset;
+    uint16_t page;
+    bool pageKnown;
+  };
+  static constexpr size_t kMaxSubChapters = 64;
+  static constexpr size_t kSubChapterAnchorBytes = 1024;
+  mutable SubChapter subChapters_[kMaxSubChapters];
+  mutable char subChapterAnchors_[kSubChapterAnchorBytes];
+  mutable size_t subChapterAnchorBytes_ = 0;
+  mutable size_t subChapterCount_ = 0;
+  // A spine with more boundaries than kMaxSubChapters keeps the old per-call scan: rare,
+  // and showing a stale sub-chapter title is worse than reading the TOC again.
+  mutable bool subChapterOverflow_ = false;
+  mutable bool subChaptersBuilt_ = false;
+  mutable bool subChapterPagesResolved_ = false;
+  // This spine's first TOC index, resolved with the table so a lookup costs no disk read.
+  mutable int baseTocIndex_ = kBaseTocIndexUnset;
+  void buildSubChapterTable() const;
+  // Fill SubChapter::page from the on-disk anchor map, in one sequential read.
+  void resolveSubChapterPages() const;
+  // The pre-table lookup, kept for sections whose TOC boundaries exceed the table.
+  int scanTocIndexForPage(int page) const;
+  // A freshly loaded file backs a different anchor map: drop the table and the cached base.
+  void invalidateSubChapterPages() const { subChapterPagesResolved_ = false; }
+  void invalidateSubChapterTable() const {
+    subChaptersBuilt_ = false;
+    subChapterPagesResolved_ = false;
+    subChapterOverflow_ = false;
+    subChapterCount_ = 0;
+    subChapterAnchorBytes_ = 0;
+    baseTocIndex_ = kBaseTocIndexUnset;
+  }
+
  public:
   uint16_t pageCount = 0;
   int currentPage = 0;
@@ -151,7 +191,7 @@ class Section {
   // Look up an anchor among the pages built so far by the in-progress build, so an anchor jump
   // (TOC / chapter select, usually the chapter top = page 0) can resolve without laying out the
   // whole chapter. Returns nullopt if the anchor hasn't been reached yet (build more) or no build.
-  std::optional<uint16_t> findAnchorDuringBuild(const std::string& anchor) const;
+  std::optional<uint16_t> findAnchorDuringBuild(std::string_view anchor) const;
 
   // Get the page count from the section cache file without fully loading it.
   std::optional<uint16_t> getCachedPageCount() const;
