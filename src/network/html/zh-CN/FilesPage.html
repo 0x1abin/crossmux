@@ -3747,9 +3747,9 @@ function logSummary(originalSize, newSize, timeElapsed) {
       <div class="log-summary-title">📊 转换摘要</div>
       <table class="log-summary-table">
         <tr><td>发现图像</td><td class="highlight">${totalImages}</td></tr>
-        <tr><td>处理图像</td><td>${totalOutput}${conversionStats.splitParts > conversionStats.splits ? `（分割增加 ${conversionStats.splitParts - conversionStats.splits} 张）` : ''}</td></tr>
+        <tr><td>处理图像</td><td>${totalOutput}${conversionStats.splitParts > conversionStats.splits ? '（分割增加 ' + (conversionStats.splitParts - conversionStats.splits) + ' 张）' : ''}</td></tr>
         <tr><td>EPUB 修复</td><td>${conversionStats.fixes > 0 ? '已应用 ' + conversionStats.fixes + ' 项修复' : '无需修复'}</td></tr>
-        ${conversionStats.errors > 0 ? `<tr><td>错误</td><td style="color:#e74c3c">${conversionStats.errors}</td></tr>` : ''}
+        ${conversionStats.errors > 0 ? '<tr><td>错误</td><td style="color:#e74c3c">' + conversionStats.errors + '</td></tr>' : ''}
         <tr><td>原始大小</td><td>${formatBytes(originalSize)}</td></tr>
         <tr><td>优化后大小</td><td>${formatBytes(newSize)}</td></tr>
         <tr><td>节省空间</td><td class="${saved > 0 ? 'saved' : 'increased'}">${saved > 0 ? formatBytes(saved) + ' (' + savedPct + '%)' : '+' + formatBytes(-saved)}</td></tr>
@@ -3850,8 +3850,8 @@ function finalizeBatchLog() {
         <tr><td>优化后总大小</td><td>${formatBytes(batchStats.totalNewSize)}</td></tr>
         <tr><td>共节省</td><td class="${totalSaved > 0 ? 'saved' : 'increased'}">${
           totalSaved > 0
-            ? `${formatBytes(totalSaved)} (${totalSavedPct}%)`
-            : `+${formatBytes(-totalSaved)}`
+            ? formatBytes(totalSaved) + ' (' + totalSavedPct + '%)'
+            : '+' + formatBytes(-totalSaved)
         }</td></tr>` : '';
 
   // Add batch summary
@@ -3865,7 +3865,7 @@ function finalizeBatchLog() {
         <tr><td>处理图像总数</td><td>${batchStats.totalImages}</td></tr>
         <tr><td>分割总数</td><td>${batchStats.totalSplits}</td></tr>
         <tr><td>应用修复总数</td><td>${batchStats.totalFixes}</td></tr>
-        ${batchStats.totalErrors > 0 ? `<tr><td>错误总数</td><td style="color:#e74c3c">${batchStats.totalErrors}</td></tr>` : ''}${sizeRowsHtml}
+        ${batchStats.totalErrors > 0 ? '<tr><td>错误总数</td><td style="color:#e74c3c">' + batchStats.totalErrors + '</td></tr>' : ''}${sizeRowsHtml}
         <tr><td>总耗时</td><td>${batchTime.toFixed(1)} 秒</td></tr>
       </table>
     </div>

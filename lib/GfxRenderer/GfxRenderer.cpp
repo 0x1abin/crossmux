@@ -2202,6 +2202,12 @@ void GfxRenderer::invertScreen() const {
   }
 }
 
+HalDisplay::RefreshMode GfxRenderer::applyPromotedRefresh(HalDisplay::RefreshMode mode) const {
+  if (!nextRefreshOverridePending) return mode;
+  nextRefreshOverridePending = false;
+  return nextRefreshOverride;
+}
+
 void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
@@ -2624,8 +2630,8 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
 #endif
 
   // Advance table fast-path for SD card fonts during layout.
-  // No kerning/ligature lookup — consistent with previous metadataOnly behavior
-  // where kern/lig data was not loaded.
+  // Snap each advance like drawText. Kerning/ligature data is not resident
+  // during layout, so kerned-pair steps can still differ.
   auto sdIt = sdCardFonts_.find(resolvedFontId);
   if (mode == TextMeasureMode::Layout && sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
@@ -2659,7 +2665,7 @@ int GfxRenderer::getTextAdvanceX(int fontId, const char* text, EpdFontFamily::St
       // and fell back to a bogus 2×"M" column width that spread ideographs far
       // apart. See SdCardFont::getAdvanceOrLoad.
       prevAdvanceFP = static_cast<int32_t>(sdIt->second->getAdvanceOrLoad(cp, styleIdx));
-      if (syntheticGlyph::isSolid(cp)) {
+      if (prevAdvanceFP == 0 || syntheticGlyph::isSolid(cp)) {
         const auto fontIt = fontMap.find(resolvedFontId);
         if (fontIt != fontMap.end() && !fontIt->second.hasCodepoint(cp, style)) {
           EpdGlyph solidFallback;
@@ -2817,10 +2823,14 @@ int GfxRenderer::getLineHeight(int fontId) const {
   return fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY;
 }
 
-int GfxRenderer::getLineHeight(int fontId, const float compression) const {
-  // Row height must follow a rebound id (see setPreferredFont()).
-  fontId = resolveFontFamilyId(fontId);
-  return static_cast<int>(getLineHeight(fontId) * compression + 0.5f);
+int GfxRenderer::getLineHeight(const int fontId, const float compression) const {
+  const int resolvedFontId = resolveFontFamilyId(fontId);
+  const auto fontIt = fontMap.find(resolvedFontId);
+  if (fontIt == fontMap.end()) {
+    LOG_ERR("GFX", "Font %d not found", fontId);
+    return 0;
+  }
+  return static_cast<int>(fontIt->second.getSizeInPixels() * compression + 0.5f);
 }
 
 int GfxRenderer::getTextHeight(int fontId) const {
@@ -2929,15 +2939,17 @@ void GfxRenderer::displayGrayscaleBase(HalDisplay::RefreshMode fallback, Display
   absoluteGrayPlanes = false;
 #ifdef SIMULATOR
   (void)context;
-  display.displayGrayscaleBase(fallback, fadingFix);
+  display.displayGrayscaleBase(applyPromotedRefresh(fallback), fadingFix);
 #else
-  display.displayGrayscaleBase(fallback, fadingFix, context);
+  display.displayGrayscaleBase(applyPromotedRefresh(fallback), fadingFix, context);
 #endif
 }
 
 bool GfxRenderer::displayGrayscaleBase(HalDisplay::GrayscaleMode mode, HalDisplay::RefreshMode fallback) const {
   absoluteGrayPlanes = false;
-  if (!display.displayGrayscaleBase(mode, fallback, fadingFix)) return false;
+  if (!display.displayGrayscaleBase(mode, nextRefreshOverridePending ? nextRefreshOverride : fallback, fadingFix))
+    return false;
+  nextRefreshOverridePending = false;
   absoluteGrayPlanes = mode != HalDisplay::GrayscaleMode::Overlay;
   return true;
 }

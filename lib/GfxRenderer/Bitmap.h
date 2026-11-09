@@ -92,6 +92,8 @@ class Bitmap {
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* opacityRow = nullptr,
                              RowOutput output = RowOutput::PackedGray2) const;
   BmpReaderError rewindToData() const;
+  // Unprocessed luminance of display-order row y (0 = top); leaves readNextRow()'s dither state alone.
+  BmpReaderError readRowGray(int y, uint8_t* gray, uint8_t* rowBuffer) const;
   int getWidth() const { return width; }
   int getHeight() const { return height; }
   bool isTopDown() const { return topDown; }

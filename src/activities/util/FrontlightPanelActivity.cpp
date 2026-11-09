@@ -1,5 +1,6 @@
 #include "FrontlightPanelActivity.h"
 
+#include <BlePageTurner.h>
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
@@ -17,6 +18,7 @@
 #include "components/UIThemeTokens.h"
 #include "components/icons/customListIcons.h"
 #include "components/icons/listIcons.h"
+#include "components/icons/readerToolbarIcons.h"
 #include "util/SlideSwitch.h"
 
 namespace fui = freeink::ui;
@@ -30,8 +32,8 @@ constexpr fui::ActionId ACTION_WARMTH_STEP = 5;
 constexpr fui::ActionId ACTION_TILE = 6;  // value = tile index
 
 // iOS-style geometry. The panel is a card hanging from the top of the screen:
-// a grabber, full-width slider pills, then a 2-column tile grid. The chrome
-// itself is fui::sheet / fui::sliderRow / fui::tileGrid; these constants only
+// a grabber, full-width slider pills, then a row of quick-setting icons. The chrome
+// itself is fui::sheet / fui::sliderRow; these constants only
 // size the bands, and computePanelBottom() mirrors them.
 constexpr int16_t kPanelSideMargin = 16;
 constexpr int16_t kGrabberHeight = 5;     // fui::SheetProps default, mirrored here
@@ -39,6 +41,9 @@ constexpr int16_t kSliderRowHeight = 56;  // the pill itself (finger-sized)
 constexpr int16_t kTileHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::buttonHeight : 84;
 constexpr int16_t kTileGap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : 16;
 constexpr int kTileCols = 2;
+constexpr int kInxTileCount = 4;
+constexpr int16_t kQuickControlSize = kSliderRowHeight;
+constexpr int16_t kQuickIconSize = 32;
 // One percent per press, on the -/+ buttons and on the physical Left/Right keys
 // alike (both repeat while held), so a level can be set exactly.
 constexpr int BRIGHTNESS_STEP = 1;
@@ -87,6 +92,7 @@ void FrontlightPanelActivity::onEnter() {
 }
 
 void FrontlightPanelActivity::persistLightSettings() {
+  if (!Frontlight.present()) return;
   // brightness/warmth are always restored unconditionally on boot (see
   // main.cpp), so they never diverge from SETTINGS at onEnter() — comparing
   // against SETTINGS here only fires on a genuine user change. lightOn has
@@ -181,6 +187,14 @@ void FrontlightPanelActivity::runTile(const int idx) {
       SETTINGS.saveToFile();
       requestUpdate();
       break;
+    case 4:  // Bluetooth page turner
+      if (!bleturner::status().compiledIn) break;
+      SETTINGS.ble.enabled = SETTINGS.ble.enabled ? 0 : 1;
+      // The panel suspends the radio; tick() reconnects in an eligible screen.
+      if (!SETTINGS.ble.enabled) bleturner::switchOff();
+      SETTINGS.saveToFile();
+      requestUpdate();
+      break;
     default:
       break;
   }
@@ -262,6 +276,7 @@ void FrontlightPanelActivity::loop() {
     close();
     return;
   }
+  if (!Frontlight.present()) return;
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (!slideSwitchOwnsLight()) toggleLight();
     return;
@@ -289,13 +304,16 @@ int FrontlightPanelActivity::computePanelBottom() const {
     }
     y += tokens.spaceSm;
   }
-  // Tiles are touch targets, so a buttons-only board gets no grid and the
+  // Icons are touch targets, so a buttons-only board gets no row and the
   // sheet is exactly the frontlight controls.
-  const int tileCount = mappedInput.hasTouch() ? kTileCount : 0;
-  y += fui::tileGridHeight(static_cast<uint16_t>(tileCount), kTileCols, kTileHeight, kTileGap);
+  if (mappedInput.hasTouch()) {
+    y += UITheme::getInstance().hasMainTabs() ? fui::tileGridHeight(kInxTileCount, kTileCols, kTileHeight, kTileGap)
+                                              : kQuickControlSize;
+  }
   // The sheet's grabber band: content margin + grabber + air to the edge.
   // buildPanelScreen() feeds the same theme spacings into SheetProps.
-  y += tokens.spaceLg + kGrabberHeight + tokens.spaceLg + tokens.spaceMd;
+  y += UITheme::getInstance().hasMainTabs() ? 2 * tokens.spaceLg + tokens.spaceMd + kGrabberHeight
+                                            : 2 * (tokens.spaceLg + tokens.spaceMd) + kGrabberHeight;
   return y;
 }
 
@@ -347,9 +365,9 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   // it. (No header: the panel is a floating card, and its own grabber says
   // what it is.)
   fui::SheetProps sheetProps;
-  // A roomy band above the bottom rule: the grabber gets a full spaceLg of
-  // air on both sides so the last row of content never crowds the sheet edge.
-  sheetProps.grabberMargin = theme.spaceLg;
+  // Keep equal padding above and below the grabber.
+  sheetProps.grabberMargin =
+      static_cast<int16_t>(theme.spaceLg + (UITheme::getInstance().hasMainTabs() ? 0 : theme.spaceMd));
   sheetProps.grabberInset = static_cast<int16_t>(theme.spaceLg + theme.spaceMd);
   screen.sheet(sheetProps, static_cast<int16_t>(panelBottom));
   screen.insetContent(fui::Insets{0, kPanelSideMargin, 0, kPanelSideMargin});
@@ -380,7 +398,7 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   // Quick-setting tiles. Two columns of finger-sized cards; a tile whose
   // setting is currently on draws filled (StateChecked -> selected style).
   // Touch boards only — the tiles are touch targets.
-  if (mappedInput.hasTouch()) {
+  if (mappedInput.hasTouch() && UITheme::getInstance().hasMainTabs()) {
     static constexpr StrId kOrientNames[4] = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW,
                                               StrId::STR_ORIENTATION_INVERTED, StrId::STR_LANDSCAPE_CCW};
     // The orientation tile is labelled with just the current mode ("Portrait"):
@@ -393,24 +411,68 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     snprintf(touchLabel, sizeof(touchLabel), "%s %s", tr(STR_TOUCH_TOGGLE),
              I18N.get(touchOn ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF));
 
-    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel, touchLabel};
-    const fui::State states[kTileCount] = {SETTINGS.screenInverted ? fui::StateChecked : fui::StateNormal,
-                                           fui::StateNormal, fui::StateNormal,
-                                           // Filled when touch reader controls are OFF — the non-default,
-                                           // attention-worthy state.
-                                           touchOn ? fui::StateNormal : fui::StateChecked};
+    const char* labels[kInxTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel, touchLabel};
+    const fui::State states[kInxTileCount] = {SETTINGS.screenInverted ? fui::StateChecked : fui::StateNormal,
+                                              fui::StateNormal, fui::StateNormal,
+                                              // Filled when touch reader controls are OFF — the non-default,
+                                              // attention-worthy state.
+                                              touchOn ? fui::StateNormal : fui::StateChecked};
 
-    for (int id = 0; id < kTileCount; ++id) {
+    for (int id = 0; id < kInxTileCount; ++id) {
       gridItems[id].label = labels[id];
       gridItems[id].value = static_cast<int16_t>(id);
       gridItems[id].state = states[id];
     }
     gridProps.items = gridItems;
-    gridProps.count = static_cast<uint16_t>(kTileCount);
+    gridProps.count = static_cast<uint16_t>(kInxTileCount);
     gridProps.action = ACTION_TILE;
     gridProps.tileHeight = kTileHeight;
     gridProps.gap = kTileGap;
     screen.tileGrid(gridProps);
+  } else if (mappedInput.hasTouch()) {
+    const int tileCount = bleturner::status().compiledIn ? kTileCount : kTileCount - 1;
+    const fui::BitmapRef icons[kTileCount] = {
+        fui::bitmapFromIcon(icon_moon_32), fui::bitmapFromIcon(icon_refresh_cw_32),
+        fui::bitmapFromIcon(icon_reader_text_24), fui::bitmapFromIcon(icon_pointer_32),
+        fui::bitmapFromIcon(SETTINGS.ble.enabled ? icon_bluetooth_32 : icon_bluetooth_off_32)};
+    const bool enabled[kTileCount] = {SETTINGS.screenInverted != 0, false, false,
+                                      SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF,
+                                      SETTINGS.ble.enabled != 0};
+    static constexpr fui::Rotation rotations[] = {fui::Rotation::None, fui::Rotation::CW90, fui::Rotation::R180,
+                                                  fui::Rotation::CCW90};
+    // The underline rotates around the same 32px square as the toolbar's T.
+    static constexpr fui::Rect underlines[] = {{4, 29, 24, 3}, {0, 4, 3, 24}, {4, 0, 24, 3}, {29, 4, 3, 24}};
+    const fui::Rect row = screen.takeTop(kQuickControlSize);
+    const fui::Paint ink = fui::Paint::solid(fui::Color::Black);
+    for (int id = 0; id < tileCount; ++id) {
+      const int16_t left = static_cast<int16_t>(row.x + row.width * id / tileCount);
+      const int16_t right = static_cast<int16_t>(row.x + row.width * (id + 1) / tileCount);
+      const fui::Rect slot{left, row.y, static_cast<int16_t>(right - left), row.height};
+      const fui::Rect control{static_cast<int16_t>(slot.x + (slot.width - kQuickControlSize) / 2), row.y,
+                              kQuickControlSize, kQuickControlSize};
+      if (enabled[id]) {
+        screen.target().fill(control, ink, theme.controlRadius);
+      } else {
+        screen.target().stroke(control, ink, 2, theme.controlRadius);
+      }
+      const fui::Rect iconRect{static_cast<int16_t>(control.x + (control.width - kQuickIconSize) / 2),
+                               static_cast<int16_t>(control.y + (control.height - kQuickIconSize) / 2), kQuickIconSize,
+                               kQuickIconSize};
+      const fui::Paint foreground = fui::Paint::solid(enabled[id] ? fui::Color::White : fui::Color::Black);
+      const int orientation = SETTINGS.orientation % CrossPointSettings::ORIENTATION_COUNT;
+      screen.target().bitmap(iconRect, icons[id], fui::BitmapMode::Center, foreground,
+                             id == 2 ? rotations[orientation] : fui::Rotation::None);
+      if (id == 2) {
+        const auto& line = underlines[orientation];
+        screen.target().fill(fui::Rect{static_cast<int16_t>(iconRect.x + line.x),
+                                       static_cast<int16_t>(iconRect.y + line.y), line.width, line.height},
+                             ink);
+      }
+      // A tile whose function the slide switch owns shows its state but takes no tap.
+      const bool switchOwned = (id == 0 && slideSwitchOwns(CrossPointSettings::SLIDE_SWITCH_NIGHT_MODE)) ||
+                               (id == 3 && slideSwitchOwns(CrossPointSettings::SLIDE_SWITCH_TOUCH_CONTROLS));
+      if (!switchOwned) screen.frame().hit(slot, ACTION_TILE, static_cast<int16_t>(id), fui::InputTouch);
+    }
   }
 }
 

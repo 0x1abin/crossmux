@@ -47,7 +47,7 @@ class PioarduinoCacheTest(unittest.TestCase):
                 return str(root)
 
             def GetProjectOption(self, name, default):
-                return requested
+                return requested if name == "custom_sdkconfig" else default
 
             def BoardConfig(self):
                 return {"build.mcu": "esp32s3"}

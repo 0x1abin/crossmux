@@ -81,7 +81,9 @@ TEST(PluginManifestClassification, VersionsMustBeExactlyThreeDigitComponents) {
 }
 
 TEST(PluginCatalogPaging, ServerPaginationCanBeSpecifiedInUrlBodyOrHeaders) {
-  using plugincatalogpaging::isStaticFeed;
+  const auto isStaticFeed = [](auto url, auto body, const auto& headers) {
+    return plugincatalogpaging::pagingOf(url, body, headers) == plugincatalogpaging::Paging::Static;
+  };
   std::map<std::string, std::string> headers;
   EXPECT_TRUE(isStaticFeed("https://host/static.json", "", headers));
   EXPECT_FALSE(isStaticFeed("https://host/?page={page}", "", headers));
@@ -100,7 +102,7 @@ TEST(PluginCatalogPaging, StaticPagesCountOnlyCompatibleEntriesAndLookAhead) {
     for (size_t row = 0; row < compatible.size(); ++row)
       if (window.take(compatible[row])) selected.push_back(row);
     EXPECT_EQ(selected, expected[page]);
-    EXPECT_EQ(window.hasMore(), page < 2);
+    EXPECT_EQ(window.hasMore(plugincatalogpaging::Paging::Static), page < 2);
   }
 }
 
@@ -111,5 +113,5 @@ TEST(PluginCatalogPaging, ServerPageLookaheadUsesRawRowsBeforeCompatibilityFilte
   for (size_t row = 0; row < compatible.size(); ++row)
     if (serverPage.take() && compatible[row]) selected.push_back(row);
   EXPECT_EQ(selected, (std::vector<size_t>{1}));
-  EXPECT_TRUE(serverPage.hasMore());
+  EXPECT_TRUE(serverPage.hasMore(plugincatalogpaging::Paging::PageNumber));
 }

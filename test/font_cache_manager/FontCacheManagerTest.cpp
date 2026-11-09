@@ -303,3 +303,15 @@ TEST(FontCacheManagerTest, MovedReaderScopeFinishesAndReleasesOnDestruction) {
   }
   EXPECT_EQ(2, reader.clearCacheCount);
 }
+
+TEST(FontCacheManagerTest, ReleaseCallbackFiresOnReleaseSdFontCaches) {
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> noSdFonts;
+  FontCacheManager manager(noBuiltinFonts, noSdFonts, kNoTtfFonts);
+
+  int callbackCallCount = 0;
+  manager.setReleaseCallback([](void* ctx) { (*static_cast<int*>(ctx))++; }, &callbackCallCount);
+
+  manager.releaseSdFontCaches();
+  EXPECT_EQ(1, callbackCallCount);
+}

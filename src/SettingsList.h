@@ -17,10 +17,12 @@
 #include "HomeButtonSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "ReaderFontSizes.h"
+#include "ReaderLineSpacing.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/SettingsActivity.h"
 #include "components/UITheme.h"
 #include "util/DictionaryRegistry.h"
+#include "util/SlideSwitch.h"
 
 // Build the font family setting dynamically. SD-card rows follow whichever
 // built-in rows are visible in this firmware.
@@ -114,8 +116,8 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
 // toJson/fromJson — the generic loop skips dynamic entries), while the ENUM
 // contract shared with the web UI stays index-based.
 inline SettingInfo buildFontSizeSetting(const SdCardFontRegistry* registry) {
-  // Captured by copy: getSettingsList() returns by value and the lambdas outlive
-  // this call, so they must not reference the registry.
+  // Captured by copy so the indexes keep matching the option labels built here,
+  // even if the family changes later.
   const std::vector<uint8_t> sizes = readerFontPointSizes(registry, SETTINGS.sdFontFamilyName);
 
   // "pt" is deliberately not translated — see the matching note in
@@ -149,6 +151,8 @@ inline SettingInfo buildFontSizeSetting(const SdCardFontRegistry* registry) {
   return s;
 }
 
+inline constexpr char DICTIONARY_SETTING_KEY[] = "dictionaryName";
+
 // Build the dictionary selection setting dynamically from the folders discovered
 // under /dictionaries. "None" plus one option per dictionary; the selected folder
 // name persists in SETTINGS.dictionaryName (saved/loaded manually in
@@ -161,7 +165,7 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
 
   SettingInfo s;
   s.nameId = StrId::STR_DICTIONARY;
-  s.key = "dictionaryName";  // web settings API; persisted by name, not by the generic loop
+  s.key = DICTIONARY_SETTING_KEY;  // web settings API; persisted by name, not by the generic loop
   s.type = SettingType::ENUM;
   s.enumStringValues.reserve(folderNames.size() + 1);
   s.enumStringValues.push_back(I18N.get(StrId::STR_NONE_OPT));
@@ -321,13 +325,98 @@ template <typename Fn>
 void forEachBaseSetting(Fn& fn) {
   forEachBaseSetting([](void* context, SettingInfo& info) { (*static_cast<Fn*>(context))(info); }, &fn);
 }
-std::vector<SettingInfo> getBaseSettingsList(size_t extraCapacity = 0);
+
+// Number of entries forEachBaseSetting() visits.
+size_t countBaseSettings();
+
+// True if this board hides the setting at runtime. UI-only: the probes have not
+// run at load time, so the base list keeps these keys persisted.
+inline bool isHiddenOnDevice(const SettingInfo& s) {
+  switch (s.nameId) {
+    // Frontlit and lightless variants of a board share one binary (EEGO A4);
+    // presence is the I2C probe result from Frontlight.begin(). The slide
+    // switch's position owns its bound function (the light at boot too).
+    case StrId::STR_RESTORE_LIGHT_ON_WAKE:
+      return !Frontlight.present() || slideSwitchOwnsLight();
+    case StrId::STR_NIGHT_MODE:
+      return slideSwitchOwns(CrossPointSettings::SLIDE_SWITCH_NIGHT_MODE);
+    case StrId::STR_TOUCH_READER_CONTROLS:
+      return slideSwitchOwns(CrossPointSettings::SLIDE_SWITCH_TOUCH_CONTROLS);
+    // Tilt page turn needs an IMU with a gyroscope. A failed probe on one boot
+    // must not drop the saved value.
+    case StrId::STR_TILT_PAGE_TURN:
+      return !halTiltSensor.isAvailable();
+    // Clock settings need the RTC, as on the device (ClockSettingsActivity).
+    case StrId::STR_CLOCK:
+    case StrId::STR_CLOCK_FORMAT:
+    case StrId::STR_TIMEZONE:
+    case StrId::STR_CLOCK_DST:
+    case StrId::STR_CLOCK_IN_HEADER:
+    case StrId::STR_CLOCK_SYNCED:
+      return !halClock.isAvailable();
+    // Hidden on touch boards: the Home button actions (X4 Pro) or the short
+    // power click (other touch boards) cover these shortcuts.
+    case StrId::STR_LONG_PRESS_MENU:
+      return BoardConfig::hasTouch();
+    default:
+      return false;
+  }
+}
+
+// Replaces the font family and size entries with options built from the fonts
+// present; other entries are left unchanged.
+inline void buildFontOptions(SettingInfo& s, const SdCardFontRegistry* registry) {
+  if (s.nameId == StrId::STR_FONT_FAMILY) {
+    s = buildFontFamilySetting(registry);
+  } else if (s.nameId == StrId::STR_FONT_SIZE) {
+    // Unconditional: even with no SD fonts installed the sizes come from the
+    // built-in family rather than a fixed Small/Medium/Large/XL enum.
+    s = buildFontSizeSetting(registry);
+  }
+}
+
+inline bool isSettingAvailableOnBoard(const SettingInfo& setting);
+
+// Visits the settings shown on this device in list order, one at a time, for
+// callers that need not hold the whole list in memory. Entries whose key
+// wants(key) rejects are skipped before their options are built; wants gets
+// nullptr for entries without a key (actions). The visited entry is valid only
+// during the callback; move from it to keep it.
+template <typename Wants, typename Visit>
+void forEachSetting(const SdCardFontRegistry* registry, const std::vector<DictionaryEntry>* dictionaries, Wants wants,
+                    Visit visit) {
+  bool dictionaryPending = dictionaries && !dictionaries->empty();
+  const auto visitDictionary = [&] {
+    dictionaryPending = false;
+    if (!wants(DICTIONARY_SETTING_KEY)) return;
+    SettingInfo s = buildDictionarySetting(*dictionaries);
+    visit(s);
+  };
+  auto each = [&](SettingInfo& s) {
+    if (isHiddenOnDevice(s) || !isSettingAvailableOnBoard(s)) return;
+    if (dictionaryPending && s.category == StrId::STR_CAT_CONTROLS) visitDictionary();
+    if (!wants(s.key)) return;
+    buildFontOptions(s, registry);
+    visit(s);
+  };
+  forEachBaseSetting(each);
+  if (dictionaryPending) visitDictionary();
+  if (BoardConfig::hasHomeKey()) {
+    for (unsigned i = 0; i < 3; ++i) {
+      if (!wants(home_button::KEYS[i])) continue;
+      auto s = SettingInfo::StaticEnum(home_button::GESTURE_LABELS[i], home_button::FIELDS[i],
+                                       home_button::ACTION_LABELS, home_button::KEYS[i], StrId::STR_CAT_CONTROLS);
+      visit(s);
+    }
+  }
+}
 
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
   if (setting.nameId == StrId::STR_DBL_CLICK_PWR_LIGHT && !BoardConfig::isX4Pro()) return false;
   if (setting.nameId == StrId::STR_TILT_PAGE_TURN && !halTiltSensor.isAvailable()) return false;
   if (!BoardConfig::hasTouch() &&
-      (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS || setting.nameId == StrId::STR_TAP_ZONES))
+      (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS || setting.nameId == StrId::STR_NEXT_PAGE_GESTURE ||
+       setting.nameId == StrId::STR_PREV_PAGE_GESTURE || setting.nameId == StrId::STR_TAP_ZONES))
     return false;
   if (!BoardConfig::hasHomeKey() && setting.nameId == StrId::STR_SHOW_READER_MENU) return false;
   const bool frontlightSetting = setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
@@ -375,64 +464,11 @@ inline void forEachSettingsListEntry(const SdCardFontRegistry* registry, Callbac
 // may insert a dynamically discovered dictionary entry.
 inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
                                                 const std::vector<DictionaryEntry>* dictionaries = nullptr) {
-  std::vector<SettingInfo> v = getBaseSettingsList(dictionaries && !dictionaries->empty() ? 1 : 0);
-  if (!BoardConfig::hasTouch()) {
-    // The reader menu style stays available on button boards (the toolbar
-    // chrome is button-navigable); only the touch controls are hidden.
-    v.erase(std::remove_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) {
-                             return s.nameId == StrId::STR_TOUCH_READER_CONTROLS ||
-                                    s.nameId == StrId::STR_NEXT_PAGE_GESTURE ||
-                                    s.nameId == StrId::STR_PREV_PAGE_GESTURE || s.nameId == StrId::STR_TAP_ZONES;
-                           }),
-            v.end());
-  }
-  // The reader-menu gesture choice only makes sense where the menu stays
-  // reachable without the tap and the bottom edge is free (the capacitive
-  // Home key); everywhere else the bottom-edge up-swipe is Home and the
-  // center tap is the primary path, so the setting stays at its Tap default.
-  if (!BoardConfig::hasHomeKey()) {
-    v.erase(std::remove_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) { return s.nameId == StrId::STR_SHOW_READER_MENU; }),
-            v.end());
-  }
-  if (BoardConfig::hasHomeKey()) {
-    v.reserve(v.size() + 3);
-    for (unsigned i = 0; i < 3; ++i) {
-      v.push_back(SettingInfo::StaticEnum(home_button::GESTURE_LABELS[i], home_button::FIELDS[i],
-                                          home_button::ACTION_LABELS, home_button::KEYS[i], StrId::STR_CAT_CONTROLS));
-    }
-  }
-  if (BoardConfig::hasTouch()) {
-    v.erase(std::remove_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) {
-                             return s.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION ||
-                                    s.nameId == StrId::STR_SUNLIGHT_FADING_FIX ||
-                                    s.nameId == StrId::STR_BACK_SHORT_TO_FILE_BROWSER;
-                           }),
-            v.end());
-  }
-  v.erase(std::remove_if(v.begin(), v.end(), [](const SettingInfo& s) { return !isSettingAvailableOnBoard(s); }),
-          v.end());
-  {
-    auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_FAMILY; });
-    if (it != v.end()) {
-      *it = buildFontFamilySetting(registry);
-    }
-  }
-  {
-    // Unconditional: even with no SD fonts installed the sizes come from the
-    // built-in family rather than a fixed Small/Medium/Large/XL enum.
-    auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_SIZE; });
-    if (it != v.end()) {
-      *it = buildFontSizeSetting(registry);
-    }
-  }
-  if (dictionaries && !dictionaries->empty()) {
-    // Insert at the end of the Reader category (just before the first Controls entry).
-    auto it =
-        std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.category == StrId::STR_CAT_CONTROLS; });
-    v.insert(it, buildDictionarySetting(*dictionaries));
-  }
+  std::vector<SettingInfo> v;
+  // Room for every base entry and the dictionary, so the list never reallocates.
+  v.reserve(countBaseSettings() + (BoardConfig::hasHomeKey() ? 3 : 0) +
+            (dictionaries && !dictionaries->empty() ? 1 : 0));
+  forEachSetting(
+      registry, dictionaries, [](const char*) { return true; }, [&v](SettingInfo& s) { v.push_back(std::move(s)); });
   return v;
 }
