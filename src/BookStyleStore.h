@@ -48,7 +48,7 @@ struct BookStyle {
   uint8_t fontFamily = CrossPointSettings::NOTOSANS;
   char sdFontFamilyName[32] = "";
   uint8_t fontPointSize = CrossPointSettings::DEFAULT_FONT_POINT_SIZE;
-  uint8_t lineSpacing = CrossPointSettings::NORMAL;
+  uint8_t lineSpacing = CrossPointSettings::LINE_SPACING_120;
   uint8_t paragraphAlignment = CrossPointSettings::JUSTIFIED;
   uint8_t extraParagraphSpacing = 0;
   uint8_t firstLineIndent = FirstLineIndent::Auto;

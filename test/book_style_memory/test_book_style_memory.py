@@ -262,8 +262,8 @@ struct CrossPointSettings {
   static constexpr uint8_t NOTOSANS = 0;
   static constexpr uint8_t FONT_FAMILY_COUNT = 8;
   static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 12;
-  static constexpr uint8_t NORMAL = 1;
-  static constexpr uint8_t LINE_COMPRESSION_COUNT = 4;
+  static constexpr uint8_t LINE_SPACING_120 = 2;
+  static constexpr uint8_t LINE_COMPRESSION_COUNT = 7;
   static constexpr uint8_t JUSTIFIED = 1;
   static constexpr uint8_t PARAGRAPH_ALIGNMENT_COUNT = 3;
   static constexpr uint8_t SYNTHETIC_BOLD_STANDARD = 1;

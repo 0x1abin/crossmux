@@ -71,7 +71,7 @@ bool styleFromJson(JsonObjectConst obj, BookStyle& style) {
   }
   style.fontPointSize =
       boundedInteger<uint8_t>(obj, "fontPointSize", CrossPointSettings::DEFAULT_FONT_POINT_SIZE, 1, kMaxFontPointSize);
-  style.lineSpacing = boundedInteger<uint8_t>(obj, "lineSpacing", CrossPointSettings::NORMAL, 0,
+  style.lineSpacing = boundedInteger<uint8_t>(obj, "lineSpacing", CrossPointSettings::LINE_SPACING_120, 0,
                                               CrossPointSettings::LINE_COMPRESSION_COUNT - 1);
   style.paragraphAlignment = boundedInteger<uint8_t>(obj, "paragraphAlignment", CrossPointSettings::JUSTIFIED, 0,
                                                      CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT - 1);
