@@ -78,6 +78,7 @@ struct OpdsClient {
  bool tokensDirty(){return false;}
 };
 }
+struct RenderLock { RenderLock() = default; template<class T> explicit RenderLock(T&) {} void unlock() {} };
 class OpdsBookBrowserActivity {
 public:
  struct {std::string url="https://catalog/";} server;

@@ -16,6 +16,9 @@ class WebServerStartupFailureTest(unittest.TestCase):
         declarations = '\n'.join('template<class... T> void '+name+'(T&&...) {}' for name in handlers)
         run_cpp(r'''
 #include <cassert>
+#include <algorithm>
+#include <functional>
+#include <vector>
 #include <memory>
 #include <new>
 #include <string>
@@ -25,7 +28,7 @@ template<class... T> void logMessage(T&&...) {}
 #define LOG_ERR(...) logMessage(__VA_ARGS__)
 using String = std::string;
 using wifi_mode_t = int;
-constexpr int WIFI_MODE_STA=1, WIFI_MODE_AP=2, WL_CONNECTED=3, HTTP_GET=0, HTTP_POST=1;
+constexpr int WIFI_MODE_STA=1, WIFI_MODE_AP=2, WL_CONNECTED=3, HTTP_GET=0, HTTP_POST=1, HTTP_HEAD=2;
 constexpr int LOCAL_UDP_PORT=8134, FILE_LIST_BATCH_CAPACITY=1400;
 int allocation=0, failAt=0, httpLive=0, wsLive=0, httpListening=0, wsListening=0;
 bool udpSuccess=true;
@@ -48,15 +51,20 @@ struct WebDAVHandler {
  }
  static void operator delete(void* p) noexcept { ::operator delete(p); }
 };
+struct Middleware {using Callback=std::function<bool()>;};
+namespace UrlUtils {bool isForeignHost(const char*) {return false;}}
 struct WebServer {
- std::unique_ptr<WebDAVHandler> handler;
+ std::vector<std::unique_ptr<WebDAVHandler>> handlers;
+ int method(){return HTTP_GET;} String header(const char*){return {};}
+ void sendHeader(const char*, const String&, bool){} void send(int,const char*,const char*){}
+ template<class T> void addMiddleware(T) {}
  explicit WebServer(int) { ++httpLive; }
  ~WebServer() { --httpLive; }
  template<class... T> void on(T&&...) {}
  template<class T> void onNotFound(T) {}
  void enableCORS(bool) {}
  void collectHeaders(const char**, int) {}
- void addHandler(WebDAVHandler* p) { handler.reset(p); }
+ void addHandler(WebDAVHandler* p) { handlers.emplace_back(p); }
  void begin() { ++httpListening; }
  void stop() { httpListening=0; }
 };
@@ -88,6 +96,11 @@ struct UploadState { static constexpr int UPLOAD_BUFFER_SIZE=4096; Buffer buffer
 struct FontUploadState { static constexpr int BUFFER_SIZE=4096; Buffer buffer; };
 class CrossPointWebServer {
  public:
+ struct RouteHandler : WebDAVHandler {explicit RouteHandler(CrossPointWebServer&) {}};
+ unsigned long wsLastActivity[2]{};
+ int discoverySocket=-1;
+ void openDiscoverySocket(){discoverySocket=udpSuccess?3:-1;}
+ void closeDiscoverySocket(){discoverySocket=-1;}
  bool running=false, apMode=false, udpActive=false;
  int port=80, wsPort=81;
  std::unique_ptr<WebServer> server;
@@ -107,7 +120,7 @@ class CrossPointWebServer {
 ''' + declarations + '\n};\n' + begin + '\n' + stop + r'''
 void assertStopped(const CrossPointWebServer& web) {
  assert(!web.running && !web.server && !web.wsServer && !web.fileListBatch);
- assert(!web.upload.buffer && !web.fontUpload.buffer && !web.udpActive && !web.udp.listening && !web.udp.bufferAllocated);
+ assert(!web.upload.buffer && !web.fontUpload.buffer && web.discoverySocket==-1);
  assert(!wsInstance && httpLive==0 && wsLive==0 && httpListening==0 && wsListening==0);
 }
 int main() {
@@ -117,13 +130,13 @@ int main() {
  assertStopped(web);
  WiFi.mode=WIFI_MODE_AP;
  // WebServer, both buffers, WebDAV, WebSocket and file-list buffer allocations.
- for (int failure=1; failure<=6; ++failure) {
+ for (int failure=1; failure<=7; ++failure) {
   allocation=0; failAt=failure;
   assert(!web.begin());
   assertStopped(web);
   allocation=0; failAt=0;
   assert(web.begin());
-  assert(web.running && web.udpActive && wsInstance==&web);
+  assert(web.running && web.discoverySocket>=0 && wsInstance==&web);
   const int before=allocation;
   assert(web.begin() && allocation==before);
   web.stop(); web.stop();

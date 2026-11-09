@@ -346,7 +346,10 @@ void OpdsBookBrowserActivity::startBrowse() {
   std::string().swap(pendingLcpLicenseText);
   pendingLcpLicense = {};
   pendingLcpPath.clear();
-  releaseEntries();  // harmless when already empty
+  {
+    RenderLock lock;
+    releaseEntries();  // harmless when already empty
+  }
   nav.reset();
   beginLoading();
   fetchFeed(currentPath);
@@ -387,6 +390,9 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     return;
   }
 
+  // Everything the render task reads (header, pagination bar, entries, rows, state) changes under
+  // the lock: a repaint that started before beginLoading() may still be drawing the old feed.
+  RenderLock lock;
   searchTemplate = parser.getSearchTemplate();
   searchDescriptionUrl = parser.getSearchDescriptionUrl();
   searchTemplateBase = "";  // feed-inline template resolves against the feed URL
@@ -486,6 +492,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   if (!rebuildRowItems()) return;
   state = entries.empty() ? State::ERROR : State::BROWSING;
   if (entries.empty()) errorMessage = tr(STR_NO_ENTRIES);
+  lock.unlock();
   requestUpdate();
 }
 
@@ -520,6 +527,8 @@ bool OpdsBookBrowserActivity::rebuildRowItems() {
   return true;
 }
 
+// Callers outside onExit() (which already runs under the render lock) take the lock first: a
+// repaint queued before this (e.g. by the press that opened a book) may still be drawing these rows.
 void OpdsBookBrowserActivity::releaseEntries() {
   // The app's interaction table holds row indices (and hit rects) for the old
   // entries; stop routing touches against it until the next render.
@@ -638,7 +647,10 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   // The selected book data is now copied into the download URL, filename, and
   // status line. Reclaim the catalog while TLS owns its record buffers; reload
   // the current feed when the transfer finishes.
-  releaseEntries();
+  {
+    RenderLock lock;
+    releaseEntries();
+  }
 
   const freeink::opds::HttpAuth dlAuth = opdsTransport.authFor(downloadUrl, opdsClient.downloadAuth());
   std::vector<HttpDownloader::Header> headers = dlAuth.headers;
@@ -729,7 +741,10 @@ void OpdsBookBrowserActivity::downloadLcpBook(const OpdsEntry& book) {
 
   // Reclaim the catalog while TLS owns its record buffers, as for a plain
   // download; downloadFile() gates the heap and pumps cancel input.
-  releaseEntries();
+  {
+    RenderLock lock(*this);
+    releaseEntries();
+  }
   const std::string staged = downloadStagePath();
   if (staged.empty()) {
     fail(StrId::STR_DOWNLOAD_FAILED);
@@ -940,8 +955,11 @@ void OpdsBookBrowserActivity::openPublicationDetail(const OpdsEntry& entry) {
 
   beginLoading();
 
-  releaseEntries();
-  if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
+  {
+    RenderLock lock;  // the loading repaint may still be drawing with these caches
+    releaseEntries();
+    if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
+  }
 
   if (haveSelf) {
     opdsClient.fetchPublication(docUrl, publication);

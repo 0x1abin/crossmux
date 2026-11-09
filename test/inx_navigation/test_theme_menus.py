@@ -15,7 +15,7 @@ from test_upstream_theme_compat import compare, source
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-REF = os.environ.get('FREEINK_UPSTREAM_READER_REF', '98da17829cb3c8afbc50af491c81d440bbfd15b9')
+REF = os.environ.get('FREEINK_UPSTREAM_READER_REF', '136c26553980579d9f9c9176f11ce0870087cb80')
 SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 
 
@@ -461,7 +461,11 @@ struct UITheme { static UITheme& getInstance(){static UITheme t;return t;} bool 
 struct { bool light=false; bool present(){return light;} } Frontlight;
 bool switchOwnsLight=false;bool slideSwitchOwnsLight(){return switchOwnsLight;}
 namespace bleturner {struct Status {bool compiledIn=false;};Status state;Status status(){return state;}}
-struct {char dictionaryName[2]={};} SETTINGS;
+struct CrossPointSettings {enum {SLIDE_SWITCH_NIGHT_MODE=1};};
+bool slideSwitchOwns(int){return false;}
+struct {char dictionaryName[2]={};struct {char peerAddr[2]={'p',0};} ble;} SETTINGS;
+struct {bool hasCredentials(){return true;}} KOREADER_STORE;
+namespace pluginevents {enum class Event {COUNT};bool anySubscriber(Event){return false;}}
 '''
     code += 'enum class StrId {'+','.join(ids)+'};\n'
     code += ''.join(f'constexpr StrId {i}=StrId::{i};\n' for i in ids)

@@ -103,6 +103,12 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Versions 88 / 89
+
+Invalidate completed and partial section caches for font-size-based line spacing,
+ruby space-around layout, RTL focus offsets and TrueType missing-glyph advances
+from upstream versions 69–73. Preserve book metadata and reading progress.
+
 ### Versions 86 / 87
 
 Versions 86 (Latin) / 87 (CJK) rebuild completed and partial pagination for the latest justified spacing and bounded greedy wrapping beside drop caps, preventing mid-line hyphens. The binary layout is unchanged from 84/85. Partial sentinels are 196/195, derived from `0xFE - (completeVersion - 28)`.

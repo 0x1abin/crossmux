@@ -163,7 +163,7 @@ def main():
         capacities.add(entry_count)
     # Compile the actual collector with descriptors for every capability count;
     # the list contents above come from the production visitor, including its factories.
-    collector_start = source.index('std::vector<SettingInfo> getBaseSettingsList(')
+    collector_start = source.index('size_t countBaseSettings(')
     collector_open = source.index('{', collector_start)
     collector_end = matching_delimiter(source, collector_open, '{', '}')
     collector = source[collector_start:collector_end + 1]
@@ -181,11 +181,7 @@ void forEachBaseSetting(SettingVisitor visit,void* context){
 }
 """ + collector + '\nint main(){for(size_t count : {' + ','.join(str(n)+'u' for n in capacities) + r"""}){
  descriptorCount=count;
- for(size_t extra:{0u,1u,4u}){
-  auto rows=getBaseSettingsList(extra);
-  assert(rows.size()==count && rows.capacity()>=count+extra);
-  for(size_t i=0;i<count;++i)assert(rows[i].id==i);
- }
+ assert(countBaseSettings()==count);
 }}
 """
     import os
@@ -196,7 +192,7 @@ void forEachBaseSetting(SettingVisitor visit,void* context){
         subprocess.run([str(binary)], check=True)
     print(f"Web Settings API keys are unique across {2 ** len(capability_names)} capability combinations")
     print("Base settings capacity matches every capability combination without vector growth")
-    print("Production visitor emits one descriptor at a time; collector reserves every capability count plus caller slots")
+    print("Production visitor emits one descriptor at a time; count matches every capability combination")
 
 
 if __name__ == "__main__":

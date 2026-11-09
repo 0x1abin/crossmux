@@ -539,7 +539,9 @@ void ImageViewerActivity::loop() {
     }
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  int touchX = 0;
+  int touchY = 0;
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenLongPress(touchX, touchY)) {
     showSleepCoverOptions();
     return;
   }
