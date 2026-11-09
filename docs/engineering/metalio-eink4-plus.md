@@ -1,5 +1,9 @@
 # Metalio E-Ink4-Plus V1.4 / ESP32-S31
 
+For the current accepted scope, prioritized remaining work and pending SDK
+integration, see the [adaptation checklist](metalio-eink4-plus-todo.md). The
+sections below retain the chronological development and acceptance evidence.
+
 This is an experimental integration, separate from the S3/SPI `metalio_eink4`
 target. The input-startup correction has now been flashed and verified. The
 user accepted book-cover touch/open, volume+/volume- page turns, the three
@@ -77,7 +81,11 @@ the development version. The generated partition binary matches the backup.
 ## Reproduce
 
 ```sh
+# Temporary SDK checkout while its integration PR is pending:
 git submodule update --init --recursive
+git -C freeink-sdk fetch https://github.com/lfxyl/freeink-sdk.git codex/metalio-eink4-plus-s31
+git -C freeink-sdk checkout --detach 3cb3d568e3fe5c9d69d1ba47eb8dfdb64d34610d
+git -C freeink-sdk submodule update --init --recursive
 pio run -e metalio_eink4_plus
 python3 scripts/tests/test_metalio_plus_build_only.py
 python3 scripts/tests/test_metalio_plus_core.py
@@ -93,14 +101,22 @@ python3 freeink-sdk/libs/book/ContentProtection/test/host/run_psa_keygen.py
 
 Sources used during development: reader `0ab0af23f69cca73af7cf0143eafbfe9f5d6d648`,
 SDK `d9a1304cd234b0536136302f629304b609f62b32` plus local changes, vendor BSP
-`2b2c36ae58f32a9cb1a721d1000883a2693651a4`. The SDK gitlink remains unchanged.
+`2b2c36ae58f32a9cb1a721d1000883a2693651a4`. These are the original development
+baselines. The tested SDK changes are now committed separately; while their PR
+is pending, follow the [temporary SDK checkout steps](metalio-eink4-plus-todo.md#复现与依赖状态)
+before running the commands above. The default gitlink retains the original SDK baseline.
 The new `MetalioPlusEpd/vendor-source-manifest.json` maps 74 copied vendor files
 to their original Git blobs. Integration and HAL adapters live outside `src/vendor`.
 
-For this Mac, the parent `tools/pio-s31-200m` wrapper selects a separate local
-cache under `toolchains/.platformio-s31-200m`; the previous packages and native
-probe toolchain remain available. Exact managed-component versions and build
-evidence are retained in the parent logs. No global tool installation is needed.
+The local `tools/pio-s31-200m` wrapper in the separate development directory
+selects an isolated cache under `toolchains/.platformio-s31-200m`. The checkout
+has moved independently of that directory. Set `METALIO_DEV_ROOT` to the existing
+development directory and invoke `"$METALIO_DEV_ROOT/tools/pio-s31-200m" run -d
+"$PWD" -e metalio_eink4_plus` from the repository root. Previous packages,
+the native probe toolchain, exact managed-component versions, backups and build
+logs remain in that external directory. Historical references below to parent
+artifacts/logs mean that development directory, not the checkout's new parent.
+No global tool installation is needed.
 
 ## Integration
 
