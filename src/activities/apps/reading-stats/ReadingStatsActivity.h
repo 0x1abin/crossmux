@@ -12,8 +12,8 @@ struct ReadingBookStats;
 class ReadingStatsActivity final : public Activity, public UiAppHost {
   static constexpr freeink::ui::ActionId ACTION_ENTRY = 1;
   struct TouchTarget {
-    Rect bounds;
-    int entry;
+    Rect bounds{};
+    int entry = 0;
   };
   std::array<TouchTarget, 4> touchTargets{};
   int touchTargetCount = 0;

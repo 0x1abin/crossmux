@@ -232,3 +232,22 @@ restoring a stale differential baseline after the panel displayed an overlay.
 A framebuffer loan forbids drawing/display until exclusive `BuildScratch` claims
 are released and the original frame is restored. See
 [framebuffer ownership](architecture-and-patterns.md#framebuffer-and-storage-ownership).
+
+### Connection-owned TLS record reservation
+
+The 2026-11-03 SDK sync removes the global wolfSSL allocator loan. After the
+HTTP request has been sent, one admitted connection may proactively grow its
+input buffer to 16,704 bytes. `scripts/patch_wolfssl.py` retains that buffer
+until forced wolfSSL teardown and releases a consumed, unreferenced buffer
+before growing it. Ciphertext and plaintext still in use are never released.
+Negotiated small fragments, unread input and other admitted clients skip the
+reservation; ordinary on-demand growth remains available. Allocation failure
+releases admission for a later retry. This is a heap allocation, never a task
+stack buffer, and is freed by wolfSSL before the admission token is released.
+
+The patch matches pinned function anchors and fails on an unrecognized source.
+Validate with `WOLFSSL_INTERNAL_SOURCE=.pio/libdeps/default/Arduino-wolfSSL/src/src/internal.c
+python3 freeink-sdk/libs/network/SecureNet/test/host/test_record_reservation.py`
+(on one shell line), after the PlatformIO pre-build patch has run. Host tests
+cover allocation failure, retained records, alignment, competing clients and
+teardown under sanitizers. They do not establish physical-device TLS headroom.

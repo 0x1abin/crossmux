@@ -41,8 +41,10 @@ class SettingsTranslationsTest(unittest.TestCase):
         keys = set().union(*(set(re.findall(r"\bSTR_[A-Z0-9_]+\b", path.read_text())) for path in sources))
         self.assertFalse(keys - chinese.keys(), sorted(keys - chinese.keys()))
         for key in english:
-            if key.startswith(("STR_THEME_", "STR_SPACING_")):
+            if key.startswith("STR_THEME_"):
                 self.assertEqual(chinese[key], english[key], key)
+            elif key.startswith("STR_SPACING_"):
+                self.assertEqual(re.findall(r"[+-]?\d+", chinese[key]), re.findall(r"[+-]?\d+", english[key]), key)
         self.assertEqual(chinese["STR_INX_TAB_POSITION"], "Inx 标签栏位置")
 
         cjk = lambda text: set(re.findall(r"[一-鿿]", text))

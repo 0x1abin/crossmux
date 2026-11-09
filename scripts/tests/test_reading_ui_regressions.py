@@ -1030,9 +1030,9 @@ int main() {
     ActivityManager missingLight(theme);
     Frontlight.available=false;
     missingLight.tick({.light=true});
-    assert(missingLight.currentActivity->name!="FrontlightPanel" && missingLight.stackActivities.empty());
+    assert(missingLight.currentActivity->name=="FrontlightPanel" && missingLight.stackActivities.size()==1);
     missingLight.tick({.tap=true,.x=100,.y=10});
-    assert(missingLight.currentActivity->name!="FrontlightPanel" && missingLight.stackActivities.empty());
+    assert(missingLight.currentActivity->name=="FrontlightPanel" && missingLight.stackActivities.size()==1);
     Frontlight.available=true;
     missingLight.tick({.light=true});
     assert(missingLight.currentActivity->name=="FrontlightPanel");

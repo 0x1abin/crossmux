@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>插件 - CrossMux</title>
+  <link rel="stylesheet" href="/assets/web.css" />
+  <link rel="icon" type="image/svg+xml" href="/assets/crosspoint-icon.svg" />
+</head>
+<body class="web-ui">
+  <!--#include file="../shared/Header.zh-CN.html.inc" -->
+<main class="page-content">
+  <div id="plugin-container"></div>
+  <div class="card" id="empty-state" hidden>
+    <p class="empty-state">没有提供网页设置的插件。请在<b>设置 &rarr; 连接 &rarr; 插件</b>中开启插件，并确认 SD 卡上已安装插件。</p>
+  </div>
+</main>
+<!--#include file="../shared/Footer.zh-CN.html.inc" -->
+
+<script src="/js/plugin-host.js"></script>
+<script>
+  (async () => {
+    // The plugin host and the plugin list are separate requests and can fail on a busy device.
+    if (typeof loadPlugins !== 'function' || !(await loadPlugins('settings'))) {
+      document.querySelector('#empty-state p').textContent = '无法加载插件，请刷新页面。';
+    } else if (document.getElementById('plugin-container').children.length) {
+      return;
+    }
+    document.getElementById('empty-state').hidden = false;
+  })();
+</script>
+</body>
+</html>

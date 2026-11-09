@@ -51,6 +51,5 @@ bool setDisplayPower(bool enabled);
 bool setAudioPower(bool enabled);
 bool readBatteryPercentage(uint16_t& percent);
 bool externalPowerConnected(bool& connected);
-bool shutdown();
 
 }  // namespace Waveshare397Power

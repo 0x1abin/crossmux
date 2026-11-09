@@ -18,7 +18,7 @@ class ReaderTextTogglesTest(unittest.TestCase):
 #include <vector>
 enum class StrId { STR_FONT_SIZE, STR_LINE_SPACING, STR_PARA_ALIGNMENT, STR_FIRST_LINE_INDENT };
 struct CrossPointSettings {
-  enum {LINE_COMPRESSION_COUNT=4,PARAGRAPH_ALIGNMENT_COUNT=5};
+  enum {LINE_COMPRESSION_COUNT=7,PARAGRAPH_ALIGNMENT_COUNT=5};
   char sdFontFamilyName[32]{};
   uint8_t fontPointSize=12,sdFontFlashPreload=0,lineSpacing=1,paragraphAlignment=0,firstLineIndent=0;
   uint8_t focusReadingEnabled=0,verticalBottomAlign=0;
@@ -26,7 +26,7 @@ struct CrossPointSettings {
 struct {int registryValue=0;int& registry(){return registryValue;}} sdFontSystem;
 std::vector<uint8_t> readerFontPointSizes(int*,const char*){return {12,18};}
 uint8_t snapToNearestPointSize(const std::vector<uint8_t>&,uint8_t value){return value;}
-constexpr StrId kSpacingIds[]={StrId::STR_LINE_SPACING};
+constexpr StrId LINE_SPACING_IDS[]={StrId::STR_LINE_SPACING};
 constexpr StrId kAlignIds[]={StrId::STR_PARA_ALIGNMENT};
 constexpr StrId kIndentIds[]={StrId::STR_FIRST_LINE_INDENT};
 struct Popup {int calls=0;template<class...Args>void show(Args&&...){++calls;}};
