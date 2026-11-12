@@ -453,3 +453,237 @@ committed, with no captured panic or error markers. This is a bounded current-UI
 check, not all-theme/orientation or endurance acceptance. The image remains on
 device; capture ended intentionally. Parent `logs/plus-ui-density-acceptance.json`
 records feedback and memory samples. No automatic commit or restore was made.
+
+## Four-level grayscale and text AA candidate — 2026-11-10
+
+The user chose staged delivery and delegated the details: four-level grayscale
+and AA first, native sixteen-level images/four-bit glyphs later. The native
+front buffer now stages B/W plus ordered overlay masks (dark=11, light=01),
+mapped to levels 0/5/10/15. The existing vendor back plane remains the completed
+physical baseline. This introduces no driver framebuffer allocation or vendor
+source/waveform/calibration change. Combined strip uploads avoid a separate B/W
+activation on ordinary AA/image turns; GL16 carries the grays and existing
+Full cleanup/recovery keeps GC16. The first B/W return uses GL16, then ordinary
+B/W continues using DU. EPUB explicitly honors Combined for image strips and
+binary reading backgrounds; XTC uses the shared periodic Full decision.
+
+The driver validates complete, ordered plane coverage and masks before commit.
+Cancel leaves the glass unchanged; unsubmitted OOM fallback can finish B/W,
+while failed hardware work is not retried by cleanup. Gray cleanup preserves
+the actual gray baseline rather than replacing it with a B/W proxy. Existing
+reader strip scratch is 12,160 bytes; whole-plane compatibility retains its
+existing snapshot behavior. Legacy AirPage/Standby/Buddy callers that omit
+`displayGrayscaleBase` remain B/W on Plus and are outside this acceptance round.
+
+The real-driver harness passed 34 cases (20 added plus the original 14), after
+the capability test first failed before implementation. The profile first
+rejected two versus four levels, then passed with the C3/ReadPico guards and
+reader cadence checks. All 74 vendor blobs remain unchanged. A fresh relocated
+host build passed; full CTest remains 1,532/1,538 with the same six baseline
+failures and identical compiler-error multiset. Independent review found no
+actionable correctness issue; actual EPUB image/background and XTC branch
+integration plus optical behavior remain physical acceptance items. Legacy
+firmware matrix/full CI limitations recorded above still apply.
+
+Native S31 compilation passed with 108,040 static RAM bytes (+8 from the accepted
+UI image) and 6,510,008 linked Flash bytes. The candidate BIN is 6,510,864 bytes,
+SHA-256 `6c7e9b786f8d52d9301fefadf69188d6c16c2aad881bb4fe6dfc2d41798244aa`.
+Native 200MHz config, compiled startup order, image checksum/digest/board/slot,
+original partition bytes and recovery-manifest integrity checks passed.
+External `logs/crossmux-plus-four-gray-artifact-checks.json` and the separate
+`artifacts/source-snapshots/plus-four-gray-20261110` preserve this uncommitted
+source/candidate combination. The main gitlink still retains the configured
+upstream SDK baseline; these checks use the temporary feature SDK checkout.
+
+The user is away and requested batching manual tests on return. **This candidate
+has not been flashed; grayscale/AA physical acceptance is pending.** The accepted
+UI firmware remains on device. Later independent adaptation work may continue,
+with candidates and source evidence recorded separately; no automatic restore,
+commit, push or PR-readiness claim follows from this build.
+
+## Native RTC candidate — 2026-11-10
+
+The matching V1.4 vendor config places PCF8563@0x51 on I2C1 SDA0/SCL1 at
+100kHz. Plus boot rail setup already initializes that native bus before
+HalClock::begin; the RTC now reuses its owner/mutex and does not create Wire1
+or reorder startup. Begin is read-only. One nine-byte transfer captures control0
+and calendar state; STOP/test/VL, malformed BCD and impossible 2000–2099 dates
+are rejected without modifying the output. Trusted set holds one mutex across
+STOP/calendar/restart, preserves alarm/CLKOUT/timer registers and leaves a failed
+partial calendar stopped. Reserved control0 bits are written zero, following
+[NXP PCF8563 Rev11.1](https://www.nxp.com/docs/en/data-sheet/PCF8563.pdf).
+RTC alarm wake is not enabled; INT is on TCA P16 rather than an ESP GPIO.
+
+The profile now enables RTC only; IMU/environment remain disabled. No new
+application buffers or tasks were added. The existing native owner lazily
+allocates a cached IDF device handle for 0x51 on first access; that internal heap
+cost has not been measured. HalClock's existing software-clock/trusted-floor
+behavior stays in place. Previous ThingsOS/vendor UTC versus local-time encoding
+is unknown: check and synchronize with trusted time before accepting offline time.
+
+31 production RTC/native-I/O ASan/UBSan scenarios pass after the native-routing
+assertion first failed. Existing RTC/PMIC (18/26 injected fault points), disabled
+RTC and 22 Plus battery cases pass. The original PCF85063 host script fails on
+its missing I2cBusLock include path; with a host-only BoardConfig include path
+appended after its own profile stub and unused-const warning demotion, its original
+roundtrip/year/probe/error assertions pass. Both strict failure and adapted pass
+logs are preserved. Plus/C3/ReadPico profile guards pass. Full CTest is now
+1,533/1,539 with the same six prior failures and identical 56 compiler errors.
+Independent review found no actionable correctness issue. No complete CI claim follows.
+
+The combined RTC/four-gray S31 build passes at 108,048 static RAM bytes (+16
+from accepted UI), 6,511,994 linked Flash bytes. BIN 6,512,848 bytes, SHA-256
+`8e808c5f7b5095f278fad316f7cc3e830bc7db6bcc59e3f425a65ddd7643cb80`.
+Native 200MHz config, compiled startup order, image checksum/digest/board/slot,
+original partition bytes, frozen 74 vendor blobs and original recovery checks pass.
+External `logs/crossmux-plus-rtc-four-gray-artifact-checks.json` and
+`artifacts/source-snapshots/plus-rtc-four-gray-20261110` preserve the exact
+uncommitted candidate. It has not been flashed. Clock continuity/timebase, native
+I2C coexistence, runtime heap and optical acceptance remain pending.
+
+Further inspection found SC7A20H INT1 is wired with TCA INT to GPIO2; the accepted
+power-key wake path uses this line. Earlier read-only probe saw 0x19 respond, 0x18
+absent, but did not validate silicon version or mount axes. Generic Imu currently
+initializes Wire and rewrites IRQ configuration. It remains disabled until those
+contracts are resolved; no unverified automatic rotation is exposed. USB MSC also
+remains off: the current native build uses USB Serial/JTAG and has no TinyUSB
+configuration. An OTG stack, pin/PHY ownership and exclusive SD ownership must be
+validated before enabling the existing MSC facade.
+
+See the [batch acceptance checklist](metalio-eink4-plus-acceptance.md). The user
+requested skipping feedback-dependent steps while away. Accepted UI firmware,
+Never auto-sleep setting and the original recovery association remain unchanged.
+
+## Four-gray physical acceptance — 2026-11-12
+
+The user returned and candidate `6c7e9b78…` was written/verified using the original
+active recovery association. Immutable-region digests matched before the update.
+The user accepted clearer/smoother text, 20 requested cumulative page turns,
+menu/Home/reopen, four distinguishable black/dark/light/white patches in the new
+EPUB fixture, ten additional fixture turns, AA off/on, 26 pt to an adjacent smaller
+size and back, and one gray-page sleep/wake with progress/turn/Home intact.
+
+The retained refresh interval was 30 pages. During a controlled temporary 5-page
+interval the serial trace recorded successive Full commits at offsets 0/5/10/15,
+with four GL16 commits between them. All those updates completed. Original 30-page
+interval, AA enabled, 26 pt LXGWWenKai and Never sleep were verified via settings
+afterward. Ordinary panel GL16 commits in the initial sample had median 754 ms;
+this excludes rendering and is not a universal page-turn benchmark.
+
+The fixture EPUB/PNG were uploaded into a new `Metalio-Gray-Test-20261112-*`
+directory and downloaded with matching SHA-256. No original book was overwritten.
+Logs/receipts remain external under `logs/plus-four-gray-physical-acceptance-20261112.json`
+and `logs/plus-four-gray-fixture-upload-20261112.json`. Earlier capture also contains
+a deliberately cancelled render during navigation, network-view clipping diagnostics,
+disabled IMU and a duplicate-font diagnostic; these are not hidden as a clean global
+error log. No physical display/operation defect was reported in the tested sequence.
+
+This accepts the bounded EPUB four-gray/AA path, not all themes/directions, XTC,
+custom reading backgrounds, old standalone gray callers or endurance. RTC remains
+a separate acceptance stage; the initial register timebase was inspected before
+activating it, as recorded below.
+
+## RTC initial state and POR recovery — 2026-11-12
+
+A standalone read-only probe took three nine-byte PCF8563 samples without NVS,
+SD or calendar/control-value writes. Control0 was `08` (TESTC POR override), and
+seconds had VL set in all samples. This is an uninitialized/untrusted calendar;
+neither UTC nor a legacy local-time convention can be inferred. No initial time
+was adopted. Raw evidence is external `logs/plus-rtc-initial-readonly-20261112.json`.
+
+The earlier explicit-set guard rejected TESTC together with TEST1. That prevented
+trusted initialization of this actual unit. Following NXP sections 8.3.1/8.11.1,
+`MetalioPlusIo.cpp:113` now permits clearing TESTC only in the explicit trusted
+STOP/calendar/run transaction. Read-only begin/now still reject STOP/TEST/VL, and
+TEST1 external-clock mode still rejects writes. Alarm/timer registers are untouched.
+The new recovery case failed against the old guard, then all 37 RTC ASan/UBSan
+cases passed, including each failure point with TESTC/VL initially set. All 17
+focused Plus CTest entries pass. No full-suite or CI-green claim follows.
+The current `./bin/ci-check` attempt passed formatting, then remained in
+PlatformIO's default-target check preparation without cppcheck diagnostics for
+over two minutes and was interrupted. Its incomplete output is retained as
+`logs/plus-rtc-por-ci-check-20261112.log`; this does not establish a static-analysis
+pass or a new source failure. The previously recorded full-suite limitations remain.
+
+The corrected combined build uses 108,048 static RAM bytes and 6,511,992 linked
+Flash bytes; BIN 6,512,848 bytes, SHA-256
+`06a27c6e3125a99ff0cd56350c36f21b8b6ad7d7f6eaab8a7e54d33c257f037e`.
+200 MHz config, compiled startup order, image/partition/recovery checks and all
+74 frozen vendor blobs pass. Exact source and artifact hashes are external in
+`artifacts/source-snapshots/plus-rtc-por-four-gray-20261112` and
+`logs/crossmux-plus-rtc-por-four-gray-artifact-checks-20261112.json`.
+Controlled app-only update `20261112-220425` verified this image; all three
+immutable-region digests matched before writing, and the original recovery
+association remains intact. Startup capture missed early clock messages because
+of USB settling, so that initial capture did not establish RTC discovery. Later
+discovery/sync/sleep evidence is recorded below; isolated heap cost remains unmeasured.
+
+The user subsequently reported successful manual sync with correct local time.
+The initial 900-second serial capture had already ended before that operation;
+external write/readback success was not inferred from the UI alone. On exit the
+user reported no reboot and correct time. Plus follows the existing touch-device
+`finishWifiSessionWithoutRestart()` path: it stops Wi-Fi without a reset. No
+reboot acceptance follows from this exit.
+
+A host-controlled ordinary reset rechecked the exact candidate and immutable
+digests. Its boot log found the external RTC and logged local system time 22:50.
+The `RTC clock read` label in main actually reads HalClock's system time, which
+can survive an ordinary reset; it does not independently establish external RTC
+restore. The existing standalone read-only probe was therefore run again. It
+read `control0=00`, VL clear and UTC `2026-11-12 14:52:07 / :09 / :11`, all within
+the host capture window. With no NTP/calendar/NVS/SD writes in the probe, this
+independently confirms trusted sync reached the hardware, UTC storage is correct
+and the calendar advances. Reserved weekday bits vary; the decoded weekday was
+4 in all three samples. Probe update `20261112-225143` and external
+`logs/plus-rtc-trusted-readback-20261112.json` preserve these readings.
+The same combined RTC/gray reader was resumed and verified in update
+`20261112-225415`. Subsequent capture recorded the firmware's own successful
+write/readback `External RTC set to 2026-11-12 14:58:33 UTC` followed by system
+sync completion. Wi-Fi was stopped before the manual sleep. The user accepted
+one sleep/wake with time, position, text, turns, Home and frontlight normal.
+The requested sleep was about one minute; actual duration was not measured.
+Serial confirms deep sleep, `reset=8 wake=3`, SD ready/err=0 and nine completed
+refresh commits afterward, without post-sleep network/NTP. Post-wake idle samples
+were stable at 158,383 internal free bytes and 13,891,316 PSRAM free bytes; this
+is a bounded sample, not an isolated RTC allocation cost or endurance measurement.
+
+The user explicitly skipped the additional approximately ten-minute sleep test;
+only one round is counted, and the longer test remains deferred. Drift, backup
+supply/total power-loss retention, actual RTC-register retention after sleep and
+an explicit invalid-system-clock fallback test remain pending. Evidence is external
+`logs/plus-rtc-physical-acceptance-20261112.json` and
+`logs/20261112-225644-plus-rtc-sleep-serial.log`. The read-only capture was stopped
+after recording acceptance. CrossMux remains on device, auto sleep remains Never,
+and the physical acceptance itself made no commit or push.
+
+A focused read-only review of the final POR recovery/native RTC code found no
+actionable correctness issues. It checked the NXP TESTC/TEST1 distinction and the
+partial-calendar failure model, and inspected the existing 37-case and 17/17 logs;
+it did not rerun builds or access hardware. This does not change the outstanding
+full-CI or SDK-integration limits.
+
+## Local feature commits and precommit checks — 2026-11-12
+
+At the user's request the changes were separated by feature. SDK grayscale is
+`e0a63f5`, and native RTC is `74ed189d55fa315073c5dbe5fe74d455546d7f1e`.
+CrossMux reader integration is `76460d6e`, and RTC test registration/design is
+`cb71b7e5`. Acceptance/backlog documentation is a separate commit. These new
+commits have not been pushed. The committed main gitlink stays at the configured
+upstream baseline `d9a1304c…`; the local SDK checkout intentionally differs until
+upstream integration. Published base-port reproduction commands do not yet fetch
+the local grayscale/RTC commits.
+
+Fresh precommit checks passed all 17 Plus CTest entries, existing RTC/PMIC and
+disabled-RTC cases, display bus/Pro regressions and changed-line formatting.
+The grayscale-only staged profile was also compiled independently for Plus,
+shared X3/X4 and ReadPico before committing, with mixed S31/S3 rejected.
+Whole-file RTC formatting still flags two unchanged baseline lines; the original
+SDK HEAD has the same diagnostics. No unrelated formatting cleanup was included.
+
+The new native build attempt stopped in the `tool-esp_install` IDF tool setup
+with rc=1 before compilation, so it is incomplete. All 18 relevant source/test
+files match the previously built and physically tested candidate's source
+snapshot. This preserves the earlier build evidence without claiming that the
+fresh attempt passed. External logs are `logs/plus-precommit-*-20261112.log` and
+`logs/plus-precommit-source-identity-20261112.json`. No new device flash or
+hardware acceptance was performed as part of these commits.
