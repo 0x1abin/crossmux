@@ -79,6 +79,8 @@ add_test(NAME MetalioPlusBatteryBoot
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_battery_boot.py)
 add_test(NAME MetalioPlusBattery
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/BatteryMonitor/test/host/run_metalio_plus.py)
+add_test(NAME MetalioPlusRtc
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/Rtc/test/host/run_metalio_plus.py)
 add_test(NAME MetalioPlusFrontlight
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/FrontlightManager/test/host/run_metalio_plus.py)
 add_test(NAME MetalioPlusBootRails
