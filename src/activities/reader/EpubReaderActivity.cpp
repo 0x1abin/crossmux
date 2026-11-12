@@ -3063,9 +3063,10 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // the gray planes join it in a single waveform. Displaying the base
   // separately makes the gray pass re-drive the whole text body — a visible
   // flash on every AA page.
-  const bool combinedGrayscaleBase = needsAnyGrayscale && !SETTINGS.readingBackgroundEnabled &&
-                                     renderer.supportsTextOnlyCombinedBase() &&
-                                     (!pageHasImages || !grayscale.stripUploads);
+  const bool combinedGrayscaleBase =
+      needsAnyGrayscale && (grayscale.base == HalDisplay::GrayscaleBase::Combined ||
+                            (!SETTINGS.readingBackgroundEnabled && renderer.supportsTextOnlyCombinedBase() &&
+                             (!pageHasImages || !grayscale.stripUploads)));
   const bool overlapRefresh = tiledGrayscale && grayscale.asyncBase && !pageHasImages;
   const auto drawGuideLines = [&] {
     if (!SETTINGS.readingGuideLineEnabled) return;

@@ -11,14 +11,19 @@ struct HalDisplay{enum RefreshMode{FAST_REFRESH,HALF_REFRESH,FULL_REFRESH};};
 struct GfxRenderer{
  mutable HalDisplay::RefreshMode last=HalDisplay::FAST_REFRESH;
  bool continuous=false;
+ bool combined=false;
+ mutable int grayCalls=0;
  bool supportsContinuousImageReading()const{return continuous;}
- bool supportsTextOnlyCombinedBase()const{return false;}
+ bool supportsTextOnlyCombinedBase()const{return combined;}
  bool supportsReaderTransitions()const{return false;}
  bool canUseTextTransition()const{return false;}
  void waitRefreshComplete()const{}
  void displayBuffer(HalDisplay::RefreshMode m,DisplayRefreshContext)const{last=m;}
  void displayBufferAsync(HalDisplay::RefreshMode m,DisplayRefreshContext)const{last=m;}
- void displayGrayscaleBase(HalDisplay::RefreshMode m,DisplayRefreshContext)const{last=m;}
+ void displayGrayscaleBase(HalDisplay::RefreshMode m,DisplayRefreshContext c)const{
+  if(c!=DisplayRefreshContext::TextOnlyAntiAliasing) __builtin_abort();
+  last=m;++grayCalls;
+ }
 };
 """)
  (p/'test.cpp').write_text(r"""#include <cassert>
@@ -51,6 +56,16 @@ int main(){
   ReaderUtils::displayImageWithRefreshCycle(r,due,true);
   assert(r.last==(page%3==0?clean:HalDisplay::FAST_REFRESH));
  }
+ r.combined=true;due=1;
+ for(int page=0;page<7;++page){
+  ReaderUtils::displayBaseWithRefreshCycle(r,due,page%3==0);
+#if FREEINK_DEVICE_READPICO
+  assert(r.last==(page%3==0?clean:HalDisplay::HALF_REFRESH));
+#else
+  assert(r.last==(page%3==0?clean:HalDisplay::FAST_REFRESH));
+#endif
+ }
+ assert(r.grayCalls==7 && due==3);
 
 }
 """)
