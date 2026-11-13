@@ -677,13 +677,16 @@ void enterDeepSleep(bool fromTimeout = false) {
 }
 
 bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false) {
-#if FREEINK_DEVICE_X4PRO
-  // X4 Pro batches use SSD1677 or UC81xx. Resolve the controller before
-  // display.begin(); C3 X3/X4 already do this once in HalGPIO::begin().
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC
+  // X4 Pro and X4 Classic batches use SSD1677 or UC81xx, and both profiles boot
+  // with SSD1677 as the default. Resolve the controller before display.begin();
+  // C3 X3/X4 already do this once in HalGPIO::begin().
   static bool controllerResolved = false;
   if (!controllerResolved) {
     controllerResolved = true;
-    freeink::applyXteinkDisplayController();
+    if (freeink::applyXteinkDisplayController()) {
+      LOG_DBG("MAIN", "Panel controller: UltraChip UC81xx variant detected");
+    }
   }
 #endif
 
