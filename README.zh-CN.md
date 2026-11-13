@@ -36,6 +36,8 @@
 
 正式版仅发布 X3/X4、Sticky、X4 Pro 和 Metalio E-Ink 4 四个目标；Nightly 发布九个目标。本地 Stable 构建模式不代表具备正式发布资格，实际可下载版本以所选区域目录为准。配置支持不代表实机验收完成。每个 S3 目标使用独立固件。X4 Classic（`x4c`）、[LilyGo T5 S3 4.7 PRO/Lite](./docs/engineering/lilygo-t5s3.md)（`lilygo_t5s3`）和 BOOX Picco（`picco`）仅提供开发构建。各设备限制见[设备变体说明](./docs/engineering/device-variants.md)。
 
+[Metalio E-Ink4-Plus V1.4](./docs/engineering/metalio-eink4-plus.md) 使用独立的 ESP32-S31 实验构建，已在一台 V1.4 设备上验证基础阅读、输入、三轮手动休眠唤醒、冷暖前光及一轮前光休眠与参数保留，并通过只读电量显示及 STA 局域网网页传书、接收 EPUB 阅读验收。文字差分刷新、周期全刷清理及其菜单与休眠唤醒回归已实机确认，普通翻页闪烁明显减少。高密度界面的字号、底栏图标和点按也已完成一轮实机验收。实际功耗、长期稳定性和剩余外设仍待验证；偶发 USB 重连问题按用户要求暂缓排查。标准上传、发布和 OTA 保持禁用，受控本地调试见设备文档，不能使用 S3 Metalio 固件。
+
 正式版本使用 [Stable](https://github.com/0x1abin/crossmux/releases/tag/stable)，开发版本使用 [Nightly](https://github.com/0x1abin/crossmux/releases/tag/nightly)，两渠道采用相同的打包规则，发布目标名单分别维护。[目标表](./scripts/nightly_targets.py) 定义渠道与产物名称；[发布架构](./docs/engineering/firmware-release.md) 说明打包与 OTA。当前源码版本及构建环境以 [platformio.ini](./platformio.ini) 为准。
 
 ## 安装固件

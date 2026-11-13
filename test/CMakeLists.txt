@@ -55,6 +55,45 @@ target_compile_options(crosspoint_test_common INTERFACE
 enable_testing()
 include(GoogleTest)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME MetalioPlusBuildOnly
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_build_only.py)
+add_test(NAME MetalioPlusCore
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_core.py)
+add_test(NAME MetalioPlusIdf
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_idf.py)
+add_test(NAME MetalioPlusNvs
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_nvs.py)
+add_test(NAME MetalioPlusEarlyLogging
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_early_logging.py)
+set_tests_properties(MetalioPlusIdf PROPERTIES ENVIRONMENT "CMAKE_COMMAND=${CMAKE_COMMAND}")
+add_test(NAME GitBranchIdf
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_git_branch_idf.py)
+add_test(NAME MetalioPlusReaderCadence
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_reader_refresh.py)
+add_test(NAME MetalioPlusDisplay
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run.py)
+add_test(NAME MetalioPlusPower
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_power.py)
+add_test(NAME MetalioPlusBatteryBoot
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_metalio_plus_battery_boot.py)
+add_test(NAME MetalioPlusBattery
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/BatteryMonitor/test/host/run_metalio_plus.py)
+add_test(NAME MetalioPlusFrontlight
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/FrontlightManager/test/host/run_metalio_plus.py)
+add_test(NAME MetalioPlusBootRails
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_boot.py)
+add_test(NAME MetalioPlusLcd
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/display/MetalioPlusEpd/test/host/run_lcd_compat.py)
+add_test(NAME MetalioPlusInput
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/InputManager/test/host/run_metalio_plus.py)
+add_test(NAME MetalioPlusSdmmc
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/SDCardManager/test/host/run_s31.py)
+add_test(NAME MetalioPlusProfile
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/BoardConfig/test/host/run_metalio_plus.py)
+add_test(NAME PsaRsaKeygen
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/book/ContentProtection/test/host/run_psa_keygen.py)
+
 add_subdirectory(streaming_json_parser)
 add_subdirectory(release_json_parser)
 add_subdirectory(differential_rounding)

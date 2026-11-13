@@ -688,13 +688,15 @@ bool setupDisplayAndFonts(bool seamless = false, bool logSdFontLoadHeap = false)
 #endif
 
   display.begin(seamless);
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   // Read Pico step 4 of 5 (see the boot-order note in setup()): the panel has
   // stepped through its own rails by now — BoardReadPico::epdPrepare/On/Off are
   // the board's LgfxEpdPowerHooks, so the SY7636A enable (FCA9555 P0.3), VCOM and
   // the PGOOD wait all ran inside display.begin(). Only now does the CST836U
   // probe go out on the shared 400 kHz bus, which is what HalGPIO::begin()
   // deferred. Idempotent, so any other path that initialises the panel is safe.
+  // Plus also defers input: its display owns native I2C/TCA initialization,
+  // and its touch reset must run only after that owner is ready.
   gpio.beginInput();
 #endif
 #if FREEINK_DEVICE_MURPHY_M4
@@ -1069,7 +1071,9 @@ void setup() {
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
     FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_READPICO ||         \
-    FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PICCO
+    FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_PICCO || FREEINK_DEVICE_METALIO_EINK4_PLUS
+      // Plus also stays awake on USB cold boot: native board/display init must
+      // precede its checked shutdown path.
       // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
       // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
       // (its button is behind the PMIC). Metalio also needs native USB available

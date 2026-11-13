@@ -3158,14 +3158,7 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // Image pages use one base refresh before the grayscale pass. FAST leaves
     // the panel receptive to the gray waveform; pending cleanup still honors
     // the scheduled/manual HALF refresh.
-    if (renderer.supportsContinuousImageReading()) {
-      renderer.displayBuffer(ReaderUtils::consumeRefreshMode(pagesUntilFullRefresh),
-                             DisplayRefreshContext::ImageReading);
-    } else {
-      renderer.displayBuffer(cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH,
-                             DisplayRefreshContext::ImageReading);
-      pagesUntilFullRefresh = 1;
-    }
+    ReaderUtils::displayImageWithRefreshCycle(renderer, pagesUntilFullRefresh, cleanImageBasePending);
   } else if (needsAnyGrayscale) {
     if (pagesUntilFullRefresh <= 1) {
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);

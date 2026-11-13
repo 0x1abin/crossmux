@@ -1,0 +1,9 @@
+# Preserves the layout read from this device's ThingsOS 0.1.5 backup.
+# This table is for compilation; it must not be uploaded over the existing table.
+# Name, Type, SubType, Offset, Size, Flags
+nvs,data,nvs,0x9000,0x6000,
+otadata,data,ota,0xf000,0x2000,
+phy_init,data,phy,0x11000,0x1000,
+rescue,app,factory,0x20000,0x200000,
+ota_0,app,ota_0,0x220000,0xae0000,
+system_font,data,0x40,0xd00000,0x300000,

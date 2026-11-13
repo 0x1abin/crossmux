@@ -2,6 +2,10 @@
 #if FREEINK_DEVICE_METALIO_EINK4
 #include <MetalioEInk4Board.h>
 #endif
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+#include <MetalioPlusPower.h>
+#include <SdmmcBlockDevice.h>
+#endif
 #if FREEINK_DEVICE_READPICO
 #include <BoardReadPico.h>
 #endif
@@ -25,7 +29,7 @@
 #include "MurphyM4BatchPreference.h"
 #endif
 
-#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_METALIO_EINK4_PLUS
 #include <soc/usb_serial_jtag_reg.h>
 #endif
 
@@ -232,6 +236,13 @@ void HalGPIO::begin() {
   // always powered and its reset already ran above.
   return;
 #endif
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // SD starts before display. A deep wake retains the TCA rail-off latches,
+  // so restore only its rails now through the same native I2C1 owner.
+  if (!freeink::metalioPlusRestoreBootRails()) LOG_ERR("HW", "Plus boot rail restoration failed");
+  // Native touch/reset still starts only after the display's board init.
+  return;
+#endif
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   InputManager::setButtonHook(wavesharePowerButtonHook);
 #endif
@@ -279,6 +290,17 @@ bool HalGPIO::saveMurphyM4Batch(const freeink::MurphyM4Batch batch) {
 #endif
 
 void HalGPIO::update() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // SD/CNNT initialization can interrupt early USB output. Replay its retained
+  // result once the console has re-enumerated, including on the SD error screen.
+  static bool bootDiagnosticReported = false;
+  if (!bootDiagnosticReported && millis() >= 5000) {
+    bootDiagnosticReported = true;
+    const auto sd = freeink::SdmmcBlockDevice::getInitDiagnostics();
+    LOG_INF("PlusBoot", "reset=%d wake=%d SD stage=%s err=%d capacity=%lu", int(esp_reset_reason()),
+            int(esp_sleep_get_wakeup_cause()), sd.stage, sd.error, static_cast<unsigned long>(sd.capacity));
+  }
+#endif
 #if FREEINK_DEVICE_READPICO
   // Safety net for the deferred INPUT PHASE (see begin()): a consumer that polls
   // input before the panel came up gets the touch backend started here rather
@@ -411,7 +433,7 @@ bool HalGPIO::verifyPowerButtonWakeup() {
   return heldAtFirstSample && inputMgr.isPowerButtonPhysicallyPressed();
 }
 
-#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_WAVESHARE_EPAPER_397 || FREEINK_DEVICE_METALIO_EINK4 || FREEINK_DEVICE_METALIO_EINK4_PLUS
 // Keep the last positive USB Serial/JTAG SOF result across nearby polls.
 static bool usbHostSofActive() {
   static uint32_t lastFrame = 0;
@@ -433,6 +455,11 @@ static bool usbHostSofActive() {
 #endif
 
 bool HalGPIO::isUsbConnected() const {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // BQ27220 current is not a cable-presence signal. Observe the native USB host;
+  // the CX25601N charger remains unconfigured by this read-only bring-up.
+  return usbHostSofActive();
+#endif
 #if FREEINK_DEVICE_WAVESHARE_EPAPER_397
   bool connected = false;
   if (Waveshare397Power::externalPowerConnected(connected)) return connected;
