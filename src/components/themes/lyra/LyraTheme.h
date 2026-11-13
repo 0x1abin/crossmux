@@ -89,6 +89,10 @@ class LyraTheme : public BaseTheme {
  public:
   // Component drawing methods
   void fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const override;
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  void drawBatteryGlyph(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, uint16_t percentage,
+                        bool charging) const override;
+#endif
   void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                      const char* rightLabel = nullptr) const override;
   void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,

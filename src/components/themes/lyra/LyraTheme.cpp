@@ -13,6 +13,9 @@
 
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include "components/BatteryIcon.h"
+#endif
 #include "components/icons/apps.h"
 #include "components/icons/avatar.h"
 #include "components/icons/blocks.h"
@@ -148,10 +151,6 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
 }
 
 void LyraTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const {
-  if (UiHighDpiProfile::enabled) {
-    BaseTheme::fillBatteryIcon(renderer, rect, percentage);
-    return;
-  }
   const bool charging = gpio.isUsbConnected();
 
   if (charging) {
@@ -170,6 +169,13 @@ void LyraTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t
     }
   }
 }
+
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+void LyraTheme::drawBatteryGlyph(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, const uint16_t percentage,
+                                 const bool charging) const {
+  BatteryIcon::draw(target, rect, percentage, charging, true);
+}
+#endif
 
 void LyraTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {
   int currentX = rect.x + LyraMetrics::values.contentSidePadding;
