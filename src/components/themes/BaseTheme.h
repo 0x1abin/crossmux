@@ -20,6 +20,7 @@ struct HeaderProps;
 struct Rect;
 struct BitmapRef;
 struct ListItem;
+class DrawTarget;
 }  // namespace ui
 }  // namespace freeink
 
@@ -192,8 +193,11 @@ enum UIIcon {
 namespace UiHighDpiProfile {
 constexpr void apply(ThemeMetrics& metrics) {
   if (enabled) {
-    metrics.batteryWidth = batteryWidth;
-    metrics.batteryHeight = batteryHeight;
+    // INX applies this profile both to its preset and when publishing metrics.
+    if (metrics.batteryHeight != batteryHeight) {
+      metrics.batteryWidth = (metrics.batteryWidth + 1) * batteryScale;
+      metrics.batteryHeight = batteryHeight;
+    }
     metrics.statusBarVerticalMargin = readerStatusHeight;
     metrics.statusBarHorizontalMargin = readerStatusHorizontalMargin;
     metrics.headerHeight = headerHeight;
@@ -330,6 +334,10 @@ class BaseTheme {
   void drawBatteryRight(const GfxRenderer& renderer, Rect rect, bool showPercentage = true,
                         int numericFontId = STATUS_NUMERIC_FONT_ID) const;
   virtual void fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const;
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  virtual void drawBatteryGlyph(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, uint16_t percentage,
+                                bool charging) const;
+#endif
   void drawButtonHintsWithStyle(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4, bool upstreamStyle) const;
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,

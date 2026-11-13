@@ -251,11 +251,19 @@ namespace BoardConfig {struct Profile {int cornerRadius=32,bottomCornerRadius=40
 struct {uint16_t getBatteryPercentage()const{return 56;}} powerManager;
 constexpr int batteryPercentSpacing=4;
 int batteryY=0;
+namespace freeink::ui {
+struct Rect { int x,y,width,height; };
+struct GfxRendererTarget { explicit GfxRendererTarget(const GfxRenderer&) {} };
+}
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+struct { bool isUsbConnected()const{return false;} } gpio;
+#endif
 struct BaseTheme {
  static constexpr int STATUS_NUMERIC_FONT_ID=8;
  void drawBatteryLeft(const GfxRenderer&,Rect,bool)const;
  void drawBatteryOutline(const GfxRenderer&,int,int y,int,int)const{batteryY=y;}
  void fillBatteryIcon(const GfxRenderer&,Rect rect,uint16_t)const{assert(rect.y==batteryY);}
+ void drawBatteryGlyph(freeink::ui::GfxRendererTarget&,freeink::ui::Rect,uint16_t,bool)const{assert(false);}
 };
 """ + battery + corner + r"""
 struct Geometry {int y,left,right;};
