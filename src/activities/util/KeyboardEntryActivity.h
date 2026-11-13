@@ -76,6 +76,7 @@ class KeyboardEntryActivity : public Activity {
   size_t cursorPos = 0;  // byte offset into text (always on a code point boundary)
   bool upHeld = false;
   bool upLongHandled = false;
+  unsigned long upPressStart = 0;
   bool downHeld = false;
   bool downLongHandled = false;
   bool rightHeld = false;
