@@ -193,3 +193,16 @@ official packaging path are mandatory.
 CI, indexes, and checksum checks do not replace real-device acceptance. Before
 making a Nightly pipeline production-critical, test OTA and reboot on every S3
 target, one X3/X4, both content profiles, and one wrong-board negative case.
+
+### Restore a missing GitHub channel
+
+The manually dispatched `Restore Firmware Channel` workflow shares the channel
+publication lock. It reconstructs a missing GitHub rolling index from the
+current COS index only when the immutable GitHub archive and both regions'
+manifests and resources verify against the original build's scripts. When a
+bundle is present, both regions' bundle URLs, size and SHA-256 are checked even
+if the historical build verifier predates bundles. A draft channel, inconsistent
+regional indexes, changed assets or a concurrent state change blocks recovery.
+An intact channel is left untouched. This does not rebuild firmware or roll back
+a newer channel. Validate on synthetic fixtures and inspect the workflow before
+manual use; the workflow is not run by tests or normal PR builds.
