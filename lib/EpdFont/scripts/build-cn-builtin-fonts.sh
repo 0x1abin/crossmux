@@ -43,7 +43,7 @@ CHARSET_FILE="cn_common_chars.txt"
 # feature that needs CJK glyphs not already covered at the point size where
 # it renders adds its own cn_<feature>_chars.txt here.
 # cn_almanac_chars.txt: ganzhi + lunar-row chars for ChineseCalendarFace.
-REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt)
+REQUIRE_FROM=(../../I18n/translations/chinese.yaml cn_almanac_chars.txt cn_books_chars.txt)
 TMP_DIR="instanced_fonts/NotoSansSC"
 SUBSET_OTF="$TMP_DIR/NotoSansSC-Regular.cncommon.otf"
 # Tiny OTF holding only the CJK chars that appear in i18n/feature sources.
