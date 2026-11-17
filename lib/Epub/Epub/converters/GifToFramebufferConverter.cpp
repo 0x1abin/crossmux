@@ -65,15 +65,17 @@ void renderCanvasRow(const uint8_t* grayRow, int srcY, GifContext& ctx) {
   if (firstDstY >= endDstY || firstDstY >= ctx.dstHeight) return;
   if (endDstY > ctx.dstHeight) endDstY = ctx.dstHeight;
 
+  // Cache-only predecode runs while the reader has lent out its framebuffer.
+  const bool writeFramebuffer = ctx.config->output == DecodeOutput::FrameBufferAndCache;
   DirectPixelWriter pw;
-  pw.init(*ctx.renderer);
+  if (writeFramebuffer) pw.init(*ctx.renderer);
 
   for (int dstY = firstDstY; dstY < endDstY; ++dstY) {
     ctx.lastDstY = dstY;
     const int outY = ctx.config->y + dstY;
     if (outY >= ctx.screenHeight) continue;
 
-    pw.beginRow(outY);
+    if (writeFramebuffer) pw.beginRow(outY);
 
     const bool caching = ctx.caching;
     DirectCacheWriter cw;
@@ -103,7 +105,7 @@ void renderCanvasRow(const uint8_t* grayRow, int srcY, GifContext& ctx) {
           ditheredGray = gray / 85;
           if (ditheredGray > 3) ditheredGray = 3;
         }
-        pw.writePixel(outX, ditheredGray);
+        if (writeFramebuffer) pw.writePixel(outX, ditheredGray);
         if (caching) cw.writePixel(outX, ditheredGray);
       }
 
