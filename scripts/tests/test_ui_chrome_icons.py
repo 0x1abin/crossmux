@@ -19,9 +19,29 @@ def arrays(text):
 
 
 class UiChromeIconTest(unittest.TestCase):
+    def test_battery_metrics_scale_once_and_include_the_terminal(self):
+        source = (ROOT / 'src/components/themes/BaseTheme.h').read_text()
+        program = '#include <cassert>\n#include <initializer_list>\n'
+        program += method(source, 'struct ThemeMetrics {') + ';\n'
+        program += 'namespace UiHighDpiProfile {\n' + method(source, 'constexpr void apply(') + '\n}\n'
+        program += r'''
+int main() {
+  for(int width : {15,16}) {
+    ThemeMetrics metrics{}; metrics.batteryWidth=width; metrics.batteryHeight=12;
+    for(int repeat=0;repeat<3;++repeat) {
+      UiHighDpiProfile::apply(metrics);
+      assert(metrics.batteryWidth==(UiHighDpiProfile::enabled?(width+1)*2:width));
+      assert(metrics.batteryHeight==(UiHighDpiProfile::enabled?24:12));
+    }
+  }
+}
+'''
+        for defines in ((), ('CROSSMUX_UI_PROFILE_HIGH_DPI',)):
+            run_cpp(program, defines=defines)
+
     def test_native_dimensions_and_white_padding(self):
         data = arrays(HEADER.read_text())
-        self.assertEqual(len(data), 11)
+        self.assertEqual(len(data), 9)
         for name, bits in data.items():
             size = 56 if name.endswith('_56_bits') else 48 if name.endswith('_48_bits') else 32 if name.endswith('_32_bits') else 24 if name.endswith('_24_bits') else None
             self.assertEqual(len(bits), size * ((size + 7) // 8) if size else 80)
@@ -78,68 +98,111 @@ int main() {
 ''', include_dirs=(ROOT / 'src', ROOT / 'freeink-sdk/libs/assets/Icons/include'),
                 defines=('CROSSMUX_UI_PROFILE_HIGH_DPI',))
 
-    def test_battery_fill_charge_bounds_and_orientation(self):
+    def test_battery_is_double_the_legacy_pixels_in_headers_and_readers(self):
         source = (ROOT / 'src/components/themes/BaseTheme.cpp').read_text()
+        lyra = (ROOT / 'src/components/themes/lyra/LyraTheme.cpp').read_text()
         run_cpp(r'''
 #include <algorithm>
 #include <cassert>
-#include <initializer_list>
 #include <cstdint>
-#include "Icon.h"
-#include "components/icons/uiChromeIcons.h"
-struct Rect {int x,y,width,height;};
-struct { bool charging=false; bool isUsbConnected() const {return charging;} } gpio;
+#include <initializer_list>
+#include "components/BatteryIcon.h"
+struct Rect { int x,y,width,height; };
+struct { bool charging=false; bool isUsbConnected() const { return charging; } } gpio;
 struct GfxRenderer {
- mutable bool pixels[32][32]{}; int orientation=0;
- void drawPixel(int x,int y,bool black=true) const {
-   assert(x>=0 && x<32 && y>=0 && y<20);
-   int px=x,py=y;
-   switch(orientation) {
-     case 1: px=31-y;py=x;break;
-     case 2: px=31-x;py=31-y;break;
-     case 3: px=y;py=31-x;break;
-   }
-   pixels[py][px]=black;
- }
- bool pixel(int x,int y) const {
-   switch(orientation) {
-     case 1:return pixels[x][31-y];
-     case 2:return pixels[31-y][31-x];
-     case 3:return pixels[31-x][y];
-   }
-   return pixels[y][x];
- }
- void fillRect(int x,int y,int w,int h) const {for(int row=y;row<y+h;++row) for(int col=x;col<x+w;++col) drawPixel(col,row);}
- void drawLine(int,int,int,int,bool=true) const {assert(false);}
+  mutable bool pixels[40][40]{};
+  void drawPixel(int x,int y,bool black=true) const {
+    assert(x>=0 && x<40 && y>=0 && y<40); pixels[y][x]=black;
+  }
+  void fillRect(int x,int y,int w,int h,bool black=true) const {
+    for(int row=y;row<y+h;++row) for(int col=x;col<x+w;++col) drawPixel(col,row,black);
+  }
+  void drawLine(int x1,int y1,int x2,int y2,bool black=true) const {
+    assert(x1==x2 || y1==y2);
+    fillRect(x1,y1,x2-x1+1,y2-y1+1,black);
+  }
+};
+struct RasterTarget : freeink::ui::DrawTarget {
+  bool pixels[40][40]{}; int orientation=0;
+  void pixel(int x,int y,bool black) {
+    assert(x>=0 && x<34 && y>=0 && y<24);
+    switch(orientation) {
+      case 1: pixels[x][39-y]=black; break;
+      case 2: pixels[39-y][39-x]=black; break;
+      case 3: pixels[39-x][y]=black; break;
+      default: pixels[y][x]=black; break;
+    }
+  }
+  bool pixel(int x,int y) const {
+    switch(orientation) {
+      case 1: return pixels[x][39-y];
+      case 2: return pixels[39-y][39-x];
+      case 3: return pixels[39-x][y];
+      default: return pixels[y][x];
+    }
+  }
+  freeink::ui::Size measureText(freeink::ui::FontId,const char*,freeink::ui::TextStyle) const override { return {}; }
+  int16_t lineHeight(freeink::ui::FontId) const override { return 0; }
+  void fill(freeink::ui::Rect r,freeink::ui::Paint paint,uint8_t,uint8_t) override {
+    for(int y=r.y;y<r.bottom();++y) for(int x=r.x;x<r.right();++x)
+      pixel(x,y,paint.color==freeink::ui::Color::Black);
+  }
+  void stroke(freeink::ui::Rect,freeink::ui::Paint,uint8_t,uint8_t,uint8_t) override { assert(false); }
+  void line(freeink::ui::Point,freeink::ui::Point,uint8_t,freeink::ui::Paint) override { assert(false); }
+  void triangle(freeink::ui::Point,freeink::ui::Point,freeink::ui::Point,freeink::ui::Paint) override { assert(false); }
+  void text(freeink::ui::Rect,const char*,freeink::ui::TextStyle) override { assert(false); }
+  void bitmap(freeink::ui::Rect,freeink::ui::BitmapRef,freeink::ui::BitmapMode,freeink::ui::Paint,freeink::ui::Rotation) override { assert(false); }
 };
 struct BaseTheme {
- static void drawBatteryOutline(const GfxRenderer&,int,int,int,int);
- static void drawBatteryLightningBolt(const GfxRenderer&,int,int);
- void fillBatteryIcon(const GfxRenderer&,Rect,uint16_t) const;
+  static void drawBatteryOutline(const GfxRenderer&,int,int,int,int);
+  static void drawBatteryLightningBolt(const GfxRenderer&,int,int);
+  virtual void fillBatteryIcon(const GfxRenderer&,Rect,uint16_t) const;
+  virtual void drawBatteryGlyph(freeink::ui::DrawTarget&,freeink::ui::Rect,uint16_t,bool) const;
 };
-''' + method(source, 'void drawTransparentBitmap(')
-            + method(source, 'void BaseTheme::drawBatteryOutline(')
+struct LyraTheme : BaseTheme {
+  void fillBatteryIcon(const GfxRenderer&,Rect,uint16_t) const override;
+  void drawBatteryGlyph(freeink::ui::DrawTarget&,freeink::ui::Rect,uint16_t,bool) const override;
+};
+const BaseTheme* activeTheme=nullptr;
+#define GUI (*activeTheme)
+''' + method(source, 'void BaseTheme::drawBatteryOutline(')
             + method(source, 'void BaseTheme::drawBatteryLightningBolt(')
-            + method(source, 'void BaseTheme::fillBatteryIcon(') + r'''
+            + method(source, 'void BaseTheme::fillBatteryIcon(')
+            + method(source, 'void BaseTheme::drawBatteryGlyph(')
+            + method(lyra, 'void LyraTheme::fillBatteryIcon(')
+            + method(lyra, 'void LyraTheme::drawBatteryGlyph(')
+            + method(source, 'bool drawHeaderBattery(') + r'''
 int main() {
- for (int orientation=0;orientation<4;++orientation) for(bool charging : {false,true})
- for(uint16_t percent : {0,50,100,150}) {
-   GfxRenderer r; r.orientation=orientation; gpio.charging=charging;
-   BaseTheme::drawBatteryOutline(r,0,0,32,20);
-   BaseTheme{}.fillBatteryIcon(r,{0,0,32,20},percent);
-   int width=std::max(charging?14:0,std::min<int>(percent,100)*17/100);
-   for(int y=0;y<20;++y) for(int x=0;x<32;++x) {
-     auto mask=0x80U>>(x%8); auto index=y*4+x/8;
-     bool outline=(icon_battery_32x20.bits[index]&mask)==0;
-     bool fill=x>=5 && x<5+width && y>=3 && y<17;
-     bool bolt=charging && (icon_battery_charging_32x20.bits[index]&mask)==0;
-     assert(!bolt || fill); assert(!outline || !bolt);
-     assert(r.pixel(x,y)==((outline || fill) && !bolt));
-   }
- }
+  BaseTheme classic; LyraTheme lyra;
+  for(const BaseTheme* theme : {&classic,static_cast<BaseTheme*>(&lyra)})
+  for(int orientation=0;orientation<4;++orientation) for(bool charging : {false,true})
+  for(uint16_t percent : {0,1,10,11,40,41,50,70,71,100,150,65535}) {
+    activeTheme=theme; gpio.charging=charging;
+    const int width=theme==&classic?15:16;
+    GfxRenderer legacy;
+    BaseTheme::drawBatteryOutline(legacy,0,0,width,12);
+    theme->fillBatteryIcon(legacy,{0,0,width,12},percent);
+    RasterTarget reader,header; reader.orientation=header.orientation=orientation;
+    const freeink::ui::Rect glyph{0,0,static_cast<int16_t>((width+1)*2),24};
+    theme->drawBatteryGlyph(reader,glyph,percent,charging);
+    freeink::ui::DeviceContext device;
+    freeink::ui::InputSnapshot input;
+    freeink::ui::InteractionBuffer<1> interactions;
+    freeink::ui::Frame<1> frame(header,device,input,interactions);
+    freeink::ui::BatteryIndicatorProps props;
+    props.percent=static_cast<uint8_t>(std::min<int>(percent,100));
+    props.charging=charging; props.glyphWidth=glyph.width-2; props.glyphHeight=24;
+    props.glyphPainter=drawHeaderBattery;
+    freeink::ui::batteryIndicator(frame,glyph,props);
+    for(int y=0;y<24;++y) for(int x=0;x<34;++x) {
+      assert(reader.pixel(x,y)==legacy.pixels[y/2][x/2]);
+      assert(header.pixel(x,y)==reader.pixel(x,y));
+    }
+  }
 }
-''', include_dirs=(ROOT / 'src', ROOT / 'freeink-sdk/libs/assets/Icons/include'),
-                defines=('CROSSMUX_UI_PROFILE_HIGH_DPI',))
+''', include_dirs=(ROOT / 'src', ROOT / 'freeink-sdk/libs/ui/FreeInkUI/include'),
+                defines=('CROSSMUX_UI_PROFILE_HIGH_DPI',),
+                extra_sources=(ROOT / 'freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp',))
 
     def test_footer_descenders_and_estimate_fit_the_status_line(self):
         faces = {}
@@ -233,15 +296,27 @@ struct GfxRenderer {
    assert(x>=0 && x+w<=width && y>=0 && y+h<=height);
  }
 };
-struct Metrics { int batteryWidth=32,batteryHeight=20,statusBarHorizontalMargin=14,statusBarVerticalMargin=48; };
+namespace freeink::ui {
+struct Rect { int x,y,width,height; };
+struct DrawTarget {};
+struct GfxRendererTarget : DrawTarget {
+ const GfxRenderer& renderer;
+ explicit GfxRendererTarget(const GfxRenderer& r):renderer(r) {}
+};
+}
+struct { bool isUsbConnected() const { return false; } } gpio;
+struct Metrics { int batteryWidth=34,batteryHeight=24,statusBarHorizontalMargin=14,statusBarVerticalMargin=48; };
 struct BaseTheme {
  static constexpr int STATUS_NUMERIC_FONT_ID=3,batteryPercentSpacing=4;
  void drawBatteryLeft(const GfxRenderer&,Rect,bool) const;
  static void drawBatteryOutline(const GfxRenderer& r,int x,int y,int w,int h) {
-   assert(w==32 && h==20 && x>=r.left+14 && x+w<=r.width-r.right-14);
+   assert(w==34 && h==24 && x>=r.left+14 && x+w<=r.width-r.right-14);
    assert(y>=r.height-r.bottom-58 && y+h<=r.height-r.bottom-5);
  }
  void fillBatteryIcon(const GfxRenderer&,Rect,uint16_t) const {}
+ void drawBatteryGlyph(freeink::ui::DrawTarget& target,freeink::ui::Rect rect,uint16_t,bool) const {
+   drawBatteryOutline(static_cast<freeink::ui::GfxRendererTarget&>(target).renderer,rect.x,rect.y,rect.width,rect.height);
+ }
  static void drawStatusBar(GfxRenderer&,float,int,int,std::string,int,int,bool,bool,bool);
 };
 struct UITheme {
