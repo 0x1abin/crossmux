@@ -687,3 +687,89 @@ snapshot. This preserves the earlier build evidence without claiming that the
 fresh attempt passed. External logs are `logs/plus-precommit-*-20261112.log` and
 `logs/plus-precommit-source-identity-20261112.json`. No new device flash or
 hardware acceptance was performed as part of these commits.
+
+## Unattended IMU/rotation software increment — 2026-11-13
+
+The user ordered IMU/rotation, native sixteen-gray, cover/image gray, then build
+repair, with physical acceptance postponed until return. Device firmware/settings,
+SD and the recovery association remain untouched. No implicit commit/push follows.
+
+The Plus profile now describes SC7A20H@0x19 on native I2C1. Production Imu routes
+through MetalioPlusIo instead of Wire, validates WHO11/VERSION28 and compatible
+polling configuration, and enters standby. Wake/read/sleep use the existing
+owner/mutex; no IRQ/reset/FIFO/filter routing is rewritten. Unknown identity or
+incompatible shared-line configuration is refused. The native owner lazily adds
+one IDF device handle; its heap cost remains unmeasured. No new application task
+or dynamic buffer was added. Other device paths retain their transport.
+
+Plus HAL shares a sample between tilt and an allocation-free four-pose classifier,
+with 600ms dwell, 1200ms cooldown and rejection of flat/noisy/invalid gravity.
+The persisted, translated reader-only `autoRotate` toggle defaults off. Popups,
+render work and held/edge/touch gestures gate rotation; EPUB reuses its locked
+content-offset/reflow path. XTC reuses manual rotation. Mount flags are provisional,
+not bench-accepted. No behavior is claimed on this actual IMU until return.
+
+Native routing first failed against the competing Wire1 path; all 33 production
+ASan/UBSan IMU cases now pass, including partial-transfer failure and preserved
+IRQ state. Real Plus/C3/ReadPico profiles, existing SC7A20H/BMI270/gyro suites,
+37 native RTC cases and Plus battery regressions pass. Classifier/HAL admission
+checks pass, Chinese settings/i18n checks pass, and settings API keys remain
+unique across 128 capability combinations. Full host CTest is 1,536/1,542: the
+same six baseline targets fail with the identical multiset of 56 compiler errors.
+No new firmware build is claimed; environment repair is deliberately the last
+requested subsystem. Logs use external `logs/plus-imu-*-20261113.log`, with RED
+and GREEN evidence also under `plus-hal-rotation-*` and `plus-auto-rotation-*`.
+
+### 2026-11-13 原生十六级软件候选（未刷机）
+
+Plus 原生目标使用既有 415,872 字节前缓冲，保留 16 档数值；普通灰阶 GL16，首次/周期/手动全刷 GC16。刷新计数仅成功后发布，硬件失败不立即补发黑白。主机 1536/1542，通过项之外为既有六个基线失败；原生渲染、46 项显示驱动用例及旧驱动门面兼容测试通过。手动全刷请求在原生提交中一次消费。图案已生成，实体十六级和周期清理验收待用户返回。
+
+### 2026-11-13 封面与图片灰阶候选（未刷机）
+
+PNG/JPEG 原生解码写入同一十六级目标，EPUB 原生图页绕过仅能存四档的 PXC。AA 关闭时保留黑白文字；两位字体可在原生图页保留四档覆盖度。背景图、假粗体仍走既有四级路径。GIF 暂保留四级量化，透明休眠叠加仍走既有合成；不宣称这些路径已有原生十六级质量。
+
+Plus EPUB/TXT 封面使用独立 `cover_gray8*`、`thumb_gray8_*` 标准8位 BMP，旧缓存不覆盖；旧 EPUB 书架路径在读取时映射，XTC 路径不变。普通书架/最近阅读/书库灰阶帧完整重绘，取消只保留黑白的封面区域快捷缓存。查看器 PNG/BMP/JPEG 和普通休眠封面接入灰阶；原生硬件提交失败不立即补发另一波形。
+
+资源：借用原有415872字节前缓冲，未新增全屏缓冲或任务。BMP 使用已有行缓冲扩为 Gray8，每行最多2048字节灰度加既有输入行；PNG保留既有解码/行缓存。灰阶BMP比旧1位缩略图增加磁盘用量，编码8位约为1位的8倍（另含BMP头/调色板），按需生成。主机检查不能代替真实屏幕残影、色阶、旋转和休眠验收。
+
+### 2026-11-13 编译恢复与最终软件检查
+
+已恢复独立 S31 编译：GCC15.2.0_20251204、Arduino4.0.0-RC1/IDF6.1.0、esptool5.4.0、SCons4.11.1。原生 `tools` 根目录及关键 packages 曾链接到共用 core，被其他目标安装自检改写；现改为独立副本，保留原链接/元数据，缓存包哈希核对。S31包装器只接受Plus环境，省略环境时默认Plus；C3使用独立的常规core。C3常规platform55与新版PIO Core对SCons版本要求不一致，机器本地元数据和忽略的local.ini固定到已有完整4.11.1/esptool5.4缓存；未修改仓库发布的依赖版本。
+
+审查后S31构建通过：静态RAM108080字节，链接Flash6518596字节；C3default构建通过：RAM68144字节，Flash6371675字节。随后S31共存复编通过。主机1536/1542，与原六个失败及56条编译诊断完全一致；格式检查无诊断。严格PIO cppcheck仅保留未改动的`lib/Epub/Epub/FootnoteEntry.h:94`低优先级报告；未声称完整CI或其他S3矩阵通过。74个冻结vendor文件与SDK HEAD一致。
+
+独立审查五项已修正：黑白图片选项不改变文字AA；两位字形可与16级图片同帧；输入/菜单/渲染拥有页面时取消旋转候选；相邻采样超过240ms重新计时（HAL80ms轮询）；原生BMP解码/行分配失败先取消目标，再显示既有翻译错误界面，硬件提交失败仍不立即重试。专项检查覆盖真实PNG/JPEG/字体/渲染、截断BMP和分配失败、HAL采样及输入准入。
+
+新候选未写入设备，当前设备仍为上轮四级灰阶/RTC已验收固件。尚未提交或推送本轮改动，保持原SDK gitlink；见[返场统一验收](metalio-plus-return-acceptance-20261113.md)。
+
+最终未刷机候选：`plus-imu-native16-images-20261113-032833/firmware.bin`，6519456字节，SHA-256 `ba851378de56c7d7882b533558899de0041d178ae50bef48d335193a447aafd8`。BIN/ELF/map/配置、源码快照和检查日志保留在独立开发目录；镜像离线校验为S31、DIO80MHz/16MB、octalPSRAM200MHz，校验和/摘要有效，位于既有0x220000应用槽大小范围内。没有写入设备、更新当前调试指针或覆盖任何SD内容。
+
+## 2026-11-17 返场验收进展
+
+Plus V1.4安装坐标实物校正为`(x,y)=(-rawY,-rawX)`，只调整板配置的交换/反向标志；正常、左/右横屏、倒置及回正停稳后方向正确，旋转后的触摸/音量翻页、Home及书架保持固定方向由用户确认。未直接采集原始三轴数值；平放抑制、IMU睡眠生命周期及功耗尚未实测。开关已关闭、竖屏。
+
+校准固件BIN 6519472字节，SHA256 `1970a11f5cc3359b10125a25ab3a89b1b0b6ce44b2d54d9dfda4d5332542be8a`，仅原应用槽写入并校验；原恢复关联保留，按用户要求继续调试不还原。当前配置/进度/缓存178个文件已独立只读备份（二次下载比对，不是全SD镜像）。
+
+16级首轮显示缺陷正在修复：启用伪粗体时为既有四级回退；关闭后EPUB PNG显示方框，串口证据是连续内存不足（最大25600、需要59456字节），原生重解码仍持有BW/PXC缓存。PNG查看器还出现预览宽2594超过Bitmap2048上限。详细证据和用户反馈见[返场记录](metalio-plus-return-acceptance-20261113.md)；此时不能标记原生十六级或封面图片实物通过。
+
+### 2026-11-18 TTF后续（未刷入）
+
+图片修复固件f33d8485…已由用户确认EPUB16档图及往返翻页、PNG/JPEG/24位BMP查看器和最近阅读/书库灰阶封面正常。改用TTF后用户报告页脚数字变化而正文似乎未更新，保持未通过；串口确认字体选择从26pt被退回22pt，并有一次LCD reason3欠载，次次完整恢复的结论尚不成立。已检测的那一次失败确实保留进度/Full债务，下一次GC16成功。原测试文案重复较多，不能据此单独解释全部反馈。
+
+高密度矢量字号8–32的修复及可选源帧指纹已开发并构建为普通/诊断两个未刷入候选；不改vendor扫描时序，不新增堆/全屏缓冲或任务。实际TTF在22/26/32pt各32帧主机渲染及ASan/UBSan通过，完整主机1537/1543，六个既有失败和56条编译诊断不变；严格CI仍受FootnoteEntry.h:94基线报告阻挡。74个vendor文件与SDK HEAD一致。额外诊断遍历可能改变耗时/cache足迹，返场先用普通对照，再按需要使用日志，不能把诊断变体无复现当作修好。
+
+新样本、候选哈希、保护流程和详细边界见[返场记录](metalio-plus-return-acceptance-20261113.md)。用户休息期间没有再次刷机、上传样本、修改设备设置或还原ThingsOS；新实机操作等用户返场。当前设备仍为f33d8485…，字号/字库取用户最后选择的TTF状态，原LXGWWenKai26pt/伪粗体标准设置已有备份，验收后再按用户需要恢复。
+
+
+### 2026-11-18 晚 TTF不同正文实测与周期堆统计隔离
+
+原f33d8485…固件上，两本独立原创书分别用不同章节标题和同章段落编号复测，22pt正文随翻页正常变化；旧样本大量重复文案会造成视觉歧义，但不能据此解释所有旧反馈。本轮仍捕获一次LCD reason3欠载，eof_gap545us；与昨晚719us事件均紧邻十秒堆统计。固定IDF的最大块查询在临界区遍历TLSF，主循环和渲染同为核1，存在阻塞LCD中断的机制。
+
+周期内存/BLE统计改为只在既有Try RenderLock成功时采样，忙时保留到期状态到下次空闲，不新增堆分配、任务或帧缓冲，不改厂商扫描时序。包含TTF26/32pt字号修正的普通候选c5408611468ba7187a71cb0ca5e593b62e4d2ec23e2d912cd1282de14b322fbd（6519552字节）已写入应用槽并独立校验，原恢复关联保留。最新NVS/otadata/PHY已备份，刷入前当前应用及保护区摘要正常。
+
+用户已确认22pt向后35页/回翻2页正文持续变化。阶段日志43次提交均成功、零欠载，周期GC16第7/37页覆盖30页清理。随后26pt明显变大，正文与菜单正常；Home重开、一次短休眠/唤醒、两页翻页及Home也通过。最终81次提交均成功、零已检测欠载；只读终检的当前应用、原分区与三段保护区摘要均正常。此为有界验收，未覆盖所有字体/模式与长期可靠性。主机1538/1544，六个既有失败保留；S31/C3构建、针对性六项CTest和格式通过，严格CI仍停在FootnoteEntry.h:94基线问题。详细步骤和后续结果见[返场验收](metalio-plus-return-acceptance-20261113.md)。
+
+
+### 2026-11-18 本地提交状态
+
+本轮功能和验收文档按关注点分别本地提交。SDK当前HEAD为 `15469204352b29ce2606c780919036046242a2b7`，主仓库仍保留原gitlink；未推送、更新远端PR或再次刷机。提交前7项针对性CTest及SDK IMU/显示/门面/板配置检查通过，完整CI的既有阻挡保留。当前建议先验收自动休眠，再验收休眠封面灰阶；具体待开发、待实测和发布条件以[剩余适配清单](metalio-eink4-plus-todo.md)为准。
