@@ -62,6 +62,7 @@
 #include "fontIds.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
+#include "util/MemoryDiagnostics.h"
 #include "util/PluginEvents.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SlideSwitch.h"
@@ -1238,7 +1239,6 @@ void setup() {
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
-  static unsigned long lastMemPrint = 0;
 
 #if FREEINK_CAP_TOUCH && FREEINK_DEVICE_READPICO
   if (sdFontReloadPending) {
@@ -1337,18 +1337,7 @@ void loop() {
   renderer.setFadingFix(SETTINGS.fadingFix);
 
   // The ROM console does not depend on Arduino USB CDC's connection state.
-  if ((Serial || FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF) && millis() - lastMemPrint >= 10000) {
-    const auto heap = HalMemory::getInternalHeap();
-    LOG_INF("MEM", "Free: %zu bytes, Total: %zu bytes, Min Free: %zu bytes, MaxAlloc: %zu bytes", heap.freeBytes,
-            heap.totalBytes, heap.minFreeBytes, heap.largestBlockBytes);
-#ifdef BOARD_HAS_PSRAM
-    const auto psram = HalMemory::getPsramHeap();
-    LOG_INF("MEM", "PSRAM: Free: %zu bytes, Total: %zu bytes, Min Free: %zu bytes, MaxAlloc: %zu bytes",
-            psram.freeBytes, psram.totalBytes, psram.minFreeBytes, psram.largestBlockBytes);
-#endif
-    if (bleinput::isRunning()) bleinput::logDiagnostics("running");
-    lastMemPrint = millis();
-  }
+  if (Serial || FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF) logMemoryDiagnosticsIfDue();
 
   // Handle incoming serial commands,
   // nb: we use logSerial from logging to avoid deprecation warnings

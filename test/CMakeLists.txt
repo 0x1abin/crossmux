@@ -273,6 +273,9 @@ set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
 add_test(NAME ReaderVectorSizes
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reader_vector_sizes.py)
 
+add_test(NAME MemoryDiagnostics
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_memory_diagnostics.py)
+
 add_test(NAME FileBrowserImages
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_file_browser_images.py)
 
