@@ -79,22 +79,22 @@ CrossMux 适配在 `codex/metalio-eink4-plus-s31`，界面密度提交为
 基础端口 SDK 为 `3cb3d568e3fe5c9d69d1ba47eb8dfdb64d34610d`，同名分支。
 灰阶与RTC之后的IMU、原生十六级、可选帧指纹及SDK验收文档也已分开本地提交，当前SDK为
 `15469204352b29ce2606c780919036046242a2b7`。本轮提交前核对81个代码/测试文件，均与实际构建和实测归档一致；提交后未重刷设备。
-这些增量尚未推送。主仓库仍保留原gitlink，SDK依赖集成是独立的发布前工作；本次没有查询或改变远端PR状态。
+SDK增量已推送至[SDK PR #51](https://github.com/0x1abin/freeink-sdk/pull/51)，CrossMux增量沿用[应用 PR #460](https://github.com/0x1abin/crossmux/pull/460)的同名来源分支。两笔PR均保持Draft；主仓库保留原gitlink，SDK依赖集成仍是独立的发布前工作。
 
 投稿期间保留源仓库已有 SDK 基线 `d9a1304cd234b0536136302f629304b609f62b32`，
 不把仅在个人 fork 中的提交作为默认子模块依赖。**默认检出的 SDK 不能构建 Plus**；
-以下远端命令只复现已发布的基础端口，不包含尚未推送的灰阶/RTC 增量：
+以下命令选择已公开的当前SDK源码，包含灰阶、RTC和IMU增量；构建仍需设备记录中说明的S31工具链：
 
 ```sh
 git submodule update --init --recursive
 git -C freeink-sdk fetch https://github.com/lfxyl/freeink-sdk.git codex/metalio-eink4-plus-s31
-git -C freeink-sdk checkout --detach 3cb3d568e3fe5c9d69d1ba47eb8dfdb64d34610d
+git -C freeink-sdk checkout --detach 15469204352b29ce2606c780919036046242a2b7
 git -C freeink-sdk submodule update --init --recursive
 pio run -e metalio_eink4_plus
 ```
 
 这会有意使本地 SDK 检出与已提交 gitlink 不同；不要将临时 gitlink 再次提交。
-当前本地 checkout 已包含上述新 SDK 提交，无需重置；推送后才能从远端取得该版本。
+当前本地checkout已包含上述SDK提交，无需重置；其他checkout可从上述PR来源分支取得该版本。
 SDK 合并后，以实际集成提交替换这段临时步骤。完整的主机检查和本地隔离工具链说明见
 [设备记录的复现部分](metalio-eink4-plus.md#reproduce)。常规 `upload` 仍由保护脚本拒绝。
 

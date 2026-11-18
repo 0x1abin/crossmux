@@ -127,7 +127,9 @@ No global tool installation is needed.
   drawing to `MetalioPlusEpd`. With a valid committed baseline, Fast uses the
   existing DU waveform and Half uses GL16. Window/split calls still compose a
   complete frame; this does not add rectangular or asynchronous refresh support.
-  Native grayscale capabilities remain disabled.
+  Combined four-gray masks and native sixteen-level staging are now enabled.
+  Ordinary native gray uses GL16; first/Full/invalidated native work uses GC16.
+  The application defers periodic heap walks under its render lock.
 - Set facade bits expand to white (15) in the vendor's existing 4bpp PSRAM
   buffer; no additional native framebuffer or heap allocation is introduced by
   the wrapper. The vendor still allocates its render buffers/tasks and internal
@@ -150,7 +152,8 @@ No global tool installation is needed.
   wrapping. SHA-256 declarations moved to a private header; the pinned archive's
   five legacy symbols were verified, with declaration opt-in scoped to the shim.
 - S31 GPIO hold/isolation calls follow APIs and Kconfig actually present in the
-  selected SDK. Sleep behavior and current are still unverified.
+  selected SDK. Bounded manual sleep/wake is accepted on V1.4; automatic
+  timeout behavior and measured current remain pending.
 - The reader uses C++20, explicitly after IDF's C++26 default; C17 middleware
   handles the pinned C dependencies. Native IDF core components retain their
   own language defaults. The native version define is injected before IDF
@@ -174,9 +177,11 @@ The user has returned. Basic reader/input and ordinary reboot/resume checks
 passed on the corrected 200MHz image. CrossMux and SD changes are retained
 until an explicit restoration request. Automatic sleep is Never. Manual
 sleep/wake, frontlight, read-only battery display and bounded STA file transfer
-have separate acceptance records below. Differential refresh is entering
-physical acceptance; measured current, native grayscale and remaining optional
-peripherals remain pending.
+have separate acceptance records below. Differential and native sixteen-level
+reading, images/covers, calibrated four-way reading rotation and native RTC
+sync/readback have bounded V1.4 acceptance. Measured current/endurance, automatic
+sleep, remaining display modes and optional peripherals remain pending; see the
+current return-acceptance and TODO records rather than the historical trials.
 
 The generated bootloader, partition table and factory image
 must never replace the current ThingsOS installation in this application-only
@@ -192,10 +197,11 @@ including PlatformIO's `__idedata`. It rejects upload, erase, `erase_upload`,
 
 `partitions_metalio_plus.csv` describes the existing ThingsOS layout, with
 the application at 0x220000 (0xae0000 bytes). OTA/release registration is absent.
-The current corrected artifact has not been written. Earlier native diagnostics
-restored only the application and verified protected Flash, followed by user
-checks. Full-reader trials use the separately approved fresh mutable-region
-recovery contract and a verified SD backup.
+The current retained ordinary development image is the accepted `c5408611…`
+candidate recorded below. Earlier native diagnostics restored only the
+application; subsequent retained-reader updates used fresh mutable snapshots,
+verified SD backups and protected-region checks under the existing approved
+recovery contract. Publishing source does not reflash the device.
 
 ## Validation and remaining work
 
@@ -773,3 +779,8 @@ Plus V1.4安装坐标实物校正为`(x,y)=(-rawY,-rawX)`，只调整板配置�
 ### 2026-11-18 本地提交状态
 
 本轮功能和验收文档按关注点分别本地提交。SDK当前HEAD为 `15469204352b29ce2606c780919036046242a2b7`，主仓库仍保留原gitlink；未推送、更新远端PR或再次刷机。提交前7项针对性CTest及SDK IMU/显示/门面/板配置检查通过，完整CI的既有阻挡保留。当前建议先验收自动休眠，再验收休眠封面灰阶；具体待开发、待实测和发布条件以[剩余适配清单](metalio-eink4-plus-todo.md)为准。
+
+
+### 2026-11-18 PR来源分支更新
+
+后续源代码沿用[CrossMux #460](https://github.com/0x1abin/crossmux/pull/460)和[SDK #51](https://github.com/0x1abin/freeink-sdk/pull/51)，两者均为Draft。SDK修订 `15469204352b29ce2606c780919036046242a2b7` 已公开在原来源分支；临时复现步骤已指向该完整修订。主仓库继续保留上游基线gitlink，不把个人fork提交改作默认依赖。推送不合并PR、不登记发布/OTA，也不触碰设备或SD；之前“本地提交、未推送”的段落保留为当时记录。
