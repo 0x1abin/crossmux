@@ -346,6 +346,10 @@ inline bool isHiddenOnDevice(const SettingInfo& s) {
     // must not drop the saved value.
     case StrId::STR_TILT_PAGE_TURN:
       return !halTiltSensor.isAvailable();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    case StrId::STR_AUTO_ROTATE:
+      return !halTiltSensor.isAvailable();
+#endif
     // Clock settings need the RTC, as on the device (ClockSettingsActivity).
     case StrId::STR_CLOCK:
     case StrId::STR_CLOCK_FORMAT:
@@ -414,6 +418,9 @@ void forEachSetting(const SdCardFontRegistry* registry, const std::vector<Dictio
 inline bool isSettingAvailableOnBoard(const SettingInfo& setting) {
   if (setting.nameId == StrId::STR_DBL_CLICK_PWR_LIGHT && !BoardConfig::isX4Pro()) return false;
   if (setting.nameId == StrId::STR_TILT_PAGE_TURN && !halTiltSensor.isAvailable()) return false;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (setting.nameId == StrId::STR_AUTO_ROTATE && !halTiltSensor.isAvailable()) return false;
+#endif
   if (!BoardConfig::hasTouch() &&
       (setting.nameId == StrId::STR_TOUCH_READER_CONTROLS || setting.nameId == StrId::STR_NEXT_PAGE_GESTURE ||
        setting.nameId == StrId::STR_PREV_PAGE_GESTURE || setting.nameId == StrId::STR_TAP_ZONES))

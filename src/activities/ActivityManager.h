@@ -175,6 +175,9 @@ class ActivityManager {
   // Bluetooth page turner (lib/BlePageTurner): the book in front, whether it has painted a page, and
   // a page or chapter turn from a remote. False when no book in front took the turn.
   bool isForegroundReader() const;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  bool automaticRotationInputAvailable() const;
+#endif
   bool isRemoteReaderContext() const;
   bool remoteClick(RemoteButton button);
   // Home is in front and has painted a frame of its own (not one left from the screen before).

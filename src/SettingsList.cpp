@@ -150,6 +150,10 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
       StrId::STR_ORIENTATION, &CrossPointSettings::orientation,
       {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_ORIENTATION_INVERTED, StrId::STR_LANDSCAPE_CCW},
       "orientation", StrId::STR_CAT_READER));
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  emit(SettingInfo::Toggle(StrId::STR_AUTO_ROTATE, &CrossPointSettings::autoRotate, "autoRotate",
+                           StrId::STR_CAT_READER));
+#endif
   emit(SettingInfo::Enum(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                          {StrId::STR_EXTRA_SPACING_OFF, StrId::STR_EXTRA_SPACING_0_5, StrId::STR_EXTRA_SPACING_0_75,
                           StrId::STR_EXTRA_SPACING_1, StrId::STR_EXTRA_SPACING_1_25, StrId::STR_EXTRA_SPACING_1_5},

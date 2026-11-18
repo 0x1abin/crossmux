@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include <Imu.h>
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+#include "AutoRotation.h"
+#endif
+
 // TODO: Move enums into new header and share with CrossPointSettings.h
 namespace CrossPointOrientation {
 enum Value : uint8_t { PORTRAIT = 0, LANDSCAPE_CW = 1, INVERTED = 2, LANDSCAPE_CCW = 3 };
@@ -55,6 +59,11 @@ class HalTiltSensor {
   CrossPointTiltPageTurn::Value _accelMode = CrossPointTiltPageTurn::TILT_OFF;
   CrossPointOrientation::Value _accelOrientation = CrossPointOrientation::PORTRAIT;
   bool _accelReading = false;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  AutoRotation _rotation;
+  bool _orientationEvent = false;
+  uint8_t _orientation = 0;
+#endif
 
   bool readGyro(float& gx, float& gy, float& gz) const;
   bool readAccel(float& ax, float& ay, float& az) const;
@@ -73,7 +82,11 @@ class HalTiltSensor {
   bool isAvailable() const { return _available; }
 
   // Poll the accelerometer and update tilt gesture state.
-  void update(const uint8_t mode, const uint8_t orientation, const bool inReader);
+  void update(const uint8_t mode, const uint8_t orientation, const bool inReader, const bool autoRotate = false,
+              const bool rotationInputAvailable = true);
+  // One stable automatic orientation event; false leaves the argument unchanged.
+  bool takeOrientation(uint8_t& orientation);
+  void cancelOrientationCandidate();
 
   // Returns true once per tilt-forward gesture (next page direction).
   // Consumed on read — subsequent calls return false until next gesture.

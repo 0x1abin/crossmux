@@ -48,6 +48,10 @@ bool HalTiltSensor::readAccel(float& ax, float& ay, float& az) const {
 }
 
 void HalTiltSensor::begin() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  _rotation.reset();
+  _orientationEvent = false;
+#endif
   _available = _sdkImu.begin();
   if (!_available) {
     LOG_ERR("GYR", "SDK IMU not found");
@@ -60,7 +64,7 @@ void HalTiltSensor::begin() {
   // by differentiating the gravity component, so the part is brought up like any other
   // and update() takes the accelerometer path. isAvailable() then reports true, which is
   // the gate SettingsList uses to offer "Tilt page turn".
-#if FREEINK_DEVICE_READPICO
+#if FREEINK_DEVICE_READPICO || FREEINK_DEVICE_METALIO_EINK4_PLUS
   _accelOnly = BoardConfig::ACTIVE.sensors.imuType == BoardConfig::ImuType::Sc7a20h;
 #else
   _accelOnly = false;
@@ -91,6 +95,10 @@ bool HalTiltSensor::wake() {
   _lastTiltMs = millis();
   _wakeMs = millis();
   _isAwake = true;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  _rotation.reset();
+  _orientationEvent = false;
+#endif
   if (_accelOnly) {
     _lastTiltGMs = 0;
     _inTilt = false;
@@ -100,6 +108,10 @@ bool HalTiltSensor::wake() {
 }
 
 bool HalTiltSensor::deepSleep() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  _rotation.reset();
+  _orientationEvent = false;
+#endif
   if (!_available) {
     return false;
   }
@@ -115,12 +127,23 @@ bool HalTiltSensor::deepSleep() {
   return true;
 }
 
-void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const bool inReader) {
+void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const bool inReader, const bool autoRotate,
+                           const bool rotationInputAvailable) {
   if (!_available) {
     return;
   }
 
-  const bool shouldBeAwake = mode != CrossPointTiltPageTurn::TILT_OFF && inReader;
+  const bool tiltEnabled = mode != CrossPointTiltPageTurn::TILT_OFF && inReader;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  const bool rotateEnabled = autoRotate && inReader;
+  _orientationEvent = false;  // Never carry a refused event through input/menu ownership.
+  if (!rotateEnabled || !rotationInputAvailable) _rotation.reset();
+#else
+  (void)autoRotate;
+  (void)rotationInputAvailable;
+  constexpr bool rotateEnabled = false;
+#endif
+  const bool shouldBeAwake = tiltEnabled || rotateEnabled;
   if (_accelOnly && (mode != _accelMode || orientation != _accelOrientation || shouldBeAwake != _accelReading)) {
     _accelMode = static_cast<CrossPointTiltPageTurn::Value>(mode);
     _accelOrientation = static_cast<CrossPointOrientation::Value>(orientation);
@@ -164,8 +187,21 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
     float ax, ay, az;
     if (!readAccel(ax, ay, az)) {
       _lastTiltGMs = 0;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+      _rotation.update(0, 0, 0, static_cast<uint32_t>(now), orientation);
+#endif
       return;
     }
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    if (rotateEnabled && rotationInputAvailable) {
+      if (const auto next = _rotation.update(ax, ay, az, static_cast<uint32_t>(now), orientation)) {
+        _orientation = *next;
+        _orientationEvent = true;
+        _hadActivity = true;
+      }
+    }
+#endif
+    if (!tiltEnabled) return;
     // The gyro measures angular rate ABOUT the tilt axis; the accelerometer measures the
     // gravity component ALONG the axis perpendicular to it. The gesture is a LEFT/RIGHT
     // sway, so in portrait the device rolls about its up/down axis and gravity swings
@@ -228,6 +264,18 @@ bool HalTiltSensor::wasTiltedForward() {
   return val;
 }
 
+bool HalTiltSensor::takeOrientation(uint8_t& orientation) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  if (!_orientationEvent) return false;
+  _orientationEvent = false;
+  orientation = _orientation;
+  return true;
+#else
+  (void)orientation;
+  return false;
+#endif
+}
+
 bool HalTiltSensor::wasTiltedBack() {
   const bool val = _tiltBackEvent;
   _tiltBackEvent = false;
@@ -245,4 +293,11 @@ void HalTiltSensor::clearPendingEvents() {
   _tiltBackEvent = false;
   _hadActivity = false;
   // Intentionally preserve _inTilt so a held tilt doesn't retrigger on next poll
+}
+
+void HalTiltSensor::cancelOrientationCandidate() {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  _rotation.reset();
+  _orientationEvent = false;
+#endif
 }

@@ -81,6 +81,8 @@ add_test(NAME MetalioPlusBattery
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/BatteryMonitor/test/host/run_metalio_plus.py)
 add_test(NAME MetalioPlusRtc
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/Rtc/test/host/run_metalio_plus.py)
+add_test(NAME MetalioPlusImu
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/Imu/test/host/run_metalio_plus.py)
 add_test(NAME MetalioPlusFrontlight
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/freeink-sdk/libs/hardware/FrontlightManager/test/host/run_metalio_plus.py)
 add_test(NAME MetalioPlusBootRails
@@ -258,6 +260,10 @@ add_test(NAME SettingsApiKeys COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/se
 
 add_test(NAME HalTiltGestures
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_hal_tilt.py)
+add_test(NAME AutomaticOrientation
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_auto_rotation.py)
+add_test(NAME ReaderAutomaticOrientation
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/test/hal_tilt/test_reader_rotation.py)
 
 add_test(NAME NativeGrayscale
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_native_grayscale.py

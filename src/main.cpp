@@ -1319,7 +1319,12 @@ void loop() {
 
   // After the exclusive-storage return: it saves settings to the SD card.
   handleSlideSwitch();
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isForegroundReader(),
+                       SETTINGS.autoRotate != 0, activityManager.automaticRotationInputAvailable());
+#else
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
+#endif
   halClock.update();
 
   // Under the render lock, so a step never overlaps the themes' gauge reads.

@@ -149,10 +149,12 @@ def main():
         "FREEINK_CAP_HAPTIC",
         "FREEINK_CAP_WARMLIGHT",
         "FREEINK_DEVICE_PICCO",
+        "FREEINK_DEVICE_METALIO_EINK4_PLUS",
     )
     for values in product((False, True), repeat=len(capability_names)):
         capabilities = dict(zip(capability_names, values))
         keys = setting_keys(source, capabilities)
+        assert ("autoRotate" in keys) == capabilities["FREEINK_DEVICE_METALIO_EINK4_PLUS"]
         duplicates = sorted(key for key, count in Counter(keys).items() if count > 1)
         assert not duplicates, (
             f"duplicate Web Settings API keys for {capabilities}: {', '.join(duplicates)}"

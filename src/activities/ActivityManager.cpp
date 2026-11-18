@@ -202,6 +202,11 @@ void ActivityManager::loop() {
       return;
     }
 
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+    if (isForegroundReader() && !requestedUpdate.load()) {
+      static_cast<ReaderActivity*>(currentActivity.get())->handleAutoRotation();
+    }
+#endif
     // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
     if (!handleHomeStandbyInput()) currentActivity->loop();
   }
@@ -738,6 +743,13 @@ bool ActivityManager::handleForcedRefresh() {
 bool ActivityManager::isForegroundReader() const {
   return pendingAction == PendingAction::None && currentActivity && currentActivity->isReaderActivity();
 }
+
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+bool ActivityManager::automaticRotationInputAvailable() const {
+  return isForegroundReader() && !requestedUpdate.load() &&
+         static_cast<const ReaderActivity*>(currentActivity.get())->automaticRotationInputAvailable();
+}
+#endif
 
 bool ActivityManager::isRemoteReaderContext() const {
   return pendingAction == PendingAction::None && currentActivity && currentActivity->acceptsRemoteInput();

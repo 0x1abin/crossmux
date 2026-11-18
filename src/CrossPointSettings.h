@@ -463,6 +463,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // EPUB reading orientation settings
   // 0 = portrait (default), 1 = landscape clockwise, 2 = inverted, 3 = landscape counter-clockwise
   uint8_t orientation = PORTRAIT;
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  uint8_t autoRotate = 0;  // Opt-in; sensor mounting must be accepted on the actual unit.
+#endif
   // Button layouts (front layout retained for migration only)
   uint8_t frontButtonLayout = BACK_CONFIRM_LEFT_RIGHT;
   uint8_t sideButtonLayout = PREV_NEXT;
