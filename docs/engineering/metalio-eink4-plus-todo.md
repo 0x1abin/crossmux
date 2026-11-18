@@ -82,13 +82,13 @@ CrossMux 适配在 `codex/metalio-eink4-plus-s31`，界面密度提交为
 SDK增量已推送至[SDK PR #51](https://github.com/0x1abin/freeink-sdk/pull/51)，CrossMux增量沿用[应用 PR #460](https://github.com/0x1abin/crossmux/pull/460)的同名来源分支。两笔PR均保持Draft；主仓库保留原gitlink，SDK依赖集成仍是独立的发布前工作。
 
 投稿期间保留源仓库已有 SDK 基线 `d9a1304cd234b0536136302f629304b609f62b32`，
-不把仅在个人 fork 中的提交作为默认子模块依赖。**默认检出的 SDK 不能构建 Plus**；
+不把仅在个人 fork 中的提交作为默认子模块依赖。**默认检出的 SDK 不满足本分支的 Plus 和新版 OPDS API，主机检查及固件构建均需显式选择下述 SDK**；
 以下命令选择已公开的当前SDK源码，包含灰阶、RTC和IMU增量；构建仍需设备记录中说明的S31工具链：
 
 ```sh
 git submodule update --init --recursive
 git -C freeink-sdk fetch https://github.com/lfxyl/freeink-sdk.git codex/metalio-eink4-plus-s31
-git -C freeink-sdk checkout --detach 15469204352b29ce2606c780919036046242a2b7
+git -C freeink-sdk checkout --detach 0301b1cc2569f1301223becb2791582cb69645ff
 git -C freeink-sdk submodule update --init --recursive
 pio run -e metalio_eink4_plus
 ```
@@ -97,6 +97,18 @@ pio run -e metalio_eink4_plus
 当前本地checkout已包含上述SDK提交，无需重置；其他checkout可从上述PR来源分支取得该版本。
 SDK 合并后，以实际集成提交替换这段临时步骤。完整的主机检查和本地隔离工具链说明见
 [设备记录的复现部分](metalio-eink4-plus.md#reproduce)。常规 `upload` 仍由保护脚本拒绝。
+
+## 2026-11-18 PR 冲突更新
+
+SDK #51 已在原功能分支合入目标 `main` 的 `0af7bb68e1e64939ed92663464fbd03f02329c6a`，
+冲突解决提交为 `0301b1cc2569f1301223becb2791582cb69645ff`。保留 Plus S31 板配置、
+旧板型别名和测试文档双方增量，没有改动冻结的厂商扫描代码。
+CrossMux 同步补齐新版 SDK 所需的 OPDS 认证挑战头与跨域结果标志。
+
+本次仅做主机检查和交叉构建，没有重刷设备。原 `c5408611…` 实机验收仍对应合入前的
+源码组合；合并后还需要设备回归，不能把旧实测当作本次 SDK 的实测。
+完整 CI、其他 S3 构建和发布前 SDK gitlink 集成仍待完成；本次不扩展硬件验收范围。
+详细验证结果见[设备记录](metalio-eink4-plus.md#pr-conflict-refresh-20261118)。
 
 ## 已有证据与限制
 

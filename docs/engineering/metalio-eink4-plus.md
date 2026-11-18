@@ -784,3 +784,71 @@ Plus V1.4安装坐标实物校正为`(x,y)=(-rawY,-rawX)`，只调整板配置�
 ### 2026-11-18 PR来源分支更新
 
 后续源代码沿用[CrossMux #460](https://github.com/0x1abin/crossmux/pull/460)和[SDK #51](https://github.com/0x1abin/freeink-sdk/pull/51)，两者均为Draft。SDK修订 `15469204352b29ce2606c780919036046242a2b7` 已公开在原来源分支；临时复现步骤已指向该完整修订。主仓库继续保留上游基线gitlink，不把个人fork提交改作默认依赖。推送不合并PR、不登记发布/OTA，也不触碰设备或SD；之前“本地提交、未推送”的段落保留为当时记录。
+
+
+## PR conflict refresh 20261118
+
+SDK [#51](https://github.com/0x1abin/freeink-sdk/pull/51) now merges its target
+`main` at `0af7bb68e1e64939ed92663464fbd03f02329c6a` in
+`0301b1cc2569f1301223becb2791582cb69645ff`. The resolution keeps the Plus S31
+profile, native bus and display paths, target board aliases, enum values and both
+sets of test documentation. The frozen vendor import is unchanged. The existing
+feature commits are preserved; no parent SDK or simulator synchronization is part
+of this update.
+
+CrossMux [#460](https://github.com/0x1abin/crossmux/pull/460) also adapts to the
+updated SDK's OPDS result contract. `OpdsHttpTransport::get` now carries the final
+combined `WWW-Authenticate` header and the downloader's actual cross-origin result.
+Without the header, a Basic catalog with an empty or HTML 401 body would no longer
+be recognized; without the cross-origin flag, the SDK could treat a foreign 401
+as its own catalog's authentication failure.
+
+The optional challenge string is owned by the individual result and requested
+only on this cold network path. SDK parsing caps all response headers at 8 KiB;
+`getCombinedHeader` reserves the matching values and moves the result into the
+caller. Retaining it is necessary because the HTTP client is destroyed before
+returning. An 8 KiB task-stack buffer is inappropriate, and a global cache would
+retain data across requests. The returned string and the SDK's response headers
+can briefly coexist; peak C3 network heap headroom still needs measurement.
+
+The production downloader → production transport → production SDK client host
+regression covers Basic authentication with empty/HTML bodies and multiple
+challenge headers, dropping intermediate redirect challenges, and a foreign 401
+that must preserve tokens without retrying authentication or sending credentials
+to the foreign host. It reproduced the missing-header failure before the fix and
+passed afterward. The OPDS safety and standalone SDK OPDS/SecureNet suites passed.
+
+Fresh combined-source checks:
+
+- S31 `metalio_eink4_plus` build passed: static RAM **108,080 bytes**,
+  linked Flash **6,521,656 / 11,403,264 bytes**. Ordinary BIN
+  **6,522,512 bytes**, SHA-256
+  `abe01dad9cd303cd3317e244ec1b0256edb703caf5e11086bbb20e5c1261464c`. Offline image inspection passed.
+- Shared C3 `default` build passed: static RAM **68,296 bytes**,
+  linked Flash **6,383,847 / 6,553,600 bytes**. No C3 hardware test.
+- Full host CTest: **1,538 / 1,544**, with the same six failures listed above.
+- Board guards, Plus display (92 trace-mode executions), IMU (33 sanitizer cases
+  and real-profile axes), legacy/native display facade, input, SDMMC, battery,
+  frontlight, serial and GPOS suites passed.
+- Standalone FreeInkUI AppleClang unused-constant errors reproduce identically on
+  the unmerged feature head; the merge adds no feature-specific UI source delta.
+- `./bin/ci-check` passed formatting and stopped at the existing
+  `lib/Epub/Epub/FootnoteEntry.h:94` low-priority cppcheck finding; the full
+  firmware matrix is not green or complete.
+
+The builds ran in an isolated checkout before the application commit. All five
+application code/test files match `2e3ebc36134d2668c2cc5fc7978bb3e53eba0f6f`, and
+all 1,277 exported SDK files match the reviewed merge tree. Git-derived build
+metadata can differ after committing; these hashes identify the saved artifacts,
+not a promise of byte-identical output from a fresh checkout.
+
+Select the exact SDK commit using the [temporary checkout steps](metalio-eink4-plus-todo.md#复现与依赖状态)
+for host checks and both firmware environments. The committed gitlink remains
+`d9a1304c…`, which lacks the required Plus and updated OPDS APIs. Replace that
+baseline with the configured upstream repository's integrated commit after SDK
+integration, then validate the actual differences.
+
+This update has **no new physical acceptance**. The device retains the accepted
+`c5408611…` image. Previously recorded page turns, grayscale, rotation and sleep
+checks do not validate this merged SDK. Recheck those paths on hardware before
+claiming equivalent device behavior or enrolling a release. Both PRs remain Draft.
