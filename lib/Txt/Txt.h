@@ -33,7 +33,7 @@ class Txt {
                                                           uint32_t& visibleOffset);
   static std::string findCompanionCoverImage(const std::string& filepath);
   static bool convertCoverImageToBmp(const std::string& imagePath, const std::string& destBmpPath, int thumbHeight = 0,
-                                     bool cropped = false, bool originalThresholds = false);
+                                     bool cropped = false, bool originalThresholds = false, bool nativeGray = false);
   static bool buildTxtCache(const std::string& filepath, const std::string& cachePath,
                             std::unique_ptr<BookMetadataCache>& bookMetadataCache);
   explicit Txt(std::string path, std::string cacheBasePath);

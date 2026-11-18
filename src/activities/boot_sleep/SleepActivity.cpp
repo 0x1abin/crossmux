@@ -780,15 +780,16 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
                             (preserveBackground || SETTINGS.sleepScreenCoverFilter ==
                                                        CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
 
-  if (nativeCustomImage && !preserveBackground && renderer.getGrayscaleLevels() == 16 &&
+  if ((nativeCustomImage || renderer.supportsNativeGrayscaleRefreshCycle()) && !preserveBackground &&
+      overlayCover != &bitmap && renderer.getGrayscaleLevels() == 16 &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER) {
-    const bool displayed = renderer.beginGrayscale16() &&
-                           renderer.drawBitmapGrayscale16(bitmap, x, y, pageWidth, pageHeight, cropX, cropY) &&
-                           renderer.commitGrayscale16();
+    const bool decoded = renderer.beginGrayscale16() &&
+                         renderer.drawBitmapGrayscale16(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    const bool displayed = decoded && renderer.commitGrayscale16();
     renderer.cancelGrayscale16();
     if (!displayed) {
       LOG_ERR("SLP", "Native grayscale sleep image failed");
-      renderDefaultSleepScreen();
+      if (!decoded || !renderer.supportsNativeGrayscaleRefreshCycle()) renderDefaultSleepScreen();
     }
     return;
   }

@@ -24,6 +24,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookCoverLoader.h"
+#include "util/NativeGrayscaleFrame.h"
 
 namespace {
 struct HomeMenuEntry {
@@ -263,7 +264,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           RECENT_BOOKS.updateBook(book.path, book.title, book.author, thumbPath);
         }
         book.coverBmpPath = epub.getCoverBmpPath();
-      } else if (book.coverBmpPath.empty()) {
+      } else if (book.coverBmpPath != epub.getThumbBmpPath()) {
         book.coverBmpPath = epub.getThumbBmpPath();
         RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.coverBmpPath);
       }
@@ -365,7 +366,7 @@ void HomeActivity::onExit() {
 }
 
 bool HomeActivity::storeCoverBuffer() {
-  if (coverBufferUnavailable) return false;
+  if (renderer.isGrayscale16Active() || coverBufferUnavailable) return false;
 
   // Thumbnail generation may borrow the framebuffer; cache only the final render.
   if (!recentsLoaded) return false;
@@ -695,6 +696,11 @@ void HomeActivity::loop() {
 }
 
 void HomeActivity::render(RenderLock&&) {
+  NativeGrayscaleFrame nativeFrame(renderer, true);
+  if (nativeFrame.active()) {
+    coverRendered = false;
+    coverBufferStored = false;
+  }
   static_assert(canRenderCarouselMenuOnly(true, true, CarouselUpdateScope::MenuOnly));
   static_assert(!canRenderCarouselMenuOnly(false, true, CarouselUpdateScope::MenuOnly));
   static_assert(!canRenderCarouselMenuOnly(true, false, CarouselUpdateScope::MenuOnly));
@@ -746,7 +752,8 @@ void HomeActivity::render(RenderLock&&) {
   };
 
   const CarouselUpdateScope updateScope = carouselUpdateScope.exchange(CarouselUpdateScope::None);
-  const bool menuOnlyUpdate = canRenderCarouselMenuOnly(isCarousel, recentsLoaded, updateScope);
+  const bool menuOnlyUpdate =
+      canRenderCarouselMenuOnly(isCarousel, recentsLoaded, updateScope) && !nativeFrame.active();
   if (menuOnlyUpdate) {
     renderer.fillRect(headerRect.x, headerRect.y, headerRect.width, headerRect.height, false);
     drawHeader();

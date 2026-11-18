@@ -16,6 +16,7 @@
 #include "components/UiAppHelpers.h"
 #endif
 #include "fontIds.h"
+#include "util/NativeGrayscaleFrame.h"
 
 namespace fui = freeink::ui;
 
@@ -330,6 +331,7 @@ void UiListActivity::drawFooter() {
 }
 
 void UiListActivity::render(RenderLock&&) {
+  NativeGrayscaleFrame nativeFrame(renderer, mainTab() == MainTab::Recent || mainTab() == MainTab::Library);
   const auto started = millis();
   contentSelectionVisibleForFrame = Activity::showMainTabContentSelection() && UiListActivity::hasContentSelection();
   std::optional<FontCacheManager::PrewarmScope> prewarm;

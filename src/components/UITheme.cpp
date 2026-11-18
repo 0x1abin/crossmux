@@ -237,6 +237,13 @@ Rect UITheme::getHeaderRect(const GfxRenderer& renderer, bool hasFrontButtonHint
 }
 
 std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int coverHeight) {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+  // Resolve persisted pre-native templates without rewriting the recent-books store.
+  const auto thumb = coverBmpPath.rfind("/thumb_");
+  if (coverBmpPath.find("/epub_") != std::string::npos && thumb != std::string::npos &&
+      coverBmpPath.compare(thumb + 7, 6, "gray8_") != 0)
+    coverBmpPath.insert(thumb + 7, "gray8_");
+#endif
   size_t pos = coverBmpPath.find("[HEIGHT]", 0);
   if (pos != std::string::npos) {
     coverBmpPath.replace(pos, 8, std::to_string(coverHeight));

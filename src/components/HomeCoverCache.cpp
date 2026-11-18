@@ -10,6 +10,8 @@
 namespace fui = freeink::ui;
 
 void HomeCoverCache::begin() {
+  // Native targets cannot be reconstructed from a saved one-bit region.
+  if (renderer.supportsNativeGrayscaleRefreshCycle()) return;
   // Cover regions do not overlap. Each may widen by one physical byte per row.
   coverCacheCapacity = renderer.getRegionByteSize(0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()) +
                        MAX_COVERS * std::max(renderer.getScreenWidth(), renderer.getScreenHeight());
@@ -41,8 +43,8 @@ bool HomeCoverCache::paint(fui::Rect rect, size_t index, const std::string& path
   if (index >= cachedCovers.size()) return false;
   auto& cached = cachedCovers[index];
   uint8_t* const cacheData = coverCache.get();
-  if (coverCache && cached.valid && cached.rect.x == rect.x && cached.rect.y == rect.y &&
-      cached.rect.width == rect.width && cached.rect.height == rect.height &&
+  if (!renderer.isGrayscale16Active() && coverCache && cached.valid && cached.rect.x == rect.x &&
+      cached.rect.y == rect.y && cached.rect.width == rect.width && cached.rect.height == rect.height &&
       renderer.copyBufferToRegion(rect.x, rect.y, rect.width, rect.height, cacheData + cached.offset, cached.bytes)) {
     return true;
   }
@@ -71,7 +73,7 @@ bool HomeCoverCache::paint(fui::Rect rect, size_t index, const std::string& path
     GUI.drawCoverPlaceholder(renderer, Rect{rect.x, rect.y, rect.width, rect.height});
     renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
   }
-  if (coverCache) {
+  if (coverCache && !renderer.isGrayscale16Active()) {
     const size_t needed = renderer.getRegionByteSize(rect.x, rect.y, rect.width, rect.height);
     if (needed > cached.bytes && needed <= coverCacheCapacity - coverCacheUsed) {
       cached.offset = coverCacheUsed;

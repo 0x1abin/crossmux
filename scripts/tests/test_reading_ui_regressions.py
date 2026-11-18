@@ -168,6 +168,7 @@ struct GfxRenderer {
  void clearScreen() {++clears;}
  void displayBuffer() {++displays;}
 };
+struct NativeGrayscaleFrame { NativeGrayscaleFrame(GfxRenderer&,bool) {} };
 struct RenderLock {};
 struct UiListActivity : Activity {
  std::string name="test-list";

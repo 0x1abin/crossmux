@@ -76,7 +76,7 @@ std::string Txt::findCompanionCoverImage(const std::string& filepath) {
 }
 
 bool Txt::convertCoverImageToBmp(const std::string& imagePath, const std::string& destBmpPath, int thumbHeight,
-                                 bool cropped, bool originalThresholds) {
+                                 bool cropped, bool originalThresholds, bool nativeGray) {
   if (!Storage.exists(imagePath.c_str())) return false;
 
   const bool isBmp = FsHelpers::hasBmpExtension(imagePath);
@@ -107,15 +107,23 @@ bool Txt::convertCoverImageToBmp(const std::string& imagePath, const std::string
     const int targetWidth = thumbHeight * 0.6;
     const int targetHeight = thumbHeight;
     if (isJpg) {
-      success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, targetWidth, targetHeight);
+      success = nativeGray ? JpegToBmpConverter::jpegFileToBmpStreamWithSize(src, dst, targetWidth, targetHeight, true,
+                                                                             JpegToBmpConverter::Output::Gray8)
+                           : JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, targetWidth, targetHeight);
     } else if (isPng) {
-      success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, targetWidth, targetHeight);
+      success = nativeGray ? PngToBmpConverter::pngFileToBmpStreamWithSize(src, dst, targetWidth, targetHeight,
+                                                                           PngToBmpConverter::Output::Gray8)
+                           : PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, targetWidth, targetHeight);
     }
   } else {
     if (isJpg) {
-      success = JpegToBmpConverter::jpegFileToBmpStream(src, dst, cropped, originalThresholds);
+      success = JpegToBmpConverter::jpegFileToBmpStream(
+          src, dst, cropped, nativeGray ? JpegToBmpConverter::Output::Gray8 : JpegToBmpConverter::Output::Gray2,
+          originalThresholds);
     } else if (isPng) {
-      success = PngToBmpConverter::pngFileToBmpStream(src, dst, cropped, originalThresholds);
+      success = PngToBmpConverter::pngFileToBmpStream(
+          src, dst, cropped, originalThresholds,
+          nativeGray ? PngToBmpConverter::Output::Gray8 : PngToBmpConverter::Output::Gray2);
     }
   }
 

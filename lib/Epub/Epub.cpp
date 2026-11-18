@@ -28,6 +28,11 @@
 #include "Epub/parsers/TocNcxParser.h"
 
 namespace {
+#if FREEINK_DEVICE_METALIO_EINK4_PLUS
+constexpr bool nativeCoverCache = true;
+#else
+constexpr bool nativeCoverCache = false;
+#endif
 enum class CoverImageType : uint8_t { None, Jpeg, Png };
 
 CoverImageType coverImageType(const std::string& path) {
@@ -846,8 +851,8 @@ std::string Epub::getCoverOverridePath() const { return cachePath + "/cover.over
 bool Epub::hasCoverOverride() const { return coverImageType(getCoverOverridePath()) != CoverImageType::None; }
 
 std::string Epub::getCoverBmpPath(bool cropped, bool originalThresholds) const {
-  const auto coverFileName =
-      std::string("cover") + (originalThresholds ? "_original" : "_legacy_v2") + (cropped ? "_crop" : "");
+  const auto coverFileName = std::string(nativeCoverCache ? "cover_gray8" : "cover") +
+                             (originalThresholds ? "_original" : "_legacy_v2") + (cropped ? "_crop" : "");
   return cachePath + "/" + coverFileName + ".bmp";
 }
 
@@ -940,10 +945,15 @@ bool Epub::generateCoverBmp(bool cropped, bool originalThresholds) const {
     if (convertExtractedCover(
             *this, coverImageHref, outputPath, cropped ? "cropped cover" : "cover",
             [cropped, originalThresholds](HalFile& source, HalFile& output) {
-              return JpegToBmpConverter::jpegFileToBmpStream(source, output, cropped, originalThresholds);
+              return JpegToBmpConverter::jpegFileToBmpStream(
+                  source, output, cropped,
+                  nativeCoverCache ? JpegToBmpConverter::Output::Gray8 : JpegToBmpConverter::Output::Gray2,
+                  originalThresholds);
             },
             [cropped, originalThresholds](HalFile& source, HalFile& output) {
-              return PngToBmpConverter::pngFileToBmpStream(source, output, cropped, originalThresholds);
+              return PngToBmpConverter::pngFileToBmpStream(
+                  source, output, cropped, originalThresholds,
+                  nativeCoverCache ? PngToBmpConverter::Output::Gray8 : PngToBmpConverter::Output::Gray2);
             })) {
       return true;
     }
@@ -951,7 +961,7 @@ bool Epub::generateCoverBmp(bool cropped, bool originalThresholds) const {
 
   if (Txt::isTxtOrMd(filepath)) {
     return Txt::convertCoverImageToBmp(coverImageHref, getCoverBmpPath(cropped, originalThresholds), 0, cropped,
-                                       originalThresholds);
+                                       originalThresholds, nativeCoverCache);
   }
 
   if (FsHelpers::hasGifExtension(coverImageHref)) {
@@ -965,15 +975,24 @@ bool Epub::generateCoverBmp(bool cropped, bool originalThresholds) const {
   return convertOverrideCover(
       *this, outputPath, cropped ? "cropped cover" : "cover",
       [cropped, originalThresholds](HalFile& source, HalFile& output) {
-        return JpegToBmpConverter::jpegFileToBmpStream(source, output, cropped, originalThresholds);
+        return JpegToBmpConverter::jpegFileToBmpStream(
+            source, output, cropped,
+            nativeCoverCache ? JpegToBmpConverter::Output::Gray8 : JpegToBmpConverter::Output::Gray2,
+            originalThresholds);
       },
       [cropped, originalThresholds](HalFile& source, HalFile& output) {
-        return PngToBmpConverter::pngFileToBmpStream(source, output, cropped, originalThresholds);
+        return PngToBmpConverter::pngFileToBmpStream(
+            source, output, cropped, originalThresholds,
+            nativeCoverCache ? PngToBmpConverter::Output::Gray8 : PngToBmpConverter::Output::Gray2);
       });
 }
 
-std::string Epub::getThumbBmpPath() const { return cachePath + "/thumb_[HEIGHT].bmp"; }
-std::string Epub::getThumbBmpPath(int height) const { return cachePath + "/thumb_" + std::to_string(height) + ".bmp"; }
+std::string Epub::getThumbBmpPath() const {
+  return cachePath + (nativeCoverCache ? "/thumb_gray8_[HEIGHT].bmp" : "/thumb_[HEIGHT].bmp");
+}
+std::string Epub::getThumbBmpPath(int height) const {
+  return cachePath + (nativeCoverCache ? "/thumb_gray8_" : "/thumb_") + std::to_string(height) + ".bmp";
+}
 
 bool Epub::generateThumbBmp(int height) const {
   // Already generated, return true
@@ -1023,9 +1042,15 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
   if (convertOverrideCover(
           *this, outputPath, "thumbnail",
           [targetWidth, height](HalFile& source, HalFile& output) {
+            if (nativeCoverCache)
+              return JpegToBmpConverter::jpegFileToBmpStreamWithSize(source, output, targetWidth, height, true,
+                                                                     JpegToBmpConverter::Output::Gray8);
             return JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(source, output, targetWidth, height);
           },
           [targetWidth, height](HalFile& source, HalFile& output) {
+            if (nativeCoverCache)
+              return PngToBmpConverter::pngFileToBmpStreamWithSize(source, output, targetWidth, height,
+                                                                   PngToBmpConverter::Output::Gray8);
             return PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(source, output, targetWidth, height);
           })) {
     return true;
@@ -1036,16 +1061,22 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
   }
 
   if (Txt::isTxtOrMd(filepath)) {
-    return Txt::convertCoverImageToBmp(coverImageHref, getThumbBmpPath(height), height);
+    return Txt::convertCoverImageToBmp(coverImageHref, getThumbBmpPath(height), height, false, false, nativeCoverCache);
   }
 
   if (FsHelpers::hasJpgExtension(coverImageHref) || FsHelpers::hasPngExtension(coverImageHref)) {
     if (convertExtractedCover(
             *this, coverImageHref, outputPath, "thumbnail",
             [targetWidth, height](HalFile& source, HalFile& output) {
+              if (nativeCoverCache)
+                return JpegToBmpConverter::jpegFileToBmpStreamWithSize(source, output, targetWidth, height, true,
+                                                                       JpegToBmpConverter::Output::Gray8);
               return JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(source, output, targetWidth, height);
             },
             [targetWidth, height](HalFile& source, HalFile& output) {
+              if (nativeCoverCache)
+                return PngToBmpConverter::pngFileToBmpStreamWithSize(source, output, targetWidth, height,
+                                                                     PngToBmpConverter::Output::Gray8);
               return PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(source, output, targetWidth, height);
             })) {
       return true;
