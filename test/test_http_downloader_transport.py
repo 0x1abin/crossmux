@@ -35,7 +35,7 @@ CLIENT = r'''
 namespace freeink {
 using DataCallback=std::function<bool(const uint8_t*,size_t)>;
 using AbortCallback=std::function<bool()>;
-struct Response {int status=200;std::string body="book",location;bool complete=true,known=true;};
+struct Response {int status=200;std::string body="book",location;bool complete=true,known=true;std::vector<std::string> challenges{};};
 struct Request {std::string url,agent,method;std::map<std::string,std::string> headers;};
 inline std::vector<Response> responses;
 inline std::vector<Request> requests;
@@ -65,7 +65,13 @@ struct SecureHttpClient {
  }
  int GET(const DataCallback& callback) {return sendRequest("GET",nullptr,0,callback);}
  int getStatus() const {return response.status;}
- std::string getHeader(const char*) const {return response.location;}
+ std::string getHeader(const char* name) const {return std::string(name)=="location"?response.location:std::string();}
+ std::string getCombinedHeader(const char* name) const {
+  if(std::string(name)!="www-authenticate") return getHeader(name);
+  std::string result;
+  for(const auto& value:response.challenges) {if(!result.empty())result+=", ";result+=value;}
+  return result;
+ }
  bool responseComplete() const {return response.complete&&!stopped&&!wasAborted;}
  bool hasContentLength() const {return response.known;}
  size_t getContentLength() const {return response.body.size();}
@@ -91,10 +97,54 @@ FetchResult fetchResumable(const std::string& url,const FetchOptions& options,Se
 HARNESS = r'''
 #include <cassert>
 #include "network/HttpDownloader.h"
+#include "network/OpdsHttpTransport.h"
+#include <OpdsClient.h>
 #include <ResumableFetch.h>
 using namespace freeink;
+namespace UrlUtils {
+std::string buildUrl(const std::string& base,const std::string& ref) {
+ std::string out;return SecureHttpClient::resolveUrl(base,ref,out)?out:std::string();
+}
+}
 void reset() {responses.clear();requests.clear();files.clear();beginOk=openOk=writeOk=replaceOk=true;fetchAborted=fetchStopped=false;fetchComplete=true;fetchStatus=200;}
 int main() {
+ // Production downloader -> production transport -> production SDK auth client.
+ for(const std::string body : {std::string(),std::string("<html>Login required</html>")}) {
+  reset();responses={{401,body}};
+  responses.back().challenges={"Digest realm=books","bAsIc realm=books"};
+  OpdsHttpTransport transport;transport.setServerUrl("https://origin.test");
+  freeink::opds::OpdsClient client(transport);client.setServer("https://origin.test","reader","secret");
+  assert(client.authenticateDownload("https://origin.test/book.epub"));
+  assert(client.useBasicAuth() && requests.size()==1);
+  assert(requests[0].headers.count("Authorization")==0);
+  responses={{200,"book"}};
+  const auto result=transport.get("https://origin.test/book.epub",client.downloadAuth(),nullptr,nullptr,false,
+                                 [](const uint8_t*,size_t){return true;});
+  assert(result.ok && result.status==200 && result.wwwAuthenticate.empty() && !result.redirected);
+  assert(requests.back().headers["Authorization"]=="Basic reader:secret");
+ }
+ {
+  // A Basic header on an intermediate redirect must not authenticate a final Bearer challenge.
+  reset();responses={{302,"","/login"},{401,""}};
+  responses[0].challenges={"Basic realm=stale"};responses[1].challenges={"Bearer realm=books"};
+  OpdsHttpTransport transport;transport.setServerUrl("https://origin.test");
+  freeink::opds::OpdsClient client(transport);client.setServer("https://origin.test","reader","secret");
+  assert(!client.authenticateDownload("https://origin.test/book.epub"));
+  assert(!client.useBasicAuth() && requests.size()==2);
+ }
+ {
+  // A foreign 401 must neither invalidate tokens nor trigger a credential-bearing POST.
+  reset();responses={{302,"","https://foreign.test/auth"},{401,
+   R"({"authentication":[{"type":"http://opds-spec.org/auth/oauth/password","links":[{"rel":"authenticate","href":"/token"}]}]})"}};
+  responses[1].challenges={"Basic realm=foreign"};
+  OpdsHttpTransport transport;transport.setServerUrl("https://origin.test");
+  freeink::opds::OpdsClient client(transport);client.setServer("https://origin.test","reader","secret");
+  client.setTokens("old-access","old-refresh","https://origin.test/token");
+  OpdsFeedParser parser;
+  assert(client.fetchFeed("https://origin.test/feed",parser)==freeink::opds::OpdsClient::FetchStatus::AuthFailed);
+  assert(client.accessToken()=="old-access" && client.refreshToken()=="old-refresh" && !client.tokensDirty());
+  assert(requests.size()==2 && requests[1].headers.count("Authorization")==0);
+ }
  reset();
  HttpDownloader::FetchOptions options;
  options.username="u";options.password="p";options.bearer="token";
@@ -159,8 +209,8 @@ def run():
         tmp=Path(tmp)
         (tmp/'HalStorage.h').write_text(STORAGE)
         (tmp/'ResumableFetch.h').write_text(CLIENT)
-        (tmp/'Arduino.h').write_text('#pragma once\n#include <cstdio>\n#include <cstdint>\n#include <cstddef>\nclass Stream {public: virtual size_t write(const uint8_t*,size_t)=0;};\n')
-        (tmp/'Logging.h').write_text('#pragma once\n#define LOG_ERR(...) ((void)0)\n#define LOG_DBG(...) ((void)0)\n')
+        (tmp/'Arduino.h').write_text('#pragma once\n#include <cstdio>\n#include <cstdint>\n#include <cstddef>\nclass Stream {public: virtual size_t write(const uint8_t*,size_t)=0;};\nstruct HostEsp {size_t getMaxAllocHeap() const {return 380000;}};inline HostEsp ESP;\n')
+        (tmp/'Logging.h').write_text('#pragma once\n#define LOG_ERR(...) ((void)0)\n#define LOG_DBG(...) ((void)0)\n#define LOG_INF(...) ((void)0)\n')
         (tmp/'HalMemory.h').write_text('#pragma once\n#include <cstddef>\nnamespace HalMemory {struct HeapStats {size_t freeBytes=100000,largestBlockBytes=100000;};inline HeapStats getDefaultHeap(){return{};}inline HeapStats getInternalHeap(){return{};}inline HeapStats getPsramHeap(){return{};}}\n')
         (tmp/'HalSystem.h').write_text('#pragma once\nnamespace HalSystem {inline const char* getDeviceModel(){return "HostTest";}}\n')
         (tmp/'esp_wifi.h').write_text('#pragma once\nusing wifi_ps_type_t=int;using esp_err_t=int;constexpr int ESP_OK=0,WIFI_PS_MIN_MODEM=1,WIFI_PS_NONE=0;inline int esp_wifi_get_ps(int* out){*out=1;return 0;}inline int esp_wifi_set_ps(int){return 0;}\n')
@@ -168,9 +218,13 @@ def run():
         binary=tmp/'check'
         subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-DCROSSPOINT_VERSION="test"',
                         '-I',str(tmp),'-I',str(ROOT/'src'),'-I',str(ROOT/'lib/HttpHeader'),'-I',str(ROOT/'lib/AsciiText'),
-                        str(tmp/'check.cpp'),str(ROOT/'src/network/HttpDownloader.cpp'),str(ROOT/'lib/HttpHeader/HttpHeader.cpp'),'-o',str(binary)],check=True)
+                        '-I',str(ROOT/'freeink-sdk/libs/network/Opds/test/host/stubs'),'-I',str(ROOT/'freeink-sdk/libs/network/Opds/include'),'-I',str(ROOT/'freeink-sdk/libs/network/JsonSax/include'),
+                        str(tmp/'check.cpp'),str(ROOT/'src/network/HttpDownloader.cpp'),str(ROOT/'src/network/OpdsHttpTransport.cpp'),
+                        *map(str,(ROOT/'freeink-sdk/libs/network/Opds/src').glob('*.cpp')),
+                        str(ROOT/'freeink-sdk/libs/network/JsonSax/src/StreamingJsonParser.cpp'),
+                        str(ROOT/'lib/HttpHeader/HttpHeader.cpp'),'-lexpat','-o',str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
-    print('HTTP downloader: origin-scoped Basic/Bearer/custom headers, CRLF rejection, 401 body, interrupted200, capped token response, cancellation and atomic files passed')
+    print('HTTP downloader: Basic challenge metadata through real OPDS client, foreign challenge rejection, origin-scoped credentials, CRLF rejection, 401 body, interrupted200, capped token response, cancellation and atomic files passed')
 
 
 if __name__ == '__main__':

@@ -27,7 +27,7 @@ class HttpDownloader {
  enum DownloadError {OK,HTTP_ERROR,FILE_ERROR,ABORTED,UNAUTHORIZED};
  using Header=std::pair<std::string,std::string>;
  using DataCallback=std::function<bool(const uint8_t*,size_t)>;
- struct FetchOptions {std::string username,password,bearer,accept,acceptLanguage;std::vector<Header> headers;int* statusOut=nullptr;bool captureErrorBody=false;};
+ struct FetchOptions {std::string username,password,bearer,accept,acceptLanguage;std::vector<Header> headers;int* statusOut=nullptr;std::string* wwwAuthenticateOut=nullptr;bool captureErrorBody=false;};
  static constexpr uint32_t MIN_TLS_FREE_HEAP=40000;
  static constexpr uint32_t MIN_TLS_MAX_ALLOC=20000;
  inline static bool tlsOk=true;inline static int gets=0,posts=0;
@@ -37,8 +37,10 @@ class HttpDownloader {
  inline static std::string lastDownloadUser;
  inline static std::vector<Header> lastDownloadHeaders;
  static bool hasMemoryForTls(){return tlsOk;}
+ static bool lastAnswerRedirected(){return false;}
  static bool fetchUrl(const std::string&,const DataCallback& sink,const FetchOptions& options) {
   ++gets;last=options;if(options.statusOut)*options.statusOut=200;
+  if(options.wwwAuthenticateOut)options.wwwAuthenticateOut->clear();
   const std::string body(licenseBytes,'x');
   for(size_t pos=0;pos<body.size();pos+=1024)
    if(!sink(reinterpret_cast<const uint8_t*>(body.data()+pos),std::min<size_t>(1024,body.size()-pos)))return false;

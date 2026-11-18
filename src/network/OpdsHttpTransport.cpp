@@ -19,7 +19,7 @@ fo::HttpAuth OpdsHttpTransport::authFor(const std::string& url, fo::HttpAuth aut
 fo::HttpResult OpdsHttpTransport::get(const std::string& url, const fo::HttpAuth& auth, const char* accept,
                                       const char* acceptLanguage, const bool captureErrorBody,
                                       const fo::OpdsDataSink& onChunk) {
-  int status = 0;
+  fo::HttpResult result{};
   HttpDownloader::FetchOptions options;
   if (!serverOrigin.empty() && freeink::fetchOrigin(url) == serverOrigin) {
     options.username = auth.username;
@@ -30,9 +30,11 @@ fo::HttpResult OpdsHttpTransport::get(const std::string& url, const fo::HttpAuth
   if (accept) options.accept = accept;
   if (acceptLanguage) options.acceptLanguage = acceptLanguage;
   options.captureErrorBody = captureErrorBody;
-  options.statusOut = &status;
-  const bool ok = HttpDownloader::fetchUrl(url, onChunk, options);
-  return fo::HttpResult{ok, status};
+  options.statusOut = &result.status;
+  options.wwwAuthenticateOut = &result.wwwAuthenticate;
+  result.ok = HttpDownloader::fetchUrl(url, onChunk, options);
+  result.redirected = HttpDownloader::lastAnswerRedirected();
+  return result;
 }
 
 bool OpdsHttpTransport::postForm(const std::string& url, const std::string& body, std::string& outResponse,

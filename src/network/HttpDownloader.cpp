@@ -146,6 +146,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const FetchOptions& options) {
+  if (options.wwwAuthenticateOut) options.wwwAuthenticateOut->clear();
   // OPDS fetches need what fetchResumable withholds: the final HTTP status
   // and a 401 body (auth documents are served as 401 bodies). Direct GET with
   // a manual redirect loop; catalog feeds are small enough that Range resume
@@ -206,6 +207,11 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
         break;
       }
       continue;
+    }
+    if (options.wwwAuthenticateOut && status > 0) {
+      // Keep only the final bounded challenge beyond this client's lifetime;
+      // move the SDK string into caller ownership instead of a global cache.
+      *options.wwwAuthenticateOut = http.getCombinedHeader("www-authenticate");
     }
     break;
   }

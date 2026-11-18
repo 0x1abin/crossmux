@@ -87,6 +87,8 @@ class HttpDownloader {
     // Extra headers (per-server custom headers), sent to the starting origin only.
     std::vector<Header> headers;
     int* statusOut = nullptr;
+    // Caller-owned final challenge; the SDK bounds all response headers to 8 KiB.
+    std::string* wwwAuthenticateOut = nullptr;
     bool captureErrorBody = false;
   };
 
