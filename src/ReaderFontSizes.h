@@ -27,8 +27,14 @@ inline int builtinReaderFontVariant(const int fontId, const float) {
   return std::find(std::begin(IDS), std::end(IDS), fontId) != std::end(IDS) ? fontId : 0;
 }
 
-// Vector (.ttf/.otf) fonts offer every whole point size from 8 through 22.
+// Preserve the legacy range on ordinary displays; the high-density profile
+// must retain installed 26pt selections when switching from bitmap to TTF.
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+inline constexpr uint8_t VECTOR_READER_POINT_SIZES[] = {8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                                        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
+#else
 inline constexpr uint8_t VECTOR_READER_POINT_SIZES[] = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22};
+#endif
 
 // Point sizes selectable for the active reader font, ascending: the vector set
 // or installed .cpfont sizes for a known SD family, otherwise the built-in set.

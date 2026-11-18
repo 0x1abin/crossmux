@@ -270,6 +270,9 @@ add_test(NAME NativeGrayscale
     ${crosspoint_simulator_SOURCE_DIR} ${CMAKE_CXX_COMPILER} ${jpegdec_SOURCE_DIR}/src)
 set_tests_properties(NativeGrayscale PROPERTIES RUN_SERIAL TRUE)
 
+add_test(NAME ReaderVectorSizes
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_reader_vector_sizes.py)
+
 add_test(NAME FileBrowserImages
   COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/tests/test_file_browser_images.py)
 
