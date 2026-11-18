@@ -60,7 +60,7 @@ This avoids a parallel rendering framework or a second framebuffer.
 | Single-line / subtitle list row | 104 / 128 minimum |
 | Control-center tile / reader chapter step | 96 |
 | Main navigation / list and reader toolbar icons | 56 / 48 |
-| Status / reading footer battery canvas | 32 × 20, generated from Lucide SVG |
+| Status / reading footer battery, including terminal | Classic/RoundedRaff 32 × 24; Lyra/INX 34 × 24 |
 | Reader text/status lane reservation | 48, plus the configured progress bar |
 | Reader footer text / estimate | 12 / 14pt |
 | Reader bookmark / Bluetooth markers | 24 × 24 |
@@ -175,29 +175,59 @@ Tab order is unchanged (recent/library/apps/settings/statistics). The former
 38 → 56 nearest-neighbor rendering is removed. Legacy targets still use
 `inx_tabs.h` at 38px.
 
-The battery outline comes from `battery.svg`; the charging marker uses only the
-lightning path from `battery-charging.svg`, fitted into the fill cavity before
-rasterization. Both are rasterized at 32 × 32, then rows `[6,26)` are retained
-without resampling, producing 32 × 20. White bits are transparent; only ink bits
-are drawn (black for the outline, white for the charging marker). Filling is
-dynamic and clamped to 0–100%; charging keeps enough fill under the lightning
-marker. All data is static, with no new runtime allocations. The bitmap payload
-is 2,680 bytes (five 392-byte Tabs, two 80-byte battery planes,
-32/48px settings variants totaling 416 bytes, and two 72-byte footer markers). All settings entrypoints use
-`settings-2`: the Tab, FUI list rows and legacy bitmap-based menu buttons.
+Battery artwork retains each theme's original pixel geometry at exactly 2×:
+outline, terminal, stroke width, inner spacing and inverted charging bolt all
+scale together. Classic/RoundedRaff retain continuous fill, including their
+minimum one-pixel legacy fill; Lyra/INX retain three segments with the original
+strict >10/>40/>70 thresholds and a solid charging cavity. Percentages are
+clamped to 0–100%. The full bounds, including the terminal, are 32 × 24 for
+Classic/RoundedRaff and 34 × 24 for Lyra/INX. Applying the high-DPI metrics more
+than once does not scale them again.
 
-The shared theme profile sets battery metrics to 32 × 20 and reserves a 48px
-reader text lane so the 12pt text and 24px auxiliary icons clear the progress bar.
+Headers and reader footers share `BatteryIcon.h`. FreeInkUI's optional
+`BatteryIndicatorProps::glyphPainter` replaces only the glyph; the component
+still owns label positioning and header reservations. With no painter (or a
+false return), SDK rendering stays unchanged. CrossMux only installs this
+painter in the high-DPI profile. Normal-resolution firmware retains its
+existing drawing paths. Drawing uses stack-local adapters and rectangle fills,
+with no bitmap buffers or new heap allocations. The Lucide battery planes are
+no longer generated. Remaining chrome bitmap payload is 2,520 bytes (five
+392-byte Tabs, 32/48px settings variants totaling 416 bytes, and two 72-byte
+footer markers). All settings entrypoints use `settings-2`: the Tab, FUI list
+rows and legacy bitmap-based menu buttons.
+
+The shared theme profile reserves a 48px reader text lane so the 12pt text and 24px auxiliary icons clear the progress bar.
 Footer percentages, clock, chapter title and counters reuse the resident 12pt
 face; the estimate marker reuses 14pt. SD reading families load footer faces at
 12/14pt, while the other UI faces remain fixed. Footer side insets are 14px,
 auxiliary-icon gaps are 12px, and a title with no remaining space is omitted.
-The former 8pt footer is no longer linked by the high-density font setup. INX/Lyra battery
-rendering uses the same generated assets in main status bars, subpage headers,
-and reading footers. FreeInkUI headers retain their SDK component renderer,
-using the updated dimensions. Viewport height is part of the existing reader
-render spec/cache identity, so the lane change rebuilds affected pagination
+The former 8pt footer is no longer linked by the high-density font setup.
+Main status bars, subpage headers and reading footers use the same themed
+battery painter and include the full terminal in their layout widths. Viewport
+height is part of the existing reader render spec/cache identity, so the lane
+change rebuilds affected pagination
 without a binary format or settings migration.
+
+The battery-style restoration passed 8 chrome/pixel tests, 18 reading-layout
+regressions, 6 UI-surface regressions and 321,403 FreeInkUI host assertions.
+ReadPico firmware, its simulator and the ESP32-C3 default firmware built; the
+default cppcheck run reported no defects. Thirteen native screenshots locate
+exact 2× themed glyphs across Home's top/bottom tab placement, four reader
+orientations and hidden percentages. The simulator always reports 100% and USB
+connected; other levels and charge states are covered by the host pixel tests.
+Scripted QUIT returned 1 after saving each capture, so clean simulator teardown
+is not claimed. Other hardware builds, the full CTest matrix and physical
+acceptance were not part of that simulator run.
+
+On 2026-11-13, the user requested a direct overwrite without a backup. The
+ReadPico dev image (`71d4d673311cf51289777d685cf8248497bc02941493629f5ee66a79a3e3a621`)
+was flashed over USB Serial/JTAG; the uploader verified the written hash.
+Boot logs detected `read_pico`, mounted SDMMC and initialized the 1216×684 panel
+without a panic. A complete 103,968-byte device framebuffer contained the
+expected 34×24 charging battery at `(609,22)` on INX Home. EPUB open, page turn
+and return to Home were observed in serial logs. The user confirmed the battery
+shape and placement on both Home and the reader. This accepts the requested
+battery UI change; other boards and unrelated hardware functions remain untested.
 
 Regenerate chrome using the existing SDK converter (`rsvg-convert` and Pillow):
 

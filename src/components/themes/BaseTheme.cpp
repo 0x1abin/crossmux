@@ -29,6 +29,7 @@
 #include "components/icons/headerIcons.h"
 #include "components/icons/listIcons.h"
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+#include "components/BatteryIcon.h"
 #include "components/icons/uiChromeIcons.h"
 #endif
 #include "fontIds.h"
@@ -88,6 +89,12 @@ constexpr int bluetoothStatusIconWidth = UiHighDpiProfile::enabled ? UiHighDpiPr
 constexpr int bluetoothStatusIconHeight = UiHighDpiProfile::enabled ? UiHighDpiProfile::readerStatusIconSize : 16;
 
 #ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+bool drawHeaderBattery(freeink::ui::DrawTarget& target, freeink::ui::Rect rect,
+                       const freeink::ui::BatteryIndicatorProps& props, void*) {
+  GUI.drawBatteryGlyph(target, rect, props.percent, props.charging);
+  return true;
+}
+
 // Plot only ink pixels; the white bits are transparent. No render-time buffers.
 void drawTransparentBitmap(const GfxRenderer& renderer, const freeink::Icon& icon, const int x, const int y,
                            const bool black) {
@@ -133,12 +140,6 @@ void drawBluetoothStatusIcon(const GfxRenderer& renderer, const int x, const int
 }  // namespace
 
 void BaseTheme::drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight) {
-#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-  if (battWidth == UiHighDpiProfile::batteryWidth && rectHeight == UiHighDpiProfile::batteryHeight) {
-    drawTransparentBitmap(renderer, icon_battery_32x20, x, y, true);
-    return;
-  }
-#endif
   // Top line
   renderer.drawLine(x + 1, y, x + battWidth - 3, y);
   // Bottom line
@@ -175,15 +176,6 @@ void BaseTheme::drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX,
 
 void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const {
   const bool charging = gpio.isUsbConnected();
-#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
-  if (rect.width == UiHighDpiProfile::batteryWidth && rect.height == UiHighDpiProfile::batteryHeight) {
-    constexpr int cavityWidth = 17;
-    const int filledWidth = std::max(charging ? 14 : 0, std::min<int>(percentage, 100) * cavityWidth / 100);
-    if (filledWidth > 0) renderer.fillRect(rect.x + 5, rect.y + 3, filledWidth, 14);
-    if (charging) drawTransparentBitmap(renderer, icon_battery_charging_32x20, rect.x, rect.y, false);
-    return;
-  }
-#endif
 
   const int maxFillWidth = rect.width - 5;
   const int fillHeight = rect.height - 4;
@@ -209,11 +201,18 @@ void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t
   }
 }
 
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+void BaseTheme::drawBatteryGlyph(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, const uint16_t percentage,
+                                 const bool charging) const {
+  BatteryIcon::draw(target, rect, percentage, charging, false);
+}
+#endif
+
 void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bool showPercentage) const {
   // Left aligned: icon on left, percentage on right (reader mode)
   const uint16_t percentage = powerManager.getBatteryPercentage();
   const bool preserveInx = UITheme::getInstance().hasMainTabs();
-  int y = rect.y + (preserveInx && UiHighDpiProfile::enabled ? 8 : 6);
+  int y = rect.y + (preserveInx && UiHighDpiProfile::enabled && rect.height != UiHighDpiProfile::batteryHeight ? 8 : 6);
   if (!preserveInx) {
     // Shared themes center the icon on the digits' ink; INX keeps its existing offset.
     const auto fontIt = renderer.getFontMap().find(SMALL_FONT_ID);
@@ -231,6 +230,16 @@ void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bo
                       percentageText.c_str());
   }
 
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (rect.height == UiHighDpiProfile::batteryHeight) {
+    freeink::ui::GfxRendererTarget target(renderer);
+    drawBatteryGlyph(target,
+                     {static_cast<int16_t>(rect.x), static_cast<int16_t>(y), static_cast<int16_t>(rect.width),
+                      static_cast<int16_t>(rect.height)},
+                     percentage, gpio.isUsbConnected());
+    return;
+  }
+#endif
   const Rect iconRect{rect.x, y, rect.width, rect.height};
   drawBatteryOutline(renderer, rect.x, y, rect.width, rect.height);
   fillBatteryIcon(renderer, iconRect, percentage);
@@ -268,8 +277,7 @@ bool BaseTheme::drawCoverThumbFill(const GfxRenderer& renderer, const Bitmap& bi
 void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const bool showPercentage,
                                  const int numericFontId) const {
   const uint16_t percentage = powerManager.getBatteryPercentage();
-  // NotoSans 12 digits and the cropped battery share their visible center at this offset.
-  const int y = rect.y + (UiHighDpiProfile::enabled ? 8 : 6);
+  const int y = rect.y + (UiHighDpiProfile::enabled && rect.height != UiHighDpiProfile::batteryHeight ? 8 : 6);
   const int gap = UiHighDpiProfile::enabled ? UiHighDpiProfile::controlGap : batteryPercentSpacing;
 
   if (showPercentage) {
@@ -278,6 +286,16 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
     renderer.drawText(numericFontId, rect.x - textWidth - gap, rect.y, percentageText.c_str());
   }
 
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  if (rect.height == UiHighDpiProfile::batteryHeight) {
+    freeink::ui::GfxRendererTarget target(renderer);
+    drawBatteryGlyph(target,
+                     {static_cast<int16_t>(rect.x), static_cast<int16_t>(y), static_cast<int16_t>(rect.width),
+                      static_cast<int16_t>(rect.height)},
+                     percentage, gpio.isUsbConnected());
+    return;
+  }
+#endif
   const Rect iconRect{rect.x, y, rect.width, rect.height};
   drawBatteryOutline(renderer, rect.x, y, rect.width, rect.height);
   fillBatteryIcon(renderer, iconRect, percentage);
@@ -626,6 +644,11 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   }
   status.battery.glyphWidth = static_cast<int16_t>(metrics.batteryWidth);
   status.battery.glyphHeight = static_cast<int16_t>(metrics.batteryHeight);
+#ifdef CROSSMUX_UI_PROFILE_HIGH_DPI
+  // FreeInkUI reserves the terminal separately; theme metrics include every pixel.
+  status.battery.glyphWidth -= 2;
+  status.battery.glyphPainter = drawHeaderBattery;
+#endif
   status.battery.gap = batteryPercentSpacing;
   status.batteryLeft = metrics.headerBatterySide == 1;
   status.edgeInset = static_cast<int16_t>(headerStatusInset(upstreamStyle));

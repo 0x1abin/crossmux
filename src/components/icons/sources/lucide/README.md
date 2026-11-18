@@ -2,7 +2,7 @@
 
 These are the unmodified SVG originals needed by `uiChromeIcons.manifest`,
 `listIcons.manifest`, `readerToolbarIcons.manifest` and the chrome generator's
-battery/settings/status variants. Maintain these files in CrossMux so changing
+settings/status variants. Maintain these files in CrossMux so changing
 the SDK's icon collection does not silently change the UI assets.
 
 Source: <https://github.com/lucide-icons/lucide>, revision
@@ -41,11 +41,10 @@ and black/0 ink. Tab icons are 56px; list/toolbar and upright settings icons are
 48px. The legacy 32px settings variant is rotated 90 degrees counterclockwise;
 reader bookmark/Bluetooth markers are 24px.
 
-The 32×20 battery is rendered on a 32×32 canvas and cropped to rows `[6,26)`.
-Its charging marker is the `battery-charging` lightning path, transformed by
-`translate(2 2) scale(0.8)` before rendering and cropping. For a different battery
-size, adjust the generator's canvas/crop/marker parameters and the drawing
-cavity together; the existing battery rendering tests check their agreement.
+Battery SVGs are retained as source references but no longer generated into
+chrome bitmaps. High-DPI batteries use the original theme's outline, fill and
+charging pixels at 2× through `src/components/BatteryIcon.h`; headers and reader
+footers share that painter.
 
 To update an original, copy it from a recorded upstream revision, retain its
 license, update the revision/checksums and regenerate the affected headers.
