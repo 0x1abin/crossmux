@@ -1,7 +1,9 @@
 #include "PluginHttp.h"
 
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SecureHttpClient.h>
 
 #include <algorithm>
@@ -158,43 +160,109 @@ static bool allowedFile(const std::string& file) {
   return false;
 }
 
-bool loadTokenFromFile(const std::string& file, const std::string& path, std::string& out) {
-  out.clear();
-  if (file.empty()) return true;  // token-less plugin
-  if (!allowedFile(file)) return false;
+static bool tokenSiblingPaths(const std::string& file, std::string& temp, std::string& backup) {
+  if (file.size() > SIZE_MAX / 2 - 5) return false;
+  const size_t bytes = file.size() + 5;
+  const auto heap = HalMemory::getDefaultHeap();
+  // Two variable-length cold-path names outlive the I/O; admit both before reserving.
+  if (!memory::hasAllocationHeadroom(heap.freeBytes, heap.largestBlockBytes, bytes * 2, bytes, 8192, 0)) {
+    LOG_ERR("PHTP", "Low heap for token transaction paths");
+    return false;
+  }
+  temp.reserve(bytes - 1);
+  backup.reserve(bytes - 1);
+  temp.assign(file).append(".tmp");
+  backup.assign(file).append(".bak");
+  return true;
+}
+
+static bool readTokenRecord(const std::string& file, const std::string& path, std::string* out = nullptr) {
   std::string raw;
   if (!Storage.readFileToString("PHTP", file, MAX_TOKEN_FILE_SIZE, raw)) return false;
   JsonDocument doc;
   if (deserializeJson(doc, raw) != DeserializationError::Ok) return false;
-  out = variantToString(resolvePath(doc.as<JsonVariantConst>(), path));
-  return !out.empty();
+  const auto token = resolvePath(doc.as<JsonVariantConst>(), path);
+  if (!token.is<const char*>() && !token.is<int>() && !token.is<long long>()) return false;
+  if (out) *out = variantToString(token);
+  return true;
+}
+
+static bool recoverTokenRecord(const std::string& file, const std::string& path, const std::string& temp,
+                               const std::string& backup) {
+  if (Storage.exists(file.c_str())) return readTokenRecord(file, path);
+  for (const auto* candidate : {&backup, &temp}) {
+    if (!Storage.exists(candidate->c_str())) continue;
+    if (!readTokenRecord(*candidate, path) || !Storage.rename(candidate->c_str(), file.c_str())) {
+      LOG_ERR("PHTP", "Cannot recover token record");
+      return false;
+    }
+    return true;
+  }
+  return true;  // A new token file has no prior record to recover.
+}
+
+bool loadTokenFromFile(const std::string& file, const std::string& path, std::string& out) {
+  out.clear();
+  if (file.empty()) return true;  // token-less plugin
+  if (!allowedFile(file)) return false;
+  HalStorage::StorageLock lock;
+  if (!Storage.exists(file.c_str())) {
+    std::string temp, backup;
+    if (!tokenSiblingPaths(file, temp, backup) || !recoverTokenRecord(file, path, temp, backup)) return false;
+  }
+  return readTokenRecord(file, path, &out) && !out.empty();
 }
 
 bool saveTokenToFile(const std::string& file, const std::string& path, const std::string& value) {
-  if (file.empty()) return false;
-  if (!allowedFile(file)) return false;
+  if (file.empty() || !allowedFile(file)) return false;
+  HalStorage::StorageLock lock;
+  std::string temp, backup;
+  if (!tokenSiblingPaths(file, temp, backup) || !recoverTokenRecord(file, path, temp, backup)) return false;
+  // Reserved siblings with unknown content cannot safely be discarded.
+  for (const auto* sibling : {&temp, &backup}) {
+    if (Storage.exists(sibling->c_str()) && (!readTokenRecord(*sibling, path) || !Storage.remove(sibling->c_str()))) {
+      LOG_ERR("PHTP", "Cannot clear previous token transaction");
+      return false;
+    }
+  }
   JsonDocument doc;
-  // Build the nesting the read path expects (numeric segments unsupported).
   std::vector<std::string> segs;
   splitPath(path, segs);
-  if (segs.empty()) return false;
+  if (segs.empty() || std::any_of(segs.begin(), segs.end(), segIsIndex)) return false;
   JsonVariant node = doc.to<JsonObject>();
   for (size_t i = 0; i + 1 < segs.size(); i++) node = node[segs[i]].to<JsonObject>();
   node[segs.back()] = value;
-  std::string out;
-  serializeJson(doc, out);
-  HalFile f;
-  if (!Storage.openFileForWrite("PHTP", file, f)) return false;
-  const size_t written = f.write(out.data(), out.size());
-  f.flush();
-  if (written != out.size()) {
-    // A short write (SD full, I/O fault) must not persist a truncated token:
-    // the writer would report success, then every later load fails.
-    LOG_ERR("PHTP", "short token write (%u of %u)", static_cast<unsigned>(written), static_cast<unsigned>(out.size()));
-    if (f.isOpen()) f.close();
-    Storage.remove(file.c_str());
+  const size_t expected = measureJson(doc);
+  if (doc.overflowed() || expected > MAX_TOKEN_FILE_SIZE) {
+    LOG_ERR("PHTP", "Invalid or oversized token JSON");
     return false;
   }
+  bool complete;
+  {
+    HalFile output;
+    if (!Storage.openFileForWrite("PHTP", temp, output)) return false;
+    complete = serializeJson(doc, output) == expected;
+    const bool closed = output.close();  // Check the flush before replacing an existing token.
+    complete = complete && closed;
+  }
+  if (!complete) {
+    Storage.remove(temp.c_str());
+    LOG_ERR("PHTP", "Failed to stage complete token JSON");
+    return false;
+  }
+  const bool hadPrevious = Storage.exists(file.c_str());
+  if (hadPrevious && !Storage.rename(file.c_str(), backup.c_str())) {
+    Storage.remove(temp.c_str());
+    LOG_ERR("PHTP", "Cannot back up token file");
+    return false;
+  }
+  if (!Storage.rename(temp.c_str(), file.c_str())) {
+    if (hadPrevious && !Storage.rename(backup.c_str(), file.c_str()))
+      LOG_ERR("PHTP", "Token backup retained for later recovery");
+    LOG_ERR("PHTP", "Cannot install staged token");
+    return false;
+  }
+  if (hadPrevious && !Storage.remove(backup.c_str())) LOG_ERR("PHTP", "Token saved; backup cleanup deferred");
   return true;
 }
 

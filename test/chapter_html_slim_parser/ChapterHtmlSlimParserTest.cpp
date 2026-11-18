@@ -330,6 +330,31 @@ TEST_P(ChapterHtmlSlimParserTest, KeepsCssVerticalAlignAndInternalLinkMetadata) 
 INSTANTIATE_TEST_SUITE_P(CssVerticalAlign, ChapterHtmlSlimParserTest,
                          ::testing::Values("vertical-align: super", "vertical-align: sub"));
 
+TEST_F(ChapterHtmlSlimParserTest, HeadingBlocksAreNotHyphenated) {
+  const XML_Char* noAttributes[] = {nullptr};
+  parser.hyphenationEnabled = true;
+
+  writeHtml("<html><body></body></html>");
+  ASSERT_TRUE(parser.beginParse());
+  ChapterHtmlSlimParser::startElement(&parser, "h2", noAttributes);
+  ChapterHtmlSlimParser::characterData(&parser, "Title ", 6);
+  ASSERT_NE(parser.currentTextBlock, nullptr);
+  EXPECT_FALSE(parser.currentTextBlock->isHyphenationEnabled());
+  // A line break inside the heading starts another block of the same heading.
+  ChapterHtmlSlimParser::startElement(&parser, "br", noAttributes);
+  ChapterHtmlSlimParser::endElement(&parser, "br");
+  ChapterHtmlSlimParser::characterData(&parser, "More ", 5);
+  EXPECT_FALSE(parser.currentTextBlock->isHyphenationEnabled());
+  ChapterHtmlSlimParser::endElement(&parser, "h2");
+
+  ChapterHtmlSlimParser::startElement(&parser, "p", noAttributes);
+  ChapterHtmlSlimParser::characterData(&parser, "Body ", 5);
+  ASSERT_NE(parser.currentTextBlock, nullptr);
+  EXPECT_TRUE(parser.currentTextBlock->isHyphenationEnabled());
+  ChapterHtmlSlimParser::endElement(&parser, "p");
+  parser.abortParse();
+}
+
 class SectionMemoryTest : public ::testing::Test {
  protected:
   std::shared_ptr<Epub> epub = std::make_shared<Epub>();
@@ -564,6 +589,25 @@ TEST_F(SectionMemoryTest, InitializationFailureReleasesResourcesAndPreservesPrio
   }
 }
 
+TEST_F(SectionMemoryTest, RejectsPreviousCompleteAndPartialPaginationVersions) {
+  writeHtml("<html><body><p>Book content</p></body></html>");
+  spec.embeddedStyle = false;
+  for (uint8_t oldVersion : {88, 89, 194, 193}) {
+    {
+      Section build(epub, 0, renderer);
+      ASSERT_TRUE(build.createSectionFile(spec));
+    }
+    const auto path = epub->cachePath + "/sections/0.bin";
+    {
+      std::fstream output(path, std::ios::in | std::ios::out | std::ios::binary);
+      ASSERT_TRUE(output.good());
+      output.put(static_cast<char>(oldVersion));
+    }
+    Section old(epub, 0, renderer);
+    EXPECT_FALSE(old.loadSectionFile(spec));
+  }
+}
+
 TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
   std::string html = "<html><body><p id='start'>";
   for (int i = 0; i < 900; ++i) html += "中文正文";
@@ -584,7 +628,7 @@ TEST_F(SectionMemoryTest, MixedChapterCacheMatchesVerifiedLayout) {
     for (const unsigned char byte : value) digest = (digest ^ byte) * 1099511628211ULL;
   };
   ASSERT_FALSE(bytes.empty());
-  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 88);
+  EXPECT_EQ(static_cast<uint8_t>(bytes.front()), 90);
   ASSERT_EQ(static_cast<uint8_t>(bytes[11]), 3);
   bytes.erase(11, 1);  // Western indent width appended to the preserved tri-state schema.
   bytes.erase(12, 1);  // vertical bottom-align toggle appended after alignment.
@@ -908,7 +952,7 @@ TEST_F(SectionMemoryTest, BottomAlignRejectsOppositeToggleAndMalformedByteInComp
       std::ifstream input(path, std::ios::binary);
       const std::string bytes{std::istreambuf_iterator<char>(input), {}};
       ASSERT_GT(bytes.size(), 47u);
-      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 194 : 88);
+      EXPECT_EQ(static_cast<uint8_t>(bytes.front()), partial ? 192 : 90);
       {
         Section same(epub, 0, renderer);
         ASSERT_TRUE(same.loadSectionFile(spec));

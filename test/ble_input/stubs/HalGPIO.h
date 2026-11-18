@@ -24,6 +24,7 @@ struct HalGPIO {
     return false;
   }
   unsigned long getHeldTime() const { return heldTime; }
+  unsigned long getPowerButtonHeldTime() const { return heldTime; }
   bool hasTouch() const { return true; }
   unsigned long lastTouchHeldMs() const { return touchHeldTime; }
   bool wasTouchTap(float& x, float& y) const {

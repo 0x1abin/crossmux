@@ -57,12 +57,40 @@
 namespace fui = freeink::ui;
 
 namespace {
+bool belongsToControlsGroup(const SettingInfo& setting, ControlsGroup group) {
+  if (setting.action == SettingAction::TapZones) return group == ControlsGroup::Touch;
+  const auto field = setting.valuePtr;
+  const bool power =
+      setting.key && (std::strcmp(setting.key, "shortPwrBtn") == 0 || std::strcmp(setting.key, "doublePwrBtn") == 0);
+  const bool menu = setting.key && std::strcmp(setting.key, "longPressMenuFunction") == 0;
+  const bool shared = field == &CrossPointSettings::longPressButtonBehavior;
+  switch (group) {
+    case ControlsGroup::Power:
+      return power || field == &CrossPointSettings::pwrBtnFootnoteBack;
+    case ControlsGroup::Front:
+      return shared || menu || field == &CrossPointSettings::frontButtonFollowOrientation ||
+             field == &CrossPointSettings::backShortToFileBrowser;
+    case ControlsGroup::Side:
+      return shared || field == &CrossPointSettings::sideButtonLayout ||
+             field == &CrossPointSettings::sideButtonFollowOrientation;
+    case ControlsGroup::Touch:
+      return field == &CrossPointSettings::touchReaderControls || field == &CrossPointSettings::pageTurnGesture ||
+             field == &CrossPointSettings::previousPageGesture || field == &CrossPointSettings::showReaderMenu;
+    case ControlsGroup::Root:
+      return !belongsToControlsGroup(setting, ControlsGroup::Power) &&
+             !belongsToControlsGroup(setting, ControlsGroup::Front) &&
+             !belongsToControlsGroup(setting, ControlsGroup::Side) &&
+             !belongsToControlsGroup(setting, ControlsGroup::Touch);
+  }
+  return false;
+}
+
 constexpr StrId OK_OPTION[] = {StrId::STR_OK_BUTTON};
 }  // namespace
 
 SettingsActivity::SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                   const SettingsSection selectedSection)
-    : UiTabListActivity("Settings", renderer, mappedInput), section(selectedSection) {}
+                                   const SettingsSection selectedSection, const ControlsGroup selectedGroup)
+    : UiTabListActivity("Settings", renderer, mappedInput), section(selectedSection), controlsGroup(selectedGroup) {}
 
 void SettingsActivity::selectMainTabContentEdge(const MainTabContentEdge edge) {
   if (usesAccordion()) {
@@ -91,7 +119,7 @@ void SettingsActivity::rebuildSettingsLists() {
   if (resourcesDirty) sdFontSystem.refreshIfDirty();
   std::vector<DictionaryEntry> dictionaries;
   if (resourcesDirty) DictionaryRegistry::discover(dictionaries);
-  auto all = getSettingsList(&sdFontSystem.registry(), &dictionaries);
+  auto all = getSettingsList(&sdFontSystem.registry(), &dictionaries, hasDictionary);
   const auto sectionFor = [](const SettingInfo& setting) {
     if (setting.valuePtr == &CrossPointSettings::libraryUseMetadata ||
         setting.valuePtr == &CrossPointSettings::removeReadBooksFromRecents ||
@@ -126,20 +154,25 @@ void SettingsActivity::rebuildSettingsLists() {
       return false;
     if (BoardConfig::hasHomeKey() && setting.valuePtr == &CrossPointSettings::longPressMenuFunction) return false;
     if (setting.valuePtr == &CrossPointSettings::pwrBtnFootnoteBack &&
-        SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::FOOTNOTES)
+        SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::FOOTNOTES &&
+        !(BoardConfig::isX4Pro() && SETTINGS.doublePwrBtn == CrossPointSettings::FOOTNOTES))
       return false;
     return setting.valuePtr != &CrossPointSettings::clockAutoSync &&
            setting.valuePtr != &CrossPointSettings::clockUtcOffsetQ &&
            setting.valuePtr != &CrossPointSettings::clockFormat;
   };
+  const auto include = [&](const SettingInfo& setting) {
+    return visible(setting) && (sectionFor(setting) != SettingsSection::Controls || !usesControlsGroups() ||
+                                belongsToControlsGroup(setting, controlsGroup));
+  };
   // Bound each activity-owned list before moving descriptors; fixed sections retain only their own rows.
-  static constexpr size_t EXTRA_ROWS[] = {9, 0, 7, 2, 0, 5};
+  static constexpr size_t EXTRA_ROWS[] = {9, 0, 7, 6, 0, 5};
   for (size_t i = 0; i < categories.size(); ++i) {
     auto& rows = categories[i];
     rows.clear();
     if (section != SettingsSection::End && static_cast<size_t>(section) != i) continue;
     const auto count = std::count_if(all.begin(), all.end(), [&](const SettingInfo& setting) {
-      return visible(setting) && static_cast<size_t>(sectionFor(setting)) == i;
+      return include(setting) && static_cast<size_t>(sectionFor(setting)) == i;
     });
     rows.reserve(static_cast<size_t>(count) + EXTRA_ROWS[i]);
   }
@@ -152,18 +185,68 @@ void SettingsActivity::rebuildSettingsLists() {
   addAction(SettingsSection::Reader, StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings);
   addAction(SettingsSection::Reader, StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts);
   addAction(SettingsSection::Reader, StrId::STR_MANAGE_DICTIONARIES, SettingAction::ManageDictionaries);
-  if (BoardConfig::hasHomeKey())
-    addAction(SettingsSection::Controls, StrId::STR_HOME_BUTTON, SettingAction::HomeButton);
-  if (!BoardConfig::hasTouch())
+  if (!usesControlsGroups()) {
+    if (BoardConfig::hasHomeKey())
+      addAction(SettingsSection::Controls, StrId::STR_HOME_BUTTON, SettingAction::HomeButton);
+    if (!BoardConfig::hasTouch())
+      addAction(SettingsSection::Controls, StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons);
+  } else if (controlsGroup == ControlsGroup::Root) {
+    if (BoardConfig::hasHomeKey())
+      addAction(SettingsSection::Controls, StrId::STR_HOME_BUTTON, SettingAction::HomeButton);
+    const auto addGroup = [&](ControlsGroup group, StrId title, SettingAction action) {
+      if (std::any_of(all.begin(), all.end(),
+                      [&](const SettingInfo& setting) {
+                        return sectionFor(setting) == SettingsSection::Controls && visible(setting) &&
+                               belongsToControlsGroup(setting, group);
+                      }) ||
+          (group == ControlsGroup::Front && !BoardConfig::hasTouch()))
+        addAction(SettingsSection::Controls, title, action);
+    };
+    addGroup(ControlsGroup::Power, StrId::STR_POWER_BUTTON, SettingAction::ControlsPower);
+    if (!BoardConfig::hasTouch())
+      addGroup(ControlsGroup::Front, StrId::STR_FRONT_BUTTONS, SettingAction::ControlsFront);
+    addGroup(ControlsGroup::Side, StrId::STR_SIDE_BUTTONS, SettingAction::ControlsSide);
+    addGroup(ControlsGroup::Touch, StrId::STR_TAPS_AND_GESTURES, SettingAction::ControlsTouch);
+  } else if (controlsGroup == ControlsGroup::Front && !BoardConfig::hasTouch()) {
     addAction(SettingsSection::Controls, StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons);
+  }
   for (auto& setting : all) {
-    if (!visible(setting)) continue;
+    if (!include(setting)) continue;
     const auto target = sectionFor(setting);
+    if (!usesControlsGroups() && target == SettingsSection::Controls && setting.key) {
+      static constexpr struct {
+        const char* key;
+        StrId label;
+      } LABELS[] = {{"shortPwrBtn", StrId::STR_INX_SHORT_PWR_BTN},
+                    {"sideButtonLayout", StrId::STR_INX_SIDE_BTN_LAYOUT},
+                    {"touchReaderControls", StrId::STR_INX_TOUCH_READER_CONTROLS},
+                    {"longPressMenuFunction", StrId::STR_INX_LONG_PRESS_MENU}};
+      for (const auto& label : LABELS) {
+        if (std::strcmp(setting.key, label.key) == 0) setting.nameId = label.label;
+      }
+    }
+    if (usesControlsGroups() && target == SettingsSection::Controls &&
+        setting.valuePtr == &CrossPointSettings::longPressButtonBehavior)
+      setting.nameId = StrId::STR_PAGE_TURN_LONG_PRESS;
     if (section == SettingsSection::End || section == target)
       categories[static_cast<size_t>(target)].push_back(std::move(setting));
   }
-  if (hasDictionary && (section == SettingsSection::End || section == SettingsSection::Reader))
-    categories[static_cast<size_t>(SettingsSection::Reader)].push_back(std::move(dictionarySetting));
+  if (usesControlsGroups() && section == SettingsSection::Controls && controlsGroup == ControlsGroup::Front) {
+    auto& rows = categories[static_cast<size_t>(SettingsSection::Controls)];
+    for (const char* key : {"longPressButtonBehavior", "longPressMenuFunction"}) {
+      const auto row = std::find_if(rows.begin(), rows.end(), [key](const SettingInfo& setting) {
+        return setting.key && std::strcmp(setting.key, key) == 0;
+      });
+      if (row != rows.end()) std::rotate(row, row + 1, rows.end());
+    }
+  }
+  if (hasDictionary && (section == SettingsSection::End || section == SettingsSection::Reader)) {
+    auto& reader = categories[static_cast<size_t>(SettingsSection::Reader)];
+    const auto history = std::find_if(reader.begin(), reader.end(), [](const SettingInfo& setting) {
+      return setting.valuePtr == &CrossPointSettings::vocabularyHistoryEnabled;
+    });
+    reader.insert(history, std::move(dictionarySetting));
+  }
   resourcesDirty = false;
   addAction(SettingsSection::General, StrId::STR_APP_VISIBILITY, SettingAction::AppVisibility);
   addAction(SettingsSection::General, StrId::STR_DATE_AND_TIME, SettingAction::ClockSettings);
@@ -428,6 +511,26 @@ bool SettingsActivity::handleButtons() {
   return false;
 }
 
+bool SettingsActivity::usesControlsGroups() const { return !UITheme::getInstance().hasMainTabs(); }
+
+const char* SettingsActivity::headerTitle() const {
+  if (usesControlsGroups() && section == SettingsSection::Controls) {
+    switch (controlsGroup) {
+      case ControlsGroup::Power:
+        return tr(STR_POWER_BUTTON);
+      case ControlsGroup::Front:
+        return tr(STR_FRONT_BUTTONS);
+      case ControlsGroup::Side:
+        return tr(STR_SIDE_BUTTONS);
+      case ControlsGroup::Touch:
+        return tr(STR_TAPS_AND_GESTURES);
+      case ControlsGroup::Root:
+        break;
+    }
+  }
+  return section == SettingsSection::End ? tr(STR_SETTINGS_TITLE) : I18N.get(categoryNames[selectedCategoryIndex]);
+}
+
 bool SettingsActivity::usesAccordion() const {
   return section == SettingsSection::End && UITheme::getInstance().hasMainTabs();
 }
@@ -522,9 +625,28 @@ void SettingsActivity::toggleSetting(const SettingInfo& setting) {
     const auto enumLabels = setting.enumLabels();
     if (enumLabels.size() > 2) {
       const auto valuePtr = setting.valuePtr;
-      optionPopup.show(setting.nameId, enumLabels.data(), static_cast<int>(enumLabels.size()), currentValue,
-                       [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
-                         SETTINGS.*valuePtr = idx;
+      const bool upstreamSleepOrder = sleepScreenChanged && !UITheme::getInstance().hasMainTabs();
+      // Swapping these rows is its own inverse; persisted IDs remain unchanged.
+      const auto pickerValue = [upstreamSleepOrder](const int value) -> int {
+        if (!upstreamSleepOrder) return value;
+        switch (value) {
+          case CrossPointSettings::BLANK:
+            return CrossPointSettings::COVER_CUSTOM;
+          case CrossPointSettings::COVER_CUSTOM:
+            return CrossPointSettings::BLANK;
+          default:
+            return value;
+        }
+      };
+      std::array<StrId, CrossPointSettings::SLEEP_SCREEN_MODE_COUNT> sleepLabels{};
+      const StrId* labels = enumLabels.data();
+      if (upstreamSleepOrder) {
+        for (size_t i = 0; i < sleepLabels.size(); ++i) sleepLabels[i] = enumLabels[pickerValue(i)];
+        labels = sleepLabels.data();
+      }
+      optionPopup.show(setting.nameId, labels, static_cast<int>(enumLabels.size()), pickerValue(currentValue),
+                       [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged, pickerValue](int idx) {
+                         SETTINGS.*valuePtr = pickerValue(idx);
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
                          SETTINGS.saveToFile();
                          refreshAfterSettingChange(valuePtr);
@@ -550,6 +672,36 @@ void SettingsActivity::toggleSetting(const SettingInfo& setting) {
     };
 
     switch (setting.action) {
+      case SettingAction::ControlsPower:
+      case SettingAction::ControlsFront:
+      case SettingAction::ControlsSide:
+      case SettingAction::ControlsTouch: {
+        ControlsGroup group = ControlsGroup::Root;
+        switch (setting.action) {
+          case SettingAction::ControlsPower:
+            group = ControlsGroup::Power;
+            break;
+          case SettingAction::ControlsFront:
+            group = ControlsGroup::Front;
+            break;
+          case SettingAction::ControlsSide:
+            group = ControlsGroup::Side;
+            break;
+          case SettingAction::ControlsTouch:
+            group = ControlsGroup::Touch;
+            break;
+          default:
+            break;  // Only the four group actions reach this branch.
+        }
+        // The activity stack owns the child until Back returns to this menu.
+        auto activity = makeUniqueNoThrow<SettingsActivity>(renderer, mappedInput, SettingsSection::Controls, group);
+        if (!activity) {
+          LOG_ERR("SET", "OOM: Controls settings (%u bytes)", static_cast<unsigned>(sizeof(SettingsActivity)));
+          return;
+        }
+        startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
+        return;
+      }
       case SettingAction::HomeButton: {
         // Activities must outlive this call and are owned by the activity stack.
         auto activity = makeUniqueNoThrow<HomeButtonSettingsActivity>(renderer, mappedInput);
@@ -973,12 +1125,9 @@ void SettingsActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
-  // Titles match the value's font size (smallText) so both sides of a row
-  // read as one unit; labels that still don't fit wrap onto a second line.
-  // maxLines=2 also marks the style explicitly set (an all-default smallText
-  // fails textStyleUnset and the list would substitute bodyText back); the
-  // common fits-on-one-line case takes the renderer's fast path anyway.
-  props.labelText = section == SettingsSection::End ? screen.theme().smallText : screen.theme().bodyText;
+  // Explicit wrapping prevents smallText from being treated as an unset style.
+  props.labelText =
+      section != SettingsSection::End && mappedInput.hasTouch() ? screen.theme().bodyText : screen.theme().smallText;
   props.labelText.maxLines = 2;
   if (section == SettingsSection::End)
     syncTabListViewport(screen, props);
@@ -995,10 +1144,8 @@ void SettingsActivity::drawChrome() {
   // indicator; the rest of the screen renders through the app.
   // Version rides in the header's trailing label slot: the footer position
   // conflicts with button hints on non-touch devices.
-  drawPageHeader(
-      Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-      section == SettingsSection::End ? tr(STR_SETTINGS_TITLE) : I18N.get(categoryNames[selectedCategoryIndex]),
-      section == SettingsSection::End ? CROSSPOINT_VERSION : "");
+  drawPageHeader(Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle(),
+                 section == SettingsSection::End ? CROSSPOINT_VERSION : "");
 }
 
 void SettingsActivity::drawFooter() {

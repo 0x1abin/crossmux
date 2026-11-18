@@ -148,6 +148,7 @@ class OpdsBookBrowserActivity final : public CatalogActivity {
   static void onClientStatus(void* ctx, freeink::opds::ClientPhase phase);
   // Persist the client's current token state (or clear it) for this server.
   // Returns false (and logs) if the SD write failed, so callers can detect it.
+  bool refreshDownloadAuth(const std::string& url);
   bool persistTokens();
   // Token-store key: URL plus username, so two accounts on the same server
   // keep separate tokens. \x1f (unit separator) can't appear in either field.

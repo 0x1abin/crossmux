@@ -2,6 +2,7 @@
 #include <Bitmap.h>
 #include <BuildScratch.h>
 #include <FontCacheManager.h>
+#include <FontDecompressor.h>
 #include <GfxRenderer.h>
 #include <HalMemory.h>
 #include <HalStorage.h>
@@ -23,6 +24,7 @@
 #include "CrossPointSettings.h"
 #include "Epub/blocks/ImageBlock.h"
 #include "Epub/converters/JpegToFramebufferConverter.h"
+#include "GlyphRenderProbe.h"
 #include "QrParams.h"
 #include "ReaderGrayProbe.h"
 #include "SleepProbe.h"
@@ -51,6 +53,23 @@ void* operator new(size_t size, const std::nothrow_t&) noexcept {
 bool FontCacheManager::isScanning() const { return false; }
 void FontCacheManager::clearCache() {}
 void SdCardFont::clearCache() {}
+SdCardFont* SdCardFont::fromMissCtx(void*) {
+  assert(false);
+  return nullptr;
+}
+bool SdCardFont::isOverflowGlyph(const EpdGlyph*) const {
+  assert(false);
+  return false;
+}
+const uint8_t* SdCardFont::getOverflowBitmap(const EpdGlyph*) const {
+  assert(false);
+  return nullptr;
+}
+const uint8_t* FontDecompressor::getBitmap(const EpdFontData*, const EpdGlyph*, uint32_t) {
+  assert(false);
+  return nullptr;
+}
+
 ESPMock ESP;
 HWCDC Serial;
 namespace {
@@ -104,7 +123,8 @@ void HalDisplay::cancelGrayscale16() {
   refreshEvents.push_back('X');
 }
 bool HalDisplay::isInverted() const { return false; }
-void HalDisplay::displayBuffer(RefreshMode mode, bool) {
+bool HalDisplay::supportsTextOnlyCombinedBase() const { return false; }
+void HalDisplay::displayBuffer(RefreshMode mode, bool, DisplayRefreshContext) {
   if (readerDriverActive) {
     readerDriver().display(readerBus, bw.data(), nullptr, static_cast<freeink::RefreshMode>(mode), false);
     return;
@@ -124,7 +144,7 @@ void HalDisplay::displayBuffer(RefreshMode mode, bool) {
       break;
   }
 }
-void HalDisplay::displayGrayscaleBase(RefreshMode mode, bool) {
+void HalDisplay::displayGrayscaleBase(RefreshMode mode, bool, DisplayRefreshContext) {
   if (readerDriverActive)
     readerDriver().displayGrayscaleBaseWithContext(readerBus, bw.data(), static_cast<freeink::RefreshMode>(mode), false,
                                                    freeink::RefreshContext::Normal);
@@ -270,12 +290,55 @@ void testFourLevelBitmapPaths(GfxRenderer& renderer) {
 }
 }  // namespace
 
+void testNativeGlyphInk(GfxRenderer& renderer) {
+  static constexpr uint8_t bitmap[] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
+  static constexpr EpdGlyph glyph{16, 1, 16 * 16, 0, 0, sizeof(bitmap), 0};
+  static constexpr EpdUnicodeInterval interval{'A', 'A', 0};
+  EpdFontData data{};
+  data.bitmap = bitmap;
+  data.glyph = &glyph;
+  data.intervals = &interval;
+  data.intervalCount = 1;
+  data.is4Bit = true;
+  const EpdFont font(&data);
+  const EpdFontFamily family(1, &font);
+  for (auto orientation : {GfxRenderer::Portrait, GfxRenderer::PortraitInverted, GfxRenderer::LandscapeClockwise,
+                           GfxRenderer::LandscapeCounterClockwise}) {
+    renderer.setOrientation(orientation);
+    for (auto mode : {GfxRenderer::BW, GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+      for (bool black : {false, true})
+        for (bool rotated : {false, true})
+          for (uint8_t background : {5, 10}) {
+            assert(renderer.beginGrayscale16());
+            native.fill(background * 17);
+            auto expected = native;
+            if (rotated)
+              renderCharImpl<TextRotation::Rotated90CW>(renderer, mode, family, 'A', 2, 17, black,
+                                                        EpdFontFamily::REGULAR);
+            else
+              renderCharImpl(renderer, mode, family, 'A', 2, 2, black, EpdFontFamily::REGULAR);
+            for (int coverage = 1; coverage < 16; ++coverage) {
+              const auto [x, y] = physical(orientation, rotated ? 2 : 2 + coverage, rotated ? 17 - coverage : 2);
+              const size_t index = y * (HalDisplay::DISPLAY_WIDTH / 2) + x / 2;
+              const unsigned shift = (x & 1) * 4;
+              const uint8_t level = black ? 15 - coverage : coverage;
+              expected[index] = (expected[index] & ~(0xFu << shift)) | (level << shift);
+            }
+            assert(native == expected);  // Includes transparent coverage zero and every untouched pixel.
+            renderer.cancelGrayscale16();
+          }
+    }
+  }
+  renderer.setOrientation(GfxRenderer::Portrait);
+}
+
 int main(int argc, char** argv) {
   assert(argc == 3);
   refreshEvents.reserve(256);
   setenv("CROSSPOINT_SIM_SD", argv[2], 1);
   GfxRenderer renderer(display);
   renderer.begin();
+  testNativeGlyphInk(renderer);
   // Overlay gray restores the retained B/W frame; absolute gray keeps its baseline.
   bw.fill(0xA5);
   {
@@ -310,6 +373,26 @@ int main(int argc, char** argv) {
   for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::PortraitInverted, GfxRenderer::LandscapeClockwise,
                                  GfxRenderer::LandscapeCounterClockwise}) {
     renderer.setOrientation(orientation);
+    bw.fill(0xFF);
+    renderer.fillRectDither(-1, -1, 10, 8, Color::LightGray);
+    const auto ditherMask = bw;
+    bw.fill(0xA5);
+    renderer.fillRectDither(-1, -1, 10, 8, Color::LightGray, GfxRenderer::DitherMode::PreserveInk);
+    for (size_t i = 0; i < bw.size(); ++i) assert(bw[i] == (0xA5 & ditherMask[i]));
+    for (const auto [color, level] : {std::pair{Color::Black, 0}, std::pair{Color::LightGray, 11},
+                                      std::pair{Color::DarkGray, 8}, std::pair{Color::White, 15}}) {
+      assert(renderer.beginGrayscale16());
+      for (int y = 0; y < renderer.getScreenHeight(); ++y)
+        for (int x = 0; x < renderer.getScreenWidth(); ++x) renderer.drawGrayscale16Pixel(x, y, ((x + y) % 16) * 17);
+      renderer.fillRectDither(-1, -1, 10, 8, color, GfxRenderer::DitherMode::PreserveInk);
+      for (int y = 0; y < renderer.getScreenHeight(); ++y)
+        for (int x = 0; x < renderer.getScreenWidth(); ++x) {
+          const auto [px, py] = physical(orientation, x, y);
+          const int original = (x + y) % 16;
+          assert(tone(px, py) == (x < 9 && y < 7 ? std::min(original, level) : original));
+        }
+      renderer.cancelGrayscale16();
+    }
     assert(renderer.beginGrayscale16());
     renderer.fillRect(0, 0, 3, 2);
     for (int y = 0; y < renderer.getScreenHeight(); ++y) {

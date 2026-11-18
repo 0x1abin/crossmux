@@ -14,6 +14,8 @@
 #include "util/ButtonNavigator.h"
 #include "util/Dictionary.h"
 
+struct VocabularyContext;
+
 // Paged viewer for one dictionary definition. HTML definitions are laid out
 // through the EPUB chapter parser into styled Pages; anything else (plain
 // text, or HTML too damaged to parse) is word-wrapped once on entry and each
@@ -26,7 +28,7 @@ class DictionaryDefinitionActivity final : public Activity {
         content{.headword = std::move(headword), .text = std::move(definition)},
         htmlDefinition(htmlDefinition) {}
 
-  bool enableLookup(Dictionary& dictionary, std::string&& query);
+  bool enableLookup(Dictionary& dictionary, std::string&& query, const VocabularyContext* vocabulary = nullptr);
 
   void onEnter() override;
   void onExit() override;
@@ -83,7 +85,8 @@ class DictionaryDefinitionActivity final : public Activity {
 
   struct LookupState {
     explicit LookupState(Dictionary& dictionary) : dictionary(dictionary) {}
-    Dictionary& dictionary;  // Owned by the retained DictionaryWordSelectActivity parent.
+    Dictionary& dictionary;                         // Owned by the retained DictionaryWordSelectActivity parent.
+    const VocabularyContext* vocabulary = nullptr;  // Borrowed from that same retained parent.
     std::array<HistoryEntry, 16> history;
     size_t depth = 0;
     std::string query;
@@ -94,6 +97,7 @@ class DictionaryDefinitionActivity final : public Activity {
   bool prepareDefinition(Definition& next, bool forcePlain = false);
   bool layoutHtmlPages(Definition& next);
   bool wrapText(Definition& next);
+  bool prepareFont(std::string& definition, int fontId);
   bool reserveLines(Definition& next, size_t count);
   int measureSpan(int fontId, const char* text, size_t len, EpdFontFamily::Style family = EpdFontFamily::REGULAR) const;
   void drawBody(int fontId, int x, int startY, int currentPage) const;

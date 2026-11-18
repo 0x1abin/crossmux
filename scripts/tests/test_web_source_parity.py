@@ -26,6 +26,62 @@ def run_node(program):
 
 
 class WebSourceParityTest(unittest.TestCase):
+    def test_controls_groups_share_bindings_and_preserve_visibility(self):
+        for locale in ["en", "zh-CN"]:
+            with self.subTest(locale=locale):
+                source = (HTML / locale / "SettingsPage.html").read_text()
+                functions = "\n".join(function(source, name) for name in [
+                    "function escapeHtml(", "function renderControl(", "function renderSettingRow(",
+                    "function renderCategory(", "function getValue(", "function getControl(",
+                    "function findSetting(", "function getControlValue(", "function markChanged(",
+                    "function updateSettingsVisibility(", "function handleSettingChanged(",
+                    "async function saveSettings("])
+                run_node(r'''
+const assert = require('node:assert/strict');
+const nodes = Object.create(null);
+const document = {getElementById: id => nodes[id] || null};
+let allSettings = [], originalValues = {}, posted = [];
+const UI_THEME_INX = 5;
+const syncQuickResumeTimeoutForSleepScreen = () => {};
+const showWebToast = () => {};
+const fetch = async (url, options) => {posted.push(JSON.parse(options.body));return {ok:true};};
+''' + functions + r'''
+(async () => {
+ const descriptor=(key,type='enum',value=0)=>({key,type,value,name:key,options:['Off','Skip','Rotate']});
+ allSettings=[descriptor('frontButtonFollowOrientation'),descriptor('sideButtonLayout'),
+  descriptor('longPressButtonBehavior'),descriptor('slideSwitchAction'),descriptor('shortPwrBtn'),
+  descriptor('doublePwrBtn'),descriptor('uiTheme'),descriptor('touchReaderControls','toggle')];
+ allSettings.forEach(s=>{originalValues[s.key]=s.value;nodes['setting-'+s.key]={value:String(s.value),checked:false,dataset:{}};});
+ nodes['setting-longPressButtonBehavior-side']={value:'0'};
+ nodes['saveBtn']={disabled:true,textContent:''};
+ nodes['row-setting-pwrBtnFootnoteBack']={style:{}};
+ nodes['row-setting-inxTabPosition']={style:{}};
+ const markup=renderCategory(allSettings);
+ assert(markup.includes('id="setting-longPressButtonBehavior"'));
+ assert(markup.includes('id="setting-longPressButtonBehavior-side"'));
+ assert.equal((markup.match(/row-setting-slideSwitchAction"/g)||[]).length,1);
+ assert(markup.includes('aria-label="touchReaderControls"'));
+ assert(markup.includes('aria-label="longPressButtonBehavior"'));
+ assert(markup.includes(', this)'));
+ const canonical=nodes['setting-longPressButtonBehavior'];
+ const side=nodes['setting-longPressButtonBehavior-side'];
+ side.value='2';handleSettingChanged('longPressButtonBehavior',side);
+ assert.equal(canonical.value,'2');assert.equal(side.value,'2');
+ await saveSettings();assert.deepEqual(posted.pop(),{longPressButtonBehavior:2});
+ canonical.value='1';handleSettingChanged('longPressButtonBehavior',canonical);
+ assert.equal(side.value,'1');await saveSettings();
+ assert.deepEqual(posted.pop(),{longPressButtonBehavior:1});
+ for(const short of [0,4])for(const double of [0,4])for(const theme of [0,5]){
+  nodes['setting-shortPwrBtn'].value=String(short);
+  nodes['setting-doublePwrBtn'].value=String(double);
+  nodes['setting-uiTheme'].value=String(theme);
+  handleSettingChanged('doublePwrBtn');
+  assert.equal(nodes['row-setting-pwrBtnFootnoteBack'].style.display,short===4||double===4?'':'none');
+  assert.equal(nodes['row-setting-inxTabPosition'].style.display,theme===5?'':'none');
+ }
+})().catch(error=>{console.error(error);process.exitCode=1;});
+''')
+
     def test_opds_header_slots_preserve_change_clear_and_cancel(self):
         for locale in ["en", "zh-CN"]:
             with self.subTest(locale=locale):

@@ -158,6 +158,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   bool complete = false;
   bool answeredBySameOrigin = true;
   for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
+    if (options.wwwAuthenticateOut) options.wwwAuthenticateOut->clear();
     freeink::SecureHttpClient http;
     if (!http.begin(current)) {
       LOG_ERR("HTTP", "bad URL: %s", current.c_str());
@@ -197,6 +198,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
       return true;
     });
     complete = http.responseComplete();
+    if (options.wwwAuthenticateOut) *options.wwwAuthenticateOut = http.getHeader("www-authenticate");
     if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
       const std::string location = http.getHeader("location");
       const bool secure = freeink::fetchOrigin(current).compare(0, 8, "https://") == 0;
@@ -212,6 +214,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   g_lastStatus = status > 0 ? status : 0;
   g_lastRedirected = !answeredBySameOrigin;
   if (options.statusOut) *options.statusOut = g_lastStatus;
+  if (options.redirectedOut) *options.redirectedOut = g_lastRedirected;
   return status >= 200 && status < 300 && complete && !sinkStopped;
 }
 

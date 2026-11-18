@@ -86,8 +86,7 @@ void UglyAvatarActivity::onSave() {
 
   char filename[64];
   snprintf(filename, sizeof(filename), "/avatars/avatar-%lu.bmp", millis());
-  const bool ok = ScreenshotUtil::saveFramebufferAsBmp(filename, renderer.getFrameBuffer(), renderer.getDisplayWidth(),
-                                                       renderer.getDisplayHeight());
+  const bool ok = ScreenshotUtil::saveFramebufferAsBmp(filename, renderer);
 
   if (ok) {
     LOG_DBG("AVATAR", "saved %s", filename);

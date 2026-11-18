@@ -20,15 +20,17 @@ GfxRenderer renderer;std::atomic<bool> quitRequested{false};
 namespace SimulatorLifecycle {
 WakeReason consumeWakeReason(){return WakeReason::None;}
 [[noreturn]] void rebootAsPowerWake(){std::abort();}
+void setExitCode(int){}
 }
+void scheduleSimulatorScreenshot(const std::string&){}
 struct CrossPointSettings {
- enum SHORT_PWRBTN {PWR_CONFIRM};SHORT_PWRBTN shortPwrBtn=PWR_CONFIRM;
- bool doubleClickPwrLight=false;
+ enum SHORT_PWRBTN {PWR_CONFIRM, IGNORE};SHORT_PWRBTN shortPwrBtn=PWR_CONFIRM;
+ int doublePwrBtn=IGNORE;
  unsigned long getPowerButtonDuration()const{return 400;}
 } settings;
 #define SETTINGS settings
 class MappedInputManager {
- HalGPIO& gpio;bool powerConfirmClickFrame=false;
+ HalGPIO& gpio;
  public:explicit MappedInputManager(HalGPIO& g):gpio(g){}
  bool wasPowerConfirmClick()const;
 };
@@ -53,6 +55,6 @@ int main(){
 '''.replace('@CLASSIFIER@',classifier)
 with tempfile.TemporaryDirectory(prefix='power-confirm-') as directory:
     cpp=Path(directory)/'test.cpp';binary=Path(directory)/'test';cpp.write_text(code)
-    subprocess.run(['c++','-std=c++20','-DSIMULATOR_DEVICE_EEGO_A4','-I'+str(SIM/'tests/native-stubs'),'-I'+str(SIM/'src'),str(cpp),str(SIM/'src/HalGPIO.cpp'),*shlex.split(subprocess.check_output(['sdl2-config','--cflags','--libs'],text=True)),'-o',str(binary)],check=True)
+    subprocess.run(['c++','-std=c++20','-DSIMULATOR_DEVICE_EEGO_A4','-I'+str(SIM/'tests/native-stubs'),'-I'+str(SIM/'src'),str(cpp),str(SIM/'src/HalGPIO.cpp'),str(SIM/'src/SimLog.cpp'),'-pthread',*shlex.split(subprocess.check_output(['sdl2-config','--cflags','--libs'],text=True)),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
 print('Real scripted Power short/long/release/next contact through MappedInputManager passed')

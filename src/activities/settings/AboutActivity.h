@@ -10,7 +10,7 @@ class AboutActivity final : public UiListActivity {
  public:
   explicit AboutActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
-  static constexpr int ITEM_COUNT = 18;
+  static constexpr int ITEM_COUNT = 20;
 
   void onEnter() override;
 

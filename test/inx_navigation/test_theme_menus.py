@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync review check: production menus/tabs with fixed host metrics, not full pages.
 
-Requires the reviewed Reader ba39565c and historical INX Git objects fetched by
+Requires the reviewed Reader 622e5de9 and historical INX Git objects fetched by
 the sync workflow; CI fetches full history for these fixed references.
 FREEINK_SDK_ROOT selects the reviewed candidate; defaults to the pinned SDK.
 """
@@ -15,7 +15,7 @@ from test_upstream_theme_compat import compare, source
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-REF = os.environ.get('FREEINK_UPSTREAM_READER_REF', '136c26553980579d9f9c9176f11ce0870087cb80')
+REF = os.environ.get('FREEINK_UPSTREAM_READER_REF', '622e5de9558399c92720e8f76deaed8a0cb1b6d3')
 SDK = Path(os.environ.get('FREEINK_SDK_ROOT', ROOT / 'freeink-sdk'))
 
 
@@ -43,7 +43,7 @@ def settings_metadata(ref=None):
     # Extract descriptor metadata, then run each production grouping method below.
     declaration = read('src/SettingsList.h', ref)
     entries = method(read('src/SettingsList.cpp', ref), 'forEachBaseSetting')
-    for helper in ('buildLongPressMenuSetting', 'buildShortPowerButtonSetting'):
+    for helper in ('buildLongPressMenuSetting', 'buildShortPowerButtonSetting', 'buildDoublePowerButtonSetting'):
         if f'emit({helper}())' in entries:
             entries = entries.replace(f'emit({helper}())', method(declaration, helper))
     result = []
@@ -56,7 +56,9 @@ def settings_metadata(ref=None):
         action = re.search(r'SettingAction::(\w+)', entry)
         result.append((ids[0], category, fields[0] if fields else None,
                        '.withTextSettings()' in entry, '.withReadingStatsSettings()' in entry,
-                       '.withWebHidden()' in entry, action.group(1) if action else 'None'))
+                       '.withWebHidden()' in entry, action.group(1) if action else 'None',
+                       (re.search(r'"([^"]+)"\s*,\s*StrId::STR_CAT_', entry).group(1)
+                        if re.search(r'"([^"]+)"\s*,\s*StrId::STR_CAT_', entry) else '')))
     return result
 
 
@@ -69,7 +71,11 @@ def menus(directory):
     for result_type, name in [('SettingsSection', 'sectionFor'), ('bool', 'showOnDevice')]:
         body = re.search(r'^' + result_type + r' ' + name + r'\([^;\n]*\) \{.*?^}', incoming, re.M | re.S).group()
         helpers.append(body)
-    upstream_code = '\n'.join(helpers) + '\n' + reference
+    reference_group = re.search(r'^bool belongsToControlsGroup\(.*?^}', incoming, re.M | re.S).group()
+    local_group = re.search(r'^bool belongsToControlsGroup\(.*?^}', read(path), re.M | re.S).group()
+    groups = re.search(r'enum class ControlsGroup.*?};', read('src/activities/settings/SettingsActivity.h'), re.S).group()
+    assert groups == re.search(r'enum class ControlsGroup.*?};', read('src/activities/settings/SettingsActivity.h', REF), re.S).group()
+    upstream_code = '\n'.join(helpers) + '\n' + reference_group.replace('belongsToControlsGroup(', 'referenceBelongsToControlsGroup(') + '\n' + reference.replace('belongsToControlsGroup(', 'referenceBelongsToControlsGroup(')
     upstream_code = upstream_code.replace('sectionFor(', 'referenceSectionFor(').replace('showOnDevice(', 'referenceShowOnDevice(')
     upstream_code = upstream_code.replace('SettingsActivity::rebuildSettings', 'ReferenceSettingsActivity::rebuildSettings')
     # The section enum and display order are the fixed incoming six groups.
@@ -80,7 +86,7 @@ def menus(directory):
     assert titles == re.search(r'SETTINGS_SECTION_TITLES.*?};', read(section_path, REF), re.S).group()
     data = [settings_metadata(ref) for ref in (None, REF)]
     theme_values = method(read('src/SettingsList.h'), 'homeThemeValues')
-    all_code = current + upstream_code + theme_values
+    all_code = current + upstream_code + local_group + theme_values
     ids = sorted(set(re.findall(r'StrId::(\w+)', all_code)) |
                  {x for rows in data for row in rows for x in row[:2]} |
                  {'STR_NONE_OPT', 'STR_DICTIONARY', 'STR_CLOCK', 'STR_DATE_AND_TIME'})
@@ -94,15 +100,16 @@ def menus(directory):
 #include <cstdio>
 #include <vector>
 #include <cstdint>
+#include <cstring>
 #define FREEINK_CAP_BLE_HID_HOST 1
 #define FREEINK_DEVICE_MURPHY_M4 0
 #define FREEINK_DEVICE_X4CLASSIC classic
 bool inx=false, touch=false, pro=false, classic=false, dictionary=false, rtc=false, home=false;
 bool grid=true, translated=false;
 struct RenderLock {template<class T> explicit RenderLock(T&) {}};
-struct UITheme { static bool supportsCoverGrid(){return grid;} };
+struct UITheme { static UITheme& getInstance(){static UITheme t;return t;} bool hasMainTabs()const{return inx;} static bool supportsCoverGrid(){return grid;} };
 '''
-    code += sections + '\nconstexpr size_t SETTINGS_SECTION_COUNT=static_cast<size_t>(SettingsSection::End);\n'
+    code += groups + '\n' + sections + '\nconstexpr size_t SETTINGS_SECTION_COUNT=static_cast<size_t>(SettingsSection::End);\n'
     for enum, values in [('StrId', ids), ('SettingAction', actions)]:
         code += f'enum class {enum} {{' + ','.join(values) + '};\n'
         code += f'const char* name({enum} v) {{ switch(v) {{' + ''.join(
@@ -122,6 +129,7 @@ struct SettingInfo {
  int CrossPointSettings::*valuePtr=nullptr;
  bool inTextSettings=false, inReadingStatsSettings=false, webHidden=false;
  SettingAction action=SettingAction::None;
+ const char* key=nullptr;
  std::vector<const char*> enumStringValues;
  static SettingInfo Action(StrId id, SettingAction action) {
    SettingInfo s; s.nameId=id; s.action=action; return s;
@@ -133,19 +141,20 @@ struct DictionaryEntry {};
 int discoveries=0;
 namespace DictionaryRegistry { void discover(std::vector<DictionaryEntry>& entries) {++discoveries;if(dictionary) entries.emplace_back();} }
 bool upstream=false;
-std::vector<SettingInfo> getSettingsList(int*, std::vector<DictionaryEntry>* entries) {
+std::vector<SettingInfo> getSettingsList(int*, std::vector<DictionaryEntry>* entries,bool knownDictionary=false) {
  std::vector<SettingInfo> result;
 '''
     for index, rows in enumerate(data):
         code += ('if (!upstream)' if index == 0 else 'else') + ' result = {\n'
-        code += ',\n'.join('{StrId::%s, StrId::%s, %s, %s, %s, %s, SettingAction::%s}' % (
-            a,b,'&CrossPointSettings::'+c if c else 'nullptr',str(d).lower(),str(e).lower(),str(f).lower(),g)
-            for a,b,c,d,e,f,g in rows)
+        code += ',\n'.join('{StrId::%s, StrId::%s, %s, %s, %s, %s, SettingAction::%s, \"%s\"}' % (
+            a,b,'&CrossPointSettings::'+c if c else 'nullptr',str(d).lower(),str(e).lower(),str(f).lower(),g,h)
+            for a,b,c,d,e,f,g,h in rows)
         code += '};\n'
-    code += r'''if (dictionary && !entries->empty()) {
+    code += r'''if (!dictionary && !knownDictionary) std::erase_if(result,[](const auto& s){return s.valuePtr==&CrossPointSettings::vocabularyHistoryEnabled;});
+ if (dictionary && !entries->empty()) {
    SettingInfo row;row.nameId=StrId::STR_DICTIONARY;row.category=StrId::STR_CAT_READER;
    row.enumStringValues={tr(STR_NONE_OPT), "Dictionary"};
-   auto pos=std::find_if(result.begin(),result.end(),[](const auto& setting){return setting.category==StrId::STR_CAT_CONTROLS;});
+   auto pos=std::find_if(result.begin(),result.end(),[](const auto& setting){return setting.valuePtr==&CrossPointSettings::vocabularyHistoryEnabled || setting.category==StrId::STR_CAT_CONTROLS;});
    result.insert(pos,std::move(row));
  }
  return result;
@@ -154,7 +163,8 @@ struct FontSystem {int value=0;void refreshIfDirty(){} int& registry(){return va
 struct SettingsActivity {
  std::array<std::vector<SettingInfo>,SETTINGS_SECTION_COUNT> categories;
  std::vector<SettingInfo>*currentSettings=nullptr;
- SettingsSection section=SettingsSection::End;
+ SettingsSection section=SettingsSection::End;ControlsGroup controlsGroup=ControlsGroup::Root;
+ bool usesControlsGroups()const{return !inx;}
  int selectedCategoryIndex=0, settingsCount=0; bool resourcesDirty=true;
  FontSystem sdFontSystem;
  bool usesAccordion() {return inx;}
@@ -162,12 +172,12 @@ struct SettingsActivity {
  void rebuildSettingsLists();
 };
 struct ReferenceSettingsActivity {
- SettingsSection section=SettingsSection::General;std::vector<SettingInfo> settings;
+ SettingsSection section=SettingsSection::General;ControlsGroup controlsGroup=ControlsGroup::Root;std::vector<SettingInfo> settings;
  FontSystem sdFontSystem;void rebuildRowItems(){}void rebuildSettings();
 };
 '''
     code += re.search(r'constexpr size_t EXTRA_ROWS_PER_SECTION = \d+;', incoming).group() + '\n'
-    code += current + '\n' + upstream_code + '\n' + theme_values
+    code += local_group + '\n' + current + '\n' + upstream_code + '\n' + theme_values
     code += r'''
 int main() {
  grid=true;const auto themes=homeThemeValues();assert(themes.size()==7);
@@ -186,6 +196,11 @@ int main() {
      assert(SETTINGS==before);
      std::printf("MENU %d %d %zu\n",flags,theme,i);
      for(const auto& row:s.settings)std::printf("%s %s\n",name(row.nameId),name(row.action));
+    }
+    for(auto group:{ControlsGroup::Power,ControlsGroup::Front,ControlsGroup::Side,ControlsGroup::Touch}) {
+     ReferenceSettingsActivity child;child.section=SettingsSection::Controls;child.controlsGroup=group;child.rebuildSettings();
+     std::printf("MENU %d %d %d\n",flags,theme,6+int(group));
+     for(const auto& row:child.settings)std::printf("%s %s\n",name(row.nameId),name(row.action));
     }
     continue;
    }
@@ -211,10 +226,15 @@ int main() {
     for(size_t j=0;j<SETTINGS_SECTION_COUNT;++j){
      if(j!=i){assert(fixed.categories[j].empty());continue;}
      assert(fixed.categories[j].size()==s.categories[j].size());
-     for(size_t k=0;k<s.categories[j].size();++k){assert(fixed.categories[j][k].nameId==s.categories[j][k].nameId);assert(fixed.categories[j][k].action==s.categories[j][k].action);}
+     for(size_t k=0;k<s.categories[j].size();++k){if(fixed.categories[j][k].nameId!=s.categories[j][k].nameId){std::fprintf(stderr,"flags=%d theme=%d category=%zu row=%zu fixed=%s all=%s\n",flags,theme,j,k,name(fixed.categories[j][k].nameId),name(s.categories[j][k].nameId));std::abort();}assert(fixed.categories[j][k].action==s.categories[j][k].action);}
     }
     std::printf("MENU %d %d %zu\n",flags,theme,i);
     for(const auto& row:s.categories[i])std::printf("%s %s\n",name(row.nameId),name(row.action));
+   }
+   if(!inx) for(auto group:{ControlsGroup::Power,ControlsGroup::Front,ControlsGroup::Side,ControlsGroup::Touch}) {
+    SettingsActivity child;child.section=SettingsSection::Controls;child.controlsGroup=group;child.rebuildSettingsLists();
+    assert(SETTINGS==before);std::printf("MENU %d %d %d\n",flags,theme,6+int(group));
+    for(const auto& row:child.categories[static_cast<size_t>(SettingsSection::Controls)])std::printf("%s %s\n",name(row.nameId),name(row.action));
    }
   }
  }
@@ -226,21 +246,35 @@ int main() {
     for block in re.split(r'^MENU ', output, flags=re.M)[1:]:
         lines = block.splitlines()
         parsed[tuple(map(int, lines[0].split()))] = lines[1:]
+    controls_category = re.findall(r'\b(?:General|Display|Reader|Controls|Network|Library)\b', sections).index('Controls')
+    def inx_comparable(rows):
+        names={'STR_INX_SHORT_PWR_BTN':'STR_SHORT_PWR_BTN', 'STR_INX_SIDE_BTN_LAYOUT':'STR_SIDE_BTN_LAYOUT',
+               'STR_INX_TOUCH_READER_CONTROLS':'STR_TOUCH_READER_CONTROLS', 'STR_INX_LONG_PRESS_MENU':'STR_LONG_PRESS_MENU',
+               'STR_PAGE_TURN_LONG_PRESS':'STR_LONG_PRESS_BEHAVIOR'}
+        return list(dict.fromkeys(' '.join((names.get(row.split()[0],row.split()[0]),row.split()[1])) for row in rows
+                                  if not row.split()[1].startswith('Controls')))
     for flags in range(128):
-        for category in range(6):
+        for category in [*range(6),7,8,9,10]:
             baseline = parsed[flags, 0, category]
             reference = parsed[flags, 7, category]
             common = set(baseline) & set(reference)
             assert [x for x in baseline if x in common] == [x for x in reference if x in common], (flags, category, baseline, reference)
             for theme in (1,2,3,4,6):
                 assert parsed[flags,theme,category] == baseline, (flags,theme,category)
-            inx_rows = parsed[flags,5,category]
-            assert set(baseline) <= set(inx_rows), (flags,category,'shared setting hidden in INX')
+            if category >= 7:
+                continue  # The child rows are compared with INX's flat Controls below.
+            inx_rows = inx_comparable(parsed[flags,5,category])
+            if category == controls_category:
+                baseline = inx_comparable(baseline + [row for group in (7,8,9,10) for row in parsed[flags,0,group]])
+                reference = inx_comparable(reference + [row for group in (7,8,9,10) for row in parsed[flags,7,group]])
+            else:
+                baseline, reference = inx_comparable(baseline), inx_comparable(reference)
+            assert set(baseline) <= set(inx_rows), (flags,category,'shared setting hidden in INX', set(baseline)-set(inx_rows))
             for row in baseline:
                 assert not row.startswith(('STR_INX_RECENT_LAYOUT ', 'STR_INX_LIBRARY_LAYOUT ', 'STR_INX_APPS_LAYOUT ', 'STR_INX_TAB_POSITION '))
             extras = set(baseline) - set(reference)
             assert [x for x in baseline if x in extras] == [x for x in inx_rows if x in extras]
-    print('Settings: 128 device/condition combinations × 7 themes × 6 sections; fixed upstream grouping/order, fixed-section parity, dictionary reuse, theme values and Date & Time pass')
+    print('Settings: 128 device/condition combinations × 7 themes × 6 sections + 4 Controls children; fixed upstream grouping/order, fixed-section parity, dictionary reuse, theme values and Date & Time pass')
 
 
 def plugin_toggle(directory):
@@ -318,8 +352,13 @@ def short_power_toggle(directory):
         return text[start:end]
 
     dynamic = block(production, 'else if (setting.type == SettingType::ENUM && setting.valueGetter && setting.valueSetter)')
-    visible = re.search(r'if \((setting.valuePtr == &CrossPointSettings::pwrBtnFootnoteBack &&\s*'
-                        r'SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::FOOTNOTES)\)\s*return false;', production).group(1)
+    start = production.index('if (setting.valuePtr == &CrossPointSettings::pwrBtnFootnoteBack &&')
+    opening = production.index('(', start)
+    end, depth = opening + 1, 1
+    while depth:
+        depth += (production[end] == '(') - (production[end] == ')')
+        end += 1
+    visible = production[opening + 1:end - 1]
     helpers = '\n'.join(method(factories, name) for name in (
         'buildShortPowerButtonValues', 'shortPowerButtonDisplayValue',
         'setShortPowerButtonFromDisplayValue', 'buildShortPowerButtonSetting'))
@@ -339,8 +378,8 @@ def short_power_toggle(directory):
 #include <span>
 #include <string>
 #include <vector>
-bool touch=false;
-namespace BoardConfig {bool hasTouch(){return touch;}}
+bool touch=false, pro=false;
+namespace BoardConfig {bool hasTouch(){return touch;}bool isX4Pro(){return pro;}}
 struct Doc {
  uint8_t value=0;
  uint8_t& operator[](const char* key){assert(std::string(key)=="shortPwrBtn");return value;}
@@ -348,7 +387,7 @@ struct Doc {
 };
 struct CrossPointSettings {
  @ENUM@
- uint8_t shortPwrBtn=IGNORE,pwrBtnFootnoteBack=0,uiTheme=0,sleepScreen=0,quickResumeSleepScreen=0;
+ uint8_t shortPwrBtn=IGNORE,doublePwrBtn=IGNORE,pwrBtnFootnoteBack=0,uiTheme=0,sleepScreen=0,quickResumeSleepScreen=0;
  int saves=0;
  void saveToFile(){++saves;}
  void save(Doc& doc)const{@SAVE@}
@@ -361,7 +400,7 @@ struct CrossPointSettings {
     code += r'''
 enum class SettingsSection {Controls,End};
 struct Popup {
- bool active=false;int selectedIndex=0;
+ bool active=false,followSelection=false;int pendingScroll=0;std::atomic<int> selectedIndex{0};
  std::vector<std::string> ownedStrings;
  std::function<void(int)> onSelectCallback;
  void show(StrId,const StrId*,int count,int initial,std::function<void(int)> callback){
@@ -430,6 +469,12 @@ int main(){
    SETTINGS.shortPwrBtn=raw;SETTINGS.save(doc);SETTINGS.shortPwrBtn=0;SETTINGS.load(doc);assert(SETTINGS.shortPwrBtn==raw);
   }
  }
+ for(bool isPro:{false,true})for(uint8_t single:{uint8_t(CrossPointSettings::IGNORE),uint8_t(CrossPointSettings::FOOTNOTES)})
+  for(uint8_t twice:{uint8_t(CrossPointSettings::IGNORE),uint8_t(CrossPointSettings::FOOTNOTES)}){
+   pro=isPro;SETTINGS.shortPwrBtn=single;SETTINGS.doublePwrBtn=twice;
+   SettingsActivity page;page.rebuildSettingsLists();
+   assert(page.footnoteVisible==(single==CrossPointSettings::FOOTNOTES||(isPro&&twice==CrossPointSettings::FOOTNOTES)));
+  }
 }
 '''
     run(code, directory)

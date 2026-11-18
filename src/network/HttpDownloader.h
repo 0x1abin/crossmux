@@ -88,6 +88,9 @@ class HttpDownloader {
     std::vector<Header> headers;
     int* statusOut = nullptr;
     bool captureErrorBody = false;
+    // Caller-owned response metadata; only requested OPDS probes allocate a challenge string.
+    std::string* wwwAuthenticateOut = nullptr;
+    bool* redirectedOut = nullptr;
   };
 
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const FetchOptions& options);

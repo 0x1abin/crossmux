@@ -21,11 +21,7 @@ class HomeActivity final : public Activity {
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;
-  bool hasOpdsServers = false;
   bool hasPlugins = false;
-  // The home "library" slot (index 2) shows Plugins when the plugin system is
-  // enabled, otherwise OPDS. The index converters gate on its presence.
-  bool hasLibrarySlot() const { return hasPlugins || hasOpdsServers; }
   bool hasContinueReading = false;
   int lastCarouselBookIndex = 0;
   bool coverRendered = false;           // Track if cover has been rendered once
@@ -33,7 +29,8 @@ class HomeActivity final : public Activity {
   bool coverBufferUnavailable = false;  // Stop retrying an optional snapshot after OOM
   std::atomic<CarouselUpdateScope> carouselUpdateScope{CarouselUpdateScope::None};
   std::unique_ptr<uint8_t[]> coverBuffer;  // HomeActivity's own buffer for cover image
-  size_t coverBufferSize = 0;              // Bytes allocated to coverBuffer
+  bool coverBufferInverted = false;
+  size_t coverBufferSize = 0;  // Bytes allocated to coverBuffer
   // Logical rect last passed to drawRecentBookCover. The cover snapshot only
   // needs to cover this region, not the entire framebuffer, so we cache the
   // tile instead of all 48 KB. Set in render() before the call.
@@ -50,7 +47,6 @@ class HomeActivity final : public Activity {
   void onRecentsOpen();
   void onSettingsOpen();
   void onFileTransferOpen();
-  void onOpdsBrowserOpen();
   void onAppsOpen();
   void onPluginsOpen();
 

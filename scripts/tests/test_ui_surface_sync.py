@@ -115,7 +115,7 @@ int main() {
 
     def test_dialog_upstream_center_and_inx_safe_center(self):
         source = (ROOT / "src/components/OptionPopup.h").read_text()
-        geometry = source[source.index("    const fui::Rect screen = device.screen();"):source.index("    // Chrome guard first")]
+        geometry = source[source.index("    const bool preserveInxCenter ="):source.index("    // Chrome guard first")]
         run_cpp(r"""
 #include <algorithm>
 #include <cassert>
@@ -127,14 +127,16 @@ struct Rect {int16_t x,y,width,height;}; struct Size {int16_t width,height;};
 int16_t clampI16(int v,int lo=-32768,int hi=32767) {return std::clamp(v,lo,hi);}
 Rect centeredRect(Rect r,Size s) {return {int16_t(r.x+(r.width-s.width)/2),int16_t(r.y+(r.height-s.height)/2),s.width,s.height};}
 struct DialogOption {const char* label;int action,value,state;};
-struct Props {int gap=10,buttonHeight=30;uint8_t optionCount=0;};
+struct Props {int gap=10,buttonHeight=30;uint8_t optionCount=0,visibleOptions=0;};
 int optionDialogHeight(int,const Props& p,int) {return 20+30*p.optionCount;}
 constexpr int StateFocused=1,StateNormal=0;
 }
-struct Theme {bool inx=false;bool hasMainTabs() const {return inx;}static Theme& getInstance(){static Theme t;return t;}};
+struct GfxRenderer {fui::Rect active;};
+struct Theme {fui::Rect getScreenSafeArea(const GfxRenderer& r,bool,bool)const{return r.active;}bool inx=false;bool hasMainTabs() const {return inx;}static Theme& getInstance(){static Theme t;return t;}};
 using UITheme=Theme;
 struct Device {fui::Rect all,safe;fui::Rect screen() const{return all;}fui::Rect safeRect()const{return safe;}};
-fui::Rect layout(Device device,bool upstreamStyle,bool inx) {
+fui::Rect layout(Device device,bool upstreamStyle,bool inx,fui::Rect active) {
+ GfxRenderer renderer{active};
  Theme::getInstance().inx=inx;
  struct {int optionPopupDialogSideMargin=10;} metrics;
  fui::Props props;int target=0,totalOptions=2,selectedIndex=0,visibleOptionRows=0;
@@ -147,14 +149,15 @@ fui::Rect layout(Device device,bool upstreamStyle,bool inx) {
 }
 int main() {
  Device d{{0,0,480,800},{0,9,480,788}};
- auto ordinary=layout(d,false,false);assert(ordinary.y==360 && ordinary.height==80);
- auto inx=layout(d,false,true);assert(inx.y==363 && inx.height==80);
- auto explicitUpstream=layout(d,true,true);assert(explicitUpstream.y==360);
+ fui::Rect active{0,35,480,700};
+ auto ordinary=layout(d,false,false,active);assert(ordinary.y==345 && ordinary.height==80);
+ auto inx=layout(d,false,true,active);assert(inx.y==363 && inx.height==80);
+ auto explicitUpstream=layout(d,true,true,active);assert(explicitUpstream.y==345);
  Device inset{{0,0,480,800},{190,360,50,40}};
- auto constrained=layout(inset,false,false);
- assert(constrained.x==190 && constrained.y==360 && constrained.width==50 && constrained.height==40);
+ auto constrained=layout(inset,false,false,inset.safe);
+ assert(constrained.x==200 && constrained.y==360 && constrained.width==30 && constrained.height==40);
  Device tiny{{0,0,12,12},{5,7,0,0}};
- auto empty=layout(tiny,false,false);assert(empty.x==5 && empty.y==7 && empty.width==0 && empty.height==0);
+ auto empty=layout(tiny,false,false,tiny.safe);assert(empty.x==5 && empty.y==7 && empty.width==0 && empty.height==0);
 }
 """)
 

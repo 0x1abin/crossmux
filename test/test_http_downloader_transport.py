@@ -35,7 +35,7 @@ CLIENT = r'''
 namespace freeink {
 using DataCallback=std::function<bool(const uint8_t*,size_t)>;
 using AbortCallback=std::function<bool()>;
-struct Response {int status=200;std::string body="book",location;bool complete=true,known=true;};
+struct Response {int status=200;std::string body="book",location;bool complete=true,known=true;std::string challenge{};};
 struct Request {std::string url,agent,method;std::map<std::string,std::string> headers;};
 inline std::vector<Response> responses;
 inline std::vector<Request> requests;
@@ -65,7 +65,7 @@ struct SecureHttpClient {
  }
  int GET(const DataCallback& callback) {return sendRequest("GET",nullptr,0,callback);}
  int getStatus() const {return response.status;}
- std::string getHeader(const char*) const {return response.location;}
+ std::string getHeader(const char* key) const {return std::string(key)=="www-authenticate"?response.challenge:response.location;}
  bool responseComplete() const {return response.complete&&!stopped&&!wasAborted;}
  bool hasContentLength() const {return response.known;}
  size_t getContentLength() const {return response.body.size();}
@@ -101,10 +101,13 @@ int main() {
  options.headers={{"X-Access","secret"},{"Bad Name","bad"},{"X-Injection","a\r\nX-Evil: yes"}};
  options.accept="application/opds+json";options.acceptLanguage="zh-CN";
  int status=0;options.statusOut=&status;
+ std::string challenge="stale";bool redirected=false;
+ options.wwwAuthenticateOut=&challenge;options.redirectedOut=&redirected;
  responses={{302,"ignored","/same"},{307,"ignored","https://cdn.test/book"},{200,"book"}};
  std::string out;
  assert(HttpDownloader::fetchUrl("https://origin.test/feed",[&](const uint8_t* data,size_t n){out.append(reinterpret_cast<const char*>(data),n);return true;},options));
  assert(out=="book"&&status==200&&HttpDownloader::lastAnswerRedirected());
+ assert(challenge.empty()&&redirected);
  assert(requests.size()==3);
  for(size_t i=0;i<3;++i) {
   assert(requests[i].agent=="CrossMux-HostTest-test");
@@ -116,9 +119,17 @@ int main() {
  reset();responses={{302,"ignored","http://origin.test/insecure"}};
  assert(!HttpDownloader::fetchUrl("https://origin.test/feed",[](const uint8_t*,size_t){return true;},options));
  assert(requests.size()==1&&status==302&&!HttpDownloader::lastAnswerRedirected());
- reset();responses={{401,"auth-document"}};out.clear();options.captureErrorBody=true;
+ reset();responses={{401,"auth-document","",true,true,"Basic realm=books"}};out.clear();options.captureErrorBody=true;
  assert(!HttpDownloader::fetchUrl("https://origin.test/feed",[&](const uint8_t* d,size_t n){out.append(reinterpret_cast<const char*>(d),n);return true;},options));
  assert(status==401&&out=="auth-document");
+ assert(challenge=="Basic realm=books"&&!redirected);
+ reset();responses={{302,"","https://foreign.test/feed"},{401,"","",true,true,"Basic realm=foreign"}};
+ assert(!HttpDownloader::fetchUrl("https://origin.test/feed",[](const uint8_t*,size_t){return true;},options));
+ assert(status==401&&redirected&&challenge=="Basic realm=foreign");
+ assert(requests.back().headers.count("Authorization")==0);
+ reset();beginOk=false;
+ assert(!HttpDownloader::fetchUrl("https://origin.test/feed",[](const uint8_t*,size_t){return true;},options));
+ assert(status==0&&challenge.empty()&&!redirected);
  reset();responses={{200,"partial","",false}};
  assert(!HttpDownloader::fetchUrl("https://origin.test/feed",[](const uint8_t*,size_t){return true;},options));
  reset();responses={{200,"book"}};

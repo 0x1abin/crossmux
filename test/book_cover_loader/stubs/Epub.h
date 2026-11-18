@@ -8,7 +8,9 @@ class Epub {
  public:
   Epub(std::string path, const std::string&) : path(std::move(path)) {}
 
-  bool load(bool buildIfMissing, bool) const { return buildIfMissing && path.find("load-fail") == std::string::npos; }
+  bool load(bool buildIfMissing, bool) const {
+    return (buildIfMissing || cover_stub::epubMetadataCached) && path.find("load-fail") == std::string::npos;
+  }
   void setupCacheDir() const { Storage.mkdir("/.crosspoint/epub"); }
   bool hasCoverOverride() const {
     HalFile file;
@@ -31,6 +33,11 @@ class Epub {
       return cover_stub::writeBmp(output);
     }
     return cover_stub::writeEmpty(output) && false;
+  }
+  bool generateThumbBmpFromSource(int height) const {
+    ++cover_stub::sourceThumbnailGenerations;
+    if (path.find("load-fail") != std::string::npos) return false;
+    return generateThumbBmp(height);
   }
   bool generateCoverBmp(bool = false) const {
     ++cover_stub::fullCoverGenerations;

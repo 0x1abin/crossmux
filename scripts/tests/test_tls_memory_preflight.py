@@ -58,7 +58,7 @@ int main() {
             self.assertNotIn('HttpDownloader::MIN_TLS_', source)
         opds = (ROOT / 'src/activities/browser/OpdsBookBrowserActivity.cpp').read_text()
         book = method(opds, 'void OpdsBookBrowserActivity::downloadBook(')
-        self.assertIn('downloadFile(downloadUrl, staged, dlAuth.username, dlAuth.password, headers)', book)
+        self.assertIn('downloadFile(downloadUrl, staged, auth.username, auth.password, headers)', book)
         self.assertNotIn('HttpDownloader::MIN_TLS_', book)
 
 

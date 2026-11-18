@@ -68,12 +68,19 @@ int main(){
   renderCharImpl<TextRotation::Rotated90CW>(rotated,mode,font,65,0,15,true,EpdFontFamily::REGULAR);
   for(int i=0;i<16;++i)assert(rotated.pixels[15-i]==r.pixels[i]);
  }
- GfxRenderer native; native.native=true;
- renderCharImpl(native,GfxRenderer::BW,font,65,0,0,true,EpdFontFamily::REGULAR);
- assert(native.grays[0]==-1);
- for(int i=1;i<16;++i)assert(native.grays[i]==(15-i)*17);
+ // Exercise the complete production eligibility branch, not just its pixel helper.
+ for(bool ink:{false,true}) for(auto mode:{GfxRenderer::BW,GfxRenderer::GRAYSCALE_LSB,GfxRenderer::GRAYSCALE_MSB}){
+  GfxRenderer native,rotated; native.native=rotated.native=true;
+  renderCharImpl(native,mode,font,65,0,0,ink,EpdFontFamily::REGULAR);
+  renderCharImpl<TextRotation::Rotated90CW>(rotated,mode,font,65,0,15,ink,EpdFontFamily::REGULAR);
+  assert(native.grays[0]==-1 && rotated.grays[15]==-1);
+  for(int i=1;i<16;++i){
+   const int expected=(ink?15-i:i)*17;
+   assert(native.grays[i]==expected && rotated.grays[15-i]==expected);
+  }
+ }
  for(bool ink:{false,true}) for(uint8_t bold:{uint8_t(0),uint8_t(1),uint8_t(3)}){
-  if(ink&&bold==0)continue;
+  if(bold==0)continue;
   GfxRenderer a,b; a.native=true;
   renderCharImpl(a,GfxRenderer::BW,font,65,0,0,ink,EpdFontFamily::REGULAR,bold);
   renderCharImpl(b,GfxRenderer::BW,font,65,0,0,ink,EpdFontFamily::REGULAR,bold);

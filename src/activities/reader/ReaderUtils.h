@@ -278,7 +278,7 @@ inline uint8_t tapZoneAction(const GfxRenderer& renderer, const int x, const int
 }
 
 inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input,
-                                         const bool rtlBook = false) {
+                                         const bool rtlBook = false, const bool reserveReaderMenuTap = true) {
   TouchPageTurn result;
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
@@ -407,7 +407,7 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
       // menu (gated on showReaderMenu == READER_MENU_TAP). The center-third
       // isTouchMenuTap fallback below only opens the menu on zones with no
       // action of their own, so a MENU zone reaches this action exactly once.
-      result.action = action;
+      if (reserveReaderMenuTap) result.action = action;
       break;
     case CrossPointSettings::TAP_ZONE_NONE:
       break;
@@ -419,8 +419,8 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
 }
 
 // Tap in the center third of the screen: the tap path into the reader menu on
-// every touch board. detectTouchPageTurn() excludes this centered rectangle,
-// so it remains free in tap mode. The Off/Swipe Up
+// every touch board. Reader pages reserve this rectangle for the menu,
+// so it stays free in tap mode. The Off/Swipe Up
 // alternatives are only surfaced on home-key boards (SettingsList), where the
 // menu stays reachable through the key's long-press function.
 inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager& input) {
@@ -474,6 +474,11 @@ struct BackNavCallback {
 // - with backShortToFileBrowser: go to file browser.
 inline bool handleBackNavigation(const MappedInputManager& mappedInput, ActivityManager& activityManager,
                                  const char* filePath, BackNavCallback goHome) {
+  if (mappedInput.homeButtonAction() == HomeButtonAction::FileBrowser) {
+    activityManager.goToFileBrowser(filePath);
+    return true;
+  }
+
   // The reading surface deliberately has no left-edge swipe-to-exit path: in
   // swipe page-turn mode a right swipe must page back instead. Home remains
   // available through the board's dedicated Home gesture/key. Back swipes stay

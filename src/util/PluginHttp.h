@@ -69,8 +69,9 @@ std::string inPluginDir(const std::string& pluginDir, const char* path);
 bool loadTokenFromFile(const std::string& file, const std::string& path, std::string& out);
 
 // Writes `value` at `path` into `file`, building the nesting the read path
-// expects (numeric segments unsupported). Removes the file on a short write so
-// a truncated token is never persisted.
+// expects (numeric segments unsupported). Stages beside the file, checks close,
+// then replaces with a backup; reads recover valid transaction copies. Unknown
+// or malformed transaction siblings are preserved and refuse a new write.
 bool saveTokenToFile(const std::string& file, const std::string& path, const std::string& value);
 
 // Loads a flat JSON config file into {cfg.KEY} pairs. Missing file = empty.

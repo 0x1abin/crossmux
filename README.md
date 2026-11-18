@@ -14,7 +14,7 @@
 - **Highlights and clippings**: select EPUB text with buttons or touch, look up words and phrases, save highlighted excerpts, and optionally sync clippings through a compatible CrossPoint Sync server. [Clippings guide](./USER_GUIDE.md#53-clippings-and-highlights).
 - **Bluetooth page turners**: connect and map tap/hold actions under **Settings → Connectivity → Bluetooth Page Turner** for pages, chapters, reader menus, and clipping selection.
 - **SD-card plugins**: enable **Settings → Connectivity → Plugins**, then open **Home → Plugins**. Install optional Plugin Hub manually or over Wi-Fi when selected; existing sideloaded plugins remain usable. Browser-side plugin JavaScript runs while its browser page stays open. [Plugin guide](./docs/sd-plugins.md).
-- **Wireless workflows**: browser file transfer and settings, Calibre wireless, OPDS downloads, WebDAV, and device OTA updates.
+- **Wireless workflows**: browser file transfer and settings, Calibre wireless, OPDS downloads, WebDAV, and device OTA updates. Open **File Transfer → OPDS Browser** in any theme; hold Back for one second and release in a catalog to return to the main menu.
 - **Apps**: lightweight games and tools including Sudoku, Gomoku, Chinese Chess, Minesweeper, 2048, Electronic Woodfish, and Ugly Avatar. [Apps guide](./src/activities/apps/README.md).
 - **AirPage**: scan to upload content, then display BMP/JPEG images with manual refresh or foreground live delivery; images can become a sleep screen. [Usage and network behavior](./src/activities/apps/README.md#airpage).
 - **WeRead**: QR login, bookshelf browsing, EPUB downloads for offline reading, and progress sync. Available in the China content profile. [WeRead guide (Chinese)](./src/activities/apps/weread/README.md).

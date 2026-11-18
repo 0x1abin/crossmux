@@ -43,7 +43,12 @@ Nightly and CI use a separate `PLATFORMIO_CORE_DIR` per build job so concurrent
 runner jobs cannot change each other's installed toolchains. The directory name
 includes `.platformio`: pioarduino's framework-restoration path check requires
 that component when switching from a custom SDK back to prebuilt TinyUSB.
-On Ubuntu, the bundled cppcheck executable also requires `libpcre3`.
+On Ubuntu, the bundled cppcheck executable also requires `libpcre3`. CI keeps the
+checker on Ubuntu 24.04 and tries apt first. If the package is unavailable, it
+fetches the fixed Ubuntu archive package over HTTPS into a private directory
+under `RUNNER_TEMP`, verifies the SHA-256 pinned in `ci.yml`, then installs it.
+Download, checksum, or installation failure stops the job; the private directory
+is removed on exit. This fallback does not change PlatformIO cache isolation.
 
 The custom SDK bootstrap uses non-LTO objects; the final application retains
 its existing LTO configuration. Keep the verified C3 optimization options and

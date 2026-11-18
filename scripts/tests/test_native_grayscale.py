@@ -126,6 +126,18 @@ class ImageViewerProbe {
 };
 """
         (work / 'ViewerProbe.h').write_text(viewer_probe + constants + methods.replace('ImageViewerActivity::','ImageViewerProbe::'))
+        # Keep production glyph selection/decoding plus real renderer pixel/rotation writes.
+        glyph_source = (ROOT / 'lib/GfxRenderer/GfxRenderer.cpp').read_text()
+        glyph_helpers = ''.join(method(glyph_source, name) for name in (
+            'static void drawGlyphPixel(', 'constexpr uint8_t dilate2BitCoverage(',
+            'static uint8_t get4BitCoverage(', 'static uint8_t get2BitCoverage(',
+            'static void draw2BitGlyphPixel(', 'static void draw4BitGlyphPixel('))
+        glyph_helpers += '\ntemplate<TextRotation rotation=TextRotation::None>\n'
+        glyph_helpers += method(glyph_source, 'static void renderMissingGlyph(')
+        glyph_helpers += '\ntemplate<TextRotation rotation=TextRotation::None>\n'
+        glyph_helpers += method(glyph_source, 'static void renderCharImpl(')
+        (work / 'GlyphRenderProbe.h').write_text(
+            '#include <MissingGlyph.h>\nenum class TextRotation {None,Rotated90CW};\n' + glyph_helpers)
         reader_driver = prepare_reader_contract(work, ROOT)
         includes = [work, work/'reader-driver/include', JPEG, SIM / 'src', ROOT / 'lib/hal', ROOT / 'lib/GfxRenderer', ROOT / 'lib/EpdFont',
                     ROOT / 'lib/Epub', ROOT / 'lib/Memory', ROOT / 'lib/Utf8', ROOT / 'lib/MiniBidi',
@@ -134,6 +146,7 @@ class ImageViewerProbe {
         sources = [ROOT / name for name in (
             'test/native_grayscale/NativeGrayscaleTest.cpp', 'src/activities/reader/ReaderSession.cpp', 'lib/GfxRenderer/GfxRenderer.cpp',
             'lib/GfxRenderer/Bitmap.cpp', 'lib/GfxRenderer/BitmapHelpers.cpp',
+            'lib/EpdFont/EpdFont.cpp', 'lib/EpdFont/EpdFontFamily.cpp', 'lib/MiniBidi/BidiUtils.cpp',
             'lib/Epub/Epub/converters/JpegToFramebufferConverter.cpp',
             'lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp',
             'lib/JpegToBmpConverter/JpegToBmpConverter.cpp', 'lib/FsHelpers/FsHelpers.cpp', 'lib/Memory/BuildScratch.cpp',
@@ -141,7 +154,7 @@ class ImageViewerProbe {
             'src/activities/apps/airpage/AirPageImageRenderer.cpp',
             'src/activities/apps/airpage/AirPageImageStore.cpp',
             'src/activities/apps/airpage/AirPageWallpaper.cpp', 'src/util/SleepCover.cpp')]
-        sources += [reader_driver, JPEG / 'JPEGDEC.cpp', SIM / 'src/HalStorage.cpp']
+        sources += [reader_driver, JPEG / 'JPEGDEC.cpp', SIM / 'src/HalStorage.cpp', SIM / 'src/SimLog.cpp']
         flags = ['-std=c++20', '-O1', '-ffunction-sections', '-fdata-sections', '-DCROSSPOINT_EMULATED=1',
                  '-DDESTRUCTOR_CLOSES_FILE=1', '-D__LINUX__=1', '-DSIMULATOR=1']
         flags += ['-DFREEINK_DRIVER_EPDIY_LCD=1','-DFREEINK_EPDIY_LCD_CONFIG=readerContractConfig']
@@ -149,11 +162,15 @@ class ImageViewerProbe {
             flags += ['-DREADER_TEST_WRAP_MALLOC=1','-Wl,--wrap=malloc','-Wl,--wrap=free']
         flags += ['-I' + str(p) for p in includes]
         flags += ['-Wl,-dead_strip' if platform.system() == 'Darwin' else '-Wl,--gc-sections']
+        bidi_object = work / 'minibidi.o'
+        subprocess.run([CXX, '-x', 'c', '-std=c99', '-O1', '-ffunction-sections', '-fdata-sections',
+                        '-c', str(ROOT / 'lib/MiniBidi/minibidi.c'), '-o', str(bidi_object)], check=True)
+        sources.append(bidi_object)
         binary = work / 'test'
         subprocess.run([CXX, *flags, *map(str, sources), '-o', str(binary)], check=True)
         subprocess.run([str(binary), str(ROOT / 'test/native_grayscale/gray16.jpg'), str(work)], check=True)
 
-    print('Native BMP/JPEG, orientations, cancellation, OOM, AirPage and sleep/wallpaper transactions passed')
+    print('Native four-bit black/white glyph coverage/rotation, BMP/JPEG, cancellation, OOM, AirPage and sleep/wallpaper transactions passed')
 
 
 if __name__ == "__main__":

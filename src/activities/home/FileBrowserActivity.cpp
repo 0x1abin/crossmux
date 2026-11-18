@@ -709,9 +709,11 @@ void FileBrowserActivity::provideRow(void* ctx, const uint16_t index, fui::ListI
   }
   formatFileName(entry, self->rowNameBuf, sizeof(self->rowNameBuf));
   item.label = self->rowNameBuf;
-  formatFileExtension(entry, self->rowExtBuf, sizeof(self->rowExtBuf));
-  if (self->rowExtBuf[0] != '\0') {
-    item.value = self->rowExtBuf;
+  item.value = nullptr;
+  // Extension-only names must remain visible when the ordinary suffix column is hidden.
+  if (SETTINGS.showFileExtensions || self->rowNameBuf[strspn(self->rowNameBuf, " ")] == '\0') {
+    formatFileExtension(entry, self->rowExtBuf, sizeof(self->rowExtBuf));
+    if (self->rowExtBuf[0] != '\0') item.value = self->rowExtBuf;
   }
   item.icon = listIconFor(UITheme::getFileIcon(entry));
   item.actionValue = static_cast<int16_t>(index);

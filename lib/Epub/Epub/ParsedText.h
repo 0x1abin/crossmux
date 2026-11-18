@@ -188,6 +188,8 @@ class ParsedText {
     firstLinePending = true;
   }
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
+  void setHyphenationEnabled(const bool enabled) { hyphenationEnabled = enabled; }
+  bool isHyphenationEnabled() const { return hyphenationEnabled; }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }

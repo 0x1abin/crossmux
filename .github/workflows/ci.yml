@@ -82,8 +82,17 @@ jobs:
 
       - name: Install cppcheck runtime dependency
         run: |
+          # pioarduino's checker requires libpcre.so.3; verify a pinned archive if apt lacks it.
           sudo apt-get update
-          sudo apt-get install -y libpcre3
+          if ! sudo apt-get install -y --no-install-recommends libpcre3; then
+            pcre_tmp=$(mktemp -d "${RUNNER_TEMP:?}/crossmux-pcre.XXXXXX")
+            trap 'rm -rf -- "$pcre_tmp"' EXIT
+            pcre_pkg="libpcre3_8.39-13ubuntu0.22.04.1_amd64.deb"
+            pcre_sha="0d1eb051047eb0c637c893f618f45e1d419863bfa3bc821897ee05ad418ba22e"
+            wget -q -O "$pcre_tmp/$pcre_pkg" "https://security.ubuntu.com/ubuntu/pool/main/p/pcre3/$pcre_pkg"
+            printf '%s  %s\n' "$pcre_sha" "$pcre_tmp/$pcre_pkg" | sha256sum -c -
+            sudo dpkg -i "$pcre_tmp/$pcre_pkg"
+          fi
 
       - name: Run cppcheck
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
